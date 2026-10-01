@@ -48,6 +48,8 @@ When the operator releases the ship, the session says so and forgets it.
 
 ## Developing
 
+The plugin's version on main is the last released one: the release workflow commits it there, since the marketplace installs from main. `/plugin marketplace update aeolus-fleet` then shows it.
+
 Load this folder directly with `claude --plugin-dir plugins/aeolus`. Such a copy keeps its own data folder (`aeolus-inline`), so ships crewed with it are not seen by the installed plugin, and the other way round.
 
 The scripts' tests run in the Vitest project `plugin:unit`. The end-to-end test that drives a real interactive session in tmux runs only on a machine with a logged-in Claude Code: `AEOLUS_PLUGIN_E2E=1 npx vitest run e2e/plugin-session.e2e.test.ts`.
