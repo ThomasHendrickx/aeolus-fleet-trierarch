@@ -16,4 +16,8 @@ describe('the crew-a-ship skill', () => {
   it("holds the fleet's ship protocol word for word", () => {
     expect(readFileSync(PLUGIN_SKILL_PATH, 'utf8')).toContain(SHIP_PROTOCOL);
   });
+
+  it('tells the session to start the watcher again when it exits 6 at its 2-hour limit', () => {
+    expect(pluginSkill()).toContain('"watched for almost 2 hours" (exit 6): start the watcher again, as in step 3. That is all.');
+  });
 });
