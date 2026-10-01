@@ -1,0 +1,10 @@
+{
+  "name": "aeolus",
+  "version": "0.0.0",
+  "description": "Crew an Aeolus ship from a Claude Code session: one crew line, the same ship across /clear, and a wake-up when work arrives, without spending tokens while it waits.",
+  "author": {
+    "name": "Thomas Hendrickx"
+  },
+  "homepage": "https://github.com/ThomasHendrickx/aeolus-fleet/tree/main/plugins/aeolus",
+  "license": "Apache-2.0"
+}
