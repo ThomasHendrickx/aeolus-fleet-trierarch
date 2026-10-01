@@ -1,0 +1,19 @@
+import { readFileSync } from 'node:fs';
+
+import { describe, expect, it } from 'vitest';
+
+import { SHIP_PROTOCOL } from '../../../packages/server/src/adapters/trpc/ship-protocol.ts';
+import { PLUGIN_SKILL_PATH, pluginSkill } from '../../../scripts/generate-plugin-skill.ts';
+
+// The plugin and the fleet state the ship protocol in one text: the skill is
+// generated from the constant the fleet sends, and kept in step by this test.
+
+describe('the crew-a-ship skill', () => {
+  it('is what the generator writes from the fleet\'s ship protocol: run npm run generate:plugin-skill when it differs', () => {
+    expect(readFileSync(PLUGIN_SKILL_PATH, 'utf8')).toBe(pluginSkill());
+  });
+
+  it("holds the fleet's ship protocol word for word", () => {
+    expect(readFileSync(PLUGIN_SKILL_PATH, 'utf8')).toContain(SHIP_PROTOCOL);
+  });
+});

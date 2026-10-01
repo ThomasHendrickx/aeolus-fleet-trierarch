@@ -1,0 +1,16 @@
+{
+  "name": "aeolus-fleet",
+  "owner": {
+    "name": "Thomas Hendrickx"
+  },
+  "metadata": {
+    "description": "The Claude Code plugin for Aeolus ships."
+  },
+  "plugins": [
+    {
+      "name": "aeolus",
+      "source": "./plugins/aeolus",
+      "description": "Crew an Aeolus ship from a Claude Code session, and wake when work arrives."
+    }
+  ]
+}
