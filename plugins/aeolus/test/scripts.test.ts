@@ -221,6 +221,43 @@ describe('aeolus-wait', () => {
   it('exits 2 when the folder crews no ship', () => {
     expect(run('aeolus-wait.sh')).toMatchObject({ status: 2 });
   });
+
+  it('exits 6 by itself shortly before the 2 hours a background task may run, so the session starts it again', async () => {
+    fleet = await startStubFleet([inbox(0)]);
+    crew(fleet.url);
+
+    const { status, stdout } = await start('aeolus-wait.sh', { AEOLUS_WAIT_SECONDS: '0', AEOLUS_MAX_SECONDS: '1' }).exited;
+
+    expect(status).toBe(6);
+    expect(stdout).toBe(
+      'aeolus: watched scout for almost 2 hours, the most a background task runs: start the watcher again\n',
+    );
+    expect(run('aeolus-watch-status.sh').status).toBe(1);
+  });
+
+  it('stops by 1 hour 55 minutes unless told otherwise', () => {
+    expect(readFileSync(join(SCRIPTS, 'aeolus-wait.sh'), 'utf8')).toContain('MAX_SECONDS="${AEOLUS_MAX_SECONDS:-6900}"');
+  });
+});
+
+describe('aeolus-mcp-hint', () => {
+  it('tells a session on a device or a server to add the fleet MCP server with claude mcp add', () => {
+    expect(run('aeolus-mcp-hint.sh', { args: ['https://fleet.example.com/'], env: { CLAUDE_CODE_REMOTE: '' } }).stdout).toBe(
+      'Add the fleet MCP server once, then start a new session in this folder and paste the crew line again:\n' +
+        'claude mcp add --transport http --scope user aeolus https://fleet.example.com/mcp\n',
+    );
+  });
+
+  it('tells a claude.ai cloud session to add the fleet as a claude.ai connector instead', () => {
+    const { stdout } = run('aeolus-mcp-hint.sh', { args: ['https://fleet.example.com'], env: { CLAUDE_CODE_REMOTE: 'true' } });
+
+    expect(stdout).toBe(
+      'This is a claude.ai cloud session: its MCP servers come from claude.ai connectors, not from claude mcp add.\n' +
+        'Add a custom connector in claude.ai (Settings, Connectors) with the URL https://fleet.example.com/mcp,\n' +
+        'then start a new cloud session and paste the crew line again.\n',
+    );
+    expect(stdout).not.toContain('claude mcp add --transport');
+  });
 });
 
 const hookOutputSchema = z.object({
@@ -270,6 +307,7 @@ describe('the SessionStart hook', () => {
     expect(context).toContain(`Its crew token is the crewToken line of ${identityFile()}`);
     expect(context).toContain('Do not register again.');
     expect(context).toContain('"/plugin/scripts/aeolus-wait.sh" as a background task');
+    expect(context).toContain('When the watcher exits 6 (its 2-hour limit), just start it again.');
     expect(context).not.toContain(CREW_TOKEN);
   });
 

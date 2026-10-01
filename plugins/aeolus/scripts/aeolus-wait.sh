@@ -10,6 +10,7 @@
 #   3  LEASE_ENDED: the operator released the ship
 #   4  a watcher already runs for this ship
 #   5  the fleet refused the crew token
+#   6  it ran for almost 2 hours, the most a background task runs: start it again
 set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
@@ -18,6 +19,10 @@ WAIT_SECONDS="${AEOLUS_WAIT_SECONDS:-25}"
 # The first pause after a failed call; it doubles up to the most.
 RETRY_SECONDS="${AEOLUS_RETRY_SECONDS:-2}"
 RETRY_MAX_SECONDS="${AEOLUS_RETRY_MAX_SECONDS:-60}"
+# A background task runs at most 2 hours (in a cloud session it is then
+# stopped): the watcher ends itself at 1 hour 55 minutes, saying so, and the
+# session starts it again.
+MAX_SECONDS="${AEOLUS_MAX_SECONDS:-6900}"
 
 identity="$(aeolus_identity_file)" || exit 2
 if [ ! -f "$identity" ]; then
@@ -39,9 +44,16 @@ crew_token="$(aeolus_identity_get "$identity" crewToken)"
 delay="$RETRY_SECONDS"
 
 while :; do
-  answer="$(curl -sS --max-time $((WAIT_SECONDS + 15)) -w '\n%{http_code}' -X POST "${fleet_url}/api/v1/ship/inbox" \
+  left=$((MAX_SECONDS - SECONDS))
+  if [ "$left" -le 0 ]; then
+    echo "aeolus: watched ${ship_name} for almost 2 hours, the most a background task runs: start the watcher again"
+    exit 6
+  fi
+  wait_now="$WAIT_SECONDS"
+  [ "$wait_now" -le "$left" ] || wait_now="$left"
+  answer="$(curl -sS --max-time $((wait_now + 15)) -w '\n%{http_code}' -X POST "${fleet_url}/api/v1/ship/inbox" \
     -H "authorization: Bearer ${crew_token}" -H 'content-type: application/json' \
-    -d "{\"waitSeconds\":${WAIT_SECONDS}}" 2>/dev/null)"
+    -d "{\"waitSeconds\":${wait_now}}" 2>/dev/null)"
   status="$(printf '%s' "$answer" | tail -n 1)"
   body="$(printf '%s' "$answer" | sed '$d')"
   case "$status" in
