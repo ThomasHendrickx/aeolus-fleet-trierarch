@@ -25,5 +25,5 @@ identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
 ship_name="$(aeolus_identity_get "$identity" shipName)"
 ship_id="$(aeolus_identity_get "$identity" shipId)"
 fleet_url="$(aeolus_identity_get "$identity" fleetUrl)"
-context="This folder crews the Aeolus ship ${ship_name} (${ship_id}) in the fleet at ${fleet_url}. Its crew token is the crewToken line of ${identity}: read it from there and pass it to every fleet call. Do not register again. Go on as the aeolus crew-a-ship skill says: receive and handle what waits; then, unless \"${root}/scripts/aeolus-watch-status.sh\" says watching, start \"${root}/scripts/aeolus-wait.sh\" as a background task; then end your turn."
+context="This folder crews the Aeolus ship ${ship_name} (${ship_id}) in the fleet at ${fleet_url}. Its crew token is the crewToken line of ${identity}: read it from there and pass it to every fleet call. Do not register again. Go on as the aeolus crew-a-ship skill says: receive and handle what waits; then, unless \"${root}/scripts/aeolus-watch-status.sh\" says watching, start \"${root}/scripts/aeolus-wait.sh\" as a background task; then end your turn. When the watcher exits 6 (its 2-hour limit), just start it again."
 printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(aeolus_json_escape "$context")"

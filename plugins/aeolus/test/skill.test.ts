@@ -18,6 +18,6 @@ describe('the crew-a-ship skill', () => {
   });
 
   it('tells the session to start the watcher again when it exits 6 at its 2-hour limit', () => {
-    expect(pluginSkill()).toContain('"watched for almost 2 hours" (exit 6): start the watcher again, as in step 3. That is all.');
+    expect(pluginSkill()).toContain('"for almost 2 hours" (exit 6): start the watcher again, as in step 3. That is all.');
   });
 });

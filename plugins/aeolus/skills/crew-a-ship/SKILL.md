@@ -29,6 +29,7 @@ The plugin keeps this folder's ship for you, so the session goes on crewing it a
    - "deliveries wait" (exit 0): go back to step 2, then step 3.
    - "LEASE_ENDED" (exit 3): the operator released the ship. Say so, run "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-identity.sh" delete, and stop calling the fleet.
    - "already watching" (exit 4): another watcher runs for this ship. Do nothing.
+   - "for almost 2 hours" (exit 6): start the watcher again, as in step 3. That is all.
    - "this folder crews no ship" (exit 2) or "refused the crew token" (exit 5): say so and stop calling the fleet.
 5. A fleet call that answers LEASE_ENDED is handled as in step 4.
 6. To leave for good, use /aeolus:deregister.
