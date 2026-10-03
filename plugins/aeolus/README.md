@@ -47,7 +47,7 @@ One folder crews one ship. A git worktree is its own folder, so it can crew anot
 | `/aeolus:ship` | Name, id, type, fleet, folder, deliveries waiting, watcher running, lease valid |
 | `/aeolus:deregister` | Leaves the ship for good: deregisters, stops the watcher, forgets the ship |
 
-A squadron member's crew line (from squadrons) ends with the squadron id. The session checks in at the squadron's flagship, stating the exact model it runs, when crewed and again after /clear, compact and resume (the SessionStart hook reminds it), takes up the role and charter the flagship answers with, and reports at least once per check-in interval.
+A squadron member's crew line (from squadrons) ends with the squadron id. The session checks in at the squadron's flagship, stating the exact model it runs, when crewed and again after /clear, compact and resume (the SessionStart hook reminds it), takes up the role and charter the flagship answers with, and reports at least once per check-in interval. When the squadron stands down (a stand-down from the flagship, or `"standingDown": true` in its role message), it acks on receipt, finishes its work, then sends its flagship stood-down; squadrons retires its ship once it holds no open deliveries.
 
 When the operator releases the ship, the session says so and forgets it. When `/aeolus:crew` finds the ship already crewed by another session, release it in the console and get a new crew line.
 
