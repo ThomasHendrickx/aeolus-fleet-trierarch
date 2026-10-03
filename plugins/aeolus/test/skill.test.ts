@@ -28,6 +28,19 @@ describe('the crew-a-ship skill', () => {
     expect(skill).toContain('report at least once per check-in interval');
   });
 
+  it('tells a standing-down member to ack the stand-down on receipt, finish its work, then send stood-down to its flagship', () => {
+    const skill = pluginSkill();
+
+    expect(skill).toContain('ack it on receipt');
+    expect(skill).toContain(
+      'send the flagship a message with contentType `application/vnd.aeolus.squadron.stood-down+json`, payload `{"squadron":"<squadron>"}` and inReplyTo the stand-down',
+    );
+  });
+
+  it('tells a member whose role message says standingDown to stand down too, inReplyTo the role message', () => {
+    expect(pluginSkill()).toContain('If the role message says `"standingDown": true`, the squadron already stands down');
+  });
+
   it('tells a squadron member to state the exact model it runs at check-in', () => {
     expect(pluginSkill()).toContain('payload `{"squadron":"<squadron>","model":"<model>"}`, where <model> is the exact model id this session runs');
   });
