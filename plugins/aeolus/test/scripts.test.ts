@@ -93,6 +93,13 @@ describe('aeolus-identity', () => {
     expect(readFileSync(identityFile(), 'utf8')).toContain(`crewToken=${CREW_TOKEN}\n`);
   });
 
+  it('keeps the squadron a member ship belongs to, and shows it', () => {
+    expect(run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', CREW_TOKEN, 'team-one'] }).status).toBe(0);
+
+    expect(readFileSync(identityFile(), 'utf8')).toContain('squadron=team-one\n');
+    expect(run('aeolus-identity.sh', { args: ['show'] }).stdout).toContain('squadron: team-one');
+  });
+
   it('keeps the file readable by its owner only', () => {
     crew();
 
@@ -309,6 +316,22 @@ describe('the SessionStart hook', () => {
     expect(context).toContain('"/plugin/scripts/aeolus-wait.sh" as a background task');
     expect(context).toContain('When the watcher exits 6 (its 2-hour limit), just start it again.');
     expect(context).not.toContain(CREW_TOKEN);
+  });
+
+  it("tells a member's fresh context to check in at its flagship before anything else", () => {
+    run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', CREW_TOKEN, 'team-one'] });
+
+    const { stdout } = hook(payloadFor(folder, 'compact'));
+
+    const context = hookOutputSchema.parse(JSON.parse(stdout)).hookSpecificOutput.additionalContext;
+    expect(context).toContain('This ship is a member of the squadron team-one.');
+    expect(context).toContain('Before anything else, check in at its flagship team-one, as the aeolus crew-a-ship skill says for a squadron member.');
+  });
+
+  it('says nothing of a squadron to a ship that belongs to none', () => {
+    crew();
+
+    expect(hookOutputSchema.parse(JSON.parse(hook(payloadFor(folder)).stdout)).hookSpecificOutput.additionalContext).not.toContain('squadron');
   });
 
   it('keys the ship by the payload cwd, its JSON escapes undone, as the scripts do', () => {
