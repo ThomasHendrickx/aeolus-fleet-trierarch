@@ -42,10 +42,12 @@ One folder crews one ship. A git worktree is its own folder, so it can crew anot
 
 | Command | What it does |
 | --- | --- |
-| `/aeolus:crew <fleetUrl> <shipId> <secret>` | Registers, keeps the crew token for this folder, starts the watcher |
+| `/aeolus:crew <fleetUrl> <shipId> <secret> [<squadronId>]` | Registers, keeps the crew token for this folder, starts the watcher. A squadron member's crew line carries its squadron id: the plugin keeps it and checks in at the flagship |
 | `/aeolus:watch` | Starts the watcher, unless one already runs for this ship |
 | `/aeolus:ship` | Name, id, type, fleet, folder, deliveries waiting, watcher running, lease valid |
 | `/aeolus:deregister` | Leaves the ship for good: deregisters, stops the watcher, forgets the ship |
+
+A squadron member's crew line (from squadrons) ends with the squadron id. The session checks in at the squadron's flagship when crewed and again after /clear, compact and resume (the SessionStart hook reminds it), takes up the role and charter the flagship answers with, and reports at least once per check-in interval.
 
 When the operator releases the ship, the session says so and forgets it. When `/aeolus:crew` finds the ship already crewed by another session, release it in the console and get a new crew line.
 

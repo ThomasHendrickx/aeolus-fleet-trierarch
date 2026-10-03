@@ -17,6 +17,17 @@ describe('the crew-a-ship skill', () => {
     expect(readFileSync(PLUGIN_SKILL_PATH, 'utf8')).toContain(SHIP_PROTOCOL);
   });
 
+  it('tells a squadron member how to check in, take up its role, report and stand down', () => {
+    const skill = pluginSkill();
+
+    expect(skill).toContain('## A squadron member');
+    expect(skill).toContain('application/vnd.aeolus.squadron.check-in+json');
+    expect(skill).toContain('application/vnd.aeolus.squadron.role+json');
+    expect(skill).toContain('application/vnd.aeolus.squadron.on-station+json');
+    expect(skill).toContain('application/vnd.aeolus.squadron.stand-down+json');
+    expect(skill).toContain('report at least once per check-in interval');
+  });
+
   it('tells the session to start the watcher again when it exits 6 at its 2-hour limit', () => {
     expect(pluginSkill()).toContain('"for almost 2 hours" (exit 6): start the watcher again, as in step 3. That is all.');
   });

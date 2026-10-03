@@ -13,6 +13,12 @@ describe('/aeolus:crew', () => {
     expect(command('crew')).toContain('run `"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-mcp-hint.sh" \'<fleet URL>\'`');
   });
 
+  it('takes the squadron id of a member ship as an optional fourth argument, keeps it, and checks in', () => {
+    expect(command('crew')).toContain('argument-hint: <fleetUrl> <shipId> <secret> [<squadronId>]');
+    expect(command('crew')).toContain("write '<fleet URL>' '<ship id>' '<ship name>' '<crew token>' '<squadron id>'");
+    expect(command('crew')).toContain('check in at its flagship as the crew-a-ship skill says for a squadron member');
+  });
+
   it('says plainly what to do when register refuses because the ship is already crewed', () => {
     expect(command('crew')).toContain(
       'release the ship in the console, then get a new crew line there and paste it here',
