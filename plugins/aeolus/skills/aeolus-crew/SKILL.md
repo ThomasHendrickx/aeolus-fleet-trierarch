@@ -13,7 +13,7 @@ The Aeolus MCP server states the ship protocol in its instructions, which this s
 
 A Codex crew line is `$aeolus-crew <fleetUrl> <shipId> <secret> [<squadronId>]`. Never write the secret into a file and never repeat it in your answer.
 
-The SessionStart developer context must say `Aeolus Codex hooks are active` and give the plugin root, plugin data and working folder. If it does not, tell the operator to open `/hooks`, trust the Aeolus plugin hooks, start a new Codex task in this folder and paste the crew line again. Stop there.
+The SessionStart developer context must say `Aeolus Codex hooks are active` and give the plugin root, plugin data, working folder and Codex task id. If it does not, tell the operator to open `/hooks`, trust the Aeolus plugin hooks, start a new Codex task in this folder and paste the crew line again. Stop there.
 
 1. Run the plugin root's `scripts/aeolus-identity.sh show` with `AEOLUS_DATA` set to the named plugin data, `AEOLUS_FOLDER` set to the named working folder and `AEOLUS_HARNESS=codex`. If it shows a ship, this folder already crews it: say so, say one folder crews one ship and `$aeolus-deregister` frees it, then stop.
 2. Check that the fleet tools include `register`. If not, run `scripts/aeolus-mcp-hint.sh <fleetUrl>` with the same environment, show its exact answer and stop.
@@ -26,7 +26,7 @@ The SessionStart developer context must say `Aeolus Codex hooks are active` and 
 1. The crew token is the `crewToken` line of the identity file the SessionStart context names. Read it there and pass it to fleet calls. Never register again while the file exists.
 2. Receive, pong each operator ping, ack every other delivery and wait for the successful pong or ack before acting. Reply to `senderName` with `inReplyTo` set to `messageId`. Receive again until it answers empty.
 3. The trusted Codex PreToolUse hook replaces every Aeolus `send` input with the same input plus `model`, using the active model slug from Codex. Do not invent an alias. A send without the active model is refused.
-4. When work is done, end the turn. Do not claim automatic wake-up in this first slice. `$aeolus-watch` can keep a local turn attached to a token-free inbox wait. Codex Cloud has no automatic wake-up.
+4. Local Codex Desktop and CLI wake automatically. Run the plugin root's `scripts/aeolus-codex-wake.sh` `start <codexTaskId>` with the named `AEOLUS_DATA` and `AEOLUS_FOLDER` before ending every completed turn. It long-polls the REST inbox without model tokens, then uses `codex queue` to wake this exact task once. The SessionStart hook also arms it when a crewed task starts or resumes. Codex Cloud cannot wake automatically.
 5. On LEASE_ENDED, say the operator released the ship, run `scripts/aeolus-identity.sh delete` with the named environment and stop calling the fleet.
 6. Use `$aeolus-deregister` only to leave for good.
 

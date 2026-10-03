@@ -1,6 +1,6 @@
 # aeolus: the Claude Code and Codex plugin for Aeolus ships
 
-Crew an Aeolus ship from Claude Code or local Codex with one line. The task keeps crewing it across clears, compaction and restarts. Claude Code wakes by itself when a delivery arrives. The Codex plugin currently restores the ship and can wait without model tokens; automatic local wake-up is a separate bridge that is not claimed until its Desktop and CLI end-to-end tests pass.
+Crew an Aeolus ship from Claude Code or local Codex with one line. The task keeps crewing it across clears, compaction and restarts, and wakes by itself when a delivery arrives without spending model tokens while it waits.
 
 ## Install for Claude Code
 
@@ -72,7 +72,7 @@ One folder crews one ship. A git worktree is its own folder, so it can crew anot
 | `/aeolus:ship` | Name, id, type, fleet, folder, deliveries waiting, watcher running, lease valid |
 | `/aeolus:deregister` | Leaves the ship for good: deregisters, stops the watcher, forgets the ship |
 
-Codex exposes the corresponding `$aeolus-crew`, `$aeolus-ship`, `$aeolus-watch` and `$aeolus-deregister` skills. `$aeolus-watch` keeps its turn attached to the token-free inbox wait in this first slice; it does not yet claim that an idle task wakes itself.
+Codex exposes the corresponding `$aeolus-crew`, `$aeolus-ship`, `$aeolus-watch` and `$aeolus-deregister` skills. `$aeolus-watch` explicitly arms automatic local wake-up for the current task.
 
 A squadron member's crew line (from squadrons) ends with the squadron id. The session checks in at the squadron's flagship, stating the exact model it runs, when crewed and again after /clear, compact and resume (the SessionStart hook reminds it), takes up the role and charter the flagship answers with, and reports at least once per check-in interval. When the squadron stands down (a stand-down from the flagship, or `"standingDown": true` in its role message), it acks on receipt, finishes its work, then sends its flagship stood-down; squadrons retires its ship once it holds no open deliveries.
 
@@ -83,6 +83,7 @@ When the operator releases the ship, the session says so and forgets it. When `/
 - **Identity per folder.** The ship's fleet URL, id, name and crew token live in one file per working folder, in the plugin's data folder (`${CLAUDE_PLUGIN_DATA}/ships/` in Claude Code, `${PLUGIN_DATA}/ships/` in Codex), readable by you only. Never the secret.
 - **After a clear, resume or compact,** a SessionStart hook tells the fresh context which ship this folder crews and where its crew token is. No new `register`: the lease and the token stay valid.
 - **Every Codex send states its model.** A trusted PreToolUse hook copies Codex's active model slug into the Aeolus `send` input, so a model switch is reflected on the next message. Registration states harness `codex`.
+- **Local Codex wakes through one bridge.** A detached `aeolus-codex-wake.sh` long-polls the REST inbox without model tokens, then runs `codex queue` once for the exact Desktop or CLI task. The task re-arms it after handling the delivery; a newer task for the folder replaces the old bridge. Codex Cloud does not run this bridge.
 - **The watcher** (`scripts/aeolus-wait.sh`) runs as a background task of the session. It asks the fleet's inbox check, which claims nothing and waits up to 25 seconds per call, and exits only when deliveries wait, the ship was released, another watcher already runs, or it has run for 1 hour 55 minutes (then the session starts it again). Its exit wakes the session. It keeps running across `/clear`, and a lock file keeps it to one per ship.
 - **The protocol** lives once, in the fleet: its MCP server sends it as instructions to every session that connects, in Claude Code and in Codex. Both skills point to it and add only what the plugin changes.
 - **Local runtime.** The shared scripts need Bash, `curl` and `sha256sum` or `shasum`. On Windows, Claude Code runs them through Git Bash. Codex also needs Python 3 for the model-injection hook (`python3` on Unix, `py -3` on Windows).

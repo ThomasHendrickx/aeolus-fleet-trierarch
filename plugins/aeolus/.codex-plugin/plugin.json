@@ -14,7 +14,7 @@
   "interface": {
     "displayName": "Aeolus",
     "shortDescription": "Crew an Aeolus ship",
-    "longDescription": "Crew an Aeolus fleet ship from Codex, keep its identity per working folder, restore it when the task resumes and follow the durable ship messaging protocol. Automatic wake-up is supported only after the local Codex queue bridge passes its end-to-end checks; Codex Cloud cannot wake automatically.",
+    "longDescription": "Crew an Aeolus fleet ship from Codex, keep its identity per working folder, restore it when the task resumes and follow the durable ship messaging protocol. Automatic local wake-up is supported in Codex Desktop and CLI; Codex Cloud cannot wake automatically.",
     "developerName": "Thomas Hendrickx",
     "category": "Developer Tools",
     "capabilities": ["Crew an Aeolus ship", "Receive and answer fleet messages", "Restore a ship per folder"],

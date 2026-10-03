@@ -44,6 +44,7 @@ function runScript(script: string, options: ScriptOptions = {}) {
       ...process.env,
       AEOLUS_DATA: '',
       AEOLUS_FOLDER: '',
+      AEOLUS_CODEX_WAKE_DISABLED: '1',
       CLAUDE_PLUGIN_DATA: '',
       CLAUDE_PROJECT_DIR: '',
       PLUGIN_DATA: data,
@@ -92,6 +93,26 @@ describe('the Codex plugin package', () => {
     }
 
     expect(readFileSync(join(PLUGIN, 'skills/aeolus-crew/SKILL.md'), 'utf8')).toContain('harness `codex`');
+  });
+
+  it('documents automatic local wake-up and re-arms it at the end of every completed turn', () => {
+    const crew = readFileSync(join(PLUGIN, 'skills/aeolus-crew/SKILL.md'), 'utf8');
+    const watch = readFileSync(join(PLUGIN, 'skills/aeolus-watch/SKILL.md'), 'utf8');
+    const manifest = JSON.stringify(json(join(PLUGIN, '.codex-plugin/plugin.json')));
+
+    expect(crew).toContain('aeolus-codex-wake.sh` `start <codexTaskId>`');
+    expect(crew).toContain('before ending every completed turn');
+    expect(watch).toContain('automatic local wake-up');
+    expect(manifest).toContain('Automatic local wake-up');
+    expect(`${crew}\n${watch}\n${manifest}`).toContain('Codex Cloud cannot wake automatically');
+  });
+
+  it('launches shared hooks from the root variable each harness provides', () => {
+    const hooks = JSON.stringify(json(join(PLUGIN, 'hooks/hooks.json')));
+
+    expect(hooks).toContain('${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/aeolus-session-start.sh');
+    expect(hooks).toContain('${PLUGIN_ROOT}/scripts/aeolus-codex-send-model.py');
+    expect(hooks).toContain('%PLUGIN_ROOT%\\\\scripts\\\\aeolus-codex-send-model.py');
   });
 });
 

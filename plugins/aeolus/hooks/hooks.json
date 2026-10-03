@@ -3,7 +3,7 @@
     "SessionStart": [
       {
         "matcher": "startup|resume|clear|compact",
-        "hooks": [{ "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-session-start.sh\"" }]
+        "hooks": [{ "type": "command", "command": "bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/aeolus-session-start.sh\"" }]
       }
     ],
     "PreToolUse": [
@@ -12,8 +12,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -z \"${PLUGIN_ROOT:-}\" ] || python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-codex-send-model.py\"",
-            "commandWindows": "if not defined PLUGIN_ROOT exit /b 0 & py -3 \"%CLAUDE_PLUGIN_ROOT%\\scripts\\aeolus-codex-send-model.py\""
+            "command": "[ -z \"${PLUGIN_ROOT:-}\" ] || python3 \"${PLUGIN_ROOT}/scripts/aeolus-codex-send-model.py\"",
+            "commandWindows": "if not defined PLUGIN_ROOT exit /b 0 & py -3 \"%PLUGIN_ROOT%\\scripts\\aeolus-codex-send-model.py\""
           }
         ]
       }

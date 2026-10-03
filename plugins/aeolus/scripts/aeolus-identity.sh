@@ -39,6 +39,13 @@ case "$command" in
     echo "$file"
     ;;
   delete)
+    wake_pid_file="$(aeolus_wake_pid_file)"
+    wake_thread_file="$(aeolus_wake_thread_file)"
+    if [ -f "$wake_pid_file" ]; then
+      wake_pid="$(head -n 1 "$wake_pid_file")"
+      [ -n "$wake_pid" ] && kill "$wake_pid" 2>/dev/null || true
+      rm -f "$wake_pid_file" "$wake_thread_file"
+    fi
     pid_file="$(aeolus_pid_file)"
     if [ -f "$pid_file" ]; then
       pid="$(head -n 1 "$pid_file")"

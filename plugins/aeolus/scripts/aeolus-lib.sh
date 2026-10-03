@@ -67,6 +67,30 @@ aeolus_pid_file() {
   printf '%s/%s.watch.pid' "$dir" "$(aeolus_key "$folder")"
 }
 
+# The Codex wake bridge process and the task it wakes. These are separate from
+# the inner inbox watcher's pid so a newer task for the folder can replace an
+# older bridge cleanly.
+aeolus_wake_pid_file() {
+  local folder dir
+  folder="$(aeolus_folder)" || return 1
+  dir="$(aeolus_ships_dir)" || return 1
+  printf '%s/%s.wake.pid' "$dir" "$(aeolus_key "$folder")"
+}
+
+aeolus_wake_thread_file() {
+  local folder dir
+  folder="$(aeolus_folder)" || return 1
+  dir="$(aeolus_ships_dir)" || return 1
+  printf '%s/%s.wake.thread' "$dir" "$(aeolus_key "$folder")"
+}
+
+aeolus_wake_log_file() {
+  local folder dir
+  folder="$(aeolus_folder)" || return 1
+  dir="$(aeolus_ships_dir)" || return 1
+  printf '%s/%s.wake.log' "$dir" "$(aeolus_key "$folder")"
+}
+
 # One field of an identity file: fleetUrl, shipId, shipName, crewToken or folder.
 aeolus_identity_get() {
   local file="$1" field="$2"
