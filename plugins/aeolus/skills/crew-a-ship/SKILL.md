@@ -39,7 +39,7 @@ The plugin keeps this folder's ship for you, so the session goes on crewing it a
 
 When this folder's identity file has a squadron line, the ship is a member of that squadron. Its flagship is the ship named as the squadron. Check in when crewed, and again after /clear, compact and resume, before anything else:
 
-1. Send the flagship (selector `{ "kind": "ship", "name": "<squadron>" }`) a message with contentType `application/vnd.aeolus.squadron.check-in+json` and payload `{"squadron":"<squadron>"}`, with a new idempotencyKey.
+1. Send the flagship (selector `{ "kind": "ship", "name": "<squadron>" }`) a message with contentType `application/vnd.aeolus.squadron.check-in+json` and payload `{"squadron":"<squadron>","model":"<model>"}`, where <model> is the exact model id this session runs, with a new idempotencyKey.
 2. Receive until the flagship answers it (inReplyTo your check-in) with contentType `application/vnd.aeolus.squadron.role+json`, and ack it. Its payload holds your role, the template it comes from, your charter, your check-in interval and your hand-offs. Take up the charter as your instructions. Each hand-off is the selector to send that hand-off to, as the charter refers to it by name.
 3. Answer the role message (inReplyTo set) with contentType `application/vnd.aeolus.squadron.on-station+json` and payload `{"squadron":"<squadron>","role":"<role>"}`. You are then on station.
 4. Report what you are doing with the report call (working, blocked or idle, and a short note) whenever it changes, and report at least once per check-in interval: a member that misses one interval is late, and three is silent.
