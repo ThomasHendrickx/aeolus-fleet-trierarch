@@ -176,13 +176,17 @@ describe('aeolus-wait', () => {
   });
 
   it('holds the lock while it runs and frees it when it exits', async () => {
-    // Enough empty inboxes that the watcher still runs when the poll first looks: with three, it could exit first.
-    const STILL_WAITING = 40;
-    fleet = await startStubFleet([...Array.from({ length: STILL_WAITING }, () => inbox(0)), inbox(1)]);
+    // The fleet holds its answer until the test has seen the lock, so the watcher cannot exit before the check.
+    let answer: () => void = () => undefined;
+    const isLockSeen = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    fleet = await startStubFleet([{ ...inbox(1), hold: isLockSeen }]);
     crew(fleet.url);
 
     const { exited } = start('aeolus-wait.sh', { AEOLUS_WAIT_SECONDS: '0' });
     await expect.poll(() => run('aeolus-watch-status.sh').status).toBe(0);
+    answer();
     await exited;
 
     expect(run('aeolus-watch-status.sh').status).toBe(1);
