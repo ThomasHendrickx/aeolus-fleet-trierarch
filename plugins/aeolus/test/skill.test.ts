@@ -28,6 +28,10 @@ describe('the crew-a-ship skill', () => {
     expect(skill).toContain('report at least once per check-in interval');
   });
 
+  it('tells a squadron member to state the exact model it runs at check-in', () => {
+    expect(pluginSkill()).toContain('payload `{"squadron":"<squadron>","model":"<model>"}`, where <model> is the exact model id this session runs');
+  });
+
   it('tells the session to start the watcher again when it exits 6 at its 2-hour limit', () => {
     expect(pluginSkill()).toContain('"for almost 2 hours" (exit 6): start the watcher again, as in step 3. That is all.');
   });
