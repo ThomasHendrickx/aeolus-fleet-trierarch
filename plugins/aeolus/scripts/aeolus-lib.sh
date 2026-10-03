@@ -7,10 +7,10 @@
 # exports it as AEOLUS_FOLDER for every later command of the session, so the
 # hook, the watcher and the commands all key the ship by the same path.
 
-# The plugin's data folder: ${CLAUDE_PLUGIN_DATA} in a hook, AEOLUS_DATA (set
-# by the hook) in a session's commands.
+# The plugin's data folder: ${CLAUDE_PLUGIN_DATA} or ${PLUGIN_DATA} in a hook,
+# AEOLUS_DATA in a session's commands.
 aeolus_data() {
-  local data="${AEOLUS_DATA:-${CLAUDE_PLUGIN_DATA:-}}"
+  local data="${AEOLUS_DATA:-${PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-}}}"
   if [ -z "$data" ]; then
     echo "aeolus: no plugin data folder; start a new session so the aeolus SessionStart hook can set it up" >&2
     return 1
@@ -19,9 +19,10 @@ aeolus_data() {
 }
 
 # The session's working folder: AEOLUS_FOLDER (set by the hook), else the
-# project folder a hook runs in.
+# project folder a Claude hook runs in, else the current Codex folder.
 aeolus_folder() {
   local folder="${AEOLUS_FOLDER:-${CLAUDE_PROJECT_DIR:-}}"
+  [ -n "$folder" ] || folder="$(pwd -P)"
   if [ -z "$folder" ]; then
     echo "aeolus: no working folder; start a new session so the aeolus SessionStart hook can set it up" >&2
     return 1

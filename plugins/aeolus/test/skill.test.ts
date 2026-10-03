@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { SHIP_PROTOCOL } from '../../../packages/server/src/adapters/trpc/ship-protocol.ts';
-import { PLUGIN_SKILL_PATH, pluginSkill } from '../../../scripts/generate-plugin-skill.ts';
+import { CODEX_PLUGIN_SKILL_PATH, codexPluginSkill, PLUGIN_SKILL_PATH, pluginSkill } from '../../../scripts/generate-plugin-skill.ts';
 
 // The plugin and the fleet state the ship protocol in one text: the skill is
 // generated from the constant the fleet sends, and kept in step by this test.
@@ -15,6 +15,13 @@ describe('the crew-a-ship skill', () => {
 
   it("holds the fleet's ship protocol word for word", () => {
     expect(readFileSync(PLUGIN_SKILL_PATH, 'utf8')).toContain(SHIP_PROTOCOL);
+  });
+
+  it("generates the Codex skill from the same fleet protocol", () => {
+    expect(readFileSync(CODEX_PLUGIN_SKILL_PATH, 'utf8')).toBe(codexPluginSkill());
+    expect(codexPluginSkill()).toContain(SHIP_PROTOCOL);
+    expect(codexPluginSkill()).toContain('$aeolus-crew');
+    expect(codexPluginSkill()).toContain('harness `codex`');
   });
 
   it('tells a squadron member how to check in, take up its role, report and stand down', () => {

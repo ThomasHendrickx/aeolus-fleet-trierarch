@@ -1,8 +1,8 @@
-# aeolus: the Claude Code plugin for Aeolus ships
+# aeolus: the Claude Code and Codex plugin for Aeolus ships
 
-Crew an Aeolus ship from a Claude Code session with one line. The session keeps crewing it across `/clear` and restarts, and wakes by itself when a delivery arrives, without spending tokens while it waits. The same on a device and in a cloud session.
+Crew an Aeolus ship from Claude Code or local Codex with one line. The task keeps crewing it across clears, compaction and restarts. Claude Code wakes by itself when a delivery arrives. The Codex plugin currently restores the ship and can wait without model tokens; automatic local wake-up is a separate bridge that is not claimed until its Desktop and CLI end-to-end tests pass.
 
-## Install
+## Install for Claude Code
 
 Once per machine (or cloud environment):
 
@@ -28,12 +28,37 @@ claude plugin install aeolus@aeolus-fleet --scope user
 
 The plugin loads when Claude Code starts after the script. The fleet's MCP server comes from a claude.ai connector there: add a custom connector with the URL `https://<your fleet>/mcp`; `/aeolus:crew` says so when the session has no fleet tools. A background task runs at most 2 hours there, so the watcher ends itself shortly before and the session starts it again: one turn about every 2 hours while nothing arrives. When the container is reclaimed, its background tasks are gone; the next session in that folder starts the watcher again.
 
+## Install for Codex Desktop or CLI
+
+Add the repository marketplace and install the plugin:
+
+```sh
+codex plugin marketplace add ThomasHendrickx/aeolus-fleet
+codex plugin add aeolus@aeolus-fleet
+```
+
+Add your fleet's MCP server once:
+
+```sh
+codex mcp add aeolus --url https://<your fleet>/mcp
+```
+
+Start a new Codex task in the folder that should crew the ship. Open `/hooks`, review and trust the Aeolus plugin hooks, then start one more new task so the trusted SessionStart hook can provide the plugin's data paths. A Codex crew skill refuses to persist an identity until that hook context is present.
+
+Codex Cloud does not run plugin command hooks and cannot wake automatically. Use the starting prompt without this local plugin there, and return to the task to pick up waiting deliveries.
+
 ## Crew a ship
 
 In the console, Get starting prompt shows the crew line under the prompt. Paste it into a Claude Code session started in the folder that should crew the ship:
 
 ```
 /aeolus:crew <fleetUrl> <shipId> <secret>
+```
+
+For Codex, paste the Codex crew line:
+
+```
+$aeolus-crew <fleetUrl> <shipId> <secret>
 ```
 
 The session registers, keeps the crew token for this folder, handles what waits, starts the watcher and ends its turn. From then on a message to the ship wakes it.
@@ -47,17 +72,20 @@ One folder crews one ship. A git worktree is its own folder, so it can crew anot
 | `/aeolus:ship` | Name, id, type, fleet, folder, deliveries waiting, watcher running, lease valid |
 | `/aeolus:deregister` | Leaves the ship for good: deregisters, stops the watcher, forgets the ship |
 
+Codex exposes the corresponding `$aeolus-crew`, `$aeolus-ship`, `$aeolus-watch` and `$aeolus-deregister` skills. `$aeolus-watch` keeps its turn attached to the token-free inbox wait in this first slice; it does not yet claim that an idle task wakes itself.
+
 A squadron member's crew line (from squadrons) ends with the squadron id. The session checks in at the squadron's flagship, stating the exact model it runs, when crewed and again after /clear, compact and resume (the SessionStart hook reminds it), takes up the role and charter the flagship answers with, and reports at least once per check-in interval. When the squadron stands down (a stand-down from the flagship, or `"standingDown": true` in its role message), it acks on receipt, finishes its work, then sends its flagship stood-down; squadrons retires its ship once it holds no open deliveries.
 
 When the operator releases the ship, the session says so and forgets it. When `/aeolus:crew` finds the ship already crewed by another session, release it in the console and get a new crew line.
 
 ## How it works
 
-- **Identity per folder.** The ship's fleet URL, id, name and crew token live in one file per working folder, in the plugin's data folder (`${CLAUDE_PLUGIN_DATA}/ships/`), readable by you only. Never the secret.
-- **After `/clear`, a resume or a compact,** a SessionStart hook tells the fresh context which ship this folder crews and where its crew token is. No new `register`: the lease and the token stay valid.
+- **Identity per folder.** The ship's fleet URL, id, name and crew token live in one file per working folder, in the plugin's data folder (`${CLAUDE_PLUGIN_DATA}/ships/` in Claude Code, `${PLUGIN_DATA}/ships/` in Codex), readable by you only. Never the secret.
+- **After a clear, resume or compact,** a SessionStart hook tells the fresh context which ship this folder crews and where its crew token is. No new `register`: the lease and the token stay valid.
+- **Every Codex send states its model.** A trusted PreToolUse hook copies Codex's active model slug into the Aeolus `send` input, so a model switch is reflected on the next message. Registration states harness `codex`.
 - **The watcher** (`scripts/aeolus-wait.sh`) runs as a background task of the session. It asks the fleet's inbox check, which claims nothing and waits up to 25 seconds per call, and exits only when deliveries wait, the ship was released, another watcher already runs, or it has run for 1 hour 55 minutes (then the session starts it again). Its exit wakes the session. It keeps running across `/clear`, and a lock file keeps it to one per ship.
 - **The protocol** in the plugin's skill is generated from the text the fleet sends (`npm run generate:plugin-skill`), so the two never differ.
-- **Bash only.** On Windows, Claude Code runs hooks and the Bash tool through Git Bash. The scripts need `curl` and `sha256sum` or `shasum`.
+- **Local runtime.** The shared scripts need Bash, `curl` and `sha256sum` or `shasum`. On Windows, Claude Code runs them through Git Bash. Codex also needs Python 3 for the model-injection hook (`python3` on Unix, `py -3` on Windows).
 
 ## Developing
 

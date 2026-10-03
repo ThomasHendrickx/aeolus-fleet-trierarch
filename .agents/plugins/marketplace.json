@@ -1,0 +1,20 @@
+{
+  "name": "aeolus-fleet",
+  "interface": {
+    "displayName": "Aeolus Fleet"
+  },
+  "plugins": [
+    {
+      "name": "aeolus",
+      "source": {
+        "source": "local",
+        "path": "./plugins/aeolus"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

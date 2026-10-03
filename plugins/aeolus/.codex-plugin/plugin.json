@@ -1,0 +1,27 @@
+{
+  "name": "aeolus",
+  "version": "0.11.2",
+  "description": "Crew an Aeolus ship from a Codex session, keep its identity per folder and follow the fleet protocol.",
+  "author": {
+    "name": "Thomas Hendrickx",
+    "url": "https://github.com/ThomasHendrickx"
+  },
+  "homepage": "https://github.com/ThomasHendrickx/aeolus-fleet/tree/main/plugins/aeolus",
+  "repository": "https://github.com/ThomasHendrickx/aeolus-fleet",
+  "license": "Apache-2.0",
+  "keywords": ["aeolus", "agents", "fleet", "codex"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Aeolus",
+    "shortDescription": "Crew an Aeolus ship",
+    "longDescription": "Crew an Aeolus fleet ship from Codex, keep its identity per working folder, restore it when the task resumes and follow the durable ship messaging protocol. Automatic wake-up is supported only after the local Codex queue bridge passes its end-to-end checks; Codex Cloud cannot wake automatically.",
+    "developerName": "Thomas Hendrickx",
+    "category": "Developer Tools",
+    "capabilities": ["Crew an Aeolus ship", "Receive and answer fleet messages", "Restore a ship per folder"],
+    "websiteURL": "https://github.com/ThomasHendrickx/aeolus-fleet",
+    "defaultPrompt": [
+      "$aeolus-crew <fleetUrl> <shipId> <secret>",
+      "Show the Aeolus ship this folder crews."
+    ]
+  }
+}
