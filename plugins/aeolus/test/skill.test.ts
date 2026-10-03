@@ -3,29 +3,33 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { SHIP_PROTOCOL } from '../../../packages/server/src/adapters/trpc/ship-protocol.ts';
-import { CODEX_PLUGIN_SKILL_PATH, codexPluginSkill, PLUGIN_SKILL_PATH, pluginSkill } from '../../../scripts/generate-plugin-skill.ts';
 
-// The plugin and the fleet state the ship protocol in one text: the skill is
-// generated from the constant the fleet sends, and kept in step by this test.
+const claudeSkill = readFileSync(new URL('../skills/crew-a-ship/SKILL.md', import.meta.url), 'utf8');
+const codexSkill = readFileSync(new URL('../skills/aeolus-crew/SKILL.md', import.meta.url), 'utf8');
+const protocolRules = SHIP_PROTOCOL.split('\n').filter((line) => /^\d+\. /.test(line));
+
+// The ship protocol lives once, in the fleet, which sends it as its MCP
+// instructions; both skills point to it and hold only what the plugin adds.
 
 describe('the crew-a-ship skill', () => {
-  it('is what the generator writes from the fleet\'s ship protocol: run npm run generate:plugin-skill when it differs', () => {
-    expect(readFileSync(PLUGIN_SKILL_PATH, 'utf8')).toBe(pluginSkill());
+  it("points to the fleet's MCP instructions for the ship protocol, and holds none of its rules", () => {
+    expect(claudeSkill).toContain("The fleet's MCP server states the ship protocol in its instructions");
+    for (const rule of protocolRules) {
+      expect(claudeSkill).not.toContain(rule);
+    }
   });
 
-  it("holds the fleet's ship protocol word for word", () => {
-    expect(readFileSync(PLUGIN_SKILL_PATH, 'utf8')).toContain(SHIP_PROTOCOL);
-  });
-
-  it("generates the Codex skill from the same fleet protocol", () => {
-    expect(readFileSync(CODEX_PLUGIN_SKILL_PATH, 'utf8')).toBe(codexPluginSkill());
-    expect(codexPluginSkill()).toContain(SHIP_PROTOCOL);
-    expect(codexPluginSkill()).toContain('$aeolus-crew');
-    expect(codexPluginSkill()).toContain('harness `codex`');
+  it("points the Codex skill to the same MCP instructions, holding none of the rules, with its Codex crew line and harness", () => {
+    expect(codexSkill).toContain('The Aeolus MCP server states the ship protocol in its instructions');
+    for (const rule of protocolRules) {
+      expect(codexSkill).not.toContain(rule);
+    }
+    expect(codexSkill).toContain('$aeolus-crew');
+    expect(codexSkill).toContain('harness `codex`');
   });
 
   it('tells a squadron member how to check in, take up its role, report and stand down', () => {
-    const skill = pluginSkill();
+    const skill = claudeSkill;
 
     expect(skill).toContain('## A squadron member');
     expect(skill).toContain('application/vnd.aeolus.squadron.check-in+json');
@@ -36,7 +40,7 @@ describe('the crew-a-ship skill', () => {
   });
 
   it('tells a standing-down member to ack the stand-down on receipt, finish its work, then send stood-down to its flagship', () => {
-    const skill = pluginSkill();
+    const skill = claudeSkill;
 
     expect(skill).toContain('ack it on receipt');
     expect(skill).toContain(
@@ -45,14 +49,14 @@ describe('the crew-a-ship skill', () => {
   });
 
   it('tells a member whose role message says standingDown to stand down too, inReplyTo the role message', () => {
-    expect(pluginSkill()).toContain('If the role message says `"standingDown": true`, the squadron already stands down');
+    expect(claudeSkill).toContain('If the role message says `"standingDown": true`, the squadron already stands down');
   });
 
   it('tells a squadron member to state the exact model it runs at check-in', () => {
-    expect(pluginSkill()).toContain('payload `{"squadron":"<squadron>","model":"<model>"}`, where <model> is the exact model id this session runs');
+    expect(claudeSkill).toContain('payload `{"squadron":"<squadron>","model":"<model>"}`, where <model> is the exact model id this session runs');
   });
 
   it('tells the session to start the watcher again when it exits 6 at its 2-hour limit', () => {
-    expect(pluginSkill()).toContain('"for almost 2 hours" (exit 6): start the watcher again, as in step 3. That is all.');
+    expect(claudeSkill).toContain('"for almost 2 hours" (exit 6): start the watcher again, as in step 3. That is all.');
   });
 });

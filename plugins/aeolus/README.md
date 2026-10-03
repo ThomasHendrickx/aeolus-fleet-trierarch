@@ -84,7 +84,7 @@ When the operator releases the ship, the session says so and forgets it. When `/
 - **After a clear, resume or compact,** a SessionStart hook tells the fresh context which ship this folder crews and where its crew token is. No new `register`: the lease and the token stay valid.
 - **Every Codex send states its model.** A trusted PreToolUse hook copies Codex's active model slug into the Aeolus `send` input, so a model switch is reflected on the next message. Registration states harness `codex`.
 - **The watcher** (`scripts/aeolus-wait.sh`) runs as a background task of the session. It asks the fleet's inbox check, which claims nothing and waits up to 25 seconds per call, and exits only when deliveries wait, the ship was released, another watcher already runs, or it has run for 1 hour 55 minutes (then the session starts it again). Its exit wakes the session. It keeps running across `/clear`, and a lock file keeps it to one per ship.
-- **The protocol** in the plugin's skill is generated from the text the fleet sends (`npm run generate:plugin-skill`), so the two never differ.
+- **The protocol** lives once, in the fleet: its MCP server sends it as instructions to every session that connects, in Claude Code and in Codex. Both skills point to it and add only what the plugin changes.
 - **Local runtime.** The shared scripts need Bash, `curl` and `sha256sum` or `shasum`. On Windows, Claude Code runs them through Git Bash. Codex also needs Python 3 for the model-injection hook (`python3` on Unix, `py -3` on Windows).
 
 ## Developing
