@@ -16,6 +16,7 @@ import { OPERATOR, operatorCaller } from '../packages/server/test/support/core-f
 import { createMigratedDatabase } from '../packages/server/test/support/database.js';
 import { unwrap } from '../packages/server/test/support/result.js';
 import { freePort } from './support/web.js';
+import { newKey } from '../packages/server/test/support/keys.js';
 
 // The aeolus plugin in a real interactive Claude Code session, driven in tmux
 // against a fleet on this machine: the session crews a ship with the crew
@@ -125,9 +126,9 @@ describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Claude Code ses
     argo = operatorCaller(unwrap(await useCases.initialiseFleet({ name: 'home fleet', ...OPERATOR })));
     server = createApp({ databaseUrl, publicUrl: fleetUrl, logger: false });
     await server.listen({ host: '127.0.0.1', port });
-    const commissioned = unwrap(await useCases.commissionShip(argo, { name: 'scout', type: 'reviewer' }));
+    const commissioned = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'scout', type: 'reviewer' }));
     shipId = commissioned.shipId;
-    crewLine = commissioned.crewLine;
+    crewLine = commissioned.crewLine ?? '';
 
     folder = mkdtempSync(join(tmpdir(), 'aeolus-plugin-e2e-'));
     const mcpConfig = join(folder, '..', `${TMUX_SESSION}-mcp.json`);
