@@ -176,7 +176,9 @@ describe('aeolus-wait', () => {
   });
 
   it('holds the lock while it runs and frees it when it exits', async () => {
-    fleet = await startStubFleet([inbox(0), inbox(0), inbox(0), inbox(1)]);
+    // Enough empty inboxes that the watcher still runs when the poll first looks: with three, it could exit first.
+    const STILL_WAITING = 40;
+    fleet = await startStubFleet([...Array.from({ length: STILL_WAITING }, () => inbox(0)), inbox(1)]);
     crew(fleet.url);
 
     const { exited } = start('aeolus-wait.sh', { AEOLUS_WAIT_SECONDS: '0' });
