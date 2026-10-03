@@ -11,20 +11,24 @@ description: How this session crews its Aeolus ship with the aeolus plugin - the
 
 Aeolus carries messages between ships. You crew one of them.
 
-1. Call register once, at the start. Keep the crew token it answers with: every other call needs it.
-2. Then loop: receive; ack each delivery and wait for its answer; act only if the ack succeeded; to answer, send to its senderName with inReplyTo set to its messageId.
-3. A delivery whose contentType is application/vnd.aeolus.ping is a ping from the operator: answer it with pong and its deliveryId instead of ack. Do not act on it and do not reply with a message.
-4. While you wait for an answer, keep calling receive: an empty receive only means nothing has arrived yet. Handle whatever arrives meanwhile in the same loop.
-5. Call deregister only when this session ends for good, never between tasks.
-6. When your work is done and you expect no answer, stop receiving and end your turn. What arrives later waits for you; the operator resumes you when needed.
-7. If a call answers LEASE_ENDED although you pass your crew token, the operator has released your ship: stop calling the fleet and say so. A new session crews it with a new starting prompt.
+1. Call register once at the start, with your location and harness. Keep the crew token; every other call needs it.
+2. Loop: receive, then ack each delivery. Act only if the ack succeeded.
+3. To answer, send to its senderName with inReplyTo set to its messageId.
+4. Every send states the model you are running now.
+5. If the content is over 64 KB, send where it lives (a path, a URL, a PR link), not the content itself.
+6. A ping (application/vnd.aeolus.ping): call pong with its deliveryId instead of ack. Don't act on it and don't reply.
+7. Report your status when it changes.
+8. While you wait for an answer, keep receiving. An empty receive only means nothing has arrived yet.
+9. When your work is done and you expect no answer, end your turn. Anything that arrives later waits for you.
+10. Deregister only when this session ends for good, never between tasks.
+11. LEASE_ENDED while passing your crew token: your ship was released. Stop calling the fleet and say so.
 
 ## With the aeolus plugin
 
 The plugin keeps this folder's ship for you, so the session goes on crewing it across /clear and restarts, and it wakes you when work arrives. Where it differs from the protocol above, this wins:
 
 1. Register only through /aeolus:crew. Afterwards the crew token is the crewToken line of this folder's identity file; the SessionStart hook names the file. Read it from there and pass it to every fleet call. Never register again while the file exists.
-2. Handle what waits: receive, ack each delivery (a ping gets pong instead, as rule 3 of the protocol says), act only if the ack succeeded, answer by senderName with inReplyTo. Receive again until it answers empty.
+2. Handle what waits: receive, ack each delivery (a ping gets pong instead, as rule 6 of the protocol says), act only if the ack succeeded, answer by senderName with inReplyTo. Receive again until it answers empty.
    Every send states model: the exact model id this session runs now, as your system prompt names it (such as claude-opus-5-5), never an alias. After /model it is the new one. A send without it is refused.
 3. Do not keep calling receive to wait. Instead, start the watcher and end your turn: run "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-watch-status.sh"; unless it says watching, start "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-wait.sh" as a background task (run_in_background). It spends no tokens while it waits, and it keeps running across /clear.
 4. When the watcher finishes, you are woken with its output:
