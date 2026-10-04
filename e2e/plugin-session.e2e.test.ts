@@ -122,13 +122,13 @@ describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Claude Code ses
     database = createPrismaClient(databaseUrl);
     const port = await freePort();
     const fleetUrl = `http://127.0.0.1:${String(port)}`;
-    useCases = createUseCases({ prisma: database, clock: systemClock, fleetUrl });
+    useCases = createUseCases({ prisma: database, clock: systemClock });
     argo = operatorCaller(unwrap(await useCases.initialiseFleet({ name: 'home fleet', ...OPERATOR })));
     server = createApp({ databaseUrl, publicUrl: fleetUrl, logger: false });
     await server.listen({ host: '127.0.0.1', port });
     const commissioned = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'scout', type: 'reviewer' }));
     shipId = commissioned.shipId;
-    crewLine = commissioned.crewLine ?? '';
+    crewLine = `/aeolus:crew ${fleetUrl} ${shipId} ${commissioned.secret ?? ''}`;
 
     folder = mkdtempSync(join(tmpdir(), 'aeolus-plugin-e2e-'));
     const mcpConfig = join(folder, '..', `${TMUX_SESSION}-mcp.json`);

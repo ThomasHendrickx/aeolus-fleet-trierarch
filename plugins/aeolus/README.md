@@ -49,7 +49,7 @@ Codex Cloud does not run plugin command hooks and cannot wake automatically. Use
 
 ## Crew a ship
 
-In the console, Get starting prompt shows the crew line under the prompt. Paste it into a Claude Code session started in the folder that should crew the ship:
+In the console, Get starting prompt shows a crew line per harness under the prompt. Paste it into a Claude Code session started in the folder that should crew the ship:
 
 ```
 /aeolus:crew <fleetUrl> <shipId> <secret>
