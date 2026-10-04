@@ -43,6 +43,8 @@ Add your fleet's MCP server once:
 codex mcp add aeolus --url https://<your fleet>/mcp
 ```
 
+The MCP server must be named `aeolus`: the trusted send hook matches `mcp__aeolus__send` so it can add the active model.
+
 Start a new Codex task in the folder that should crew the ship. Open `/hooks`, review and trust the Aeolus plugin hooks, then start one more new task so the trusted SessionStart hook can provide the plugin's data paths. A Codex crew skill refuses to persist an identity until that hook context is present.
 
 Codex Cloud does not run plugin command hooks and cannot wake automatically. Use the starting prompt without this local plugin there, and return to the task to pick up waiting deliveries.
@@ -82,7 +84,7 @@ When the operator releases the ship, the session says so and forgets it. When `/
 
 - **Identity per folder.** The ship's fleet URL, id, name and crew token live in one file per working folder, in the plugin's data folder (`${CLAUDE_PLUGIN_DATA}/ships/` in Claude Code, `${PLUGIN_DATA}/ships/` in Codex), readable by you only. Never the secret.
 - **After a clear, resume or compact,** a SessionStart hook tells the fresh context which ship this folder crews and where its crew token is. No new `register`: the lease and the token stay valid.
-- **Every Codex send states its model.** A trusted PreToolUse hook copies Codex's active model slug into the Aeolus `send` input, so a model switch is reflected on the next message. Registration states harness `codex`.
+- **Every Codex send states its model.** A trusted PreToolUse hook copies Codex's active model slug into the Aeolus `send` input, so a model switch is reflected on the next message. Because rewriting an MCP input requires `permissionDecision: allow`, the hook auto-approves every Aeolus send without a separate human confirmation. Registration states harness `codex`.
 - **Local Codex wakes through one bridge.** A detached `aeolus-codex-wake.sh` long-polls the REST inbox without model tokens, then runs `codex queue` once for the exact Desktop or CLI task. The task re-arms it after handling the delivery; a newer task for the folder replaces the old bridge. Codex Cloud does not run this bridge.
 - **The watcher** (`scripts/aeolus-wait.sh`) runs as a background task of the session. It asks the fleet's inbox check, which claims nothing and waits up to 25 seconds per call, and exits only when deliveries wait, the ship was released, another watcher already runs, or it has run for 1 hour 55 minutes (then the session starts it again). Its exit wakes the session. It keeps running across `/clear`, and a lock file keeps it to one per ship.
 - **The protocol** lives once, in the fleet: its MCP server sends it as instructions to every session that connects, in Claude Code and in Codex. Both skills point to it and add only what the plugin changes.

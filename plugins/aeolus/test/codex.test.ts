@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -107,12 +107,21 @@ describe('the Codex plugin package', () => {
     expect(`${crew}\n${watch}\n${manifest}`).toContain('Codex Cloud cannot wake automatically');
   });
 
+  it('documents that model injection auto-approves sends and requires the aeolus MCP server name', () => {
+    const readme = readFileSync(join(PLUGIN, 'README.md'), 'utf8');
+
+    expect(readme).toContain('auto-approves every Aeolus send');
+    expect(readme).toContain('MCP server must be named `aeolus`');
+  });
+
   it('launches shared hooks from the root variable each harness provides', () => {
     const hooks = JSON.stringify(json(join(PLUGIN, 'hooks/hooks.json')));
 
     expect(hooks).toContain('${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/aeolus-session-start.sh');
     expect(hooks).toContain('${PLUGIN_ROOT}/scripts/aeolus-codex-send-model.py');
     expect(hooks).toContain('%PLUGIN_ROOT%\\\\scripts\\\\aeolus-codex-send-model.py');
+    expect(hooks).toContain('commandWindows');
+    expect(hooks).toContain('%PLUGIN_ROOT%\\\\scripts\\\\aeolus-session-start.sh');
   });
 });
 
@@ -169,6 +178,30 @@ describe('Codex plugin state', () => {
 
     expect(hook.stdout).toContain('Aeolus Codex hooks are active.');
     expect(hook.stdout).toContain('This folder crews no Aeolus ship.');
+  });
+
+  it('surfaces a wake bridge startup failure in the restored session context', () => {
+    expect(
+      runScript('aeolus-identity.sh', {
+        args: ['write', 'http://127.0.0.1:1', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout', 'aeolus_ct_v1_crew'],
+        env: { AEOLUS_FOLDER: folder },
+      }).status,
+    ).toBe(0);
+    const bin = join(data, 'bin');
+    const codex = join(bin, 'codex');
+    mkdirSync(bin);
+    writeFileSync(codex, '#!/usr/bin/env bash\nexit 0\n');
+    chmodSync(codex, 0o700);
+
+    const hook = runScript('aeolus-session-start.sh', {
+      input: JSON.stringify({ session_id: '01a10348-c3ff-7951-9962-349fca3538e8', cwd: folder, hook_event_name: 'SessionStart', source: 'resume' }),
+      env: { AEOLUS_CODEX_WAKE_DISABLED: '', PATH: `${bin}:${process.env.PATH ?? ''}` },
+    });
+    const output = z.object({ hookSpecificOutput: z.object({ additionalContext: z.string() }) }).parse(JSON.parse(hook.stdout)).hookSpecificOutput.additionalContext;
+
+    expect(output).toContain('Automatic local wake-up failed:');
+    expect(output).toContain('cannot reach the fleet');
+    expect(output).not.toContain('Automatic local wake-up targets this Codex task');
   });
 });
 

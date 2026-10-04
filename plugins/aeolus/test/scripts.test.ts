@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,6 +26,9 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  if (statSync(identityFile(), { throwIfNoEntry: false })) {
+    run('aeolus-identity.sh', { args: ['delete'] });
+  }
   await fleet?.close();
   fleet = undefined;
   rmSync(data, { recursive: true, force: true });
@@ -81,6 +84,10 @@ function wakePidFile(): string {
   return identityFile().replace(/\.identity$/, '.wake.pid');
 }
 
+function wakeThreadFile(): string {
+  return identityFile().replace(/\.identity$/, '.wake.thread');
+}
+
 const inbox = (waiting: number) => ({ status: 200, body: { waiting } });
 
 describe('aeolus-identity', () => {
@@ -92,7 +99,7 @@ describe('aeolus-identity', () => {
     expect(shown.status).toBe(0);
     expect(shown.stdout).toContain(`ship: scout (${SHIP_ID})`);
     expect(shown.stdout).toContain('fleet: https://fleet.example.com');
-    expect(shown.stdout).toContain(`folder: ${folder}`);
+    expect(shown.stdout).toContain(`folder: ${realpathSync(folder)}`);
     expect(shown.stdout).not.toContain(CREW_TOKEN);
     expect(readFileSync(identityFile(), 'utf8')).toContain(`crewToken=${CREW_TOKEN}\n`);
   });
@@ -124,34 +131,38 @@ describe('aeolus-identity', () => {
     }
   });
 
+  it('uses the physical folder path so a symlink and its target keep one identity', () => {
+    const linked = `${folder}-linked`;
+    symlinkSync(folder, linked);
+    try {
+      expect(
+        run('aeolus-identity.sh', {
+          args: ['write', 'https://fleet.example.com', SHIP_ID, 'scout', CREW_TOKEN],
+          env: { AEOLUS_FOLDER: linked },
+        }).status,
+      ).toBe(0);
+
+      expect(run('aeolus-identity.sh', { args: ['show'] }).stdout).toContain('ship: scout');
+    } finally {
+      rmSync(linked);
+    }
+  });
+
   it('shows nothing, and fails, for a folder that crews no ship', () => {
     expect(run('aeolus-identity.sh', { args: ['show'] })).toMatchObject({ status: 1, stdout: 'aeolus: this folder crews no ship\n' });
   });
 
-  it('forgets the ship and stops its watcher on delete', async () => {
+  it('forgets the ship without killing unrelated processes named by stale pid files', async () => {
     crew();
     const sleeper = spawn('sleep', ['30']);
     const wakeSleeper = spawn('sleep', ['30']);
     writeFileSync(pidFile(), `${String(sleeper.pid)}\n`);
     writeFileSync(wakePidFile(), `${String(wakeSleeper.pid)}\n`);
-    const stopped = new Promise((resolve) => sleeper.on('exit', resolve));
-    const wakeStopped = new Promise((resolve) => wakeSleeper.on('exit', resolve));
-
     try {
       expect(run('aeolus-identity.sh', { args: ['delete'] }).status).toBe(0);
-
-      await expect(
-        Promise.race([
-          Promise.all([stopped, wakeStopped]).then(() => {
-            return true;
-          }),
-          new Promise<boolean>((resolve) =>
-            setTimeout(() => {
-              resolve(false);
-            }, 500),
-          ),
-        ]),
-      ).resolves.toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(sleeper.exitCode).toBeNull();
+      expect(wakeSleeper.exitCode).toBeNull();
       expect(readdirSync(join(data, 'ships'))).toEqual([]);
     } finally {
       sleeper.kill();
@@ -165,11 +176,21 @@ describe('aeolus-watch-status', () => {
     expect(run('aeolus-watch-status.sh')).toMatchObject({ status: 1, stdout: 'aeolus: not watching\n' });
   });
 
-  it('says watching while a live process holds the lock', () => {
+  it('says watching while an aeolus watcher process holds the lock', () => {
     crew();
+    const bin = join(data, 'bin');
+    mkdirSync(bin);
+    const watcher = join(bin, 'aeolus-wait.sh');
+    writeFileSync(watcher, '#!/usr/bin/env bash\nsleep 30\n');
+    chmodSync(watcher, 0o700);
+    const process = spawn('bash', [watcher]);
     writeFileSync(pidFile(), `${String(process.pid)}\n`);
 
-    expect(run('aeolus-watch-status.sh')).toMatchObject({ status: 0, stdout: 'aeolus: watching\n' });
+    try {
+      expect(run('aeolus-watch-status.sh')).toMatchObject({ status: 0, stdout: 'aeolus: watching\n' });
+    } finally {
+      process.kill();
+    }
   });
 
   it('says not watching when the lock names a process that ended', () => {
@@ -217,13 +238,23 @@ describe('aeolus-wait', () => {
 
   it('exits 4 and starts no second watcher while one runs for the ship', () => {
     crew();
+    const bin = join(data, 'bin');
+    mkdirSync(bin);
+    const watcher = join(bin, 'aeolus-wait.sh');
+    writeFileSync(watcher, '#!/usr/bin/env bash\nsleep 30\n');
+    chmodSync(watcher, 0o700);
+    const process = spawn('bash', [watcher]);
     writeFileSync(pidFile(), `${String(process.pid)}\n`);
 
-    expect(run('aeolus-wait.sh')).toMatchObject({
-      status: 4,
-      stdout: 'aeolus: already watching: a watcher runs for this ship; do not start another\n',
-    });
-    expect(readFileSync(pidFile(), 'utf8')).toBe(`${String(process.pid)}\n`);
+    try {
+      expect(run('aeolus-wait.sh')).toMatchObject({
+        status: 4,
+        stdout: 'aeolus: already watching: a watcher runs for this ship; do not start another\n',
+      });
+      expect(readFileSync(pidFile(), 'utf8')).toBe(`${String(process.pid)}\n`);
+    } finally {
+      process.kill();
+    }
   });
 
   it('exits 3 on LEASE_ENDED: the operator released the ship', async () => {
@@ -279,6 +310,23 @@ describe('aeolus-wait', () => {
 });
 
 describe('the Codex wake bridge', () => {
+  it('refuses to look armed when its first fleet check cannot connect', () => {
+    crew('http://127.0.0.1:1');
+    const bin = join(data, 'bin');
+    mkdirSync(bin);
+    const codex = join(bin, 'codex');
+    writeFileSync(codex, '#!/usr/bin/env bash\nexit 0\n');
+    chmodSync(codex, 0o700);
+
+    const started = run('aeolus-codex-wake.sh', {
+      args: ['start', '01a103c9-80b0-7ab1-82e3-6f4a2f70ad86'],
+      env: { PATH: `${bin}:${process.env.PATH ?? ''}` },
+    });
+
+    expect(started.status).toBe(8);
+    expect(started.stderr).toContain('cannot reach the fleet');
+  });
+
   it('waits without model tokens, then queues one message to the exact Codex task', async () => {
     fleet = await startStubFleet([inbox(1)]);
     crew(fleet.url);
@@ -311,16 +359,46 @@ describe('the Codex wake bridge', () => {
     chmodSync(codex, 0o700);
     const threadId = '01a103c9-80b0-7ab1-82e3-6f4a2f70ad86';
 
-    expect(
-      run('aeolus-codex-wake.sh', {
+    await expect(
+      start('aeolus-codex-wake.sh', {
         args: ['start', threadId],
         env: { PATH: `${bin}:${process.env.PATH ?? ''}` },
-      }),
-    ).toMatchObject({ status: 0, stdout: `aeolus: automatic wake-up armed for Codex task ${threadId}\n` });
+      }).exited,
+    ).resolves.toMatchObject({ status: 0, stdout: `aeolus: automatic wake-up armed for Codex task ${threadId}\n` });
 
-    await expect.poll(() => (statSync(calls, { throwIfNoEntry: false }) ? readFileSync(calls, 'utf8') : '')).toContain(
+    await expect.poll(() => (statSync(calls, { throwIfNoEntry: false }) ? readFileSync(calls, 'utf8') : ''), { timeout: 5_000 }).toContain(
       `queue --thread ${threadId}`,
     );
+  });
+
+  it('replaces a stale same-task pid instead of trusting an unrelated live process', async () => {
+    fleet = await startStubFleet([inbox(1)]);
+    crew(fleet.url);
+    const unrelated = spawn('sleep', ['30']);
+    const bin = join(data, 'bin');
+    const calls = join(data, 'codex.calls');
+    mkdirSync(bin);
+    const codex = join(bin, 'codex');
+    writeFileSync(codex, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "${calls}"\n`);
+    chmodSync(codex, 0o700);
+    const threadId = '01a103c9-80b0-7ab1-82e3-6f4a2f70ad86';
+    writeFileSync(wakePidFile(), `${String(unrelated.pid)}\n`);
+    writeFileSync(wakeThreadFile(), `${threadId}\n`);
+
+    try {
+      await expect(
+        start('aeolus-codex-wake.sh', {
+          args: ['start', threadId],
+          env: { PATH: `${bin}:${process.env.PATH ?? ''}` },
+        }).exited,
+      ).resolves.toMatchObject({ status: 0, stdout: `aeolus: automatic wake-up armed for Codex task ${threadId}\n` });
+      await expect.poll(() => (statSync(calls, { throwIfNoEntry: false }) ? readFileSync(calls, 'utf8') : ''), { timeout: 5_000 }).toContain(
+        `queue --thread ${threadId}`,
+      );
+      expect(unrelated.exitCode).toBeNull();
+    } finally {
+      unrelated.kill();
+    }
   });
 });
 

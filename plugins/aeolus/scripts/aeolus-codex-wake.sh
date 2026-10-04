@@ -32,13 +32,18 @@ if [ "$mode" = start ]; then
   if [ -f "$wake_pid_file" ]; then
     old_pid="$(head -n 1 "$wake_pid_file")"
     old_thread="$(head -n 1 "$wake_thread_file" 2>/dev/null || true)"
-    if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+    if aeolus_process_is "$old_pid" aeolus-codex-wake.sh; then
       if [ "$old_thread" = "$thread_id" ]; then
         echo "aeolus: automatic wake-up is already armed for this Codex task"
         exit 0
       fi
       kill "$old_pid" 2>/dev/null || true
     fi
+    rm -f "$wake_pid_file" "$wake_thread_file"
+  fi
+  if ! probe="$("$(dirname "$0")/aeolus-inbox.sh" 2>&1)"; then
+    printf 'aeolus: cannot reach the fleet, so automatic wake-up is not armed: %s\n' "$probe" | tee -a "$wake_log_file" >&2
+    exit 8
   fi
   AEOLUS_DATA="$(aeolus_data)" AEOLUS_FOLDER="$(aeolus_folder)" \
     nohup "$0" run "$thread_id" >> "$wake_log_file" 2>&1 </dev/null &

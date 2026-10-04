@@ -26,6 +26,7 @@ describe('the crew-a-ship skill', () => {
     }
     expect(codexSkill).toContain('$aeolus-crew');
     expect(codexSkill).toContain('harness `codex`');
+    expect(codexSkill).not.toContain('Receive, pong each operator ping');
   });
 
   it('tells a squadron member how to check in, take up its role, report and stand down', () => {

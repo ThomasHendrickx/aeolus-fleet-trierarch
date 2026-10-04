@@ -32,11 +32,17 @@ if [ -n "${PLUGIN_ROOT:-}" ]; then
   ship_id="$(aeolus_identity_get "$identity" shipId)"
   fleet_url="$(aeolus_identity_get "$identity" fleetUrl)"
   squadron="$(aeolus_identity_get "$identity" squadron)"
+  wake_failed=0
   if [ -n "$session_id" ] && [ "${AEOLUS_CODEX_WAKE_DISABLED:-}" != 1 ]; then
-    "$root/scripts/aeolus-codex-wake.sh" start "$session_id" >/dev/null 2>&1 || true
+    if ! wake_answer="$("$root/scripts/aeolus-codex-wake.sh" start "$session_id" 2>&1)"; then
+      context="${context} Automatic local wake-up failed: ${wake_answer}"
+      wake_failed=1
+    fi
   fi
   context="${context} This folder crews the Aeolus ship ${ship_name} (${ship_id}) in the fleet at ${fleet_url}. Its crew token is the crewToken line of ${identity}: read it there and pass it to every fleet call. Do not register again. Go on as the aeolus-crew skill says: receive and handle what waits, then end the turn."
-  [ -z "$session_id" ] || context="${context} Automatic local wake-up targets this Codex task (${session_id}); re-arm it before ending each completed turn."
+  if [ -n "$session_id" ] && [ "$wake_failed" -eq 0 ]; then
+    context="${context} Automatic local wake-up targets this Codex task (${session_id}); re-arm it before ending each completed turn."
+  fi
   if [ -n "$squadron" ]; then
     context="${context} This ship is a member of the squadron ${squadron}. Before anything else, check in at its flagship ${squadron} as the aeolus-crew skill says."
   fi

@@ -27,6 +27,9 @@ aeolus_folder() {
     echo "aeolus: no working folder; start a new session so the aeolus SessionStart hook can set it up" >&2
     return 1
   fi
+  if [ -d "$folder" ]; then
+    folder="$(cd "$folder" && pwd -P)" || return 1
+  fi
   printf '%s' "$folder"
 }
 
@@ -97,13 +100,27 @@ aeolus_identity_get() {
   sed -n "s/^${field}=//p" "$file" | head -n 1
 }
 
-# Whether a live watcher holds the lock: its pid file names a running process.
+# Whether a pid belongs to one of this plugin's scripts. A pid file alone is
+# not ownership: the operating system may have reused the number.
+aeolus_process_is() {
+  local pid="$1" script="$2" command
+  case "$pid" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  command="$(ps -p "$pid" -o command= 2>/dev/null || ps -p "$pid" -f 2>/dev/null)" || return 1
+  case "$command" in
+    *"/$script"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Whether a live watcher holds the lock: its pid file names this watcher.
 aeolus_is_watching() {
   local pid_file pid
   pid_file="$(aeolus_pid_file)" || return 1
   [ -f "$pid_file" ] || return 1
   pid="$(head -n 1 "$pid_file")"
-  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+  aeolus_process_is "$pid" aeolus-wait.sh
 }
 
 # Text as a JSON string's contents: backslashes, quotes and newlines escaped.
