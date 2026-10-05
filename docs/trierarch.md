@@ -11,7 +11,7 @@ A trierarch is a ship like any other, commissioned with `fleet:crew`, one per ma
 1. Anything with `fleet:manage` commissions a ship: the console as `argo`, squadrons, an orchestrator. There are no naming rules.
 2. It sends the trierarch a want with:
    - the ship id and the harness;
-   - the workspace: a new git worktree of a repository, or a folder, each named in the trierarch's local configuration. Worktrees go under the trierarch's worktree root, one folder per ship (`<root>/<repository>/<ship>`), so nothing spreads over the home folder. The root is `~/.aeolus/trierarch/worktrees/` unless the configuration names another;
+   - the workspace: a new git worktree of a repository, or a folder, each named in the trierarch's local configuration. Worktrees go under the trierarch's worktree root, one folder per ship (`<root>/<repository>/<ship>`), so nothing spreads over the home folder. The root is `~/.aeolus/trierarch/worktrees/`, beside the trierarch's other files under `~/.aeolus/trierarch/`, unless the configuration names another;
    - optionally the squadron the ship is a member of, so it checks in at its flagship as a crew line's squadron id does;
    - an optional first prompt, at most 8 KB, given on the first start only;
    - options from what describe offers.
