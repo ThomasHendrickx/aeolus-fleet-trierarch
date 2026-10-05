@@ -83,8 +83,8 @@ describe('the Codex plugin package', () => {
     expect(marketplace.plugins).toHaveLength(1);
   });
 
-  it('offers Codex skills for crewing, inspecting, watching and deregistering a ship', () => {
-    const skills = ['aeolus-crew', 'aeolus-ship', 'aeolus-watch', 'aeolus-deregister'];
+  it('offers Codex skills for crewing, inspecting, watching, waking and deregistering a ship', () => {
+    const skills = ['aeolus-crew', 'aeolus-ship', 'aeolus-watch', 'aeolus-wake', 'aeolus-deregister'];
 
     for (const skill of skills) {
       const text = readFileSync(join(PLUGIN, 'skills', skill, 'SKILL.md'), 'utf8');
@@ -93,6 +93,18 @@ describe('the Codex plugin package', () => {
     }
 
     expect(readFileSync(join(PLUGIN, 'skills/aeolus-crew/SKILL.md'), 'utf8')).toContain('harness `codex`');
+  });
+
+  it('wakes a session as /aeolus:wake does: identity and lease, waiting deliveries, the wake bridge armed again, and a status report', () => {
+    const wake = readFileSync(join(PLUGIN, 'skills/aeolus-wake/SKILL.md'), 'utf8');
+
+    expect(wake).toContain('scripts/aeolus-identity.sh show');
+    expect(wake).toContain('call `whoami`');
+    expect(wake).toContain('LEASE_ENDED');
+    expect(wake).toContain('act only if the ack succeeded');
+    expect(wake).toContain('until it answers empty');
+    expect(wake).toContain('aeolus-codex-wake.sh` `start <codexTaskId>`');
+    expect(wake).toContain('deliveries handled');
   });
 
   it('documents automatic local wake-up and re-arms it at the end of every completed turn', () => {

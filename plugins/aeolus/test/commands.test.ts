@@ -25,3 +25,28 @@ describe('/aeolus:crew', () => {
     );
   });
 });
+
+describe('/aeolus:wake', () => {
+  it('checks the identity and the lease first, and stops on LEASE_ENDED as the crew-a-ship skill says', () => {
+    expect(command('wake')).toContain('"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-identity.sh" show');
+    expect(command('wake')).toContain('call `whoami`');
+    expect(command('wake')).toContain('LEASE_ENDED');
+  });
+
+  it('receives and handles every waiting delivery: ack each, act only if the ack succeeded, receive again until empty', () => {
+    expect(command('wake')).toContain('receive');
+    expect(command('wake')).toContain('act only if the ack succeeded');
+    expect(command('wake')).toContain('until it answers empty');
+  });
+
+  it('makes sure the watcher runs, starting it again unless it says watching', () => {
+    expect(command('wake')).toContain('"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-watch-status.sh"');
+    expect(command('wake')).toContain('"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-wait.sh"');
+    expect(command('wake')).toContain('run_in_background');
+  });
+
+  it("reports the ship's status: name, id, deliveries handled, watcher and lease", () => {
+    expect(command('wake')).toContain('deliveries handled');
+    expect(command('wake')).toContain('watcher already running or started again');
+  });
+});

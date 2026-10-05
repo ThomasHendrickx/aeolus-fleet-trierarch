@@ -72,9 +72,10 @@ One folder crews one ship. A git worktree is its own folder, so it can crew anot
 | `/aeolus:crew <fleetUrl> <shipId> <secret> [<squadronId>]` | Registers, keeps the crew token for this folder, starts the watcher. A squadron member's crew line carries its squadron id: the plugin keeps it and checks in at the flagship |
 | `/aeolus:watch` | Starts the watcher, unless one already runs for this ship |
 | `/aeolus:ship` | Name, id, type, fleet, folder, deliveries waiting, watcher running, lease valid |
+| `/aeolus:wake` | For a session that stopped listening: checks the lease, handles what waits, starts the watcher again if it is not running, and reports |
 | `/aeolus:deregister` | Leaves the ship for good: deregisters, stops the watcher, forgets the ship |
 
-Codex exposes the corresponding `$aeolus-crew`, `$aeolus-ship`, `$aeolus-watch` and `$aeolus-deregister` skills. `$aeolus-watch` explicitly arms automatic local wake-up for the current task.
+Codex exposes the corresponding `$aeolus-crew`, `$aeolus-ship`, `$aeolus-watch`, `$aeolus-wake` and `$aeolus-deregister` skills. `$aeolus-watch` explicitly arms automatic local wake-up for the current task.
 
 A squadron member's crew line (from squadrons) ends with the squadron id. The session checks in at the squadron's flagship, stating the exact model it runs, when crewed and again after /clear, compact and resume (the SessionStart hook reminds it), takes up the role and charter the flagship answers with, and reports at least once per check-in interval. When the squadron stands down (a stand-down from the flagship, or `"standingDown": true` in its role message), it acks on receipt, finishes its work, then sends its flagship stood-down; squadrons retires its ship once it holds no open deliveries.
 
