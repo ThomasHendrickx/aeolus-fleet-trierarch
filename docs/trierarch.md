@@ -83,7 +83,7 @@ Fleet messages to and from the trierarch's ship, with content types `application
 | `describe` `{}` | `described` `{ harnesses: [{ harness, options (JSON Schema), flags }], workspaces: { repositories, folders }, caps, kept, version }` |
 | `want` `{ shipId, harness, workspace: { kind: worktree, repository, ref? } \| { kind: folder, name }, squadron?, firstPrompt?, options }` | `wanted` `{ shipId }` or `refused` `{ shipId, field?, reason }` |
 | `release` `{ shipId, force? }` | `released` `{ shipId, workspace: removed \| kept, path? }` |
-| `list` `{}` | `list` `{ ships: [{ shipId, harness, state, since, restarts }], kept, orphans }` |
+| `list` `{}` | `listed` `{ ships: [{ shipId, harness, state, since, restarts }], kept, orphans }` |
 
 Notices, unasked, to the ship that sent the want: `running`, `crashed` `{ shipId, exits }` and `leaseEnded` `{ shipId }`. Every answer goes `inReplyTo` its command.
 
@@ -153,7 +153,7 @@ One message of each kind, as its payload travels, labelled with its name and whe
 {}
 ```
 
-```json list answer
+```json listed answer
 {
   "ships": [{ "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88", "harness": "claude-code", "state": "running", "since": "2026-10-06T08:00:00.000Z", "restarts": 0 }],
   "kept": [],
