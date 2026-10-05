@@ -163,6 +163,17 @@ describe('the Codex plugin package', () => {
         ],
       },
     ]);
+    expect(hooks.UserPromptSubmit).toEqual([
+      {
+        hooks: [
+          {
+            type: 'command',
+            command: 'bash "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/aeolus-turn.sh"',
+            commandWindows: 'bash "%PLUGIN_ROOT%\\scripts\\aeolus-turn.sh"',
+          },
+        ],
+      },
+    ]);
     expect(hooks.Stop).toEqual([
       {
         hooks: [
