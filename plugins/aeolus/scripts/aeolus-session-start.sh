@@ -7,8 +7,7 @@ set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
 payload="$(cat)"
-# The cwd field of the hook's JSON payload, its escapes undone.
-cwd="$(printf '%s' "$payload" | tr -d '\n' | sed -E -n 's/.*"cwd"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p' | sed -e 's/\\"/"/g' -e 's/\\\\/\\/g')"
+cwd="$(aeolus_json_string "$payload" cwd)"
 [ -n "$cwd" ] || cwd="${CLAUDE_PROJECT_DIR:-}"
 [ -n "$cwd" ] || exit 0
 export AEOLUS_FOLDER="$cwd"
@@ -16,8 +15,8 @@ export AEOLUS_DATA="${PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-}}"
 root="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}"
 
 if [ -n "${PLUGIN_ROOT:-}" ]; then
-  model="$(printf '%s' "$payload" | tr -d '\n' | sed -E -n 's/.*"model"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p' | sed -e 's/\\"/"/g' -e 's/\\\\/\\/g')"
-  session_id="$(printf '%s' "$payload" | tr -d '\n' | sed -E -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p' | sed -e 's/\\"/"/g' -e 's/\\\\/\\/g')"
+  model="$(aeolus_json_string "$payload" model)"
+  session_id="$(aeolus_json_string "$payload" session_id)"
   identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
   context="Aeolus Codex hooks are active. The plugin root is ${root}; plugin data is ${AEOLUS_DATA}; the working folder is ${AEOLUS_FOLDER}."
   [ -n "$model" ] && context="${context} The active model is ${model}."
