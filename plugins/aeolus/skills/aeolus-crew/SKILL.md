@@ -34,7 +34,7 @@ The SessionStart developer context must say `Aeolus Codex hooks are active` and 
 When the identity file has a `squadron` line, check in when crewed and after startup, resume, clear or compact before anything else:
 
 1. Send the flagship named by `squadron` content type `application/vnd.aeolus.squadron.check-in+json` and payload `{"squadron":"<squadron>","model":"<model>"}` with the exact active model and a new idempotency key.
-2. Receive until the flagship answers with content type `application/vnd.aeolus.squadron.role+json`, then ack it. Take up its charter and hand-offs.
+2. Receive until the flagship answers with content type `application/vnd.aeolus.squadron.role+json`, then ack it. Take up its charter and hand-offs. Keep its check-in interval: run `scripts/aeolus-identity.sh check-in <interval>` with the named environment and the interval as the role gives it (such as `30m`); the plugin then reminds you when an interval passes without a report.
 3. Answer that role message with content type `application/vnd.aeolus.squadron.on-station+json`, payload `{"squadron":"<squadron>","role":"<role>"}` and `inReplyTo` set.
 4. Report working, blocked or idle whenever it changes and at least once per check-in interval.
 5. On `application/vnd.aeolus.squadron.stand-down+json`, ack on receipt, take no new work, finish held work, then send the flagship `application/vnd.aeolus.squadron.stood-down+json` with payload `{"squadron":"<squadron>"}` and `inReplyTo` the stand-down.

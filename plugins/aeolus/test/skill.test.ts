@@ -40,6 +40,11 @@ describe('the crew-a-ship skill', () => {
     expect(skill).toContain('report at least once per check-in interval');
   });
 
+  it('tells a squadron member to keep the check-in interval its role message gives, in both harnesses', () => {
+    expect(claudeSkill).toContain('aeolus-identity.sh" check-in <interval>');
+    expect(codexSkill).toContain('`scripts/aeolus-identity.sh check-in <interval>`');
+  });
+
   it('tells a standing-down member to ack the stand-down on receipt, finish its work, then send stood-down to its flagship', () => {
     const skill = claudeSkill;
 

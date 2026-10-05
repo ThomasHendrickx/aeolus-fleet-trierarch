@@ -644,3 +644,128 @@ describe('the Stop hook', () => {
     );
   });
 });
+
+describe("a squadron member's check-in interval", () => {
+  const MINUTE = 60;
+  const reminder =
+    'aeolus: 30m, the check-in interval of the squadron team-one, passed since tester-k3x9 last reported: report what you are doing now with the report call, such as {"state":"working","note":"reviewing PR 89"}, then go on';
+
+  function aMember(interval = '30m'): void {
+    run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', CREW_TOKEN, 'team-one'] });
+    expect(run('aeolus-identity.sh', { args: ['check-in', interval] }).status).toBe(0);
+  }
+
+  function reportedFile(): string {
+    return identityFile().replace(/\.identity$/, '.reported');
+  }
+
+  /** The member last reported this many seconds ago. */
+  function lastReported(secondsAgo: number): void {
+    writeFileSync(reportedFile(), `${String(Math.floor(Date.now() / 1000) - secondsAgo)}\n`);
+  }
+
+  const aToolCall = { hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { file_path: '/tmp/x' } };
+
+  function contextOf(stdout: string): string {
+    return z.object({ hookSpecificOutput: z.object({ hookEventName: z.literal('PostToolUse'), additionalContext: z.string() }) }).parse(JSON.parse(stdout))
+      .hookSpecificOutput.additionalContext;
+  }
+
+  it('keeps the interval the role message gives, and shows it', () => {
+    aMember();
+
+    expect(run('aeolus-identity.sh', { args: ['show'] }).stdout).toContain('check-in: 30m\n');
+  });
+
+  it('refuses an interval in another form than <n>m or <n>h', () => {
+    run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', CREW_TOKEN, 'team-one'] });
+
+    expect(run('aeolus-identity.sh', { args: ['check-in', '30 min'] }).status).toBe(2);
+    expect(run('aeolus-identity.sh', { args: ['show'] }).stdout).not.toContain('check-in');
+  });
+
+  it('reminds the session to report once the interval passed since its last report, so a long run never looks like silence', () => {
+    aMember();
+    lastReported(31 * MINUTE);
+
+    const { status, stdout } = claudeHook('aeolus-report-due.sh', aToolCall);
+
+    expect(status).toBe(0);
+    expect(contextOf(stdout)).toBe(reminder);
+  });
+
+  it('says nothing while the interval has not passed', () => {
+    aMember();
+    lastReported(29 * MINUTE);
+
+    expect(claudeHook('aeolus-report-due.sh', aToolCall)).toMatchObject({ status: 0, stdout: '' });
+  });
+
+  it('reads an interval in hours', () => {
+    aMember('2h');
+    lastReported(119 * MINUTE);
+
+    expect(claudeHook('aeolus-report-due.sh', aToolCall).stdout).toBe('');
+  });
+
+  it('reminds once per interval, not after every call', () => {
+    aMember();
+    lastReported(31 * MINUTE);
+
+    claudeHook('aeolus-report-due.sh', aToolCall);
+
+    expect(claudeHook('aeolus-report-due.sh', aToolCall).stdout).toBe('');
+  });
+
+  it('starts the clock at the first call when the member has not reported yet', () => {
+    aMember();
+
+    expect(claudeHook('aeolus-report-due.sh', aToolCall).stdout).toBe('');
+    expect(statSync(reportedFile(), { throwIfNoEntry: false })).toBeDefined();
+  });
+
+  it('counts a report through the report tool', () => {
+    aMember();
+    lastReported(31 * MINUTE);
+
+    claudeHook('aeolus-report-due.sh', { hook_event_name: 'PostToolUse', tool_name: 'mcp__aeolus__report', tool_input: { state: 'working' } });
+
+    expect(claudeHook('aeolus-report-due.sh', aToolCall).stdout).toBe('');
+  });
+
+  it("counts a report through the fleet's REST door", () => {
+    aMember();
+    lastReported(31 * MINUTE);
+
+    expect(
+      claudeHook('aeolus-report-due.sh', {
+        hook_event_name: 'PostToolUse',
+        tool_name: 'Bash',
+        tool_input: { command: 'curl -X POST https://fleet.example.com/api/v1/ship/report -d \'{"state":"idle"}\'' },
+      }).stdout,
+    ).toBe('');
+    expect(claudeHook('aeolus-report-due.sh', aToolCall).stdout).toBe('');
+  });
+
+  it('says nothing to a ship that belongs to no squadron, which has no interval (decided: no reminders for plain ships)', () => {
+    crew();
+    writeFileSync(identityFile().replace(/\.identity$/, '.reported'), '0\n');
+
+    expect(claudeHook('aeolus-report-due.sh', aToolCall)).toMatchObject({ status: 0, stdout: '' });
+  });
+
+  it("brings the interval back to a member's fresh context after /clear or compaction", () => {
+    aMember();
+    const envFile = join(data, 'session.env');
+    writeFileSync(envFile, '');
+
+    const { stdout } = run('aeolus-session-start.sh', {
+      stdin: JSON.stringify({ session_id: 'c5858406-be86-46cd-8591-f4fb39b1fa61', cwd: folder, hook_event_name: 'SessionStart', source: 'compact' }),
+      env: { AEOLUS_FOLDER: '', AEOLUS_DATA: '', CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin', CLAUDE_ENV_FILE: envFile },
+    });
+
+    expect(hookOutputSchema.parse(JSON.parse(stdout)).hookSpecificOutput.additionalContext).toContain(
+      'Its check-in interval is 30m: report at least once per interval; the plugin reminds you when one passes without a report.',
+    );
+  });
+});
