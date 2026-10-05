@@ -83,8 +83,92 @@ Fleet messages to and from the trierarch's ship, with content types `application
 | `describe` `{}` | `described` `{ harnesses: [{ harness, options (JSON Schema), flags }], workspaces: { repositories, folders }, caps, kept, version }` |
 | `want` `{ shipId, harness, workspace: { kind: worktree, repository, ref? } \| { kind: folder, name }, squadron?, firstPrompt?, options }` | `wanted` `{ shipId }` or `refused` `{ shipId, field?, reason }` |
 | `release` `{ shipId, force? }` | `released` `{ shipId, workspace: removed \| kept, path? }` |
-| `list` `{}` | `list` `{ ships: [{ shipId, harness, state, since, restarts }], kept, orphans }` |
+| `list` `{}` | `listed` `{ ships: [{ shipId, harness, state, since, restarts }], kept, orphans }` |
 
 Notices, unasked, to the ship that sent the want: `running`, `crashed` `{ shipId, exits }` and `leaseEnded` `{ shipId }`. Every answer goes `inReplyTo` its command.
 
 A want's options are checked against the JSON Schema describe gives for its harness; anything unknown is refused, with the field named. Messages never carry paths or command-line flags: a workspace names a repository or folder from the trierarch's configuration, and options pick named settings. A message the trierarch has applied before, by message id, changes nothing.
+
+### Examples
+
+One message of each kind, as its payload travels, labelled with its name and whether it is a command, an answer or a notice. The schemas in `common` take each of these.
+
+```json describe command
+{}
+```
+
+```json described answer
+{
+  "harnesses": [
+    {
+      "harness": "claude-code",
+      "options": { "type": "object", "properties": { "model": { "enum": ["opus", "sonnet"], "default": "opus" } }, "additionalProperties": false },
+      "flags": ["--remote-control"]
+    }
+  ],
+  "workspaces": { "repositories": ["aeolus-fleet"], "folders": ["notes"] },
+  "caps": { "ships": 8, "running": 4 },
+  "kept": [{ "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88", "path": "/Users/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/scout" }],
+  "version": "0.1.0"
+}
+```
+
+```json want command
+{
+  "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88",
+  "harness": "claude-code",
+  "workspace": { "kind": "worktree", "repository": "aeolus-fleet", "ref": "main" },
+  "squadron": "hemma-feature-a1b2c3",
+  "firstPrompt": "Review the open pull requests.",
+  "options": { "model": "opus" }
+}
+```
+
+```json want command
+{
+  "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88",
+  "harness": "claude-code",
+  "workspace": { "kind": "folder", "name": "notes" },
+  "options": {}
+}
+```
+
+```json wanted answer
+{ "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88" }
+```
+
+```json refused answer
+{ "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88", "field": "options.model", "reason": "model must be one of opus, sonnet" }
+```
+
+```json release command
+{ "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88", "force": false }
+```
+
+```json released answer
+{ "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88", "workspace": "kept", "path": "/Users/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/scout" }
+```
+
+```json list command
+{}
+```
+
+```json listed answer
+{
+  "ships": [{ "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88", "harness": "claude-code", "state": "running", "since": "2026-10-06T08:00:00.000Z", "restarts": 0 }],
+  "kept": [],
+  "orphans": [{ "path": "/Users/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/lookout" }]
+}
+```
+
+```json running notice
+{ "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88" }
+```
+
+```json crashed notice
+{ "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88", "exits": 5 }
+```
+
+```json leaseEnded notice
+{ "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88" }
+```
