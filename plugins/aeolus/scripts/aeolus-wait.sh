@@ -35,6 +35,7 @@ if aeolus_is_watching; then
 fi
 
 pid_file="$(aeolus_pid_file)"
+refused_file="$(aeolus_refused_file)"
 echo "$$" > "$pid_file"
 trap 'rm -f "$pid_file"' EXIT
 
@@ -58,6 +59,7 @@ while :; do
   body="$(printf '%s' "$answer" | sed '$d')"
   case "$status" in
     200)
+      rm -f "$refused_file"
       delay="$RETRY_SECONDS"
       waiting="$(printf '%s' "$body" | sed -n 's/.*"waiting"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
       if [ -n "$waiting" ] && [ "$waiting" -gt 0 ]; then
@@ -71,10 +73,12 @@ while :; do
         echo "aeolus: LEASE_ENDED: the operator released ${ship_name}; this session no longer crews it"
         exit 3
       fi
+      : > "$refused_file"
       echo "aeolus: the fleet refused the crew token of ${ship_name}"
       exit 5
       ;;
     403)
+      : > "$refused_file"
       echo "aeolus: the fleet refused the crew token of ${ship_name}"
       exit 5
       ;;
