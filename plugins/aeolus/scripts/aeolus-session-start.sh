@@ -32,6 +32,9 @@ if [ -n "${PLUGIN_ROOT:-}" ]; then
   fleet_url="$(aeolus_identity_get "$identity" fleetUrl)"
   squadron="$(aeolus_identity_get "$identity" squadron)"
   wake_failed=0
+  if aeolus_woken_by_trierarch "$identity"; then
+    session_id=""
+  fi
   if [ -n "$session_id" ] && [ "${AEOLUS_CODEX_WAKE_DISABLED:-}" != 1 ]; then
     if ! wake_answer="$("$root/scripts/aeolus-codex-wake.sh" start "$session_id" 2>&1)"; then
       context="${context} Automatic local wake-up failed: ${wake_answer}"
@@ -39,7 +42,9 @@ if [ -n "${PLUGIN_ROOT:-}" ]; then
     fi
   fi
   context="${context} This folder crews the Aeolus ship ${ship_name} (${ship_id}) in the fleet at ${fleet_url}. Its crew token is the crewToken line of ${identity}: read it there and pass it to every fleet call. Do not register again. Go on as the aeolus-crew skill says: receive and handle what waits, then end the turn."
-  if [ -n "$session_id" ] && [ "$wake_failed" -eq 0 ]; then
+  if aeolus_woken_by_trierarch "$identity"; then
+    context="${context} The trierarch wakes this session when work arrives: start no watcher."
+  elif [ -n "$session_id" ] && [ "$wake_failed" -eq 0 ]; then
     context="${context} Automatic local wake-up targets this Codex task (${session_id}); re-arm it before ending each completed turn."
   fi
   if [ -n "$squadron" ]; then
@@ -67,6 +72,11 @@ if [ -n "$squadron" ]; then
   context="${context} This ship is a member of the squadron ${squadron}. Before anything else, check in at its flagship ${squadron}, as the aeolus crew-a-ship skill says for a squadron member."
   check_in="$(aeolus_identity_get "$identity" checkIn)"
   [ -n "$check_in" ] && context="${context} Its check-in interval is ${check_in}: report at least once per interval; the plugin reminds you when one passes without a report."
+fi
+if aeolus_woken_by_trierarch "$identity"; then
+  context="${context} Go on as the aeolus crew-a-ship skill says: receive and handle what waits; then end your turn. The trierarch wakes this session when work arrives: start no watcher."
+  printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(aeolus_json_escape "$context")"
+  exit 0
 fi
 context="${context} Go on as the aeolus crew-a-ship skill says: receive and handle what waits; then, unless \"${root}/scripts/aeolus-watch-status.sh\" says watching, start \"${root}/scripts/aeolus-wait.sh\" as a background task; then end your turn. When the watcher exits 6 (its 2-hour limit), just start it again."
 printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(aeolus_json_escape "$context")"
