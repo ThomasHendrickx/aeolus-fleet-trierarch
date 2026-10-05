@@ -73,7 +73,7 @@ One folder crews one ship. A git worktree is its own folder, so it can crew anot
 | `/aeolus:watch` | Starts the watcher, unless one already runs for this ship |
 | `/aeolus:ship` | Name, id, type, fleet, folder, deliveries waiting, watcher running, lease valid |
 | `/aeolus:wake` | For a session that stopped listening: checks the lease, handles what waits, starts the watcher again if it is not running, and reports |
-| `/aeolus:issue <what went wrong>` | Reports an issue: investigates, writes the report, files it on GitHub with gh (or leaves a draft and a prefilled link), and tells argo where it is. The public issue carries no tokens, secrets, fleet host, paths on this machine, or ship names and ids |
+| `/aeolus:issue <what went wrong>` | Reports an issue: investigates, writes the report, files it on GitHub with gh (or leaves a draft and a prefilled link), and tells argo where it is. The public issue carries no tokens, secrets, fleet host, paths on this machine, ship names and ids, or personal and sensitive information (email addresses, phone numbers, IP addresses, other hosts, keys, card numbers and IBANs), and keeps to Aeolus behaviour |
 | `/aeolus:deregister` | Leaves the ship for good: deregisters, stops the watcher, forgets the ship |
 
 Codex exposes the corresponding `$aeolus-crew`, `$aeolus-ship`, `$aeolus-watch`, `$aeolus-wake`, `$aeolus-issue` and `$aeolus-deregister` skills. `$aeolus-watch` explicitly arms automatic local wake-up for the current task.
