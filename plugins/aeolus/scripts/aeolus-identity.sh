@@ -2,6 +2,7 @@
 # The ship this folder crews, kept in the plugin's data folder.
 #
 #   aeolus-identity.sh write <fleetUrl> <shipId> <shipName> <crewToken> [<squadronId>]
+#   aeolus-identity.sh check-in <interval>   a squadron member keeps its check-in interval: <n>m or <n>h
 #   aeolus-identity.sh show     the ship, its fleet and the file (never the token); exit 1 when none
 #   aeolus-identity.sh path     the identity file of this folder, whether it exists or not
 #   aeolus-identity.sh delete   stops the folder's watcher and forgets the ship
@@ -23,6 +24,21 @@ case "$command" in
     mv "$file.tmp" "$file"
     echo "aeolus: this folder now crews ${4} (${3}); identity file ${file}"
     ;;
+  check-in)
+    # The interval the flagship's role message gives, so the plugin can remind the member to report.
+    case "${2:-}" in
+      [1-9]*m|[1-9]*h) ;;
+      *) echo "usage: aeolus-identity.sh check-in <n>m|<n>h" >&2; exit 2 ;;
+    esac
+    case "${2%[mh]}" in
+      *[!0-9]*) echo "usage: aeolus-identity.sh check-in <n>m|<n>h" >&2; exit 2 ;;
+    esac
+    [ -f "$file" ] || { echo "aeolus: this folder crews no ship" >&2; exit 1; }
+    umask 077
+    { grep -v '^checkIn=' "$file" || true; printf 'checkIn=%s\n' "$2"; } > "$file.tmp"
+    mv "$file.tmp" "$file"
+    echo "aeolus: check-in interval ${2}"
+    ;;
   show)
     if [ ! -f "$file" ]; then
       echo "aeolus: this folder crews no ship"
@@ -33,6 +49,8 @@ case "$command" in
     echo "folder: $(aeolus_identity_get "$file" folder)"
     squadron="$(aeolus_identity_get "$file" squadron)"
     [ -n "$squadron" ] && echo "squadron: ${squadron}"
+    check_in="$(aeolus_identity_get "$file" checkIn)"
+    [ -n "$check_in" ] && echo "check-in: ${check_in}"
     echo "identity file: ${file} (the crew token is its crewToken line)"
     ;;
   path)
@@ -52,11 +70,11 @@ case "$command" in
       aeolus_process_is "$pid" aeolus-wait.sh && kill "$pid" 2>/dev/null || true
       rm -f "$pid_file"
     fi
-    rm -f "$file" "$(aeolus_refused_file)"
+    rm -f "$file" "$(aeolus_refused_file)" "$(aeolus_reported_file)"
     echo "aeolus: this folder crews no ship any more"
     ;;
   *)
-    echo "usage: aeolus-identity.sh write|show|path|delete" >&2
+    echo "usage: aeolus-identity.sh write|check-in|show|path|delete" >&2
     exit 2
     ;;
 esac

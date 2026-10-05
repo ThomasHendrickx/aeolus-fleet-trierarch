@@ -80,6 +80,15 @@ aeolus_refused_file() {
   printf '%s/%s.refused' "$dir" "$(aeolus_key "$folder")"
 }
 
+# When a squadron member last reported, or was last reminded to: seconds since
+# the epoch. The report reminder counts its check-in interval from it.
+aeolus_reported_file() {
+  local folder dir
+  folder="$(aeolus_folder)" || return 1
+  dir="$(aeolus_ships_dir)" || return 1
+  printf '%s/%s.reported' "$dir" "$(aeolus_key "$folder")"
+}
+
 # The Codex wake bridge process and the task it wakes. These are separate from
 # the inner inbox watcher's pid so a newer task for the folder can replace an
 # older bridge cleanly.
