@@ -135,6 +135,35 @@ describe('the Codex plugin package', () => {
     expect(hooks).toContain('commandWindows');
     expect(hooks).toContain('%PLUGIN_ROOT%\\\\scripts\\\\aeolus-session-start.sh');
   });
+
+  it('guards the watcher on every Bash call and re-arms it at the end of every turn, in both harnesses', () => {
+    const hook = z.object({ type: z.string(), command: z.string(), commandWindows: z.string() });
+    const hooks = z
+      .object({ hooks: z.record(z.string(), z.array(z.object({ matcher: z.string().optional(), hooks: z.array(hook) }))) })
+      .parse(json(join(PLUGIN, 'hooks/hooks.json'))).hooks;
+
+    expect(hooks.PreToolUse).toContainEqual({
+      matcher: '^Bash$',
+      hooks: [
+        {
+          type: 'command',
+          command: 'bash "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/aeolus-watch-guard.sh"',
+          commandWindows: 'bash "%PLUGIN_ROOT%\\scripts\\aeolus-watch-guard.sh"',
+        },
+      ],
+    });
+    expect(hooks.Stop).toEqual([
+      {
+        hooks: [
+          {
+            type: 'command',
+            command: 'bash "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/aeolus-stop.sh"',
+            commandWindows: 'bash "%PLUGIN_ROOT%\\scripts\\aeolus-stop.sh"',
+          },
+        ],
+      },
+    ]);
+  });
 });
 
 describe('Codex plugin state', () => {

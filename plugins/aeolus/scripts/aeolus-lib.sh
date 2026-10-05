@@ -70,6 +70,16 @@ aeolus_pid_file() {
   printf '%s/%s.watch.pid' "$dir" "$(aeolus_key "$folder")"
 }
 
+# Marks that the fleet refused the folder's crew token to the watcher, so the
+# Stop hook does not ask for a watcher that would only be refused again. A
+# watcher that reaches the fleet with the token clears it.
+aeolus_refused_file() {
+  local folder dir
+  folder="$(aeolus_folder)" || return 1
+  dir="$(aeolus_ships_dir)" || return 1
+  printf '%s/%s.refused' "$dir" "$(aeolus_key "$folder")"
+}
+
 # The Codex wake bridge process and the task it wakes. These are separate from
 # the inner inbox watcher's pid so a newer task for the folder can replace an
 # older bridge cleanly.
@@ -126,4 +136,16 @@ aeolus_is_watching() {
 # Text as a JSON string's contents: backslashes, quotes and newlines escaped.
 aeolus_json_escape() {
   printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | awk 'NR > 1 { printf "\\n" } { printf "%s", $0 }'
+}
+
+# One string field of a hook's JSON payload, its escapes undone.
+aeolus_json_string() {
+  printf '%s' "$1" | tr -d '\n' | sed -E -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"(([^\"\\\\]|\\\\.)*)\".*/\\1/p" | sed -e 's/\\"/"/g' -e 's/\\\\/\\/g'
+}
+
+# A hook's folder: Claude Code's project folder, else the payload's cwd. The
+# session's working folder may have moved; the project folder has not.
+aeolus_hook_folder() {
+  [ -n "${AEOLUS_FOLDER:-}${CLAUDE_PROJECT_DIR:-}" ] || AEOLUS_FOLDER="$(aeolus_json_string "$1" cwd)"
+  export AEOLUS_FOLDER
 }

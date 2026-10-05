@@ -52,10 +52,11 @@ function run(script: string, options: { args?: string[]; env?: Record<string, st
 }
 
 /** Runs a script without waiting for it, for one that keeps running. */
-function start(script: string, options: { args?: string[]; env?: Record<string, string> } = {}) {
+function start(script: string, options: { args?: string[]; env?: Record<string, string>; stdin?: string } = {}) {
   const child = spawn('bash', [join(SCRIPTS, script), ...(options.args ?? [])], {
     env: { ...process.env, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_RETRY_SECONDS: '0', ...options.env },
   });
+  child.stdin.end(options.stdin ?? '');
   let stdout = '';
   child.stdout.on('data', (chunk: Buffer) => {
     stdout += chunk.toString('utf8');
@@ -496,5 +497,150 @@ describe('the SessionStart hook', () => {
     const { stdout } = hook(payloadFor(windowsFolder));
 
     expect(hookOutputSchema.parse(JSON.parse(stdout)).hookSpecificOutput.additionalContext).toContain('crews the Aeolus ship scout');
+  });
+});
+
+/** A process named like the watcher that holds this folder's lock, as a running watcher does. */
+function aRunningWatcher() {
+  const bin = join(data, 'bin');
+  mkdirSync(bin, { recursive: true });
+  const watcher = join(bin, 'aeolus-wait.sh');
+  writeFileSync(watcher, '#!/usr/bin/env bash\nsleep 30\n');
+  chmodSync(watcher, 0o700);
+  const process = spawn('bash', [watcher]);
+  writeFileSync(pidFile(), `${String(process.pid)}\n`);
+  return process;
+}
+
+/** Runs a hook as Claude Code does: the payload on stdin, the plugin's variables and the project folder set, no AEOLUS_ ones. */
+function claudeHook(script: string, payload: Record<string, unknown>) {
+  return run(script, {
+    stdin: JSON.stringify({ session_id: 'c5858406-be86-46cd-8591-f4fb39b1fa61', cwd: folder, ...payload }),
+    env: { AEOLUS_FOLDER: '', AEOLUS_DATA: '', CLAUDE_PROJECT_DIR: folder, CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin' },
+  });
+}
+
+describe('the watcher guard (PreToolUse on Bash)', () => {
+  const startingTheWatcher = {
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Bash',
+    tool_input: { command: '"/plugin/scripts/aeolus-wait.sh"', run_in_background: true },
+  };
+
+  it('refuses to start a second watcher, saying already running, so the session is not woken with nothing to read', () => {
+    crew();
+    const watcher = aRunningWatcher();
+
+    try {
+      const { status, stdout } = claudeHook('aeolus-watch-guard.sh', startingTheWatcher);
+
+      expect(status).toBe(0);
+      expect(JSON.parse(stdout)).toEqual({
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: 'aeolus: already running: a watcher runs for scout; do nothing else',
+        },
+      });
+    } finally {
+      watcher.kill();
+    }
+  });
+
+  it('lets the watcher start when none runs', () => {
+    crew();
+
+    expect(claudeHook('aeolus-watch-guard.sh', startingTheWatcher)).toMatchObject({ status: 0, stdout: '' });
+  });
+
+  it('lets a command that only names the watcher run in the foreground', () => {
+    crew();
+    const watcher = aRunningWatcher();
+
+    try {
+      expect(
+        claudeHook('aeolus-watch-guard.sh', { ...startingTheWatcher, tool_input: { command: 'cat "/plugin/scripts/aeolus-wait.sh"' } }),
+      ).toMatchObject({ status: 0, stdout: '' });
+    } finally {
+      watcher.kill();
+    }
+  });
+});
+
+describe('the Stop hook', () => {
+  const endingTheTurn = { hook_event_name: 'Stop', stop_hook_active: false };
+
+  it('keeps the turn open to start the watcher when the folder crews a ship and none runs, so no session has to remember', () => {
+    crew();
+
+    const { status, stdout } = claudeHook('aeolus-stop.sh', endingTheTurn);
+
+    expect(status).toBe(0);
+    expect(JSON.parse(stdout)).toEqual({
+      decision: 'block',
+      reason:
+        'aeolus: no watcher runs for scout, so nothing wakes this session when work arrives: start "/plugin/scripts/aeolus-wait.sh" as a background task (run_in_background), then end your turn',
+    });
+  });
+
+  it('lets the turn end while a watcher runs', () => {
+    crew();
+    const watcher = aRunningWatcher();
+
+    try {
+      expect(claudeHook('aeolus-stop.sh', endingTheTurn)).toMatchObject({ status: 0, stdout: '' });
+    } finally {
+      watcher.kill();
+    }
+  });
+
+  it('lets the turn end in a folder that crews no ship', () => {
+    expect(claudeHook('aeolus-stop.sh', endingTheTurn)).toMatchObject({ status: 0, stdout: '' });
+  });
+
+  it('keeps a turn open once only, so it never loops', () => {
+    crew();
+
+    expect(claudeHook('aeolus-stop.sh', { ...endingTheTurn, stop_hook_active: true })).toMatchObject({ status: 0, stdout: '' });
+  });
+
+  it('lets the turn end once the fleet refused the crew token, so a refused watcher is not started over and over', async () => {
+    fleet = await startStubFleet([{ status: 401, body: { code: 'UNAUTHORIZED', message: 'Call with the crew token' } }]);
+    crew(fleet.url);
+    await start('aeolus-wait.sh').exited;
+
+    expect(claudeHook('aeolus-stop.sh', endingTheTurn)).toMatchObject({ status: 0, stdout: '' });
+  });
+
+  it('asks for the watcher again once a watcher reached the fleet with the crew token', async () => {
+    fleet = await startStubFleet([{ status: 401, body: { code: 'UNAUTHORIZED', message: 'Call with the crew token' } }, inbox(1)]);
+    crew(fleet.url);
+    await start('aeolus-wait.sh').exited;
+    await start('aeolus-wait.sh').exited;
+
+    expect(claudeHook('aeolus-stop.sh', endingTheTurn).stdout).toContain('"decision":"block"');
+  });
+
+  it('re-arms the Codex wake bridge for the task by itself at the end of every turn', async () => {
+    fleet = await startStubFleet([inbox(1)]);
+    crew(fleet.url);
+    const bin = join(data, 'bin');
+    const calls = join(data, 'codex.calls');
+    mkdirSync(bin);
+    const codex = join(bin, 'codex');
+    writeFileSync(codex, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "${calls}"\n`);
+    chmodSync(codex, 0o700);
+    const threadId = '01a103c9-80b0-7ab1-82e3-6f4a2f70ad86';
+
+    // Started, not run: the stub fleet answers the bridge's first check only while the test does not block.
+    const ended = await start('aeolus-stop.sh', {
+      stdin: JSON.stringify({ session_id: threadId, cwd: folder, hook_event_name: 'Stop', stop_hook_active: false }),
+      env: { AEOLUS_FOLDER: '', AEOLUS_DATA: '', CLAUDE_PROJECT_DIR: '', PLUGIN_DATA: data, PLUGIN_ROOT: '/plugin', PATH: `${bin}:${process.env.PATH ?? ''}` },
+    }).exited;
+
+    expect(ended).toMatchObject({ status: 0, stdout: '' });
+    await expect.poll(() => (statSync(calls, { throwIfNoEntry: false }) ? readFileSync(calls, 'utf8') : ''), { timeout: 5_000 }).toContain(
+      `queue --thread ${threadId}`,
+    );
   });
 });
