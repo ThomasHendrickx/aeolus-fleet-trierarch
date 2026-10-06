@@ -58,14 +58,14 @@ describe('aeolus-trierarch', () => {
 
     expect(output).toContain(
       [
-        '  first start: claude "<first prompt>" --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --model claude-opus-5-5 (configuration)',
-        '  restart: claude /aeolus:wake --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --model claude-opus-5-5 (configuration) --continue (adapter)',
+        '  first start: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --model claude-opus-5-5 (configuration) -- "<first prompt>"',
+        '  restart: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --model claude-opus-5-5 (configuration) --continue (adapter) -- /aeolus:wake',
       ].join('\n'),
     );
     expect(output).toContain(
       [
-        '  first start: codex "<first prompt>" --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter)',
-        '  restart: codex resume --last $aeolus-wake --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter)',
+        '  first start: codex --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter) -- "<first prompt>"',
+        '  restart: codex resume --last --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter) -- $aeolus-wake',
       ].join('\n'),
     );
   });
@@ -82,11 +82,12 @@ describe('aeolus-trierarch', () => {
           flags: ['--remote-control', '--model', 'claude-opus-5-5'],
           adapterFlags: [{ flag: '--continue', when: 'restart' }],
           restart: [
-            { words: ['claude', '/aeolus:wake'] },
+            { words: ['claude'] },
             { words: ['--remote-control'], source: 'configuration' },
             { words: ['[<repository or folder>] <ship>'], source: 'adapter' },
             { words: ['--model', 'claude-opus-5-5'], source: 'configuration' },
             { words: ['--continue'], source: 'adapter' },
+            { words: ['--', '/aeolus:wake'] },
           ],
         },
       },

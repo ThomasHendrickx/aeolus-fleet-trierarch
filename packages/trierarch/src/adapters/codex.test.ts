@@ -74,22 +74,28 @@ describe('Codex as a harness', () => {
     await expect(harness().crewTokenOf(folder)).resolves.toBe('aeolus_ct_v1_scout');
   });
 
-  it('starts codex with the first prompt on the first start, before the configured flags and the picked option', async () => {
+  it('starts codex with the first prompt on the first start, last and after -- behind the configured flags and the picked option', async () => {
     await harness().launch({ ...launchOf(shipId), options: { model: 'terra' }, isFirstStart: true, firstPrompt: 'Review the open pull requests.' });
 
-    expect(started).toEqual([{ shipId, folder, command: ['codex', 'Review the open pull requests.', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-terra', '--no-daemon'] }]);
+    expect(started).toEqual([{ shipId, folder, command: ['codex', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-terra', '--no-daemon', '--', 'Review the open pull requests.'] }]);
+  });
+
+  it('passes a first prompt that starts with - after --, so it never reads as a flag', async () => {
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true, firstPrompt: '--dangerously-bypass-approvals-and-sandbox' });
+
+    expect(started[0]?.command.slice(-2)).toEqual(['--', '--dangerously-bypass-approvals-and-sandbox']);
   });
 
   it('starts codex with $aeolus-wake on a first start without a first prompt', async () => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
 
-    expect(started[0]?.command.slice(0, 2)).toEqual(['codex', '$aeolus-wake']);
+    expect(started[0]?.command.slice(-2)).toEqual(['--', '$aeolus-wake']);
   });
 
   it("resumes the folder's last conversation on a restart, with $aeolus-wake and never the first prompt again", async () => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false, firstPrompt: 'Review the open pull requests.' });
 
-    expect(started[0]?.command).toEqual(['codex', 'resume', '--last', '$aeolus-wake', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-sol', '--no-daemon']);
+    expect(started[0]?.command).toEqual(['codex', 'resume', '--last', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-sol', '--no-daemon', '--', '$aeolus-wake']);
   });
 
   it('adds --no-daemon once even when the operator configured it too, so the session owns its work and a stop stops it', async () => {
@@ -113,11 +119,16 @@ describe('Codex as a harness', () => {
   it('tells the configured flags from --no-daemon, which the adapter adds to every launch', () => {
     expect(CODEX_ADAPTER_FLAGS).toEqual([{ flag: '--no-daemon', when: 'always' }]);
     expect(codexCommandLine({ flags: ['--dangerously-bypass-approvals-and-sandbox', '--no-daemon'], prompt: '<first prompt>', isFirstStart: true })).toEqual([
-      { words: ['codex', '<first prompt>'] },
+      { words: ['codex'] },
       { words: ['--dangerously-bypass-approvals-and-sandbox'], source: 'configuration' },
       { words: ['--no-daemon'], source: 'adapter' },
+      { words: ['--', '<first prompt>'] },
     ]);
-    expect(codexCommandLine({ flags: [], prompt: '$aeolus-wake', isFirstStart: false })).toEqual([{ words: ['codex', 'resume', '--last', '$aeolus-wake'] }, { words: ['--no-daemon'], source: 'adapter' }]);
+    expect(codexCommandLine({ flags: [], prompt: '$aeolus-wake', isFirstStart: false })).toEqual([
+      { words: ['codex', 'resume', '--last'] },
+      { words: ['--no-daemon'], source: 'adapter' },
+      { words: ['--', '$aeolus-wake'] },
+    ]);
   });
 
   it("wakes a session by typing $aeolus-wake, closed by a space so the skill picker leaves Enter alone, and settling before Enter so Codex takes no paste", async () => {

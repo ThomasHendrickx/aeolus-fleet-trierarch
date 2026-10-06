@@ -74,28 +74,34 @@ describe('Claude Code as a harness', () => {
     await expect(harness().crewTokenOf(folder)).resolves.toBeUndefined();
   });
 
-  it('starts claude with the first prompt on the first start, before the configured flags so a flag with an optional value never takes it', async () => {
+  it('starts claude with the first prompt on the first start, last and after -- so no flag takes it', async () => {
     await harness().launch({ ...launchOf(shipId), options: { model: 'sonnet' }, isFirstStart: true, firstPrompt: 'Review the open pull requests.' });
 
-    expect(started).toEqual([{ shipId, folder, command: ['claude', 'Review the open pull requests.', '--remote-control', '[aeolus-fleet] scout', '--model', 'claude-sonnet-5-5'] }]);
+    expect(started).toEqual([{ shipId, folder, command: ['claude', '--remote-control', '[aeolus-fleet] scout', '--model', 'claude-sonnet-5-5', '--', 'Review the open pull requests.'] }]);
+  });
+
+  it('passes a first prompt that starts with - after --, so it never reads as a flag', async () => {
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true, firstPrompt: '--dangerously-skip-permissions' });
+
+    expect(started[0]?.command.slice(-2)).toEqual(['--', '--dangerously-skip-permissions']);
   });
 
   it('starts claude with /aeolus:wake on a first start without a first prompt', async () => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
 
-    expect(started[0]?.command[1]).toBe('/aeolus:wake');
+    expect(started[0]?.command.slice(-2)).toEqual(['--', '/aeolus:wake']);
   });
 
   it('continues the conversation on a restart, with /aeolus:wake and never the first prompt again', async () => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false, firstPrompt: 'Review the open pull requests.' });
 
-    expect(started[0]?.command).toEqual(['claude', '/aeolus:wake', '--remote-control', '[aeolus-fleet] scout', '--model', 'claude-opus-5-5', '--continue']);
+    expect(started[0]?.command).toEqual(['claude', '--remote-control', '[aeolus-fleet] scout', '--model', 'claude-opus-5-5', '--continue', '--', '/aeolus:wake']);
   });
 
   it('names the remote-control session after its folder and ship: the repository of a worktree, the name of a configured folder', async () => {
     await harness().launch({ ...launchOf(shipId), workspace: { kind: 'folder', name: 'notes' }, options: {}, isFirstStart: true });
 
-    expect(started[0]?.command.slice(2, 4)).toEqual(['--remote-control', '[notes] scout']);
+    expect(started[0]?.command.slice(1, 3)).toEqual(['--remote-control', '[notes] scout']);
   });
 
   it('keeps a remote-control name the operator configured, and names nothing without --remote-control', async () => {
@@ -115,21 +121,23 @@ describe('Claude Code as a harness', () => {
     await withFlags(['--remote-control', 'mine', '--verbose']).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
     await withFlags(['--verbose']).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
 
-    expect(started.map((session) => session.command.slice(2))).toEqual([['--remote-control', 'mine', '--verbose'], ['--verbose']]);
+    expect(started.map((session) => session.command.slice(1, -2))).toEqual([['--remote-control', 'mine', '--verbose'], ['--verbose']]);
   });
 
   it('tells the configured flags from the remote-control name and --continue on a restart, which the adapter adds', () => {
     expect(CLAUDE_CODE_ADAPTER_FLAGS).toEqual([{ flag: '--continue', when: 'restart' }]);
     expect(claudeCodeCommandLine({ flags: ['--remote-control', '--model', 'claude-opus-5-5'], sessionName: '[aeolus-fleet] scout', prompt: '/aeolus:wake', isFirstStart: false })).toEqual([
-      { words: ['claude', '/aeolus:wake'] },
+      { words: ['claude'] },
       { words: ['--remote-control'], source: 'configuration' },
       { words: ['[aeolus-fleet] scout'], source: 'adapter' },
       { words: ['--model', 'claude-opus-5-5'], source: 'configuration' },
       { words: ['--continue'], source: 'adapter' },
+      { words: ['--', '/aeolus:wake'] },
     ]);
     expect(claudeCodeCommandLine({ flags: ['--verbose'], sessionName: '[aeolus-fleet] scout', prompt: '<first prompt>', isFirstStart: true })).toEqual([
-      { words: ['claude', '<first prompt>'] },
+      { words: ['claude'] },
       { words: ['--verbose'], source: 'configuration' },
+      { words: ['--', '<first prompt>'] },
     ]);
   });
 
