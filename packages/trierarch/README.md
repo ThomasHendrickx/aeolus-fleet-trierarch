@@ -36,7 +36,7 @@ That gives the command `aeolus-trierarch`.
 
 | Command | What it does |
 | --- | --- |
-| `aeolus-trierarch status` | The service (running, pid, since), the fleet and the trierarch's own lease, the caps in use, the entries by state, kept worktrees and orphans |
+| `aeolus-trierarch status` | The installed version, the service (running, pid, since), the fleet and the trierarch's own lease, the caps in use, the entries by state, kept worktrees and orphans |
 | `aeolus-trierarch list` | The wanted entries: ship, state, harness, workspace, since, restarts |
 | `aeolus-trierarch logs [--lines <n>] [--follow]` | The last lines of `~/.aeolus/trierarch/logs/trierarch.log`, and with `--follow` each new one |
 | `aeolus-trierarch config check` | Checks the configuration and gives the flags each harness launches with, and each option value's flags |
@@ -45,6 +45,7 @@ That gives the command `aeolus-trierarch`.
 | `aeolus-trierarch install [--no-load]` | Installs the service; with `--no-load` it only writes its file |
 | `aeolus-trierarch uninstall` | Removes the service and stops every session. It deletes nothing else: it lists the worktrees it leaves, and keeps its own files under `~/.aeolus/trierarch/` |
 | `aeolus-trierarch run` | What the service runs: keeps the wanted ships crewed until stopped |
+| `aeolus-trierarch --version`, `-v` | The installed version |
 
 Every command takes `--json`, so a ship can read what it says, and `--config <path>`. `status`, `list` and `logs` read what is on the machine and send no message; `status` asks the fleet `whoami` once, for the lease.
 
