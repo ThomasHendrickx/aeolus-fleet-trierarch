@@ -137,6 +137,10 @@ async function exists(path: string): Promise<boolean> {
   return (await stat(path).catch(() => undefined)) !== undefined;
 }
 
+/** How long stop waits for the service to be gone: checks, a second apart. */
+const STOP_CHECKS = 30;
+const STOP_CHECK_MS = 1000;
+
 const NOT_INSTALLED = 'The service is not installed: run aeolus-trierarch install';
 
 export function createService(options: {
@@ -148,8 +152,11 @@ export function createService(options: {
   uid: number;
   exec: Exec;
   now: () => Date;
+  /** Waits between checks that a stopped service is gone; a test passes one that does not wait. */
+  sleep?: (ms: number) => Promise<void>;
 }): Service {
   const { platform, homeDirectory, paths, run, environment, uid, exec, now } = options;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const must = async (command: string, args: readonly string[]): Promise<string> => {
     const result = await exec(command, args);
     if (result.status !== 0) {
@@ -205,8 +212,15 @@ export function createService(options: {
         await ((await isLoaded()) ? must('launchctl', ['kickstart', target]) : bootstrap());
       },
       // Unloading, not killing: KeepAlive would start a killed one again. It loads again at the next login.
+      // bootout returns before the process has exited: stopped means launchd has the agent gone.
       stop: async () => {
         await exec('launchctl', ['bootout', target]);
+        for (let check = 0; await isLoaded(); check += 1) {
+          if (check >= STOP_CHECKS) {
+            throw new Error(`The trierarch still runs ${String((STOP_CHECKS * STOP_CHECK_MS) / MS_PER_SECOND)} s after it was stopped: see aeolus-trierarch status`);
+          }
+          await sleep(STOP_CHECK_MS);
+        }
       },
       restart: async () => {
         await mustBeInstalled();
