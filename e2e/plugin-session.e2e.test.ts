@@ -8,15 +8,15 @@ import type { MessageId, ShipId } from '@aeolus-fleet/common';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { createPrismaClient, type PrismaClient } from '../packages/server/src/adapters/prisma/client.js';
-import { createApp } from '../packages/server/src/app.js';
-import type { Caller } from '../packages/server/src/core/shared/caller.js';
-import { createUseCases, systemClock, type UseCases } from '../packages/server/src/wiring.js';
-import { OPERATOR, operatorCaller } from '../packages/server/test/support/core-fixtures.js';
-import { createMigratedDatabase } from '../packages/server/test/support/database.js';
-import { unwrap } from '../packages/server/test/support/result.js';
+import { createPrismaClient, type PrismaClient } from '../packages/core/src/adapters/prisma/client.js';
+import { createApp } from '../packages/core/src/app.js';
+import type { Caller } from '../packages/core/src/domain/shared/caller.js';
+import { createUseCases, systemClock, type UseCases } from '../packages/core/src/wiring.js';
+import { OPERATOR, operatorCaller } from '../packages/core/test/support/core-fixtures.js';
+import { createMigratedDatabase } from '../packages/core/test/support/database.js';
+import { unwrap } from '../packages/core/test/support/result.js';
 import { freePort } from './support/web.js';
-import { newKey } from '../packages/server/test/support/keys.js';
+import { newKey } from '../packages/core/test/support/keys.js';
 
 // The aeolus plugin in a real interactive Claude Code session, driven in tmux
 // against a fleet on this machine: the session crews a ship with the crew

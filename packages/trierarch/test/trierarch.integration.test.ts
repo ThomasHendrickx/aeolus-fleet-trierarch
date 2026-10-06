@@ -9,14 +9,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 // The shared Postgres container's URL, which the global setup provides to every file.
-import type {} from '../../server/test/postgres.global-setup.js';
-import { createApp } from '../../server/src/app.js';
-import { createPrismaClient, type PrismaClient } from '../../server/src/adapters/prisma/client.js';
-import { createUseCases } from '../../server/src/wiring.js';
-import { FLEET_URL, OPERATOR, operatorCaller, secretOf } from '../../server/test/support/core-fixtures.js';
-import { createMigratedDatabase } from '../../server/test/support/database.js';
-import { newKey } from '../../server/test/support/keys.js';
-import { unwrap } from '../../server/test/support/result.js';
+import type {} from '../../core/test/postgres.global-setup.js';
+import { createApp } from '../../core/src/app.js';
+import { createPrismaClient, type PrismaClient } from '../../core/src/adapters/prisma/client.js';
+import { createUseCases } from '../../core/src/wiring.js';
+import { FLEET_URL, OPERATOR, operatorCaller, secretOf } from '../../core/test/support/core-fixtures.js';
+import { createMigratedDatabase } from '../../core/test/support/database.js';
+import { newKey } from '../../core/test/support/keys.js';
+import { unwrap } from '../../core/test/support/result.js';
 import { createClaudeCodeHarness } from '../src/adapters/claude-code.js';
 import { adapterFlagsOf } from '../src/adapters/harnesses.js';
 import { createClaudeCodeSetup } from '../src/adapters/claude-code-setup.js';
