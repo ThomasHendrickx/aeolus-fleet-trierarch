@@ -8,6 +8,8 @@ const shipId = newId('ship');
 const crewed = { time: NOW, shipId, shipName: 'scout', action: 'crew', outcome: 'crewed, claude-code started in /worktrees/aeolus-fleet/scout' } as const;
 const failed = { time: NOW, shipId, action: 'crew', outcome: 'failed: the fleet cannot be reached', next: 'the next pass tries again' } as const;
 
+const parsed = (line: string): unknown => JSON.parse(line);
+
 /** A logger writing to two collected streams, a terminal or not. */
 function aLogger(isTerminal = false) {
   const out: string[] = [];
@@ -23,7 +25,7 @@ describe("the trierarch's log", () => {
     logger.action(crewed);
     logger.action(failed);
 
-    expect(out.map((line) => JSON.parse(line) as unknown)).toEqual([
+    expect(out.map((line) => parsed(line))).toEqual([
       { time: '2026-10-06T15:00:00.000Z', shipId, shipName: 'scout', action: 'crew', outcome: 'crewed, claude-code started in /worktrees/aeolus-fleet/scout' },
       { time: '2026-10-06T15:00:00.000Z', shipId, action: 'crew', outcome: 'failed: the fleet cannot be reached', next: 'the next pass tries again' },
     ]);
@@ -36,8 +38,8 @@ describe("the trierarch's log", () => {
     logger.info('aeolus-trierarch 0.18.0 runs');
     logger.warn('The loop failed and goes on: the fleet cannot be reached');
 
-    expect(out.map((line) => JSON.parse(line) as unknown)).toEqual([{ time: '2026-10-06T15:00:00.000Z', level: 'info', message: 'aeolus-trierarch 0.18.0 runs' }]);
-    expect(err.map((line) => JSON.parse(line) as unknown)).toEqual([{ time: '2026-10-06T15:00:00.000Z', level: 'warn', message: 'The loop failed and goes on: the fleet cannot be reached' }]);
+    expect(out.map((line) => parsed(line))).toEqual([{ time: '2026-10-06T15:00:00.000Z', level: 'info', message: 'aeolus-trierarch 0.18.0 runs' }]);
+    expect(err.map((line) => parsed(line))).toEqual([{ time: '2026-10-06T15:00:00.000Z', level: 'warn', message: 'The loop failed and goes on: the fleet cannot be reached' }]);
   });
 
   it('writes readable text instead to a terminal, as a run in the foreground', () => {
