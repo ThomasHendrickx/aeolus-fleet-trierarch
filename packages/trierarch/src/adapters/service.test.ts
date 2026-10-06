@@ -93,7 +93,55 @@ describe('the service on macOS (launchd)', () => {
   it('stops by unloading the agent, so KeepAlive does not start it again', async () => {
     await serviceOn('darwin').stop();
 
-    expect(calls).toEqual([`launchctl bootout ${target}`]);
+    expect(calls).toEqual([`launchctl bootout ${target}`, `launchctl print ${target}`]);
+  });
+
+  it('says stopped only once launchd has the agent gone, as bootout returns before the process exits', async () => {
+    answers.set(`launchctl print ${target}`, ok('state = running'));
+    let waits = 0;
+    const service = createService({
+      platform: 'darwin',
+      homeDirectory: home,
+      paths: trierarchPaths({ homeDirectory: home }),
+      run,
+      environment,
+      uid: 501,
+      now: () => NOW,
+      sleep: () => {
+        waits += 1;
+        if (waits === 3) {
+          answers.delete(`launchctl print ${target}`);
+        }
+        return Promise.resolve();
+      },
+      exec: (command, args) => {
+        const line = [command, ...args].join(' ');
+        calls.push(line);
+        return Promise.resolve(answers.get(line) ?? { status: 1, stdout: '', stderr: 'not loaded' });
+      },
+    });
+
+    await service.stop();
+
+    expect(waits).toBe(3);
+    expect(calls.filter((line) => line === `launchctl print ${target}`)).toHaveLength(4);
+  });
+
+  it('says why when the agent is still there long after it was stopped', async () => {
+    answers.set(`launchctl print ${target}`, ok('state = running'));
+    const service = createService({
+      platform: 'darwin',
+      homeDirectory: home,
+      paths: trierarchPaths({ homeDirectory: home }),
+      run,
+      environment,
+      uid: 501,
+      now: () => NOW,
+      sleep: () => Promise.resolve(),
+      exec: (command, args) => Promise.resolve(answers.get([command, ...args].join(' ')) ?? { status: 1, stdout: '', stderr: '' }),
+    });
+
+    await expect(service.stop()).rejects.toThrow('The trierarch still runs 30 s after it was stopped');
   });
 
   it('starts by loading the agent when it is unloaded, and by kicking it when it is loaded', async () => {
