@@ -6,7 +6,7 @@ import { trierarchPaths } from '../adapters/paths.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
 import { configCheck } from './config-check.js';
 import { initTrierarch } from './init.js';
-import { install } from './install.js';
+import { install, serviceEnvironment } from './install.js';
 import { runTrierarch } from './run.js';
 
 export const USAGE = [
@@ -49,7 +49,7 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
           homeDirectory,
           paths,
           run: { node: process.execPath, script: fileURLToPath(new URL('../bin/aeolus-trierarch.js', import.meta.url)) },
-          path: env.PATH ?? '/usr/bin:/bin',
+          environment: serviceEnvironment(env),
           isLoading: !rest.includes('--no-load'),
           uid: process.getuid?.() ?? 0,
         });

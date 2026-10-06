@@ -19,12 +19,32 @@ export interface RunCommand {
   readonly script: string;
 }
 
+/** The variables the trierarch itself reads, carried into the service when set where install ran. */
+const TRIERARCH_VARIABLES = ['AEOLUS_PLUGIN_ROOT', 'AEOLUS_PLUGIN_DATA', 'AEOLUS_TRIERARCH_CONFIG'] as const;
+
+const DEFAULT_PATH = '/usr/bin:/bin';
+
+/** The service's environment: PATH, so it finds tmux, git and claude, and the trierarch's own variables. */
+export function serviceEnvironment(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
+  const environment: Record<string, string> = { PATH: env.PATH ?? DEFAULT_PATH };
+  for (const name of TRIERARCH_VARIABLES) {
+    const value = env[name];
+    if (value !== undefined) {
+      environment[name] = value;
+    }
+  }
+  return environment;
+}
+
 function escapeXml(text: string): string {
   return text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
-export function launchdPlist(at: { run: RunCommand; paths: TrierarchPaths; path: string }): string {
+export function launchdPlist(at: { run: RunCommand; paths: TrierarchPaths; environment: Readonly<Record<string, string>> }): string {
   const strings = (values: readonly string[]) => values.map((value) => `    <string>${escapeXml(value)}</string>`).join('\n');
+  const variables = Object.entries(at.environment)
+    .map(([name, value]) => `    <key>${escapeXml(name)}</key>\n    <string>${escapeXml(value)}</string>`)
+    .join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -37,8 +57,7 @@ ${strings([at.run.node, at.run.script, 'run'])}
   </array>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key>
-    <string>${escapeXml(at.path)}</string>
+${variables}
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -53,13 +72,16 @@ ${strings([at.run.node, at.run.script, 'run'])}
 `;
 }
 
-export function systemdUnit(at: { run: RunCommand; path: string }): string {
+export function systemdUnit(at: { run: RunCommand; environment: Readonly<Record<string, string>> }): string {
+  const variables = Object.entries(at.environment)
+    .map(([name, value]) => `Environment="${name}=${value}"`)
+    .join('\n');
   return `[Unit]
 Description=Aeolus trierarch: keeps the ships on its wanted list crewed on this machine
 
 [Service]
 ExecStart="${at.run.node}" "${at.run.script}" run
-Environment="PATH=${at.path}"
+${variables}
 Restart=always
 RestartSec=5
 
@@ -73,17 +95,17 @@ export async function install(input: {
   homeDirectory: string;
   paths: TrierarchPaths;
   run: RunCommand;
-  path: string;
+  environment: Readonly<Record<string, string>>;
   /** Write the file only, without loading it: for a test, or to load it by hand. */
   isLoading: boolean;
   uid: number;
 }): Promise<string[]> {
-  const { platform, homeDirectory, paths, run, path, isLoading, uid } = input;
+  const { platform, homeDirectory, paths, run, environment, isLoading, uid } = input;
   await mkdir(paths.logs, { recursive: true });
   if (platform === 'darwin') {
     const plist = join(homeDirectory, 'Library', 'LaunchAgents', `${LAUNCHD_LABEL}.plist`);
     await mkdir(join(homeDirectory, 'Library', 'LaunchAgents'), { recursive: true });
-    await writeFile(plist, launchdPlist({ run, paths, path }));
+    await writeFile(plist, launchdPlist({ run, paths, environment }));
     if (!isLoading) {
       return [`Wrote ${plist}. Load it with: launchctl bootstrap gui/${String(uid)} ${plist}`];
     }
@@ -98,7 +120,7 @@ export async function install(input: {
     const folder = join(homeDirectory, '.config', 'systemd', 'user');
     const unit = join(folder, SYSTEMD_UNIT);
     await mkdir(folder, { recursive: true });
-    await writeFile(unit, systemdUnit({ run, path }));
+    await writeFile(unit, systemdUnit({ run, environment }));
     if (!isLoading) {
       return [`Wrote ${unit}. Start it with: systemctl --user enable --now ${SYSTEMD_UNIT}`];
     }
