@@ -51,7 +51,7 @@ describe('aeolus-trierarch', () => {
   });
 
   it('names every command in its usage', () => {
-    for (const command of ['init', 'status', 'list', 'logs', 'start', 'stop', 'restart', 'install', 'uninstall', 'config check', 'run']) {
+    for (const command of ['init', 'status', 'list', 'logs', 'start', 'stop', 'restart', 'upgrade', 'install', 'uninstall', 'config check', 'run']) {
       expect(USAGE).toContain(`  ${command}`);
     }
     expect(USAGE).toContain('--json');
