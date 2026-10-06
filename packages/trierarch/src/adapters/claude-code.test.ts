@@ -71,22 +71,22 @@ describe('Claude Code as a harness', () => {
     await expect(harness().crewTokenOf(folder)).resolves.toBeUndefined();
   });
 
-  it('starts claude with the configured flags and the first prompt on the first start', async () => {
+  it('starts claude with the first prompt on the first start, before the configured flags so a flag with an optional value never takes it', async () => {
     await harness().launch({ shipId, folder, harness: 'claude-code', options: { model: 'sonnet' }, isFirstStart: true, firstPrompt: 'Review the open pull requests.' });
 
-    expect(started).toEqual([{ shipId, folder, command: ['claude', '--remote-control', '--model', 'claude-sonnet-5-5', 'Review the open pull requests.'] }]);
+    expect(started).toEqual([{ shipId, folder, command: ['claude', 'Review the open pull requests.', '--remote-control', '--model', 'claude-sonnet-5-5'] }]);
   });
 
   it('starts claude with /aeolus:wake on a first start without a first prompt', async () => {
     await harness().launch({ shipId, folder, harness: 'claude-code', options: {}, isFirstStart: true });
 
-    expect(started[0]?.command.at(-1)).toBe('/aeolus:wake');
+    expect(started[0]?.command[1]).toBe('/aeolus:wake');
   });
 
   it('continues the conversation on a restart, with /aeolus:wake and never the first prompt again', async () => {
     await harness().launch({ shipId, folder, harness: 'claude-code', options: {}, isFirstStart: false, firstPrompt: 'Review the open pull requests.' });
 
-    expect(started[0]?.command).toEqual(['claude', '--remote-control', '--model', 'claude-opus-5-5', '--continue', '/aeolus:wake']);
+    expect(started[0]?.command).toEqual(['claude', '/aeolus:wake', '--remote-control', '--model', 'claude-opus-5-5', '--continue']);
   });
 
   it('wakes a session by typing /aeolus:wake', async () => {
