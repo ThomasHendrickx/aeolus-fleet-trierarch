@@ -34,7 +34,7 @@ export interface InitReport {
   readonly fleetUrl: string;
   readonly shipId?: ShipId;
   readonly configuration: 'written' | 'changed' | 'kept';
-  /** The folders Claude Code now trusts. */
+  /** The folders Claude Code now trusts: the worktree root, then each configured folder. */
   readonly trusted: readonly string[];
   readonly isSkipPermissionsAccepted: boolean;
   readonly service: 'installed' | 'restarted' | 'unchanged' | 'notInstalled';
@@ -230,8 +230,15 @@ export async function initTrierarch(input: {
   // Claude Code's one-time questions, answered ahead.
   const root = configuration.worktreeRoot ?? paths.worktrees;
   await mkdir(root, { recursive: true });
-  await claudeCode.trust(root);
+  const folders = Object.values(configuration.folders).map((folder) => folder.path);
+  // Every run, so a folder added to the configuration since is trusted too.
+  for (const folder of [root, ...folders]) {
+    await claudeCode.trust(folder);
+  }
   said.push(`Claude Code trusts ${root}, so a session in any worktree starts with no trust question.`);
+  if (folders.length > 0) {
+    said.push(`Claude Code trusts each configured folder too: ${folders.join(', ')}.`);
+  }
   let isSkipPermissionsAccepted = await claudeCode.isSkipPermissionsAccepted();
   if (configuration.harnesses[CLAUDE_CODE]?.flags.includes(SKIP_PERMISSIONS) === true && !isSkipPermissionsAccepted) {
     if (await prompter.confirm('Claude Code asks once per user to accept bypass permissions mode. Accept it now (skipDangerousModePermissionPrompt in ~/.claude/settings.json)?', { isDefault: true })) {
@@ -266,7 +273,7 @@ export async function initTrierarch(input: {
     fleetUrl,
     ...(shipId !== undefined && { shipId }),
     configuration: configured,
-    trusted: [root],
+    trusted: [root, ...folders],
     isSkipPermissionsAccepted,
     service: serviced,
     said,
