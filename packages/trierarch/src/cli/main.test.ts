@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -146,6 +146,19 @@ describe('aeolus-trierarch', () => {
       path: config,
       harnesses: { 'claude-code': { flags: ['--remote-control', '--model', 'claude-opus-5-5'], options: { model: { opus: ['--model', 'claude-opus-5-5'], sonnet: ['--model', 'claude-sonnet-5-5'] } } } },
     });
+  });
+
+  it('logs renders the log for the operator, and gives its records with --json', async () => {
+    const logs = join(home, '.aeolus', 'trierarch', 'logs');
+    mkdirSync(logs, { recursive: true });
+    const record = { time: '2026-10-06T15:00:00.000Z', shipId: 'shp_01m487vd5pdz6zh6s0jdnkg9p6', shipName: 'scout', action: 'wake', outcome: 'woken, deliveries wait' };
+    writeFileSync(join(logs, 'trierarch.log'), `${JSON.stringify(record)}\nan older line\n`);
+
+    const text = await main(['logs'], { HOME: home });
+    const json = await main(['logs', '--json'], { HOME: home });
+
+    expect(text.output).toBe('2026-10-06T15:00:00.000Z shp_01m487vd5pdz6zh6s0jdnkg9p6 (scout) wake: woken, deliveries wait\nan older line');
+    expect(JSON.parse(json.output)).toEqual({ file: join(logs, 'trierarch.log'), lines: [record, { line: 'an older line' }] });
   });
 
   it('takes a flag value written with an equals sign', async () => {
