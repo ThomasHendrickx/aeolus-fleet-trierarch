@@ -1,7 +1,7 @@
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import type { AeolusPlugin } from './claude-code.js';
+import type { AeolusPlugin } from './plugin-identity.js';
 
 /**
  * Where Claude Code installed the aeolus plugin: AEOLUS_PLUGIN_ROOT and
