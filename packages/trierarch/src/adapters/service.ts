@@ -137,7 +137,7 @@ async function exists(path: string): Promise<boolean> {
   return (await stat(path).catch(() => undefined)) !== undefined;
 }
 
-/** How long stop waits for the service to be gone: checks, a second apart. */
+/** How long stop and install wait for the service to be gone: checks, a second apart. */
 const STOP_CHECKS = 30;
 const STOP_CHECK_MS = 1000;
 
@@ -195,12 +195,23 @@ export function createService(options: {
     const bootstrap = async (): Promise<void> => {
       await must('launchctl', ['bootstrap', domain, file]);
     };
+    // Unloading, not killing: KeepAlive would start a killed one again. It loads again at the next login.
+    // bootout returns before the process has exited: unloaded means launchd has the agent gone.
+    const bootout = async (): Promise<void> => {
+      await exec('launchctl', ['bootout', target]);
+      for (let check = 0; await isLoaded(); check += 1) {
+        if (check >= STOP_CHECKS) {
+          throw new Error(`The trierarch still runs ${String((STOP_CHECKS * STOP_CHECK_MS) / MS_PER_SECOND)} s after it was stopped: see aeolus-trierarch status`);
+        }
+        await sleep(STOP_CHECK_MS);
+      }
+    };
     return {
       write,
       install: async () => {
         await write();
         // Unload an earlier copy first: bootstrap refuses a loaded agent.
-        await exec('launchctl', ['bootout', target]);
+        await bootout();
         await bootstrap();
       },
       uninstall: async () => {
@@ -211,17 +222,7 @@ export function createService(options: {
         await mustBeInstalled();
         await ((await isLoaded()) ? must('launchctl', ['kickstart', target]) : bootstrap());
       },
-      // Unloading, not killing: KeepAlive would start a killed one again. It loads again at the next login.
-      // bootout returns before the process has exited: stopped means launchd has the agent gone.
-      stop: async () => {
-        await exec('launchctl', ['bootout', target]);
-        for (let check = 0; await isLoaded(); check += 1) {
-          if (check >= STOP_CHECKS) {
-            throw new Error(`The trierarch still runs ${String((STOP_CHECKS * STOP_CHECK_MS) / MS_PER_SECOND)} s after it was stopped: see aeolus-trierarch status`);
-          }
-          await sleep(STOP_CHECK_MS);
-        }
-      },
+      stop: bootout,
       restart: async () => {
         await mustBeInstalled();
         await ((await isLoaded()) ? must('launchctl', ['kickstart', '-k', target]) : bootstrap());
