@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
- * `aeolus-trierarch`: the command that runs a trierarch on this machine. Its
- * commands (init, run, config check, install) come with the adapters; until
- * then it says so.
+ * `aeolus-trierarch`: runs a trierarch on this machine (docs/trierarch.md).
+ * See `main.ts` for its commands.
  */
-process.stdout.write('Usage: aeolus-trierarch init | run | config check | install (coming with the adapters)\n');
-process.exitCode = 2;
+import { main } from '../cli/main.js';
+
+const outcome = await main(process.argv.slice(2));
+process.stdout.write(`${outcome.output}\n`);
+process.exitCode = outcome.code;
