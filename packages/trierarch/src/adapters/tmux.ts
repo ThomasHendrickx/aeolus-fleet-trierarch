@@ -1,3 +1,5 @@
+import { setTimeout as wait } from 'node:timers/promises';
+
 import { idSchema, type ShipId } from '@aeolus-fleet/common';
 
 import type { ObservedSession, ProcessPort } from '../core/ports.js';
@@ -12,8 +14,8 @@ import { runCommand } from './run-command.js';
 export interface Tmux extends ProcessPort {
   /** Starts the command in the folder, in a new session for the ship; an exited one is replaced. */
   start(session: { shipId: ShipId; folder: string; command: readonly string[] }): Promise<void>;
-  /** Types the text into the ship's session and presses Enter. */
-  type(at: { shipId: ShipId; text: string }): Promise<void>;
+  /** Types the text into the ship's session and presses Enter, after `settleMs` when given. */
+  type(at: { shipId: ShipId; text: string; settleMs?: number }): Promise<void>;
 }
 
 const PREFIX = 'trierarch-';
@@ -60,9 +62,12 @@ export function createTmux(options: { server?: string } = {}): Tmux {
       await must(['set-option', '-w', '-t', `=${name}:`, 'remain-on-exit', 'on']);
       await must(['respawn-pane', '-k', '-t', `=${name}:`, '-c', folder, '--', ...command]);
     },
-    type: async ({ shipId, text }) => {
+    type: async ({ shipId, text, settleMs }) => {
       const target = `=${sessionName(shipId)}:`;
       await must(['send-keys', '-t', target, '-l', text]);
+      if (settleMs !== undefined) {
+        await wait(settleMs);
+      }
       await must(['send-keys', '-t', target, 'Enter']);
     },
   };

@@ -4,7 +4,7 @@ Keeps the ships on its wanted list crewed on the machine it runs on: it starts, 
 
 ## Install
 
-On the machine that will run the sessions (macOS or Linux), with Node 26, `git`, `tmux`, Claude Code and the aeolus plugin for Claude Code installed:
+On the machine that will run the sessions (macOS or Linux), with Node 26, `git`, `tmux`, and Claude Code with the aeolus plugin for Claude Code, Codex with the aeolus plugin for Codex, or both, installed. Codex must be on the `PATH` as `codex`:
 
 ```sh
 npm install --global @aeolus-fleet/trierarch
@@ -22,10 +22,11 @@ That gives the command `aeolus-trierarch`.
    It asks for what it needs, in a short flow:
    - the fleet URL, the ship id and the secret. The secret is not shown as you type it, so it stays out of your shell history and any transcript. It registers the ship, keeps its crew token in `~/.aeolus/trierarch/crew-token` (readable by you only) and writes the secret nowhere;
    - whether Claude Code launches with `--dangerously-skip-permissions` and with `--remote-control` (both no unless you say yes);
+   - where `codex` runs or Codex is configured already: whether to offer Codex, and whether it launches with `--dangerously-bypass-approvals-and-sandbox` (no unless you say yes). Every Codex session launches with `--no-daemon` whatever the flags, so stopping it stops its work;
    - the repositories it may make worktrees of, by name and path;
    - the caps: how many ships on its list, how many sessions at once.
 
-   It writes `~/.aeolus/trierarch/config.json`, with `config.schema.json` beside it so an editor checks it. It answers Claude Code's one-time questions ahead, so a session nobody watches never waits on one: it trusts the worktree root in `~/.claude.json`, which covers every worktree under it, and each configured folder (on every run, so a folder added since is trusted too), and, when the sessions skip permissions, offers to accept bypass permissions mode in `~/.claude/settings.json`. Then it offers to install and start the service: a launchd agent on macOS (`~/Library/LaunchAgents/dev.aeolus-fleet.trierarch.plist`), a systemd user unit on Linux (`aeolus-trierarch.service`), started at login and again whenever it stops.
+   It writes `~/.aeolus/trierarch/config.json`, with `config.schema.json` beside it so an editor checks it. When the configuration offers Codex, it answers Codex's one-time questions ahead too, through `codex app-server` as Codex's own dialogs do: it trusts each configured repository and folder in `~/.codex/config.toml` (a repository covers its worktrees), and trusts the aeolus plugin's hooks, without which a Codex session marks no turn and is never woken. A plugin update changes the hooks: run `aeolus-trierarch init` again after updating the aeolus plugin for Codex. It answers Claude Code's one-time questions ahead, so a session nobody watches never waits on one: it trusts the worktree root in `~/.claude.json`, which covers every worktree under it, and each configured folder (on every run, so a folder added since is trusted too), and, when the sessions skip permissions, offers to accept bypass permissions mode in `~/.claude/settings.json`. Then it offers to install and start the service: a launchd agent on macOS (`~/Library/LaunchAgents/dev.aeolus-fleet.trierarch.plist`), a systemd user unit on Linux (`aeolus-trierarch.service`), started at login and again whenever it stops.
 
    Without a terminal, pass everything as flags and take every default with `--yes`: `aeolus-trierarch init --fleet-url https://fleet.example.com --ship-id shp_... --secret aeolus_sk_v1_... --yes`. Prefer the prompt: a secret in a flag lands in your shell history.
 
@@ -65,6 +66,12 @@ To stop the trierarch: `aeolus-trierarch stop`, or `aeolus-trierarch uninstall` 
       "options": {
         "model": { "values": { "opus": ["--model", "claude-opus-5-5"], "sonnet": ["--model", "claude-sonnet-5-5"] }, "default": "opus" }
       }
+    },
+    "codex": {
+      "flags": ["--dangerously-bypass-approvals-and-sandbox"],
+      "options": {
+        "model": { "values": { "sol": ["-m", "gpt-5.6-sol"] }, "default": "sol" }
+      }
     }
   }
 }
@@ -73,11 +80,11 @@ To stop the trierarch: `aeolus-trierarch stop`, or `aeolus-trierarch uninstall` 
 - **caps**: how many ships it keeps on its list, and how many sessions run at once.
 - **repositories**: by name. A want for a worktree of one gets a git worktree under `~/.aeolus/trierarch/worktrees/<repository>/<ship>`, detached at the want's ref or the repository's HEAD. It fetches the repository first, and a ref `origin` has a branch for checks out that remote branch (`origin/<ref>`), so a ship starts from current code; when the fetch fails it uses what the repository has. `worktreeRoot` moves that root.
 - **folders**: by name, used as they are, one ship per folder, never removed.
-- **harnesses**: the flags every launch gets, and named options. A want picks option values by name; it never adds a flag, and messages never carry paths or flags. There is no policy on which flags: put `--dangerously-skip-permissions` in `flags` if you want it. The trierarch never adds a flag by itself. With `--remote-control` and no name after it, each session is named `[<repository or folder>] <ship>`, such as `[aeolus-fleet] trial-1`, so it is easy to find among your remote-control sessions.
+- **harnesses**: `claude-code`, `codex` or both: the flags every launch gets, and named options. A want picks option values by name; it never adds a flag, and messages never carry paths or flags. There is no policy on which flags: put `--dangerously-skip-permissions` in `flags` if you want it. The trierarch never adds a flag by itself. With `--remote-control` and no name after it, each session is named `[<repository or folder>] <ship>`, such as `[aeolus-fleet] trial-1`, so it is easy to find among your remote-control sessions.
 
-`aeolus-trierarch init` writes caps, repositories and Claude Code's flags; edit the file for folders, options and `worktreeRoot`, then `aeolus-trierarch config check` and `aeolus-trierarch restart`.
+`aeolus-trierarch init` writes caps, repositories, and Claude Code's and Codex's flags; edit the file for folders, options and `worktreeRoot`, then `aeolus-trierarch config check` and `aeolus-trierarch restart`.
 
-The trierarch finds the aeolus plugin in Claude Code's plugin cache (the newest version). Set `AEOLUS_PLUGIN_ROOT` and `AEOLUS_PLUGIN_DATA` to point it elsewhere. `aeolus-trierarch install` carries these, `AEOLUS_TRIERARCH_CONFIG` and `PATH` into the service as they are set where it runs.
+The trierarch finds the aeolus plugin in each offered harness's plugin cache (the newest version): Claude Code's under `~/.claude/plugins`, Codex's under `~/.codex/plugins` (or `$CODEX_HOME/plugins`). Set `AEOLUS_PLUGIN_ROOT` and `AEOLUS_PLUGIN_DATA` (Claude Code), or `AEOLUS_CODEX_PLUGIN_ROOT` and `AEOLUS_CODEX_PLUGIN_DATA` (Codex), to point it elsewhere. `aeolus-trierarch install` carries these, `CODEX_HOME`, `AEOLUS_TRIERARCH_CONFIG` and `PATH` into the service as they are set where it runs.
 
 ## What is here
 
@@ -90,7 +97,7 @@ The trierarch finds the aeolus plugin in Claude Code's plugin cache (the newest 
   - the fleet over REST;
   - tmux, on its own server (`tmux -L aeolus-trierarch`, sessions named `trierarch-<ship id>` and kept on exit). Attach to one with `tmux -L aeolus-trierarch attach -t trierarch-<ship id>`;
   - git worktrees and folders;
-  - Claude Code, through the aeolus plugin's `aeolus-identity.sh`;
+  - Claude Code and Codex, through the aeolus plugin's `aeolus-identity.sh`. A Codex session starts with `codex <prompt>`, always with `--no-daemon`, comes back with `codex resume --last`, and is woken by typing `$aeolus-wake`;
   - the JSON state store.
 - **The command** (`src/cli`): `init`, `status`, `list`, `logs`, `config check`, `start`, `stop`, `restart`, `install`, `uninstall`, `run`.
-- **Adapters for the setup**: the service (launchd or systemd), and Claude Code's own files for its one-time questions.
+- **Adapters for the setup**: the service (launchd or systemd), Claude Code's own files and Codex's app server for their one-time questions.

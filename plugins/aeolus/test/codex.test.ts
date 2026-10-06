@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -265,6 +265,31 @@ describe('Codex plugin state', () => {
     expect(output).toContain('Automatic local wake-up failed:');
     expect(output).toContain('cannot reach the fleet');
     expect(output).not.toContain('Automatic local wake-up targets this Codex task');
+  });
+});
+
+describe('Codex in a folder a trierarch crews (wakeBy=trierarch)', () => {
+  it('arms no wake bridge: the trierarch wakes the session, so a wake skill asking for one starts nothing', () => {
+    expect(
+      runScript('aeolus-identity.sh', {
+        args: ['write', '--wake-by', 'trierarch', 'http://127.0.0.1:1', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout', 'aeolus_ct_v1_crew'],
+        env: { AEOLUS_FOLDER: folder },
+      }).status,
+    ).toBe(0);
+    const bin = join(data, 'bin');
+    const codex = join(bin, 'codex');
+    mkdirSync(bin);
+    writeFileSync(codex, '#!/usr/bin/env bash\nexit 0\n');
+    chmodSync(codex, 0o700);
+
+    const started = runScript('aeolus-codex-wake.sh', {
+      args: ['start', '01a10348-c3ff-7951-9962-349fca3538e8'],
+      env: { AEOLUS_FOLDER: folder, AEOLUS_CODEX_WAKE_DISABLED: '', PATH: `${bin}:${process.env.PATH ?? ''}` },
+    });
+
+    expect(started.status).toBe(0);
+    expect(started.stdout).toContain('the trierarch wakes this session');
+    expect(readdirSync(join(data, 'ships')).filter((name) => name.endsWith('.wake.pid'))).toEqual([]);
   });
 });
 

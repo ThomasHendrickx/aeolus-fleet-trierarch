@@ -19,6 +19,11 @@ if [ ! -f "$identity" ]; then
   echo "aeolus: this folder crews no ship; run \$aeolus-crew with the crew line first"
   exit 2
 fi
+# A session a trierarch crews: the trierarch wakes it, so no bridge of its own.
+if aeolus_woken_by_trierarch "$identity"; then
+  echo "aeolus: the trierarch wakes this session; no wake bridge armed"
+  exit 0
+fi
 if ! command -v codex >/dev/null 2>&1; then
   echo "aeolus: codex is not on PATH; cannot arm automatic wake-up" >&2
   exit 7

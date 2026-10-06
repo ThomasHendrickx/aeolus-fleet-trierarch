@@ -1,11 +1,10 @@
 import { setTimeout as wait } from 'node:timers/promises';
 
-import { createClaudeCodeHarness } from '../adapters/claude-code.js';
 import { loadConfiguration, readCrewFile } from '../adapters/files.js';
 import { createGitWorkspace } from '../adapters/git-workspace.js';
+import { createHarnesses } from '../adapters/harnesses.js';
 import { createJsonState } from '../adapters/json-state.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
-import { findAeolusPlugin } from '../adapters/plugin.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
 import { createTmux } from '../adapters/tmux.js';
 import { runningVersion } from '../adapters/version.js';
@@ -26,18 +25,18 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const { paths, homeDirectory, env, signal, logger } = input;
   const configuration = await loadConfiguration(paths.config);
   const crew = await readCrewFile(paths.crewToken);
-  const plugin = await findAeolusPlugin({ homeDirectory, env });
   const fleet = createRestFleet(crew);
   const tmux = createTmux();
-  const harness = createClaudeCodeHarness({ configuration, plugin, sessions: tmux });
+  const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, sessions: tmux });
   const workspace = createGitWorkspace({ configuration, root: configuration.worktreeRoot ?? paths.worktrees });
   const state = createJsonState(paths.state);
   const clock = { now: () => new Date() };
   const setup = { configuration, version: runningVersion() };
   const handle = createHandleDelivery({ fleet, workspace, state, setup, clock, logger });
-  const pass = createRunPass({ fleet, harness, processes: tmux, workspace, state, setup, clock, logger });
+  const pass = createRunPass({ fleet, harnesses, processes: tmux, workspace, state, setup, clock, logger });
 
-  logger.info(`aeolus-trierarch ${setup.version} runs for ${crew.fleetUrl}, with the aeolus plugin at ${plugin.root}`);
+  const found = Object.entries(plugins).map(([harness, plugin]) => `${harness} at ${plugin.root}`);
+  logger.info(`aeolus-trierarch ${setup.version} runs for ${crew.fleetUrl}, with the aeolus plugin for ${found.join(' and ') || 'no harness'}`);
   await loop({ receive: (stop) => fleet.receive(stop), handle, pass, signal, logger, intervalMs: PASS_INTERVAL_MS });
 }
 

@@ -69,6 +69,20 @@ describe('sessions in tmux', () => {
       .toContain('got /aeolus:wake');
   });
 
+  it('waits the settle time between the text and Enter when asked', async () => {
+    const shipId = newId('ship');
+    const settleMs = 300;
+    await tmux.start({ shipId, folder, command: ['sh', '-c', 'read line; echo "got $line"; sleep 30'] });
+    const before = Date.now();
+
+    await tmux.type({ shipId, text: '$aeolus-wake ', settleMs });
+
+    expect(Date.now() - before).toBeGreaterThanOrEqual(settleMs);
+    await expect
+      .poll(async () => (await runCommand('tmux', { args: ['-L', server, 'capture-pane', '-p', '-t', `=trierarch-${shipId}:`] })).stdout, { timeout: 5000 })
+      .toContain('got $aeolus-wake');
+  });
+
   it('stops a session', async () => {
     const shipId = newId('ship');
     await tmux.start({ shipId, folder, command: ['sleep', '30'] });

@@ -267,6 +267,15 @@ describe("the service's environment", () => {
     ).toEqual({ PATH: '/usr/bin', AEOLUS_PLUGIN_ROOT: '/plugin', AEOLUS_PLUGIN_DATA: '/data', AEOLUS_TRIERARCH_CONFIG: '/config.json' });
   });
 
+  it("carries the Codex plugin's variables and CODEX_HOME too, when set", () => {
+    expect(serviceEnvironment({ PATH: '/usr/bin', AEOLUS_CODEX_PLUGIN_ROOT: '/codex-plugin', AEOLUS_CODEX_PLUGIN_DATA: '/codex-data', CODEX_HOME: '/codex' })).toEqual({
+      PATH: '/usr/bin',
+      AEOLUS_CODEX_PLUGIN_ROOT: '/codex-plugin',
+      AEOLUS_CODEX_PLUGIN_DATA: '/codex-data',
+      CODEX_HOME: '/codex',
+    });
+  });
+
   it('gives the service a plain PATH where install ran without one', () => {
     expect(serviceEnvironment({})).toEqual({ PATH: '/usr/bin:/bin' });
   });

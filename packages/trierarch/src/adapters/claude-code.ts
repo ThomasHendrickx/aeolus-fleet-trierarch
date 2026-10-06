@@ -1,10 +1,8 @@
-import { readFile } from 'node:fs/promises';
-
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
-import type { HarnessPort, Turn } from '../core/ports.js';
+import type { HarnessPort } from '../core/ports.js';
 import { effectiveFlags } from './flags.js';
-import { runCommand } from './run-command.js';
+import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
 import type { Tmux } from './tmux.js';
 
 /**
@@ -14,12 +12,6 @@ import type { Tmux } from './tmux.js';
  * plugin's own `aeolus-identity.sh`, never a copy of how the plugin names its
  * files.
  */
-
-/** The aeolus plugin as Claude Code installed it: its scripts and its data folder. */
-export interface AeolusPlugin {
-  readonly root: string;
-  readonly data: string;
-}
 
 export const WAKE_PROMPT = '/aeolus:wake';
 
@@ -48,33 +40,9 @@ export function createClaudeCodeHarness(options: {
   command?: string;
 }): HarnessPort {
   const { configuration, plugin, sessions } = options;
-  const identity = async (folder: string, args: readonly string[]): Promise<{ status: number; stdout: string; stderr: string }> =>
-    runCommand('bash', { args: [`${plugin.root}/scripts/aeolus-identity.sh`, ...args], env: { AEOLUS_FOLDER: folder, AEOLUS_DATA: plugin.data } });
 
   return {
-    prepareIdentity: async ({ folder, identity: crew }) => {
-      const written = await identity(folder, [
-        'write',
-        '--wake-by',
-        'trierarch',
-        crew.fleetUrl,
-        crew.shipId,
-        crew.shipName,
-        crew.crewToken,
-        ...(crew.squadron === undefined ? [] : [crew.squadron]),
-      ]);
-      if (written.status !== 0) {
-        throw new Error(`aeolus-identity.sh write failed: ${written.stderr.trim()}`);
-      }
-    },
-    crewTokenOf: async (folder) => {
-      const path = (await identity(folder, ['path'])).stdout.trim();
-      const text = await readFile(path, 'utf8').catch(() => '');
-      return /^crewToken=(.+)$/m.exec(text)?.[1];
-    },
-    removeIdentity: async (folder) => {
-      await identity(folder, ['delete']);
-    },
+    ...createPluginIdentity(plugin),
     launch: async ({ shipId, shipName, folder, workspace, harness, options: picked, isFirstStart, firstPrompt }) => {
       const settings = configuration.harnesses[harness];
       if (settings === undefined) {
@@ -85,11 +53,6 @@ export function createClaudeCodeHarness(options: {
       // The prompt goes first: a flag with an optional value, such as `--remote-control [name]`, would take it.
       const command = [options.command ?? 'claude', prompt, ...flags, ...(isFirstStart ? [] : ['--continue'])];
       await sessions.start({ shipId, folder, command });
-    },
-    turnOf: async (folder): Promise<Turn> => {
-      const turn = await identity(folder, ['turn']);
-      const [state] = turn.stdout.split(' ');
-      return turn.status === 0 && (state === 'busy' || state === 'idle') ? state : 'unknown';
     },
     wake: async ({ shipId }) => {
       await sessions.type({ shipId, text: WAKE_PROMPT });

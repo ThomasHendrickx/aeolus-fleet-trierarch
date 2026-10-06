@@ -48,11 +48,11 @@ export interface Service {
 export type Exec = (command: string, args: readonly string[]) => Promise<CommandResult>;
 
 /** The variables the trierarch itself reads, carried into the service when set where install ran. */
-const TRIERARCH_VARIABLES = ['AEOLUS_PLUGIN_ROOT', 'AEOLUS_PLUGIN_DATA', 'AEOLUS_TRIERARCH_CONFIG'] as const;
+const TRIERARCH_VARIABLES = ['AEOLUS_PLUGIN_ROOT', 'AEOLUS_PLUGIN_DATA', 'AEOLUS_CODEX_PLUGIN_ROOT', 'AEOLUS_CODEX_PLUGIN_DATA', 'CODEX_HOME', 'AEOLUS_TRIERARCH_CONFIG'] as const;
 
 const DEFAULT_PATH = '/usr/bin:/bin';
 
-/** The service's environment: PATH, so it finds tmux, git and claude, and the trierarch's own variables. */
+/** The service's environment: PATH, so it finds tmux, git, claude and codex, and the trierarch's own variables. */
 export function serviceEnvironment(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
   const environment: Record<string, string> = { PATH: env.PATH ?? DEFAULT_PATH };
   for (const name of TRIERARCH_VARIABLES) {

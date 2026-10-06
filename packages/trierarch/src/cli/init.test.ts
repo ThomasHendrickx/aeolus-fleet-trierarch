@@ -6,6 +6,7 @@ import { trierarchConfigurationSchema, type ShipId, type TrierarchConfiguration 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createClaudeCodeSetup } from '../adapters/claude-code-setup.js';
+import type { CodexSetup } from '../adapters/codex-setup.js';
 import { trierarchPaths, type TrierarchPaths } from '../adapters/paths.js';
 import type { Service, ServiceStatus } from '../adapters/service.js';
 import { newId } from '../../test/support/in-memory.js';
@@ -20,6 +21,8 @@ let paths: TrierarchPaths;
 let registered: { fleetUrl: string; shipId: ShipId; secret: string }[];
 let service: FakeService;
 let repository: string;
+let codex: FakeCodexSetup;
+let isCodexInstalled: boolean;
 
 /** A prompter that answers from a script, in order, each answer for a question containing its words; it fails on any question it was not given. */
 class ScriptedPrompter implements Prompter {
@@ -75,7 +78,35 @@ class FakeService implements Pick<Service, 'install' | 'restart' | 'status'> {
   }
 }
 
+/** Codex's own configuration as its app server keeps it: the folders it trusts and the hooks, by key. */
+class FakeCodexSetup implements CodexSetup {
+  readonly trusted: string[] = [];
+  readonly hooks = new Map<string, 'trusted' | 'untrusted'>([
+    ['aeolus@aeolus-fleet:hooks/hooks.json:stop:0:0', 'untrusted'],
+    ['aeolus@aeolus-fleet:hooks/hooks.json:user_prompt_submit:0:0', 'untrusted'],
+  ]);
+  isMissing = false;
+
+  trust(folders: readonly string[]): Promise<void> {
+    if (this.isMissing) {
+      return Promise.reject(new Error('Codex is not installed: codex was not found'));
+    }
+    this.trusted.push(...folders);
+    return Promise.resolve();
+  }
+
+  trustAeolusHooks(): Promise<readonly string[]> {
+    const keys = [...this.hooks].filter(([, status]) => status === 'untrusted').map(([key]) => key);
+    for (const key of keys) {
+      this.hooks.set(key, 'trusted');
+    }
+    return Promise.resolve(keys);
+  }
+}
+
 beforeEach(() => {
+  codex = new FakeCodexSetup();
+  isCodexInstalled = false;
   home = mkdtempSync(join(tmpdir(), 'trierarch-init-'));
   paths = trierarchPaths({ homeDirectory: home });
   registered = [];
@@ -90,6 +121,8 @@ afterEach(() => {
 
 function init(flags: Partial<InitFlags>, prompter: Prompter = new ScriptedPrompter([])) {
   return initTrierarch({
+    isCodexInstalled,
+    codex,
     homeDirectory: home,
     paths,
     flags: { isYes: false, ...flags },
@@ -355,5 +388,78 @@ describe('aeolus-trierarch init on a machine set up already', () => {
 
     await expect(init({ isYes: true })).resolves.toMatchObject({ configuration: 'kept' });
     expect(readFileSync(paths.config, 'utf8')).toBe(before);
+  });
+});
+
+describe('aeolus-trierarch init, for Codex', () => {
+  /** A configuration that offers Codex, with a repository and a folder. */
+  function withCodex(): void {
+    const notes = join(home, 'notes');
+    mkdirSync(notes);
+    mkdirSync(paths.home, { recursive: true });
+    const offered: TrierarchConfiguration = {
+      caps: { ships: 4, running: 2 },
+      repositories: { 'aeolus-fleet': { path: repository } },
+      folders: { notes: { path: notes } },
+      harnesses: { codex: { flags: [], options: {} } },
+    };
+    writeFileSync(paths.config, JSON.stringify(offered));
+    writeFileSync(paths.crewToken, `fleetUrl=${FLEET_URL}\nshipId=${newId('ship')}\ncrewToken=aeolus_ct_v1_trierarch\n`, { mode: 0o600 });
+  }
+
+  it('asks nothing about Codex where it is neither installed nor configured', async () => {
+    const prompter = new ScriptedPrompter(defaults());
+
+    await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET }, prompter);
+
+    expect(prompter.asked.join('\n')).not.toContain('Codex');
+    expect(configuration().harnesses.codex).toBeUndefined();
+  });
+
+  it('offers Codex where it is installed, with the flags as answered', async () => {
+    const [skip, remote, ...rest] = defaults();
+    const prompter = new ScriptedPrompter([skip ?? ['', false], remote ?? ['', false], ['Offer Codex', true], ['--dangerously-bypass-approvals-and-sandbox', true], ...rest]);
+
+    isCodexInstalled = true;
+
+    await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET }, prompter);
+
+    expect(prompter.isDone).toBe(true);
+    expect(configuration().harnesses.codex).toEqual({ flags: ['--dangerously-bypass-approvals-and-sandbox'], options: {} });
+    expect(prompter.asked.join('\n')).not.toContain('--no-daemon');
+  });
+
+  it('trusts each configured repository and folder for Codex, since a repository covers its worktrees and a parent folder covers no repository', async () => {
+    withCodex();
+
+    const report = await init({ isYes: true });
+
+    expect(codex.trusted).toEqual([repository, join(home, 'notes')]);
+    expect(report.codexTrusted).toEqual([repository, join(home, 'notes')]);
+  });
+
+  it("trusts the aeolus plugin's hooks for Codex, so its sessions mark their turns and the trierarch can wake them", async () => {
+    withCodex();
+
+    const report = await init({ isYes: true });
+
+    expect([...codex.hooks.values()]).toEqual(['trusted', 'trusted']);
+    expect(report.codexHooksTrusted).toHaveLength(2);
+  });
+
+  it('says so when Codex cannot be set up, and finishes the rest of the setup', async () => {
+    withCodex();
+    codex.isMissing = true;
+
+    const report = await init({ isYes: true });
+
+    expect(report.said.join('\n')).toContain('Codex is not set up: Codex is not installed');
+    expect(report.codexTrusted).toEqual([]);
+  });
+
+  it('leaves Codex alone where the configuration does not offer it', async () => {
+    await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET, isYes: true });
+
+    expect(codex.trusted).toEqual([]);
   });
 });

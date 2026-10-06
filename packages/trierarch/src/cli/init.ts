@@ -4,6 +4,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { idSchema, trierarchNameSchema, type ShipId, type TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { ClaudeCodeSetup } from '../adapters/claude-code-setup.js';
+import type { CodexSetup } from '../adapters/codex-setup.js';
 import { configurationJsonSchema, initialConfiguration, loadConfiguration, readCrewFile, TrierarchFileError, writeCrewFile } from '../adapters/files.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
 import type { RestFleet } from '../adapters/rest-fleet.js';
@@ -37,6 +38,10 @@ export interface InitReport {
   /** The folders Claude Code now trusts: the worktree root, then each configured folder. */
   readonly trusted: readonly string[];
   readonly isSkipPermissionsAccepted: boolean;
+  /** The repositories and folders Codex now trusts, when the configuration offers Codex. */
+  readonly codexTrusted: readonly string[];
+  /** The aeolus plugin's hooks Codex trusts since this run, by key. */
+  readonly codexHooksTrusted: readonly string[];
   readonly service: 'installed' | 'restarted' | 'unchanged' | 'notInstalled';
   readonly said: readonly string[];
 }
@@ -44,6 +49,8 @@ export interface InitReport {
 const CLAUDE_CODE = 'claude-code';
 const SKIP_PERMISSIONS = '--dangerously-skip-permissions';
 const REMOTE_CONTROL = '--remote-control';
+const CODEX = 'codex';
+const BYPASS_APPROVALS = '--dangerously-bypass-approvals-and-sandbox';
 
 type Accepted<T> = { readonly value: T } | { readonly why: string };
 
@@ -151,8 +158,29 @@ async function askRepositories(at: { base: TrierarchConfiguration; prompter: Pro
   }
 }
 
-/** The configuration from the operator's answers, starting from what it holds: Claude Code's flags, the repositories and the caps. Everything else is kept. */
-async function askConfiguration(at: { base: TrierarchConfiguration; prompter: Prompter; homeDirectory: string }): Promise<TrierarchConfiguration> {
+/**
+ * Codex's harness from the operator's answers, asked only where Codex is
+ * installed or offered already: whether to offer it, and its flags. Undefined
+ * when it is not offered.
+ */
+async function askCodex(at: { base: TrierarchConfiguration; prompter: Prompter; isCodexInstalled: boolean }): Promise<TrierarchConfiguration['harnesses'][string] | undefined> {
+  const { base, prompter } = at;
+  const harness = base.harnesses[CODEX];
+  if (!(at.isCodexInstalled || harness !== undefined) || !(await prompter.confirm('Offer Codex as a harness too?', { isDefault: true }))) {
+    return undefined;
+  }
+  const flags = harness?.flags ?? [];
+  const isBypassing = await prompter.confirm(`Launch Codex with ${BYPASS_APPROVALS}? Its sessions then run every command without asking, and outside the sandbox.`, {
+    isDefault: flags.includes(BYPASS_APPROVALS),
+  });
+  return {
+    options: harness?.options ?? {},
+    flags: [...flags.filter((flag) => flag !== BYPASS_APPROVALS), ...(isBypassing ? [BYPASS_APPROVALS] : [])],
+  };
+}
+
+/** The configuration from the operator's answers, starting from what it holds: Claude Code's and Codex's flags, the repositories and the caps. Everything else is kept. */
+async function askConfiguration(at: { base: TrierarchConfiguration; prompter: Prompter; homeDirectory: string; isCodexInstalled: boolean }): Promise<TrierarchConfiguration> {
   const { base, prompter } = at;
   const harness = base.harnesses[CLAUDE_CODE] ?? { flags: [], options: {} };
   const isSkipping = await prompter.confirm(`Launch Claude Code with ${SKIP_PERMISSIONS}? Its sessions then run every tool without asking.`, {
@@ -166,10 +194,17 @@ async function askConfiguration(at: { base: TrierarchConfiguration; prompter: Pr
     ...(isSkipping ? [SKIP_PERMISSIONS] : []),
     ...(isRemote ? [REMOTE_CONTROL] : []),
   ];
+  const codex = await askCodex(at);
   const repositories = await askRepositories(at);
   const ships = await askUntil({ prompter, ask: () => prompter.text('How many ships may it keep on its list?', { default: String(base.caps.ships) }), accept: asCap });
   const running = await askUntil({ prompter, ask: () => prompter.text('How many sessions may run at once?', { default: String(base.caps.running) }), accept: asCap });
-  return { ...base, caps: { ships, running }, repositories, harnesses: { ...base.harnesses, [CLAUDE_CODE]: { ...harness, flags } } };
+  const others = Object.fromEntries(Object.entries(base.harnesses).filter(([name]) => name !== CODEX));
+  return {
+    ...base,
+    caps: { ships, running },
+    repositories,
+    harnesses: { ...others, [CLAUDE_CODE]: { ...harness, flags }, ...(codex !== undefined && { [CODEX]: codex }) },
+  };
 }
 
 export async function initTrierarch(input: {
@@ -179,9 +214,12 @@ export async function initTrierarch(input: {
   prompter: Prompter;
   fleetAt: (fleetUrl: string) => Pick<RestFleet, 'registerSelf'>;
   claudeCode: ClaudeCodeSetup;
+  codex: CodexSetup;
+  /** Whether `codex` runs on this machine: only then, or when Codex is configured, does init ask about it. */
+  isCodexInstalled: boolean;
   service: Pick<Service, 'install' | 'restart' | 'status'>;
 }): Promise<InitReport> {
-  const { homeDirectory, paths, flags, claudeCode, service } = input;
+  const { homeDirectory, paths, flags, claudeCode, service, isCodexInstalled } = input;
   const prompter = flags.isYes ? defaultsOnly(input.prompter) : input.prompter;
   const said: string[] = [];
 
@@ -210,12 +248,12 @@ export async function initTrierarch(input: {
   let configuration: TrierarchConfiguration;
   let configured: InitReport['configuration'] = 'kept';
   if (!(await exists(paths.config))) {
-    configuration = { $schema: './config.schema.json', ...(await askConfiguration({ base: initialConfiguration(), prompter, homeDirectory })) };
+    configuration = { $schema: './config.schema.json', ...(await askConfiguration({ base: initialConfiguration(), prompter, homeDirectory, isCodexInstalled })) };
     configured = 'written';
   } else {
     configuration = await loadConfiguration(paths.config);
     if (await prompter.confirm('Change the configuration?', { isDefault: false })) {
-      configuration = await askConfiguration({ base: configuration, prompter, homeDirectory });
+      configuration = await askConfiguration({ base: configuration, prompter, homeDirectory, isCodexInstalled });
       configured = 'changed';
     }
   }
@@ -250,6 +288,9 @@ export async function initTrierarch(input: {
     }
   }
 
+  const codex = await setUpCodex({ configuration, codex: input.codex, root });
+  said.push(...codex.said);
+
   // The service: offered when it is not installed, restarted when it should read a new configuration.
   let serviced: InitReport['service'] = 'unchanged';
   const status = await service.status();
@@ -275,7 +316,39 @@ export async function initTrierarch(input: {
     configuration: configured,
     trusted: [root, ...folders],
     isSkipPermissionsAccepted,
+    codexTrusted: codex.trusted,
+    codexHooksTrusted: codex.hooksTrusted,
     service: serviced,
     said,
   };
 }
+
+/**
+ * Codex's one-time questions, answered ahead on every run where the
+ * configuration offers Codex: each repository and folder trusted (a folder
+ * added since among them), and the aeolus plugin's hooks, which a plugin
+ * update changes. When Codex cannot be set up, init says so and goes on.
+ */
+async function setUpCodex(at: { configuration: TrierarchConfiguration; codex: CodexSetup; root: string }): Promise<{ trusted: readonly string[]; hooksTrusted: readonly string[]; said: readonly string[] }> {
+  const { configuration, codex, root } = at;
+  if (configuration.harnesses[CODEX] === undefined) {
+    return { trusted: [], hooksTrusted: [], said: [] };
+  }
+  const folders = [...Object.values(configuration.repositories), ...Object.values(configuration.folders)].map((place) => place.path);
+  try {
+    await codex.trust(folders);
+    const hooksTrusted = await codex.trustAeolusHooks(root);
+    return {
+      trusted: folders,
+      hooksTrusted,
+      said: [
+        ...(folders.length > 0 ? [`Codex trusts each configured repository and folder, so a session there, or in a worktree of one, starts with no trust question: ${folders.join(', ')}.`] : []),
+        hooksTrusted.length > 0 ? `Codex trusts the aeolus plugin's ${String(hooksTrusted.length)} new or changed hooks.` : "Codex trusts the aeolus plugin's hooks already.",
+      ],
+    };
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error);
+    return { trusted: [], hooksTrusted: [], said: [`Codex is not set up: ${why}. A Codex session waits on its trust questions until you run aeolus-trierarch init again.`] };
+  }
+}
+
