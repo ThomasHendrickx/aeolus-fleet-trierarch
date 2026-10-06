@@ -44,6 +44,9 @@ export interface RestFleet extends FleetPort {
 
 export function createRestFleet(options: { fleetUrl: string; crewToken: string }): RestFleet {
   const fleetUrl = options.fleetUrl.replace(/\/$/, '');
+  /** A call that got no answer: said with the fleet's url, unless it was stopped on purpose. */
+  const unreachable = (error: unknown, signal: AbortSignal | undefined): unknown =>
+    signal?.aborted === true ? error : new Error(`The fleet at ${fleetUrl} cannot be reached: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   async function call<T>(request: { path: string; crewToken?: string; body?: unknown; answers: z.ZodType<T>; signal?: AbortSignal }): Promise<T> {
     const headers: Record<string, string> = {};
     const crewToken = request.crewToken ?? options.crewToken;
@@ -60,12 +63,21 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string }
           : { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(request.body), signal: request.signal ?? null },
       );
     } catch (error) {
-      if (request.signal?.aborted === true) {
-        throw error;
-      }
-      throw new Error(`The fleet at ${fleetUrl} cannot be reached: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+      throw unreachable(error, request.signal);
     }
-    const body: unknown = await response.json();
+    // While the fleet restarts, an answer may come empty, as a proxy's page, or cut off: none of it is the fleet's word.
+    let text: string;
+    try {
+      text = await response.text();
+    } catch (error) {
+      throw unreachable(error, request.signal);
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse(text);
+    } catch (error) {
+      throw new Error(`The fleet at ${fleetUrl} cannot be reached: it answered ${String(response.status)} without JSON, as while it restarts`, { cause: error });
+    }
     if (!response.ok) {
       const refusal = refusalSchema.safeParse(body);
       throw refusal.success ? new FleetRefusal(refusal.data.code, refusal.data.message) : new FleetRefusal(String(response.status), 'The fleet refused');
