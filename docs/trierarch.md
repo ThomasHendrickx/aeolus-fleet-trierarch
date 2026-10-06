@@ -52,8 +52,8 @@ The trierarch plugin follows the fleet's changes: new, changed and removed reque
 
 A trierarch never registers or labels itself.
 
-1. The operator asks the trierarch plugin for a new machine. The trierarch plugin commissions a ship of type `trierarch` with `crew:run` beside the send and receive every agent has, nothing more, and answers its starting prompt.
-2. On the machine, `aeolus-trierarch init` takes that starting prompt, registers, writes the configuration and installs the service.
+1. The operator asks the trierarch plugin for a new machine, naming it. The trierarch plugin commissions a ship of that name, of type `trierarch` with `crew:run` beside the send and receive every agent has, nothing more, and answers its starting prompt (decision 0019) and one setup line for the machine, built from the fleet's URL, the ship's id and its secret: `npx @aeolus-fleet/trierarch init --fleet-url <url> --ship-id <id> --secret <secret>`. Both are shown once; the trierarch plugin never logs the secret.
+2. On the machine, the setup line runs `aeolus-trierarch init`, which takes the fleet URL, ship id and secret as flags (it never parses a prompt), registers, writes the configuration and installs the service.
 3. The trierarch reports what it can do in its report's details (below).
 4. The trierarch plugin labels the machine from that report (labels, #102). Until labels exist, placement reads the report itself.
 
@@ -61,7 +61,7 @@ A trierarch's ship stays a normal ship: it receives messages, such as pings, and
 
 ### What a trierarch reports
 
-Its report (state, a one-line note such as "4 of 6 running, 1 crashed") with `details`, read from its local configuration and what runs:
+Its report, sent on start and again whenever it changes: its state (`working` while a session runs, `idle` with none), a one-line note such as "4 of 6 running, 1 crashed" (the sessions that run of `caps.ships`, and the crashed ones when there are any), and `details`, read from its local configuration and what runs. Each harness's `flags` are the flags its configuration gives it:
 
 ```json trierarch report details
 {
