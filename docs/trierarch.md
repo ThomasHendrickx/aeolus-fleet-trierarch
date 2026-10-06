@@ -87,14 +87,14 @@ Its shape lives in `common`, as the type `trierarch`'s report details. It holds 
 The trierarch plugin serves unassigned requests oldest first and assigns each to one trierarch:
 
 1. It considers trierarchs that fit: their report offers the request's repository (or folder), harness and model (its options schema for that harness takes the request's options), and they have room (`caps.ships` above the number of requests assigned to it).
-2. Of those, it picks the one with the most room as a percentage of its `caps.ships`, then the oldest.
+2. Of those, it picks the one with the most room as a percentage of its `caps.ships`, then the oldest: the first commissioned. A trierarch that has not reported details yet takes nothing.
 3. It assigns by optimistic claim: the fleet sets the assignment only if the request is still unassigned. A lost claim is no error; the trierarch plugin reads again.
 4. It never assigns a request whose ship is crewed already: crewing by hand fulfils a request.
 5. When no trierarch can take a request (none offers its harness, workspace or options, or none has room), the trierarch plugin writes the reason on the request. It shows in the operator's needs-crew to-do.
 
 Strategies to change this order come later. The operator does not pick the machine.
 
-A machine is silent when its trierarch's last seen is older than a threshold. The flag shows on the machines page and in needs attention; its requests are not moved.
+A machine is silent when its trierarch's last seen is older than a threshold: 5 minutes, which the trierarch plugin's configuration may change. A trierarch no session crews has no last seen and is never silent. A silent trierarch gets no new requests; the ones it holds stay assigned to it, nothing moves. The flag shows on the machines page and in needs attention.
 
 ## Crewing a ship
 
