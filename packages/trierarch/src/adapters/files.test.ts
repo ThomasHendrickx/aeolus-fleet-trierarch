@@ -6,7 +6,7 @@ import { trierarchConfigurationSchema } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { newId } from '../../test/support/in-memory.js';
-import { initialConfiguration, loadConfiguration, readCrewFile, writeCrewFile } from './files.js';
+import { initialConfiguration, loadConfiguration, readCrewFile, readRunningFile, writeCrewFile, writeRunningFile } from './files.js';
 
 let folder: string;
 
@@ -38,6 +38,25 @@ describe('the crew file', () => {
 
   it('says to run init when there is none', async () => {
     await expect(readCrewFile(join(folder, 'crew-token'))).rejects.toThrow('run aeolus-trierarch init first');
+  });
+});
+
+describe('the running file', () => {
+  it('keeps the pid and the version of the trierarch that runs', async () => {
+    const path = join(folder, 'running.json');
+
+    await writeRunningFile(path, { pid: 4242, version: '0.17.4' });
+
+    await expect(readRunningFile(path)).resolves.toEqual({ pid: 4242, version: '0.17.4' });
+  });
+
+  it('is none when no trierarch wrote it, or it does not fit', async () => {
+    const path = join(folder, 'running.json');
+    await expect(readRunningFile(path)).resolves.toBeUndefined();
+
+    writeFileSync(path, '{"pid":"4242"}');
+
+    await expect(readRunningFile(path)).resolves.toBeUndefined();
   });
 });
 
