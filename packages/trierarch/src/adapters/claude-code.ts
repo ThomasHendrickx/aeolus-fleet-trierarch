@@ -64,7 +64,8 @@ export function createClaudeCodeHarness(options: {
         throw new Error(`The configuration has no harness ${harness}`);
       }
       const prompt = isFirstStart && firstPrompt !== undefined ? firstPrompt : WAKE_PROMPT;
-      const command = [options.command ?? 'claude', ...effectiveFlags(settings, picked), ...(isFirstStart ? [] : ['--continue']), prompt];
+      // The prompt goes first: a flag with an optional value, such as `--remote-control [name]`, would take it.
+      const command = [options.command ?? 'claude', prompt, ...effectiveFlags(settings, picked), ...(isFirstStart ? [] : ['--continue'])];
       await sessions.start({ shipId, folder, command });
     },
     turnOf: async (folder): Promise<Turn> => {

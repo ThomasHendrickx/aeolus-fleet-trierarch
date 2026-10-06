@@ -59,7 +59,7 @@ npm install --global @aeolus-fleet/trierarch
 - **folders**: by name, used as they are, one ship per folder, never removed.
 - **harnesses**: the flags every launch gets, and named options. A want picks option values by name; it never adds a flag, and messages never carry paths or flags. There is no policy on which flags: put `--dangerously-skip-permissions` in `flags` if you want it. The trierarch never adds a flag by itself.
 
-The trierarch finds the aeolus plugin in Claude Code's plugin cache (the newest version). Set `AEOLUS_PLUGIN_ROOT` and `AEOLUS_PLUGIN_DATA` to point it elsewhere.
+The trierarch finds the aeolus plugin in Claude Code's plugin cache (the newest version). Set `AEOLUS_PLUGIN_ROOT` and `AEOLUS_PLUGIN_DATA` to point it elsewhere. `aeolus-trierarch install` carries these, `AEOLUS_TRIERARCH_CONFIG` and `PATH` into the service as they are set where it runs.
 
 ## What is here
 
