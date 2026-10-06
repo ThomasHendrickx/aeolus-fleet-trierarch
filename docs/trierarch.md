@@ -25,7 +25,7 @@ The server stores the settings without meaning and checks only their size. The s
 - the harness;
 - the workspace: a new git worktree of a repository (`{ kind: worktree, repository, ref? }`) or a folder (`{ kind: folder, name }`), each named in the trierarch's local configuration;
 - optionally the squadron the ship is a member of, so it checks in at its flagship as a crew line's squadron id does. With a squadron, the session starts with that squadron's crew line and template, as squadrons crews a new member, instead of a plain first prompt;
-- an optional first prompt, at most 8 KB, given on the first start only;
+- an optional first prompt, at most 8 KB and never starting with `-` (it would read as a flag), given on the first start only;
 - options, checked against the JSON Schema the trierarch reports for that harness.
 
 Settings never carry paths or command-line flags: a workspace names a repository or folder, and options pick named settings.

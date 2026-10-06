@@ -99,7 +99,7 @@ The trierarch finds the aeolus plugin in each offered harness's plugin cache (th
   - the fleet over REST;
   - tmux, on its own server (`tmux -L aeolus-trierarch`, sessions named `trierarch-<ship id>` and kept on exit). Attach to one with `tmux -L aeolus-trierarch attach -t trierarch-<ship id>`;
   - git worktrees and folders;
-  - Claude Code and Codex, through the aeolus plugin's `aeolus-identity.sh`. A Codex session starts with `codex <prompt>`, always with `--no-daemon`, comes back with `codex resume --last`, and is woken by typing `$aeolus-wake`;
+  - Claude Code and Codex, through the aeolus plugin's `aeolus-identity.sh`. Each passes its prompt last, after `--`, so a prompt never reads as a flag. A Codex session starts with `codex ... -- <prompt>`, always with `--no-daemon`, comes back with `codex resume --last`, and is woken by typing `$aeolus-wake`;
   - the JSON state store.
 - **The command** (`src/cli`): `init`, `status`, `list`, `logs`, `config check`, `start`, `stop`, `restart`, `install`, `uninstall`, `run`.
 - **Adapters for the setup**: the service (launchd or systemd), Claude Code's own files and Codex's app server for their one-time questions.
