@@ -22,7 +22,7 @@ That gives the command `aeolus-trierarch`.
    It asks for what it needs, in a short flow:
    - the fleet URL, the ship id and the secret. The secret is not shown as you type it, so it stays out of your shell history and any transcript. It registers the ship, keeps its crew token in `~/.aeolus/trierarch/crew-token` (readable by you only) and writes the secret nowhere;
    - whether Claude Code launches with `--dangerously-skip-permissions` and with `--remote-control` (both no unless you say yes);
-   - where `codex` runs or Codex is configured already: whether to offer Codex, and whether it launches with `--dangerously-bypass-approvals-and-sandbox` and with `--no-daemon` (both no unless you say yes). Without `--no-daemon` a Codex session's work runs in Codex's shared background server, so it goes on after the trierarch stops the session, on a release among others;
+   - where `codex` runs or Codex is configured already: whether to offer Codex, and whether it launches with `--dangerously-bypass-approvals-and-sandbox` (no unless you say yes). Every Codex session launches with `--no-daemon` whatever the flags, so stopping it stops its work;
    - the repositories it may make worktrees of, by name and path;
    - the caps: how many ships on its list, how many sessions at once.
 
@@ -68,7 +68,7 @@ To stop the trierarch: `aeolus-trierarch stop`, or `aeolus-trierarch uninstall` 
       }
     },
     "codex": {
-      "flags": ["--no-daemon"],
+      "flags": ["--dangerously-bypass-approvals-and-sandbox"],
       "options": {
         "model": { "values": { "sol": ["-m", "gpt-5.6-sol"] }, "default": "sol" }
       }
@@ -97,7 +97,7 @@ The trierarch finds the aeolus plugin in each offered harness's plugin cache (th
   - the fleet over REST;
   - tmux, on its own server (`tmux -L aeolus-trierarch`, sessions named `trierarch-<ship id>` and kept on exit). Attach to one with `tmux -L aeolus-trierarch attach -t trierarch-<ship id>`;
   - git worktrees and folders;
-  - Claude Code and Codex, through the aeolus plugin's `aeolus-identity.sh`. A Codex session starts with `codex <prompt>`, comes back with `codex resume --last`, and is woken by typing `$aeolus-wake`;
+  - Claude Code and Codex, through the aeolus plugin's `aeolus-identity.sh`. A Codex session starts with `codex <prompt>`, always with `--no-daemon`, comes back with `codex resume --last`, and is woken by typing `$aeolus-wake`;
   - the JSON state store.
 - **The command** (`src/cli`): `init`, `status`, `list`, `logs`, `config check`, `start`, `stop`, `restart`, `install`, `uninstall`, `run`.
 - **Adapters for the setup**: the service (launchd or systemd), Claude Code's own files and Codex's app server for their one-time questions.

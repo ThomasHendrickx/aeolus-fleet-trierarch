@@ -8,9 +8,9 @@ import type { Tmux } from './tmux.js';
 /**
  * Codex as a harness (docs/architecture.md, "First adapters"): `codex` in the
  * folder, `codex resume --last` on a restart (the folder's last conversation;
- * one ship per folder), always with `--no-daemon`, `$aeolus-wake` typed to wake an idle session. The
- * identity and the turn marker go through the aeolus plugin for Codex, in
- * Codex's own plugin data folder.
+ * one ship per folder), always with `--no-daemon`, and `$aeolus-wake` typed
+ * to wake an idle session. The identity and the turn marker go through the
+ * aeolus plugin for Codex, in Codex's own plugin data folder.
  */
 
 export const WAKE_PROMPT = '$aeolus-wake';

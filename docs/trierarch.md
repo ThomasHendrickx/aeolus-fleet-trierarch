@@ -74,6 +74,8 @@ stateDiagram-v2
 
 Release is the one command that stops a ship: it stops the session, ends the lease, removes the entry, and removes the worktree when it is clean. A restart of the machine is no release. Retire stays separate, for whoever holds `fleet:manage`.
 
+Stopping a session must stop its work, or a release and a restarted crash would leave work running with no one watching it. So a harness adapter starts each session as a process that owns its work. Codex by default runs a session's turns in its shared app-server daemon, which keeps a turn running after the session's pane is gone: the codex adapter always adds `--no-daemon`, as mechanism, the way the Claude Code adapter adds `--continue` on a restart. Neither is the operator's flag.
+
 ## The protocol
 
 Fleet messages to and from the trierarch's ship, with content types `application/vnd.aeolus.trierarch.<name>+json`, by convention: Aeolus reads none of them. The schemas live in `common`, beside the configuration's schema, so the trierarch, the console and squadrons share them. Anyone may implement a dispatcher that speaks it: the core below is fixed, and each dispatcher advertises its options (decision 0027).
