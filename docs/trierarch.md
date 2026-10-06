@@ -1,6 +1,6 @@
 # Trierarch: crewing ships on machines
 
-Model and decisions: 0026 (the trierarch on a machine), 0027 (crew settings), 0028 (the crew request and its scopes) and 0029 (the trierarch plugin). The fleet holds the crew request; everything else here is read only by the trierarch plugin, the trierarchs it manages and the console. `@aeolus-fleet/trierarch` is one implementation, optional, like squadrons; its build is in [architecture.md](architecture.md#the-trierarch). Anyone may write another: this file is what it must do.
+Model and decisions: 0026 (the trierarch on a machine), 0027 (crew settings), 0029 (the crew request and its scopes) and 0030 (the trierarch plugin). The fleet holds the crew request; everything else here is read only by the trierarch plugin, the trierarchs it manages and the console. `@aeolus-fleet/trierarch` is one implementation, optional, like squadrons; its build is in [architecture.md](architecture.md#the-trierarch). Anyone may write another: this file is what it must do.
 
 Two parts, each its own process:
 
@@ -11,7 +11,7 @@ Plugins never know each other: a requester (the console, squadrons, an orchestra
 
 ## The crew request
 
-Declared state on the ship, in the fleet core (decision 0028): "keep this ship crewed, with these settings". At most one per ship, standing (level, not edge). Three parts, each with one writer:
+Declared state on the ship, in the fleet core (decision 0029): "keep this ship crewed, with these settings". At most one per ship, standing (level, not edge). Three parts, each with one writer:
 
 | Part | Holds | Written by | Scope |
 | --- | --- | --- | --- |
