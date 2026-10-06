@@ -1,4 +1,4 @@
-import type { ShipId, TrierarchConfiguration, TrierarchWorkspace } from '@aeolus-fleet/common';
+import type { ShipId, TrierarchAdapterFlag, TrierarchConfiguration, TrierarchWorkspace } from '@aeolus-fleet/common';
 
 import type { Outgoing, TrierarchState } from './entry.js';
 
@@ -111,8 +111,9 @@ export interface Logger {
   warn(message: string): void;
 }
 
-/** What describe answers beside the configuration: the trierarch's version. */
+/** What describe answers beside the configuration: the trierarch's version, and the flags each harness's adapter adds itself. */
 export interface TrierarchSetup {
   readonly configuration: TrierarchConfiguration;
   readonly version: string;
+  readonly adapterFlags: Readonly<Record<string, readonly TrierarchAdapterFlag[]>>;
 }

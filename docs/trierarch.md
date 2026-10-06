@@ -148,7 +148,7 @@ What the trierarch in `@aeolus-fleet/trierarch` still speaks until the build pla
 
 | Command | Answer |
 | --- | --- |
-| `describe` `{}` | `described` `{ harnesses: [{ harness, options (JSON Schema), flags }], workspaces: { repositories, folders }, caps, kept, version }` |
+| `describe` `{}` | `described` `{ harnesses: [{ harness, options (JSON Schema), flags, adapterFlags: [{ flag, when: always \| restart }] }], workspaces: { repositories, folders }, caps, kept, version }` |
 | `want` `{ shipId, harness, workspace: { kind: worktree, repository, ref? } \| { kind: folder, name }, squadron?, firstPrompt?, options }` | `wanted` `{ shipId }` or `refused` `{ shipId, field?, reason }` |
 | `release` `{ shipId, force? }` | `released` `{ shipId, workspace: removed \| kept, path? }` |
 | `list` `{}` | `listed` `{ ships: [{ shipId, harness, state, since, restarts }], kept, orphans }` |
@@ -171,7 +171,8 @@ One message of each kind, as its payload travels, labelled with its name and whe
     {
       "harness": "claude-code",
       "options": { "type": "object", "properties": { "model": { "enum": ["opus", "sonnet"], "default": "opus" } }, "additionalProperties": false },
-      "flags": ["--remote-control"]
+      "flags": ["--remote-control"],
+      "adapterFlags": [{ "flag": "--continue", "when": "restart" }]
     }
   ],
   "workspaces": { "repositories": ["aeolus-fleet"], "folders": ["notes"] },

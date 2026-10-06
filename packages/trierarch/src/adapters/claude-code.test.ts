@@ -7,7 +7,7 @@ import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
-import { createClaudeCodeHarness } from './claude-code.js';
+import { CLAUDE_CODE_ADAPTER_FLAGS, claudeCodeCommandLine, createClaudeCodeHarness } from './claude-code.js';
 import { runCommand } from './run-command.js';
 
 // With the aeolus plugin's own scripts from this repository, in a temporary data folder.
@@ -116,6 +116,21 @@ describe('Claude Code as a harness', () => {
     await withFlags(['--verbose']).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
 
     expect(started.map((session) => session.command.slice(2))).toEqual([['--remote-control', 'mine', '--verbose'], ['--verbose']]);
+  });
+
+  it('tells the configured flags from the remote-control name and --continue on a restart, which the adapter adds', () => {
+    expect(CLAUDE_CODE_ADAPTER_FLAGS).toEqual([{ flag: '--continue', when: 'restart' }]);
+    expect(claudeCodeCommandLine({ flags: ['--remote-control', '--model', 'claude-opus-5-5'], sessionName: '[aeolus-fleet] scout', prompt: '/aeolus:wake', isFirstStart: false })).toEqual([
+      { words: ['claude', '/aeolus:wake'] },
+      { words: ['--remote-control'], source: 'configuration' },
+      { words: ['[aeolus-fleet] scout'], source: 'adapter' },
+      { words: ['--model', 'claude-opus-5-5'], source: 'configuration' },
+      { words: ['--continue'], source: 'adapter' },
+    ]);
+    expect(claudeCodeCommandLine({ flags: ['--verbose'], sessionName: '[aeolus-fleet] scout', prompt: '<first prompt>', isFirstStart: true })).toEqual([
+      { words: ['claude', '<first prompt>'] },
+      { words: ['--verbose'], source: 'configuration' },
+    ]);
   });
 
   it('wakes a session by typing /aeolus:wake', async () => {

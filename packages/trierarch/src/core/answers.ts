@@ -17,9 +17,14 @@ function optionsSchemaOf(harness: TrierarchConfiguration['harnesses'][string]): 
 }
 
 export function describedOf(setup: TrierarchSetup, state: TrierarchState): Record<string, unknown> {
-  const { configuration, version } = setup;
+  const { configuration, version, adapterFlags } = setup;
   return {
-    harnesses: Object.entries(configuration.harnesses).map(([harness, settings]) => ({ harness, options: optionsSchemaOf(settings), flags: settings.flags })),
+    harnesses: Object.entries(configuration.harnesses).map(([harness, settings]) => ({
+      harness,
+      options: optionsSchemaOf(settings),
+      flags: settings.flags,
+      adapterFlags: adapterFlags[harness] ?? [],
+    })),
     workspaces: { repositories: Object.keys(configuration.repositories), folders: Object.keys(configuration.folders) },
     caps: configuration.caps,
     kept: state.kept,

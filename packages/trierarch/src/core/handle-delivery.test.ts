@@ -103,7 +103,7 @@ describe('a command to the trierarch', () => {
     expect(trierarch.state.current().entries[shipId]?.squadron).toBe('hemma-feature-a1b2c3');
   });
 
-  it('describes its harnesses with their options as a JSON Schema, its workspaces, caps, kept worktrees and version', async () => {
+  it('describes its harnesses with their options as a JSON Schema, the configured flags and those the adapter adds, its workspaces, caps, kept worktrees and version', async () => {
     const trierarch = aTrierarch();
 
     await trierarch.command('describe', {});
@@ -115,6 +115,7 @@ describe('a command to the trierarch', () => {
           harness: 'claude-code',
           options: { type: 'object', properties: { model: { enum: ['opus', 'sonnet'], default: 'opus' } }, additionalProperties: false },
           flags: ['--remote-control'],
+          adapterFlags: [{ flag: '--continue', when: 'restart' }],
         },
       ],
       workspaces: { repositories: ['aeolus-fleet'], folders: ['notes'] },

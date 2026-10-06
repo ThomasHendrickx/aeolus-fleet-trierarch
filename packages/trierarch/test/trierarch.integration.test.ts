@@ -18,6 +18,7 @@ import { createMigratedDatabase } from '../../server/test/support/database.js';
 import { newKey } from '../../server/test/support/keys.js';
 import { unwrap } from '../../server/test/support/result.js';
 import { createClaudeCodeHarness } from '../src/adapters/claude-code.js';
+import { adapterFlagsOf } from '../src/adapters/harnesses.js';
 import { createClaudeCodeSetup } from '../src/adapters/claude-code-setup.js';
 import { readCrewFile } from '../src/adapters/files.js';
 import { runCommand } from '../src/adapters/run-command.js';
@@ -117,7 +118,7 @@ describe('the trierarch on a real fleet', () => {
     const state = createJsonState(paths.state);
     const clock = { now: () => new Date() };
     const logger = { warn: () => undefined };
-    const setup = { configuration, version: '0.0.0' };
+    const setup = { configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration) };
     const handle = createHandleDelivery({ fleet, workspace, state, setup, clock, logger });
     const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, state, setup, clock, logger });
     const handleWhatCame = async (trierarch: RestFleet) => {
