@@ -24,6 +24,7 @@ const aState = (): TrierarchState => {
     entries: {
       [shipId]: {
         shipId,
+        shipName: 'scout',
         harness: 'claude-code',
         workspace: { kind: 'worktree', repository: 'aeolus-fleet' },
         options: { model: 'opus' },

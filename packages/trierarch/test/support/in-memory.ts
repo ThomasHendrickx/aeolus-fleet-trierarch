@@ -194,7 +194,7 @@ export class InMemoryProcesses implements ProcessPort {
 
 export class InMemoryHarness implements HarnessPort {
   readonly identities = new Map<string, Identity>();
-  readonly launches: { shipId: ShipId; folder: string; isFirstStart: boolean; firstPrompt?: string }[] = [];
+  readonly launches: { shipId: ShipId; shipName: string; folder: string; workspace: TrierarchWorkspace; isFirstStart: boolean; firstPrompt?: string }[] = [];
   readonly wakes: ShipId[] = [];
   readonly turns = new Map<string, Turn>();
 
@@ -214,9 +214,9 @@ export class InMemoryHarness implements HarnessPort {
     return Promise.resolve();
   }
 
-  launch(session: { shipId: ShipId; folder: string; isFirstStart: boolean; firstPrompt?: string }): Promise<void> {
-    const { shipId, folder, isFirstStart, firstPrompt } = session;
-    this.launches.push({ shipId, folder, isFirstStart, ...(firstPrompt !== undefined && { firstPrompt }) });
+  launch(session: { shipId: ShipId; shipName: string; folder: string; workspace: TrierarchWorkspace; isFirstStart: boolean; firstPrompt?: string }): Promise<void> {
+    const { shipId, shipName, folder, workspace, isFirstStart, firstPrompt } = session;
+    this.launches.push({ shipId, shipName, folder, workspace, isFirstStart, ...(firstPrompt !== undefined && { firstPrompt }) });
     this.processes.sessions.set(shipId, 'running');
     return Promise.resolve();
   }
