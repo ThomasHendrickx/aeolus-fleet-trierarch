@@ -10,6 +10,7 @@ import { createRestFleet } from '../adapters/rest-fleet.js';
 import { runCommand } from '../adapters/run-command.js';
 import { createService, serviceEnvironment, type ServiceStatus } from '../adapters/service.js';
 import { createTmux } from '../adapters/tmux.js';
+import { runningVersion } from '../adapters/version.js';
 import { createUninstall } from '../core/uninstall.js';
 import { configCheck } from './config-check.js';
 import { initTrierarch } from './init.js';
@@ -19,6 +20,7 @@ import { createTerminalPrompter } from './prompter.js';
 import { runTrierarch } from './run.js';
 import { describeStatus, inspectStatus, leaseFrom } from './status.js';
 import { uninstallTrierarch } from './uninstall.js';
+import { PACKAGE, upgradeTrierarch } from './upgrade.js';
 
 export const USAGE = [
   'Usage: aeolus-trierarch <command> [--config <path>] [--json]',
@@ -36,6 +38,7 @@ export const USAGE = [
   '  start                 start the service',
   '  stop                  stop the service (it starts again at the next login)',
   '  restart               restart the service, so it reads a changed configuration',
+  '  upgrade [version]     install the given version, or the latest, and restart the service; sessions keep running',
   '  install [--no-load]   install the service: launchd on macOS, systemd on Linux',
   '  uninstall             remove the service and stop every session; deletes no worktree and none of its files',
   '  run                   keep the wanted ships crewed until stopped (what the service runs)',
@@ -124,6 +127,21 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
     return stopping.signal;
   };
 
+  const inspect = async (): Promise<Answer> => {
+    const crew = await readCrewFile(paths.crewToken);
+    const configuration = await loadConfiguration(paths.config);
+    const fleet = createRestFleet(crew);
+    const report = await inspectStatus({
+      configuration,
+      crew,
+      service: serviceAt(),
+      lease: leaseFrom(() => fleet.whoami()),
+      processes: createTmux(),
+      state: createJsonState(paths.state),
+    });
+    return { data: report, text: describeStatus(report) };
+  };
+
   const commands: Record<string, (() => Promise<Answer>) | undefined> = {
     init: async () => {
       // Questions go to stderr under --json, so stdout holds the JSON alone.
@@ -150,19 +168,23 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
       const { text, ...data } = await configCheck(paths);
       return { data, text };
     },
-    status: async () => {
-      const crew = await readCrewFile(paths.crewToken);
-      const configuration = await loadConfiguration(paths.config);
-      const fleet = createRestFleet(crew);
-      const report = await inspectStatus({
-        configuration,
-        crew,
+    status: inspect,
+    upgrade: async () => {
+      const version = words[1];
+      const report = await upgradeTrierarch({
+        ...(version !== undefined && { version }),
+        installedVersion: runningVersion,
+        npm: {
+          latest: async () => (await runCommand('npm', { args: ['view', PACKAGE, 'version'] })).stdout,
+          install: (spec) => runCommand('npm', { args: ['install', '--global', spec] }),
+        },
         service: serviceAt(),
-        lease: leaseFrom(() => fleet.whoami()),
-        processes: createTmux(),
-        state: createJsonState(paths.state),
       });
-      return { data: report, text: describeStatus(report) };
+      if (!report.isUpgraded) {
+        return { data: report, text: report.said.join('\n') };
+      }
+      const status = await inspect();
+      return { data: { ...report, status: status.data }, text: [...report.said, '', status.text].join('\n') };
     },
     list: async () => {
       const entries = await inspectList(createJsonState(paths.state));
@@ -223,7 +245,8 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
     },
   };
 
-  const command = commands[words.join(' ')];
+  // upgrade alone takes a word after it: the version.
+  const command = words[0] === 'upgrade' && words.length <= 2 ? commands.upgrade : commands[words.join(' ')];
   if (command === undefined) {
     return { output: USAGE, code: 2 };
   }
