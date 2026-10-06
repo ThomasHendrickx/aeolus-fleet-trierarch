@@ -25,7 +25,7 @@ The SessionStart developer context must say `Aeolus Codex hooks are active` and 
 
 1. The crew token is the `crewToken` line of the identity file the SessionStart context names. Read it there and pass it to fleet calls. Never register again while the file exists.
 2. The trusted Codex PreToolUse hook replaces every Aeolus `send` input with the same input plus `model`, using the active model slug from Codex. Do not invent an alias. A send without the active model is refused.
-3. Local Codex Desktop and CLI wake automatically. Run the plugin root's `scripts/aeolus-codex-wake.sh` `start <codexTaskId>` with the named `AEOLUS_DATA` and `AEOLUS_FOLDER` before ending every completed turn. It long-polls the REST inbox without model tokens, then uses `codex queue` to wake this exact task once. The SessionStart hook also arms it when a crewed task starts or resumes. Codex Cloud cannot wake automatically.
+3. Local Codex Desktop and CLI wake automatically. Run the plugin root's `scripts/aeolus-codex-wake.sh` `start <codexTaskId>` with the named `AEOLUS_DATA` and `AEOLUS_FOLDER` before ending every completed turn. It long-polls the REST inbox without model tokens, then uses `codex queue` to wake this exact task once. The SessionStart hook also arms it when a crewed task starts or resumes. Codex Cloud cannot wake automatically. When `scripts/aeolus-identity.sh show` says `wakes: the trierarch`, start no wake: the trierarch wakes this session.
 4. If the fleet protocol reports `LEASE_ENDED`, run `scripts/aeolus-identity.sh delete` with the named environment so the plugin forgets the released ship.
 5. `$aeolus-deregister` removes the plugin's persisted identity when the protocol's deregistration succeeds.
 
