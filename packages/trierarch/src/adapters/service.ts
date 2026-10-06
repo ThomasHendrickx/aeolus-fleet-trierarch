@@ -254,7 +254,9 @@ export function createService(options: {
       install: async () => {
         await write();
         await systemctl('daemon-reload');
-        await systemctl('enable', '--now', SYSTEMD_UNIT);
+        await systemctl('enable', SYSTEMD_UNIT);
+        // restart, not start: an active unit runs the old file until it restarts. It starts an inactive one too.
+        await systemctl('restart', SYSTEMD_UNIT);
       },
       uninstall: async () => {
         await exec('systemctl', ['--user', 'disable', '--now', SYSTEMD_UNIT]);
