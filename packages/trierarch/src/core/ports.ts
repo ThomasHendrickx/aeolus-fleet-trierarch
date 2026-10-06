@@ -1,4 +1,4 @@
-import type { ShipId, TrierarchAdapterFlag, TrierarchConfiguration, TrierarchWorkspace } from '@aeolus-fleet/common';
+import type { ShipId, TrierarchAdapterFlag, TrierarchConfiguration, TrierarchReportDetails, TrierarchWorkspace } from '@aeolus-fleet/common';
 
 import type { Outgoing, TrierarchState } from './entry.js';
 import type { Action } from './reconciler.js';
@@ -41,6 +41,15 @@ export interface FleetPort {
   inbox(crewToken: string): Promise<InboxAnswer>;
   /** Reports on a ship's behalf, with its session's crew token. */
   report(crew: { crewToken: string; state: 'blocked' | 'working'; note: string }): Promise<void>;
+  /** Reports as the trierarch's own ship: what it does, and its details. */
+  reportSelf(report: SelfReport): Promise<void>;
+}
+
+/** The trierarch's own report: idle or working, how many sessions run, and its details (docs/trierarch.md). */
+export interface SelfReport {
+  readonly state: 'idle' | 'working';
+  readonly note: string;
+  readonly details: TrierarchReportDetails;
 }
 
 /** What a session's folder identity holds for the trierarch: written through the aeolus plugin, never a copy of it. */

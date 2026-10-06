@@ -10,6 +10,7 @@ import { createTmux } from '../adapters/tmux.js';
 import { runningVersion } from '../adapters/version.js';
 import { createHandleDelivery } from '../core/handle-delivery.js';
 import type { Delivery, Logger } from '../core/ports.js';
+import { createReportSelf } from '../core/report-self.js';
 import { createRunPass } from '../core/run-pass.js';
 
 /** How often the loop runs a pass: restarts, wakes and releases wait at most this long. */
@@ -33,7 +34,13 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const clock = { now: () => new Date() };
   const setup = { configuration, version: runningVersion(), adapterFlags: adapterFlagsOf(configuration) };
   const handle = createHandleDelivery({ fleet, workspace, state, setup, clock, logger });
-  const pass = createRunPass({ fleet, harnesses, processes: tmux, workspace, state, setup, clock, logger });
+  const runPass = createRunPass({ fleet, harnesses, processes: tmux, workspace, state, setup, clock, logger });
+  const reportSelf = createReportSelf({ fleet, processes: tmux, state, setup });
+  // Each pass ends with the trierarch's own report: the first at start, then only when it changed.
+  const pass = async (): Promise<void> => {
+    await runPass();
+    await reportSelf();
+  };
 
   await writeRunningFile(paths.running, { pid: process.pid, version: setup.version });
   const found = Object.entries(plugins).map(([harness, plugin]) => `${harness} at ${plugin.root}`);

@@ -13,10 +13,12 @@ import type {
   ObservedSession,
   ObservedWorktree,
   ProcessPort,
+  SelfReport,
   StatePort,
   Turn,
   WorkspacePort,
 } from '../../src/core/ports.js';
+import { createReportSelf } from '../../src/core/report-self.js';
 import { createRunPass } from '../../src/core/run-pass.js';
 import { createUninstall } from '../../src/core/uninstall.js';
 
@@ -56,6 +58,8 @@ export class InMemoryFleet implements FleetPort {
   readonly sent: Outgoing[] = [];
   readonly acked: string[] = [];
   readonly reports: { crewToken: string; state: string; note: string }[] = [];
+  /** What the trierarch reported of itself, as its own ship. */
+  readonly selfReports: SelfReport[] = [];
   /** The state saved when each delivery was acknowledged. */
   readonly stateAtAck = new Map<string, TrierarchState | undefined>();
   /** Set to lose the next register's reply: the fleet crews the ship, the trierarch never hears. */
@@ -148,6 +152,11 @@ export class InMemoryFleet implements FleetPort {
 
   report(crew: { crewToken: string; state: 'blocked' | 'working'; note: string }): Promise<void> {
     this.reports.push(crew);
+    return Promise.resolve();
+  }
+
+  reportSelf(report: SelfReport): Promise<void> {
+    this.selfReports.push(structuredClone(report));
     return Promise.resolve();
   }
 
@@ -333,6 +342,7 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
   const handle = createHandleDelivery({ fleet, workspace, state, setup, clock, logger });
   const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, workspace, state, setup, clock, logger });
   const uninstall = createUninstall({ processes, state });
+  const reportSelf = createReportSelf({ fleet, processes, state, setup });
 
   /** Sends the trierarch a command, as the requester does: its delivery, handled. */
   async function command(name: string, payload: unknown): Promise<Delivery> {
@@ -347,7 +357,7 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
     return delivery;
   }
 
-  return { fleet, processes, harness, codex, workspace, state, clock, logger, requester, handle, pass, uninstall, command };
+  return { fleet, processes, harness, codex, workspace, state, clock, logger, requester, handle, pass, uninstall, reportSelf, command };
 }
 
 export type Trierarch = ReturnType<typeof aTrierarch>;
