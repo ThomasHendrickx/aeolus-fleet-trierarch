@@ -418,14 +418,15 @@ describe('aeolus-trierarch init, for Codex', () => {
 
   it('offers Codex where it is installed, with the flags as answered', async () => {
     const [skip, remote, ...rest] = defaults();
-    const prompter = new ScriptedPrompter([skip ?? ['', false], remote ?? ['', false], ['Offer Codex', true], ['--dangerously-bypass-approvals-and-sandbox', true], ['--no-daemon', true], ...rest]);
+    const prompter = new ScriptedPrompter([skip ?? ['', false], remote ?? ['', false], ['Offer Codex', true], ['--dangerously-bypass-approvals-and-sandbox', true], ...rest]);
 
     isCodexInstalled = true;
 
     await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET }, prompter);
 
     expect(prompter.isDone).toBe(true);
-    expect(configuration().harnesses.codex).toEqual({ flags: ['--dangerously-bypass-approvals-and-sandbox', '--no-daemon'], options: {} });
+    expect(configuration().harnesses.codex).toEqual({ flags: ['--dangerously-bypass-approvals-and-sandbox'], options: {} });
+    expect(prompter.asked.join('\n')).not.toContain('--no-daemon');
   });
 
   it('trusts each configured repository and folder for Codex, since a repository covers its worktrees and a parent folder covers no repository', async () => {

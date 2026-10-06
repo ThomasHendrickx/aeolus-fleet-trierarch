@@ -77,7 +77,7 @@ describe('Codex as a harness', () => {
   it('starts codex with the first prompt on the first start, before the configured flags and the picked option', async () => {
     await harness().launch({ ...launchOf(shipId), options: { model: 'terra' }, isFirstStart: true, firstPrompt: 'Review the open pull requests.' });
 
-    expect(started).toEqual([{ shipId, folder, command: ['codex', 'Review the open pull requests.', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-terra'] }]);
+    expect(started).toEqual([{ shipId, folder, command: ['codex', 'Review the open pull requests.', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-terra', '--no-daemon'] }]);
   });
 
   it('starts codex with $aeolus-wake on a first start without a first prompt', async () => {
@@ -89,7 +89,25 @@ describe('Codex as a harness', () => {
   it("resumes the folder's last conversation on a restart, with $aeolus-wake and never the first prompt again", async () => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false, firstPrompt: 'Review the open pull requests.' });
 
-    expect(started[0]?.command).toEqual(['codex', 'resume', '--last', '$aeolus-wake', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-sol']);
+    expect(started[0]?.command).toEqual(['codex', 'resume', '--last', '$aeolus-wake', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-sol', '--no-daemon']);
+  });
+
+  it('adds --no-daemon once even when the operator configured it too, so the session owns its work and a stop stops it', async () => {
+    const withNoDaemon = createCodexHarness({
+      configuration: { ...WITH_CODEX, harnesses: { codex: { flags: ['--no-daemon'], options: {} } } },
+      plugin: { root: PLUGIN_ROOT, data },
+      sessions: {
+        start: (session) => {
+          started.push(session);
+          return Promise.resolve();
+        },
+        type: () => Promise.resolve(),
+      },
+    });
+
+    await withNoDaemon.launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+
+    expect(started[0]?.command.filter((part) => part === '--no-daemon')).toHaveLength(1);
   });
 
   it("wakes a session by typing $aeolus-wake, closed by a space so the skill picker leaves Enter alone, and settling before Enter so Codex takes no paste", async () => {
