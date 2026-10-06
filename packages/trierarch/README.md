@@ -10,28 +10,43 @@ On the machine that will run the sessions (macOS or Linux), with Node 26, `git`,
 npm install --global @aeolus-fleet/trierarch
 ```
 
-1. In the console, commission the trierarch's own ship: type `trierarch`, with **Crew ships** (`fleet:crew`). Copy its ship id and secret from the starting prompt.
-2. Register it and write a configuration:
+That gives the command `aeolus-trierarch`.
+
+1. In the console, commission the trierarch's own ship: type `trierarch`, with **Crew ships** (`fleet:crew`). Keep its starting prompt open: it shows the ship id and the secret.
+2. Set up the machine:
 
    ```sh
-   aeolus-trierarch init https://fleet.example.com shp_... aeolus_sk_v1_...
+   aeolus-trierarch init
    ```
 
-   This keeps the trierarch's own crew token in `~/.aeolus/trierarch/crew-token`, readable by you only, and never writes the secret. It writes `~/.aeolus/trierarch/config.json` when there is none yet, with `config.schema.json` beside it so an editor checks it.
-3. Edit the configuration (below), then check it:
+   It asks for what it needs, in a short flow:
+   - the fleet URL, the ship id and the secret. The secret is not shown as you type it, so it stays out of your shell history and any transcript. It registers the ship, keeps its crew token in `~/.aeolus/trierarch/crew-token` (readable by you only) and writes the secret nowhere;
+   - whether Claude Code launches with `--dangerously-skip-permissions` and with `--remote-control` (both no unless you say yes);
+   - the repositories it may make worktrees of, by name and path;
+   - the caps: how many ships on its list, how many sessions at once.
 
-   ```sh
-   aeolus-trierarch config check
-   ```
+   It writes `~/.aeolus/trierarch/config.json`, with `config.schema.json` beside it so an editor checks it. It answers Claude Code's one-time questions ahead, so a session nobody watches never waits on one: it trusts the worktree root in `~/.claude.json`, which covers every worktree under it, and, when the sessions skip permissions, offers to accept bypass permissions mode in `~/.claude/settings.json`. Then it offers to install and start the service: a launchd agent on macOS (`~/Library/LaunchAgents/dev.aeolus-fleet.trierarch.plist`), a systemd user unit on Linux (`aeolus-trierarch.service`), started at login and again whenever it stops.
 
-   It prints the flags each harness launches with, and each option value's flags.
-4. Keep it running:
+   Without a terminal, pass everything as flags and take every default with `--yes`: `aeolus-trierarch init --fleet-url https://fleet.example.com --ship-id shp_... --secret aeolus_sk_v1_... --yes`. Prefer the prompt: a secret in a flag lands in your shell history.
 
-   ```sh
-   aeolus-trierarch install
-   ```
+   Run `aeolus-trierarch init` again on a machine set up already to change the configuration. It says so and never registers again; to register another ship, remove `~/.aeolus/trierarch/crew-token` first.
 
-   On macOS this loads a launchd agent (`~/Library/LaunchAgents/dev.aeolus-fleet.trierarch.plist`) that starts the trierarch at login and again whenever it stops. On Linux it enables a systemd user unit (`aeolus-trierarch.service`). With `--no-load` it only writes the file. Logs go to `~/.aeolus/trierarch/logs/`. To run it in the foreground instead: `aeolus-trierarch run`.
+## Use
+
+| Command | What it does |
+| --- | --- |
+| `aeolus-trierarch status` | The service (running, pid, since), the fleet and the trierarch's own lease, the caps in use, the entries by state, kept worktrees and orphans |
+| `aeolus-trierarch list` | The wanted entries: ship, state, harness, workspace, since, restarts |
+| `aeolus-trierarch logs [--lines <n>] [--follow]` | The last lines of `~/.aeolus/trierarch/logs/trierarch.log`, and with `--follow` each new one |
+| `aeolus-trierarch config check` | Checks the configuration and gives the flags each harness launches with, and each option value's flags |
+| `aeolus-trierarch start`, `stop`, `restart` | The service. A stopped one starts again at the next login; restart it after you change the configuration |
+| `aeolus-trierarch install [--no-load]` | Installs the service; with `--no-load` it only writes its file |
+| `aeolus-trierarch uninstall` | Removes the service and stops every session. It deletes nothing else: it lists the worktrees it leaves, and keeps its own files under `~/.aeolus/trierarch/` |
+| `aeolus-trierarch run` | What the service runs: keeps the wanted ships crewed until stopped |
+
+Every command takes `--json`, so a ship can read what it says, and `--config <path>`. `status`, `list` and `logs` read what is on the machine and send no message; `status` asks the fleet `whoami` once, for the lease.
+
+To stop the trierarch: `aeolus-trierarch stop`, or `aeolus-trierarch uninstall` to keep it from starting at login. Each session runs in tmux on the trierarch's own server: attach to one with `tmux -L aeolus-trierarch attach -t trierarch-<ship id>`.
 
 ## Configure
 
@@ -59,6 +74,8 @@ npm install --global @aeolus-fleet/trierarch
 - **folders**: by name, used as they are, one ship per folder, never removed.
 - **harnesses**: the flags every launch gets, and named options. A want picks option values by name; it never adds a flag, and messages never carry paths or flags. There is no policy on which flags: put `--dangerously-skip-permissions` in `flags` if you want it. The trierarch never adds a flag by itself.
 
+`aeolus-trierarch init` writes caps, repositories and Claude Code's flags; edit the file for folders, options and `worktreeRoot`, then `aeolus-trierarch config check` and `aeolus-trierarch restart`.
+
 The trierarch finds the aeolus plugin in Claude Code's plugin cache (the newest version). Set `AEOLUS_PLUGIN_ROOT` and `AEOLUS_PLUGIN_DATA` to point it elsewhere. `aeolus-trierarch install` carries these, `AEOLUS_TRIERARCH_CONFIG` and `PATH` into the service as they are set where it runs.
 
 ## What is here
@@ -74,4 +91,5 @@ The trierarch finds the aeolus plugin in Claude Code's plugin cache (the newest 
   - git worktrees and folders;
   - Claude Code, through the aeolus plugin's `aeolus-identity.sh`;
   - the JSON state store.
-- **The command** (`src/cli`): `init`, `config check`, `run`, `install`.
+- **The command** (`src/cli`): `init`, `status`, `list`, `logs`, `config check`, `start`, `stop`, `restart`, `install`, `uninstall`, `run`.
+- **Adapters for the setup**: the service (launchd or systemd), and Claude Code's own files for its one-time questions.
