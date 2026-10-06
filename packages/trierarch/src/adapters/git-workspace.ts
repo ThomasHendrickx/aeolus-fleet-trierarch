@@ -10,8 +10,13 @@ import { runCommand } from './run-command.js';
  * Workspaces (docs/architecture.md, "First adapters"): a git worktree of a
  * configured repository under the worktree root, one folder per ship
  * (`<root>/<repository>/<ship>`), detached at the want's ref or the
- * repository's HEAD; or a configured folder used as it is.
+ * repository's HEAD; or a configured folder used as it is. The repository is
+ * fetched first, and a ref the remote has a branch for is that remote branch,
+ * so a ship starts from current code, not from a stale local branch. A fetch
+ * that fails (offline, no remote) leaves what the repository has.
  */
+
+const REMOTE = 'origin';
 export function createGitWorkspace(options: { configuration: TrierarchConfiguration; root: string }): WorkspacePort {
   const { configuration, root } = options;
   const git = async (args: readonly string[]): Promise<string> => {
@@ -20,6 +25,11 @@ export function createGitWorkspace(options: { configuration: TrierarchConfigurat
       throw new Error(`git ${args.join(' ')} failed: ${result.stderr.trim()}`);
     }
     return result.stdout;
+  };
+  /** The remote branch for the ref when the remote has one, else the ref as it is. */
+  const resolve = async (repository: string, ref: string): Promise<string> => {
+    const remote = await runCommand('git', { args: ['-C', repository, 'rev-parse', '--verify', '--quiet', `refs/remotes/${REMOTE}/${ref}`] });
+    return remote.status === 0 ? `${REMOTE}/${ref}` : ref;
   };
   const exists = async (path: string): Promise<boolean> => (await stat(path).catch(() => undefined)) !== undefined;
   const repositoryOf = (folder: string): string | undefined => {
@@ -44,7 +54,8 @@ export function createGitWorkspace(options: { configuration: TrierarchConfigurat
       // A worktree a stop mid-crew left is used as it is.
       if (!(await exists(folder))) {
         await mkdir(join(root, workspace.repository), { recursive: true });
-        await git(['-C', repository, 'worktree', 'add', '--detach', folder, ...(workspace.ref === undefined ? [] : [workspace.ref])]);
+        await runCommand('git', { args: ['-C', repository, 'fetch', '--quiet', REMOTE] });
+        await git(['-C', repository, 'worktree', 'add', '--detach', folder, ...(workspace.ref === undefined ? [] : [await resolve(repository, workspace.ref)])]);
       }
       return { folder };
     },
