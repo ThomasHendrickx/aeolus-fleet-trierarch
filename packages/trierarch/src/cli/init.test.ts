@@ -148,6 +148,7 @@ function defaults(): [string, string | boolean][] {
     ['--dangerously-skip-permissions', false],
     ['--remote-control', false],
     ['repository', ''],
+    ['folder', ''],
     ['ships', '4'],
     ['sessions', '2'],
     ['Install the service', true],
@@ -213,6 +214,7 @@ describe('aeolus-trierarch init, the whole setup', () => {
       ['repository', 'aeolus-fleet'],
       ['aeolus-fleet', '~/Projects/aeolus-fleet'],
       ['repository', ''],
+      ['folder', ''],
       ['ships', '6'],
       ['sessions', '3'],
       ['bypass permissions', true],
@@ -237,6 +239,7 @@ describe('aeolus-trierarch init, the whole setup', () => {
       ['notes', join(home, 'notes')],
       ['notes', repository],
       ['repository', ''],
+      ['folder', ''],
       ['ships', '0'],
       ['ships', 'many'],
       ['ships', '5'],
@@ -336,6 +339,7 @@ describe('aeolus-trierarch init on a machine set up already', () => {
       ['repository', 'aeolus-fleet'],
       ['aeolus-fleet', repository],
       ['repository', ''],
+      ['folder', ''],
       ['ships', '4'],
       ['sessions', '2'],
       ['Restart', true],
@@ -350,18 +354,63 @@ describe('aeolus-trierarch init on a machine set up already', () => {
   });
 
   it('keeps or drops each repository it offers, as answered', async () => {
-    await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', false], ['repository', 'aeolus-fleet'], ['aeolus-fleet', repository], ['repository', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
+    await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', false], ['repository', 'aeolus-fleet'], ['aeolus-fleet', repository], ['repository', ''], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
 
-    await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', false], ['Keep the repository aeolus-fleet', false], ['repository', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
+    await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', false], ['Keep the repository aeolus-fleet', false], ['repository', ''], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
 
     expect(configuration().repositories).toEqual({});
+  });
+
+  it('adds named folders it may crew a ship in as they are, and trusts each for Claude Code', async () => {
+    const notes = join(home, 'notes');
+    mkdirSync(notes);
+
+    const report = await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', false], ['repository', ''], ['folder', 'notes'], ['notes', '~/notes'], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
+
+    expect(configuration().folders).toEqual({ notes: { path: notes } });
+    expect(report.trusted).toEqual([paths.worktrees, notes]);
+  });
+
+  it('asks again for a folder name that is no name, and for a folder that is not there', async () => {
+    const notes = join(home, 'notes');
+    mkdirSync(notes);
+    const prompter = new ScriptedPrompter([
+      ['Change the configuration', true],
+      ['--dangerously-skip-permissions', false],
+      ['--remote-control', false],
+      ['repository', ''],
+      ['folder', 'My Notes'],
+      ['folder', 'notes'],
+      ['notes', join(home, 'nowhere')],
+      ['notes', notes],
+      ['folder', ''],
+      ['ships', '4'],
+      ['sessions', '2'],
+      ['Restart', false],
+    ]);
+
+    await init({}, prompter);
+
+    expect(configuration().folders).toEqual({ notes: { path: notes } });
+    expect(prompter.said).toContain('My Notes is no name: lowercase letters, digits and hyphens.');
+    expect(prompter.said).toContain(`${join(home, 'nowhere')} is no folder.`);
+  });
+
+  it('keeps or drops each folder it offers, as answered', async () => {
+    const notes = join(home, 'notes');
+    mkdirSync(notes);
+    writeFileSync(paths.config, JSON.stringify({ ...configuration(), folders: { notes: { path: notes } } }));
+
+    await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', false], ['repository', ''], ['Keep the folder notes', false], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
+
+    expect(configuration().folders).toEqual({});
   });
 
   it('keeps everything else the configuration holds: folders, options and the worktree root', async () => {
     const custom = { ...configuration(), worktreeRoot: join(home, 'worktrees'), folders: { notes: { path: '/notes' } }, harnesses: { 'claude-code': { flags: ['--verbose'], options: { model: { values: { opus: ['--model', 'claude-opus-5-5'] }, default: 'opus' } } } } };
     writeFileSync(paths.config, JSON.stringify(custom));
 
-    await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', true], ['repository', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
+    await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', true], ['repository', ''], ['Keep the folder notes', true], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
 
     expect(configuration()).toEqual({ ...custom, harnesses: { 'claude-code': { ...custom.harnesses['claude-code'], flags: ['--verbose', '--remote-control'] } } });
     await expect(createClaudeCodeSetup({ homeDirectory: home }).isTrusted(join(home, 'worktrees'))).resolves.toBe(true);
