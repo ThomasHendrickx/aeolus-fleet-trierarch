@@ -83,7 +83,16 @@ async function carryOut(state: TrierarchState, at: CarryOut): Promise<TrierarchS
       return crew(state, { entry, isResumed: action.isResumed, deps });
     case 'launch':
       if (entry.folder !== undefined) {
-        await deps.harness.launch({ shipId: entry.shipId, folder: entry.folder, harness: entry.harness, options: entry.options, isFirstStart: false });
+        await deps.harness.launch({
+          shipId: entry.shipId,
+          // An entry saved before the ship's name was kept goes by its id.
+          shipName: entry.shipName ?? entry.shipId,
+          folder: entry.folder,
+          workspace: entry.workspace,
+          harness: entry.harness,
+          options: entry.options,
+          isFirstStart: false,
+        });
       }
       return state;
     case 'wake':
@@ -136,14 +145,16 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   });
   await deps.harness.launch({
     shipId: entry.shipId,
+    shipName: ship.name,
     folder,
+    workspace: entry.workspace,
     harness: entry.harness,
     options: entry.options,
     isFirstStart: !entry.hasStarted,
     ...(!entry.hasStarted && entry.firstPrompt !== undefined && { firstPrompt: entry.firstPrompt }),
   });
   const now = deps.clock.now();
-  const next = putEntry(state, { ...withState(entry, { state: 'running', now }), folder, hasStarted: true });
+  const next = putEntry(state, { ...withState(entry, { state: 'running', now }), shipName: ship.name, folder, hasStarted: true });
   await deps.state.save(next);
   await deps.fleet.send(notice(entry, { name: 'running', now }));
   return next;

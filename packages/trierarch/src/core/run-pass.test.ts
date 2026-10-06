@@ -41,8 +41,10 @@ describe('the lifecycle of a wanted ship (docs/trierarch.md)', () => {
       shipName: 'scout',
       crewToken: trierarch.fleet.shipOf(shipId).crewToken,
     });
-    expect(trierarch.harness.launches).toEqual([{ shipId, folder: SCOUT_FOLDER, isFirstStart: true, firstPrompt: 'Review the open pull requests.' }]);
-    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'running', folder: SCOUT_FOLDER });
+    expect(trierarch.harness.launches).toEqual([
+      { shipId, shipName: 'scout', folder: SCOUT_FOLDER, workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, isFirstStart: true, firstPrompt: 'Review the open pull requests.' },
+    ]);
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'running', folder: SCOUT_FOLDER, shipName: 'scout' });
     expect(trierarch.fleet.sentTo(trierarch.requester, 'running').map((message) => message.payload)).toEqual([{ shipId }]);
   });
 
@@ -76,7 +78,7 @@ describe('the lifecycle of a wanted ship (docs/trierarch.md)', () => {
     trierarch.clock.advance(5 * SECOND_MS);
     await trierarch.pass();
 
-    expect(trierarch.harness.launches.at(-1)).toEqual({ shipId, folder: SCOUT_FOLDER, isFirstStart: false });
+    expect(trierarch.harness.launches.at(-1)).toEqual({ shipId, shipName: 'scout', folder: SCOUT_FOLDER, workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, isFirstStart: false });
     expect(trierarch.fleet.shipOf(shipId).crewToken).toBe(crewToken);
     expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'running', exits: [expect.any(String)] });
   });

@@ -72,7 +72,7 @@ To stop the trierarch: `aeolus-trierarch stop`, or `aeolus-trierarch uninstall` 
 - **caps**: how many ships it keeps on its list, and how many sessions run at once.
 - **repositories**: by name. A want for a worktree of one gets a git worktree under `~/.aeolus/trierarch/worktrees/<repository>/<ship>`, detached at the want's ref or the repository's HEAD. `worktreeRoot` moves that root.
 - **folders**: by name, used as they are, one ship per folder, never removed.
-- **harnesses**: the flags every launch gets, and named options. A want picks option values by name; it never adds a flag, and messages never carry paths or flags. There is no policy on which flags: put `--dangerously-skip-permissions` in `flags` if you want it. The trierarch never adds a flag by itself.
+- **harnesses**: the flags every launch gets, and named options. A want picks option values by name; it never adds a flag, and messages never carry paths or flags. There is no policy on which flags: put `--dangerously-skip-permissions` in `flags` if you want it. The trierarch never adds a flag by itself. With `--remote-control` and no name after it, each session is named `[<repository or folder>] <ship>`, such as `[aeolus-fleet] trial-1`, so it is easy to find among your remote-control sessions.
 
 `aeolus-trierarch init` writes caps, repositories and Claude Code's flags; edit the file for folders, options and `worktreeRoot`, then `aeolus-trierarch config check` and `aeolus-trierarch restart`.
 

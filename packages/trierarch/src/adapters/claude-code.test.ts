@@ -51,6 +51,9 @@ function harness() {
 const shipId = newId('ship');
 const identity = { fleetUrl: 'https://fleet.example.com', shipId, shipName: 'scout', crewToken: 'aeolus_ct_v1_scout' };
 
+/** The launch of the ship scout in a worktree of aeolus-fleet. */
+const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' } }) as const;
+
 describe('Claude Code as a harness', () => {
   it("writes the folder's identity through the plugin, saying the trierarch wakes it, with the squadron", async () => {
     await harness().prepareIdentity({ folder, identity: { ...identity, squadron: 'hemma-feature-a1b2c3' } });
@@ -72,21 +75,47 @@ describe('Claude Code as a harness', () => {
   });
 
   it('starts claude with the first prompt on the first start, before the configured flags so a flag with an optional value never takes it', async () => {
-    await harness().launch({ shipId, folder, harness: 'claude-code', options: { model: 'sonnet' }, isFirstStart: true, firstPrompt: 'Review the open pull requests.' });
+    await harness().launch({ ...launchOf(shipId), options: { model: 'sonnet' }, isFirstStart: true, firstPrompt: 'Review the open pull requests.' });
 
-    expect(started).toEqual([{ shipId, folder, command: ['claude', 'Review the open pull requests.', '--remote-control', '--model', 'claude-sonnet-5-5'] }]);
+    expect(started).toEqual([{ shipId, folder, command: ['claude', 'Review the open pull requests.', '--remote-control', '[aeolus-fleet] scout', '--model', 'claude-sonnet-5-5'] }]);
   });
 
   it('starts claude with /aeolus:wake on a first start without a first prompt', async () => {
-    await harness().launch({ shipId, folder, harness: 'claude-code', options: {}, isFirstStart: true });
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
 
     expect(started[0]?.command[1]).toBe('/aeolus:wake');
   });
 
   it('continues the conversation on a restart, with /aeolus:wake and never the first prompt again', async () => {
-    await harness().launch({ shipId, folder, harness: 'claude-code', options: {}, isFirstStart: false, firstPrompt: 'Review the open pull requests.' });
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false, firstPrompt: 'Review the open pull requests.' });
 
-    expect(started[0]?.command).toEqual(['claude', '/aeolus:wake', '--remote-control', '--model', 'claude-opus-5-5', '--continue']);
+    expect(started[0]?.command).toEqual(['claude', '/aeolus:wake', '--remote-control', '[aeolus-fleet] scout', '--model', 'claude-opus-5-5', '--continue']);
+  });
+
+  it('names the remote-control session after its folder and ship: the repository of a worktree, the name of a configured folder', async () => {
+    await harness().launch({ ...launchOf(shipId), workspace: { kind: 'folder', name: 'notes' }, options: {}, isFirstStart: true });
+
+    expect(started[0]?.command.slice(2, 4)).toEqual(['--remote-control', '[notes] scout']);
+  });
+
+  it('keeps a remote-control name the operator configured, and names nothing without --remote-control', async () => {
+    const withFlags = (flags: string[]) =>
+      createClaudeCodeHarness({
+        configuration: { ...CONFIGURATION, harnesses: { 'claude-code': { flags, options: {} } } },
+        plugin: { root: PLUGIN_ROOT, data },
+        sessions: {
+          start: (session) => {
+            started.push(session);
+            return Promise.resolve();
+          },
+          type: () => Promise.resolve(),
+        },
+      });
+
+    await withFlags(['--remote-control', 'mine', '--verbose']).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+    await withFlags(['--verbose']).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+
+    expect(started.map((session) => session.command.slice(2))).toEqual([['--remote-control', 'mine', '--verbose'], ['--verbose']]);
   });
 
   it('wakes a session by typing /aeolus:wake', async () => {
