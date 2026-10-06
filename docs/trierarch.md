@@ -1,23 +1,24 @@
 # Trierarch: crewing ships on machines
 
-Model and decisions: 0026 (the trierarch on a machine), 0027 (crew settings), 0029 (the crew request and its scopes) and 0030 (the trierarch plugin). The fleet holds the crew request; everything else here is read only by the trierarch plugin, the trierarchs it manages and the console. `@aeolus-fleet/trierarch` is one implementation, optional, like squadrons; its build is in [architecture.md](architecture.md#the-trierarch). Anyone may write another: this file is what it must do.
+Model and decisions: 0026 (the trierarch on a machine), 0027 (crew settings), 0029 (the crew request and its scopes) and 0030 (the navarch). The fleet holds the crew request; everything else here is read only by the navarch, the trierarchs it manages and the console. `@aeolus-fleet/navarch` and `@aeolus-fleet/trierarch` are one implementation, optional, like squadrons; their build is in [architecture.md](architecture.md#the-trierarch). Anyone may write another: this file is what it must do.
 
-Two parts, each its own process:
+Two parts, each its own process and package:
 
-- **The trierarch plugin**, one per installation, beside squadrons: a ship of each fleet it serves. It brings machines into the fleet and picks which machine crews each crew request.
+- **The navarch** (`@aeolus-fleet/navarch`), the plugin on the server side, one per installation, beside squadrons: a ship of each fleet it serves. It brings machines into the fleet and picks which machine crews each crew request.
 - **A trierarch**, one per machine: a plain process, not an AI, crewing its own ship of type `trierarch`. It crews the ships whose requests are assigned to it, and starts, restarts, wakes and stops their sessions. It never commissions, retires or picks.
 
-Plugins never know each other: a requester (the console, squadrons, an orchestrator ship) only touches ships and their crew requests. Without the trierarch plugin a crew request is the operator's to-do list, crewed by hand.
+Plugins never know each other: a requester (the console, squadrons, an orchestrator ship) only touches ships and their crew requests. Without the navarch a crew request is the operator's to-do list, crewed by hand.
 
 ## The crew request
 
-Declared state on the ship, in the fleet core (decision 0029): "keep this ship crewed, with these settings". At most one per ship, standing (level, not edge). Three parts, each with one writer:
+Declared state on the ship, in the fleet core (decision 0029): "keep this ship crewed, with these settings". At most one per ship, standing (level, not edge). Its parts, each with one writer:
 
 | Part | Holds | Written by | Scope |
 | --- | --- | --- | --- |
 | Request | The settings (below) | A requester | `fleet:manage` |
-| Assignment | The trierarch ship that crews it; set only while unassigned | The trierarch plugin | `crew:assign` |
-| Status | crewing, running, restarting, crashed, releasing | The assigned trierarch | `crew:run` |
+| Assignment | The trierarch ship that crews it; set only while unassigned | The navarch | `crew:assign` |
+| Reason | Why no trierarch can take it, while unassigned; shown in the operator's needs-crew to-do | The navarch | `crew:assign` |
+| Status | crewing, running, restarting, crashed, releasing; and who crewed it, the trierarch or argo | The assigned trierarch | `crew:run` |
 
 The server stores the settings without meaning and checks only their size. The settings have a fixed core (decision 0027), whose schema lives in `common`:
 
@@ -41,16 +42,22 @@ Settings never carry paths or command-line flags: a workspace names a repository
 
 A trierarch's ships are a query, the requests assigned to it, never a list kept on its ship.
 
+The request is the desired state. A ship released elsewhere while its request stands is crewed again by its trierarch. Retiring the ship removes its request (decision 0029).
+
+## Following the fleet
+
+The navarch follows the fleet's changes: new, changed and removed requests, and reports. Every check-in, of the navarch and of each trierarch, returns the latest full state (for a trierarch, the requests assigned to it), so a missed event never leaves either stale. The navarch keeps no database of its own: its state lives in the fleet. That is a choice for the first version, not a rule. It is on or off per fleet by the same mechanism as squadrons (decision 0021).
+
 ## A machine joins
 
 A trierarch never registers or labels itself.
 
-1. The operator asks the trierarch plugin for a new machine. The plugin commissions a ship of type `trierarch` with `crew:run` and answers its starting prompt.
+1. The operator asks the navarch for a new machine. The navarch commissions a ship of type `trierarch` with `crew:run` beside the send and receive every agent has, nothing more, and answers its starting prompt.
 2. On the machine, `aeolus-trierarch init` takes that starting prompt, registers, writes the configuration and installs the service.
 3. The trierarch reports what it can do in its report's details (below).
-4. The plugin labels the machine from that report (labels, #102). Until labels exist, placement reads the report itself.
+4. The navarch labels the machine from that report (labels, #102). Until labels exist, placement reads the report itself.
 
-Releasing a trierarch's own ship is the kill switch for that machine.
+A trierarch's ship stays a normal ship: it receives messages, such as pings, and sends its crash reports to argo. Releasing it is the kill switch for that machine.
 
 ### What a trierarch reports
 
@@ -73,17 +80,21 @@ Its report (state, a one-line note such as "4 of 6 running, 1 crashed") with `de
 }
 ```
 
-Its shape lives in `common`, as the type `trierarch`'s report details.
+Its shape lives in `common`, as the type `trierarch`'s report details. It holds no entry per ship: each request carries its own status.
 
 ## Assignment
 
-The trierarch plugin assigns each unassigned request to one trierarch:
+The navarch serves unassigned requests oldest first and assigns each to one trierarch:
 
-1. It considers trierarchs whose report offers the request's harness and workspace, whose options schema for that harness takes the request's options, and that have room (`caps.ships` above the number of requests assigned to it).
-2. It assigns by optimistic claim: the fleet sets the assignment only if the request is still unassigned. A lost claim is no error; the plugin reads again.
-3. It never assigns a request whose ship is crewed already: crewing by hand fulfils a request.
+1. It considers trierarchs that fit: their report offers the request's repository (or folder), harness and model (its options schema for that harness takes the request's options), and they have room (`caps.ships` above the number of requests assigned to it).
+2. Of those, it picks the one with the most room as a percentage of its `caps.ships`, then the oldest.
+3. It assigns by optimistic claim: the fleet sets the assignment only if the request is still unassigned. A lost claim is no error; the navarch reads again.
+4. It never assigns a request whose ship is crewed already: crewing by hand fulfils a request.
+5. When no trierarch can take a request (none offers its harness, workspace or options, or none has room), the navarch writes the reason on the request. It shows in the operator's needs-crew to-do.
 
-The operator does not pick the machine. A trierarch that goes silent while ships are assigned to it is flagged for the operator as needing attention; its requests are not moved.
+Strategies to change this order come later. The operator does not pick the machine.
+
+A machine is silent when its trierarch's last seen is older than a threshold. The flag shows on the machines page and in needs attention; its requests are not moved.
 
 ## Crewing a ship
 
@@ -96,6 +107,12 @@ A trierarch reconciles from the requests assigned to it. Its loop crews each one
 
 From then on the trierarch watches the ship's inbox while the session runs. It wakes the session when deliveries wait and the session is idle, and restarts a session that dies.
 
+A ship crewed by hand before its trierarch crews it counts as crewed: the trierarch leaves it, and the status shows it was crewed by argo.
+
+### Crashed and Restart
+
+A session that dies is restarted by the trierarch on its own. When its restart budget is spent, the trierarch writes status `crashed` and sends a report to argo: a human decides. The operator's Restart action deletes the request and creates an exact copy behind the scenes; the trierarch sees a new version of its crew record and crews it again.
+
 ## Lifecycles
 
 The ship, its crew request, its session and its worktree live and end together:
@@ -106,12 +123,14 @@ The ship, its crew request, its session and its worktree live and end together:
 | 2 | assigned | awaiting crew | assigned to a trierarch | none yet | none yet |
 | 3 | first crew | crewed (the trierarch registers) | crewing, then running | started | created, identity written |
 | 4 | session dies | crewed, lease held | restarting | started again in the same folder, same crew token | kept |
-| 5 | restart budget spent | crewed, lease held | crashed | stopped | kept |
+| 5 | restart budget spent | crewed, lease held | crashed, a report sent to argo | stopped | kept |
 | 6 | the machine restarts | crewed, lease held | unchanged | started again by the loop | kept |
 | 7 | request removed | awaiting crew, lease ended | releasing, then gone once the trierarch confirms | stopped | removed if clean; kept and reported if not |
 | 8 | the trierarch stops mid-crew (a lost `register` reply among them) | perhaps crewed, by its own lost token | crewing, saved locally before it registered | none, or a stray | perhaps half made |
 | 9 | the trierarch is uninstalled | crewed | still assigned to it | stopped first | uninstall lists kept worktrees and deletes nothing |
 | 10 | the machine goes silent | as it was | still assigned to it, the machine flagged | unknown | unknown |
+| 11 | released elsewhere | awaiting crew, then crewed again by the trierarch | unchanged, crewing, then running | stopped, then started | kept |
+| 12 | Restart of a crashed request | as row 7, then as row 1 | removed, then an exact copy requested: a new version | stopped, then started | as row 7, then as row 3 |
 
 The rules that close the gaps:
 
@@ -124,13 +143,13 @@ The rules that close the gaps:
 ```mermaid
 stateDiagram-v2
   [*] --> Unassigned: requested
-  Unassigned --> Assigned: claimed by the plugin
+  Unassigned --> Assigned: claimed by the navarch
   Assigned --> Crewing: saved as crewing
   Crewing --> Running: register, create worktree, start session
   Crewing --> Crewing: resumed with the ship crewed, release and register again
   Running --> Restarting: session dies
   Restarting --> Running: start again, same folder and crew token
-  Restarting --> Crashed: restart budget spent
+  Restarting --> Crashed: restart budget spent, report to argo
   Running --> Releasing: request removed
   Crashed --> Releasing: request removed
   Releasing --> [*]: trierarch confirms, request gone
@@ -144,7 +163,7 @@ Stopping a session must stop its work, or a release and a restarted crash would 
 
 ## The 0.17 protocol, until T4
 
-What the trierarch in `@aeolus-fleet/trierarch` still speaks until the build plan's slice T4 removes it, together with this section: fleet messages to and from the trierarch's ship, with content types `application/vnd.aeolus.trierarch.<name>+json`. The crew request and the report replace it (decision 0027). The schemas in `common` take every example below.
+What the trierarch in `@aeolus-fleet/trierarch` still speaks until the build plan's slice T4 removes it, together with this section: fleet messages to and from the trierarch's ship, with content types `application/vnd.aeolus.trierarch.<name>+json`. The crew request and the report replace it (decision 0027). The running 0.17 setup is not migrated: its sessions are released and the new trierarch crews them again (decision 0013). The schemas in `common` take every example below.
 
 | Command | Answer |
 | --- | --- |
@@ -241,21 +260,3 @@ One message of each kind, as its payload travels, labelled with its name and whe
 ```json leaseEnded notice
 { "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88" }
 ```
-
-## Open questions
-
-Answered by Thomas, then moved into the text above and the decisions:
-
-1. The package of the trierarch plugin: its own package beside `@aeolus-fleet/trierarch`, or both processes in one; and its name.
-2. How the plugin learns of new and removed requests and of reports (following the fleet's events, or reading on an interval), and how a trierarch learns of its assigned requests.
-3. What "silent" means for a machine (its lease's last seen, its report's age, a threshold), and where the flag shows.
-4. A request no trierarch can take (no machine offers its harness or workspace, or none has room): does it stay unassigned silently, or does the plugin say why, and where.
-5. Which trierarch wins when several fit.
-6. A ship released or retired elsewhere while its request stands: the trierarch crews it again (level), or writes a status and waits; whether retire removes the request.
-7. A crashed request: what starts it again (removing and requesting again, or a new write of its settings).
-8. The ship of an assigned request crewed by hand before the trierarch crews it: which status it writes.
-9. Messages to a trierarch's ship once describe, want, release and list retire: whether it still receives, and which scopes besides `crew:run` it is commissioned with.
-10. The trierarch plugin's scopes in full: `fleet:read` beside `fleet:manage`, `crew:assign` and the label scopes.
-11. Whether the per-ship entries #248 planned in the trierarch's details stay, now that each request carries its status.
-12. Whether the plugin keeps its own database, as squadrons does (the architecture assumes it, for the connection per fleet and the flags).
-13. The migration of the running 0.17 setup: do its sessions keep running while their ships get crew requests (the plugin never assigns a crewed ship), or are they released and crewed again by the new trierarch.

@@ -1,8 +1,10 @@
 # 0026 Trierarch: a reconciling launcher on a machine
 
-- `@aeolus-fleet/trierarch` crews ships on its machine. It is a plain process, not an AI, kept alive by the operating system. It crews its own ship of type `trierarch`, with `crew:run` (0029), one per machine. The trierarch plugin commissions that ship and gives the operator its starting prompt for `aeolus-trierarch init` (0030); a trierarch never registers or labels itself.
-- It reconciles from the crew requests assigned to it, read from the fleet: a loop compares them with what runs, and starts, restarts or stops to match. It writes each request's status. It never picks, commissions or retires.
-- It reports what it can do (harnesses with their options as a JSON Schema, workspaces, caps, kept worktrees, orphans) in its report's details.
+- `@aeolus-fleet/trierarch` crews ships on its machine. It is a plain process, not an AI, kept alive by the operating system. It crews its own ship of type `trierarch`, one per machine: a normal ship that receives messages such as pings, with `crew:run` (0029) beside sending and receiving, nothing more. The navarch commissions that ship and gives the operator its starting prompt for `aeolus-trierarch init` (0030); a trierarch never registers or labels itself.
+- It reconciles from the crew requests assigned to it, read from the fleet, each check-in returning the latest full state: a loop compares them with what runs, and starts, restarts or stops to match. It writes each request's status. It never picks, commissions or retires.
+- A request is the desired state: a ship released elsewhere while its request stands is crewed again. A ship crewed by hand first counts as crewed, its status showing argo crewed it.
+- A dying session is restarted on its own; when the restart budget is spent, it writes crashed and sends a report to argo. The operator's Restart deletes the request and creates an exact copy, a new version the trierarch crews again.
+- It reports what it can do (harnesses with their options as a JSON Schema, workspaces, caps, kept worktrees, orphans) in its report's details, with no entry per ship: each request carries its own status.
 - It gets the starting prompt and registers itself, so a session never sees a secret. It writes the folder's identity through the aeolus plugin.
 - It saves an entry as crewing before it registers. On resume, its own entry still crewing with the ship crewed means the register reply was lost: it releases the ship (`crew:run`) and crews it again.
 - It owns wake and liveness for the sessions it starts. The plugin's in-session watcher is not used there.
