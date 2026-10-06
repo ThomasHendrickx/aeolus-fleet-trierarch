@@ -65,4 +65,9 @@ describe('the crew-a-ship skill', () => {
   it('tells the session to start the watcher again when it exits 6 at its 2-hour limit', () => {
     expect(claudeSkill).toContain('"for almost 2 hours" (exit 6): start the watcher again, as in step 3. That is all.');
   });
+
+  it('tells a session the trierarch wakes to start no watcher, in both harnesses', () => {
+    expect(claudeSkill).toContain('When "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-identity.sh" show says `wakes: the trierarch`, start no watcher and end your turn: the trierarch wakes this session.');
+    expect(codexSkill).toContain('When `scripts/aeolus-identity.sh show` says `wakes: the trierarch`, start no wake: the trierarch wakes this session.');
+  });
 });
