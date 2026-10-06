@@ -82,6 +82,30 @@ aeolus_refused_file() {
 
 # When a squadron member last reported, or was last reminded to: seconds since
 # the epoch. The report reminder counts its check-in interval from it.
+# The turn marker of a folder a trierarch crews: busy or idle, with when.
+aeolus_turn_file() {
+  local folder dir
+  folder="$(aeolus_folder)" || return 1
+  dir="$(aeolus_ships_dir)" || return 1
+  printf '%s/%s.turn' "$dir" "$(aeolus_key "$folder")"
+}
+
+# Whether the folder's identity says the trierarch wakes its sessions
+# (wakeBy=trierarch): then the plugin asks for no watcher of its own.
+aeolus_woken_by_trierarch() {
+  local identity="$1"
+  [ "$(aeolus_identity_get "$identity" wakeBy)" = trierarch ]
+}
+
+# Writes the turn marker, busy or idle with the time in UTC, for a folder a
+# trierarch crews; nothing for any other folder.
+aeolus_mark_turn() {
+  local identity="$1" state="$2" file
+  aeolus_woken_by_trierarch "$identity" || return 0
+  file="$(aeolus_turn_file)" || return 0
+  printf '%s %s\n' "$state" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$file.tmp" && mv "$file.tmp" "$file"
+}
+
 aeolus_reported_file() {
   local folder dir
   folder="$(aeolus_folder)" || return 1

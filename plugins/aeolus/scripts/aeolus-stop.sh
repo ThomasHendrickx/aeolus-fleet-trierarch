@@ -6,8 +6,9 @@
 #   Claude Code: a session wakes only through its own background task, which a
 #   hook cannot start, so when no watcher runs the hook keeps the turn open once
 #   and asks the session to start it.
-# Silent when the folder crews no ship, a watcher runs, or the fleet refused the
-# crew token. Never fails the session.
+# In a folder a trierarch crews (wakeBy=trierarch), it only marks the turn idle:
+# the trierarch wakes the session. Silent when the folder crews no ship, a
+# watcher runs, or the fleet refused the crew token. Never fails the session.
 set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
@@ -15,6 +16,11 @@ payload="$(cat)"
 aeolus_hook_folder "$payload"
 identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
 [ -f "$identity" ] || exit 0
+
+if aeolus_woken_by_trierarch "$identity"; then
+  aeolus_mark_turn "$identity" idle
+  exit 0
+fi
 
 if [ -n "${PLUGIN_ROOT:-}" ]; then
   session_id="$(aeolus_json_string "$payload" session_id)"

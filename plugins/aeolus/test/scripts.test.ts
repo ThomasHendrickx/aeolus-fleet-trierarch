@@ -769,3 +769,158 @@ describe("a squadron member's check-in interval", () => {
     );
   });
 });
+
+describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
+  const TURN_MARKER = /^(busy|idle) \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+  function crewedByATrierarch(): void {
+    expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', 'https://fleet.example.com', SHIP_ID, 'scout', CREW_TOKEN] }).status).toBe(0);
+  }
+
+  /** The turn marker as the trierarch reads it, through the plugin's own script. */
+  function turn(): Run {
+    return run('aeolus-identity.sh', { args: ['turn'] });
+  }
+
+  function sessionStart(env: Record<string, string>) {
+    const envFile = join(data, 'session.env');
+    writeFileSync(envFile, '');
+    const { stdout } = run('aeolus-session-start.sh', {
+      stdin: JSON.stringify({ session_id: 'c5858406-be86-46cd-8591-f4fb39b1fa61', cwd: folder, hook_event_name: 'SessionStart', source: 'startup' }),
+      env: { AEOLUS_FOLDER: '', AEOLUS_DATA: '', CLAUDE_ENV_FILE: envFile, ...env },
+    });
+    return hookOutputSchema.parse(JSON.parse(stdout)).hookSpecificOutput.additionalContext;
+  }
+
+  /** Runs a hook as Codex does: PLUGIN_ROOT and PLUGIN_DATA set, the task id in the payload. */
+  function codexHook(script: string, payload: Record<string, unknown>) {
+    return run(script, {
+      stdin: JSON.stringify({ session_id: '01a103c9-80b0-7ab1-82e3-6f4a2f70ad86', cwd: folder, ...payload }),
+      env: { AEOLUS_FOLDER: '', AEOLUS_DATA: '', CLAUDE_PROJECT_DIR: '', PLUGIN_DATA: data, PLUGIN_ROOT: SCRIPTS.replace(/\/scripts\/$/, '') },
+    });
+  }
+
+  it('keeps wakeBy=trierarch in the identity file when asked, and shows it', () => {
+    crewedByATrierarch();
+
+    expect(readFileSync(identityFile(), 'utf8')).toContain('wakeBy=trierarch\n');
+    expect(run('aeolus-identity.sh', { args: ['show'] }).stdout).toContain('wakes: the trierarch');
+  });
+
+  it('keeps the squadron beside it, for a member a trierarch crews', () => {
+    run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', CREW_TOKEN, 'team-one'] });
+
+    expect(readFileSync(identityFile(), 'utf8')).toMatch(/squadron=team-one\n[\s\S]*wakeBy=trierarch\n|wakeBy=trierarch\n[\s\S]*squadron=team-one\n/);
+  });
+
+  it('refuses to wake by anything but the trierarch', () => {
+    const written = run('aeolus-identity.sh', { args: ['write', '--wake-by', 'cron', 'https://fleet.example.com', SHIP_ID, 'scout', CREW_TOKEN] });
+
+    expect(written.status).toBe(2);
+    expect(statSync(identityFile(), { throwIfNoEntry: false })).toBeUndefined();
+  });
+
+  it('tells a fresh Claude Code context to start no watcher, since the trierarch wakes it', () => {
+    crewedByATrierarch();
+
+    const context = sessionStart({ CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin' });
+
+    expect(context).toContain('The trierarch wakes this session when work arrives: start no watcher.');
+    expect(context).not.toContain('aeolus-wait.sh');
+  });
+
+  it('starts no Codex wake bridge at session start, and says the trierarch wakes it', () => {
+    crewedByATrierarch();
+
+    const context = sessionStart({ PLUGIN_DATA: data, PLUGIN_ROOT: SCRIPTS.replace(/\/scripts\/$/, '') });
+
+    expect(context).toContain('The trierarch wakes this session when work arrives: start no watcher.');
+    expect(context).not.toContain('wake-up');
+    expect(statSync(wakePidFile(), { throwIfNoEntry: false })).toBeUndefined();
+  });
+
+  it('refuses to start a watcher in the background, saying the trierarch wakes the session', () => {
+    crewedByATrierarch();
+
+    const { stdout } = claudeHook('aeolus-watch-guard.sh', {
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Bash',
+      tool_input: { command: '"/plugin/scripts/aeolus-wait.sh"', run_in_background: true },
+    });
+
+    expect(JSON.parse(stdout)).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'aeolus: the trierarch wakes scout; start no watcher and do nothing else',
+      },
+    });
+  });
+
+  it('lets a Claude Code turn end with no watcher running', () => {
+    crewedByATrierarch();
+
+    expect(claudeHook('aeolus-stop.sh', { hook_event_name: 'Stop', stop_hook_active: false })).toMatchObject({ status: 0, stdout: '' });
+  });
+
+  it('arms no Codex wake bridge at the end of a turn', () => {
+    crewedByATrierarch();
+
+    expect(codexHook('aeolus-stop.sh', { hook_event_name: 'Stop', stop_hook_active: false })).toMatchObject({ status: 0, stdout: '' });
+    expect(statSync(wakePidFile(), { throwIfNoEntry: false })).toBeUndefined();
+  });
+
+  it('marks the turn busy when a prompt is submitted, with when', () => {
+    crewedByATrierarch();
+
+    expect(claudeHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: '/aeolus:wake' })).toMatchObject({ status: 0, stdout: '' });
+
+    const { status, stdout } = turn();
+    expect(status).toBe(0);
+    expect(stdout.trim()).toMatch(TURN_MARKER);
+    expect(stdout).toMatch(/^busy /);
+  });
+
+  it('marks the turn idle when it ends, with when', () => {
+    crewedByATrierarch();
+    claudeHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: '/aeolus:wake' });
+
+    claudeHook('aeolus-stop.sh', { hook_event_name: 'Stop', stop_hook_active: false });
+
+    expect(turn().stdout.trim()).toMatch(TURN_MARKER);
+    expect(turn().stdout).toMatch(/^idle /);
+  });
+
+  it('marks the turn in a Codex session alike', () => {
+    crewedByATrierarch();
+
+    codexHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: '/aeolus:wake' });
+    expect(turn().stdout).toMatch(/^busy /);
+    codexHook('aeolus-stop.sh', { hook_event_name: 'Stop', stop_hook_active: false });
+    expect(turn().stdout).toMatch(/^idle /);
+  });
+
+  it('says no turn has been marked before the first prompt', () => {
+    crewedByATrierarch();
+
+    expect(turn()).toMatchObject({ status: 1, stdout: 'aeolus: no turn marked yet\n' });
+  });
+
+  it('marks no turn in a folder without the line, which behaves as today', () => {
+    crew();
+
+    claudeHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: 'hello' });
+
+    expect(turn().status).toBe(1);
+    expect(readdirSync(data, { recursive: true }).map(String).filter((name) => name.endsWith('.turn'))).toEqual([]);
+  });
+
+  it('forgets the turn marker with the ship', () => {
+    crewedByATrierarch();
+    claudeHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: '/aeolus:wake' });
+
+    run('aeolus-identity.sh', { args: ['delete'] });
+
+    expect(readdirSync(data, { recursive: true }).map(String).filter((name) => name.endsWith('.turn'))).toEqual([]);
+  });
+});

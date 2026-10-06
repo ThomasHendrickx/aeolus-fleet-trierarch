@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # The ship this folder crews, kept in the plugin's data folder.
 #
-#   aeolus-identity.sh write <fleetUrl> <shipId> <shipName> <crewToken> [<squadronId>]
+#   aeolus-identity.sh write [--wake-by trierarch] <fleetUrl> <shipId> <shipName> <crewToken> [<squadronId>]
+#                       with --wake-by trierarch, the trierarch wakes the folder's sessions, not a watcher
 #   aeolus-identity.sh check-in <interval>   a squadron member keeps its check-in interval: <n>m or <n>h
 #   aeolus-identity.sh show     the ship, its fleet and the file (never the token); exit 1 when none
+#   aeolus-identity.sh turn     the turn marker of a folder a trierarch crews: busy or idle, with when; exit 1 when none
 #   aeolus-identity.sh path     the identity file of this folder, whether it exists or not
 #   aeolus-identity.sh delete   stops the folder's watcher and forgets the ship
 set -euo pipefail
@@ -14,13 +16,22 @@ command="${1:-}"
 
 case "$command" in
   write)
-    { [ "$#" -eq 5 ] || [ "$#" -eq 6 ]; } || { echo "usage: aeolus-identity.sh write <fleetUrl> <shipId> <shipName> <crewToken> [<squadronId>]" >&2; exit 2; }
+    usage="usage: aeolus-identity.sh write [--wake-by trierarch] <fleetUrl> <shipId> <shipName> <crewToken> [<squadronId>]"
+    wake_by=""
+    if [ "${2:-}" = --wake-by ]; then
+      [ "${3:-}" = trierarch ] || { echo "$usage" >&2; exit 2; }
+      wake_by=trierarch
+      set -- "$1" "${@:4}"
+    fi
+    { [ "$#" -eq 5 ] || [ "$#" -eq 6 ]; } || { echo "$usage" >&2; exit 2; }
     folder="$(aeolus_folder)"
     mkdir -p "$(dirname "$file")"
     umask 077
     printf 'fleetUrl=%s\nshipId=%s\nshipName=%s\ncrewToken=%s\nfolder=%s\n' "${2%/}" "$3" "$4" "$5" "$folder" > "$file.tmp"
     # A squadron member keeps its squadron: it checks in at the flagship of that name.
     [ "$#" -eq 6 ] && printf 'squadron=%s\n' "$6" >> "$file.tmp"
+    # A trierarch's session: the trierarch wakes it, so the plugin asks for no watcher.
+    [ -n "$wake_by" ] && printf 'wakeBy=%s\n' "$wake_by" >> "$file.tmp"
     mv "$file.tmp" "$file"
     echo "aeolus: this folder now crews ${4} (${3}); identity file ${file}"
     ;;
@@ -51,7 +62,13 @@ case "$command" in
     [ -n "$squadron" ] && echo "squadron: ${squadron}"
     check_in="$(aeolus_identity_get "$file" checkIn)"
     [ -n "$check_in" ] && echo "check-in: ${check_in}"
+    [ "$(aeolus_identity_get "$file" wakeBy)" = trierarch ] && echo "wakes: the trierarch"
     echo "identity file: ${file} (the crew token is its crewToken line)"
+    ;;
+  turn)
+    turn_file="$(aeolus_turn_file)"
+    [ -f "$turn_file" ] || { echo "aeolus: no turn marked yet"; exit 1; }
+    cat "$turn_file"
     ;;
   path)
     echo "$file"
@@ -70,11 +87,11 @@ case "$command" in
       aeolus_process_is "$pid" aeolus-wait.sh && kill "$pid" 2>/dev/null || true
       rm -f "$pid_file"
     fi
-    rm -f "$file" "$(aeolus_refused_file)" "$(aeolus_reported_file)"
+    rm -f "$file" "$(aeolus_refused_file)" "$(aeolus_reported_file)" "$(aeolus_turn_file)"
     echo "aeolus: this folder crews no ship any more"
     ;;
   *)
-    echo "usage: aeolus-identity.sh write|check-in|show|path|delete" >&2
+    echo "usage: aeolus-identity.sh write|check-in|show|turn|path|delete" >&2
     exit 2
     ;;
 esac
