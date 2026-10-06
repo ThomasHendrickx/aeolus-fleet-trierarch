@@ -66,6 +66,37 @@ describe('workspaces in git', () => {
     expect(existsSync(join(made, 'later.md'))).toBe(false);
   });
 
+  it("fetches the repository first and checks out the remote branch for a ref, so a ship starts from current code and not from a stale local branch", async () => {
+    const upstream = join(folder, 'upstream');
+    await git(['clone', '-q', repository, upstream]);
+    await git(['-C', repository, 'remote', 'add', 'origin', upstream]);
+    await git(['-C', repository, 'fetch', '-q', 'origin']);
+    writeFileSync(join(upstream, 'current.md'), 'current\n');
+    await git(['-C', upstream, 'add', '.']);
+    await git(['-C', upstream, 'commit', '-q', '-m', 'current']);
+
+    const { folder: made } = await workspace().prepare({ ...scout, workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'main' } });
+
+    expect(existsSync(join(made, 'current.md'))).toBe(true);
+    expect((await git(['-C', made, 'rev-parse', 'HEAD'])).trim()).toBe((await git(['-C', upstream, 'rev-parse', 'HEAD'])).trim());
+  });
+
+  it('checks out a ref the remote has no branch for as it is, and crews a repository with no remote', async () => {
+    await git(['-C', repository, 'tag', 'v1']);
+
+    const { folder: made } = await workspace().prepare({ ...scout, workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'v1' } });
+
+    expect((await git(['-C', made, 'rev-parse', 'HEAD'])).trim()).toBe((await git(['-C', repository, 'rev-parse', 'v1'])).trim());
+  });
+
+  it('crews from what it has when the remote cannot be fetched', async () => {
+    await git(['-C', repository, 'remote', 'add', 'origin', join(folder, 'gone')]);
+
+    const { folder: made } = await workspace().prepare({ ...scout, workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'main' } });
+
+    expect(existsSync(join(made, 'README.md'))).toBe(true);
+  });
+
   it('uses a worktree a stop mid-crew left', async () => {
     const first = await workspace().prepare(scout);
 

@@ -39,7 +39,7 @@ That gives the command `aeolus-trierarch`.
 | `aeolus-trierarch list` | The wanted entries: ship, state, harness, workspace, since, restarts |
 | `aeolus-trierarch logs [--lines <n>] [--follow]` | The last lines of `~/.aeolus/trierarch/logs/trierarch.log`, and with `--follow` each new one |
 | `aeolus-trierarch config check` | Checks the configuration and gives the flags each harness launches with, and each option value's flags |
-| `aeolus-trierarch start`, `stop`, `restart` | The service. A stopped one starts again at the next login; restart it after you change the configuration |
+| `aeolus-trierarch start`, `stop`, `restart` | The service. `stop` returns once the trierarch has exited; a stopped one starts again at the next login. Restart it after you change the configuration |
 | `aeolus-trierarch install [--no-load]` | Installs the service; with `--no-load` it only writes its file |
 | `aeolus-trierarch uninstall` | Removes the service and stops every session. It deletes nothing else: it lists the worktrees it leaves, and keeps its own files under `~/.aeolus/trierarch/` |
 | `aeolus-trierarch run` | What the service runs: keeps the wanted ships crewed until stopped |
@@ -70,7 +70,7 @@ To stop the trierarch: `aeolus-trierarch stop`, or `aeolus-trierarch uninstall` 
 ```
 
 - **caps**: how many ships it keeps on its list, and how many sessions run at once.
-- **repositories**: by name. A want for a worktree of one gets a git worktree under `~/.aeolus/trierarch/worktrees/<repository>/<ship>`, detached at the want's ref or the repository's HEAD. `worktreeRoot` moves that root.
+- **repositories**: by name. A want for a worktree of one gets a git worktree under `~/.aeolus/trierarch/worktrees/<repository>/<ship>`, detached at the want's ref or the repository's HEAD. It fetches the repository first, and a ref `origin` has a branch for checks out that remote branch (`origin/<ref>`), so a ship starts from current code; when the fetch fails it uses what the repository has. `worktreeRoot` moves that root.
 - **folders**: by name, used as they are, one ship per folder, never removed.
 - **harnesses**: the flags every launch gets, and named options. A want picks option values by name; it never adds a flag, and messages never carry paths or flags. There is no policy on which flags: put `--dangerously-skip-permissions` in `flags` if you want it. The trierarch never adds a flag by itself. With `--remote-control` and no name after it, each session is named `[<repository or folder>] <ship>`, such as `[aeolus-fleet] trial-1`, so it is easy to find among your remote-control sessions.
 

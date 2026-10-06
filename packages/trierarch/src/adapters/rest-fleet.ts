@@ -34,8 +34,8 @@ export class FleetRefusal extends Error {
 }
 
 export interface RestFleet extends FleetPort {
-  /** The deliveries waiting for the trierarch's own ship. */
-  receive(): Promise<Delivery[]>;
+  /** The deliveries waiting for the trierarch's own ship; `signal` ends the fleet's long poll at once. */
+  receive(signal?: AbortSignal): Promise<Delivery[]>;
   /** Registers a ship with its secret, as the trierarch itself at init: its crew token. */
   registerSelf(crew: { shipId: ShipId; secret: string }): Promise<{ crewToken: string }>;
   /** The trierarch's own ship, as its crew token says: it answers while the lease holds. */
@@ -44,7 +44,7 @@ export interface RestFleet extends FleetPort {
 
 export function createRestFleet(options: { fleetUrl: string; crewToken: string }): RestFleet {
   const fleetUrl = options.fleetUrl.replace(/\/$/, '');
-  async function call<T>(request: { path: string; crewToken?: string; body?: unknown; answers: z.ZodType<T> }): Promise<T> {
+  async function call<T>(request: { path: string; crewToken?: string; body?: unknown; answers: z.ZodType<T>; signal?: AbortSignal }): Promise<T> {
     const headers: Record<string, string> = {};
     const crewToken = request.crewToken ?? options.crewToken;
     if (crewToken !== '') {
@@ -55,9 +55,14 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string }
     try {
       response = await fetch(
         `${fleetUrl}/api/v1${request.path}`,
-        request.body === undefined ? { method: 'GET', headers } : { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(request.body) },
+        request.body === undefined
+          ? { method: 'GET', headers, signal: request.signal ?? null }
+          : { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(request.body), signal: request.signal ?? null },
       );
     } catch (error) {
+      if (request.signal?.aborted === true) {
+        throw error;
+      }
       throw new Error(`The fleet at ${fleetUrl} cannot be reached: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
     const body: unknown = await response.json();
@@ -97,8 +102,8 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string }
     release: async (shipId) => {
       await call({ path: '/fleet/release', body: { shipId }, answers: z.unknown() });
     },
-    receive: async () => {
-      const { deliveries } = await call({ path: '/ship/receive', body: { max: 10 }, answers: z.object({ deliveries: z.array(receivedDeliverySchema) }) });
+    receive: async (signal) => {
+      const { deliveries } = await call({ path: '/ship/receive', body: { max: 10 }, answers: z.object({ deliveries: z.array(receivedDeliverySchema) }), ...(signal !== undefined && { signal }) });
       return deliveries.map(({ deliveryId, messageId, senderShipId, contentType, payload }) => ({ deliveryId, messageId, senderShipId, contentType, payload }));
     },
     ack: async (deliveryId) => {
