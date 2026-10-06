@@ -42,7 +42,7 @@ That gives the command `aeolus-trierarch`.
 | `aeolus-trierarch config check` | Checks the configuration and gives the flags each harness launches with, and each option value's flags |
 | `aeolus-trierarch start`, `stop`, `restart` | The service. `stop` returns once the trierarch has exited; a stopped one starts again at the next login. Restart it after you change the configuration |
 | `aeolus-trierarch upgrade [version]` | Installs the given version, or the latest on npm, globally and pinned to it. Then it stops the old process and starts the new one, and shows `status`. Sessions keep running: the new process takes them over. If the install fails, the old version keeps running. It never upgrades on its own |
-| `aeolus-trierarch install [--no-load]` | Installs the service; with `--no-load` it only writes its file |
+| `aeolus-trierarch install [--no-load]` | Installs the service; over a running one it waits for the old process to exit, then loads it again. With `--no-load` it only writes its file |
 | `aeolus-trierarch uninstall` | Removes the service and stops every session. It deletes nothing else: it lists the worktrees it leaves, and keeps its own files under `~/.aeolus/trierarch/` |
 | `aeolus-trierarch run` | What the service runs: keeps the wanted ships crewed until stopped |
 | `aeolus-trierarch --version`, `-v` | The installed version |
