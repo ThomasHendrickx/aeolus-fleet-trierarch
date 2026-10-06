@@ -38,6 +38,7 @@ export const CONFIGURATION: TrierarchConfiguration = {
       flags: ['--remote-control'],
       options: { model: { values: { opus: ['--model', 'claude-opus-5-5'], sonnet: ['--model', 'claude-sonnet-5-5'] }, default: 'opus' } },
     },
+    codex: { flags: [], options: {} },
   },
 };
 
@@ -317,13 +318,15 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
   const fleet = new InMemoryFleet(state);
   const processes = new InMemoryProcesses();
   const harness = new InMemoryHarness(processes);
+  // Each harness keeps its own identities, as the aeolus plugin does per harness.
+  const codex = new InMemoryHarness(processes);
   const workspace = new InMemoryWorkspace();
   const clock = new TestClock();
   const logger = new CollectingLogger();
   const setup = { configuration, version: '0.1.0' };
   const requester = newId('ship');
   const handle = createHandleDelivery({ fleet, workspace, state, setup, clock, logger });
-  const pass = createRunPass({ fleet, harness, processes, workspace, state, setup, clock, logger });
+  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, workspace, state, setup, clock, logger });
   const uninstall = createUninstall({ processes, state });
 
   /** Sends the trierarch a command, as the requester does: its delivery, handled. */
@@ -339,7 +342,7 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
     return delivery;
   }
 
-  return { fleet, processes, harness, workspace, state, clock, logger, requester, handle, pass, uninstall, command };
+  return { fleet, processes, harness, codex, workspace, state, clock, logger, requester, handle, pass, uninstall, command };
 }
 
 export type Trierarch = ReturnType<typeof aTrierarch>;

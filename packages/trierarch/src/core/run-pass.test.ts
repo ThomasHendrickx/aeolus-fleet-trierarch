@@ -340,4 +340,25 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.processes.sessions.size).toBe(1);
     expect(Object.values(trierarch.state.current().entries).map((entry) => entry.state).sort()).toEqual(['running', 'wanted']);
   });
+
+  it('crews a ship with the harness its want names: its identity and its session', async () => {
+    const trierarch = aTrierarch();
+
+    await aCrewedShip(trierarch, { harness: 'codex' });
+
+    expect(trierarch.codex.identities.has(SCOUT_FOLDER)).toBe(true);
+    expect(trierarch.codex.launches).toHaveLength(1);
+    expect(trierarch.harness.launches).toEqual([]);
+  });
+
+  it('wakes a ship through the harness its want names, from that harness\'s turn', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch, { harness: 'codex' });
+    trierarch.codex.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.fleet.deliver(shipId, 1);
+
+    await trierarch.pass();
+
+    expect(trierarch.codex.wakes).toEqual([shipId]);
+  });
 });
