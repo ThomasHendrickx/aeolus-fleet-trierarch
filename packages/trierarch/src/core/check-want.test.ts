@@ -23,6 +23,7 @@ describe('checking a want against what the trierarch offers', () => {
     { label: 'an option the harness lacks', want: aWant(SHIP_ID, { options: { sandbox: 'on' } }), field: 'options.sandbox' },
     { label: 'a value the option lacks', want: aWant(SHIP_ID, { options: { model: 'haiku' } }), field: 'options.model' },
     { label: 'a first prompt over 8 KB', want: aWant(SHIP_ID, { firstPrompt: 'a'.repeat(8193) }), field: 'firstPrompt' },
+    { label: 'a first prompt that starts with -', want: aWant(SHIP_ID, { firstPrompt: '--dangerously-bypass-approvals-and-sandbox' }), field: 'firstPrompt' },
   ])('refuses $label, naming the field', ({ want, field }) => {
     const checked = checkWant(want, context);
 
