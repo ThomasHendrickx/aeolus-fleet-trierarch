@@ -51,6 +51,36 @@ describe('the run loop', () => {
     expect(warned).toEqual(['The loop failed and goes on: The fleet cannot be reached']);
   });
 
+  it('receives again after the fleet could not be reached, as while it restarts, and handles what then comes', async () => {
+    const stopping = new AbortController();
+    const warned: string[] = [];
+    const handled: string[] = [];
+    const delivery = { deliveryId: 'dlv_1', messageId: 'msg_1', senderShipId: 'shp_01m487vd5pdz6zh6s0jdnkg9p6', contentType: 'text/plain', payload: '' } as const;
+    let receives = 0;
+
+    await loop({
+      receive: (signal) => {
+        receives += 1;
+        if (receives === 1) {
+          return Promise.reject(new Error('The fleet at https://fleet.example.com cannot be reached: it answered 502 without JSON, as while it restarts'));
+        }
+        return receives === 2 ? Promise.resolve([delivery]) : longPoll(signal);
+      },
+      handle: (received) => {
+        handled.push(received.deliveryId);
+        stopping.abort();
+        return Promise.resolve();
+      },
+      pass: () => Promise.resolve(),
+      signal: stopping.signal,
+      logger: { warn: (message) => warned.push(message) },
+      intervalMs: 1,
+    });
+
+    expect(warned).toEqual(['The loop failed and goes on: The fleet at https://fleet.example.com cannot be reached: it answered 502 without JSON, as while it restarts']);
+    expect(handled).toEqual(['dlv_1']);
+  });
+
   it('handles each delivery it receives and runs a pass', async () => {
     const stopping = new AbortController();
     const handled: string[] = [];
