@@ -1,19 +1,18 @@
-# 0026 Trierarch: a reconciling supervisor
+# 0026 Trierarch: a reconciling launcher on a machine
 
-- `@aeolus-fleet/trierarch` crews ships on its machine. It is a plain process, not an AI, kept alive by the operating system. It crews its own ship of type `trierarch`, with `fleet:crew` (0002), one per machine. Aeolus knows nothing about it beyond that ship.
-- It keeps a saved wanted list: ships to keep crewed, by ship id, each with its start settings. A loop compares the list with what runs, and starts, restarts or stops to match. Messages only edit the list. Each edit is saved before the ack and is idempotent by message id.
-- Anything with `fleet:manage` creates ships (the console as `argo`, squadrons, an orchestrator); the trierarch crews by ship id. It has no sender allowlist: any ship that can message it may edit its list. Steering comes from local options (caps, the harnesses, repositories and folders it offers), not from policy.
+- `@aeolus-fleet/trierarch` crews ships on its machine. It is a plain process, not an AI, kept alive by the operating system. It crews its own ship of type `trierarch`, with `crew:run` (0029), one per machine. The trierarch plugin commissions that ship and gives the operator its starting prompt for `aeolus-trierarch init` (0030); a trierarch never registers or labels itself.
+- It reconciles from the crew requests assigned to it, read from the fleet: a loop compares them with what runs, and starts, restarts or stops to match. It writes each request's status. It never picks, commissions or retires.
+- It reports what it can do (harnesses with their options as a JSON Schema, workspaces, caps, kept worktrees, orphans) in its report's details.
 - It gets the starting prompt and registers itself, so a session never sees a secret. It writes the folder's identity through the aeolus plugin.
-- It saves an entry as crewing before it registers. On resume, its own entry still crewing with the ship crewed means the register reply was lost: it releases the ship (`fleet:crew`) and crews it again. A want for a ship crewed by any other session is refused.
+- It saves an entry as crewing before it registers. On resume, its own entry still crewing with the ship crewed means the register reply was lost: it releases the ship (`crew:run`) and crews it again.
 - It owns wake and liveness for the sessions it starts. The plugin's in-session watcher is not used there.
-- Release stops the session, ends the lease and removes the entry. The worktree is removed when clean, and kept and reported when not. Retire stays separate. A ship released or retired elsewhere is dropped and its requester notified, never crewed again.
-- First harness: Claude Code. Codex next. Each harness is one adapter, so none bends the design.
+- A removed request is released: it stops the session, ends the lease, removes the worktree when clean (kept and reported when not), and confirms. Retire stays separate.
+- Each harness is one adapter (Claude Code, Codex), so none bends the design.
 
-Why: Thomas starts, restarts and scales sessions by hand. A supervisor that converges on a saved list survives crashes, restarts and lost messages, and keeps the server dumb.
+Why: a machine is a launcher (kubelet): it runs sessions, reports status, holds no authority. Declared state lives in the fleet, not in a file on one machine, so controllers reconcile from state instead of reacting to messages, and no fleet is bound to one machine.
 
 Rejected:
 - An AI dispatcher;
-- `fleet:manage` for the trierarch;
-- a trierarch that commissions its own ships (it would duplicate squadrons and couple to it);
-- a sender allowlist (policy; cross-network trust comes later);
-- crewing again a ship that was released elsewhere.
+- `fleet:manage` or `fleet:crew` for a trierarch (it would crew any ship);
+- a wanted list on the machine, edited by want and release messages (the 0.17 design);
+- a trierarch that commissions its own ships or picks its own work.
