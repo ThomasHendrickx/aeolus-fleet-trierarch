@@ -1,6 +1,6 @@
 import { setTimeout as wait } from 'node:timers/promises';
 
-import { loadConfiguration, readCrewFile } from '../adapters/files.js';
+import { loadConfiguration, readCrewFile, writeRunningFile } from '../adapters/files.js';
 import { createGitWorkspace } from '../adapters/git-workspace.js';
 import { adapterFlagsOf, createHarnesses } from '../adapters/harnesses.js';
 import { createJsonState } from '../adapters/json-state.js';
@@ -35,6 +35,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const handle = createHandleDelivery({ fleet, workspace, state, setup, clock, logger });
   const pass = createRunPass({ fleet, harnesses, processes: tmux, workspace, state, setup, clock, logger });
 
+  await writeRunningFile(paths.running, { pid: process.pid, version: setup.version });
   const found = Object.entries(plugins).map(([harness, plugin]) => `${harness} at ${plugin.root}`);
   logger.info(`aeolus-trierarch ${setup.version} runs for ${crew.fleetUrl}, with the aeolus plugin for ${found.join(' and ') || 'no harness'}`);
   await loop({ receive: (stop) => fleet.receive(stop), handle, pass, signal, logger, intervalMs: PASS_INTERVAL_MS });

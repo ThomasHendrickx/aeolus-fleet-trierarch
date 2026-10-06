@@ -12,6 +12,7 @@ export interface TrierarchPaths {
   readonly configSchema: string;
   readonly crewToken: string;
   readonly state: string;
+  readonly running: string;
   readonly logs: string;
   readonly worktrees: string;
 }
@@ -24,6 +25,7 @@ export function trierarchPaths(at: { homeDirectory: string; config?: string }): 
     configSchema: join(home, 'config.schema.json'),
     crewToken: join(home, 'crew-token'),
     state: join(home, 'state.json'),
+    running: join(home, 'running.json'),
     logs: join(home, 'logs'),
     worktrees: join(home, 'worktrees'),
   };

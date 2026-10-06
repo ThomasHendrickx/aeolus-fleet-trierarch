@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { createClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import { createCodexSetup } from '../adapters/codex-setup.js';
-import { loadConfiguration, readCrewFile, TrierarchFileError } from '../adapters/files.js';
+import { loadConfiguration, readCrewFile, readRunningFile, TrierarchFileError } from '../adapters/files.js';
 import { createJsonState } from '../adapters/json-state.js';
 import { createLogger, readLogLine, renderLogLine } from '../adapters/log.js';
 import { trierarchPaths } from '../adapters/paths.js';
@@ -141,6 +141,7 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
     const report = await inspectStatus({
       configuration,
       version: runningVersion(),
+      running: () => readRunningFile(paths.running),
       crew,
       service: serviceAt(),
       lease: leaseFrom(() => fleet.whoami()),

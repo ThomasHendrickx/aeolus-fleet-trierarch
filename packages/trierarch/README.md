@@ -36,7 +36,7 @@ That gives the command `aeolus-trierarch`.
 
 | Command | What it does |
 | --- | --- |
-| `aeolus-trierarch status` | The installed version, the service (running, pid, since), the fleet and the trierarch's own lease, the caps in use, the entries by state, kept worktrees and orphans |
+| `aeolus-trierarch status` | The installed version, and the one the service runs when it differs (then it says to restart), the service (running, pid, since), the fleet and the trierarch's own lease, the caps in use, the entries by state, kept worktrees and orphans |
 | `aeolus-trierarch list` | The wanted entries: ship, state, harness, workspace, since, restarts |
 | `aeolus-trierarch logs [--lines <n>] [--follow]` | The last lines of `~/.aeolus/trierarch/logs/trierarch.log`, and with `--follow` each new one. The log holds one JSON record per line: each action the loop takes for a ship (crew, launch, wake, report, release, drop, stop) as `{ time, shipId, shipName, action, outcome, next }`, where `next` says what happens after a failure, or a message as `{ time, level, message }`. `logs` renders them as text, and `--json` gives the records as they are (a line that is no record as `{ line }`). `run` in a terminal writes the text |
 | `aeolus-trierarch config check` | Checks the configuration and gives the flags each harness launches with, and each option value's flags. Then the command each harness launches on a first start and on a restart, with each flag marked `(configuration)` or `(adapter)` when the adapter adds it itself (`--no-daemon` for Codex, `--continue` on a Claude Code restart, the remote-control session name) |

@@ -78,3 +78,27 @@ export async function readCrewFile(path: string): Promise<CrewFile> {
   const shipId = idSchema('ship').safeParse(field('shipId'));
   return { fleetUrl, ...(shipId.success && { shipId: shipId.data }), crewToken };
 }
+
+/** What the running trierarch says of itself: its pid and its version, as it started. */
+export interface RunningFile {
+  readonly pid: number;
+  readonly version: string;
+}
+
+const runningFileSchema = z.object({ pid: z.int().positive(), version: z.string() });
+
+/** Written by `run` as it starts: an upgrade replaces the installed files, so only the process itself knows the version it runs. */
+export async function writeRunningFile(path: string, running: RunningFile): Promise<void> {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  await writeFile(path, `${JSON.stringify(running)}\n`);
+}
+
+/** None when no trierarch wrote it (one before 0.18.0 did not) or it does not fit. */
+export async function readRunningFile(path: string): Promise<RunningFile | undefined> {
+  try {
+    const parsed = runningFileSchema.safeParse(JSON.parse(await readFile(path, 'utf8')));
+    return parsed.success ? parsed.data : undefined;
+  } catch {
+    return undefined;
+  }
+}

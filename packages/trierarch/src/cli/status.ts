@@ -1,6 +1,6 @@
 import type { TrierarchConfiguration, TrierarchEntryState } from '@aeolus-fleet/common';
 
-import type { CrewFile } from '../adapters/files.js';
+import type { CrewFile, RunningFile } from '../adapters/files.js';
 import { FleetRefusal } from '../adapters/rest-fleet.js';
 import type { Service, ServiceStatus } from '../adapters/service.js';
 import type { KeptWorktree } from '../core/entry.js';
@@ -19,6 +19,8 @@ export type Lease = 'valid' | 'ended' | 'unreachable';
 export interface StatusReport {
   /** The installed version: what the command runs, and the service once it started again after an upgrade. */
   readonly version: string;
+  /** The version the running service runs, as it said when it started; none when it does not run or did not say. */
+  readonly runningVersion?: string;
   readonly service: ServiceStatus;
   readonly fleet: { readonly url: string; readonly shipId?: string; readonly lease: Lease };
   readonly caps: { readonly ships: { readonly used: number; readonly cap: number }; readonly running: { readonly used: number; readonly cap: number } };
@@ -44,19 +46,23 @@ export function leaseFrom(whoami: () => Promise<unknown>): () => Promise<Lease> 
 export async function inspectStatus(at: {
   configuration: TrierarchConfiguration;
   version: string;
+  running: () => Promise<RunningFile | undefined>;
   crew: CrewFile;
   service: Pick<Service, 'status'>;
   lease: () => Promise<Lease>;
   processes: ProcessPort;
   state: StatePort;
 }): Promise<StatusReport> {
-  const [service, lease, sessions, state] = await Promise.all([at.service.status(), at.lease(), at.processes.list(), at.state.load()]);
+  const [service, lease, sessions, state, running] = await Promise.all([at.service.status(), at.lease(), at.processes.list(), at.state.load(), at.running()]);
+  // Only the service's own process counts: a file left by an earlier process, or by a `run` outside the service, says nothing of it.
+  const runningVersion = service.isRunning && running !== undefined && running.pid === service.pid ? running.version : undefined;
   const entries: Record<TrierarchEntryState, number> = { wanted: 0, crewing: 0, running: 0, restarting: 0, crashed: 0, releasing: 0 };
   for (const entry of Object.values(state.entries)) {
     entries[entry.state] += 1;
   }
   return {
     version: at.version,
+    ...(runningVersion !== undefined && { runningVersion }),
     service,
     fleet: { url: at.crew.fleetUrl, ...(at.crew.shipId !== undefined && { shipId: at.crew.shipId }), lease },
     caps: {
@@ -91,10 +97,22 @@ function describeFleet(fleet: StatusReport['fleet']): string {
   }
 }
 
+const RESTART = 'aeolus-trierarch restart';
+
+function describeVersion(report: StatusReport): string {
+  if (!report.service.isRunning || report.runningVersion === report.version) {
+    return report.version;
+  }
+  if (report.runningVersion === undefined) {
+    return `${report.version} installed, the running service did not say its version, so it started before ${report.version}: restart it to run the installed one (${RESTART})`;
+  }
+  return `${report.version} installed, ${report.runningVersion} running: restart the service to run the installed one (${RESTART})`;
+}
+
 export function describeStatus(report: StatusReport): string {
   const counted = Object.entries(report.entries).filter(([, count]) => count > 0);
   return [
-    `Version: ${report.version}`,
+    `Version: ${describeVersion(report)}`,
     `Service: ${describeService(report.service)}`,
     `Fleet: ${describeFleet(report.fleet)}`,
     `Caps: ${String(report.caps.ships.used)} of ${String(report.caps.ships.cap)} ships on the list, ${String(report.caps.running.used)} of ${String(report.caps.running.cap)} sessions running`,
