@@ -22,6 +22,7 @@ let registered: { fleetUrl: string; shipId: ShipId; secret: string }[];
 let service: FakeService;
 let repository: string;
 let codex: FakeCodexSetup;
+let isCodexInstalled: boolean;
 
 /** A prompter that answers from a script, in order, each answer for a question containing its words; it fails on any question it was not given. */
 class ScriptedPrompter implements Prompter {
@@ -105,6 +106,7 @@ class FakeCodexSetup implements CodexSetup {
 
 beforeEach(() => {
   codex = new FakeCodexSetup();
+  isCodexInstalled = false;
   home = mkdtempSync(join(tmpdir(), 'trierarch-init-'));
   paths = trierarchPaths({ homeDirectory: home });
   registered = [];
@@ -117,9 +119,9 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-function init(flags: Partial<InitFlags>, prompter: Prompter = new ScriptedPrompter([]), at: { isCodexInstalled?: boolean } = {}) {
+function init(flags: Partial<InitFlags>, prompter: Prompter = new ScriptedPrompter([])) {
   return initTrierarch({
-    isCodexInstalled: at.isCodexInstalled ?? false,
+    isCodexInstalled,
     codex,
     homeDirectory: home,
     paths,
@@ -418,7 +420,9 @@ describe('aeolus-trierarch init, for Codex', () => {
     const [skip, remote, ...rest] = defaults();
     const prompter = new ScriptedPrompter([skip ?? ['', false], remote ?? ['', false], ['Offer Codex', true], ['--dangerously-bypass-approvals-and-sandbox', true], ['--no-daemon', true], ...rest]);
 
-    await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET }, prompter, { isCodexInstalled: true });
+    isCodexInstalled = true;
+
+    await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET }, prompter);
 
     expect(prompter.isDone).toBe(true);
     expect(configuration().harnesses.codex).toEqual({ flags: ['--dangerously-bypass-approvals-and-sandbox', '--no-daemon'], options: {} });

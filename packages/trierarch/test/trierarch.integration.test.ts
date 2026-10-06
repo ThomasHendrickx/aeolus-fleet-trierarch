@@ -104,6 +104,8 @@ describe('the trierarch on a real fleet', () => {
       prompter: quiet,
       fleetAt: (fleetUrl) => createRestFleet({ fleetUrl, crewToken: '' }),
       claudeCode: createClaudeCodeSetup({ homeDirectory: home }),
+      codex: { trust: () => Promise.reject(new Error('no Codex here')), trustAeolusHooks: () => Promise.reject(new Error('no Codex here')) },
+      isCodexInstalled: false,
       service,
     });
     const fleet = createRestFleet(await readCrewFile(paths.crewToken));

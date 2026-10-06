@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createClaudeCodeSetup } from '../adapters/claude-code-setup.js';
+import { createCodexSetup } from '../adapters/codex-setup.js';
 import { loadConfiguration, readCrewFile, TrierarchFileError } from '../adapters/files.js';
 import { createJsonState } from '../adapters/json-state.js';
 import { trierarchPaths } from '../adapters/paths.js';
@@ -26,7 +27,7 @@ export const USAGE = [
   'Usage: aeolus-trierarch <command> [--config <path>] [--json]',
   '',
   'Set up:',
-  "  init [--fleet-url <url>] [--ship-id <shp_...>] [--secret <secret>] [--yes]   the whole setup: registers the trierarch's own ship, writes the configuration, answers Claude Code's one-time questions and offers to install the service. Asks for what is missing; prefer typing the secret when asked, so it stays out of your shell history",
+  "  init [--fleet-url <url>] [--ship-id <shp_...>] [--secret <secret>] [--yes]   the whole setup: registers the trierarch's own ship, writes the configuration, answers Claude Code's and Codex's one-time questions and offers to install the service. Asks for what is missing; prefer typing the secret when asked, so it stays out of your shell history",
   '  config check          check the configuration and give the effective flags per harness',
   '',
   'Look:',
@@ -157,6 +158,8 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
           prompter,
           fleetAt: (url) => createRestFleet({ fleetUrl: url, crewToken: '' }),
           claudeCode: createClaudeCodeSetup({ homeDirectory }),
+          codex: createCodexSetup(),
+          isCodexInstalled: (await runCommand('sh', { args: ['-c', 'command -v codex'] })).status === 0,
           service: serviceAt(),
         });
         return { data: report, text: report.said.join('\n') };
