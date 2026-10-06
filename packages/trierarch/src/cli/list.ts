@@ -1,6 +1,7 @@
 import type { ShipId, TrierarchEntryState, TrierarchWorkspace } from '@aeolus-fleet/common';
 
 import type { StatePort } from '../core/ports.js';
+import { PLAIN, stateTone, type Style } from '../adapters/style.js';
 
 /** `aeolus-trierarch list`: the wanted entries, from the saved state. */
 
@@ -39,14 +40,24 @@ export async function inspectList(state: StatePort): Promise<ListedEntry[]> {
 
 const COLUMN_GAP = '  ';
 
-export function describeList(entries: readonly ListedEntry[]): string {
+const HEADER = ['SHIP', 'STATE', 'HARNESS', 'WORKSPACE', 'SINCE', 'RESTARTS'];
+const STATE_COLUMN = 1;
+
+/** A table, its columns aligned on the plain text: the header strong and each state in its tone where the style colours. */
+export function describeList(entries: readonly ListedEntry[], style: Style = PLAIN): string {
   if (entries.length === 0) {
     return 'No ship is on the list.';
   }
-  const rows = [
-    ['SHIP', 'STATE', 'HARNESS', 'WORKSPACE', 'SINCE', 'RESTARTS'],
-    ...entries.map((entry) => [entry.shipId, entry.state, entry.harness, entry.workspace, entry.since, String(entry.restarts)]),
-  ];
-  const widths = rows[0]?.map((_, column) => Math.max(...rows.map((row) => row[column]?.length ?? 0))) ?? [];
-  return rows.map((row) => row.map((cell, column) => (column === row.length - 1 ? cell : cell.padEnd(widths[column] ?? 0))).join(COLUMN_GAP)).join('\n');
+  const rows = [HEADER, ...entries.map((entry) => [entry.shipId, entry.state, entry.harness, entry.workspace, entry.since, String(entry.restarts)])];
+  const widths = HEADER.map((_, column) => Math.max(...rows.map((row) => row[column]?.length ?? 0)));
+  const toned = (cell: string, at: { row: number; column: number }): string => {
+    if (at.row === 0) {
+      return style.tone('strong', cell);
+    }
+    const entry = entries[at.row - 1];
+    return at.column === STATE_COLUMN && entry !== undefined ? style.tone(stateTone(entry.state), cell) : cell;
+  };
+  return rows
+    .map((row, rowAt) => row.map((cell, column) => toned(column === row.length - 1 ? cell : cell.padEnd(widths[column] ?? 0), { row: rowAt, column })).join(COLUMN_GAP))
+    .join('\n');
 }

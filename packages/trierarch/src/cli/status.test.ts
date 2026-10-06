@@ -1,3 +1,5 @@
+import { stripVTControlCharacters } from 'node:util';
+
 import { describe, expect, it } from 'vitest';
 
 import { FleetRefusal } from '../adapters/rest-fleet.js';
@@ -5,6 +7,7 @@ import type { RunningFile } from '../adapters/files.js';
 import type { ServiceStatus } from '../adapters/service.js';
 import { aTrierarch, aWant, CONFIGURATION, newId, WORKTREE_ROOT } from '../../test/support/in-memory.js';
 import { describeStatus, inspectStatus, leaseFrom, type Lease } from './status.js';
+import { createStyle } from '../adapters/style.js';
 
 const RUNNING: ServiceStatus = { file: '/LaunchAgents/dev.aeolus-fleet.trierarch.plist', isInstalled: true, isRunning: true, pid: 4242, since: '2026-10-06T07:00:00.000Z' };
 const shipId = newId('ship');
@@ -56,6 +59,15 @@ describe('aeolus-trierarch status', () => {
         'Orphans: none',
       ].join('\n'),
     );
+  });
+
+  it('colours how the service, the lease and the entries stand on a colour terminal, saying the same as in plain text', async () => {
+    const report = await inspect(aTrierarch(), { lease: 'ended' });
+
+    const coloured = describeStatus(report, createStyle({ isColour: true }));
+
+    expect(coloured).not.toBe(describeStatus(report));
+    expect(stripVTControlCharacters(coloured)).toBe(describeStatus(report));
   });
 
   it('lists kept worktrees and orphans', async () => {

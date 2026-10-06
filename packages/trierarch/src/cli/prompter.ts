@@ -1,6 +1,8 @@
 import { createInterface } from 'node:readline';
 import { Writable } from 'node:stream';
 
+import { PLAIN, type Style } from '../adapters/style.js';
+
 /**
  * How init asks the operator: a line of text, a secret never shown as it is
  * typed, yes or no. Node's readline, no prompt library: the questions are
@@ -12,6 +14,8 @@ export interface Prompter {
   secret(question: string): Promise<string>;
   confirm(question: string, options: { isDefault: boolean }): Promise<boolean>;
   say(message: string): void;
+  /** Starts a step of the flow: its title is shown before the step's first question, and not at all for a step that asks nothing. */
+  step(title: string): void;
 }
 
 export interface TerminalPrompter extends Prompter {
@@ -21,8 +25,17 @@ export interface TerminalPrompter extends Prompter {
 const YES = new Set(['y', 'yes']);
 const NO = new Set(['n', 'no']);
 
-export function createTerminalPrompter(at: { input: NodeJS.ReadableStream; output: NodeJS.WritableStream & { isTTY?: boolean } }): TerminalPrompter {
+export function createTerminalPrompter(at: { input: NodeJS.ReadableStream; output: NodeJS.WritableStream & { isTTY?: boolean }; style?: Style }): TerminalPrompter {
   const { input, output } = at;
+  const style = at.style ?? PLAIN;
+  // The title of the step whose first question is still to come.
+  let pendingStep: string | undefined;
+  const showStep = (): void => {
+    if (pendingStep !== undefined) {
+      output.write(`\n${style.tone('strong', pendingStep)}\n`);
+      pendingStep = undefined;
+    }
+  };
   // What readline echoes goes through here, so a secret's keys can be kept off the screen.
   let isMuted = false;
   const echo = new Writable({
@@ -57,6 +70,7 @@ export function createTerminalPrompter(at: { input: NodeJS.ReadableStream; outpu
   });
 
   const ask = async (question: string): Promise<string> => {
+    showStep();
     output.write(question);
     const line = waiting.shift();
     if (line !== undefined) {
@@ -76,10 +90,11 @@ export function createTerminalPrompter(at: { input: NodeJS.ReadableStream; outpu
 
   const prompter: TerminalPrompter = {
     text: async (question, options = {}) => {
-      const answer = (await ask(`${question} ${options.default === undefined ? '' : `(${options.default}) `}`)).trim();
+      const answer = (await ask(`${question} ${options.default === undefined ? '' : `${style.tone('quiet', `(${options.default})`)} `}`)).trim();
       return answer === '' ? (options.default ?? '') : answer;
     },
     secret: async (question) => {
+      showStep();
       output.write(`${question} `);
       isMuted = true;
       try {
@@ -91,7 +106,7 @@ export function createTerminalPrompter(at: { input: NodeJS.ReadableStream; outpu
     },
     confirm: async (question, { isDefault }) => {
       for (;;) {
-        const answer = (await ask(`${question} ${isDefault ? '[Y/n]' : '[y/N]'} `)).trim().toLowerCase();
+        const answer = (await ask(`${question} ${style.tone('quiet', isDefault ? '[Y/n]' : '[y/N]')} `)).trim().toLowerCase();
         if (answer === '') {
           return isDefault;
         }
@@ -102,7 +117,10 @@ export function createTerminalPrompter(at: { input: NodeJS.ReadableStream; outpu
       }
     },
     say: (message) => {
-      output.write(`${message}\n`);
+      output.write(`${style.tone('busy', message)}\n`);
+    },
+    step: (title) => {
+      pendingStep = title;
     },
     close: () => {
       lines.close();

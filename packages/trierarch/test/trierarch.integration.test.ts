@@ -97,7 +97,7 @@ describe('the trierarch on a real fleet', () => {
     const scout = await commission('scout', { type: 'reviewer' });
 
     const service = { install: () => Promise.resolve(), restart: () => Promise.resolve(), status: () => Promise.resolve({ file: 'none', isInstalled: true, isRunning: true }) };
-    const quiet = { text: () => Promise.reject(new Error('asked')), secret: () => Promise.reject(new Error('asked')), confirm: () => Promise.reject(new Error('asked')), say: () => undefined };
+    const quiet = { text: () => Promise.reject(new Error('asked')), secret: () => Promise.reject(new Error('asked')), confirm: () => Promise.reject(new Error('asked')), say: () => undefined, step: () => undefined };
     await initTrierarch({
       homeDirectory: home,
       paths,

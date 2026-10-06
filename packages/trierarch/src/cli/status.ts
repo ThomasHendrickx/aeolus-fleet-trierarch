@@ -1,10 +1,11 @@
-import type { TrierarchConfiguration, TrierarchEntryState } from '@aeolus-fleet/common';
+import { trierarchEntryStateSchema, type TrierarchConfiguration, type TrierarchEntryState } from '@aeolus-fleet/common';
 
 import type { CrewFile, RunningFile } from '../adapters/files.js';
 import { FleetRefusal } from '../adapters/rest-fleet.js';
 import type { Service, ServiceStatus } from '../adapters/service.js';
 import type { KeptWorktree } from '../core/entry.js';
 import type { ProcessPort, StatePort } from '../core/ports.js';
+import { PLAIN, stateTone, type Style } from '../adapters/style.js';
 
 /**
  * `aeolus-trierarch status`: how the trierarch stands on this machine, from
@@ -75,49 +76,58 @@ export async function inspectStatus(at: {
   };
 }
 
-function describeService(service: ServiceStatus): string {
+function describeService(service: ServiceStatus, style: Style): string {
   if (!service.isInstalled) {
-    return 'not installed (aeolus-trierarch install)';
+    return style.tone('bad', 'not installed (aeolus-trierarch install)');
   }
   if (!service.isRunning) {
-    return 'installed, not running (aeolus-trierarch start)';
+    return style.tone('busy', 'installed, not running (aeolus-trierarch start)');
   }
-  return ['running', ...(service.pid === undefined ? [] : [`pid ${String(service.pid)}`]), ...(service.since === undefined ? [] : [`since ${service.since}`])].join(', ');
+  return [style.tone('good', 'running'), ...(service.pid === undefined ? [] : [`pid ${String(service.pid)}`]), ...(service.since === undefined ? [] : [`since ${service.since}`])].join(', ');
 }
 
-function describeFleet(fleet: StatusReport['fleet']): string {
+function describeFleet(fleet: StatusReport['fleet'], style: Style): string {
   const ship = fleet.shipId ?? 'its ship';
   switch (fleet.lease) {
     case 'valid':
-      return `${fleet.url}, the lease of ${ship} is valid`;
+      return `${fleet.url}, ${style.tone('good', `the lease of ${ship} is valid`)}`;
     case 'ended':
-      return `${fleet.url}, the lease of ${ship} ended: its ship was released or retired, so it crews nothing`;
+      return `${fleet.url}, ${style.tone('bad', `the lease of ${ship} ended`)}: its ship was released or retired, so it crews nothing`;
     case 'unreachable':
-      return `${fleet.url} cannot be reached`;
+      return `${fleet.url} ${style.tone('bad', 'cannot be reached')}`;
   }
 }
 
 const RESTART = 'aeolus-trierarch restart';
 
-function describeVersion(report: StatusReport): string {
+/** The installed version, and where the running service runs another, what to do about it, in the busy tone. */
+function describeVersion(report: StatusReport, style: Style): string {
   if (!report.service.isRunning || report.runningVersion === report.version) {
     return report.version;
   }
   if (report.runningVersion === undefined) {
-    return `${report.version} installed, the running service did not say its version, so it started before ${report.version}: restart it to run the installed one (${RESTART})`;
+    return style.tone('busy', `${report.version} installed, the running service did not say its version, so it started before ${report.version}: restart it to run the installed one (${RESTART})`);
   }
-  return `${report.version} installed, ${report.runningVersion} running: restart the service to run the installed one (${RESTART})`;
+  return style.tone('busy', `${report.version} installed, ${report.runningVersion} running: restart the service to run the installed one (${RESTART})`);
 }
 
-export function describeStatus(report: StatusReport): string {
+/** Each line its label and how it stands; where the style colours, the label strong and each state in its tone. */
+export function describeStatus(report: StatusReport, style: Style = PLAIN): string {
   const counted = Object.entries(report.entries).filter(([, count]) => count > 0);
+  const line = (label: string, text: string): string => `${style.tone('strong', `${label}:`)} ${text}`;
   return [
-    `Version: ${describeVersion(report)}`,
-    `Service: ${describeService(report.service)}`,
-    `Fleet: ${describeFleet(report.fleet)}`,
-    `Caps: ${String(report.caps.ships.used)} of ${String(report.caps.ships.cap)} ships on the list, ${String(report.caps.running.used)} of ${String(report.caps.running.cap)} sessions running`,
-    `Entries: ${counted.length === 0 ? 'none' : counted.map(([state, count]) => `${state} ${String(count)}`).join(', ')}`,
-    `Kept worktrees: ${report.kept.length === 0 ? 'none' : report.kept.map((kept) => `${kept.path} (${kept.shipId})`).join(', ')}`,
-    `Orphans: ${report.orphans.length === 0 ? 'none' : report.orphans.join(', ')}`,
+    line('Version', describeVersion(report, style)),
+    line('Service', describeService(report.service, style)),
+    line('Fleet', describeFleet(report.fleet, style)),
+    line('Caps', `${String(report.caps.ships.used)} of ${String(report.caps.ships.cap)} ships on the list, ${String(report.caps.running.used)} of ${String(report.caps.running.cap)} sessions running`),
+    line('Entries', counted.length === 0 ? 'none' : counted.map(([state, count]) => style.tone(stateToneOf(state), `${state} ${String(count)}`)).join(', ')),
+    line('Kept worktrees', report.kept.length === 0 ? 'none' : style.tone('busy', report.kept.map((kept) => `${kept.path} (${kept.shipId})`).join(', '))),
+    line('Orphans', report.orphans.length === 0 ? 'none' : style.tone('busy', report.orphans.join(', '))),
   ].join('\n');
+}
+
+/** The tone of a state counted under entries, as its name is a key of the report. */
+function stateToneOf(state: string): ReturnType<typeof stateTone> {
+  const parsed = trierarchEntryStateSchema.safeParse(state);
+  return parsed.success ? stateTone(parsed.data) : 'quiet';
 }

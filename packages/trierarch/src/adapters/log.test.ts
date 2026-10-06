@@ -1,6 +1,9 @@
+import { stripVTControlCharacters } from 'node:util';
+
 import { describe, expect, it } from 'vitest';
 
 import { newId } from '../../test/support/in-memory.js';
+import { createStyle } from './style.js';
 import { createLogger, readLogLine, renderLogLine } from './log.js';
 
 const NOW = new Date('2026-10-06T15:00:00.000Z');
@@ -59,6 +62,17 @@ describe("the trierarch's log", () => {
       `2026-10-06T15:00:00.000Z ${shipId} (scout) crew: crewed, claude-code started in /worktrees/aeolus-fleet/scout`,
       '2026-10-06T15:00:00.000Z warn The loop failed and goes on',
     ]);
+  });
+
+  it('colours a line on a colour terminal, saying the same as in plain text', () => {
+    const { logger, out } = aLogger();
+    logger.action(failed);
+    const line = (out[0] ?? '').trimEnd();
+
+    const coloured = renderLogLine(line, createStyle({ isColour: true }));
+
+    expect(coloured).not.toBe(renderLogLine(line));
+    expect(stripVTControlCharacters(coloured)).toBe(renderLogLine(line));
   });
 
   it('reads a line that is no record, such as an older line or a stack trace, as it is', () => {

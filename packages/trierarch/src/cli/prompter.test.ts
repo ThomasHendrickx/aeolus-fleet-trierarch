@@ -33,6 +33,21 @@ describe('the terminal prompter', () => {
     expect(shown).toContain('How many ships? (4) ');
   });
 
+  it('shows a step once, before its first question, and nothing for a step with no question', async () => {
+    input.write('aeolus-fleet\n4\n');
+
+    prompter.step('The fleet');
+    prompter.step('Workspaces');
+    await prompter.text('Its name?');
+    await prompter.text('How many ships?');
+    prompter.step('The service');
+
+    expect(shown).not.toContain('The fleet');
+    expect(shown.indexOf('Workspaces')).toBeLessThan(shown.indexOf('Its name?'));
+    expect(shown.split('Workspaces')).toHaveLength(2);
+    expect(shown).not.toContain('The service');
+  });
+
   it('answers yes or no, and the default for an empty line', async () => {
     input.write('y\nno\n\n\n');
 

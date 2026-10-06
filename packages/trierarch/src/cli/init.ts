@@ -64,6 +64,8 @@ function defaultsOnly(prompter: Prompter): Prompter {
     say: (message) => {
       prompter.say(message);
     },
+    // --yes asks nothing, so no step has a question to show its title before.
+    step: () => undefined,
   };
 }
 
@@ -212,6 +214,7 @@ async function askCodex(at: { base: TrierarchConfiguration; prompter: Prompter; 
 async function askConfiguration(at: { base: TrierarchConfiguration; prompter: Prompter; homeDirectory: string; isCodexInstalled: boolean }): Promise<TrierarchConfiguration> {
   const { base, prompter } = at;
   const harness = base.harnesses[CLAUDE_CODE] ?? { flags: [], options: {} };
+  prompter.step('Claude Code');
   const isSkipping = await prompter.confirm(`Launch Claude Code with ${SKIP_PERMISSIONS}? Its sessions then run every tool without asking.`, {
     isDefault: harness.flags.includes(SKIP_PERMISSIONS),
   });
@@ -223,9 +226,12 @@ async function askConfiguration(at: { base: TrierarchConfiguration; prompter: Pr
     ...(isSkipping ? [SKIP_PERMISSIONS] : []),
     ...(isRemote ? [REMOTE_CONTROL] : []),
   ];
+  prompter.step('Codex');
   const codex = await askCodex(at);
+  prompter.step('Workspaces');
   const repositories = await askPlaces({ held: base.repositories, prompter, homeDirectory: at.homeDirectory, questions: REPOSITORY_QUESTIONS });
   const folders = await askPlaces({ held: base.folders, prompter, homeDirectory: at.homeDirectory, questions: FOLDER_QUESTIONS });
+  prompter.step('Caps');
   const ships = await askUntil({ prompter, ask: () => prompter.text('How many ships may it keep on its list?', { default: String(base.caps.ships) }), accept: asCap });
   const running = await askUntil({ prompter, ask: () => prompter.text('How many sessions may run at once?', { default: String(base.caps.running) }), accept: asCap });
   const others = Object.fromEntries(Object.entries(base.harnesses).filter(([name]) => name !== CODEX));
@@ -259,6 +265,7 @@ export async function initTrierarch(input: {
   let fleetUrl: string;
   let shipId: ShipId | undefined;
   if (crew === undefined) {
+    prompter.step('The fleet');
     const asked = await askCrew(flags, prompter);
     const { crewToken } = await input.fleetAt(asked.fleetUrl).registerSelf({ shipId: asked.shipId, secret: asked.secret });
     await writeCrewFile(paths.crewToken, { fleetUrl: asked.fleetUrl, shipId: asked.shipId, crewToken });
@@ -323,6 +330,7 @@ export async function initTrierarch(input: {
   said.push(...codex.said);
 
   // The service: offered when it is not installed, restarted when it should read a new configuration.
+  prompter.step('The service');
   let serviced: InitReport['service'] = 'unchanged';
   const status = await service.status();
   if (!status.isInstalled) {
