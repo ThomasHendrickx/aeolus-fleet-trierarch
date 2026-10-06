@@ -1,6 +1,7 @@
-import type { TrierarchConfiguration } from '@aeolus-fleet/common';
+import type { TrierarchAdapterFlag, TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { HarnessPort } from '../core/ports.js';
+import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
 import { effectiveFlags } from './flags.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
 import type { Tmux } from './tmux.js';
@@ -16,20 +17,37 @@ import type { Tmux } from './tmux.js';
 export const WAKE_PROMPT = '/aeolus:wake';
 
 const REMOTE_CONTROL = '--remote-control';
+const CONTINUE = '--continue';
+
+export const CLAUDE_CODE_ADAPTER_FLAGS: readonly TrierarchAdapterFlag[] = [{ flag: CONTINUE, when: 'restart' }];
 
 /**
- * The flags, with a name for the remote-control session where the operator
- * gave `--remote-control` without one: `[<repository or folder>] <ship>`, so
- * the session is easy to find among the operator's remote-control sessions.
- * A name the operator gave is kept; without the flag nothing is added.
+ * The configured flags, with a name for the remote-control session where the
+ * operator gave `--remote-control` without one: `[<repository or folder>]
+ * <ship>`, so the session is easy to find among the operator's
+ * remote-control sessions. A name the operator gave is kept; without the
+ * flag nothing is added.
  */
-function namedRemoteControl(flags: readonly string[], name: string): string[] {
+function namedRemoteControl(flags: readonly string[], name: string): CommandPart[] {
   const at = flags.indexOf(REMOTE_CONTROL);
   const next = flags[at + 1];
   if (at === -1 || (next !== undefined && !next.startsWith('-'))) {
-    return [...flags];
+    return [{ words: flags, source: 'configuration' }];
   }
-  return [...flags.slice(0, at + 1), name, ...flags.slice(at + 1)];
+  return [
+    { words: flags.slice(0, at + 1), source: 'configuration' },
+    { words: [name], source: 'adapter' },
+    { words: flags.slice(at + 1), source: 'configuration' },
+  ];
+}
+
+/** `claude <prompt>`, the prompt before the flags (a flag with an optional value, such as `--remote-control [name]`, would take it), then `--continue` on a restart. */
+export function claudeCodeCommandLine(at: { flags: readonly string[]; sessionName: string; prompt: string; isFirstStart: boolean; program?: string }): CommandPart[] {
+  return partsWithWords([
+    { words: [at.program ?? 'claude', at.prompt] },
+    ...namedRemoteControl(at.flags, at.sessionName),
+    { words: at.isFirstStart ? [] : [CONTINUE], source: 'adapter' },
+  ]);
 }
 
 export function createClaudeCodeHarness(options: {
@@ -49,10 +67,14 @@ export function createClaudeCodeHarness(options: {
         throw new Error(`The configuration has no harness ${harness}`);
       }
       const prompt = isFirstStart && firstPrompt !== undefined ? firstPrompt : WAKE_PROMPT;
-      const flags = namedRemoteControl(effectiveFlags(settings, picked), `[${workspace.kind === 'worktree' ? workspace.repository : workspace.name}] ${shipName}`);
-      // The prompt goes first: a flag with an optional value, such as `--remote-control [name]`, would take it.
-      const command = [options.command ?? 'claude', prompt, ...flags, ...(isFirstStart ? [] : ['--continue'])];
-      await sessions.start({ shipId, folder, command });
+      const command = claudeCodeCommandLine({
+        flags: effectiveFlags(settings, picked),
+        sessionName: `[${workspace.kind === 'worktree' ? workspace.repository : workspace.name}] ${shipName}`,
+        prompt,
+        isFirstStart,
+        ...(options.command !== undefined && { program: options.command }),
+      });
+      await sessions.start({ shipId, folder, command: wordsOf(command) });
     },
     wake: async ({ shipId }) => {
       await sessions.type({ shipId, text: WAKE_PROMPT });

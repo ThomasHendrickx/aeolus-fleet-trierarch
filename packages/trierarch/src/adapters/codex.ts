@@ -1,6 +1,7 @@
-import type { TrierarchConfiguration } from '@aeolus-fleet/common';
+import type { TrierarchAdapterFlag, TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { HarnessPort } from '../core/ports.js';
+import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
 import { effectiveFlags } from './flags.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
 import type { Tmux } from './tmux.js';
@@ -28,6 +29,18 @@ export const CODEX_TYPING_SETTLE_MS = 1000;
  */
 const NO_DAEMON = '--no-daemon';
 
+export const CODEX_ADAPTER_FLAGS: readonly TrierarchAdapterFlag[] = [{ flag: NO_DAEMON, when: 'always' }];
+
+/** `codex <prompt>`, or `codex resume --last <prompt>` on a restart, then the configured flags, then --no-daemon once. */
+export function codexCommandLine(at: { flags: readonly string[]; prompt: string; isFirstStart: boolean; program?: string }): CommandPart[] {
+  const program = at.program ?? 'codex';
+  return partsWithWords([
+    { words: at.isFirstStart ? [program, at.prompt] : [program, 'resume', '--last', at.prompt] },
+    { words: at.flags.filter((flag) => flag !== NO_DAEMON), source: 'configuration' },
+    { words: [NO_DAEMON], source: 'adapter' },
+  ]);
+}
+
 export function createCodexHarness(options: {
   configuration: TrierarchConfiguration;
   plugin: AeolusPlugin;
@@ -45,10 +58,8 @@ export function createCodexHarness(options: {
         throw new Error(`The configuration has no harness ${harness}`);
       }
       const prompt = isFirstStart && firstPrompt !== undefined ? firstPrompt : WAKE_PROMPT;
-      const program = options.command ?? 'codex';
-      const command = isFirstStart ? [program, prompt] : [program, 'resume', '--last', prompt];
-      const flags = effectiveFlags(settings, picked).filter((flag) => flag !== NO_DAEMON);
-      await sessions.start({ shipId, folder, command: [...command, ...flags, NO_DAEMON] });
+      const command = codexCommandLine({ flags: effectiveFlags(settings, picked), prompt, isFirstStart, ...(options.command !== undefined && { program: options.command }) });
+      await sessions.start({ shipId, folder, command: wordsOf(command) });
     },
     wake: async ({ shipId }) => {
       // The space closes Codex's skill picker, which would otherwise take the Enter.

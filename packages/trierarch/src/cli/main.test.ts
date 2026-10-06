@@ -44,13 +44,13 @@ describe('aeolus-trierarch', () => {
 
     expect(output).toContain(
       [
-        '  first start: claude <first prompt> --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --model claude-opus-5-5 (configuration)',
+        '  first start: claude "<first prompt>" --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --model claude-opus-5-5 (configuration)',
         '  restart: claude /aeolus:wake --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --model claude-opus-5-5 (configuration) --continue (adapter)',
       ].join('\n'),
     );
     expect(output).toContain(
       [
-        '  first start: codex <first prompt> --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter)',
+        '  first start: codex "<first prompt>" --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter)',
         '  restart: codex resume --last $aeolus-wake --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter)',
       ].join('\n'),
     );
@@ -67,7 +67,13 @@ describe('aeolus-trierarch', () => {
         'claude-code': {
           flags: ['--remote-control', '--model', 'claude-opus-5-5'],
           adapterFlags: [{ flag: '--continue', when: 'restart' }],
-          restart: expect.arrayContaining([{ words: ['--continue'], source: 'adapter' }]),
+          restart: [
+            { words: ['claude', '/aeolus:wake'] },
+            { words: ['--remote-control'], source: 'configuration' },
+            { words: ['[<repository or folder>] <ship>'], source: 'adapter' },
+            { words: ['--model', 'claude-opus-5-5'], source: 'configuration' },
+            { words: ['--continue'], source: 'adapter' },
+          ],
         },
       },
     });
@@ -123,7 +129,7 @@ describe('aeolus-trierarch', () => {
 
     const { output } = await main(['config', 'check', '--config', config, '--json'], { HOME: home });
 
-    expect(JSON.parse(output)).toEqual({
+    expect(JSON.parse(output)).toMatchObject({
       path: config,
       harnesses: { 'claude-code': { flags: ['--remote-control', '--model', 'claude-opus-5-5'], options: { model: { opus: ['--model', 'claude-opus-5-5'], sonnet: ['--model', 'claude-sonnet-5-5'] } } } },
     });
