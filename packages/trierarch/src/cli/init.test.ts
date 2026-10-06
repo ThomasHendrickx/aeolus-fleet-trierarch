@@ -334,6 +334,17 @@ describe('aeolus-trierarch init on a machine set up already', () => {
     await expect(createClaudeCodeSetup({ homeDirectory: home }).isTrusted(join(home, 'worktrees'))).resolves.toBe(true);
   });
 
+  it('trusts every configured folder for Claude Code too, a folder added since among them, so a want for a folder never waits on the trust question', async () => {
+    const notes = join(home, 'notes');
+    mkdirSync(notes);
+    writeFileSync(paths.config, JSON.stringify({ ...configuration(), folders: { notes: { path: notes } } }));
+
+    const report = await init({ isYes: true });
+
+    await expect(createClaudeCodeSetup({ homeDirectory: home }).isTrusted(notes)).resolves.toBe(true);
+    expect(report.trusted).toEqual([paths.worktrees, notes]);
+  });
+
   it('refuses a ship id or secret given again, saying how to register another ship', async () => {
     await expect(init({ shipId: newId('ship'), secret: SECRET })).rejects.toThrow(`init never registers again: to register another ship, remove ${paths.crewToken} first`);
     expect(registered).toEqual([]);
