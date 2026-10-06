@@ -3,7 +3,7 @@ import { stripVTControlCharacters } from 'node:util';
 import { describe, expect, it } from 'vitest';
 
 import { newId } from '../../test/support/in-memory.js';
-import { createStyle } from '../cli/style.js';
+import { createStyle } from './style.js';
 import { createLogger, readLogLine, renderLogLine } from './log.js';
 
 const NOW = new Date('2026-10-06T15:00:00.000Z');

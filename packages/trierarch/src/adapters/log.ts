@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { PLAIN, type Style } from './style.js';
 import type { LoggedAction, Logger } from '../core/ports.js';
 
 /**
@@ -31,12 +32,17 @@ export interface LogStream {
   readonly isTerminal: boolean;
 }
 
-function render(record: LogRecord): string {
+const FAILED = 'failed:';
+
+/** A record as the operator reads it; where the style colours, the time quiet, the ship strong, a failure bad and what happens next busy. */
+function render(record: LogRecord, style: Style = PLAIN): string {
+  const time = style.tone('quiet', record.time);
   if ('level' in record) {
-    return `${record.time} ${record.level} ${record.message}`;
+    return `${time} ${record.level === 'warn' ? style.tone('busy', record.level) : record.level} ${record.message}`;
   }
-  const ship = record.shipName === undefined ? record.shipId : `${record.shipId} (${record.shipName})`;
-  return `${record.time} ${ship} ${record.action}: ${record.outcome}${record.next === undefined ? '' : `. Next: ${record.next}`}`;
+  const ship = style.tone('strong', record.shipName === undefined ? record.shipId : `${record.shipId} (${record.shipName})`);
+  const outcome = record.outcome.startsWith(FAILED) ? style.tone('bad', record.outcome) : record.outcome;
+  return `${time} ${ship} ${record.action}: ${outcome}${record.next === undefined ? '' : `. ${style.tone('busy', `Next: ${record.next}`)}`}`;
 }
 
 /** A line of the log as its record, or as it is when it is none. */
@@ -50,9 +56,9 @@ export function readLogLine(line: string): LogRecord | { line: string } {
 }
 
 /** A line of the log as the operator reads it. */
-export function renderLogLine(line: string): string {
+export function renderLogLine(line: string, style: Style = PLAIN): string {
   const read = readLogLine(line);
-  return 'line' in read ? read.line : render(read);
+  return 'line' in read ? read.line : render(read, style);
 }
 
 /** Info and actions to `out`, warnings to `err`; each a JSON line, or rendered text where a person reads it. */

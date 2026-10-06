@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { aTrierarch, aWant, NOTES_FOLDER, WORKTREE_ROOT } from '../../test/support/in-memory.js';
 import { describeList, inspectList } from './list.js';
-import { createStyle } from './style.js';
+import { createStyle } from '../adapters/style.js';
 
 describe('aeolus-trierarch list', () => {
   it('lists the wanted entries with ship, state, harness, workspace, folder, since and restarts', async () => {

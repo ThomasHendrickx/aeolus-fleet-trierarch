@@ -7,7 +7,7 @@ import type { RunningFile } from '../adapters/files.js';
 import type { ServiceStatus } from '../adapters/service.js';
 import { aTrierarch, aWant, CONFIGURATION, newId, WORKTREE_ROOT } from '../../test/support/in-memory.js';
 import { describeStatus, inspectStatus, leaseFrom, type Lease } from './status.js';
-import { createStyle } from './style.js';
+import { createStyle } from '../adapters/style.js';
 
 const RUNNING: ServiceStatus = { file: '/LaunchAgents/dev.aeolus-fleet.trierarch.plist', isInstalled: true, isRunning: true, pid: 4242, since: '2026-10-06T07:00:00.000Z' };
 const shipId = newId('ship');

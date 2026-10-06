@@ -7,6 +7,7 @@ import { createCodexSetup } from '../adapters/codex-setup.js';
 import { loadConfiguration, readCrewFile, readRunningFile, TrierarchFileError } from '../adapters/files.js';
 import { createJsonState } from '../adapters/json-state.js';
 import { createLogger, readLogLine, renderLogLine } from '../adapters/log.js';
+import { createStyle, isColourTerminal, type Style } from '../adapters/style.js';
 import { trierarchPaths } from '../adapters/paths.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
 import { runCommand } from '../adapters/run-command.js';
@@ -97,6 +98,11 @@ function describeService(verb: string, status: ServiceStatus): string {
   return status.isRunning ? `The trierarch ${verb}: it runs${status.pid === undefined ? '' : ` as pid ${String(status.pid)}`}.` : `The trierarch ${verb}: it does not run.`;
 }
 
+/** What init did, at the end of its steps: a heading, then each thing it did on its own line. */
+function summaryOf(said: readonly string[], style: Style): string {
+  return [`\n${style.tone('strong', 'Summary')}`, ...said.map((line) => `  ${line}`)].join('\n');
+}
+
 /** Runs one command line of `aeolus-trierarch`. */
 export async function main(argv: readonly string[], env: Readonly<Record<string, string | undefined>> = process.env): Promise<Outcome> {
   const parsed = parse(argv);
@@ -105,6 +111,8 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
   }
   const { words, values, switches } = parsed;
   const isJson = switches.has('--json');
+  // Colour only where a person reads it: --json and a pipe get the plain words.
+  const style = createStyle({ isColour: !isJson && isColourTerminal(env, process.stdout.isTTY) });
   if ((switches.has('--version') && words.length === 0) || (words.length === 1 && words[0] === '-v')) {
     const version = runningVersion();
     return { output: isJson ? JSON.stringify({ version }) : version, code: 0 };
@@ -148,13 +156,14 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
       processes: createTmux(),
       state: createJsonState(paths.state),
     });
-    return { data: report, text: describeStatus(report) };
+    return { data: report, text: describeStatus(report, style) };
   };
 
   const commands: Record<string, (() => Promise<Answer>) | undefined> = {
     init: async () => {
       // Questions go to stderr under --json, so stdout holds the JSON alone.
-      const prompter = createTerminalPrompter({ input: process.stdin, output: isJson ? process.stderr : process.stdout });
+      const output = isJson ? process.stderr : process.stdout;
+      const prompter = createTerminalPrompter({ input: process.stdin, output, style: createStyle({ isColour: isColourTerminal(env, output.isTTY) }) });
       try {
         const fleetUrl = values.get('--fleet-url');
         const shipId = values.get('--ship-id');
@@ -170,7 +179,7 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
           isCodexInstalled: (await runCommand('sh', { args: ['-c', 'command -v codex'] })).status === 0,
           service: serviceAt(),
         });
-        return { data: report, text: report.said.join('\n') };
+        return { data: report, text: summaryOf(report.said, style) };
       } finally {
         prompter.close();
       }
@@ -199,7 +208,7 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
     },
     list: async () => {
       const entries = await inspectList(createJsonState(paths.state));
-      return { data: entries, text: describeList(entries) };
+      return { data: entries, text: describeList(entries, style) };
     },
     logs: async () => {
       const file = join(paths.logs, 'trierarch.log');
@@ -209,10 +218,10 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
       }
       const tail = await tailLog({ file, lines });
       if (!switches.has('--follow')) {
-        return { data: { file, lines: tail.map(readLogLine) }, text: tail.length === 0 ? `No log lines yet in ${file}.` : tail.map(renderLogLine).join('\n') };
+        return { data: { file, lines: tail.map(readLogLine) }, text: tail.length === 0 ? `No log lines yet in ${file}.` : tail.map((line) => renderLogLine(line, style)).join('\n') };
       }
       const write = (line: string): void => {
-        process.stdout.write(`${isJson ? JSON.stringify(readLogLine(line)) : renderLogLine(line)}\n`);
+        process.stdout.write(`${isJson ? JSON.stringify(readLogLine(line)) : renderLogLine(line, style)}\n`);
       };
       tail.forEach(write);
       await followLog({ file, signal: untilStopped(), intervalMs: FOLLOW_INTERVAL_MS, write });
@@ -268,6 +277,6 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
   } catch (error) {
     // A refusal, a file it cannot use, or a program that failed (launchctl, systemctl): said, not thrown at the operator.
     const message = error instanceof Error ? error.message : String(error);
-    return { output: isJson ? JSON.stringify({ error: message }) : message, code: 1 };
+    return { output: isJson ? JSON.stringify({ error: message }) : style.tone('bad', message), code: 1 };
   }
 }
