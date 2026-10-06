@@ -1,0 +1,108 @@
+import type { ShipId, TrierarchConfiguration, TrierarchWorkspace } from '@aeolus-fleet/common';
+
+import type { Outgoing, TrierarchState } from './entry.js';
+
+/**
+ * The trierarch's ports (docs/architecture.md, "The trierarch"). Adapters
+ * implement them in D2b: REST for the fleet, tmux for processes, git worktree
+ * and folders for workspaces, Claude Code for the harness, a JSON file for
+ * state. Each throws only for a system failure.
+ */
+
+/** Where a ship stands in the fleet, as `fleet.ship` answers the trierarch (fleet:crew). */
+export type FleetShipStatus = { readonly kind: 'awaitingCrew'; readonly name: string } | { readonly kind: 'crewed'; readonly name: string } | { readonly kind: 'retired' } | { readonly kind: 'notFound' };
+
+/** A delivery to the trierarch's own ship. */
+export interface Delivery {
+  readonly deliveryId: string;
+  readonly messageId: string;
+  readonly senderShipId: ShipId;
+  readonly contentType: string;
+  readonly payload: string;
+}
+
+/** What a session's inbox says: deliveries waiting, or the lease ended (released or retired elsewhere). */
+export type InboxAnswer = { readonly kind: 'waiting'; readonly count: number } | { readonly kind: 'leaseEnded' };
+
+export interface FleetPort {
+  /** The fleet's URL, written into each session's identity. */
+  readonly url: string;
+  ship(shipId: ShipId): Promise<FleetShipStatus>;
+  /** A new starting prompt's secret; the trierarch keeps it only until it registers. */
+  getStartingPrompt(shipId: ShipId): Promise<{ secret: string }>;
+  /** Registers the ship with its secret, as the session's crew: its crew token. */
+  register(crew: { shipId: ShipId; secret: string }): Promise<{ crewToken: string }>;
+  release(shipId: ShipId): Promise<void>;
+  /** Acknowledges a delivery to the trierarch's own ship. */
+  ack(deliveryId: string): Promise<void>;
+  send(message: Outgoing): Promise<void>;
+  /** A session's inbox, asked with its crew token. */
+  inbox(crewToken: string): Promise<InboxAnswer>;
+  /** Reports on a ship's behalf, with its session's crew token. */
+  report(crew: { crewToken: string; state: 'blocked' | 'working'; note: string }): Promise<void>;
+}
+
+/** What a session's folder identity holds for the trierarch: written through the aeolus plugin, never a copy of it. */
+export interface Identity {
+  readonly fleetUrl: string;
+  readonly shipId: ShipId;
+  readonly shipName: string;
+  readonly crewToken: string;
+  readonly squadron?: string;
+}
+
+/** The turn a session is in, from the plugin's turn marker. */
+export type Turn = 'busy' | 'idle' | 'unknown';
+
+export interface HarnessPort {
+  /** Writes the folder's identity with wakeBy=trierarch, as the aeolus plugin does. */
+  prepareIdentity(at: { folder: string; identity: Identity }): Promise<void>;
+  /** The crew token of the folder's identity, when there is one. */
+  crewTokenOf(folder: string): Promise<string | undefined>;
+  removeIdentity(folder: string): Promise<void>;
+  /** Starts the harness in the folder: the first start with the want's first prompt, later ones continuing. */
+  launch(session: { shipId: ShipId; folder: string; harness: string; options: Readonly<Record<string, string>>; isFirstStart: boolean; firstPrompt?: string }): Promise<void>;
+  turnOf(folder: string): Promise<Turn>;
+  wake(session: { shipId: ShipId; folder: string }): Promise<void>;
+}
+
+/** A session the process supervisor runs, by ship id: running, or exited and kept so the exit is seen. */
+export interface ObservedSession {
+  readonly shipId: ShipId;
+  readonly status: 'running' | 'exited';
+}
+
+export interface ProcessPort {
+  list(): Promise<readonly ObservedSession[]>;
+  stop(shipId: ShipId): Promise<void>;
+}
+
+/** A worktree under the trierarch's root, with the ship it is named after when it is one. */
+export interface ObservedWorktree {
+  readonly path: string;
+  readonly shipId?: ShipId;
+}
+
+export interface WorkspacePort {
+  /** Makes the workspace, or finds the one a stop mid-crew left half made: its folder. */
+  prepare(workspace: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace }): Promise<{ folder: string }>;
+  isClean(folder: string): Promise<boolean>;
+  /** Removes a worktree the trierarch made; never a configured folder. */
+  remove(folder: string): Promise<void>;
+  worktrees(): Promise<readonly ObservedWorktree[]>;
+}
+
+export interface StatePort {
+  load(): Promise<TrierarchState>;
+  save(state: TrierarchState): Promise<void>;
+}
+
+export interface Logger {
+  warn(message: string): void;
+}
+
+/** What describe answers beside the configuration: the trierarch's version. */
+export interface TrierarchSetup {
+  readonly configuration: TrierarchConfiguration;
+  readonly version: string;
+}
