@@ -96,6 +96,10 @@ async function exists(path: string): Promise<boolean> {
   return (await stat(path).catch(() => undefined)) !== undefined;
 }
 
+async function isFolder(path: string): Promise<boolean> {
+  return (await stat(path).catch(() => undefined))?.isDirectory() === true;
+}
+
 /** The fleet URL, ship id and secret, from the flags or asked; with --yes all three must be flags. */
 async function askCrew(flags: InitFlags, prompter: Prompter): Promise<{ fleetUrl: string; shipId: ShipId; secret: string }> {
   if (flags.isYes) {
@@ -127,36 +131,61 @@ async function askCrew(flags: InitFlags, prompter: Prompter): Promise<{ fleetUrl
   return { fleetUrl, shipId, secret };
 }
 
-/** The repositories: each one held kept or dropped as answered, then new ones until the operator is done. */
-async function askRepositories(at: { base: TrierarchConfiguration; prompter: Prompter; homeDirectory: string }): Promise<Record<string, { path: string }>> {
-  const { base, prompter, homeDirectory } = at;
-  const repositories: Record<string, { path: string }> = {};
-  for (const [name, place] of Object.entries(base.repositories)) {
-    if (await prompter.confirm(`Keep the repository ${name} (${place.path})?`, { isDefault: true })) {
-      repositories[name] = place;
+/** How init asks for one kind of named place: repositories or folders. */
+interface PlaceQuestions {
+  /** Its word in "Keep the <kind> <name>?". */
+  readonly kind: 'repository' | 'folder';
+  readonly add: string;
+  where(name: string): string;
+  /** Why an absolute path is no such place, or undefined when it is one. */
+  refuse(absolute: string): Promise<string | undefined>;
+}
+
+/** Named places: each one held kept or dropped as answered, then new ones, name and path, until the operator is done. */
+async function askPlaces(at: { held: Readonly<Record<string, { path: string }>>; prompter: Prompter; homeDirectory: string; questions: PlaceQuestions }): Promise<Record<string, { path: string }>> {
+  const { held, prompter, homeDirectory, questions } = at;
+  const places: Record<string, { path: string }> = {};
+  for (const [name, place] of Object.entries(held)) {
+    if (await prompter.confirm(`Keep the ${questions.kind} ${name} (${place.path})?`, { isDefault: true })) {
+      places[name] = place;
     }
   }
   for (;;) {
     const name = await askUntil<string>({
       prompter,
-      ask: () => prompter.text('Add a repository it may make worktrees of: its name, or nothing when done?', { default: '' }),
+      ask: () => prompter.text(questions.add, { default: '' }),
       accept: (answer) => (answer === '' || trierarchNameSchema.safeParse(answer).success ? { value: answer } : { why: `${answer} is no name: lowercase letters, digits and hyphens.` }),
     });
     if (name === '') {
-      return repositories;
+      return places;
     }
     const path = await askUntil<string>({
       prompter,
-      ask: () => prompter.text(`Where is ${name} checked out?`),
+      ask: () => prompter.text(questions.where(name)),
       accept: async (answer) => {
         const expanded = answer.replace(/^~(?=$|\/)/, homeDirectory);
         const absolute = isAbsolute(expanded) ? expanded : resolve(expanded);
-        return (await exists(join(absolute, '.git'))) ? { value: absolute } : { why: `${absolute} is no git checkout.` };
+        const why = await questions.refuse(absolute);
+        return why === undefined ? { value: absolute } : { why };
       },
     });
-    repositories[name] = { path };
+    places[name] = { path };
   }
 }
+
+const REPOSITORY_QUESTIONS: PlaceQuestions = {
+  kind: 'repository',
+  add: 'Add a repository it may make worktrees of: its name, or nothing when done?',
+  where: (name) => `Where is ${name} checked out?`,
+  refuse: async (absolute) => ((await exists(join(absolute, '.git'))) ? undefined : `${absolute} is no git checkout.`),
+};
+
+const FOLDER_QUESTIONS: PlaceQuestions = {
+  kind: 'folder',
+  add: 'Add a folder it may crew a ship in as it is: its name, or nothing when done?',
+  where: (name) => `Where is ${name}?`,
+  refuse: async (absolute) => ((await isFolder(absolute)) ? undefined : `${absolute} is no folder.`),
+};
 
 /**
  * Codex's harness from the operator's answers, asked only where Codex is
@@ -179,7 +208,7 @@ async function askCodex(at: { base: TrierarchConfiguration; prompter: Prompter; 
   };
 }
 
-/** The configuration from the operator's answers, starting from what it holds: Claude Code's and Codex's flags, the repositories and the caps. Everything else is kept. */
+/** The configuration from the operator's answers, starting from what it holds: Claude Code's and Codex's flags, the repositories, the folders and the caps. Everything else is kept. */
 async function askConfiguration(at: { base: TrierarchConfiguration; prompter: Prompter; homeDirectory: string; isCodexInstalled: boolean }): Promise<TrierarchConfiguration> {
   const { base, prompter } = at;
   const harness = base.harnesses[CLAUDE_CODE] ?? { flags: [], options: {} };
@@ -195,7 +224,8 @@ async function askConfiguration(at: { base: TrierarchConfiguration; prompter: Pr
     ...(isRemote ? [REMOTE_CONTROL] : []),
   ];
   const codex = await askCodex(at);
-  const repositories = await askRepositories(at);
+  const repositories = await askPlaces({ held: base.repositories, prompter, homeDirectory: at.homeDirectory, questions: REPOSITORY_QUESTIONS });
+  const folders = await askPlaces({ held: base.folders, prompter, homeDirectory: at.homeDirectory, questions: FOLDER_QUESTIONS });
   const ships = await askUntil({ prompter, ask: () => prompter.text('How many ships may it keep on its list?', { default: String(base.caps.ships) }), accept: asCap });
   const running = await askUntil({ prompter, ask: () => prompter.text('How many sessions may run at once?', { default: String(base.caps.running) }), accept: asCap });
   const others = Object.fromEntries(Object.entries(base.harnesses).filter(([name]) => name !== CODEX));
@@ -203,6 +233,7 @@ async function askConfiguration(at: { base: TrierarchConfiguration; prompter: Pr
     ...base,
     caps: { ships, running },
     repositories,
+    folders,
     harnesses: { ...others, [CLAUDE_CODE]: { ...harness, flags }, ...(codex !== undefined && { [CODEX]: codex }) },
   };
 }
