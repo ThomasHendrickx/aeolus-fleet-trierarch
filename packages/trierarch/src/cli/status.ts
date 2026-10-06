@@ -17,6 +17,8 @@ import type { ProcessPort, StatePort } from '../core/ports.js';
 export type Lease = 'valid' | 'ended' | 'unreachable';
 
 export interface StatusReport {
+  /** The installed version: what the command runs, and the service once it started again after an upgrade. */
+  readonly version: string;
   readonly service: ServiceStatus;
   readonly fleet: { readonly url: string; readonly shipId?: string; readonly lease: Lease };
   readonly caps: { readonly ships: { readonly used: number; readonly cap: number }; readonly running: { readonly used: number; readonly cap: number } };
@@ -41,6 +43,7 @@ export function leaseFrom(whoami: () => Promise<unknown>): () => Promise<Lease> 
 
 export async function inspectStatus(at: {
   configuration: TrierarchConfiguration;
+  version: string;
   crew: CrewFile;
   service: Pick<Service, 'status'>;
   lease: () => Promise<Lease>;
@@ -53,6 +56,7 @@ export async function inspectStatus(at: {
     entries[entry.state] += 1;
   }
   return {
+    version: at.version,
     service,
     fleet: { url: at.crew.fleetUrl, ...(at.crew.shipId !== undefined && { shipId: at.crew.shipId }), lease },
     caps: {
@@ -90,6 +94,7 @@ function describeFleet(fleet: StatusReport['fleet']): string {
 export function describeStatus(report: StatusReport): string {
   const counted = Object.entries(report.entries).filter(([, count]) => count > 0);
   return [
+    `Version: ${report.version}`,
     `Service: ${describeService(report.service)}`,
     `Fleet: ${describeFleet(report.fleet)}`,
     `Caps: ${String(report.caps.ships.used)} of ${String(report.caps.ships.cap)} ships on the list, ${String(report.caps.running.used)} of ${String(report.caps.running.cap)} sessions running`,

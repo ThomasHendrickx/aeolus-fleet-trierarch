@@ -25,13 +25,14 @@ import { PACKAGE, upgradeTrierarch } from './upgrade.js';
 
 export const USAGE = [
   'Usage: aeolus-trierarch <command> [--config <path>] [--json]',
+  '       aeolus-trierarch --version   the installed version (also -v)',
   '',
   'Set up:',
   "  init [--fleet-url <url>] [--ship-id <shp_...>] [--secret <secret>] [--yes]   the whole setup: registers the trierarch's own ship, writes the configuration, answers Claude Code's and Codex's one-time questions and offers to install the service. Asks for what is missing; prefer typing the secret when asked, so it stays out of your shell history",
   '  config check          check the configuration and give the effective flags per harness',
   '',
   'Look:',
-  '  status                the service, the fleet and its own lease, caps in use, entries by state, kept worktrees and orphans',
+  '  status                the version, the service, the fleet and its own lease, caps in use, entries by state, kept worktrees and orphans',
   '  list                  the wanted entries: ship, state, harness, workspace, since, restarts',
   '  logs [--lines <n>] [--follow]   the last lines of the log, and with --follow each new one',
   '',
@@ -60,7 +61,7 @@ interface Answer {
 }
 
 const VALUE_FLAGS = new Set(['--config', '--fleet-url', '--ship-id', '--secret', '--lines']);
-const SWITCHES = new Set(['--json', '--yes', '--follow', '--no-load']);
+const SWITCHES = new Set(['--json', '--yes', '--follow', '--no-load', '--version']);
 const DEFAULT_LINES = 50;
 const FOLLOW_INTERVAL_MS = 500;
 
@@ -103,6 +104,10 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
   }
   const { words, values, switches } = parsed;
   const isJson = switches.has('--json');
+  if ((switches.has('--version') && words.length === 0) || (words.length === 1 && words[0] === '-v')) {
+    const version = runningVersion();
+    return { output: isJson ? JSON.stringify({ version }) : version, code: 0 };
+  }
   const config = values.get('--config') ?? env.AEOLUS_TRIERARCH_CONFIG;
   const homeDirectory = env.HOME ?? homedir();
   const paths = trierarchPaths({ homeDirectory, ...(config !== undefined && { config }) });
@@ -134,6 +139,7 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
     const fleet = createRestFleet(crew);
     const report = await inspectStatus({
       configuration,
+      version: runningVersion(),
       crew,
       service: serviceAt(),
       lease: leaseFrom(() => fleet.whoami()),

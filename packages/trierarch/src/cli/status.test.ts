@@ -12,6 +12,7 @@ const crew = { fleetUrl: 'https://fleet.example.com', shipId, crewToken: 'aeolus
 function inspect(trierarch = aTrierarch(), more: { service?: ServiceStatus; lease?: Lease } = {}) {
   return inspectStatus({
     configuration: CONFIGURATION,
+    version: '0.18.0',
     crew,
     service: { status: () => Promise.resolve(more.service ?? RUNNING) },
     lease: () => Promise.resolve(more.lease ?? 'valid'),
@@ -33,6 +34,7 @@ describe('aeolus-trierarch status', () => {
     const report = await inspect(trierarch);
 
     expect(report).toEqual({
+      version: '0.18.0',
       service: RUNNING,
       fleet: { url: 'https://fleet.example.com', shipId, lease: 'valid' },
       caps: { ships: { used: 2, cap: 8 }, running: { used: 1, cap: 4 } },
@@ -42,6 +44,7 @@ describe('aeolus-trierarch status', () => {
     });
     expect(describeStatus(report)).toBe(
       [
+        'Version: 0.18.0',
         'Service: running, pid 4242, since 2026-10-06T07:00:00.000Z',
         `Fleet: https://fleet.example.com, the lease of ${shipId} is valid`,
         'Caps: 2 of 8 ships on the list, 1 of 4 sessions running',
