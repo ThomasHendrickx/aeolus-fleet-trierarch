@@ -149,5 +149,8 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string }
     report: async ({ crewToken, state, note }) => {
       await call({ path: '/ship/report', crewToken, body: { state, note }, answers: z.unknown() });
     },
+    reportSelf: async ({ state, note, details }) => {
+      await call({ path: '/ship/report', body: { state, note, details }, answers: z.unknown() });
+    },
   };
 }

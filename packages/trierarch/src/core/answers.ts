@@ -1,4 +1,4 @@
-import type { TrierarchConfiguration } from '@aeolus-fleet/common';
+import type { TrierarchConfiguration, TrierarchReportDetails } from '@aeolus-fleet/common';
 
 import type { TrierarchState } from './entry.js';
 import type { TrierarchSetup } from './ports.js';
@@ -9,7 +9,7 @@ import type { TrierarchSetup } from './ports.js';
  */
 
 /** A harness's options as a JSON Schema: each option one of its value names, with its default when it has one. */
-function optionsSchemaOf(harness: TrierarchConfiguration['harnesses'][string]): Record<string, unknown> {
+export function optionsSchemaOf(harness: TrierarchConfiguration['harnesses'][string]): TrierarchReportDetails['harnesses'][number]['options'] {
   const properties = Object.fromEntries(
     Object.entries(harness.options).map(([name, option]) => [name, { enum: Object.keys(option.values), ...(option.default !== undefined && { default: option.default }) }]),
   );
