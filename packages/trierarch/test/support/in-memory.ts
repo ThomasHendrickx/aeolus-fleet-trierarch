@@ -38,7 +38,6 @@ export const CONFIGURATION: TrierarchConfiguration = {
       flags: ['--remote-control'],
       options: { model: { values: { opus: ['--model', 'claude-opus-5-5'], sonnet: ['--model', 'claude-sonnet-5-5'] }, default: 'opus' } },
     },
-    codex: { flags: [], options: {} },
   },
 };
 

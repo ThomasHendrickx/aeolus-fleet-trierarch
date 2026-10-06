@@ -117,7 +117,7 @@ describe('the trierarch on a real fleet', () => {
     const logger = { warn: () => undefined };
     const setup = { configuration, version: '0.0.0' };
     const handle = createHandleDelivery({ fleet, workspace, state, setup, clock, logger });
-    const pass = createRunPass({ fleet, harness, processes: sessions, workspace, state, setup, clock, logger });
+    const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, state, setup, clock, logger });
     const handleWhatCame = async (trierarch: RestFleet) => {
       for (const delivery of await trierarch.receive()) {
         await handle(delivery);

@@ -13,7 +13,8 @@ export type RunPass = () => Promise<void>;
 
 export interface RunPassDeps {
   fleet: FleetPort;
-  harness: HarnessPort;
+  /** One adapter per harness the configuration offers, by its name. */
+  harnesses: Readonly<Record<string, HarnessPort>>;
   processes: ProcessPort;
   workspace: WorkspacePort;
   state: StatePort;
@@ -51,9 +52,10 @@ async function observe(state: TrierarchState, deps: RunPassDeps): Promise<Observ
     if (entry.state !== 'running' || folder === undefined || session?.status === 'exited') {
       continue;
     }
-    const crewToken = await deps.harness.crewTokenOf(folder);
-    if (crewToken !== undefined) {
-      ships[entry.shipId] = { inbox: await deps.fleet.inbox(crewToken), turn: await deps.harness.turnOf(folder) };
+    const harness = harnessOf(entry, deps);
+    const crewToken = await harness?.crewTokenOf(folder);
+    if (harness !== undefined && crewToken !== undefined) {
+      ships[entry.shipId] = { inbox: await deps.fleet.inbox(crewToken), turn: await harness.turnOf(folder) };
     }
   }
   return { sessions, worktrees, ships };
@@ -83,7 +85,7 @@ async function carryOut(state: TrierarchState, at: CarryOut): Promise<TrierarchS
       return crew(state, { entry, isResumed: action.isResumed, deps });
     case 'launch':
       if (entry.folder !== undefined) {
-        await deps.harness.launch({
+        await harnessOf(entry, deps)?.launch({
           shipId: entry.shipId,
           // An entry saved before the ship's name was kept goes by its id.
           shipName: entry.shipName ?? entry.shipId,
@@ -97,11 +99,11 @@ async function carryOut(state: TrierarchState, at: CarryOut): Promise<TrierarchS
       return state;
     case 'wake':
       if (entry.folder !== undefined) {
-        await deps.harness.wake({ shipId: entry.shipId, folder: entry.folder });
+        await harnessOf(entry, deps)?.wake({ shipId: entry.shipId, folder: entry.folder });
       }
       return state;
     case 'report': {
-      const crewToken = entry.folder === undefined ? undefined : await deps.harness.crewTokenOf(entry.folder);
+      const crewToken = entry.folder === undefined ? undefined : await harnessOf(entry, deps)?.crewTokenOf(entry.folder);
       if (crewToken !== undefined) {
         await deps.fleet.report({ crewToken, state: 'blocked', note: action.note });
       }
@@ -129,6 +131,10 @@ interface EntryAt {
  */
 async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean }): Promise<TrierarchState> {
   const { entry, isResumed, deps } = at;
+  const harness = harnessOf(entry, deps);
+  if (harness === undefined) {
+    return state;
+  }
   const ship = await deps.fleet.ship(entry.shipId);
   if (ship.kind === 'notFound' || ship.kind === 'retired' || (ship.kind === 'crewed' && !isResumed)) {
     return drop(state, { entry, deps });
@@ -139,11 +145,11 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   const { secret } = await deps.fleet.getStartingPrompt(entry.shipId);
   const { crewToken } = await deps.fleet.register({ shipId: entry.shipId, secret });
   const { folder } = await deps.workspace.prepare({ shipId: entry.shipId, shipName: ship.name, workspace: entry.workspace });
-  await deps.harness.prepareIdentity({
+  await harness.prepareIdentity({
     folder,
     identity: { fleetUrl: deps.fleet.url, shipId: entry.shipId, shipName: ship.name, crewToken, ...(entry.squadron !== undefined && { squadron: entry.squadron }) },
   });
-  await deps.harness.launch({
+  await harness.launch({
     shipId: entry.shipId,
     shipName: ship.name,
     folder,
@@ -206,7 +212,7 @@ async function finishWorkspace(
   if (folder === undefined) {
     return { state, workspace: 'removed' };
   }
-  await deps.harness.removeIdentity(folder);
+  await harnessOf(entry, deps)?.removeIdentity(folder);
   if (entry.workspace.kind === 'folder') {
     return { state, workspace: 'kept', path: folder };
   }
@@ -216,6 +222,19 @@ async function finishWorkspace(
   }
   deps.logger.warn(`Kept the worktree of ${entry.shipId}, which has changes: ${folder}`);
   return { state: { ...state, kept: [...state.kept, { shipId: entry.shipId, path: folder }] }, workspace: 'kept', path: folder };
+}
+
+/**
+ * The adapter of the entry's harness. A want names only a harness the
+ * configuration offers, and the trierarch starts with an adapter for each, so
+ * none missing is a setup gone wrong: logged, and the entry left as it is.
+ */
+function harnessOf(entry: Entry, deps: RunPassDeps): HarnessPort | undefined {
+  const harness = deps.harnesses[entry.harness];
+  if (harness === undefined) {
+    deps.logger.warn(`No adapter for the harness ${entry.harness} of ${entry.shipId}`);
+  }
+  return harness;
 }
 
 function notice(entry: Entry, at: { name: 'running' | 'leaseEnded'; now: Date }): Outgoing {

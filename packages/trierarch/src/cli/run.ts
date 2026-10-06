@@ -35,7 +35,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const clock = { now: () => new Date() };
   const setup = { configuration, version: runningVersion() };
   const handle = createHandleDelivery({ fleet, workspace, state, setup, clock, logger });
-  const pass = createRunPass({ fleet, harness, processes: tmux, workspace, state, setup, clock, logger });
+  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: tmux, workspace, state, setup, clock, logger });
 
   logger.info(`aeolus-trierarch ${setup.version} runs for ${crew.fleetUrl}, with the aeolus plugin at ${plugin.root}`);
   await loop({ receive: (stop) => fleet.receive(stop), handle, pass, signal, logger, intervalMs: PASS_INTERVAL_MS });
