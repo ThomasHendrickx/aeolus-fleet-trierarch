@@ -1,23 +1,46 @@
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createClaudeCodeSetup } from '../adapters/claude-code-setup.js';
-import { TrierarchFileError } from '../adapters/files.js';
+import { loadConfiguration, readCrewFile, TrierarchFileError } from '../adapters/files.js';
+import { createJsonState } from '../adapters/json-state.js';
 import { trierarchPaths } from '../adapters/paths.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
 import { runCommand } from '../adapters/run-command.js';
-import { createService, serviceEnvironment } from '../adapters/service.js';
+import { createService, serviceEnvironment, type ServiceStatus } from '../adapters/service.js';
+import { createTmux } from '../adapters/tmux.js';
+import { createUninstall } from '../core/uninstall.js';
 import { configCheck } from './config-check.js';
 import { initTrierarch } from './init.js';
+import { describeList, inspectList } from './list.js';
+import { followLog, tailLog } from './logs.js';
 import { createTerminalPrompter } from './prompter.js';
 import { runTrierarch } from './run.js';
+import { describeStatus, inspectStatus, leaseFrom } from './status.js';
+import { uninstallTrierarch } from './uninstall.js';
 
 export const USAGE = [
-  'Usage: aeolus-trierarch <command> [--config <path>]',
-  '  init <fleetUrl> <shipId> <secret>   register the trierarch\'s own ship (commissioned with fleet:crew) and write a configuration',
-  '  config check                       check the configuration and print the effective flags per harness',
-  '  run                                keep the wanted ships crewed until stopped',
-  '  install [--no-load]                run it under launchd (macOS) or systemd (Linux)',
+  'Usage: aeolus-trierarch <command> [--config <path>] [--json]',
+  '',
+  'Set up:',
+  "  init [--fleet-url <url>] [--ship-id <shp_...>] [--secret <secret>] [--yes]   the whole setup: registers the trierarch's own ship, writes the configuration, answers Claude Code's one-time questions and offers to install the service. Asks for what is missing; prefer typing the secret when asked, so it stays out of your shell history",
+  '  config check          check the configuration and give the effective flags per harness',
+  '',
+  'Look:',
+  '  status                the service, the fleet and its own lease, caps in use, entries by state, kept worktrees and orphans',
+  '  list                  the wanted entries: ship, state, harness, workspace, since, restarts',
+  '  logs [--lines <n>] [--follow]   the last lines of the log, and with --follow each new one',
+  '',
+  'Run:',
+  '  start                 start the service',
+  '  stop                  stop the service (it starts again at the next login)',
+  '  restart               restart the service, so it reads a changed configuration',
+  '  install [--no-load]   install the service: launchd on macOS, systemd on Linux',
+  '  uninstall             remove the service and stop every session; deletes no worktree and none of its files',
+  '  run                   keep the wanted ships crewed until stopped (what the service runs)',
+  '',
+  '--json answers JSON, for a ship to read.',
 ].join('\n');
 
 /** The command's own words: its output and its exit code. */
@@ -26,14 +49,59 @@ export interface Outcome {
   readonly code: number;
 }
 
+/** What a command answers: data for --json, words for the operator. */
+interface Answer {
+  readonly data: unknown;
+  readonly text: string;
+}
+
+const VALUE_FLAGS = new Set(['--config', '--fleet-url', '--ship-id', '--secret', '--lines']);
+const SWITCHES = new Set(['--json', '--yes', '--follow', '--no-load']);
+const DEFAULT_LINES = 50;
+const FOLLOW_INTERVAL_MS = 500;
+
+/** The command words, flag values and switches of a command line; undefined for a flag it does not know. */
+function parse(argv: readonly string[]): { words: string[]; values: Map<string, string>; switches: Set<string> } | undefined {
+  const words: string[] = [];
+  const values = new Map<string, string>();
+  const switches = new Set<string>();
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index] ?? '';
+    if (!arg.startsWith('--')) {
+      words.push(arg);
+      continue;
+    }
+    const [name = '', inline] = arg.split(/=(.*)/s);
+    if (SWITCHES.has(name) && inline === undefined) {
+      switches.add(name);
+    } else if (VALUE_FLAGS.has(name)) {
+      const value = inline ?? argv[(index += 1)];
+      if (value === undefined) {
+        return undefined;
+      }
+      values.set(name, value);
+    } else {
+      return undefined;
+    }
+  }
+  return { words, values, switches };
+}
+
+function describeService(verb: string, status: ServiceStatus): string {
+  return status.isRunning ? `The trierarch ${verb}: it runs${status.pid === undefined ? '' : ` as pid ${String(status.pid)}`}.` : `The trierarch ${verb}: it does not run.`;
+}
+
 /** Runs one command line of `aeolus-trierarch`. */
 export async function main(argv: readonly string[], env: Readonly<Record<string, string | undefined>> = process.env): Promise<Outcome> {
-  const args = [...argv];
-  const configAt = args.indexOf('--config');
-  const config = configAt === -1 ? env.AEOLUS_TRIERARCH_CONFIG : args.splice(configAt, 2)[1];
+  const parsed = parse(argv);
+  if (parsed === undefined) {
+    return { output: USAGE, code: 2 };
+  }
+  const { words, values, switches } = parsed;
+  const isJson = switches.has('--json');
+  const config = values.get('--config') ?? env.AEOLUS_TRIERARCH_CONFIG;
   const homeDirectory = env.HOME ?? homedir();
   const paths = trierarchPaths({ homeDirectory, ...(config !== undefined && { config }) });
-  const [command = '', ...rest] = args;
   const serviceAt = () =>
     createService({
       platform: process.platform,
@@ -45,63 +113,126 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
       exec: (program, args) => runCommand(program, { args }),
       now: () => new Date(),
     });
+  const untilStopped = (): AbortSignal => {
+    const stopping = new AbortController();
+    process.once('SIGINT', () => {
+      stopping.abort();
+    });
+    process.once('SIGTERM', () => {
+      stopping.abort();
+    });
+    return stopping.signal;
+  };
+
+  const commands: Record<string, (() => Promise<Answer>) | undefined> = {
+    init: async () => {
+      // Questions go to stderr under --json, so stdout holds the JSON alone.
+      const prompter = createTerminalPrompter({ input: process.stdin, output: isJson ? process.stderr : process.stdout });
+      try {
+        const fleetUrl = values.get('--fleet-url');
+        const shipId = values.get('--ship-id');
+        const secret = values.get('--secret');
+        const report = await initTrierarch({
+          homeDirectory,
+          paths,
+          flags: { ...(fleetUrl !== undefined && { fleetUrl }), ...(shipId !== undefined && { shipId }), ...(secret !== undefined && { secret }), isYes: switches.has('--yes') },
+          prompter,
+          fleetAt: (url) => createRestFleet({ fleetUrl: url, crewToken: '' }),
+          claudeCode: createClaudeCodeSetup({ homeDirectory }),
+          service: serviceAt(),
+        });
+        return { data: report, text: report.said.join('\n') };
+      } finally {
+        prompter.close();
+      }
+    },
+    'config check': async () => {
+      const { text, ...data } = await configCheck(paths);
+      return { data, text };
+    },
+    status: async () => {
+      const crew = await readCrewFile(paths.crewToken);
+      const configuration = await loadConfiguration(paths.config);
+      const fleet = createRestFleet(crew);
+      const report = await inspectStatus({
+        configuration,
+        crew,
+        service: serviceAt(),
+        lease: leaseFrom(() => fleet.whoami()),
+        processes: createTmux(),
+        state: createJsonState(paths.state),
+      });
+      return { data: report, text: describeStatus(report) };
+    },
+    list: async () => {
+      const entries = await inspectList(createJsonState(paths.state));
+      return { data: entries, text: describeList(entries) };
+    },
+    logs: async () => {
+      const file = join(paths.logs, 'trierarch.log');
+      const lines = Number(values.get('--lines') ?? DEFAULT_LINES);
+      if (!Number.isInteger(lines) || lines < 0) {
+        throw new TrierarchFileError('--lines takes a whole number');
+      }
+      const tail = await tailLog({ file, lines });
+      if (!switches.has('--follow')) {
+        return { data: { file, lines: tail }, text: tail.length === 0 ? `No log lines yet in ${file}.` : tail.join('\n') };
+      }
+      const write = (line: string): void => {
+        process.stdout.write(`${isJson ? JSON.stringify({ line }) : line}\n`);
+      };
+      tail.forEach(write);
+      await followLog({ file, signal: untilStopped(), intervalMs: FOLLOW_INTERVAL_MS, write });
+      return { data: undefined, text: '' };
+    },
+    start: async () => {
+      const service = serviceAt();
+      await service.start();
+      const status = await service.status();
+      return { data: status, text: describeService('started', status) };
+    },
+    stop: async () => {
+      const service = serviceAt();
+      await service.stop();
+      const status = await service.status();
+      return { data: status, text: `${describeService('stopped', status)} It starts again at the next login, or with aeolus-trierarch start.` };
+    },
+    restart: async () => {
+      const service = serviceAt();
+      await service.restart();
+      const status = await service.status();
+      return { data: status, text: describeService('restarted', status) };
+    },
+    install: async () => {
+      const service = serviceAt();
+      await (switches.has('--no-load') ? service.write() : service.install());
+      const status = await service.status();
+      return { data: status, text: `Installed ${status.file}. Logs: ${paths.logs}` };
+    },
+    uninstall: async () => {
+      const report = await uninstallTrierarch({ service: serviceAt(), uninstall: createUninstall({ processes: createTmux(), state: createJsonState(paths.state) }), home: paths.home });
+      return { data: report, text: report.said.join('\n') };
+    },
+    run: async () => {
+      const logger = {
+        info: (message: string) => process.stdout.write(`${new Date().toISOString()} ${message}\n`),
+        warn: (message: string) => process.stderr.write(`${new Date().toISOString()} ${message}\n`),
+      };
+      await runTrierarch({ paths, homeDirectory, env, signal: untilStopped(), logger });
+      return { data: { stopped: true }, text: 'aeolus-trierarch stopped.' };
+    },
+  };
+
+  const command = commands[words.join(' ')];
+  if (command === undefined) {
+    return { output: USAGE, code: 2 };
+  }
   try {
-    switch (command) {
-      case 'init': {
-        const valueOf = (name: string): string | undefined => {
-          const at = rest.indexOf(name);
-          return at === -1 ? undefined : rest[at + 1];
-        };
-        const prompter = createTerminalPrompter({ input: process.stdin, output: process.stdout });
-        try {
-          const report = await initTrierarch({
-            homeDirectory,
-            paths,
-            flags: {
-              ...(valueOf('--fleet-url') !== undefined && { fleetUrl: valueOf('--fleet-url') }),
-              ...(valueOf('--ship-id') !== undefined && { shipId: valueOf('--ship-id') }),
-              ...(valueOf('--secret') !== undefined && { secret: valueOf('--secret') }),
-              isYes: rest.includes('--yes'),
-            },
-            prompter,
-            fleetAt: (url) => createRestFleet({ fleetUrl: url, crewToken: '' }),
-            claudeCode: createClaudeCodeSetup({ homeDirectory }),
-            service: serviceAt(),
-          });
-          return { output: report.said.join('\n'), code: 0 };
-        } finally {
-          prompter.close();
-        }
-      }
-      case 'config':
-        return rest[0] === 'check' ? { output: await configCheck(paths), code: 0 } : { output: USAGE, code: 2 };
-      case 'install': {
-        const service = serviceAt();
-        await (rest.includes('--no-load') ? service.write() : service.install());
-        return { output: `Installed ${(await service.status()).file}. Logs: ${paths.logs}`, code: 0 };
-      }
-      case 'run': {
-        const stopping = new AbortController();
-        process.once('SIGINT', () => {
-          stopping.abort();
-        });
-        process.once('SIGTERM', () => {
-          stopping.abort();
-        });
-        const logger = {
-          info: (message: string) => process.stdout.write(`${new Date().toISOString()} ${message}\n`),
-          warn: (message: string) => process.stderr.write(`${new Date().toISOString()} ${message}\n`),
-        };
-        await runTrierarch({ paths, homeDirectory, env, signal: stopping.signal, logger });
-        return { output: 'aeolus-trierarch stopped.', code: 0 };
-      }
-      default:
-        return { output: USAGE, code: 2 };
-    }
+    const { data, text } = await command();
+    return { output: isJson && data !== undefined ? JSON.stringify(data, null, 2) : text, code: 0 };
   } catch (error) {
-    if (error instanceof TrierarchFileError) {
-      return { output: error.message, code: 1 };
-    }
-    throw error;
+    // A refusal, a file it cannot use, or a program that failed (launchctl, systemctl): said, not thrown at the operator.
+    const message = error instanceof Error ? error.message : String(error);
+    return { output: isJson ? JSON.stringify({ error: message }) : message, code: 1 };
   }
 }

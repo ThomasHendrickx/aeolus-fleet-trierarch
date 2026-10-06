@@ -6,5 +6,7 @@
 import { main } from '../cli/main.js';
 
 const outcome = await main(process.argv.slice(2));
-process.stdout.write(`${outcome.output}\n`);
+if (outcome.output !== '') {
+  process.stdout.write(`${outcome.output}\n`);
+}
 process.exitCode = outcome.code;

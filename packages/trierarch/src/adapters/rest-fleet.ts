@@ -38,17 +38,23 @@ export interface RestFleet extends FleetPort {
   receive(): Promise<Delivery[]>;
   /** Registers a ship with its secret, as the trierarch itself at init: its crew token. */
   registerSelf(crew: { shipId: ShipId; secret: string }): Promise<{ crewToken: string }>;
+  /** The trierarch's own ship, as its crew token says: it answers while the lease holds. */
+  whoami(): Promise<{ shipId: ShipId; name: string }>;
 }
 
 export function createRestFleet(options: { fleetUrl: string; crewToken: string }): RestFleet {
   const fleetUrl = options.fleetUrl.replace(/\/$/, '');
-  async function call<T>(request: { path: string; crewToken?: string; body: unknown; answers: z.ZodType<T> }): Promise<T> {
-    const headers: Record<string, string> = { 'content-type': 'application/json' };
+  async function call<T>(request: { path: string; crewToken?: string; body?: unknown; answers: z.ZodType<T> }): Promise<T> {
+    const headers: Record<string, string> = {};
     const crewToken = request.crewToken ?? options.crewToken;
     if (crewToken !== '') {
       headers.authorization = `Bearer ${crewToken}`;
     }
-    const response = await fetch(`${fleetUrl}/api/v1${request.path}`, { method: 'POST', headers, body: JSON.stringify(request.body) });
+    // A call with no body is a GET, as whoami is.
+    const response = await fetch(
+      `${fleetUrl}/api/v1${request.path}`,
+      request.body === undefined ? { method: 'GET', headers } : { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(request.body) },
+    );
     const body: unknown = await response.json();
     if (!response.ok) {
       const refusal = refusalSchema.safeParse(body);
@@ -82,6 +88,7 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string }
     getStartingPrompt: async (shipId) => call({ path: '/fleet/getStartingPrompt', body: { shipId }, answers: z.object({ secret: z.string() }) }),
     register: async (crew) => register(crew, SESSION_HARNESS),
     registerSelf: async (crew) => register(crew, TRIERARCH_SELF.harness),
+    whoami: async () => call({ path: '/ship/whoami', answers: z.object({ shipId: idSchema('ship'), name: z.string() }) }),
     release: async (shipId) => {
       await call({ path: '/fleet/release', body: { shipId }, answers: z.unknown() });
     },
