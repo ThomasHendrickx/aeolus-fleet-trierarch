@@ -46,7 +46,7 @@ The request is the desired state. A ship released elsewhere while its request st
 
 ## Following the fleet
 
-The trierarch plugin follows the fleet's changes: new, changed and removed requests, and reports. Every check-in, of the trierarch plugin and of each trierarch, returns the latest full state (for a trierarch, the requests assigned to it), so a missed event never leaves either stale. The trierarch plugin keeps no database of its own: its state lives in the fleet. That is a choice for the first version, not a rule. It is on or off per fleet by the same mechanism as squadrons (decision 0021).
+The trierarch plugin follows the fleet's changes: new, changed and removed requests, and reports. Every check-in, of the trierarch plugin and of each trierarch, returns the latest full state (for a trierarch, the requests assigned to it), so a missed event never leaves either stale. The trierarch plugin keeps a small database of its own, the same shape as squadrons': per fleet only the connection (its ship and kept crew token) and the switch, set through installation procedures as squadrons' are (decision 0021). Everything else (requests, statuses, machines) lives in the fleet.
 
 ## A machine joins
 
