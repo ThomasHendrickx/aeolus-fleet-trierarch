@@ -29,6 +29,7 @@ class ScriptedPrompter implements Prompter {
   readonly asked: string[] = [];
   readonly hidden: string[] = [];
   readonly said: string[] = [];
+  readonly steps: string[] = [];
   constructor(private readonly script: [string, string | boolean][]) {}
 
   private next(question: string): string | boolean {
@@ -55,6 +56,10 @@ class ScriptedPrompter implements Prompter {
 
   say(message: string): void {
     this.said.push(message);
+  }
+
+  step(title: string): void {
+    this.steps.push(title);
   }
 
   get isDone(): boolean {
@@ -205,6 +210,14 @@ describe('aeolus-trierarch init, the whole setup', () => {
 
   it('refuses a --ship-id that is no ship id', async () => {
     await expect(init({ fleetUrl: FLEET_URL, shipId: 'trierarch-mac', secret: SECRET, isYes: true })).rejects.toThrow('trierarch-mac is no ship id: it starts with shp_.');
+  });
+
+  it('goes through its questions in steps: the fleet, Claude Code, Codex, workspaces, caps and the service', async () => {
+    const prompter = new ScriptedPrompter(defaults());
+
+    await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET }, prompter);
+
+    expect(prompter.steps).toEqual(['The fleet', 'Claude Code', 'Codex', 'Workspaces', 'Caps', 'The service']);
   });
 
   it('sets the Claude Code flags as answered, the repositories it may make worktrees of, and the caps', async () => {

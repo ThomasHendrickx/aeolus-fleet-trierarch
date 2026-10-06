@@ -1,7 +1,10 @@
+import { stripVTControlCharacters } from 'node:util';
+
 import { describe, expect, it } from 'vitest';
 
 import { aTrierarch, aWant, NOTES_FOLDER, WORKTREE_ROOT } from '../../test/support/in-memory.js';
 import { describeList, inspectList } from './list.js';
+import { createStyle } from './style.js';
 
 describe('aeolus-trierarch list', () => {
   it('lists the wanted entries with ship, state, harness, workspace, folder, since and restarts', async () => {
@@ -27,6 +30,19 @@ describe('aeolus-trierarch list', () => {
         `${notes}  running     claude-code  folder notes                   2026-10-06T08:00:00.000Z  0`,
       ].join('\n'),
     );
+  });
+
+  it('colours each state on a colour terminal, keeping the columns as they are in plain text', async () => {
+    const trierarch = aTrierarch();
+    const scout = trierarch.fleet.commission('scout');
+    await trierarch.command('want', aWant(scout));
+    await trierarch.pass();
+    const entries = await inspectList(trierarch.state);
+
+    const coloured = describeList(entries, createStyle({ isColour: true }));
+
+    expect(coloured).not.toBe(describeList(entries));
+    expect(stripVTControlCharacters(coloured)).toBe(describeList(entries));
   });
 
   it('says when no ship is on the list', async () => {

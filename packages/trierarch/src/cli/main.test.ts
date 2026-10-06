@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -127,6 +128,17 @@ describe('aeolus-trierarch', () => {
 
     expect(code).toBe(0);
     expect(JSON.parse(output)).toEqual([expect.objectContaining({ shipId: scout, state: 'wanted', workspace: 'worktree aeolus-fleet' })]);
+  });
+
+  it('colours a failure on a colour terminal, and answers plain JSON with --json all the same', async () => {
+    const colour = { HOME: home, FORCE_COLOR: '1' };
+
+    const text = await main(['config', 'check'], colour);
+    const json = await main(['config', 'check', '--json'], colour);
+
+    expect(text.output).not.toBe(stripVTControlCharacters(text.output));
+    expect(stripVTControlCharacters(text.output)).toBe(`No configuration at ${join(home, '.aeolus', 'trierarch', 'config.json')}: run aeolus-trierarch init first`);
+    expect(json.output).toBe(stripVTControlCharacters(json.output));
   });
 
   it('answers a failure as JSON with --json', async () => {
