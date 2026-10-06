@@ -18,6 +18,7 @@ import { createMigratedDatabase } from '../../server/test/support/database.js';
 import { newKey } from '../../server/test/support/keys.js';
 import { unwrap } from '../../server/test/support/result.js';
 import { createClaudeCodeHarness } from '../src/adapters/claude-code.js';
+import { createClaudeCodeSetup } from '../src/adapters/claude-code-setup.js';
 import { readCrewFile } from '../src/adapters/files.js';
 import { runCommand } from '../src/adapters/run-command.js';
 import { createGitWorkspace } from '../src/adapters/git-workspace.js';
@@ -94,7 +95,17 @@ describe('the trierarch on a real fleet', () => {
     const orchestrator = await commission('orchestrator', { type: 'orchestrator' });
     const scout = await commission('scout', { type: 'reviewer' });
 
-    await initTrierarch({ paths, crew: { fleetUrl: address, ...trierarchShip }, fleetAt: (fleetUrl) => createRestFleet({ fleetUrl, crewToken: '' }) });
+    const service = { install: () => Promise.resolve(), restart: () => Promise.resolve(), status: () => Promise.resolve({ file: 'none', isInstalled: true, isRunning: true }) };
+    const quiet = { text: () => Promise.reject(new Error('asked')), secret: () => Promise.reject(new Error('asked')), confirm: () => Promise.reject(new Error('asked')), say: () => undefined };
+    await initTrierarch({
+      homeDirectory: home,
+      paths,
+      flags: { fleetUrl: address, shipId: trierarchShip.shipId, secret: trierarchShip.secret, isYes: true },
+      prompter: quiet,
+      fleetAt: (fleetUrl) => createRestFleet({ fleetUrl, crewToken: '' }),
+      claudeCode: createClaudeCodeSetup({ homeDirectory: home }),
+      service,
+    });
     const fleet = createRestFleet(await readCrewFile(paths.crewToken));
     const configuration = { ...CONFIGURATION, folders: { notes: { path: notes } } };
     const sessions = standInSessions();
