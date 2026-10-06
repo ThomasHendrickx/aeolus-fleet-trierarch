@@ -9,6 +9,7 @@ import type {
   HarnessPort,
   Identity,
   InboxAnswer,
+  LoggedAction,
   ObservedSession,
   ObservedWorktree,
   ProcessPort,
@@ -305,9 +306,14 @@ export class TestClock {
 
 export class CollectingLogger {
   readonly warnings: string[] = [];
+  readonly actions: LoggedAction[] = [];
 
   warn(message: string): void {
     this.warnings.push(message);
+  }
+
+  action(logged: LoggedAction): void {
+    this.actions.push(logged);
   }
 }
 

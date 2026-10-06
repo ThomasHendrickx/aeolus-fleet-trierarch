@@ -55,7 +55,7 @@ describe('the lifecycle of a wanted ship (docs/trierarch.md)', () => {
     await trierarch.command('want', aWant(shipId));
     trierarch.fleet.isLosingRegisterReply = true;
 
-    await expect(trierarch.pass()).rejects.toThrow('the register reply was lost');
+    await trierarch.pass();
 
     expect(trierarch.state.current().entries[shipId]?.state).toBe('crewing');
   });
@@ -361,5 +361,85 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     await trierarch.pass();
 
     expect(trierarch.codex.wakes).toEqual([shipId]);
+  });
+});
+
+describe('what the loop logs (aeolus-trierarch logs)', () => {
+  const logged = (trierarch: Trierarch) => trierarch.logger.actions.map(({ action, outcome }) => `${action}: ${outcome}`);
+
+  it('logs a crew with its time, its ship and the outcome', async () => {
+    const trierarch = aTrierarch();
+
+    const shipId = await aCrewedShip(trierarch);
+
+    expect(trierarch.logger.actions).toEqual([{ time: trierarch.clock.now(), shipId, shipName: 'scout', action: 'crew', outcome: `crewed, claude-code started in ${SCOUT_FOLDER}` }]);
+  });
+
+  it('logs the report on its behalf when its session died, and its start again', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.processes.exit(shipId);
+
+    await trierarch.pass();
+    trierarch.clock.advance(5 * SECOND_MS);
+    await trierarch.pass();
+
+    expect(logged(trierarch).slice(1)).toEqual(['report: reported blocked: session crashed, restarting', `launch: started again in ${SCOUT_FOLDER}`]);
+  });
+
+  it('logs a wake', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.fleet.deliver(shipId, 1);
+
+    await trierarch.pass();
+
+    expect(logged(trierarch).at(-1)).toBe('wake: woken, deliveries wait');
+  });
+
+  it('logs a release, saying whether its worktree was removed or kept', async () => {
+    const clean = aTrierarch();
+    await clean.command('release', { shipId: await aCrewedShip(clean) });
+    const changed = aTrierarch();
+    const shipId = await aCrewedShip(changed);
+    changed.workspace.change(SCOUT_FOLDER);
+    await changed.command('release', { shipId });
+
+    await clean.pass();
+    await changed.pass();
+
+    expect(logged(clean).at(-1)).toBe('release: released, its worktree removed');
+    expect(logged(changed).at(-1)).toBe(`release: released, its worktree kept with changes: ${SCOUT_FOLDER}`);
+  });
+
+  it('logs a ship dropped because its lease ended elsewhere', async () => {
+    const trierarch = aTrierarch();
+    const shipId = trierarch.fleet.commission('scout');
+    await trierarch.command('want', aWant(shipId));
+    trierarch.fleet.crewElsewhere(shipId);
+
+    await trierarch.pass();
+
+    expect(logged(trierarch)).toEqual(['drop: its lease ended elsewhere, so it is no longer crewed here']);
+  });
+
+  it('logs a failure with its ship and what happens next, and ends the pass there', async () => {
+    const trierarch = aTrierarch();
+    const shipId = trierarch.fleet.commission('scout');
+    await trierarch.command('want', aWant(shipId));
+    trierarch.fleet.isLosingRegisterReply = true;
+
+    await trierarch.pass();
+
+    expect(trierarch.logger.actions).toEqual([
+      {
+        time: trierarch.clock.now(),
+        shipId,
+        action: 'crew',
+        outcome: 'failed: the register reply was lost',
+        next: 'the next pass tries again; aeolus-trierarch status and list show where it stands',
+      },
+    ]);
   });
 });
