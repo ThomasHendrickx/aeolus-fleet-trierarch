@@ -1,77 +1,359 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { trierarchConfigurationSchema, type ShipId } from '@aeolus-fleet/common';
+import { trierarchConfigurationSchema, type ShipId, type TrierarchConfiguration } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import { trierarchPaths, type TrierarchPaths } from '../adapters/paths.js';
+import type { Service, ServiceStatus } from '../adapters/service.js';
 import { newId } from '../../test/support/in-memory.js';
-import { initTrierarch } from './init.js';
+import { initTrierarch, type InitFlags } from './init.js';
+import type { Prompter } from './prompter.js';
 
 const SECRET = 'aeolus_sk_v1_trierarch-secret';
+const FLEET_URL = 'https://fleet.example.com';
 
 let home: string;
 let paths: TrierarchPaths;
 let registered: { fleetUrl: string; shipId: ShipId; secret: string }[];
+let service: FakeService;
+let repository: string;
+
+/** A prompter that answers from a script, in order, each answer for a question containing its words; it fails on any question it was not given. */
+class ScriptedPrompter implements Prompter {
+  readonly asked: string[] = [];
+  readonly hidden: string[] = [];
+  readonly said: string[] = [];
+  constructor(private readonly script: [string, string | boolean][]) {}
+
+  private next(question: string): string | boolean {
+    this.asked.push(question);
+    const [words, answer] = this.script.shift() ?? ['', ''];
+    if (words === '' || !question.includes(words)) {
+      throw new Error(`Not scripted: "${question}" (expected one with "${words}")`);
+    }
+    return answer;
+  }
+
+  text(question: string): Promise<string> {
+    return Promise.resolve(String(this.next(question)));
+  }
+
+  secret(question: string): Promise<string> {
+    this.hidden.push(question);
+    return Promise.resolve(String(this.next(question)));
+  }
+
+  confirm(question: string): Promise<boolean> {
+    return Promise.resolve(this.next(question) === true);
+  }
+
+  say(message: string): void {
+    this.said.push(message);
+  }
+
+  get isDone(): boolean {
+    return this.script.length === 0;
+  }
+}
+
+class FakeService implements Pick<Service, 'install' | 'restart' | 'status'> {
+  isInstalled = false;
+  restarts = 0;
+  install(): Promise<void> {
+    this.isInstalled = true;
+    return Promise.resolve();
+  }
+  restart(): Promise<void> {
+    this.restarts += 1;
+    return Promise.resolve();
+  }
+  status(): Promise<ServiceStatus> {
+    return Promise.resolve({ file: '/LaunchAgents/dev.aeolus-fleet.trierarch.plist', isInstalled: this.isInstalled, isRunning: this.isInstalled });
+  }
+}
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'trierarch-init-'));
   paths = trierarchPaths({ homeDirectory: home });
   registered = [];
+  service = new FakeService();
+  repository = join(home, 'Projects', 'aeolus-fleet');
+  mkdirSync(join(repository, '.git'), { recursive: true });
 });
 
 afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-function init(shipId: ShipId = newId('ship')) {
+function init(flags: Partial<InitFlags>, prompter: Prompter = new ScriptedPrompter([])) {
   return initTrierarch({
+    homeDirectory: home,
     paths,
-    crew: { fleetUrl: 'https://fleet.example.com/', shipId, secret: SECRET },
+    flags: { isYes: false, ...flags },
+    prompter,
     fleetAt: (fleetUrl) => ({
       registerSelf: (crew) => {
         registered.push({ fleetUrl, ...crew });
         return Promise.resolve({ crewToken: 'aeolus_ct_v1_trierarch' });
       },
     }),
+    claudeCode: createClaudeCodeSetup({ homeDirectory: home }),
+    service,
   });
 }
 
-describe('aeolus-trierarch init', () => {
-  it("registers the trierarch's own ship with its secret and keeps the crew token, readable by its user only", async () => {
+function configuration(): TrierarchConfiguration {
+  return trierarchConfigurationSchema.parse(JSON.parse(readFileSync(paths.config, 'utf8')));
+}
+
+/** The script for a machine set up with every default: no flags, no repository, the caps as they are, the service installed. */
+function defaults(): [string, string | boolean][] {
+  return [
+    ['--dangerously-skip-permissions', false],
+    ['--remote-control', false],
+    ['repository', ''],
+    ['ships', '4'],
+    ['sessions', '2'],
+    ['Install the service', true],
+  ];
+}
+
+/** The defaults, but with sessions that skip permissions, and the answer to accepting bypass permissions mode. */
+function skippingPermissions(isAccepting: boolean): [string, string | boolean][] {
+  const [, ...rest] = defaults();
+  const install = rest.pop() ?? ['Install the service', true];
+  return [['--dangerously-skip-permissions', true], ...rest, ['bypass permissions', isAccepting], install];
+}
+
+describe('aeolus-trierarch init, the whole setup', () => {
+  it("asks for what is missing, the secret hidden, registers the trierarch's own ship and keeps its crew token with its ship id, readable by its user only", async () => {
+    const shipId = newId('ship');
+    const prompter = new ScriptedPrompter([['Fleet URL', `${FLEET_URL}/`], ['ship id', shipId], ['secret', SECRET], ...defaults()]);
+
+    await init({}, prompter);
+
+    expect(registered).toEqual([{ fleetUrl: FLEET_URL, shipId, secret: SECRET }]);
+    expect(prompter.hidden).toEqual([expect.stringContaining('secret')]);
+    expect(readFileSync(paths.crewToken, 'utf8')).toBe(`fleetUrl=${FLEET_URL}\nshipId=${shipId}\ncrewToken=aeolus_ct_v1_trierarch\n`);
+    expect(statSync(paths.crewToken).mode & 0o777).toBe(0o600);
+    expect(prompter.isDone).toBe(true);
+  });
+
+  it('asks again for a ship id that is none', async () => {
+    const shipId = newId('ship');
+    const prompter = new ScriptedPrompter([['Fleet URL', FLEET_URL], ['ship id', 'trierarch-mac'], ['ship id', shipId], ['secret', SECRET], ...defaults()]);
+
+    await init({}, prompter);
+
+    expect(registered.map((crew) => crew.shipId)).toEqual([shipId]);
+    expect(prompter.said).toContain('trierarch-mac is no ship id: it starts with shp_.');
+  });
+
+  it('asks nothing with --yes and every flag, writing a configuration with no flag and no repository, and installing the service', async () => {
     const shipId = newId('ship');
 
-    await init(shipId);
+    const report = await init({ fleetUrl: FLEET_URL, shipId, secret: SECRET, isYes: true });
 
-    expect(registered).toEqual([{ fleetUrl: 'https://fleet.example.com/', shipId, secret: SECRET }]);
-    expect(readFileSync(paths.crewToken, 'utf8')).toBe('fleetUrl=https://fleet.example.com\ncrewToken=aeolus_ct_v1_trierarch\n');
-    expect(statSync(paths.crewToken).mode & 0o777).toBe(0o600);
-  });
-
-  it('writes a configuration under ~/.aeolus/trierarch/ that fits, with its JSON Schema beside it and no flag', async () => {
-    await init();
-
-    const configuration: unknown = JSON.parse(readFileSync(join(home, '.aeolus', 'trierarch', 'config.json'), 'utf8'));
-    expect(trierarchConfigurationSchema.safeParse(configuration).error).toBeUndefined();
-    expect(JSON.stringify(configuration)).not.toContain('--');
+    expect(registered).toEqual([{ fleetUrl: FLEET_URL, shipId, secret: SECRET }]);
+    expect(configuration()).toEqual({ $schema: './config.schema.json', caps: { ships: 4, running: 2 }, repositories: {}, folders: {}, harnesses: { 'claude-code': { flags: [], options: {} } } });
     expect(existsSync(paths.configSchema)).toBe(true);
+    expect(service.isInstalled).toBe(true);
+    expect(report).toMatchObject({ isSetUpAlready: false, configuration: 'written', service: 'installed' });
   });
 
-  it('keeps a configuration the operator wrote', async () => {
-    await init();
-    writeFileSync(paths.config, '{"mine": true}');
+  it('refuses with --yes when a flag is missing, naming it, and registers nothing', async () => {
+    await expect(init({ fleetUrl: FLEET_URL, isYes: true })).rejects.toThrow('init --yes needs --fleet-url, --ship-id and --secret: --ship-id and --secret are missing');
+    expect(registered).toEqual([]);
+  });
 
-    await init();
+  it('refuses a --ship-id that is no ship id', async () => {
+    await expect(init({ fleetUrl: FLEET_URL, shipId: 'trierarch-mac', secret: SECRET, isYes: true })).rejects.toThrow('trierarch-mac is no ship id: it starts with shp_.');
+  });
 
-    expect(readFileSync(paths.config, 'utf8')).toBe('{"mine": true}');
+  it('sets the Claude Code flags as answered, the repositories it may make worktrees of, and the caps', async () => {
+    const prompter = new ScriptedPrompter([
+      ['--dangerously-skip-permissions', true],
+      ['--remote-control', true],
+      ['repository', 'aeolus-fleet'],
+      ['aeolus-fleet', '~/Projects/aeolus-fleet'],
+      ['repository', ''],
+      ['ships', '6'],
+      ['sessions', '3'],
+      ['bypass permissions', true],
+      ['Install the service', false],
+    ]);
+
+    await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET }, prompter);
+
+    expect(configuration()).toMatchObject({
+      caps: { ships: 6, running: 3 },
+      repositories: { 'aeolus-fleet': { path: repository } },
+      harnesses: { 'claude-code': { flags: ['--dangerously-skip-permissions', '--remote-control'], options: {} } },
+    });
+    expect(prompter.isDone).toBe(true);
+  });
+
+  it('asks again for a repository that is no git checkout, and for a cap that is no positive whole number', async () => {
+    const prompter = new ScriptedPrompter([
+      ['--dangerously-skip-permissions', false],
+      ['--remote-control', false],
+      ['repository', 'notes'],
+      ['notes', join(home, 'notes')],
+      ['notes', repository],
+      ['repository', ''],
+      ['ships', '0'],
+      ['ships', 'many'],
+      ['ships', '5'],
+      ['sessions', '2'],
+      ['Install the service', false],
+    ]);
+
+    await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET }, prompter);
+
+    expect(configuration()).toMatchObject({ caps: { ships: 5, running: 2 }, repositories: { notes: { path: repository } } });
+    expect(prompter.said).toContain(`${join(home, 'notes')} is no git checkout.`);
+    expect(prompter.said).toContain('A cap is a whole number of 1 or more.');
+  });
+
+  it('trusts the worktree root for Claude Code, so a session in any worktree starts with no trust question', async () => {
+    const report = await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET, isYes: true });
+
+    await expect(createClaudeCodeSetup({ homeDirectory: home }).isTrusted(paths.worktrees)).resolves.toBe(true);
+    expect(existsSync(paths.worktrees)).toBe(true);
+    expect(report.trusted).toEqual([paths.worktrees]);
+  });
+
+  it('accepts bypass permissions mode for the user when the sessions skip permissions and the operator agrees', async () => {
+    const prompter = new ScriptedPrompter(skippingPermissions(true));
+
+    const report = await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET }, prompter);
+
+    await expect(createClaudeCodeSetup({ homeDirectory: home }).isSkipPermissionsAccepted()).resolves.toBe(true);
+    expect(report.isSkipPermissionsAccepted).toBe(true);
+  });
+
+  it('leaves bypass permissions mode alone when the operator declines, saying a session would wait on the question', async () => {
+    const prompter = new ScriptedPrompter(skippingPermissions(false));
+
+    const report = await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET }, prompter);
+
+    await expect(createClaudeCodeSetup({ homeDirectory: home }).isSkipPermissionsAccepted()).resolves.toBe(false);
+    expect(report.isSkipPermissionsAccepted).toBe(false);
+    expect(report.said.join('\n')).toContain('waits on that question');
+  });
+
+  it('asks nothing about bypass permissions mode when the sessions do not skip permissions', async () => {
+    const prompter = new ScriptedPrompter(defaults());
+
+    await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET }, prompter);
+
+    expect(prompter.asked.join('\n')).not.toContain('bypass permissions');
+  });
+
+  it('says how to install the service later when the operator declines it now', async () => {
+    const prompter = new ScriptedPrompter([...defaults().slice(0, -1), ['Install the service', false]]);
+
+    const report = await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET }, prompter);
+
+    expect(service.isInstalled).toBe(false);
+    expect(report.service).toBe('notInstalled');
+    expect(report.said.join('\n')).toContain('aeolus-trierarch install');
   });
 
   it('never writes the secret', async () => {
-    await init();
+    await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET, isYes: true });
 
-    for (const file of readdirSync(paths.home)) {
-      expect(readFileSync(join(paths.home, file), 'utf8')).not.toContain(SECRET);
+    for (const file of readdirSync(paths.home, { recursive: true, withFileTypes: true })) {
+      if (file.isFile()) {
+        expect(readFileSync(join(file.parentPath, file.name), 'utf8')).not.toContain(SECRET);
+      }
     }
+  });
+});
+
+describe('aeolus-trierarch init on a machine set up already', () => {
+  let shipId: ShipId;
+
+  beforeEach(async () => {
+    shipId = newId('ship');
+    await init({ fleetUrl: FLEET_URL, shipId, secret: SECRET, isYes: true });
+    registered = [];
+  });
+
+  it('says so and never registers again, keeping the configuration when the operator does not change it', async () => {
+    const before = readFileSync(paths.config, 'utf8');
+    const prompter = new ScriptedPrompter([['Change the configuration', false]]);
+
+    const report = await init({}, prompter);
+
+    expect(registered).toEqual([]);
+    expect(readFileSync(paths.config, 'utf8')).toBe(before);
+    expect(report).toMatchObject({ isSetUpAlready: true, configuration: 'kept', service: 'unchanged' });
+    expect(report.said[0]).toBe(`This machine is set up already: the trierarch crews ${shipId} at ${FLEET_URL}.`);
+  });
+
+  it('changes the configuration from what it holds, then offers to restart the trierarch so it reads it', async () => {
+    const prompter = new ScriptedPrompter([
+      ['Change the configuration', true],
+      ['--dangerously-skip-permissions', false],
+      ['--remote-control', true],
+      ['repository', 'aeolus-fleet'],
+      ['aeolus-fleet', repository],
+      ['repository', ''],
+      ['ships', '4'],
+      ['sessions', '2'],
+      ['Restart', true],
+    ]);
+
+    const report = await init({}, prompter);
+
+    expect(configuration().harnesses['claude-code']?.flags).toEqual(['--remote-control']);
+    expect(service.restarts).toBe(1);
+    expect(report).toMatchObject({ configuration: 'changed', service: 'restarted' });
+    expect(prompter.isDone).toBe(true);
+  });
+
+  it('keeps or drops each repository it offers, as answered', async () => {
+    await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', false], ['repository', 'aeolus-fleet'], ['aeolus-fleet', repository], ['repository', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
+
+    await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', false], ['Keep the repository aeolus-fleet', false], ['repository', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
+
+    expect(configuration().repositories).toEqual({});
+  });
+
+  it('keeps everything else the configuration holds: folders, options and the worktree root', async () => {
+    const custom = { ...configuration(), worktreeRoot: join(home, 'worktrees'), folders: { notes: { path: '/notes' } }, harnesses: { 'claude-code': { flags: ['--verbose'], options: { model: { values: { opus: ['--model', 'claude-opus-5-5'] }, default: 'opus' } } } } };
+    writeFileSync(paths.config, JSON.stringify(custom));
+
+    await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', true], ['repository', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
+
+    expect(configuration()).toEqual({ ...custom, harnesses: { 'claude-code': { ...custom.harnesses['claude-code'], flags: ['--verbose', '--remote-control'] } } });
+    await expect(createClaudeCodeSetup({ homeDirectory: home }).isTrusted(join(home, 'worktrees'))).resolves.toBe(true);
+  });
+
+  it('trusts every configured folder for Claude Code too, a folder added since among them, so a want for a folder never waits on the trust question', async () => {
+    const notes = join(home, 'notes');
+    mkdirSync(notes);
+    writeFileSync(paths.config, JSON.stringify({ ...configuration(), folders: { notes: { path: notes } } }));
+
+    const report = await init({ isYes: true });
+
+    await expect(createClaudeCodeSetup({ homeDirectory: home }).isTrusted(notes)).resolves.toBe(true);
+    expect(report.trusted).toEqual([paths.worktrees, notes]);
+  });
+
+  it('refuses a ship id or secret given again, saying how to register another ship', async () => {
+    await expect(init({ shipId: newId('ship'), secret: SECRET })).rejects.toThrow(`init never registers again: to register another ship, remove ${paths.crewToken} first`);
+    expect(registered).toEqual([]);
+  });
+
+  it('keeps the configuration with --yes', async () => {
+    const before = readFileSync(paths.config, 'utf8');
+
+    await expect(init({ isYes: true })).resolves.toMatchObject({ configuration: 'kept' });
+    expect(readFileSync(paths.config, 'utf8')).toBe(before);
   });
 });

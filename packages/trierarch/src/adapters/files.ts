@@ -1,7 +1,7 @@
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-import { trierarchConfigurationSchema, type TrierarchConfiguration } from '@aeolus-fleet/common';
+import { idSchema, trierarchConfigurationSchema, type ShipId, type TrierarchConfiguration } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
 /**
@@ -49,15 +49,16 @@ export async function loadConfiguration(path: string): Promise<TrierarchConfigur
   return parsed.data;
 }
 
-/** The fleet and the trierarch's own crew token. */
+/** The fleet, the trierarch's own ship and its crew token. A crew file written before the ship id was kept lacks it. */
 export interface CrewFile {
   readonly fleetUrl: string;
+  readonly shipId?: ShipId;
   readonly crewToken: string;
 }
 
-export async function writeCrewFile(path: string, crew: CrewFile): Promise<void> {
+export async function writeCrewFile(path: string, crew: CrewFile & { shipId: ShipId }): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await writeFile(path, `fleetUrl=${crew.fleetUrl}\ncrewToken=${crew.crewToken}\n`, { mode: 0o600 });
+  await writeFile(path, `fleetUrl=${crew.fleetUrl}\nshipId=${crew.shipId}\ncrewToken=${crew.crewToken}\n`, { mode: 0o600 });
   await chmod(path, 0o600);
 }
 
@@ -74,5 +75,6 @@ export async function readCrewFile(path: string): Promise<CrewFile> {
   if (fleetUrl === undefined || crewToken === undefined) {
     throw new TrierarchFileError(`The crew file at ${path} lacks its fleetUrl or crewToken line: run aeolus-trierarch init again`);
   }
-  return { fleetUrl, crewToken };
+  const shipId = idSchema('ship').safeParse(field('shipId'));
+  return { fleetUrl, ...(shipId.success && { shipId: shipId.data }), crewToken };
 }

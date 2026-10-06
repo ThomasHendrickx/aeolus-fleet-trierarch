@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { trierarchConfigurationSchema } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { newId } from '../../test/support/in-memory.js';
 import { initialConfiguration, loadConfiguration, readCrewFile, writeCrewFile } from './files.js';
 
 let folder: string;
@@ -18,12 +19,20 @@ afterEach(() => {
 });
 
 describe('the crew file', () => {
-  it('keeps the fleet URL and the crew token, readable by its user only', async () => {
+  it("keeps the fleet URL, the trierarch's ship id and its crew token, readable by its user only", async () => {
     const path = join(folder, 'crew-token');
+    const crew = { fleetUrl: 'https://fleet.example.com', shipId: newId('ship'), crewToken: 'aeolus_ct_v1_trierarch' };
 
-    await writeCrewFile(path, { fleetUrl: 'https://fleet.example.com', crewToken: 'aeolus_ct_v1_trierarch' });
+    await writeCrewFile(path, crew);
 
     expect(statSync(path).mode & 0o777).toBe(0o600);
+    await expect(readCrewFile(path)).resolves.toEqual(crew);
+  });
+
+  it('reads a crew file written without the ship id', async () => {
+    const path = join(folder, 'crew-token');
+    writeFileSync(path, 'fleetUrl=https://fleet.example.com\ncrewToken=aeolus_ct_v1_trierarch\n');
+
     await expect(readCrewFile(path)).resolves.toEqual({ fleetUrl: 'https://fleet.example.com', crewToken: 'aeolus_ct_v1_trierarch' });
   });
 
@@ -62,7 +71,7 @@ describe('the configuration file', () => {
 
   it('never holds the crew token: that lives in the crew file', async () => {
     const path = join(folder, 'crew-token');
-    await writeCrewFile(path, { fleetUrl: 'https://fleet.example.com', crewToken: 'aeolus_ct_v1_trierarch' });
+    await writeCrewFile(path, { fleetUrl: 'https://fleet.example.com', shipId: newId('ship'), crewToken: 'aeolus_ct_v1_trierarch' });
 
     expect(JSON.stringify(initialConfiguration())).not.toContain('crewToken');
     expect(readFileSync(path, 'utf8')).toContain('crewToken=');
