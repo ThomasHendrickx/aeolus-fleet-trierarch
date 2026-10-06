@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
+import { createClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import { TrierarchFileError } from '../adapters/files.js';
 import { trierarchPaths } from '../adapters/paths.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
@@ -8,6 +9,7 @@ import { runCommand } from '../adapters/run-command.js';
 import { createService, serviceEnvironment } from '../adapters/service.js';
 import { configCheck } from './config-check.js';
 import { initTrierarch } from './init.js';
+import { createTerminalPrompter } from './prompter.js';
 import { runTrierarch } from './run.js';
 
 export const USAGE = [
@@ -32,29 +34,49 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
   const homeDirectory = env.HOME ?? homedir();
   const paths = trierarchPaths({ homeDirectory, ...(config !== undefined && { config }) });
   const [command = '', ...rest] = args;
+  const serviceAt = () =>
+    createService({
+      platform: process.platform,
+      homeDirectory,
+      paths,
+      run: { node: process.execPath, script: fileURLToPath(new URL('../bin/aeolus-trierarch.js', import.meta.url)) },
+      environment: serviceEnvironment(env),
+      uid: process.getuid?.() ?? 0,
+      exec: (program, args) => runCommand(program, { args }),
+      now: () => new Date(),
+    });
   try {
     switch (command) {
       case 'init': {
-        const [fleetUrl, shipId, secret] = rest;
-        if (fleetUrl === undefined || shipId === undefined || secret === undefined) {
-          return { output: USAGE, code: 2 };
+        const valueOf = (name: string): string | undefined => {
+          const at = rest.indexOf(name);
+          return at === -1 ? undefined : rest[at + 1];
+        };
+        const prompter = createTerminalPrompter({ input: process.stdin, output: process.stdout });
+        try {
+          const report = await initTrierarch({
+            homeDirectory,
+            paths,
+            flags: {
+              ...(valueOf('--fleet-url') !== undefined && { fleetUrl: valueOf('--fleet-url') }),
+              ...(valueOf('--ship-id') !== undefined && { shipId: valueOf('--ship-id') }),
+              ...(valueOf('--secret') !== undefined && { secret: valueOf('--secret') }),
+              isYes: rest.includes('--yes'),
+            },
+            prompter,
+            fleetAt: (url) => createRestFleet({ fleetUrl: url, crewToken: '' }),
+            claudeCode: createClaudeCodeSetup({ homeDirectory }),
+            service: serviceAt(),
+          });
+          return { output: report.said.join('\n'), code: 0 };
+        } finally {
+          prompter.close();
         }
-        const said = await initTrierarch({ paths, crew: { fleetUrl, shipId, secret }, fleetAt: (url) => createRestFleet({ fleetUrl: url, crewToken: '' }) });
-        return { output: said.join('\n'), code: 0 };
       }
       case 'config':
         return rest[0] === 'check' ? { output: await configCheck(paths), code: 0 } : { output: USAGE, code: 2 };
       case 'install': {
-        const service = createService({
-          platform: process.platform,
-          homeDirectory,
-          paths,
-          run: { node: process.execPath, script: fileURLToPath(new URL('../bin/aeolus-trierarch.js', import.meta.url)) },
-          environment: serviceEnvironment(env),
-          uid: process.getuid?.() ?? 0,
-          exec: (program, args) => runCommand(program, { args }),
-          now: () => new Date(),
-        });
+        const service = serviceAt();
         await (rest.includes('--no-load') ? service.write() : service.install());
         return { output: `Installed ${(await service.status()).file}. Logs: ${paths.logs}`, code: 0 };
       }
