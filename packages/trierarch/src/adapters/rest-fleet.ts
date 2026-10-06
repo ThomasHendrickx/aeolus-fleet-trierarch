@@ -51,10 +51,15 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string }
       headers.authorization = `Bearer ${crewToken}`;
     }
     // A call with no body is a GET, as whoami is.
-    const response = await fetch(
-      `${fleetUrl}/api/v1${request.path}`,
-      request.body === undefined ? { method: 'GET', headers } : { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(request.body) },
-    );
+    let response: Response;
+    try {
+      response = await fetch(
+        `${fleetUrl}/api/v1${request.path}`,
+        request.body === undefined ? { method: 'GET', headers } : { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(request.body) },
+      );
+    } catch (error) {
+      throw new Error(`The fleet at ${fleetUrl} cannot be reached: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    }
     const body: unknown = await response.json();
     if (!response.ok) {
       const refusal = refusalSchema.safeParse(body);
