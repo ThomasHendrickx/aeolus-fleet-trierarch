@@ -12,6 +12,7 @@ import { runCommand } from '../adapters/run-command.js';
 import { createService, serviceEnvironment, type ServiceStatus } from '../adapters/service.js';
 import { createTmux } from '../adapters/tmux.js';
 import { runningVersion } from '../adapters/version.js';
+import type { LoggedAction } from '../core/ports.js';
 import { createUninstall } from '../core/uninstall.js';
 import { configCheck } from './config-check.js';
 import { initTrierarch } from './init.js';
@@ -248,6 +249,8 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
       const logger = {
         info: (message: string) => process.stdout.write(`${new Date().toISOString()} ${message}\n`),
         warn: (message: string) => process.stderr.write(`${new Date().toISOString()} ${message}\n`),
+        action: (logged: LoggedAction) =>
+          process.stdout.write(`${logged.time.toISOString()} ${logged.shipId} ${logged.action}: ${logged.outcome}${logged.next === undefined ? '' : `. Next: ${logged.next}`}\n`),
       };
       await runTrierarch({ paths, homeDirectory, env, signal: untilStopped(), logger });
       return { data: { stopped: true }, text: 'aeolus-trierarch stopped.' };

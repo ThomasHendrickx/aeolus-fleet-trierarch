@@ -51,7 +51,7 @@ export async function loop(at: {
   handle: (delivery: Delivery) => Promise<void>;
   pass: () => Promise<void>;
   signal: AbortSignal;
-  logger: Logger;
+  logger: Pick<Logger, 'warn'>;
   intervalMs: number;
 }): Promise<void> {
   const { signal, logger, intervalMs } = at;

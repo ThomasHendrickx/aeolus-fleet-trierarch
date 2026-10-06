@@ -117,7 +117,7 @@ describe('the trierarch on a real fleet', () => {
     const workspace = createGitWorkspace({ configuration, root: paths.worktrees });
     const state = createJsonState(paths.state);
     const clock = { now: () => new Date() };
-    const logger = { warn: () => undefined };
+    const logger = { warn: () => undefined, action: () => undefined };
     const setup = { configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration) };
     const handle = createHandleDelivery({ fleet, workspace, state, setup, clock, logger });
     const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, state, setup, clock, logger });

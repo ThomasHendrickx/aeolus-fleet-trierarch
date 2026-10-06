@@ -1,5 +1,5 @@
 import { putEntry, removeEntry, withState, type Entry, type Outgoing, type TrierarchState } from './entry.js';
-import type { FleetPort, HarnessPort, Logger, ProcessPort, StatePort, TrierarchSetup, WorkspacePort } from './ports.js';
+import type { FleetPort, HarnessPort, LoggedAction, Logger, ProcessPort, StatePort, TrierarchSetup, WorkspacePort } from './ports.js';
 import { reconcile, type Action, type Observed } from './reconciler.js';
 import type { Clock } from './shared/clock.js';
 
@@ -8,6 +8,9 @@ import type { Clock } from './shared/clock.js';
  * what runs, lets the Reconciler decide, saves the state the actions start
  * from (an entry crewing is saved before the trierarch registers), then
  * carries the actions out, saving after each one that changes the list.
+ * Each action is logged with its ship and outcome. A failed one is logged
+ * with what happens next, and the pass ends there: the next pass starts from
+ * the saved state.
  */
 export type RunPass = () => Promise<void>;
 
@@ -31,7 +34,17 @@ export function createRunPass(deps: RunPassDeps): RunPass {
     let state = reconciled.state;
     await deps.state.save(state);
     for (const action of reconciled.actions) {
-      state = await carryOut(state, { action, deps });
+      try {
+        state = await carryOut(state, { action, deps });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        if (action.kind === 'notify') {
+          deps.logger.warn(`A notice to ${action.message.to} failed: ${reason}; ${NEXT_AFTER_FAILURE}`);
+        } else {
+          log(deps, { ...about(state, { shipId: action.shipId, action: action.kind }), outcome: `failed: ${reason}`, next: NEXT_AFTER_FAILURE });
+        }
+        return;
+      }
     }
   };
 }
@@ -61,6 +74,18 @@ async function observe(state: TrierarchState, deps: RunPassDeps): Promise<Observ
   return { sessions, worktrees, ships };
 }
 
+const NEXT_AFTER_FAILURE = 'the next pass tries again; aeolus-trierarch status and list show where it stands';
+
+function log(deps: RunPassDeps, logged: Omit<LoggedAction, 'time'>): void {
+  deps.logger.action({ time: deps.clock.now(), ...logged });
+}
+
+/** Which ship a log line is about, with its name once the state knows it. */
+function about(state: TrierarchState, of: Pick<LoggedAction, 'shipId' | 'action'>): Pick<LoggedAction, 'shipId' | 'shipName' | 'action'> {
+  const shipName = state.entries[of.shipId]?.shipName;
+  return { ...of, ...(shipName !== undefined && { shipName }) };
+}
+
 interface CarryOut {
   readonly action: Action;
   readonly deps: RunPassDeps;
@@ -74,6 +99,7 @@ async function carryOut(state: TrierarchState, at: CarryOut): Promise<TrierarchS
   }
   if (action.kind === 'stop') {
     await deps.processes.stop(action.shipId);
+    log(deps, { ...about(state, { shipId: action.shipId, action: 'stop' }), outcome: 'its session stopped' });
     return state;
   }
   const entry = state.entries[action.shipId];
@@ -95,17 +121,20 @@ async function carryOut(state: TrierarchState, at: CarryOut): Promise<TrierarchS
           options: entry.options,
           isFirstStart: false,
         });
+        log(deps, { ...about(state, { shipId: entry.shipId, action: 'launch' }), outcome: `started again in ${entry.folder}` });
       }
       return state;
     case 'wake':
       if (entry.folder !== undefined) {
         await harnessOf(entry, deps)?.wake({ shipId: entry.shipId, folder: entry.folder });
+        log(deps, { ...about(state, { shipId: entry.shipId, action: 'wake' }), outcome: 'woken, deliveries wait' });
       }
       return state;
     case 'report': {
       const crewToken = entry.folder === undefined ? undefined : await harnessOf(entry, deps)?.crewTokenOf(entry.folder);
       if (crewToken !== undefined) {
         await deps.fleet.report({ crewToken, state: 'blocked', note: action.note });
+        log(deps, { ...about(state, { shipId: entry.shipId, action: 'report' }), outcome: `reported ${action.note}` });
       }
       return state;
     }
@@ -162,6 +191,7 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   const now = deps.clock.now();
   const next = putEntry(state, { ...withState(entry, { state: 'running', now }), shipName: ship.name, folder, hasStarted: true });
   await deps.state.save(next);
+  log(deps, { shipId: entry.shipId, shipName: ship.name, action: 'crew', outcome: `crewed, ${entry.harness} started in ${folder}` });
   await deps.fleet.send(notice(entry, { name: 'running', now }));
   return next;
 }
@@ -174,6 +204,7 @@ async function release(state: TrierarchState, at: EntryAt): Promise<TrierarchSta
   const finished = await finishWorkspace(state, { entry, deps, isForced: entry.release?.isForced ?? false });
   const next = removeEntry(finished.state, entry.shipId);
   await deps.state.save(next);
+  log(deps, { ...about(state, { shipId: entry.shipId, action: 'release' }), outcome: `released, ${describeWorkspace(entry, finished)}` });
   if (entry.release !== undefined) {
     const { messageId, sender } = entry.release;
     await deps.fleet.send({
@@ -194,6 +225,7 @@ async function drop(state: TrierarchState, at: EntryAt): Promise<TrierarchState>
   const finished = await finishWorkspace(state, { entry, deps, isForced: false });
   const next = removeEntry(finished.state, entry.shipId);
   await deps.state.save(next);
+  log(deps, { ...about(state, { shipId: entry.shipId, action: 'drop' }), outcome: 'its lease ended elsewhere, so it is no longer crewed here' });
   await deps.fleet.send(notice(entry, { name: 'leaseEnded', now: deps.clock.now() }));
   return next;
 }
@@ -222,6 +254,14 @@ async function finishWorkspace(
   }
   deps.logger.warn(`Kept the worktree of ${entry.shipId}, which has changes: ${folder}`);
   return { state: { ...state, kept: [...state.kept, { shipId: entry.shipId, path: folder }] }, workspace: 'kept', path: folder };
+}
+
+/** What became of an ended entry's workspace, as its log line says it. */
+function describeWorkspace(entry: Entry, finished: { workspace: 'removed' | 'kept'; path?: string }): string {
+  if (finished.workspace === 'removed') {
+    return 'its worktree removed';
+  }
+  return entry.workspace.kind === 'folder' ? `its folder kept: ${finished.path ?? ''}` : `its worktree kept with changes: ${finished.path ?? ''}`;
 }
 
 /**

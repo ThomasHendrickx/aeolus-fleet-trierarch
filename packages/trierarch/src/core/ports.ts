@@ -1,6 +1,7 @@
 import type { ShipId, TrierarchAdapterFlag, TrierarchConfiguration, TrierarchWorkspace } from '@aeolus-fleet/common';
 
 import type { Outgoing, TrierarchState } from './entry.js';
+import type { Action } from './reconciler.js';
 
 /**
  * The trierarch's ports (docs/architecture.md, "The trierarch"). Adapters
@@ -107,8 +108,21 @@ export interface StatePort {
   save(state: TrierarchState): Promise<void>;
 }
 
+/** What the loop did for a ship, and how it came out: one line of the trierarch's log (aeolus-trierarch logs). */
+export interface LoggedAction {
+  readonly time: Date;
+  readonly shipId: ShipId;
+  /** Known once the ship was first crewed. */
+  readonly shipName?: string;
+  readonly action: Exclude<Action['kind'], 'notify'>;
+  readonly outcome: string;
+  /** For a failure: what happens next, and where to look. */
+  readonly next?: string;
+}
+
 export interface Logger {
   warn(message: string): void;
+  action(logged: LoggedAction): void;
 }
 
 /** What describe answers beside the configuration: the trierarch's version, and the flags each harness's adapter adds itself. */
