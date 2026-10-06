@@ -21,7 +21,7 @@ export async function initTrierarch(input: {
   const { paths, crew, fleetAt } = input;
   const shipId = idSchema('ship').parse(crew.shipId);
   const { crewToken } = await fleetAt(crew.fleetUrl).registerSelf({ shipId, secret: crew.secret });
-  await writeCrewFile(paths.crewToken, { fleetUrl: crew.fleetUrl.replace(/\/$/, ''), crewToken });
+  await writeCrewFile(paths.crewToken, { fleetUrl: crew.fleetUrl.replace(/\/$/, ''), shipId, crewToken });
   const said = [`Crew token kept in ${paths.crewToken}.`];
   await mkdir(paths.home, { recursive: true, mode: 0o700 });
   await writeFile(paths.configSchema, `${JSON.stringify(configurationJsonSchema(), null, 2)}\n`);

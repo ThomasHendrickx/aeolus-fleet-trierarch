@@ -71,7 +71,7 @@ describe('the configuration file', () => {
 
   it('never holds the crew token: that lives in the crew file', async () => {
     const path = join(folder, 'crew-token');
-    await writeCrewFile(path, { fleetUrl: 'https://fleet.example.com', crewToken: 'aeolus_ct_v1_trierarch' });
+    await writeCrewFile(path, { fleetUrl: 'https://fleet.example.com', shipId: newId('ship'), crewToken: 'aeolus_ct_v1_trierarch' });
 
     expect(JSON.stringify(initialConfiguration())).not.toContain('crewToken');
     expect(readFileSync(path, 'utf8')).toContain('crewToken=');

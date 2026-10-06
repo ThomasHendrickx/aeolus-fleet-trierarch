@@ -45,7 +45,7 @@ describe('aeolus-trierarch init', () => {
     await init(shipId);
 
     expect(registered).toEqual([{ fleetUrl: 'https://fleet.example.com/', shipId, secret: SECRET }]);
-    expect(readFileSync(paths.crewToken, 'utf8')).toBe('fleetUrl=https://fleet.example.com\ncrewToken=aeolus_ct_v1_trierarch\n');
+    expect(readFileSync(paths.crewToken, 'utf8')).toBe(`fleetUrl=https://fleet.example.com\nshipId=${shipId}\ncrewToken=aeolus_ct_v1_trierarch\n`);
     expect(statSync(paths.crewToken).mode & 0o777).toBe(0o600);
   });
 

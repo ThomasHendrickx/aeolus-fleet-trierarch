@@ -4,9 +4,10 @@ import { fileURLToPath } from 'node:url';
 import { TrierarchFileError } from '../adapters/files.js';
 import { trierarchPaths } from '../adapters/paths.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
+import { runCommand } from '../adapters/run-command.js';
+import { createService, serviceEnvironment } from '../adapters/service.js';
 import { configCheck } from './config-check.js';
 import { initTrierarch } from './init.js';
-import { install, serviceEnvironment } from './install.js';
 import { runTrierarch } from './run.js';
 
 export const USAGE = [
@@ -44,16 +45,18 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
       case 'config':
         return rest[0] === 'check' ? { output: await configCheck(paths), code: 0 } : { output: USAGE, code: 2 };
       case 'install': {
-        const said = await install({
+        const service = createService({
           platform: process.platform,
           homeDirectory,
           paths,
           run: { node: process.execPath, script: fileURLToPath(new URL('../bin/aeolus-trierarch.js', import.meta.url)) },
           environment: serviceEnvironment(env),
-          isLoading: !rest.includes('--no-load'),
           uid: process.getuid?.() ?? 0,
+          exec: (program, args) => runCommand(program, { args }),
+          now: () => new Date(),
         });
-        return { output: said.join('\n'), code: 0 };
+        await (rest.includes('--no-load') ? service.write() : service.install());
+        return { output: `Installed ${(await service.status()).file}. Logs: ${paths.logs}`, code: 0 };
       }
       case 'run': {
         const stopping = new AbortController();
