@@ -30,6 +30,7 @@ const stateSchema = z.object({
     z.string(),
     z.object({
       shipId: idSchema('ship'),
+      shipName: z.string().optional(),
       harness: z.string(),
       workspace: trierarchWorkspaceSchema,
       squadron: z.string().optional(),

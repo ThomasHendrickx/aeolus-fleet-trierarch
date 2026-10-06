@@ -23,6 +23,23 @@ export interface AeolusPlugin {
 
 export const WAKE_PROMPT = '/aeolus:wake';
 
+const REMOTE_CONTROL = '--remote-control';
+
+/**
+ * The flags, with a name for the remote-control session where the operator
+ * gave `--remote-control` without one: `[<repository or folder>] <ship>`, so
+ * the session is easy to find among the operator's remote-control sessions.
+ * A name the operator gave is kept; without the flag nothing is added.
+ */
+function namedRemoteControl(flags: readonly string[], name: string): string[] {
+  const at = flags.indexOf(REMOTE_CONTROL);
+  const next = flags[at + 1];
+  if (at === -1 || (next !== undefined && !next.startsWith('-'))) {
+    return [...flags];
+  }
+  return [...flags.slice(0, at + 1), name, ...flags.slice(at + 1)];
+}
+
 export function createClaudeCodeHarness(options: {
   configuration: TrierarchConfiguration;
   plugin: AeolusPlugin;
@@ -58,14 +75,15 @@ export function createClaudeCodeHarness(options: {
     removeIdentity: async (folder) => {
       await identity(folder, ['delete']);
     },
-    launch: async ({ shipId, folder, harness, options: picked, isFirstStart, firstPrompt }) => {
+    launch: async ({ shipId, shipName, folder, workspace, harness, options: picked, isFirstStart, firstPrompt }) => {
       const settings = configuration.harnesses[harness];
       if (settings === undefined) {
         throw new Error(`The configuration has no harness ${harness}`);
       }
       const prompt = isFirstStart && firstPrompt !== undefined ? firstPrompt : WAKE_PROMPT;
+      const flags = namedRemoteControl(effectiveFlags(settings, picked), `[${workspace.kind === 'worktree' ? workspace.repository : workspace.name}] ${shipName}`);
       // The prompt goes first: a flag with an optional value, such as `--remote-control [name]`, would take it.
-      const command = [options.command ?? 'claude', prompt, ...effectiveFlags(settings, picked), ...(isFirstStart ? [] : ['--continue'])];
+      const command = [options.command ?? 'claude', prompt, ...flags, ...(isFirstStart ? [] : ['--continue'])];
       await sessions.start({ shipId, folder, command });
     },
     turnOf: async (folder): Promise<Turn> => {

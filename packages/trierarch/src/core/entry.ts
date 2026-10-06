@@ -17,6 +17,8 @@ export interface TrierarchState {
 /** One ship the trierarch keeps crewed, with the settings its want gave. */
 export interface Entry {
   readonly shipId: ShipId;
+  /** The ship's name, from the fleet when it is crewed: its session is named after it. */
+  readonly shipName?: string;
   readonly harness: string;
   readonly workspace: TrierarchWorkspace;
   readonly squadron?: string;

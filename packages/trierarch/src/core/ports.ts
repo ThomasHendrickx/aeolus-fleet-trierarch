@@ -61,7 +61,17 @@ export interface HarnessPort {
   crewTokenOf(folder: string): Promise<string | undefined>;
   removeIdentity(folder: string): Promise<void>;
   /** Starts the harness in the folder: the first start with the want's first prompt, later ones continuing. */
-  launch(session: { shipId: ShipId; folder: string; harness: string; options: Readonly<Record<string, string>>; isFirstStart: boolean; firstPrompt?: string }): Promise<void>;
+  launch(session: {
+    shipId: ShipId;
+    /** With the workspace, what the session is named after where the harness names one. */
+    shipName: string;
+    folder: string;
+    workspace: TrierarchWorkspace;
+    harness: string;
+    options: Readonly<Record<string, string>>;
+    isFirstStart: boolean;
+    firstPrompt?: string;
+  }): Promise<void>;
   turnOf(folder: string): Promise<Turn>;
   wake(session: { shipId: ShipId; folder: string }): Promise<void>;
 }
