@@ -36,6 +36,43 @@ describe('aeolus-trierarch', () => {
     expect(output).toContain('claude-code: --remote-control --model claude-opus-5-5');
   });
 
+  it('config check prints the command each harness launches, on a first start and a restart, with each flag marked as configured or added by the adapter', async () => {
+    const config = join(home, 'both.json');
+    writeFileSync(config, JSON.stringify({ ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: { flags: ['--dangerously-bypass-approvals-and-sandbox'], options: {} } } }));
+
+    const { output } = await main(['config', 'check', '--config', config], { HOME: home });
+
+    expect(output).toContain(
+      [
+        '  first start: claude <first prompt> --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --model claude-opus-5-5 (configuration)',
+        '  restart: claude /aeolus:wake --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --model claude-opus-5-5 (configuration) --continue (adapter)',
+      ].join('\n'),
+    );
+    expect(output).toContain(
+      [
+        '  first start: codex <first prompt> --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter)',
+        '  restart: codex resume --last $aeolus-wake --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter)',
+      ].join('\n'),
+    );
+  });
+
+  it('config check gives the flags each adapter adds, beside the configured ones, as JSON with --json', async () => {
+    const config = join(home, 'elsewhere.json');
+    writeFileSync(config, JSON.stringify(CONFIGURATION));
+
+    const { output } = await main(['config', 'check', '--json', '--config', config], { HOME: home });
+
+    expect(JSON.parse(output)).toMatchObject({
+      harnesses: {
+        'claude-code': {
+          flags: ['--remote-control', '--model', 'claude-opus-5-5'],
+          adapterFlags: [{ flag: '--continue', when: 'restart' }],
+          restart: expect.arrayContaining([{ words: ['--continue'], source: 'adapter' }]),
+        },
+      },
+    });
+  });
+
   it('reads the configuration AEOLUS_TRIERARCH_CONFIG names', async () => {
     const config = join(home, 'env.json');
     writeFileSync(config, JSON.stringify(CONFIGURATION));

@@ -7,7 +7,7 @@ import type { ShipId, TrierarchConfiguration } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
-import { CODEX_TYPING_SETTLE_MS, createCodexHarness } from './codex.js';
+import { CODEX_ADAPTER_FLAGS, CODEX_TYPING_SETTLE_MS, codexCommandLine, createCodexHarness } from './codex.js';
 import { runCommand } from './run-command.js';
 
 // With the aeolus plugin's own scripts from this repository, in a temporary data folder standing for Codex's.
@@ -108,6 +108,16 @@ describe('Codex as a harness', () => {
     await withNoDaemon.launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
 
     expect(started[0]?.command.filter((part) => part === '--no-daemon')).toHaveLength(1);
+  });
+
+  it('tells the configured flags from --no-daemon, which the adapter adds to every launch', () => {
+    expect(CODEX_ADAPTER_FLAGS).toEqual([{ flag: '--no-daemon', when: 'always' }]);
+    expect(codexCommandLine({ flags: ['--dangerously-bypass-approvals-and-sandbox', '--no-daemon'], prompt: '<first prompt>', isFirstStart: true })).toEqual([
+      { words: ['codex', '<first prompt>'] },
+      { words: ['--dangerously-bypass-approvals-and-sandbox'], source: 'configuration' },
+      { words: ['--no-daemon'], source: 'adapter' },
+    ]);
+    expect(codexCommandLine({ flags: [], prompt: '$aeolus-wake', isFirstStart: false })).toEqual([{ words: ['codex', 'resume', '--last', '$aeolus-wake'] }, { words: ['--no-daemon'], source: 'adapter' }]);
   });
 
   it("wakes a session by typing $aeolus-wake, closed by a space so the skill picker leaves Enter alone, and settling before Enter so Codex takes no paste", async () => {
