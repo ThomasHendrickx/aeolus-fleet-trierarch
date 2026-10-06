@@ -8,7 +8,7 @@ import type { Tmux } from './tmux.js';
 /**
  * Codex as a harness (docs/architecture.md, "First adapters"): `codex` in the
  * folder, `codex resume --last` on a restart (the folder's last conversation;
- * one ship per folder), `$aeolus-wake` typed to wake an idle session. The
+ * one ship per folder), always with `--no-daemon`, `$aeolus-wake` typed to wake an idle session. The
  * identity and the turn marker go through the aeolus plugin for Codex, in
  * Codex's own plugin data folder.
  */
@@ -20,6 +20,13 @@ export const WAKE_PROMPT = '$aeolus-wake';
  * right after fast typing as part of a paste, a newline, and submits nothing.
  */
 export const CODEX_TYPING_SETTLE_MS = 1000;
+
+/**
+ * Added to every launch, as mechanism: without it Codex runs the session's
+ * work in its shared app-server daemon, which keeps a turn running after the
+ * pane is gone, so a release or a crash would stop the pane but not the work.
+ */
+const NO_DAEMON = '--no-daemon';
 
 export function createCodexHarness(options: {
   configuration: TrierarchConfiguration;
@@ -40,7 +47,8 @@ export function createCodexHarness(options: {
       const prompt = isFirstStart && firstPrompt !== undefined ? firstPrompt : WAKE_PROMPT;
       const program = options.command ?? 'codex';
       const command = isFirstStart ? [program, prompt] : [program, 'resume', '--last', prompt];
-      await sessions.start({ shipId, folder, command: [...command, ...effectiveFlags(settings, picked)] });
+      const flags = effectiveFlags(settings, picked).filter((flag) => flag !== NO_DAEMON);
+      await sessions.start({ shipId, folder, command: [...command, ...flags, NO_DAEMON] });
     },
     wake: async ({ shipId }) => {
       // The space closes Codex's skill picker, which would otherwise take the Enter.

@@ -51,7 +51,6 @@ const SKIP_PERMISSIONS = '--dangerously-skip-permissions';
 const REMOTE_CONTROL = '--remote-control';
 const CODEX = 'codex';
 const BYPASS_APPROVALS = '--dangerously-bypass-approvals-and-sandbox';
-const NO_DAEMON = '--no-daemon';
 
 type Accepted<T> = { readonly value: T } | { readonly why: string };
 
@@ -174,12 +173,9 @@ async function askCodex(at: { base: TrierarchConfiguration; prompter: Prompter; 
   const isBypassing = await prompter.confirm(`Launch Codex with ${BYPASS_APPROVALS}? Its sessions then run every command without asking, and outside the sandbox.`, {
     isDefault: flags.includes(BYPASS_APPROVALS),
   });
-  const isDaemonless = await prompter.confirm(`Launch Codex with ${NO_DAEMON}? Without it a session's work goes on in Codex's shared background server after the trierarch stops its session.`, {
-    isDefault: flags.includes(NO_DAEMON),
-  });
   return {
     options: harness?.options ?? {},
-    flags: [...flags.filter((flag) => flag !== BYPASS_APPROVALS && flag !== NO_DAEMON), ...(isBypassing ? [BYPASS_APPROVALS] : []), ...(isDaemonless ? [NO_DAEMON] : [])],
+    flags: [...flags.filter((flag) => flag !== BYPASS_APPROVALS), ...(isBypassing ? [BYPASS_APPROVALS] : [])],
   };
 }
 
