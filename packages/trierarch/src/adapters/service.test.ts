@@ -230,7 +230,8 @@ describe('the service on macOS (launchd)', () => {
 describe('the service on Linux (systemd)', () => {
   it('installs a user unit that restarts the trierarch, and enables and starts it', async () => {
     answers.set('systemctl --user daemon-reload', ok());
-    answers.set(`systemctl --user enable --now ${SYSTEMD_UNIT}`, ok());
+    answers.set(`systemctl --user enable ${SYSTEMD_UNIT}`, ok());
+    answers.set(`systemctl --user restart ${SYSTEMD_UNIT}`, ok());
 
     await serviceOn('linux').install();
 
@@ -239,12 +240,23 @@ describe('the service on Linux (systemd)', () => {
     expect(text).toContain('Restart=always');
     expect(text).toContain('Environment="PATH=/opt/homebrew/bin:/usr/bin:/bin"');
     expect(text).toContain('Environment="AEOLUS_PLUGIN_ROOT=/Users/thomas/aeolus-fleet/plugins/aeolus"');
-    expect(calls).toEqual(['systemctl --user daemon-reload', `systemctl --user enable --now ${SYSTEMD_UNIT}`]);
+    expect(calls).toEqual(['systemctl --user daemon-reload', `systemctl --user enable ${SYSTEMD_UNIT}`, `systemctl --user restart ${SYSTEMD_UNIT}`]);
+  });
+
+  it('installs over an active unit by restarting it, so the new unit takes effect at once, as on macOS', async () => {
+    answers.set('systemctl --user daemon-reload', ok());
+    answers.set(`systemctl --user enable ${SYSTEMD_UNIT}`, ok());
+    answers.set(`systemctl --user restart ${SYSTEMD_UNIT}`, ok());
+
+    await serviceOn('linux').install();
+
+    expect(calls).toEqual(['systemctl --user daemon-reload', `systemctl --user enable ${SYSTEMD_UNIT}`, `systemctl --user restart ${SYSTEMD_UNIT}`]);
   });
 
   it('runs with its pid and since when it started, as systemd and ps say', async () => {
     answers.set('systemctl --user daemon-reload', ok());
-    answers.set(`systemctl --user enable --now ${SYSTEMD_UNIT}`, ok());
+    answers.set(`systemctl --user enable ${SYSTEMD_UNIT}`, ok());
+    answers.set(`systemctl --user restart ${SYSTEMD_UNIT}`, ok());
     answers.set(`systemctl --user show ${SYSTEMD_UNIT} -p ActiveState -p MainPID`, ok('ActiveState=active\nMainPID=77\n'));
     answers.set('ps -o etime= -p 77', ok('05:00\n'));
     const service = serviceOn('linux');
@@ -255,7 +267,8 @@ describe('the service on Linux (systemd)', () => {
 
   it('starts, stops and restarts through systemctl', async () => {
     answers.set('systemctl --user daemon-reload', ok());
-    answers.set(`systemctl --user enable --now ${SYSTEMD_UNIT}`, ok());
+    answers.set(`systemctl --user enable ${SYSTEMD_UNIT}`, ok());
+    answers.set(`systemctl --user restart ${SYSTEMD_UNIT}`, ok());
     for (const verb of ['start', 'stop', 'restart']) {
       answers.set(`systemctl --user ${verb} ${SYSTEMD_UNIT}`, ok());
     }
@@ -272,7 +285,8 @@ describe('the service on Linux (systemd)', () => {
 
   it('uninstalls by disabling and stopping the unit, removing its file and reloading', async () => {
     answers.set('systemctl --user daemon-reload', ok());
-    answers.set(`systemctl --user enable --now ${SYSTEMD_UNIT}`, ok());
+    answers.set(`systemctl --user enable ${SYSTEMD_UNIT}`, ok());
+    answers.set(`systemctl --user restart ${SYSTEMD_UNIT}`, ok());
     const service = serviceOn('linux');
     await service.install();
     calls = [];
