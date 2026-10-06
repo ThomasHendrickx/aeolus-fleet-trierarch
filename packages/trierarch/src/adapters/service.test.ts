@@ -61,7 +61,38 @@ describe('the service on macOS (launchd)', () => {
     expect(text).toContain(`<string>${join(home, '.aeolus', 'trierarch', 'logs', 'trierarch.log')}</string>`);
     expect(text).toContain('<key>PATH</key>\n    <string>/opt/homebrew/bin:/usr/bin:/bin</string>');
     expect(text).toContain('<key>AEOLUS_PLUGIN_ROOT</key>\n    <string>/Users/thomas/aeolus-fleet/plugins/aeolus</string>');
-    expect(calls).toEqual([`launchctl bootout ${target}`, `launchctl bootstrap gui/501 ${plist()}`]);
+    expect(calls).toEqual([`launchctl bootout ${target}`, `launchctl print ${target}`, `launchctl bootstrap gui/501 ${plist()}`]);
+  });
+
+  it('installs over a running agent by loading it again only once launchd has the old one gone, as bootout returns before the process exits', async () => {
+    let isLoaded = true;
+    let waits = 0;
+    const service = createService({
+      platform: 'darwin',
+      homeDirectory: home,
+      paths: trierarchPaths({ homeDirectory: home }),
+      run,
+      environment,
+      uid: 501,
+      now: () => NOW,
+      sleep: () => {
+        waits += 1;
+        isLoaded = waits < 3;
+        return Promise.resolve();
+      },
+      exec: (command, args) => {
+        const line = [command, ...args].join(' ');
+        if (line === `launchctl print ${target}`) {
+          return Promise.resolve(isLoaded ? ok('state = running') : { status: 1, stdout: '', stderr: 'not loaded' });
+        }
+        if (line === `launchctl bootstrap gui/501 ${plist()}`) {
+          return Promise.resolve(isLoaded ? { status: 5, stdout: '', stderr: 'Bootstrap failed: 5: Input/output error' } : ok());
+        }
+        return Promise.resolve(ok());
+      },
+    });
+
+    await expect(service.install()).resolves.toBeUndefined();
   });
 
   it('says why when launchd refuses to load it', async () => {
@@ -74,10 +105,10 @@ describe('the service on macOS (launchd)', () => {
 
   it('runs with its pid and since when it started, as launchd and ps say', async () => {
     answers.set(`launchctl bootstrap gui/501 ${plist()}`, ok());
-    answers.set(`launchctl print ${target}`, ok(`${target} = {\n\tstate = running\n\tpid = 4242\n}`));
     answers.set('ps -o etime= -p 4242', ok('  1-02:03:04\n'));
     const service = serviceOn('darwin');
     await service.install();
+    answers.set(`launchctl print ${target}`, ok(`${target} = {\n\tstate = running\n\tpid = 4242\n}`));
 
     await expect(service.status()).resolves.toEqual({ file: plist(), isInstalled: true, isRunning: true, pid: 4242, since: '2026-10-05T07:56:56.000Z' });
   });
@@ -160,10 +191,10 @@ describe('the service on macOS (launchd)', () => {
 
   it('restarts by killing and starting it again', async () => {
     answers.set(`launchctl bootstrap gui/501 ${plist()}`, ok());
-    answers.set(`launchctl print ${target}`, ok('state = running'));
     answers.set(`launchctl kickstart -k ${target}`, ok());
     const service = serviceOn('darwin');
     await service.install();
+    answers.set(`launchctl print ${target}`, ok('state = running'));
     calls = [];
 
     await service.restart();
