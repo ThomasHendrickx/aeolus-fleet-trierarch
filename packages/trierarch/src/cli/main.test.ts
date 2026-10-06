@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createJsonState } from '../adapters/json-state.js';
 import { trierarchPaths } from '../adapters/paths.js';
+import { runningVersion } from '../adapters/version.js';
 import { aTrierarch, aWant, CONFIGURATION } from '../../test/support/in-memory.js';
 import { main, USAGE } from './main.js';
 
@@ -23,6 +24,18 @@ describe('aeolus-trierarch', () => {
   it('prints its usage, exiting 2, for no command or an unknown one', async () => {
     await expect(main([], { HOME: home })).resolves.toEqual({ output: USAGE, code: 2 });
     await expect(main(['sail'], { HOME: home })).resolves.toEqual({ output: USAGE, code: 2 });
+  });
+
+  it('prints the installed version for --version and -v', async () => {
+    await expect(main(['--version'], { HOME: home })).resolves.toEqual({ output: runningVersion(), code: 0 });
+    await expect(main(['-v'], { HOME: home })).resolves.toEqual({ output: runningVersion(), code: 0 });
+  });
+
+  it('answers the installed version as JSON with --version --json', async () => {
+    const { output, code } = await main(['--version', '--json'], { HOME: home });
+
+    expect(code).toBe(0);
+    expect(JSON.parse(output)).toEqual({ version: runningVersion() });
   });
 
   it('config check prints the effective flags per harness, reading the configuration --config names', async () => {
