@@ -18,6 +18,7 @@ export const WAKE_PROMPT = '/aeolus:wake';
 
 const REMOTE_CONTROL = '--remote-control';
 const CONTINUE = '--continue';
+const END_OF_FLAGS = '--';
 
 export const CLAUDE_CODE_ADAPTER_FLAGS: readonly TrierarchAdapterFlag[] = [{ flag: CONTINUE, when: 'restart' }];
 
@@ -41,12 +42,13 @@ function namedRemoteControl(flags: readonly string[], name: string): CommandPart
   ];
 }
 
-/** `claude <prompt>`, the prompt before the flags (a flag with an optional value, such as `--remote-control [name]`, would take it), then `--continue` on a restart. */
+/** `claude`, the flags, `--continue` on a restart, then the prompt last after `--`: no flag takes it (`--remote-control [name]` has an optional value), and it never reads as a flag. */
 export function claudeCodeCommandLine(at: { flags: readonly string[]; sessionName: string; prompt: string; isFirstStart: boolean; program?: string }): CommandPart[] {
   return partsWithWords([
-    { words: [at.program ?? 'claude', at.prompt] },
+    { words: [at.program ?? 'claude'] },
     ...namedRemoteControl(at.flags, at.sessionName),
     { words: at.isFirstStart ? [] : [CONTINUE], source: 'adapter' },
+    { words: [END_OF_FLAGS, at.prompt] },
   ]);
 }
 

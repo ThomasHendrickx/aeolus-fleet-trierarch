@@ -28,16 +28,18 @@ export const CODEX_TYPING_SETTLE_MS = 1000;
  * pane is gone, so a release or a crash would stop the pane but not the work.
  */
 const NO_DAEMON = '--no-daemon';
+const END_OF_FLAGS = '--';
 
 export const CODEX_ADAPTER_FLAGS: readonly TrierarchAdapterFlag[] = [{ flag: NO_DAEMON, when: 'always' }];
 
-/** `codex <prompt>`, or `codex resume --last <prompt>` on a restart, then the configured flags, then --no-daemon once. */
+/** `codex`, or `codex resume --last` on a restart, then the configured flags, --no-daemon once, and the prompt last after `--`, so it never reads as a flag. */
 export function codexCommandLine(at: { flags: readonly string[]; prompt: string; isFirstStart: boolean; program?: string }): CommandPart[] {
   const program = at.program ?? 'codex';
   return partsWithWords([
-    { words: at.isFirstStart ? [program, at.prompt] : [program, 'resume', '--last', at.prompt] },
+    { words: at.isFirstStart ? [program] : [program, 'resume', '--last'] },
     { words: at.flags.filter((flag) => flag !== NO_DAEMON), source: 'configuration' },
     { words: [NO_DAEMON], source: 'adapter' },
+    { words: [END_OF_FLAGS, at.prompt] },
   ]);
 }
 
