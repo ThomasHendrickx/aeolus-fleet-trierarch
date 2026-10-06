@@ -4,7 +4,9 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { CONFIGURATION } from '../../test/support/in-memory.js';
+import { createJsonState } from '../adapters/json-state.js';
+import { trierarchPaths } from '../adapters/paths.js';
+import { aTrierarch, aWant, CONFIGURATION } from '../../test/support/in-memory.js';
 import { main, USAGE } from './main.js';
 
 let home: string;
@@ -46,5 +48,54 @@ describe('aeolus-trierarch', () => {
 
     expect(code).toBe(1);
     expect(output).toBe(`No configuration at ${join(home, '.aeolus', 'trierarch', 'config.json')}: run aeolus-trierarch init first`);
+  });
+
+  it('names every command in its usage', () => {
+    for (const command of ['init', 'status', 'list', 'logs', 'start', 'stop', 'restart', 'install', 'uninstall', 'config check', 'run']) {
+      expect(USAGE).toContain(`  ${command}`);
+    }
+    expect(USAGE).toContain('--json');
+  });
+
+  it('prints its usage, exiting 2, for a flag it does not know', async () => {
+    await expect(main(['list', '--colour'], { HOME: home })).resolves.toEqual({ output: USAGE, code: 2 });
+  });
+
+  it('lists the wanted entries as JSON with --json, reading the saved state', async () => {
+    const trierarch = aTrierarch();
+    const scout = trierarch.fleet.commission('scout');
+    await trierarch.command('want', aWant(scout));
+    await createJsonState(trierarchPaths({ homeDirectory: home }).state).save(trierarch.state.current());
+
+    const { output, code } = await main(['list', '--json'], { HOME: home });
+
+    expect(code).toBe(0);
+    expect(JSON.parse(output)).toEqual([expect.objectContaining({ shipId: scout, state: 'wanted', workspace: 'worktree aeolus-fleet' })]);
+  });
+
+  it('answers a failure as JSON with --json', async () => {
+    const { output, code } = await main(['config', 'check', '--json'], { HOME: home });
+
+    expect(code).toBe(1);
+    expect(JSON.parse(output)).toEqual({ error: `No configuration at ${join(home, '.aeolus', 'trierarch', 'config.json')}: run aeolus-trierarch init first` });
+  });
+
+  it('config check gives the effective flags per harness as JSON with --json', async () => {
+    const config = join(home, 'config.json');
+    writeFileSync(config, JSON.stringify(CONFIGURATION));
+
+    const { output } = await main(['config', 'check', '--config', config, '--json'], { HOME: home });
+
+    expect(JSON.parse(output)).toEqual({
+      path: config,
+      harnesses: { 'claude-code': { flags: ['--remote-control', '--model', 'claude-opus-5-5'], options: { model: { opus: ['--model', 'claude-opus-5-5'], sonnet: ['--model', 'claude-sonnet-5-5'] } } } },
+    });
+  });
+
+  it('takes a flag value written with an equals sign', async () => {
+    const config = join(home, 'config.json');
+    writeFileSync(config, JSON.stringify(CONFIGURATION));
+
+    await expect(main(['config', 'check', `--config=${config}`], { HOME: home })).resolves.toMatchObject({ code: 0 });
   });
 });

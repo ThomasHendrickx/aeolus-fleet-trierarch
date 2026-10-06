@@ -107,6 +107,7 @@ describe('the trierarch on a real fleet', () => {
       service,
     });
     const fleet = createRestFleet(await readCrewFile(paths.crewToken));
+    await expect(fleet.whoami()).resolves.toMatchObject({ shipId: trierarchShip.shipId, name: 'mac-mini' });
     const configuration = { ...CONFIGURATION, folders: { notes: { path: notes } } };
     const sessions = standInSessions();
     const harness = createClaudeCodeHarness({ configuration, plugin: { root: PLUGIN_ROOT, data: pluginData }, sessions });
