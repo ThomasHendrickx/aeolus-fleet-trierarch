@@ -242,6 +242,16 @@ describe('the service on Linux (systemd)', () => {
     expect(calls).toEqual(['systemctl --user daemon-reload', `systemctl --user enable --now ${SYSTEMD_UNIT}`]);
   });
 
+  it('installs over an active unit by restarting it, so the new unit takes effect at once, as on macOS', async () => {
+    answers.set('systemctl --user daemon-reload', ok());
+    answers.set(`systemctl --user enable ${SYSTEMD_UNIT}`, ok());
+    answers.set(`systemctl --user restart ${SYSTEMD_UNIT}`, ok());
+
+    await serviceOn('linux').install();
+
+    expect(calls).toEqual(['systemctl --user daemon-reload', `systemctl --user enable ${SYSTEMD_UNIT}`, `systemctl --user restart ${SYSTEMD_UNIT}`]);
+  });
+
   it('runs with its pid and since when it started, as systemd and ps say', async () => {
     answers.set('systemctl --user daemon-reload', ok());
     answers.set(`systemctl --user enable --now ${SYSTEMD_UNIT}`, ok());
