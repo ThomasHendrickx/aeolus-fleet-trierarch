@@ -1,6 +1,6 @@
 import { putEntry, removeEntry, withState, type Entry, type TrierarchState } from './entry.js';
 import type { FleetPort, HarnessPort, LoggedAction, Logger, ProcessPort, StatePort, TrierarchSetup, WorkspacePort } from './ports.js';
-import { reconcile, type Action, type Observed } from './reconciler.js';
+import { reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
 import type { Clock } from './shared/clock.js';
 
 /**
@@ -100,7 +100,7 @@ async function carryOut(state: TrierarchState, at: CarryOut): Promise<TrierarchS
       await deps.fleet.reportToArgo(action.report);
       return state;
     case 'status':
-      await deps.fleet.writeStatus(action.shipId, action.status);
+      await deps.fleet.writeStatus(action.shipId, action.written);
       return state;
     case 'refuse':
       return refuse(state, { action, deps });
@@ -198,7 +198,7 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   if (ship.kind === 'crewed') {
     await deps.fleet.release(entry.shipId);
   }
-  await deps.fleet.writeStatus(entry.shipId, 'crewing');
+  await deps.fleet.writeStatus(entry.shipId, writtenStatusOf(withState(entry, { state: 'crewing', now: deps.clock.now() })));
   const { secret } = await deps.fleet.getStartingPrompt(entry.shipId);
   const { crewToken } = await deps.fleet.register({ shipId: entry.shipId, secret });
   const { folder } = await deps.workspace.prepare({ shipId: entry.shipId, shipName: ship.name, workspace: entry.workspace });
@@ -219,7 +219,8 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   const now = deps.clock.now();
   const next = putEntry(state, { ...withState(entry, { state: 'running', now }), shipName: ship.name, folder, hasStarted: true });
   await deps.state.save(next);
-  await deps.fleet.writeStatus(entry.shipId, 'running');
+  const running = next.entries[entry.shipId];
+  await deps.fleet.writeStatus(entry.shipId, running === undefined ? { status: 'running', attempt: 0, startedAt: now } : writtenStatusOf({ ...running, state: 'running' }));
   log(deps, { shipId: entry.shipId, shipName: ship.name, action: 'crew', outcome: `crewed, ${entry.harness} started in ${folder}` });
   return next;
 }

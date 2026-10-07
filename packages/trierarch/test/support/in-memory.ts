@@ -19,6 +19,7 @@ import type {
   StatePort,
   Turn,
   WorkspacePort,
+  WrittenStatus,
 } from '../../src/core/ports.js';
 import { createReportSelf } from '../../src/core/report-self.js';
 import { createRunPass } from '../../src/core/run-pass.js';
@@ -71,8 +72,8 @@ export class InMemoryFleet implements FleetPort {
   readonly ships = new Map<ShipId, FleetShip>();
   /** The crew requests assigned to this trierarch, by ship, oldest first. */
   readonly requests = new Map<ShipId, HeldRequest>();
-  /** Every status the trierarch wrote, in order. */
-  readonly statuses: { shipId: ShipId; status: CrewStatus }[] = [];
+  /** Every status the trierarch wrote, in order, with the attempt and session start it wrote with it. */
+  readonly statuses: ({ shipId: ShipId } & WrittenStatus)[] = [];
   /** The ships whose release the trierarch confirmed. */
   readonly confirmed: ShipId[] = [];
   /** What the trierarch sent argo, once per idempotency key. */
@@ -119,14 +120,17 @@ export class InMemoryFleet implements FleetPort {
     return Promise.resolve([...this.requests].map(([shipId, { settings, settingsVersion, status }]) => ({ shipId, settings, settingsVersion, status })));
   }
 
-  writeStatus(shipId: ShipId, status: CrewStatus): Promise<void> {
+  writeStatus(shipId: ShipId, written: WrittenStatus): Promise<void> {
     const held = this.requestOf(shipId);
+    const { status } = written;
     if (held.status === 'releasing' && status !== 'releasing') {
       return Promise.reject(new Error('CREW_REQUEST_RELEASING'));
     }
-    if (held.status !== status) {
+    const last = this.statuses.findLast((each) => each.shipId === shipId);
+    const isSame = held.status === status && last?.attempt === written.attempt && last.startedAt?.getTime() === written.startedAt?.getTime();
+    if (!isSame) {
       held.status = status;
-      this.statuses.push({ shipId, status });
+      this.statuses.push({ shipId, ...written });
     }
     return Promise.resolve();
   }

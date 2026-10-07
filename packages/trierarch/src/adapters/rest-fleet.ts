@@ -134,8 +134,8 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string }
     },
     assignedRequests: async () =>
       (await call({ path: '/fleet/assignedCrewRequests', answers: assignedCrewRequestsOutputSchema })).map(({ shipId, settings, settingsVersion, status }) => ({ shipId, settings, settingsVersion, status })),
-    writeStatus: async (shipId, status) => {
-      await call({ path: '/fleet/reportCrewStatus', body: { shipId, status }, answers: z.unknown() });
+    writeStatus: async (shipId, { status, attempt, startedAt }) => {
+      await call({ path: '/fleet/reportCrewStatus', body: { shipId, status, attempt, startedAt: startedAt?.toISOString() ?? null }, answers: z.unknown() });
     },
     confirmRelease: async (shipId) => {
       await call({ path: '/fleet/confirmCrewRelease', body: { shipId }, answers: z.unknown() });

@@ -2,7 +2,7 @@ import type { CrewStatus, ShipId, TrierarchConfiguration } from '@aeolus-fleet/c
 
 import { checkSettings, type CheckedSettings, type Refusal } from './check-settings.js';
 import { putEntry, removeEntry, withState, type Entry, type TrierarchState } from './entry.js';
-import type { ArgoReport, AssignedRequest, InboxAnswer, ObservedSession, ObservedWorktree, Turn } from './ports.js';
+import type { ArgoReport, AssignedRequest, InboxAnswer, ObservedSession, ObservedWorktree, Turn, WrittenStatus } from './ports.js';
 import { decideRestart, exitsInWindow } from './restart-policy.js';
 
 /**
@@ -34,7 +34,7 @@ export type Action =
   | { readonly kind: 'confirm'; readonly shipId: ShipId }
   /** Its request is no longer assigned here: stop, remove the identity of the entry it was; the worktree stays as an orphan. */
   | { readonly kind: 'forget'; readonly shipId: ShipId; readonly entry: Entry }
-  | { readonly kind: 'status'; readonly shipId: ShipId; readonly status: CrewStatus }
+  | { readonly kind: 'status'; readonly shipId: ShipId; readonly written: WrittenStatus }
   /** Report on the ship's behalf, with its session's crew token. */
   | { readonly kind: 'report'; readonly shipId: ShipId; readonly note: string }
   /** Tell argo it cannot crew this settings version. */
@@ -94,7 +94,7 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
     next = step.entry === undefined ? next : putEntry(next, step.entry);
     actions.push(...step.actions);
     if (WRITTEN.has(after.state) && request.status !== after.state && after.state !== 'releasing') {
-      actions.push({ kind: 'status', shipId: entry.shipId, status: after.state });
+      actions.push({ kind: 'status', shipId: entry.shipId, written: writtenStatusOf(after) });
     }
     running += step.starts;
   }
@@ -132,6 +132,17 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
     .filter((worktree) => !known.has(worktree.path) && (worktree.shipId === undefined || !(worktree.shipId in next.entries)))
     .map((worktree) => worktree.path);
   return { state: { ...next, orphans }, actions };
+}
+
+/**
+ * The status an entry writes (#332): its state; the restart attempt, the
+ * restarts made or under way within the window (a crashed entry's last exit
+ * started none); and when the session it runs now started, the time it took
+ * running, or null while none runs.
+ */
+export function writtenStatusOf(entry: Entry & { state: CrewStatus }): WrittenStatus {
+  const attempt = entry.state === 'crashed' ? Math.max(0, entry.exits.length - 1) : entry.exits.length;
+  return { status: entry.state, attempt, startedAt: entry.state === 'running' ? new Date(entry.since) : null };
 }
 
 /** A new entry, crewing since now, for checked settings of a version. */

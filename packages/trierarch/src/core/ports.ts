@@ -44,13 +44,20 @@ export interface ArgoReport {
  * The fleet as the trierarch's own ship calls it, with `crew:run`: it reaches
  * only the ships whose crew requests are assigned to it (decision 0029).
  */
+/** A crew status as the trierarch writes it: the status, how many times it restarted the session within its window (0 on its first start), and when the session it runs now started, or null while none runs. */
+export interface WrittenStatus {
+  readonly status: CrewStatus;
+  readonly attempt: number;
+  readonly startedAt: Date | null;
+}
+
 export interface FleetPort {
   /** The fleet's URL, written into each session's identity. */
   readonly url: string;
   /** The crew requests assigned to the trierarch's ship, oldest ship first. */
   assignedRequests(): Promise<readonly AssignedRequest[]>;
-  /** Says how its crew of an assigned ship stands. */
-  writeStatus(shipId: ShipId, status: CrewStatus): Promise<void>;
+  /** Says how its crew of an assigned ship stands, with the restart attempt and when the session started (#332). */
+  writeStatus(shipId: ShipId, written: WrittenStatus): Promise<void>;
   /** Confirms it released the ship of a releasing request, which then goes. */
   confirmRelease(shipId: ShipId): Promise<void>;
   ship(shipId: ShipId): Promise<FleetShipStatus>;
