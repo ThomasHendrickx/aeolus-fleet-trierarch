@@ -197,6 +197,32 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.fleet.confirmed).toEqual([shipId]);
   });
 
+  it('drops a kept worktree once it is gone from disk, as when a human removed it by hand (#325)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.change(SCOUT_FOLDER);
+    trierarch.fleet.removeRequest(shipId);
+    await trierarch.pass();
+    trierarch.workspace.folders.delete(SCOUT_FOLDER);
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().kept).toEqual([]);
+    expect(trierarch.state.current().orphans).toEqual([]);
+  });
+
+  it('keeps a kept worktree that is still on disk, pass after pass', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.change(SCOUT_FOLDER);
+    trierarch.fleet.removeRequest(shipId);
+    await trierarch.pass();
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().kept).toEqual([{ shipId, path: SCOUT_FOLDER }]);
+  });
+
   it('row 7: a configured folder is never removed, only its identity', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch, { workspace: { kind: 'folder', name: 'notes' } });
