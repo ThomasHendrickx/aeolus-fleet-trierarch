@@ -27,7 +27,9 @@
   ],
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
-    "typecheck": "tsc --project tsconfig.json"
+    "typecheck": "tsc --project tsconfig.json",
+    "prepack": "cp ../../LICENSE LICENSE",
+    "postpack": "rm LICENSE"
   },
   "dependencies": {
     "@aeolus-fleet/common": "0.0.0",
