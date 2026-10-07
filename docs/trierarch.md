@@ -18,7 +18,7 @@ Declared state on the ship, in the fleet core (decision 0029): "keep this ship c
 | Request | The settings (below) | A requester | `fleet:manage` |
 | Assignment | The trierarch ship that crews it; set only while unassigned | The trierarch plugin | `crew:assign` |
 | Reason | Why no trierarch can take it, while unassigned; shown in the operator's needs-crew to-do | The trierarch plugin | `crew:assign` |
-| Status | crewing, running, restarting, crashed, releasing; and who crewed it, the trierarch or argo | The assigned trierarch | `crew:run` |
+| Status | crewing, running, restarting, crashed, releasing, with the restart attempt (0 on the first start) and when the session started; and who crewed it, the trierarch or argo | The assigned trierarch | `crew:run` |
 
 The server stores the settings without meaning and checks only their size. The settings have a fixed core (decision 0027), whose schema lives in `common`:
 
