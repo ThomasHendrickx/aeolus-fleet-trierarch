@@ -127,11 +127,14 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
     }
   }
 
-  const known = new Set([...Object.values(next.entries).flatMap((entry) => (entry.folder === undefined ? [] : [entry.folder])), ...next.kept.map((kept) => kept.path)]);
+  // A kept worktree stays until it is gone from disk, as when a human removed it (#325).
+  const onDisk = new Set(observed.worktrees.map((worktree) => worktree.path));
+  const kept = next.kept.filter((each) => onDisk.has(each.path));
+  const known = new Set([...Object.values(next.entries).flatMap((entry) => (entry.folder === undefined ? [] : [entry.folder])), ...kept.map((each) => each.path)]);
   const orphans = observed.worktrees
     .filter((worktree) => !known.has(worktree.path) && (worktree.shipId === undefined || !(worktree.shipId in next.entries)))
     .map((worktree) => worktree.path);
-  return { state: { ...next, orphans }, actions };
+  return { state: { ...next, kept, orphans }, actions };
 }
 
 /**
