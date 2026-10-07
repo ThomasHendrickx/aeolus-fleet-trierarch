@@ -57,6 +57,17 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(statusesOf(trierarch, shipId)).toEqual(['crewing', 'running']);
   });
 
+  it('row 3: writes no session start while crewing, and when the session started once running, as its first start (#332)', async () => {
+    const trierarch = aTrierarch();
+
+    const shipId = await aCrewedShip(trierarch);
+
+    expect(trierarch.fleet.statuses.filter((each) => each.shipId === shipId)).toEqual([
+      { shipId, status: 'crewing', attempt: 0, startedAt: null },
+      { shipId, status: 'running', attempt: 0, startedAt: trierarch.clock.now() },
+    ]);
+  });
+
   it('row 3: saves the entry as crewing before it registers', async () => {
     const trierarch = aTrierarch();
     const shipId = trierarch.fleet.commission('scout');
@@ -85,6 +96,21 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     await trierarch.pass();
 
     expect(trierarch.state.current().entries[shipId]?.options).toEqual({ model: 'sonnet' });
+  });
+
+  it('row 4: writes the restart attempt while it restarts, and when the restarted session started (#332)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.processes.exit(shipId);
+
+    await trierarch.pass();
+    trierarch.clock.advance(5 * SECOND_MS);
+    await trierarch.pass();
+
+    expect(trierarch.fleet.statuses.filter((each) => each.shipId === shipId).slice(2)).toEqual([
+      { shipId, status: 'restarting', attempt: 1, startedAt: null },
+      { shipId, status: 'running', attempt: 1, startedAt: trierarch.clock.now() },
+    ]);
   });
 
   it('row 4: a session that dies starts again in the same folder with the same crew token, after its wait', async () => {
