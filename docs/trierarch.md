@@ -55,7 +55,7 @@ A trierarch never registers or labels itself.
 1. The operator asks the trierarch plugin for a new machine, naming it. The trierarch plugin commissions a ship of that name, of type `trierarch` with `crew:run` beside the send and receive every agent has, nothing more, and answers its starting prompt (decision 0019) and one setup line for the machine, built from the fleet's URL, the ship's id and its secret: `npx @aeolus-fleet/trierarch init --fleet-url <url> --ship-id <id> --secret <secret>`. Both are shown once; the trierarch plugin never logs the secret.
 2. On the machine, the setup line runs `aeolus-trierarch init`, which takes the fleet URL, ship id and secret as flags (it never parses a prompt), registers, writes the configuration and installs the service.
 3. The trierarch reports what it can do in its report's details (below).
-4. The trierarch plugin labels the machine from that report (labels, #102). Until labels exist, placement reads the report itself.
+4. The trierarch plugin labels the machine from that report (labels, #102). Until it does, placement reads the report itself.
 
 A trierarch's ship stays a normal ship: it receives messages, such as pings, and sends its crash reports to argo. Releasing it is the kill switch for that machine.
 
