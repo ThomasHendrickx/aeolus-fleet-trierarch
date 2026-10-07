@@ -55,6 +55,7 @@ function detailsOf(setup: TrierarchSetup, state: TrierarchState): TrierarchRepor
     caps: configuration.caps,
     kept: state.kept.map(({ shipId, path }) => ({ shipId, path })),
     orphans: state.orphans.map((path) => ({ path })),
+    ...(setup.machine === undefined || Object.keys(setup.machine).length === 0 ? {} : { machine: setup.machine }),
     version,
   };
 }
