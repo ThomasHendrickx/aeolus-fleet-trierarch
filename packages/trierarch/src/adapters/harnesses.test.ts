@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { CONFIGURATION } from '../../test/support/in-memory.js';
-import { createHarnesses } from './harnesses.js';
+import { createHarnesses, riskyFlagsOf } from './harnesses.js';
 
 const sessions = { start: () => Promise.resolve(), type: () => Promise.resolve() };
 const env = { AEOLUS_PLUGIN_ROOT: '/claude-plugin', AEOLUS_CODEX_PLUGIN_ROOT: '/codex-plugin' };
@@ -19,6 +19,12 @@ describe('the harnesses a trierarch offers', () => {
     const { plugins } = await createHarnesses({ configuration: CONFIGURATION, homeDirectory: '/home/thomas', env: { AEOLUS_PLUGIN_ROOT: '/claude-plugin' }, sessions });
 
     expect(Object.keys(plugins)).toEqual(['claude-code']);
+  });
+
+  it("names each configured harness's risky flags, as Thomas decided: skipping permissions in Claude Code, bypassing approvals and the sandbox in Codex (#326)", () => {
+    const both = { ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: { flags: [], options: {} } } };
+
+    expect(riskyFlagsOf(both)).toEqual({ 'claude-code': ['--dangerously-skip-permissions'], codex: ['--dangerously-bypass-approvals-and-sandbox'] });
   });
 
   it('refuses a configured harness it has no adapter for, naming it', async () => {
