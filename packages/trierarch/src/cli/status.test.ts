@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { FleetRefusal } from '../adapters/rest-fleet.js';
 import type { RunningFile } from '../adapters/files.js';
 import type { ServiceStatus } from '../adapters/service.js';
-import { aTrierarch, aWant, CONFIGURATION, newId, WORKTREE_ROOT } from '../../test/support/in-memory.js';
+import { aTrierarch, CONFIGURATION, newId, WORKTREE_ROOT } from '../../test/support/in-memory.js';
 import { describeStatus, inspectStatus, leaseFrom, type Lease } from './status.js';
 import { createStyle } from '../adapters/style.js';
 
@@ -30,8 +30,8 @@ describe('aeolus-trierarch status', () => {
   it('says how the service runs, the fleet and its own lease, the caps in use, the entries by state, kept worktrees and orphans', async () => {
     const trierarch = aTrierarch();
     const scout = trierarch.fleet.commission('scout');
-    await trierarch.command('want', aWant(scout));
-    await trierarch.command('want', aWant(trierarch.fleet.commission('reviewer')));
+    trierarch.fleet.request(scout);
+    trierarch.fleet.request(trierarch.fleet.commission('reviewer'));
     await trierarch.pass();
     trierarch.processes.exit(scout);
     await trierarch.pass();
@@ -44,7 +44,7 @@ describe('aeolus-trierarch status', () => {
       service: RUNNING,
       fleet: { url: 'https://fleet.example.com', shipId, lease: 'valid' },
       caps: { ships: { used: 2, cap: 8 }, running: { used: 1, cap: 4 } },
-      entries: { wanted: 0, crewing: 0, running: 1, restarting: 1, crashed: 0, releasing: 0 },
+      entries: { crewing: 0, running: 1, restarting: 1, crashed: 0, releasing: 0 },
       kept: [],
       orphans: [],
     });
@@ -53,7 +53,7 @@ describe('aeolus-trierarch status', () => {
         'Version: 0.18.0',
         'Service: running, pid 4242, since 2026-10-06T07:00:00.000Z',
         `Fleet: https://fleet.example.com, the lease of ${shipId} is valid`,
-        'Caps: 2 of 8 ships on the list, 1 of 4 sessions running',
+        'Caps: 2 of 8 ships crewed here, 1 of 4 sessions running',
         'Entries: running 1, restarting 1',
         'Kept worktrees: none',
         'Orphans: none',
@@ -73,10 +73,10 @@ describe('aeolus-trierarch status', () => {
   it('lists kept worktrees and orphans', async () => {
     const trierarch = aTrierarch();
     const scout = trierarch.fleet.commission('scout');
-    await trierarch.command('want', aWant(scout));
+    trierarch.fleet.request(scout);
     await trierarch.pass();
     trierarch.workspace.change(`${WORKTREE_ROOT}/aeolus-fleet/scout`);
-    await trierarch.command('release', { shipId: scout });
+    trierarch.fleet.removeRequest(scout);
     await trierarch.pass();
     trierarch.workspace.folders.set(`${WORKTREE_ROOT}/aeolus-fleet/stray`, { hasChanges: false });
     await trierarch.pass();

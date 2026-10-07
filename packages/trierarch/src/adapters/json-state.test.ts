@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { EMPTY_STATE, type TrierarchState } from '../core/entry.js';
 import { newId } from '../../test/support/in-memory.js';
-import { APPLIED_CAP, createJsonState } from './json-state.js';
+import { createJsonState } from './json-state.js';
 
 let folder: string;
 
@@ -28,7 +28,7 @@ const aState = (): TrierarchState => {
         harness: 'claude-code',
         workspace: { kind: 'worktree', repository: 'aeolus-fleet' },
         options: { model: 'opus' },
-        requester: newId('ship'),
+        settingsVersion: 1,
         state: 'running',
         since: '2026-10-06T08:00:00.000Z',
         exits: [],
@@ -37,9 +37,9 @@ const aState = (): TrierarchState => {
         wake: { waiting: 0, isPending: false },
       },
     },
-    applied: {},
     kept: [],
     orphans: [],
+    refused: {},
   };
 };
 
@@ -66,16 +66,15 @@ describe('the JSON state store', () => {
     expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 
-  it('keeps only the most recent applied messages', async () => {
-    const store = createJsonState(join(folder, 'state.json'));
-    const applied = Object.fromEntries(Array.from({ length: APPLIED_CAP + 5 }, (_, index) => [`msg_${String(index).padStart(5, '0')}`, []]));
+  it('moves a 0.17 state file aside and starts empty: its wanted list is not migrated (decision 0013)', async () => {
+    const path = join(folder, 'state.json');
+    const old = '{"entries": {}, "applied": {}, "kept": [], "orphans": []}';
+    writeFileSync(path, old);
 
-    await store.save({ ...EMPTY_STATE, applied });
+    await expect(createJsonState(path).load()).resolves.toEqual(EMPTY_STATE);
 
-    const kept = Object.keys((await store.load()).applied);
-    expect(kept).toHaveLength(APPLIED_CAP);
-    expect(kept[0]).toBe('msg_00005');
-    expect(kept.at(-1)).toBe(`msg_${String(APPLIED_CAP + 4).padStart(5, '0')}`);
+    expect(readdirSync(folder)).toEqual(['state.0.17.json']);
+    expect(readFileSync(join(folder, 'state.0.17.json'), 'utf8')).toBe(old);
   });
 
   it('refuses a state file that does not fit, rather than guessing', async () => {

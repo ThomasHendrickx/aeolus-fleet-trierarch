@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ServiceStatus } from '../adapters/service.js';
-import { aTrierarch, aWant, WORKTREE_ROOT } from '../../test/support/in-memory.js';
+import { aTrierarch, WORKTREE_ROOT } from '../../test/support/in-memory.js';
 import { uninstallTrierarch } from './uninstall.js';
 
 class FakeService {
@@ -18,7 +18,7 @@ class FakeService {
 describe('aeolus-trierarch uninstall', () => {
   it('removes the service, stops every session, lists the worktrees it leaves, and deletes nothing', async () => {
     const trierarch = aTrierarch();
-    await trierarch.command('want', aWant(trierarch.fleet.commission('scout')));
+    trierarch.fleet.request(trierarch.fleet.commission('scout'));
     await trierarch.pass();
     const service = new FakeService();
 

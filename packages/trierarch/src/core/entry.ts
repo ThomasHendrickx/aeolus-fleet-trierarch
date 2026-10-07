@@ -1,34 +1,40 @@
-import type { ShipId, TrierarchEntryState, TrierarchWorkspace } from '@aeolus-fleet/common';
+import type { ShipId, TrierarchWorkspace } from '@aeolus-fleet/common';
 
 /**
- * The trierarch's saved state (docs/trierarch.md): the wanted list by ship id,
- * the messages it applied with the answers it sent for them, the worktrees it
- * kept, and the orphans it found. Plain data, saved whole as JSON, never a
- * secret: a session's crew token lives only in its folder's identity file.
+ * The trierarch's saved state (docs/trierarch.md): an entry per ship it
+ * crews, by ship id, the worktrees it kept, the orphans it found, and the
+ * settings versions it told argo it cannot crew. Plain data, saved whole as
+ * JSON, never a secret: a session's crew token lives only in its folder's
+ * identity file. The crew requests themselves live in the fleet.
  */
 export interface TrierarchState {
   readonly entries: Readonly<Record<string, Entry>>;
-  /** Each applied message's answers, by message id, so a message applied before changes nothing. */
-  readonly applied: Readonly<Record<string, readonly Outgoing[]>>;
   readonly kept: readonly KeptWorktree[];
   readonly orphans: readonly string[];
+  /** By ship id: the settings version argo was told this trierarch cannot crew, so it is told once. */
+  readonly refused: Readonly<Record<string, number>>;
 }
 
-/** One ship the trierarch keeps crewed, with the settings its want gave. */
+/** Where an entry stands: the crew statuses the trierarch writes, and releasing while it ends. */
+export const ENTRY_STATES = ['crewing', 'running', 'restarting', 'crashed', 'releasing'] as const;
+
+export type EntryState = (typeof ENTRY_STATES)[number];
+
+/** One ship the trierarch crews, from the crew request assigned to it, with the settings of the version it crewed. */
 export interface Entry {
   readonly shipId: ShipId;
   /** The ship's name, from the fleet when it is crewed: its session is named after it. */
   readonly shipName?: string;
+  /** The settings version this entry crews with: a new one crews the ship again. */
+  readonly settingsVersion: number;
   readonly harness: string;
   readonly workspace: TrierarchWorkspace;
   readonly squadron?: string;
   /** Given on the first start only. */
   readonly firstPrompt?: string;
-  /** Option name to value name, as the want picked them. */
+  /** Option name to value name, as the settings picked them. */
   readonly options: Readonly<Record<string, string>>;
-  /** The ship that sent the want: notices go to it. */
-  readonly requester: ShipId;
-  readonly state: TrierarchEntryState;
+  readonly state: EntryState;
   /** When the entry took its state, ISO 8601. */
   readonly since: string;
   /** When its session exited within the restart window, oldest first, ISO 8601. */
@@ -38,33 +44,20 @@ export interface Entry {
   /** Where its workspace is, once made. */
   readonly folder?: string;
   readonly hasStarted: boolean;
-  /** The release a message asked for, answered once the ship is released. */
-  readonly release?: { readonly messageId: string; readonly sender: ShipId; readonly isForced: boolean };
   /** The inbox count last seen, and whether a wake waits for the session to turn idle. */
   readonly wake: { readonly waiting: number; readonly isPending: boolean };
 }
 
-/** A worktree kept because it had changes, until a human or a release with force clears it. */
+/** A worktree kept because it had changes, until a human clears it. */
 export interface KeptWorktree {
   readonly shipId: ShipId;
   readonly path: string;
 }
 
-/** A message the trierarch sends: an answer in reply to a command, or a notice. */
-export interface Outgoing {
-  readonly to: ShipId;
-  readonly inReplyTo?: string;
-  /** The protocol name, such as `wanted`: its content type is `trierarchContentType(name)`. */
-  readonly name: string;
-  readonly payload: Readonly<Record<string, unknown>>;
-  /** The same each time this message is sent again, so the fleet stores it once. */
-  readonly idempotencyKey: string;
-}
-
-export const EMPTY_STATE: TrierarchState = { entries: {}, applied: {}, kept: [], orphans: [] };
+export const EMPTY_STATE: TrierarchState = { entries: {}, kept: [], orphans: [], refused: {} };
 
 /** The entry in a new state since now. */
-export function withState(entry: Entry, change: { state: TrierarchEntryState; now: Date }): Entry {
+export function withState(entry: Entry, change: { state: EntryState; now: Date }): Entry {
   return { ...entry, state: change.state, since: change.now.toISOString() };
 }
 

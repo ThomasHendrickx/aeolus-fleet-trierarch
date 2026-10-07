@@ -35,7 +35,7 @@ export const USAGE = [
   '',
   'Look:',
   '  status                the version, the service, the fleet and its own lease, caps in use, entries by state, kept worktrees and orphans',
-  '  list                  the wanted entries: ship, state, harness, workspace, since, restarts',
+  '  list                  the ships it crews: ship, state, harness, workspace, since, restarts',
   '  logs [--lines <n>] [--follow]   the last lines of the log, and with --follow each new one',
   '',
   'Run:',
@@ -45,7 +45,7 @@ export const USAGE = [
   '  upgrade [version]     install the given version, or the latest, and restart the service; sessions keep running',
   '  install [--no-load]   install the service: launchd on macOS, systemd on Linux',
   '  uninstall             remove the service and stop every session; deletes no worktree and none of its files',
-  '  run                   keep the wanted ships crewed until stopped (what the service runs)',
+  '  run                   keep the ships assigned to it crewed until stopped (what the service runs)',
   '',
   '--json answers JSON, for a ship to read.',
 ].join('\n');

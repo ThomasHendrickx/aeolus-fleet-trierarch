@@ -1,16 +1,17 @@
-import { putEntry, removeEntry, withState, type Entry, type Outgoing, type TrierarchState } from './entry.js';
+import { putEntry, removeEntry, withState, type Entry, type TrierarchState } from './entry.js';
 import type { FleetPort, HarnessPort, LoggedAction, Logger, ProcessPort, StatePort, TrierarchSetup, WorkspacePort } from './ports.js';
 import { reconcile, type Action, type Observed } from './reconciler.js';
 import type { Clock } from './shared/clock.js';
 
 /**
- * Use case: one pass of the trierarch's loop (docs/trierarch.md). It sees
- * what runs, lets the Reconciler decide, saves the state the actions start
- * from (an entry crewing is saved before the trierarch registers), then
- * carries the actions out, saving after each one that changes the list.
- * Each action is logged with its ship and outcome. A failed one is logged
- * with what happens next, and the pass ends there: the next pass starts from
- * the saved state.
+ * Use case: one pass of the trierarch's loop (docs/trierarch.md, "Crewing a
+ * ship"). It reads the crew requests assigned to it and sees what runs, lets
+ * the Reconciler decide, saves the state the actions start from (an entry
+ * crewing is saved before the trierarch registers), then carries the actions
+ * out, saving after each one that changes the state. Each action is logged
+ * with its ship and outcome. A failed one is logged with what happens next,
+ * and the pass ends there: the next pass starts from the saved state and the
+ * requests as the fleet holds them then.
  */
 export type RunPass = () => Promise<void>;
 
@@ -26,24 +27,27 @@ export interface RunPassDeps {
   logger: Logger;
 }
 
+const NEXT_AFTER_FAILURE = 'the next pass tries again; aeolus-trierarch status and list show where it stands';
+
 export function createRunPass(deps: RunPassDeps): RunPass {
   return async () => {
-    const loaded = await deps.state.load();
-    const observed = await observe(loaded, deps);
-    const reconciled = reconcile(loaded, { observed, now: deps.clock.now(), configuration: deps.setup.configuration });
-    let state = reconciled.state;
-    await deps.state.save(state);
-    for (const action of reconciled.actions) {
-      try {
+    let state = await deps.state.load();
+    let action: Action | undefined;
+    try {
+      const requests = await deps.fleet.assignedRequests();
+      const observed = await observe(state, deps);
+      const reconciled = reconcile(state, { requests, observed, now: deps.clock.now(), configuration: deps.setup.configuration });
+      state = reconciled.state;
+      await deps.state.save(state);
+      for (action of reconciled.actions) {
         state = await carryOut(state, { action, deps });
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        if (action.kind === 'notify') {
-          deps.logger.warn(`A notice to ${action.message.to} failed: ${reason}; ${NEXT_AFTER_FAILURE}`);
-        } else {
-          log(deps, { ...about(state, { shipId: action.shipId, action: action.kind }), outcome: `failed: ${reason}`, next: NEXT_AFTER_FAILURE });
-        }
-        return;
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      if (action === undefined || action.kind === 'argo' || action.kind === 'status' || action.kind === 'refuse') {
+        deps.logger.warn(`The pass failed${action === undefined ? '' : ` at ${action.kind}`}: ${reason}; ${NEXT_AFTER_FAILURE}`);
+      } else {
+        log(deps, { ...about(state, { shipId: action.shipId, action: action.kind }), outcome: `failed: ${reason}`, next: NEXT_AFTER_FAILURE });
       }
     }
   };
@@ -74,8 +78,6 @@ async function observe(state: TrierarchState, deps: RunPassDeps): Promise<Observ
   return { sessions, worktrees, ships };
 }
 
-const NEXT_AFTER_FAILURE = 'the next pass tries again; aeolus-trierarch status and list show where it stands';
-
 function log(deps: RunPassDeps, logged: Omit<LoggedAction, 'time'>): void {
   deps.logger.action({ time: deps.clock.now(), ...logged });
 }
@@ -93,15 +95,37 @@ interface CarryOut {
 
 async function carryOut(state: TrierarchState, at: CarryOut): Promise<TrierarchState> {
   const { action, deps } = at;
-  if (action.kind === 'notify') {
-    await deps.fleet.send(action.message);
-    return state;
+  switch (action.kind) {
+    case 'argo':
+      await deps.fleet.reportToArgo(action.report);
+      return state;
+    case 'status':
+      await deps.fleet.writeStatus(action.shipId, action.status);
+      return state;
+    case 'refuse':
+      return refuse(state, { action, deps });
+    case 'confirm':
+      await deps.fleet.confirmRelease(action.shipId);
+      log(deps, { shipId: action.shipId, action: 'confirm', outcome: 'its request removed; this trierarch did not crew it' });
+      return state;
+    case 'stop':
+      await deps.processes.stop(action.shipId);
+      log(deps, { ...about(state, { shipId: action.shipId, action: 'stop' }), outcome: 'its session stopped' });
+      return state;
+    case 'forget':
+      return forget(state, { entry: action.entry, deps });
+    case 'release':
+      return release(state, { shipId: action.shipId, deps });
+    case 'crew':
+    case 'launch':
+    case 'wake':
+    case 'report':
+      return carryOutForEntry(state, { action, deps });
   }
-  if (action.kind === 'stop') {
-    await deps.processes.stop(action.shipId);
-    log(deps, { ...about(state, { shipId: action.shipId, action: 'stop' }), outcome: 'its session stopped' });
-    return state;
-  }
+}
+
+async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: Extract<Action, { kind: 'crew' | 'launch' | 'wake' | 'report' }> }): Promise<TrierarchState> {
+  const { action, deps } = at;
   const entry = state.entries[action.shipId];
   if (entry === undefined) {
     return state;
@@ -138,10 +162,6 @@ async function carryOut(state: TrierarchState, at: CarryOut): Promise<TrierarchS
       }
       return state;
     }
-    case 'release':
-      return release(state, { entry, deps });
-    case 'drop':
-      return drop(state, { entry, deps });
   }
 }
 
@@ -151,12 +171,13 @@ interface EntryAt {
 }
 
 /**
- * Crews the ship: gets its starting prompt (fleet:crew) and registers with the
- * secret, so the session never sees it; makes the workspace, writes the
- * folder's identity (with its squadron) and starts the harness. A resumed crew
- * whose ship is crewed lost its register reply: the trierarch releases the
- * ship and crews it again. A ship crewed by another session meanwhile, or gone,
- * is dropped.
+ * Crews the ship (crew:run): gets its starting prompt and registers with the
+ * secret, so the session never sees it; makes the workspace (or uses the one
+ * it has), writes the folder's identity (with its squadron) and starts the
+ * harness, writing status crewing, then running. A resumed crew whose ship is
+ * crewed holds the ship by its own lease, or lost its register reply: the
+ * trierarch releases the ship and crews it again. A ship another session
+ * crews before its crew is left; a ship gone is forgotten.
  */
 async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean }): Promise<TrierarchState> {
   const { entry, isResumed, deps } = at;
@@ -165,12 +186,19 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
     return state;
   }
   const ship = await deps.fleet.ship(entry.shipId);
-  if (ship.kind === 'notFound' || ship.kind === 'retired' || (ship.kind === 'crewed' && !isResumed)) {
-    return drop(state, { entry, deps });
+  if (ship.kind === 'notFound' || ship.kind === 'retired') {
+    return forget(state, { entry, deps });
+  }
+  if (ship.kind === 'crewed' && !isResumed) {
+    const next = removeEntry(state, entry.shipId);
+    await deps.state.save(next);
+    log(deps, { shipId: entry.shipId, shipName: ship.name, action: 'leave', outcome: 'crewed by another session, so the trierarch leaves it' });
+    return next;
   }
   if (ship.kind === 'crewed') {
     await deps.fleet.release(entry.shipId);
   }
+  await deps.fleet.writeStatus(entry.shipId, 'crewing');
   const { secret } = await deps.fleet.getStartingPrompt(entry.shipId);
   const { crewToken } = await deps.fleet.register({ shipId: entry.shipId, secret });
   const { folder } = await deps.workspace.prepare({ shipId: entry.shipId, shipName: ship.name, workspace: entry.workspace });
@@ -191,55 +219,74 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   const now = deps.clock.now();
   const next = putEntry(state, { ...withState(entry, { state: 'running', now }), shipName: ship.name, folder, hasStarted: true });
   await deps.state.save(next);
+  await deps.fleet.writeStatus(entry.shipId, 'running');
   log(deps, { shipId: entry.shipId, shipName: ship.name, action: 'crew', outcome: `crewed, ${entry.harness} started in ${folder}` });
-  await deps.fleet.send(notice(entry, { name: 'running', now }));
   return next;
 }
 
-/** Release asked by a message: the lease ends whatever the worktree holds, then the workspace, then the answer. */
-async function release(state: TrierarchState, at: EntryAt): Promise<TrierarchState> {
-  const { entry, deps } = at;
-  await deps.processes.stop(entry.shipId);
-  await deps.fleet.release(entry.shipId);
-  const finished = await finishWorkspace(state, { entry, deps, isForced: entry.release?.isForced ?? false });
-  const next = removeEntry(finished.state, entry.shipId);
-  await deps.state.save(next);
-  log(deps, { ...about(state, { shipId: entry.shipId, action: 'release' }), outcome: `released, ${describeWorkspace(entry, finished)}` });
-  if (entry.release !== undefined) {
-    const { messageId, sender } = entry.release;
-    await deps.fleet.send({
-      to: sender,
-      inReplyTo: messageId,
-      name: 'released',
-      payload: { shipId: entry.shipId, workspace: finished.workspace, ...(finished.path !== undefined && { path: finished.path }) },
-      idempotencyKey: `trierarch:${messageId}:released`,
-    });
+/**
+ * Its request was removed (row 7): the session stops, the lease ends
+ * whatever the worktree holds, then the workspace; only then does the
+ * trierarch confirm, and the request goes.
+ */
+async function release(state: TrierarchState, at: { shipId: Entry['shipId']; deps: RunPassDeps }): Promise<TrierarchState> {
+  const { shipId, deps } = at;
+  const entry = state.entries[shipId];
+  if (entry === undefined) {
+    return state;
   }
+  await deps.processes.stop(shipId);
+  if ((await deps.fleet.ship(shipId)).kind === 'crewed') {
+    await deps.fleet.release(shipId);
+  }
+  const finished = await finishWorkspace(state, { entry, deps });
+  const next = removeEntry(finished.state, shipId);
+  await deps.state.save(next);
+  await deps.fleet.confirmRelease(shipId);
+  log(deps, { ...about(state, { shipId, action: 'release' }), outcome: `released, ${describeWorkspace(entry, finished)}` });
   return next;
 }
 
-/** The lease ended elsewhere (released, re-crewed or retired): never crewed again, its requester told. */
-async function drop(state: TrierarchState, at: EntryAt): Promise<TrierarchState> {
+/**
+ * Its request is no longer assigned here, as when its ship is retired (gap
+ * rule 2): the session stops and its identity goes, but nothing the trierarch
+ * cannot tell is clean goes: its worktree stays, reported as an orphan.
+ */
+async function forget(state: TrierarchState, at: EntryAt): Promise<TrierarchState> {
   const { entry, deps } = at;
   await deps.processes.stop(entry.shipId);
-  const finished = await finishWorkspace(state, { entry, deps, isForced: false });
-  const next = removeEntry(finished.state, entry.shipId);
+  if (entry.folder !== undefined) {
+    await harnessOf(entry, deps)?.removeIdentity(entry.folder);
+  }
+  const next = removeEntry(state, entry.shipId);
   await deps.state.save(next);
-  log(deps, { ...about(state, { shipId: entry.shipId, action: 'drop' }), outcome: 'its lease ended elsewhere, so it is no longer crewed here' });
-  await deps.fleet.send(notice(entry, { name: 'leaseEnded', now: deps.clock.now() }));
+  log(deps, { shipId: entry.shipId, ...(entry.shipName !== undefined && { shipName: entry.shipName }), action: 'forget', outcome: 'its request is no longer assigned here, so its session stopped' });
+  return next;
+}
+
+/** Tells argo, once per settings version, that this trierarch cannot crew them. */
+async function refuse(state: TrierarchState, at: CarryOut & { action: Extract<Action, { kind: 'refuse' }> }): Promise<TrierarchState> {
+  const { action, deps } = at;
+  const ship = await deps.fleet.ship(action.shipId);
+  const name = ship.kind === 'awaitingCrew' || ship.kind === 'crewed' ? ship.name : action.shipId;
+  const { field, reason } = action.refusal;
+  await deps.fleet.reportToArgo({
+    text: `${name} (${action.shipId}): this trierarch cannot crew settings version ${String(action.settingsVersion)}: ${field === undefined ? reason : `${field}: ${reason}`}`,
+    idempotencyKey: `trierarch:refused:${action.shipId}:${String(action.settingsVersion)}`,
+  });
+  const next = { ...state, refused: { ...state.refused, [action.shipId]: action.settingsVersion } };
+  await deps.state.save(next);
+  deps.logger.warn(`Cannot crew ${name} (${action.shipId}), settings version ${String(action.settingsVersion)}: ${reason}`);
   return next;
 }
 
 /**
  * The workspace of an entry that ends: a worktree the trierarch made is
- * removed when clean (or forced), and kept and reported when not; a
- * configured folder is never removed. The identity goes either way.
+ * removed when clean, and kept and reported when not; a configured folder is
+ * never removed. The identity goes either way.
  */
-async function finishWorkspace(
-  state: TrierarchState,
-  at: EntryAt & { isForced: boolean },
-): Promise<{ state: TrierarchState; workspace: 'removed' | 'kept'; path?: string }> {
-  const { entry, deps, isForced } = at;
+async function finishWorkspace(state: TrierarchState, at: EntryAt): Promise<{ state: TrierarchState; workspace: 'removed' | 'kept'; path?: string }> {
+  const { entry, deps } = at;
   const { folder } = entry;
   if (folder === undefined) {
     return { state, workspace: 'removed' };
@@ -248,7 +295,7 @@ async function finishWorkspace(
   if (entry.workspace.kind === 'folder') {
     return { state, workspace: 'kept', path: folder };
   }
-  if (isForced || (await deps.workspace.isClean(folder))) {
+  if (await deps.workspace.isClean(folder)) {
     await deps.workspace.remove(folder);
     return { state, workspace: 'removed' };
   }
@@ -265,7 +312,7 @@ function describeWorkspace(entry: Entry, finished: { workspace: 'removed' | 'kep
 }
 
 /**
- * The adapter of the entry's harness. A want names only a harness the
+ * The adapter of the entry's harness. Settings name only a harness the
  * configuration offers, and the trierarch starts with an adapter for each, so
  * none missing is a setup gone wrong: logged, and the entry left as it is.
  */
@@ -275,8 +322,4 @@ function harnessOf(entry: Entry, deps: RunPassDeps): HarnessPort | undefined {
     deps.logger.warn(`No adapter for the harness ${entry.harness} of ${entry.shipId}`);
   }
   return harness;
-}
-
-function notice(entry: Entry, at: { name: 'running' | 'leaseEnded'; now: Date }): Outgoing {
-  return { to: entry.requester, name: at.name, payload: { shipId: entry.shipId }, idempotencyKey: `trierarch:${at.name}:${entry.shipId}:${at.now.toISOString()}` };
 }

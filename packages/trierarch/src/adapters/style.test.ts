@@ -27,7 +27,6 @@ describe('the terminal style', () => {
     expect(stateTone('crewing')).toBe('busy');
     expect(stateTone('restarting')).toBe('busy');
     expect(stateTone('crashed')).toBe('bad');
-    expect(stateTone('wanted')).toBe('quiet');
     expect(stateTone('releasing')).toBe('quiet');
   });
 });

@@ -107,11 +107,15 @@ A trierarch reconciles from the requests assigned to it. Its loop crews each one
 
 From then on the trierarch watches the ship's inbox while the session runs. It wakes the session when deliveries wait and the session is idle, and restarts a session that dies.
 
-A ship crewed by hand before its trierarch crews it counts as crewed: the trierarch leaves it, and the status shows it was crewed by argo.
+Before it crews, the trierarch checks the settings again against its own configuration (decision 0027): the harness, the repository or folder, and each option's value. Settings it cannot crew are not crewed and get no status; it tells argo once per settings version, as plain text naming the ship and the field at fault.
+
+A ship crewed by hand before its trierarch crews it counts as crewed: the trierarch leaves it, writes no status, and the status shows it was crewed by argo. Once the ship awaits crew again, the trierarch crews it.
+
+The trierarch's own ship takes no work by message: a ping gets pong, and any other delivery is acknowledged and logged as not handled. Only the crew requests assigned to it start or stop a session on the machine.
 
 ### Crashed and Restart
 
-A session that dies is restarted by the trierarch on its own. When its restart budget is spent, the trierarch writes status `crashed` and sends a report to argo: a human decides. The operator's Restart action deletes the request and creates an exact copy behind the scenes; the trierarch sees a new version of its crew record and crews it again.
+A session that dies is restarted by the trierarch on its own. When its restart budget is spent, the trierarch writes status `crashed` and sends argo a plain-text report naming the ship and how often its session crashed: a human decides. The operator's Restart writes the request again as an exact copy, and Edit writes it with new settings: either is a new settings version. The trierarch treats a new version of its crew record as the signal: it stops the running session and crews the ship again with that version, in the same worktree, and a crashed request starts again with a fresh restart budget. It is no release: the worktree stays.
 
 ## Lifecycles
 
@@ -130,12 +134,12 @@ The ship, its crew request, its session and its worktree live and end together:
 | 9 | the trierarch is uninstalled | crewed | still assigned to it | stopped first | uninstall lists kept worktrees and deletes nothing |
 | 10 | the machine goes silent | as it was | still assigned to it, the machine flagged | unknown | unknown |
 | 11 | released elsewhere | awaiting crew, then crewed again by the trierarch | unchanged, crewing, then running | stopped, then started | kept |
-| 12 | Restart of a crashed request | as row 7, then as row 1 | removed, then an exact copy requested: a new version | stopped, then started | as row 7, then as row 3 |
+| 12 | Restart or Edit: the request written again, a new settings version | crewed, released and crewed again by the trierarch | the new version: crewing, then running | stopped, then started with a fresh restart budget | kept |
 
 The rules that close the gaps:
 
 1. The trierarch removes only what it made: worktrees under its own worktree root, never a configured folder and never a worktree with changes. A kept worktree is reported in its details until a human clears it.
-2. Every pass of the loop also looks for strays. A session of the trierarch with no assigned request is stopped. A worktree under its root with no assigned request is reported as an orphan, never deleted.
+2. Every pass of the loop also looks for strays. A session of the trierarch with no assigned request is stopped. A worktree under its root with no assigned request is reported as an orphan, never deleted. A request that is no longer assigned to it without being removed (its ship retired) has its session stopped and its identity removed; its worktree is then an orphan.
 3. After a stop mid-crew, the loop resumes from its assigned requests and its saved state. An entry still crewing whose ship is crewed was lost between register and its reply: the trierarch releases the ship (`crew:run`) and crews it again. A half-made worktree of an assigned ship is used; one of a ship no longer assigned is an orphan (rule 2).
 4. A worktree with changes never holds up releasing the ship: the lease ends either way, so the ship can be crewed elsewhere.
 5. The trierarch watches a ship's inbox only while its session runs, so "last seen" still means the session is alive. It reports on the ship's behalf when its session crashes or restarts ("blocked: session crashed, restarting").
@@ -152,6 +156,8 @@ stateDiagram-v2
   Restarting --> Crashed: restart budget spent, report to argo
   Running --> Releasing: request removed
   Crashed --> Releasing: request removed
+  Running --> Crewing: a new settings version, the session stopped
+  Crashed --> Crewing: a new settings version, a fresh restart budget
   Releasing --> [*]: trierarch confirms, request gone
 ```
 
@@ -163,7 +169,7 @@ Stopping a session must stop its work, or a release and a restarted crash would 
 
 ## The 0.17 protocol, until T4
 
-What the trierarch in `@aeolus-fleet/trierarch` still speaks until the build plan's slice T4 removes it, together with this section: fleet messages to and from the trierarch's ship, with content types `application/vnd.aeolus.trierarch.<name>+json`. The crew request and the report replace it (decision 0027). The running 0.17 setup is not migrated: its sessions are released and the new trierarch crews them again (decision 0013). The schemas in `common` take every example below.
+The messages the 0.17 trierarch spoke, whose schemas stay in `common` until the build plan's slice T4 removes them, together with this section: fleet messages to and from the trierarch's ship, with content types `application/vnd.aeolus.trierarch.<name>+json`. The crew request and the report replace it (decision 0027), and the trierarch no longer acts on them: it acknowledges each and logs it as not handled. The running 0.17 setup is not migrated: its sessions are released and the new trierarch crews them again (decision 0013); a 0.17 state file is moved aside to `state.0.17.json`. The schemas in `common` take every example below.
 
 | Command | Answer |
 | --- | --- |

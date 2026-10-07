@@ -1,13 +1,14 @@
-import type { ShipId, TrierarchEntryState, TrierarchWorkspace } from '@aeolus-fleet/common';
+import type { ShipId, TrierarchWorkspace } from '@aeolus-fleet/common';
 
+import type { EntryState } from '../core/entry.js';
 import type { StatePort } from '../core/ports.js';
 import { PLAIN, stateTone, type Style } from '../adapters/style.js';
 
-/** `aeolus-trierarch list`: the wanted entries, from the saved state. */
+/** `aeolus-trierarch list`: the ships it crews, from the saved state. */
 
 export interface ListedEntry {
   readonly shipId: ShipId;
-  readonly state: TrierarchEntryState;
+  readonly state: EntryState;
   readonly harness: string;
   readonly workspace: string;
   readonly folder?: string;
@@ -46,7 +47,7 @@ const STATE_COLUMN = 1;
 /** A table, its columns aligned on the plain text: the header strong and each state in its tone where the style colours. */
 export function describeList(entries: readonly ListedEntry[], style: Style = PLAIN): string {
   if (entries.length === 0) {
-    return 'No ship is on the list.';
+    return 'No ship is crewed here.';
   }
   const rows = [HEADER, ...entries.map((entry) => [entry.shipId, entry.state, entry.harness, entry.workspace, entry.since, String(entry.restarts)])];
   const widths = HEADER.map((_, column) => Math.max(...rows.map((row) => row[column]?.length ?? 0)));

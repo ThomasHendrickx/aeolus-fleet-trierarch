@@ -1,6 +1,6 @@
-import type { ShipId, TrierarchAdapterFlag, TrierarchConfiguration, TrierarchReportDetails, TrierarchWorkspace } from '@aeolus-fleet/common';
+import type { CrewStatus, ShipId, TrierarchAdapterFlag, TrierarchConfiguration, TrierarchReportDetails, TrierarchWorkspace } from '@aeolus-fleet/common';
 
-import type { Outgoing, TrierarchState } from './entry.js';
+import type { TrierarchState } from './entry.js';
 import type { Action } from './reconciler.js';
 
 /**
@@ -10,7 +10,7 @@ import type { Action } from './reconciler.js';
  * state. Each throws only for a system failure.
  */
 
-/** Where a ship stands in the fleet, as `fleet.ship` answers the trierarch (fleet:crew). */
+/** Where a ship stands in the fleet, as `fleet.ship` answers the trierarch (crew:run, for a ship assigned to it). */
 export type FleetShipStatus = { readonly kind: 'awaitingCrew'; readonly name: string } | { readonly kind: 'crewed'; readonly name: string } | { readonly kind: 'retired' } | { readonly kind: 'notFound' };
 
 /** A delivery to the trierarch's own ship. */
@@ -25,9 +25,34 @@ export interface Delivery {
 /** What a session's inbox says: deliveries waiting, or the lease ended (released or retired elsewhere). */
 export type InboxAnswer = { readonly kind: 'waiting'; readonly count: number } | { readonly kind: 'leaseEnded' };
 
+/** A crew request assigned to the trierarch's ship, as `fleet.assignedCrewRequests` answers: its settings unread. */
+export interface AssignedRequest {
+  readonly shipId: ShipId;
+  readonly settings: unknown;
+  readonly settingsVersion: number;
+  /** How the trierarch last said the crew stands; releasing once the requester removed it; null until any. */
+  readonly status: CrewStatus | null;
+}
+
+/** A plain-text report to argo, the operator, stored once under its idempotency key. */
+export interface ArgoReport {
+  readonly text: string;
+  readonly idempotencyKey: string;
+}
+
+/**
+ * The fleet as the trierarch's own ship calls it, with `crew:run`: it reaches
+ * only the ships whose crew requests are assigned to it (decision 0029).
+ */
 export interface FleetPort {
   /** The fleet's URL, written into each session's identity. */
   readonly url: string;
+  /** The crew requests assigned to the trierarch's ship, oldest ship first. */
+  assignedRequests(): Promise<readonly AssignedRequest[]>;
+  /** Says how its crew of an assigned ship stands. */
+  writeStatus(shipId: ShipId, status: CrewStatus): Promise<void>;
+  /** Confirms it released the ship of a releasing request, which then goes. */
+  confirmRelease(shipId: ShipId): Promise<void>;
   ship(shipId: ShipId): Promise<FleetShipStatus>;
   /** A new starting prompt's secret; the trierarch keeps it only until it registers. */
   getStartingPrompt(shipId: ShipId): Promise<{ secret: string }>;
@@ -36,7 +61,10 @@ export interface FleetPort {
   release(shipId: ShipId): Promise<void>;
   /** Acknowledges a delivery to the trierarch's own ship. */
   ack(deliveryId: string): Promise<void>;
-  send(message: Outgoing): Promise<void>;
+  /** Answers a ping to the trierarch's own ship. */
+  pong(deliveryId: string): Promise<void>;
+  /** Sends argo a report, as the trierarch's own ship. */
+  reportToArgo(report: ArgoReport): Promise<void>;
   /** A session's inbox, asked with its crew token. */
   inbox(crewToken: string): Promise<InboxAnswer>;
   /** Reports on a ship's behalf, with its session's crew token. */
@@ -123,7 +151,8 @@ export interface LoggedAction {
   readonly shipId: ShipId;
   /** Known once the ship was first crewed. */
   readonly shipName?: string;
-  readonly action: Exclude<Action['kind'], 'notify'>;
+  /** What the loop did for the ship: an action it carried out, or leave when another session crews the ship. */
+  readonly action: Exclude<Action['kind'], 'argo' | 'status' | 'refuse'> | 'leave';
   readonly outcome: string;
   /** For a failure: what happens next, and where to look. */
   readonly next?: string;
@@ -134,7 +163,7 @@ export interface Logger {
   action(logged: LoggedAction): void;
 }
 
-/** What describe answers beside the configuration: the trierarch's version, and the flags each harness's adapter adds itself. */
+/** The trierarch's configuration, its version, and the flags each harness's adapter adds itself. */
 export interface TrierarchSetup {
   readonly configuration: TrierarchConfiguration;
   readonly version: string;
