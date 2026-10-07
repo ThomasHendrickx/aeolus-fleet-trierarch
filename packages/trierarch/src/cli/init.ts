@@ -13,8 +13,8 @@ import type { Prompter } from './prompter.js';
 
 /**
  * `aeolus-trierarch init`: the whole setup of a machine, asking for what is
- * missing. It registers the trierarch's own ship (commissioned with
- * fleet:crew) and keeps its crew token, never the secret; writes the
+ * missing. It registers the trierarch's own ship (commissioned by the
+ * trierarch plugin, with crew:run) and keeps its crew token, never the secret; writes the
  * configuration from the operator's answers; answers Claude Code's one-time
  * questions ahead, so a session nobody watches never waits on one; and offers
  * to install and start the service. On a machine set up already it says so,
