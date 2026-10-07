@@ -9,6 +9,7 @@ import { createRestFleet } from '../adapters/rest-fleet.js';
 import { createTmux } from '../adapters/tmux.js';
 import { runningVersion } from '../adapters/version.js';
 import { createHandleDelivery } from '../core/handle-delivery.js';
+import { machineOf } from '../core/machine.js';
 import type { Delivery, Logger } from '../core/ports.js';
 import { createReportSelf } from '../core/report-self.js';
 import { createRunPass } from '../core/run-pass.js';
@@ -32,7 +33,13 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const workspace = createGitWorkspace({ configuration, root: configuration.worktreeRoot ?? paths.worktrees });
   const state = createJsonState(paths.state);
   const clock = { now: () => new Date() };
-  const setup = { configuration, version: runningVersion(), adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
+  const setup = {
+    configuration,
+    version: runningVersion(),
+    adapterFlags: adapterFlagsOf(configuration),
+    riskyFlags: riskyFlagsOf(configuration),
+    machine: machineOf({ platform: process.platform, arch: process.arch }),
+  };
   const handle = createHandleDelivery({ fleet, logger });
   const runPass = createRunPass({ fleet, harnesses, processes: tmux, workspace, state, setup, clock, logger });
   const reportSelf = createReportSelf({ fleet, processes: tmux, state, setup });

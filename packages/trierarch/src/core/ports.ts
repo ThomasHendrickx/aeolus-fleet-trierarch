@@ -1,6 +1,7 @@
 import type { CrewStatus, ShipId, TrierarchConfiguration, TrierarchReportDetails, TrierarchWorkspace } from '@aeolus-fleet/common';
 
 import type { TrierarchState } from './entry.js';
+import type { Machine } from './machine.js';
 import type { Action } from './reconciler.js';
 
 /**
@@ -182,4 +183,6 @@ export interface TrierarchSetup {
   readonly version: string;
   readonly adapterFlags: Readonly<Record<string, readonly AdapterFlag[]>>;
   readonly riskyFlags: Readonly<Record<string, readonly string[]>>;
+  /** The machine it runs on, by os and arch, for the trierarch plugin's labels (#102); none reports none. */
+  readonly machine?: Machine;
 }

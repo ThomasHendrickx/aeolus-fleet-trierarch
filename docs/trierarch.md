@@ -26,7 +26,8 @@ The server stores the settings without meaning and checks only their size. The s
 - the workspace: a new git worktree of a repository (`{ kind: worktree, repository, ref? }`) or a folder (`{ kind: folder, name }`), each named in the trierarch's local configuration;
 - optionally the squadron the ship is a member of, so it checks in at its flagship as a crew line's squadron id does. With a squadron, the session starts with that squadron's crew line and template, as squadrons crews a new member, instead of a plain first prompt;
 - an optional first prompt, at most 8 KB and never starting with `-` (it would read as a flag), given on the first start only;
-- options, checked against the JSON Schema the trierarch reports for that harness.
+- options, checked against the JSON Schema the trierarch reports for that harness;
+- optional machine labels: label value ids of the fleet, any owner's, that the machine's trierarch ship must carry, every one (exact matches, AND; see Machine labels below).
 
 Settings never carry paths or command-line flags: a workspace names a repository or folder, and options pick named settings.
 
@@ -55,7 +56,7 @@ A trierarch never registers or labels itself.
 1. The operator asks the trierarch plugin for a new machine, naming it. The trierarch plugin commissions a ship of that name, of type `trierarch` with `crew:run` beside the send and receive every agent has, nothing more, and answers its starting prompt (decision 0019) and one setup line for the machine, built from the fleet's URL, the ship's id and its secret: `npx @aeolus-fleet/trierarch init --fleet-url <url> --ship-id <id> --secret <secret>`. Both are shown once; the trierarch plugin never logs the secret.
 2. On the machine, the setup line runs `aeolus-trierarch init`, which takes the fleet URL, ship id and secret as flags (it never parses a prompt), registers, writes the configuration and installs the service.
 3. The trierarch reports what it can do in its report's details (below).
-4. The trierarch plugin labels the machine from that report (labels, #102). Until it does, placement reads the report itself.
+4. The trierarch plugin labels the machine from that report (Machine labels, below).
 
 A trierarch's ship stays a normal ship: it receives messages, such as pings, and sends its crash reports to argo. Releasing it is the kill switch for that machine.
 
@@ -77,21 +78,35 @@ Its report, sent on start and again whenever it changes: its state (`working` wh
   "caps": { "ships": 8, "running": 4 },
   "kept": [{ "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88", "path": "/Users/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/scout" }],
   "orphans": [{ "path": "/Users/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/lookout" }],
-  "version": "0.18.0"
+  "machine": { "os": "macos", "arch": "arm64" },
+  "version": "0.20.0"
 }
 ```
 
-Its shape lives in `common`, as the type `trierarch`'s report details. It holds no entry per ship: each request carries its own status.
+Its shape lives in `common`, as the type `trierarch`'s report details. It holds no entry per ship: each request carries its own status. `machine` is read from the trierarch's process: `os` is `macos`, `linux` or `windows`, and `arch` is `arm64` or `amd64`; a platform outside these is left out.
+
+### Machine labels
+
+Labels (decision 0031) select machines. Each pass, before assignment, the trierarch plugin:
+
+1. defines the labels `os` (`macos`, `linux`, `windows`) and `arch` (`arm64`, `amd64`), which its ship then owns. A key another ship owns already is left alone: the trierarch plugin neither defines nor assigns it;
+2. labels each trierarch ship with the `os` and `arch` its last report names: the value it reports now goes on first, then any other value of that label comes off. A trierarch whose report names neither carries neither.
+
+Only `os` and `arch` come from the report. A site, a room or anything else the machine cannot tell is left to the operator, as labels of their own on the trierarch ships.
+
+Its ship needs `labels:define` and `labels:assign`, which connecting gives it. Scopes never change after commissioning, so a ship connected before it had them labels nothing: the trierarch plugin logs why, once, and goes on assigning. Retiring that ship and connecting again gives a ship with them.
 
 ## Assignment
 
 The trierarch plugin serves unassigned requests oldest first and assigns each to one trierarch:
 
-1. It considers trierarchs that fit: their report offers the request's repository (or folder), harness and model (its options schema for that harness takes the request's options), and they have room (`caps.ships` above the number of requests assigned to it).
+1. It considers trierarchs that fit: their ship carries every machine label of the request, their report offers the request's repository (or folder), harness and model (its options schema for that harness takes the request's options), and they have room (`caps.ships` above the number of requests assigned to it).
 2. Of those, it picks the one with the most room as a percentage of its `caps.ships`, then the oldest: the first commissioned. A trierarch that has not reported details yet takes nothing.
 3. It assigns by optimistic claim: the fleet sets the assignment only if the request is still unassigned. A lost claim is no error; the trierarch plugin reads again.
 4. It never assigns a request whose ship is crewed already: crewing by hand fulfils a request.
-5. When no trierarch can take a request (none offers its harness, workspace or options, or none has room), the trierarch plugin writes the reason on the request. It shows in the operator's needs-crew to-do.
+5. When no trierarch can take a request (no machine matches its labels, none offers its harness, workspace or options, or none has room), the trierarch plugin writes the reason on the request. It shows in the operator's needs-crew to-do.
+
+Machine labels are checked only at placement, as the trierarch plugin never reassigns (decision 0030). A request already assigned stays on its trierarch when that trierarch's labels change, and when the request's own machine labels are edited: the new labels apply at its next placement.
 
 Strategies to change this order come later. The operator does not pick the machine.
 
