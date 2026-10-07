@@ -1,14 +1,16 @@
-import type { ShipId, TrierarchConfiguration } from '@aeolus-fleet/common';
+import type { CrewStatus, ShipId, TrierarchConfiguration } from '@aeolus-fleet/common';
 
-import { putEntry, withState, type Entry, type Outgoing, type TrierarchState } from './entry.js';
-import type { InboxAnswer, ObservedSession, ObservedWorktree, Turn } from './ports.js';
+import { checkSettings, type CheckedSettings, type Refusal } from './check-settings.js';
+import { putEntry, removeEntry, withState, type Entry, type TrierarchState } from './entry.js';
+import type { ArgoReport, AssignedRequest, InboxAnswer, ObservedSession, ObservedWorktree, Turn } from './ports.js';
 import { decideRestart, exitsInWindow } from './restart-policy.js';
 
 /**
  * The Reconciler (docs/architecture.md, "The trierarch"): a pure function
- * from the wanted list, what runs and the time to the actions that make them
- * match, and the state those actions start from. It is the only place that
- * decides; the run pass only carries the actions out.
+ * from the crew requests assigned to the trierarch, its saved state, what
+ * runs and the time to the actions that make them match, and the state those
+ * actions start from. It is the only place that decides; the run pass only
+ * carries the actions out.
  */
 
 /** What the trierarch saw this pass. */
@@ -20,19 +22,24 @@ export interface Observed {
 }
 
 export type Action =
-  /** Crew the ship: starting prompt, register, workspace, identity, launch. Resumed when a stop mid-crew left it crewing. */
+  /** Crew the ship: starting prompt, register, workspace, identity, launch. Resumed while its own lease may still hold the ship. */
   | { readonly kind: 'crew'; readonly shipId: ShipId; readonly isResumed: boolean }
   /** Start its session again in its folder, continuing. */
   | { readonly kind: 'launch'; readonly shipId: ShipId }
   | { readonly kind: 'stop'; readonly shipId: ShipId }
   | { readonly kind: 'wake'; readonly shipId: ShipId }
-  /** Release asked by a message: stop, end the lease, the workspace, answer released. */
+  /** Its request was removed: stop, end the lease, the workspace, then confirm. */
   | { readonly kind: 'release'; readonly shipId: ShipId }
-  /** The lease ended elsewhere (released, re-crewed or retired): stop, the workspace, notify leaseEnded. */
-  | { readonly kind: 'drop'; readonly shipId: ShipId }
-  | { readonly kind: 'notify'; readonly message: Outgoing }
+  /** A removed request it does not crew: confirm alone. */
+  | { readonly kind: 'confirm'; readonly shipId: ShipId }
+  /** Its request is no longer assigned here: stop, remove the identity of the entry it was; the worktree stays as an orphan. */
+  | { readonly kind: 'forget'; readonly shipId: ShipId; readonly entry: Entry }
+  | { readonly kind: 'status'; readonly shipId: ShipId; readonly status: CrewStatus }
   /** Report on the ship's behalf, with its session's crew token. */
-  | { readonly kind: 'report'; readonly shipId: ShipId; readonly note: string };
+  | { readonly kind: 'report'; readonly shipId: ShipId; readonly note: string }
+  /** Tell argo it cannot crew this settings version. */
+  | { readonly kind: 'refuse'; readonly shipId: ShipId; readonly settingsVersion: number; readonly refusal: Refusal }
+  | { readonly kind: 'argo'; readonly report: ArgoReport };
 
 export interface Reconciled {
   readonly state: TrierarchState;
@@ -41,6 +48,7 @@ export interface Reconciled {
 
 /** What reconciling needs beside the state and what was seen. */
 export interface ReconcileContext {
+  readonly requests: readonly AssignedRequest[];
   readonly observed: Observed;
   readonly now: Date;
   readonly configuration: TrierarchConfiguration;
@@ -49,32 +57,8 @@ export interface ReconcileContext {
 const RESTARTING_NOTE = 'blocked: session crashed, restarting';
 const CRASHED_NOTE = 'blocked: session crashed, restart budget spent';
 
-export function reconcile(state: TrierarchState, context: ReconcileContext): Reconciled {
-  const { observed, configuration } = context;
-  let next: TrierarchState = state;
-  const actions: Action[] = [];
-  let running = observed.sessions.filter((session) => session.status === 'running' && session.shipId in state.entries).length;
-  const canStart = (): boolean => running < configuration.caps.running;
-
-  for (const entry of Object.values(state.entries)) {
-    const step = stepOf(entry, { ...context, canStart: canStart() });
-    next = step.entry === undefined ? next : putEntry(next, step.entry);
-    actions.push(...step.actions);
-    running += step.starts;
-  }
-
-  for (const session of observed.sessions) {
-    if (!(session.shipId in state.entries)) {
-      actions.push({ kind: 'stop', shipId: session.shipId });
-    }
-  }
-
-  const known = new Set([...Object.values(state.entries).flatMap((entry) => (entry.folder === undefined ? [] : [entry.folder])), ...state.kept.map((kept) => kept.path)]);
-  const orphans = observed.worktrees
-    .filter((worktree) => !known.has(worktree.path) && (worktree.shipId === undefined || !(worktree.shipId in state.entries)))
-    .map((worktree) => worktree.path);
-  return { state: { ...next, orphans }, actions };
-}
+/** The statuses the reconciler writes; crewing and running at the first crew are the crew's own to write. */
+const WRITTEN: ReadonlySet<Entry['state']> = new Set(['running', 'restarting', 'crashed']);
 
 interface Step {
   readonly entry?: Entry;
@@ -83,20 +67,127 @@ interface Step {
   readonly starts: number;
 }
 
+const NOTHING: Step = { actions: [], starts: 0 };
+
+export function reconcile(state: TrierarchState, context: ReconcileContext): Reconciled {
+  const { observed, configuration, requests, now } = context;
+  const requested = new Map(requests.map((request) => [request.shipId, request]));
+  const assigned = new Set<string>(requested.keys());
+  let next: TrierarchState = { ...state, refused: Object.fromEntries(Object.entries(state.refused).filter(([shipId]) => assigned.has(shipId))) };
+  const actions: Action[] = [];
+  let running = observed.sessions.filter((session) => session.status === 'running' && session.shipId in state.entries).length;
+  const canStart = (): boolean => running < configuration.caps.running;
+
+  for (const entry of Object.values(state.entries)) {
+    const request = requested.get(entry.shipId);
+    if (request === undefined) {
+      next = removeEntry(next, entry.shipId);
+      actions.push({ kind: 'forget', shipId: entry.shipId, entry });
+      continue;
+    }
+    if (request.status === 'releasing') {
+      actions.push({ kind: 'release', shipId: entry.shipId });
+      continue;
+    }
+    const step = request.settingsVersion === entry.settingsVersion ? stepOf(entry, { ...context, canStart: canStart() }) : newVersionStep(entry, { request, state: next, context });
+    const after = step.entry ?? entry;
+    next = step.entry === undefined ? next : putEntry(next, step.entry);
+    actions.push(...step.actions);
+    if (WRITTEN.has(after.state) && request.status !== after.state && after.state !== 'releasing') {
+      actions.push({ kind: 'status', shipId: entry.shipId, status: after.state });
+    }
+    running += step.starts;
+  }
+
+  for (const request of requests) {
+    if (request.shipId in state.entries) {
+      continue;
+    }
+    if (request.status === 'releasing') {
+      actions.push({ kind: 'confirm', shipId: request.shipId });
+      continue;
+    }
+    const checked = checkSettings(request.settings, { shipId: request.shipId, configuration, state: next });
+    if (!checked.isOk) {
+      if (next.refused[request.shipId] !== request.settingsVersion) {
+        actions.push({ kind: 'refuse', shipId: request.shipId, settingsVersion: request.settingsVersion, refusal: checked.error });
+      }
+      continue;
+    }
+    if (canStart()) {
+      next = putEntry(next, entryOf(checked.value, { shipId: request.shipId, settingsVersion: request.settingsVersion, now }));
+      actions.push({ kind: 'crew', shipId: request.shipId, isResumed: false });
+      running += 1;
+    }
+  }
+
+  for (const session of observed.sessions) {
+    if (!(session.shipId in state.entries)) {
+      actions.push({ kind: 'stop', shipId: session.shipId });
+    }
+  }
+
+  const known = new Set([...Object.values(next.entries).flatMap((entry) => (entry.folder === undefined ? [] : [entry.folder])), ...next.kept.map((kept) => kept.path)]);
+  const orphans = observed.worktrees
+    .filter((worktree) => !known.has(worktree.path) && (worktree.shipId === undefined || !(worktree.shipId in next.entries)))
+    .map((worktree) => worktree.path);
+  return { state: { ...next, orphans }, actions };
+}
+
+/** A new entry, crewing since now, for checked settings of a version. */
+function entryOf(checked: CheckedSettings, at: { shipId: ShipId; settingsVersion: number; now: Date }): Entry {
+  const { settings, options } = checked;
+  return {
+    shipId: at.shipId,
+    settingsVersion: at.settingsVersion,
+    harness: settings.harness,
+    workspace: settings.workspace,
+    ...(settings.squadron !== undefined && { squadron: settings.squadron }),
+    ...(settings.firstPrompt !== undefined && { firstPrompt: settings.firstPrompt }),
+    options,
+    state: 'crewing',
+    since: at.now.toISOString(),
+    exits: [],
+    hasStarted: false,
+    wake: { waiting: 0, isPending: false },
+  };
+}
+
+/**
+ * A new settings version of a request it crews (Restart or Edit): the
+ * session stops and the ship is crewed again with that version, in its
+ * folder, with a fresh restart budget. It is no release: the worktree stays.
+ * Settings this trierarch cannot crew are refused to argo, and the entry
+ * stays as it was.
+ */
+function newVersionStep(entry: Entry, at: { request: AssignedRequest; state: TrierarchState; context: ReconcileContext }): Step {
+  const { request, state, context } = at;
+  const checked = checkSettings(request.settings, { shipId: entry.shipId, configuration: context.configuration, state });
+  if (!checked.isOk) {
+    const step = stepOf(entry, { ...context, canStart: false });
+    return state.refused[entry.shipId] === request.settingsVersion
+      ? step
+      : { ...step, actions: [...step.actions, { kind: 'refuse', shipId: entry.shipId, settingsVersion: request.settingsVersion, refusal: checked.error }] };
+  }
+  const fresh = entryOf(checked.value, { shipId: entry.shipId, settingsVersion: request.settingsVersion, now: context.now });
+  return {
+    entry: { ...fresh, hasStarted: entry.hasStarted, ...(entry.shipName !== undefined && { shipName: entry.shipName }), ...(entry.folder !== undefined && { folder: entry.folder }) },
+    actions: [
+      { kind: 'stop', shipId: entry.shipId },
+      { kind: 'crew', shipId: entry.shipId, isResumed: true },
+    ],
+    starts: 0,
+  };
+}
+
 function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean }): Step {
   const { observed, now, canStart } = context;
   const seen = observed.ships[entry.shipId];
-  if (entry.state === 'releasing') {
-    return { actions: [{ kind: 'release', shipId: entry.shipId }], starts: 0 };
-  }
   if (seen?.inbox.kind === 'leaseEnded') {
-    return { actions: [{ kind: 'drop', shipId: entry.shipId }], starts: 0 };
+    // Released elsewhere (row 11): its session stops and the ship is crewed again, in its folder.
+    return { entry: withState(entry, { state: 'crewing', now }), actions: [{ kind: 'stop', shipId: entry.shipId }, { kind: 'crew', shipId: entry.shipId, isResumed: false }], starts: 0 };
   }
   switch (entry.state) {
-    case 'wanted':
-      return canStart
-        ? { entry: withState(entry, { state: 'crewing', now }), actions: [{ kind: 'crew', shipId: entry.shipId, isResumed: false }], starts: 1 }
-        : { actions: [], starts: 0 };
     case 'crewing':
       return { actions: [{ kind: 'crew', shipId: entry.shipId, isResumed: true }], starts: 1 };
     case 'running':
@@ -104,9 +195,10 @@ function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean })
     case 'restarting':
       return entry.restartAt !== undefined && now >= new Date(entry.restartAt) && canStart
         ? { entry: withState(entry, { state: 'running', now }), actions: [{ kind: 'launch', shipId: entry.shipId }], starts: 1 }
-        : { actions: [], starts: 0 };
+        : NOTHING;
     case 'crashed':
-      return { actions: [], starts: 0 };
+    case 'releasing':
+      return NOTHING;
   }
 }
 
@@ -115,7 +207,7 @@ function runningStep(entry: Entry, context: ReconcileContext & { canStart: boole
   const session = observed.sessions.find((each) => each.shipId === entry.shipId);
   if (session === undefined) {
     // No session at all, as after the machine restarts: start it again, with no restart counted.
-    return canStart ? { actions: [{ kind: 'launch', shipId: entry.shipId }], starts: 1 } : { actions: [], starts: 0 };
+    return canStart ? { actions: [{ kind: 'launch', shipId: entry.shipId }], starts: 1 } : NOTHING;
   }
   if (session.status === 'exited') {
     const exits = [...exitsInWindow(entry.exits, now), now.toISOString()];
@@ -133,10 +225,7 @@ function runningStep(entry: Entry, context: ReconcileContext & { canStart: boole
           actions: [
             { kind: 'stop', shipId: entry.shipId },
             { kind: 'report', shipId: entry.shipId, note: CRASHED_NOTE },
-            {
-              kind: 'notify',
-              message: { to: entry.requester, name: 'crashed', payload: { shipId: entry.shipId, exits: exits.length }, idempotencyKey: `trierarch:crashed:${entry.shipId}:${now.toISOString()}` },
-            },
+            { kind: 'argo', report: crashReport(entry, { exits: exits.length, now }) },
           ],
           starts: 0,
         };
@@ -145,10 +234,18 @@ function runningStep(entry: Entry, context: ReconcileContext & { canStart: boole
   return wakeStep(entry, observed.ships[entry.shipId]);
 }
 
+/** What argo is told when a session's restart budget is spent: a human decides. */
+function crashReport(entry: Entry, at: { exits: number; now: Date }): ArgoReport {
+  return {
+    text: `${entry.shipName ?? entry.shipId} (${entry.shipId}): its session crashed ${String(at.exits)} times within an hour, restart budget spent; status crashed. Restart it in the console to crew it again.`,
+    idempotencyKey: `trierarch:crashed:${entry.shipId}:${at.now.toISOString()}`,
+  };
+}
+
 /** One wake per rise in the waiting count, given once the session is idle, and nothing more until it has received. */
 function wakeStep(entry: Entry, seen: Observed['ships'][string] | undefined): Step {
   if (seen?.inbox.kind !== 'waiting') {
-    return { actions: [], starts: 0 };
+    return NOTHING;
   }
   const { count } = seen.inbox;
   const isPending = count === 0 ? false : entry.wake.isPending || count > entry.wake.waiting;
@@ -156,5 +253,5 @@ function wakeStep(entry: Entry, seen: Observed['ships'][string] | undefined): St
     return { entry: { ...entry, wake: { waiting: count, isPending: false } }, actions: [{ kind: 'wake', shipId: entry.shipId }], starts: 0 };
   }
   const wake = { waiting: count, isPending };
-  return wake.waiting === entry.wake.waiting && wake.isPending === entry.wake.isPending ? { actions: [], starts: 0 } : { entry: { ...entry, wake }, actions: [], starts: 0 };
+  return wake.waiting === entry.wake.waiting && wake.isPending === entry.wake.isPending ? NOTHING : { entry: { ...entry, wake }, actions: [], starts: 0 };
 }

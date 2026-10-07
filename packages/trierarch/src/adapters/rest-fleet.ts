@@ -1,4 +1,4 @@
-import { idSchema, receivedDeliverySchema, shipDetailOutputSchema, trierarchContentType, type ShipId } from '@aeolus-fleet/common';
+import { assignedCrewRequestsOutputSchema, idSchema, receivedDeliverySchema, shipDetailOutputSchema, type ShipId } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
 import type { Delivery, FleetPort } from '../core/ports.js';
@@ -6,9 +6,10 @@ import { runningVersion } from './version.js';
 
 /**
  * The fleet over its REST API (`/api/v1`), as any ship may call it: the
- * trierarch's own crew (receive, ack, send) with its crew token, its
- * `fleet:crew` calls (ship, getStartingPrompt, release), and a session's
- * register, inbox and report. A refusal the trierarch does not expect throws
+ * trierarch's own crew (receive, ack, pong, send to argo, report) with its
+ * crew token, its `crew:run` calls for the ships assigned to it (assigned
+ * requests, status, confirm, ship, getStartingPrompt, release), and a
+ * session's register, inbox and report. A refusal the trierarch does not expect throws
  * with the fleet's code and message.
  */
 
@@ -121,19 +122,23 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string }
     ack: async (deliveryId) => {
       await call({ path: '/ship/ack', body: { deliveryId }, answers: z.unknown() });
     },
-    send: async (message) => {
+    pong: async (deliveryId) => {
+      await call({ path: '/ship/pong', body: { deliveryId }, answers: z.unknown() });
+    },
+    reportToArgo: async ({ text, idempotencyKey }) => {
       await call({
         path: '/ship/send',
-        body: {
-          selector: { kind: 'ship', shipId: message.to },
-          payload: JSON.stringify(message.payload),
-          contentType: trierarchContentType(message.name),
-          model: TRIERARCH_SELF.model,
-          idempotencyKey: message.idempotencyKey,
-          ...(message.inReplyTo !== undefined && { inReplyTo: message.inReplyTo }),
-        },
+        body: { selector: { kind: 'ship', name: 'argo' }, payload: text, contentType: 'text/plain', model: TRIERARCH_SELF.model, idempotencyKey },
         answers: z.object({ messageId: idSchema('message') }),
       });
+    },
+    assignedRequests: async () =>
+      (await call({ path: '/fleet/assignedCrewRequests', answers: assignedCrewRequestsOutputSchema })).map(({ shipId, settings, settingsVersion, status }) => ({ shipId, settings, settingsVersion, status })),
+    writeStatus: async (shipId, status) => {
+      await call({ path: '/fleet/reportCrewStatus', body: { shipId, status }, answers: z.unknown() });
+    },
+    confirmRelease: async (shipId) => {
+      await call({ path: '/fleet/confirmCrewRelease', body: { shipId }, answers: z.unknown() });
     },
     inbox: async (crewToken) => {
       try {

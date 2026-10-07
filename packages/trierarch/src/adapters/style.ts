@@ -1,6 +1,6 @@
 import { styleText } from 'node:util';
 
-import type { TrierarchEntryState } from '@aeolus-fleet/common';
+import type { EntryState } from '../core/entry.js';
 
 /**
  * How the command colours what it says: Node's own styleText, no colour
@@ -39,8 +39,8 @@ export function createStyle(at: { isColour: boolean }): Style {
   return at.isColour ? { tone: (tone, text) => styleText(FORMATS[tone], text, { validateStream: false }) } : PLAIN;
 }
 
-/** How an entry's state stands: running is good, on its way is busy, crashed is bad, waiting is quiet. */
-export function stateTone(state: TrierarchEntryState): Tone {
+/** How an entry's state stands: running is good, on its way is busy, crashed is bad, releasing is quiet. */
+export function stateTone(state: EntryState): Tone {
   switch (state) {
     case 'running':
       return 'good';
@@ -49,7 +49,6 @@ export function stateTone(state: TrierarchEntryState): Tone {
       return 'busy';
     case 'crashed':
       return 'bad';
-    case 'wanted':
     case 'releasing':
       return 'quiet';
   }

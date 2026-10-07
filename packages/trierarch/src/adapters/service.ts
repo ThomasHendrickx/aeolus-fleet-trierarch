@@ -105,7 +105,7 @@ function systemdUnit(at: { run: RunCommand; environment: Readonly<Record<string,
     .map(([name, value]) => `Environment="${name}=${value}"`)
     .join('\n');
   return `[Unit]
-Description=Aeolus trierarch: keeps the ships on its wanted list crewed on this machine
+Description=Aeolus trierarch: keeps the ships assigned to it crewed on this machine
 
 [Service]
 ExecStart="${at.run.node}" "${at.run.script}" run

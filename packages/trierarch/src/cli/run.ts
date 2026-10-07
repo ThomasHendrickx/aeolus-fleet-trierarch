@@ -33,7 +33,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const state = createJsonState(paths.state);
   const clock = { now: () => new Date() };
   const setup = { configuration, version: runningVersion(), adapterFlags: adapterFlagsOf(configuration) };
-  const handle = createHandleDelivery({ fleet, workspace, state, setup, clock, logger });
+  const handle = createHandleDelivery({ fleet, logger });
   const runPass = createRunPass({ fleet, harnesses, processes: tmux, workspace, state, setup, clock, logger });
   const reportSelf = createReportSelf({ fleet, processes: tmux, state, setup });
   // Each pass ends with the trierarch's own report: the first at start, then only when it changed.

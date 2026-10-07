@@ -1,6 +1,6 @@
 import type { TrierarchReportDetails } from '@aeolus-fleet/common';
 
-import { optionsSchemaOf } from './answers.js';
+import { optionsSchemaOf } from './options-schema.js';
 import type { TrierarchState } from './entry.js';
 import type { FleetPort, ProcessPort, SelfReport, StatePort, TrierarchSetup } from './ports.js';
 

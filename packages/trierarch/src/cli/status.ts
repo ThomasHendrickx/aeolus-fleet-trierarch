@@ -1,4 +1,7 @@
-import { trierarchEntryStateSchema, type TrierarchConfiguration, type TrierarchEntryState } from '@aeolus-fleet/common';
+import type { TrierarchConfiguration } from '@aeolus-fleet/common';
+import { z } from 'zod';
+
+import { ENTRY_STATES, type EntryState } from '../core/entry.js';
 
 import type { CrewFile, RunningFile } from '../adapters/files.js';
 import { FleetRefusal } from '../adapters/rest-fleet.js';
@@ -25,7 +28,7 @@ export interface StatusReport {
   readonly service: ServiceStatus;
   readonly fleet: { readonly url: string; readonly shipId?: string; readonly lease: Lease };
   readonly caps: { readonly ships: { readonly used: number; readonly cap: number }; readonly running: { readonly used: number; readonly cap: number } };
-  readonly entries: Readonly<Record<TrierarchEntryState, number>>;
+  readonly entries: Readonly<Record<EntryState, number>>;
   readonly kept: readonly KeptWorktree[];
   readonly orphans: readonly string[];
 }
@@ -57,7 +60,7 @@ export async function inspectStatus(at: {
   const [service, lease, sessions, state, running] = await Promise.all([at.service.status(), at.lease(), at.processes.list(), at.state.load(), at.running()]);
   // Only the service's own process counts: a file left by an earlier process, or by a `run` outside the service, says nothing of it.
   const runningVersion = service.isRunning && running !== undefined && running.pid === service.pid ? running.version : undefined;
-  const entries: Record<TrierarchEntryState, number> = { wanted: 0, crewing: 0, running: 0, restarting: 0, crashed: 0, releasing: 0 };
+  const entries: Record<EntryState, number> = { crewing: 0, running: 0, restarting: 0, crashed: 0, releasing: 0 };
   for (const entry of Object.values(state.entries)) {
     entries[entry.state] += 1;
   }
@@ -119,7 +122,7 @@ export function describeStatus(report: StatusReport, style: Style = PLAIN): stri
     line('Version', describeVersion(report, style)),
     line('Service', describeService(report.service, style)),
     line('Fleet', describeFleet(report.fleet, style)),
-    line('Caps', `${String(report.caps.ships.used)} of ${String(report.caps.ships.cap)} ships on the list, ${String(report.caps.running.used)} of ${String(report.caps.running.cap)} sessions running`),
+    line('Caps', `${String(report.caps.ships.used)} of ${String(report.caps.ships.cap)} ships crewed here, ${String(report.caps.running.used)} of ${String(report.caps.running.cap)} sessions running`),
     line('Entries', counted.length === 0 ? 'none' : counted.map(([state, count]) => style.tone(stateToneOf(state), `${state} ${String(count)}`)).join(', ')),
     line('Kept worktrees', report.kept.length === 0 ? 'none' : style.tone('busy', report.kept.map((kept) => `${kept.path} (${kept.shipId})`).join(', '))),
     line('Orphans', report.orphans.length === 0 ? 'none' : style.tone('busy', report.orphans.join(', '))),
@@ -128,6 +131,6 @@ export function describeStatus(report: StatusReport, style: Style = PLAIN): stri
 
 /** The tone of a state counted under entries, as its name is a key of the report. */
 function stateToneOf(state: string): ReturnType<typeof stateTone> {
-  const parsed = trierarchEntryStateSchema.safeParse(state);
+  const parsed = z.enum(ENTRY_STATES).safeParse(state);
   return parsed.success ? stateTone(parsed.data) : 'quiet';
 }
