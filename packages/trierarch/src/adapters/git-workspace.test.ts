@@ -55,7 +55,7 @@ describe('workspaces in git', () => {
     expect((await git(['-C', made, 'rev-parse', '--abbrev-ref', 'HEAD'])).trim()).toBe('HEAD');
   });
 
-  it("checks out the want's ref", async () => {
+  it("checks out the settings' ref", async () => {
     await git(['-C', repository, 'tag', 'v1']);
     writeFileSync(join(repository, 'later.md'), 'later\n');
     await git(['-C', repository, 'add', '.']);

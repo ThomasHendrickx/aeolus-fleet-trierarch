@@ -9,7 +9,7 @@ import { runCommand } from './run-command.js';
 /**
  * Workspaces (docs/architecture.md, "First adapters"): a git worktree of a
  * configured repository under the worktree root, one folder per ship
- * (`<root>/<repository>/<ship>`), detached at the want's ref or the
+ * (`<root>/<repository>/<ship>`), detached at the settings' ref or the
  * repository's HEAD; or a configured folder used as it is. The repository is
  * fetched first, and a ref the remote has a branch for is that remote branch,
  * so a ship starts from current code, not from a stale local branch. A fetch

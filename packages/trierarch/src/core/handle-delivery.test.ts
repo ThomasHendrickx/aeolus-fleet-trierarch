@@ -14,7 +14,7 @@ describe("what arrives at the trierarch's own ship", () => {
   });
 
   it.each([
-    ['a 0.17 want, which no longer starts a session (#301)', 'application/vnd.aeolus.trierarch.want+json'],
+    ['a message asking for a ship to be crewed, which crews nothing (#301)', 'application/json'],
     ['any other message', 'text/plain'],
   ])('acks %s, logs it as not handled, and acts on nothing', async (_label, contentType) => {
     const trierarch = aTrierarch();

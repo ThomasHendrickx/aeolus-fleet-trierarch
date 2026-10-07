@@ -1,6 +1,6 @@
-import type { TrierarchAdapterFlag, TrierarchConfiguration } from '@aeolus-fleet/common';
+import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
-import type { HarnessPort } from '../core/ports.js';
+import type { AdapterFlag, HarnessPort } from '../core/ports.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
 import { effectiveFlags } from './flags.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
@@ -20,7 +20,7 @@ const REMOTE_CONTROL = '--remote-control';
 const CONTINUE = '--continue';
 const END_OF_FLAGS = '--';
 
-export const CLAUDE_CODE_ADAPTER_FLAGS: readonly TrierarchAdapterFlag[] = [{ flag: CONTINUE, when: 'restart' }];
+export const CLAUDE_CODE_ADAPTER_FLAGS: readonly AdapterFlag[] = [{ flag: CONTINUE, when: 'restart' }];
 
 /**
  * The configured flags, with a name for the remote-control session where the

@@ -13,8 +13,8 @@ import type { Prompter } from './prompter.js';
 
 /**
  * `aeolus-trierarch init`: the whole setup of a machine, asking for what is
- * missing. It registers the trierarch's own ship (commissioned with
- * fleet:crew) and keeps its crew token, never the secret; writes the
+ * missing. It registers the trierarch's own ship (commissioned by the
+ * trierarch plugin, with crew:run) and keeps its crew token, never the secret; writes the
  * configuration from the operator's answers; answers Claude Code's one-time
  * questions ahead, so a session nobody watches never waits on one; and offers
  * to install and start the service. On a machine set up already it says so,
@@ -300,7 +300,7 @@ export async function initTrierarch(input: {
     said.push(`Configuration ${configured} at ${paths.config}.`);
   }
   if (Object.keys(configuration.repositories).length === 0 && Object.keys(configuration.folders).length === 0) {
-    said.push('It has no repository or folder yet, so it refuses every want: run aeolus-trierarch init again to add one.');
+    said.push('It has no repository or folder yet, so it can crew no request: run aeolus-trierarch init again to add one.');
   }
 
   // Claude Code's one-time questions, answered ahead.

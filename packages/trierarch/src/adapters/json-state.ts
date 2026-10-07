@@ -10,8 +10,8 @@ import type { StatePort } from '../core/ports.js';
 /**
  * The state store: `~/.aeolus/trierarch/state.json`, written whole and
  * atomically (a temporary file, then a rename), so a stop mid-write leaves the
- * last state. It holds no secret. A state file of the 0.17 protocol, whose
- * wanted list is not migrated (decision 0013), is moved aside to
+ * last state. It holds no secret. A state file of the 0.17 trierarch, whose
+ * ships are not migrated (decision 0013), is moved aside to
  * `state.0.17.json` and the trierarch starts empty: its sessions are then
  * strays, stopped by the loop.
  */

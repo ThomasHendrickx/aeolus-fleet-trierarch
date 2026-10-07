@@ -15,6 +15,6 @@ Why: a machine is a launcher (kubelet): it runs sessions, reports status, holds 
 
 Rejected:
 - An AI dispatcher;
-- `fleet:manage` or `fleet:crew` for a trierarch (it would crew any ship);
-- a wanted list on the machine, edited by want and release messages (the 0.17 design);
+- `fleet:manage`, or any scope crewing every ship, for a trierarch (it would crew any ship);
+- a list of ships kept on the machine and edited by messages to its ship;
 - a trierarch that commissions its own ships or picks its own work.

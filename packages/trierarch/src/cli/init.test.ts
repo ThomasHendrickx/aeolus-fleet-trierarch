@@ -429,7 +429,7 @@ describe('aeolus-trierarch init on a machine set up already', () => {
     await expect(createClaudeCodeSetup({ homeDirectory: home }).isTrusted(join(home, 'worktrees'))).resolves.toBe(true);
   });
 
-  it('trusts every configured folder for Claude Code too, a folder added since among them, so a want for a folder never waits on the trust question', async () => {
+  it('trusts every configured folder for Claude Code too, a folder added since among them, so a crew request for a folder never waits on the trust question', async () => {
     const notes = join(home, 'notes');
     mkdirSync(notes);
     writeFileSync(paths.config, JSON.stringify({ ...configuration(), folders: { notes: { path: notes } } }));

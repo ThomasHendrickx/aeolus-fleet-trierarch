@@ -4,7 +4,7 @@ type HarnessConfiguration = TrierarchConfiguration['harnesses'][string];
 
 /**
  * The flags a launch gets: the harness's own, then each option's value as the
- * want picked it, or its default. A want picks names only; the flags come
+ * settings picked it, or its default. Settings pick names only; the flags come
  * from the configuration alone.
  */
 export function effectiveFlags(harness: HarnessConfiguration, options: Readonly<Record<string, string>>): string[] {
@@ -15,7 +15,7 @@ export function effectiveFlags(harness: HarnessConfiguration, options: Readonly<
   return [...harness.flags, ...picked];
 }
 
-/** What `config check` prints: per harness, the flags a want with no options launches with, and each option's values. */
+/** What `config check` prints: per harness, the flags settings with no options launch with, and each option's values. */
 export function describeFlags(configuration: TrierarchConfiguration): string {
   return Object.entries(configuration.harnesses)
     .map(([name, harness]) => {

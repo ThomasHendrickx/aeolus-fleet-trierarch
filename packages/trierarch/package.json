@@ -1,7 +1,7 @@
 {
   "name": "@aeolus-fleet/trierarch",
   "version": "0.0.0",
-  "description": "Aeolus trierarch: keeps the ships on its wanted list crewed on its machine, as a ship of the fleet with fleet:crew.",
+  "description": "Aeolus trierarch: keeps the ships whose crew requests are assigned to it crewed on its machine, as a ship of the fleet with crew:run.",
   "license": "Apache-2.0",
   "type": "module",
   "repository": {
