@@ -429,12 +429,12 @@ const hookOutputSchema = z.object({
 
 describe('the SessionStart hook', () => {
   /** Runs the hook as Claude Code does: the payload on stdin, the plugin's variables set, no AEOLUS_ ones yet. */
-  function hook(payload: Record<string, unknown>) {
+  function hook(payload: Record<string, unknown>, projectFolder = '') {
     const envFile = join(data, 'session.env');
     writeFileSync(envFile, '');
     const result = run('aeolus-session-start.sh', {
       stdin: JSON.stringify(payload),
-      env: { AEOLUS_FOLDER: '', AEOLUS_DATA: '', CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin', CLAUDE_ENV_FILE: envFile },
+      env: { AEOLUS_FOLDER: '', AEOLUS_DATA: '', CLAUDE_PROJECT_DIR: projectFolder, CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin', CLAUDE_ENV_FILE: envFile },
     });
     return { ...result, env: readFileSync(envFile, 'utf8') };
   }
@@ -488,6 +488,19 @@ describe('the SessionStart hook', () => {
     crew();
 
     expect(hookOutputSchema.parse(JSON.parse(hook(payloadFor(folder)).stdout)).hookSpecificOutput.additionalContext).not.toContain('squadron');
+  });
+
+  it('keeps the folder the session started in after a compact while it works in a subfolder, so it still finds its ship (#334)', () => {
+    crew();
+    const subfolder = join(folder, 'packages', 'core');
+    mkdirSync(subfolder, { recursive: true });
+
+    const { stdout, env } = hook(payloadFor(subfolder, 'compact'), folder);
+
+    const exported = spawnSync('bash', ['-c', `. "$1"; printf '%s' "$AEOLUS_FOLDER"`, 'bash', join(data, 'session.env')]);
+    expect(exported.stdout.toString()).toBe(folder);
+    expect(env).toContain('export AEOLUS_FOLDER=');
+    expect(hookOutputSchema.parse(JSON.parse(stdout)).hookSpecificOutput.additionalContext).toContain(`This folder crews the Aeolus ship scout (${SHIP_ID})`);
   });
 
   it('keys the ship by the payload cwd, its JSON escapes undone, as the scripts do', () => {
