@@ -61,7 +61,7 @@ A trierarch's ship stays a normal ship: it receives messages, such as pings, and
 
 ### What a trierarch reports
 
-Its report, sent on start and again whenever it changes: its state (`working` while a session runs, `idle` with none), a one-line note such as "4 of 6 running, 1 crashed" (the sessions that run of `caps.ships`, and the crashed ones when there are any), and `details`, read from its local configuration and what runs. Each harness's `flags` are the flags its configuration gives it:
+Its report, sent on start and again whenever it changes: its state (`working` while a session runs, `idle` with none), a one-line note such as "4 of 6 running, 1 crashed" (the sessions that run of `caps.ships`, and the crashed ones when there are any), and `details`, read from its local configuration and what runs. Each harness's `flags` are the flags its configuration gives it, and its `riskyFlags` those of them its adapter calls risky, so a reader needs no harness knowledge: `--dangerously-skip-permissions` for Claude Code and `--dangerously-bypass-approvals-and-sandbox` for Codex. The console marks them:
 
 ```json trierarch report details
 {
@@ -69,7 +69,8 @@ Its report, sent on start and again whenever it changes: its state (`working` wh
     {
       "harness": "claude-code",
       "options": { "type": "object", "properties": { "model": { "enum": ["opus", "sonnet"], "default": "opus" } }, "additionalProperties": false },
-      "flags": ["--remote-control"]
+      "flags": ["--remote-control", "--dangerously-skip-permissions"],
+      "riskyFlags": ["--dangerously-skip-permissions"]
     }
   ],
   "workspaces": { "repositories": ["aeolus-fleet"], "folders": ["notes"] },
