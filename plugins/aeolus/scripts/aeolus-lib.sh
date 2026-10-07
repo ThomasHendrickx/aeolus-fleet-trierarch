@@ -2,10 +2,11 @@
 # how to read and write it. Sourced, never run. Bash only: on Windows, Claude
 # Code runs hooks and the Bash tool through Git Bash.
 #
-# One ship per folder. The folder is the session's working folder as Claude
-# Code reports it: the SessionStart hook reads it from its payload's cwd and
-# exports it as AEOLUS_FOLDER for every later command of the session, so the
-# hook, the watcher and the commands all key the ship by the same path.
+# One ship per folder. The folder is the session's working folder: the folder
+# Claude Code started in (CLAUDE_PROJECT_DIR), else the payload's cwd (Codex).
+# The SessionStart hook exports it as AEOLUS_FOLDER for every later command of
+# the session, so the hook, the watcher and the commands all key the ship by
+# the same path, wherever in the folder the session works.
 
 # The plugin's data folder: ${CLAUDE_PLUGIN_DATA} or ${PLUGIN_DATA} in a hook,
 # AEOLUS_DATA in a session's commands.
