@@ -81,6 +81,34 @@ describe('the run loop', () => {
     expect(handled).toEqual(['dlv_1']);
   });
 
+  it('runs a pass every interval while a receive waits on the fleet, so restarts and wakes never wait for the long poll (#250)', async () => {
+    const stopping = new AbortController();
+    const started = Date.now();
+    const passedAt: number[] = [];
+    const intervalMs = 20;
+
+    const running = loop({
+      receive: longPoll,
+      handle: () => Promise.resolve(),
+      pass: () => {
+        passedAt.push(Date.now() - started);
+        return Promise.resolve();
+      },
+      signal: stopping.signal,
+      logger: quiet,
+      intervalMs,
+    });
+    setTimeout(() => {
+      stopping.abort();
+    }, 10 * intervalMs);
+    await running;
+
+    // The long poll never answers here, so every pass ran while it waited: the first at once, then one each interval.
+    expect(passedAt.length).toBeGreaterThanOrEqual(4);
+    const delays = passedAt.map((at, index) => at - (passedAt[index - 1] ?? 0));
+    expect(Math.max(...delays)).toBeLessThan(5 * intervalMs);
+  });
+
   it('handles each delivery it receives and runs a pass', async () => {
     const stopping = new AbortController();
     const handled: string[] = [];
