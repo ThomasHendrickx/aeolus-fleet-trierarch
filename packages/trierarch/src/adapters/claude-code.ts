@@ -22,6 +22,9 @@ const END_OF_FLAGS = '--';
 
 export const CLAUDE_CODE_ADAPTER_FLAGS: readonly AdapterFlag[] = [{ flag: CONTINUE, when: 'restart' }];
 
+/** The flags of Claude Code that are risky: it then runs every tool without asking (#326). */
+export const CLAUDE_CODE_RISKY_FLAGS: readonly string[] = ['--dangerously-skip-permissions'];
+
 /**
  * The configured flags, with a name for the remote-control session where the
  * operator gave `--remote-control` without one: `[<repository or folder>]

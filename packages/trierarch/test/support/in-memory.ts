@@ -412,7 +412,12 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
   const workspace = new InMemoryWorkspace();
   const clock = new TestClock();
   const logger = new CollectingLogger();
-  const setup = { configuration, version: '0.1.0', adapterFlags: { 'claude-code': [{ flag: '--continue', when: 'restart' as const }], codex: [{ flag: '--no-daemon', when: 'always' as const }] } };
+  const setup = {
+    configuration,
+    version: '0.1.0',
+    adapterFlags: { 'claude-code': [{ flag: '--continue', when: 'restart' as const }], codex: [{ flag: '--no-daemon', when: 'always' as const }] },
+    riskyFlags: { 'claude-code': ['--dangerously-skip-permissions'], codex: ['--dangerously-bypass-approvals-and-sandbox'] },
+  };
   const handle = createHandleDelivery({ fleet, logger });
   const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, workspace, state, setup, clock, logger });
   const uninstall = createUninstall({ processes, state });

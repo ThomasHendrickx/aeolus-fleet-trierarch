@@ -2,7 +2,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 
 import { loadConfiguration, readCrewFile, writeRunningFile } from '../adapters/files.js';
 import { createGitWorkspace } from '../adapters/git-workspace.js';
-import { adapterFlagsOf, createHarnesses } from '../adapters/harnesses.js';
+import { adapterFlagsOf, createHarnesses, riskyFlagsOf } from '../adapters/harnesses.js';
 import { createJsonState } from '../adapters/json-state.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
@@ -32,7 +32,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const workspace = createGitWorkspace({ configuration, root: configuration.worktreeRoot ?? paths.worktrees });
   const state = createJsonState(paths.state);
   const clock = { now: () => new Date() };
-  const setup = { configuration, version: runningVersion(), adapterFlags: adapterFlagsOf(configuration) };
+  const setup = { configuration, version: runningVersion(), adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
   const handle = createHandleDelivery({ fleet, logger });
   const runPass = createRunPass({ fleet, harnesses, processes: tmux, workspace, state, setup, clock, logger });
   const reportSelf = createReportSelf({ fleet, processes: tmux, state, setup });

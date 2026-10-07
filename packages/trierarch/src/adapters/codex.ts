@@ -32,6 +32,9 @@ const END_OF_FLAGS = '--';
 
 export const CODEX_ADAPTER_FLAGS: readonly AdapterFlag[] = [{ flag: NO_DAEMON, when: 'always' }];
 
+/** The flags of Codex that are risky: it then runs every command without approval and outside its sandbox (#326). */
+export const CODEX_RISKY_FLAGS: readonly string[] = ['--dangerously-bypass-approvals-and-sandbox'];
+
 /** `codex`, or `codex resume --last` on a restart, then the configured flags, --no-daemon once, and the prompt last after `--`, so it never reads as a flag. */
 export function codexCommandLine(at: { flags: readonly string[]; prompt: string; isFirstStart: boolean; program?: string }): CommandPart[] {
   const program = at.program ?? 'codex';
