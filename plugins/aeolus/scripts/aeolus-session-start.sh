@@ -7,8 +7,12 @@ set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
 payload="$(cat)"
-cwd="$(aeolus_json_string "$payload" cwd)"
-[ -n "$cwd" ] || cwd="${CLAUDE_PROJECT_DIR:-}"
+# The folder the session started in: Claude Code's project folder, which stays
+# the same for the whole session. The payload's cwd follows the session into a
+# subfolder, so after /clear or a compact there it would key another ship (#334).
+# Codex has no project folder and keeps its cwd.
+cwd="${CLAUDE_PROJECT_DIR:-}"
+[ -n "$cwd" ] || cwd="$(aeolus_json_string "$payload" cwd)"
 [ -n "$cwd" ] || exit 0
 export AEOLUS_FOLDER="$cwd"
 export AEOLUS_DATA="${PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-}}"
