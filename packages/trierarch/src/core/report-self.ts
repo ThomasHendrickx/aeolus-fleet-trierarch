@@ -36,11 +36,21 @@ function selfReportOf(at: { setup: TrierarchSetup; state: TrierarchState; runnin
   return { state: running > 0 ? 'working' : 'idle', note, details: detailsOf(setup, state) };
 }
 
+/** A flag's name, without a value given with `=`. */
+function flagName(flag: string): string {
+  return flag.split('=', 1)[0] ?? flag;
+}
+
 /** The trierarch's report details: what it offers from its configuration, the worktrees it kept and found, its version. */
 function detailsOf(setup: TrierarchSetup, state: TrierarchState): TrierarchReportDetails {
   const { configuration, version } = setup;
   return {
-    harnesses: Object.entries(configuration.harnesses).map(([harness, settings]) => ({ harness, options: optionsSchemaOf(settings), flags: [...settings.flags] })),
+    harnesses: Object.entries(configuration.harnesses).map(([harness, settings]) => ({
+      harness,
+      options: optionsSchemaOf(settings),
+      flags: [...settings.flags],
+      riskyFlags: settings.flags.filter((flag) => setup.riskyFlags[harness]?.includes(flagName(flag)) === true),
+    })),
     workspaces: { repositories: Object.keys(configuration.repositories), folders: Object.keys(configuration.folders) },
     caps: configuration.caps,
     kept: state.kept.map(({ shipId, path }) => ({ shipId, path })),

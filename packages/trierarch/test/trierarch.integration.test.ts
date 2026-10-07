@@ -17,7 +17,7 @@ import { createMigratedDatabase } from '../../core/test/support/database.js';
 import { newKey } from '../../core/test/support/keys.js';
 import { unwrap } from '../../core/test/support/result.js';
 import { createClaudeCodeHarness } from '../src/adapters/claude-code.js';
-import { adapterFlagsOf } from '../src/adapters/harnesses.js';
+import { adapterFlagsOf, riskyFlagsOf } from '../src/adapters/harnesses.js';
 import { createClaudeCodeSetup } from '../src/adapters/claude-code-setup.js';
 import { readCrewFile } from '../src/adapters/files.js';
 import { runCommand } from '../src/adapters/run-command.js';
@@ -120,7 +120,7 @@ describe('the trierarch on a real fleet', () => {
     const state = createJsonState(paths.state);
     const clock = { now: () => new Date() };
     const logger = { warn: () => undefined, action: () => undefined };
-    const setup = { configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration) };
+    const setup = { configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
     const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, state, setup, clock, logger });
     const leasesOf = (shipId: ShipId) => database.lease.count({ where: { shipId, endedAt: null } });
     const worktree = join(paths.worktrees, 'aeolus-fleet', 'scout');

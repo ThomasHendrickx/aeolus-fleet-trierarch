@@ -1,8 +1,8 @@
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { AdapterFlag, HarnessPort } from '../core/ports.js';
-import { CLAUDE_CODE_ADAPTER_FLAGS, claudeCodeCommandLine, createClaudeCodeHarness, WAKE_PROMPT as CLAUDE_CODE_WAKE_PROMPT } from './claude-code.js';
-import { CODEX_ADAPTER_FLAGS, codexCommandLine, createCodexHarness, WAKE_PROMPT as CODEX_WAKE_PROMPT } from './codex.js';
+import { CLAUDE_CODE_ADAPTER_FLAGS, CLAUDE_CODE_RISKY_FLAGS, claudeCodeCommandLine, createClaudeCodeHarness, WAKE_PROMPT as CLAUDE_CODE_WAKE_PROMPT } from './claude-code.js';
+import { CODEX_ADAPTER_FLAGS, CODEX_RISKY_FLAGS, codexCommandLine, createCodexHarness, WAKE_PROMPT as CODEX_WAKE_PROMPT } from './codex.js';
 import type { CommandPart } from './command-line.js';
 import type { AeolusPlugin } from './plugin-identity.js';
 import { findAeolusPlugin } from './plugin.js';
@@ -12,14 +12,21 @@ import type { Tmux } from './tmux.js';
 const FIRST_PROMPT = '<first prompt>';
 const SESSION_NAME = '[<repository or folder>] <ship>';
 
-/** Per harness this trierarch has an adapter for: the flags it adds itself, and its command line for given flags. */
-const ADAPTERS: Readonly<Record<string, { adapterFlags: readonly AdapterFlag[]; commandLine: (at: { flags: readonly string[]; isFirstStart: boolean }) => CommandPart[] } | undefined>> = {
+/** Per harness this trierarch has an adapter for: the flags it adds itself, its risky flags, and its command line for given flags. */
+const ADAPTERS: Readonly<
+  Record<
+    string,
+    { adapterFlags: readonly AdapterFlag[]; riskyFlags: readonly string[]; commandLine: (at: { flags: readonly string[]; isFirstStart: boolean }) => CommandPart[] } | undefined
+  >
+> = {
   'claude-code': {
     adapterFlags: CLAUDE_CODE_ADAPTER_FLAGS,
+    riskyFlags: CLAUDE_CODE_RISKY_FLAGS,
     commandLine: ({ flags, isFirstStart }) => claudeCodeCommandLine({ flags, sessionName: SESSION_NAME, prompt: isFirstStart ? FIRST_PROMPT : CLAUDE_CODE_WAKE_PROMPT, isFirstStart }),
   },
   codex: {
     adapterFlags: CODEX_ADAPTER_FLAGS,
+    riskyFlags: CODEX_RISKY_FLAGS,
     commandLine: ({ flags, isFirstStart }) => codexCommandLine({ flags, prompt: isFirstStart ? FIRST_PROMPT : CODEX_WAKE_PROMPT, isFirstStart }),
   },
 };
@@ -27,6 +34,11 @@ const ADAPTERS: Readonly<Record<string, { adapterFlags: readonly AdapterFlag[]; 
 /** The flags each configured harness's adapter adds itself, for describe. */
 export function adapterFlagsOf(configuration: TrierarchConfiguration): Record<string, readonly AdapterFlag[]> {
   return Object.fromEntries(Object.keys(configuration.harnesses).map((name) => [name, ADAPTERS[name]?.adapterFlags ?? []]));
+}
+
+/** The flags each configured harness's adapter calls risky, for the report (#326). */
+export function riskyFlagsOf(configuration: TrierarchConfiguration): Record<string, readonly string[]> {
+  return Object.fromEntries(Object.keys(configuration.harnesses).map((name) => [name, ADAPTERS[name]?.riskyFlags ?? []]));
 }
 
 /** What a harness launches with the given flags, on a first start and a restart, for config check; undefined without an adapter. */

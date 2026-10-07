@@ -176,9 +176,10 @@ export interface AdapterFlag {
   readonly when: 'always' | 'restart';
 }
 
-/** The trierarch's configuration, its version, and the flags each harness's adapter adds itself. */
+/** The trierarch's configuration, its version, the flags each harness's adapter adds itself, and those its adapter calls risky. */
 export interface TrierarchSetup {
   readonly configuration: TrierarchConfiguration;
   readonly version: string;
   readonly adapterFlags: Readonly<Record<string, readonly AdapterFlag[]>>;
+  readonly riskyFlags: Readonly<Record<string, readonly string[]>>;
 }
