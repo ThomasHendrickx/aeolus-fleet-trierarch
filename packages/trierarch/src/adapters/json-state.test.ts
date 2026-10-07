@@ -66,7 +66,7 @@ describe('the JSON state store', () => {
     expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 
-  it('moves a 0.17 state file aside and starts empty: its wanted list is not migrated (decision 0013)', async () => {
+  it('moves a 0.17 state file aside and starts empty: its ships are not migrated (decision 0013)', async () => {
     const path = join(folder, 'state.json');
     const old = '{"entries": {}, "applied": {}, "kept": [], "orphans": []}';
     writeFileSync(path, old);

@@ -300,7 +300,7 @@ export async function initTrierarch(input: {
     said.push(`Configuration ${configured} at ${paths.config}.`);
   }
   if (Object.keys(configuration.repositories).length === 0 && Object.keys(configuration.folders).length === 0) {
-    said.push('It has no repository or folder yet, so it refuses every want: run aeolus-trierarch init again to add one.');
+    said.push('It has no repository or folder yet, so it can crew no request: run aeolus-trierarch init again to add one.');
   }
 
   // Claude Code's one-time questions, answered ahead.

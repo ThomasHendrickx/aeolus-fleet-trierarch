@@ -1,4 +1,4 @@
-import type { CrewStatus, ShipId, TrierarchAdapterFlag, TrierarchConfiguration, TrierarchReportDetails, TrierarchWorkspace } from '@aeolus-fleet/common';
+import type { CrewStatus, ShipId, TrierarchConfiguration, TrierarchReportDetails, TrierarchWorkspace } from '@aeolus-fleet/common';
 
 import type { TrierarchState } from './entry.js';
 import type { Action } from './reconciler.js';
@@ -98,7 +98,7 @@ export interface HarnessPort {
   /** The crew token of the folder's identity, when there is one. */
   crewTokenOf(folder: string): Promise<string | undefined>;
   removeIdentity(folder: string): Promise<void>;
-  /** Starts the harness in the folder: the first start with the want's first prompt, later ones continuing. */
+  /** Starts the harness in the folder: the first start with the settings' first prompt, later ones continuing. */
   launch(session: {
     shipId: ShipId;
     /** With the workspace, what the session is named after where the harness names one. */
@@ -163,9 +163,15 @@ export interface Logger {
   action(logged: LoggedAction): void;
 }
 
+/** A flag a harness adapter adds itself, as mechanism, never the operator's: on every launch or on a restart only. */
+export interface AdapterFlag {
+  readonly flag: string;
+  readonly when: 'always' | 'restart';
+}
+
 /** The trierarch's configuration, its version, and the flags each harness's adapter adds itself. */
 export interface TrierarchSetup {
   readonly configuration: TrierarchConfiguration;
   readonly version: string;
-  readonly adapterFlags: Readonly<Record<string, readonly TrierarchAdapterFlag[]>>;
+  readonly adapterFlags: Readonly<Record<string, readonly AdapterFlag[]>>;
 }

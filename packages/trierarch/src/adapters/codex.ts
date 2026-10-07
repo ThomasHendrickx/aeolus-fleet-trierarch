@@ -1,6 +1,6 @@
-import type { TrierarchAdapterFlag, TrierarchConfiguration } from '@aeolus-fleet/common';
+import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
-import type { HarnessPort } from '../core/ports.js';
+import type { AdapterFlag, HarnessPort } from '../core/ports.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
 import { effectiveFlags } from './flags.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
@@ -30,7 +30,7 @@ export const CODEX_TYPING_SETTLE_MS = 1000;
 const NO_DAEMON = '--no-daemon';
 const END_OF_FLAGS = '--';
 
-export const CODEX_ADAPTER_FLAGS: readonly TrierarchAdapterFlag[] = [{ flag: NO_DAEMON, when: 'always' }];
+export const CODEX_ADAPTER_FLAGS: readonly AdapterFlag[] = [{ flag: NO_DAEMON, when: 'always' }];
 
 /** `codex`, or `codex resume --last` on a restart, then the configured flags, --no-daemon once, and the prompt last after `--`, so it never reads as a flag. */
 export function codexCommandLine(at: { flags: readonly string[]; prompt: string; isFirstStart: boolean; program?: string }): CommandPart[] {

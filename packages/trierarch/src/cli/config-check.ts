@@ -1,16 +1,15 @@
-import type { TrierarchAdapterFlag } from '@aeolus-fleet/common';
-
 import { describeCommandLine, type CommandPart } from '../adapters/command-line.js';
 import { loadConfiguration } from '../adapters/files.js';
 import { describeFlags, effectiveFlags } from '../adapters/flags.js';
 import { adapterFlagsOf, commandLinesOf } from '../adapters/harnesses.js';
+import type { AdapterFlag } from '../core/ports.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
 
 /** `aeolus-trierarch config check`: checks the configuration and gives the effective command per harness. */
 export interface ConfigCheckReport {
   readonly path: string;
   /**
-   * Per harness, the flags a want with no options launches with, each option
+   * Per harness, the flags settings with no options launch with, each option
    * value's flags, the flags the adapter adds itself, and the command lines
    * of a first start and a restart, each part marked by its source.
    */
@@ -20,7 +19,7 @@ export interface ConfigCheckReport {
       {
         flags: readonly string[];
         options: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>>;
-        adapterFlags: readonly TrierarchAdapterFlag[];
+        adapterFlags: readonly AdapterFlag[];
         firstStart?: readonly CommandPart[];
         restart?: readonly CommandPart[];
       }
@@ -56,7 +55,7 @@ export async function configCheck(paths: TrierarchPaths): Promise<ConfigCheckRep
     harnesses,
     text: [
       `The configuration at ${paths.config} fits.`,
-      'Flags per harness (a want picks option values by name):',
+      'Flags per harness (settings pick option values by name):',
       describeFlags(configuration),
       '',
       'What each harness launches, with the default options:',
