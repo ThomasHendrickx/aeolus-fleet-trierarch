@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createJsonState } from '../adapters/json-state.js';
 import { trierarchPaths } from '../adapters/paths.js';
 import { runningVersion } from '../adapters/version.js';
-import { aTrierarch, aWant, CONFIGURATION } from '../../test/support/in-memory.js';
+import { aTrierarch, CONFIGURATION } from '../../test/support/in-memory.js';
 import { main, USAGE } from './main.js';
 
 let home: string;
@@ -119,16 +119,17 @@ describe('aeolus-trierarch', () => {
     await expect(main(['list', '--colour'], { HOME: home })).resolves.toEqual({ output: USAGE, code: 2 });
   });
 
-  it('lists the wanted entries as JSON with --json, reading the saved state', async () => {
+  it('lists the entries as JSON with --json, reading the saved state', async () => {
     const trierarch = aTrierarch();
     const scout = trierarch.fleet.commission('scout');
-    await trierarch.command('want', aWant(scout));
+    trierarch.fleet.request(scout);
+    await trierarch.pass();
     await createJsonState(trierarchPaths({ homeDirectory: home }).state).save(trierarch.state.current());
 
     const { output, code } = await main(['list', '--json'], { HOME: home });
 
     expect(code).toBe(0);
-    expect(JSON.parse(output)).toEqual([expect.objectContaining({ shipId: scout, state: 'wanted', workspace: 'worktree aeolus-fleet' })]);
+    expect(JSON.parse(output)).toEqual([expect.objectContaining({ shipId: scout, state: 'running', workspace: 'worktree aeolus-fleet' })]);
   });
 
   it('colours a failure on a colour terminal, and answers plain JSON with --json all the same', async () => {

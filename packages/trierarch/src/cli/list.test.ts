@@ -2,17 +2,17 @@ import { stripVTControlCharacters } from 'node:util';
 
 import { describe, expect, it } from 'vitest';
 
-import { aTrierarch, aWant, NOTES_FOLDER, WORKTREE_ROOT } from '../../test/support/in-memory.js';
+import { aTrierarch, crewSettings, NOTES_FOLDER, WORKTREE_ROOT } from '../../test/support/in-memory.js';
 import { describeList, inspectList } from './list.js';
 import { createStyle } from '../adapters/style.js';
 
 describe('aeolus-trierarch list', () => {
-  it('lists the wanted entries with ship, state, harness, workspace, folder, since and restarts', async () => {
+  it('lists the entries with ship, state, harness, workspace, folder, since and restarts', async () => {
     const trierarch = aTrierarch();
     const scout = trierarch.fleet.commission('scout');
     const notes = trierarch.fleet.commission('notes');
-    await trierarch.command('want', aWant(scout, { workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'main' } }));
-    await trierarch.command('want', aWant(notes, { workspace: { kind: 'folder', name: 'notes' } }));
+    trierarch.fleet.request(scout, crewSettings({ workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'main' } }));
+    trierarch.fleet.request(notes, crewSettings({ workspace: { kind: 'folder', name: 'notes' } }));
     await trierarch.pass();
     trierarch.processes.exit(scout);
     await trierarch.pass();
@@ -35,7 +35,7 @@ describe('aeolus-trierarch list', () => {
   it('colours each state on a colour terminal, keeping the columns as they are in plain text', async () => {
     const trierarch = aTrierarch();
     const scout = trierarch.fleet.commission('scout');
-    await trierarch.command('want', aWant(scout));
+    trierarch.fleet.request(scout);
     await trierarch.pass();
     const entries = await inspectList(trierarch.state);
 
@@ -46,6 +46,6 @@ describe('aeolus-trierarch list', () => {
   });
 
   it('says when no ship is on the list', async () => {
-    expect(describeList(await inspectList(aTrierarch().state))).toBe('No ship is on the list.');
+    expect(describeList(await inspectList(aTrierarch().state))).toBe('No ship is crewed here.');
   });
 });

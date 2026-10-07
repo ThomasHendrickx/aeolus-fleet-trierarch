@@ -1,8 +1,10 @@
-import { createIdGenerator, type ShipId, type TrierarchConfiguration, type TrierarchWorkspace } from '@aeolus-fleet/common';
+import { createIdGenerator, type CrewStatus, type ShipId, type TrierarchConfiguration, type TrierarchWorkspace } from '@aeolus-fleet/common';
 
-import { EMPTY_STATE, type Outgoing, type TrierarchState } from '../../src/core/entry.js';
+import { EMPTY_STATE, type TrierarchState } from '../../src/core/entry.js';
 import { createHandleDelivery } from '../../src/core/handle-delivery.js';
 import type {
+  ArgoReport,
+  AssignedRequest,
   Delivery,
   FleetPort,
   FleetShipStatus,
@@ -52,21 +54,103 @@ interface FleetShip {
   waiting: number;
 }
 
+/** A crew request assigned to this trierarch, as the fleet holds it. */
+interface HeldRequest {
+  settings: unknown;
+  settingsVersion: number;
+  status: CrewStatus | null;
+}
+
+/** The settings most tests request: a worktree of aeolus-fleet on Claude Code. */
+export function crewSettings(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {}, ...overrides };
+}
+
 export class InMemoryFleet implements FleetPort {
   readonly url = 'https://fleet.example.com';
   readonly ships = new Map<ShipId, FleetShip>();
-  readonly sent: Outgoing[] = [];
+  /** The crew requests assigned to this trierarch, by ship, oldest first. */
+  readonly requests = new Map<ShipId, HeldRequest>();
+  /** Every status the trierarch wrote, in order. */
+  readonly statuses: { shipId: ShipId; status: CrewStatus }[] = [];
+  /** The ships whose release the trierarch confirmed. */
+  readonly confirmed: ShipId[] = [];
+  /** What the trierarch sent argo, once per idempotency key. */
+  readonly toArgo: ArgoReport[] = [];
   readonly acked: string[] = [];
+  readonly pongs: string[] = [];
   readonly reports: { crewToken: string; state: string; note: string }[] = [];
   /** What the trierarch reported of itself, as its own ship. */
   readonly selfReports: SelfReport[] = [];
-  /** The state saved when each delivery was acknowledged. */
-  readonly stateAtAck = new Map<string, TrierarchState | undefined>();
   /** Set to lose the next register's reply: the fleet crews the ship, the trierarch never hears. */
   isLosingRegisterReply = false;
   private count = 0;
 
-  constructor(private readonly store: InMemoryState) {}
+  /** The ship's crew request, assigned to this trierarch, as a requester asks and the trierarch plugin assigns it. */
+  request(shipId: ShipId, settings: unknown = crewSettings()): void {
+    this.requests.set(shipId, { settings, settingsVersion: 1, status: null });
+  }
+
+  /** The request written again, as Restart (the same settings) or Edit (new ones) does: a new settings version. */
+  requestAgain(shipId: ShipId, settings?: unknown): void {
+    const held = this.requestOf(shipId);
+    this.requests.set(shipId, { ...held, settings: settings ?? held.settings, settingsVersion: held.settingsVersion + 1 });
+  }
+
+  /** The requester removes the request: it is marked releasing, as it is assigned. */
+  removeRequest(shipId: ShipId): void {
+    this.requestOf(shipId).status = 'releasing';
+  }
+
+  /** The request is no longer assigned to this trierarch, as when its ship is retired. */
+  unassign(shipId: ShipId): void {
+    this.requests.delete(shipId);
+  }
+
+  requestOf(shipId: ShipId): HeldRequest {
+    const held = this.requests.get(shipId);
+    if (held === undefined) {
+      throw new Error(`no request for ${shipId}`);
+    }
+    return held;
+  }
+
+  assignedRequests(): Promise<readonly AssignedRequest[]> {
+    return Promise.resolve([...this.requests].map(([shipId, { settings, settingsVersion, status }]) => ({ shipId, settings, settingsVersion, status })));
+  }
+
+  writeStatus(shipId: ShipId, status: CrewStatus): Promise<void> {
+    const held = this.requestOf(shipId);
+    if (held.status === 'releasing' && status !== 'releasing') {
+      return Promise.reject(new Error('CREW_REQUEST_RELEASING'));
+    }
+    if (held.status !== status) {
+      held.status = status;
+      this.statuses.push({ shipId, status });
+    }
+    return Promise.resolve();
+  }
+
+  confirmRelease(shipId: ShipId): Promise<void> {
+    if (this.requestOf(shipId).status !== 'releasing') {
+      return Promise.reject(new Error('CREW_REQUEST_NOT_RELEASING'));
+    }
+    this.requests.delete(shipId);
+    this.confirmed.push(shipId);
+    return Promise.resolve();
+  }
+
+  reportToArgo(report: ArgoReport): Promise<void> {
+    if (!this.toArgo.some((each) => each.idempotencyKey === report.idempotencyKey)) {
+      this.toArgo.push(report);
+    }
+    return Promise.resolve();
+  }
+
+  pong(deliveryId: string): Promise<void> {
+    this.pongs.push(deliveryId);
+    return Promise.resolve();
+  }
 
   /** A ship of the fleet awaiting crew, as a requester commissions it. */
   commission(name: string): ShipId {
@@ -134,14 +218,6 @@ export class InMemoryFleet implements FleetPort {
 
   ack(deliveryId: string): Promise<void> {
     this.acked.push(deliveryId);
-    this.stateAtAck.set(deliveryId, this.store.saved.at(-1));
-    return Promise.resolve();
-  }
-
-  send(message: Outgoing): Promise<void> {
-    if (!this.sent.some((each) => each.idempotencyKey === message.idempotencyKey)) {
-      this.sent.push(message);
-    }
     return Promise.resolve();
   }
 
@@ -171,11 +247,6 @@ export class InMemoryFleet implements FleetPort {
       throw new Error(`no ship ${shipId}`);
     }
     return ship;
-  }
-
-  /** What was sent to a ship, by protocol name. */
-  sentTo(shipId: ShipId, name: string): Outgoing[] {
-    return this.sent.filter((message) => message.to === shipId && message.name === name);
   }
 }
 
@@ -326,10 +397,10 @@ export class CollectingLogger {
   }
 }
 
-/** A trierarch on in-memory ports, with a requester ship that sends it commands. */
+/** A trierarch on in-memory ports. */
 export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION) {
   const state = new InMemoryState();
-  const fleet = new InMemoryFleet(state);
+  const fleet = new InMemoryFleet();
   const processes = new InMemoryProcesses();
   const harness = new InMemoryHarness(processes);
   // Each harness keeps its own identities, as the aeolus plugin does per harness.
@@ -338,31 +409,20 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
   const clock = new TestClock();
   const logger = new CollectingLogger();
   const setup = { configuration, version: '0.1.0', adapterFlags: { 'claude-code': [{ flag: '--continue', when: 'restart' as const }], codex: [{ flag: '--no-daemon', when: 'always' as const }] } };
-  const requester = newId('ship');
-  const handle = createHandleDelivery({ fleet, workspace, state, setup, clock, logger });
+  const handle = createHandleDelivery({ fleet, logger });
   const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, workspace, state, setup, clock, logger });
   const uninstall = createUninstall({ processes, state });
   const reportSelf = createReportSelf({ fleet, processes, state, setup });
 
-  /** Sends the trierarch a command, as the requester does: its delivery, handled. */
-  async function command(name: string, payload: unknown): Promise<Delivery> {
-    const delivery: Delivery = {
-      deliveryId: newId('delivery'),
-      messageId: newId('message'),
-      senderShipId: requester,
-      contentType: `application/vnd.aeolus.trierarch.${name}+json`,
-      payload: JSON.stringify(payload),
-    };
+  /** A message arrives at the trierarch's own ship: its delivery, handled. */
+  async function deliver(message: { contentType: string; payload: string }): Promise<Delivery> {
+    const delivery: Delivery = { deliveryId: newId('delivery'), messageId: newId('message'), senderShipId: newId('ship'), ...message };
     await handle(delivery);
     return delivery;
   }
 
-  return { fleet, processes, harness, codex, workspace, state, clock, logger, requester, handle, pass, uninstall, reportSelf, command };
+  return { fleet, processes, harness, codex, workspace, state, clock, logger, handle, pass, uninstall, reportSelf, deliver };
 }
 
 export type Trierarch = ReturnType<typeof aTrierarch>;
 
-/** A want for a worktree of aeolus-fleet, as most tests send it. */
-export function aWant(shipId: ShipId, overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return { shipId, harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {}, ...overrides };
-}

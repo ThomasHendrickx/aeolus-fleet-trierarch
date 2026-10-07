@@ -1,13 +1,13 @@
 import { trierarchReportDetailsSchema } from '@aeolus-fleet/common';
 import { describe, expect, it } from 'vitest';
 
-import { aTrierarch, aWant, newId, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
+import { aTrierarch, newId, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
 import { EMPTY_STATE, putEntry, type Entry } from './entry.js';
 
-/** A ship wanted and crewed by the trierarch, so its session runs. */
+/** A ship whose request is assigned to the trierarch, crewed, so its session runs. */
 async function aRunningShip(trierarch: Trierarch) {
   const shipId = trierarch.fleet.commission('scout');
-  await trierarch.command('want', aWant(shipId));
+  trierarch.fleet.request(shipId);
   await trierarch.pass();
   return shipId;
 }
@@ -19,7 +19,7 @@ function aCrashedEntry(): Entry {
     harness: 'claude-code',
     workspace: { kind: 'worktree', repository: 'aeolus-fleet' },
     options: {},
-    requester: newId('ship'),
+    settingsVersion: 1,
     state: 'crashed',
     since: '2026-10-06T22:00:00.000Z',
     exits: [],
