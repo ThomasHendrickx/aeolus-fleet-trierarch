@@ -50,6 +50,7 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
       caps: { ships: 8, running: 4 },
       kept: [kept],
       orphans: [{ path: `${WORKTREE_ROOT}/aeolus-fleet/stray` }],
+      machine: { os: 'macos', arch: 'arm64' },
       version: '0.1.0',
     });
     expect(trierarchReportDetailsSchema.safeParse(report?.details).success).toBe(true);
