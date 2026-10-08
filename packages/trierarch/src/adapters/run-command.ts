@@ -31,6 +31,14 @@ export function runCommand(command: string, options: { args: readonly string[]; 
       stderr += chunk.toString('utf8');
     });
     child.on('error', reject);
+    // Ended at its time limit: answer now, as a child it forked may hold its output open long after.
+    child.on('exit', (code, signal) => {
+      if (signal !== null) {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        resolve({ status: code ?? 1, stdout, stderr });
+      }
+    });
     child.on('close', (code) => {
       resolve({ status: code ?? 1, stdout, stderr });
     });
