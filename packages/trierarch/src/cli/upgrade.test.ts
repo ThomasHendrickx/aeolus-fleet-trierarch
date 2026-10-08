@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import type { RunningFile } from '../adapters/files.js';
 import type { CommandResult } from '../adapters/run-command.js';
 import type { ServiceStatus } from '../adapters/service.js';
 import { upgradeTrierarch, type Npm } from './upgrade.js';
@@ -13,6 +14,10 @@ let installs: string[];
 let failing: CommandResult | undefined;
 let steps: string[];
 let isServiceInstalled: boolean;
+/** What running.json says on each read after the new process starts, the last one from then on. */
+let saying: (RunningFile | undefined)[];
+let reads: number;
+let waits: number[];
 
 beforeEach(() => {
   installed = '0.17.1';
@@ -22,7 +27,20 @@ beforeEach(() => {
   failing = undefined;
   steps = [];
   isServiceInstalled = true;
+  saying = [{ pid: 2, version: '0.17.2' }];
+  reads = 0;
+  waits = [];
 });
+
+function running(): Promise<RunningFile | undefined> {
+  reads += 1;
+  return Promise.resolve(saying[Math.min(reads, saying.length) - 1]);
+}
+
+function sleep(ms: number): Promise<void> {
+  waits.push(ms);
+  return Promise.resolve();
+}
 
 const npm: Npm = {
   latest: () => {
@@ -52,7 +70,7 @@ const service = {
 };
 
 function upgrade(version?: string) {
-  return upgradeTrierarch({ ...(version !== undefined && { version }), installedVersion: () => installed, npm, service });
+  return upgradeTrierarch({ ...(version !== undefined && { version }), installedVersion: () => installed, npm, service, running, sleep });
 }
 
 describe('aeolus-trierarch upgrade', () => {
@@ -104,5 +122,35 @@ describe('aeolus-trierarch upgrade', () => {
     expect(installs).toEqual([`${PACKAGE}@0.17.2`]);
     expect(steps).toEqual([]);
     expect(report.said.join('\n')).toContain('The service is not installed: run aeolus-trierarch install');
+  });
+
+  it('waits for the new process to say its version before it reports, so the status that follows shows it running (#376)', async () => {
+    saying = [{ pid: 1, version: '0.17.1' }, undefined, { pid: 2, version: '0.17.2' }];
+
+    const report = await upgrade();
+
+    expect(reads).toBe(3);
+    expect(waits).toEqual([1000, 1000]);
+    expect(report.said.join('\n')).toContain('The service runs 0.17.2 now.');
+  });
+
+  it('stops waiting after 30 seconds when the new process has not said its version, and says so without telling to restart it (#376)', async () => {
+    saying = [{ pid: 1, version: '0.17.1' }];
+
+    const report = await upgrade();
+
+    expect(waits.reduce((sum, ms) => sum + ms, 0)).toBe(30_000);
+    expect(report.said.join('\n')).toContain(
+      'The service started 0.17.2, but the new process has not said its version after 30 seconds: aeolus-trierarch status shows the version it runs once it does.',
+    );
+    expect(report.said.join('\n')).not.toContain('The service runs 0.17.2 now.');
+  });
+
+  it('does not wait for a version when the service is not installed (#376)', async () => {
+    isServiceInstalled = false;
+
+    await upgrade();
+
+    expect(reads).toBe(0);
   });
 });
