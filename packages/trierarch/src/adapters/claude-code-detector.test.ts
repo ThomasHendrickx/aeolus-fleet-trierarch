@@ -14,6 +14,21 @@ const HELP = [
   '  --effort <level>                  Effort level for the current session (low, medium, high, xhigh, max)',
 ].join('\n');
 
+/** `claude --help` of Claude Code 2.1.295 as the mac mini prints it, cut to its two options: each description wraps over several lines (#383). */
+const WRAPPED_HELP = [
+  'Usage: claude [options] [command] [prompt]',
+  '  --effort <level>                      Effort level for the current session',
+  '                                        (low, medium, high, xhigh, max)',
+  '  --environment <environment_id>        Create a new cloud session that runs on',
+  '                                        the given self-hosted environment',
+  '                                        (ccpool_...).',
+  '  --model <model>                       Model for the current session. Provide',
+  '                                        an alias for the latest model (e.g.',
+  "                                        'fable', 'opus', or 'sonnet') or a",
+  "                                        model's full name.",
+  '  -n, --name <name>                     Set a display name for this session',
+].join('\n');
+
 /** What each alias resolves to on Claude Code 2.1.293. */
 const RESOLVES: Readonly<Record<string, string>> = { fable: 'claude-fable-5-1', opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5' };
 
@@ -56,6 +71,12 @@ const EFFORT = { values: { low: ['--effort', 'low'], medium: ['--effort', 'mediu
 const ALL_IDS = ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5'];
 
 describe('detecting Claude Code (#365)', () => {
+  it("reads the aliases and the effort levels from --help whose descriptions wrap over several lines (#383)", async () => {
+    const detected = await aClaude({ help: WRAPPED_HELP }).detector.detect({ version: '2.1.295', previous: undefined, now: NOW });
+
+    expect(detected?.options).toEqual({ model: modelOption(ALL_IDS), effort: EFFORT });
+  });
+
   it('reads its version from --version', async () => {
     await expect(aClaude().detector.version()).resolves.toBe('2.1.293');
   });
