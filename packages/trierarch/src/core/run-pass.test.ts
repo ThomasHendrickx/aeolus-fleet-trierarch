@@ -251,6 +251,24 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.fleet.cleared).toEqual([{ shipId, repository: 'aeolus-fleet', outcome: 'not-kept' }]);
   });
 
+  it('drops a kept worktree from kept once a ship is crewed in it again, so a clear request removes nothing in use (decision 0032)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.change(SCOUT_FOLDER);
+    trierarch.fleet.removeRequest(shipId);
+    await trierarch.pass();
+    trierarch.fleet.request(shipId);
+    await trierarch.pass();
+    trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]?.folder).toBe(SCOUT_FOLDER);
+    expect(trierarch.state.current().kept).toEqual([]);
+    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
+    expect(trierarch.fleet.cleared).toEqual([{ shipId, repository: 'aeolus-fleet', outcome: 'not-kept' }]);
+  });
+
   it('keeps a kept worktree and its clear request when removing it fails, so the next pass tries again', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
