@@ -53,15 +53,34 @@ function outcomeOf(alias: string, result: CommandResult): Outcome {
   }
 }
 
+/**
+ * An option's entry in --help on one line: its own line and the lines its
+ * description wraps onto (#383), those indented deeper that start no option.
+ */
+function entryOf(help: string, flag: string): string {
+  const lines = help.split('\n');
+  const start = lines.findIndex((line) => line.trimStart().startsWith(flag));
+  if (start === -1) {
+    return '';
+  }
+  const indent = (lines[start] ?? '').length - (lines[start] ?? '').trimStart().length;
+  const wrapped = lines.slice(start + 1).findIndex((line) => line.length - line.trimStart().length <= indent || line.trimStart().startsWith('-'));
+  const end = wrapped === -1 ? lines.length : start + 1 + wrapped;
+  return lines
+    .slice(start, end)
+    .map((line) => line.trim())
+    .join(' ');
+}
+
 /** The aliases --help names for --model, quoted, such as 'opus'. */
 function aliasesOf(help: string): string[] {
-  const line = /--model <model>[^\n]*/.exec(help)?.[0] ?? '';
-  return [...line.matchAll(/'([a-z0-9][a-z0-9._-]*)'/g)].flatMap((match) => (match[1] === undefined ? [] : [match[1]]));
+  const entry = entryOf(help, '--model <model>');
+  return [...entry.matchAll(/'([a-z0-9][a-z0-9._-]*)'/g)].flatMap((match) => (match[1] === undefined ? [] : [match[1]]));
 }
 
 /** The levels `--effort <level> ... (low, medium, high)` names in --help, each a value name. */
 function effortLevelsOf(help: string): string[] {
-  const listed = /--effort <level>[^\n(]*\(([^)]*)\)/.exec(help)?.[1];
+  const listed = /\(([^)]*)\)/.exec(entryOf(help, '--effort <level>'))?.[1];
   return (listed ?? '')
     .split(',')
     .map((level) => level.trim())
