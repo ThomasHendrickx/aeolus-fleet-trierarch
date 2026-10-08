@@ -9,9 +9,11 @@ export interface Refusal {
   readonly reason: string;
 }
 
-/** Settings this trierarch can crew: parsed, with each option resolved to its value name. */
+/** Settings this trierarch can crew: parsed, with the harness it crews them with and each option resolved to its value name. */
 export interface CheckedSettings {
   readonly settings: CrewSettings;
+  /** The harness the settings name, or without one this trierarch's default: the first in its configuration (#343). */
+  readonly harness: string;
   readonly options: Readonly<Record<string, string>>;
 }
 
@@ -35,9 +37,10 @@ export function checkSettings(raw: unknown, context: { shipId: ShipId; configura
   }
   const settings = parsed.data;
   const { configuration, state, shipId } = context;
-  const harness = configuration.harnesses[settings.harness];
-  if (harness === undefined) {
-    return err({ field: 'harness', reason: `This trierarch offers no harness ${settings.harness}` });
+  const harnessName = settings.harness ?? Object.keys(configuration.harnesses)[0];
+  const harness = harnessName === undefined ? undefined : configuration.harnesses[harnessName];
+  if (harnessName === undefined || harness === undefined) {
+    return err({ field: 'harness', reason: settings.harness === undefined ? 'This trierarch offers no harness' : `This trierarch offers no harness ${settings.harness}` });
   }
   const { workspace } = settings;
   if (workspace.kind === 'worktree' && !(workspace.repository in configuration.repositories)) {
@@ -56,12 +59,12 @@ export function checkSettings(raw: unknown, context: { shipId: ShipId; configura
   for (const [name, value] of Object.entries(settings.options)) {
     const option = harness.options[name];
     if (option === undefined) {
-      return err({ field: `options.${name}`, reason: `${settings.harness} has no option ${name}` });
+      return err({ field: `options.${name}`, reason: `${harnessName} has no option ${name}` });
     }
     if (typeof value !== 'string' || !(value in option.values)) {
       return err({ field: `options.${name}`, reason: `${name} must be one of ${Object.keys(option.values).join(', ')}` });
     }
     options[name] = value;
   }
-  return ok({ settings, options });
+  return ok({ settings, harness: harnessName, options });
 }
