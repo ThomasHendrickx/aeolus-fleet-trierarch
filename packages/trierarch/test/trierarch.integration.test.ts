@@ -116,7 +116,7 @@ async function aTrierarchOnTheFleet() {
   const fleet = createRestFleet(await readCrewFile(paths.crewToken));
   const configuration = { ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: repository } }, folders: { notes: { path: join(home, 'notes') } } };
   const sessions = standInSessions();
-  const harness = createClaudeCodeHarness({ configuration, plugin: { root: PLUGIN_ROOT, data: pluginData }, sessions });
+  const harness = createClaudeCodeHarness({ configuration, plugin: { root: PLUGIN_ROOT, data: pluginData }, projects: join(home, '.claude', 'projects'), sessions });
   const workspace = createGitWorkspace({ configuration, root: paths.worktrees });
   const state = createJsonState(paths.state);
   const clock = { now: () => new Date() };
