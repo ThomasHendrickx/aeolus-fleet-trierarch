@@ -131,10 +131,12 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
     }
   }
 
-  // A kept worktree stays until it is gone from disk, as when a human removed it (#325).
+  // A kept worktree stays until it is gone from disk, as when a human removed it (#325). One an entry
+  // works in again is that entry's worktree, no longer kept, so a clear never removes it (decision 0032).
   const onDisk = new Set(observed.worktrees.map((worktree) => worktree.path));
-  const kept = next.kept.filter((each) => onDisk.has(each.path));
-  const known = new Set([...Object.values(next.entries).flatMap((entry) => (entry.folder === undefined ? [] : [entry.folder])), ...kept.map((each) => each.path)]);
+  const inUse = new Set(Object.values(next.entries).flatMap((entry) => (entry.folder === undefined ? [] : [entry.folder])));
+  const kept = next.kept.filter((each) => onDisk.has(each.path) && !inUse.has(each.path));
+  const known = new Set([...inUse, ...kept.map((each) => each.path)]);
   const orphans = observed.worktrees
     .filter((worktree) => !known.has(worktree.path) && (worktree.shipId === undefined || !(worktree.shipId in next.entries)))
     .map(({ path, repository, name }) => ({ path, repository, name }));
