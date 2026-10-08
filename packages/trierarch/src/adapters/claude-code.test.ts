@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,12 +16,15 @@ const PLUGIN_ROOT = fileURLToPath(new URL('../../../../plugins/aeolus', import.m
 
 let data: string;
 let folder: string;
+/** Claude Code's projects folder, where it keeps each folder's conversations. */
+let projects: string;
 let started: { shipId: ShipId; folder: string; command: readonly string[] }[];
 let typed: { shipId: ShipId; text: string }[];
 
 beforeEach(() => {
   data = mkdtempSync(join(tmpdir(), 'trierarch-plugin-data-'));
   folder = realpathSync(mkdtempSync(join(tmpdir(), 'trierarch-session-')));
+  projects = mkdtempSync(join(tmpdir(), 'trierarch-claude-projects-'));
   started = [];
   typed = [];
 });
@@ -29,12 +32,21 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(data, { recursive: true, force: true });
   rmSync(folder, { recursive: true, force: true });
+  rmSync(projects, { recursive: true, force: true });
 });
+
+/** A conversation Claude Code kept for the folder, where it keeps them: under the folder's path with every other character than a letter or digit as `-`. */
+function aConversationIn(folder: string): void {
+  const kept = join(projects, folder.replace(/[^a-zA-Z0-9]/g, '-'));
+  mkdirSync(kept, { recursive: true });
+  writeFileSync(join(kept, '0b8e3f2a-5c1d-4e7f-9a6b-2d4c8e1f3a5b.jsonl'), '{}\n');
+}
 
 function harness() {
   return createClaudeCodeHarness({
     configuration: CONFIGURATION,
     plugin: { root: PLUGIN_ROOT, data },
+    projects,
     sessions: {
       start: (session) => {
         started.push(session);
@@ -93,9 +105,25 @@ describe('Claude Code as a harness', () => {
   });
 
   it('continues the conversation on a restart, with /aeolus:wake and never the first prompt again', async () => {
+    aConversationIn(folder);
+
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false, firstPrompt: 'Review the open pull requests.' });
 
     expect(started[0]?.command).toEqual(['claude', '--remote-control', '[aeolus-fleet] scout', '--model', 'claude-opus-5-5', '--continue', '--', '/aeolus:wake']);
+  });
+
+  it('starts fresh on a restart when the folder has no conversation to continue, as claude --continue would exit at once (#381)', async () => {
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false });
+
+    expect(started[0]?.command).toEqual(['claude', '--remote-control', '[aeolus-fleet] scout', '--model', 'claude-opus-5-5', '--', '/aeolus:wake']);
+  });
+
+  it('continues on a restart only a conversation of its own folder, not one of another folder (#381)', async () => {
+    aConversationIn(join(folder, 'elsewhere'));
+
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false });
+
+    expect(started[0]?.command).not.toContain('--continue');
   });
 
   it('names the remote-control session after its folder and ship: the repository of a worktree, the name of a configured folder', async () => {
@@ -109,6 +137,7 @@ describe('Claude Code as a harness', () => {
       createClaudeCodeHarness({
         configuration: { ...CONFIGURATION, harnesses: { 'claude-code': { flags, options: {} } } },
         plugin: { root: PLUGIN_ROOT, data },
+        projects,
         sessions: {
           start: (session) => {
             started.push(session);
