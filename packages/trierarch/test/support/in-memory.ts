@@ -1,4 +1,4 @@
-import { createIdGenerator, type CrewStatus, type ShipId, type TrierarchConfiguration, type TrierarchWorkspace } from '@aeolus-fleet/common';
+import { createIdGenerator, type ClearOutcome, type CrewStatus, type ShipId, type TrierarchConfiguration, type TrierarchWorkspace } from '@aeolus-fleet/common';
 
 import { EMPTY_STATE, type TrierarchState } from '../../src/core/entry.js';
 import { createHandleDelivery } from '../../src/core/handle-delivery.js';
@@ -76,6 +76,10 @@ export class InMemoryFleet implements FleetPort {
   readonly statuses: ({ shipId: ShipId } & WrittenStatus)[] = [];
   /** The ships whose release the trierarch confirmed. */
   readonly confirmed: ShipId[] = [];
+  /** The pending clear requests to this trierarch, oldest first (decision 0032). */
+  readonly clearRequests: { shipId: ShipId; repository: string }[] = [];
+  /** Every clear request the trierarch confirmed, and how. */
+  readonly cleared: { shipId: ShipId; repository: string; outcome: ClearOutcome }[] = [];
   /** What the trierarch sent argo, once per idempotency key. */
   readonly toArgo: ArgoReport[] = [];
   readonly acked: string[] = [];
@@ -141,6 +145,27 @@ export class InMemoryFleet implements FleetPort {
     }
     this.requests.delete(shipId);
     this.confirmed.push(shipId);
+    return Promise.resolve();
+  }
+
+  /** A ship with fleet:manage asks this trierarch to clear the worktree it kept; asking again changes nothing. */
+  clearWorktree(worktree: { shipId: ShipId; repository: string }): void {
+    if (!this.clearRequests.some((each) => each.shipId === worktree.shipId && each.repository === worktree.repository)) {
+      this.clearRequests.push({ ...worktree });
+    }
+  }
+
+  pendingClears(): Promise<readonly { shipId: ShipId; repository: string }[]> {
+    return Promise.resolve(this.clearRequests.map((each) => ({ ...each })));
+  }
+
+  confirmCleared(cleared: { shipId: ShipId; repository: string; outcome: ClearOutcome }): Promise<void> {
+    const index = this.clearRequests.findIndex((each) => each.shipId === cleared.shipId && each.repository === cleared.repository);
+    if (index === -1) {
+      return Promise.reject(new Error('CLEAR_REQUEST_NOT_FOUND'));
+    }
+    this.clearRequests.splice(index, 1);
+    this.cleared.push({ ...cleared });
     return Promise.resolve();
   }
 
@@ -333,7 +358,13 @@ export class InMemoryWorkspace implements WorkspacePort {
     return Promise.resolve(this.folders.get(folder)?.hasChanges !== true);
   }
 
+  /** Set to make every remove fail, as when git refuses. */
+  isFailingRemove = false;
+
   remove(folder: string): Promise<void> {
+    if (this.isFailingRemove) {
+      return Promise.reject(new Error(`git worktree remove ${folder} failed`));
+    }
     this.folders.delete(folder);
     return Promise.resolve();
   }
@@ -342,7 +373,10 @@ export class InMemoryWorkspace implements WorkspacePort {
     return Promise.resolve(
       [...this.folders]
         .filter(([path]) => path.startsWith(`${WORKTREE_ROOT}/`))
-        .map(([path, { shipId }]) => ({ path, ...(shipId !== undefined && { shipId }) })),
+        .map(([path, { shipId }]) => {
+          const [repository = '', name = ''] = path.slice(WORKTREE_ROOT.length + 1).split('/');
+          return { path, repository, name, ...(shipId !== undefined && { shipId }) };
+        }),
     );
   }
 

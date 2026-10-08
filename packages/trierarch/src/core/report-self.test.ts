@@ -31,8 +31,8 @@ function aCrashedEntry(): Entry {
 describe("the trierarch's own report (docs/trierarch.md, What a trierarch reports)", () => {
   it('reports on start the details its configuration and saved state hold, as the trierarch report details', async () => {
     const trierarch = aTrierarch();
-    const kept = { shipId: newId('ship'), path: `${WORKTREE_ROOT}/aeolus-fleet/lookout` };
-    await trierarch.state.save({ ...EMPTY_STATE, kept: [kept], orphans: [`${WORKTREE_ROOT}/aeolus-fleet/stray`] });
+    const kept = { shipId: newId('ship'), repository: 'aeolus-fleet', path: `${WORKTREE_ROOT}/aeolus-fleet/lookout` };
+    await trierarch.state.save({ ...EMPTY_STATE, kept: [kept], orphans: [{ path: `${WORKTREE_ROOT}/aeolus-fleet/stray`, repository: 'aeolus-fleet', name: 'stray' }] });
 
     await trierarch.reportSelf();
 
@@ -48,8 +48,9 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
       ],
       workspaces: { repositories: ['aeolus-fleet'], folders: ['notes'] },
       caps: { ships: 8, running: 4 },
-      kept: [kept],
-      orphans: [{ path: `${WORKTREE_ROOT}/aeolus-fleet/stray` }],
+      // Paths stay on the machine: a kept worktree goes by its ship and repository, an orphan by its repository and name (#325).
+      kept: [{ shipId: kept.shipId, repository: 'aeolus-fleet' }],
+      orphans: [{ repository: 'aeolus-fleet', name: 'stray' }],
       machine: { os: 'macos', arch: 'arm64' },
       version: '0.1.0',
     });
@@ -100,10 +101,10 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
     const trierarch = aTrierarch();
     await trierarch.reportSelf();
 
-    await trierarch.state.save({ ...EMPTY_STATE, orphans: [`${WORKTREE_ROOT}/aeolus-fleet/stray`] });
+    await trierarch.state.save({ ...EMPTY_STATE, orphans: [{ path: `${WORKTREE_ROOT}/aeolus-fleet/stray`, repository: 'aeolus-fleet', name: 'stray' }] });
     await trierarch.reportSelf();
 
-    expect(trierarch.fleet.selfReports.map((report) => report.details.orphans)).toEqual([[], [{ path: `${WORKTREE_ROOT}/aeolus-fleet/stray` }]]);
+    expect(trierarch.fleet.selfReports.map((report) => report.details.orphans)).toEqual([[], [{ repository: 'aeolus-fleet', name: 'stray' }]]);
   });
 
   it('reports again when how many run changes', async () => {

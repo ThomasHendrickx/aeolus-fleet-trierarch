@@ -193,7 +193,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.fleet.shipOf(shipId).status).toBe('awaitingCrew');
     expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
     expect(trierarch.harness.identities.has(SCOUT_FOLDER)).toBe(false);
-    expect(trierarch.state.current().kept).toEqual([{ shipId, path: SCOUT_FOLDER }]);
+    expect(trierarch.state.current().kept).toEqual([{ shipId, repository: 'aeolus-fleet', path: SCOUT_FOLDER }]);
     expect(trierarch.fleet.confirmed).toEqual([shipId]);
   });
 
@@ -220,7 +220,51 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
 
     await trierarch.pass();
 
-    expect(trierarch.state.current().kept).toEqual([{ shipId, path: SCOUT_FOLDER }]);
+    expect(trierarch.state.current().kept).toEqual([{ shipId, repository: 'aeolus-fleet', path: SCOUT_FOLDER }]);
+  });
+
+  it('clears a kept worktree its clear request names: removes it, drops it from kept and confirms it removed (decision 0032)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.change(SCOUT_FOLDER);
+    trierarch.fleet.removeRequest(shipId);
+    await trierarch.pass();
+    trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
+
+    await trierarch.pass();
+
+    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.state.current().kept).toEqual([]);
+    expect(trierarch.fleet.clearRequests).toEqual([]);
+    expect(trierarch.fleet.cleared).toEqual([{ shipId, repository: 'aeolus-fleet', outcome: 'removed' }]);
+  });
+
+  it('confirms a clear request for a worktree it does not keep as not-kept, and removes nothing (decision 0032)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.workspace.folders.set(SCOUT_FOLDER, { hasChanges: true });
+    trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
+
+    await trierarch.pass();
+
+    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
+    expect(trierarch.fleet.cleared).toEqual([{ shipId, repository: 'aeolus-fleet', outcome: 'not-kept' }]);
+  });
+
+  it('keeps a kept worktree and its clear request when removing it fails, so the next pass tries again', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.change(SCOUT_FOLDER);
+    trierarch.fleet.removeRequest(shipId);
+    await trierarch.pass();
+    trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
+    trierarch.workspace.isFailingRemove = true;
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().kept).toEqual([{ shipId, repository: 'aeolus-fleet', path: SCOUT_FOLDER }]);
+    expect(trierarch.fleet.clearRequests).toHaveLength(1);
+    expect(trierarch.fleet.cleared).toEqual([]);
   });
 
   it('row 7: a configured folder is never removed, only its identity', async () => {
@@ -338,7 +382,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     await trierarch.pass();
 
     expect(trierarch.workspace.folders.has(orphan)).toBe(true);
-    expect(trierarch.state.current().orphans).toEqual([orphan]);
+    expect(trierarch.state.current().orphans).toEqual([{ path: orphan, repository: 'aeolus-fleet', name: 'lookout' }]);
   });
 
   it('rule 2: a request no longer assigned to it, as when its ship is retired, has its session stopped and its worktree left as an orphan', async () => {
@@ -352,7 +396,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.state.current().entries).toEqual({});
     expect(trierarch.harness.identities.has(SCOUT_FOLDER)).toBe(false);
     expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
-    expect(trierarch.state.current().orphans).toEqual([SCOUT_FOLDER]);
+    expect(trierarch.state.current().orphans).toEqual([{ path: SCOUT_FOLDER, repository: 'aeolus-fleet', name: 'scout' }]);
   });
 
   it('rule 5: an inbox is watched only while its session runs', async () => {
@@ -510,6 +554,21 @@ describe('what the loop logs (aeolus-trierarch logs)', () => {
 
     expect(logged(clean).at(-1)).toBe('release: released, its worktree removed');
     expect(logged(changed).at(-1)).toBe(`release: released, its worktree kept with changes: ${SCOUT_FOLDER}`);
+  });
+
+  it('logs a clear, saying whether it removed the kept worktree or kept none', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.change(SCOUT_FOLDER);
+    trierarch.fleet.removeRequest(shipId);
+    await trierarch.pass();
+    trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
+    await trierarch.pass();
+    trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
+
+    await trierarch.pass();
+
+    expect(logged(trierarch).slice(-2)).toEqual([`clear: its kept worktree removed: ${SCOUT_FOLDER}`, 'clear: no kept aeolus-fleet worktree of it here']);
   });
 
   it('logs a ship it leaves because another session crews it', async () => {
