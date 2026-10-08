@@ -22,11 +22,11 @@ Declared state on the ship, in the fleet core (decision 0029): "keep this ship c
 
 The server stores the settings without meaning and checks only their size. The settings have a fixed core (decision 0027), whose schema lives in `common`:
 
-- the harness;
+- optionally the harness. Without one, the trierarch it goes to crews it with its default harness: the first in its configuration, which is also the first in its report;
 - the workspace: a new git worktree of a repository (`{ kind: worktree, repository, ref? }`) or a folder (`{ kind: folder, name }`), each named in the trierarch's local configuration;
 - optionally the squadron the ship is a member of, so it checks in at its flagship as a crew line's squadron id does. With a squadron, the session starts with that squadron's crew line and template, as squadrons crews a new member, instead of a plain first prompt;
 - an optional first prompt, at most 8 KB and never starting with `-` (it would read as a flag), given on the first start only;
-- options, checked against the JSON Schema the trierarch reports for that harness;
+- options, checked against the JSON Schema the trierarch reports for that harness, or for its default harness when the settings name none;
 - optional machine labels: label value ids of the fleet, any owner's, that the machine's trierarch ship must carry, every one (exact matches, AND; see Machine labels below).
 
 Settings never carry paths or command-line flags: a workspace names a repository or folder, and options pick named settings.
@@ -100,7 +100,7 @@ Its ship needs `labels:define` and `labels:assign`, which connecting gives it. S
 
 The trierarch plugin serves unassigned requests oldest first and assigns each to one trierarch:
 
-1. It considers trierarchs that fit: their ship carries every machine label of the request, their report offers the request's repository (or folder), harness and model (its options schema for that harness takes the request's options), and they have room (`caps.ships` above the number of requests assigned to it).
+1. It considers trierarchs that fit: their ship carries every machine label of the request, their report offers the request's repository (or folder), harness and model (its options schema for that harness takes the request's options; without a harness, any trierarch offers one, and its default harness's schema must take them), and they have room (`caps.ships` above the number of requests assigned to it).
 2. Of those, it picks the one with the most room as a percentage of its `caps.ships`, then the oldest: the first commissioned. A trierarch that has not reported details yet takes nothing.
 3. It assigns by optimistic claim: the fleet sets the assignment only if the request is still unassigned. A lost claim is no error; the trierarch plugin reads again.
 4. It never assigns a request whose ship is crewed already: crewing by hand fulfils a request.
