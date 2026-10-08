@@ -59,7 +59,8 @@ export function checkSettings(raw: unknown, context: { shipId: ShipId; configura
   for (const [name, value] of Object.entries(settings.options)) {
     const option = harness.options[name];
     if (option === undefined) {
-      return err({ field: `options.${name}`, reason: `${harnessName} has no option ${name}` });
+      // An option the harness does not declare is ignored: no flag, no refusal (#366).
+      continue;
     }
     if (typeof value !== 'string' || !(value in option.values)) {
       return err({ field: `options.${name}`, reason: `${name} must be one of ${Object.keys(option.values).join(', ')}` });
