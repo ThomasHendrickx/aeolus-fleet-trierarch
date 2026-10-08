@@ -199,6 +199,7 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
           install: (spec) => runCommand('npm', { args: ['install', '--global', spec] }),
         },
         service: serviceAt(),
+        running: () => readRunningFile(paths.running),
       });
       if (!report.isUpgraded) {
         return { data: report, text: report.said.join('\n') };
