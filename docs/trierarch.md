@@ -125,6 +125,8 @@ From then on the trierarch watches the ship's inbox while the session runs. It w
 
 Before it crews, the trierarch checks the settings again against its own configuration (decision 0027): the harness, the repository or folder, and the value of each option the harness declares. An option the harness does not declare is ignored: it crews without it. Settings it cannot crew are not crewed and get no status; it tells argo once per settings version, as plain text naming the ship and the field at fault.
 
+The trierarch plugin compares each crewed ship's stated model with the model its crew request's options name. When they differ, it tells argo once per ship, settings version and stated model, as plain text naming the ship and both models; it observes only and changes nothing. A model stated before the running session started may be a former crew's, so it is not compared.
+
 A ship crewed by hand before its trierarch crews it counts as crewed: the trierarch leaves it, writes no status, and the status shows it was crewed by argo. Once the ship awaits crew again, the trierarch crews it.
 
 The trierarch's own ship takes no work by message: a ping gets pong, and any other delivery is acknowledged and logged as not handled. Only the crew requests assigned to it start or stop a session on the machine.
