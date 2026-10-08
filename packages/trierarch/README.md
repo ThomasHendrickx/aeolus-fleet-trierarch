@@ -41,6 +41,7 @@ That gives the command `aeolus-trierarch`.
 | `aeolus-trierarch list` | The ships it crews: ship, state, harness, workspace, since, restarts |
 | `aeolus-trierarch logs [--lines <n>] [--follow]` | The last lines of `~/.aeolus/trierarch/logs/trierarch.log`, and with `--follow` each new one. The log holds one JSON record per line: each action the loop takes for a ship (crew, launch, wake, report, release, confirm, forget, leave, stop) as `{ time, shipId, shipName, action, outcome, next }`, where `next` says what happens after a failure, or a message as `{ time, level, message }`. `logs` renders them as text, and `--json` gives the records as they are (a line that is no record as `{ line }`). `run` in a terminal writes the text |
 | `aeolus-trierarch config check` | Checks the configuration and gives the flags each harness launches with, and each option value's flags. Then the command each harness launches on a first start and on a restart, with each flag marked `(configuration)` or `(adapter)` when the adapter adds it itself (`--no-daemon` for Codex, `--continue` on a Claude Code restart, the remote-control session name) |
+| `aeolus-trierarch detect` | Detects again what each configured harness offers (its models, and effort where its CLI has a flag for it) and keeps it in `~/.aeolus/trierarch/detected.json`, then gives per harness its version, each option's values and when its models were last confirmed. Restart the trierarch so it reads them ([docs/trierarch.md](../../docs/trierarch.md#detected-options)) |
 | `aeolus-trierarch start`, `stop`, `restart` | The service. `stop` returns once the trierarch has exited; a stopped one starts again at the next login. Restart it after you change the configuration |
 | `aeolus-trierarch upgrade [version]` | Installs the given version, or the latest on npm, globally and pinned to it. Then it stops the old process and starts the new one, and shows `status`. Sessions keep running: the new process takes them over. If the install fails, the old version keeps running. It never upgrades on its own |
 | `aeolus-trierarch install [--no-load]` | Installs the service; over a running one it waits for the old process to exit, then loads it again. With `--no-load` it only writes its file |
@@ -66,13 +67,12 @@ To stop the trierarch: `aeolus-trierarch stop`, or `aeolus-trierarch uninstall` 
     "claude-code": {
       "flags": ["--remote-control"],
       "options": {
-        "model": { "values": { "opus": ["--model", "claude-opus-5-5"], "sonnet": ["--model", "claude-sonnet-5-5"] }, "default": "opus" }
+        "effort": { "values": { "high": ["--effort", "high"], "max": ["--effort", "max"] }, "default": "high" }
       }
     },
     "codex": {
       "flags": ["--dangerously-bypass-approvals-and-sandbox"],
       "options": {
-        "model": { "values": { "sol": ["-m", "gpt-5.6-sol"] }, "default": "sol" }
       }
     }
   }
@@ -84,7 +84,7 @@ To stop the trierarch: `aeolus-trierarch stop`, or `aeolus-trierarch uninstall` 
 - **folders**: by name, used as they are, one ship per folder, never removed.
 - **harnesses**: `claude-code`, `codex` or both: the flags every launch gets, and named options. A crew request's settings pick option values by name; they never add a flag or carry a path. There is no policy on which flags: put `--dangerously-skip-permissions` in `flags` if you want it. The trierarch never adds a flag by itself. With `--remote-control` and no name after it, each session is named `[<repository or folder>] <ship>`, such as `[aeolus-fleet] trial-1`, so it is easy to find among your remote-control sessions.
 
-`aeolus-trierarch init` writes caps, repositories, folders, and Claude Code's and Codex's flags; edit the file for options and `worktreeRoot`, then `aeolus-trierarch config check` and `aeolus-trierarch restart`.
+`aeolus-trierarch init` writes caps, repositories, folders, and Claude Code's and Codex's flags, and detects each harness's models and effort levels into `detected.json` ([docs/trierarch.md](../../docs/trierarch.md#detected-options)). Options you write here replace the detected option of the same name whole: the example above narrows Claude Code's effort to two levels with a default, and takes the detected models as they are. Edit the file for options and `worktreeRoot`, then `aeolus-trierarch config check` and `aeolus-trierarch restart`.
 
 The trierarch finds the aeolus plugin in each offered harness's plugin cache (the newest version): Claude Code's under `~/.claude/plugins`, Codex's under `~/.codex/plugins` (or `$CODEX_HOME/plugins`). Set `AEOLUS_PLUGIN_ROOT` and `AEOLUS_PLUGIN_DATA` (Claude Code), or `AEOLUS_CODEX_PLUGIN_ROOT` and `AEOLUS_CODEX_PLUGIN_DATA` (Codex), to point it elsewhere. `aeolus-trierarch install` carries these, `CODEX_HOME`, `AEOLUS_TRIERARCH_CONFIG` and `PATH` into the service as they are set where it runs.
 
@@ -101,5 +101,5 @@ The trierarch finds the aeolus plugin in each offered harness's plugin cache (th
   - git worktrees and folders;
   - Claude Code and Codex, through the aeolus plugin's `aeolus-identity.sh`. Each passes its prompt last, after `--`, so a prompt never reads as a flag. A Codex session starts with `codex ... -- <prompt>`, always with `--no-daemon`, comes back with `codex resume --last`, and is woken by typing `$aeolus-wake`;
   - the JSON state store.
-- **The command** (`src/cli`): `init`, `status`, `list`, `logs`, `config check`, `start`, `stop`, `restart`, `install`, `uninstall`, `run`.
+- **The command** (`src/cli`): `init`, `status`, `list`, `logs`, `config check`, `detect`, `start`, `stop`, `restart`, `install`, `uninstall`, `run`.
 - **Adapters for the setup**: the service (launchd or systemd), Claude Code's own files and Codex's app server for their one-time questions.

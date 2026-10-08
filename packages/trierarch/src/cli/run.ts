@@ -12,6 +12,7 @@ import { createTmux } from '../adapters/tmux.js';
 import { runningVersion } from '../adapters/version.js';
 import { createDetectHarnesses } from '../core/detect-harnesses.js';
 import { withDetectedOptions } from '../core/detected-options.js';
+import { createReportDetectionProblems } from '../core/report-detection-problems.js';
 import { createHandleDelivery } from '../core/handle-delivery.js';
 import { machineOf } from '../core/machine.js';
 import type { Delivery, Logger } from '../core/ports.js';
@@ -30,11 +31,15 @@ export const PASS_INTERVAL_MS = 5000;
 export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory: string; env: Readonly<Record<string, string | undefined>>; signal: AbortSignal; logger: Logger & { info(message: string): void } }): Promise<void> {
   const { paths, homeDirectory, env, signal, logger } = input;
   const configured = await loadConfiguration(paths.config);
-  // Detected again only for a harness whose version changed since (#365); the operator's own options win.
-  const detectHarnesses = createDetectHarnesses({ detectors: createDetectors({ homeDirectory }), store: createDetectedFile(paths.detected), clock: { now: () => new Date() }, logger });
-  const configuration = withDetectedOptions(configured, await detectHarnesses({ harnesses: Object.keys(configured.harnesses), isForced: false }));
   const crew = await readCrewFile(paths.crewToken);
   const fleet = createRestFleet(crew);
+  // Detected again only for a harness whose version changed since (#365); the operator's own options win.
+  const detectHarnesses = createDetectHarnesses({ detectors: createDetectors({ homeDirectory }), store: createDetectedFile(paths.detected), clock: { now: () => new Date() }, logger });
+  const detected = await detectHarnesses({ harnesses: Object.keys(configured.harnesses), isForced: false });
+  await createReportDetectionProblems({ fleet })(detected).catch((error: unknown) => {
+    logger.warn(`Could not tell argo what detection found: ${error instanceof Error ? error.message : String(error)}`);
+  });
+  const configuration = withDetectedOptions(configured, detected);
   const tmux = createTmux();
   const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, sessions: tmux });
   const workspace = createGitWorkspace({ configuration, root: configuration.worktreeRoot ?? paths.worktrees });

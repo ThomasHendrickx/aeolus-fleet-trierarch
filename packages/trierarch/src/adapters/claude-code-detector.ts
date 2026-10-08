@@ -6,16 +6,15 @@ import type { CommandResult } from './run-command.js';
 
 /**
  * Detecting Claude Code (#365; docs/trierarch.md, "Detected options"). Its
- * CLI lists no models, so the trierarch ships the ids it knows and confirms
- * each with one short print-mode turn, from a neutral folder and never as a
- * ship. An id the CLI refuses as unrecognized is left out; one whose probe
- * neither confirms nor refuses it (offline, not logged in) is declared only
- * when it was confirmed before at the same version. The effort levels come
- * from --help. Neither has a default: the CLI keeps its own.
+ * CLI lists no models, but its --help names the aliases it takes, each for
+ * the latest of a family: each is probed once with a short print-mode turn,
+ * from a neutral folder and never as a ship, and the exact id it resolves to
+ * is read from the answer's modelUsage. Those ids are declared, so they follow
+ * the installed CLI with no list to keep. An alias the CLI refuses is left
+ * out; one whose probe neither confirms nor refuses it (offline, not logged
+ * in) keeps the id it resolved to before at the same version. The effort
+ * levels come from --help. Neither has a default: the CLI keeps its own.
  */
-
-/** The model ids this trierarch knows for Claude Code, each confirmed by a probe before it is declared. */
-export const CLAUDE_CODE_KNOWN_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001'] as const;
 
 /** The longest a probe may take: a CLI that hangs is ended, its id neither confirmed nor refused. */
 export const CLAUDE_CODE_PROBE_TIMEOUT_MS = 60_000;
@@ -29,21 +28,35 @@ const PROBE_PROMPT = 'Reply OK';
 
 const probeAnswerSchema = z.object({ modelUsage: z.record(z.string(), z.unknown()) });
 
-type Outcome = 'confirmed' | 'refused' | 'unknown';
+/** What a probe of an alias found: the exact id it resolved to, a refusal, or neither. */
+type Outcome = { kind: 'resolved'; id: string } | { kind: 'refused' } | { kind: 'unknown' };
 
-function outcomeOf(id: string, result: CommandResult): Outcome {
+/** The id the probe ran: the one in modelUsage that names the alias, or the only one. */
+function resolvedIdOf(alias: string, modelUsage: Readonly<Record<string, unknown>>): string | undefined {
+  const ids = Object.keys(modelUsage).filter((id) => trierarchNameSchema.safeParse(id).success);
+  return ids.find((id) => id.includes(alias)) ?? (ids.length === 1 ? ids[0] : undefined);
+}
+
+function outcomeOf(alias: string, result: CommandResult): Outcome {
   if (`${result.stdout}\n${result.stderr}`.includes(UNRECOGNIZED_MODEL)) {
-    return 'refused';
+    return { kind: 'refused' };
   }
   if (result.status !== 0) {
-    return 'unknown';
+    return { kind: 'unknown' };
   }
   try {
     const answer = probeAnswerSchema.safeParse(JSON.parse(result.stdout));
-    return answer.success && id in answer.data.modelUsage ? 'confirmed' : 'unknown';
+    const id = answer.success ? resolvedIdOf(alias, answer.data.modelUsage) : undefined;
+    return id === undefined ? { kind: 'unknown' } : { kind: 'resolved', id };
   } catch {
-    return 'unknown';
+    return { kind: 'unknown' };
   }
+}
+
+/** The aliases --help names for --model, quoted, such as 'opus'. */
+function aliasesOf(help: string): string[] {
+  const line = /--model <model>[^\n]*/.exec(help)?.[0] ?? '';
+  return [...line.matchAll(/'([a-z0-9][a-z0-9._-]*)'/g)].flatMap((match) => (match[1] === undefined ? [] : [match[1]]));
 }
 
 /** The levels `--effort <level> ... (low, medium, high)` names in --help, each a value name. */
@@ -74,27 +87,31 @@ export function createClaudeCodeDetector(deps: {
     },
     detect: async ({ version, previous, now }) => {
       const help = await deps.run(program, { args: ['--help'], timeoutMs: QUICK_TIMEOUT_MS });
-      const levels = help.status === 0 ? effortLevelsOf(help.stdout) : [];
-      const folder = await deps.neutralFolder();
+      const text = help.status === 0 ? help.stdout : '';
+      const levels = effortLevelsOf(text);
+      const aliases = aliasesOf(text);
       const before = previous?.version === version ? previous : undefined;
-      const confirmedBefore = Object.keys(before?.options.model?.values ?? {});
+      const resolvedBefore = Object.keys(before?.options.model?.values ?? {});
+      const folder = aliases.length === 0 ? undefined : await deps.neutralFolder();
       const ids: string[] = [];
-      let isAnyConfirmed = false;
-      for (const id of CLAUDE_CODE_KNOWN_MODELS) {
-        const outcome = outcomeOf(id, await deps.run(program, { args: ['-p', '--model', id, '--max-turns', '1', '--output-format', 'json', PROBE_PROMPT], cwd: folder, timeoutMs: CLAUDE_CODE_PROBE_TIMEOUT_MS }));
-        isAnyConfirmed ||= outcome === 'confirmed';
-        if (outcome === 'confirmed' || (outcome === 'unknown' && confirmedBefore.includes(id))) {
-          ids.push(id);
-        }
+      let isAnyResolved = false;
+      for (const alias of aliases) {
+        const outcome = outcomeOf(alias, await deps.run(program, { args: ['-p', '--model', alias, '--max-turns', '1', '--output-format', 'json', PROBE_PROMPT], cwd: folder, timeoutMs: CLAUDE_CODE_PROBE_TIMEOUT_MS }));
+        isAnyResolved ||= outcome.kind === 'resolved';
+        const kept = outcome.kind === 'resolved' ? [outcome.id] : outcome.kind === 'unknown' ? resolvedBefore.filter((id) => id.includes(alias)) : [];
+        ids.push(...kept.filter((id) => !ids.includes(id)));
       }
       return {
         version,
         detectedAt: now,
-        confirmedAt: isAnyConfirmed ? now : (before?.confirmedAt ?? null),
+        confirmedAt: isAnyResolved ? now : (before?.confirmedAt ?? null),
         options: {
           ...(ids.length > 0 && { model: optionOf(ids, '--model') }),
           ...(levels.length > 0 && { effort: optionOf(levels, '--effort') }),
         },
+        ...(aliases.length === 0 && {
+          problem: `Claude Code ${version}'s --help names no model alias, so this machine declares no Claude Code model: add the ones you want to its configuration`,
+        }),
       };
     },
   };

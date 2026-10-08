@@ -22,6 +22,7 @@ const detectedSchema = z.record(
     detectedAt: z.iso.datetime(),
     confirmedAt: z.iso.datetime().nullable(),
     options: z.record(trierarchNameSchema, optionSchema),
+    problem: z.string().optional(),
   }),
 );
 

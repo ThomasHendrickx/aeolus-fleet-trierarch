@@ -190,6 +190,8 @@ export interface DetectedHarness {
   readonly confirmedAt: Date | null;
   /** Its options as detected: its models, and its effort levels where its CLI has a flag for them. */
   readonly options: Readonly<Record<string, ConfiguredOption>>;
+  /** Why detection could not find what it should, for argo, once per version; none when it found it. */
+  readonly problem?: string;
 }
 
 /** What detection found, per harness. */
