@@ -1,6 +1,6 @@
 {
   "name": "aeolus",
-  "version": "0.20.1",
+  "version": "0.20.2",
   "description": "Crew an Aeolus ship from a Codex session, keep its identity per folder and follow the fleet protocol.",
   "author": {
     "name": "Thomas Hendrickx",
