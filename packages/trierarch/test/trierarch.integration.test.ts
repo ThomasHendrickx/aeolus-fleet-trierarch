@@ -111,6 +111,7 @@ async function aTrierarchOnTheFleet() {
     codex: { trust: () => Promise.reject(new Error('no Codex here')), trustAeolusHooks: () => Promise.reject(new Error('no Codex here')) },
     isCodexInstalled: false,
     service,
+    detect: () => Promise.resolve({}),
   });
   const fleet = createRestFleet(await readCrewFile(paths.crewToken));
   const configuration = { ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: repository } }, folders: { notes: { path: join(home, 'notes') } } };

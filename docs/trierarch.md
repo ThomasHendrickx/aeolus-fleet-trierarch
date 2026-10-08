@@ -37,7 +37,7 @@ Settings never carry paths or command-line flags: a workspace names a repository
   "workspace": { "kind": "worktree", "repository": "aeolus-fleet", "ref": "main" },
   "squadron": "hemma-feature-a1b2c3",
   "firstPrompt": "Review the open pull requests.",
-  "options": { "model": "opus" }
+  "options": { "model": "claude-opus-5-5", "effort": "high" }
 }
 ```
 
@@ -60,6 +60,15 @@ A trierarch never registers or labels itself.
 
 A trierarch's ship stays a normal ship: it receives messages, such as pings, and sends its crash reports to argo. Releasing it is the kill switch for that machine.
 
+### Detected options
+
+A trierarch detects what each harness it offers can do (#365), so a machine needs no hand-made options after `init`, and stays right after a harness updates. Each harness adapter has a detection; it runs at `init`, at each start for a harness whose version differs from the one detected, and by hand with `aeolus-trierarch detect`, never more often:
+
+- **Claude Code** lists no models, but its `--help` names the aliases `--model` takes, each the latest of a family (`fable`, `opus`, `sonnet`). Each alias is probed once with a short print-mode turn (`claude -p --model <alias> --max-turns 1 --output-format json`), from a new empty folder and never as a ship, a minute at most, and the exact id it resolves to is read from the answer's `modelUsage`. Those exact ids are declared, so they follow the installed CLI with no list to keep; an older id no alias resolves to any more can be added in the configuration. An alias the CLI refuses as unrecognized is left out. One whose probe neither confirms nor refuses it (offline, not logged in) keeps the id it resolved to before at the same version. When `--help` names no alias, no model is declared and argo is told once per version. The effort levels come from `--help`. Neither option has a default: the CLI keeps its own. Values map to `--model <id>` and `--effort <level>`.
+- **Codex** lists its models, offline (`codex debug models --bundled`). Its visible models are declared with `-m <slug>`, the default being the `model` of `~/.codex/config.toml`'s top level when it is one of them, else the catalog's first. Codex has no effort flag, so no effort is declared.
+
+What it finds is kept in `~/.aeolus/trierarch/detected.json`, apart from the operator's configuration, which the trierarch never writes: per harness its version, when it was detected, when its models were last confirmed, and its options. An option the operator writes in the configuration replaces the detected option of that name whole, values and default, so a hand edit is never overwritten. A harness that does not say its version, or gives nothing to detect, keeps what was detected before, and the trierarch starts all the same.
+
 ### What a trierarch reports
 
 Its report, sent on start and again whenever it changes: its state (`working` while a session runs, `idle` with none), a one-line note such as "4 of 6 running, 1 crashed" (the sessions that run of `caps.ships`, and the crashed ones when there are any), and `details`, read from its local configuration and what runs. Each harness's `flags` are the flags its configuration gives it, and its `riskyFlags` those of them its adapter calls risky, so a reader needs no harness knowledge: `--dangerously-skip-permissions` for Claude Code and `--dangerously-bypass-approvals-and-sandbox` for Codex. The console marks them:
@@ -69,7 +78,7 @@ Its report, sent on start and again whenever it changes: its state (`working` wh
   "harnesses": [
     {
       "harness": "claude-code",
-      "options": { "type": "object", "properties": { "model": { "enum": ["opus", "sonnet"], "default": "opus" } }, "additionalProperties": false },
+      "options": { "type": "object", "properties": { "model": { "enum": ["claude-opus-5-5", "claude-sonnet-5-5"] }, "effort": { "enum": ["low", "medium", "high"] } }, "additionalProperties": false },
       "flags": ["--remote-control", "--dangerously-skip-permissions"],
       "riskyFlags": ["--dangerously-skip-permissions"]
     }

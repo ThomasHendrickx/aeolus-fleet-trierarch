@@ -9,6 +9,8 @@ import { configurationJsonSchema, initialConfiguration, loadConfiguration, readC
 import type { TrierarchPaths } from '../adapters/paths.js';
 import type { RestFleet } from '../adapters/rest-fleet.js';
 import type { Service } from '../adapters/service.js';
+import type { DetectHarnesses } from '../core/detect-harnesses.js';
+import { describeDetected } from './detect.js';
 import type { Prompter } from './prompter.js';
 
 /**
@@ -254,6 +256,8 @@ export async function initTrierarch(input: {
   codex: CodexSetup;
   /** Whether `codex` runs on this machine: only then, or when Codex is configured, does init ask about it. */
   isCodexInstalled: boolean;
+  /** Detects the configured harnesses' options (#365), once per harness version. */
+  detect: DetectHarnesses;
   service: Pick<Service, 'install' | 'restart' | 'status'>;
 }): Promise<InitReport> {
   const { homeDirectory, paths, flags, claudeCode, service, isCodexInstalled } = input;
@@ -328,6 +332,10 @@ export async function initTrierarch(input: {
 
   const codex = await setUpCodex({ configuration, codex: input.codex, root });
   said.push(...codex.said);
+
+  // What each harness offers, detected on this machine and kept apart from the configuration (#365).
+  const harnesses = Object.keys(configuration.harnesses);
+  said.push(...describeDetected({ harnesses, detected: await input.detect({ harnesses, isForced: false }) }).split('\n'));
 
   // The service: offered when it is not installed, restarted when it should read a new configuration.
   prompter.step('The service');
