@@ -5,6 +5,7 @@ import { createHandleDelivery } from '../../src/core/handle-delivery.js';
 import type {
   ArgoReport,
   AssignedRequest,
+  Detected,
   Delivery,
   FleetPort,
   FleetShipStatus,
@@ -436,7 +437,7 @@ export class CollectingLogger {
 }
 
 /** A trierarch on in-memory ports. */
-export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION) {
+export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION, detected: Detected = {}) {
   const state = new InMemoryState();
   const fleet = new InMemoryFleet();
   const processes = new InMemoryProcesses();
@@ -452,6 +453,7 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
     adapterFlags: { 'claude-code': [{ flag: '--continue', when: 'restart' as const }], codex: [{ flag: '--no-daemon', when: 'always' as const }] },
     riskyFlags: { 'claude-code': ['--dangerously-skip-permissions'], codex: ['--dangerously-bypass-approvals-and-sandbox'] },
     machine: { os: 'macos' as const, arch: 'arm64' as const },
+    detected,
   };
   const handle = createHandleDelivery({ fleet, logger });
   const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, workspace, state, setup, clock, logger });
