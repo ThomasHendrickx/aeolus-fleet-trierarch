@@ -80,7 +80,9 @@ Its report, sent on start and again whenever it changes: its state (`working` wh
       "harness": "claude-code",
       "options": { "type": "object", "properties": { "model": { "enum": ["claude-opus-5-5", "claude-sonnet-5-5"] }, "effort": { "enum": ["low", "medium", "high"] } }, "additionalProperties": false },
       "flags": ["--remote-control", "--dangerously-skip-permissions"],
-      "riskyFlags": ["--dangerously-skip-permissions"]
+      "riskyFlags": ["--dangerously-skip-permissions"],
+      "version": "2.1.293",
+      "modelsConfirmedAt": "2026-10-08T15:00:00.000Z"
     }
   ],
   "workspaces": { "repositories": ["aeolus-fleet"], "folders": ["notes"] },
@@ -92,7 +94,7 @@ Its report, sent on start and again whenever it changes: its state (`working` wh
 }
 ```
 
-Its shape lives in `common`, as the type `trierarch`'s report details. Paths stay on the machine (decision 0032): a kept worktree is named by the ship it belonged to and its repository, an orphan by its repository and its folder's name under the worktree root (`<root>/<repository>/<name>`). It holds no entry per ship: each request carries its own status. `machine` is read from the trierarch's process: `os` is `macos`, `linux` or `windows`, and `arch` is `arm64` or `amd64`; a platform outside these is left out.
+Each harness gives the `version` the trierarch detected and when it last confirmed its models (`modelsConfirmedAt`, null while none is; see Detected options); the console's machine card shows both. Its shape lives in `common`, as the type `trierarch`'s report details. Paths stay on the machine (decision 0032): a kept worktree is named by the ship it belonged to and its repository, an orphan by its repository and its folder's name under the worktree root (`<root>/<repository>/<name>`). It holds no entry per ship: each request carries its own status. `machine` is read from the trierarch's process: `os` is `macos`, `linux` or `windows`, and `arch` is `arm64` or `amd64`; a platform outside these is left out.
 
 ### Machine labels
 
