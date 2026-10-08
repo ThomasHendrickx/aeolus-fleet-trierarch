@@ -446,6 +446,18 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.state.current().entries[shipId]?.state).toBe('running');
   });
 
+  it('crews settings with an option its harness does not declare, ignoring that option: no flag, no refusal (#366)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, crewSettings({ options: { model: 'sonnet', effort: 'high' } }));
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo).toEqual([]);
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'running', options: { model: 'sonnet' } });
+    expect(trierarch.state.current().entries[shipId]?.options).not.toHaveProperty('effort');
+  });
+
   it.each([
     { label: 'a harness it does not offer', settings: crewSettings({ harness: 'codex' }), reason: 'harness: This trierarch offers no harness codex' },
     { label: 'a repository it does not offer', settings: crewSettings({ workspace: { kind: 'worktree', repository: 'hemma' } }), reason: 'workspace.repository: This trierarch offers no repository hemma' },
