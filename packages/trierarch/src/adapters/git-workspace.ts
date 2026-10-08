@@ -71,7 +71,7 @@ export function createGitWorkspace(options: { configuration: TrierarchConfigurat
       const found: ObservedWorktree[] = [];
       for (const repository of await readdir(root).catch(() => [])) {
         for (const ship of await readdir(join(root, repository)).catch(() => [])) {
-          found.push({ path: join(root, repository, ship) });
+          found.push({ path: join(root, repository, ship), repository, name: ship });
         }
       }
       return found;

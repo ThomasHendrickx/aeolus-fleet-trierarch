@@ -10,7 +10,7 @@ import type { ShipId, TrierarchWorkspace } from '@aeolus-fleet/common';
 export interface TrierarchState {
   readonly entries: Readonly<Record<string, Entry>>;
   readonly kept: readonly KeptWorktree[];
-  readonly orphans: readonly string[];
+  readonly orphans: readonly Orphan[];
   /** By ship id: the settings version argo was told this trierarch cannot crew, so it is told once. */
   readonly refused: Readonly<Record<string, number>>;
 }
@@ -48,10 +48,18 @@ export interface Entry {
   readonly wake: { readonly waiting: number; readonly isPending: boolean };
 }
 
-/** A worktree kept because it had changes, until a human clears it. */
+/** A worktree kept because it had changes, until a human clears it: reported by its ship and repository, never its path. */
 export interface KeptWorktree {
   readonly shipId: ShipId;
+  readonly repository: string;
   readonly path: string;
+}
+
+/** A worktree under the root with no assigned request: reported by its repository and name, never its path. */
+export interface Orphan {
+  readonly path: string;
+  readonly repository: string;
+  readonly name: string;
 }
 
 export const EMPTY_STATE: TrierarchState = { entries: {}, kept: [], orphans: [], refused: {} };

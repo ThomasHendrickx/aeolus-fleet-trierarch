@@ -53,8 +53,9 @@ function detailsOf(setup: TrierarchSetup, state: TrierarchState): TrierarchRepor
     })),
     workspaces: { repositories: Object.keys(configuration.repositories), folders: Object.keys(configuration.folders) },
     caps: configuration.caps,
-    kept: state.kept.map(({ shipId, path }) => ({ shipId, path })),
-    orphans: state.orphans.map((path) => ({ path })),
+    // Paths stay on the machine: names only (decision 0032).
+    kept: state.kept.map(({ shipId, repository }) => ({ shipId, repository })),
+    orphans: state.orphans.map(({ repository, name }) => ({ repository, name })),
     ...(setup.machine === undefined || Object.keys(setup.machine).length === 0 ? {} : { machine: setup.machine }),
     version,
   };

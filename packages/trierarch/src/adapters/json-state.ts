@@ -40,8 +40,8 @@ const stateSchema = z.object({
       wake: z.object({ waiting: z.int().nonnegative(), isPending: z.boolean() }),
     }),
   ),
-  kept: z.array(z.object({ shipId: idSchema('ship'), path: z.string() })),
-  orphans: z.array(z.string()),
+  kept: z.array(z.object({ shipId: idSchema('ship'), repository: z.string(), path: z.string() })),
+  orphans: z.array(z.object({ path: z.string(), repository: z.string(), name: z.string() })),
   refused: z.record(z.string(), z.int().positive()),
 });
 
@@ -69,7 +69,14 @@ export function createJsonState(path: string): StatePort {
         await rename(path, join(dirname(path), OLD_STATE_FILE));
         return EMPTY_STATE;
       }
-      return stateSchema.parse(json);
+      const parsed = stateSchema.safeParse(json);
+      if (!parsed.success) {
+        // Kept worktrees and orphans name their repository since 0.20; an older file is not translated (decision 0013).
+        throw new Error(
+          `${path} does not hold the state this trierarch reads: empty its kept and orphans ("kept": [], "orphans": []) and start it again; the next pass finds the orphans again`,
+        );
+      }
+      return parsed.data;
     },
     save: async (state: TrierarchState) => {
       await mkdir(dirname(path), { recursive: true });
