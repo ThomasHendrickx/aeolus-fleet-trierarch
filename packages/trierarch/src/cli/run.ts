@@ -1,6 +1,8 @@
 import { setTimeout as wait } from 'node:timers/promises';
 
 import { loadConfiguration, readCrewFile, writeRunningFile } from '../adapters/files.js';
+import { createDetectedFile } from '../adapters/detected-file.js';
+import { createDetectors } from '../adapters/detectors.js';
 import { createGitWorkspace } from '../adapters/git-workspace.js';
 import { adapterFlagsOf, createHarnesses, riskyFlagsOf } from '../adapters/harnesses.js';
 import { createJsonState } from '../adapters/json-state.js';
@@ -8,6 +10,8 @@ import type { TrierarchPaths } from '../adapters/paths.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
 import { createTmux } from '../adapters/tmux.js';
 import { runningVersion } from '../adapters/version.js';
+import { createDetectHarnesses } from '../core/detect-harnesses.js';
+import { withDetectedOptions } from '../core/detected-options.js';
 import { createHandleDelivery } from '../core/handle-delivery.js';
 import { machineOf } from '../core/machine.js';
 import type { Delivery, Logger } from '../core/ports.js';
@@ -25,7 +29,10 @@ export const PASS_INTERVAL_MS = 5000;
  */
 export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory: string; env: Readonly<Record<string, string | undefined>>; signal: AbortSignal; logger: Logger & { info(message: string): void } }): Promise<void> {
   const { paths, homeDirectory, env, signal, logger } = input;
-  const configuration = await loadConfiguration(paths.config);
+  const configured = await loadConfiguration(paths.config);
+  // Detected again only for a harness whose version changed since (#365); the operator's own options win.
+  const detectHarnesses = createDetectHarnesses({ detectors: createDetectors({ homeDirectory }), store: createDetectedFile(paths.detected), clock: { now: () => new Date() }, logger });
+  const configuration = withDetectedOptions(configured, await detectHarnesses({ harnesses: Object.keys(configured.harnesses), isForced: false }));
   const crew = await readCrewFile(paths.crewToken);
   const fleet = createRestFleet(crew);
   const tmux = createTmux();

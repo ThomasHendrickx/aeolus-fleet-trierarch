@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 
 import { createClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import { createCodexSetup } from '../adapters/codex-setup.js';
+import { createDetectedFile } from '../adapters/detected-file.js';
+import { createDetectors } from '../adapters/detectors.js';
 import { loadConfiguration, readCrewFile, readRunningFile, TrierarchFileError } from '../adapters/files.js';
 import { createJsonState } from '../adapters/json-state.js';
 import { createLogger, readLogLine, renderLogLine } from '../adapters/log.js';
@@ -14,8 +16,10 @@ import { runCommand } from '../adapters/run-command.js';
 import { createService, serviceEnvironment, type ServiceStatus } from '../adapters/service.js';
 import { createTmux } from '../adapters/tmux.js';
 import { runningVersion } from '../adapters/version.js';
+import { createDetectHarnesses } from '../core/detect-harnesses.js';
 import { createUninstall } from '../core/uninstall.js';
 import { configCheck } from './config-check.js';
+import { detectOptions } from './detect.js';
 import { initTrierarch } from './init.js';
 import { describeList, inspectList } from './list.js';
 import { followLog, tailLog } from './logs.js';
@@ -32,6 +36,7 @@ export const USAGE = [
   'Set up:',
   "  init [--fleet-url <url>] [--ship-id <shp_...>] [--secret <secret>] [--yes]   the whole setup: registers the trierarch's own ship, writes the configuration, answers Claude Code's and Codex's one-time questions and offers to install the service. Asks for what is missing; prefer typing the secret when asked, so it stays out of your shell history",
   '  config check          check the configuration and give the effective flags per harness',
+  '  detect                detect again what each configured harness offers (models, effort) and keep it beside the configuration',
   '',
   'Look:',
   '  status                the version, the service, the fleet and its own lease, caps in use, entries by state, kept worktrees and orphans',
@@ -159,6 +164,14 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
     return { data: report, text: describeStatus(report, style) };
   };
 
+  const detectAt = () =>
+    createDetectHarnesses({
+      detectors: createDetectors({ homeDirectory }),
+      store: createDetectedFile(paths.detected),
+      clock: { now: () => new Date() },
+      logger: { warn: (message) => process.stderr.write(`${message}\n`) },
+    });
+
   const commands: Record<string, (() => Promise<Answer>) | undefined> = {
     init: async () => {
       // Questions go to stderr under --json, so stdout holds the JSON alone.
@@ -178,6 +191,7 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
           codex: createCodexSetup(),
           isCodexInstalled: (await runCommand('sh', { args: ['-c', 'command -v codex'] })).status === 0,
           service: serviceAt(),
+          detect: detectAt(),
         });
         return { data: report, text: summaryOf(report.said, style) };
       } finally {
@@ -186,6 +200,10 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
     },
     'config check': async () => {
       const { text, ...data } = await configCheck(paths);
+      return { data, text };
+    },
+    detect: async () => {
+      const { text, ...data } = await detectOptions({ configuration: await loadConfiguration(paths.config), detect: detectAt() });
       return { data, text };
     },
     status: inspect,

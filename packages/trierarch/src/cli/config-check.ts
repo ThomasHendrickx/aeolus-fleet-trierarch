@@ -1,7 +1,9 @@
 import { describeCommandLine, type CommandPart } from '../adapters/command-line.js';
+import { createDetectedFile } from '../adapters/detected-file.js';
 import { loadConfiguration } from '../adapters/files.js';
 import { describeFlags, effectiveFlags } from '../adapters/flags.js';
 import { adapterFlagsOf, commandLinesOf } from '../adapters/harnesses.js';
+import { withDetectedOptions } from '../core/detected-options.js';
 import type { AdapterFlag } from '../core/ports.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
 
@@ -29,7 +31,8 @@ export interface ConfigCheckReport {
 }
 
 export async function configCheck(paths: TrierarchPaths): Promise<ConfigCheckReport> {
-  const configuration = await loadConfiguration(paths.config);
+  // The detected options too (#365), as the running trierarch has them.
+  const configuration = withDetectedOptions(await loadConfiguration(paths.config), await createDetectedFile(paths.detected).load());
   const adapterFlags = adapterFlagsOf(configuration);
   const harnesses = Object.fromEntries(
     Object.entries(configuration.harnesses).map(([name, harness]) => {

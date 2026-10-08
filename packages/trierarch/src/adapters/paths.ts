@@ -12,6 +12,8 @@ export interface TrierarchPaths {
   readonly configSchema: string;
   readonly crewToken: string;
   readonly state: string;
+  /** What detection found per harness (#365), apart from the configuration. */
+  readonly detected: string;
   readonly running: string;
   readonly logs: string;
   readonly worktrees: string;
@@ -25,6 +27,7 @@ export function trierarchPaths(at: { homeDirectory: string; config?: string }): 
     configSchema: join(home, 'config.schema.json'),
     crewToken: join(home, 'crew-token'),
     state: join(home, 'state.json'),
+    detected: join(home, 'detected.json'),
     running: join(home, 'running.json'),
     logs: join(home, 'logs'),
     worktrees: join(home, 'worktrees'),

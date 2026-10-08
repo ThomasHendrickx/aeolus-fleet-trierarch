@@ -37,7 +37,7 @@ describe('aeolus-trierarch detect (#365)', () => {
   });
 
   it('says per harness its version, each option with its values and default, and when its models were last confirmed', () => {
-    expect(describeDetected({ harnesses: ['claude-code', 'codex', 'gemini'], detected: { ...DETECTED, 'claude-code': { ...DETECTED['claude-code'], confirmedAt: null, options: {} } } })).toEqual(
+    expect(describeDetected({ harnesses: ['claude-code', 'codex', 'gemini'], detected: { ...DETECTED, 'claude-code': { version: '2.1.293', detectedAt: AT, confirmedAt: null, options: {} } } })).toEqual(
       [
         'claude-code 2.1.293: no options detected; no model confirmed',
         'codex 0.160.1: model gpt-6.1-sol, gpt-6-luna (default); models confirmed 2026-10-08T15:00:00.000Z',
