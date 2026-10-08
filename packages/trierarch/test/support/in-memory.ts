@@ -18,6 +18,8 @@ import type {
   ProcessPort,
   SelfReport,
   StatePort,
+  TrustedPlaces,
+  TrustPort,
   Turn,
   WorkspacePort,
   WrittenStatus,
@@ -436,6 +438,28 @@ export class CollectingLogger {
   }
 }
 
+/** What each harness trusts, as Claude Code's and Codex's own files say: every configured place, until a test takes one away. */
+export class InMemoryTrust implements TrustPort {
+  private readonly untrusted = new Set<string>();
+  constructor(private readonly configuration: TrierarchConfiguration) {}
+
+  untrust(harness: string, place: { kind: 'repository' | 'folder'; name: string }): void {
+    this.untrusted.add(`${harness} ${place.kind} ${place.name}`);
+  }
+
+  trusted(): Promise<TrustedPlaces> {
+    const isTrusted = (harness: string, kind: 'repository' | 'folder') => (name: string) => !this.untrusted.has(`${harness} ${kind} ${name}`);
+    return Promise.resolve(
+      Object.fromEntries(
+        Object.keys(this.configuration.harnesses).map((harness) => [
+          harness,
+          { repositories: Object.keys(this.configuration.repositories).filter(isTrusted(harness, 'repository')), folders: Object.keys(this.configuration.folders).filter(isTrusted(harness, 'folder')) },
+        ]),
+      ),
+    );
+  }
+}
+
 /** A trierarch on in-memory ports. */
 export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION, detected: Detected = {}) {
   const state = new InMemoryState();
@@ -445,6 +469,7 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
   // Each harness keeps its own identities, as the aeolus plugin does per harness.
   const codex = new InMemoryHarness(processes);
   const workspace = new InMemoryWorkspace();
+  const trust = new InMemoryTrust(configuration);
   const clock = new TestClock();
   const logger = new CollectingLogger();
   const setup = {
@@ -456,9 +481,9 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
     detected,
   };
   const handle = createHandleDelivery({ fleet, logger });
-  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, workspace, state, setup, clock, logger });
+  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, workspace, trust, state, setup, clock, logger });
   const uninstall = createUninstall({ processes, state });
-  const reportSelf = createReportSelf({ fleet, processes, state, setup });
+  const reportSelf = createReportSelf({ fleet, processes, trust, state, setup });
 
   /** A message arrives at the trierarch's own ship: its delivery, handled. */
   async function deliver(message: { contentType: string; payload: string }): Promise<Delivery> {
@@ -467,7 +492,7 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
     return delivery;
   }
 
-  return { fleet, processes, harness, codex, workspace, state, clock, logger, handle, pass, uninstall, reportSelf, deliver };
+  return { fleet, processes, harness, codex, workspace, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver };
 }
 
 export type Trierarch = ReturnType<typeof aTrierarch>;

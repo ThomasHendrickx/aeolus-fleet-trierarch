@@ -131,4 +131,23 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
 
     expect(trierarch.fleet.selfReports.map(({ note }) => note)).toEqual(['0 of 8 running', '1 of 8 running']);
   });
+
+  it('offers only the repositories and folders every configured harness trusts (#381)', async () => {
+    const trierarch = aTrierarch({ ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: { flags: [], options: {} } } });
+    trierarch.trust.untrust('codex', { kind: 'folder', name: 'notes' });
+
+    await trierarch.reportSelf();
+
+    expect(trierarch.fleet.selfReports.at(-1)?.details.workspaces).toEqual({ repositories: ['aeolus-fleet'], folders: [] });
+  });
+
+  it('reports again once a place is trusted or no longer trusted (#381)', async () => {
+    const trierarch = aTrierarch();
+    await trierarch.reportSelf();
+    trierarch.trust.untrust('claude-code', { kind: 'repository', name: 'aeolus-fleet' });
+
+    await trierarch.reportSelf();
+
+    expect(trierarch.fleet.selfReports.map((report) => report.details.workspaces.repositories)).toEqual([['aeolus-fleet'], []]);
+  });
 });
