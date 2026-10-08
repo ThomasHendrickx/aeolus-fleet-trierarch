@@ -26,7 +26,7 @@ The server stores the settings without meaning and checks only their size. The s
 - the workspace: a new git worktree of a repository (`{ kind: worktree, repository, ref? }`) or a folder (`{ kind: folder, name }`), each named in the trierarch's local configuration;
 - optionally the squadron the ship is a member of, so it checks in at its flagship as a crew line's squadron id does. With a squadron, the session starts with that squadron's crew line and template, as squadrons crews a new member, instead of a plain first prompt;
 - an optional first prompt, at most 8 KB and never starting with `-` (it would read as a flag), given on the first start only;
-- options, checked against the JSON Schema the trierarch reports for that harness, or for its default harness when the settings name none;
+- options, checked against the JSON Schema the trierarch reports for that harness, or for its default harness when the settings name none. Only the options that schema declares (its `properties`) are checked; an option it does not declare is ignored: no flag, no refusal. A declared option with a value the harness does not offer does not fit;
 - optional machine labels: label value ids of the fleet, any owner's, that the machine's trierarch ship must carry, every one (exact matches, AND; see Machine labels below).
 
 Settings never carry paths or command-line flags: a workspace names a repository or folder, and options pick named settings.
@@ -100,7 +100,7 @@ Its ship needs `labels:define` and `labels:assign`, which connecting gives it. S
 
 The trierarch plugin serves unassigned requests oldest first and assigns each to one trierarch:
 
-1. It considers trierarchs that fit: their ship carries every machine label of the request, their report offers the request's repository (or folder), harness and model (its options schema for that harness takes the request's options; without a harness, any trierarch offers one, and its default harness's schema must take them), and they have room (`caps.ships` above the number of requests assigned to it).
+1. It considers trierarchs that fit: their ship carries every machine label of the request, their report offers the request's repository (or folder), harness and model (its options schema for that harness takes the request's options it declares, ignoring the rest; without a harness, any trierarch offers one, and its default harness's schema must take them), and they have room (`caps.ships` above the number of requests assigned to it).
 2. Of those, it picks the one with the most room as a percentage of its `caps.ships`, then the oldest: the first commissioned. A trierarch that has not reported details yet takes nothing.
 3. It assigns by optimistic claim: the fleet sets the assignment only if the request is still unassigned. A lost claim is no error; the trierarch plugin reads again.
 4. It never assigns a request whose ship is crewed already: crewing by hand fulfils a request.
@@ -123,7 +123,7 @@ A trierarch reconciles from the requests assigned to it. Its loop crews each one
 
 From then on the trierarch watches the ship's inbox while the session runs. It wakes the session when deliveries wait and the session is idle, and restarts a session that dies.
 
-Before it crews, the trierarch checks the settings again against its own configuration (decision 0027): the harness, the repository or folder, and each option's value. Settings it cannot crew are not crewed and get no status; it tells argo once per settings version, as plain text naming the ship and the field at fault.
+Before it crews, the trierarch checks the settings again against its own configuration (decision 0027): the harness, the repository or folder, and the value of each option the harness declares. An option the harness does not declare is ignored: it crews without it. Settings it cannot crew are not crewed and get no status; it tells argo once per settings version, as plain text naming the ship and the field at fault.
 
 A ship crewed by hand before its trierarch crews it counts as crewed: the trierarch leaves it, writes no status, and the status shows it was crewed by argo. Once the ship awaits crew again, the trierarch crews it.
 
