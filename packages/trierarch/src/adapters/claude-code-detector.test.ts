@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { DetectedHarness } from '../core/ports.js';
-import { CLAUDE_CODE_KNOWN_MODELS, CLAUDE_CODE_PROBE_TIMEOUT_MS, createClaudeCodeDetector } from './claude-code-detector.js';
+import { CLAUDE_CODE_PROBE_TIMEOUT_MS, createClaudeCodeDetector } from './claude-code-detector.js';
 import type { CommandResult } from './run-command.js';
 
 const BEFORE = new Date('2026-10-01T09:00:00.000Z');
@@ -14,11 +14,18 @@ const HELP = [
   '  --effort <level>                  Effort level for the current session (low, medium, high, xhigh, max)',
 ].join('\n');
 
+/** What each alias resolves to on Claude Code 2.1.293. */
+const RESOLVES: Readonly<Record<string, string>> = { fable: 'claude-fable-5-1', opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5' };
+
 const ok = (stdout: string): CommandResult => ({ status: 0, stdout, stderr: '' });
 const failed = (stderr: string): CommandResult => ({ status: 1, stdout: '', stderr });
 
-/** Claude Code 2.1.293 as the mac mini runs it: each id in `known` answers its probe, `refused` ones are unrecognized, others fail otherwise. */
-function aClaude(at: { known?: readonly string[]; refused?: readonly string[]; help?: string } = {}) {
+/**
+ * Claude Code 2.1.293 as the mac mini runs it: an alias it `resolves` answers
+ * its probe with the exact id in modelUsage (beside `helper` when set), a
+ * `refused` one is unrecognized, any other fails otherwise.
+ */
+function aClaude(at: { resolves?: Readonly<Record<string, string>>; refused?: readonly string[]; help?: string; helper?: string } = {}) {
   const calls: { args: readonly string[]; cwd: string | undefined; timeoutMs: number | undefined }[] = [];
   const run = (command: string, options: { args: readonly string[]; cwd?: string; timeoutMs?: number }): Promise<CommandResult> => {
     calls.push({ args: options.args, cwd: options.cwd, timeoutMs: options.timeoutMs });
@@ -30,12 +37,14 @@ function aClaude(at: { known?: readonly string[]; refused?: readonly string[]; h
     if (first === '--help') {
       return Promise.resolve(ok(at.help ?? HELP));
     }
-    const model = options.args[options.args.indexOf('--model') + 1] ?? '';
-    if (at.refused?.includes(model) === true) {
-      return Promise.resolve(failed(`[claude-code:unrecognized_model] {"model":"${model}"}`));
+    const alias = options.args[options.args.indexOf('--model') + 1] ?? '';
+    if (at.refused?.includes(alias) === true) {
+      return Promise.resolve(failed(`[claude-code:unrecognized_model] {"model":"${alias}"}`));
     }
-    if ((at.known ?? CLAUDE_CODE_KNOWN_MODELS).includes(model)) {
-      return Promise.resolve(ok(JSON.stringify({ type: 'result', result: 'OK', modelUsage: { [model]: { inputTokens: 9 } } })));
+    const id = (at.resolves ?? RESOLVES)[alias];
+    if (id !== undefined) {
+      const modelUsage = { ...(at.helper !== undefined && { [at.helper]: { inputTokens: 3 } }), [id]: { inputTokens: 9 } };
+      return Promise.resolve(ok(JSON.stringify({ type: 'result', result: 'OK', modelUsage })));
     }
     return Promise.resolve(failed('API Error: Connection error.'));
   };
@@ -44,6 +53,7 @@ function aClaude(at: { known?: readonly string[]; refused?: readonly string[]; h
 
 const modelOption = (ids: readonly string[]) => ({ values: Object.fromEntries(ids.map((id) => [id, ['--model', id]])) });
 const EFFORT = { values: { low: ['--effort', 'low'], medium: ['--effort', 'medium'], high: ['--effort', 'high'], xhigh: ['--effort', 'xhigh'], max: ['--effort', 'max'] } };
+const ALL_IDS = ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5'];
 
 describe('detecting Claude Code (#365)', () => {
   it('reads its version from --version', async () => {
@@ -54,58 +64,65 @@ describe('detecting Claude Code (#365)', () => {
     expect(CLAUDE_CODE_PROBE_TIMEOUT_MS).toBe(60_000);
   });
 
-  it('ships the five ids the mac mini runs as the ids it probes', () => {
-    expect(CLAUDE_CODE_KNOWN_MODELS).toEqual(['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001']);
-  });
-
-  it('declares each shipped id its probe confirms as a model, with --model and no default, and the effort levels --help gives, with --effort and no default', async () => {
-    const detected = await aClaude().detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
-
-    expect(detected).toEqual({ version: '2.1.293', detectedAt: NOW, confirmedAt: NOW, options: { model: modelOption(CLAUDE_CODE_KNOWN_MODELS), effort: EFFORT } });
-  });
-
-  it('probes each id once, from the neutral folder, with one short print-mode turn within a time limit', async () => {
+  it('probes each alias --help names once, from the neutral folder, with one short print-mode turn within a time limit', async () => {
     const claude = aClaude();
 
     await claude.detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
 
     expect(claude.calls.filter((call) => call.args[0] === '-p')).toEqual(
-      CLAUDE_CODE_KNOWN_MODELS.map((id) => ({ args: ['-p', '--model', id, '--max-turns', '1', '--output-format', 'json', 'Reply OK'], cwd: NEUTRAL, timeoutMs: CLAUDE_CODE_PROBE_TIMEOUT_MS })),
+      ['fable', 'opus', 'sonnet'].map((alias) => ({ args: ['-p', '--model', alias, '--max-turns', '1', '--output-format', 'json', 'Reply OK'], cwd: NEUTRAL, timeoutMs: CLAUDE_CODE_PROBE_TIMEOUT_MS })),
     );
   });
 
-  it('leaves out an id the CLI refuses as unrecognized', async () => {
-    const detected = await aClaude({ refused: ['claude-sonnet-5'] }).detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
+  it("declares the exact id each alias resolves to, read from its probe's modelUsage, with --model and no default, and the effort levels --help gives, with --effort and no default", async () => {
+    const detected = await aClaude().detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
 
-    expect(Object.keys(detected?.options.model?.values ?? {})).toEqual(['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001']);
+    expect(detected).toEqual({ version: '2.1.293', detectedAt: NOW, confirmedAt: NOW, options: { model: modelOption(ALL_IDS), effort: EFFORT } });
   });
 
-  it('leaves out an id whose probe neither confirms nor refuses it, and declares no model when none is confirmed', async () => {
-    const detected = await aClaude({ known: [] }).detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
+  it('takes the id that names its alias when the probe used another model beside it', async () => {
+    const detected = await aClaude({ helper: 'claude-haiku-4-5-20251001' }).detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
 
-    expect(detected).toEqual({ version: '2.1.293', detectedAt: NOW, confirmedAt: null, options: { effort: EFFORT } });
+    expect(detected?.options.model).toEqual(modelOption(ALL_IDS));
   });
 
-  it('keeps an id confirmed before at the same version when its probe now neither confirms nor refuses it, and when it was confirmed', async () => {
-    const previous: DetectedHarness = { version: '2.1.293', detectedAt: BEFORE, confirmedAt: BEFORE, options: { model: modelOption(['claude-opus-5-5', 'claude-sonnet-5']) } };
+  it('leaves out an alias the CLI refuses as unrecognized', async () => {
+    const detected = await aClaude({ refused: ['fable'] }).detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
 
-    const detected = await aClaude({ known: [], refused: ['claude-sonnet-5'] }).detector.detect({ version: '2.1.293', previous, now: NOW });
+    expect(detected?.options.model).toEqual(modelOption(['claude-opus-5-5', 'claude-sonnet-5-5']));
+  });
+
+  it('keeps the id an alias resolved to before at the same version when its probe now neither confirms nor refuses it', async () => {
+    const previous: DetectedHarness = { version: '2.1.293', detectedAt: BEFORE, confirmedAt: BEFORE, options: { model: modelOption(['claude-opus-5-5', 'claude-fable-5-1']) } };
+
+    const detected = await aClaude({ resolves: {}, refused: ['fable'] }).detector.detect({ version: '2.1.293', previous, now: NOW });
 
     expect(detected?.options.model).toEqual(modelOption(['claude-opus-5-5']));
     expect(detected?.confirmedAt).toEqual(BEFORE);
   });
 
-  it('keeps no id confirmed at another version', async () => {
+  it('keeps no id resolved at another version, and declares no model when none resolves', async () => {
     const previous: DetectedHarness = { version: '2.1.200', detectedAt: BEFORE, confirmedAt: BEFORE, options: { model: modelOption(['claude-opus-5-5']) } };
 
-    const detected = await aClaude({ known: [] }).detector.detect({ version: '2.1.293', previous, now: NOW });
+    const detected = await aClaude({ resolves: {} }).detector.detect({ version: '2.1.293', previous, now: NOW });
 
-    expect(detected?.options.model).toBeUndefined();
-    expect(detected?.confirmedAt).toBeNull();
+    expect(detected).toEqual({ version: '2.1.293', detectedAt: NOW, confirmedAt: null, options: { effort: EFFORT } });
+  });
+
+  it('declares no model when --help names no alias, and says why', async () => {
+    const detected = await aClaude({ help: '  --effort <level>  Effort level (low, high)' }).detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
+
+    expect(detected).toEqual({
+      version: '2.1.293',
+      detectedAt: NOW,
+      confirmedAt: null,
+      options: { effort: { values: { low: ['--effort', 'low'], high: ['--effort', 'high'] } } },
+      problem: "Claude Code 2.1.293's --help names no model alias, so this machine declares no Claude Code model: add the ones you want to its configuration",
+    });
   });
 
   it('declares no effort when --help names no levels', async () => {
-    const detected = await aClaude({ help: 'Usage: claude [options]' }).detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
+    const detected = await aClaude({ help: "  --model <model>  Model (e.g. 'opus')" }).detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
 
     expect(detected?.options.effort).toBeUndefined();
   });

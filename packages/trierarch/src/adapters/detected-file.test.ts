@@ -23,7 +23,7 @@ describe('the detected file (#365)', () => {
   it('keeps what was detected, times and all', async () => {
     const file = createDetectedFile(join(folder, 'detected.json'));
     const detected: Detected = {
-      'claude-code': { version: '2.1.293', detectedAt: AT, confirmedAt: null, options: { effort: { values: { low: ['--effort', 'low'] } } } },
+      'claude-code': { version: '2.1.293', detectedAt: AT, confirmedAt: null, options: { effort: { values: { low: ['--effort', 'low'] } } }, problem: 'no model alias' },
       codex: { version: '0.160.1', detectedAt: AT, confirmedAt: AT, options: { model: { values: { 'gpt-6.1-sol': ['-m', 'gpt-6.1-sol'] }, default: 'gpt-6.1-sol' } } },
     };
 
