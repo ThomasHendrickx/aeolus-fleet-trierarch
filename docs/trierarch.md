@@ -94,7 +94,7 @@ Its report, sent on start and again whenever it changes: its state (`working` wh
 }
 ```
 
-Each harness gives the `version` the trierarch detected and when it last confirmed its models (`modelsConfirmedAt`, null while none is; see Detected options); the console's machine card shows both. Its shape lives in `common`, as the type `trierarch`'s report details. Paths stay on the machine (decision 0032): a kept worktree is named by the ship it belonged to and its repository, an orphan by its repository and its folder's name under the worktree root (`<root>/<repository>/<name>`). It holds no entry per ship: each request carries its own status. `machine` is read from the trierarch's process: `os` is `macos`, `linux` or `windows`, and `arch` is `arm64` or `amd64`; a platform outside these is left out.
+`workspaces` offers only the repositories and folders every configured harness trusts (see Trust below), so the trierarch plugin never assigns a request to a place a harness would stop at. Each harness gives the `version` the trierarch detected and when it last confirmed its models (`modelsConfirmedAt`, null while none is; see Detected options); the console's machine card shows both. Its shape lives in `common`, as the type `trierarch`'s report details. Paths stay on the machine (decision 0032): a kept worktree is named by the ship it belonged to and its repository, an orphan by its repository and its folder's name under the worktree root (`<root>/<repository>/<name>`). It holds no entry per ship: each request carries its own status. `machine` is read from the trierarch's process: `os` is `macos`, `linux` or `windows`, and `arch` is `arm64` or `amd64`; a platform outside these is left out.
 
 ### Machine labels
 
@@ -134,7 +134,11 @@ A trierarch reconciles from the requests assigned to it. Its loop crews each one
 
 From then on the trierarch watches the ship's inbox while the session runs. It wakes the session when deliveries wait and the session is idle, and restarts a session that dies.
 
-Before it crews, the trierarch checks the settings again against its own configuration (decision 0027): the harness, the repository or folder, and the value of each option the harness declares. An option the harness does not declare is ignored: it crews without it. Settings it cannot crew are not crewed and get no status; it tells argo once per settings version, as plain text naming the ship and the field at fault.
+Before it crews, the trierarch checks the settings again against its own configuration (decision 0027): the harness, the repository or folder, that the harness trusts it (see Trust below), and the value of each option the harness declares. An option the harness does not declare is ignored: it crews without it. Settings it cannot crew are not crewed and get no status; it tells argo once per settings version, as plain text naming the ship and the field at fault.
+
+### Trust
+
+A trierarch never lets a harness start a session in a repository or folder it does not trust, no matter what (#381): the session would stop at the harness's trust question with no one to answer it. Adding a place is what trusts it: `aeolus-trierarch init` and `aeolus-trierarch add repository|folder <name> <path>` write it to the configuration and trust it for every configured harness that asks (Claude Code in `~/.claude.json`, Codex in its `config.toml`; for a worktree, both ask about the repository's own checkout). A place written into `config.json` by hand is not trusted: it is never offered and never crewed until it is added with one of them. Before every launch, a restart too, the trierarch reads what the harness trusts now: settings in a place it does not trust are not crewed, and it tells argo once per settings version that the place needs adding with `aeolus-trierarch init`. A repository or folder is offered in the report only while every configured harness trusts it.
 
 The trierarch plugin compares each crewed ship's stated model with the model its crew request's options name. When they differ, it tells argo once per ship, settings version and stated model, as plain text naming the ship and both models; it observes only and changes nothing. A model stated before the running session started may be a former crew's, so it is not compared.
 
