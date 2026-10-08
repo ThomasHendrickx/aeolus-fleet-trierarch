@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { DetectedHarness } from '../core/ports.js';
-import { CLAUDE_CODE_KNOWN_MODELS, createClaudeCodeDetector } from './claude-code-detector.js';
+import { CLAUDE_CODE_KNOWN_MODELS, CLAUDE_CODE_PROBE_TIMEOUT_MS, createClaudeCodeDetector } from './claude-code-detector.js';
 import type { CommandResult } from './run-command.js';
 
 const BEFORE = new Date('2026-10-01T09:00:00.000Z');
@@ -19,9 +19,9 @@ const failed = (stderr: string): CommandResult => ({ status: 1, stdout: '', stde
 
 /** Claude Code 2.1.293 as the mac mini runs it: each id in `known` answers its probe, `refused` ones are unrecognized, others fail otherwise. */
 function aClaude(at: { known?: readonly string[]; refused?: readonly string[]; help?: string } = {}) {
-  const calls: { args: readonly string[]; cwd: string | undefined }[] = [];
-  const run = (command: string, options: { args: readonly string[]; cwd?: string }): Promise<CommandResult> => {
-    calls.push({ args: options.args, cwd: options.cwd });
+  const calls: { args: readonly string[]; cwd: string | undefined; timeoutMs: number | undefined }[] = [];
+  const run = (command: string, options: { args: readonly string[]; cwd?: string; timeoutMs?: number }): Promise<CommandResult> => {
+    calls.push({ args: options.args, cwd: options.cwd, timeoutMs: options.timeoutMs });
     expect(command).toBe('claude');
     const [first] = options.args;
     if (first === '--version') {
@@ -50,6 +50,10 @@ describe('detecting Claude Code (#365)', () => {
     await expect(aClaude().detector.version()).resolves.toBe('2.1.293');
   });
 
+  it('gives a probe a minute at most, so a CLI that hangs never holds up the trierarch for long', () => {
+    expect(CLAUDE_CODE_PROBE_TIMEOUT_MS).toBe(60_000);
+  });
+
   it('ships the five ids the mac mini runs as the ids it probes', () => {
     expect(CLAUDE_CODE_KNOWN_MODELS).toEqual(['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001']);
   });
@@ -60,13 +64,13 @@ describe('detecting Claude Code (#365)', () => {
     expect(detected).toEqual({ version: '2.1.293', detectedAt: NOW, confirmedAt: NOW, options: { model: modelOption(CLAUDE_CODE_KNOWN_MODELS), effort: EFFORT } });
   });
 
-  it('probes each id once, from the neutral folder, with one short print-mode turn', async () => {
+  it('probes each id once, from the neutral folder, with one short print-mode turn within a time limit', async () => {
     const claude = aClaude();
 
     await claude.detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
 
     expect(claude.calls.filter((call) => call.args[0] === '-p')).toEqual(
-      CLAUDE_CODE_KNOWN_MODELS.map((id) => ({ args: ['-p', '--model', id, '--max-turns', '1', '--output-format', 'json', 'Reply OK'], cwd: NEUTRAL })),
+      CLAUDE_CODE_KNOWN_MODELS.map((id) => ({ args: ['-p', '--model', id, '--max-turns', '1', '--output-format', 'json', 'Reply OK'], cwd: NEUTRAL, timeoutMs: CLAUDE_CODE_PROBE_TIMEOUT_MS })),
     );
   });
 
