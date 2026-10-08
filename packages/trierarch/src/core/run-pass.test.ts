@@ -450,6 +450,11 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     { label: 'a harness it does not offer', settings: crewSettings({ harness: 'codex' }), reason: 'harness: This trierarch offers no harness codex' },
     { label: 'a repository it does not offer', settings: crewSettings({ workspace: { kind: 'worktree', repository: 'hemma' } }), reason: 'workspace.repository: This trierarch offers no repository hemma' },
     { label: 'an option value it does not offer', settings: crewSettings({ options: { model: 'haiku' } }), reason: 'options.model: model must be one of opus, sonnet' },
+    {
+      label: 'no harness and an option value its default harness does not offer',
+      settings: { workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: { model: 'haiku' } },
+      reason: 'options.model: model must be one of opus, sonnet',
+    },
     { label: 'settings that are not crew settings', settings: { harness: 'claude-code' }, reason: 'workspace: Invalid input: expected object, received undefined' },
   ])('does not crew settings with $label, and tells argo once per version', async ({ settings, reason }) => {
     const trierarch = aTrierarch();
@@ -511,6 +516,30 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.codex.identities.has(SCOUT_FOLDER)).toBe(true);
     expect(trierarch.codex.launches).toHaveLength(1);
     expect(trierarch.harness.launches).toEqual([]);
+  });
+
+  it('crews settings without a harness with its default: the first harness in its configuration (#343)', async () => {
+    const codexFirst = { ...CONFIGURATION, harnesses: { codex: { flags: [], options: {} }, ...CONFIGURATION.harnesses } };
+    const trierarch = aTrierarch(codexFirst);
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, { workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} });
+
+    await trierarch.pass();
+
+    expect(trierarch.codex.launches).toHaveLength(1);
+    expect(trierarch.harness.launches).toEqual([]);
+    expect(trierarch.state.current().entries[shipId]?.harness).toBe('codex');
+  });
+
+  it('checks the options of settings without a harness against its default harness (#343)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, { workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: { model: 'sonnet' } });
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.launches).toEqual([expect.objectContaining({ shipId })]);
+    expect(trierarch.state.current().entries[shipId]?.options).toEqual({ model: 'sonnet' });
   });
 
   it("wakes a ship through the harness its settings name, from that harness's turn", async () => {

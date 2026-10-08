@@ -161,11 +161,11 @@ export function writtenStatusOf(entry: Entry & { state: CrewStatus }): WrittenSt
 
 /** A new entry, crewing since now, for checked settings of a version. */
 function entryOf(checked: CheckedSettings, at: { shipId: ShipId; settingsVersion: number; now: Date }): Entry {
-  const { settings, options } = checked;
+  const { settings, harness, options } = checked;
   return {
     shipId: at.shipId,
     settingsVersion: at.settingsVersion,
-    harness: settings.harness,
+    harness,
     workspace: settings.workspace,
     ...(settings.squadron !== undefined && { squadron: settings.squadron }),
     ...(settings.firstPrompt !== undefined && { firstPrompt: settings.firstPrompt }),
