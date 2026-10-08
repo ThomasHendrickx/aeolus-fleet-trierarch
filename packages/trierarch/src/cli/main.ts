@@ -20,6 +20,7 @@ import { createDetectHarnesses } from '../core/detect-harnesses.js';
 import { createUninstall } from '../core/uninstall.js';
 import { configCheck } from './config-check.js';
 import { detectOptions } from './detect.js';
+import { addPlace } from './add.js';
 import { initTrierarch } from './init.js';
 import { describeList, inspectList } from './list.js';
 import { followLog, tailLog } from './logs.js';
@@ -35,6 +36,8 @@ export const USAGE = [
   '',
   'Set up:',
   "  init [--fleet-url <url>] [--ship-id <shp_...>] [--secret <secret>] [--yes]   the whole setup: registers the trierarch's own ship, writes the configuration, answers Claude Code's and Codex's one-time questions and offers to install the service. Asks for what is missing; prefer typing the secret when asked, so it stays out of your shell history",
+  '  add repository <name> <path>   add a repository to make worktrees of, trusted for every configured harness, and restart the service; sessions keep running',
+  '  add folder <name> <path>       add a folder to crew a ship in as it is, the same way',
   '  config check          check the configuration and give the effective flags per harness',
   '  detect                detect again what each configured harness offers (models, effort) and keep it beside the configuration',
   '',
@@ -198,6 +201,14 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
         prompter.close();
       }
     },
+    add: async () => {
+      const [, kind, name, path] = words;
+      if ((kind !== 'repository' && kind !== 'folder') || name === undefined || path === undefined) {
+        throw new TrierarchFileError('add takes repository or folder, a name and a path: aeolus-trierarch add repository pagasae ~/Projects/pagasae');
+      }
+      const report = await addPlace({ kind, name, path, paths, homeDirectory, claudeCode: createClaudeCodeSetup({ homeDirectory }), codex: createCodexSetup(), service: serviceAt() });
+      return { data: report, text: report.said.join('\n') };
+    },
     'config check': async () => {
       const { text, ...data } = await configCheck(paths);
       return { data, text };
@@ -285,8 +296,8 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
     },
   };
 
-  // upgrade alone takes a word after it: the version.
-  const command = words[0] === 'upgrade' && words.length <= 2 ? commands.upgrade : commands[words.join(' ')];
+  // upgrade takes a word after it, the version; add takes three, the kind, the name and the path.
+  const command = words[0] === 'upgrade' && words.length <= 2 ? commands.upgrade : words[0] === 'add' && words.length === 4 ? commands.add : commands[words.join(' ')];
   if (command === undefined) {
     return { output: USAGE, code: 2 };
   }
