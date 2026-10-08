@@ -45,12 +45,16 @@ function flagName(flag: string): string {
 function detailsOf(setup: TrierarchSetup, state: TrierarchState): TrierarchReportDetails {
   const { configuration, version } = setup;
   return {
-    harnesses: Object.entries(configuration.harnesses).map(([harness, settings]) => ({
-      harness,
-      options: optionsSchemaOf(settings),
-      flags: [...settings.flags],
-      riskyFlags: settings.flags.filter((flag) => setup.riskyFlags[harness]?.includes(flagName(flag)) === true),
-    })),
+    harnesses: Object.entries(configuration.harnesses).map(([harness, settings]) => {
+      const detected = setup.detected?.[harness];
+      return {
+        harness,
+        options: optionsSchemaOf(settings),
+        flags: [...settings.flags],
+        riskyFlags: settings.flags.filter((flag) => setup.riskyFlags[harness]?.includes(flagName(flag)) === true),
+        ...(detected !== undefined && { version: detected.version, modelsConfirmedAt: detected.confirmedAt?.toISOString() ?? null }),
+      };
+    }),
     workspaces: { repositories: Object.keys(configuration.repositories), folders: Object.keys(configuration.folders) },
     caps: configuration.caps,
     // Paths stay on the machine: names only (decision 0032).

@@ -230,4 +230,6 @@ export interface TrierarchSetup {
   readonly riskyFlags: Readonly<Record<string, readonly string[]>>;
   /** The machine it runs on, by os and arch, for the trierarch plugin's labels (#102); none reports none. */
   readonly machine?: Machine;
+  /** What detection found per harness (#365), for the version and confirmed time the report gives. */
+  readonly detected?: Detected;
 }

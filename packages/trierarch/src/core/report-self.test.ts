@@ -57,6 +57,21 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
     expect(trierarchReportDetailsSchema.safeParse(report?.details).success).toBe(true);
   });
 
+  it('reports per harness the version detected and when its models were last confirmed, and neither for a harness not detected (#365)', async () => {
+    const at = new Date('2026-10-08T15:00:00.000Z');
+    const trierarch = aTrierarch({ ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: { flags: [], options: {} } } }, {
+      'claude-code': { version: '2.1.293', detectedAt: at, confirmedAt: at, options: {} },
+    });
+
+    await trierarch.reportSelf();
+
+    const [report] = trierarch.fleet.selfReports;
+    expect(report?.details.harnesses.map(({ harness, version, modelsConfirmedAt }) => ({ harness, version, modelsConfirmedAt }))).toEqual([
+      { harness: 'claude-code', version: '2.1.293', modelsConfirmedAt: '2026-10-08T15:00:00.000Z' },
+      { harness: 'codex', version: undefined, modelsConfirmedAt: undefined },
+    ]);
+  });
+
   it("marks each of a harness's flags its adapter calls risky (#326)", async () => {
     const claudeCode = { ...CONFIGURATION.harnesses['claude-code'], flags: ['--remote-control', '--dangerously-skip-permissions'], options: {} };
     const trierarch = aTrierarch({ ...CONFIGURATION, harnesses: { 'claude-code': claudeCode, codex: { flags: ['--dangerously-bypass-approvals-and-sandbox', '--search'], options: {} } } });
