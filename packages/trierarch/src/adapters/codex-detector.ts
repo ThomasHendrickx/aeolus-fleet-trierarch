@@ -6,7 +6,9 @@ import type { CommandResult } from './run-command.js';
 
 /**
  * Detecting Codex (#365; docs/trierarch.md, "Detected options"): its own
- * catalog, offline (`codex debug models --bundled`), gives its models. The
+ * catalog gives its models. That is the catalog it runs with now (`codex
+ * debug models`), which hides what the account cannot pick (#383), else the
+ * bundled one (`--bundled`), offline. The
  * visible ones are declared, each with `-m`; the default is the model the
  * user's `~/.codex/config.toml` sets at its top level when it is one of them,
  * else the catalog's first. Codex has no effort flag, so no effort is
@@ -53,7 +55,9 @@ export function createCodexDetector(deps: {
       return result?.status === 0 ? /\S+$/.exec(result.stdout.trim())?.[0] : undefined;
     },
     detect: async ({ version, now }) => {
-      const catalog = catalogOf(await deps.run(program, { args: ['debug', 'models', '--bundled'], timeoutMs: QUICK_TIMEOUT_MS }));
+      const catalog =
+        catalogOf(await deps.run(program, { args: ['debug', 'models'], timeoutMs: QUICK_TIMEOUT_MS })) ??
+        catalogOf(await deps.run(program, { args: ['debug', 'models', '--bundled'], timeoutMs: QUICK_TIMEOUT_MS }));
       const slugs = (catalog?.models ?? []).filter((model) => model.visibility === VISIBLE && trierarchNameSchema.safeParse(model.slug).success).map((model) => model.slug);
       const [first] = slugs;
       if (first === undefined) {
