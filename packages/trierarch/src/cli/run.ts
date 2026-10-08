@@ -51,6 +51,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     adapterFlags: adapterFlagsOf(configuration),
     riskyFlags: riskyFlagsOf(configuration),
     machine: machineOf({ platform: process.platform, arch: process.arch }),
+    detected,
   };
   const handle = createHandleDelivery({ fleet, logger });
   const runPass = createRunPass({ fleet, harnesses, processes: tmux, workspace, state, setup, clock, logger });
