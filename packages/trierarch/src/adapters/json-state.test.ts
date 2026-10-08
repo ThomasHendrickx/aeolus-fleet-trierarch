@@ -57,6 +57,28 @@ describe('the JSON state store', () => {
     await expect(store.load()).resolves.toEqual(state);
   });
 
+  it('loads the kept worktrees and orphans it saved, each with its repository, and an orphan with its name (#325)', async () => {
+    const store = createJsonState(join(folder, 'state.json'));
+    const state = {
+      ...aState(),
+      kept: [{ shipId: newId('ship'), repository: 'aeolus-fleet', path: '/home/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/lookout' }],
+      orphans: [{ path: '/home/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/stray', repository: 'aeolus-fleet', name: 'stray' }],
+    };
+
+    await store.save(state);
+
+    await expect(store.load()).resolves.toEqual(state);
+  });
+
+  it('stops with an error naming the file and what to empty when its kept worktrees or orphans have a shape from before 0.20 (decision 0013)', async () => {
+    const path = join(folder, 'state.json');
+    writeFileSync(path, JSON.stringify({ ...aState(), kept: [{ shipId: newId('ship'), path: '/home/thomas/scout' }], orphans: ['/home/thomas/stray'] }));
+
+    await expect(createJsonState(path).load()).rejects.toThrow(
+      `${path} does not hold the state this trierarch reads: empty its kept and orphans ("kept": [], "orphans": []) and start it again; the next pass finds the orphans again`,
+    );
+  });
+
   it('writes the file whole, leaving no temporary file, readable by its user only', async () => {
     const path = join(folder, 'state.json');
 

@@ -92,39 +92,45 @@ afterEach(async () => {
   rmSync(home, { recursive: true, force: true });
 });
 
+/** A trierarch set up with init on a real fleet, with a ship scout of the fleet to crew, and one pass of its loop. */
+async function aTrierarchOnTheFleet() {
+  const useCases = createUseCases({ prisma: database });
+  const argo = operatorCaller(unwrap(await useCases.initialiseFleet({ name: 'home fleet', ...OPERATOR })));
+  const trierarchShip = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'mac-mini', type: 'trierarch', fleetScopes: ['crew:run'] }));
+  const scout = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'scout', type: 'reviewer' }));
+
+  const service = { install: () => Promise.resolve(), restart: () => Promise.resolve(), status: () => Promise.resolve({ file: 'none', isInstalled: true, isRunning: true }) };
+  const quiet = { text: () => Promise.reject(new Error('asked')), secret: () => Promise.reject(new Error('asked')), confirm: () => Promise.reject(new Error('asked')), say: () => undefined, step: () => undefined };
+  await initTrierarch({
+    homeDirectory: home,
+    paths,
+    flags: { fleetUrl: address, shipId: trierarchShip.shipId, secret: secretOf(trierarchShip.secret), isYes: true },
+    prompter: quiet,
+    fleetAt: (fleetUrl) => createRestFleet({ fleetUrl, crewToken: '' }),
+    claudeCode: createClaudeCodeSetup({ homeDirectory: home }),
+    codex: { trust: () => Promise.reject(new Error('no Codex here')), trustAeolusHooks: () => Promise.reject(new Error('no Codex here')) },
+    isCodexInstalled: false,
+    service,
+  });
+  const fleet = createRestFleet(await readCrewFile(paths.crewToken));
+  const configuration = { ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: repository } }, folders: { notes: { path: join(home, 'notes') } } };
+  const sessions = standInSessions();
+  const harness = createClaudeCodeHarness({ configuration, plugin: { root: PLUGIN_ROOT, data: pluginData }, sessions });
+  const workspace = createGitWorkspace({ configuration, root: paths.worktrees });
+  const state = createJsonState(paths.state);
+  const clock = { now: () => new Date() };
+  const logger = { warn: () => undefined, action: () => undefined };
+  const setup = { configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
+  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, state, setup, clock, logger });
+  const leasesOf = (shipId: ShipId) => database.lease.count({ where: { shipId, endedAt: null } });
+  const worktree = join(paths.worktrees, 'aeolus-fleet', 'scout');
+
+  return { useCases, argo, trierarchShip, scout, pass, leasesOf, worktree };
+}
+
 describe('the trierarch on a real fleet', () => {
   it('crews an assigned request, its status reads running, and removing it ends the lease, removes the clean worktree and the request', async () => {
-    const useCases = createUseCases({ prisma: database });
-    const argo = operatorCaller(unwrap(await useCases.initialiseFleet({ name: 'home fleet', ...OPERATOR })));
-    const trierarchShip = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'mac-mini', type: 'trierarch', fleetScopes: ['crew:run'] }));
-    const scout = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'scout', type: 'reviewer' }));
-
-    const service = { install: () => Promise.resolve(), restart: () => Promise.resolve(), status: () => Promise.resolve({ file: 'none', isInstalled: true, isRunning: true }) };
-    const quiet = { text: () => Promise.reject(new Error('asked')), secret: () => Promise.reject(new Error('asked')), confirm: () => Promise.reject(new Error('asked')), say: () => undefined, step: () => undefined };
-    await initTrierarch({
-      homeDirectory: home,
-      paths,
-      flags: { fleetUrl: address, shipId: trierarchShip.shipId, secret: secretOf(trierarchShip.secret), isYes: true },
-      prompter: quiet,
-      fleetAt: (fleetUrl) => createRestFleet({ fleetUrl, crewToken: '' }),
-      claudeCode: createClaudeCodeSetup({ homeDirectory: home }),
-      codex: { trust: () => Promise.reject(new Error('no Codex here')), trustAeolusHooks: () => Promise.reject(new Error('no Codex here')) },
-      isCodexInstalled: false,
-      service,
-    });
-    const fleet = createRestFleet(await readCrewFile(paths.crewToken));
-    const configuration = { ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: repository } }, folders: { notes: { path: join(home, 'notes') } } };
-    const sessions = standInSessions();
-    const harness = createClaudeCodeHarness({ configuration, plugin: { root: PLUGIN_ROOT, data: pluginData }, sessions });
-    const workspace = createGitWorkspace({ configuration, root: paths.worktrees });
-    const state = createJsonState(paths.state);
-    const clock = { now: () => new Date() };
-    const logger = { warn: () => undefined, action: () => undefined };
-    const setup = { configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
-    const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, state, setup, clock, logger });
-    const leasesOf = (shipId: ShipId) => database.lease.count({ where: { shipId, endedAt: null } });
-    const worktree = join(paths.worktrees, 'aeolus-fleet', 'scout');
-
+    const { useCases, argo, trierarchShip, scout, pass, leasesOf, worktree } = await aTrierarchOnTheFleet();
     unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } }));
     unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
     await pass();
@@ -143,5 +149,25 @@ describe('the trierarch on a real fleet', () => {
     await expect(leasesOf(scout.shipId)).resolves.toBe(0);
     expect(existsSync(worktree)).toBe(false);
     await expect(database.crewRequest.findUnique({ where: { shipId: scout.shipId } })).resolves.toBeNull();
+  });
+
+  it('clears a kept worktree when argo asks, and confirms it removed it (#325, decision 0032)', async () => {
+    const { useCases, argo, trierarchShip, scout, pass, worktree } = await aTrierarchOnTheFleet();
+    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } }));
+    unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
+    await pass();
+    writeFileSync(join(worktree, 'draft.md'), 'work in progress\n');
+    unwrap(await useCases.removeCrewRequest(argo, { shipId: scout.shipId }));
+    await pass();
+    expect(existsSync(worktree)).toBe(true);
+
+    unwrap(await useCases.requestWorktreeClear(argo, { trierarchShipId: trierarchShip.shipId, shipId: scout.shipId, repository: 'aeolus-fleet' }));
+    await pass();
+
+    expect(existsSync(worktree)).toBe(false);
+    await expect(useCases.readClearRequests(argo)).resolves.toEqual([]);
+    await expect(database.event.findMany({ where: { type: 'WorktreeCleared' }, select: { details: true } })).resolves.toEqual([
+      { details: { worktreeShipId: scout.shipId, repository: 'aeolus-fleet', outcome: 'removed' } },
+    ]);
   });
 });

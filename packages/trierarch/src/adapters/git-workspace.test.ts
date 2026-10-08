@@ -130,10 +130,13 @@ describe('workspaces in git', () => {
     await expect(workspace().prepare({ ...scout, workspace: { kind: 'folder', name: 'notes' } })).resolves.toEqual({ folder: notes });
   });
 
-  it('lists the worktrees under its root', async () => {
+  it('lists the worktrees under its root, each with its repository and name', async () => {
     await workspace().prepare(scout);
     await workspace().prepare({ ...scout, shipId: newId('ship'), shipName: 'lookout' });
 
-    expect((await workspace().worktrees()).map((each) => each.path).sort()).toEqual([join(root, 'aeolus-fleet', 'lookout'), join(root, 'aeolus-fleet', 'scout')]);
+    expect([...(await workspace().worktrees())].sort((first, second) => first.path.localeCompare(second.path))).toEqual([
+      { path: join(root, 'aeolus-fleet', 'lookout'), repository: 'aeolus-fleet', name: 'lookout' },
+      { path: join(root, 'aeolus-fleet', 'scout'), repository: 'aeolus-fleet', name: 'scout' },
+    ]);
   });
 });

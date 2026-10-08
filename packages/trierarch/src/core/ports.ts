@@ -1,4 +1,4 @@
-import type { CrewStatus, ShipId, TrierarchConfiguration, TrierarchReportDetails, TrierarchWorkspace } from '@aeolus-fleet/common';
+import type { ClearOutcome, CrewStatus, ShipId, TrierarchConfiguration, TrierarchReportDetails, TrierarchWorkspace } from '@aeolus-fleet/common';
 
 import type { TrierarchState } from './entry.js';
 import type { Machine } from './machine.js';
@@ -25,6 +25,12 @@ export interface Delivery {
 
 /** What a session's inbox says: deliveries waiting, or the lease ended (released or retired elsewhere). */
 export type InboxAnswer = { readonly kind: 'waiting'; readonly count: number } | { readonly kind: 'leaseEnded' };
+
+/** A clear request to the trierarch's ship: the kept worktree, by the ship it belonged to and its repository. */
+export interface ClearRequestToMe {
+  readonly shipId: ShipId;
+  readonly repository: string;
+}
 
 /** A crew request assigned to the trierarch's ship, as `fleet.assignedCrewRequests` answers: its settings unread. */
 export interface AssignedRequest {
@@ -71,6 +77,10 @@ export interface FleetPort {
   ack(deliveryId: string): Promise<void>;
   /** Answers a ping to the trierarch's own ship. */
   pong(deliveryId: string): Promise<void>;
+  /** The pending clear requests to the trierarch's own ship, oldest first (decision 0032). */
+  pendingClears(): Promise<readonly ClearRequestToMe[]>;
+  /** Confirms a clear request: it removed the kept worktree, or keeps none; the request then goes. */
+  confirmCleared(cleared: ClearRequestToMe & { outcome: ClearOutcome }): Promise<void>;
   /** Sends argo a report, as the trierarch's own ship. */
   reportToArgo(report: ArgoReport): Promise<void>;
   /** A session's inbox, asked with its crew token. */
@@ -133,9 +143,11 @@ export interface ProcessPort {
   stop(shipId: ShipId): Promise<void>;
 }
 
-/** A worktree under the trierarch's root, with the ship it is named after when it is one. */
+/** A worktree under the trierarch's root (`<root>/<repository>/<name>`), with the ship it is named after when it is one. */
 export interface ObservedWorktree {
   readonly path: string;
+  readonly repository: string;
+  readonly name: string;
   readonly shipId?: ShipId;
 }
 

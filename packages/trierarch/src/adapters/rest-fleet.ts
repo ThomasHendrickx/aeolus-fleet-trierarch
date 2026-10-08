@@ -1,4 +1,4 @@
-import { assignedCrewRequestsOutputSchema, idSchema, receivedDeliverySchema, shipDetailOutputSchema, type ShipId } from '@aeolus-fleet/common';
+import { assignedCrewRequestsOutputSchema, clearRequestsOutputSchema, idSchema, receivedDeliverySchema, shipDetailOutputSchema, type ShipId } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
 import type { Delivery, FleetPort } from '../core/ports.js';
@@ -139,6 +139,11 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string }
     },
     confirmRelease: async (shipId) => {
       await call({ path: '/fleet/confirmCrewRelease', body: { shipId }, answers: z.unknown() });
+    },
+    pendingClears: async () =>
+      (await call({ path: '/fleet/clearRequests', answers: clearRequestsOutputSchema })).map(({ shipId, repository }) => ({ shipId, repository })),
+    confirmCleared: async (cleared) => {
+      await call({ path: '/fleet/confirmWorktreeCleared', body: cleared, answers: z.unknown() });
     },
     inbox: async (crewToken) => {
       try {

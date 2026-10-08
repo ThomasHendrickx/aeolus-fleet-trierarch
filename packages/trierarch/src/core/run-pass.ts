@@ -35,8 +35,9 @@ export function createRunPass(deps: RunPassDeps): RunPass {
     let action: Action | undefined;
     try {
       const requests = await deps.fleet.assignedRequests();
+      const clears = await deps.fleet.pendingClears();
       const observed = await observe(state, deps);
-      const reconciled = reconcile(state, { requests, observed, now: deps.clock.now(), configuration: deps.setup.configuration });
+      const reconciled = reconcile(state, { requests, clears, observed, now: deps.clock.now(), configuration: deps.setup.configuration });
       state = reconciled.state;
       await deps.state.save(state);
       for (action of reconciled.actions) {
@@ -116,6 +117,8 @@ async function carryOut(state: TrierarchState, at: CarryOut): Promise<TrierarchS
       return forget(state, { entry: action.entry, deps });
     case 'release':
       return release(state, { shipId: action.shipId, deps });
+    case 'clear':
+      return clear(state, { action, deps });
     case 'crew':
     case 'launch':
     case 'wake':
@@ -249,6 +252,29 @@ async function release(state: TrierarchState, at: { shipId: Entry['shipId']; dep
 }
 
 /**
+ * A clear request (decision 0032): the kept worktree it names is removed
+ * (the workspace removes only one under the root) and dropped from the state,
+ * saved, then the request is confirmed removed. With none kept, it is
+ * confirmed not-kept. A failed remove leaves both for the next pass; a lost
+ * confirmation is confirmed not-kept on the next one.
+ */
+async function clear(state: TrierarchState, at: CarryOut & { action: Extract<Action, { kind: 'clear' }> }): Promise<TrierarchState> {
+  const { action, deps } = at;
+  const { shipId, repository, kept } = action;
+  if (kept === undefined) {
+    await deps.fleet.confirmCleared({ shipId, repository, outcome: 'not-kept' });
+    log(deps, { shipId, action: 'clear', outcome: `no kept ${repository} worktree of it here` });
+    return state;
+  }
+  await deps.workspace.remove(kept.path);
+  const next = { ...state, kept: state.kept.filter((each) => each.path !== kept.path) };
+  await deps.state.save(next);
+  await deps.fleet.confirmCleared({ shipId, repository, outcome: 'removed' });
+  log(deps, { shipId, action: 'clear', outcome: `its kept worktree removed: ${kept.path}` });
+  return next;
+}
+
+/**
  * Its request is no longer assigned here, as when its ship is retired (gap
  * rule 2): the session stops and its identity goes, but nothing the trierarch
  * cannot tell is clean goes: its worktree stays, reported as an orphan.
@@ -301,7 +327,7 @@ async function finishWorkspace(state: TrierarchState, at: EntryAt): Promise<{ st
     return { state, workspace: 'removed' };
   }
   deps.logger.warn(`Kept the worktree of ${entry.shipId}, which has changes: ${folder}`);
-  return { state: { ...state, kept: [...state.kept, { shipId: entry.shipId, path: folder }] }, workspace: 'kept', path: folder };
+  return { state: { ...state, kept: [...state.kept, { shipId: entry.shipId, repository: entry.workspace.repository, path: folder }] }, workspace: 'kept', path: folder };
 }
 
 /** What became of an ended entry's workspace, as its log line says it. */

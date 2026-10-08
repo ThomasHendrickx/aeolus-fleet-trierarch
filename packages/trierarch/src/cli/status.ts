@@ -75,7 +75,7 @@ export async function inspectStatus(at: {
     },
     entries,
     kept: state.kept,
-    orphans: state.orphans,
+    orphans: state.orphans.map((orphan) => orphan.path),
   };
 }
 

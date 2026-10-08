@@ -1,8 +1,8 @@
 import type { CrewStatus, ShipId, TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import { checkSettings, type CheckedSettings, type Refusal } from './check-settings.js';
-import { putEntry, removeEntry, withState, type Entry, type TrierarchState } from './entry.js';
-import type { ArgoReport, AssignedRequest, InboxAnswer, ObservedSession, ObservedWorktree, Turn, WrittenStatus } from './ports.js';
+import { putEntry, removeEntry, withState, type Entry, type KeptWorktree, type TrierarchState } from './entry.js';
+import type { ArgoReport, AssignedRequest, ClearRequestToMe, InboxAnswer, ObservedSession, ObservedWorktree, Turn, WrittenStatus } from './ports.js';
 import { decideRestart, exitsInWindow } from './restart-policy.js';
 
 /**
@@ -39,7 +39,9 @@ export type Action =
   | { readonly kind: 'report'; readonly shipId: ShipId; readonly note: string }
   /** Tell argo it cannot crew this settings version. */
   | { readonly kind: 'refuse'; readonly shipId: ShipId; readonly settingsVersion: number; readonly refusal: Refusal }
-  | { readonly kind: 'argo'; readonly report: ArgoReport };
+  | { readonly kind: 'argo'; readonly report: ArgoReport }
+  /** A clear request (decision 0032): remove the kept worktree it names, or, when none is kept, confirm alone. */
+  | { readonly kind: 'clear'; readonly shipId: ShipId; readonly repository: string; readonly kept?: KeptWorktree };
 
 export interface Reconciled {
   readonly state: TrierarchState;
@@ -49,6 +51,8 @@ export interface Reconciled {
 /** What reconciling needs beside the state and what was seen. */
 export interface ReconcileContext {
   readonly requests: readonly AssignedRequest[];
+  /** The pending clear requests to the trierarch's ship. */
+  readonly clears: readonly ClearRequestToMe[];
   readonly observed: Observed;
   readonly now: Date;
   readonly configuration: TrierarchConfiguration;
@@ -127,11 +131,21 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
     }
   }
 
-  const known = new Set([...Object.values(next.entries).flatMap((entry) => (entry.folder === undefined ? [] : [entry.folder])), ...next.kept.map((kept) => kept.path)]);
+  // A kept worktree stays until it is gone from disk, as when a human removed it (#325). One an entry
+  // works in again is that entry's worktree, no longer kept, so a clear never removes it (decision 0032).
+  const onDisk = new Set(observed.worktrees.map((worktree) => worktree.path));
+  const inUse = new Set(Object.values(next.entries).flatMap((entry) => (entry.folder === undefined ? [] : [entry.folder])));
+  const kept = next.kept.filter((each) => onDisk.has(each.path) && !inUse.has(each.path));
+  const known = new Set([...inUse, ...kept.map((each) => each.path)]);
   const orphans = observed.worktrees
     .filter((worktree) => !known.has(worktree.path) && (worktree.shipId === undefined || !(worktree.shipId in next.entries)))
-    .map((worktree) => worktree.path);
-  return { state: { ...next, orphans }, actions };
+    .map(({ path, repository, name }) => ({ path, repository, name }));
+  // A clear request removes only a worktree this trierarch kept; for any other it keeps none (decision 0032).
+  for (const { shipId, repository } of context.clears) {
+    const held = kept.find((each) => each.shipId === shipId && each.repository === repository);
+    actions.push({ kind: 'clear', shipId, repository, ...(held !== undefined && { kept: held }) });
+  }
+  return { state: { ...next, kept, orphans }, actions };
 }
 
 /**

@@ -76,14 +76,14 @@ Its report, sent on start and again whenever it changes: its state (`working` wh
   ],
   "workspaces": { "repositories": ["aeolus-fleet"], "folders": ["notes"] },
   "caps": { "ships": 8, "running": 4 },
-  "kept": [{ "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88", "path": "/Users/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/scout" }],
-  "orphans": [{ "path": "/Users/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/lookout" }],
+  "kept": [{ "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88", "repository": "aeolus-fleet" }],
+  "orphans": [{ "repository": "aeolus-fleet", "name": "lookout" }],
   "machine": { "os": "macos", "arch": "arm64" },
   "version": "0.20.0"
 }
 ```
 
-Its shape lives in `common`, as the type `trierarch`'s report details. It holds no entry per ship: each request carries its own status. `machine` is read from the trierarch's process: `os` is `macos`, `linux` or `windows`, and `arch` is `arm64` or `amd64`; a platform outside these is left out.
+Its shape lives in `common`, as the type `trierarch`'s report details. Paths stay on the machine (decision 0032): a kept worktree is named by the ship it belonged to and its repository, an orphan by its repository and its folder's name under the worktree root (`<root>/<repository>/<name>`). It holds no entry per ship: each request carries its own status. `machine` is read from the trierarch's process: `os` is `macos`, `linux` or `windows`, and `arch` is `arm64` or `amd64`; a platform outside these is left out.
 
 ### Machine labels
 
@@ -154,7 +154,7 @@ The ship, its crew request, its session and its worktree live and end together:
 
 The rules that close the gaps:
 
-1. The trierarch removes only what it made: worktrees under its own worktree root, never a configured folder and never a worktree with changes. A kept worktree is reported in its details until a human clears it.
+1. The trierarch removes only what it made: worktrees under its own worktree root, never a configured folder and never a worktree with changes. A kept worktree is reported in its details until a human clears it: a clear request (decision 0032) names it by its ship and repository, and on its next pass the trierarch removes it, drops it and confirms `removed`, or, keeping none by that name, confirms `not-kept`. One already gone from disk is dropped on the next pass, and so is one a ship is crewed in again: it is that ship's worktree now, so a clear removes nothing in use.
 2. Every pass of the loop also looks for strays. A session of the trierarch with no assigned request is stopped. A worktree under its root with no assigned request is reported as an orphan, never deleted. A request that is no longer assigned to it without being removed (its ship retired) has its session stopped and its identity removed; its worktree is then an orphan.
 3. After a stop mid-crew, the loop resumes from its assigned requests and its saved state. An entry still crewing whose ship is crewed was lost between register and its reply: the trierarch releases the ship (`crew:run`) and crews it again. A half-made worktree of an assigned ship is used; one of a ship no longer assigned is an orphan (rule 2).
 4. A worktree with changes never holds up releasing the ship: the lease ends either way, so the ship can be crewed elsewhere.
