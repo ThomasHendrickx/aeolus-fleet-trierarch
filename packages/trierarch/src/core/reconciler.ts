@@ -1,8 +1,8 @@
 import type { CrewStatus, ShipId, TrierarchConfiguration } from '@aeolus-fleet/common';
 
-import { checkSettings, type CheckedSettings, type Refusal } from './check-settings.js';
+import { checkSettings, trustRefusal, type CheckedSettings, type Refusal } from './check-settings.js';
 import { putEntry, removeEntry, withState, type Entry, type KeptWorktree, type TrierarchState } from './entry.js';
-import type { ArgoReport, AssignedRequest, ClearRequestToMe, InboxAnswer, ObservedSession, ObservedWorktree, Turn, WrittenStatus } from './ports.js';
+import type { ArgoReport, AssignedRequest, ClearRequestToMe, InboxAnswer, ObservedSession, ObservedWorktree, TrustedPlaces, Turn, WrittenStatus } from './ports.js';
 import { decideRestart, exitsInWindow } from './restart-policy.js';
 
 /**
@@ -56,6 +56,8 @@ export interface ReconcileContext {
   readonly observed: Observed;
   readonly now: Date;
   readonly configuration: TrierarchConfiguration;
+  /** What each harness trusts now: checked before every launch (#381). */
+  readonly trusted: TrustedPlaces;
 }
 
 const RESTARTING_NOTE = 'blocked: session crashed, restarting';
@@ -93,7 +95,7 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
       actions.push({ kind: 'release', shipId: entry.shipId });
       continue;
     }
-    const step = request.settingsVersion === entry.settingsVersion ? stepOf(entry, { ...context, canStart: canStart() }) : newVersionStep(entry, { request, state: next, context });
+    const step = request.settingsVersion === entry.settingsVersion ? trustedStep(entry, { step: stepOf(entry, { ...context, canStart: canStart() }), state: next, context }) : newVersionStep(entry, { request, state: next, context });
     const after = step.entry ?? entry;
     next = step.entry === undefined ? next : putEntry(next, step.entry);
     actions.push(...step.actions);
@@ -111,7 +113,7 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
       actions.push({ kind: 'confirm', shipId: request.shipId });
       continue;
     }
-    const checked = checkSettings(request.settings, { shipId: request.shipId, configuration, state: next });
+    const checked = checkSettings(request.settings, { shipId: request.shipId, configuration, state: next, trusted: context.trusted });
     if (!checked.isOk) {
       if (next.refused[request.shipId] !== request.settingsVersion) {
         actions.push({ kind: 'refuse', shipId: request.shipId, settingsVersion: request.settingsVersion, refusal: checked.error });
@@ -187,7 +189,7 @@ function entryOf(checked: CheckedSettings, at: { shipId: ShipId; settingsVersion
  */
 function newVersionStep(entry: Entry, at: { request: AssignedRequest; state: TrierarchState; context: ReconcileContext }): Step {
   const { request, state, context } = at;
-  const checked = checkSettings(request.settings, { shipId: entry.shipId, configuration: context.configuration, state });
+  const checked = checkSettings(request.settings, { shipId: entry.shipId, configuration: context.configuration, state, trusted: context.trusted });
   if (!checked.isOk) {
     const step = stepOf(entry, { ...context, canStart: false });
     return state.refused[entry.shipId] === request.settingsVersion
@@ -201,6 +203,26 @@ function newVersionStep(entry: Entry, at: { request: AssignedRequest; state: Tri
       { kind: 'stop', shipId: entry.shipId },
       { kind: 'crew', shipId: entry.shipId, isResumed: true },
     ],
+    starts: 0,
+  };
+}
+
+/**
+ * A step that would start the entry's session, held while its harness does
+ * not trust its repository or folder (#381): trust is checked before every
+ * launch, a restart too. The entry stays as it is and argo is told once per
+ * settings version.
+ */
+function trustedStep(entry: Entry, at: { step: Step; state: TrierarchState; context: ReconcileContext }): Step {
+  const { step, state, context } = at;
+  const isLaunching = step.actions.some((action) => action.kind === 'crew' || action.kind === 'launch');
+  const refusal = isLaunching ? trustRefusal({ harness: entry.harness, workspace: entry.workspace, trusted: context.trusted }) : undefined;
+  if (refusal === undefined) {
+    return step;
+  }
+  const held = step.actions.filter((action) => action.kind !== 'crew' && action.kind !== 'launch');
+  return {
+    actions: state.refused[entry.shipId] === entry.settingsVersion ? held : [...held, { kind: 'refuse', shipId: entry.shipId, settingsVersion: entry.settingsVersion, refusal }],
     starts: 0,
   };
 }

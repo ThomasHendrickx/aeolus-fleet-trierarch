@@ -151,6 +151,18 @@ export interface ObservedWorktree {
   readonly shipId?: ShipId;
 }
 
+/** The configured repositories and folders each configured harness trusts, by name (#381). */
+export type TrustedPlaces = Readonly<Record<string, { readonly repositories: readonly string[]; readonly folders: readonly string[] }>>;
+
+/**
+ * What each harness trusts now, as its own files say (#381). Init trusts a
+ * place as it adds it; the trierarch only reads: a place a harness does not
+ * trust is never offered and never crewed.
+ */
+export interface TrustPort {
+  trusted(): Promise<TrustedPlaces>;
+}
+
 export interface WorkspacePort {
   /** Makes the workspace, or finds the one a stop mid-crew left half made: its folder. */
   prepare(workspace: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace }): Promise<{ folder: string }>;

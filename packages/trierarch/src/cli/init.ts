@@ -37,7 +37,7 @@ export interface InitReport {
   readonly fleetUrl: string;
   readonly shipId?: ShipId;
   readonly configuration: 'written' | 'changed' | 'kept';
-  /** The folders Claude Code now trusts: the worktree root, then each configured folder. */
+  /** The places Claude Code now trusts: the worktree root, then each configured repository and folder. */
   readonly trusted: readonly string[];
   readonly isSkipPermissionsAccepted: boolean;
   /** The repositories and folders Codex now trusts, when the configuration offers Codex. */
@@ -310,12 +310,16 @@ export async function initTrierarch(input: {
   // Claude Code's one-time questions, answered ahead.
   const root = configuration.worktreeRoot ?? paths.worktrees;
   await mkdir(root, { recursive: true });
+  const repositories = Object.values(configuration.repositories).map((repository) => repository.path);
   const folders = Object.values(configuration.folders).map((folder) => folder.path);
-  // Every run, so a folder added to the configuration since is trusted too.
-  for (const folder of [root, ...folders]) {
-    await claudeCode.trust(folder);
+  // Adding a place through init is what trusts it (#381); every run, so a place added since is trusted too.
+  for (const place of [root, ...repositories, ...folders]) {
+    await claudeCode.trust(place);
   }
   said.push(`Claude Code trusts ${root}, so a session in any worktree starts with no trust question.`);
+  if (repositories.length > 0) {
+    said.push(`Claude Code trusts each configured repository too, as it asks about a worktree's repository: ${repositories.join(', ')}.`);
+  }
   if (folders.length > 0) {
     said.push(`Claude Code trusts each configured folder too: ${folders.join(', ')}.`);
   }
@@ -361,7 +365,7 @@ export async function initTrierarch(input: {
     fleetUrl,
     ...(shipId !== undefined && { shipId }),
     configuration: configured,
-    trusted: [root, ...folders],
+    trusted: [root, ...repositories, ...folders],
     isSkipPermissionsAccepted,
     codexTrusted: codex.trusted,
     codexHooksTrusted: codex.hooksTrusted,
