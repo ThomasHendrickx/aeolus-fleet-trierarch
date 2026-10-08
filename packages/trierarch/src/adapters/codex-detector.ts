@@ -15,6 +15,9 @@ import type { CommandResult } from './run-command.js';
 
 const catalogSchema = z.object({ models: z.array(z.object({ slug: z.string(), visibility: z.string() })) });
 
+/** The longest --version and the catalog may take: both are read offline. */
+const QUICK_TIMEOUT_MS = 10_000;
+
 /** The catalog's way of marking a model the picker shows. */
 const VISIBLE = 'list';
 
@@ -37,7 +40,7 @@ function catalogOf(result: CommandResult): z.infer<typeof catalogSchema> | undef
 }
 
 export function createCodexDetector(deps: {
-  run: (command: string, options: { args: readonly string[] }) => Promise<CommandResult>;
+  run: (command: string, options: { args: readonly string[]; timeoutMs?: number }) => Promise<CommandResult>;
   /** The user's Codex configuration, `~/.codex/config.toml`; undefined when there is none. */
   readConfig: () => Promise<string | undefined>;
   /** The program to run; `codex` unless a test runs another. */
@@ -46,11 +49,11 @@ export function createCodexDetector(deps: {
   const program = deps.program ?? 'codex';
   return {
     version: async () => {
-      const result = await deps.run(program, { args: ['--version'] }).catch(() => undefined);
+      const result = await deps.run(program, { args: ['--version'], timeoutMs: QUICK_TIMEOUT_MS }).catch(() => undefined);
       return result?.status === 0 ? /\S+$/.exec(result.stdout.trim())?.[0] : undefined;
     },
     detect: async ({ version, now }) => {
-      const catalog = catalogOf(await deps.run(program, { args: ['debug', 'models', '--bundled'] }));
+      const catalog = catalogOf(await deps.run(program, { args: ['debug', 'models', '--bundled'], timeoutMs: QUICK_TIMEOUT_MS }));
       const slugs = (catalog?.models ?? []).filter((model) => model.visibility === VISIBLE && trierarchNameSchema.safeParse(model.slug).success).map((model) => model.slug);
       const [first] = slugs;
       if (first === undefined) {

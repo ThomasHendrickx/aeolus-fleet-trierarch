@@ -17,6 +17,12 @@ import type { CommandResult } from './run-command.js';
 /** The model ids this trierarch knows for Claude Code, each confirmed by a probe before it is declared. */
 export const CLAUDE_CODE_KNOWN_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001'] as const;
 
+/** The longest a probe may take: a CLI that hangs is ended, its id neither confirmed nor refused. */
+export const CLAUDE_CODE_PROBE_TIMEOUT_MS = 60_000;
+
+/** The longest --version and --help may take. */
+const QUICK_TIMEOUT_MS = 10_000;
+
 /** How Claude Code says it does not know a model. */
 const UNRECOGNIZED_MODEL = 'unrecognized_model';
 const PROBE_PROMPT = 'Reply OK';
@@ -54,7 +60,7 @@ function optionOf(names: readonly string[], flag: string): ConfiguredOption {
 }
 
 export function createClaudeCodeDetector(deps: {
-  run: (command: string, options: { args: readonly string[]; cwd?: string }) => Promise<CommandResult>;
+  run: (command: string, options: { args: readonly string[]; cwd?: string; timeoutMs?: number }) => Promise<CommandResult>;
   /** An empty folder to probe from, so no project's hooks or settings run. */
   neutralFolder: () => Promise<string>;
   /** The program to run; `claude` unless a test runs another. */
@@ -63,11 +69,11 @@ export function createClaudeCodeDetector(deps: {
   const program = deps.program ?? 'claude';
   return {
     version: async () => {
-      const result = await deps.run(program, { args: ['--version'] }).catch(() => undefined);
+      const result = await deps.run(program, { args: ['--version'], timeoutMs: QUICK_TIMEOUT_MS }).catch(() => undefined);
       return result?.status === 0 ? /^\S+/.exec(result.stdout.trim())?.[0] : undefined;
     },
     detect: async ({ version, previous, now }) => {
-      const help = await deps.run(program, { args: ['--help'] });
+      const help = await deps.run(program, { args: ['--help'], timeoutMs: QUICK_TIMEOUT_MS });
       const levels = help.status === 0 ? effortLevelsOf(help.stdout) : [];
       const folder = await deps.neutralFolder();
       const before = previous?.version === version ? previous : undefined;
@@ -75,7 +81,7 @@ export function createClaudeCodeDetector(deps: {
       const ids: string[] = [];
       let isAnyConfirmed = false;
       for (const id of CLAUDE_CODE_KNOWN_MODELS) {
-        const outcome = outcomeOf(id, await deps.run(program, { args: ['-p', '--model', id, '--max-turns', '1', '--output-format', 'json', PROBE_PROMPT], cwd: folder }));
+        const outcome = outcomeOf(id, await deps.run(program, { args: ['-p', '--model', id, '--max-turns', '1', '--output-format', 'json', PROBE_PROMPT], cwd: folder, timeoutMs: CLAUDE_CODE_PROBE_TIMEOUT_MS }));
         isAnyConfirmed ||= outcome === 'confirmed';
         if (outcome === 'confirmed' || (outcome === 'unknown' && confirmedBefore.includes(id))) {
           ids.push(id);
