@@ -12,6 +12,7 @@ import type { Service, ServiceStatus } from '../adapters/service.js';
 import { newId } from '../../test/support/in-memory.js';
 import { initTrierarch, type InitFlags } from './init.js';
 import type { Prompter } from './prompter.js';
+import type { Detected } from '../core/ports.js';
 
 const SECRET = 'aeolus_sk_v1_trierarch-secret';
 const FLEET_URL = 'https://fleet.example.com';
@@ -109,7 +110,13 @@ class FakeCodexSetup implements CodexSetup {
   }
 }
 
+/** What init's detection finds, and each time it was asked. */
+let detected: Detected;
+let detections: { harnesses: readonly string[]; isForced: boolean }[];
+
 beforeEach(() => {
+  detected = {};
+  detections = [];
   codex = new FakeCodexSetup();
   isCodexInstalled = false;
   home = mkdtempSync(join(tmpdir(), 'trierarch-init-'));
@@ -140,6 +147,10 @@ function init(flags: Partial<InitFlags>, prompter: Prompter = new ScriptedPrompt
     }),
     claudeCode: createClaudeCodeSetup({ homeDirectory: home }),
     service,
+    detect: (at) => {
+      detections.push(at);
+      return Promise.resolve(detected);
+    },
   });
 }
 
@@ -523,5 +534,17 @@ describe('aeolus-trierarch init, for Codex', () => {
     await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET, isYes: true });
 
     expect(codex.trusted).toEqual([]);
+  });
+});
+
+describe("init's detection (#365)", () => {
+  it("detects the configured harnesses' options and says what it found, keeping a detection of the same version", async () => {
+    const at = new Date('2026-10-08T15:00:00.000Z');
+    detected = { 'claude-code': { version: '2.1.293', detectedAt: at, confirmedAt: at, options: { model: { values: { 'claude-opus-5-5': ['--model', 'claude-opus-5-5'] } } } } };
+
+    const report = await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET, isYes: true });
+
+    expect(detections).toEqual([{ harnesses: ['claude-code'], isForced: false }]);
+    expect(report.said).toContain('claude-code 2.1.293: model claude-opus-5-5; models confirmed 2026-10-08T15:00:00.000Z');
   });
 });

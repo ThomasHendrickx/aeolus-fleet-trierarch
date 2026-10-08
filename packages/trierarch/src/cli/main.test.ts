@@ -50,6 +50,29 @@ describe('aeolus-trierarch', () => {
     expect(output).toContain('claude-code: --remote-control --model claude-opus-5-5');
   });
 
+  it('config check gives the detected options too, an option the operator wrote winning by its name (#365)', async () => {
+    const config = join(home, 'detected.json');
+    writeFileSync(config, JSON.stringify(CONFIGURATION));
+    mkdirSync(join(home, '.aeolus', 'trierarch'), { recursive: true });
+    const detectedAt = '2026-10-08T15:00:00.000Z';
+    writeFileSync(
+      join(home, '.aeolus', 'trierarch', 'detected.json'),
+      JSON.stringify({
+        'claude-code': {
+          version: '2.1.293',
+          detectedAt,
+          confirmedAt: detectedAt,
+          options: { model: { values: { 'claude-haiku-4-5-20251001': ['--model', 'claude-haiku-4-5-20251001'] } }, effort: { values: { high: ['--effort', 'high'] } } },
+        },
+      }),
+    );
+
+    const { output } = await main(['config', 'check', '--config', config], { HOME: home });
+
+    expect(output).toContain('  effort=high: --effort high');
+    expect(output).not.toContain('claude-haiku-4-5-20251001');
+  });
+
   it('config check prints the command each harness launches, on a first start and a restart, with each flag marked as configured or added by the adapter', async () => {
     const config = join(home, 'both.json');
     writeFileSync(config, JSON.stringify({ ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: { flags: ['--dangerously-bypass-approvals-and-sandbox'], options: {} } } }));
@@ -109,7 +132,7 @@ describe('aeolus-trierarch', () => {
   });
 
   it('names every command in its usage', () => {
-    for (const command of ['init', 'status', 'list', 'logs', 'start', 'stop', 'restart', 'upgrade', 'install', 'uninstall', 'config check', 'run']) {
+    for (const command of ['init', 'status', 'list', 'logs', 'start', 'stop', 'restart', 'upgrade', 'install', 'uninstall', 'config check', 'detect', 'run']) {
       expect(USAGE).toContain(`  ${command}`);
     }
     expect(USAGE).toContain('--json');
