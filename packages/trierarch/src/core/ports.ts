@@ -178,6 +178,37 @@ export interface LoggedAction {
   readonly next?: string;
 }
 
+/** An option as the configuration gives it: its values by name, each with its flags, and its default. */
+export type ConfiguredOption = TrierarchConfiguration['harnesses'][string]['options'][string];
+
+/** What detection found for one harness on this machine (#365). */
+export interface DetectedHarness {
+  /** Its version, as its CLI says it. */
+  readonly version: string;
+  readonly detectedAt: Date;
+  /** When its models were last confirmed; null while none is. */
+  readonly confirmedAt: Date | null;
+  /** Its options as detected: its models, and its effort levels where its CLI has a flag for them. */
+  readonly options: Readonly<Record<string, ConfiguredOption>>;
+}
+
+/** What detection found, per harness. */
+export type Detected = Readonly<Record<string, DetectedHarness | undefined>>;
+
+/** A harness's CLI as detection asks it (#365). */
+export interface HarnessDetector {
+  /** Its version; undefined when it does not say one, such as when it is not installed. */
+  version(): Promise<string | undefined>;
+  /** Its options at that version, given what was detected before; undefined when it gives nothing to detect. */
+  detect(at: { version: string; previous: DetectedHarness | undefined; now: Date }): Promise<DetectedHarness | undefined>;
+}
+
+/** Where the trierarch keeps what it detected, apart from the operator's configuration. */
+export interface DetectedStore {
+  load(): Promise<Detected>;
+  save(detected: Detected): Promise<void>;
+}
+
 export interface Logger {
   warn(message: string): void;
   action(logged: LoggedAction): void;
