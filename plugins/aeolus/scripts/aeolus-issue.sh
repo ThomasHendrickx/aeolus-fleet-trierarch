@@ -22,6 +22,9 @@ REPOSITORY='ThomasHendrickx/aeolus-fleet'
 # GitHub refuses a URL much past 8 KB; the title and the cut notice need room too.
 LINK_BODY_MAX=6000
 SHIP_ID_PATTERN='shp_[0-9a-z]{26}'
+# The gh that files the issue: gh on PATH, unless AEOLUS_GH names another, as
+# the plugin's tests do so they never file a real issue.
+GH="${AEOLUS_GH:-gh}"
 
 identity="$(aeolus_identity_file)" || exit 2
 fleet_url="$(aeolus_identity_get "$identity" fleetUrl 2>/dev/null)"
@@ -207,8 +210,8 @@ case "${1:-}" in
     title="$(head -n 1 "$public" | sed 's/^#[[:space:]]*//')"
     body_file="${public%.md}.body.md"
     sed '1d' "$public" | sed '/./,$!d' > "$body_file"
-    if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
-      if url="$(gh issue create --repo "$REPOSITORY" --title "$title" --body-file "$body_file")"; then
+    if command -v "$GH" >/dev/null 2>&1 && "$GH" auth status >/dev/null 2>&1; then
+      if url="$("$GH" issue create --repo "$REPOSITORY" --title "$title" --body-file "$body_file")"; then
         echo "aeolus: issue filed: ${url}"
         echo "aeolus: tell argo: Issue filed: ${url}"
         exit 0
