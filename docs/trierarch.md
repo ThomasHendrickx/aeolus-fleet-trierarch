@@ -118,7 +118,8 @@ The trierarch plugin serves unassigned requests oldest first and assigns each to
 2. Of those, it picks the one with the most room as a percentage of its `caps.ships`, then the oldest: the first commissioned. A trierarch that has not reported details yet takes nothing.
 3. It assigns by optimistic claim: the fleet sets the assignment only if the request is still unassigned. A lost claim is no error; the trierarch plugin reads again.
 4. It never assigns a request whose ship is crewed already: crewing by hand fulfils a request.
-5. When no trierarch can take a request (no machine matches its labels, none offers its harness, workspace or options, or none has room), the trierarch plugin writes the reason on the request. It shows in the operator's needs-crew to-do.
+5. It leaves out every trierarch that gave the request back (#382). When every trierarch that fits gave it back, the request waits with the reason "given back by every trierarch that fits; last: " and the last give-back's reason.
+6. When no trierarch can take a request (no machine matches its labels, none offers its harness, workspace or options, or none has room), the trierarch plugin writes the reason on the request. It shows in the operator's needs-crew to-do.
 
 Machine labels are checked only at placement, as the trierarch plugin never reassigns (decision 0030). A request already assigned stays on its trierarch when that trierarch's labels change, and when the request's own machine labels are edited: the new labels apply at its next placement.
 
