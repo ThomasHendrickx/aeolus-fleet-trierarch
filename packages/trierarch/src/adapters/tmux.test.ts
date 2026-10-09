@@ -83,6 +83,17 @@ describe('sessions in tmux', () => {
       .toContain('got $aeolus-wake');
   });
 
+  it("reads what the session's screen shows", async () => {
+    const shipId = newId('ship');
+    await tmux.start({ shipId, folder, command: ['sh', '-c', 'echo "Ran 1 shell command"; sleep 30'] });
+
+    await expect.poll(async () => tmux.screen(shipId), { timeout: 5000 }).toContain('Ran 1 shell command');
+  });
+
+  it('reads an empty screen for a ship with no session', async () => {
+    await expect(tmux.screen(newId('ship'))).resolves.toBe('');
+  });
+
   it('stops a session', async () => {
     const shipId = newId('ship');
     await tmux.start({ shipId, folder, command: ['sleep', '30'] });

@@ -27,6 +27,8 @@ const WITH_CODEX: TrierarchConfiguration = {
 let data: string;
 let folder: string;
 let started: { shipId: ShipId; folder: string; command: readonly string[] }[];
+/** What each ship's session shows, by ship id. */
+let screens: Map<ShipId, string>;
 let typed: { shipId: ShipId; text: string; settleMs?: number }[];
 
 beforeEach(() => {
@@ -34,6 +36,7 @@ beforeEach(() => {
   folder = realpathSync(mkdtempSync(join(tmpdir(), 'trierarch-codex-session-')));
   started = [];
   typed = [];
+  screens = new Map();
 });
 
 afterEach(() => {
@@ -54,6 +57,7 @@ function harness() {
         typed.push(at);
         return Promise.resolve();
       },
+      screen: (shipId) => Promise.resolve(screens.get(shipId) ?? ''),
     },
   });
 }
@@ -108,6 +112,7 @@ describe('Codex as a harness', () => {
           return Promise.resolve();
         },
         type: () => Promise.resolve(),
+        screen: () => Promise.resolve(''),
       },
     });
 
@@ -135,5 +140,11 @@ describe('Codex as a harness', () => {
     await harness().wake({ shipId, folder });
 
     expect(typed).toEqual([{ shipId, text: '$aeolus-wake ', settleMs: CODEX_TYPING_SETTLE_MS }]);
+  });
+
+  it("sees in its session's screen the model it launched with refused", async () => {
+    screens.set(shipId, readFileSync(new URL('../../test/screens/codex-refused.txt', import.meta.url), 'utf8'));
+
+    await expect(harness().launchSeen({ shipId, model: 'gpt-nonexistent-9' })).resolves.toEqual({ kind: 'refused', model: 'gpt-nonexistent-9' });
   });
 });
