@@ -19,6 +19,7 @@ Declared state on the ship, in the fleet core (decision 0029): "keep this ship c
 | Assignment | The trierarch ship that crews it; set only while unassigned | The trierarch plugin | `crew:assign` |
 | Reason | Why no trierarch can take it, while unassigned; shown in the operator's needs-crew to-do | The trierarch plugin | `crew:assign` |
 | Status | crewing, running, restarting, crashed, releasing, with the restart attempt (0 on the first start) and when the session started; and who crewed it, the trierarch or argo | The assigned trierarch | `crew:run` |
+| Give-back | The trierarchs that gave it back before their crew was final, each with the settings version it tried, the reason and when; cleared on every new settings version | The assigned trierarch | `crew:run` |
 
 The server stores the settings without meaning and checks only their size. The settings have a fixed core (decision 0027), whose schema lives in `common`:
 
@@ -42,6 +43,8 @@ Settings never carry paths or command-line flags: a workspace names a repository
 ```
 
 A trierarch's ships are a query, the requests assigned to it, never a list kept on its ship.
+
+A crew is final once the session shows activity: its trierarch's first `running`, `restarting` or `crashed` (decision 0029). Until then the assigned trierarch may give the request back with a reason (`fleet.giveBackCrewRequest`, for the settings version it tried): the request is unassigned and its status cleared, the ship's lease ends and its secret stops working, and the trierarch is recorded. Placement then leaves out every trierarch that gave it back (decision 0030).
 
 The request is the desired state. A ship released elsewhere while its request stands is crewed again by its trierarch. Retiring the ship removes its request (decision 0029).
 
