@@ -1,3 +1,5 @@
+import { CREW_REQUEST_REASON_MAX_LENGTH } from '@aeolus-fleet/common';
+
 import { putEntry, removeEntry, withState, type Entry, type TrierarchState } from './entry.js';
 import type { FleetPort, HarnessPort, LoggedAction, Logger, ProcessPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
@@ -108,6 +110,8 @@ async function carryOut(state: TrierarchState, at: CarryOut): Promise<TrierarchS
       return state;
     case 'refuse':
       return refuse(state, { action, deps });
+    case 'giveBack':
+      return giveBack(state, { action, deps });
     case 'confirm':
       await deps.fleet.confirmRelease(action.shipId);
       log(deps, { shipId: action.shipId, action: 'confirm', outcome: 'its request removed; this trierarch did not crew it' });
@@ -208,6 +212,9 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   const { secret } = await deps.fleet.getStartingPrompt(entry.shipId);
   const { crewToken } = await deps.fleet.register({ shipId: entry.shipId, secret });
   const { folder } = await deps.workspace.prepare({ shipId: entry.shipId, shipName: ship.name, workspace: entry.workspace });
+  // Kept at once, so an entry still crewing knows the workspace and identity to remove if it ends (#382).
+  state = putEntry(state, { ...entry, shipName: ship.name, folder });
+  await deps.state.save(state);
   await harness.prepareIdentity({
     folder,
     identity: { fleetUrl: deps.fleet.url, shipId: entry.shipId, shipName: ship.name, crewToken, ...(entry.squadron !== undefined && { squadron: entry.squadron }) },
@@ -291,6 +298,34 @@ async function forget(state: TrierarchState, at: EntryAt): Promise<TrierarchStat
   const next = removeEntry(state, entry.shipId);
   await deps.state.save(next);
   log(deps, { shipId: entry.shipId, ...(entry.shipName !== undefined && { shipName: entry.shipName }), action: 'forget', outcome: 'its request is no longer assigned here, so its session stopped' });
+  return next;
+}
+
+/**
+ * Gives back a request whose settings this trierarch cannot crew while its
+ * crew is not final (#382): an entry it crewed with ends first (its session
+ * stops, its identity goes, its worktree too when clean), then the fleet
+ * takes the request back, with the reason after this machine's name, cut to
+ * 200 characters, and ends the lease. When the fleet refuses, argo is told
+ * instead, once per settings version.
+ */
+async function giveBack(state: TrierarchState, at: CarryOut & { action: Extract<Action, { kind: 'giveBack' }> }): Promise<TrierarchState> {
+  const { action, deps } = at;
+  const { shipId, settingsVersion, entry } = action;
+  let next = state;
+  if (entry !== undefined) {
+    await deps.processes.stop(shipId);
+    next = removeEntry((await finishWorkspace(state, { entry, deps })).state, shipId);
+    await deps.state.save(next);
+  }
+  const machine = await deps.fleet.whoami();
+  const reason = `${machine.name}: ${action.reason}`.slice(0, CREW_REQUEST_REASON_MAX_LENGTH);
+  const answer = await deps.fleet.giveBack(shipId, { settingsVersion, reason });
+  if (answer.kind === 'refused') {
+    deps.logger.warn(`The fleet refused to take back the crew request of ${shipId}: ${answer.code}: ${answer.message}`);
+    return refuse(next, { action: { kind: 'refuse', shipId, settingsVersion, refusal: { reason: action.reason } }, deps });
+  }
+  log(deps, { shipId, ...(entry?.shipName !== undefined && { shipName: entry.shipName }), action: 'giveBack', outcome: `given back: ${reason}` });
   return next;
 }
 

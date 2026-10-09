@@ -37,8 +37,14 @@ export type Action =
   | { readonly kind: 'status'; readonly shipId: ShipId; readonly written: WrittenStatus }
   /** Report on the ship's behalf, with its session's crew token. */
   | { readonly kind: 'report'; readonly shipId: ShipId; readonly note: string }
-  /** Tell argo it cannot crew this settings version. */
+  /** Tell argo it cannot crew this settings version: its crew is final, so it is not given back. */
   | { readonly kind: 'refuse'; readonly shipId: ShipId; readonly settingsVersion: number; readonly refusal: Refusal }
+  /**
+   * Give back a request it cannot crew while its crew is not final (#382), with
+   * why, without the machine's name, which the run pass adds. With the entry it
+   * crewed with, which ends first: session, identity and clean worktree.
+   */
+  | { readonly kind: 'giveBack'; readonly shipId: ShipId; readonly settingsVersion: number; readonly reason: string; readonly entry?: Entry }
   | { readonly kind: 'argo'; readonly report: ArgoReport }
   /** A clear request (decision 0032): remove the kept worktree it names, or, when none is kept, confirm alone. */
   | { readonly kind: 'clear'; readonly shipId: ShipId; readonly repository: string; readonly kept?: KeptWorktree };
@@ -68,12 +74,36 @@ const WRITTEN: ReadonlySet<Entry['state']> = new Set(['running', 'restarting', '
 
 interface Step {
   readonly entry?: Entry;
+  /** Set when the step gives the request back: its entry ends. */
+  readonly isGivenBack?: boolean;
   readonly actions: readonly Action[];
   /** Sessions this step starts, counted against the running cap. */
   readonly starts: number;
 }
 
 const NOTHING: Step = { actions: [], starts: 0 };
+
+/** The statuses at which a crew is final (decision 0029): it is no longer given back. */
+const FINAL: ReadonlySet<CrewStatus> = new Set(['running', 'restarting', 'crashed']);
+
+/**
+ * What the trierarch does with settings it cannot crew (#382): while the
+ * crew is not final as the fleet holds it, it gives the request back with
+ * the field at fault as the reason, ending the entry it crewed with; once it
+ * is final, it tells argo, once per settings version.
+ */
+function uncrewable(at: { request: AssignedRequest; refusal: Refusal; state: TrierarchState; entry?: Entry }): Action[] {
+  const { request, refusal, state, entry } = at;
+  const { shipId, settingsVersion } = request;
+  if (state.refused[shipId] === settingsVersion) {
+    return [];
+  }
+  if (request.status === null || !FINAL.has(request.status)) {
+    const reason = refusal.field === undefined ? refusal.reason : `${refusal.field}: ${refusal.reason}`;
+    return [{ kind: 'giveBack', shipId, settingsVersion, reason, ...(entry !== undefined && { entry }) }];
+  }
+  return [{ kind: 'refuse', shipId, settingsVersion, refusal }];
+}
 
 export function reconcile(state: TrierarchState, context: ReconcileContext): Reconciled {
   const { observed, configuration, requests, now } = context;
@@ -95,7 +125,15 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
       actions.push({ kind: 'release', shipId: entry.shipId });
       continue;
     }
-    const step = request.settingsVersion === entry.settingsVersion ? trustedStep(entry, { step: stepOf(entry, { ...context, canStart: canStart() }), state: next, context }) : newVersionStep(entry, { request, state: next, context });
+    const step =
+      request.settingsVersion === entry.settingsVersion
+        ? trustedStep(entry, { step: stepOf(entry, { ...context, canStart: canStart() }), request, state: next, context })
+        : newVersionStep(entry, { request, state: next, context });
+    if (step.isGivenBack === true) {
+      next = removeEntry(next, entry.shipId);
+      actions.push(...step.actions);
+      continue;
+    }
     const after = step.entry ?? entry;
     next = step.entry === undefined ? next : putEntry(next, step.entry);
     actions.push(...step.actions);
@@ -115,9 +153,7 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
     }
     const checked = checkSettings(request.settings, { shipId: request.shipId, configuration, state: next, trusted: context.trusted });
     if (!checked.isOk) {
-      if (next.refused[request.shipId] !== request.settingsVersion) {
-        actions.push({ kind: 'refuse', shipId: request.shipId, settingsVersion: request.settingsVersion, refusal: checked.error });
-      }
+      actions.push(...uncrewable({ request, refusal: checked.error, state: next }));
       continue;
     }
     if (canStart()) {
@@ -184,17 +220,20 @@ function entryOf(checked: CheckedSettings, at: { shipId: ShipId; settingsVersion
  * A new settings version of a request it crews (Restart or Edit): the
  * session stops and the ship is crewed again with that version, in its
  * folder, with a fresh restart budget. It is no release: the worktree stays.
- * Settings this trierarch cannot crew are refused to argo, and the entry
- * stays as it was.
+ * Settings this trierarch cannot crew are given back while the crew is not
+ * final, its entry ending; once it is final, argo is told and the entry stays
+ * as it was.
  */
 function newVersionStep(entry: Entry, at: { request: AssignedRequest; state: TrierarchState; context: ReconcileContext }): Step {
   const { request, state, context } = at;
   const checked = checkSettings(request.settings, { shipId: entry.shipId, configuration: context.configuration, state, trusted: context.trusted });
   if (!checked.isOk) {
+    const uncrewed = uncrewable({ request, refusal: checked.error, state, entry });
+    if (uncrewed.some((action) => action.kind === 'giveBack')) {
+      return { isGivenBack: true, actions: uncrewed, starts: 0 };
+    }
     const step = stepOf(entry, { ...context, canStart: false });
-    return state.refused[entry.shipId] === request.settingsVersion
-      ? step
-      : { ...step, actions: [...step.actions, { kind: 'refuse', shipId: entry.shipId, settingsVersion: request.settingsVersion, refusal: checked.error }] };
+    return { ...step, actions: [...step.actions, ...uncrewed] };
   }
   const fresh = entryOf(checked.value, { shipId: entry.shipId, settingsVersion: request.settingsVersion, now: context.now });
   return {
@@ -210,21 +249,20 @@ function newVersionStep(entry: Entry, at: { request: AssignedRequest; state: Tri
 /**
  * A step that would start the entry's session, held while its harness does
  * not trust its repository or folder (#381): trust is checked before every
- * launch, a restart too. The entry stays as it is and argo is told once per
- * settings version.
+ * launch, a restart too. While the crew is not final the request is given
+ * back and the entry ends (#382); once it is final, the entry stays as it is
+ * and argo is told once per settings version.
  */
-function trustedStep(entry: Entry, at: { step: Step; state: TrierarchState; context: ReconcileContext }): Step {
-  const { step, state, context } = at;
+function trustedStep(entry: Entry, at: { step: Step; request: AssignedRequest; state: TrierarchState; context: ReconcileContext }): Step {
+  const { step, request, state, context } = at;
   const isLaunching = step.actions.some((action) => action.kind === 'crew' || action.kind === 'launch');
   const refusal = isLaunching ? trustRefusal({ harness: entry.harness, workspace: entry.workspace, trusted: context.trusted }) : undefined;
   if (refusal === undefined) {
     return step;
   }
   const held = step.actions.filter((action) => action.kind !== 'crew' && action.kind !== 'launch');
-  return {
-    actions: state.refused[entry.shipId] === entry.settingsVersion ? held : [...held, { kind: 'refuse', shipId: entry.shipId, settingsVersion: entry.settingsVersion, refusal }],
-    starts: 0,
-  };
+  const uncrewed = uncrewable({ request, refusal, state, entry });
+  return { ...(uncrewed.some((action) => action.kind === 'giveBack') && { isGivenBack: true }), actions: [...held, ...uncrewed], starts: 0 };
 }
 
 function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean }): Step {

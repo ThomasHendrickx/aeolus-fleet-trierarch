@@ -1,4 +1,4 @@
-import { assignedCrewRequestsOutputSchema, clearRequestsOutputSchema, idSchema, receivedDeliverySchema, shipDetailOutputSchema, type ShipId } from '@aeolus-fleet/common';
+import { assignedCrewRequestsOutputSchema, clearRequestsOutputSchema, giveBackCrewRequestOutputSchema, idSchema, receivedDeliverySchema, shipDetailOutputSchema, type ShipId } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
 import type { Delivery, FleetPort } from '../core/ports.js';
@@ -24,13 +24,13 @@ const SESSION_HARNESS = 'claude-code';
 
 const refusalSchema = z.object({ code: z.string(), message: z.string() });
 
-/** A refusal from the fleet: its code and message. */
+/** A refusal from the fleet: its code and message, and both together as the error's message. */
 export class FleetRefusal extends Error {
   constructor(
     readonly code: string,
-    message: string,
+    readonly said: string,
   ) {
-    super(`${code}: ${message}`);
+    super(`${code}: ${said}`);
   }
 }
 
@@ -39,8 +39,6 @@ export interface RestFleet extends FleetPort {
   receive(signal?: AbortSignal): Promise<Delivery[]>;
   /** Registers a ship with its secret, as the trierarch itself at init: its crew token. */
   registerSelf(crew: { shipId: ShipId; secret: string }): Promise<{ crewToken: string }>;
-  /** The trierarch's own ship, as its crew token says: it answers while the lease holds. */
-  whoami(): Promise<{ shipId: ShipId; name: string }>;
 }
 
 export function createRestFleet(options: { fleetUrl: string; crewToken: string }): RestFleet {
@@ -136,6 +134,17 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string }
       (await call({ path: '/fleet/assignedCrewRequests', answers: assignedCrewRequestsOutputSchema })).map(({ shipId, settings, settingsVersion, status }) => ({ shipId, settings, settingsVersion, status })),
     writeStatus: async (shipId, { status, attempt, startedAt }) => {
       await call({ path: '/fleet/reportCrewStatus', body: { shipId, status, attempt, startedAt: startedAt?.toISOString() ?? null }, answers: z.unknown() });
+    },
+    giveBack: async (shipId, { settingsVersion, reason }) => {
+      try {
+        await call({ path: '/fleet/giveBackCrewRequest', body: { shipId, settingsVersion, reason }, answers: giveBackCrewRequestOutputSchema });
+        return { kind: 'givenBack' };
+      } catch (error) {
+        if (error instanceof FleetRefusal) {
+          return { kind: 'refused', code: error.code, message: error.said };
+        }
+        throw error;
+      }
     },
     confirmRelease: async (shipId) => {
       await call({ path: '/fleet/confirmCrewRelease', body: { shipId }, answers: z.unknown() });
