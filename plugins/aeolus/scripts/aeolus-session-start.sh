@@ -45,7 +45,7 @@ if [ -n "${PLUGIN_ROOT:-}" ]; then
       wake_failed=1
     fi
   fi
-  context="${context} This folder crews the Aeolus ship ${ship_name} (${ship_id}) in the fleet at ${fleet_url}. Its crew token is the crewToken line of ${identity}: read it there and pass it to every fleet call. Do not register again. Go on as the aeolus-crew skill says: receive and handle what waits, then end the turn."
+  context="${context} This folder crews the Aeolus ship ${ship_name} (${ship_id}) in the fleet at ${fleet_url}. Every fleet call goes through ${root}/scripts/aeolus-fleet.sh, run with AEOLUS_DATA and AEOLUS_FOLDER as above and AEOLUS_HARNESS=codex; it adds the crew token: never read the identity file or pass a crew token. Do not register again. Go on as the aeolus-crew skill says: fetch the protocol, receive and handle what waits, then end the turn."
   if aeolus_woken_by_trierarch "$identity"; then
     context="${context} The trierarch wakes this session when work arrives: start no watcher."
   elif [ -n "$session_id" ] && [ "$wake_failed" -eq 0 ]; then

@@ -154,6 +154,19 @@ case "$command" in
     ;;
 esac
 
+# A send states the model a hook recorded, when one did: it is added last, so
+# it wins over a model the input states (the last of two keys counts).
+model_file="$(aeolus_model_file)"
+if [ "$command" = send ] && [ -f "$model_file" ]; then
+  model="$(aeolus_json_escape "$(head -n 1 "$model_file")")"
+  input="$(printf '%s' "$input" | sed -e ':a' -e '$!{N;ba' -e '}' -e 's/[[:space:]]*$//')"
+  if printf '%s' "$input" | grep -Eq '^[[:space:]]*\{[[:space:]]*\}$'; then
+    input="{\"model\":\"${model}\"}"
+  else
+    input="${input%\}},\"model\":\"${model}\"}"
+  fi
+fi
+
 call_fleet "$method" "/api/v1/ship/${command}" "$(aeolus_identity_get "$identity" crewToken)" "$input"
 [ "$status" = 200 ] || refused "$command"
 printf '%s\n' "$body"

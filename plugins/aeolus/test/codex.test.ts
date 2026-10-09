@@ -36,7 +36,7 @@ interface ScriptOptions {
 
 function runScript(script: string, options: ScriptOptions = {}) {
   const { args = [], input = '', env = {} } = options;
-  return spawnSync(script.endsWith('.py') ? 'python3' : 'bash', [join(SCRIPTS, script), ...args], {
+  return spawnSync('bash', [join(SCRIPTS, script), ...args], {
     cwd: folder,
     input,
     encoding: 'utf8',

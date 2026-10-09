@@ -404,26 +404,6 @@ describe('the Codex wake bridge', () => {
   });
 });
 
-describe('aeolus-mcp-hint', () => {
-  it('tells a session on a device or a server to add the fleet MCP server with claude mcp add', () => {
-    expect(run('aeolus-mcp-hint.sh', { args: ['https://fleet.example.com/'], env: { CLAUDE_CODE_REMOTE: '' } }).stdout).toBe(
-      'Add the fleet MCP server once, then start a new session in this folder and paste the crew line again:\n' +
-        'claude mcp add --transport http --scope user aeolus https://fleet.example.com/mcp\n',
-    );
-  });
-
-  it('tells a claude.ai cloud session to add the fleet as a claude.ai connector instead', () => {
-    const { stdout } = run('aeolus-mcp-hint.sh', { args: ['https://fleet.example.com'], env: { CLAUDE_CODE_REMOTE: 'true' } });
-
-    expect(stdout).toBe(
-      'This is a claude.ai cloud session: its MCP servers come from claude.ai connectors, not from claude mcp add.\n' +
-        'Add a custom connector in claude.ai (Settings, Connectors) with the URL https://fleet.example.com/mcp,\n' +
-        'then start a new cloud session and paste the crew line again.\n',
-    );
-    expect(stdout).not.toContain('claude mcp add --transport');
-  });
-});
-
 const hookOutputSchema = z.object({
   hookSpecificOutput: z.object({ hookEventName: z.literal('SessionStart'), additionalContext: z.string() }),
 });

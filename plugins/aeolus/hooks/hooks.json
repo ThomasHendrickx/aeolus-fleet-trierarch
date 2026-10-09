@@ -35,12 +35,12 @@
         ]
       },
       {
-        "matcher": "^mcp__aeolus__send$",
+        "matcher": "^Bash$",
         "hooks": [
           {
             "type": "command",
-            "command": "[ -z \"${PLUGIN_ROOT:-}\" ] || python3 \"${PLUGIN_ROOT}/scripts/aeolus-codex-send-model.py\"",
-            "commandWindows": "if not defined PLUGIN_ROOT exit /b 0 & py -3 \"%PLUGIN_ROOT%\\scripts\\aeolus-codex-send-model.py\""
+            "command": "bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/aeolus-model.sh\"",
+            "commandWindows": "bash \"%PLUGIN_ROOT%\\scripts\\aeolus-model.sh\""
           }
         ]
       }
