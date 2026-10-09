@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,9 +19,10 @@ import { freePort } from './support/web.js';
 import { newKey } from '../packages/core/test/support/keys.js';
 
 // The aeolus plugin in a real interactive Claude Code session, driven in tmux
-// against a fleet on this machine: the session crews a ship with the crew
-// line, answers a message sent while it is idle without anyone touching it,
-// and does again after /clear. It needs a logged-in Claude Code and tmux, so
+// against a fleet on this machine and with no fleet MCP server: the session
+// crews a ship with the crew line, answers a message sent while it is idle
+// without anyone touching it, and does again after /clear, and its crew token
+// never shows on its screen or in its transcript (#104, #264). It needs a logged-in Claude Code and tmux, so
 // it runs only when AEOLUS_PLUGIN_E2E=1, never in CI.
 
 const isEnabled = process.env.AEOLUS_PLUGIN_E2E === '1';
@@ -47,6 +48,17 @@ function tmux(...args: string[]): string {
 
 function pane(): string {
   return tmux('capture-pane', '-t', TMUX_SESSION, '-p');
+}
+
+/** Everything the session showed, its scrollback included. */
+function wholePane(): string {
+  return tmux('capture-pane', '-t', TMUX_SESSION, '-p', '-S', '-');
+}
+
+/** The session's transcripts: Claude Code keeps them per project folder, named by its path. */
+function transcripts(): string[] {
+  const project = join(homedir(), '.claude', 'projects', realpathSync(folder).replace(/[^a-zA-Z0-9]/g, '-'));
+  return existsSync(project) ? readdirSync(project).filter((file) => file.endsWith('.jsonl')).map((file) => readFileSync(join(project, file), 'utf8')) : [];
 }
 
 /** Types a line into the session and sends it, as the operator would. */
@@ -131,8 +143,6 @@ describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Claude Code ses
     crewLine = `/aeolus:crew ${fleetUrl} ${shipId} ${commissioned.secret ?? ''}`;
 
     folder = mkdtempSync(join(tmpdir(), 'aeolus-plugin-e2e-'));
-    const mcpConfig = join(folder, '..', `${TMUX_SESSION}-mcp.json`);
-    writeFileSync(mcpConfig, JSON.stringify({ mcpServers: { aeolus: { type: 'http', url: `${fleetUrl}/mcp` } } }));
     try {
       tmux('kill-session', '-t', TMUX_SESSION);
     } catch {
@@ -157,10 +167,10 @@ describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Claude Code ses
   });
 
   it('crews the ship with the crew line, and answers a message sent while it is idle, without anyone touching it', async () => {
-    const mcpConfig = join(folder, '..', `${TMUX_SESSION}-mcp.json`);
+    // No MCP server at all: the plugin's scripts make every fleet call.
     tmux(
       'new-session', '-d', '-s', TMUX_SESSION, '-x', '200', '-y', '50', '-c', folder,
-      `claude --plugin-dir '${PLUGIN_DIR}' --mcp-config '${mcpConfig}' --strict-mcp-config --dangerously-skip-permissions`,
+      `claude --plugin-dir '${PLUGIN_DIR}' --mcp-config '{"mcpServers":{}}' --strict-mcp-config --dangerously-skip-permissions`,
     );
     await until(() => {
       const shown = pane();
@@ -185,4 +195,16 @@ describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Claude Code ses
     await expectAnswered('Answer this message with a reply whose payload is exactly: PONG 2', 'PONG 2');
     await until(isWatching, 'the watcher to run again');
   }, 2 * SESSION_TIMEOUT_MS);
+
+  it('never shows the crew token on its screen or in its transcript', () => {
+    const file = identityFile();
+    const crewToken = file === undefined ? undefined : /^crewToken=(.+)$/m.exec(readFileSync(file, 'utf8'))?.[1];
+
+    expect(crewToken).toMatch(/^aeolus_ct_v1_/);
+    expect(wholePane()).not.toContain(crewToken);
+    expect(transcripts()).not.toHaveLength(0);
+    for (const transcript of transcripts()) {
+      expect(transcript).not.toContain(crewToken);
+    }
+  });
 });
