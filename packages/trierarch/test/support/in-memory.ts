@@ -363,6 +363,8 @@ export class InMemoryHarness implements HarnessPort {
   readonly turns = new Map<string, Turn>();
   /** What each ship's session shows in its launch window: activity unless a test sets otherwise. */
   readonly seen = new Map<ShipId, LaunchSeen>();
+  /** Each screen it was asked to read, with the model the session launched with. */
+  readonly asked: { shipId: ShipId; model?: string }[] = [];
   /** Set to make every launch fail, as when the harness's CLI cannot start: the entry stays crewing. */
   isFailingLaunch = false;
 
@@ -401,7 +403,8 @@ export class InMemoryHarness implements HarnessPort {
     return Promise.resolve();
   }
 
-  launchSeen(session: { shipId: ShipId }): Promise<LaunchSeen> {
+  launchSeen(session: { shipId: ShipId; model?: string }): Promise<LaunchSeen> {
+    this.asked.push(session);
     return Promise.resolve(this.seen.get(session.shipId) ?? { kind: 'active' });
   }
 }

@@ -2,6 +2,7 @@ import type { ShipId } from '@aeolus-fleet/common';
 import { describe, expect, it } from 'vitest';
 
 import { aTrierarch, CONFIGURATION, crewSettings, NOTES_FOLDER, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
+import type { LaunchSeen } from './ports.js';
 import { RESTART_BUDGET } from './restart-policy.js';
 
 const SECOND_MS = 1000;
@@ -9,13 +10,26 @@ const MINUTE_MS = 60 * SECOND_MS;
 const SCOUT_FOLDER = `${WORKTREE_ROOT}/aeolus-fleet/scout`;
 const WITH_CODEX = { ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: { flags: [], options: {} } } };
 
-/** A ship whose crew request is assigned to the trierarch, crewed by one pass: its id. */
+/** A ship whose crew request is assigned to the trierarch, crewed by one pass and running from the next, once its session shows activity: its id. */
 async function aCrewedShip(trierarch: Trierarch, settings: Record<string, unknown> = {}) {
   const shipId = trierarch.fleet.commission('scout');
   trierarch.fleet.request(shipId, crewSettings(settings));
   await trierarch.pass();
+  await trierarch.pass();
   return shipId;
 }
+
+/** A ship crewed by one pass, whose session shows what is given in its launch window: its id. */
+async function aLaunchedShip(trierarch: Trierarch, at: { seen: LaunchSeen; settings?: Record<string, unknown> }) {
+  const shipId = trierarch.fleet.commission('scout');
+  trierarch.harness.seen.set(shipId, at.seen);
+  trierarch.fleet.request(shipId, crewSettings(at.settings ?? {}));
+  await trierarch.pass();
+  return shipId;
+}
+
+/** Claude Code as detection found it on the machine. */
+const DETECTED = { 'claude-code': { version: '2.1.295', detectedAt: new Date('2026-10-09T08:00:00Z'), confirmedAt: null, options: {} } };
 
 /** Lets the session die until the restart budget is spent. */
 async function crashForGood(trierarch: Trierarch, shipId: ShipId) {
@@ -378,6 +392,129 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'running', exits: [], folder: SCOUT_FOLDER });
     expect(trierarch.processes.sessions.get(shipId)).toBe('running');
     expect(trierarch.fleet.requestOf(shipId).status).toBe('running');
+  });
+});
+
+describe('the launch window: a crew is final once its session shows activity (#382)', () => {
+  it('keeps a ship it crewed crewing, writing no running, while its session shows no activity', async () => {
+    const trierarch = aTrierarch();
+
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' } });
+    await trierarch.pass();
+
+    expect(statusesOf(trierarch, shipId)).toEqual(['crewing']);
+    expect(trierarch.state.current().entries[shipId]?.state).toBe('crewing');
+    expect(trierarch.processes.sessions.get(shipId)).toBe('running');
+    expect(trierarch.harness.launches).toHaveLength(1);
+  });
+
+  it('writes running once its session shows activity within the minute, with when the session started', async () => {
+    const trierarch = aTrierarch();
+    const startedAt = trierarch.clock.now();
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.clock.advance(20 * SECOND_MS);
+    trierarch.harness.seen.set(shipId, { kind: 'active' });
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.statuses.filter((each) => each.shipId === shipId)).toEqual([
+      { shipId, status: 'crewing', attempt: 0, startedAt: null },
+      { shipId, status: 'running', attempt: 0, startedAt },
+    ]);
+    expect(trierarch.state.current().entries[shipId]?.state).toBe('running');
+  });
+
+  it('reads the screen of its session for the model it launched with', async () => {
+    const trierarch = aTrierarch();
+
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' }, settings: { options: { model: 'sonnet' } } });
+    await trierarch.pass();
+
+    expect(trierarch.harness.asked).toEqual([{ shipId, model: 'sonnet' }]);
+  });
+
+  it('gives the request back when its session refused the model it launched with, naming the harness, its version and the model: the session stops, its identity and clean worktree go', async () => {
+    const trierarch = aTrierarch(CONFIGURATION, DETECTED);
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'refused', model: 'sonnet' }, settings: { options: { model: 'sonnet' } } });
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 1, reason: 'mac-studio: claude-code 2.1.295 refused sonnet' }]);
+    expect(trierarch.processes.sessions.has(shipId)).toBe(false);
+    expect(trierarch.harness.identities.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.state.current().entries).toEqual({});
+    expect(trierarch.fleet.shipOf(shipId).status).toBe('awaitingCrew');
+    expect(statusesOf(trierarch, shipId)).toEqual(['crewing']);
+  });
+
+  it("names the model its session refused when it launched with none, the harness's own default", async () => {
+    const trierarch = aTrierarch({ ...CONFIGURATION, harnesses: { 'claude-code': { flags: [], options: {} } } }, DETECTED);
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'refused', model: 'claude-opus-5-5' } });
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.asked).toEqual([{ shipId }]);
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 1, reason: 'mac-studio: claude-code 2.1.295 refused claude-opus-5-5' }]);
+  });
+
+  it('names the harness without a version when detection found none', async () => {
+    const trierarch = aTrierarch();
+    await aLaunchedShip(trierarch, { seen: { kind: 'refused', model: 'opus' } });
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack.map((each) => each.reason)).toEqual(['mac-studio: claude-code refused opus']);
+  });
+
+  it('gives the request back when its session shows no activity within a minute of its start', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.clock.advance(MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 1, reason: 'mac-studio: no activity within a minute of its start' }]);
+    expect(trierarch.processes.sessions.has(shipId)).toBe(false);
+    expect(trierarch.state.current().entries).toEqual({});
+  });
+
+  it('waits out the minute before it gives the request back', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.clock.advance(MINUTE_MS - SECOND_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([]);
+    expect(trierarch.state.current().entries[shipId]?.state).toBe('crewing');
+  });
+
+  it('reads no screen once its session showed activity, and never gives a final crew back', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'active' } });
+    await trierarch.pass();
+    trierarch.harness.seen.set(shipId, { kind: 'none' });
+    trierarch.clock.advance(2 * MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.asked).toHaveLength(1);
+    expect(trierarch.fleet.givenBack).toEqual([]);
+    expect(trierarch.state.current().entries[shipId]?.state).toBe('running');
+  });
+
+  it('checks the start of a new settings version again: crewing until its session shows activity', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.seen.set(shipId, { kind: 'none' });
+    trierarch.fleet.requestAgain(shipId, crewSettings({ options: { model: 'sonnet' } }));
+    await trierarch.pass();
+    trierarch.clock.advance(MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 2, reason: 'mac-studio: no activity within a minute of its start' }]);
   });
 });
 
