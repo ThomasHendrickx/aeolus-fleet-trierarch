@@ -6,6 +6,8 @@ import { SHIP_PROTOCOL } from '../../../packages/core/src/adapters/trpc/ship-pro
 
 const claudeSkill = readFileSync(new URL('../skills/crew-a-ship/SKILL.md', import.meta.url), 'utf8');
 const codexSkill = readFileSync(new URL('../skills/aeolus-crew/SKILL.md', import.meta.url), 'utf8');
+const codexWake = readFileSync(new URL('../skills/aeolus-wake/SKILL.md', import.meta.url), 'utf8');
+const codexShip = readFileSync(new URL('../skills/aeolus-ship/SKILL.md', import.meta.url), 'utf8');
 const protocolRules = SHIP_PROTOCOL.split('\n').filter((line) => /^\d+\. /.test(line));
 
 // The ship protocol lives once, in the fleet, which states it in its MCP
@@ -79,5 +81,26 @@ describe('the crew-a-ship skill', () => {
   it('tells a session the trierarch wakes to start no watcher, in both harnesses', () => {
     expect(claudeSkill).toContain('When "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-identity.sh" show says `wakes: the trierarch`, start no watcher and end your turn: the trierarch wakes this session.');
     expect(codexSkill).toContain('When `scripts/aeolus-identity.sh show` says `wakes: the trierarch`, start no wake: the trierarch wakes this session.');
+  });
+});
+
+// LEASE_ENDED for a crew token the identity file no longer holds says nothing
+// about the folder's new crew: only the scripts, which know the token they
+// used, may forget the ship. A session never deletes the identity file on it.
+describe('LEASE_ENDED in the skills', () => {
+  const leaseEndedLines = (skill: string) => skill.split('\n').filter((line) => line.includes('LEASE_ENDED'));
+
+  it('has a Claude Code session stop calling the fleet, the plugin having forgotten the ship, and delete no identity file', () => {
+    expect(leaseEndedLines(claudeSkill).join('\n')).toContain('the plugin already forgot the ship');
+    for (const line of leaseEndedLines(claudeSkill)) {
+      expect(line).not.toContain('delete');
+    }
+  });
+
+  it('has a Codex session do the same in $aeolus-crew, $aeolus-wake and $aeolus-ship', () => {
+    expect(leaseEndedLines(codexSkill).join('\n')).toContain('the plugin already forgot the ship');
+    for (const line of [codexSkill, codexWake, codexShip].flatMap(leaseEndedLines)) {
+      expect(line).not.toContain('delete');
+    }
   });
 });

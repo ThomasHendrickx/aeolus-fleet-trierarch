@@ -265,8 +265,39 @@ describe('aeolus-wait', () => {
 
     await expect(start('aeolus-wait.sh').exited).resolves.toEqual({
       status: 3,
-      stdout: 'aeolus: LEASE_ENDED: the operator released scout; this session no longer crews it\n',
+      stdout: 'aeolus: LEASE_ENDED: the operator released scout; this session no longer crews it, and the plugin forgot it\n',
     });
+  });
+
+  it('forgets the ship on LEASE_ENDED with the crew token the identity file still holds', async () => {
+    fleet = await startStubFleet([{ status: 401, body: { code: 'LEASE_ENDED', message: 'This ship was released' } }]);
+    crew(fleet.url);
+
+    const { stdout } = await start('aeolus-wait.sh').exited;
+
+    expect(stdout).toContain('the plugin forgot it');
+    expect(statSync(identityFile(), { throwIfNoEntry: false })).toBeUndefined();
+  });
+
+  it('keeps the identity file, and watches on with its crew token, when the folder was crewed again while it watched', async () => {
+    let answerLeaseEnded = (): void => undefined;
+    const held = new Promise<void>((resolve) => {
+      answerLeaseEnded = resolve;
+    });
+    fleet = await startStubFleet([
+      { status: 401, body: { code: 'LEASE_ENDED', message: 'This ship was released' }, hold: held },
+      inbox(1),
+    ]);
+    const stub = fleet;
+    crew(stub.url);
+    const watcher = start('aeolus-wait.sh');
+    await expect.poll(() => stub.calls.length).toBe(1);
+    expect(run('aeolus-identity.sh', { args: ['write', stub.url, SHIP_ID, 'scout', 'aeolus_ct_v1_new_crew'] }).status).toBe(0);
+    answerLeaseEnded();
+
+    await expect(watcher.exited).resolves.toEqual({ status: 0, stdout: 'aeolus: 1 deliveries wait for scout: receive them\n' });
+    expect(stub.calls[1]?.authorization).toBe('Bearer aeolus_ct_v1_new_crew');
+    expect(readFileSync(identityFile(), 'utf8')).toContain('crewToken=aeolus_ct_v1_new_crew\n');
   });
 
   it('exits 5 when the fleet refuses the crew token', async () => {
