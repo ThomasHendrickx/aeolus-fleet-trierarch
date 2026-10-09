@@ -141,7 +141,15 @@ export interface HarnessPort {
   }): Promise<void>;
   turnOf(folder: string): Promise<Turn>;
   wake(session: { shipId: ShipId; folder: string }): Promise<void>;
+  /** What the session's screen shows in its launch window (#382), for the model it launched with; any model refused when it launched with none. */
+  launchSeen(session: { shipId: ShipId; model?: string }): Promise<LaunchSeen>;
 }
+
+/**
+ * What a session's screen shows in its launch window (#382): activity once
+ * its first prompt made a tool call, the model refused, or neither yet.
+ */
+export type LaunchSeen = { readonly kind: 'active' } | { readonly kind: 'refused'; readonly model: string } | { readonly kind: 'none' };
 
 /** A session the process supervisor runs, by ship id: running, or exited and kept so the exit is seen. */
 export interface ObservedSession {

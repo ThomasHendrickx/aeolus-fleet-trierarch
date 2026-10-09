@@ -16,10 +16,14 @@ export interface Tmux extends ProcessPort {
   start(session: { shipId: ShipId; folder: string; command: readonly string[] }): Promise<void>;
   /** Types the text into the ship's session and presses Enter, after `settleMs` when given. */
   type(at: { shipId: ShipId; text: string; settleMs?: number }): Promise<void>;
+  /** What the ship's session shows: its last lines, wrapped ones joined; empty with no session. */
+  screen(shipId: ShipId): Promise<string>;
 }
 
 const PREFIX = 'trierarch-';
 export const TMUX_SERVER = 'aeolus-trierarch';
+/** How many lines back a screen is read: the launch window's first prompt fits well within. */
+const SCREEN_LINES = 200;
 
 function sessionName(shipId: ShipId): string {
   return `${PREFIX}${shipId}`;
@@ -69,6 +73,10 @@ export function createTmux(options: { server?: string } = {}): Tmux {
         await wait(settleMs);
       }
       await must(['send-keys', '-t', target, 'Enter']);
+    },
+    screen: async (shipId) => {
+      const result = await tmux(['capture-pane', '-p', '-J', '-S', `-${String(SCREEN_LINES)}`, '-t', `=${sessionName(shipId)}:`]);
+      return result.status === 0 ? result.stdout : '';
     },
   };
 }

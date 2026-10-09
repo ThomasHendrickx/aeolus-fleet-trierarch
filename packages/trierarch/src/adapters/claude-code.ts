@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { AdapterFlag, HarnessPort } from '../core/ports.js';
+import { claudeCodeLaunchSeen } from './claude-code-screen.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
 import { effectiveFlags } from './flags.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
@@ -75,7 +76,7 @@ async function hasConversation(projects: string, folder: string): Promise<boolea
 export function createClaudeCodeHarness(options: {
   configuration: TrierarchConfiguration;
   plugin: AeolusPlugin;
-  sessions: Pick<Tmux, 'start' | 'type'>;
+  sessions: Pick<Tmux, 'start' | 'type' | 'screen'>;
   /** Claude Code's projects folder, where it keeps each folder's conversations. */
   projects: string;
   /** The program to run; `claude` unless a test runs another. */
@@ -103,5 +104,6 @@ export function createClaudeCodeHarness(options: {
     wake: async ({ shipId }) => {
       await sessions.type({ shipId, text: WAKE_PROMPT });
     },
+    launchSeen: async ({ shipId, model }) => claudeCodeLaunchSeen({ screen: await sessions.screen(shipId), ...(model !== undefined && { model }) }),
   };
 }

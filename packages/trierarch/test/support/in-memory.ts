@@ -11,6 +11,7 @@ import type {
   FleetShipStatus,
   GiveBackAnswer,
   HarnessPort,
+  LaunchSeen,
   Identity,
   InboxAnswer,
   LoggedAction,
@@ -360,6 +361,8 @@ export class InMemoryHarness implements HarnessPort {
   readonly launches: { shipId: ShipId; shipName: string; folder: string; workspace: TrierarchWorkspace; isFirstStart: boolean; firstPrompt?: string }[] = [];
   readonly wakes: ShipId[] = [];
   readonly turns = new Map<string, Turn>();
+  /** What each ship's session shows in its launch window: activity unless a test sets otherwise. */
+  readonly seen = new Map<ShipId, LaunchSeen>();
   /** Set to make every launch fail, as when the harness's CLI cannot start: the entry stays crewing. */
   isFailingLaunch = false;
 
@@ -396,6 +399,10 @@ export class InMemoryHarness implements HarnessPort {
   wake(session: { shipId: ShipId }): Promise<void> {
     this.wakes.push(session.shipId);
     return Promise.resolve();
+  }
+
+  launchSeen(session: { shipId: ShipId }): Promise<LaunchSeen> {
+    return Promise.resolve(this.seen.get(session.shipId) ?? { kind: 'active' });
   }
 }
 

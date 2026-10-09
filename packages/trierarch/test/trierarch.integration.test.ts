@@ -63,6 +63,7 @@ function standInSessions(): Tmux {
       return Promise.resolve();
     },
     type: () => Promise.resolve(),
+    screen: () => Promise.resolve(''),
   };
 }
 

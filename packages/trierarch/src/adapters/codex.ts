@@ -1,6 +1,7 @@
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { AdapterFlag, HarnessPort } from '../core/ports.js';
+import { codexLaunchSeen } from './codex-screen.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
 import { effectiveFlags } from './flags.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
@@ -49,7 +50,7 @@ export function codexCommandLine(at: { flags: readonly string[]; prompt: string;
 export function createCodexHarness(options: {
   configuration: TrierarchConfiguration;
   plugin: AeolusPlugin;
-  sessions: Pick<Tmux, 'start' | 'type'>;
+  sessions: Pick<Tmux, 'start' | 'type' | 'screen'>;
   /** The program to run; `codex` unless a test runs another. */
   command?: string;
 }): HarnessPort {
@@ -70,5 +71,6 @@ export function createCodexHarness(options: {
       // The space closes Codex's skill picker, which would otherwise take the Enter.
       await sessions.type({ shipId, text: `${WAKE_PROMPT} `, settleMs: CODEX_TYPING_SETTLE_MS });
     },
+    launchSeen: async ({ shipId, model }) => codexLaunchSeen({ screen: await sessions.screen(shipId), ...(model !== undefined && { model }) }),
   };
 }
