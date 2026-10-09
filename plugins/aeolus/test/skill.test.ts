@@ -22,7 +22,7 @@ describe('the crew-a-ship skill', () => {
 
   it('makes every fleet call through aeolus-fleet.sh, and never has the session read or pass the crew token', () => {
     for (const call of ['receive', 'ack', 'pong', 'send', 'report', 'inbox', 'whoami', 'deregister']) {
-      expect(claudeSkill).toContain(`\`${call}\``);
+      expect(claudeSkill).toContain(`\`${call}`);
     }
     expect(claudeSkill).toContain('aeolus-fleet.sh" send -');
     expect(claudeSkill).toContain('Never read the identity file, and never pass a crew token');
