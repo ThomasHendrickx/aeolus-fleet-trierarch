@@ -468,7 +468,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
       reason: 'options.model: model must be one of opus, sonnet',
     },
     { label: 'settings that are not crew settings', settings: { harness: 'claude-code' }, reason: 'workspace: Invalid input: expected object, received undefined' },
-  ])('does not crew settings with $label, and tells argo once per version', async ({ settings, reason }) => {
+  ])('does not crew settings with $label: it gives the request back with its machine and the field at fault as the reason, and tells argo nothing (#382)', async ({ settings, reason }) => {
     const trierarch = aTrierarch();
     const shipId = trierarch.fleet.commission('scout');
     trierarch.fleet.request(shipId, settings);
@@ -478,7 +478,78 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
 
     expect(trierarch.harness.launches).toEqual([]);
     expect(trierarch.fleet.statuses).toEqual([]);
-    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`scout (${shipId}): this trierarch cannot crew settings version 1: ${reason}`]);
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 1, reason: `mac-studio: ${reason}` }]);
+    expect(trierarch.fleet.requests.has(shipId)).toBe(false);
+    expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+
+  it('cuts the reason it gives back to 200 characters (#382)', async () => {
+    const values = Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`a-value-name-of-some-length-${String(index)}`, []]));
+    const trierarch = aTrierarch({ ...CONFIGURATION, harnesses: { 'claude-code': { flags: [], options: { model: { values } } } } });
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, crewSettings({ options: { model: 'haiku' } }));
+
+    await trierarch.pass();
+
+    const [given] = trierarch.fleet.givenBack;
+    expect(given?.reason).toHaveLength(200);
+    expect(given?.reason.startsWith('mac-studio: options.model: model must be one of a-value-name-of-some-length-0')).toBe(true);
+  });
+
+  it('tells argo once per version, as before, when the fleet holds its crew final already, as after its state was lost (#382)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, crewSettings({ harness: 'codex' }));
+    trierarch.fleet.holdStatus(shipId, 'running');
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([]);
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`scout (${shipId}): this trierarch cannot crew settings version 1: harness: This trierarch offers no harness codex`]);
+  });
+
+  it('tells argo once per version instead when the fleet refuses the give-back (#382)', async () => {
+    const trierarch = aTrierarch();
+    trierarch.fleet.isRefusingGiveBack = true;
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, crewSettings({ harness: 'codex' }));
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.fleet.requests.has(shipId)).toBe(true);
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`scout (${shipId}): this trierarch cannot crew settings version 1: harness: This trierarch offers no harness codex`]);
+  });
+
+  it('gives back a new settings version it cannot crew while its crew is not final: the session stops, its identity and clean worktree go, the lease ends (#382)', async () => {
+    const trierarch = aTrierarch();
+    trierarch.harness.isFailingLaunch = true;
+    const shipId = await aCrewedShip(trierarch);
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'crewing', folder: SCOUT_FOLDER });
+    trierarch.fleet.requestAgain(shipId, crewSettings({ harness: 'codex' }));
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 2, reason: 'mac-studio: harness: This trierarch offers no harness codex' }]);
+    expect(trierarch.state.current().entries).toEqual({});
+    expect(trierarch.harness.identities.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.fleet.shipOf(shipId).status).toBe('awaitingCrew');
+    expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+
+  it('tells argo once, as before, of a new settings version it cannot crew once its crew is final: the session runs on (#382)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.fleet.requestAgain(shipId, crewSettings({ harness: 'codex' }));
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([]);
+    expect(trierarch.processes.sessions.get(shipId)).toBe('running');
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`scout (${shipId}): this trierarch cannot crew settings version 2: harness: This trierarch offers no harness codex`]);
   });
 
   it.each([
@@ -494,7 +565,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
       settings: crewSettings({ workspace: { kind: 'folder', name: 'notes' } }),
       reason: 'workspace.name: claude-code does not trust the folder notes: add it with aeolus-trierarch init, which trusts it',
     },
-  ])('never crews settings in $label its harness does not trust, and tells argo once to add it with init (#381)', async ({ place, settings, reason }) => {
+  ])('never crews settings in $label its harness does not trust, and gives the request back saying to add it with init (#381, #382)', async ({ place, settings, reason }) => {
     const trierarch = aTrierarch();
     trierarch.trust.untrust('claude-code', place);
     const shipId = trierarch.fleet.commission('scout');
@@ -504,7 +575,24 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     await trierarch.pass();
 
     expect(trierarch.harness.launches).toEqual([]);
-    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`scout (${shipId}): this trierarch cannot crew settings version 1: ${reason}`]);
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 1, reason: `mac-studio: ${reason}` }]);
+    expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+
+  it('gives back a request whose crew is not final yet once its harness no longer trusts the repository it would start in (#381, #382)', async () => {
+    const trierarch = aTrierarch();
+    trierarch.harness.isFailingLaunch = true;
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.isFailingLaunch = false;
+    trierarch.trust.untrust('claude-code', { kind: 'repository', name: 'aeolus-fleet' });
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.launches).toEqual([]);
+    expect(trierarch.fleet.givenBack).toEqual([
+      { shipId, settingsVersion: 1, reason: 'mac-studio: workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it' },
+    ]);
+    expect(trierarch.state.current().entries).toEqual({});
   });
 
   it('checks trust with the harness the settings name: a repository only Codex does not trust is crewed on Claude Code (#381)', async () => {
