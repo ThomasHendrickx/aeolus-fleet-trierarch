@@ -129,7 +129,7 @@ export function createClaudeCodeDetector(deps: {
           ...(levels.length > 0 && { effort: optionOf(levels, '--effort') }),
         },
         ...(aliases.length === 0 && {
-          problem: `Claude Code ${version}'s --help names no model alias, so this machine declares no Claude Code model: add the ones you want to its configuration`,
+          problem: `Claude Code ${version}'s --help names no model alias, so this machine declares no Claude Code model until an update of Claude Code names one`,
         }),
       };
     },
