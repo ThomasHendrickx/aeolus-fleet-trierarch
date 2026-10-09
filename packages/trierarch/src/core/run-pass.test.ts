@@ -451,6 +451,36 @@ describe('the launch window: a crew is final once its session shows activity (#3
     expect(statusesOf(trierarch, shipId)).toEqual(['crewing']);
   });
 
+  it('keeps the model its session refused as refused for its harness, and tells argo once, naming the machine, the harness, its version, the model and the ship', async () => {
+    const trierarch = aTrierarch(CONFIGURATION, DETECTED);
+    const refused = { seen: { kind: 'refused', model: 'sonnet' }, settings: { options: { model: 'sonnet' } } } as const;
+    const shipId = await aLaunchedShip(trierarch, refused);
+    await trierarch.pass();
+    await aLaunchedShip(trierarch, refused);
+    await trierarch.pass();
+
+    expect(trierarch.refusals).toEqual([
+      { harness: 'claude-code', id: 'sonnet', at: trierarch.clock.now() },
+      { harness: 'claude-code', id: 'sonnet', at: trierarch.clock.now() },
+    ]);
+    expect(trierarch.fleet.toArgo).toEqual([
+      {
+        text: `mac-studio: claude-code 2.1.295 refused the model sonnet for scout (${shipId}): this machine offers it no more at this version, until aeolus-trierarch detect runs by hand`,
+        idempotencyKey: 'trierarch:refused-model:claude-code:2.1.295:sonnet',
+      },
+    ]);
+  });
+
+  it("keeps nothing refused and tells argo nothing when its session refused the harness's own default", async () => {
+    const trierarch = aTrierarch({ ...CONFIGURATION, harnesses: { 'claude-code': { flags: [], options: {} } } }, DETECTED);
+    await aLaunchedShip(trierarch, { seen: { kind: 'refused', model: 'claude-opus-5-5' } });
+
+    await trierarch.pass();
+
+    expect(trierarch.refusals).toEqual([]);
+    expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+
   it("names the model its session refused when it launched with none, the harness's own default", async () => {
     const trierarch = aTrierarch({ ...CONFIGURATION, harnesses: { 'claude-code': { flags: [], options: {} } } }, DETECTED);
     const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'refused', model: 'claude-opus-5-5' } });

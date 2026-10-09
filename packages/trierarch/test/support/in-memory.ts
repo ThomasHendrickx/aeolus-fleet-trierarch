@@ -546,7 +546,13 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
     detected,
   };
   const handle = createHandleDelivery({ fleet, logger });
-  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, workspace, trust, state, setup, clock, logger });
+  /** The models sessions refused, as the trierarch kept them. */
+  const refusals: { harness: string; id: string; at: Date }[] = [];
+  const refuseModel = (refused: { harness: string; id: string; at: Date }): Promise<void> => {
+    refusals.push(refused);
+    return Promise.resolve();
+  };
+  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, workspace, trust, state, setup, clock, logger, refuseModel });
   const uninstall = createUninstall({ processes, state });
   const reportSelf = createReportSelf({ fleet, processes, trust, state, setup });
 
@@ -557,7 +563,7 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
     return delivery;
   }
 
-  return { fleet, processes, harness, codex, workspace, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver };
+  return { fleet, processes, harness, codex, workspace, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver, refusals };
 }
 
 export type Trierarch = ReturnType<typeof aTrierarch>;
