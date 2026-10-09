@@ -192,6 +192,14 @@ export interface DetectedHarness {
   readonly options: Readonly<Record<string, ConfiguredOption>>;
   /** Why detection could not find what it should, for argo, once per version; none when it found it. */
   readonly problem?: string;
+  /** The model ids a session on this machine refused at this version (#382), never offered again until the version changes or a hand detect; none when none was. */
+  readonly refused?: readonly RefusedModel[];
+}
+
+/** A model id a session refused, and when it was seen on its screen. */
+export interface RefusedModel {
+  readonly id: string;
+  readonly at: Date;
 }
 
 /** What detection found, per harness. */

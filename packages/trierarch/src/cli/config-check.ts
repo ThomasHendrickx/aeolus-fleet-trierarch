@@ -1,9 +1,9 @@
 import { describeCommandLine, type CommandPart } from '../adapters/command-line.js';
 import { createDetectedFile } from '../adapters/detected-file.js';
-import { loadConfiguration } from '../adapters/files.js';
+import { loadConfiguration, TrierarchFileError } from '../adapters/files.js';
 import { describeFlags, effectiveFlags } from '../adapters/flags.js';
 import { adapterFlagsOf, commandLinesOf } from '../adapters/harnesses.js';
-import { withDetectedOptions } from '../core/detected-options.js';
+import { modelOptionsIgnored, withDetectedOptions } from '../core/detected-options.js';
 import type { AdapterFlag } from '../core/ports.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
 
@@ -31,8 +31,16 @@ export interface ConfigCheckReport {
 }
 
 export async function configCheck(paths: TrierarchPaths): Promise<ConfigCheckReport> {
+  const configured = await loadConfiguration(paths.config);
+  const [withModel, ...more] = modelOptionsIgnored(configured);
+  if (withModel !== undefined) {
+    // A running trierarch ignores it with a warning; the check says so, so the operator removes it (#382).
+    throw new TrierarchFileError(
+      `The configuration at ${paths.config} sets a model option for ${[withModel, ...more].join(', ')}: model ids come from detection only (#382), so remove it; aeolus-trierarch detect lists them`,
+    );
+  }
   // The detected options too (#365), as the running trierarch has them.
-  const configuration = withDetectedOptions(await loadConfiguration(paths.config), await createDetectedFile(paths.detected).load());
+  const configuration = withDetectedOptions(configured, await createDetectedFile(paths.detected).load());
   const adapterFlags = adapterFlagsOf(configuration);
   const harnesses = Object.fromEntries(
     Object.entries(configuration.harnesses).map(([name, harness]) => {

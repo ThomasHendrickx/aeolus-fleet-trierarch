@@ -23,6 +23,7 @@ const detectedSchema = z.record(
     confirmedAt: z.iso.datetime().nullable(),
     options: z.record(trierarchNameSchema, optionSchema),
     problem: z.string().optional(),
+    refused: z.array(z.strictObject({ id: z.string().min(1), at: z.iso.datetime() })).optional(),
   }),
 );
 
@@ -40,9 +41,14 @@ export function createDetectedFile(path: string): DetectedStore {
         return {};
       }
       return Object.fromEntries(
-        Object.entries(parsed.data).map(([harness, found]) => [
+        Object.entries(parsed.data).map(([harness, { refused, ...found }]) => [
           harness,
-          { ...found, detectedAt: new Date(found.detectedAt), confirmedAt: found.confirmedAt === null ? null : new Date(found.confirmedAt) },
+          {
+            ...found,
+            detectedAt: new Date(found.detectedAt),
+            confirmedAt: found.confirmedAt === null ? null : new Date(found.confirmedAt),
+            ...(refused !== undefined && { refused: refused.map(({ id, at }) => ({ id, at: new Date(at) })) }),
+          },
         ]),
       );
     },
