@@ -383,6 +383,38 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.harness.identities.get(SCOUT_FOLDER)?.crewToken).toBe(trierarch.fleet.shipOf(shipId).crewToken);
   });
 
+  it('row 12: a new settings version starts a fresh session with its first prompt, never continuing the old conversation (#443)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch, { firstPrompt: 'Review the open pull requests.' });
+    trierarch.fleet.requestAgain(shipId, crewSettings({ firstPrompt: 'Take slice 12.' }));
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.launches.at(-1)).toEqual({
+      shipId,
+      shipName: 'scout',
+      folder: SCOUT_FOLDER,
+      workspace: { kind: 'worktree', repository: 'aeolus-fleet' },
+      isFirstStart: true,
+      firstPrompt: 'Take slice 12.',
+    });
+  });
+
+  it('row 12: a session of the new settings version that dies continues its conversation, without the first prompt again (#443)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.fleet.requestAgain(shipId, crewSettings({ firstPrompt: 'Take slice 12.' }));
+    await trierarch.pass();
+    await trierarch.pass();
+    trierarch.processes.exit(shipId);
+
+    await trierarch.pass();
+    trierarch.clock.advance(5 * SECOND_MS);
+    await trierarch.pass();
+
+    expect(trierarch.harness.launches.at(-1)).toEqual({ shipId, shipName: 'scout', folder: SCOUT_FOLDER, workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, isFirstStart: false });
+  });
+
   it('row 12: a crashed request written again starts again with a fresh restart budget', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
