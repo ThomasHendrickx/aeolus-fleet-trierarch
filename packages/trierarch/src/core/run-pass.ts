@@ -4,6 +4,7 @@ import { putEntry, removeEntry, withState, type Entry, type TrierarchState } fro
 import { MODEL_OPTION } from './detected-options.js';
 import type { FleetPort, HarnessPort, LaunchSeen, LoggedAction, Logger, ProcessPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
+import type { RefuseModel } from './refuse-model.js';
 import type { Clock } from './shared/clock.js';
 
 /**
@@ -30,6 +31,8 @@ export interface RunPassDeps {
   setup: TrierarchSetup;
   clock: Clock;
   logger: Logger;
+  /** Keeps a model a session refused as refused, so the machine offers it no more (#382). */
+  refuseModel: RefuseModel;
 }
 
 const NEXT_AFTER_FAILURE = 'the next pass tries again; aeolus-trierarch status and list show where it stands';
@@ -119,6 +122,9 @@ async function carryOut(state: TrierarchState, at: CarryOut): Promise<TrierarchS
       return refuse(state, { action, deps });
     case 'giveBack':
       return giveBack(state, { action, deps });
+    case 'modelRefused':
+      await modelRefused({ action, deps });
+      return state;
     case 'confirm':
       await deps.fleet.confirmRelease(action.shipId);
       log(deps, { shipId: action.shipId, action: 'confirm', outcome: 'its request removed; this trierarch did not crew it' });
@@ -333,6 +339,24 @@ async function giveBack(state: TrierarchState, at: CarryOut & { action: Extract<
   }
   log(deps, { shipId, ...(entry?.shipName !== undefined && { shipName: entry.shipName }), action: 'giveBack', outcome: `given back: ${reason}` });
   return next;
+}
+
+/**
+ * A session refused the model it launched with (#382): the model is kept
+ * refused at its harness's version, so this machine offers it no more, and
+ * argo is told once per harness, version and model, as the machine and its
+ * harness are where to look.
+ */
+async function modelRefused(at: CarryOut & { action: Extract<Action, { kind: 'modelRefused' }> }): Promise<void> {
+  const { action, deps } = at;
+  const { shipId, shipName, harness, version, model } = action;
+  await deps.refuseModel({ harness, id: model, at: deps.clock.now() });
+  const machine = await deps.fleet.whoami();
+  await deps.fleet.reportToArgo({
+    text: `${machine.name}: ${harness} ${version} refused the model ${model} for ${shipName ?? shipId} (${shipId}): this machine offers it no more at this version, until aeolus-trierarch detect runs by hand`,
+    idempotencyKey: `trierarch:refused-model:${harness}:${version}:${model}`,
+  });
+  log(deps, { shipId, ...(shipName !== undefined && { shipName }), action: 'modelRefused', outcome: `${harness} ${version} refused ${model}, offered no more at this version` });
 }
 
 /** Tells argo, once per settings version, that this trierarch cannot crew them. */

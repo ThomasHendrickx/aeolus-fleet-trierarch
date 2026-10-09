@@ -13,10 +13,11 @@ import { createTrust } from '../adapters/trust.js';
 import { runningVersion } from '../adapters/version.js';
 import { createDetectHarnesses } from '../core/detect-harnesses.js';
 import { modelOptionsIgnored, withDetectedOptions } from '../core/detected-options.js';
+import { createRefuseModel } from '../core/refuse-model.js';
 import { createReportDetectionProblems } from '../core/report-detection-problems.js';
 import { createHandleDelivery } from '../core/handle-delivery.js';
 import { machineOf } from '../core/machine.js';
-import type { Delivery, Logger } from '../core/ports.js';
+import type { Delivery, Logger, TrierarchSetup } from '../core/ports.js';
 import { createReportSelf } from '../core/report-self.js';
 import { createRunPass } from '../core/run-pass.js';
 
@@ -35,7 +36,8 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const crew = await readCrewFile(paths.crewToken);
   const fleet = createRestFleet(crew);
   // Detected again only for a harness whose version changed since (#365); the operator's own options win.
-  const detectHarnesses = createDetectHarnesses({ detectors: createDetectors({ homeDirectory }), store: createDetectedFile(paths.detected), clock: { now: () => new Date() }, logger });
+  const detectedStore = createDetectedFile(paths.detected);
+  const detectHarnesses = createDetectHarnesses({ detectors: createDetectors({ homeDirectory }), store: detectedStore, clock: { now: () => new Date() }, logger });
   const detected = await detectHarnesses({ harnesses: Object.keys(configured.harnesses), by: 'start' });
   await createReportDetectionProblems({ fleet })(detected).catch((error: unknown) => {
     logger.warn(`Could not tell argo what detection found: ${error instanceof Error ? error.message : String(error)}`);
@@ -44,22 +46,37 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     logger.warn(`${harness}: the configuration's model option is ignored: model ids come from detection only (#382); remove it`);
   }
   const configuration = withDetectedOptions(configured, detected);
+  // What the machine offers changes while it runs, as sessions refuse models (#382): each pass and report reads it afresh.
+  let offered = { configuration, detected };
   const tmux = createTmux();
   const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, sessions: tmux });
   const workspace = createGitWorkspace({ configuration, root: configuration.worktreeRoot ?? paths.worktrees });
   const state = createJsonState(paths.state);
   const trust = createTrust({ configuration, homeDirectory, env });
   const clock = { now: () => new Date() };
-  const setup = {
-    configuration,
+  const setup: TrierarchSetup = {
+    get configuration() {
+      return offered.configuration;
+    },
     version: runningVersion(),
     adapterFlags: adapterFlagsOf(configuration),
     riskyFlags: riskyFlagsOf(configuration),
     machine: machineOf({ platform: process.platform, arch: process.arch }),
-    detected,
+    get detected() {
+      return offered.detected;
+    },
   };
+  const refuseModel = createRefuseModel({
+    store: detectedStore,
+    detect: detectHarnesses,
+    onDetected: (found) => {
+      const kept = Object.fromEntries(Object.entries(found).filter(([harness]) => harness in configured.harnesses));
+      offered = { configuration: withDetectedOptions(configured, kept), detected: kept };
+    },
+    logger,
+  });
   const handle = createHandleDelivery({ fleet, logger });
-  const runPass = createRunPass({ fleet, harnesses, processes: tmux, workspace, trust, state, setup, clock, logger });
+  const runPass = createRunPass({ fleet, harnesses, processes: tmux, workspace, trust, state, setup, clock, logger, refuseModel });
   const reportSelf = createReportSelf({ fleet, processes: tmux, trust, state, setup });
   // Each pass ends with the trierarch's own report: the first at start, then only when it changed.
   const pass = async (): Promise<void> => {

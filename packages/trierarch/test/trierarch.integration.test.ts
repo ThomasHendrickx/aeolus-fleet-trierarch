@@ -127,7 +127,7 @@ async function aTrierarchOnTheFleet() {
   const clock = { now: () => new Date() };
   const logger = { warn: () => undefined, action: () => undefined };
   const setup = { configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
-  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {} }), state, setup, clock, logger });
+  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {} }), state, setup, clock, logger, refuseModel: () => Promise.resolve() });
   const leasesOf = (shipId: ShipId) => database.lease.count({ where: { shipId, endedAt: null } });
   const worktree = join(paths.worktrees, 'aeolus-fleet', 'scout');
 

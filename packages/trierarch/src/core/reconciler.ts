@@ -1,6 +1,7 @@
 import type { CrewStatus, ShipId, TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import { checkSettings, trustRefusal, type CheckedSettings, type Refusal } from './check-settings.js';
+import { MODEL_OPTION } from './detected-options.js';
 import { putEntry, removeEntry, withState, type Entry, type KeptWorktree, type TrierarchState } from './entry.js';
 import type { ArgoReport, AssignedRequest, ClearRequestToMe, InboxAnswer, LaunchSeen, ObservedSession, ObservedWorktree, TrustedPlaces, Turn, WrittenStatus } from './ports.js';
 import { decideRestart, exitsInWindow } from './restart-policy.js';
@@ -47,6 +48,8 @@ export type Action =
    * crewed with, which ends first: session, identity and clean worktree.
    */
   | { readonly kind: 'giveBack'; readonly shipId: ShipId; readonly settingsVersion: number; readonly reason: string; readonly entry?: Entry }
+  /** A session refused the model it launched with (#382): kept refused at its harness's version, and argo told once. */
+  | { readonly kind: 'modelRefused'; readonly shipId: ShipId; readonly shipName?: string; readonly harness: string; readonly version: string; readonly model: string }
   | { readonly kind: 'argo'; readonly report: ArgoReport }
   /** A clear request (decision 0032): remove the kept worktree it names, or, when none is kept, confirm alone. */
   | { readonly kind: 'clear'; readonly shipId: ShipId; readonly repository: string; readonly kept?: KeptWorktree };
@@ -310,9 +313,9 @@ function launchStep(entry: Entry, context: ReconcileContext): Step {
   if (launchedAt === undefined || seen === undefined) {
     return { actions: [{ kind: 'crew', shipId: entry.shipId, isResumed: true }], starts: 1 };
   }
-  const giveBack = (reason: string): Step => ({
+  const giveBack = (reason: string, first: readonly Action[] = []): Step => ({
     isGivenBack: true,
-    actions: [{ kind: 'giveBack', shipId: entry.shipId, settingsVersion: entry.settingsVersion, reason, entry }],
+    actions: [...first, { kind: 'giveBack', shipId: entry.shipId, settingsVersion: entry.settingsVersion, reason, entry }],
     starts: 0,
   });
   switch (seen.kind) {
@@ -320,8 +323,14 @@ function launchStep(entry: Entry, context: ReconcileContext): Step {
       // Running since its session started, so the session start it writes is that start; the window is closed.
       return { entry: { ...running, state: 'running', since: launchedAt }, actions: [], starts: 0 };
     case 'refused': {
-      const version = context.versions[entry.harness];
-      return giveBack(`${entry.harness}${version === undefined ? '' : ` ${version}`} refused ${seen.model}`);
+      const { harness } = entry;
+      const version = context.versions[harness];
+      const reason = `${harness}${version === undefined ? '' : ` ${version}`} refused ${seen.model}`;
+      // The harness's own default refused drops nothing: the machine never offered it as a model.
+      if (entry.options[MODEL_OPTION] === undefined || version === undefined) {
+        return giveBack(reason);
+      }
+      return giveBack(reason, [{ kind: 'modelRefused', shipId: entry.shipId, ...(entry.shipName !== undefined && { shipName: entry.shipName }), harness, version, model: seen.model }]);
     }
     case 'none':
       return now.getTime() - new Date(launchedAt).getTime() >= LAUNCH_WINDOW_MS ? giveBack(NO_ACTIVITY_REASON) : NOTHING;
