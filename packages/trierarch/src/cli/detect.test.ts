@@ -45,4 +45,12 @@ describe('aeolus-trierarch detect (#365)', () => {
       ].join('\n'),
     );
   });
+
+  it('names the model ids the machine refused, which it offers no more (#382)', () => {
+    const refused: Detected = { codex: { ...DETECTED.codex, version: '0.160.1', detectedAt: AT, confirmedAt: AT, options: DETECTED.codex?.options ?? {}, refused: [{ id: 'gpt-6.1-sol', at: AT }] } };
+
+    expect(describeDetected({ harnesses: ['codex'], detected: refused })).toBe(
+      `codex 0.160.1: model gpt-6.1-sol, gpt-6-luna (default); models confirmed ${AT.toISOString()}; refused gpt-6.1-sol`,
+    );
+  });
 });
