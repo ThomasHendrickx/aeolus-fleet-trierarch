@@ -1,7 +1,8 @@
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 
-/** One call the stub fleet received: path, bearer token and JSON body. */
+/** One call the stub fleet received: method, path, bearer token and JSON body. */
 export interface StubCall {
+  method: string;
   path: string;
   authorization: string | undefined;
   body: string;
@@ -40,7 +41,7 @@ export async function startStubFleet(answers: readonly StubAnswer[]): Promise<St
   const calls: StubCall[] = [];
   const server: Server = createServer((request, response) => {
     void bodyOf(request).then(async (body) => {
-      calls.push({ path: request.url ?? '', authorization: request.headers.authorization, body });
+      calls.push({ method: request.method ?? '', path: request.url ?? '', authorization: request.headers.authorization, body });
       const answer = answers[Math.min(calls.length - 1, answers.length - 1)] ?? { status: 500, body: {} };
       await answer.hold;
       response.writeHead(answer.status, { 'content-type': 'application/json' });

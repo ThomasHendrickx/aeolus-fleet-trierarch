@@ -214,6 +214,7 @@ describe('aeolus-wait', () => {
     expect(stdout).toBe('aeolus: 2 deliveries wait for scout: receive them\n');
     expect(fleet.calls).toHaveLength(3);
     expect(fleet.calls[0]).toEqual({
+      method: 'POST',
       path: '/api/v1/ship/inbox',
       authorization: `Bearer ${CREW_TOKEN}`,
       body: '{"waitSeconds":25}',
