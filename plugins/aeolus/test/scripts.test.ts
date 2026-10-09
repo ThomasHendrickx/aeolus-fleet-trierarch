@@ -460,7 +460,7 @@ describe('the SessionStart hook', () => {
     expect(hook(payloadFor(folder))).toMatchObject({ status: 0, stdout: '' });
   });
 
-  it('tells a fresh context after /clear which ship it crews, where its crew token is, and to start the watcher', () => {
+  it('tells a fresh context after /clear which ship it crews, that aeolus-fleet.sh makes its fleet calls, and to start the watcher', () => {
     crew();
 
     const { status, stdout } = hook(payloadFor(folder, 'clear'));
@@ -468,7 +468,8 @@ describe('the SessionStart hook', () => {
     expect(status).toBe(0);
     const context = hookOutputSchema.parse(JSON.parse(stdout)).hookSpecificOutput.additionalContext;
     expect(context).toContain(`This folder crews the Aeolus ship scout (${SHIP_ID}) in the fleet at https://fleet.example.com.`);
-    expect(context).toContain(`Its crew token is the crewToken line of ${identityFile()}`);
+    expect(context).toContain('Every fleet call goes through "/plugin/scripts/aeolus-fleet.sh", which adds the crew token: never read the identity file or pass a crew token.');
+    expect(context).not.toContain('crewToken');
     expect(context).toContain('Do not register again.');
     expect(context).toContain('"/plugin/scripts/aeolus-wait.sh" as a background task');
     expect(context).toContain('When the watcher exits 6 (its 2-hour limit), just start it again.');
