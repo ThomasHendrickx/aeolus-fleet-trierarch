@@ -11,6 +11,12 @@ import { runningVersion } from '../adapters/version.js';
 import { aTrierarch, CONFIGURATION } from '../../test/support/in-memory.js';
 import { main, USAGE } from './main.js';
 
+/** The configuration as an operator writes it now (#382): no model, which comes from detection only, and an effort with its default. */
+const CONFIGURED = {
+  ...CONFIGURATION,
+  harnesses: { 'claude-code': { flags: ['--remote-control'], options: { effort: { values: { high: ['--effort', 'high'], low: ['--effort', 'low'] }, default: 'high' } } } },
+};
+
 let home: string;
 
 beforeEach(() => {
@@ -41,18 +47,18 @@ describe('aeolus-trierarch', () => {
 
   it('config check prints the effective flags per harness, reading the configuration --config names', async () => {
     const config = join(home, 'elsewhere.json');
-    writeFileSync(config, JSON.stringify(CONFIGURATION));
+    writeFileSync(config, JSON.stringify(CONFIGURED));
 
     const { output, code } = await main(['config', 'check', '--config', config], { HOME: home });
 
     expect(code).toBe(0);
     expect(output).toContain(`The configuration at ${config} fits.`);
-    expect(output).toContain('claude-code: --remote-control --model claude-opus-5-5');
+    expect(output).toContain('claude-code: --remote-control --effort high');
   });
 
-  it('config check gives the detected options too, an option the operator wrote winning by its name (#365)', async () => {
+  it('config check gives the detected options too, an option the operator wrote winning by its name, and the detected model always (#365, #382)', async () => {
     const config = join(home, 'detected.json');
-    writeFileSync(config, JSON.stringify(CONFIGURATION));
+    writeFileSync(config, JSON.stringify(CONFIGURED));
     mkdirSync(join(home, '.aeolus', 'trierarch'), { recursive: true });
     const detectedAt = '2026-10-08T15:00:00.000Z';
     writeFileSync(
@@ -69,20 +75,20 @@ describe('aeolus-trierarch', () => {
 
     const { output } = await main(['config', 'check', '--config', config], { HOME: home });
 
-    expect(output).toContain('  effort=high: --effort high');
-    expect(output).not.toContain('claude-haiku-4-5-20251001');
+    expect(output).toContain('  effort=low: --effort low');
+    expect(output).toContain('claude-haiku-4-5-20251001');
   });
 
   it('config check prints the command each harness launches, on a first start and a restart, with each flag marked as configured or added by the adapter', async () => {
     const config = join(home, 'both.json');
-    writeFileSync(config, JSON.stringify({ ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: { flags: ['--dangerously-bypass-approvals-and-sandbox'], options: {} } } }));
+    writeFileSync(config, JSON.stringify({ ...CONFIGURED, harnesses: { ...CONFIGURED.harnesses, codex: { flags: ['--dangerously-bypass-approvals-and-sandbox'], options: {} } } }));
 
     const { output } = await main(['config', 'check', '--config', config], { HOME: home });
 
     expect(output).toContain(
       [
-        '  first start: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --model claude-opus-5-5 (configuration) -- "<first prompt>"',
-        '  restart: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --model claude-opus-5-5 (configuration) --continue (adapter) -- /aeolus:wake',
+        '  first start: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) -- "<first prompt>"',
+        '  restart: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --continue (adapter) -- /aeolus:wake',
       ].join('\n'),
     );
     expect(output).toContain(
@@ -95,20 +101,20 @@ describe('aeolus-trierarch', () => {
 
   it('config check gives the flags each adapter adds, beside the configured ones, as JSON with --json', async () => {
     const config = join(home, 'elsewhere.json');
-    writeFileSync(config, JSON.stringify(CONFIGURATION));
+    writeFileSync(config, JSON.stringify(CONFIGURED));
 
     const { output } = await main(['config', 'check', '--json', '--config', config], { HOME: home });
 
     expect(JSON.parse(output)).toMatchObject({
       harnesses: {
         'claude-code': {
-          flags: ['--remote-control', '--model', 'claude-opus-5-5'],
+          flags: ['--remote-control', '--effort', 'high'],
           adapterFlags: [{ flag: '--continue', when: 'restart' }],
           restart: [
             { words: ['claude'] },
             { words: ['--remote-control'], source: 'configuration' },
             { words: ['[<repository or folder>] <ship>'], source: 'adapter' },
-            { words: ['--model', 'claude-opus-5-5'], source: 'configuration' },
+            { words: ['--effort', 'high'], source: 'configuration' },
             { words: ['--continue'], source: 'adapter' },
             { words: ['--', '/aeolus:wake'] },
           ],
@@ -117,9 +123,21 @@ describe('aeolus-trierarch', () => {
     });
   });
 
+  it('config check refuses a model option in the configuration: model ids come from detection only (#382)', async () => {
+    const config = join(home, 'with-model.json');
+    writeFileSync(config, JSON.stringify(CONFIGURATION));
+
+    const { output, code } = await main(['config', 'check', '--config', config], { HOME: home });
+
+    expect(code).toBe(1);
+    expect(stripVTControlCharacters(output)).toBe(
+      `The configuration at ${config} sets a model option for claude-code: model ids come from detection only (#382), so remove it; aeolus-trierarch detect lists them`,
+    );
+  });
+
   it('reads the configuration AEOLUS_TRIERARCH_CONFIG names', async () => {
     const config = join(home, 'env.json');
-    writeFileSync(config, JSON.stringify(CONFIGURATION));
+    writeFileSync(config, JSON.stringify(CONFIGURED));
 
     await expect(main(['config', 'check'], { HOME: home, AEOLUS_TRIERARCH_CONFIG: config })).resolves.toMatchObject({ code: 0 });
   });
@@ -175,13 +193,13 @@ describe('aeolus-trierarch', () => {
 
   it('config check gives the effective flags per harness as JSON with --json', async () => {
     const config = join(home, 'config.json');
-    writeFileSync(config, JSON.stringify(CONFIGURATION));
+    writeFileSync(config, JSON.stringify(CONFIGURED));
 
     const { output } = await main(['config', 'check', '--config', config, '--json'], { HOME: home });
 
     expect(JSON.parse(output)).toMatchObject({
       path: config,
-      harnesses: { 'claude-code': { flags: ['--remote-control', '--model', 'claude-opus-5-5'], options: { model: { opus: ['--model', 'claude-opus-5-5'], sonnet: ['--model', 'claude-sonnet-5-5'] } } } },
+      harnesses: { 'claude-code': { flags: ['--remote-control', '--effort', 'high'], options: { effort: { high: ['--effort', 'high'], low: ['--effort', 'low'] } } } },
     });
   });
 
@@ -200,7 +218,7 @@ describe('aeolus-trierarch', () => {
 
   it('takes a flag value written with an equals sign', async () => {
     const config = join(home, 'config.json');
-    writeFileSync(config, JSON.stringify(CONFIGURATION));
+    writeFileSync(config, JSON.stringify(CONFIGURED));
 
     await expect(main(['config', 'check', `--config=${config}`], { HOME: home })).resolves.toMatchObject({ code: 0 });
   });

@@ -1,7 +1,7 @@
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 import { describe, expect, it } from 'vitest';
 
-import { withDetectedOptions } from './detected-options.js';
+import { modelOptionsIgnored, withDetectedOptions } from './detected-options.js';
 import type { Detected } from './ports.js';
 
 const AT = new Date('2026-10-08T15:00:00.000Z');
@@ -40,3 +40,40 @@ describe('the detected options of a configuration (#365)', () => {
     expect(withDetectedOptions(configuration, {})).toEqual(configuration);
   });
 });
+
+describe('model ids from detection only (#382)', () => {
+  const operatorModel = { values: { opus: ['--model', 'claude-opus-5-5'] }, default: 'opus' };
+  const withOperatorModel: TrierarchConfiguration = {
+    ...configuration,
+    harnesses: { 'claude-code': { flags: [], options: { model: operatorModel, effort: operatorEffort } }, codex: { flags: [], options: { model: operatorModel } } },
+  };
+
+  it('never takes a model option the operator wrote: the detected one stands', () => {
+    expect(withDetectedOptions(withOperatorModel, detected).harnesses['claude-code']?.options).toEqual({ model: detectedModel, effort: operatorEffort });
+  });
+
+  it('offers no model at all for a harness detection found none for, whatever the configuration writes', () => {
+    expect(withDetectedOptions(withOperatorModel, {}).harnesses.codex?.options).toEqual({});
+  });
+
+  it('names each harness whose configuration writes a model option, so the operator is told it is ignored', () => {
+    expect(modelOptionsIgnored(withOperatorModel)).toEqual(['claude-code', 'codex']);
+    expect(modelOptionsIgnored(configuration)).toEqual([]);
+  });
+
+  it('leaves out an id the machine refused, the default moving to the first id left', () => {
+    const codexModels = { values: { 'gpt-6.1-sol': ['-m', 'gpt-6.1-sol'], 'gpt-5.6-sol': ['-m', 'gpt-5.6-sol'] }, default: 'gpt-6.1-sol' };
+    const refusedDefault: Detected = { codex: { version: '0.160.1', detectedAt: AT, confirmedAt: AT, options: { model: codexModels }, refused: [{ id: 'gpt-6.1-sol', at: AT }] } };
+
+    expect(withDetectedOptions(configuration, refusedDefault).harnesses.codex?.options).toEqual({
+      model: { values: { 'gpt-5.6-sol': ['-m', 'gpt-5.6-sol'] }, default: 'gpt-5.6-sol' },
+    });
+  });
+
+  it('offers no model option once every detected id was refused', () => {
+    const allRefused: Detected = { codex: { version: '0.160.1', detectedAt: AT, confirmedAt: AT, options: { model: codexModel }, refused: [{ id: 'gpt-6.1-sol', at: AT }] } };
+
+    expect(withDetectedOptions(configuration, allRefused).harnesses.codex?.options).toEqual({});
+  });
+});
+
