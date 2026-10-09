@@ -92,7 +92,7 @@ function wakeThreadFile(): string {
 const inbox = (waiting: number) => ({ status: 200, body: { waiting } });
 
 describe('aeolus-identity', () => {
-  it("writes the folder's ship and shows it, naming the file that holds the crew token but never the token", () => {
+  it("writes the folder's ship and shows it, never the crew token", () => {
     crew();
 
     const shown = run('aeolus-identity.sh', { args: ['show'] });
