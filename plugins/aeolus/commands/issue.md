@@ -15,5 +15,5 @@ Keep the report to Aeolus behaviour only. No code, file contents, data or names 
    - "issue filed: <url>": it is filed on GitHub.
    - "issue draft: <path>" and "open: <link>": gh is not signed in. Show the operator both: the link opens the new issue, prefilled.
    - Exit 3, "not filed": the stripped report still carries what it names. Take that out of the draft and run it again.
-5. Send argo, the operator's ship (selector `{ "kind": "ship", "name": "argo" }`), one short message with a new idempotencyKey: exactly the text after "tell argo:" in the script's last line, which is `Issue filed: <url>`, or `Issue draft: <path>, open: <link>` with the path filtered. Only that, never the report itself.
+5. Send argo, the operator's ship (selector `{ "kind": "ship", "name": "argo" }`), through `"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-fleet.sh" send -` as the crew-a-ship skill says, one short message with a new idempotencyKey: exactly the text after "tell argo:" in the script's last line, which is `Issue filed: <url>`, or `Issue draft: <path>, open: <link>` with the path filtered. Only that, never the report itself.
 6. Say what was filed, or where the draft is. Then end your turn.

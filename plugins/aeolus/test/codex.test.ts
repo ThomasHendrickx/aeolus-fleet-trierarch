@@ -36,7 +36,7 @@ interface ScriptOptions {
 
 function runScript(script: string, options: ScriptOptions = {}) {
   const { args = [], input = '', env = {} } = options;
-  return spawnSync(script.endsWith('.py') ? 'python3' : 'bash', [join(SCRIPTS, script), ...args], {
+  return spawnSync('bash', [join(SCRIPTS, script), ...args], {
     cwd: folder,
     input,
     encoding: 'utf8',
@@ -95,11 +95,33 @@ describe('the Codex plugin package', () => {
     expect(readFileSync(join(PLUGIN, 'skills/aeolus-crew/SKILL.md'), 'utf8')).toContain('harness `codex`');
   });
 
+  it('leaves the crew token to the scripts: no Codex skill has the session read or pass it', () => {
+    for (const skill of ['aeolus-crew', 'aeolus-ship', 'aeolus-watch', 'aeolus-wake', 'aeolus-deregister', 'aeolus-issue']) {
+      expect(readFileSync(join(PLUGIN, 'skills', skill, 'SKILL.md'), 'utf8')).not.toMatch(/crewToken|the crew token/);
+    }
+  });
+
+  it('crews through aeolus-fleet.sh with harness codex, needing no fleet MCP server, and fetches the protocol from the fleet', () => {
+    const crew = readFileSync(join(PLUGIN, 'skills/aeolus-crew/SKILL.md'), 'utf8');
+
+    expect(crew).toContain("`scripts/aeolus-fleet.sh register <fleetUrl> <shipId> <secret> <location> [<squadronId>]`");
+    expect(crew).toContain('`scripts/aeolus-fleet.sh protocol`');
+    expect(crew).toContain('`scripts/aeolus-fleet.sh send -`');
+    expect(crew).not.toContain('aeolus-mcp-hint');
+  });
+
+  it('tells a session whose fleet calls get no answer about the one-time sandbox setup', () => {
+    const crew = readFileSync(join(PLUGIN, 'skills/aeolus-crew/SKILL.md'), 'utf8');
+
+    expect(crew).toContain('exits 6');
+    expect(crew).toContain('sandbox_workspace_write');
+  });
+
   it('wakes a session as /aeolus:wake does: identity and lease, waiting deliveries, the wake bridge armed again, and a status report', () => {
     const wake = readFileSync(join(PLUGIN, 'skills/aeolus-wake/SKILL.md'), 'utf8');
 
     expect(wake).toContain('scripts/aeolus-identity.sh show');
-    expect(wake).toContain('call `whoami`');
+    expect(wake).toContain('`scripts/aeolus-fleet.sh whoami`');
     expect(wake).toContain('LEASE_ENDED');
     expect(wake).toContain('act only if the ack succeeded');
     expect(wake).toContain('until it answers empty');
@@ -119,19 +141,19 @@ describe('the Codex plugin package', () => {
     expect(`${crew}\n${watch}\n${manifest}`).toContain('Codex Cloud cannot wake automatically');
   });
 
-  it('documents that model injection auto-approves sends and requires the aeolus MCP server name', () => {
+  it("documents Codex's one-time sandbox setup, and the Linux hosts where its sandbox cannot run", () => {
     const readme = readFileSync(join(PLUGIN, 'README.md'), 'utf8');
 
-    expect(readme).toContain('auto-approves every Aeolus send');
-    expect(readme).toContain('MCP server must be named `aeolus`');
+    expect(readme).toContain('network_access = true');
+    expect(readme).toContain('writable_roots');
+    expect(readme).toContain('unprivileged user namespaces');
   });
 
   it('launches shared hooks from the root variable each harness provides', () => {
     const hooks = JSON.stringify(json(join(PLUGIN, 'hooks/hooks.json')));
 
     expect(hooks).toContain('${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/aeolus-session-start.sh');
-    expect(hooks).toContain('${PLUGIN_ROOT}/scripts/aeolus-codex-send-model.py');
-    expect(hooks).toContain('%PLUGIN_ROOT%\\\\scripts\\\\aeolus-codex-send-model.py');
+    expect(hooks).not.toContain('mcp__aeolus__send');
     expect(hooks).toContain('commandWindows');
     expect(hooks).toContain('%PLUGIN_ROOT%\\\\scripts\\\\aeolus-session-start.sh');
   });
@@ -149,6 +171,16 @@ describe('the Codex plugin package', () => {
           type: 'command',
           command: 'bash "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/aeolus-watch-guard.sh"',
           commandWindows: 'bash "%PLUGIN_ROOT%\\scripts\\aeolus-watch-guard.sh"',
+        },
+      ],
+    });
+    expect(hooks.PreToolUse).toContainEqual({
+      matcher: '^Bash$',
+      hooks: [
+        {
+          type: 'command',
+          command: 'bash "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/aeolus-model.sh"',
+          commandWindows: 'bash "%PLUGIN_ROOT%\\scripts\\aeolus-model.sh"',
         },
       ],
     });
@@ -225,6 +257,8 @@ describe('Codex plugin state', () => {
     expect(output).toContain(`plugin data is ${data}`);
     expect(output).toContain('crews the Aeolus ship scout');
     expect(output).toContain('The active model is gpt-6-astra.');
+    expect(output).toContain(`Every fleet call goes through ${PLUGIN}/scripts/aeolus-fleet.sh`);
+    expect(output).not.toContain('crewToken');
     expect(output).not.toContain('aeolus_ct_v1_crew');
   });
 
@@ -294,43 +328,28 @@ describe('Codex in a folder a trierarch crews (wakeBy=trierarch)', () => {
 });
 
 describe('Codex fleet calls', () => {
-  it('adds the active Codex model to every aeolus send without changing its other arguments', () => {
-    const toolInput = {
-      crewToken: 'aeolus_ct_v1_crew',
-      selector: { kind: 'ship', name: 'orchestrator-1' },
-      payload: 'A payload with "quotes" and a newline\ninside.',
-      contentType: 'text/plain',
-      idempotencyKey: 'send-1',
-    };
-    const hook = runScript('aeolus-codex-send-model.py', {
-      input: JSON.stringify({
-        hook_event_name: 'PreToolUse',
-        tool_name: 'mcp__aeolus__send',
-        model: 'gpt-6-astra',
-        tool_input: toolInput,
-      }),
-    });
-    const output = z
-      .object({
-        hookSpecificOutput: z.object({
-          hookEventName: z.literal('PreToolUse'),
-          permissionDecision: z.literal('allow'),
-          updatedInput: z.record(z.string(), z.unknown()),
-        }),
-      })
-      .parse(JSON.parse(hook.stdout));
+  const crewed = () => {
+    expect(runScript('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout', 'aeolus_ct_v1_crew'], env: { AEOLUS_FOLDER: folder } }).status).toBe(0);
+    return runScript('aeolus-identity.sh', { args: ['path'], env: { AEOLUS_FOLDER: folder } }).stdout.trim().replace(/\.identity$/, '.model');
+  };
+  const bashCall = (command: string) =>
+    JSON.stringify({ hook_event_name: 'PreToolUse', cwd: folder, model: 'gpt-6-astra', tool_name: 'Bash', tool_input: { command } });
 
-    expect(output.hookSpecificOutput.updatedInput).toEqual({ ...toolInput, model: 'gpt-6-astra' });
+  it('records the active Codex model when a command calls aeolus-fleet.sh, for its sends to state', () => {
+    const modelFile = crewed();
+
+    const hook = runScript('aeolus-model.sh', { input: bashCall(`AEOLUS_HARNESS=codex ${SCRIPTS}/aeolus-fleet.sh send - <<'JSON'\n{"model":"not-this-one"}\nJSON`) });
+
+    expect(hook.status).toBe(0);
+    expect(hook.stdout).toBe('');
+    expect(readFileSync(modelFile, 'utf8')).toBe('gpt-6-astra\n');
   });
 
-  it('shows the Codex MCP command when a Codex session has no fleet tools', () => {
-    const hinted = runScript('aeolus-mcp-hint.sh', {
-      args: ['https://fleet.example.com/'],
-      env: { AEOLUS_HARNESS: 'codex' },
-    });
+  it('records nothing for a command that makes no fleet call', () => {
+    const modelFile = crewed();
 
-    expect(hinted.stdout).toContain('codex mcp add aeolus --url https://fleet.example.com/mcp');
-    expect(hinted.stdout).toContain('start a new Codex task');
-    expect(hinted.stdout).not.toContain('claude mcp add');
+    runScript('aeolus-model.sh', { input: bashCall('npm test') });
+
+    expect(readdirSync(data, { recursive: true })).not.toContain(modelFile.slice(data.length + 1));
   });
 });

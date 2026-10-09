@@ -8,19 +8,29 @@ const claudeSkill = readFileSync(new URL('../skills/crew-a-ship/SKILL.md', impor
 const codexSkill = readFileSync(new URL('../skills/aeolus-crew/SKILL.md', import.meta.url), 'utf8');
 const protocolRules = SHIP_PROTOCOL.split('\n').filter((line) => /^\d+\. /.test(line));
 
-// The ship protocol lives once, in the fleet, which sends it as its MCP
-// instructions; both skills point to it and hold only what the plugin adds.
+// The ship protocol lives once, in the fleet, which states it in its MCP
+// instructions and its REST description; both skills point to it and hold
+// only what the plugin adds.
 
 describe('the crew-a-ship skill', () => {
-  it("points to the fleet's MCP instructions for the ship protocol, and holds none of its rules", () => {
-    expect(claudeSkill).toContain("The fleet's MCP server states the ship protocol in its instructions");
+  it('has the session fetch the ship protocol from the fleet through aeolus-fleet.sh, and holds none of its rules', () => {
+    expect(claudeSkill).toContain('"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-fleet.sh" protocol');
     for (const rule of protocolRules) {
       expect(claudeSkill).not.toContain(rule);
     }
   });
 
-  it("points the Codex skill to the same MCP instructions, holding none of the rules, with its Codex crew line and harness", () => {
-    expect(codexSkill).toContain('The Aeolus MCP server states the ship protocol in its instructions');
+  it('makes every fleet call through aeolus-fleet.sh, and never has the session read or pass the crew token', () => {
+    for (const call of ['receive', 'ack', 'pong', 'send', 'report', 'inbox', 'whoami', 'deregister']) {
+      expect(claudeSkill).toContain(`\`${call}`);
+    }
+    expect(claudeSkill).toContain('aeolus-fleet.sh" send -');
+    expect(claudeSkill).toContain('Never read the identity file, and never pass a crew token');
+    expect(claudeSkill).not.toMatch(/crewToken line|pass it to every fleet call/);
+  });
+
+  it('has a Codex session fetch the same protocol from the fleet, holding none of the rules, with its Codex crew line and harness', () => {
+    expect(codexSkill).toContain('`scripts/aeolus-fleet.sh protocol`');
     for (const rule of protocolRules) {
       expect(codexSkill).not.toContain(rule);
     }

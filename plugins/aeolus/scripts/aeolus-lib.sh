@@ -114,6 +114,15 @@ aeolus_reported_file() {
   printf '%s/%s.reported' "$dir" "$(aeolus_key "$folder")"
 }
 
+# The model a hook last saw the session run, for aeolus-fleet.sh to state on
+# every send: Codex names its active model in each hook payload.
+aeolus_model_file() {
+  local folder dir
+  folder="$(aeolus_folder)" || return 1
+  dir="$(aeolus_ships_dir)" || return 1
+  printf '%s/%s.model' "$dir" "$(aeolus_key "$folder")"
+}
+
 # The Codex wake bridge process and the task it wakes. These are separate from
 # the inner inbox watcher's pid so a newer task for the folder can replace an
 # older bridge cleanly.

@@ -92,7 +92,7 @@ function wakeThreadFile(): string {
 const inbox = (waiting: number) => ({ status: 200, body: { waiting } });
 
 describe('aeolus-identity', () => {
-  it("writes the folder's ship and shows it, naming the file that holds the crew token but never the token", () => {
+  it("writes the folder's ship and shows it, never the crew token", () => {
     crew();
 
     const shown = run('aeolus-identity.sh', { args: ['show'] });
@@ -214,6 +214,7 @@ describe('aeolus-wait', () => {
     expect(stdout).toBe('aeolus: 2 deliveries wait for scout: receive them\n');
     expect(fleet.calls).toHaveLength(3);
     expect(fleet.calls[0]).toEqual({
+      method: 'POST',
       path: '/api/v1/ship/inbox',
       authorization: `Bearer ${CREW_TOKEN}`,
       body: '{"waitSeconds":25}',
@@ -403,26 +404,6 @@ describe('the Codex wake bridge', () => {
   });
 });
 
-describe('aeolus-mcp-hint', () => {
-  it('tells a session on a device or a server to add the fleet MCP server with claude mcp add', () => {
-    expect(run('aeolus-mcp-hint.sh', { args: ['https://fleet.example.com/'], env: { CLAUDE_CODE_REMOTE: '' } }).stdout).toBe(
-      'Add the fleet MCP server once, then start a new session in this folder and paste the crew line again:\n' +
-        'claude mcp add --transport http --scope user aeolus https://fleet.example.com/mcp\n',
-    );
-  });
-
-  it('tells a claude.ai cloud session to add the fleet as a claude.ai connector instead', () => {
-    const { stdout } = run('aeolus-mcp-hint.sh', { args: ['https://fleet.example.com'], env: { CLAUDE_CODE_REMOTE: 'true' } });
-
-    expect(stdout).toBe(
-      'This is a claude.ai cloud session: its MCP servers come from claude.ai connectors, not from claude mcp add.\n' +
-        'Add a custom connector in claude.ai (Settings, Connectors) with the URL https://fleet.example.com/mcp,\n' +
-        'then start a new cloud session and paste the crew line again.\n',
-    );
-    expect(stdout).not.toContain('claude mcp add --transport');
-  });
-});
-
 const hookOutputSchema = z.object({
   hookSpecificOutput: z.object({ hookEventName: z.literal('SessionStart'), additionalContext: z.string() }),
 });
@@ -459,7 +440,7 @@ describe('the SessionStart hook', () => {
     expect(hook(payloadFor(folder))).toMatchObject({ status: 0, stdout: '' });
   });
 
-  it('tells a fresh context after /clear which ship it crews, where its crew token is, and to start the watcher', () => {
+  it('tells a fresh context after /clear which ship it crews, that aeolus-fleet.sh makes its fleet calls, and to start the watcher', () => {
     crew();
 
     const { status, stdout } = hook(payloadFor(folder, 'clear'));
@@ -467,7 +448,8 @@ describe('the SessionStart hook', () => {
     expect(status).toBe(0);
     const context = hookOutputSchema.parse(JSON.parse(stdout)).hookSpecificOutput.additionalContext;
     expect(context).toContain(`This folder crews the Aeolus ship scout (${SHIP_ID}) in the fleet at https://fleet.example.com.`);
-    expect(context).toContain(`Its crew token is the crewToken line of ${identityFile()}`);
+    expect(context).toContain('Every fleet call goes through "/plugin/scripts/aeolus-fleet.sh", which adds the crew token: never read the identity file or pass a crew token.');
+    expect(context).not.toContain('crewToken');
     expect(context).toContain('Do not register again.');
     expect(context).toContain('"/plugin/scripts/aeolus-wait.sh" as a background task');
     expect(context).toContain('When the watcher exits 6 (its 2-hour limit), just start it again.');

@@ -4,7 +4,7 @@
 #   aeolus-identity.sh write [--wake-by trierarch] <fleetUrl> <shipId> <shipName> <crewToken> [<squadronId>]
 #                       with --wake-by trierarch, the trierarch wakes the folder's sessions, not a watcher
 #   aeolus-identity.sh check-in <interval>   a squadron member keeps its check-in interval: <n>m or <n>h
-#   aeolus-identity.sh show     the ship, its fleet and the file (never the token); exit 1 when none
+#   aeolus-identity.sh show     the ship and its fleet (never the token); exit 1 when none
 #   aeolus-identity.sh turn     the turn marker of a folder a trierarch crews: busy or idle, with when; exit 1 when none
 #   aeolus-identity.sh path     the identity file of this folder, whether it exists or not
 #   aeolus-identity.sh delete   stops the folder's watcher and forgets the ship
@@ -62,8 +62,9 @@ case "$command" in
     [ -n "$squadron" ] && echo "squadron: ${squadron}"
     check_in="$(aeolus_identity_get "$file" checkIn)"
     [ -n "$check_in" ] && echo "check-in: ${check_in}"
-    [ "$(aeolus_identity_get "$file" wakeBy)" = trierarch ] && echo "wakes: the trierarch"
-    echo "identity file: ${file} (the crew token is its crewToken line)"
+    if [ "$(aeolus_identity_get "$file" wakeBy)" = trierarch ]; then
+      echo "wakes: the trierarch"
+    fi
     ;;
   turn)
     turn_file="$(aeolus_turn_file)"
@@ -87,7 +88,7 @@ case "$command" in
       aeolus_process_is "$pid" aeolus-wait.sh && kill "$pid" 2>/dev/null || true
       rm -f "$pid_file"
     fi
-    rm -f "$file" "$(aeolus_refused_file)" "$(aeolus_reported_file)" "$(aeolus_turn_file)"
+    rm -f "$file" "$(aeolus_refused_file)" "$(aeolus_reported_file)" "$(aeolus_turn_file)" "$(aeolus_model_file)"
     echo "aeolus: this folder crews no ship any more"
     ;;
   *)
