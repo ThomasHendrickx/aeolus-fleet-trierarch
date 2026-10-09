@@ -18,6 +18,8 @@ export function createDetectors(at: { homeDirectory: string }): Record<string, H
     codex: createCodexDetector({
       run: runCommand,
       readConfig: () => readFile(join(at.homeDirectory, '.codex', 'config.toml'), 'utf8').catch(() => undefined),
+      // As for Claude Code: a new empty folder per detection, so a probe is never a ship.
+      neutralFolder: () => mkdtemp(join(tmpdir(), 'aeolus-trierarch-probe-')),
     }),
   };
 }

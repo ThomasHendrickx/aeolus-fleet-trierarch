@@ -16,21 +16,14 @@ const CATALOG = JSON.stringify({
 
 /**
  * `codex debug models` as codex-cli 0.160.1 prints it on the mac mini, cut to
- * what detection reads: the catalog it runs with now, which hides gpt-5.5
- * where the bundled one lists it (#383).
+ * what detection reads: the catalog it runs with now. It hides gpt-5.5,
+ * which a ChatGPT login may use, and shows gpt-6.1-sol, which it refuses (#392).
  */
 const LIVE_CATALOG = JSON.stringify({
   models: [
     { slug: 'gpt-6.1-sol', visibility: 'list' },
     { slug: 'gpt-6-luna', visibility: 'list' },
     { slug: 'gpt-5.5', visibility: 'hide' },
-  ],
-});
-const BUNDLED_WITH_GPT_5_5 = JSON.stringify({
-  models: [
-    { slug: 'gpt-6.1-sol', visibility: 'list' },
-    { slug: 'gpt-6-luna', visibility: 'list' },
-    { slug: 'gpt-5.5', visibility: 'list' },
   ],
 });
 
