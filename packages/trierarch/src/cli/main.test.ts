@@ -177,6 +177,7 @@ describe('aeolus-trierarch', () => {
     const scout = trierarch.fleet.commission('scout');
     trierarch.fleet.request(scout);
     await trierarch.pass();
+    await trierarch.pass();
     await createJsonState(trierarchPaths({ homeDirectory: home }).state).save(trierarch.state.current());
 
     const { output, code } = await main(['list', '--json'], { HOME: home });

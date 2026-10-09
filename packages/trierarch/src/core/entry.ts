@@ -44,6 +44,8 @@ export interface Entry {
   /** Where its workspace is, once made. */
   readonly folder?: string;
   readonly hasStarted: boolean;
+  /** When the session crewing checks in its launch window started (#382), ISO 8601; none before its launch. */
+  readonly launchedAt?: string;
   /** The inbox count last seen, and whether a wake waits for the session to turn idle. */
   readonly wake: { readonly waiting: number; readonly isPending: boolean };
 }

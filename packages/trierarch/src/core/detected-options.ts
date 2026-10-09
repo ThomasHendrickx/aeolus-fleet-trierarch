@@ -3,7 +3,7 @@ import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 import type { ConfiguredOption, Detected, DetectedHarness } from './ports.js';
 
 /** The option that names the model: its ids come from detection only (#382). */
-const MODEL_OPTION = 'model';
+export const MODEL_OPTION = 'model';
 
 /** The detected model option without the ids the machine refused, its default moving to the first id left; none when none is left. */
 function offeredModel(found: DetectedHarness): ConfiguredOption | undefined {

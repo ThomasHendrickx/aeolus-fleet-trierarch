@@ -1,7 +1,8 @@
 import { CREW_REQUEST_REASON_MAX_LENGTH } from '@aeolus-fleet/common';
 
 import { putEntry, removeEntry, withState, type Entry, type TrierarchState } from './entry.js';
-import type { FleetPort, HarnessPort, LoggedAction, Logger, ProcessPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
+import { MODEL_OPTION } from './detected-options.js';
+import type { FleetPort, HarnessPort, LaunchSeen, LoggedAction, Logger, ProcessPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
 import type { Clock } from './shared/clock.js';
 
@@ -42,7 +43,8 @@ export function createRunPass(deps: RunPassDeps): RunPass {
       const clears = await deps.fleet.pendingClears();
       const observed = await observe(state, deps);
       const trusted = await deps.trust.trusted();
-      const reconciled = reconcile(state, { requests, clears, observed, now: deps.clock.now(), configuration: deps.setup.configuration, trusted });
+      const versions = Object.fromEntries(Object.entries(deps.setup.detected ?? {}).flatMap(([harness, found]) => (found === undefined ? [] : [[harness, found.version]])));
+      const reconciled = reconcile(state, { requests, clears, observed, now: deps.clock.now(), configuration: deps.setup.configuration, trusted, versions });
       state = reconciled.state;
       await deps.state.save(state);
       for (action of reconciled.actions) {
@@ -69,19 +71,24 @@ async function observe(state: TrierarchState, deps: RunPassDeps): Promise<Observ
   const sessions = await deps.processes.list();
   const worktrees = await deps.workspace.worktrees();
   const ships: Record<string, Observed['ships'][string]> = {};
+  const launches: Record<string, LaunchSeen> = {};
   for (const entry of Object.values(state.entries)) {
     const session = sessions.find((each) => each.shipId === entry.shipId);
     const { folder } = entry;
+    const harness = harnessOf(entry, deps);
+    if (entry.state === 'crewing' && entry.launchedAt !== undefined && session !== undefined && harness !== undefined) {
+      const model = entry.options[MODEL_OPTION];
+      launches[entry.shipId] = await harness.launchSeen({ shipId: entry.shipId, ...(model !== undefined && { model }) });
+    }
     if (entry.state !== 'running' || folder === undefined || session?.status === 'exited') {
       continue;
     }
-    const harness = harnessOf(entry, deps);
     const crewToken = await harness?.crewTokenOf(folder);
     if (harness !== undefined && crewToken !== undefined) {
       ships[entry.shipId] = { inbox: await deps.fleet.inbox(crewToken), turn: await harness.turnOf(folder) };
     }
   }
-  return { sessions, worktrees, ships };
+  return { sessions, worktrees, ships, launches };
 }
 
 function log(deps: RunPassDeps, logged: Omit<LoggedAction, 'time'>): void {
@@ -184,7 +191,8 @@ interface EntryAt {
  * Crews the ship (crew:run): gets its starting prompt and registers with the
  * secret, so the session never sees it; makes the workspace (or uses the one
  * it has), writes the folder's identity (with its squadron) and starts the
- * harness, writing status crewing, then running. A resumed crew whose ship is
+ * harness, writing status crewing: it runs once its session shows activity
+ * in its launch window (#382). A resumed crew whose ship is
  * crewed holds the ship by its own lease, or lost its register reply: the
  * trierarch releases the ship and crews it again. A ship another session
  * crews before its crew is left; a ship gone is forgotten.
@@ -229,11 +237,9 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
     isFirstStart: !entry.hasStarted,
     ...(!entry.hasStarted && entry.firstPrompt !== undefined && { firstPrompt: entry.firstPrompt }),
   });
-  const now = deps.clock.now();
-  const next = putEntry(state, { ...withState(entry, { state: 'running', now }), shipName: ship.name, folder, hasStarted: true });
+  // Crewing still: its launch window is open, and only activity in it makes the crew final (#382).
+  const next = putEntry(state, { ...entry, shipName: ship.name, folder, hasStarted: true, launchedAt: deps.clock.now().toISOString() });
   await deps.state.save(next);
-  const running = next.entries[entry.shipId];
-  await deps.fleet.writeStatus(entry.shipId, running === undefined ? { status: 'running', attempt: 0, startedAt: now } : writtenStatusOf({ ...running, state: 'running' }));
   log(deps, { shipId: entry.shipId, shipName: ship.name, action: 'crew', outcome: `crewed, ${entry.harness} started in ${folder}` });
   return next;
 }

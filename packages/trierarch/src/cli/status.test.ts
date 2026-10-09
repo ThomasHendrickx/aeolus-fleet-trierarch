@@ -33,6 +33,7 @@ describe('aeolus-trierarch status', () => {
     trierarch.fleet.request(scout);
     trierarch.fleet.request(trierarch.fleet.commission('reviewer'));
     await trierarch.pass();
+    await trierarch.pass();
     trierarch.processes.exit(scout);
     await trierarch.pass();
 

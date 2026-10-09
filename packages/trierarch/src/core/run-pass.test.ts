@@ -332,6 +332,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     const lostToken = trierarch.fleet.shipOf(shipId).crewToken;
 
     await trierarch.pass();
+    await trierarch.pass();
 
     expect(trierarch.state.current().entries[shipId]?.state).toBe('running');
     expect(trierarch.fleet.shipOf(shipId).crewToken).not.toBe(lostToken);
@@ -373,6 +374,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     trierarch.fleet.requestAgain(shipId, crewSettings({ options: { model: 'sonnet' } }));
 
     await trierarch.pass();
+    await trierarch.pass();
 
     expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'running', settingsVersion: 2, options: { model: 'sonnet' }, folder: SCOUT_FOLDER });
     expect(trierarch.harness.launches).toHaveLength(2);
@@ -387,6 +389,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     await crashForGood(trierarch, shipId);
 
     trierarch.fleet.requestAgain(shipId);
+    await trierarch.pass();
     await trierarch.pass();
 
     expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'running', exits: [], folder: SCOUT_FOLDER });
@@ -579,6 +582,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
 
     trierarch.fleet.releaseElsewhere(shipId);
     await trierarch.pass();
+    await trierarch.pass();
 
     expect(trierarch.state.current().entries[shipId]?.state).toBe('running');
   });
@@ -588,6 +592,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     const shipId = trierarch.fleet.commission('scout');
     trierarch.fleet.request(shipId, crewSettings({ options: { model: 'sonnet', effort: 'high' } }));
 
+    await trierarch.pass();
     await trierarch.pass();
 
     expect(trierarch.fleet.toArgo).toEqual([]);

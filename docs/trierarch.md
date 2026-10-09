@@ -134,7 +134,8 @@ A trierarch reconciles from the requests assigned to it. Its loop crews each one
 1. It saves the entry as crewing and writes status `crewing`.
 2. It gets a starting prompt with `crew:run` and registers with the secret, so the session never sees the secret.
 3. It writes the folder's identity through the aeolus plugin, with the squadron when the settings name one, saying the trierarch wakes it.
-4. It starts the harness in the folder, with `/aeolus:wake` (Codex: `$aeolus-wake`) as the first prompt, and writes status `running`.
+4. It starts the harness in the folder, with `/aeolus:wake` (Codex: `$aeolus-wake`) as the first prompt.
+5. For one minute after the session starts (its launch window, #382), it reads the session's screen each pass. Activity, a tool call the first prompt made, makes the crew final: it writes status `running`, with when the session started. A refusal of the model it launched with (any model when it launched with none, the harness's own default), or no activity within the minute, as when the session is stuck at a prompt, stops the session and gives the request back with the reason, such as `mac-studio: claude-code 2.1.295 refused claude-opus-5-5` or `mac-studio: no activity within a minute of its start`. Each harness adapter matches its own screen texts in one place, tested on screens captured from real sessions.
 
 From then on the trierarch watches the ship's inbox while the session runs. It wakes the session when deliveries wait and the session is idle, and restarts a session that dies.
 
@@ -162,7 +163,7 @@ The ship, its crew request, its session and its worktree live and end together:
 | --- | --- | --- | --- | --- | --- |
 | 1 | requested | must exist and await crew | unassigned | none yet | none yet |
 | 2 | assigned | awaiting crew | assigned to a trierarch | none yet | none yet |
-| 3 | first crew | crewed (the trierarch registers) | crewing, then running | started | created, identity written |
+| 3 | first crew | crewed (the trierarch registers) | crewing, then running once the session shows activity, else given back (step 5) | started | created, identity written |
 | 4 | session dies | crewed, lease held | restarting | started again in the same folder, same crew token | kept |
 | 5 | restart budget spent | crewed, lease held | crashed, a report sent to argo | stopped | kept |
 | 6 | the machine restarts | crewed, lease held | unchanged | started again by the loop | kept |
