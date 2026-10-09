@@ -112,7 +112,7 @@ class FakeCodexSetup implements CodexSetup {
 
 /** What init's detection finds, and each time it was asked. */
 let detected: Detected;
-let detections: { harnesses: readonly string[]; isForced: boolean }[];
+let detections: { harnesses: readonly string[]; by: 'start' | 'hand' | 'refusal' }[];
 
 beforeEach(() => {
   detected = {};
@@ -553,7 +553,7 @@ describe("init's detection (#365)", () => {
 
     const report = await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET, isYes: true });
 
-    expect(detections).toEqual([{ harnesses: ['claude-code'], isForced: false }]);
+    expect(detections).toEqual([{ harnesses: ['claude-code'], by: 'start' }]);
     expect(report.said).toContain('claude-code 2.1.293: model claude-opus-5-5; models confirmed 2026-10-08T15:00:00.000Z');
   });
 });

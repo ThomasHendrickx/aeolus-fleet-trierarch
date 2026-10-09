@@ -52,7 +52,7 @@ beforeEach(() => {
 
 describe('detecting the harnesses of a machine (#365)', () => {
   it('detects a harness it has no detection for yet, and keeps what it found', async () => {
-    const detected = await detectWith({ 'claude-code': aDetector({ version: '2.1.293' }) })({ harnesses: ['claude-code'], isForced: false });
+    const detected = await detectWith({ 'claude-code': aDetector({ version: '2.1.293' }) })({ harnesses: ['claude-code'], by: 'start' });
 
     expect(detected).toEqual({ 'claude-code': aDetection('2.1.293', NOW) });
     expect(held).toEqual(detected);
@@ -62,7 +62,7 @@ describe('detecting the harnesses of a machine (#365)', () => {
     held = { 'claude-code': aDetection('2.1.293', BEFORE) };
     const claude = aDetector({ version: '2.1.293' });
 
-    const detected = await detectWith({ 'claude-code': claude })({ harnesses: ['claude-code'], isForced: false });
+    const detected = await detectWith({ 'claude-code': claude })({ harnesses: ['claude-code'], by: 'start' });
 
     expect(claude.detections).toEqual([]);
     expect(detected).toEqual({ 'claude-code': aDetection('2.1.293', BEFORE) });
@@ -73,25 +73,52 @@ describe('detecting the harnesses of a machine (#365)', () => {
     held = { 'claude-code': aDetection('2.1.293', BEFORE) };
     const claude = aDetector({ version: '2.1.300' });
 
-    const detected = await detectWith({ 'claude-code': claude })({ harnesses: ['claude-code'], isForced: false });
+    const detected = await detectWith({ 'claude-code': claude })({ harnesses: ['claude-code'], by: 'start' });
 
     expect(claude.detections).toEqual([{ version: '2.1.300', previous: aDetection('2.1.293', BEFORE) }]);
     expect(detected).toEqual({ 'claude-code': aDetection('2.1.300', NOW) });
   });
 
-  it('detects again when asked by hand, though the version is the same', async () => {
+  it('detects again when asked by hand or after a refusal, though the version is the same', async () => {
     held = { 'claude-code': aDetection('2.1.293', BEFORE) };
     const claude = aDetector({ version: '2.1.293' });
 
-    await detectWith({ 'claude-code': claude })({ harnesses: ['claude-code'], isForced: true });
+    await detectWith({ 'claude-code': claude })({ harnesses: ['claude-code'], by: 'hand' });
+    await detectWith({ 'claude-code': claude })({ harnesses: ['claude-code'], by: 'refusal' });
 
-    expect(claude.detections).toHaveLength(1);
+    expect(claude.detections).toHaveLength(2);
+  });
+
+  it('keeps the ids a session refused when it detects again after a refusal, at the same version (#382)', async () => {
+    const refused = [{ id: 'model-2.1.293', at: BEFORE }];
+    held = { 'claude-code': { ...aDetection('2.1.293', BEFORE), refused } };
+
+    const detected = await detectWith({ 'claude-code': aDetector({ version: '2.1.293' }) })({ harnesses: ['claude-code'], by: 'refusal' });
+
+    expect(detected).toEqual({ 'claude-code': { ...aDetection('2.1.293', NOW), refused } });
+    expect(held).toEqual(detected);
+  });
+
+  it('clears the ids a session refused when asked by hand (#382)', async () => {
+    held = { 'claude-code': { ...aDetection('2.1.293', BEFORE), refused: [{ id: 'model-2.1.293', at: BEFORE }] } };
+
+    const detected = await detectWith({ 'claude-code': aDetector({ version: '2.1.293' }) })({ harnesses: ['claude-code'], by: 'hand' });
+
+    expect(detected).toEqual({ 'claude-code': aDetection('2.1.293', NOW) });
+  });
+
+  it('clears the ids a session refused once the harness updated (#382)', async () => {
+    held = { 'claude-code': { ...aDetection('2.1.293', BEFORE), refused: [{ id: 'model-2.1.293', at: BEFORE }] } };
+
+    const detected = await detectWith({ 'claude-code': aDetector({ version: '2.1.300' }) })({ harnesses: ['claude-code'], by: 'refusal' });
+
+    expect(detected).toEqual({ 'claude-code': aDetection('2.1.300', NOW) });
   });
 
   it('keeps what it detected before when the CLI does not say its version, and says so', async () => {
     held = { 'claude-code': aDetection('2.1.293', BEFORE) };
 
-    const detected = await detectWith({ 'claude-code': aDetector({ version: undefined }) })({ harnesses: ['claude-code'], isForced: false });
+    const detected = await detectWith({ 'claude-code': aDetector({ version: undefined }) })({ harnesses: ['claude-code'], by: 'start' });
 
     expect(detected).toEqual({ 'claude-code': aDetection('2.1.293', BEFORE) });
     expect(warnings).toEqual(['claude-code did not say its version, so its options stay as detected before']);
@@ -100,7 +127,7 @@ describe('detecting the harnesses of a machine (#365)', () => {
   it('keeps what it detected before when detecting finds nothing, and says so', async () => {
     held = { codex: aDetection('0.160.1', BEFORE) };
 
-    const detected = await detectWith({ codex: aDetector({ version: '0.161.0', found: () => undefined }) })({ harnesses: ['codex'], isForced: false });
+    const detected = await detectWith({ codex: aDetector({ version: '0.161.0', found: () => undefined }) })({ harnesses: ['codex'], by: 'start' });
 
     expect(detected).toEqual({ codex: aDetection('0.160.1', BEFORE) });
     expect(warnings).toEqual(['codex 0.161.0 gave nothing to detect, so its options stay as detected before']);
@@ -110,7 +137,7 @@ describe('detecting the harnesses of a machine (#365)', () => {
     const claude = aDetector({ version: '2.1.293' });
     const codex = aDetector({ version: '0.160.1' });
 
-    const detected = await detectWith({ 'claude-code': claude, codex })({ harnesses: ['claude-code', 'gemini'], isForced: false });
+    const detected = await detectWith({ 'claude-code': claude, codex })({ harnesses: ['claude-code', 'gemini'], by: 'start' });
 
     expect(Object.keys(detected)).toEqual(['claude-code']);
     expect(codex.detections).toEqual([]);
