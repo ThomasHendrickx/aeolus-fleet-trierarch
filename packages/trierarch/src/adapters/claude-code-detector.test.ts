@@ -138,7 +138,7 @@ describe('detecting Claude Code (#365)', () => {
       detectedAt: NOW,
       confirmedAt: null,
       options: { effort: { values: { low: ['--effort', 'low'], high: ['--effort', 'high'] } } },
-      problem: "Claude Code 2.1.293's --help names no model alias, so this machine declares no Claude Code model: add the ones you want to its configuration",
+      problem: "Claude Code 2.1.293's --help names no model alias, so this machine declares no Claude Code model until an update of Claude Code names one",
     });
   });
 

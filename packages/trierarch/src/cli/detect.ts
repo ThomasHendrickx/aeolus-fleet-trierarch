@@ -9,7 +9,7 @@ export interface DetectReport {
   readonly text: string;
 }
 
-/** Per harness, one line: its version, each option with its values and default, and when its models were last confirmed. */
+/** Per harness, one line: its version, each option with its values and default, when its models were last confirmed, and the model ids the machine refused (#382). */
 export function describeDetected(at: { harnesses: readonly string[]; detected: Detected }): string {
   return at.harnesses
     .map((name) => {
@@ -21,7 +21,8 @@ export function describeDetected(at: { harnesses: readonly string[]; detected: D
         ([option, settings]) => `${option} ${Object.keys(settings.values).map((value) => (value === settings.default ? `${value} (default)` : value)).join(', ')}`,
       );
       const confirmed = found.confirmedAt === null ? 'no model confirmed' : `models confirmed ${found.confirmedAt.toISOString()}`;
-      return `${name} ${found.version}: ${options.length === 0 ? 'no options detected' : options.join('; ')}; ${confirmed}`;
+      const refused = found.refused === undefined || found.refused.length === 0 ? '' : `; refused ${found.refused.map((each) => each.id).join(', ')}`;
+      return `${name} ${found.version}: ${options.length === 0 ? 'no options detected' : options.join('; ')}; ${confirmed}${refused}`;
     })
     .join('\n');
 }

@@ -4,7 +4,7 @@ import { InMemoryFleet } from '../../test/support/in-memory.js';
 import { createReportDetectionProblems } from './report-detection-problems.js';
 
 const AT = new Date('2026-10-08T15:00:00.000Z');
-const PROBLEM = "Claude Code 2.1.293's --help names no model alias, so this machine declares no Claude Code model: add the ones you want to its configuration";
+const PROBLEM = "Claude Code 2.1.293's --help names no model alias, so this machine declares no Claude Code model until an update of Claude Code names one";
 
 describe("reporting detection's problems to argo (#365)", () => {
   it('tells argo each problem once per harness version, however often the trierarch starts', async () => {

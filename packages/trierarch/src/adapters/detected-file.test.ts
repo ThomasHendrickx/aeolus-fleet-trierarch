@@ -32,6 +32,17 @@ describe('the detected file (#365)', () => {
     await expect(file.load()).resolves.toEqual(detected);
   });
 
+  it('keeps the ids the machine refused, with when (#382)', async () => {
+    const file = createDetectedFile(join(folder, 'detected.json'));
+    const detected: Detected = {
+      codex: { version: '0.160.1', detectedAt: AT, confirmedAt: AT, options: { model: { values: { 'gpt-5.6-sol': ['-m', 'gpt-5.6-sol'] } } }, refused: [{ id: 'gpt-6.1-sol', at: AT }] },
+    };
+
+    await file.save(detected);
+
+    await expect(file.load()).resolves.toEqual(detected);
+  });
+
   it('holds nothing before the first detection', async () => {
     await expect(createDetectedFile(join(folder, 'detected.json')).load()).resolves.toEqual({});
   });

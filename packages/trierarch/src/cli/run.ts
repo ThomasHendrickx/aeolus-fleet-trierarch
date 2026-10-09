@@ -12,7 +12,7 @@ import { createTmux } from '../adapters/tmux.js';
 import { createTrust } from '../adapters/trust.js';
 import { runningVersion } from '../adapters/version.js';
 import { createDetectHarnesses } from '../core/detect-harnesses.js';
-import { withDetectedOptions } from '../core/detected-options.js';
+import { modelOptionsIgnored, withDetectedOptions } from '../core/detected-options.js';
 import { createReportDetectionProblems } from '../core/report-detection-problems.js';
 import { createHandleDelivery } from '../core/handle-delivery.js';
 import { machineOf } from '../core/machine.js';
@@ -40,6 +40,9 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   await createReportDetectionProblems({ fleet })(detected).catch((error: unknown) => {
     logger.warn(`Could not tell argo what detection found: ${error instanceof Error ? error.message : String(error)}`);
   });
+  for (const harness of modelOptionsIgnored(configured)) {
+    logger.warn(`${harness}: the configuration's model option is ignored: model ids come from detection only (#382); remove it`);
+  }
   const configuration = withDetectedOptions(configured, detected);
   const tmux = createTmux();
   const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, sessions: tmux });
