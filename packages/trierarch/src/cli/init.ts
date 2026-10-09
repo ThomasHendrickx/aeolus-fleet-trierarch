@@ -332,7 +332,7 @@ export async function initTrierarch(input: {
 
   // What each harness offers, detected on this machine and kept apart from the configuration (#365).
   const harnesses = Object.keys(configuration.harnesses);
-  said.push(...describeDetected({ harnesses, detected: await input.detect({ harnesses, isForced: false }) }).split('\n'));
+  said.push(...describeDetected({ harnesses, detected: await input.detect({ harnesses, by: 'start' }) }).split('\n'));
 
   // The service: offered when it is not installed, restarted when it should read a new configuration.
   prompter.step('The service');

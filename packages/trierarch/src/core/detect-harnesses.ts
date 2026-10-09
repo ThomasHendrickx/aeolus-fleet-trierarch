@@ -1,19 +1,26 @@
 import type { Detected, DetectedHarness, DetectedStore, HarnessDetector, Logger } from './ports.js';
 import type { Clock } from './shared/clock.js';
 
-export type DetectHarnesses = (at: { harnesses: readonly string[]; isForced: boolean }) => Promise<Detected>;
+/**
+ * Why it detects: at start, only a harness whose version changed; by hand,
+ * every harness, clearing the ids sessions refused; after a refusal, the
+ * harness again, keeping them while its version is the same (#382).
+ */
+export type DetectedBy = 'start' | 'hand' | 'refusal';
+
+export type DetectHarnesses = (at: { harnesses: readonly string[]; by: DetectedBy }) => Promise<Detected>;
 
 /**
  * Use case: detect what the machine's harnesses offer (#365; docs/trierarch.md,
  * "Detected options"). A harness is detected when it has no detection yet,
- * when its version differs from the one detected, or by hand, never more
- * often: a probe costs a call. A harness whose CLI does not say its version,
+ * when its version differs from the one detected, by hand, or after a
+ * session refused a model, never more often: a probe costs a call. A harness whose CLI does not say its version,
  * or gives nothing to detect, keeps what was detected before, and the
  * operator is told. Only the harnesses given that have a detector are
  * detected; what was found is kept.
  */
 export function createDetectHarnesses(deps: { detectors: Readonly<Record<string, HarnessDetector>>; store: DetectedStore; clock: Clock; logger: Pick<Logger, 'warn'> }): DetectHarnesses {
-  return async ({ harnesses, isForced }) => {
+  return async ({ harnesses, by }) => {
     const before = await deps.store.load();
     const detected: Record<string, DetectedHarness | undefined> = { ...before };
     let isChanged = false;
@@ -28,7 +35,7 @@ export function createDetectHarnesses(deps: { detectors: Readonly<Record<string,
         deps.logger.warn(`${name} did not say its version, so its options stay as detected before`);
         continue;
       }
-      if (!isForced && previous?.version === version) {
+      if (by === 'start' && previous?.version === version) {
         continue;
       }
       const found = await detector.detect({ version, previous, now: deps.clock.now() });
@@ -36,7 +43,8 @@ export function createDetectHarnesses(deps: { detectors: Readonly<Record<string,
         deps.logger.warn(`${name} ${version} gave nothing to detect, so its options stay as detected before`);
         continue;
       }
-      detected[name] = found;
+      const refused = by === 'refusal' && previous?.version === version ? previous.refused : undefined;
+      detected[name] = refused === undefined ? found : { ...found, refused };
       isChanged = true;
     }
     if (isChanged) {

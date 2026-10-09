@@ -36,7 +36,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const fleet = createRestFleet(crew);
   // Detected again only for a harness whose version changed since (#365); the operator's own options win.
   const detectHarnesses = createDetectHarnesses({ detectors: createDetectors({ homeDirectory }), store: createDetectedFile(paths.detected), clock: { now: () => new Date() }, logger });
-  const detected = await detectHarnesses({ harnesses: Object.keys(configured.harnesses), isForced: false });
+  const detected = await detectHarnesses({ harnesses: Object.keys(configured.harnesses), by: 'start' });
   await createReportDetectionProblems({ fleet })(detected).catch((error: unknown) => {
     logger.warn(`Could not tell argo what detection found: ${error instanceof Error ? error.message : String(error)}`);
   });
