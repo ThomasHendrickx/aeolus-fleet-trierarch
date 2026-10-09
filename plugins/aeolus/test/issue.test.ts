@@ -39,15 +39,20 @@ afterEach(() => {
   rmSync(folder, { recursive: true, force: true });
 });
 
+/**
+ * Runs a script with AEOLUS_GH naming this test's gh, which exists only once
+ * aGh writes it: a gh installed on the machine is never called, so no test
+ * files a real issue (#411).
+ */
 function run(script: string, options: { args?: string[]; env?: Record<string, string> } = {}) {
   const result = spawnSync('bash', [join(SCRIPTS, script), ...(options.args ?? [])], {
     encoding: 'utf8',
-    env: { ...process.env, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, PATH: `${bin}:/usr/bin:/bin`, ...options.env },
+    env: { ...process.env, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_GH: join(bin, 'gh'), PATH: `${bin}:/usr/bin:/bin`, ...options.env },
   });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
-/** A gh on PATH: signed in or not; `issue create` answers with the new issue's URL. Every call and its body file are logged. */
+/** This test's gh, as AEOLUS_GH names it: signed in or not; `issue create` answers with the new issue's URL. Every call and its body file are logged. */
 function aGh(options: { isSignedIn: boolean }): void {
   const gh = join(bin, 'gh');
   writeFileSync(
@@ -236,6 +241,18 @@ describe('aeolus-issue file', () => {
     expect(lines[2]).toMatch(/^aeolus: tell argo: Issue draft: .*\[email\].*\.md, open: /);
     expect(lines[2]).toContain(`, open: ${link}`);
     expect(lines[2]).not.toContain('bob@example.org');
+  });
+
+  it('never calls a gh on PATH, signed in or not, but only the gh AEOLUS_GH names', () => {
+    const elsewhere = join(data, 'path');
+    mkdirSync(elsewhere);
+    writeFileSync(join(elsewhere, 'gh'), `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "${ghCalls}"\necho "https://github.com/${REPOSITORY}/issues/1"\n`);
+    chmodSync(join(elsewhere, 'gh'), 0o700);
+
+    const { stdout } = run('aeolus-issue.sh', { args: ['file', aDraft()], env: { PATH: `${elsewhere}:/usr/bin:/bin` } });
+
+    expect(stdout).toContain('aeolus: open: https://github.com/');
+    expect(existsSync(ghCalls)).toBe(false);
   });
 
   it('keeps the draft and prints the link when gh is not installed', () => {
