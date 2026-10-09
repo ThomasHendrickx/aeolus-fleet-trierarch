@@ -34,7 +34,7 @@ export function describeDetected(at: { harnesses: readonly string[]; detected: D
  */
 export async function detectOptions(at: { configuration: TrierarchConfiguration; detect: DetectHarnesses }): Promise<DetectReport> {
   const harnesses = Object.keys(at.configuration.harnesses);
-  const detected = await at.detect({ harnesses, isForced: true });
+  const detected = await at.detect({ harnesses, by: 'hand' });
   return {
     harnesses: Object.fromEntries(
       Object.entries(detected).flatMap(([name, found]) =>

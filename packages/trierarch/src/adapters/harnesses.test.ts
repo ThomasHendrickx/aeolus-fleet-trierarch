@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { CONFIGURATION } from '../../test/support/in-memory.js';
 import { createHarnesses, riskyFlagsOf } from './harnesses.js';
 
-const sessions = { start: () => Promise.resolve(), type: () => Promise.resolve() };
+const sessions = { start: () => Promise.resolve(), type: () => Promise.resolve(), screen: () => Promise.resolve('') };
 const env = { AEOLUS_PLUGIN_ROOT: '/claude-plugin', AEOLUS_CODEX_PLUGIN_ROOT: '/codex-plugin' };
 
 describe('the harnesses a trierarch offers', () => {

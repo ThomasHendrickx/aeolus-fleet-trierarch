@@ -19,6 +19,8 @@ let folder: string;
 /** Claude Code's projects folder, where it keeps each folder's conversations. */
 let projects: string;
 let started: { shipId: ShipId; folder: string; command: readonly string[] }[];
+/** What each ship's session shows, by ship id. */
+let screens: Map<ShipId, string>;
 let typed: { shipId: ShipId; text: string }[];
 
 beforeEach(() => {
@@ -27,6 +29,7 @@ beforeEach(() => {
   projects = mkdtempSync(join(tmpdir(), 'trierarch-claude-projects-'));
   started = [];
   typed = [];
+  screens = new Map();
 });
 
 afterEach(() => {
@@ -56,6 +59,7 @@ function harness() {
         typed.push(at);
         return Promise.resolve();
       },
+      screen: (shipId) => Promise.resolve(screens.get(shipId) ?? ''),
     },
   });
 }
@@ -144,6 +148,7 @@ describe('Claude Code as a harness', () => {
             return Promise.resolve();
           },
           type: () => Promise.resolve(),
+          screen: () => Promise.resolve(''),
         },
       });
 
@@ -188,5 +193,11 @@ describe('Claude Code as a harness', () => {
 
     expect(marked.status).toBe(0);
     await expect(harness().turnOf(folder)).resolves.toBe('busy');
+  });
+
+  it("sees in its session's screen the model it launched with refused", async () => {
+    screens.set(shipId, readFileSync(new URL('../../test/screens/claude-code-refused.txt', import.meta.url), 'utf8'));
+
+    await expect(harness().launchSeen({ shipId, model: 'claude-nonexistent-9' })).resolves.toEqual({ kind: 'refused', model: 'claude-nonexistent-9' });
   });
 });

@@ -1,0 +1,16 @@
+
+ ▐▛███▛█   Claude Code v2.1.295
+▝▜██████▀  claude-nonexistent-9 · Claude Max
+ ▝▝   ▝▝   /Users/operator/work/cc-bad
+
+❯ Reply OK
+
+⏺ There's an issue with the selected model (claude-nonexistent-9). It may not exist or you may not have access to it. Run /model to pick a different model.
+
+✻ Crunched for 3s · done 2:12 AM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  …/work/cc-bad (claude-nonexistent-9)
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

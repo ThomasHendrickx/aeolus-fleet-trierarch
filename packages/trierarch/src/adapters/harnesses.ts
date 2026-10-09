@@ -60,7 +60,7 @@ export async function createHarnesses(at: {
   configuration: TrierarchConfiguration;
   homeDirectory: string;
   env: Readonly<Record<string, string | undefined>>;
-  sessions: Pick<Tmux, 'start' | 'type'>;
+  sessions: Pick<Tmux, 'start' | 'type' | 'screen'>;
 }): Promise<{ harnesses: Record<string, HarnessPort>; plugins: Record<string, AeolusPlugin> }> {
   const { configuration, homeDirectory, env, sessions } = at;
   const harnesses: Record<string, HarnessPort> = {};

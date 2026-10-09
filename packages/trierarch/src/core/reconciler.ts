@@ -1,8 +1,9 @@
 import type { CrewStatus, ShipId, TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import { checkSettings, trustRefusal, type CheckedSettings, type Refusal } from './check-settings.js';
+import { MODEL_OPTION } from './detected-options.js';
 import { putEntry, removeEntry, withState, type Entry, type KeptWorktree, type TrierarchState } from './entry.js';
-import type { ArgoReport, AssignedRequest, ClearRequestToMe, InboxAnswer, ObservedSession, ObservedWorktree, TrustedPlaces, Turn, WrittenStatus } from './ports.js';
+import type { ArgoReport, AssignedRequest, ClearRequestToMe, InboxAnswer, LaunchSeen, ObservedSession, ObservedWorktree, TrustedPlaces, Turn, WrittenStatus } from './ports.js';
 import { decideRestart, exitsInWindow } from './restart-policy.js';
 
 /**
@@ -19,6 +20,8 @@ export interface Observed {
   readonly worktrees: readonly ObservedWorktree[];
   /** For each entry whose session it watches: its inbox and its turn. */
   readonly ships: Readonly<Record<string, { readonly inbox: InboxAnswer; readonly turn: Turn }>>;
+  /** For each entry crewing whose session started: what its screen shows in its launch window (#382). */
+  readonly launches: Readonly<Record<string, LaunchSeen>>;
 }
 
 export type Action =
@@ -45,6 +48,8 @@ export type Action =
    * crewed with, which ends first: session, identity and clean worktree.
    */
   | { readonly kind: 'giveBack'; readonly shipId: ShipId; readonly settingsVersion: number; readonly reason: string; readonly entry?: Entry }
+  /** A session refused the model it launched with (#382): kept refused at its harness's version, and argo told once. */
+  | { readonly kind: 'modelRefused'; readonly shipId: ShipId; readonly shipName?: string; readonly harness: string; readonly version: string; readonly model: string }
   | { readonly kind: 'argo'; readonly report: ArgoReport }
   /** A clear request (decision 0032): remove the kept worktree it names, or, when none is kept, confirm alone. */
   | { readonly kind: 'clear'; readonly shipId: ShipId; readonly repository: string; readonly kept?: KeptWorktree };
@@ -64,7 +69,14 @@ export interface ReconcileContext {
   readonly configuration: TrierarchConfiguration;
   /** What each harness trusts now: checked before every launch (#381). */
   readonly trusted: TrustedPlaces;
+  /** Each harness's version as detection found it, for the reason a refused model is given back with (#382). */
+  readonly versions: Readonly<Record<string, string>>;
 }
+
+/** How long after its start a crewing session has to show activity (#382): its first prompt made a tool call. */
+export const LAUNCH_WINDOW_MS = 60_000;
+
+const NO_ACTIVITY_REASON = 'no activity within a minute of its start';
 
 const RESTARTING_NOTE = 'blocked: session crashed, restarting';
 const CRASHED_NOTE = 'blocked: session crashed, restart budget spent';
@@ -274,7 +286,7 @@ function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean })
   }
   switch (entry.state) {
     case 'crewing':
-      return { actions: [{ kind: 'crew', shipId: entry.shipId, isResumed: true }], starts: 1 };
+      return launchStep(entry, context);
     case 'running':
       return runningStep(entry, context);
     case 'restarting':
@@ -284,6 +296,44 @@ function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean })
     case 'crashed':
     case 'releasing':
       return NOTHING;
+  }
+}
+
+/**
+ * An entry crewing: crewed (again) until its session started, then in its
+ * launch window (#382). Activity makes the crew final, so it runs from when
+ * its session started. A model refused, or no activity within the minute,
+ * gives the request back, its entry ending. A session gone, as after the
+ * machine restarts, is crewed again.
+ */
+function launchStep(entry: Entry, context: ReconcileContext): Step {
+  const { observed, now } = context;
+  const { launchedAt, ...running } = entry;
+  const seen = observed.launches[entry.shipId];
+  if (launchedAt === undefined || seen === undefined) {
+    return { actions: [{ kind: 'crew', shipId: entry.shipId, isResumed: true }], starts: 1 };
+  }
+  const giveBack = (reason: string, first: readonly Action[] = []): Step => ({
+    isGivenBack: true,
+    actions: [...first, { kind: 'giveBack', shipId: entry.shipId, settingsVersion: entry.settingsVersion, reason, entry }],
+    starts: 0,
+  });
+  switch (seen.kind) {
+    case 'active':
+      // Running since its session started, so the session start it writes is that start; the window is closed.
+      return { entry: { ...running, state: 'running', since: launchedAt }, actions: [], starts: 0 };
+    case 'refused': {
+      const { harness } = entry;
+      const version = context.versions[harness];
+      const reason = `${harness}${version === undefined ? '' : ` ${version}`} refused ${seen.model}`;
+      // The harness's own default refused drops nothing: the machine never offered it as a model.
+      if (entry.options[MODEL_OPTION] === undefined || version === undefined) {
+        return giveBack(reason);
+      }
+      return giveBack(reason, [{ kind: 'modelRefused', shipId: entry.shipId, ...(entry.shipName !== undefined && { shipName: entry.shipName }), harness, version, model: seen.model }]);
+    }
+    case 'none':
+      return now.getTime() - new Date(launchedAt).getTime() >= LAUNCH_WINDOW_MS ? giveBack(NO_ACTIVITY_REASON) : NOTHING;
   }
 }
 

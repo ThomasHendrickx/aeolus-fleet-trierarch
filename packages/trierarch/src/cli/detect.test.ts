@@ -18,7 +18,7 @@ const DETECTED: Detected = {
 
 describe('aeolus-trierarch detect (#365)', () => {
   it('detects every configured harness again by hand, and gives what it found', async () => {
-    const asked: { harnesses: readonly string[]; isForced: boolean }[] = [];
+    const asked: { harnesses: readonly string[]; by: 'start' | 'hand' | 'refusal' }[] = [];
     const configuration = { ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: { flags: [], options: {} } } };
 
     const report = await detectOptions({
@@ -29,7 +29,7 @@ describe('aeolus-trierarch detect (#365)', () => {
       },
     });
 
-    expect(asked).toEqual([{ harnesses: ['claude-code', 'codex'], isForced: true }]);
+    expect(asked).toEqual([{ harnesses: ['claude-code', 'codex'], by: 'hand' }]);
     expect(report.harnesses).toEqual({
       'claude-code': { version: '2.1.293', confirmedAt: '2026-10-08T15:00:00.000Z', options: { model: ['claude-opus-5-5', 'claude-sonnet-5-5'], effort: ['low', 'high'] } },
       codex: { version: '0.160.1', confirmedAt: '2026-10-08T15:00:00.000Z', options: { model: ['gpt-6.1-sol', 'gpt-6-luna'] } },

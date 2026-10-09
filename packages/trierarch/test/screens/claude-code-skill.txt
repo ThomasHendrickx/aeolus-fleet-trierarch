@@ -1,0 +1,20 @@
+
+ ▐▛███▛█   Claude Code v2.1.295
+▝▜██████▀  Opus 5.5 · Claude Max
+ ▝▝   ▝▝   /Users/operator/work/cc-skill
+
+❯ /aeolus:wake
+
+  Ran 1 shell command
+
+⏺ This folder doesn't crew an Aeolus ship, so there's nothing to wake. I didn't check the lease or the inbox, and I didn't start a watcher.
+
+  To crew a ship from this folder, run /aeolus:crew with the crew line the Aeolus console shows.
+
+✻ Sautéed for 17s · done 2:13 AM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  …/work/cc-skill (Opus 5.5) 6% ctx
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

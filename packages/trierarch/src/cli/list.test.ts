@@ -14,6 +14,7 @@ describe('aeolus-trierarch list', () => {
     trierarch.fleet.request(scout, crewSettings({ workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'main' } }));
     trierarch.fleet.request(notes, crewSettings({ workspace: { kind: 'folder', name: 'notes' } }));
     await trierarch.pass();
+    await trierarch.pass();
     trierarch.processes.exit(scout);
     await trierarch.pass();
 

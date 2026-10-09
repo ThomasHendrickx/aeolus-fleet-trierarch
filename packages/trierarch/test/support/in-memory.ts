@@ -11,6 +11,7 @@ import type {
   FleetShipStatus,
   GiveBackAnswer,
   HarnessPort,
+  LaunchSeen,
   Identity,
   InboxAnswer,
   LoggedAction,
@@ -360,6 +361,10 @@ export class InMemoryHarness implements HarnessPort {
   readonly launches: { shipId: ShipId; shipName: string; folder: string; workspace: TrierarchWorkspace; isFirstStart: boolean; firstPrompt?: string }[] = [];
   readonly wakes: ShipId[] = [];
   readonly turns = new Map<string, Turn>();
+  /** What each ship's session shows in its launch window: activity unless a test sets otherwise. */
+  readonly seen = new Map<ShipId, LaunchSeen>();
+  /** Each screen it was asked to read, with the model the session launched with. */
+  readonly asked: { shipId: ShipId; model?: string }[] = [];
   /** Set to make every launch fail, as when the harness's CLI cannot start: the entry stays crewing. */
   isFailingLaunch = false;
 
@@ -396,6 +401,11 @@ export class InMemoryHarness implements HarnessPort {
   wake(session: { shipId: ShipId }): Promise<void> {
     this.wakes.push(session.shipId);
     return Promise.resolve();
+  }
+
+  launchSeen(session: { shipId: ShipId; model?: string }): Promise<LaunchSeen> {
+    this.asked.push(session);
+    return Promise.resolve(this.seen.get(session.shipId) ?? { kind: 'active' });
   }
 }
 
@@ -536,7 +546,13 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
     detected,
   };
   const handle = createHandleDelivery({ fleet, logger });
-  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, workspace, trust, state, setup, clock, logger });
+  /** The models sessions refused, as the trierarch kept them. */
+  const refusals: { harness: string; id: string; at: Date }[] = [];
+  const refuseModel = (refused: { harness: string; id: string; at: Date }): Promise<void> => {
+    refusals.push(refused);
+    return Promise.resolve();
+  };
+  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, workspace, trust, state, setup, clock, logger, refuseModel });
   const uninstall = createUninstall({ processes, state });
   const reportSelf = createReportSelf({ fleet, processes, trust, state, setup });
 
@@ -547,7 +563,7 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
     return delivery;
   }
 
-  return { fleet, processes, harness, codex, workspace, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver };
+  return { fleet, processes, harness, codex, workspace, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver, refusals };
 }
 
 export type Trierarch = ReturnType<typeof aTrierarch>;

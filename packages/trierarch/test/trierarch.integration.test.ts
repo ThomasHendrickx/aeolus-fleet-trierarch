@@ -49,7 +49,7 @@ let paths: TrierarchPaths;
 let repository: string;
 let pluginData: string;
 
-/** Sessions as a map, standing in for tmux: started ones run until stopped. */
+/** Sessions as a map, standing in for tmux: started ones run until stopped, each showing a tool call on its screen. */
 function standInSessions(): Tmux {
   const sessions = new Map<ShipId, ObservedSession['status']>();
   return {
@@ -63,6 +63,7 @@ function standInSessions(): Tmux {
       return Promise.resolve();
     },
     type: () => Promise.resolve(),
+    screen: (shipId) => Promise.resolve(sessions.has(shipId) ? '❯ /aeolus:wake\n\n  Ran 1 shell command\n' : ''),
   };
 }
 
@@ -126,7 +127,7 @@ async function aTrierarchOnTheFleet() {
   const clock = { now: () => new Date() };
   const logger = { warn: () => undefined, action: () => undefined };
   const setup = { configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
-  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {} }), state, setup, clock, logger });
+  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {} }), state, setup, clock, logger, refuseModel: () => Promise.resolve() });
   const leasesOf = (shipId: ShipId) => database.lease.count({ where: { shipId, endedAt: null } });
   const worktree = join(paths.worktrees, 'aeolus-fleet', 'scout');
 
@@ -134,10 +135,12 @@ async function aTrierarchOnTheFleet() {
 }
 
 describe('the trierarch on a real fleet', () => {
-  it('crews an assigned request, its status reads running, and removing it ends the lease, removes the clean worktree and the request', async () => {
+  it('crews an assigned request, its status reads running once its session shows activity, and removing it ends the lease, removes the clean worktree and the request', async () => {
     const { useCases, argo, trierarchShip, scout, pass, leasesOf, worktree } = await aTrierarchOnTheFleet();
     unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } }));
     unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
+    await pass();
+    await expect(database.crewRequest.findUniqueOrThrow({ where: { shipId: scout.shipId } })).resolves.toMatchObject({ status: 'crewing' });
     await pass();
 
     await expect(leasesOf(scout.shipId)).resolves.toBe(1);
