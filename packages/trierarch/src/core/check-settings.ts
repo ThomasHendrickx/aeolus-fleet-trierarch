@@ -1,6 +1,7 @@
 import { crewSettingsSchema, type CrewSettings, type ShipId, type TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { TrierarchState } from './entry.js';
+import type { TrustedPlaces } from './ports.js';
 import { err, ok, type Result } from './shared/result.js';
 
 /** Why the trierarch cannot crew settings: the field at fault, when one is, and a reason argo can read. */
@@ -17,6 +18,20 @@ export interface CheckedSettings {
   readonly options: Readonly<Record<string, string>>;
 }
 
+/**
+ * Why a harness may not start a session in a place: it does not trust it
+ * (#381). Adding a place through init is what trusts it, so the reason says
+ * to do that.
+ */
+export function trustRefusal(at: { harness: string; workspace: CrewSettings['workspace']; trusted: TrustedPlaces }): Refusal | undefined {
+  const { harness, workspace, trusted } = at;
+  const [field, kind, name, places] =
+    workspace.kind === 'worktree'
+      ? (['workspace.repository', 'repository', workspace.repository, trusted[harness]?.repositories ?? []] as const)
+      : (['workspace.name', 'folder', workspace.name, trusted[harness]?.folders ?? []] as const);
+  return places.includes(name) ? undefined : { field, reason: `${harness} does not trust the ${kind} ${name}: add it with aeolus-trierarch init, which trusts it` };
+}
+
 /** The field an issue names, as `options.model`, when it names one. */
 function fieldOf(path: readonly PropertyKey[]): { field?: string } {
   return path.length === 0 ? {} : { field: path.map(String).join('.') };
@@ -25,18 +40,18 @@ function fieldOf(path: readonly PropertyKey[]): { field?: string } {
 /**
  * Checks a crew request's settings again before crewing (decision 0027):
  * the crew settings schema, then what this trierarch's configuration offers
- * (harness, repository or folder, each option and its value), and one folder
- * per ship. The trierarch plugin checked them already; this machine's
+ * (harness, repository or folder, each option and its value), that the
+ * harness trusts the repository or folder (#381), and one folder per ship. The trierarch plugin checked them already; this machine's
  * configuration may have changed since.
  */
-export function checkSettings(raw: unknown, context: { shipId: ShipId; configuration: TrierarchConfiguration; state: TrierarchState }): Result<CheckedSettings, Refusal> {
+export function checkSettings(raw: unknown, context: { shipId: ShipId; configuration: TrierarchConfiguration; state: TrierarchState; trusted: TrustedPlaces }): Result<CheckedSettings, Refusal> {
   const parsed = crewSettingsSchema.safeParse(raw);
   if (!parsed.success) {
     const [issue] = parsed.error.issues;
     return err({ ...fieldOf(issue?.path ?? []), reason: issue?.message ?? 'The settings do not parse' });
   }
   const settings = parsed.data;
-  const { configuration, state, shipId } = context;
+  const { configuration, state, shipId, trusted } = context;
   const harnessName = settings.harness ?? Object.keys(configuration.harnesses)[0];
   const harness = harnessName === undefined ? undefined : configuration.harnesses[harnessName];
   if (harnessName === undefined || harness === undefined) {
@@ -54,6 +69,10 @@ export function checkSettings(raw: unknown, context: { shipId: ShipId; configura
     if (crewing !== undefined) {
       return err({ field: 'workspace.name', reason: `The folder ${workspace.name} crews ${crewing.shipId} already: one folder crews one ship` });
     }
+  }
+  const untrusted = trustRefusal({ harness: harnessName, workspace, trusted });
+  if (untrusted !== undefined) {
+    return err(untrusted);
   }
   const options: Record<string, string> = {};
   for (const [name, value] of Object.entries(settings.options)) {

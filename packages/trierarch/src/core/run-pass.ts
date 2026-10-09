@@ -1,5 +1,5 @@
 import { putEntry, removeEntry, withState, type Entry, type TrierarchState } from './entry.js';
-import type { FleetPort, HarnessPort, LoggedAction, Logger, ProcessPort, StatePort, TrierarchSetup, WorkspacePort } from './ports.js';
+import type { FleetPort, HarnessPort, LoggedAction, Logger, ProcessPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
 import type { Clock } from './shared/clock.js';
 
@@ -21,6 +21,8 @@ export interface RunPassDeps {
   harnesses: Readonly<Record<string, HarnessPort>>;
   processes: ProcessPort;
   workspace: WorkspacePort;
+  /** What each harness trusts, read each pass so it is checked before every launch (#381). */
+  trust: TrustPort;
   state: StatePort;
   setup: TrierarchSetup;
   clock: Clock;
@@ -37,7 +39,8 @@ export function createRunPass(deps: RunPassDeps): RunPass {
       const requests = await deps.fleet.assignedRequests();
       const clears = await deps.fleet.pendingClears();
       const observed = await observe(state, deps);
-      const reconciled = reconcile(state, { requests, clears, observed, now: deps.clock.now(), configuration: deps.setup.configuration });
+      const trusted = await deps.trust.trusted();
+      const reconciled = reconcile(state, { requests, clears, observed, now: deps.clock.now(), configuration: deps.setup.configuration, trusted });
       state = reconciled.state;
       await deps.state.save(state);
       for (action of reconciled.actions) {

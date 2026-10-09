@@ -17,6 +17,8 @@ import { TrierarchFileError } from './files.js';
 export interface ClaudeCodeSetup {
   trust(folder: string): Promise<void>;
   isTrusted(folder: string): Promise<boolean>;
+  /** Every folder it trusts, from one read of its file (#381). */
+  trustedFolders(): Promise<ReadonlySet<string>>;
   acceptSkipPermissions(): Promise<void>;
   isSkipPermissionsAccepted(): Promise<boolean>;
 }
@@ -64,6 +66,10 @@ export function createClaudeCodeSetup(at: { homeDirectory: string }): ClaudeCode
     isTrusted: async (folder) => {
       const project = jsonObjectSchema.safeParse(projectsOf(await readJsonObject(state))[folder]).data;
       return project?.hasTrustDialogAccepted === true;
+    },
+    trustedFolders: async () => {
+      const projects = Object.entries(projectsOf(await readJsonObject(state)));
+      return new Set(projects.filter(([, project]) => jsonObjectSchema.safeParse(project).data?.hasTrustDialogAccepted === true).map(([folder]) => folder));
     },
     acceptSkipPermissions: async () => {
       await writeJsonObject(settings, { ...(await readJsonObject(settings)), skipDangerousModePermissionPrompt: true });

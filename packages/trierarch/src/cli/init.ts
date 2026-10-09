@@ -1,7 +1,5 @@
 import { mkdir, stat, writeFile } from 'node:fs/promises';
-import { isAbsolute, join, resolve } from 'node:path';
-
-import { idSchema, trierarchNameSchema, type ShipId, type TrierarchConfiguration } from '@aeolus-fleet/common';
+import { idSchema, type ShipId, type TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { ClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import type { CodexSetup } from '../adapters/codex-setup.js';
@@ -11,6 +9,7 @@ import type { RestFleet } from '../adapters/rest-fleet.js';
 import type { Service } from '../adapters/service.js';
 import type { DetectHarnesses } from '../core/detect-harnesses.js';
 import { describeDetected } from './detect.js';
+import { absolutePath, nameRefusal, placeRefusal } from './places.js';
 import type { Prompter } from './prompter.js';
 
 /**
@@ -37,7 +36,7 @@ export interface InitReport {
   readonly fleetUrl: string;
   readonly shipId?: ShipId;
   readonly configuration: 'written' | 'changed' | 'kept';
-  /** The folders Claude Code now trusts: the worktree root, then each configured folder. */
+  /** The places Claude Code now trusts: the worktree root, then each configured repository and folder. */
   readonly trusted: readonly string[];
   readonly isSkipPermissionsAccepted: boolean;
   /** The repositories and folders Codex now trusts, when the configuration offers Codex. */
@@ -100,10 +99,6 @@ async function exists(path: string): Promise<boolean> {
   return (await stat(path).catch(() => undefined)) !== undefined;
 }
 
-async function isFolder(path: string): Promise<boolean> {
-  return (await stat(path).catch(() => undefined))?.isDirectory() === true;
-}
-
 /** The fleet URL, ship id and secret, from the flags or asked; with --yes all three must be flags. */
 async function askCrew(flags: InitFlags, prompter: Prompter): Promise<{ fleetUrl: string; shipId: ShipId; secret: string }> {
   if (flags.isYes) {
@@ -141,8 +136,6 @@ interface PlaceQuestions {
   readonly kind: 'repository' | 'folder';
   readonly add: string;
   where(name: string): string;
-  /** Why an absolute path is no such place, or undefined when it is one. */
-  refuse(absolute: string): Promise<string | undefined>;
 }
 
 /** Named places: each one held kept or dropped as answered, then new ones, name and path, until the operator is done. */
@@ -158,7 +151,10 @@ async function askPlaces(at: { held: Readonly<Record<string, { path: string }>>;
     const name = await askUntil<string>({
       prompter,
       ask: () => prompter.text(questions.add, { default: '' }),
-      accept: (answer) => (answer === '' || trierarchNameSchema.safeParse(answer).success ? { value: answer } : { why: `${answer} is no name: lowercase letters, digits and hyphens.` }),
+      accept: (answer) => {
+        const why = answer === '' ? undefined : nameRefusal(answer);
+        return why === undefined ? { value: answer } : { why };
+      },
     });
     if (name === '') {
       return places;
@@ -167,9 +163,8 @@ async function askPlaces(at: { held: Readonly<Record<string, { path: string }>>;
       prompter,
       ask: () => prompter.text(questions.where(name)),
       accept: async (answer) => {
-        const expanded = answer.replace(/^~(?=$|\/)/, homeDirectory);
-        const absolute = isAbsolute(expanded) ? expanded : resolve(expanded);
-        const why = await questions.refuse(absolute);
+        const absolute = absolutePath(answer, homeDirectory);
+        const why = await placeRefusal(questions.kind, absolute);
         return why === undefined ? { value: absolute } : { why };
       },
     });
@@ -181,14 +176,12 @@ const REPOSITORY_QUESTIONS: PlaceQuestions = {
   kind: 'repository',
   add: 'Add a repository it may make worktrees of: its name, or nothing when done?',
   where: (name) => `Where is ${name} checked out?`,
-  refuse: async (absolute) => ((await exists(join(absolute, '.git'))) ? undefined : `${absolute} is no git checkout.`),
 };
 
 const FOLDER_QUESTIONS: PlaceQuestions = {
   kind: 'folder',
   add: 'Add a folder it may crew a ship in as it is: its name, or nothing when done?',
   where: (name) => `Where is ${name}?`,
-  refuse: async (absolute) => ((await isFolder(absolute)) ? undefined : `${absolute} is no folder.`),
 };
 
 /**
@@ -310,12 +303,16 @@ export async function initTrierarch(input: {
   // Claude Code's one-time questions, answered ahead.
   const root = configuration.worktreeRoot ?? paths.worktrees;
   await mkdir(root, { recursive: true });
+  const repositories = Object.values(configuration.repositories).map((repository) => repository.path);
   const folders = Object.values(configuration.folders).map((folder) => folder.path);
-  // Every run, so a folder added to the configuration since is trusted too.
-  for (const folder of [root, ...folders]) {
-    await claudeCode.trust(folder);
+  // Adding a place through init is what trusts it (#381); every run, so a place added since is trusted too.
+  for (const place of [root, ...repositories, ...folders]) {
+    await claudeCode.trust(place);
   }
   said.push(`Claude Code trusts ${root}, so a session in any worktree starts with no trust question.`);
+  if (repositories.length > 0) {
+    said.push(`Claude Code trusts each configured repository too, as it asks about a worktree's repository: ${repositories.join(', ')}.`);
+  }
   if (folders.length > 0) {
     said.push(`Claude Code trusts each configured folder too: ${folders.join(', ')}.`);
   }
@@ -361,7 +358,7 @@ export async function initTrierarch(input: {
     fleetUrl,
     ...(shipId !== undefined && { shipId }),
     configuration: configured,
-    trusted: [root, ...folders],
+    trusted: [root, ...repositories, ...folders],
     isSkipPermissionsAccepted,
     codexTrusted: codex.trusted,
     codexHooksTrusted: codex.hooksTrusted,

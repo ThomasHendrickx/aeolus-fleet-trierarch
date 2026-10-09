@@ -481,6 +481,57 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`scout (${shipId}): this trierarch cannot crew settings version 1: ${reason}`]);
   });
 
+  it.each([
+    {
+      label: 'a repository',
+      place: { kind: 'repository' as const, name: 'aeolus-fleet' },
+      settings: crewSettings(),
+      reason: 'workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it',
+    },
+    {
+      label: 'a folder',
+      place: { kind: 'folder' as const, name: 'notes' },
+      settings: crewSettings({ workspace: { kind: 'folder', name: 'notes' } }),
+      reason: 'workspace.name: claude-code does not trust the folder notes: add it with aeolus-trierarch init, which trusts it',
+    },
+  ])('never crews settings in $label its harness does not trust, and tells argo once to add it with init (#381)', async ({ place, settings, reason }) => {
+    const trierarch = aTrierarch();
+    trierarch.trust.untrust('claude-code', place);
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, settings);
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.harness.launches).toEqual([]);
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`scout (${shipId}): this trierarch cannot crew settings version 1: ${reason}`]);
+  });
+
+  it('checks trust with the harness the settings name: a repository only Codex does not trust is crewed on Claude Code (#381)', async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    trierarch.trust.untrust('codex', { kind: 'repository', name: 'aeolus-fleet' });
+
+    await aCrewedShip(trierarch);
+
+    expect(trierarch.harness.launches).toHaveLength(1);
+  });
+
+  it('never starts a session again in a repository its harness no longer trusts (#381)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.trust.untrust('claude-code', { kind: 'repository', name: 'aeolus-fleet' });
+    trierarch.processes.exit(shipId);
+
+    await trierarch.pass();
+    trierarch.clock.advance(5 * SECOND_MS);
+    await trierarch.pass();
+
+    expect(trierarch.harness.launches).toHaveLength(1);
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
+      `scout (${shipId}): this trierarch cannot crew settings version 1: workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it`,
+    ]);
+  });
+
   it('wakes an idle session once when deliveries come, and not again until it has received', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);

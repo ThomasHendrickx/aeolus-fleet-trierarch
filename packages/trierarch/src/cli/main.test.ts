@@ -124,6 +124,18 @@ describe('aeolus-trierarch', () => {
     await expect(main(['config', 'check'], { HOME: home, AEOLUS_TRIERARCH_CONFIG: config })).resolves.toMatchObject({ code: 0 });
   });
 
+  it('add takes the kind, the name and the path of a place, and names both kinds in its usage (#381)', async () => {
+    const config = join(home, 'env.json');
+    writeFileSync(config, JSON.stringify(CONFIGURATION));
+
+    const { output, code } = await main(['add', 'folder', 'drafts', join(home, 'drafts')], { HOME: home, AEOLUS_TRIERARCH_CONFIG: config });
+
+    expect(code).toBe(1);
+    expect(output).toBe(`${join(home, 'drafts')} is no folder.`);
+    expect(USAGE).toContain('  add repository <name> <path>');
+    expect(USAGE).toContain('  add folder <name> <path>');
+  });
+
   it('says to run init, exiting 1, when there is no configuration yet', async () => {
     const { output, code } = await main(['config', 'check'], { HOME: home });
 
