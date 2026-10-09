@@ -26,7 +26,7 @@ The server stores the settings without meaning and checks only their size. The s
 - optionally the harness. Without one, the trierarch it goes to crews it with its default harness: the first in its configuration, which is also the first in its report;
 - the workspace: a new git worktree of a repository (`{ kind: worktree, repository, ref? }`) or a folder (`{ kind: folder, name }`), each named in the trierarch's local configuration;
 - optionally the squadron the ship is a member of, so it checks in at its flagship as a crew line's squadron id does. With a squadron, the session starts with that squadron's crew line and template, as squadrons crews a new member, instead of a plain first prompt;
-- an optional first prompt, at most 8 KB and never starting with `-` (it would read as a flag), given on the first start only;
+- an optional first prompt, at most 8 KB and never starting with `-` (it would read as a flag), given on the first start of each settings version only;
 - options, checked against the JSON Schema the trierarch reports for that harness, or for its default harness when the settings name none. Only the options that schema declares (its `properties`) are checked; an option it does not declare is ignored: no flag, no refusal. A declared option with a value the harness does not offer does not fit;
 - optional machine labels: label value ids of the fleet, any owner's, that the machine's trierarch ship must carry, every one (exact matches, AND; see Machine labels below).
 
@@ -153,7 +153,7 @@ The trierarch's own ship takes no work by message: a ping gets pong, and any oth
 
 ### Crashed and Restart
 
-A session that dies is restarted by the trierarch on its own. When its restart budget is spent, the trierarch writes status `crashed` and sends argo a plain-text report naming the ship and how often its session crashed: a human decides. The operator's Restart writes the request again as an exact copy, and Edit writes it with new settings: either is a new settings version. The trierarch treats a new version of its crew record as the signal: it stops the running session and crews the ship again with that version, in the same worktree, and a crashed request starts again with a fresh restart budget. It is no release: the worktree stays.
+A session that dies is restarted by the trierarch on its own. When its restart budget is spent, the trierarch writes status `crashed` and sends argo a plain-text report naming the ship and how often its session crashed: a human decides. The operator's Restart writes the request again as an exact copy, and Edit writes it with new settings: either is a new settings version. The trierarch treats a new version of its crew record as the signal: it stops the running session and crews the ship again with that version, in the same worktree, as a first start: a fresh session with that version's first prompt, never the old conversation continued (#443). A crashed request starts again with a fresh restart budget. It is no release: the worktree stays.
 
 ## Lifecycles
 

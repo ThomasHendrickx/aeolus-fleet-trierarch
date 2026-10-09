@@ -232,6 +232,8 @@ function entryOf(checked: CheckedSettings, at: { shipId: ShipId; settingsVersion
  * A new settings version of a request it crews (Restart or Edit): the
  * session stops and the ship is crewed again with that version, in its
  * folder, with a fresh restart budget. It is no release: the worktree stays.
+ * It is a first start (#443): a fresh session with the new version's first
+ * prompt, never the old conversation continued.
  * Settings this trierarch cannot crew are given back while the crew is not
  * final, its entry ending; once it is final, argo is told and the entry stays
  * as it was.
@@ -249,7 +251,7 @@ function newVersionStep(entry: Entry, at: { request: AssignedRequest; state: Tri
   }
   const fresh = entryOf(checked.value, { shipId: entry.shipId, settingsVersion: request.settingsVersion, now: context.now });
   return {
-    entry: { ...fresh, hasStarted: entry.hasStarted, ...(entry.shipName !== undefined && { shipName: entry.shipName }), ...(entry.folder !== undefined && { folder: entry.folder }) },
+    entry: { ...fresh, ...(entry.shipName !== undefined && { shipName: entry.shipName }), ...(entry.folder !== undefined && { folder: entry.folder }) },
     actions: [
       { kind: 'stop', shipId: entry.shipId },
       { kind: 'crew', shipId: entry.shipId, isResumed: true },
