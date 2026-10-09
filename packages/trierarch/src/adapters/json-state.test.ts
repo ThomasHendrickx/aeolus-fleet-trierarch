@@ -57,6 +57,17 @@ describe('the JSON state store', () => {
     await expect(store.load()).resolves.toEqual(state);
   });
 
+  it('loads when the session of an entry crewing started, so its launch window survives a restart of the trierarch (#382)', async () => {
+    const store = createJsonState(join(folder, 'state.json'));
+    const state = aState();
+    const entries = Object.fromEntries(Object.entries(state.entries).map(([shipId, entry]) => [shipId, { ...entry, state: 'crewing' as const, launchedAt: '2026-10-06T08:00:30.000Z' }]));
+    const crewing = { ...state, entries };
+
+    await store.save(crewing);
+
+    await expect(store.load()).resolves.toEqual(crewing);
+  });
+
   it('loads the kept worktrees and orphans it saved, each with its repository, and an orphan with its name (#325)', async () => {
     const store = createJsonState(join(folder, 'state.json'));
     const state = {
