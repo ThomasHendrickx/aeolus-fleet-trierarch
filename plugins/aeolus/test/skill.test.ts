@@ -29,8 +29,8 @@ describe('the crew-a-ship skill', () => {
     expect(claudeSkill).not.toMatch(/crewToken line|pass it to every fleet call/);
   });
 
-  it("points the Codex skill to the same MCP instructions, holding none of the rules, with its Codex crew line and harness", () => {
-    expect(codexSkill).toContain('The Aeolus MCP server states the ship protocol in its instructions');
+  it('has a Codex session fetch the same protocol from the fleet, holding none of the rules, with its Codex crew line and harness', () => {
+    expect(codexSkill).toContain('`scripts/aeolus-fleet.sh protocol`');
     for (const rule of protocolRules) {
       expect(codexSkill).not.toContain(rule);
     }

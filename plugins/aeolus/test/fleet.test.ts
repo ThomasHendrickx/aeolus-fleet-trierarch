@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -214,6 +214,19 @@ describe('aeolus-fleet calls', () => {
 
     expect(result.status).toBe(0);
     expect(fleet.calls[0]).toMatchObject({ path: '/api/v1/ship/send', body: input });
+  });
+
+  it('states the model a hook recorded on every send, over one the input states, as the Codex hook records it', async () => {
+    fleet = await crewedAt([{ status: 200, body: { messageId: 'msg_01m3tbfspe96yf1rnr4ank9h1d' } }]);
+    writeFileSync((await identityFile()).replace(/\.identity$/, '.model'), 'gpt-6-astra\n');
+
+    await run('aeolus-fleet.sh', { args: ['send', '-'], stdin: '{"payload":"a \\"model\\": in the text","model":"stale"}\n' });
+    await run('aeolus-fleet.sh', { args: ['send', '{ }'] });
+
+    expect(fleet.calls.map((call): unknown => JSON.parse(call.body))).toEqual([
+      { payload: 'a "model": in the text', model: 'gpt-6-astra' },
+      { model: 'gpt-6-astra' },
+    ]);
   });
 
   it('reports, checks the inbox and deregisters as POST, and asks whoami and the report log as GET', async () => {
