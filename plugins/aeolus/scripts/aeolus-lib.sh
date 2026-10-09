@@ -153,6 +153,14 @@ aeolus_identity_get() {
   sed -n "s/^${field}=//p" "$file" | head -n 1
 }
 
+# The crew token the identity file holds now, or nothing once it is gone: the
+# folder may have been crewed again since a script read it.
+aeolus_identity_token() {
+  local file="$1"
+  [ -f "$file" ] || return 0
+  aeolus_identity_get "$file" crewToken
+}
+
 # Whether a pid belongs to one of this plugin's scripts. A pid file alone is
 # not ownership: the operating system may have reused the number.
 aeolus_process_is() {

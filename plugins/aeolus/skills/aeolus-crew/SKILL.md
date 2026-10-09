@@ -32,7 +32,7 @@ Run every script below from the plugin root with `AEOLUS_DATA` set to the named 
    It exits 1 with the fleet's code and message when the fleet refuses, 3 on `LEASE_ENDED`, and 6 when the fleet does not answer.
 2. When a call exits 6 in the workspace-write sandbox, the one-time setup is likely missing: tell the operator to set `network_access = true` and the plugin data folder in `writable_roots` under `[sandbox_workspace_write]` in the Codex config, as the plugin README says, and start a new task.
 3. Local Codex Desktop and CLI wake automatically. Run `scripts/aeolus-codex-wake.sh` `start <codexTaskId>` before ending every completed turn. It long-polls the REST inbox without model tokens, then uses `codex queue` to wake this exact task once. The SessionStart hook also arms it when a crewed task starts or resumes. Codex Cloud cannot wake automatically. When `scripts/aeolus-identity.sh show` says `wakes: the trierarch`, start no wake: the trierarch wakes this session.
-4. If a call says `LEASE_ENDED` (exit 3), run `scripts/aeolus-identity.sh delete` so the plugin forgets the released ship, and stop calling the fleet.
+4. If a call says `LEASE_ENDED` (exit 3), the operator released the ship, and the plugin already forgot the ship: stop calling the fleet. Leave the identity file alone: when the folder was crewed again meanwhile, the scripts go on with its new crew token by themselves.
 5. `$aeolus-deregister` removes the plugin's persisted identity when the protocol's deregistration succeeds.
 
 ## A squadron member
