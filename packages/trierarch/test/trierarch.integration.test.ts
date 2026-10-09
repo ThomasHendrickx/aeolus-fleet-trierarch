@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { ShipId } from '@aeolus-fleet/common';
@@ -26,6 +26,7 @@ import { createJsonState } from '../src/adapters/json-state.js';
 import { trierarchPaths, type TrierarchPaths } from '../src/adapters/paths.js';
 import { createRestFleet } from '../src/adapters/rest-fleet.js';
 import type { Tmux } from '../src/adapters/tmux.js';
+import { createTrust } from '../src/adapters/trust.js';
 import { initTrierarch } from '../src/cli/init.js';
 import type { ObservedSession } from '../src/core/ports.js';
 import { createRunPass } from '../src/core/run-pass.js';
@@ -100,6 +101,10 @@ async function aTrierarchOnTheFleet() {
   const scout = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'scout', type: 'reviewer' }));
 
   const service = { install: () => Promise.resolve(), restart: () => Promise.resolve(), status: () => Promise.resolve({ file: 'none', isInstalled: true, isRunning: true }) };
+  // The places come with init, as an operator adds them: adding a place through init is what trusts it (#381).
+  const configuration = { ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: repository } }, folders: { notes: { path: join(home, 'notes') } } };
+  mkdirSync(dirname(paths.config), { recursive: true });
+  writeFileSync(paths.config, JSON.stringify(configuration));
   const quiet = { text: () => Promise.reject(new Error('asked')), secret: () => Promise.reject(new Error('asked')), confirm: () => Promise.reject(new Error('asked')), say: () => undefined, step: () => undefined };
   await initTrierarch({
     homeDirectory: home,
@@ -114,15 +119,14 @@ async function aTrierarchOnTheFleet() {
     detect: () => Promise.resolve({}),
   });
   const fleet = createRestFleet(await readCrewFile(paths.crewToken));
-  const configuration = { ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: repository } }, folders: { notes: { path: join(home, 'notes') } } };
   const sessions = standInSessions();
-  const harness = createClaudeCodeHarness({ configuration, plugin: { root: PLUGIN_ROOT, data: pluginData }, sessions });
+  const harness = createClaudeCodeHarness({ configuration, plugin: { root: PLUGIN_ROOT, data: pluginData }, projects: join(home, '.claude', 'projects'), sessions });
   const workspace = createGitWorkspace({ configuration, root: paths.worktrees });
   const state = createJsonState(paths.state);
   const clock = { now: () => new Date() };
   const logger = { warn: () => undefined, action: () => undefined };
   const setup = { configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
-  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, state, setup, clock, logger });
+  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {} }), state, setup, clock, logger });
   const leasesOf = (shipId: ShipId) => database.lease.count({ where: { shipId, endedAt: null } });
   const worktree = join(paths.worktrees, 'aeolus-fleet', 'scout');
 

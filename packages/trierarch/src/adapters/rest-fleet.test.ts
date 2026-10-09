@@ -88,4 +88,44 @@ describe('the fleet over REST', () => {
       },
     );
   });
+
+  it('gives a crew request back with the settings version it tried and the reason, and answers given back once the fleet takes it (#382)', async () => {
+    const shipId = newId('ship');
+    const asked: { method?: string; url?: string; body: string }[] = [];
+    const server = createServer((request, response) => {
+      let body = '';
+      request.on('data', (chunk: Buffer) => {
+        body += chunk.toString();
+      });
+      request.on('end', () => {
+        asked.push({ ...(request.method !== undefined && { method: request.method }), ...(request.url !== undefined && { url: request.url }), body });
+        response.writeHead(200, { 'content-type': 'application/json' }).end('{}');
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    const port = typeof address === 'object' && address !== null ? address.port : 0;
+    try {
+      const answer = await createRestFleet({ fleetUrl: `http://127.0.0.1:${String(port)}`, crewToken: 'aeolus_ct_v1_x' }).giveBack(shipId, { settingsVersion: 2, reason: 'mac-studio: harness: no codex' });
+
+      expect(answer).toEqual({ kind: 'givenBack' });
+      expect(asked).toEqual([{ method: 'POST', url: '/api/v1/fleet/giveBackCrewRequest', body: JSON.stringify({ shipId, settingsVersion: 2, reason: 'mac-studio: harness: no codex' }) }]);
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
+  it('answers the code and message when the fleet refuses a give-back, rather than throwing (#382)', async () => {
+    await aFleetThat(
+      (response) => response.writeHead(409, { 'content-type': 'application/json' }).end(JSON.stringify({ code: 'CREW_REQUEST_FINAL', message: "scout's crew is final (running)" })),
+      async (fleetUrl) => {
+        await expect(createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_x' }).giveBack(newId('ship'), { settingsVersion: 1, reason: 'mac-studio: harness: no codex' })).resolves.toEqual({
+          kind: 'refused',
+          code: 'CREW_REQUEST_FINAL',
+          message: "scout's crew is final (running)",
+        });
+      },
+    );
+  });
 });

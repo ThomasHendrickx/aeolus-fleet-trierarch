@@ -451,6 +451,15 @@ describe('aeolus-trierarch init on a machine set up already', () => {
     expect(report.trusted).toEqual([paths.worktrees, notes]);
   });
 
+  it('trusts every configured repository for Claude Code, a repository added since among them, as it asks about the repository of a worktree (#381)', async () => {
+    writeFileSync(paths.config, JSON.stringify({ ...configuration(), repositories: { 'aeolus-fleet': { path: repository } } }));
+
+    const report = await init({ isYes: true });
+
+    await expect(createClaudeCodeSetup({ homeDirectory: home }).isTrusted(repository)).resolves.toBe(true);
+    expect(report.trusted).toEqual([paths.worktrees, repository]);
+  });
+
   it('refuses a ship id or secret given again, saying how to register another ship', async () => {
     await expect(init({ shipId: newId('ship'), secret: SECRET })).rejects.toThrow(`init never registers again: to register another ship, remove ${paths.crewToken} first`);
     expect(registered).toEqual([]);

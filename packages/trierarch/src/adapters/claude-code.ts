@@ -1,3 +1,6 @@
+import { readdir } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { AdapterFlag, HarnessPort } from '../core/ports.js';
@@ -8,8 +11,8 @@ import type { Tmux } from './tmux.js';
 
 /**
  * Claude Code as a harness (docs/architecture.md, "First adapters"): `claude`
- * in the folder, `--continue` on a restart, `/aeolus:wake` typed to wake an
- * idle session. A session's identity is written and read through the aeolus
+ * in the folder, `--continue` on a restart when the folder has a conversation
+ * to continue, `/aeolus:wake` typed to wake an idle session. A session's identity is written and read through the aeolus
  * plugin's own `aeolus-identity.sh`, never a copy of how the plugin names its
  * files.
  */
@@ -55,10 +58,26 @@ export function claudeCodeCommandLine(at: { flags: readonly string[]; sessionNam
   ]);
 }
 
+/**
+ * Whether Claude Code keeps a conversation for the folder: it keeps each in
+ * its projects folder, under the folder's path with every character other
+ * than a letter or digit as `-`. Without one, `claude --continue` exits at
+ * once (#381), so a restart starts fresh instead.
+ */
+async function hasConversation(projects: string, folder: string): Promise<boolean> {
+  try {
+    return (await readdir(join(projects, folder.replace(/[^a-zA-Z0-9]/g, '-')))).some((file) => file.endsWith('.jsonl'));
+  } catch {
+    return false;
+  }
+}
+
 export function createClaudeCodeHarness(options: {
   configuration: TrierarchConfiguration;
   plugin: AeolusPlugin;
   sessions: Pick<Tmux, 'start' | 'type'>;
+  /** Claude Code's projects folder, where it keeps each folder's conversations. */
+  projects: string;
   /** The program to run; `claude` unless a test runs another. */
   command?: string;
 }): HarnessPort {
@@ -76,7 +95,7 @@ export function createClaudeCodeHarness(options: {
         flags: effectiveFlags(settings, picked),
         sessionName: `[${workspace.kind === 'worktree' ? workspace.repository : workspace.name}] ${shipName}`,
         prompt,
-        isFirstStart,
+        isFirstStart: isFirstStart || !(await hasConversation(options.projects, folder)),
         ...(options.command !== undefined && { program: options.command }),
       });
       await sessions.start({ shipId, folder, command: wordsOf(command) });

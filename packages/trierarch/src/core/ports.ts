@@ -58,6 +58,9 @@ export interface WrittenStatus {
   readonly startedAt: Date | null;
 }
 
+/** How the fleet answered a give-back (#382): it took the request back, or refused with its code and message. */
+export type GiveBackAnswer = { readonly kind: 'givenBack' } | { readonly kind: 'refused'; readonly code: string; readonly message: string };
+
 export interface FleetPort {
   /** The fleet's URL, written into each session's identity. */
   readonly url: string;
@@ -65,6 +68,14 @@ export interface FleetPort {
   assignedRequests(): Promise<readonly AssignedRequest[]>;
   /** Says how its crew of an assigned ship stands, with the restart attempt and when the session started (#332). */
   writeStatus(shipId: ShipId, written: WrittenStatus): Promise<void>;
+  /**
+   * Gives back a request it cannot crew, for the settings version it tried,
+   * while its crew is not final (#382): the fleet unassigns it and ends the
+   * ship's lease. A refusal is answered, not thrown.
+   */
+  giveBack(shipId: ShipId, given: { settingsVersion: number; reason: string }): Promise<GiveBackAnswer>;
+  /** The trierarch's own ship, as its crew token says: its name names the machine. It answers while the lease holds. */
+  whoami(): Promise<{ shipId: ShipId; name: string }>;
   /** Confirms it released the ship of a releasing request, which then goes. */
   confirmRelease(shipId: ShipId): Promise<void>;
   ship(shipId: ShipId): Promise<FleetShipStatus>;
@@ -149,6 +160,18 @@ export interface ObservedWorktree {
   readonly repository: string;
   readonly name: string;
   readonly shipId?: ShipId;
+}
+
+/** The configured repositories and folders each configured harness trusts, by name (#381). */
+export type TrustedPlaces = Readonly<Record<string, { readonly repositories: readonly string[]; readonly folders: readonly string[] }>>;
+
+/**
+ * What each harness trusts now, as its own files say (#381). Init trusts a
+ * place as it adds it; the trierarch only reads: a place a harness does not
+ * trust is never offered and never crewed.
+ */
+export interface TrustPort {
+  trusted(): Promise<TrustedPlaces>;
 }
 
 export interface WorkspacePort {

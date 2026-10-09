@@ -9,6 +9,7 @@ import { createJsonState } from '../adapters/json-state.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
 import { createTmux } from '../adapters/tmux.js';
+import { createTrust } from '../adapters/trust.js';
 import { runningVersion } from '../adapters/version.js';
 import { createDetectHarnesses } from '../core/detect-harnesses.js';
 import { modelOptionsIgnored, withDetectedOptions } from '../core/detected-options.js';
@@ -47,6 +48,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, sessions: tmux });
   const workspace = createGitWorkspace({ configuration, root: configuration.worktreeRoot ?? paths.worktrees });
   const state = createJsonState(paths.state);
+  const trust = createTrust({ configuration, homeDirectory, env });
   const clock = { now: () => new Date() };
   const setup = {
     configuration,
@@ -57,8 +59,8 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     detected,
   };
   const handle = createHandleDelivery({ fleet, logger });
-  const runPass = createRunPass({ fleet, harnesses, processes: tmux, workspace, state, setup, clock, logger });
-  const reportSelf = createReportSelf({ fleet, processes: tmux, state, setup });
+  const runPass = createRunPass({ fleet, harnesses, processes: tmux, workspace, trust, state, setup, clock, logger });
+  const reportSelf = createReportSelf({ fleet, processes: tmux, trust, state, setup });
   // Each pass ends with the trierarch's own report: the first at start, then only when it changed.
   const pass = async (): Promise<void> => {
     await runPass();

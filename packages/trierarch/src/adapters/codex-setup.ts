@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 
 import { z } from 'zod';
@@ -132,4 +134,37 @@ export function createCodexSetup(options: { command?: string } = {}): CodexSetup
         return untrusted.map((hook) => hook.key);
       }),
   };
+}
+
+/** A `[projects."<path>"]` or `[projects.'<path>']` table header in Codex's config.toml, as Codex writes it. */
+const PROJECT_HEADER = /^\s*\[\s*projects\.(?:"((?:[^"\\]|\\.)*)"|'([^']*)')\s*\]\s*$/;
+const TABLE_HEADER = /^\s*\[/;
+const TRUSTED_LEVEL = /^\s*trust_level\s*=\s*(?:"trusted"|'trusted')\s*(?:#.*)?$/;
+
+/**
+ * The folders Codex trusts (#381), read from its config.toml in CODEX_HOME,
+ * or ~/.codex without it: each `projects` table whose `trust_level` is
+ * `trusted`. None where Codex keeps no configuration yet.
+ */
+export async function codexTrustedFolders(at: { homeDirectory: string; env: Readonly<Record<string, string | undefined>> }): Promise<ReadonlySet<string>> {
+  let text: string;
+  try {
+    text = await readFile(join(at.env.CODEX_HOME ?? join(at.homeDirectory, '.codex'), 'config.toml'), 'utf8');
+  } catch {
+    return new Set();
+  }
+  const trusted = new Set<string>();
+  let project: string | undefined;
+  for (const line of text.split('\n')) {
+    const header = PROJECT_HEADER.exec(line);
+    if (header !== null) {
+      // A basic string's escapes read as JSON's do; a literal string has none.
+      project = header[1] === undefined ? header[2] : z.string().parse(JSON.parse(`"${header[1]}"`));
+    } else if (TABLE_HEADER.test(line)) {
+      project = undefined;
+    } else if (project !== undefined && TRUSTED_LEVEL.test(line)) {
+      trusted.add(project);
+    }
+  }
+  return trusted;
 }
