@@ -43,6 +43,43 @@ const aState = (): TrierarchState => {
   };
 };
 
+/**
+ * A state with every optional field filled, down to the items of its lists:
+ * a field added to the state but not to this factory fails the typecheck,
+ * and one the state file schema does not know then fails the round trip (#543).
+ */
+type Populated<T> = T extends readonly (infer Item)[] ? readonly Populated<Item>[] : T extends object ? { readonly [Key in keyof T]-?: Populated<T[Key]> } : T;
+
+const aPopulatedState = (): Populated<TrierarchState> => {
+  const shipId = newId('ship');
+  return {
+    entries: {
+      [shipId]: {
+        shipId,
+        shipName: 'scout',
+        settingsVersion: 2,
+        harness: 'claude-code',
+        workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'main' },
+        squadron: 'pathfinders',
+        firstPrompt: 'Chart the coast.',
+        options: { model: 'opus' },
+        state: 'restarting',
+        since: '2026-10-06T08:00:00.000Z',
+        exits: ['2026-10-06T07:59:00.000Z'],
+        restartAt: '2026-10-06T08:01:00.000Z',
+        folder: '/home/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/scout',
+        hasStarted: true,
+        launchedAt: '2026-10-06T07:58:30.000Z',
+        isReleasedElsewhere: true,
+        wake: { waiting: 2, isPending: true },
+      },
+    },
+    kept: [{ shipId: newId('ship'), repository: 'aeolus-fleet', path: '/home/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/lookout' }],
+    orphans: [{ path: '/home/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/stray', repository: 'aeolus-fleet', name: 'stray' }],
+    refused: { [newId('ship')]: 3 },
+  };
+};
+
 describe('the JSON state store', () => {
   it('starts empty when there is no state file yet', async () => {
     await expect(createJsonState(join(folder, 'state.json')).load()).resolves.toEqual(EMPTY_STATE);
@@ -51,6 +88,15 @@ describe('the JSON state store', () => {
   it('loads what it saved', async () => {
     const store = createJsonState(join(folder, 'nested', 'state.json'));
     const state = aState();
+
+    await store.save(state);
+
+    await expect(store.load()).resolves.toEqual(state);
+  });
+
+  it('loads every field of a state it saved with all of them filled, so a field the state file schema does not know cannot be dropped unseen (#543)', async () => {
+    const store = createJsonState(join(folder, 'state.json'));
+    const state = aPopulatedState();
 
     await store.save(state);
 
