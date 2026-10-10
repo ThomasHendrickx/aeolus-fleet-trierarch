@@ -1111,17 +1111,19 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.fleet.toArgo).toEqual([]);
   });
 
-  it('tells argo once, as before, of a new settings version it cannot crew once its crew is final: the session runs on (#382)', async () => {
+  it('gives back a new settings version it cannot crew of a ship whose crew ran, as the new version clears final: the session stops, its identity and clean worktree go (#477)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     trierarch.fleet.requestAgain(shipId, crewSettings({ harness: 'codex' }));
 
     await trierarch.pass();
-    await trierarch.pass();
 
-    expect(trierarch.fleet.givenBack).toEqual([]);
-    expect(trierarch.processes.sessions.get(shipId)).toBe('running');
-    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`scout (${shipId}): this trierarch cannot crew settings version 2: harness: This trierarch offers no harness codex`]);
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 2, reason: 'mac-studio: harness: This trierarch offers no harness codex' }]);
+    expect(trierarch.processes.sessions.has(shipId)).toBe(false);
+    expect(trierarch.state.current().entries).toEqual({});
+    expect(trierarch.harness.identities.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.fleet.toArgo).toEqual([]);
   });
 
   it.each([
