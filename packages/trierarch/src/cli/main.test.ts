@@ -125,6 +125,23 @@ describe('aeolus-trierarch', () => {
     expect(output).toContain('  first start: claude --permission-mode default (adapter) --disallowedTools');
   });
 
+  it('config check shows the override with the mode the detected Claude Code lists: manual where it lists manual (#517)', async () => {
+    const config = join(home, 'manual.json');
+    writeFileSync(config, JSON.stringify({ ...CONFIGURATION, harnesses: { 'claude-code': { flags: [], options: {} } } }));
+    mkdirSync(join(home, 'managed'));
+    writeFileSync(join(home, 'managed', 'managed-settings.json'), JSON.stringify({ permissions: { defaultMode: 'plan' } }));
+    mkdirSync(join(home, '.aeolus', 'trierarch'), { recursive: true });
+    const detectedAt = '2026-10-10T15:00:00.000Z';
+    writeFileSync(
+      join(home, '.aeolus', 'trierarch', 'detected.json'),
+      JSON.stringify({ 'claude-code': { version: '2.1.296', detectedAt, confirmedAt: detectedAt, options: {}, permissionModes: ['acceptEdits', 'manual', 'plan'] } }),
+    );
+
+    const { output } = await main(['config', 'check', '--config', config], machine({ HOME: home }));
+
+    expect(output).toContain('  first start: claude --permission-mode manual (adapter) --disallowedTools');
+  });
+
   it('config check shows no --permission-mode default when the flags name a permission mode of their own (#507)', async () => {
     const config = join(home, 'mode.json');
     writeFileSync(config, JSON.stringify({ ...CONFIGURATION, harnesses: { 'claude-code': { flags: ['--permission-mode', 'acceptEdits'], options: {} } } }));

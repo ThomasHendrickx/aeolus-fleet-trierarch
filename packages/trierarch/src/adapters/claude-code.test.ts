@@ -196,13 +196,14 @@ describe('Claude Code as a harness', () => {
       writeFileSync(settings, JSON.stringify({ permissions: { defaultMode } }));
     };
     /** The words between claude and the adapter's own flags: the configured flags and the override, if any. */
-    const modeOf = async (flags: string[], at: { configDirectory?: string } = {}) => {
+    const modeOf = async (flags: string[], at: { configDirectory?: string; permissionModes?: readonly string[] } = {}) => {
       started = [];
       await createClaudeCodeHarness({
         configuration: { ...CONFIGURATION, harnesses: { 'claude-code': { flags, options: {} } } },
         plugin: { root: PLUGIN_ROOT, data },
         projects,
-        setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: managed, ...at }),
+        setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: managed, ...(at.configDirectory !== undefined && { configDirectory: at.configDirectory }) }),
+        permissionModes: () => at.permissionModes,
         sessions: {
           start: (session) => {
             started.push(session);
@@ -220,6 +221,12 @@ describe('Claude Code as a harness', () => {
       defaultModeIn(join(managed, 'managed-settings.json'), 'plan');
 
       expect(await modeOf([])).toEqual(['--permission-mode', 'default']);
+    });
+
+    it('names the mode the installed Claude Code documents, as detection last found its permission modes: manual where they list it (#517)', async () => {
+      defaultModeIn(join(managed, 'managed-settings.json'), 'plan');
+
+      expect(await modeOf([], { permissionModes: ['acceptEdits', 'manual', 'plan'] })).toEqual(['--permission-mode', 'manual']);
     });
 
     it('takes the managed drop-ins after managed-settings.json, in alphabetical order, the last one winning', async () => {
