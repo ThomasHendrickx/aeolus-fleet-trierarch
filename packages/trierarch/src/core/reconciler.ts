@@ -95,9 +95,6 @@ interface Step {
 
 const NOTHING: Step = { actions: [], starts: 0 };
 
-/** The statuses at which a crew is final (decision 0029): it is no longer given back. */
-const FINAL: ReadonlySet<CrewStatus> = new Set(['running', 'restarting', 'crashed']);
-
 /**
  * What the trierarch does with settings it cannot crew (#382): while the
  * crew is not final as the fleet holds it (#477), it gives the request back with
@@ -139,7 +136,7 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
     }
     const step =
       request.settingsVersion === entry.settingsVersion
-        ? trustedStep(entry, { step: stepOf(entry, { ...context, canStart: canStart() }), request, state: next, context })
+        ? trustedStep(entry, { step: stepOf(entry, { ...context, canStart: canStart(), isFinal: request.isFinal }), request, state: next, context })
         : newVersionStep(entry, { request, state: next, context });
     if (step.isGivenBack === true) {
       next = removeEntry(next, entry.shipId);
@@ -247,7 +244,7 @@ function newVersionStep(entry: Entry, at: { request: AssignedRequest; state: Tri
     if (uncrewed.some((action) => action.kind === 'giveBack')) {
       return { isGivenBack: true, actions: uncrewed, starts: 0 };
     }
-    const step = stepOf(entry, { ...context, canStart: false });
+    const step = stepOf(entry, { ...context, canStart: false, isFinal: request.isFinal });
     return { ...step, actions: [...step.actions, ...uncrewed] };
   }
   const fresh = entryOf(checked.value, { shipId: entry.shipId, settingsVersion: request.settingsVersion, now: context.now });
@@ -282,13 +279,13 @@ function trustedStep(entry: Entry, at: { step: Step; request: AssignedRequest; s
   return { ...(uncrewed.some((action) => action.kind === 'giveBack') && { isGivenBack: true }), actions: [...held, ...uncrewed], starts: 0 };
 }
 
-function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean }): Step {
+/** Steps an entry of the settings version it crews, with whether the fleet holds its crew final (#477). */
+function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean; isFinal: boolean }): Step {
   const { observed, now, canStart } = context;
   const seen = observed.ships[entry.shipId];
   if (seen?.inbox.kind === 'leaseEnded') {
-    // Released elsewhere (row 11): its session stops and the ship is crewed again, in its folder. A final crew stays final (#469).
-    const crewing = withState(entry, { state: 'crewing', now });
-    return { entry: FINAL.has(entry.state) ? { ...crewing, isFinal: true } : crewing, actions: [{ kind: 'stop', shipId: entry.shipId }, { kind: 'crew', shipId: entry.shipId, isResumed: false }], starts: 0 };
+    // Released elsewhere (row 11): its session stops and the ship is crewed again, in its folder. A final crew stays final in the fleet (#469).
+    return { entry: withState(entry, { state: 'crewing', now }), actions: [{ kind: 'stop', shipId: entry.shipId }, { kind: 'crew', shipId: entry.shipId, isResumed: false }], starts: 0 };
   }
   switch (entry.state) {
     case 'crewing':
@@ -310,21 +307,21 @@ function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean })
  * launch window (#382). Activity makes the crew final, so it runs from when
  * its session started. A model refused, or no activity within the minute,
  * gives the request back, its entry ending, the reason naming the harness's
- * screen the session stopped at when it knows it (#403); for a crew already
- * final, crewed again after a release elsewhere, it is a failed start against
- * the restart budget instead (#469). A session gone, as after the machine
+ * screen the session stopped at when it knows it (#403); for a crew the fleet
+ * holds final (#477), as one crewed again after a release elsewhere, it is a
+ * failed start against the restart budget instead (#469). A session gone, as after the machine
  * restarts, is crewed again. Until its start fails, its session is watched
  * and woken as any other (#473).
  */
-function launchStep(entry: Entry, context: ReconcileContext): Step {
-  const { observed, now } = context;
-  const { launchedAt, isFinal, ...running } = entry;
+function launchStep(entry: Entry, context: ReconcileContext & { isFinal: boolean }): Step {
+  const { observed, now, isFinal } = context;
+  const { launchedAt, ...running } = entry;
   const seen = observed.launches[entry.shipId];
   if (launchedAt === undefined || seen === undefined) {
     return { actions: [{ kind: 'crew', shipId: entry.shipId, isResumed: true }], starts: 1 };
   }
   const failedStart = (reason: string, first: readonly Action[] = []): Step => {
-    if (isFinal === true) {
+    if (isFinal) {
       const step = exitStep(running, { now, failedStart: reason });
       return { ...step, actions: [...first, ...step.actions] };
     }
