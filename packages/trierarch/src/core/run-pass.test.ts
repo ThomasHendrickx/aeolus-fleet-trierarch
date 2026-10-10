@@ -653,6 +653,154 @@ describe('the launch window: a crew is final once its session shows activity (#3
   });
 });
 
+/** A crewed ship whose session dies and starts again, showing what is given in its first minute: its id. */
+async function aRestartedShip(trierarch: Trierarch, at: { seen: LaunchSeen; settings?: Record<string, unknown> }) {
+  const shipId = await aCrewedShip(trierarch, at.settings);
+  trierarch.harness.seen.set(shipId, at.seen);
+  trierarch.processes.exit(shipId);
+  await trierarch.pass();
+  trierarch.clock.advance(5 * SECOND_MS);
+  await trierarch.pass();
+  return shipId;
+}
+
+/** Waits until the restarting entry starts again, then lets its first minute run out. */
+async function failAgain(trierarch: Trierarch, shipId: ShipId) {
+  const restartAt = trierarch.state.current().entries[shipId]?.restartAt;
+  if (restartAt !== undefined) {
+    trierarch.clock.advance(new Date(restartAt).getTime() - trierarch.clock.now().getTime());
+  }
+  await trierarch.pass();
+  trierarch.clock.advance(MINUTE_MS);
+  await trierarch.pass();
+}
+
+describe('the restart window: a restarted final crew is checked, never held back (#397)', () => {
+  it('starts a restarted session at once and writes running while its first minute runs', async () => {
+    const trierarch = aTrierarch();
+
+    const shipId = await aRestartedShip(trierarch, { seen: { kind: 'none' } });
+
+    expect(trierarch.processes.sessions.get(shipId)).toBe('running');
+    expect(trierarch.state.current().entries[shipId]?.state).toBe('running');
+    expect(statusesOf(trierarch, shipId)).toEqual(['crewing', 'running', 'restarting', 'running']);
+  });
+
+  it('watches the inbox of a restarted session and wakes it while its first minute runs', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aRestartedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.fleet.deliver(shipId, 1);
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.wakes).toEqual([shipId]);
+  });
+
+  it('reads the screen of a restarted session for the model it launched with', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aRestartedShip(trierarch, { seen: { kind: 'none' }, settings: { options: { model: 'sonnet' } } });
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.asked.slice(1)).toEqual([{ shipId, model: 'sonnet' }]);
+  });
+
+  it('counts no activity within a minute of a restart as a failed start: the session stops and restarts after its wait, nothing given back', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aRestartedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.clock.advance(MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'restarting', exits: [expect.any(String), expect.any(String)] });
+    expect(trierarch.processes.sessions.has(shipId)).toBe(false);
+    expect(statusesOf(trierarch, shipId)).toEqual(['crewing', 'running', 'restarting', 'running', 'restarting']);
+    expect(trierarch.fleet.givenBack).toEqual([]);
+  });
+
+  it('waits out the minute before it counts a failed start', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aRestartedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.clock.advance(MINUTE_MS - SECOND_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'running', exits: [expect.any(String)] });
+  });
+
+  it('counts a refused model on a restart as a failed start against the restart budget, nothing given back', async () => {
+    const trierarch = aTrierarch(CONFIGURATION, DETECTED);
+    const shipId = await aRestartedShip(trierarch, { seen: { kind: 'refused', model: 'sonnet' }, settings: { options: { model: 'sonnet' } } });
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'restarting', exits: [expect.any(String), expect.any(String)] });
+    expect(trierarch.processes.sessions.has(shipId)).toBe(false);
+    expect(trierarch.fleet.givenBack).toEqual([]);
+  });
+
+  it('keeps the model a restarted session refused as refused for its harness, and tells argo once', async () => {
+    const trierarch = aTrierarch(CONFIGURATION, DETECTED);
+    const shipId = await aRestartedShip(trierarch, { seen: { kind: 'refused', model: 'sonnet' }, settings: { options: { model: 'sonnet' } } });
+
+    await trierarch.pass();
+
+    expect(trierarch.refusals).toEqual([{ harness: 'claude-code', id: 'sonnet', at: trierarch.clock.now() }]);
+    expect(trierarch.fleet.toArgo).toEqual([
+      {
+        text: `mac-studio: claude-code 2.1.295 refused the model sonnet for scout (${shipId}): this machine offers it no more at this version, until aeolus-trierarch detect runs by hand`,
+        idempotencyKey: 'trierarch:refused-model:claude-code:2.1.295:sonnet',
+      },
+    ]);
+  });
+
+  it('once failed starts spend the restart budget, writes crashed and tells argo the reason, giving nothing back', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aRestartedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.clock.advance(MINUTE_MS);
+    await trierarch.pass();
+
+    for (let start = 1; start < RESTART_BUDGET; start += 1) {
+      await failAgain(trierarch, shipId);
+    }
+
+    expect(trierarch.state.current().entries[shipId]?.state).toBe('crashed');
+    expect(trierarch.fleet.requestOf(shipId).status).toBe('crashed');
+    expect(trierarch.processes.sessions.has(shipId)).toBe(false);
+    expect(trierarch.fleet.givenBack).toEqual([]);
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
+      `scout (${shipId}): its session crashed ${String(RESTART_BUDGET + 1)} times within an hour, restart budget spent; its last start: no activity within a minute of its start; status crashed. Restart it in the console to crew it again.`,
+    ]);
+  });
+
+  it('checks the session started again after the machine restarts too', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.seen.set(shipId, { kind: 'none' });
+    trierarch.processes.restartMachine();
+    await trierarch.pass();
+    trierarch.clock.advance(MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'restarting', exits: [expect.any(String)] });
+  });
+
+  it('reads no screen once the restarted session showed activity', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aRestartedShip(trierarch, { seen: { kind: 'active' } });
+    await trierarch.pass();
+    trierarch.harness.seen.set(shipId, { kind: 'none' });
+    trierarch.clock.advance(2 * MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.asked).toHaveLength(2);
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'running', exits: [expect.any(String)] });
+  });
+});
+
 describe('the gaps the loop closes (docs/trierarch.md)', () => {
   it('rule 2: a session of the trierarch with no assigned request is stopped', async () => {
     const trierarch = aTrierarch();
