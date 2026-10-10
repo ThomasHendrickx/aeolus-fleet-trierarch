@@ -497,6 +497,23 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.fleet.toArgo).toHaveLength(1);
   });
 
+  it('row 11: a ship released elsewhere is crewed again as a first start, with its first prompt and no resume (#475)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch, { firstPrompt: 'Review the open pull requests.' });
+    trierarch.fleet.releaseElsewhere(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.launches.at(-1)).toEqual({
+      shipId,
+      shipName: 'scout',
+      folder: SCOUT_FOLDER,
+      workspace: { kind: 'worktree', repository: 'aeolus-fleet' },
+      isFirstStart: true,
+      firstPrompt: 'Review the open pull requests.',
+    });
+  });
+
   it('row 12: a new settings version stops the session and crews it again with that version, keeping the worktree', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
