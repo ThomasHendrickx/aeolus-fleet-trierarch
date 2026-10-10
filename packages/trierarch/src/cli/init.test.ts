@@ -72,15 +72,22 @@ class ScriptedPrompter implements Prompter {
   }
 }
 
-class FakeService implements Pick<Service, 'install' | 'restart' | 'status'> {
+class FakeService implements Pick<Service, 'install' | 'rewrite' | 'restart' | 'status'> {
   isInstalled = false;
   restarts = 0;
+  /** What the service went through, in order, from rewrite and restart. */
+  readonly done: string[] = [];
+  rewrite(): Promise<void> {
+    this.done.push('rewrite');
+    return Promise.resolve();
+  }
   install(): Promise<void> {
     this.isInstalled = true;
     return Promise.resolve();
   }
   restart(): Promise<void> {
     this.restarts += 1;
+    this.done.push('restart');
     return Promise.resolve();
   }
   status(): Promise<ServiceStatus> {
@@ -390,6 +397,20 @@ describe('aeolus-trierarch init on a machine set up already', () => {
     expect(readFileSync(paths.config, 'utf8')).toBe(before);
     expect(report).toMatchObject({ isSetUpAlready: true, configuration: 'kept', service: 'unchanged' });
     expect(report.said[0]).toBe(`This machine is set up already: the trierarch crews ${shipId} at ${FLEET_URL}.`);
+  });
+
+  it("rewrites the installed service's file, so a unit an earlier trierarch wrote runs as this one writes it from its next start (#479)", async () => {
+    await init({}, new ScriptedPrompter([['Change the configuration', false]]));
+
+    expect(service.done).toEqual(['rewrite']);
+  });
+
+  it("rewrites the installed service's file before it restarts the trierarch, so the restart runs the new one", async () => {
+    const prompter = new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', false], ['repository', ''], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', true]]);
+
+    await init({}, prompter);
+
+    expect(service.done).toEqual(['rewrite', 'restart']);
   });
 
   it('changes the configuration from what it holds, then offers to restart the trierarch so it reads it', async () => {

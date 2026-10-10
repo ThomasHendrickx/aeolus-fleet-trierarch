@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -219,6 +219,13 @@ describe('the service on macOS (launchd)', () => {
     expect(existsSync(plist())).toBe(false);
   });
 
+  it('rewrites an installed agent without loading it again, so the running trierarch and its sessions are left alone', async () => {
+    await serviceOn('darwin').rewrite();
+
+    expect(readFileSync(plist(), 'utf8')).toContain('<key>KeepAlive</key>');
+    expect(calls).toEqual([]);
+  });
+
   it('only writes the file when asked not to load it', async () => {
     await serviceOn('darwin').write();
 
@@ -241,6 +248,27 @@ describe('the service on Linux (systemd)', () => {
     expect(text).toContain('Environment="PATH=/opt/homebrew/bin:/usr/bin:/bin"');
     expect(text).toContain('Environment="AEOLUS_PLUGIN_ROOT=/Users/thomas/aeolus-fleet/plugins/aeolus"');
     expect(calls).toEqual(['systemctl --user daemon-reload', `systemctl --user enable ${SYSTEMD_UNIT}`, `systemctl --user restart ${SYSTEMD_UNIT}`]);
+  });
+
+  it('writes a unit whose stop ends only the trierarch, so the sessions in its tmux server keep running across upgrade and restart (#479)', async () => {
+    await serviceOn('linux').write();
+
+    expect(readFileSync(unit(), 'utf8')).toContain('\nKillMode=process\n');
+  });
+
+  it('rewrites an installed unit and reloads systemd, leaving the running trierarch and its sessions alone', async () => {
+    answers.set('systemctl --user daemon-reload', ok());
+    mkdirSync(join(home, '.config', 'systemd', 'user'), { recursive: true });
+    writeFileSync(unit(), '[Service]\nExecStart=/old/node run\n');
+
+    await serviceOn('linux').rewrite();
+
+    expect(readFileSync(unit(), 'utf8')).toContain('KillMode=process');
+    expect(calls).toEqual(['systemctl --user daemon-reload']);
+  });
+
+  it('says why when systemd refuses to reload the rewritten unit', async () => {
+    await expect(serviceOn('linux').rewrite()).rejects.toThrow('systemctl --user daemon-reload failed: not loaded');
   });
 
   it('installs over an active unit by restarting it, so the new unit takes effect at once, as on macOS', async () => {
