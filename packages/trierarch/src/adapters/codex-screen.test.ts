@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { codexLaunchSeen } from './codex-screen.js';
 
-// On screens of Codex 0.160.1, captured from real sessions (#382).
+// On screens of Codex 0.162.1, captured from real sessions (#382, #594).
 
 function screen(name: string): string {
   return readFileSync(new URL(`../../test/screens/codex-${name}.txt`, import.meta.url), 'utf8');
@@ -38,6 +38,6 @@ describe('what a Codex screen shows in its launch window', () => {
   });
 
   it('sees the model refused that a session launched without one used', () => {
-    expect(codexLaunchSeen({ screen: screen('refused-default') })).toEqual({ kind: 'refused', model: 'gpt-6.1-sol' });
+    expect(codexLaunchSeen({ screen: screen('refused-default') })).toEqual({ kind: 'refused', model: 'gpt-nonexistent-9' });
   });
 });

@@ -2,7 +2,7 @@ import type { LaunchSeen } from '../core/ports.js';
 import { launchSeenWith, type LaunchTexts } from './launch-screen.js';
 
 /**
- * Codex's screen in a session's launch window (#382), as Codex 0.160.1
+ * Codex's screen in a session's launch window (#382), as Codex 0.162.1
  * writes it: the one place its texts are matched, tested on screens captured
  * from real sessions (test/screens). "• Working" shows even with no tool
  * call, so it is no activity.

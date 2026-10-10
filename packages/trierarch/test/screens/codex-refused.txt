@@ -1,23 +1,5 @@
-╭───────────────────────────────────────────────────────────────╮
-│ ✨ Update available! 0.160.1 -> 0.161.0                       │
-│ See https://github.com/openai/codex for installation options. │
-│                                                               │
-│ See full release notes:                                       │
-│ https://github.com/openai/codex/releases/latest               │
-╰───────────────────────────────────────────────────────────────╯
-
-  >_ OpenAI Codex (v0.160.1)
-     /Users/operator/work/cx-bad
-
-  Shall we see where this goes?
-
-  To get started, describe a task or try one of these commands:
-
-  /init - create an AGENTS.md file with instructions for Codex
-  /status - show current session configuration
-  /permissions - choose what Codex is allowed to do
-  /model - choose what model and reasoning effort to use
-  /review - review any changes and find issues
+  >_ OpenAI Codex (v0.162.1)
+     /Users/operator/work/cx-refused
 
 › Reply OK
 
@@ -25,5 +7,5 @@
 
 › Ask Codex to do anything
 
-  gpt-nonexistent-9 low · /Users/operator/work/cx-bad · Reply …
-  ← for agents · ? for shortcuts                                                                                                                                              ⚠ 2 warnings · f2 to view
+  gpt-nonexistent-9 low · /Users/operator/work/cx-refused · Reply…
+  ? for shortcuts                                                                                                                                                              ⚠ 1 warning · f2 to view
