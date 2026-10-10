@@ -614,6 +614,18 @@ describe('the launch window: a crew is final once its session shows activity (#3
     expect(trierarch.state.current().entries).toEqual({});
   });
 
+  it('names the screen its session stopped at when it gives the request back', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none', screen: 'bypass permissions warning' } });
+    trierarch.clock.advance(MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([
+      { shipId, settingsVersion: 1, reason: "mac-studio: no activity within a minute of its start, stopped at claude-code's bypass permissions warning" },
+    ]);
+  });
+
   it('waits out the minute before it gives the request back', async () => {
     const trierarch = aTrierarch();
     const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' } });
