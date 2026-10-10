@@ -8,7 +8,7 @@ import { createCodexDetector } from './codex-detector.js';
 import { runCommand } from './run-command.js';
 
 /** The detector of each harness this trierarch has an adapter for (#365), running the real CLIs. */
-export function createDetectors(at: { homeDirectory: string }): Record<string, HarnessDetector> {
+export function createDetectors(at: { homeDirectory: string; env: Readonly<Record<string, string | undefined>> }): Record<string, HarnessDetector> {
   return {
     'claude-code': createClaudeCodeDetector({
       run: runCommand,
@@ -17,7 +17,8 @@ export function createDetectors(at: { homeDirectory: string }): Record<string, H
     }),
     codex: createCodexDetector({
       run: runCommand,
-      readConfig: () => readFile(join(at.homeDirectory, '.codex', 'config.toml'), 'utf8').catch(() => undefined),
+      // Codex's configuration where Codex keeps it: in CODEX_HOME when it is set (#521).
+      readConfig: () => readFile(join(at.env.CODEX_HOME ?? join(at.homeDirectory, '.codex'), 'config.toml'), 'utf8').catch(() => undefined),
       // As for Claude Code: a new empty folder per detection, so a probe is never a ship.
       neutralFolder: () => mkdtemp(join(tmpdir(), 'aeolus-trierarch-probe-')),
     }),

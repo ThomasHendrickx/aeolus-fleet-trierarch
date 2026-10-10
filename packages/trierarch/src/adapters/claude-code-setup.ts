@@ -21,6 +21,8 @@ import { TrierarchFileError } from './files.js';
  * files follow CLAUDE_CONFIG_DIR when it is set, as Claude Code's do (#474).
  */
 export interface ClaudeCodeSetup {
+  /** The files it answers in: `.claude.json` and the user's `settings.json`, where Claude Code keeps them. */
+  readonly files: { readonly claudeJson: string; readonly settings: string };
   trust(folder: string): Promise<void>;
   isTrusted(folder: string): Promise<boolean>;
   /** Every folder it trusts, from one read of its file (#381). */
@@ -131,6 +133,7 @@ export function createClaudeCodeSetup(at: {
   const fullscreenOfferSeen = (claude: JsonObject): number => z.number().safeParse(claude.fullscreenUpsellSeenCount).data ?? 0;
 
   return {
+    files: { claudeJson: state, settings },
     trust: async (folder) => {
       const claude = await readJsonObject(state);
       const projects = projectsOf(claude);

@@ -390,13 +390,13 @@ async function setUpClaudeCode(at: {
   }
   // Its onboarding is no consent, only its first-run screens, so it is completed without asking (#403).
   await claudeCode.completeOnboarding();
-  said.push("Claude Code's onboarding is complete (hasCompletedOnboarding in ~/.claude.json), so a session on this machine shows no first-run screen.");
+  said.push(`Claude Code's onboarding is complete (hasCompletedOnboarding in ${claudeCode.files.claudeJson}), so a session on this machine shows no first-run screen.`);
   let isSkipPermissionsAccepted = await claudeCode.isSkipPermissionsAccepted();
   if (harness.flags.includes(SKIP_PERMISSIONS) && !isSkipPermissionsAccepted) {
-    if (await prompter.confirm('Claude Code asks once per user to accept bypass permissions mode. Accept it now (skipDangerousModePermissionPrompt in ~/.claude/settings.json)?', { isDefault: true })) {
+    if (await prompter.confirm(`Claude Code asks once per user to accept bypass permissions mode. Accept it now (skipDangerousModePermissionPrompt in ${claudeCode.files.settings})?`, { isDefault: true })) {
       await claudeCode.acceptSkipPermissions();
       isSkipPermissionsAccepted = true;
-      said.push('Claude Code accepts bypass permissions mode for you.');
+      said.push(`Claude Code accepts bypass permissions mode for you (skipDangerousModePermissionPrompt in ${claudeCode.files.settings}).`);
     } else {
       said.push(`Claude Code still asks to accept bypass permissions mode, and a session started with ${SKIP_PERMISSIONS} waits on that question until you answer it.`);
     }

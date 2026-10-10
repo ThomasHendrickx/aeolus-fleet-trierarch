@@ -182,7 +182,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
 
   const detectAt = () =>
     createDetectHarnesses({
-      detectors: createDetectors({ homeDirectory }),
+      detectors: createDetectors({ homeDirectory, env }),
       store: createDetectedFile(paths.detected),
       clock: { now: () => new Date() },
       logger: { warn: (message) => process.stderr.write(`${message}\n`) },

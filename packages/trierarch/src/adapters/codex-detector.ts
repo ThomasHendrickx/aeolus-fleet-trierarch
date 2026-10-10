@@ -66,7 +66,7 @@ function catalogOf(result: CommandResult): z.infer<typeof catalogSchema> | undef
 
 export function createCodexDetector(deps: {
   run: (command: string, options: { args: readonly string[]; cwd?: string; timeoutMs?: number }) => Promise<CommandResult>;
-  /** The user's Codex configuration, `~/.codex/config.toml`; undefined when there is none. */
+  /** The user's Codex configuration, `config.toml` in CODEX_HOME or `~/.codex`; undefined when there is none. */
   readConfig: () => Promise<string | undefined>;
   /** An empty folder to probe from, so no project's instructions or settings apply. */
   neutralFolder: () => Promise<string>;
