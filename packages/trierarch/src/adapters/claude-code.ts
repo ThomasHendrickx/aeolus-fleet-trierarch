@@ -13,7 +13,10 @@ import type { Tmux } from './tmux.js';
 /**
  * Claude Code as a harness (docs/architecture.md, "First adapters"): `claude`
  * in the folder, `--continue` on a restart when the folder has a conversation
- * to continue, `/aeolus:wake` typed to wake an idle session. A session's identity is written and read through the aeolus
+ * to continue, `/aeolus:wake` typed to wake an idle session, and always
+ * without AskUserQuestion: nobody watches the session's pane, so it asks its
+ * questions over the fleet, and a form waiting there would take the keys of a
+ * wake (#457). A session's identity is written and read through the aeolus
  * plugin's own `aeolus-identity.sh`, never a copy of how the plugin names its
  * files.
  */
@@ -23,8 +26,12 @@ export const WAKE_PROMPT = '/aeolus:wake';
 const REMOTE_CONTROL = '--remote-control';
 const CONTINUE = '--continue';
 const END_OF_FLAGS = '--';
+const NO_QUESTION_FORM = '--disallowedTools=AskUserQuestion';
 
-export const CLAUDE_CODE_ADAPTER_FLAGS: readonly AdapterFlag[] = [{ flag: CONTINUE, when: 'restart' }];
+export const CLAUDE_CODE_ADAPTER_FLAGS: readonly AdapterFlag[] = [
+  { flag: NO_QUESTION_FORM, when: 'always' },
+  { flag: CONTINUE, when: 'restart' },
+];
 
 /** The flags of Claude Code that are risky: it then runs every tool without asking (#326). */
 export const CLAUDE_CODE_RISKY_FLAGS: readonly string[] = ['--dangerously-skip-permissions'];
@@ -49,11 +56,12 @@ function namedRemoteControl(flags: readonly string[], name: string): CommandPart
   ];
 }
 
-/** `claude`, the flags, `--continue` on a restart, then the prompt last after `--`: no flag takes it (`--remote-control [name]` has an optional value), and it never reads as a flag. */
+/** `claude`, the flags, AskUserQuestion disallowed, `--continue` on a restart, then the prompt last after `--`: no flag takes it (`--remote-control [name]` has an optional value), and it never reads as a flag. */
 export function claudeCodeCommandLine(at: { flags: readonly string[]; sessionName: string; prompt: string; isFirstStart: boolean; program?: string }): CommandPart[] {
   return partsWithWords([
     { words: [at.program ?? 'claude'] },
     ...namedRemoteControl(at.flags, at.sessionName),
+    { words: [NO_QUESTION_FORM], source: 'adapter' },
     { words: at.isFirstStart ? [] : [CONTINUE], source: 'adapter' },
     { words: [END_OF_FLAGS, at.prompt] },
   ]);
