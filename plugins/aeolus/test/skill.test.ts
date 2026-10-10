@@ -42,9 +42,14 @@ describe('the crew-a-ship skill', () => {
     expect(codexSkill).not.toContain('Receive, pong each operator ping');
   });
 
-  it('has a crewed session ask its questions over the fleet, to the sender of its task, never through an interactive question form, in both harnesses (#457)', () => {
-    expect(claudeSkill).toContain('Ask your questions over the fleet: `send -` them to the sender of your task, never through AskUserQuestion or another interactive question form.');
-    expect(codexSkill).toContain('Ask your questions over the fleet: `send -` them to the sender of your task, never through request_user_input or another interactive question form.');
+  it('has a crewed session send every other question to the sender of its task, never through an interactive question form, in both harnesses (#457)', () => {
+    expect(claudeSkill).toContain('Every other question goes to the sender of your task with `send -`, never through AskUserQuestion or another interactive question form.');
+    expect(codexSkill).toContain('Every other question goes to the sender of your task with `send -`, never through request_user_input or another interactive question form.');
+  });
+
+  it('says ask over the fleet once, in the trierarch line, not again after it, in both harnesses (#598)', () => {
+    expect(claudeSkill.match(/over the fleet/g)).toHaveLength(1);
+    expect(codexSkill.match(/over the fleet/g)).toHaveLength(1);
   });
 
   it('tells every crewed session, in both harnesses, the line the trierarch gives its sessions: no human reads its terminal, ask over the fleet, and argo for what only the operator can answer (#585)', () => {
