@@ -20,6 +20,7 @@ afterEach(() => {
 const AEOLUS_FLEET = '/home/thomas/Projects/aeolus-fleet';
 const PAGASAE = '/home/thomas/Projects/pagasae';
 const NOTES = '/home/thomas/notes';
+const SKIP = '--dangerously-skip-permissions';
 
 const configuration: TrierarchConfiguration = {
   caps: { ships: 4, running: 2 },
@@ -43,7 +44,7 @@ describe("each harness's trust, read from its own files (#381)", () => {
 
     const trusted = await createTrust({ configuration: { ...configuration, harnesses: { 'claude-code': { flags: [], options: {} } } }, homeDirectory: home, env: {} }).trusted();
 
-    expect(trusted).toEqual({ 'claude-code': { repositories: ['aeolus-fleet'], folders: ['notes'] } });
+    expect(trusted).toEqual({ 'claude-code': { repositories: ['aeolus-fleet'], folders: ['notes'], unacceptedFlags: [SKIP] } });
   });
 
   it("answers the places Codex trusts from its config.toml, in either quoting, and nothing for a place whose trust level is another", async () => {
@@ -67,7 +68,7 @@ describe("each harness's trust, read from its own files (#381)", () => {
 
     const trusted = await createTrust({ configuration, homeDirectory: home, env: {} }).trusted();
 
-    expect(trusted).toEqual({ 'claude-code': { repositories: [], folders: [] }, codex: { repositories: ['aeolus-fleet'], folders: ['notes'] } });
+    expect(trusted).toEqual({ 'claude-code': { repositories: [], folders: [], unacceptedFlags: [SKIP] }, codex: { repositories: ['aeolus-fleet'], folders: ['notes'], unacceptedFlags: [] } });
   });
 
   it('reads Codex from CODEX_HOME when it is set', async () => {
@@ -76,12 +77,21 @@ describe("each harness's trust, read from its own files (#381)", () => {
 
     const trusted = await createTrust({ configuration, homeDirectory: home, env: { CODEX_HOME: codexHome } }).trusted();
 
-    expect(trusted.codex).toEqual({ repositories: ['pagasae'], folders: [] });
+    expect(trusted.codex).toEqual({ repositories: ['pagasae'], folders: [], unacceptedFlags: [] });
+  });
+
+  it("answers Claude Code's skip-permissions flag as unaccepted until bypass permissions mode is accepted in ~/.claude/settings.json (#403)", async () => {
+    mkdirSync(join(home, '.claude'));
+    writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ skipDangerousModePermissionPrompt: true }));
+
+    const trusted = await createTrust({ configuration, homeDirectory: home, env: {} }).trusted();
+
+    expect(trusted['claude-code']?.unacceptedFlags).toEqual([]);
   });
 
   it('trusts nothing where a harness has no files yet', async () => {
     const trusted = await createTrust({ configuration, homeDirectory: home, env: {} }).trusted();
 
-    expect(trusted).toEqual({ 'claude-code': { repositories: [], folders: [] }, codex: { repositories: [], folders: [] } });
+    expect(trusted).toEqual({ 'claude-code': { repositories: [], folders: [], unacceptedFlags: [SKIP] }, codex: { repositories: [], folders: [], unacceptedFlags: [] } });
   });
 });
