@@ -42,6 +42,10 @@ describe('what a Claude Code screen shows in its launch window', () => {
     expect(claudeCodeLaunchSeen({ screen: `${promptedOnly('read')}\n\n${text}\n`, model: 'claude-opus-5-5' })).toEqual({ kind: 'none' });
   });
 
+  it.each(['❯ Reading list for this week: the open pull requests.', '❯ Bash(echo hi) is the first thing to run.'])('sees none in a first prompt that starts like a tool call (%s)', (prompt) => {
+    expect(claudeCodeLaunchSeen({ screen: `${promptedOnly('read')}\n\n${prompt}\n`, model: 'claude-opus-5-5' })).toEqual({ kind: 'none' });
+  });
+
   it('sees none while its first prompt made no tool call on Linux', () => {
     expect(claudeCodeLaunchSeen({ screen: `${promptedOnly('linux')}\n\n● Done.\n`, model: 'claude-opus-5-5' })).toEqual({ kind: 'none' });
   });
