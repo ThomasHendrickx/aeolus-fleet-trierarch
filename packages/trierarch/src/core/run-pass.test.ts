@@ -747,7 +747,12 @@ describe('the restart window: a restarted final crew is checked, never held back
     await trierarch.pass();
 
     expect(trierarch.refusals).toEqual([{ harness: 'claude-code', id: 'sonnet', at: trierarch.clock.now() }]);
-    expect(trierarch.fleet.toArgo.map((report) => report.idempotencyKey)).toEqual(['trierarch:refused-model:claude-code:2.1.295:sonnet']);
+    expect(trierarch.fleet.toArgo).toEqual([
+      {
+        text: `mac-studio: claude-code 2.1.295 refused the model sonnet for scout (${shipId}): this machine offers it no more at this version, until aeolus-trierarch detect runs by hand`,
+        idempotencyKey: 'trierarch:refused-model:claude-code:2.1.295:sonnet',
+      },
+    ]);
   });
 
   it('once failed starts spend the restart budget, writes crashed and tells argo the reason, giving nothing back', async () => {

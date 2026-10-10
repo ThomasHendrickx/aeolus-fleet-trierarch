@@ -293,7 +293,7 @@ function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean })
       return runningStep(entry, context);
     case 'restarting':
       return entry.restartAt !== undefined && now >= new Date(entry.restartAt) && canStart
-        ? { entry: withState(entry, { state: 'running', now }), actions: [{ kind: 'launch', shipId: entry.shipId }], starts: 1 }
+        ? { entry: withState(withoutLaunch(entry), { state: 'running', now }), actions: [{ kind: 'launch', shipId: entry.shipId }], starts: 1 }
         : NOTHING;
     case 'crashed':
     case 'releasing':
@@ -325,18 +325,38 @@ function launchStep(entry: Entry, context: ReconcileContext): Step {
       // Running since its session started, so the session start it writes is that start; the window is closed.
       return { entry: { ...running, state: 'running', since: launchedAt }, actions: [], starts: 0 };
     case 'refused': {
-      const { harness } = entry;
-      const version = context.versions[harness];
-      const reason = `${harness}${version === undefined ? '' : ` ${version}`} refused ${seen.model}`;
-      // The harness's own default refused drops nothing: the machine never offered it as a model.
-      if (entry.options[MODEL_OPTION] === undefined || version === undefined) {
-        return giveBack(reason);
-      }
-      return giveBack(reason, [{ kind: 'modelRefused', shipId: entry.shipId, ...(entry.shipName !== undefined && { shipName: entry.shipName }), harness, version, model: seen.model }]);
+      const refused = modelRefusal(entry, { model: seen.model, versions: context.versions });
+      return giveBack(refused.reason, refused.actions);
     }
     case 'none':
-      return now.getTime() - new Date(launchedAt).getTime() >= LAUNCH_WINDOW_MS ? giveBack(NO_ACTIVITY_REASON) : NOTHING;
+      return isWindowOver(launchedAt, now) ? giveBack(NO_ACTIVITY_REASON) : NOTHING;
   }
+}
+
+/** The entry with no launch window open. */
+function withoutLaunch(entry: Entry): Entry {
+  const { launchedAt, ...rest } = entry;
+  return launchedAt === undefined ? entry : rest;
+}
+
+function isWindowOver(launchedAt: string, now: Date): boolean {
+  return now.getTime() - new Date(launchedAt).getTime() >= LAUNCH_WINDOW_MS;
+}
+
+/**
+ * Why a session refused the model it launched with, naming the harness and
+ * its version, and the model kept refused when the settings picked it (#382).
+ * The harness's own default refused drops nothing: the machine never offered
+ * it as a model.
+ */
+function modelRefusal(entry: Entry, at: { model: string; versions: ReconcileContext['versions'] }): { reason: string; actions: Action[] } {
+  const { harness } = entry;
+  const version = at.versions[harness];
+  const reason = `${harness}${version === undefined ? '' : ` ${version}`} refused ${at.model}`;
+  if (entry.options[MODEL_OPTION] === undefined || version === undefined) {
+    return { reason, actions: [] };
+  }
+  return { reason, actions: [{ kind: 'modelRefused', shipId: entry.shipId, ...(entry.shipName !== undefined && { shipName: entry.shipName }), harness, version, model: at.model }] };
 }
 
 function runningStep(entry: Entry, context: ReconcileContext & { canStart: boolean }): Step {
@@ -344,37 +364,81 @@ function runningStep(entry: Entry, context: ReconcileContext & { canStart: boole
   const session = observed.sessions.find((each) => each.shipId === entry.shipId);
   if (session === undefined) {
     // No session at all, as after the machine restarts: start it again, with no restart counted.
-    return canStart ? { actions: [{ kind: 'launch', shipId: entry.shipId }], starts: 1 } : NOTHING;
+    return canStart ? { entry: withoutLaunch(entry), actions: [{ kind: 'launch', shipId: entry.shipId }], starts: 1 } : NOTHING;
   }
   if (session.status === 'exited') {
-    const exits = [...exitsInWindow(entry.exits, now), now.toISOString()];
-    const decision = decideRestart(exits, now);
-    switch (decision.kind) {
-      case 'restart':
-        return {
-          entry: { ...withState(entry, { state: 'restarting', now }), exits, restartAt: decision.at.toISOString() },
-          actions: [{ kind: 'report', shipId: entry.shipId, note: RESTARTING_NOTE }],
-          starts: 0,
-        };
-      case 'crashed':
-        return {
-          entry: { ...withState(entry, { state: 'crashed', now }), exits },
-          actions: [
-            { kind: 'stop', shipId: entry.shipId },
-            { kind: 'report', shipId: entry.shipId, note: CRASHED_NOTE },
-            { kind: 'argo', report: crashReport(entry, { exits: exits.length, now }) },
-          ],
-          starts: 0,
-        };
-    }
+    return exitStep(entry, { now });
   }
-  return wakeStep(entry, observed.ships[entry.shipId]);
+  return restartWindowStep(entry, context);
 }
 
-/** What argo is told when a session's restart budget is spent: a human decides. */
-function crashReport(entry: Entry, at: { exits: number; now: Date }): ArgoReport {
+/**
+ * A running entry whose session started again (#397): its crew is final, so
+ * the check only observes. The session runs, is watched and woken as any
+ * other; activity closes the window. A model refused, or no activity within
+ * the minute, is a failed start: the session stops, and it counts against
+ * the restart budget as an exit does, nothing given back.
+ */
+function restartWindowStep(entry: Entry, context: ReconcileContext): Step {
+  const { observed, now } = context;
+  const seen = observed.ships[entry.shipId];
+  const { launchedAt } = entry;
+  const launch = observed.launches[entry.shipId];
+  if (launchedAt === undefined || launch === undefined) {
+    return wakeStep(entry, seen);
+  }
+  switch (launch.kind) {
+    case 'active': {
+      const closed = withoutLaunch(entry);
+      const step = wakeStep(closed, seen);
+      return { ...step, entry: step.entry ?? closed };
+    }
+    case 'refused': {
+      const refused = modelRefusal(entry, { model: launch.model, versions: context.versions });
+      const step = exitStep(entry, { now, failedStart: refused.reason });
+      return { ...step, actions: [...refused.actions, ...step.actions] };
+    }
+    case 'none':
+      return isWindowOver(launchedAt, now) ? exitStep(entry, { now, failedStart: NO_ACTIVITY_REASON }) : wakeStep(entry, seen);
+  }
+}
+
+/**
+ * The session exited, or failed its start with the reason given (#397): it
+ * starts again after its wait, or, with the restart budget spent, the entry
+ * is crashed and argo told. A session that failed its start still runs, so it
+ * stops first.
+ */
+function exitStep(entry: Entry, at: { now: Date; failedStart?: string }): Step {
+  const { now, failedStart } = at;
+  const exits = [...exitsInWindow(entry.exits, now), now.toISOString()];
+  const decision = decideRestart(exits, now);
+  const stop: Action = { kind: 'stop', shipId: entry.shipId };
+  switch (decision.kind) {
+    case 'restart':
+      return {
+        entry: { ...withState(withoutLaunch(entry), { state: 'restarting', now }), exits, restartAt: decision.at.toISOString() },
+        actions: [...(failedStart === undefined ? [] : [stop]), { kind: 'report', shipId: entry.shipId, note: RESTARTING_NOTE }],
+        starts: 0,
+      };
+    case 'crashed':
+      return {
+        entry: { ...withState(withoutLaunch(entry), { state: 'crashed', now }), exits },
+        actions: [
+          stop,
+          { kind: 'report', shipId: entry.shipId, note: CRASHED_NOTE },
+          { kind: 'argo', report: crashReport(entry, { exits: exits.length, now, ...(failedStart !== undefined && { failedStart }) }) },
+        ],
+        starts: 0,
+      };
+  }
+}
+
+/** What argo is told when a session's restart budget is spent, with why its last start failed when it did (#397): a human decides. */
+function crashReport(entry: Entry, at: { exits: number; now: Date; failedStart?: string }): ArgoReport {
+  const lastStart = at.failedStart === undefined ? '' : `; its last start: ${at.failedStart}`;
   return {
-    text: `${entry.shipName ?? entry.shipId} (${entry.shipId}): its session crashed ${String(at.exits)} times within an hour, restart budget spent; status crashed. Restart it in the console to crew it again.`,
+    text: `${entry.shipName ?? entry.shipId} (${entry.shipId}): its session crashed ${String(at.exits)} times within an hour, restart budget spent${lastStart}; status crashed. Restart it in the console to crew it again.`,
     idempotencyKey: `trierarch:crashed:${entry.shipId}:${at.now.toISOString()}`,
   };
 }

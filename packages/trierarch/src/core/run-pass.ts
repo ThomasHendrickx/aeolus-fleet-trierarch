@@ -79,7 +79,8 @@ async function observe(state: TrierarchState, deps: RunPassDeps): Promise<Observ
     const session = sessions.find((each) => each.shipId === entry.shipId);
     const { folder } = entry;
     const harness = harnessOf(entry, deps);
-    if (entry.state === 'crewing' && entry.launchedAt !== undefined && session !== undefined && harness !== undefined) {
+    // A crewing session's launch window (#382), and a final crew's first minute after a restart (#397).
+    if ((entry.state === 'crewing' || entry.state === 'running') && entry.launchedAt !== undefined && session !== undefined && harness !== undefined) {
       const model = entry.options[MODEL_OPTION];
       launches[entry.shipId] = await harness.launchSeen({ shipId: entry.shipId, ...(model !== undefined && { model }) });
     }
@@ -169,6 +170,10 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
           isFirstStart: false,
         });
         log(deps, { ...about(state, { shipId: entry.shipId, action: 'launch' }), outcome: `started again in ${entry.folder}` });
+        // Its first minute is checked from now, while it runs (#397).
+        const next = putEntry(state, { ...entry, launchedAt: deps.clock.now().toISOString() });
+        await deps.state.save(next);
+        return next;
       }
       return state;
     case 'wake':
