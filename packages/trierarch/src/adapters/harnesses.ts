@@ -7,6 +7,7 @@ import { CLAUDE_CODE_ADAPTER_FLAGS, CLAUDE_CODE_RISKY_FLAGS, claudeCodeCommandLi
 import { createClaudeCodeSetup, type ClaudeCodeSetup } from './claude-code-setup.js';
 import { CODEX_ADAPTER_FLAGS, CODEX_RISKY_FLAGS, codexCommandLine, createCodexHarness, WAKE_PROMPT as CODEX_WAKE_PROMPT } from './codex.js';
 import type { CommandPart } from './command-line.js';
+import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
 import type { AeolusPlugin } from './plugin-identity.js';
 import { findAeolusPlugin } from './plugin.js';
 import type { Tmux } from './tmux.js';
@@ -35,7 +36,7 @@ const ADAPTERS: Readonly<
     commandLines: async (flags, { files, permissionModes }) => {
       const defaultPermissionMode = await claudeCodeSettingsDefaultMode(files.claudeCode, { flags });
       const commandLine = (isFirstStart: boolean) =>
-        claudeCodeCommandLine({ flags, sessionName: SESSION_NAME, prompt: isFirstStart ? FIRST_PROMPT : CLAUDE_CODE_WAKE_PROMPT, isFirstStart, defaultPermissionMode, permissionModes });
+        claudeCodeCommandLine({ flags, sessionName: SESSION_NAME, prompt: isFirstStart ? firstPromptOf(FIRST_PROMPT) : wakePromptOf(CLAUDE_CODE_WAKE_PROMPT), isFirstStart, defaultPermissionMode, permissionModes });
       return { firstStart: commandLine(true), restart: commandLine(false) };
     },
   },
@@ -43,7 +44,7 @@ const ADAPTERS: Readonly<
     adapterFlags: CODEX_ADAPTER_FLAGS,
     riskyFlags: CODEX_RISKY_FLAGS,
     commandLines: (flags) => {
-      const commandLine = (isFirstStart: boolean) => codexCommandLine({ flags, prompt: isFirstStart ? FIRST_PROMPT : CODEX_WAKE_PROMPT, isFirstStart });
+      const commandLine = (isFirstStart: boolean) => codexCommandLine({ flags, prompt: isFirstStart ? firstPromptOf(FIRST_PROMPT) : wakePromptOf(CODEX_WAKE_PROMPT), isFirstStart });
       return Promise.resolve({ firstStart: commandLine(true), restart: commandLine(false) });
     },
   },

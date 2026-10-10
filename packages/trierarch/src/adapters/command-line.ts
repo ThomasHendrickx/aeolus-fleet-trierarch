@@ -15,11 +15,11 @@ export function wordsOf(parts: readonly CommandPart[]): string[] {
   return parts.flatMap((part) => part.words);
 }
 
-/** One line: each part's words, a word with a space in quotes, and each flag part followed by its source and when it applies. */
+/** One line: each part's words, a word with a space in quotes and its line breaks as \n, and each flag part followed by its source and when it applies. */
 export function describeCommandLine(parts: readonly CommandPart[]): string {
   return parts
     .map((part) => {
-      const words = part.words.map((word) => (word.includes(' ') ? `"${word}"` : word)).join(' ');
+      const words = part.words.map((word) => (word.includes(' ') ? `"${word.replaceAll('\n', '\\n')}"` : word)).join(' ');
       if (part.source === undefined) {
         return words;
       }
