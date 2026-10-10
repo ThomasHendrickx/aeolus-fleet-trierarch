@@ -1,0 +1,19 @@
+
+ ▐▛███▛█   Claude Code v2.1.295
+▝▜██████▀  Opus 5.5 · Claude Max
+ ▝▝   ▝▝   /home/operator/work/cc-linux
+
+❯ Run the shell command: echo hi
+
+● Bash(echo hi)
+  ⎿  hi
+
+● Done.
+
+✻ Cooked for 2s · done 2:12 AM
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  …/work/cc-linux (Opus 5.5) 6% ctx
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
