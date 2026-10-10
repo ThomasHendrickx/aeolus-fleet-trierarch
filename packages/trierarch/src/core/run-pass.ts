@@ -228,32 +228,53 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   if (ship.kind === 'crewed') {
     await deps.fleet.release(entry.shipId);
   }
-  await deps.fleet.writeStatus(entry.shipId, writtenStatusOf(withState(entry, { state: 'crewing', now: deps.clock.now() })));
-  const { secret } = await deps.fleet.getStartingPrompt(entry.shipId);
-  const { crewToken } = await deps.fleet.register({ shipId: entry.shipId, secret });
-  const { folder } = await deps.workspace.prepare({ shipId: entry.shipId, shipName: ship.name, workspace: entry.workspace });
-  // Kept at once, so an entry still crewing knows the workspace and identity to remove if it ends (#382).
-  state = putEntry(state, { ...entry, shipName: ship.name, folder });
+  let crewing = entry;
+  if (entry.isReleasedElsewhere === true) {
+    crewing = await freshAfterReleaseElsewhere({ entry, deps });
+    state = putEntry(state, crewing);
+    await deps.state.save(state);
+  }
+  await deps.fleet.writeStatus(crewing.shipId, writtenStatusOf(withState(crewing, { state: 'crewing', now: deps.clock.now() })));
+  const { secret } = await deps.fleet.getStartingPrompt(crewing.shipId);
+  const { crewToken } = await deps.fleet.register({ shipId: crewing.shipId, secret });
+  const { folder } = await deps.workspace.prepare({ shipId: crewing.shipId, shipName: ship.name, workspace: crewing.workspace });
+  // Kept at once, so an crewing still crewing knows the workspace and identity to remove if it ends (#382).
+  state = putEntry(state, { ...crewing, shipName: ship.name, folder });
   await deps.state.save(state);
   await harness.prepareIdentity({
     folder,
-    identity: { fleetUrl: deps.fleet.url, shipId: entry.shipId, shipName: ship.name, crewToken, ...(entry.squadron !== undefined && { squadron: entry.squadron }) },
+    identity: { fleetUrl: deps.fleet.url, shipId: crewing.shipId, shipName: ship.name, crewToken, ...(crewing.squadron !== undefined && { squadron: crewing.squadron }) },
   });
   await harness.launch({
-    shipId: entry.shipId,
+    shipId: crewing.shipId,
     shipName: ship.name,
     folder,
-    workspace: entry.workspace,
-    harness: entry.harness,
-    options: entry.options,
-    isFirstStart: !entry.hasStarted,
-    ...(!entry.hasStarted && entry.firstPrompt !== undefined && { firstPrompt: entry.firstPrompt }),
+    workspace: crewing.workspace,
+    harness: crewing.harness,
+    options: crewing.options,
+    isFirstStart: !crewing.hasStarted,
+    ...(!crewing.hasStarted && crewing.firstPrompt !== undefined && { firstPrompt: crewing.firstPrompt }),
   });
   // Crewing still: its launch window is open, and only activity in it makes the crew final (#382).
-  const next = putEntry(state, { ...entry, shipName: ship.name, folder, hasStarted: true, launchedAt: deps.clock.now().toISOString() });
+  const next = putEntry(state, { ...crewing, shipName: ship.name, folder, hasStarted: true, launchedAt: deps.clock.now().toISOString() });
   await deps.state.save(next);
-  log(deps, { shipId: entry.shipId, shipName: ship.name, action: 'crew', outcome: `crewed, ${entry.harness} started in ${folder}` });
+  log(deps, { shipId: crewing.shipId, shipName: ship.name, action: 'crew', outcome: `crewed, ${crewing.harness} started in ${folder}` });
   return next;
+}
+
+/**
+ * A ship released elsewhere is crewed again in a fresh worktree (row 11,
+ * #475): before it registers, its workspace goes as a release's does, argo
+ * told first what that discards. The entry is saved without its mark only
+ * once that is done, so a failed remove tries again on the next pass.
+ * Answers the entry it is crewed with.
+ */
+async function freshAfterReleaseElsewhere(at: EntryAt): Promise<Entry> {
+  const { entry, deps } = at;
+  const workspace = await releaseWorkspace({ entry, deps, cause: 'releasedElsewhere' });
+  log(deps, { ...(entry.shipName !== undefined && { shipName: entry.shipName }), shipId: entry.shipId, action: 'release', outcome: `released elsewhere, ${workspace}` });
+  const { isReleasedElsewhere, ...fresh } = entry;
+  return isReleasedElsewhere === undefined ? entry : fresh;
 }
 
 /**
@@ -271,7 +292,7 @@ async function release(state: TrierarchState, at: { shipId: Entry['shipId']; dep
   if ((await deps.fleet.ship(shipId)).kind === 'crewed') {
     await deps.fleet.release(shipId);
   }
-  const workspace = await releaseWorkspace({ entry, deps });
+  const workspace = await releaseWorkspace({ entry, deps, cause: 'release' });
   const next = removeEntry(state, shipId);
   await deps.state.save(next);
   await deps.fleet.confirmRelease(shipId);
@@ -286,8 +307,8 @@ async function release(state: TrierarchState, at: { shipId: Entry['shipId']; dep
  * release; a failed remove tries again on the next pass. A configured folder
  * is never removed. Answers what became of it, as the log line says it.
  */
-async function releaseWorkspace(at: EntryAt): Promise<string> {
-  const { entry, deps } = at;
+async function releaseWorkspace(at: EntryAt & { cause: ReleaseCause }): Promise<string> {
+  const { entry, deps, cause } = at;
   const { folder } = entry;
   if (folder === undefined) {
     return 'its worktree removed';
@@ -300,7 +321,7 @@ async function releaseWorkspace(at: EntryAt): Promise<string> {
   if (unsaved.length > 0) {
     const machine = await deps.fleet.whoami();
     await deps.fleet.reportToArgo({
-      text: discardedText(`${machine.name}: released ${entry.shipName ?? entry.shipId} (${entry.shipId}) and removed its ${entry.workspace.repository} worktree, discarding what was not pushed: `, unsaved),
+      text: discardedText(`${machine.name}: ${removedBecause(entry, { cause, repository: entry.workspace.repository })}, discarding what was not pushed: `, unsaved),
       idempotencyKey: `trierarch:discarded:${entry.shipId}:${entry.since}`,
     });
   }
@@ -411,6 +432,21 @@ async function refuse(state: TrierarchState, at: CarryOut & { action: Extract<Ac
   await deps.state.save(next);
   deps.logger.warn(`Cannot crew ${name} (${action.shipId}), settings version ${String(action.settingsVersion)}: ${reason}`);
   return next;
+}
+
+/** Why a worktree is removed whatever it holds: its request was removed (row 7), or its ship released elsewhere is crewed again (row 11). */
+type ReleaseCause = 'release' | 'releasedElsewhere';
+
+/** What argo is told was removed, and why, before the list of what that discards. */
+function removedBecause(entry: Entry, at: { cause: ReleaseCause; repository: string }): string {
+  const ship = `${entry.shipName ?? entry.shipId} (${entry.shipId})`;
+  const worktree = `its ${at.repository} worktree`;
+  switch (at.cause) {
+    case 'release':
+      return `released ${ship} and removed ${worktree}`;
+    case 'releasedElsewhere':
+      return `${ship} was released elsewhere, so the trierarch removed ${worktree} before crewing it again`;
+  }
 }
 
 /** At most this many characters tell argo what a release discards, so the report is always small enough to send. */
