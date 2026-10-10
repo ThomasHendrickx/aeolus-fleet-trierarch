@@ -1,5 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,7 +8,11 @@ import { runCommand } from './run-command.js';
 import { createTmux, sessionsLaunch, type Tmux } from './tmux.js';
 
 // Against the real tmux, on a tmux server of the test's own, its socket in the
-// test's own folder: kill-server leaves the socket behind (#537).
+// test's own folder: kill-server leaves the socket behind (#537). The folder
+// sits under /tmp, not $TMPDIR: on macOS $TMPDIR is so long that the socket path
+// passes the Unix socket limit of 104 bytes (#559). tmux resolves the folder to
+// its real path (/private/tmp on macOS), so the test holds that path.
+const SOCKET_ROOT = '/tmp';
 
 let server: string;
 let folder: string;
@@ -17,7 +20,7 @@ let tmux: Tmux;
 
 beforeEach(() => {
   server = `trierarch-test-${newId('ship').slice(-8)}`;
-  folder = mkdtempSync(join(tmpdir(), 'trierarch-tmux-'));
+  folder = realpathSync(mkdtempSync(join(SOCKET_ROOT, 'trierarch-tmux-')));
   vi.stubEnv('TMUX_TMPDIR', folder);
   tmux = createTmux({ server });
 });
