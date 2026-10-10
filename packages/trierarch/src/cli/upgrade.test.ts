@@ -12,6 +12,7 @@ let latest: string;
 let lookups: number;
 let installs: string[];
 let failing: CommandResult | undefined;
+let failingWrite: CommandResult | undefined;
 let steps: string[];
 let isServiceInstalled: boolean;
 /** What running.json says on each read after the new process starts, the last one from then on. */
@@ -25,6 +26,7 @@ beforeEach(() => {
   lookups = 0;
   installs = [];
   failing = undefined;
+  failingWrite = undefined;
   steps = [];
   isServiceInstalled = true;
   saying = [{ pid: 2, version: '0.17.2' }];
@@ -57,9 +59,23 @@ const npm: Npm = {
   },
 };
 
+/** The installed version's own `install --no-load`: it writes the service's file as that version writes it. */
+function writeInstalledServiceFile(): Promise<CommandResult> {
+  if (failingWrite !== undefined) {
+    return Promise.resolve(failingWrite);
+  }
+  steps.push(`write ${installed}`);
+  return Promise.resolve({ status: 0, stdout: '', stderr: '' });
+}
+
 const service = {
+  // The command that upgrades runs the code already in memory, the version it replaces.
   rewrite: () => {
-    steps.push(`rewrite ${installed}`);
+    steps.push('rewrite 0.17.1');
+    return Promise.resolve();
+  },
+  reload: () => {
+    steps.push('reload');
     return Promise.resolve();
   },
   stop: () => {
@@ -74,7 +90,7 @@ const service = {
 };
 
 function upgrade(version?: string) {
-  return upgradeTrierarch({ ...(version !== undefined && { version }), installedVersion: () => installed, npm, service, running, sleep });
+  return upgradeTrierarch({ ...(version !== undefined && { version }), installedVersion: () => installed, npm, writeInstalledServiceFile, service, running, sleep });
 }
 
 describe('aeolus-trierarch upgrade', () => {
@@ -82,7 +98,7 @@ describe('aeolus-trierarch upgrade', () => {
     const report = await upgrade();
 
     expect(installs).toEqual([`${PACKAGE}@0.17.2`]);
-    expect(steps).toEqual(['rewrite 0.17.2', 'stop 0.17.2', 'start 0.17.2']);
+    expect(steps).toEqual(['write 0.17.2', 'reload', 'stop 0.17.2', 'start 0.17.2']);
     expect(report).toMatchObject({ from: '0.17.1', to: '0.17.2', isUpgraded: true });
     expect(report.said.join('\n')).toContain('Upgraded the trierarch from 0.17.1 to 0.17.2');
   });
@@ -97,7 +113,23 @@ describe('aeolus-trierarch upgrade', () => {
   it('rewrites the service\'s file before it stops the old process, so the stop already ends the trierarch only, as init writes it (#485)', async () => {
     await upgrade();
 
-    expect(steps.slice(0, 2)).toEqual(['rewrite 0.17.2', 'stop 0.17.2']);
+    expect(steps.slice(0, 3)).toEqual(['write 0.17.2', 'reload', 'stop 0.17.2']);
+  });
+
+  it('writes the service\'s file as the version it installs writes it, not as the version it replaces (#492)', async () => {
+    await upgrade();
+
+    expect(steps).not.toContain('rewrite 0.17.1');
+    expect(steps[0]).toBe('write 0.17.2');
+  });
+
+  it('leaves the old process running when the installed version cannot write the service\'s file, saying what failed and what to do (#492)', async () => {
+    failingWrite = { status: 1, stdout: '', stderr: 'EACCES: permission denied\n' };
+
+    await expect(upgrade()).rejects.toThrow(
+      'The trierarch 0.17.2 could not write the service\'s file: EACCES: permission denied\nThe service keeps running 0.17.1. Fix what it says, then run aeolus-trierarch install to write the file and restart the service.',
+    );
+    expect(steps).toEqual([]);
   });
 
   it('says it is already on a version and does nothing more', async () => {

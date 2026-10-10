@@ -226,6 +226,12 @@ describe('the service on macOS (launchd)', () => {
     expect(calls).toEqual([]);
   });
 
+  it('reloads nothing, since launchd reads the file when it loads the agent again (#492)', async () => {
+    await serviceOn('darwin').reload();
+
+    expect(calls).toEqual([]);
+  });
+
   it('only writes the file when asked not to load it', async () => {
     await serviceOn('darwin').write();
 
@@ -264,6 +270,17 @@ describe('the service on Linux (systemd)', () => {
     await serviceOn('linux').rewrite();
 
     expect(readFileSync(unit(), 'utf8')).toContain('KillMode=process');
+    expect(calls).toEqual(['systemctl --user daemon-reload']);
+  });
+
+  it('reloads systemd without writing the unit, so a unit another version wrote takes effect at the next stop (#492)', async () => {
+    answers.set('systemctl --user daemon-reload', ok());
+    mkdirSync(join(home, '.config', 'systemd', 'user'), { recursive: true });
+    writeFileSync(unit(), '[Service]\nExecStart=/new/node run\n');
+
+    await serviceOn('linux').reload();
+
+    expect(readFileSync(unit(), 'utf8')).toBe('[Service]\nExecStart=/new/node run\n');
     expect(calls).toEqual(['systemctl --user daemon-reload']);
   });
 
