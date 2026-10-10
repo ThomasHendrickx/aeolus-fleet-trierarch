@@ -294,7 +294,7 @@ async function releaseWorkspace(at: EntryAt): Promise<string> {
   if (unsaved.length > 0) {
     const machine = await deps.fleet.whoami();
     await deps.fleet.reportToArgo({
-      text: `${machine.name}: released ${entry.shipName ?? entry.shipId} (${entry.shipId}) and removed its ${entry.workspace.repository} worktree, discarding what was not pushed: ${unsaved.join('; ')}`,
+      text: discardedText(`${machine.name}: released ${entry.shipName ?? entry.shipId} (${entry.shipId}) and removed its ${entry.workspace.repository} worktree, discarding what was not pushed: `, unsaved),
       idempotencyKey: `trierarch:discarded:${entry.shipId}:${entry.since}`,
     });
   }
@@ -405,6 +405,27 @@ async function refuse(state: TrierarchState, at: CarryOut & { action: Extract<Ac
   await deps.state.save(next);
   deps.logger.warn(`Cannot crew ${name} (${action.shipId}), settings version ${String(action.settingsVersion)}: ${reason}`);
   return next;
+}
+
+/** At most this many characters tell argo what a release discards, so the report is always small enough to send. */
+const DISCARDED_TEXT_MAX_LENGTH = 4000;
+
+/** The heading, then as many of the discarded lines as fit, then how many more. */
+function discardedText(heading: string, unsaved: readonly string[]): string {
+  const whole = heading + unsaved.join('; ');
+  if (whole.length <= DISCARDED_TEXT_MAX_LENGTH) {
+    return whole;
+  }
+  const named: string[] = [];
+  const textOf = (rest: number): string => heading + [...named, `and ${String(rest)} more`].join('; ');
+  for (const line of unsaved) {
+    named.push(line);
+    if (textOf(unsaved.length - named.length).length > DISCARDED_TEXT_MAX_LENGTH) {
+      named.pop();
+      break;
+    }
+  }
+  return textOf(unsaved.length - named.length);
 }
 
 /**
