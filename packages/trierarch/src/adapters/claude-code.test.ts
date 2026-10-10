@@ -355,6 +355,24 @@ describe('Claude Code as a harness', () => {
     ]);
   });
 
+  it('overrides a plan default mode with the mode the installed Claude Code documents: manual where its --help lists it, default where it lists modes without manual or none (#517)', () => {
+    const overrideWith = (permissionModes?: readonly string[]) =>
+      wordsOf(
+        claudeCodeCommandLine({
+          flags: [],
+          sessionName: '[aeolus-fleet] scout',
+          prompt: '/aeolus:wake',
+          isFirstStart: true,
+          defaultPermissionMode: { kind: 'decided', mode: 'plan' },
+          ...(permissionModes !== undefined && { permissionModes }),
+        }),
+      ).slice(1, 3);
+
+    expect(overrideWith(['acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan'])).toEqual(['--permission-mode', 'manual']);
+    expect(overrideWith(['acceptEdits', 'bypassPermissions', 'default', 'plan'])).toEqual(['--permission-mode', 'default']);
+    expect(overrideWith()).toEqual(['--permission-mode', 'default']);
+  });
+
   it('wakes a session by typing /aeolus:wake', async () => {
     await harness().wake({ shipId, folder });
 
