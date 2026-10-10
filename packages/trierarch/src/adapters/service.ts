@@ -36,6 +36,8 @@ export interface Service {
   write(): Promise<void>;
   /** Writes the service's file over an installed one, for its next start, leaving the running trierarch and its sessions alone. */
   rewrite(): Promise<void>;
+  /** Makes the supervisor read the service's file again, as written by this or another version, without restarting the trierarch. */
+  reload(): Promise<void>;
   /** Writes the service's file, then loads and starts it. */
   install(): Promise<void>;
   /** Stops the service and removes its file. */
@@ -214,6 +216,7 @@ export function createService(options: {
       write,
       // launchd reads the file when it loads the agent again; the trierarch's own stop and start do.
       rewrite: write,
+      reload: () => Promise.resolve(),
       install: async () => {
         await write();
         // Unload an earlier copy first: bootstrap refuses a loaded agent.
@@ -255,13 +258,17 @@ export function createService(options: {
       await mkdir(folder, { recursive: true });
       await writeFile(file, systemdUnit({ run, environment }));
     };
+    // A reload, not a restart: systemd stops and starts the unit as the new file says from then on.
+    const reload = async (): Promise<void> => {
+      await systemctl('daemon-reload');
+    };
     return {
       write,
-      // A reload, not a restart: systemd stops and starts the unit as the new file says from then on.
       rewrite: async () => {
         await write();
-        await systemctl('daemon-reload');
+        await reload();
       },
+      reload,
       install: async () => {
         await write();
         await systemctl('daemon-reload');
@@ -297,5 +304,5 @@ export function createService(options: {
 
   const elsewhere = (): Promise<never> =>
     Promise.reject(new Error(`aeolus-trierarch knows launchd (macOS) and systemd (Linux), not ${platform}: run aeolus-trierarch run under your own supervisor`));
-  return { write: elsewhere, rewrite: elsewhere, install: elsewhere, uninstall: elsewhere, start: elsewhere, stop: elsewhere, restart: elsewhere, status: elsewhere };
+  return { write: elsewhere, rewrite: elsewhere, reload: elsewhere, install: elsewhere, uninstall: elsewhere, start: elsewhere, stop: elsewhere, restart: elsewhere, status: elsewhere };
 }

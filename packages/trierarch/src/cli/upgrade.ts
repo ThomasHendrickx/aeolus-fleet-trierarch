@@ -10,8 +10,10 @@ import { NOT_SAID_YET_REASON, startNewProcess } from './new-process.js';
  * own tmux server, and the new process takes them over from its saved state.
  * It reports once the new process has said its version in running.json, so
  * the status that follows shows it running (#376), waiting at most 30 seconds,
- * as every start waits (#466). It rewrites the service's file first, as init
- * does, so the stop already follows the file this version writes (#485).
+ * as every start waits (#466). Before the stop, the installed version writes
+ * the service's file, as its own init does, and the supervisor reads it again,
+ * so the stop already follows it (#485) and a change to the file arrives with
+ * the version that makes it, not one upgrade later (#492).
  * It never upgrades on its own. A failed install leaves the old version
  * running.
  */
@@ -40,7 +42,9 @@ export async function upgradeTrierarch(at: {
   /** The version installed now, read afresh each time: the install replaces it. */
   installedVersion: () => string;
   npm: Npm;
-  service: Pick<Service, 'rewrite' | 'stop' | 'start' | 'status'>;
+  /** The installed version's `install --no-load`: this process still runs the code of the version it replaces. */
+  writeInstalledServiceFile: () => Promise<CommandResult>;
+  service: Pick<Service, 'reload' | 'stop' | 'start' | 'status'>;
   /** What running.json says now: the new process writes it as it starts. */
   running: () => Promise<RunningFile | undefined>;
   /** Waits between reads of running.json; a test passes one that does not wait. */
@@ -69,8 +73,15 @@ export async function upgradeTrierarch(at: {
     const { service } = at;
     const { hasSaidVersion } = await startNewProcess({
       start: async () => {
-        // Rewritten before the stop: on Linux the stop follows the reloaded unit, which ends the trierarch only (#479).
-        await service.rewrite();
+        const written = await at.writeInstalledServiceFile();
+        // aeolus-trierarch says a failure on stdout, node one it cannot run on stderr.
+        if (written.status !== 0) {
+          throw new TrierarchFileError(
+            `The trierarch ${to} could not write the service's file: ${`${written.stdout}${written.stderr}`.trim()}\nThe service keeps running ${from}. Fix what it says, then run aeolus-trierarch install to write the file and restart the service.`,
+          );
+        }
+        // Reloaded before the stop: on Linux the stop follows the reloaded unit, which ends the trierarch only (#479).
+        await service.reload();
         // Stop waits until the old process has exited, so only the new one ever runs the loop.
         await service.stop();
         await service.start();

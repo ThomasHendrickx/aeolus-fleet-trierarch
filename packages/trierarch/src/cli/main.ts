@@ -125,12 +125,14 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
   const config = values.get('--config') ?? env.AEOLUS_TRIERARCH_CONFIG;
   const homeDirectory = env.HOME ?? homedir();
   const paths = trierarchPaths({ homeDirectory, ...(config !== undefined && { config }) });
+  // The installed package's own command: an upgrade puts the new version's code here.
+  const script = fileURLToPath(new URL('../bin/aeolus-trierarch.js', import.meta.url));
   const serviceAt = () =>
     createService({
       platform: process.platform,
       homeDirectory,
       paths,
-      run: { node: process.execPath, script: fileURLToPath(new URL('../bin/aeolus-trierarch.js', import.meta.url)) },
+      run: { node: process.execPath, script },
       environment: serviceEnvironment(env),
       uid: process.getuid?.() ?? 0,
       exec: (program, args) => runCommand(program, { args }),
@@ -225,6 +227,7 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
           latest: async () => (await runCommand('npm', { args: ['view', PACKAGE, 'version'] })).stdout,
           install: (spec) => runCommand('npm', { args: ['install', '--global', spec] }),
         },
+        writeInstalledServiceFile: () => runCommand(process.execPath, { args: [script, 'install', '--no-load', ...(config !== undefined ? ['--config', config] : [])] }),
         service: serviceAt(),
         running: () => readRunningFile(paths.running),
       });

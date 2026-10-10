@@ -65,7 +65,7 @@ A trierarch's ship stays a normal ship: it receives messages, such as pings, and
 
 The trierarch's log is where its service writes it: on macOS the launchd agent writes `~/.aeolus/trierarch/logs/trierarch.log`, which `aeolus-trierarch logs` reads; on Linux the systemd user unit writes to the journal, read with `journalctl --user -u aeolus-trierarch`, and `~/.aeolus/trierarch/logs` stays empty.
 
-Stopping or restarting the service (upgrade, restart, add) ends the trierarch only, never the sessions in the tmux server it started: launchd leaves them running, and the systemd user unit stops its main process only (`KillMode=process`, #479). `aeolus-trierarch init` rewrites an installed service's file as this version writes it, and reloads systemd on Linux, without restarting the trierarch. `aeolus-trierarch upgrade` rewrites it the same way before it stops the old process (#485).
+Stopping or restarting the service (upgrade, restart, add) ends the trierarch only, never the sessions in the tmux server it started: launchd leaves them running, and the systemd user unit stops its main process only (`KillMode=process`, #479). `aeolus-trierarch init` rewrites an installed service's file as this version writes it, and reloads systemd on Linux, without restarting the trierarch. `aeolus-trierarch upgrade` has the version it installs rewrite it the same way (its `install --no-load`), and reloads systemd, before it stops the old process (#485, #492).
 
 ### Detected options
 
