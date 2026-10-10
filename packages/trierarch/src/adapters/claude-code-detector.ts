@@ -87,6 +87,12 @@ function effortLevelsOf(help: string): string[] {
     .filter((level) => trierarchNameSchema.safeParse(level).success);
 }
 
+/** The modes `--permission-mode <mode> ... (choices: "acceptEdits", ...)` lists in --help, each one word such as acceptEdits (#517). */
+function permissionModesOf(help: string): string[] {
+  const listed = /\(choices:([^)]*)\)/.exec(entryOf(help, '--permission-mode <mode>'))?.[1];
+  return [...(listed ?? '').matchAll(/"([A-Za-z]+)"/g)].flatMap((match) => (match[1] === undefined ? [] : [match[1]]));
+}
+
 function optionOf(names: readonly string[], flag: string): ConfiguredOption {
   return { values: Object.fromEntries(names.map((name) => [name, [flag, name]])) };
 }
@@ -108,6 +114,7 @@ export function createClaudeCodeDetector(deps: {
       const help = await deps.run(program, { args: ['--help'], timeoutMs: QUICK_TIMEOUT_MS });
       const text = help.status === 0 ? help.stdout : '';
       const levels = effortLevelsOf(text);
+      const permissionModes = permissionModesOf(text);
       const aliases = aliasesOf(text);
       const before = previous?.version === version ? previous : undefined;
       const resolvedBefore = Object.keys(before?.options.model?.values ?? {});
@@ -128,6 +135,7 @@ export function createClaudeCodeDetector(deps: {
           ...(ids.length > 0 && { model: optionOf(ids, '--model') }),
           ...(levels.length > 0 && { effort: optionOf(levels, '--effort') }),
         },
+        ...(permissionModes.length > 0 && { permissionModes }),
         ...(aliases.length === 0 && {
           problem: `Claude Code ${version}'s --help names no model alias, so this machine declares no Claude Code model until an update of Claude Code names one`,
         }),

@@ -235,6 +235,8 @@ export interface DetectedHarness {
   readonly confirmedAt: Date | null;
   /** Its options as detected: its models, and its effort levels where its CLI has a flag for them. */
   readonly options: Readonly<Record<string, ConfiguredOption>>;
+  /** The permission modes its CLI lists for its permission mode flag (#517), so a launch names a mode the installed version documents; none when it lists none. */
+  readonly permissionModes?: readonly string[];
   /** Why detection could not find what it should, for argo, once per version; none when it found it. */
   readonly problem?: string;
   /** The model ids a session on this machine refused at this version (#382), never offered again until the version changes or a hand detect; none when none was. */
