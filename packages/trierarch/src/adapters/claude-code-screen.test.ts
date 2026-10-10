@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { claudeCodeLaunchSeen } from './claude-code-screen.js';
 
 // On screens of Claude Code 2.1.295, captured from real sessions (#382), its first-run screens from a fresh home (#403).
-// On Linux it draws ● where macOS draws ⏺ (#487).
+// On Linux it draws ● where macOS draws ⏺ (#487); ✦ stands for a marker it may draw on another platform or version (#489).
 
 function screen(name: string): string {
   return readFileSync(new URL(`../../test/screens/claude-code-${name}.txt`, import.meta.url), 'utf8');
@@ -26,8 +26,20 @@ describe('what a Claude Code screen shows in its launch window', () => {
     expect(claudeCodeLaunchSeen({ screen: screen('linux'), model: 'claude-opus-5-5' })).toEqual({ kind: 'active' });
   });
 
-  it.each(['⏺', '●'])('sees activity while a tool call runs (%s)', (glyph) => {
+  it.each(['⏺', '●', '✦'])('sees activity while a tool call runs (%s)', (glyph) => {
     expect(claudeCodeLaunchSeen({ screen: `${promptedOnly('read')}\n\n${glyph} Reading 1 file…\n`, model: 'claude-opus-5-5' })).toEqual({ kind: 'active' });
+  });
+
+  it.each(['⏺', '●', '✦'])('sees activity once a tool call shows whole (%s)', (glyph) => {
+    expect(claudeCodeLaunchSeen({ screen: `${promptedOnly('read')}\n\n${glyph} Bash(echo hi)\n`, model: 'claude-opus-5-5' })).toEqual({ kind: 'active' });
+  });
+
+  it.each(['⏺', '●', '✦'])('sees none while its first prompt only answered in text (%s)', (glyph) => {
+    expect(claudeCodeLaunchSeen({ screen: `${promptedOnly('read')}\n\n${glyph} Done.\n`, model: 'claude-opus-5-5' })).toEqual({ kind: 'none' });
+  });
+
+  it.each(['I Reading the issue first.', 'A Bash(echo hi) call is next.'])('sees none in ordinary text that starts like a tool call (%s)', (text) => {
+    expect(claudeCodeLaunchSeen({ screen: `${promptedOnly('read')}\n\n${text}\n`, model: 'claude-opus-5-5' })).toEqual({ kind: 'none' });
   });
 
   it('sees none while its first prompt made no tool call on Linux', () => {
