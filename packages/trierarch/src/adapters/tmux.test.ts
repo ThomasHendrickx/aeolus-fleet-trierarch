@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -107,5 +107,14 @@ describe('sessions in tmux', () => {
     await runCommand('tmux', { args: ['-L', server, 'new-session', '-d', '-s', 'thomas', 'sleep 30'] });
 
     await expect(tmux.list()).resolves.toEqual([]);
+  });
+
+  it("keeps the test's tmux server in the test's own folder, so the test leaves no socket on the machine (#537)", async () => {
+    await tmux.start({ shipId: newId('ship'), folder, command: ['sleep', '30'] });
+
+    const socket = await runCommand('tmux', { args: ['-L', server, 'display-message', '-p', '#{socket_path}'] });
+
+    // tmux keeps its sockets in $TMUX_TMPDIR/tmux-<uid>/.
+    expect(dirname(dirname(socket.stdout.trim()))).toBe(folder);
   });
 });
