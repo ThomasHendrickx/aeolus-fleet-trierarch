@@ -252,7 +252,7 @@ export async function initTrierarch(input: {
   isCodexInstalled: boolean;
   /** Detects the configured harnesses' options (#365), once per harness version. */
   detect: DetectHarnesses;
-  service: Pick<Service, 'install' | 'restart' | 'status'>;
+  service: Pick<Service, 'install' | 'rewrite' | 'restart' | 'status'>;
   /** What running.json says now: the started process writes it as it starts (#402). */
   running: () => Promise<RunningFile | undefined>;
   /** Waits between reads of running.json; a test passes one that does not wait. */
@@ -321,7 +321,8 @@ export async function initTrierarch(input: {
   const harnesses = Object.keys(configuration.harnesses);
   said.push(...describeDetected({ harnesses, detected: await input.detect({ harnesses, by: 'start' }) }).split('\n'));
 
-  // The service: offered when it is not installed, restarted when it should read a new configuration.
+  // The service: offered when it is not installed, rewritten as this trierarch writes it when it is (#479),
+  // and restarted when it should read a new configuration.
   prompter.step('The service');
   let serviced: InitReport['service'] = 'unchanged';
   const status = await service.status();
@@ -333,9 +334,12 @@ export async function initTrierarch(input: {
       serviced = 'notInstalled';
       said.push('Install and start it later with aeolus-trierarch install.');
     }
-  } else if (configured !== 'kept' && (await prompter.confirm('Restart the trierarch so it reads the new configuration?', { isDefault: true }))) {
-    await startNew(() => service.restart(), 'The trierarch restarted with the new configuration.');
-    serviced = 'restarted';
+  } else {
+    await service.rewrite();
+    if (configured !== 'kept' && (await prompter.confirm('Restart the trierarch so it reads the new configuration?', { isDefault: true }))) {
+      await startNew(() => service.restart(), 'The trierarch restarted with the new configuration.');
+      serviced = 'restarted';
+    }
   }
 
   return {

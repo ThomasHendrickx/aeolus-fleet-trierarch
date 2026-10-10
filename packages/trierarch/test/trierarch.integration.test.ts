@@ -131,7 +131,7 @@ async function aTrierarchOnTheFleet(claudeCodeFlags: readonly string[] = CONFIGU
   const trierarchShip = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'mac-mini', type: 'trierarch', fleetScopes: ['crew:run'] }));
   const scout = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'scout', type: 'reviewer' }));
 
-  const service = { install: () => Promise.resolve(), restart: () => Promise.resolve(), status: () => Promise.resolve({ file: 'none', isInstalled: true, isRunning: true }) };
+  const service = { install: () => Promise.resolve(), rewrite: () => Promise.resolve(), restart: () => Promise.resolve(), status: () => Promise.resolve({ file: 'none', isInstalled: true, isRunning: true }) };
   // The places come with init, as an operator adds them: adding a place through init is what trusts it (#381).
   const configuration = {
     ...CONFIGURATION,

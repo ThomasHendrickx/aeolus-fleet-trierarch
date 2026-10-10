@@ -65,6 +65,8 @@ A trierarch's ship stays a normal ship: it receives messages, such as pings, and
 
 The trierarch's log is where its service writes it: on macOS the launchd agent writes `~/.aeolus/trierarch/logs/trierarch.log`, which `aeolus-trierarch logs` reads; on Linux the systemd user unit writes to the journal, read with `journalctl --user -u aeolus-trierarch`, and `~/.aeolus/trierarch/logs` stays empty.
 
+Stopping or restarting the service (upgrade, restart, add) ends the trierarch only, never the sessions in the tmux server it started: launchd leaves them running, and the systemd user unit stops its main process only (`KillMode=process`, #479). `aeolus-trierarch init` rewrites an installed service's file as this version writes it, and reloads systemd on Linux, without restarting the trierarch.
+
 ### Detected options
 
 A trierarch detects what each harness it offers can do (#365), so a machine needs no hand-made options after `init`, and stays right after a harness updates. Each harness adapter has a detection; it runs at `init`, at each start for a harness whose version differs from the one detected, and by hand with `aeolus-trierarch detect`, never more often:

@@ -34,6 +34,8 @@ export interface ServiceStatus {
 export interface Service {
   /** Writes the service's file without loading it. */
   write(): Promise<void>;
+  /** Writes the service's file over an installed one, for its next start, leaving the running trierarch and its sessions alone. */
+  rewrite(): Promise<void>;
   /** Writes the service's file, then loads and starts it. */
   install(): Promise<void>;
   /** Stops the service and removes its file. */
@@ -112,6 +114,8 @@ ExecStart="${at.run.node}" "${at.run.script}" run
 ${variables}
 Restart=always
 RestartSec=5
+# The sessions run in the tmux server the trierarch starts, in this unit's control group: a stop ends the trierarch only (#479).
+KillMode=process
 
 [Install]
 WantedBy=default.target
@@ -208,6 +212,8 @@ export function createService(options: {
     };
     return {
       write,
+      // launchd reads the file when it loads the agent again; the trierarch's own stop and start do.
+      rewrite: write,
       install: async () => {
         await write();
         // Unload an earlier copy first: bootstrap refuses a loaded agent.
@@ -251,6 +257,11 @@ export function createService(options: {
     };
     return {
       write,
+      // A reload, not a restart: systemd stops and starts the unit as the new file says from then on.
+      rewrite: async () => {
+        await write();
+        await systemctl('daemon-reload');
+      },
       install: async () => {
         await write();
         await systemctl('daemon-reload');
@@ -286,5 +297,5 @@ export function createService(options: {
 
   const elsewhere = (): Promise<never> =>
     Promise.reject(new Error(`aeolus-trierarch knows launchd (macOS) and systemd (Linux), not ${platform}: run aeolus-trierarch run under your own supervisor`));
-  return { write: elsewhere, install: elsewhere, uninstall: elsewhere, start: elsewhere, stop: elsewhere, restart: elsewhere, status: elsewhere };
+  return { write: elsewhere, rewrite: elsewhere, install: elsewhere, uninstall: elsewhere, start: elsewhere, stop: elsewhere, restart: elsewhere, status: elsewhere };
 }
