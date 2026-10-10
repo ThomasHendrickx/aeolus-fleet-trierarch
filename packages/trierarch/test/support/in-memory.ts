@@ -65,7 +65,12 @@ interface HeldRequest {
   settings: unknown;
   settingsVersion: number;
   status: CrewStatus | null;
+  /** Kept as the fleet keeps it (decision 0029): set by the first running, restarting or crashed, cleared on every new settings version. */
+  isFinal: boolean;
 }
+
+/** The statuses at which the fleet holds a crew final (decision 0029). */
+const FINAL_STATUSES: ReadonlySet<CrewStatus> = new Set(['running', 'restarting', 'crashed']);
 
 /** The settings most tests request: a worktree of aeolus-fleet on Claude Code. */
 export function crewSettings(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -104,18 +109,20 @@ export class InMemoryFleet implements FleetPort {
 
   /** The ship's crew request, assigned to this trierarch, as a requester asks and the trierarch plugin assigns it. */
   request(shipId: ShipId, settings: unknown = crewSettings()): void {
-    this.requests.set(shipId, { settings, settingsVersion: 1, status: null });
+    this.requests.set(shipId, { settings, settingsVersion: 1, status: null, isFinal: false });
   }
 
   /** The request written again, as Restart (the same settings) or Edit (new ones) does: a new settings version. */
   requestAgain(shipId: ShipId, settings?: unknown): void {
     const held = this.requestOf(shipId);
-    this.requests.set(shipId, { ...held, settings: settings ?? held.settings, settingsVersion: held.settingsVersion + 1 });
+    this.requests.set(shipId, { ...held, settings: settings ?? held.settings, settingsVersion: held.settingsVersion + 1, isFinal: false });
   }
 
   /** The crew's status as the fleet holds it, as one another pass of this trierarch wrote before its state was lost. */
   holdStatus(shipId: ShipId, status: CrewStatus): void {
-    this.requestOf(shipId).status = status;
+    const held = this.requestOf(shipId);
+    held.status = status;
+    held.isFinal ||= FINAL_STATUSES.has(status);
   }
 
   /**
@@ -130,7 +137,7 @@ export class InMemoryFleet implements FleetPort {
     if (held === undefined) {
       return this.givenBack.some((each) => each.shipId === shipId && each.settingsVersion === given.settingsVersion) ? Promise.resolve({ kind: 'givenBack' }) : refused('NOT_FOUND');
     }
-    if (this.isRefusingGiveBack || held.status === 'running' || held.status === 'restarting' || held.status === 'crashed') {
+    if (this.isRefusingGiveBack || held.isFinal) {
       return refused('CREW_REQUEST_FINAL');
     }
     if (held.status === 'releasing') {
@@ -175,7 +182,7 @@ export class InMemoryFleet implements FleetPort {
   }
 
   assignedRequests(): Promise<readonly AssignedRequest[]> {
-    return Promise.resolve([...this.requests].map(([shipId, { settings, settingsVersion, status }]) => ({ shipId, settings, settingsVersion, status })));
+    return Promise.resolve([...this.requests].map(([shipId, { settings, settingsVersion, status, isFinal }]) => ({ shipId, settings, settingsVersion, status, isFinal })));
   }
 
   writeStatus(shipId: ShipId, written: WrittenStatus): Promise<void> {
@@ -188,6 +195,7 @@ export class InMemoryFleet implements FleetPort {
     const isSame = held.status === status && last?.attempt === written.attempt && last.startedAt?.getTime() === written.startedAt?.getTime();
     if (!isSame) {
       held.status = status;
+      held.isFinal ||= FINAL_STATUSES.has(status);
       this.statuses.push({ shipId, ...written });
     }
     return Promise.resolve();

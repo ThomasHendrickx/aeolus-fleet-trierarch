@@ -89,6 +89,21 @@ describe('the fleet over REST', () => {
     );
   });
 
+  it('reads each crew request assigned to it with whether its crew is final, as the fleet holds it (#477)', async () => {
+    const shipId = newId('ship');
+    await aFleetThat(
+      (response) =>
+        response
+          .writeHead(200, { 'content-type': 'application/json' })
+          .end(JSON.stringify([{ shipId, settings: { harness: 'codex' }, settingsVersion: 2, requestedAt: '2026-10-10T09:00:00.000Z', status: 'crewing', isFinal: true }])),
+      async (fleetUrl) => {
+        await expect(createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_x' }).assignedRequests()).resolves.toEqual([
+          { shipId, settings: { harness: 'codex' }, settingsVersion: 2, status: 'crewing', isFinal: true },
+        ]);
+      },
+    );
+  });
+
   it('gives a crew request back with the settings version it tried and the reason, and answers given back once the fleet takes it (#382)', async () => {
     const shipId = newId('ship');
     const asked: { method?: string; url?: string; body: string }[] = [];

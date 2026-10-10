@@ -871,6 +871,38 @@ describe('a final crew crewed again after a release elsewhere follows the restar
     ]);
   });
 
+  it('gives nothing back once its harness no longer trusts the repository, as the fleet holds its crew final while its status says crewing: its worktree stays and argo is told once (#477)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aReleasedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.trust.untrust('claude-code', { kind: 'repository', name: 'aeolus-fleet' });
+    trierarch.processes.restartMachine();
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.fleet.requestOf(shipId)).toMatchObject({ status: 'crewing', isFinal: true });
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'crewing', folder: SCOUT_FOLDER });
+    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
+      `scout (${shipId}): this trierarch cannot crew settings version 1: workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it`,
+    ]);
+  });
+
+  it('counts no activity within a minute as a failed start, nothing given back, when the fleet holds its crew final as its state was lost (#477)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, crewSettings());
+    trierarch.fleet.holdStatus(shipId, 'running');
+    trierarch.harness.seen.set(shipId, { kind: 'none' });
+    await trierarch.pass();
+    trierarch.clock.advance(MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'restarting', exits: [expect.any(String)] });
+    expect(trierarch.fleet.givenBack).toEqual([]);
+  });
+
   it('still gives the request back when its crew was not final yet as it was released elsewhere', async () => {
     const trierarch = aTrierarch();
     const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' } });
@@ -1094,17 +1126,19 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.fleet.toArgo).toEqual([]);
   });
 
-  it('tells argo once, as before, of a new settings version it cannot crew once its crew is final: the session runs on (#382)', async () => {
+  it('gives back a new settings version it cannot crew of a ship whose crew ran, as the new version clears final: the session stops, its identity and clean worktree go (#477)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     trierarch.fleet.requestAgain(shipId, crewSettings({ harness: 'codex' }));
 
     await trierarch.pass();
-    await trierarch.pass();
 
-    expect(trierarch.fleet.givenBack).toEqual([]);
-    expect(trierarch.processes.sessions.get(shipId)).toBe('running');
-    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`scout (${shipId}): this trierarch cannot crew settings version 2: harness: This trierarch offers no harness codex`]);
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 2, reason: 'mac-studio: harness: This trierarch offers no harness codex' }]);
+    expect(trierarch.processes.sessions.has(shipId)).toBe(false);
+    expect(trierarch.state.current().entries).toEqual({});
+    expect(trierarch.harness.identities.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.fleet.toArgo).toEqual([]);
   });
 
   it.each([

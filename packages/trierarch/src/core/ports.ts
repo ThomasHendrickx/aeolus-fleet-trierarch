@@ -39,6 +39,8 @@ export interface AssignedRequest {
   readonly settingsVersion: number;
   /** How the trierarch last said the crew stands; releasing once the requester removed it; null until any. */
   readonly status: CrewStatus | null;
+  /** Whether its crew is final as the fleet holds it (decision 0029): read, never derived from the status (#477). */
+  readonly isFinal: boolean;
 }
 
 /** A plain-text report to argo, the operator, stored once under its idempotency key. */

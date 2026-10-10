@@ -38,7 +38,6 @@ const stateSchema = z.object({
       folder: z.string().optional(),
       hasStarted: z.boolean(),
       launchedAt: z.string().optional(),
-      isFinal: z.literal(true).optional(),
       wake: z.object({ waiting: z.int().nonnegative(), isPending: z.boolean() }),
     }),
   ),
