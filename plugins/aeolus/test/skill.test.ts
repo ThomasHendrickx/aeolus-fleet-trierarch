@@ -41,6 +41,11 @@ describe('the crew-a-ship skill', () => {
     expect(codexSkill).not.toContain('Receive, pong each operator ping');
   });
 
+  it('has a crewed session ask its questions over the fleet, to the sender of its task, never through an interactive question form, in both harnesses (#457)', () => {
+    expect(claudeSkill).toContain('Ask your questions over the fleet: `send -` them to the sender of your task, never through AskUserQuestion or another interactive question form.');
+    expect(codexSkill).toContain('Ask your questions over the fleet: `send -` them to the sender of your task, never through request_user_input or another interactive question form.');
+  });
+
   it('tells a squadron member how to check in, take up its role, report and stand down', () => {
     const skill = claudeSkill;
 
