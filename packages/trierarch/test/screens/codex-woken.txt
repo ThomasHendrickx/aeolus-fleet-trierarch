@@ -1,0 +1,33 @@
+╭───────────────────────────────────────────────────────────────╮
+│ ✨ Update available! 0.160.1 -> 0.162.1                       │
+│ See https://github.com/openai/codex for installation options. │
+│                                                               │
+│ See full release notes:                                       │
+│ https://github.com/openai/codex/releases/latest               │
+╰───────────────────────────────────────────────────────────────╯
+
+  >_ OpenAI Codex (v0.160.1)
+     /Users/operator/work/cx-wake
+
+  A new prompt awakens.
+
+› $aeolus-wake No human reads this terminal. Never ask here; ask over the fleet. A question only the operator can answer goes to argo.
+
+• I’m using the aeolus-wake skill to check the ship lease and handle waiting fleet deliveries.
+
+• Explored
+  └ Read SKILL.md (aeolus:aeolus-wake skill), SKILL.md (aeolus:crew-a-ship skill)
+    + Show details
+
+• Failed (exit 1) AEOLUS_DATA=/Users/operator/.codex/plugins/data/aeolus-aeolus-fleet AEOLUS_FOLDER=/Users/operator/work/cx-wake AEOLUS_HARNESS=codex /Users/operator/.codex…
+  └ aeolus: this folder crews no ship
+    + Show details
+
+• This folder crews no Aeolus ship. Use $aeolus-crew with a Codex crew line to crew one.
+
+  Worked for 13s • 00:38
+
+› Ask Codex to do anything
+
+  GPT-6.1-Sol low · /Users/operator/work/cx-wake · Route questions to Argo
+  ? for shortcuts                                                                                                                                                              ⚠ 1 warning · f2 to view

@@ -155,6 +155,16 @@ describe('Codex as a harness', () => {
     expect(typed).toEqual([{ shipId, text: `$aeolus-wake ${NO_TERMINAL_QUESTIONS}`, settleMs: CODEX_TYPING_SETTLE_MS }]);
   });
 
+  // The screen is captured from a real idle Codex 0.160.1 session in tmux after this adapter's wake typed into it (#589).
+  it('wakes a real idle Codex: the typed wake is submitted as one prompt, not left in the skill picker, and the session runs the wake skill', async () => {
+    await harness().wake({ shipId, folder });
+    const woken = readFileSync(new URL('../../test/screens/codex-woken.txt', import.meta.url), 'utf8');
+    screens.set(shipId, woken);
+
+    expect(woken).toContain(`› ${typed[0]?.text ?? ''}\n\n• I’m using the aeolus-wake skill`);
+    await expect(harness().launchSeen({ shipId })).resolves.toEqual({ kind: 'active' });
+  });
+
   it("sees in its session's screen the model it launched with refused", async () => {
     screens.set(shipId, readFileSync(new URL('../../test/screens/codex-refused.txt', import.meta.url), 'utf8'));
 
