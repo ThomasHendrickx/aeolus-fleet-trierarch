@@ -801,6 +801,72 @@ describe('the restart window: a restarted final crew is checked, never held back
   });
 });
 
+/** A crewed ship released elsewhere and crewed again by one pass, whose session shows what is given in its first minute: its id. */
+async function aReleasedShip(trierarch: Trierarch, at: { seen: LaunchSeen; settings?: Record<string, unknown> }) {
+  const shipId = await aCrewedShip(trierarch, at.settings);
+  trierarch.harness.seen.set(shipId, at.seen);
+  trierarch.fleet.releaseElsewhere(shipId);
+  await trierarch.pass();
+  return shipId;
+}
+
+describe('a final crew crewed again after a release elsewhere follows the restart rule (#469)', () => {
+  it('counts no activity within a minute of crewing it again as a failed start: the session stops and restarts after its wait, nothing given back', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aReleasedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.clock.advance(MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'restarting', exits: [expect.any(String)] });
+    expect(trierarch.processes.sessions.has(shipId)).toBe(false);
+    expect(trierarch.fleet.requestOf(shipId).status).toBe('restarting');
+    expect(trierarch.fleet.givenBack).toEqual([]);
+  });
+
+  it('counts a refused model when crewed again as a failed start against the restart budget, nothing given back', async () => {
+    const trierarch = aTrierarch(CONFIGURATION, DETECTED);
+    const shipId = await aReleasedShip(trierarch, { seen: { kind: 'refused', model: 'sonnet' }, settings: { options: { model: 'sonnet' } } });
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'restarting', exits: [expect.any(String)] });
+    expect(trierarch.processes.sessions.has(shipId)).toBe(false);
+    expect(trierarch.fleet.givenBack).toEqual([]);
+  });
+
+  it('once failed starts spend the restart budget, writes crashed and tells argo the reason, giving nothing back', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aReleasedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.clock.advance(MINUTE_MS);
+    await trierarch.pass();
+
+    for (let start = 0; start < RESTART_BUDGET; start += 1) {
+      await failAgain(trierarch, shipId);
+    }
+
+    expect(trierarch.state.current().entries[shipId]?.state).toBe('crashed');
+    expect(trierarch.fleet.requestOf(shipId).status).toBe('crashed');
+    expect(trierarch.processes.sessions.has(shipId)).toBe(false);
+    expect(trierarch.fleet.givenBack).toEqual([]);
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
+      `scout (${shipId}): its session crashed ${String(RESTART_BUDGET + 1)} times within an hour, restart budget spent; its last start: no activity within a minute of its start; status crashed. Restart it in the console to crew it again.`,
+    ]);
+  });
+
+  it('still gives the request back when its crew was not final yet as it was released elsewhere', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.fleet.releaseElsewhere(shipId);
+    await trierarch.pass();
+    trierarch.clock.advance(MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 1, reason: 'mac-studio: no activity within a minute of its start' }]);
+  });
+});
+
 describe('the gaps the loop closes (docs/trierarch.md)', () => {
   it('rule 2: a session of the trierarch with no assigned request is stopped', async () => {
     const trierarch = aTrierarch();
