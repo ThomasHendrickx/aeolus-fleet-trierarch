@@ -71,6 +71,17 @@ describe("each harness's trust, read from its own files (#381)", () => {
     expect(trusted).toEqual({ 'claude-code': { repositories: [], folders: [], unacceptedFlags: [SKIP] }, codex: { repositories: ['aeolus-fleet'], folders: ['notes'], unacceptedFlags: [] } });
   });
 
+  it('reads Claude Code from CLAUDE_CONFIG_DIR when it is set (#474)', async () => {
+    const configDir = join(home, 'claude-config');
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, '.claude.json'), JSON.stringify({ projects: { [PAGASAE]: { hasTrustDialogAccepted: true } } }));
+    writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ skipDangerousModePermissionPrompt: true }));
+
+    const trusted = await createTrust({ configuration, homeDirectory: home, env: { CLAUDE_CONFIG_DIR: configDir } }).trusted();
+
+    expect(trusted['claude-code']).toEqual({ repositories: ['pagasae'], folders: [], unacceptedFlags: [] });
+  });
+
   it('reads Codex from CODEX_HOME when it is set', async () => {
     const codexHome = join(home, 'codex-home');
     codexToml(codexHome, `[projects."${PAGASAE}"]\ntrust_level = "trusted"\n`);

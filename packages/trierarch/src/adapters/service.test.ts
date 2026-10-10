@@ -366,6 +366,10 @@ describe("the service's environment", () => {
     });
   });
 
+  it('carries CLAUDE_CONFIG_DIR too, when set, so the trierarch and its sessions find the files Claude Code keeps there (#474)', () => {
+    expect(serviceEnvironment({ PATH: '/usr/bin', CLAUDE_CONFIG_DIR: '/claude-config' })).toEqual({ PATH: '/usr/bin', CLAUDE_CONFIG_DIR: '/claude-config' });
+  });
+
   it('gives the service a plain PATH where install ran without one', () => {
     expect(serviceEnvironment({})).toEqual({ PATH: '/usr/bin:/bin' });
   });

@@ -91,6 +91,14 @@ describe('the version of the aeolus plugin a harness installed (#480)', () => {
     await expect(aeolusPluginVersion({ homeDirectory: home, env: {}, harness: 'codex' })).resolves.toBe('0.20.4');
   });
 
+  it("is what Claude Code's manifest says of the plugin in its cache under CLAUDE_CONFIG_DIR when it is set (#474)", async () => {
+    const configDir = join(home, 'claude-config');
+    aPlugin({ root: join(configDir, 'plugins', 'cache', 'aeolus-fleet', 'aeolus', '0.20.5'), manifest: '.claude-plugin', version: '0.20.5' });
+    aPlugin({ root: join(home, '.claude', 'plugins', 'cache', 'aeolus-fleet', 'aeolus', '0.20.4'), manifest: '.claude-plugin', version: '0.20.4' });
+
+    await expect(aeolusPluginVersion({ homeDirectory: home, env: { CLAUDE_CONFIG_DIR: configDir }, harness: 'claude-code' })).resolves.toBe('0.20.5');
+  });
+
   it('is read from the plugin AEOLUS_PLUGIN_ROOT names when set', async () => {
     const root = join(home, 'checkout');
     aPlugin({ root, manifest: '.claude-plugin', version: '0.21.0' });

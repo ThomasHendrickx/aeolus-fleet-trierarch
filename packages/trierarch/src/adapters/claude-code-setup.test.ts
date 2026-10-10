@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -115,5 +115,29 @@ describe("Claude Code's one-time questions, answered ahead", () => {
     writeFileSync(claudeJson(), JSON.stringify({ hasCompletedOnboarding: true, fullscreenUpsellSeenCount: 2 }));
 
     await expect(createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).isOnboardingComplete()).resolves.toBe(false);
+  });
+});
+
+describe("Claude Code's files under CLAUDE_CONFIG_DIR, where Claude Code keeps them when it is set (#474)", () => {
+  const configDirectory = () => join(home, 'claude-config');
+
+  it('trusts a folder and completes the onboarding in .claude.json under CLAUDE_CONFIG_DIR, leaving ~/.claude.json alone', async () => {
+    const setup = createClaudeCodeSetup({ homeDirectory: home, configDirectory: configDirectory() });
+
+    await setup.trust('/root');
+    await setup.completeOnboarding();
+
+    expect(read(join(configDirectory(), '.claude.json'))).toEqual({ projects: { '/root': { hasTrustDialogAccepted: true } }, hasCompletedOnboarding: true, fullscreenUpsellSeenCount: 3 });
+    expect(existsSync(claudeJson())).toBe(false);
+  });
+
+  it('accepts bypass permissions mode in settings.json under CLAUDE_CONFIG_DIR, leaving ~/.claude/settings.json alone', async () => {
+    const setup = createClaudeCodeSetup({ homeDirectory: home, configDirectory: configDirectory() });
+
+    await setup.acceptSkipPermissions();
+
+    expect(read(join(configDirectory(), 'settings.json'))).toEqual({ skipDangerousModePermissionPrompt: true });
+    expect(existsSync(settingsJson())).toBe(false);
+    await expect(setup.isSkipPermissionsAccepted()).resolves.toBe(true);
   });
 });
