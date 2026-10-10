@@ -7,8 +7,10 @@ import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
+import { effectiveFlags } from '../core/effective-flags.js';
 import { CLAUDE_CODE_ADAPTER_FLAGS, claudeCodeCommandLine, createClaudeCodeHarness } from './claude-code.js';
 import { createClaudeCodeSetup } from './claude-code-setup.js';
+import { wordsOf } from './command-line.js';
 import { runCommand } from './run-command.js';
 
 // With the aeolus plugin's own scripts from this repository, in a temporary data folder.
@@ -122,6 +124,16 @@ describe('Claude Code as a harness', () => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false });
 
     expect(started.map((session) => session.command.filter((word) => word.startsWith('--disallowedTools')))).toEqual([['--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode'], ['--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode']]);
+  });
+
+  it('never starts a crewed session in plan mode, which it could not leave without plan mode: --permission-mode plan from the flags or an option is ignored, another permission mode kept (#465)', () => {
+    const wordsFor = (flags: string[]) => wordsOf(claudeCodeCommandLine({ flags, sessionName: '[aeolus-fleet] scout', prompt: '/aeolus:wake', isFirstStart: true }));
+    const mode = (flags: string[]) => effectiveFlags({ flags, options: { mode: { values: { plan: ['--permission-mode', 'plan'], edits: ['--permission-mode', 'acceptEdits'] } } } }, { mode: 'plan' });
+
+    expect(wordsFor(['--permission-mode', 'plan', '--verbose'])).toEqual(['claude', '--verbose', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', '/aeolus:wake']);
+    expect(wordsFor(['--permission-mode=plan'])).toEqual(['claude', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', '/aeolus:wake']);
+    expect(wordsFor(mode(['--remote-control']))).toEqual(['claude', '--remote-control', '[aeolus-fleet] scout', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', '/aeolus:wake']);
+    expect(wordsFor(['--permission-mode', 'acceptEdits'])).toEqual(['claude', '--permission-mode', 'acceptEdits', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', '/aeolus:wake']);
   });
 
   it('passes a first prompt that starts with - after --, so it never reads as a flag', async () => {
