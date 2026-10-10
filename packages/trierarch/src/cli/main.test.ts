@@ -87,8 +87,8 @@ describe('aeolus-trierarch', () => {
 
     expect(output).toContain(
       [
-        '  first start: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter) -- "<first prompt>"',
-        '  restart: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter) --continue (adapter) -- /aeolus:wake',
+        '  first start: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --permission-mode default (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter) -- "<first prompt>"',
+        '  restart: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --permission-mode default (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter) --continue (adapter) -- /aeolus:wake',
       ].join('\n'),
     );
     expect(output).toContain(
@@ -97,6 +97,26 @@ describe('aeolus-trierarch', () => {
         '  restart: codex resume --last --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- $aeolus-wake',
       ].join('\n'),
     );
+  });
+
+  it("config check shows the command a launch runs when --settings decides Claude Code's default mode, which the folder's settings cannot change: --permission-mode default for plan, nothing for another mode (#507)", async () => {
+    const config = join(home, 'settings.json');
+    const firstStartWith = async (settings: object) => {
+      writeFileSync(config, JSON.stringify({ ...CONFIGURATION, harnesses: { 'claude-code': { flags: ['--settings', JSON.stringify(settings)], options: {} } } }));
+      return (await main(['config', 'check', '--config', config], { HOME: home })).output.split('\n').find((line) => line.startsWith('  first start: claude'));
+    };
+
+    expect(await firstStartWith({ permissions: { defaultMode: 'plan' } })).toContain('(configuration) --permission-mode default (adapter) --disallowedTools');
+    expect(await firstStartWith({ permissions: { defaultMode: 'acceptEdits' } })).not.toContain('--permission-mode');
+  });
+
+  it('config check shows no --permission-mode default when the flags name a permission mode of their own (#507)', async () => {
+    const config = join(home, 'mode.json');
+    writeFileSync(config, JSON.stringify({ ...CONFIGURATION, harnesses: { 'claude-code': { flags: ['--permission-mode', 'acceptEdits'], options: {} } } }));
+
+    const { output } = await main(['config', 'check', '--config', config], { HOME: home });
+
+    expect(output).toContain('  first start: claude --permission-mode acceptEdits (configuration) --disallowedTools');
   });
 
   it('config check gives the flags each adapter adds, beside the configured ones, as JSON with --json', async () => {
@@ -118,6 +138,7 @@ describe('aeolus-trierarch', () => {
             { words: ['--remote-control'], source: 'configuration' },
             { words: ['[<repository or folder>] <ship>'], source: 'adapter' },
             { words: ['--effort', 'high'], source: 'configuration' },
+            { words: ['--permission-mode', 'default'], source: 'adapter', when: 'the Claude Code settings for the folder make plan the default mode' },
             { words: ['--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode'], source: 'adapter' },
             { words: ['--continue'], source: 'adapter' },
             { words: ['--', '/aeolus:wake'] },

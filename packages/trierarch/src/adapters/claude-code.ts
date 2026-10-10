@@ -5,7 +5,7 @@ import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { AdapterFlag, HarnessPort } from '../core/ports.js';
 import { claudeCodeLaunchSeen } from './claude-code-screen.js';
-import type { ClaudeCodeSetup } from './claude-code-setup.js';
+import { SETTING_SOURCES, type ClaudeCodeSetup, type SettingsDefaultMode, type SettingSource } from './claude-code-setup.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
 import { effectiveFlags } from '../core/effective-flags.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
@@ -20,8 +20,9 @@ import type { Tmux } from './tmux.js';
  * waiting there would take the keys of a wake (#457, #460). Plan mode goes as a
  * whole: without ExitPlanMode alone a session that entered it could never leave,
  * and for that reason a configured `--permission-mode plan` is ignored (#465),
- * and a default mode of plan in Claude Code's settings is overridden with
- * `--permission-mode default` when the flags name no mode of their own (#505).
+ * and a default mode of plan from any of Claude Code's settings files is
+ * overridden with `--permission-mode default` when the flags name no mode of
+ * their own (#505, #507).
  * Its onboarding is completed before every launch, so a session on a machine
  * where Claude Code never ran by hand stops at no first-run screen (#403). A
  * session's identity is written and read through the aeolus
@@ -38,6 +39,11 @@ const NO_PANE_PROMPTS = '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPla
 const PERMISSION_MODE = '--permission-mode';
 const PLAN_MODE = 'plan';
 const DEFAULT_MODE = 'default';
+const SETTINGS = '--settings';
+const SETTING_SOURCES_FLAG = '--setting-sources';
+const RESTRICTED = '--restricted';
+/** Where config check cannot know the folder: the override is shown with when it applies. */
+const WHEN_PLAN_PER_FOLDER = 'the Claude Code settings for the folder make plan the default mode';
 
 export const CLAUDE_CODE_ADAPTER_FLAGS: readonly AdapterFlag[] = [
   { flag: NO_PANE_PROMPTS, when: 'always' },
@@ -61,6 +67,34 @@ function namesPermissionMode(flags: readonly string[]): boolean {
   return flags.some((flag) => flag === PERMISSION_MODE || flag.startsWith(`${PERMISSION_MODE}=`) || flag === SKIP_PERMISSIONS);
 }
 
+/** A flag's value, given as `<flag> <value>` or `<flag>=<value>`; the last one wins. */
+function valueOf(flags: readonly string[], flag: string): string | undefined {
+  return flags.flatMap((word, at) => (word === flag ? [flags[at + 1]] : word.startsWith(`${flag}=`) ? [word.slice(flag.length + 1)] : [])).findLast((value) => value !== undefined);
+}
+
+/** The settings sources Claude Code loads with the flags: none with `--restricted`, those `--setting-sources` names, else all. */
+function settingSourcesOf(flags: readonly string[]): readonly SettingSource[] {
+  if (flags.includes(RESTRICTED)) {
+    return [];
+  }
+  const named = valueOf(flags, SETTING_SOURCES_FLAG)?.split(',').map((source) => source.trim());
+  return named === undefined ? SETTING_SOURCES : SETTING_SOURCES.filter((source) => named.includes(source));
+}
+
+/** The default mode Claude Code's settings give a session started with the flags, in the folder or, without one, for config check. */
+export function claudeCodeSettingsDefaultMode(setup: Pick<ClaudeCodeSetup, 'defaultPermissionMode'>, at: { flags: readonly string[]; folder?: string }): Promise<SettingsDefaultMode> {
+  const settings = valueOf(at.flags, SETTINGS);
+  return setup.defaultPermissionMode({ sources: settingSourcesOf(at.flags), ...(at.folder !== undefined && { folder: at.folder }), ...(settings !== undefined && { settings }) });
+}
+
+/** `--permission-mode default` where the settings' default mode is plan and the flags name none, and with when it applies where that depends on the folder. */
+function planOverride(flags: readonly string[], defaultMode: SettingsDefaultMode | undefined): CommandPart {
+  if (namesPermissionMode(flags) || defaultMode === undefined || (defaultMode.kind === 'decided' && defaultMode.mode !== PLAN_MODE)) {
+    return { words: [] };
+  }
+  return { words: [PERMISSION_MODE, DEFAULT_MODE], source: 'adapter', ...(defaultMode.kind === 'per folder' && { when: WHEN_PLAN_PER_FOLDER }) };
+}
+
 /**
  * The configured flags, with a name for the remote-control session where the
  * operator gave `--remote-control` without one: `[<repository or folder>]
@@ -81,13 +115,13 @@ function namedRemoteControl(flags: readonly string[], name: string): CommandPart
   ];
 }
 
-/** `claude`, the flags without plan mode, `--permission-mode default` when the settings' default mode is plan and the flags name none, AskUserQuestion and plan mode disallowed, `--continue` on a restart, then the prompt last after `--`: no flag takes it (`--remote-control [name]` has an optional value), and it never reads as a flag. */
-export function claudeCodeCommandLine(at: { flags: readonly string[]; sessionName: string; prompt: string; isFirstStart: boolean; defaultPermissionMode?: string; program?: string }): CommandPart[] {
+/** `claude`, the flags without plan mode, `--permission-mode default` when the settings' default mode is plan and the flags name none (or where it depends on the folder, with when it applies), AskUserQuestion and plan mode disallowed, `--continue` on a restart, then the prompt last after `--`: no flag takes it (`--remote-control [name]` has an optional value), and it never reads as a flag. */
+export function claudeCodeCommandLine(at: { flags: readonly string[]; sessionName: string; prompt: string; isFirstStart: boolean; defaultPermissionMode?: SettingsDefaultMode; program?: string }): CommandPart[] {
   const flags = withoutPlanMode(at.flags);
   return partsWithWords([
     { words: [at.program ?? 'claude'] },
     ...namedRemoteControl(flags, at.sessionName),
-    { words: at.defaultPermissionMode === PLAN_MODE && !namesPermissionMode(flags) ? [PERMISSION_MODE, DEFAULT_MODE] : [], source: 'adapter' },
+    planOverride(flags, at.defaultPermissionMode),
     { words: [NO_PANE_PROMPTS], source: 'adapter' },
     { words: at.isFirstStart ? [] : [CONTINUE], source: 'adapter' },
     { words: [END_OF_FLAGS, at.prompt] },
@@ -114,7 +148,7 @@ export function createClaudeCodeHarness(options: {
   sessions: Pick<Tmux, 'start' | 'type' | 'screen'>;
   /** Claude Code's projects folder, where it keeps each folder's conversations. */
   projects: string;
-  /** Claude Code's own files, where its onboarding is completed before each launch (#403) and its settings' default mode is read (#505). */
+  /** Claude Code's own files, where its onboarding is completed before each launch (#403) and its settings' default mode is read (#505, #507). */
   setup: Pick<ClaudeCodeSetup, 'completeOnboarding' | 'defaultPermissionMode'>;
   /** The program to run; `claude` unless a test runs another. */
   command?: string;
@@ -129,12 +163,13 @@ export function createClaudeCodeHarness(options: {
         throw new Error(`The configuration has no harness ${harness}`);
       }
       const prompt = isFirstStart && firstPrompt !== undefined ? firstPrompt : WAKE_PROMPT;
+      const flags = effectiveFlags(settings, picked);
       const command = claudeCodeCommandLine({
-        flags: effectiveFlags(settings, picked),
+        flags,
         sessionName: `[${workspace.kind === 'worktree' ? workspace.repository : workspace.name}] ${shipName}`,
         prompt,
         isFirstStart: isFirstStart || !(await hasConversation(options.projects, folder)),
-        defaultPermissionMode: await options.setup.defaultPermissionMode(folder),
+        defaultPermissionMode: await claudeCodeSettingsDefaultMode(options.setup, { flags, folder }),
         ...(options.command !== undefined && { program: options.command }),
       });
       await options.setup.completeOnboarding();

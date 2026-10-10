@@ -214,7 +214,7 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
       return { data: report, text: report.said.join('\n') };
     },
     'config check': async () => {
-      const { text, ...data } = await configCheck(paths);
+      const { text, ...data } = await configCheck(paths, { claudeCode: createClaudeCodeSetup({ homeDirectory, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) }) });
       return { data, text };
     },
     detect: async () => {

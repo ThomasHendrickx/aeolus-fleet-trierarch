@@ -7,18 +7,23 @@
 export interface CommandPart {
   readonly words: readonly string[];
   readonly source?: 'configuration' | 'adapter';
+  /** When the words apply, where config check cannot know it: the launch knows and runs them or not. */
+  readonly when?: string;
 }
 
 export function wordsOf(parts: readonly CommandPart[]): string[] {
   return parts.flatMap((part) => part.words);
 }
 
-/** One line: each part's words, a word with a space in quotes, and each flag part followed by its source. */
+/** One line: each part's words, a word with a space in quotes, and each flag part followed by its source and when it applies. */
 export function describeCommandLine(parts: readonly CommandPart[]): string {
   return parts
     .map((part) => {
       const words = part.words.map((word) => (word.includes(' ') ? `"${word}"` : word)).join(' ');
-      return part.source === undefined ? words : `${words} (${part.source})`;
+      if (part.source === undefined) {
+        return words;
+      }
+      return part.when === undefined ? `${words} (${part.source})` : `${words} (${part.source}, when ${part.when})`;
     })
     .join(' ');
 }

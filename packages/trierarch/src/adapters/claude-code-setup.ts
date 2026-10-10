@@ -1,5 +1,5 @@
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join } from 'node:path';
 
 import { z } from 'zod';
 
@@ -17,7 +17,7 @@ import { TrierarchFileError } from './files.js';
  * as often as it is shown skips the second. The answers live in Claude Code's
  * own files, which this changes key by key, keeping everything else and the
  * file's mode. It reads the default permission mode its settings give a
- * folder, so a crewed session is never started in plan mode (#505).
+ * folder, so a crewed session is never started in plan mode (#505, #507).
  */
 export interface ClaudeCodeSetup {
   trust(folder: string): Promise<void>;
@@ -28,9 +28,27 @@ export interface ClaudeCodeSetup {
   isSkipPermissionsAccepted(): Promise<boolean>;
   completeOnboarding(): Promise<void>;
   isOnboardingComplete(): Promise<boolean>;
-  /** The `permissions.defaultMode` Claude Code's settings give the folder: its local settings, else its project's, else the user's. */
-  defaultPermissionMode(folder: string): Promise<string | undefined>;
+  /**
+   * The `permissions.defaultMode` Claude Code takes from its settings files,
+   * the first that names one: the managed settings, the `--settings` file or
+   * JSON, then of the sources it loads the folder's local settings, its
+   * project's and the user's. Without a folder it is decided only when no
+   * folder settings come before the one that names it.
+   */
+  defaultPermissionMode(at: { folder?: string; settings?: string; sources: readonly SettingSource[] }): Promise<SettingsDefaultMode>;
 }
+
+/** The settings files `--setting-sources` picks from. */
+export type SettingSource = 'user' | 'project' | 'local';
+
+/** The settings sources, the one Claude Code takes first. */
+export const SETTING_SOURCES: readonly SettingSource[] = ['local', 'project', 'user'];
+
+/** A default mode the settings decide, possibly none; or one the settings of each folder decide. */
+export type SettingsDefaultMode = { kind: 'decided'; mode: string | undefined } | { kind: 'per folder' };
+
+/** Where Claude Code reads its managed settings files on macOS and on Linux. */
+const MANAGED_SETTINGS = process.platform === 'darwin' ? '/Library/Application Support/ClaudeCode' : '/etc/claude-code';
 
 const jsonObjectSchema = z.record(z.string(), z.unknown());
 type JsonObject = z.infer<typeof jsonObjectSchema>;
@@ -55,14 +73,39 @@ async function readJsonObject(path: string): Promise<JsonObject> {
   }
 }
 
-/** A settings file's `permissions.defaultMode`, or none when the file is missing, no JSON or names none: Claude Code reports a broken settings file itself. */
-async function defaultModeIn(path: string): Promise<string | undefined> {
+/** Settings' `permissions.defaultMode`, or none when they are no JSON or name none: Claude Code reports broken settings itself. */
+function defaultModeOf(text: string): string | undefined {
   try {
-    const settings = jsonObjectSchema.parse(JSON.parse(await readFile(path, 'utf8')));
+    const settings = jsonObjectSchema.parse(JSON.parse(text));
     return z.object({ defaultMode: z.string() }).safeParse(settings.permissions).data?.defaultMode;
   } catch {
     return undefined;
   }
+}
+
+/** A settings file's default mode, or none when the file is missing. */
+async function defaultModeIn(path: string): Promise<string | undefined> {
+  const text = await readFile(path, 'utf8').catch(() => undefined);
+  return text === undefined ? undefined : defaultModeOf(text);
+}
+
+/** The managed settings' default mode: managed-settings.json, then each visible `.json` in managed-settings.d in alphabetical order, the last that names one winning. */
+async function managedDefaultMode(folder: string): Promise<string | undefined> {
+  const dropIns = join(folder, 'managed-settings.d');
+  const files = (await readdir(dropIns).catch(() => [])).filter((file) => file.endsWith('.json') && !file.startsWith('.')).sort();
+  const modes = await Promise.all([join(folder, 'managed-settings.json'), ...files.map((file) => join(dropIns, file))].map(defaultModeIn));
+  return modes.findLast((mode) => mode !== undefined);
+}
+
+/** `--settings` takes a file or JSON; a relative file is the folder's, so without a folder it is unknown. */
+async function commandLineDefaultMode(settings: string, folder: string | undefined): Promise<string | undefined> {
+  if (settings.trimStart().startsWith('{')) {
+    return defaultModeOf(settings);
+  }
+  if (isAbsolute(settings)) {
+    return defaultModeIn(settings);
+  }
+  return folder === undefined ? undefined : defaultModeIn(join(folder, settings));
 }
 
 async function writeJsonObject(path: string, value: JsonObject): Promise<void> {
@@ -73,9 +116,16 @@ async function writeJsonObject(path: string, value: JsonObject): Promise<void> {
   await rename(temporary, path);
 }
 
-export function createClaudeCodeSetup(at: { homeDirectory: string }): ClaudeCodeSetup {
+export function createClaudeCodeSetup(at: {
+  homeDirectory: string;
+  /** Claude Code's configuration folder, CLAUDE_CONFIG_DIR when set, where it reads the user's settings; ~/.claude by default. */
+  configDirectory?: string;
+  /** Where Claude Code reads its managed settings files; the system's folder unless a test gives another. */
+  managedSettings?: string;
+}): ClaudeCodeSetup {
   const state = join(at.homeDirectory, '.claude.json');
   const settings = join(at.homeDirectory, '.claude', 'settings.json');
+  const userSettings = join(at.configDirectory ?? join(at.homeDirectory, '.claude'), 'settings.json');
   const projectsOf = (claude: JsonObject): JsonObject => jsonObjectSchema.safeParse(claude.projects).data ?? {};
   const fullscreenOfferSeen = (claude: JsonObject): number => z.number().safeParse(claude.fullscreenUpsellSeenCount).data ?? 0;
 
@@ -106,7 +156,24 @@ export function createClaudeCodeSetup(at: { homeDirectory: string }): ClaudeCode
       const claude = await readJsonObject(state);
       return claude.hasCompletedOnboarding === true && fullscreenOfferSeen(claude) >= FULLSCREEN_OFFER_SHOWN_MAX;
     },
-    defaultPermissionMode: async (folder) =>
-      (await defaultModeIn(join(folder, '.claude', 'settings.local.json'))) ?? (await defaultModeIn(join(folder, '.claude', 'settings.json'))) ?? (await defaultModeIn(settings)),
+    defaultPermissionMode: async ({ folder, settings: commandLine, sources }) => {
+      const above = (await managedDefaultMode(at.managedSettings ?? MANAGED_SETTINGS)) ?? (commandLine === undefined ? undefined : await commandLineDefaultMode(commandLine, folder));
+      if (above !== undefined) {
+        return { kind: 'decided', mode: above };
+      }
+      const fileOf = (source: SettingSource): string | undefined =>
+        source === 'user' ? userSettings : folder === undefined ? undefined : join(folder, '.claude', source === 'local' ? 'settings.local.json' : 'settings.json');
+      for (const source of SETTING_SOURCES.filter((source) => sources.includes(source))) {
+        const file = fileOf(source);
+        if (file === undefined) {
+          return { kind: 'per folder' };
+        }
+        const mode = await defaultModeIn(file);
+        if (mode !== undefined) {
+          return { kind: 'decided', mode };
+        }
+      }
+      return { kind: 'decided', mode: undefined };
+    },
   };
 }
