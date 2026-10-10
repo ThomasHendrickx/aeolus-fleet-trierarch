@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { SHIP_PROTOCOL } from '../../../packages/core/src/adapters/trpc/ship-protocol.ts';
-import { NO_TERMINAL_QUESTIONS } from '../../../packages/trierarch/src/core/no-terminal-questions.ts';
+import { NO_TERMINAL_QUESTIONS } from '../../../packages/common/src/fleet/no-terminal-questions.ts';
 
 const claudeSkill = readFileSync(new URL('../skills/crew-a-ship/SKILL.md', import.meta.url), 'utf8');
 const codexSkill = readFileSync(new URL('../skills/aeolus-crew/SKILL.md', import.meta.url), 'utf8');

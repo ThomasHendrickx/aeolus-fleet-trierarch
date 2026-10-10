@@ -7,7 +7,7 @@ import type { ShipId, TrierarchConfiguration } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
-import { NO_TERMINAL_QUESTIONS } from '../core/no-terminal-questions.js';
+import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
 import { CODEX_ADAPTER_FLAGS, CODEX_TYPING_SETTLE_MS, codexCommandLine, createCodexHarness } from './codex.js';
 import { runCommand } from './run-command.js';
 

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
 import { effectiveFlags } from '../core/effective-flags.js';
-import { NO_TERMINAL_QUESTIONS } from '../core/no-terminal-questions.js';
+import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
 import { CLAUDE_CODE_ADAPTER_FLAGS, claudeCodeCommandLine, createClaudeCodeHarness } from './claude-code.js';
 import { createClaudeCodeSetup } from './claude-code-setup.js';
 import { wordsOf } from './command-line.js';
