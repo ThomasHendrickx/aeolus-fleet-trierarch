@@ -21,8 +21,9 @@ import type { Tmux } from './tmux.js';
  * whole: without ExitPlanMode alone a session that entered it could never leave,
  * and for that reason a configured `--permission-mode plan` is ignored (#465),
  * and a default mode of plan from any of Claude Code's settings files is
- * overridden with `--permission-mode default` when the flags name no mode of
- * their own (#505, #507).
+ * overridden with `--permission-mode manual` when the flags name no mode of
+ * their own (#505, #507), or `default` on a Claude Code whose --help lists no
+ * manual mode (#517).
  * Its onboarding is completed before every launch, so a session on a machine
  * where Claude Code never ran by hand stops at no first-run screen (#403). A
  * session's identity is written and read through the aeolus
@@ -38,6 +39,8 @@ const END_OF_FLAGS = '--';
 const NO_PANE_PROMPTS = '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode';
 const PERMISSION_MODE = '--permission-mode';
 const PLAN_MODE = 'plan';
+/** The mode that asks before each action: Claude Code names it manual where its --help lists that, and default before (#517). */
+const MANUAL_MODE = 'manual';
 const DEFAULT_MODE = 'default';
 const SETTINGS = '--settings';
 const SETTING_SOURCES_FLAG = '--setting-sources';
@@ -87,12 +90,14 @@ export function claudeCodeSettingsDefaultMode(setup: Pick<ClaudeCodeSetup, 'defa
   return setup.defaultPermissionMode({ sources: settingSourcesOf(at.flags), ...(at.folder !== undefined && { folder: at.folder }), ...(settings !== undefined && { settings }) });
 }
 
-/** `--permission-mode default` where the settings' default mode is plan and the flags name none, and with when it applies where that depends on the folder. */
-function planOverride(flags: readonly string[], defaultMode: SettingsDefaultMode | undefined): CommandPart {
+/** `--permission-mode manual` (or `default` where the installed Claude Code lists no manual) where the settings' default mode is plan and the flags name none, and with when it applies where that depends on the folder. */
+function planOverride(flags: readonly string[], installed: { defaultMode: SettingsDefaultMode | undefined; permissionModes: readonly string[] | undefined }): CommandPart {
+  const { defaultMode, permissionModes } = installed;
   if (namesPermissionMode(flags) || defaultMode === undefined || (defaultMode.kind === 'decided' && defaultMode.mode !== PLAN_MODE)) {
     return { words: [] };
   }
-  return { words: [PERMISSION_MODE, DEFAULT_MODE], source: 'adapter', ...(defaultMode.kind === 'per folder' && { when: WHEN_PLAN_PER_FOLDER }) };
+  const mode = permissionModes?.includes(MANUAL_MODE) === true ? MANUAL_MODE : DEFAULT_MODE;
+  return { words: [PERMISSION_MODE, mode], source: 'adapter', ...(defaultMode.kind === 'per folder' && { when: WHEN_PLAN_PER_FOLDER }) };
 }
 
 /**
@@ -115,13 +120,13 @@ function namedRemoteControl(flags: readonly string[], name: string): CommandPart
   ];
 }
 
-/** `claude`, the flags without plan mode, `--permission-mode default` when the settings' default mode is plan and the flags name none (or where it depends on the folder, with when it applies), AskUserQuestion and plan mode disallowed, `--continue` on a restart, then the prompt last after `--`: no flag takes it (`--remote-control [name]` has an optional value), and it never reads as a flag. */
-export function claudeCodeCommandLine(at: { flags: readonly string[]; sessionName: string; prompt: string; isFirstStart: boolean; defaultPermissionMode?: SettingsDefaultMode; program?: string }): CommandPart[] {
+/** `claude`, the flags without plan mode, `--permission-mode manual` (or `default`, as the installed Claude Code lists) when the settings' default mode is plan and the flags name none (or where it depends on the folder, with when it applies), AskUserQuestion and plan mode disallowed, `--continue` on a restart, then the prompt last after `--`: no flag takes it (`--remote-control [name]` has an optional value), and it never reads as a flag. */
+export function claudeCodeCommandLine(at: { flags: readonly string[]; sessionName: string; prompt: string; isFirstStart: boolean; defaultPermissionMode?: SettingsDefaultMode; permissionModes?: readonly string[]; program?: string }): CommandPart[] {
   const flags = withoutPlanMode(at.flags);
   return partsWithWords([
     { words: [at.program ?? 'claude'] },
     ...namedRemoteControl(flags, at.sessionName),
-    planOverride(flags, at.defaultPermissionMode),
+    planOverride(flags, { defaultMode: at.defaultPermissionMode, permissionModes: at.permissionModes }),
     { words: [NO_PANE_PROMPTS], source: 'adapter' },
     { words: at.isFirstStart ? [] : [CONTINUE], source: 'adapter' },
     { words: [END_OF_FLAGS, at.prompt] },
