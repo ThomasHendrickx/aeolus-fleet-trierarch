@@ -50,6 +50,8 @@ export type Action =
   | { readonly kind: 'giveBack'; readonly shipId: ShipId; readonly settingsVersion: number; readonly reason: string; readonly entry?: Entry }
   /** A session refused the model it launched with (#382): kept refused at its harness's version, and argo told once. */
   | { readonly kind: 'modelRefused'; readonly shipId: ShipId; readonly shipName?: string; readonly harness: string; readonly version: string; readonly model: string }
+  /** A session on a harness version its launch screens were not checked on showed no activity (#594): argo told once per harness and version. */
+  | { readonly kind: 'screensUnchecked'; readonly shipId: ShipId; readonly shipName?: string; readonly harness: string; readonly version: string; readonly checkedOn: string }
   | { readonly kind: 'argo'; readonly report: ArgoReport }
   /** A clear request (decision 0032): remove the kept worktree it names, or, when none is kept, confirm alone. */
   | { readonly kind: 'clear'; readonly shipId: ShipId; readonly repository: string; readonly kept?: KeptWorktree };
@@ -71,6 +73,8 @@ export interface ReconcileContext {
   readonly trusted: TrustedPlaces;
   /** Each harness's version as detection found it, for the reason a refused model is given back with (#382). */
   readonly versions: Readonly<Record<string, string>>;
+  /** Each harness's version its launch screens were checked on, where its adapter names one (#594). */
+  readonly screensCheckedOn: Readonly<Record<string, string>>;
 }
 
 /** How long after its start a crewing session has to show activity (#382): its first prompt made a tool call. */
@@ -342,13 +346,28 @@ function launchStep(entry: Entry, context: ReconcileContext & { isFinal: boolean
       if (!isWindowOver(launchedAt, now)) {
         return wakeStep(entry, observed.ships[entry.shipId]);
       }
-      return failedStart(noActivityReason(entry, seen.screen));
+      return failedStart(noActivityReason(entry, seen.screen), screensUnchecked(entry, context));
   }
 }
 
 /** Why a start failed for no activity, naming the harness's screen the session stopped at when it knows it (#403). */
 function noActivityReason(entry: Entry, screen: string | undefined): string {
   return screen === undefined ? NO_ACTIVITY_REASON : `${NO_ACTIVITY_REASON}, stopped at ${entry.harness}'s ${screen}`;
+}
+
+/**
+ * A session that showed no activity on a harness version its launch screens
+ * were not checked on (#594): a changed screen may be why, so argo is told.
+ * Nothing when the adapter names no checked version or detection found none.
+ */
+function screensUnchecked(entry: Entry, context: Pick<ReconcileContext, 'versions' | 'screensCheckedOn'>): Action[] {
+  const { harness } = entry;
+  const version = context.versions[harness];
+  const checkedOn = context.screensCheckedOn[harness];
+  if (version === undefined || checkedOn === undefined || version === checkedOn) {
+    return [];
+  }
+  return [{ kind: 'screensUnchecked', shipId: entry.shipId, ...(entry.shipName !== undefined && { shipName: entry.shipName }), harness, version, checkedOn }];
 }
 
 /** The entry with no launch window open. */
@@ -417,8 +436,13 @@ function restartWindowStep(entry: Entry, context: ReconcileContext): Step {
       const step = exitStep(entry, { now, failedStart: refused.reason });
       return { ...step, actions: [...refused.actions, ...step.actions] };
     }
-    case 'none':
-      return isWindowOver(launchedAt, now) ? exitStep(entry, { now, failedStart: noActivityReason(entry, launch.screen) }) : wakeStep(entry, seen);
+    case 'none': {
+      if (!isWindowOver(launchedAt, now)) {
+        return wakeStep(entry, seen);
+      }
+      const step = exitStep(entry, { now, failedStart: noActivityReason(entry, launch.screen) });
+      return { ...step, actions: [...screensUnchecked(entry, context), ...step.actions] };
+    }
   }
 }
 

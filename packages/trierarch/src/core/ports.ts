@@ -143,6 +143,12 @@ export interface HarnessPort {
   }): Promise<void>;
   turnOf(folder: string): Promise<Turn>;
   wake(session: { shipId: ShipId; folder: string }): Promise<void>;
+  /**
+   * The version of the harness its launch screen texts were checked on (#594):
+   * a session on another version that shows no activity is told to argo. None
+   * when its adapter names none.
+   */
+  readonly screensCheckedOn?: string;
   /** What the session's screen shows in its launch window (#382), for the model it launched with; any model refused when it launched with none. */
   launchSeen(session: { shipId: ShipId; model?: string }): Promise<LaunchSeen>;
 }

@@ -1,7 +1,7 @@
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { AdapterFlag, HarnessPort } from '../core/ports.js';
-import { codexLaunchSeen } from './codex-screen.js';
+import { CODEX_SCREENS_CHECKED_ON, codexLaunchSeen } from './codex-screen.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
 import { effectiveFlags } from '../core/effective-flags.js';
 import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
@@ -71,6 +71,7 @@ export function createCodexHarness(options: {
 
   return {
     ...createPluginIdentity(plugin),
+    screensCheckedOn: CODEX_SCREENS_CHECKED_ON,
     launch: async ({ shipId, folder, harness, options: picked, isFirstStart, firstPrompt }) => {
       const settings = configuration.harnesses[harness];
       if (settings === undefined) {
