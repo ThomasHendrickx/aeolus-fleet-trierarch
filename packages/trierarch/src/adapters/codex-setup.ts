@@ -66,6 +66,10 @@ async function withAppServer<T>(command: string, talk: (request: Request) => Pro
     child.on('exit', (code) => {
       reject(new Error(`codex app-server ended before it answered (exit ${String(code)})`));
     });
+    // An app server that ends before it reads what it is sent fails the write (EPIPE): a failed setup, not a crash.
+    child.stdin.on('error', (error) => {
+      reject(new Error(`codex app-server ended before it read what it was sent: ${error.message}`));
+    });
   });
   const waiting = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; method: string }>();
   createInterface({ input: child.stdout }).on('line', (line) => {
