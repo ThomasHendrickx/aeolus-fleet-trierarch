@@ -122,7 +122,7 @@ async function aTrierarchOnTheFleet() {
   });
   const fleet = createRestFleet(await readCrewFile(paths.crewToken));
   const sessions = standInSessions();
-  const harness = createClaudeCodeHarness({ configuration, plugin: { root: PLUGIN_ROOT, data: pluginData }, projects: join(home, '.claude', 'projects'), sessions });
+  const harness = createClaudeCodeHarness({ configuration, plugin: { root: PLUGIN_ROOT, data: pluginData }, projects: join(home, '.claude', 'projects'), sessions, setup: createClaudeCodeSetup({ homeDirectory: home }) });
   const workspace = createGitWorkspace({ configuration, root: paths.worktrees });
   const state = createJsonState(paths.state);
   const clock = { now: () => new Date() };

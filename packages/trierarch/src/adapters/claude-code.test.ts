@@ -78,6 +78,8 @@ function harness() {
 const shipId = newId('ship');
 const identity = { fleetUrl: 'https://fleet.example.com', shipId, shipName: 'scout', crewToken: 'aeolus_ct_v1_scout' };
 
+const parsed = (text: string | undefined): unknown => (text === undefined ? undefined : JSON.parse(text));
+
 /** The launch of the ship scout in a worktree of aeolus-fleet. */
 const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' } }) as const;
 
@@ -85,7 +87,7 @@ describe('Claude Code as a harness', () => {
   it("completes Claude Code's onboarding before it starts a session, so a fresh machine shows no first-run screen (#403)", async () => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
 
-    expect(claudeJsonAtStart.map((text) => (text === undefined ? undefined : JSON.parse(text)))).toEqual([{ hasCompletedOnboarding: true, fullscreenUpsellSeenCount: 3 }]);
+    expect(claudeJsonAtStart.map(parsed)).toEqual([{ hasCompletedOnboarding: true, fullscreenUpsellSeenCount: 3 }]);
   });
 
   it("writes the folder's identity through the plugin, saying the trierarch wakes it, with the squadron", async () => {
@@ -168,6 +170,7 @@ describe('Claude Code as a harness', () => {
         configuration: { ...CONFIGURATION, harnesses: { 'claude-code': { flags, options: {} } } },
         plugin: { root: PLUGIN_ROOT, data },
         projects,
+        setup: createClaudeCodeSetup({ homeDirectory: home }),
         sessions: {
           start: (session) => {
             started.push(session);
