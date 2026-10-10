@@ -167,7 +167,7 @@ The ship, its crew request, its session and its worktree live and end together:
 | 4 | session dies | crewed, lease held | restarting | started again in the same folder, same crew token | kept |
 | 5 | restart budget spent | crewed, lease held | crashed, a report sent to argo | stopped | kept |
 | 6 | the machine restarts | crewed, lease held | unchanged | started again by the loop | kept |
-| 7 | request removed | awaiting crew, lease ended | releasing, then gone once the trierarch confirms | stopped | removed if clean; kept and reported if not |
+| 7 | request removed | awaiting crew, lease ended | releasing, then gone once the trierarch confirms | stopped | removed, with changes too: argo is told what it discards |
 | 8 | the trierarch stops mid-crew (a lost `register` reply among them) | perhaps crewed, by its own lost token | crewing, saved locally before it registered | none, or a stray | perhaps half made |
 | 9 | the trierarch is uninstalled | crewed | still assigned to it | stopped first | uninstall lists kept worktrees and deletes nothing |
 | 10 | the machine goes silent | as it was | still assigned to it, the machine flagged | unknown | unknown |
@@ -176,10 +176,10 @@ The ship, its crew request, its session and its worktree live and end together:
 
 The rules that close the gaps:
 
-1. The trierarch removes only what it made: worktrees under its own worktree root, never a configured folder and never a worktree with changes. A kept worktree is reported in its details until a human clears it: a clear request (decision 0032) names it by its ship and repository, and on its next pass the trierarch removes it, drops it and confirms `removed`, or, keeping none by that name, confirms `not-kept`. In the console, Delete on a kept worktree of a machine's page (`fleet:manage`, after a confirm) sends the clear request, and the worktree shows Clearing until its trierarch confirms. One already gone from disk is dropped on the next pass, and so is one a ship is crewed in again: it is that ship's worktree now, so a clear removes nothing in use.
+1. The trierarch removes only what it made: worktrees under its own worktree root, never a configured folder. A release removes the ship's worktree whatever it holds (#450), so the next crew starts from a fresh worktree of the requested ref: when the worktree holds work no branch, tag or remote keeps (changes not committed, commits not pushed), the trierarch first sends argo a plain-text report naming the machine, the ship and each of them, once per release. A crew given back before it is final (step 5, and settings it cannot crew) removes its worktree only when clean, and keeps one with changes. A kept worktree is reported in its details until a human clears it: a clear request (decision 0032) names it by its ship and repository, and on its next pass the trierarch removes it, drops it and confirms `removed`, or, keeping none by that name, confirms `not-kept`. In the console, Delete on a kept worktree of a machine's page (`fleet:manage`, after a confirm) sends the clear request, and the worktree shows Clearing until its trierarch confirms. One already gone from disk is dropped on the next pass, and so is one a ship is crewed in again: it is that ship's worktree now, so a clear removes nothing in use.
 2. Every pass of the loop also looks for strays. A session of the trierarch with no assigned request is stopped. A worktree under its root with no assigned request is reported as an orphan, never deleted. A request that is no longer assigned to it without being removed (its ship retired) has its session stopped and its identity removed; its worktree is then an orphan.
 3. After a stop mid-crew, the loop resumes from its assigned requests and its saved state. An entry still crewing whose ship is crewed was lost between register and its reply: the trierarch releases the ship (`crew:run`) and crews it again. A half-made worktree of an assigned ship is used; one of a ship no longer assigned is an orphan (rule 2).
-4. A worktree with changes never holds up releasing the ship: the lease ends either way, so the ship can be crewed elsewhere.
+4. A worktree with changes never holds up releasing the ship: the lease ends before the worktree goes, so the ship can be crewed elsewhere.
 5. The trierarch watches a ship's inbox only while its session runs, so "last seen" still means the session is alive. It reports on the ship's behalf when its session crashes or restarts ("blocked: session crashed, restarting").
 
 ```mermaid
@@ -201,6 +201,6 @@ stateDiagram-v2
 
 ## Release
 
-Removing a crew request is the one way to stop a ship's crew through a trierarch. The request is marked releasing; the assigned trierarch stops the session, ends the lease, removes the worktree when clean, and confirms; only then does the request disappear (a finalizer). A restart of the machine is no release. Retire stays separate, for whoever holds `fleet:manage`.
+Removing a crew request is the one way to stop a ship's crew through a trierarch. The request is marked releasing; the assigned trierarch stops the session, ends the lease, removes the worktree (telling argo what it discards, gap rule 1), and confirms; only then does the request disappear (a finalizer). A restart of the machine is no release. Retire stays separate, for whoever holds `fleet:manage`.
 
 Stopping a session must stop its work, or a release and a restarted crash would leave work running with no one watching it. So a harness adapter starts each session as a process that owns its work. Codex by default runs a session's turns in its shared app-server daemon, which keeps a turn running after the session's pane is gone: the codex adapter always adds `--no-daemon`, as mechanism, the way the Claude Code adapter adds `--continue` on a restart. Neither is the operator's flag.
