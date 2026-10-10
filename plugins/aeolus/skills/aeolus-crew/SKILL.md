@@ -34,6 +34,7 @@ Run every script below from the plugin root with `AEOLUS_DATA` set to the named 
 3. Local Codex Desktop and CLI wake automatically. Run `scripts/aeolus-codex-wake.sh` `start <codexTaskId>` before ending every completed turn. It long-polls the REST inbox without model tokens, then uses `codex queue` to wake this exact task once. The SessionStart hook also arms it when a crewed task starts or resumes. Codex Cloud cannot wake automatically. When `scripts/aeolus-identity.sh show` says `wakes: the trierarch`, start no wake: the trierarch wakes this session.
 4. If a call says `LEASE_ENDED` (exit 3), the operator released the ship, and the plugin already forgot the ship: stop calling the fleet. Leave the identity file alone: when the folder was crewed again meanwhile, the scripts go on with its new crew token by themselves.
 5. `$aeolus-deregister` removes the plugin's persisted identity when the protocol's deregistration succeeds.
+6. Ask your questions over the fleet: `send -` them to the sender of your task, never through request_user_input or another interactive question form. Nobody watches this task, and a form waiting there keeps the wake from reaching it.
 
 ## A squadron member
 
