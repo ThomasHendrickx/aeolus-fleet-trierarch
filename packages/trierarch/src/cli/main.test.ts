@@ -110,6 +110,18 @@ describe('aeolus-trierarch', () => {
     expect(await firstStartWith({ permissions: { defaultMode: 'acceptEdits' } })).not.toContain('--permission-mode');
   });
 
+  it("config check reads Claude Code's managed settings in the folder the machine gives, never the system's own (#516)", async () => {
+    const config = join(home, 'managed.json');
+    writeFileSync(config, JSON.stringify({ ...CONFIGURATION, harnesses: { 'claude-code': { flags: [], options: {} } } }));
+    const managedSettings = join(home, 'managed');
+    mkdirSync(managedSettings);
+    writeFileSync(join(managedSettings, 'managed-settings.json'), JSON.stringify({ permissions: { defaultMode: 'plan' } }));
+
+    const { output } = await main(['config', 'check', '--config', config], { HOME: home }, { managedSettings });
+
+    expect(output).toContain('  first start: claude --permission-mode default (adapter) --disallowedTools');
+  });
+
   it('config check shows no --permission-mode default when the flags name a permission mode of their own (#507)', async () => {
     const config = join(home, 'mode.json');
     writeFileSync(config, JSON.stringify({ ...CONFIGURATION, harnesses: { 'claude-code': { flags: ['--permission-mode', 'acceptEdits'], options: {} } } }));
