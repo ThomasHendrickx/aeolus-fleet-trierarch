@@ -36,9 +36,8 @@ usage() {
 call_fleet() {
   local method="$1" path="$2" token="$3" input="$4" answer
   local args=(-sS --max-time "$MAX_SECONDS" -w '\n%{http_code}' -X "$method" "${fleet_url}${path}")
-  [ -n "$token" ] && args+=(-H "authorization: Bearer ${token}")
   [ -n "$input" ] && args+=(-H 'content-type: application/json' --data-binary "$input")
-  answer="$(curl "${args[@]}" 2>/dev/null)"
+  answer="$(aeolus_bearer_config "$token" | curl -K - "${args[@]}" 2>/dev/null)"
   status="$(printf '%s' "$answer" | tail -n 1)"
   body="$(printf '%s' "$answer" | sed '$d')"
   if [ -z "$status" ] || [ "$status" = 000 ]; then

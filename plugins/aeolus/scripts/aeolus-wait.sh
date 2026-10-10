@@ -52,8 +52,8 @@ while :; do
   fi
   wait_now="$WAIT_SECONDS"
   [ "$wait_now" -le "$left" ] || wait_now="$left"
-  answer="$(curl -sS --max-time $((wait_now + 15)) -w '\n%{http_code}' -X POST "${fleet_url}/api/v1/ship/inbox" \
-    -H "authorization: Bearer ${crew_token}" -H 'content-type: application/json' \
+  answer="$(aeolus_bearer_config "$crew_token" | curl -K - -sS --max-time $((wait_now + 15)) -w '\n%{http_code}' -X POST "${fleet_url}/api/v1/ship/inbox" \
+    -H 'content-type: application/json' \
     -d "{\"waitSeconds\":${wait_now}}" 2>/dev/null)"
   status="$(printf '%s' "$answer" | tail -n 1)"
   body="$(printf '%s' "$answer" | sed '$d')"
