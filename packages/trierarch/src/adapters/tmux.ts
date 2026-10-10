@@ -10,6 +10,11 @@ import { runCommand } from './run-command.js';
  * per ship, named after its ship id, kept on exit so an exit is seen. The
  * trierarch uses its own tmux server (`tmux -L aeolus-trierarch`), so it never
  * touches the operator's own sessions.
+ *
+ * The first session started forks the tmux server, which keeps running when
+ * the trierarch stops. Under a systemd unit it starts in a scope of its own
+ * (`systemd-run --scope`), so it is not left over in the service's control
+ * group on a restart (#537), and the unit's stop leaves it alone (#479).
  */
 export interface Tmux extends ProcessPort {
   /** Starts the command in the folder, in a new session for the ship; an exited one is replaced. */
@@ -25,12 +30,18 @@ export const TMUX_SERVER = 'aeolus-trierarch';
 /** How many lines back a screen is read: the launch window's first prompt fits well within. */
 const SCREEN_LINES = 200;
 
+/** What the tmux command that may start the server runs through: a systemd scope of its own under a systemd unit, which sets INVOCATION_ID. */
+export function sessionsLaunch(at: { platform: string; env: Readonly<Record<string, string | undefined>> }): readonly string[] {
+  return at.platform === 'linux' && at.env.INVOCATION_ID !== undefined ? ['systemd-run', '--user', '--scope', '--quiet', '--collect', '--'] : [];
+}
+
 function sessionName(shipId: ShipId): string {
   return `${PREFIX}${shipId}`;
 }
 
-export function createTmux(options: { server?: string } = {}): Tmux {
+export function createTmux(options: { server?: string; launch?: readonly string[] } = {}): Tmux {
   const server = options.server ?? TMUX_SERVER;
+  const launch = options.launch ?? [];
   const tmux = async (args: readonly string[]): Promise<{ status: number; stdout: string; stderr: string }> => runCommand('tmux', { args: ['-L', server, ...args] });
   const must = async (args: readonly string[]): Promise<string> => {
     const result = await tmux(args);
@@ -62,7 +73,12 @@ export function createTmux(options: { server?: string } = {}): Tmux {
       const name = sessionName(shipId);
       await tmux(['kill-session', '-t', `=${name}`]);
       // Start with the shell, keep the pane on exit, then run the command: so even a command that ends at once leaves its exit to see.
-      await must(['new-session', '-d', '-s', name, '-c', folder, '-x', '200', '-y', '50']);
+      // The one command that starts the server when none runs yet.
+      const [program, ...args] = [...launch, 'tmux', '-L', server, 'new-session', '-d', '-s', name, '-c', folder, '-x', '200', '-y', '50'];
+      const started = await runCommand(program, { args });
+      if (started.status !== 0) {
+        throw new Error(`tmux new-session failed: ${started.stderr.trim()}`);
+      }
       await must(['set-option', '-w', '-t', `=${name}:`, 'remain-on-exit', 'on']);
       await must(['respawn-pane', '-k', '-t', `=${name}:`, '-c', folder, '--', ...command]);
     },
