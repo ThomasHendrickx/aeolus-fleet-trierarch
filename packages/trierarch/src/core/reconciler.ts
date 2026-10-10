@@ -305,7 +305,8 @@ function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean })
  * An entry crewing: crewed (again) until its session started, then in its
  * launch window (#382). Activity makes the crew final, so it runs from when
  * its session started. A model refused, or no activity within the minute,
- * gives the request back, its entry ending. A session gone, as after the
+ * gives the request back, its entry ending, the reason naming the harness's
+ * screen the session stopped at when it knows it (#403). A session gone, as after the
  * machine restarts, is crewed again.
  */
 function launchStep(entry: Entry, context: ReconcileContext): Step {
@@ -329,7 +330,10 @@ function launchStep(entry: Entry, context: ReconcileContext): Step {
       return giveBack(refused.reason, refused.actions);
     }
     case 'none':
-      return isWindowOver(launchedAt, now) ? giveBack(NO_ACTIVITY_REASON) : NOTHING;
+      if (!isWindowOver(launchedAt, now)) {
+        return NOTHING;
+      }
+      return giveBack(seen.screen === undefined ? NO_ACTIVITY_REASON : `${NO_ACTIVITY_REASON}, stopped at ${entry.harness}'s ${seen.screen}`);
   }
 }
 

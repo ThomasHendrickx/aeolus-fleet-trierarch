@@ -147,9 +147,11 @@ export interface HarnessPort {
 
 /**
  * What a session's screen shows in its launch window (#382): activity once
- * its first prompt made a tool call, the model refused, or neither yet.
+ * its first prompt made a tool call, the model refused, or neither yet, with
+ * the harness's own screen it stopped at when it knows that screen (#403),
+ * such as `bypass permissions warning`.
  */
-export type LaunchSeen = { readonly kind: 'active' } | { readonly kind: 'refused'; readonly model: string } | { readonly kind: 'none' };
+export type LaunchSeen = { readonly kind: 'active' } | { readonly kind: 'refused'; readonly model: string } | { readonly kind: 'none'; readonly screen?: string };
 
 /** A session the process supervisor runs, by ship id: running, or exited and kept so the exit is seen. */
 export interface ObservedSession {
