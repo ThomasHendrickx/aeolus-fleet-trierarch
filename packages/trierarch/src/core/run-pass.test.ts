@@ -1038,6 +1038,66 @@ describe('a session is watched and woken from the moment it runs, whatever the c
   });
 });
 
+describe('a first crew released elsewhere in its launch window is crewed again, never released or given back (row 11, #482)', () => {
+  it('stops its session and crews it again as a first start, with its first prompt', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' }, settings: { firstPrompt: 'Review the open pull requests.' } });
+    const firstToken = trierarch.fleet.shipOf(shipId).crewToken;
+    trierarch.fleet.releaseElsewhere(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.shipOf(shipId)).toMatchObject({ status: 'crewed' });
+    expect(trierarch.fleet.shipOf(shipId).crewToken).not.toBe(firstToken);
+    expect(trierarch.harness.launches.map((launch) => ({ isFirstStart: launch.isFirstStart, firstPrompt: launch.firstPrompt }))).toEqual([
+      { isFirstStart: true, firstPrompt: 'Review the open pull requests.' },
+      { isFirstStart: true, firstPrompt: 'Review the open pull requests.' },
+    ]);
+  });
+
+  it('gives nothing back, confirms no release and writes no status beyond crewing', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.fleet.releaseElsewhere(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([]);
+    expect(trierarch.fleet.confirmed).toEqual([]);
+    expect(trierarch.fleet.requestOf(shipId)).toMatchObject({ status: 'crewing', isFinal: false });
+    expect(trierarch.state.current().entries[shipId]?.state).toBe('crewing');
+  });
+
+  it('counts the minute of its launch window from the start after the release', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.clock.advance(MINUTE_MS - SECOND_MS);
+    trierarch.fleet.releaseElsewhere(shipId);
+    await trierarch.pass();
+    trierarch.clock.advance(MINUTE_MS - SECOND_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([]);
+    expect(trierarch.state.current().entries[shipId]?.state).toBe('crewing');
+  });
+
+  it('writes running, with when the start after the release began, once that session shows activity', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.clock.advance(20 * SECOND_MS);
+    trierarch.fleet.releaseElsewhere(shipId);
+    await trierarch.pass();
+    const startedAgainAt = trierarch.clock.now();
+    trierarch.clock.advance(20 * SECOND_MS);
+    trierarch.harness.seen.set(shipId, { kind: 'active' });
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.statuses.filter((each) => each.shipId === shipId).at(-1)).toEqual({ shipId, status: 'running', attempt: 0, startedAt: startedAgainAt });
+  });
+});
+
 describe('the gaps the loop closes (docs/trierarch.md)', () => {
   it('rule 2: a session of the trierarch with no assigned request is stopped', async () => {
     const trierarch = aTrierarch();
