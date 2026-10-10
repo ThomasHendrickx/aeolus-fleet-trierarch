@@ -325,6 +325,9 @@ export async function initTrierarch(input: {
   if (folders.length > 0) {
     said.push(`Claude Code trusts each configured folder too: ${folders.join(', ')}.`);
   }
+  // Its onboarding is no consent, only its first-run screens, so it is completed without asking (#403).
+  await claudeCode.completeOnboarding();
+  said.push("Claude Code's onboarding is complete (hasCompletedOnboarding in ~/.claude.json), so a session on this machine shows no first-run screen.");
   let isSkipPermissionsAccepted = await claudeCode.isSkipPermissionsAccepted();
   if (configuration.harnesses[CLAUDE_CODE]?.flags.includes(SKIP_PERMISSIONS) === true && !isSkipPermissionsAccepted) {
     if (await prompter.confirm('Claude Code asks once per user to accept bypass permissions mode. Accept it now (skipDangerousModePermissionPrompt in ~/.claude/settings.json)?', { isDefault: true })) {
