@@ -23,6 +23,7 @@ const detectedSchema = z.record(
     confirmedAt: z.iso.datetime().nullable(),
     options: z.record(trierarchNameSchema, optionSchema),
     problem: z.string().optional(),
+    permissionModes: z.array(z.string().min(1)).optional(),
     refused: z.array(z.strictObject({ id: z.string().min(1), at: z.iso.datetime() })).optional(),
   }),
 );
