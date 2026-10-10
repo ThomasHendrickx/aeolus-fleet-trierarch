@@ -240,6 +240,23 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     ]);
   });
 
+  it('row 7: names what it discards in at most 4000 characters, then how many more, so the report is never too large to send (#450)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    for (let file = 0; file < 1000; file += 1) {
+      trierarch.workspace.change(SCOUT_FOLDER, `?? notes/${String(file).padStart(4, '0')}.md`);
+    }
+    trierarch.fleet.removeRequest(shipId);
+
+    await trierarch.pass();
+
+    const [text = ''] = trierarch.fleet.toArgo.map((report) => report.text);
+    const named = text.split(': ').at(-1)?.split('; ') ?? [];
+    const more = Number(/; and (\d+) more$/.exec(text)?.[1]);
+    expect(text.length).toBeLessThanOrEqual(4000);
+    expect(named.length - 1 + more).toBe(1000);
+  });
+
   it('row 7: tells argo nothing when the worktree it removes holds nothing unpushed (#450)', async () => {
     const trierarch = aTrierarch();
     trierarch.fleet.removeRequest(await aCrewedShip(trierarch));
