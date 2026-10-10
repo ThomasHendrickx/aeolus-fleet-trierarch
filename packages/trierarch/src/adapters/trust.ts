@@ -7,7 +7,7 @@ import { codexTrustedFolders } from './codex-setup.js';
 
 /**
  * What each configured harness trusts, read from its own files each time
- * (#381): Claude Code's ~/.claude.json, Codex's config.toml. A repository is
+ * (#381): Claude Code's .claude.json, Codex's config.toml. A repository is
  * trusted when its own checkout is, as both ask about a worktree's
  * repository; a folder when its path is. A harness with no reader trusts
  * nothing. Claude Code's skip-permissions flag is unaccepted until bypass
@@ -16,7 +16,7 @@ import { codexTrustedFolders } from './codex-setup.js';
  */
 export function createTrust(at: { configuration: TrierarchConfiguration; homeDirectory: string; env: Readonly<Record<string, string | undefined>>; managedSettings: string }): TrustPort {
   const { configuration, homeDirectory, env, managedSettings } = at;
-  const claudeCode = createClaudeCodeSetup({ homeDirectory, managedSettings });
+  const claudeCode = createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) });
   const readers: Readonly<Record<string, (() => Promise<ReadonlySet<string>>) | undefined>> = {
     'claude-code': () => claudeCode.trustedFolders(),
     codex: () => codexTrustedFolders({ homeDirectory, env }),

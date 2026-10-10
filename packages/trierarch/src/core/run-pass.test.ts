@@ -863,6 +863,21 @@ describe('the restart window: a restarted final crew is checked, never held back
     ]);
   });
 
+  it('names the screen a restarted session stopped at in the reason argo is told, as the first start does (#474)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aRestartedShip(trierarch, { seen: { kind: 'none', screen: 'bypass permissions warning' } });
+    trierarch.clock.advance(MINUTE_MS);
+    await trierarch.pass();
+
+    for (let start = 1; start < RESTART_BUDGET; start += 1) {
+      await failAgain(trierarch, shipId);
+    }
+
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
+      `scout (${shipId}): its session crashed ${String(RESTART_BUDGET + 1)} times within an hour, restart budget spent; its last start: no activity within a minute of its start, stopped at claude-code's bypass permissions warning; status crashed. Restart it in the console to crew it again.`,
+    ]);
+  });
+
   it('checks the session started again after the machine restarts too', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);

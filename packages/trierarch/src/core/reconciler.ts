@@ -342,8 +342,13 @@ function launchStep(entry: Entry, context: ReconcileContext & { isFinal: boolean
       if (!isWindowOver(launchedAt, now)) {
         return wakeStep(entry, observed.ships[entry.shipId]);
       }
-      return failedStart(seen.screen === undefined ? NO_ACTIVITY_REASON : `${NO_ACTIVITY_REASON}, stopped at ${entry.harness}'s ${seen.screen}`);
+      return failedStart(noActivityReason(entry, seen.screen));
   }
+}
+
+/** Why a start failed for no activity, naming the harness's screen the session stopped at when it knows it (#403). */
+function noActivityReason(entry: Entry, screen: string | undefined): string {
+  return screen === undefined ? NO_ACTIVITY_REASON : `${NO_ACTIVITY_REASON}, stopped at ${entry.harness}'s ${screen}`;
 }
 
 /** The entry with no launch window open. */
@@ -389,8 +394,9 @@ function runningStep(entry: Entry, context: ReconcileContext & { canStart: boole
  * A running entry whose session started again (#397): its crew is final, so
  * the check only observes. The session runs, is watched and woken as any
  * other; activity closes the window. A model refused, or no activity within
- * the minute, is a failed start: the session stops, and it counts against
- * the restart budget as an exit does, nothing given back.
+ * the minute, is a failed start, naming the screen it stopped at when it
+ * knows it (#474): the session stops, and it counts against the restart
+ * budget as an exit does, nothing given back.
  */
 function restartWindowStep(entry: Entry, context: ReconcileContext): Step {
   const { observed, now } = context;
@@ -412,7 +418,7 @@ function restartWindowStep(entry: Entry, context: ReconcileContext): Step {
       return { ...step, actions: [...refused.actions, ...step.actions] };
     }
     case 'none':
-      return isWindowOver(launchedAt, now) ? exitStep(entry, { now, failedStart: NO_ACTIVITY_REASON }) : wakeStep(entry, seen);
+      return isWindowOver(launchedAt, now) ? exitStep(entry, { now, failedStart: noActivityReason(entry, launch.screen) }) : wakeStep(entry, seen);
   }
 }
 

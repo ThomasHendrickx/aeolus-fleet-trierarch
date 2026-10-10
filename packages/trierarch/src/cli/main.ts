@@ -15,7 +15,7 @@ import { createStyle, isColourTerminal, type Style } from '../adapters/style.js'
 import { trierarchPaths } from '../adapters/paths.js';
 import { aeolusPluginVersion } from '../adapters/plugin.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
-import { runCommand } from '../adapters/run-command.js';
+import { runCommand, streamCommand } from '../adapters/run-command.js';
 import { createService, serviceEnvironment } from '../adapters/service.js';
 import { createTmux } from '../adapters/tmux.js';
 import { runningVersion } from '../adapters/version.js';
@@ -26,7 +26,7 @@ import { detectOptions } from './detect.js';
 import { addPlace } from './add.js';
 import { initTrierarch } from './init.js';
 import { describeList, inspectList } from './list.js';
-import { followLog, tailLog } from './logs.js';
+import { createServiceLog } from './logs.js';
 import { createTerminalPrompter } from './prompter.js';
 import { runTrierarch } from './run.js';
 import { describeService, runServiceCommand } from './service-command.js';
@@ -48,7 +48,7 @@ export const USAGE = [
   'Look:',
   '  status                the version, the aeolus plugin per harness, the service, the fleet and its own lease, caps in use, entries by state, kept worktrees and orphans',
   '  list                  the ships it crews: ship, state, harness, workspace, since, restarts',
-  '  logs [--lines <n>] [--follow]   the last lines of the log, and with --follow each new one',
+  '  logs [--lines <n>] [--follow]   the last lines of the log (the journal on Linux), and with --follow each new one',
   '',
   'Run:',
   '  start                 start the service',
@@ -111,15 +111,16 @@ function summaryOf(said: readonly string[], style: Style): string {
   return [`\n${style.tone('strong', 'Summary')}`, ...said.map((line) => `  ${line}`)].join('\n');
 }
 
-/** What a command line reads of the machine: its environment, and where Claude Code's managed settings live, a folder of its own in a test (#516). */
+/** What a command line reads of the machine: its environment, where Claude Code's managed settings live, a folder of its own in a test (#516), and its platform, which says where the service writes its log (#474). */
 export interface Machine {
   env: Readonly<Record<string, string | undefined>>;
   managedSettings: string;
+  platform: string;
 }
 
 /** Runs one command line of `aeolus-trierarch`. */
 export async function main(argv: readonly string[], machine: Machine): Promise<Outcome> {
-  const { env } = machine;
+  const { env, platform } = machine;
   const parsed = parse(argv);
   if (parsed === undefined) {
     return { output: USAGE, code: 2 };
@@ -139,7 +140,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
   const script = fileURLToPath(new URL('../bin/aeolus-trierarch.js', import.meta.url));
   const serviceAt = () =>
     createService({
-      platform: process.platform,
+      platform,
       homeDirectory,
       paths,
       run: { node: process.execPath, script },
@@ -148,6 +149,8 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       exec: (program, args) => runCommand(program, { args }),
       now: () => new Date(),
     });
+  // Claude Code's files where Claude Code keeps them: under CLAUDE_CONFIG_DIR when it is set (#474).
+  const claudeCodeSetup = () => createClaudeCodeSetup({ homeDirectory, managedSettings: machine.managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) });
   const untilStopped = (): AbortSignal => {
     const stopping = new AbortController();
     process.once('SIGINT', () => {
@@ -200,7 +203,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
           flags: { ...(fleetUrl !== undefined && { fleetUrl }), ...(shipId !== undefined && { shipId }), ...(secret !== undefined && { secret }), isYes: switches.has('--yes') },
           prompter,
           fleetAt: (url) => createRestFleet({ fleetUrl: url, crewToken: '' }),
-          claudeCode: createClaudeCodeSetup({ homeDirectory, managedSettings: machine.managedSettings }),
+          claudeCode: claudeCodeSetup(),
           codex: createCodexSetup(),
           isCodexInstalled: (await runCommand('sh', { args: ['-c', 'command -v codex'] })).status === 0,
           service: serviceAt(),
@@ -217,11 +220,11 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       if ((kind !== 'repository' && kind !== 'folder') || name === undefined || path === undefined) {
         throw new TrierarchFileError('add takes repository or folder, a name and a path: aeolus-trierarch add repository pagasae ~/Projects/pagasae');
       }
-      const report = await addPlace({ kind, name, path, paths, homeDirectory, claudeCode: createClaudeCodeSetup({ homeDirectory, managedSettings: machine.managedSettings }), codex: createCodexSetup(), service: serviceAt(), running: () => readRunningFile(paths.running) });
+      const report = await addPlace({ kind, name, path, paths, homeDirectory, claudeCode: claudeCodeSetup(), codex: createCodexSetup(), service: serviceAt(), running: () => readRunningFile(paths.running) });
       return { data: report, text: report.said.join('\n') };
     },
     'config check': async () => {
-      const { text, ...data } = await configCheck(paths, { claudeCode: createClaudeCodeSetup({ homeDirectory, managedSettings: machine.managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) }) });
+      const { text, ...data } = await configCheck(paths, { claudeCode: claudeCodeSetup() });
       return { data, text };
     },
     detect: async () => {
@@ -261,20 +264,21 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       return { data: entries, text: describeList(entries, style) };
     },
     logs: async () => {
-      const file = join(paths.logs, 'trierarch.log');
+      const log = createServiceLog({ platform, file: join(paths.logs, 'trierarch.log'), exec: (program, args) => runCommand(program, { args }), stream: streamCommand });
       const lines = Number(values.get('--lines') ?? DEFAULT_LINES);
       if (!Number.isInteger(lines) || lines < 0) {
         throw new TrierarchFileError('--lines takes a whole number');
       }
-      const tail = await tailLog({ file, lines });
+      const tail = await log.tail(lines);
       if (!switches.has('--follow')) {
-        return { data: { file, lines: tail.map(readLogLine) }, text: tail.length === 0 ? `No log lines yet in ${file}.` : tail.map((line) => renderLogLine(line, style)).join('\n') };
+        const where = 'file' in log.where ? log.where.file : `the journal (${log.where.journal})`;
+        return { data: { ...log.where, lines: tail.map(readLogLine) }, text: tail.length === 0 ? `No log lines yet in ${where}.` : tail.map((line) => renderLogLine(line, style)).join('\n') };
       }
       const write = (line: string): void => {
         process.stdout.write(`${isJson ? JSON.stringify(readLogLine(line)) : renderLogLine(line, style)}\n`);
       };
       tail.forEach(write);
-      await followLog({ file, signal: untilStopped(), intervalMs: FOLLOW_INTERVAL_MS, write });
+      await log.follow({ signal: untilStopped(), intervalMs: FOLLOW_INTERVAL_MS, write });
       return { data: undefined, text: '' };
     },
     start: async () => {

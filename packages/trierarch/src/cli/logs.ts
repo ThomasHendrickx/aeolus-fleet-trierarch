@@ -1,9 +1,12 @@
 import { open, readFile, stat } from 'node:fs/promises';
 
+import { SYSTEMD_UNIT, type Exec } from '../adapters/service.js';
+
 /**
  * `aeolus-trierarch logs`: the last lines of the trierarch's log, and with
- * `--follow` each line written after, until it is stopped. The log is the file
- * the service writes, `~/.aeolus/trierarch/logs/trierarch.log`.
+ * `--follow` each line written after, until it is stopped. The log is where
+ * the service writes it: `~/.aeolus/trierarch/logs/trierarch.log` on macOS,
+ * the journal on Linux.
  */
 
 export async function tailLog(at: { file: string; lines: number }): Promise<string[]> {
@@ -49,4 +52,50 @@ export async function followLog(at: { file: string; signal: AbortSignal; interva
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
+}
+
+/**
+ * The trierarch's log where its service writes it: the file the launchd agent
+ * writes on macOS (and wherever no service of ours runs it), the journal of
+ * the systemd user unit on Linux, read through `journalctl` (#474).
+ */
+export interface ServiceLog {
+  /** Where the log is: its file, or the command that reads the journal. */
+  readonly where: { readonly file: string } | { readonly journal: string };
+  /** The last `lines` lines. */
+  tail(lines: number): Promise<string[]>;
+  /** Writes each line added after it starts, until `signal` aborts. */
+  follow(at: { signal: AbortSignal; intervalMs: number; write: (line: string) => void }): Promise<void>;
+}
+
+/** Runs a program until it ends or is stopped, writing each line it prints. */
+export type Stream = (command: string, options: { args: readonly string[]; signal: AbortSignal; write: (line: string) => void }) => Promise<void>;
+
+export function createServiceLog(at: { platform: string; file: string; exec: Exec; stream: Stream }): ServiceLog {
+  const { platform, file, exec, stream } = at;
+  if (platform !== 'linux') {
+    return {
+      where: { file },
+      tail: (lines) => tailLog({ file, lines }),
+      follow: (following) => followLog({ file, ...following }),
+    };
+  }
+  const unit = ['--user', '--unit', SYSTEMD_UNIT];
+  // Each record as the trierarch wrote it, with no journal header or notices.
+  const plain = ['--output', 'cat', '--quiet', '--no-pager'];
+  return {
+    where: { journal: ['journalctl', ...unit].join(' ') },
+    tail: async (lines) => {
+      const result = await exec('journalctl', [...unit, '--lines', String(lines), ...plain]);
+      if (result.status !== 0) {
+        throw new Error(`journalctl ${unit.join(' ')} failed: ${result.stderr.trim()}`);
+      }
+      const read = result.stdout.split('\n');
+      if (read.at(-1) === '') {
+        read.pop();
+      }
+      return read;
+    },
+    follow: ({ signal, write }) => stream('journalctl', { args: [...unit, '--follow', '--lines', '0', ...plain], signal, write }),
+  };
 }

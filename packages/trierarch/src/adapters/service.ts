@@ -52,7 +52,7 @@ export interface Service {
 export type Exec = (command: string, args: readonly string[]) => Promise<CommandResult>;
 
 /** The variables the trierarch itself reads, carried into the service when set where install ran. */
-const TRIERARCH_VARIABLES = ['AEOLUS_PLUGIN_ROOT', 'AEOLUS_PLUGIN_DATA', 'AEOLUS_CODEX_PLUGIN_ROOT', 'AEOLUS_CODEX_PLUGIN_DATA', 'CODEX_HOME', 'AEOLUS_TRIERARCH_CONFIG'] as const;
+const TRIERARCH_VARIABLES = ['AEOLUS_PLUGIN_ROOT', 'AEOLUS_PLUGIN_DATA', 'AEOLUS_CODEX_PLUGIN_ROOT', 'AEOLUS_CODEX_PLUGIN_DATA', 'CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'AEOLUS_TRIERARCH_CONFIG'] as const;
 
 const DEFAULT_PATH = '/usr/bin:/bin';
 

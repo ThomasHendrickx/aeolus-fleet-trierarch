@@ -44,3 +44,34 @@ export function runCommand(command: string, options: { args: readonly string[]; 
     });
   });
 }
+
+/**
+ * Runs a program, no shell, writing each whole line it prints as it prints
+ * it, until it ends or `signal` stops it. For a program that runs until it is
+ * stopped, as `journalctl --follow`.
+ */
+export function streamCommand(command: string, options: { args: readonly string[]; signal: AbortSignal; write: (line: string) => void }): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, [...options.args], { stdio: ['ignore', 'pipe', 'inherit'], signal: options.signal });
+    let partial = '';
+    child.stdout.on('data', (chunk: Buffer) => {
+      const lines = (partial + chunk.toString('utf8')).split('\n');
+      partial = lines.pop() ?? '';
+      for (const line of lines) {
+        if (options.signal.aborted) {
+          return;
+        }
+        options.write(line);
+      }
+    });
+    // Stopped is how a followed program ends: no failure.
+    child.on('error', (error) => {
+      if (!options.signal.aborted) {
+        reject(error);
+      }
+    });
+    child.on('close', () => {
+      resolve();
+    });
+  });
+}
