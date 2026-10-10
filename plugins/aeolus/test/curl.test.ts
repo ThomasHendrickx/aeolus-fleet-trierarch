@@ -8,9 +8,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { startStubFleet, type StubAnswer, type StubFleet } from './stub-fleet.js';
 
-// The crew token never leaves the identity file except to the fleet (#445):
-// it reaches curl without appearing on curl's command line, which any process
-// of the same user can read (ps) while a call runs. A curl on PATH records the
+// The crew token never leaves the identity file except to the fleet (#445),
+// and neither the token nor the crew line's secret appears on curl's command
+// line, which any process of the same user can read (ps) while a call runs. A curl on PATH records the
 // arguments its process gets, then runs the real curl.
 
 const SCRIPTS = fileURLToPath(new URL('../scripts/', import.meta.url));
@@ -69,7 +69,7 @@ function curlCommandLines(): string {
 
 const whoami = { status: 200, body: { shipId: SHIP_ID, fleetId: 'flt_01m3tbfspe96yf1rnr4ank9h1c', name: 'scout', type: 'implementer' } };
 
-describe("the crew token stays off curl's command line", () => {
+describe("the crew token and the secret stay off curl's command line", () => {
   it('aeolus-fleet sends the crew token as the bearer, and no curl argument holds it', async () => {
     fleet = await crewedAt([whoami]);
 
@@ -88,6 +88,16 @@ describe("the crew token stays off curl's command line", () => {
     expect(fleet.calls[1]?.authorization).toBe(`Bearer ${CREW_TOKEN}`);
     expect(curlCommandLines()).toContain('/api/v1/ship/whoami');
     expect(curlCommandLines()).not.toContain(CREW_TOKEN);
+  });
+
+  it("aeolus-fleet register sends the crew line's secret in the body, and no curl argument holds it", async () => {
+    fleet = await startStubFleet([{ status: 200, body: { crewToken: CREW_TOKEN } }, whoami]);
+
+    expect(await run('aeolus-fleet.sh', ['register', fleet.url, SHIP_ID, SECRET, 'SERVER'])).toBe(0);
+
+    expect(JSON.parse(fleet.calls[0]?.body ?? '')).toMatchObject({ shipId: SHIP_ID, secret: SECRET });
+    expect(curlCommandLines()).toContain('/api/v1/ship/register');
+    expect(curlCommandLines()).not.toContain(SECRET);
   });
 
   it('aeolus-inbox sends the crew token as the bearer, and no curl argument holds it', async () => {
