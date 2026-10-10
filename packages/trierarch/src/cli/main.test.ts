@@ -1,11 +1,12 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createJsonState } from '../adapters/json-state.js';
+import { writeCrewFile } from '../adapters/files.js';
 import { trierarchPaths } from '../adapters/paths.js';
 import { runningVersion } from '../adapters/version.js';
 import { aTrierarch, CONFIGURATION } from '../../test/support/in-memory.js';
@@ -28,6 +29,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -292,5 +294,61 @@ describe('aeolus-trierarch', () => {
     writeFileSync(config, JSON.stringify(CONFIGURED));
 
     await expect(main(['config', 'check', `--config=${config}`], machine({ HOME: home }))).resolves.toMatchObject({ code: 0 });
+  });
+});
+
+/** `codex debug models` cut to what detection reads: two models it shows, both confirmed by a probe. */
+const CODEX_CATALOG = JSON.stringify({ models: [{ slug: 'gpt-6.1-sol', visibility: 'list' }, { slug: 'gpt-6-luna', visibility: 'list' }] });
+
+/**
+ * The programs main runs, as stand-ins first on PATH, so no test runs the
+ * machine's own: a Claude Code that is not installed, a Codex that lists and
+ * confirms its models but whose app server ends on its first request, and a systemctl that does
+ * nothing. `sh` is the system's, for `command -v`.
+ */
+function standInPrograms(): void {
+  const bin = join(home, 'bin');
+  mkdirSync(bin);
+  const program = (name: string, script: string) => {
+    writeFileSync(join(bin, name), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+  };
+  program('sh', 'exec /bin/sh "$@"');
+  program('claude', 'exit 1');
+  program('codex', `case "$1" in\n  --version) echo "codex-cli 0.160.1" ;;\n  debug) echo '${CODEX_CATALOG}' ;;\n  exec) echo OK ;;\n  app-server) read -r line; exit 1 ;;\n  *) exit 1 ;;\nesac`);
+  program('systemctl', 'exit 0');
+  vi.stubEnv('PATH', bin);
+}
+
+describe('aeolus-trierarch with CLAUDE_CONFIG_DIR and CODEX_HOME set (#521)', () => {
+  const both = () => ({ HOME: home, CLAUDE_CONFIG_DIR: join(home, 'claude-config'), CODEX_HOME: join(home, 'codex-home') });
+  const json = (path: string): unknown => JSON.parse(readFileSync(path, 'utf8'));
+
+  /** A machine set up already, offering both harnesses with Claude Code skipping permissions, its service installed or not. */
+  async function aSetUpMachine(at: { isServiceInstalled: boolean }): Promise<void> {
+    const paths = trierarchPaths({ homeDirectory: home });
+    await writeCrewFile(paths.crewToken, { fleetUrl: 'https://fleet.example', shipId: 'shp_01m487vd5pdz6zh6s0jdnkg9p6', crewToken: 'crew-token' });
+    writeFileSync(
+      paths.config,
+      JSON.stringify({ ...CONFIGURATION, repositories: {}, folders: {}, harnesses: { 'claude-code': { flags: ['--dangerously-skip-permissions'], options: {} }, codex: { flags: [], options: {} } } }),
+    );
+    if (at.isServiceInstalled) {
+      mkdirSync(join(home, '.config', 'systemd', 'user'), { recursive: true });
+      writeFileSync(join(home, '.config', 'systemd', 'user', 'aeolus-trierarch.service'), '');
+    }
+    mkdirSync(join(home, 'codex-home'));
+    writeFileSync(join(home, 'codex-home', 'config.toml'), 'model = "gpt-6-luna"\n');
+    standInPrograms();
+  }
+
+  it('add trusts a place in .claude.json under CLAUDE_CONFIG_DIR, leaving ~/.claude.json alone', async () => {
+    await aSetUpMachine({ isServiceInstalled: false });
+    const drafts = join(home, 'drafts');
+    mkdirSync(drafts);
+
+    const { output, code } = await main(['add', 'folder', 'drafts', drafts], machine(both()));
+
+    expect(code, output).toBe(0);
+    expect(json(join(home, 'claude-config', '.claude.json'))).toMatchObject({ projects: { [drafts]: { hasTrustDialogAccepted: true } } });
+    expect(existsSync(join(home, '.claude.json'))).toBe(false);
   });
 });
