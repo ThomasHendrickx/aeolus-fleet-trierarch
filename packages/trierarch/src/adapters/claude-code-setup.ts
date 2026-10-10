@@ -16,7 +16,8 @@ import { TrierarchFileError } from './files.js';
  * renderer (#403); a completed onboarding skips the first, and an offer seen
  * as often as it is shown skips the second. The answers live in Claude Code's
  * own files, which this changes key by key, keeping everything else and the
- * file's mode.
+ * file's mode. It reads the default permission mode its settings give a
+ * folder, so a crewed session is never started in plan mode (#505).
  */
 export interface ClaudeCodeSetup {
   trust(folder: string): Promise<void>;
@@ -27,6 +28,8 @@ export interface ClaudeCodeSetup {
   isSkipPermissionsAccepted(): Promise<boolean>;
   completeOnboarding(): Promise<void>;
   isOnboardingComplete(): Promise<boolean>;
+  /** The `permissions.defaultMode` Claude Code's settings give the folder: its local settings, else its project's, else the user's. */
+  defaultPermissionMode(folder: string): Promise<string | undefined>;
 }
 
 const jsonObjectSchema = z.record(z.string(), z.unknown());
@@ -49,6 +52,16 @@ async function readJsonObject(path: string): Promise<JsonObject> {
     return jsonObjectSchema.parse(JSON.parse(text));
   } catch {
     throw new TrierarchFileError(`${path} is no JSON object: fix it by hand, then run this again`);
+  }
+}
+
+/** A settings file's `permissions.defaultMode`, or none when the file is missing, no JSON or names none: Claude Code reports a broken settings file itself. */
+async function defaultModeIn(path: string): Promise<string | undefined> {
+  try {
+    const settings = jsonObjectSchema.parse(JSON.parse(await readFile(path, 'utf8')));
+    return z.object({ defaultMode: z.string() }).safeParse(settings.permissions).data?.defaultMode;
+  } catch {
+    return undefined;
   }
 }
 
@@ -93,5 +106,7 @@ export function createClaudeCodeSetup(at: { homeDirectory: string }): ClaudeCode
       const claude = await readJsonObject(state);
       return claude.hasCompletedOnboarding === true && fullscreenOfferSeen(claude) >= FULLSCREEN_OFFER_SHOWN_MAX;
     },
+    defaultPermissionMode: async (folder) =>
+      (await defaultModeIn(join(folder, '.claude', 'settings.local.json'))) ?? (await defaultModeIn(join(folder, '.claude', 'settings.json'))) ?? (await defaultModeIn(settings)),
   };
 }
