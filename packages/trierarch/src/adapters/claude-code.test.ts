@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { ShipId } from '@aeolus-fleet/common';
@@ -134,6 +134,47 @@ describe('Claude Code as a harness', () => {
     expect(wordsFor(['--permission-mode=plan'])).toEqual(['claude', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', '/aeolus:wake']);
     expect(wordsFor(mode(['--remote-control']))).toEqual(['claude', '--remote-control', '[aeolus-fleet] scout', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', '/aeolus:wake']);
     expect(wordsFor(['--permission-mode', 'acceptEdits'])).toEqual(['claude', '--permission-mode', 'acceptEdits', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', '/aeolus:wake']);
+  });
+
+  it("never starts a crewed session in plan mode when Claude Code's settings make plan its default mode: the user's, the project's or the project's local settings, the nearest one winning; a permission mode in the flags is kept (#505)", async () => {
+    const defaultModeIn = (settings: string, defaultMode: string) => {
+      mkdirSync(dirname(settings), { recursive: true });
+      writeFileSync(settings, JSON.stringify({ permissions: { defaultMode } }));
+    };
+    const user = join(home, '.claude', 'settings.json');
+    const project = join(folder, '.claude', 'settings.json');
+    const projectLocal = join(folder, '.claude', 'settings.local.json');
+    const modeOf = async (flags: string[]) => {
+      started = [];
+      await createClaudeCodeHarness({
+        configuration: { ...CONFIGURATION, harnesses: { 'claude-code': { flags, options: {} } } },
+        plugin: { root: PLUGIN_ROOT, data },
+        projects,
+        setup: createClaudeCodeSetup({ homeDirectory: home }),
+        sessions: {
+          start: (session) => {
+            started.push(session);
+            return Promise.resolve();
+          },
+          type: () => Promise.resolve(),
+          screen: () => Promise.resolve(''),
+        },
+      }).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+      return started[0]?.command.slice(1, -3);
+    };
+
+    expect(await modeOf([])).toEqual([]);
+    defaultModeIn(user, 'plan');
+    expect(await modeOf([])).toEqual(['--permission-mode', 'default']);
+    expect(await modeOf(['--permission-mode', 'acceptEdits'])).toEqual(['--permission-mode', 'acceptEdits']);
+    expect(await modeOf(['--dangerously-skip-permissions'])).toEqual(['--dangerously-skip-permissions']);
+    defaultModeIn(project, 'acceptEdits');
+    expect(await modeOf([])).toEqual([]);
+    defaultModeIn(projectLocal, 'plan');
+    expect(await modeOf([])).toEqual(['--permission-mode', 'default']);
+    rmSync(projectLocal);
+    defaultModeIn(project, 'plan');
+    expect(await modeOf(['--permission-mode', 'plan'])).toEqual(['--permission-mode', 'default']);
   });
 
   it('passes a first prompt that starts with - after --, so it never reads as a flag', async () => {
