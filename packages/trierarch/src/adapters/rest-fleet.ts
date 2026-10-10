@@ -1,4 +1,6 @@
-import { assignedCrewRequestsOutputSchema, clearRequestsOutputSchema, giveBackCrewRequestOutputSchema, idSchema, receivedDeliverySchema, shipDetailOutputSchema, type ShipId } from '@aeolus-fleet/common';
+import { setTimeout as wait } from 'node:timers/promises';
+
+import { assignedCrewRequestsOutputSchema, clearRequestsOutputSchema, FLEET_BUSY_WAITS_MS, giveBackCrewRequestOutputSchema, idSchema, receivedDeliverySchema, shipDetailOutputSchema, type ShipId } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
 import type { Delivery, FleetPort } from '../core/ports.js';
@@ -10,7 +12,9 @@ import { runningVersion } from './version.js';
  * crew token, its `crew:run` calls for the ships assigned to it (assigned
  * requests, status, confirm, ship, getStartingPrompt, release), and a
  * session's register, inbox and report. A refusal the trierarch does not expect throws
- * with the fleet's code and message.
+ * with the fleet's code and message. While the fleet is busy (nothing stored),
+ * each call is made again by itself with the same body, after each of the busy
+ * waits, so a send keeps its idempotency key.
  */
 
 /** What the trierarch states as model and harness: it is software, not a model, as squadrons is (#157). */
@@ -24,6 +28,9 @@ const SESSION_HARNESS = 'claude-code';
 
 const refusalSchema = z.object({ code: z.string(), message: z.string() });
 
+/** The fleet's code for a call it could not start: nothing was stored, so the same call may be made again. */
+const FLEET_BUSY = 'SERVICE_UNAVAILABLE';
+
 /** A refusal from the fleet: its code and message, and both together as the error's message. */
 export class FleetRefusal extends Error {
   constructor(
@@ -34,6 +41,15 @@ export class FleetRefusal extends Error {
   }
 }
 
+/** One call to the fleet: a call with no body is a GET, as whoami is. */
+interface FleetCall<T> {
+  path: string;
+  crewToken?: string;
+  body?: unknown;
+  answers: z.ZodType<T>;
+  signal?: AbortSignal;
+}
+
 export interface RestFleet extends FleetPort {
   /** The deliveries waiting for the trierarch's own ship; `signal` ends the fleet's long poll at once. */
   receive(signal?: AbortSignal): Promise<Delivery[]>;
@@ -41,12 +57,26 @@ export interface RestFleet extends FleetPort {
   registerSelf(crew: { shipId: ShipId; secret: string }): Promise<{ crewToken: string }>;
 }
 
-export function createRestFleet(options: { fleetUrl: string; crewToken: string }): RestFleet {
+export function createRestFleet(options: { fleetUrl: string; crewToken: string; busyWaitsMs?: readonly number[] }): RestFleet {
   const fleetUrl = options.fleetUrl.replace(/\/$/, '');
   /** A call that got no answer: said with the fleet's url, unless it was stopped on purpose. */
   const unreachable = (error: unknown, signal: AbortSignal | undefined): unknown =>
     signal?.aborted === true ? error : new Error(`The fleet at ${fleetUrl} cannot be reached: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
-  async function call<T>(request: { path: string; crewToken?: string; body?: unknown; answers: z.ZodType<T>; signal?: AbortSignal }): Promise<T> {
+  const busyWaitsMs = options.busyWaitsMs ?? FLEET_BUSY_WAITS_MS;
+  async function call<T>(request: FleetCall<T>): Promise<T> {
+    for (const waitMs of busyWaitsMs) {
+      try {
+        return await callOnce(request);
+      } catch (error) {
+        if (!(error instanceof FleetRefusal && error.code === FLEET_BUSY)) {
+          throw error;
+        }
+        await wait(waitMs, undefined, request.signal === undefined ? {} : { signal: request.signal });
+      }
+    }
+    return callOnce(request);
+  }
+  async function callOnce<T>(request: FleetCall<T>): Promise<T> {
     const headers: Record<string, string> = {};
     const crewToken = request.crewToken ?? options.crewToken;
     if (crewToken !== '') {
