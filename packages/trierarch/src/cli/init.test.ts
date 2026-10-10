@@ -313,6 +313,16 @@ describe('aeolus-trierarch init, the whole setup', () => {
     expect(report.trusted).toEqual([paths.worktrees]);
   });
 
+  it("completes Claude Code's onboarding without asking, saying so, so a session on a fresh machine shows no first-run screen (#403)", async () => {
+    const prompter = new ScriptedPrompter(defaults());
+
+    const report = await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET }, prompter);
+
+    await expect(createClaudeCodeSetup({ homeDirectory: home }).isOnboardingComplete()).resolves.toBe(true);
+    expect(report.said.join('\n')).toContain("Claude Code's onboarding is complete");
+    expect(prompter.asked.join('\n')).not.toContain('onboarding');
+  });
+
   it('accepts bypass permissions mode for the user when the sessions skip permissions and the operator agrees', async () => {
     const prompter = new ScriptedPrompter(skippingPermissions(true));
 
