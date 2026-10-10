@@ -41,7 +41,8 @@ export async function configCheck(paths: TrierarchPaths, files: HarnessFiles): P
     );
   }
   // The detected options too (#365), as the running trierarch has them.
-  const configuration = withDetectedOptions(configured, await createDetectedFile(paths.detected).load());
+  const detected = await createDetectedFile(paths.detected).load();
+  const configuration = withDetectedOptions(configured, detected);
   const adapterFlags = adapterFlagsOf(configuration);
   const harnesses = Object.fromEntries(
     await Promise.all(
@@ -53,7 +54,7 @@ export async function configCheck(paths: TrierarchPaths, files: HarnessFiles): P
             flags,
             options: Object.fromEntries(Object.entries(harness.options).map(([option, settings]) => [option, settings.values])),
             adapterFlags: adapterFlags[name] ?? [],
-            ...(await commandLinesOf({ harness: name, flags, files })),
+            ...(await commandLinesOf({ harness: name, flags, files, permissionModes: detected[name]?.permissionModes })),
           },
         ] as const;
       }),

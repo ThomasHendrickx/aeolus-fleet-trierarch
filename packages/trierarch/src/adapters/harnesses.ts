@@ -2,7 +2,7 @@ import { join } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
-import type { AdapterFlag, HarnessPort } from '../core/ports.js';
+import type { AdapterFlag, Detected, HarnessPort } from '../core/ports.js';
 import { CLAUDE_CODE_ADAPTER_FLAGS, CLAUDE_CODE_RISKY_FLAGS, claudeCodeCommandLine, claudeCodeSettingsDefaultMode, createClaudeCodeHarness, WAKE_PROMPT as CLAUDE_CODE_WAKE_PROMPT } from './claude-code.js';
 import { createClaudeCodeSetup, type ClaudeCodeSetup } from './claude-code-setup.js';
 import { CODEX_ADAPTER_FLAGS, CODEX_RISKY_FLAGS, codexCommandLine, createCodexHarness, WAKE_PROMPT as CODEX_WAKE_PROMPT } from './codex.js';
@@ -27,14 +27,15 @@ interface CommandLines {
 
 /** Per harness this trierarch has an adapter for: the flags it adds itself, its risky flags, and its command lines for given flags. */
 const ADAPTERS: Readonly<
-  Record<string, { adapterFlags: readonly AdapterFlag[]; riskyFlags: readonly string[]; commandLines: (flags: readonly string[], files: HarnessFiles) => Promise<CommandLines> } | undefined>
+  Record<string, { adapterFlags: readonly AdapterFlag[]; riskyFlags: readonly string[]; commandLines: (flags: readonly string[], at: { files: HarnessFiles; permissionModes: readonly string[] | undefined }) => Promise<CommandLines> } | undefined>
 > = {
   'claude-code': {
     adapterFlags: CLAUDE_CODE_ADAPTER_FLAGS,
     riskyFlags: CLAUDE_CODE_RISKY_FLAGS,
-    commandLines: async (flags, files) => {
+    commandLines: async (flags, { files, permissionModes }) => {
       const defaultPermissionMode = await claudeCodeSettingsDefaultMode(files.claudeCode, { flags });
-      const commandLine = (isFirstStart: boolean) => claudeCodeCommandLine({ flags, sessionName: SESSION_NAME, prompt: isFirstStart ? FIRST_PROMPT : CLAUDE_CODE_WAKE_PROMPT, isFirstStart, defaultPermissionMode });
+      const commandLine = (isFirstStart: boolean) =>
+        claudeCodeCommandLine({ flags, sessionName: SESSION_NAME, prompt: isFirstStart ? FIRST_PROMPT : CLAUDE_CODE_WAKE_PROMPT, isFirstStart, defaultPermissionMode, permissionModes });
       return { firstStart: commandLine(true), restart: commandLine(false) };
     },
   },
@@ -59,8 +60,8 @@ export function riskyFlagsOf(configuration: TrierarchConfiguration): Record<stri
 }
 
 /** What a harness launches with the given flags, on a first start and a restart, for config check; undefined without an adapter. */
-export async function commandLinesOf(at: { harness: string; flags: readonly string[]; files: HarnessFiles }): Promise<CommandLines | undefined> {
-  return ADAPTERS[at.harness]?.commandLines(at.flags, at.files);
+export async function commandLinesOf(at: { harness: string; flags: readonly string[]; files: HarnessFiles; permissionModes: readonly string[] | undefined }): Promise<CommandLines | undefined> {
+  return ADAPTERS[at.harness]?.commandLines(at.flags, { files: at.files, permissionModes: at.permissionModes });
 }
 
 /**
@@ -75,9 +76,11 @@ export async function createHarnesses(at: {
   homeDirectory: string;
   env: Readonly<Record<string, string | undefined>>;
   managedSettings: string;
+  /** What detection last found, read at each launch (#517). */
+  detected: () => Detected;
   sessions: Pick<Tmux, 'start' | 'type' | 'screen'>;
 }): Promise<{ harnesses: Record<string, HarnessPort>; plugins: Record<string, AeolusPlugin> }> {
-  const { configuration, homeDirectory, env, managedSettings, sessions } = at;
+  const { configuration, homeDirectory, env, managedSettings, detected, sessions } = at;
   const harnesses: Record<string, HarnessPort> = {};
   const plugins: Record<string, AeolusPlugin> = {};
   for (const name of Object.keys(configuration.harnesses)) {
@@ -86,7 +89,7 @@ export async function createHarnesses(at: {
     }
     const plugin = await findAeolusPlugin({ homeDirectory, env, harness: name });
     plugins[name] = plugin;
-    harnesses[name] = name === 'codex' ? createCodexHarness({ configuration, plugin, sessions }) : createClaudeCodeHarness({ configuration, plugin, sessions, projects: join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects'), setup: createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) }) });
+    harnesses[name] = name === 'codex' ? createCodexHarness({ configuration, plugin, sessions }) : createClaudeCodeHarness({ configuration, plugin, sessions, permissionModes: () => detected()['claude-code']?.permissionModes, projects: join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects'), setup: createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) }) });
   }
   return { harnesses, plugins };
 }

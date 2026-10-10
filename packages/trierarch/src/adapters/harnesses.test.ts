@@ -10,13 +10,13 @@ describe('the harnesses a trierarch offers', () => {
   it('has an adapter for each harness the configuration offers, and only those', async () => {
     const both = { ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: { flags: [], options: {} } } };
 
-    const { harnesses } = await createHarnesses({ configuration: both, homeDirectory: '/home/thomas', env, managedSettings: '/home/thomas/managed', sessions });
+    const { harnesses } = await createHarnesses({ configuration: both, homeDirectory: '/home/thomas', env, managedSettings: '/home/thomas/managed', detected: () => ({}), sessions });
 
     expect(Object.keys(harnesses).sort()).toEqual(['claude-code', 'codex']);
   });
 
   it('looks for the aeolus plugin of Codex only when the configuration offers Codex', async () => {
-    const { plugins } = await createHarnesses({ configuration: CONFIGURATION, homeDirectory: '/home/thomas', env: { AEOLUS_PLUGIN_ROOT: '/claude-plugin' }, managedSettings: '/home/thomas/managed', sessions });
+    const { plugins } = await createHarnesses({ configuration: CONFIGURATION, homeDirectory: '/home/thomas', env: { AEOLUS_PLUGIN_ROOT: '/claude-plugin' }, managedSettings: '/home/thomas/managed', detected: () => ({}), sessions });
 
     expect(Object.keys(plugins)).toEqual(['claude-code']);
   });
@@ -30,6 +30,6 @@ describe('the harnesses a trierarch offers', () => {
   it('refuses a configured harness it has no adapter for, naming it', async () => {
     const withPi = { ...CONFIGURATION, harnesses: { pi: { flags: [], options: {} } } };
 
-    await expect(createHarnesses({ configuration: withPi, homeDirectory: '/home/thomas', env, managedSettings: '/home/thomas/managed', sessions })).rejects.toThrow('no adapter for the harness pi');
+    await expect(createHarnesses({ configuration: withPi, homeDirectory: '/home/thomas', env, managedSettings: '/home/thomas/managed', detected: () => ({}), sessions })).rejects.toThrow('no adapter for the harness pi');
   });
 });

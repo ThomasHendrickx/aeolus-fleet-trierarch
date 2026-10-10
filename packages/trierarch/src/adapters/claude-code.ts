@@ -121,7 +121,7 @@ function namedRemoteControl(flags: readonly string[], name: string): CommandPart
 }
 
 /** `claude`, the flags without plan mode, `--permission-mode manual` (or `default`, as the installed Claude Code lists) when the settings' default mode is plan and the flags name none (or where it depends on the folder, with when it applies), AskUserQuestion and plan mode disallowed, `--continue` on a restart, then the prompt last after `--`: no flag takes it (`--remote-control [name]` has an optional value), and it never reads as a flag. */
-export function claudeCodeCommandLine(at: { flags: readonly string[]; sessionName: string; prompt: string; isFirstStart: boolean; defaultPermissionMode?: SettingsDefaultMode; permissionModes?: readonly string[]; program?: string }): CommandPart[] {
+export function claudeCodeCommandLine(at: { flags: readonly string[]; sessionName: string; prompt: string; isFirstStart: boolean; defaultPermissionMode?: SettingsDefaultMode; permissionModes?: readonly string[] | undefined; program?: string }): CommandPart[] {
   const flags = withoutPlanMode(at.flags);
   return partsWithWords([
     { words: [at.program ?? 'claude'] },
@@ -155,6 +155,8 @@ export function createClaudeCodeHarness(options: {
   projects: string;
   /** Claude Code's own files, where its onboarding is completed before each launch (#403) and its settings' default mode is read (#505, #507). */
   setup: Pick<ClaudeCodeSetup, 'completeOnboarding' | 'defaultPermissionMode'>;
+  /** The permission modes the installed Claude Code lists, as detection last found them (#517); undefined before it found any. */
+  permissionModes: () => readonly string[] | undefined;
   /** The program to run; `claude` unless a test runs another. */
   command?: string;
 }): HarnessPort {
@@ -175,6 +177,7 @@ export function createClaudeCodeHarness(options: {
         prompt,
         isFirstStart: isFirstStart || !(await hasConversation(options.projects, folder)),
         defaultPermissionMode: await claudeCodeSettingsDefaultMode(options.setup, { flags, folder }),
+        permissionModes: options.permissionModes(),
         ...(options.command !== undefined && { program: options.command }),
       });
       await options.setup.completeOnboarding();

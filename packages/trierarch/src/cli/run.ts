@@ -49,7 +49,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   // What the machine offers changes while it runs, as sessions refuse models (#382): each pass and report reads it afresh.
   let offered = { configuration, detected };
   const tmux = createTmux();
-  const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, managedSettings, sessions: tmux });
+  const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, managedSettings, detected: () => offered.detected, sessions: tmux });
   const workspace = createGitWorkspace({ configuration, root: configuration.worktreeRoot ?? paths.worktrees });
   const state = createJsonState(paths.state);
   const trust = createTrust({ configuration, homeDirectory, env, managedSettings });
