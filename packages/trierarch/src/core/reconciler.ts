@@ -312,7 +312,8 @@ function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean })
  * screen the session stopped at when it knows it (#403); for a crew already
  * final, crewed again after a release elsewhere, it is a failed start against
  * the restart budget instead (#469). A session gone, as after the machine
- * restarts, is crewed again.
+ * restarts, is crewed again. Until its start fails, its session is watched
+ * and woken as any other (#473).
  */
 function launchStep(entry: Entry, context: ReconcileContext): Step {
   const { observed, now } = context;
@@ -329,16 +330,19 @@ function launchStep(entry: Entry, context: ReconcileContext): Step {
     return { isGivenBack: true, actions: [...first, { kind: 'giveBack', shipId: entry.shipId, settingsVersion: entry.settingsVersion, reason, entry }], starts: 0 };
   };
   switch (seen.kind) {
-    case 'active':
+    case 'active': {
       // Running since its session started, so the session start it writes is that start; the window is closed.
-      return { entry: { ...running, state: 'running', since: launchedAt }, actions: [], starts: 0 };
+      const final: Entry = { ...running, state: 'running', since: launchedAt };
+      const step = wakeStep(final, observed.ships[entry.shipId]);
+      return { ...step, entry: step.entry ?? final };
+    }
     case 'refused': {
       const refused = modelRefusal(entry, { model: seen.model, versions: context.versions });
       return failedStart(refused.reason, refused.actions);
     }
     case 'none':
       if (!isWindowOver(launchedAt, now)) {
-        return NOTHING;
+        return wakeStep(entry, observed.ships[entry.shipId]);
       }
       return failedStart(seen.screen === undefined ? NO_ACTIVITY_REASON : `${NO_ACTIVITY_REASON}, stopped at ${entry.harness}'s ${seen.screen}`);
   }
