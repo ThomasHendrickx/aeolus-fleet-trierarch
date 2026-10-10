@@ -284,8 +284,8 @@ function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean; i
   const { observed, now, canStart } = context;
   const seen = observed.ships[entry.shipId];
   if (seen?.inbox.kind === 'leaseEnded') {
-    // Released elsewhere (row 11): its session stops and the ship is crewed again, in its folder. A final crew stays final in the fleet (#469).
-    return { entry: withState(entry, { state: 'crewing', now }), actions: [{ kind: 'stop', shipId: entry.shipId }, { kind: 'crew', shipId: entry.shipId, isResumed: false }], starts: 0 };
+    // Released elsewhere (row 11): its session stops and the ship is crewed again, in a fresh worktree as a first start, with its first prompt and no resume (#475). A final crew stays final in the fleet (#469).
+    return { entry: { ...withState(entry, { state: 'crewing', now }), isReleasedElsewhere: true, hasStarted: false }, actions: [{ kind: 'stop', shipId: entry.shipId }, { kind: 'crew', shipId: entry.shipId, isResumed: false }], starts: 0 };
   }
   switch (entry.state) {
     case 'crewing':

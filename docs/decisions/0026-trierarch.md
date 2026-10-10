@@ -8,7 +8,7 @@
 - It gets the starting prompt and registers itself, so a session never sees a secret. It writes the folder's identity through the aeolus plugin.
 - It saves an entry as crewing before it registers. On resume, its own entry still crewing with the ship crewed means the register reply was lost: it releases the ship (`crew:run`) and crews it again.
 - It owns wake and liveness for the sessions it starts. The plugin's in-session watcher is not used there.
-- A removed request is released: it stops the session, ends the lease, removes the worktree whatever it holds, telling argo first what that discards (work no branch, tag or remote keeps), and confirms. A ship crewed again starts from a fresh worktree: a released ship holds no state on the machine. Retire stays separate.
+- A removed request is released: it stops the session, ends the lease, removes the worktree whatever it holds, telling argo first what that discards (work no branch, tag or remote keeps), and confirms. A ship released elsewhere has its worktree removed the same way before it is crewed again. A ship crewed again starts from a fresh worktree: a released ship holds no state on the machine. Retire stays separate.
 - Each harness is one adapter (Claude Code, Codex), so none bends the design.
 
 Why: a machine is a launcher (kubelet): it runs sessions, reports status, holds no authority. Declared state lives in the fleet, not in a file on one machine, so controllers reconcile from state instead of reacting to messages, and no fleet is bound to one machine.

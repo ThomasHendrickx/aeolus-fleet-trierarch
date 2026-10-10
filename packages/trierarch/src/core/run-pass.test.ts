@@ -426,7 +426,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.state.current().orphans).toEqual([]);
   });
 
-  it('row 11: a ship released elsewhere has its session stopped and is crewed again in the same folder', async () => {
+  it('row 11: a ship released elsewhere has its session stopped and is crewed again', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     const firstToken = trierarch.fleet.shipOf(shipId).crewToken;
@@ -440,6 +440,78 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.harness.identities.get(SCOUT_FOLDER)?.crewToken).toBe(trierarch.fleet.shipOf(shipId).crewToken);
     expect(trierarch.harness.launches.map((launch) => launch.folder)).toEqual([SCOUT_FOLDER, SCOUT_FOLDER]);
     expect(trierarch.state.current().entries[shipId]?.state).toBe('running');
+  });
+
+  it('row 11: a ship released elsewhere is crewed again in a fresh worktree, without what the crew before left (#475)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.change(SCOUT_FOLDER);
+    trierarch.fleet.releaseElsewhere(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]?.folder).toBe(SCOUT_FOLDER);
+    expect(trierarch.workspace.folders.get(SCOUT_FOLDER)).toMatchObject({ hasChanges: false, unsaved: [] });
+    expect(trierarch.state.current().kept).toEqual([]);
+  });
+
+  it('row 11: tells argo what removing the worktree of a ship released elsewhere discards, naming the machine, the ship and each unpushed change (#475)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.change(SCOUT_FOLDER, ' M README.md');
+    trierarch.workspace.change(SCOUT_FOLDER, '?? draft.md');
+    trierarch.fleet.releaseElsewhere(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
+      `mac-studio: scout (${shipId}) was released elsewhere, so the trierarch removed its aeolus-fleet worktree before crewing it again, discarding what was not pushed:  M README.md; ?? draft.md`,
+    ]);
+  });
+
+  it('row 11: tells argo nothing when the worktree of a ship released elsewhere holds nothing unpushed (#475)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.fleet.releaseElsewhere(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+
+  it('row 11: when removing the worktree of a ship released elsewhere fails, crews it nowhere and the next pass removes it, telling argo once (#475)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.change(SCOUT_FOLDER);
+    trierarch.fleet.releaseElsewhere(shipId);
+    trierarch.workspace.isFailingRemove = true;
+    await trierarch.pass();
+    const launchesAfterFailure = trierarch.harness.launches.length;
+    trierarch.workspace.isFailingRemove = false;
+
+    await trierarch.pass();
+
+    expect(launchesAfterFailure).toBe(1);
+    expect(trierarch.workspace.folders.get(SCOUT_FOLDER)).toMatchObject({ hasChanges: false, unsaved: [] });
+    expect(trierarch.fleet.shipOf(shipId).status).toBe('crewed');
+    expect(trierarch.fleet.toArgo).toHaveLength(1);
+  });
+
+  it('row 11: a ship released elsewhere is crewed again as a first start, with its first prompt and no resume (#475)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch, { firstPrompt: 'Review the open pull requests.' });
+    trierarch.fleet.releaseElsewhere(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.launches.at(-1)).toEqual({
+      shipId,
+      shipName: 'scout',
+      folder: SCOUT_FOLDER,
+      workspace: { kind: 'worktree', repository: 'aeolus-fleet' },
+      isFirstStart: true,
+      firstPrompt: 'Review the open pull requests.',
+    });
   });
 
   it('row 12: a new settings version stops the session and crews it again with that version, keeping the worktree', async () => {

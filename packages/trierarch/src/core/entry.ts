@@ -46,6 +46,8 @@ export interface Entry {
   readonly hasStarted: boolean;
   /** When the session crewing checks in its launch window started (#382), ISO 8601; none before its launch. */
   readonly launchedAt?: string;
+  /** Set as it goes back to crewing after a release elsewhere (row 11): its worktree goes before it is crewed again (#475). */
+  readonly isReleasedElsewhere?: true;
   /** The inbox count last seen, and whether a wake waits for the session to turn idle. */
   readonly wake: { readonly waiting: number; readonly isPending: boolean };
 }
