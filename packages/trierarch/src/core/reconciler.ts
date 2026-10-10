@@ -100,7 +100,7 @@ const FINAL: ReadonlySet<CrewStatus> = new Set(['running', 'restarting', 'crashe
 
 /**
  * What the trierarch does with settings it cannot crew (#382): while the
- * crew is not final as the fleet holds it, it gives the request back with
+ * crew is not final as the fleet holds it (#477), it gives the request back with
  * the field at fault as the reason, ending the entry it crewed with; once it
  * is final, it tells argo, once per settings version.
  */
@@ -110,7 +110,7 @@ function uncrewable(at: { request: AssignedRequest; refusal: Refusal; state: Tri
   if (state.refused[shipId] === settingsVersion) {
     return [];
   }
-  if (request.status === null || !FINAL.has(request.status)) {
+  if (!request.isFinal) {
     const reason = refusal.field === undefined ? refusal.reason : `${refusal.field}: ${refusal.reason}`;
     return [{ kind: 'giveBack', shipId, settingsVersion, reason, ...(entry !== undefined && { entry }) }];
   }
@@ -235,8 +235,9 @@ function entryOf(checked: CheckedSettings, at: { shipId: ShipId; settingsVersion
  * It is a first start (#443): a fresh session with the new version's first
  * prompt, never the old conversation continued.
  * Settings this trierarch cannot crew are given back while the crew is not
- * final, its entry ending; once it is final, argo is told and the entry stays
- * as it was.
+ * final, its entry ending: a new version clears final (decision 0029), so a
+ * running crew's is given back too. Once the fleet holds it final, argo is
+ * told and the entry stays as it was.
  */
 function newVersionStep(entry: Entry, at: { request: AssignedRequest; state: TrierarchState; context: ReconcileContext }): Step {
   const { request, state, context } = at;
