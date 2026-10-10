@@ -283,8 +283,9 @@ function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean })
   const { observed, now, canStart } = context;
   const seen = observed.ships[entry.shipId];
   if (seen?.inbox.kind === 'leaseEnded') {
-    // Released elsewhere (row 11): its session stops and the ship is crewed again, in its folder.
-    return { entry: withState(entry, { state: 'crewing', now }), actions: [{ kind: 'stop', shipId: entry.shipId }, { kind: 'crew', shipId: entry.shipId, isResumed: false }], starts: 0 };
+    // Released elsewhere (row 11): its session stops and the ship is crewed again, in its folder. A final crew stays final (#469).
+    const crewing = withState(entry, { state: 'crewing', now });
+    return { entry: FINAL.has(entry.state) ? { ...crewing, isFinal: true } : crewing, actions: [{ kind: 'stop', shipId: entry.shipId }, { kind: 'crew', shipId: entry.shipId, isResumed: false }], starts: 0 };
   }
   switch (entry.state) {
     case 'crewing':
@@ -305,31 +306,35 @@ function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean })
  * An entry crewing: crewed (again) until its session started, then in its
  * launch window (#382). Activity makes the crew final, so it runs from when
  * its session started. A model refused, or no activity within the minute,
- * gives the request back, its entry ending. A session gone, as after the
- * machine restarts, is crewed again.
+ * gives the request back, its entry ending; for a crew already final, crewed
+ * again after a release elsewhere, it is a failed start against the restart
+ * budget instead (#469). A session gone, as after the machine restarts, is
+ * crewed again.
  */
 function launchStep(entry: Entry, context: ReconcileContext): Step {
   const { observed, now } = context;
-  const { launchedAt, ...running } = entry;
+  const { launchedAt, isFinal, ...running } = entry;
   const seen = observed.launches[entry.shipId];
   if (launchedAt === undefined || seen === undefined) {
     return { actions: [{ kind: 'crew', shipId: entry.shipId, isResumed: true }], starts: 1 };
   }
-  const giveBack = (reason: string, first: readonly Action[] = []): Step => ({
-    isGivenBack: true,
-    actions: [...first, { kind: 'giveBack', shipId: entry.shipId, settingsVersion: entry.settingsVersion, reason, entry }],
-    starts: 0,
-  });
+  const failedStart = (reason: string, first: readonly Action[] = []): Step => {
+    if (isFinal === true) {
+      const step = exitStep(running, { now, failedStart: reason });
+      return { ...step, actions: [...first, ...step.actions] };
+    }
+    return { isGivenBack: true, actions: [...first, { kind: 'giveBack', shipId: entry.shipId, settingsVersion: entry.settingsVersion, reason, entry }], starts: 0 };
+  };
   switch (seen.kind) {
     case 'active':
       // Running since its session started, so the session start it writes is that start; the window is closed.
       return { entry: { ...running, state: 'running', since: launchedAt }, actions: [], starts: 0 };
     case 'refused': {
       const refused = modelRefusal(entry, { model: seen.model, versions: context.versions });
-      return giveBack(refused.reason, refused.actions);
+      return failedStart(refused.reason, refused.actions);
     }
     case 'none':
-      return isWindowOver(launchedAt, now) ? giveBack(NO_ACTIVITY_REASON) : NOTHING;
+      return isWindowOver(launchedAt, now) ? failedStart(NO_ACTIVITY_REASON) : NOTHING;
   }
 }
 
