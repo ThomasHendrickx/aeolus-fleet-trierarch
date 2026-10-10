@@ -18,7 +18,8 @@ import type { Tmux } from './tmux.js';
  * without AskUserQuestion and plan mode: nobody watches the session's pane, so
  * it asks its questions over the fleet, and a question form or a plan approval
  * waiting there would take the keys of a wake (#457, #460). Plan mode goes as a
- * whole: without ExitPlanMode alone a session that entered it could never leave.
+ * whole: without ExitPlanMode alone a session that entered it could never leave,
+ * and for that reason a configured `--permission-mode plan` is ignored (#465).
  * Its onboarding is completed before every launch, so a session on a machine
  * where Claude Code never ran by hand stops at no first-run screen (#403). A
  * session's identity is written and read through the aeolus
@@ -32,6 +33,8 @@ const REMOTE_CONTROL = '--remote-control';
 const CONTINUE = '--continue';
 const END_OF_FLAGS = '--';
 const NO_PANE_PROMPTS = '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode';
+const PERMISSION_MODE = '--permission-mode';
+const PLAN_MODE = 'plan';
 
 export const CLAUDE_CODE_ADAPTER_FLAGS: readonly AdapterFlag[] = [
   { flag: NO_PANE_PROMPTS, when: 'always' },
@@ -43,6 +46,12 @@ export const SKIP_PERMISSIONS = '--dangerously-skip-permissions';
 
 /** The flags of Claude Code that are risky: it then runs every tool without asking (#326). */
 export const CLAUDE_CODE_RISKY_FLAGS: readonly string[] = [SKIP_PERMISSIONS];
+
+/** The flags without `--permission-mode plan` (or `=plan`): a session started in plan mode could never leave it (#465). */
+function withoutPlanMode(flags: readonly string[]): string[] {
+  const startsPlanMode = (at: number) => flags[at] === PERMISSION_MODE && flags[at + 1] === PLAN_MODE;
+  return flags.filter((flag, at) => flag !== `${PERMISSION_MODE}=${PLAN_MODE}` && !startsPlanMode(at) && !startsPlanMode(at - 1));
+}
 
 /**
  * The configured flags, with a name for the remote-control session where the
@@ -64,11 +73,11 @@ function namedRemoteControl(flags: readonly string[], name: string): CommandPart
   ];
 }
 
-/** `claude`, the flags, AskUserQuestion and plan mode disallowed, `--continue` on a restart, then the prompt last after `--`: no flag takes it (`--remote-control [name]` has an optional value), and it never reads as a flag. */
+/** `claude`, the flags without plan mode, AskUserQuestion and plan mode disallowed, `--continue` on a restart, then the prompt last after `--`: no flag takes it (`--remote-control [name]` has an optional value), and it never reads as a flag. */
 export function claudeCodeCommandLine(at: { flags: readonly string[]; sessionName: string; prompt: string; isFirstStart: boolean; program?: string }): CommandPart[] {
   return partsWithWords([
     { words: [at.program ?? 'claude'] },
-    ...namedRemoteControl(at.flags, at.sessionName),
+    ...namedRemoteControl(withoutPlanMode(at.flags), at.sessionName),
     { words: [NO_PANE_PROMPTS], source: 'adapter' },
     { words: at.isFirstStart ? [] : [CONTINUE], source: 'adapter' },
     { words: [END_OF_FLAGS, at.prompt] },
