@@ -58,6 +58,23 @@ function requests(method: string): unknown[] {
     .map((request) => request.params);
 }
 
+/** A stand-in app server that answers `initialize`, then stops reading and ends: what it is sent next has no reader. */
+function anAppServerThatEndsEarly() {
+  writeFileSync(
+    program,
+    `#!/usr/bin/env node
+const { closeSync } = require('node:fs');
+const readline = require('node:readline');
+readline.createInterface({ input: process.stdin }).once('line', (line) => {
+  closeSync(0);
+  process.stdout.write(JSON.stringify({ id: JSON.parse(line).id, result: {} }) + '\\n', () => process.exit(0));
+});
+`,
+  );
+  chmodSync(program, 0o700);
+  return createCodexSetup({ command: program });
+}
+
 beforeEach(() => {
   folder = mkdtempSync(join(tmpdir(), 'trierarch-codex-setup-'));
   log = join(folder, 'requests.log');
@@ -113,5 +130,9 @@ describe("Codex's one-time questions, answered ahead through its app server", ()
 
   it('fails saying Codex is missing when there is no codex to run', async () => {
     await expect(createCodexSetup({ command: join(folder, 'no-codex') }).trust(['/home/thomas/notes'])).rejects.toThrow('Codex');
+  });
+
+  it('fails, rather than ending the trierarch, when the app server ends before it reads what it is sent', async () => {
+    await expect(anAppServerThatEndsEarly().trust(['/home/thomas/notes'])).rejects.toThrow('codex app-server');
   });
 });
