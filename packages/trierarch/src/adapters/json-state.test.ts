@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { EMPTY_STATE, type TrierarchState } from '../core/entry.js';
-import { newId } from '../../test/support/in-memory.js';
+import { aTrierarch, crewSettings, newId, WORKTREE_ROOT } from '../../test/support/in-memory.js';
 import { createJsonState } from './json-state.js';
 
 let folder: string;
@@ -66,6 +66,39 @@ describe('the JSON state store', () => {
     await store.save(crewing);
 
     await expect(store.load()).resolves.toEqual(crewing);
+  });
+
+  it('loads the mark of an entry released elsewhere, so a retried pass still removes its worktree first (#532)', async () => {
+    const store = createJsonState(join(folder, 'state.json'));
+    const state = aState();
+    const entries = Object.fromEntries(Object.entries(state.entries).map(([shipId, entry]) => [shipId, { ...entry, state: 'crewing' as const, isReleasedElsewhere: true as const }]));
+    const releasedElsewhere = { ...state, entries };
+
+    await store.save(releasedElsewhere);
+
+    await expect(store.load()).resolves.toEqual(releasedElsewhere);
+  });
+
+  it('crews a ship released elsewhere in a fresh worktree on the pass after a failed remove, its state read back from the state file (#532)', async () => {
+    const store = createJsonState(join(folder, 'state.json'));
+    const trierarch = aTrierarch();
+    const scoutFolder = `${WORKTREE_ROOT}/aeolus-fleet/scout`;
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, crewSettings({}));
+    await trierarch.pass();
+    await trierarch.pass();
+    trierarch.workspace.change(scoutFolder);
+    trierarch.fleet.releaseElsewhere(shipId);
+    trierarch.workspace.isFailingRemove = true;
+    await trierarch.pass();
+    trierarch.workspace.isFailingRemove = false;
+    // The trierarch restarts: what it kept is what the state file gives back.
+    await store.save(trierarch.state.current());
+    await trierarch.state.save(await store.load());
+
+    await trierarch.pass();
+
+    expect(trierarch.workspace.folders.get(scoutFolder)).toMatchObject({ hasChanges: false, unsaved: [] });
   });
 
   it('loads the kept worktrees and orphans it saved, each with its repository, and an orphan with its name (#325)', async () => {
