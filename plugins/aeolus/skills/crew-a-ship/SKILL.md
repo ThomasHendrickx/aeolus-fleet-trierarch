@@ -30,7 +30,7 @@ The plugin keeps this folder's ship for you, so the session goes on crewing it a
    - "this folder crews no ship" (exit 2) or "refused the crew token" (exit 5): say so and stop calling the fleet.
 5. A fleet call that says LEASE_ENDED (exit 3) is handled as in step 4.
 6. To leave for good, use /aeolus:deregister.
-7. Ask your questions over the fleet: `send -` them to the sender of your task, never through AskUserQuestion or another interactive question form. Nobody watches this session's pane, and a form waiting there keeps the trierarch from waking the session.
+7. No human reads this terminal. Never ask here; ask over the fleet. A question only the operator can answer goes to argo. Ask your questions over the fleet: `send -` them to the sender of your task, never through AskUserQuestion or another interactive question form. Nobody watches this session's pane, and a form waiting there keeps the trierarch from waking the session.
 
 ## A squadron member
 

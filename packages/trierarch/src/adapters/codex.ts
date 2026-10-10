@@ -4,6 +4,7 @@ import type { AdapterFlag, HarnessPort } from '../core/ports.js';
 import { codexLaunchSeen } from './codex-screen.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
 import { effectiveFlags } from '../core/effective-flags.js';
+import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
 import type { Tmux } from './tmux.js';
 
@@ -12,7 +13,8 @@ import type { Tmux } from './tmux.js';
  * folder, `codex resume --last` on a restart (the folder's last conversation;
  * one ship per folder), always with `--no-daemon` and without the question
  * tool, and `$aeolus-wake` typed
- * to wake an idle session. The identity and the turn marker go through the
+ * to wake an idle session, each prompt with the line that no human reads its
+ * terminal (#585). The identity and the turn marker go through the
  * aeolus plugin for Codex, in Codex's own plugin data folder.
  */
 
@@ -74,13 +76,13 @@ export function createCodexHarness(options: {
       if (settings === undefined) {
         throw new Error(`The configuration has no harness ${harness}`);
       }
-      const prompt = isFirstStart && firstPrompt !== undefined ? firstPrompt : WAKE_PROMPT;
+      const prompt = isFirstStart && firstPrompt !== undefined ? firstPromptOf(firstPrompt) : wakePromptOf(WAKE_PROMPT);
       const command = codexCommandLine({ flags: effectiveFlags(settings, picked), prompt, isFirstStart, ...(options.command !== undefined && { program: options.command }) });
       await sessions.start({ shipId, folder, command: wordsOf(command) });
     },
     wake: async ({ shipId }) => {
-      // The space closes Codex's skill picker, which would otherwise take the Enter.
-      await sessions.type({ shipId, text: `${WAKE_PROMPT} `, settleMs: CODEX_TYPING_SETTLE_MS });
+      // The space after the skill closes Codex's skill picker, which would otherwise take the Enter.
+      await sessions.type({ shipId, text: wakePromptOf(WAKE_PROMPT), settleMs: CODEX_TYPING_SETTLE_MS });
     },
     launchSeen: async ({ shipId, model }) => codexLaunchSeen({ screen: await sessions.screen(shipId), ...(model !== undefined && { model }) }),
   };
