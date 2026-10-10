@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { newId } from '../../test/support/in-memory.js';
+import { userSystemd } from '../../test/support/user-systemd.js';
 import { trierarchPaths } from './paths.js';
 import { runCommand } from './run-command.js';
 import { createService, serviceEnvironment, SYSTEMD_UNIT } from './service.js';
@@ -13,11 +14,12 @@ import { createTmux, sessionsLaunch } from './tmux.js';
 // The unit the trierarch writes, run by the real systemd user manager under a
 // name of the test's own, so the machine's own trierarch is left alone. Its
 // command starts a tmux server the way the trierarch starts its sessions, in a
-// scope of its own. Runs only where a systemd user manager answers (a Linux
-// desktop or host, not CI). Each test proves it leaves nothing on the machine
-// (#537): no unit, no scope, no tmux server, no socket.
+// scope of its own. Runs wherever a systemd user manager starts units (a Linux
+// desktop or host, not CI), degraded included; elsewhere each test skips,
+// saying why (#552). Each test proves it leaves nothing on the machine (#537):
+// no unit, no scope, no tmux server, no socket.
 
-const hasUserSystemd = process.platform === 'linux' && (await runCommand('systemctl', { args: ['--user', 'is-system-running'] }).catch(() => ({ status: 1 }))).status === 0;
+const systemd = await userSystemd({ platform: process.platform, isSystemRunning: () => runCommand('systemctl', { args: ['--user', 'is-system-running'] }) });
 
 const SESSION_TIMEOUT_MS = 10_000;
 const TEST_TIMEOUT_MS = 60_000;
@@ -60,31 +62,38 @@ async function startTheUnit(): Promise<void> {
   await expect.poll(serverPid, { timeout: SESSION_TIMEOUT_MS }).not.toBe('');
 }
 
-beforeEach(() => {
-  folder = mkdtempSync(join(tmpdir(), 'trierarch-systemd-'));
-  const suffix = folder.slice(-6).toLowerCase().replaceAll(/[^a-z0-9]/g, 'x');
-  name = `aeolus-trierarch-test-${suffix}.service`;
-  socket = join(folder, 'tmux.socket');
-  unitFile = join(homedir(), '.config', 'systemd', 'user', name);
-  scopes = [];
-  // The tmux the test runs itself keeps its socket in the test's folder too.
-  vi.stubEnv('TMUX_TMPDIR', folder);
-});
+describe('the systemd user unit on this machine', () => {
+  // First, so a skip runs neither the setup nor the cleanup, which need systemctl.
+  beforeEach((context) => {
+    if (!systemd.isUsable) {
+      context.skip(systemd.reason);
+    }
+  });
 
-afterEach(async () => {
-  await systemctl('stop', name);
-  rmSync(unitFile, { force: true });
-  await systemctl('daemon-reload');
-  await systemctl('reset-failed', name);
-  await runCommand('tmux', { args: ['-S', socket, 'kill-server'] });
-  await runCommand('tmux', { args: ['-L', 'sessions', 'kill-server'] });
-  rmSync(folder, { recursive: true, force: true });
-  vi.unstubAllEnvs();
+  beforeEach(() => {
+    folder = mkdtempSync(join(tmpdir(), 'trierarch-systemd-'));
+    const suffix = folder.slice(-6).toLowerCase().replaceAll(/[^a-z0-9]/g, 'x');
+    name = `aeolus-trierarch-test-${suffix}.service`;
+    socket = join(folder, 'tmux.socket');
+    unitFile = join(homedir(), '.config', 'systemd', 'user', name);
+    scopes = [];
+    // The tmux the test runs itself keeps its socket in the test's folder too.
+    vi.stubEnv('TMUX_TMPDIR', folder);
+  });
 
-  await expect.poll(async () => Promise.all([name, ...scopes].map(loadState))).toEqual([name, ...scopes].map(() => 'not-found'));
-});
+  afterEach(async () => {
+    await systemctl('stop', name);
+    rmSync(unitFile, { force: true });
+    await systemctl('daemon-reload');
+    await systemctl('reset-failed', name);
+    await runCommand('tmux', { args: ['-S', socket, 'kill-server'] });
+    await runCommand('tmux', { args: ['-L', 'sessions', 'kill-server'] });
+    rmSync(folder, { recursive: true, force: true });
+    vi.unstubAllEnvs();
 
-describe.runIf(hasUserSystemd)('the systemd user unit on this machine', () => {
+    await expect.poll(async () => Promise.all([name, ...scopes].map(loadState))).toEqual([name, ...scopes].map(() => 'not-found'));
+  });
+
   it(
     'keeps the sessions in the tmux server the trierarch started running across a stop and a restart of the service (#479)',
     async () => {
