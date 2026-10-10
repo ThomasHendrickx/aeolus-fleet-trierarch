@@ -15,13 +15,17 @@ import { NOT_SAID_YET_REASON, startNewProcess } from './new-process.js';
  * so the stop already follows it (#485) and a change to the file arrives with
  * the version that makes it, not one upgrade later (#492).
  * It never upgrades on its own. A failed install leaves the old version
- * running.
+ * running. Where npm's global folder is not the user's to write, as under a
+ * system Node install, it installs nothing and says what to run instead
+ * (#480): it never runs sudo itself.
  */
 
 export const PACKAGE = '@aeolus-fleet/trierarch';
 
 /** npm, as upgrade needs it. */
 export interface Npm {
+  /** Where `npm install --global` puts packages, and whether the user may write there. */
+  globalFolder(): Promise<{ path: string; isWritable: boolean }>;
   /** The latest version on npm. */
   latest(): Promise<string>;
   /** `npm install --global <spec>`. */
@@ -60,6 +64,13 @@ export async function upgradeTrierarch(at: {
   }
 
   const spec = `${PACKAGE}@${target}`;
+  const folder = await at.npm.globalFolder();
+  if (!folder.isWritable) {
+    const instead = [`sudo npm install --global ${spec}`, ...((await at.service.status()).isInstalled ? ['aeolus-trierarch install'] : [])];
+    throw new TrierarchFileError(
+      `npm's global folder ${folder.path} is not yours to write: a system Node install owns it. Run instead:\n${instead.map((line) => `  ${line}`).join('\n')}\nThe trierarch keeps running ${from}.`,
+    );
+  }
   const installed = await at.npm.install(spec);
   if (installed.status !== 0) {
     throw new TrierarchFileError(

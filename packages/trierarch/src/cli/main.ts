@@ -1,3 +1,5 @@
+import { constants } from 'node:fs';
+import { access } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -224,6 +226,14 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
         ...(version !== undefined && { version }),
         installedVersion: runningVersion,
         npm: {
+          globalFolder: async () => {
+            const path = (await runCommand('npm', { args: ['root', '--global'] })).stdout.trim();
+            const isWritable = await access(path, constants.W_OK).then(
+              () => true,
+              () => false,
+            );
+            return { path, isWritable };
+          },
           latest: async () => (await runCommand('npm', { args: ['view', PACKAGE, 'version'] })).stdout,
           install: (spec) => runCommand('npm', { args: ['install', '--global', spec] }),
         },
