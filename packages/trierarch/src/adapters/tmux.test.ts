@@ -2,13 +2,14 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { newId } from '../../test/support/in-memory.js';
 import { runCommand } from './run-command.js';
 import { createTmux, type Tmux } from './tmux.js';
 
-// Against the real tmux, on a tmux server of the test's own.
+// Against the real tmux, on a tmux server of the test's own, its socket in the
+// test's own folder: kill-server leaves the socket behind (#537).
 
 let server: string;
 let folder: string;
@@ -17,12 +18,14 @@ let tmux: Tmux;
 beforeEach(() => {
   server = `trierarch-test-${newId('ship').slice(-8)}`;
   folder = mkdtempSync(join(tmpdir(), 'trierarch-tmux-'));
+  vi.stubEnv('TMUX_TMPDIR', folder);
   tmux = createTmux({ server });
 });
 
 afterEach(async () => {
   await runCommand('tmux', { args: ['-L', server, 'kill-server'] });
   rmSync(folder, { recursive: true, force: true });
+  vi.unstubAllEnvs();
 });
 
 describe('sessions in tmux', () => {
