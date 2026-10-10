@@ -17,7 +17,7 @@ import type { Prompter } from './prompter.js';
  * `aeolus-trierarch init`: the whole setup of a machine, asking for what is
  * missing. It registers the trierarch's own ship (commissioned by the
  * trierarch plugin, with crew:run) and keeps its crew token, never the secret; writes the
- * configuration from the operator's answers; answers Claude Code's one-time
+ * configuration from the operator's answers; answers the offered harnesses' one-time
  * questions ahead, so a session nobody watches never waits on one; and offers
  * to install and start the service. On a machine set up already it says so,
  * never registers again, and offers to change the configuration.
@@ -37,7 +37,7 @@ export interface InitReport {
   readonly fleetUrl: string;
   readonly shipId?: ShipId;
   readonly configuration: 'written' | 'changed' | 'kept';
-  /** The places Claude Code now trusts: the worktree root, then each configured repository and folder. */
+  /** The places Claude Code now trusts, when the configuration offers it: the worktree root, then each configured repository and folder. */
   readonly trusted: readonly string[];
   readonly isSkipPermissionsAccepted: boolean;
   /** The repositories and folders Codex now trusts, when the configuration offers Codex. */
@@ -309,32 +309,10 @@ export async function initTrierarch(input: {
     said.push('It has no repository or folder yet, so it can crew no request: run aeolus-trierarch init again to add one.');
   }
 
-  // Claude Code's one-time questions, answered ahead.
   const root = configuration.worktreeRoot ?? paths.worktrees;
   await mkdir(root, { recursive: true });
-  const repositories = Object.values(configuration.repositories).map((repository) => repository.path);
-  const folders = Object.values(configuration.folders).map((folder) => folder.path);
-  // Adding a place through init is what trusts it (#381); every run, so a place added since is trusted too.
-  for (const place of [root, ...repositories, ...folders]) {
-    await claudeCode.trust(place);
-  }
-  said.push(`Claude Code trusts ${root}, so a session in any worktree starts with no trust question.`);
-  if (repositories.length > 0) {
-    said.push(`Claude Code trusts each configured repository too, as it asks about a worktree's repository: ${repositories.join(', ')}.`);
-  }
-  if (folders.length > 0) {
-    said.push(`Claude Code trusts each configured folder too: ${folders.join(', ')}.`);
-  }
-  let isSkipPermissionsAccepted = await claudeCode.isSkipPermissionsAccepted();
-  if (configuration.harnesses[CLAUDE_CODE]?.flags.includes(SKIP_PERMISSIONS) === true && !isSkipPermissionsAccepted) {
-    if (await prompter.confirm('Claude Code asks once per user to accept bypass permissions mode. Accept it now (skipDangerousModePermissionPrompt in ~/.claude/settings.json)?', { isDefault: true })) {
-      await claudeCode.acceptSkipPermissions();
-      isSkipPermissionsAccepted = true;
-      said.push('Claude Code accepts bypass permissions mode for you.');
-    } else {
-      said.push(`Claude Code still asks to accept bypass permissions mode, and a session started with ${SKIP_PERMISSIONS} waits on that question until you answer it.`);
-    }
-  }
+  const claude = await setUpClaudeCode({ configuration, claudeCode, prompter, root });
+  said.push(...claude.said);
 
   const codex = await setUpCodex({ configuration, codex: input.codex, root });
   said.push(...codex.said);
@@ -365,13 +343,61 @@ export async function initTrierarch(input: {
     fleetUrl,
     ...(shipId !== undefined && { shipId }),
     configuration: configured,
-    trusted: [root, ...repositories, ...folders],
-    isSkipPermissionsAccepted,
+    trusted: claude.trusted,
+    isSkipPermissionsAccepted: claude.isSkipPermissionsAccepted,
     codexTrusted: codex.trusted,
     codexHooksTrusted: codex.hooksTrusted,
     service: serviced,
     said,
   };
+}
+
+/**
+ * Claude Code's one-time questions, answered ahead on every run where the
+ * configuration offers Claude Code: the worktree root and each repository and
+ * folder trusted (adding a place through init is what trusts it, #381, so a
+ * place added since is trusted too), its onboarding completed, and bypass
+ * permissions mode offered when its sessions skip permissions. Where the
+ * configuration does not offer it, its files stay untouched.
+ */
+async function setUpClaudeCode(at: {
+  configuration: TrierarchConfiguration;
+  claudeCode: ClaudeCodeSetup;
+  prompter: Prompter;
+  root: string;
+}): Promise<{ trusted: readonly string[]; isSkipPermissionsAccepted: boolean; said: readonly string[] }> {
+  const { configuration, claudeCode, prompter, root } = at;
+  const harness = configuration.harnesses[CLAUDE_CODE];
+  if (harness === undefined) {
+    return { trusted: [], isSkipPermissionsAccepted: false, said: [] };
+  }
+  const said: string[] = [];
+  const repositories = Object.values(configuration.repositories).map((repository) => repository.path);
+  const folders = Object.values(configuration.folders).map((folder) => folder.path);
+  for (const place of [root, ...repositories, ...folders]) {
+    await claudeCode.trust(place);
+  }
+  said.push(`Claude Code trusts ${root}, so a session in any worktree starts with no trust question.`);
+  if (repositories.length > 0) {
+    said.push(`Claude Code trusts each configured repository too, as it asks about a worktree's repository: ${repositories.join(', ')}.`);
+  }
+  if (folders.length > 0) {
+    said.push(`Claude Code trusts each configured folder too: ${folders.join(', ')}.`);
+  }
+  // Its onboarding is no consent, only its first-run screens, so it is completed without asking (#403).
+  await claudeCode.completeOnboarding();
+  said.push("Claude Code's onboarding is complete (hasCompletedOnboarding in ~/.claude.json), so a session on this machine shows no first-run screen.");
+  let isSkipPermissionsAccepted = await claudeCode.isSkipPermissionsAccepted();
+  if (harness.flags.includes(SKIP_PERMISSIONS) && !isSkipPermissionsAccepted) {
+    if (await prompter.confirm('Claude Code asks once per user to accept bypass permissions mode. Accept it now (skipDangerousModePermissionPrompt in ~/.claude/settings.json)?', { isDefault: true })) {
+      await claudeCode.acceptSkipPermissions();
+      isSkipPermissionsAccepted = true;
+      said.push('Claude Code accepts bypass permissions mode for you.');
+    } else {
+      said.push(`Claude Code still asks to accept bypass permissions mode, and a session started with ${SKIP_PERMISSIONS} waits on that question until you answer it.`);
+    }
+  }
+  return { trusted: [root, ...repositories, ...folders], isSkipPermissionsAccepted, said };
 }
 
 /**

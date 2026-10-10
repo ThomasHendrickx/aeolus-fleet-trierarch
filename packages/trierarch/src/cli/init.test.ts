@@ -313,6 +313,16 @@ describe('aeolus-trierarch init, the whole setup', () => {
     expect(report.trusted).toEqual([paths.worktrees]);
   });
 
+  it("completes Claude Code's onboarding without asking, saying so, so a session on a fresh machine shows no first-run screen (#403)", async () => {
+    const prompter = new ScriptedPrompter(defaults());
+
+    const report = await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET }, prompter);
+
+    await expect(createClaudeCodeSetup({ homeDirectory: home }).isOnboardingComplete()).resolves.toBe(true);
+    expect(report.said.join('\n')).toContain("Claude Code's onboarding is complete");
+    expect(prompter.asked.join('\n')).not.toContain('onboarding');
+  });
+
   it('accepts bypass permissions mode for the user when the sessions skip permissions and the operator agrees', async () => {
     const prompter = new ScriptedPrompter(skippingPermissions(true));
 
@@ -575,6 +585,19 @@ describe('aeolus-trierarch init, for Codex', () => {
 
     expect(report.said.join('\n')).toContain('Codex is not set up: Codex is not installed');
     expect(report.codexTrusted).toEqual([]);
+  });
+
+  it("leaves Claude Code's files alone where the configuration does not offer it: no trust, no onboarding, no bypass question", async () => {
+    withCodex();
+    const prompter = new ScriptedPrompter([['Change the configuration', false], ['Install the service', true]]);
+
+    const report = await init({}, prompter);
+
+    expect(existsSync(join(home, '.claude.json'))).toBe(false);
+    expect(existsSync(join(home, '.claude'))).toBe(false);
+    expect(report.trusted).toEqual([]);
+    expect(report.said.join('\n')).not.toContain('Claude Code');
+    expect(prompter.asked.join('\n')).not.toContain('bypass permissions');
   });
 
   it('leaves Codex alone where the configuration does not offer it', async () => {

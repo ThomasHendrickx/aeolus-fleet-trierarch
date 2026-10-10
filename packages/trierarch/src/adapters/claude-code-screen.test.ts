@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { claudeCodeLaunchSeen } from './claude-code-screen.js';
 
-// On screens of Claude Code 2.1.295, captured from real sessions (#382).
+// On screens of Claude Code 2.1.295, captured from real sessions (#382), its first-run screens from a fresh home (#403).
 
 function screen(name: string): string {
   return readFileSync(new URL(`../../test/screens/claude-code-${name}.txt`, import.meta.url), 'utf8');
@@ -27,6 +27,17 @@ describe('what a Claude Code screen shows in its launch window', () => {
 
   it('sees none while its first prompt made no tool call', () => {
     expect(claudeCodeLaunchSeen({ screen: promptedOnly('ran'), model: 'claude-opus-5-5' })).toEqual({ kind: 'none' });
+  });
+
+  it.each([
+    ['theme', 'theme picker'],
+    ['login', 'login method question'],
+    ['security-notes', 'security notes'],
+    ['trust', 'folder trust question'],
+    ['bypass', 'bypass permissions warning'],
+    ['fullscreen', 'fullscreen renderer offer'],
+  ])('names the first-run screen it stopped at (%s)', (name, shown) => {
+    expect(claudeCodeLaunchSeen({ screen: screen(name), model: 'claude-opus-5-5' })).toEqual({ kind: 'none', screen: shown });
   });
 
   it('sees the model it launched with refused', () => {

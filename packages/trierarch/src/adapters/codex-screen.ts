@@ -11,6 +11,7 @@ const CODEX_TEXTS: LaunchTexts = {
   // A tool call done: "• Ran echo hi", "• Explored", "• Called aeolus.whoami", "• Edited file.ts".
   activity: /^• (?:Ran \S|Explored$|Called \S|Edited \S)/mu,
   refused: /"type":"invalid_request_error","message":"The '([^']+)' model is not supported/gu,
+  screens: [],
 };
 
 export function codexLaunchSeen(at: { screen: string; model?: string }): LaunchSeen {

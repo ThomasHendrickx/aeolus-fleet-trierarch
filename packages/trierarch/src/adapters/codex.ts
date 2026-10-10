@@ -3,7 +3,7 @@ import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 import type { AdapterFlag, HarnessPort } from '../core/ports.js';
 import { codexLaunchSeen } from './codex-screen.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
-import { effectiveFlags } from './flags.js';
+import { effectiveFlags } from '../core/effective-flags.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
 import type { Tmux } from './tmux.js';
 

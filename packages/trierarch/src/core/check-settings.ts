@@ -1,5 +1,6 @@
 import { crewSettingsSchema, type CrewSettings, type ShipId, type TrierarchConfiguration } from '@aeolus-fleet/common';
 
+import { effectiveFlags } from './effective-flags.js';
 import type { TrierarchState } from './entry.js';
 import type { TrustedPlaces } from './ports.js';
 import { err, ok, type Result } from './shared/result.js';
@@ -32,6 +33,19 @@ export function trustRefusal(at: { harness: string; workspace: CrewSettings['wor
   return places.includes(name) ? undefined : { field, reason: `${harness} does not trust the ${kind} ${name}: add it with aeolus-trierarch init, which trusts it` };
 }
 
+/**
+ * Why a harness may not start a session with its flags: one of them waits on
+ * a one-time question it still asks, as Claude Code's bypass permissions
+ * (#403). Init is where the operator accepts it, so the reason says to do that.
+ */
+export function unacceptedRefusal(at: { harness: string; configuration: TrierarchConfiguration; options: Readonly<Record<string, string>>; trusted: TrustedPlaces }): Refusal | undefined {
+  const { harness, configuration, options, trusted } = at;
+  const settings = configuration.harnesses[harness];
+  const unaccepted = trusted[harness]?.unacceptedFlags ?? [];
+  const flag = settings === undefined ? undefined : effectiveFlags(settings, options).find((each) => unaccepted.includes(each));
+  return flag === undefined ? undefined : { field: 'harness', reason: `${harness} still asks to accept ${flag}: accept it with aeolus-trierarch init` };
+}
+
 /** The field an issue names, as `options.model`, when it names one. */
 function fieldOf(path: readonly PropertyKey[]): { field?: string } {
   return path.length === 0 ? {} : { field: path.map(String).join('.') };
@@ -41,7 +55,8 @@ function fieldOf(path: readonly PropertyKey[]): { field?: string } {
  * Checks a crew request's settings again before crewing (decision 0027):
  * the crew settings schema, then what this trierarch's configuration offers
  * (harness, repository or folder, each option and its value), that the
- * harness trusts the repository or folder (#381), and one folder per ship. The trierarch plugin checked them already; this machine's
+ * harness trusts the repository or folder (#381), and one folder per ship,
+ * and that no flag it launches with waits on a question (#403). The trierarch plugin checked them already; this machine's
  * configuration may have changed since.
  */
 export function checkSettings(raw: unknown, context: { shipId: ShipId; configuration: TrierarchConfiguration; state: TrierarchState; trusted: TrustedPlaces }): Result<CheckedSettings, Refusal> {
@@ -85,6 +100,10 @@ export function checkSettings(raw: unknown, context: { shipId: ShipId; configura
       return err({ field: `options.${name}`, reason: `${name} must be one of ${Object.keys(option.values).join(', ')}` });
     }
     options[name] = value;
+  }
+  const unaccepted = unacceptedRefusal({ harness: harnessName, configuration, options, trusted });
+  if (unaccepted !== undefined) {
+    return err(unaccepted);
   }
   return ok({ settings, harness: harnessName, options });
 }

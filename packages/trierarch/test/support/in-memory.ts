@@ -511,7 +511,13 @@ export class CollectingLogger {
 /** What each harness trusts, as Claude Code's and Codex's own files say: every configured place, until a test takes one away. */
 export class InMemoryTrust implements TrustPort {
   private readonly untrusted = new Set<string>();
+  private readonly unaccepted: { harness: string; flag: string }[] = [];
   constructor(private readonly configuration: TrierarchConfiguration) {}
+
+  /** The harness asks again about the flag, as before its question is accepted (#403). */
+  unaccept(harness: string, flag: string): void {
+    this.unaccepted.push({ harness, flag });
+  }
 
   untrust(harness: string, place: { kind: 'repository' | 'folder'; name: string }): void {
     this.untrusted.add(`${harness} ${place.kind} ${place.name}`);
@@ -523,7 +529,11 @@ export class InMemoryTrust implements TrustPort {
       Object.fromEntries(
         Object.keys(this.configuration.harnesses).map((harness) => [
           harness,
-          { repositories: Object.keys(this.configuration.repositories).filter(isTrusted(harness, 'repository')), folders: Object.keys(this.configuration.folders).filter(isTrusted(harness, 'folder')) },
+          {
+            repositories: Object.keys(this.configuration.repositories).filter(isTrusted(harness, 'repository')),
+            folders: Object.keys(this.configuration.folders).filter(isTrusted(harness, 'folder')),
+            unacceptedFlags: this.unaccepted.filter((each) => each.harness === harness).map((each) => each.flag),
+          },
         ]),
       ),
     );
