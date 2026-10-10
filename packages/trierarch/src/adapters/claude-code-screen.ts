@@ -7,12 +7,13 @@ import { launchSeenWith, type LaunchTexts } from './launch-screen.js';
  * captured from real sessions (test/screens). Its first-run screens (#403)
  * show on a machine where it never ran by hand, and each waits for a key.
  * It marks a tool call with ⏺ on macOS and with ● on Linux (#487), so any
- * single mark that is no letter, digit or space counts as that marker (#489).
+ * single mark that is no letter, digit or space counts as that marker (#489),
+ * except ❯, which marks the prompt it was given.
  */
 const CLAUDE_CODE_TEXTS: LaunchTexts = {
   // A tool call collapsed once done ("Ran 1 shell command", "Read 1 file", "Called aeolus"), under way ("⏺ Reading 1 file…"), or shown whole ("⏺ Bash(echo hi)").
   activity:
-    /^ {2}(?:Ran|Read|Wrote|Edited|Updated|Searched for|Listed|Fetched) \d+ |^ {2}Called \S+|^[^\s\p{L}\p{N}] (?:Running|Reading|Calling|Writing|Editing|Updating|Searching|Listing|Fetching) |^[^\s\p{L}\p{N}] [A-Za-z][\w-]*\(/mu,
+    /^ {2}(?:Ran|Read|Wrote|Edited|Updated|Searched for|Listed|Fetched) \d+ |^ {2}Called \S+|^[^\s\p{L}\p{N}❯] (?:Running|Reading|Calling|Writing|Editing|Updating|Searching|Listing|Fetching) |^[^\s\p{L}\p{N}❯] [A-Za-z][\w-]*\(/mu,
   refused: /There's an issue with the selected model \(([^()\s]+)\)/gu,
   screens: [
     { name: 'theme picker', text: /Choose the text style that looks best with your terminal/u },
