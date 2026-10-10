@@ -122,7 +122,7 @@ describe("Claude Code's files under CLAUDE_CONFIG_DIR, where Claude Code keeps t
   const configDirectory = () => join(home, 'claude-config');
 
   it('trusts a folder and completes the onboarding in .claude.json under CLAUDE_CONFIG_DIR, leaving ~/.claude.json alone', async () => {
-    const setup = createClaudeCodeSetup({ homeDirectory: home, configDirectory: configDirectory() });
+    const setup = createClaudeCodeSetup({ homeDirectory: home, configDirectory: configDirectory(), managedSettings: join(home, 'managed') });
 
     await setup.trust('/root');
     await setup.completeOnboarding();
@@ -132,7 +132,7 @@ describe("Claude Code's files under CLAUDE_CONFIG_DIR, where Claude Code keeps t
   });
 
   it('accepts bypass permissions mode in settings.json under CLAUDE_CONFIG_DIR, leaving ~/.claude/settings.json alone', async () => {
-    const setup = createClaudeCodeSetup({ homeDirectory: home, configDirectory: configDirectory() });
+    const setup = createClaudeCodeSetup({ homeDirectory: home, configDirectory: configDirectory(), managedSettings: join(home, 'managed') });
 
     await setup.acceptSkipPermissions();
 

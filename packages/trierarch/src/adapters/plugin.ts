@@ -14,15 +14,15 @@ function placesOf(at: { homeDirectory: string; env: Readonly<Record<string, stri
   if (at.harness === 'codex') {
     return { name: 'Codex', plugins: join(env.CODEX_HOME ?? join(homeDirectory, '.codex'), 'plugins'), root: env.AEOLUS_CODEX_PLUGIN_ROOT, data: env.AEOLUS_CODEX_PLUGIN_DATA, rootVariable: 'AEOLUS_CODEX_PLUGIN_ROOT' };
   }
-  return { name: 'Claude Code', plugins: join(homeDirectory, '.claude', 'plugins'), root: env.AEOLUS_PLUGIN_ROOT, data: env.AEOLUS_PLUGIN_DATA, rootVariable: 'AEOLUS_PLUGIN_ROOT' };
+  return { name: 'Claude Code', plugins: join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'plugins'), root: env.AEOLUS_PLUGIN_ROOT, data: env.AEOLUS_PLUGIN_DATA, rootVariable: 'AEOLUS_PLUGIN_ROOT' };
 }
 
 /**
  * Where a harness installed the aeolus plugin: the newest version in its
  * plugin cache and the plugin's data folder, unless variables name others
  * (AEOLUS_PLUGIN_ROOT and AEOLUS_PLUGIN_DATA for Claude Code,
- * AEOLUS_CODEX_PLUGIN_ROOT and AEOLUS_CODEX_PLUGIN_DATA for Codex, whose
- * folders follow CODEX_HOME as Codex does).
+ * AEOLUS_CODEX_PLUGIN_ROOT and AEOLUS_CODEX_PLUGIN_DATA for Codex). The
+ * folders follow CLAUDE_CONFIG_DIR and CODEX_HOME as the harnesses do.
  */
 export async function findAeolusPlugin(at: { homeDirectory: string; env: Readonly<Record<string, string | undefined>>; harness?: PluginHarness }): Promise<AeolusPlugin> {
   const places = placesOf({ ...at, harness: at.harness ?? 'claude-code' });

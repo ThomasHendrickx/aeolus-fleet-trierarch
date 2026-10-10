@@ -77,7 +77,7 @@ describe("each harness's trust, read from its own files (#381)", () => {
     writeFileSync(join(configDir, '.claude.json'), JSON.stringify({ projects: { [PAGASAE]: { hasTrustDialogAccepted: true } } }));
     writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ skipDangerousModePermissionPrompt: true }));
 
-    const trusted = await createTrust({ configuration, homeDirectory: home, env: { CLAUDE_CONFIG_DIR: configDir } }).trusted();
+    const trusted = await createTrust({ configuration, homeDirectory: home, env: { CLAUDE_CONFIG_DIR: configDir }, managedSettings: join(home, 'managed') }).trusted();
 
     expect(trusted['claude-code']).toEqual({ repositories: ['pagasae'], folders: [], unacceptedFlags: [] });
   });

@@ -17,7 +17,8 @@ import { TrierarchFileError } from './files.js';
  * as often as it is shown skips the second. The answers live in Claude Code's
  * own files, which this changes key by key, keeping everything else and the
  * file's mode. It reads the default permission mode its settings give a
- * folder, so a crewed session is never started in plan mode (#505, #507).
+ * folder, so a crewed session is never started in plan mode (#505, #507). Its
+ * files follow CLAUDE_CONFIG_DIR when it is set, as Claude Code's do (#474).
  */
 export interface ClaudeCodeSetup {
   trust(folder: string): Promise<void>;
@@ -118,14 +119,14 @@ async function writeJsonObject(path: string, value: JsonObject): Promise<void> {
 
 export function createClaudeCodeSetup(at: {
   homeDirectory: string;
-  /** Claude Code's configuration folder, CLAUDE_CONFIG_DIR when set, where it reads the user's settings; ~/.claude by default. */
+  /** Claude Code's configuration folder, CLAUDE_CONFIG_DIR when set, where it keeps the user's settings and .claude.json; ~/.claude by default, with .claude.json in the home folder. */
   configDirectory?: string;
   /** Where Claude Code reads its managed settings files: CLAUDE_CODE_MANAGED_SETTINGS on the machine, a folder of its own in a test. */
   managedSettings: string;
 }): ClaudeCodeSetup {
-  const state = join(at.homeDirectory, '.claude.json');
-  const settings = join(at.homeDirectory, '.claude', 'settings.json');
-  const userSettings = join(at.configDirectory ?? join(at.homeDirectory, '.claude'), 'settings.json');
+  // As Claude Code does: .claude.json in CLAUDE_CONFIG_DIR when it is set, else in the home folder beside ~/.claude (#474).
+  const state = join(at.configDirectory ?? at.homeDirectory, '.claude.json');
+  const settings = join(at.configDirectory ?? join(at.homeDirectory, '.claude'), 'settings.json');
   const projectsOf = (claude: JsonObject): JsonObject => jsonObjectSchema.safeParse(claude.projects).data ?? {};
   const fullscreenOfferSeen = (claude: JsonObject): number => z.number().safeParse(claude.fullscreenUpsellSeenCount).data ?? 0;
 
@@ -162,7 +163,7 @@ export function createClaudeCodeSetup(at: {
         return { kind: 'decided', mode: above };
       }
       const fileOf = (source: SettingSource): string | undefined =>
-        source === 'user' ? userSettings : folder === undefined ? undefined : join(folder, '.claude', source === 'local' ? 'settings.local.json' : 'settings.json');
+        source === 'user' ? settings : folder === undefined ? undefined : join(folder, '.claude', source === 'local' ? 'settings.local.json' : 'settings.json');
       for (const source of SETTING_SOURCES.filter((source) => sources.includes(source))) {
         const file = fileOf(source);
         if (file === undefined) {

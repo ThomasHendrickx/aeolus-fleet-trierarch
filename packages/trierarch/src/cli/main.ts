@@ -148,6 +148,8 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       exec: (program, args) => runCommand(program, { args }),
       now: () => new Date(),
     });
+  // Claude Code's files where Claude Code keeps them: under CLAUDE_CONFIG_DIR when it is set (#474).
+  const claudeCodeSetup = () => createClaudeCodeSetup({ homeDirectory, managedSettings: machine.managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) });
   const untilStopped = (): AbortSignal => {
     const stopping = new AbortController();
     process.once('SIGINT', () => {
@@ -200,7 +202,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
           flags: { ...(fleetUrl !== undefined && { fleetUrl }), ...(shipId !== undefined && { shipId }), ...(secret !== undefined && { secret }), isYes: switches.has('--yes') },
           prompter,
           fleetAt: (url) => createRestFleet({ fleetUrl: url, crewToken: '' }),
-          claudeCode: createClaudeCodeSetup({ homeDirectory, managedSettings: machine.managedSettings }),
+          claudeCode: claudeCodeSetup(),
           codex: createCodexSetup(),
           isCodexInstalled: (await runCommand('sh', { args: ['-c', 'command -v codex'] })).status === 0,
           service: serviceAt(),
@@ -217,11 +219,11 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       if ((kind !== 'repository' && kind !== 'folder') || name === undefined || path === undefined) {
         throw new TrierarchFileError('add takes repository or folder, a name and a path: aeolus-trierarch add repository pagasae ~/Projects/pagasae');
       }
-      const report = await addPlace({ kind, name, path, paths, homeDirectory, claudeCode: createClaudeCodeSetup({ homeDirectory, managedSettings: machine.managedSettings }), codex: createCodexSetup(), service: serviceAt(), running: () => readRunningFile(paths.running) });
+      const report = await addPlace({ kind, name, path, paths, homeDirectory, claudeCode: claudeCodeSetup(), codex: createCodexSetup(), service: serviceAt(), running: () => readRunningFile(paths.running) });
       return { data: report, text: report.said.join('\n') };
     },
     'config check': async () => {
-      const { text, ...data } = await configCheck(paths, { claudeCode: createClaudeCodeSetup({ homeDirectory, managedSettings: machine.managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) }) });
+      const { text, ...data } = await configCheck(paths, { claudeCode: claudeCodeSetup() });
       return { data, text };
     },
     detect: async () => {
