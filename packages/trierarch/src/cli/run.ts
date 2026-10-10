@@ -8,7 +8,7 @@ import { adapterFlagsOf, createHarnesses, riskyFlagsOf } from '../adapters/harne
 import { createJsonState } from '../adapters/json-state.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
-import { createTmux } from '../adapters/tmux.js';
+import { createTmux, sessionsLaunch } from '../adapters/tmux.js';
 import { createTrust } from '../adapters/trust.js';
 import { runningVersion } from '../adapters/version.js';
 import { createDetectHarnesses } from '../core/detect-harnesses.js';
@@ -48,7 +48,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const configuration = withDetectedOptions(configured, detected);
   // What the machine offers changes while it runs, as sessions refuse models (#382): each pass and report reads it afresh.
   let offered = { configuration, detected };
-  const tmux = createTmux();
+  const tmux = createTmux({ launch: sessionsLaunch({ platform: process.platform, env }) });
   const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, managedSettings, detected: () => offered.detected, sessions: tmux });
   const workspace = createGitWorkspace({ configuration, root: configuration.worktreeRoot ?? paths.worktrees });
   const state = createJsonState(paths.state);
