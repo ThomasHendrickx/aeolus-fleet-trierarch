@@ -3,12 +3,13 @@ import { idSchema, type ShipId, type TrierarchConfiguration } from '@aeolus-flee
 
 import type { ClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import type { CodexSetup } from '../adapters/codex-setup.js';
-import { configurationJsonSchema, initialConfiguration, loadConfiguration, readCrewFile, TrierarchFileError, writeCrewFile } from '../adapters/files.js';
+import { configurationJsonSchema, initialConfiguration, loadConfiguration, readCrewFile, TrierarchFileError, writeCrewFile, type RunningFile } from '../adapters/files.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
 import type { RestFleet } from '../adapters/rest-fleet.js';
 import type { Service } from '../adapters/service.js';
 import type { DetectHarnesses } from '../core/detect-harnesses.js';
 import { describeDetected } from './detect.js';
+import { NOT_SAID_YET, startNewProcess } from './new-process.js';
 import { absolutePath, nameRefusal, placeRefusal } from './places.js';
 import type { Prompter } from './prompter.js';
 
@@ -252,10 +253,18 @@ export async function initTrierarch(input: {
   /** Detects the configured harnesses' options (#365), once per harness version. */
   detect: DetectHarnesses;
   service: Pick<Service, 'install' | 'restart' | 'status'>;
+  /** What running.json says now: the started process writes it as it starts (#402). */
+  running: () => Promise<RunningFile | undefined>;
+  /** Waits between reads of running.json; a test passes one that does not wait. */
+  sleep?: (ms: number) => Promise<void>;
 }): Promise<InitReport> {
   const { homeDirectory, paths, flags, claudeCode, service, isCodexInstalled } = input;
   const prompter = flags.isYes ? defaultsOnly(input.prompter) : input.prompter;
   const said: string[] = [];
+  const startNew = async (start: () => Promise<void>, line: string): Promise<void> => {
+    const { hasSaidVersion } = await startNewProcess({ start, service, running: input.running, ...(input.sleep !== undefined && { sleep: input.sleep }) });
+    said.push(line, ...(hasSaidVersion ? [] : [NOT_SAID_YET]));
+  };
 
   // The ship: registered once per machine, never again.
   const crew = await readCrewFile(paths.crewToken).catch(() => undefined);
@@ -340,17 +349,15 @@ export async function initTrierarch(input: {
   const status = await service.status();
   if (!status.isInstalled) {
     if (await prompter.confirm('Install the service and start the trierarch now? It then starts again at every login.', { isDefault: true })) {
-      await service.install();
+      await startNew(() => service.install(), `The trierarch runs, and starts again at every login (${status.file}). See it with aeolus-trierarch status.`);
       serviced = 'installed';
-      said.push(`The trierarch runs, and starts again at every login (${status.file}). See it with aeolus-trierarch status.`);
     } else {
       serviced = 'notInstalled';
       said.push('Install and start it later with aeolus-trierarch install.');
     }
   } else if (configured !== 'kept' && (await prompter.confirm('Restart the trierarch so it reads the new configuration?', { isDefault: true }))) {
-    await service.restart();
+    await startNew(() => service.restart(), 'The trierarch restarted with the new configuration.');
     serviced = 'restarted';
-    said.push('The trierarch restarted with the new configuration.');
   }
 
   return {

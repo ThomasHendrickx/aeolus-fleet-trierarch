@@ -24,6 +24,7 @@ import { addPlace } from './add.js';
 import { initTrierarch } from './init.js';
 import { describeList, inspectList } from './list.js';
 import { followLog, tailLog } from './logs.js';
+import { NOT_SAID_YET, startNewProcess } from './new-process.js';
 import { createTerminalPrompter } from './prompter.js';
 import { runTrierarch } from './run.js';
 import { describeStatus, inspectStatus, leaseFrom } from './status.js';
@@ -194,6 +195,7 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
           codex: createCodexSetup(),
           isCodexInstalled: (await runCommand('sh', { args: ['-c', 'command -v codex'] })).status === 0,
           service: serviceAt(),
+          running: () => readRunningFile(paths.running),
           detect: detectAt(),
         });
         return { data: report, text: summaryOf(report.said, style) };
@@ -206,7 +208,7 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
       if ((kind !== 'repository' && kind !== 'folder') || name === undefined || path === undefined) {
         throw new TrierarchFileError('add takes repository or folder, a name and a path: aeolus-trierarch add repository pagasae ~/Projects/pagasae');
       }
-      const report = await addPlace({ kind, name, path, paths, homeDirectory, claudeCode: createClaudeCodeSetup({ homeDirectory }), codex: createCodexSetup(), service: serviceAt() });
+      const report = await addPlace({ kind, name, path, paths, homeDirectory, claudeCode: createClaudeCodeSetup({ homeDirectory }), codex: createCodexSetup(), service: serviceAt(), running: () => readRunningFile(paths.running) });
       return { data: report, text: report.said.join('\n') };
     },
     'config check': async () => {
@@ -271,9 +273,8 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
     },
     restart: async () => {
       const service = serviceAt();
-      await service.restart();
-      const status = await service.status();
-      return { data: status, text: describeService('restarted', status) };
+      const { status, hasSaidVersion } = await startNewProcess({ start: () => service.restart(), service, running: () => readRunningFile(paths.running) });
+      return { data: status, text: [describeService('restarted', status), ...(hasSaidVersion ? [] : [NOT_SAID_YET])].join(' ') };
     },
     install: async () => {
       const service = serviceAt();
