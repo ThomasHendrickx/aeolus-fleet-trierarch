@@ -55,7 +55,7 @@ function add(place: Pick<AddPlace, 'kind' | 'name' | 'path'>) {
     ...place,
     paths,
     homeDirectory: home,
-    claudeCode: createClaudeCodeSetup({ homeDirectory: home }),
+    claudeCode: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
     codex: {
       trust: (folders) => {
         if (isCodexFailing) {
@@ -80,7 +80,7 @@ function add(place: Pick<AddPlace, 'kind' | 'name' | 'path'>) {
   });
 }
 
-const isClaudeCodeTrusting = (path: string) => createClaudeCodeSetup({ homeDirectory: home }).isTrusted(path);
+const isClaudeCodeTrusting = (path: string) => createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).isTrusted(path);
 
 describe('aeolus-trierarch add (#381)', () => {
   it('adds a repository by name and path, trusts it for Claude Code, and restarts the service so the trierarch reads it, its sessions running on', async () => {

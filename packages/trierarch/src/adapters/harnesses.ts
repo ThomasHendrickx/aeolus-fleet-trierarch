@@ -74,9 +74,10 @@ export async function createHarnesses(at: {
   configuration: TrierarchConfiguration;
   homeDirectory: string;
   env: Readonly<Record<string, string | undefined>>;
+  managedSettings: string;
   sessions: Pick<Tmux, 'start' | 'type' | 'screen'>;
 }): Promise<{ harnesses: Record<string, HarnessPort>; plugins: Record<string, AeolusPlugin> }> {
-  const { configuration, homeDirectory, env, sessions } = at;
+  const { configuration, homeDirectory, env, managedSettings, sessions } = at;
   const harnesses: Record<string, HarnessPort> = {};
   const plugins: Record<string, AeolusPlugin> = {};
   for (const name of Object.keys(configuration.harnesses)) {
@@ -85,7 +86,7 @@ export async function createHarnesses(at: {
     }
     const plugin = await findAeolusPlugin({ homeDirectory, env, harness: name });
     plugins[name] = plugin;
-    harnesses[name] = name === 'codex' ? createCodexHarness({ configuration, plugin, sessions }) : createClaudeCodeHarness({ configuration, plugin, sessions, projects: join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects'), setup: createClaudeCodeSetup({ homeDirectory, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) }) });
+    harnesses[name] = name === 'codex' ? createCodexHarness({ configuration, plugin, sessions }) : createClaudeCodeHarness({ configuration, plugin, sessions, projects: join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects'), setup: createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) }) });
   }
   return { harnesses, plugins };
 }

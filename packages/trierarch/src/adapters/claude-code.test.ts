@@ -60,7 +60,7 @@ function harness() {
     configuration: CONFIGURATION,
     plugin: { root: PLUGIN_ROOT, data },
     projects,
-    setup: createClaudeCodeSetup({ homeDirectory: home }),
+    setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
     sessions: {
       start: (session) => {
         started.push(session);
@@ -150,7 +150,7 @@ describe('Claude Code as a harness', () => {
         configuration: { ...CONFIGURATION, harnesses: { 'claude-code': { flags, options: {} } } },
         plugin: { root: PLUGIN_ROOT, data },
         projects,
-        setup: createClaudeCodeSetup({ homeDirectory: home }),
+        setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
         sessions: {
           start: (session) => {
             started.push(session);
@@ -316,7 +316,7 @@ describe('Claude Code as a harness', () => {
         configuration: { ...CONFIGURATION, harnesses: { 'claude-code': { flags, options: {} } } },
         plugin: { root: PLUGIN_ROOT, data },
         projects,
-        setup: createClaudeCodeSetup({ homeDirectory: home }),
+        setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
         sessions: {
           start: (session) => {
             started.push(session);

@@ -47,8 +47,8 @@ export const SETTING_SOURCES: readonly SettingSource[] = ['local', 'project', 'u
 /** A default mode the settings decide, possibly none; or one the settings of each folder decide. */
 export type SettingsDefaultMode = { kind: 'decided'; mode: string | undefined } | { kind: 'per folder' };
 
-/** Where Claude Code reads its managed settings files on macOS and on Linux. */
-const MANAGED_SETTINGS = process.platform === 'darwin' ? '/Library/Application Support/ClaudeCode' : '/etc/claude-code';
+/** Where Claude Code reads its managed settings files on macOS and on Linux; only the command itself reads it, so no test reads the machine's own (#516). */
+export const CLAUDE_CODE_MANAGED_SETTINGS = process.platform === 'darwin' ? '/Library/Application Support/ClaudeCode' : '/etc/claude-code';
 
 const jsonObjectSchema = z.record(z.string(), z.unknown());
 type JsonObject = z.infer<typeof jsonObjectSchema>;
@@ -120,8 +120,8 @@ export function createClaudeCodeSetup(at: {
   homeDirectory: string;
   /** Claude Code's configuration folder, CLAUDE_CONFIG_DIR when set, where it reads the user's settings; ~/.claude by default. */
   configDirectory?: string;
-  /** Where Claude Code reads its managed settings files; the system's folder unless a test gives another. */
-  managedSettings?: string;
+  /** Where Claude Code reads its managed settings files: CLAUDE_CODE_MANAGED_SETTINGS on the machine, a folder of its own in a test. */
+  managedSettings: string;
 }): ClaudeCodeSetup {
   const state = join(at.homeDirectory, '.claude.json');
   const settings = join(at.homeDirectory, '.claude', 'settings.json');
@@ -157,7 +157,7 @@ export function createClaudeCodeSetup(at: {
       return claude.hasCompletedOnboarding === true && fullscreenOfferSeen(claude) >= FULLSCREEN_OFFER_SHOWN_MAX;
     },
     defaultPermissionMode: async ({ folder, settings: commandLine, sources }) => {
-      const above = (await managedDefaultMode(at.managedSettings ?? MANAGED_SETTINGS)) ?? (commandLine === undefined ? undefined : await commandLineDefaultMode(commandLine, folder));
+      const above = (await managedDefaultMode(at.managedSettings)) ?? (commandLine === undefined ? undefined : await commandLineDefaultMode(commandLine, folder));
       if (above !== undefined) {
         return { kind: 'decided', mode: above };
       }
