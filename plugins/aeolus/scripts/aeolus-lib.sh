@@ -153,6 +153,14 @@ aeolus_identity_get() {
   sed -n "s/^${field}=//p" "$file" | head -n 1
 }
 
+# The crew token the identity file holds now, or nothing once it is gone: the
+# folder may have been crewed again since a script read it.
+aeolus_identity_token() {
+  local file="$1"
+  [ -f "$file" ] || return 0
+  aeolus_identity_get "$file" crewToken
+}
+
 # The crew token as the bearer, a curl config line for `curl -K -` to read on
 # stdin: printf is a builtin, so the token reaches no command line, which any
 # process of the same user can read (ps). Prints nothing without a token.

@@ -7,7 +7,7 @@
 # Exit codes:
 #   0  deliveries wait: receive them
 #   2  this folder crews no ship
-#   3  LEASE_ENDED: the operator released the ship
+#   3  LEASE_ENDED: the operator released the ship, and the plugin forgot it
 #   4  a watcher already runs for this ship
 #   5  the fleet refused the crew token
 #   6  it ran for almost 2 hours, the most a background task runs: start it again
@@ -70,7 +70,19 @@ while :; do
       ;;
     401)
       if printf '%s' "$body" | grep -q 'LEASE_ENDED'; then
-        echo "aeolus: LEASE_ENDED: the operator released ${ship_name}; this session no longer crews it"
+        # Crewed again while it watched: watch on with the new crew token.
+        current="$(aeolus_identity_token "$identity")"
+        if [ -n "$current" ] && [ "$current" != "$crew_token" ]; then
+          fleet_url="$(aeolus_identity_get "$identity" fleetUrl)"
+          ship_name="$(aeolus_identity_get "$identity" shipName)"
+          crew_token="$current"
+          continue
+        fi
+        # The lease of the file's own crew token ended: forget the ship. The pid
+        # file goes first, so forgetting does not stop this watcher mid-sentence.
+        rm -f "$pid_file"
+        [ -n "$current" ] && "$(dirname "$0")/aeolus-identity.sh" delete >/dev/null
+        echo "aeolus: LEASE_ENDED: the operator released ${ship_name}; this session no longer crews it, and the plugin forgot it"
         exit 3
       fi
       : > "$refused_file"

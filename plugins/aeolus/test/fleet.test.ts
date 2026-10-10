@@ -14,6 +14,7 @@ import { startStubFleet, type StubAnswer, type StubFleet } from './stub-fleet.js
 
 const SCRIPTS = fileURLToPath(new URL('../scripts/', import.meta.url));
 const CREW_TOKEN = 'aeolus_ct_v1_kept_out_of_sight';
+const NEW_CREW_TOKEN = 'aeolus_ct_v1_of_the_new_crew';
 const SECRET = 'aeolus_sk_v1_from_the_crew_line';
 const SHIP_ID = 'shp_01m3tbfspe96yf1rnr4ank9h1a';
 const DELIVERY_ID = 'dlv_01m3tbfspe96yf1rnr4ank9h1b';
@@ -256,6 +257,39 @@ describe('aeolus-fleet calls', () => {
     expect(result.status).toBe(3);
     expect(result.stdout).toContain('LEASE_ENDED');
     expectNoToken(result);
+  });
+
+  it('forgets the ship on LEASE_ENDED with the crew token the identity file still holds', async () => {
+    fleet = await crewedAt([{ status: 401, body: { code: 'LEASE_ENDED', message: 'This ship was released' } }]);
+
+    const result = await run('aeolus-fleet.sh', { args: ['receive'] });
+
+    expect(result.stdout).toContain('the plugin forgot it');
+    expect(statSync(await identityFile(), { throwIfNoEntry: false })).toBeUndefined();
+  });
+
+  it('keeps the identity file, and calls again with its crew token, when the folder was crewed again during the call', async () => {
+    let answerLeaseEnded = (): void => undefined;
+    const held = new Promise<void>((resolve) => {
+      answerLeaseEnded = resolve;
+    });
+    fleet = await crewedAt([
+      { status: 401, body: { code: 'LEASE_ENDED', message: 'This ship was released' }, hold: held },
+      { status: 200, body: { deliveries: [] } },
+    ]);
+    const stub = fleet;
+    const call = run('aeolus-fleet.sh', { args: ['receive'] });
+    await expect.poll(() => stub.calls.length).toBe(1);
+    expect((await run('aeolus-identity.sh', { args: ['write', stub.url, SHIP_ID, 'scout', NEW_CREW_TOKEN] })).status).toBe(0);
+    answerLeaseEnded();
+
+    const result = await call;
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('{"deliveries":[]}\n');
+    expect(stub.calls[1]).toMatchObject({ path: '/api/v1/ship/receive', authorization: `Bearer ${NEW_CREW_TOKEN}` });
+    expect(readFileSync(await identityFile(), 'utf8')).toContain(`crewToken=${NEW_CREW_TOKEN}\n`);
+    expect(result.stdout).not.toContain(NEW_CREW_TOKEN);
   });
 
   it("says what the fleet refused, and exits 1, for any other refusal", async () => {

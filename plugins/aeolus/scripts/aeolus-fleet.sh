@@ -17,7 +17,8 @@
 #   0  done: the fleet's answer is printed
 #   1  the fleet refused: its code and message are printed
 #   2  this folder crews no ship, or the call is not one of these
-#   3  LEASE_ENDED: the operator released the ship
+#   3  LEASE_ENDED: the operator released the ship; the plugin forgot it when the
+#      identity file still held the crew token the call used
 #   4  register: this folder already crews a ship
 #   6  no answer from the fleet
 set -uo pipefail
@@ -46,12 +47,23 @@ call_fleet() {
   fi
 }
 
+lease_ended() {
+  [ "$status" = 401 ] && [ "$(aeolus_json_string "$body" code)" = LEASE_ENDED ]
+}
+
 # A refusal, as the fleet states it: LEASE_ENDED exits 3, any other 1.
+# LEASE_ENDED for the crew token the identity file still holds forgets the
+# ship; for another token it says nothing about the folder's crew now.
 refused() {
-  local call="$1" code
+  local call="$1" token="${2:-}" code
   code="$(aeolus_json_string "$body" code)"
   if [ "$code" = LEASE_ENDED ]; then
-    echo "aeolus: LEASE_ENDED: the operator released the ship; this session no longer crews it"
+    if [ -n "$token" ] && [ "$(aeolus_identity_token "$identity")" = "$token" ]; then
+      "$(dirname "$0")/aeolus-identity.sh" delete >/dev/null
+      echo "aeolus: LEASE_ENDED: the operator released the ship; this session no longer crews it, and the plugin forgot it"
+    else
+      echo "aeolus: LEASE_ENDED: the operator released the ship; this session no longer crews it"
+    fi
     exit 3
   fi
   echo "aeolus: the fleet refused ${call}: ${code:-HTTP ${status}}: $(aeolus_json_string "$body" message)"
@@ -166,6 +178,15 @@ if [ "$command" = send ] && [ -f "$model_file" ]; then
   fi
 fi
 
-call_fleet "$method" "/api/v1/ship/${command}" "$(aeolus_identity_get "$identity" crewToken)" "$input"
-[ "$status" = 200 ] || refused "$command"
+token="$(aeolus_identity_get "$identity" crewToken)"
+call_fleet "$method" "/api/v1/ship/${command}" "$token" "$input"
+# Crewed again during the call: the file holds a new crew token, so the call
+# is made once more with it.
+current="$(aeolus_identity_token "$identity")"
+if lease_ended && [ -n "$current" ] && [ "$current" != "$token" ]; then
+  token="$current"
+  fleet_url="$(aeolus_identity_get "$identity" fleetUrl)"
+  call_fleet "$method" "/api/v1/ship/${command}" "$token" "$input"
+fi
+[ "$status" = 200 ] || refused "$command" "$token"
 printf '%s\n' "$body"
