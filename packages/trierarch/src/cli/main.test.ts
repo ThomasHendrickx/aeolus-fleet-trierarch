@@ -340,6 +340,30 @@ describe('aeolus-trierarch with CLAUDE_CONFIG_DIR and CODEX_HOME set (#521)', ()
     standInPrograms();
   }
 
+  it("init answers Claude Code's questions in CLAUDE_CONFIG_DIR and its summary names the files it wrote there", async () => {
+    await aSetUpMachine({ isServiceInstalled: true });
+    const claudeJson = join(home, 'claude-config', '.claude.json');
+    const settings = join(home, 'claude-config', 'settings.json');
+
+    const { output, code } = await main(['init', '--yes'], machine(both()));
+
+    expect(code, output).toBe(0);
+    expect(json(claudeJson)).toMatchObject({ hasCompletedOnboarding: true });
+    expect(json(settings)).toMatchObject({ skipDangerousModePermissionPrompt: true });
+    expect(existsSync(join(home, '.claude.json')) || existsSync(join(home, '.claude', 'settings.json'))).toBe(false);
+    expect(output).toContain(`(hasCompletedOnboarding in ${claudeJson})`);
+    expect(output).toContain(`(skipDangerousModePermissionPrompt in ${settings})`);
+    expect(output).not.toContain('~/.claude');
+  });
+
+  it('init detects the default Codex model from config.toml in CODEX_HOME', async () => {
+    await aSetUpMachine({ isServiceInstalled: true });
+
+    const { output } = await main(['init', '--yes'], machine(both()));
+
+    expect(output).toContain('codex 0.160.1: model gpt-6.1-sol, gpt-6-luna (default);');
+  });
+
   it('add trusts a place in .claude.json under CLAUDE_CONFIG_DIR, leaving ~/.claude.json alone', async () => {
     await aSetUpMachine({ isServiceInstalled: false });
     const drafts = join(home, 'drafts');
