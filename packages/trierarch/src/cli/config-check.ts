@@ -3,7 +3,7 @@ import { createDetectedFile } from '../adapters/detected-file.js';
 import { loadConfiguration, TrierarchFileError } from '../adapters/files.js';
 import { describeFlags } from '../adapters/flags.js';
 import { effectiveFlags } from '../core/effective-flags.js';
-import { adapterFlagsOf, commandLinesOf } from '../adapters/harnesses.js';
+import { adapterFlagsOf, commandLinesOf, type HarnessFiles } from '../adapters/harnesses.js';
 import { modelOptionsIgnored, withDetectedOptions } from '../core/detected-options.js';
 import type { AdapterFlag } from '../core/ports.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
@@ -31,7 +31,7 @@ export interface ConfigCheckReport {
   readonly text: string;
 }
 
-export async function configCheck(paths: TrierarchPaths): Promise<ConfigCheckReport> {
+export async function configCheck(paths: TrierarchPaths, files: HarnessFiles): Promise<ConfigCheckReport> {
   const configured = await loadConfiguration(paths.config);
   const [withModel, ...more] = modelOptionsIgnored(configured);
   if (withModel !== undefined) {
@@ -44,18 +44,20 @@ export async function configCheck(paths: TrierarchPaths): Promise<ConfigCheckRep
   const configuration = withDetectedOptions(configured, await createDetectedFile(paths.detected).load());
   const adapterFlags = adapterFlagsOf(configuration);
   const harnesses = Object.fromEntries(
-    Object.entries(configuration.harnesses).map(([name, harness]) => {
-      const flags = effectiveFlags(harness, {});
-      return [
-        name,
-        {
-          flags,
-          options: Object.fromEntries(Object.entries(harness.options).map(([option, settings]) => [option, settings.values])),
-          adapterFlags: adapterFlags[name] ?? [],
-          ...commandLinesOf(name, flags),
-        },
-      ];
-    }),
+    await Promise.all(
+      Object.entries(configuration.harnesses).map(async ([name, harness]) => {
+        const flags = effectiveFlags(harness, {});
+        return [
+          name,
+          {
+            flags,
+            options: Object.fromEntries(Object.entries(harness.options).map(([option, settings]) => [option, settings.values])),
+            adapterFlags: adapterFlags[name] ?? [],
+            ...(await commandLinesOf({ harness: name, flags, files })),
+          },
+        ] as const;
+      }),
+    ),
   );
   const commands = Object.entries(harnesses).map(([name, harness]) =>
     harness.firstStart === undefined || harness.restart === undefined
