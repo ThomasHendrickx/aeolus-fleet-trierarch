@@ -7,7 +7,7 @@ import type { AdapterFlag, HarnessPort } from '../core/ports.js';
 import { claudeCodeLaunchSeen } from './claude-code-screen.js';
 import type { ClaudeCodeSetup } from './claude-code-setup.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
-import { effectiveFlags } from './flags.js';
+import { effectiveFlags } from '../core/effective-flags.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
 import type { Tmux } from './tmux.js';
 

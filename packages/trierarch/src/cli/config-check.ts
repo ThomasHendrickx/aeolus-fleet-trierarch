@@ -1,7 +1,8 @@
 import { describeCommandLine, type CommandPart } from '../adapters/command-line.js';
 import { createDetectedFile } from '../adapters/detected-file.js';
 import { loadConfiguration, TrierarchFileError } from '../adapters/files.js';
-import { describeFlags, effectiveFlags } from '../adapters/flags.js';
+import { describeFlags } from '../adapters/flags.js';
+import { effectiveFlags } from '../core/effective-flags.js';
 import { adapterFlagsOf, commandLinesOf } from '../adapters/harnesses.js';
 import { modelOptionsIgnored, withDetectedOptions } from '../core/detected-options.js';
 import type { AdapterFlag } from '../core/ports.js';
