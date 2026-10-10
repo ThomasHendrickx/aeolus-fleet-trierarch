@@ -871,6 +871,23 @@ describe('a final crew crewed again after a release elsewhere follows the restar
     ]);
   });
 
+  it('gives nothing back once its harness no longer trusts the repository, as the fleet holds its crew final while its status says crewing: its worktree stays and argo is told once (#477)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aReleasedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.trust.untrust('claude-code', { kind: 'repository', name: 'aeolus-fleet' });
+    trierarch.processes.restartMachine();
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.fleet.requestOf(shipId)).toMatchObject({ status: 'crewing', isFinal: true });
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'crewing', folder: SCOUT_FOLDER });
+    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
+      `scout (${shipId}): this trierarch cannot crew settings version 1: workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it`,
+    ]);
+  });
+
   it('still gives the request back when its crew was not final yet as it was released elsewhere', async () => {
     const trierarch = aTrierarch();
     const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' } });
