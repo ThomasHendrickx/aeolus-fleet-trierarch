@@ -93,7 +93,16 @@ describe('Claude Code as a harness', () => {
   it('starts claude with the first prompt on the first start, last and after -- so no flag takes it', async () => {
     await harness().launch({ ...launchOf(shipId), options: { model: 'sonnet' }, isFirstStart: true, firstPrompt: 'Review the open pull requests.' });
 
-    expect(started).toEqual([{ shipId, folder, command: ['claude', '--remote-control', '[aeolus-fleet] scout', '--model', 'claude-sonnet-5-5', '--', 'Review the open pull requests.'] }]);
+    expect(started).toEqual([{ shipId, folder, command: ['claude', '--remote-control', '[aeolus-fleet] scout', '--model', 'claude-sonnet-5-5', '--disallowedTools=AskUserQuestion', '--', 'Review the open pull requests.'] }]);
+  });
+
+  it('starts claude without AskUserQuestion on every start, so the crewed session asks its questions over the fleet, never in a form in a pane nobody watches (#457)', async () => {
+    aConversationIn(folder);
+
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true, firstPrompt: 'Review the open pull requests.' });
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false });
+
+    expect(started.map((session) => session.command.filter((word) => word.startsWith('--disallowedTools')))).toEqual([['--disallowedTools=AskUserQuestion'], ['--disallowedTools=AskUserQuestion']]);
   });
 
   it('passes a first prompt that starts with - after --, so it never reads as a flag', async () => {
@@ -113,13 +122,13 @@ describe('Claude Code as a harness', () => {
 
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false, firstPrompt: 'Review the open pull requests.' });
 
-    expect(started[0]?.command).toEqual(['claude', '--remote-control', '[aeolus-fleet] scout', '--model', 'claude-opus-5-5', '--continue', '--', '/aeolus:wake']);
+    expect(started[0]?.command).toEqual(['claude', '--remote-control', '[aeolus-fleet] scout', '--model', 'claude-opus-5-5', '--disallowedTools=AskUserQuestion', '--continue', '--', '/aeolus:wake']);
   });
 
   it('starts fresh on a restart when the folder has no conversation to continue, as claude --continue would exit at once (#381)', async () => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false });
 
-    expect(started[0]?.command).toEqual(['claude', '--remote-control', '[aeolus-fleet] scout', '--model', 'claude-opus-5-5', '--', '/aeolus:wake']);
+    expect(started[0]?.command).toEqual(['claude', '--remote-control', '[aeolus-fleet] scout', '--model', 'claude-opus-5-5', '--disallowedTools=AskUserQuestion', '--', '/aeolus:wake']);
   });
 
   it('continues on a restart only a conversation of its own folder, not one of another folder (#381)', async () => {
@@ -155,22 +164,27 @@ describe('Claude Code as a harness', () => {
     await withFlags(['--remote-control', 'mine', '--verbose']).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
     await withFlags(['--verbose']).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
 
-    expect(started.map((session) => session.command.slice(1, -2))).toEqual([['--remote-control', 'mine', '--verbose'], ['--verbose']]);
+    expect(started.map((session) => session.command.slice(1, -3))).toEqual([['--remote-control', 'mine', '--verbose'], ['--verbose']]);
   });
 
   it('tells the configured flags from the remote-control name and --continue on a restart, which the adapter adds', () => {
-    expect(CLAUDE_CODE_ADAPTER_FLAGS).toEqual([{ flag: '--continue', when: 'restart' }]);
+    expect(CLAUDE_CODE_ADAPTER_FLAGS).toEqual([
+      { flag: '--disallowedTools=AskUserQuestion', when: 'always' },
+      { flag: '--continue', when: 'restart' },
+    ]);
     expect(claudeCodeCommandLine({ flags: ['--remote-control', '--model', 'claude-opus-5-5'], sessionName: '[aeolus-fleet] scout', prompt: '/aeolus:wake', isFirstStart: false })).toEqual([
       { words: ['claude'] },
       { words: ['--remote-control'], source: 'configuration' },
       { words: ['[aeolus-fleet] scout'], source: 'adapter' },
       { words: ['--model', 'claude-opus-5-5'], source: 'configuration' },
+      { words: ['--disallowedTools=AskUserQuestion'], source: 'adapter' },
       { words: ['--continue'], source: 'adapter' },
       { words: ['--', '/aeolus:wake'] },
     ]);
     expect(claudeCodeCommandLine({ flags: ['--verbose'], sessionName: '[aeolus-fleet] scout', prompt: '<first prompt>', isFirstStart: true })).toEqual([
       { words: ['claude'] },
       { words: ['--verbose'], source: 'configuration' },
+      { words: ['--disallowedTools=AskUserQuestion'], source: 'adapter' },
       { words: ['--', '<first prompt>'] },
     ]);
   });

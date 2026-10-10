@@ -545,7 +545,10 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
   const setup = {
     configuration,
     version: '0.1.0',
-    adapterFlags: { 'claude-code': [{ flag: '--continue', when: 'restart' as const }], codex: [{ flag: '--no-daemon', when: 'always' as const }] },
+    adapterFlags: { 'claude-code': [
+      { flag: '--disallowedTools=AskUserQuestion', when: 'always' as const },
+      { flag: '--continue', when: 'restart' as const },
+    ], codex: [{ flag: '--no-daemon', when: 'always' as const }] },
     riskyFlags: { 'claude-code': ['--dangerously-skip-permissions'], codex: ['--dangerously-bypass-approvals-and-sandbox'] },
     machine: { os: 'macos' as const, arch: 'arm64' as const },
     detected,

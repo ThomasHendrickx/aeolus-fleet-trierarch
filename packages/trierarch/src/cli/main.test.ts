@@ -87,8 +87,8 @@ describe('aeolus-trierarch', () => {
 
     expect(output).toContain(
       [
-        '  first start: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) -- "<first prompt>"',
-        '  restart: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --continue (adapter) -- /aeolus:wake',
+        '  first start: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --disallowedTools=AskUserQuestion (adapter) -- "<first prompt>"',
+        '  restart: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --disallowedTools=AskUserQuestion (adapter) --continue (adapter) -- /aeolus:wake',
       ].join('\n'),
     );
     expect(output).toContain(
@@ -109,12 +109,16 @@ describe('aeolus-trierarch', () => {
       harnesses: {
         'claude-code': {
           flags: ['--remote-control', '--effort', 'high'],
-          adapterFlags: [{ flag: '--continue', when: 'restart' }],
+          adapterFlags: [
+            { flag: '--disallowedTools=AskUserQuestion', when: 'always' },
+            { flag: '--continue', when: 'restart' },
+          ],
           restart: [
             { words: ['claude'] },
             { words: ['--remote-control'], source: 'configuration' },
             { words: ['[<repository or folder>] <ship>'], source: 'adapter' },
             { words: ['--effort', 'high'], source: 'configuration' },
+            { words: ['--disallowedTools=AskUserQuestion'], source: 'adapter' },
             { words: ['--continue'], source: 'adapter' },
             { words: ['--', '/aeolus:wake'] },
           ],
