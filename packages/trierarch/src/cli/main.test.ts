@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 
+import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createJsonState } from '../adapters/json-state.js';
@@ -85,7 +86,7 @@ describe('aeolus-trierarch', () => {
     expect(output).toContain('claude-haiku-4-5-20251001');
   });
 
-  it('config check prints the command each harness launches, on a first start and a restart, with each flag marked as configured or added by the adapter', async () => {
+  it('config check prints the command each harness launches, on a first start and a restart, its prompt with the line no human reads the terminal (#588), with each flag marked as configured or added by the adapter', async () => {
     const config = join(home, 'both.json');
     writeFileSync(config, JSON.stringify({ ...CONFIGURED, harnesses: { ...CONFIGURED.harnesses, codex: { flags: ['--dangerously-bypass-approvals-and-sandbox'], options: {} } } }));
 
@@ -93,14 +94,14 @@ describe('aeolus-trierarch', () => {
 
     expect(output).toContain(
       [
-        '  first start: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --permission-mode default (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter) -- "<first prompt>"',
-        '  restart: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --permission-mode default (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter) --continue (adapter) -- /aeolus:wake',
+        `  first start: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --permission-mode default (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter) -- "<first prompt>\\n\\n${NO_TERMINAL_QUESTIONS}"`,
+        `  restart: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --permission-mode default (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter) --continue (adapter) -- "/aeolus:wake ${NO_TERMINAL_QUESTIONS}"`,
       ].join('\n'),
     );
     expect(output).toContain(
       [
-        '  first start: codex --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- "<first prompt>"',
-        '  restart: codex resume --last --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- $aeolus-wake',
+        `  first start: codex --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- "<first prompt>\\n\\n${NO_TERMINAL_QUESTIONS}"`,
+        `  restart: codex resume --last --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- "$aeolus-wake ${NO_TERMINAL_QUESTIONS}"`,
       ].join('\n'),
     );
   });
@@ -176,7 +177,7 @@ describe('aeolus-trierarch', () => {
             { words: ['--permission-mode', 'default'], source: 'adapter', when: 'the Claude Code settings for the folder make plan the default mode' },
             { words: ['--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode'], source: 'adapter' },
             { words: ['--continue'], source: 'adapter' },
-            { words: ['--', '/aeolus:wake'] },
+            { words: ['--', `/aeolus:wake ${NO_TERMINAL_QUESTIONS}`] },
           ],
         },
       },
