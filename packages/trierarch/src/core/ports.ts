@@ -186,6 +186,12 @@ export interface WorkspacePort {
   /** Makes the workspace, or finds the one a stop mid-crew left half made: its folder. */
   prepare(workspace: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace }): Promise<{ folder: string }>;
   isClean(folder: string): Promise<boolean>;
+  /**
+   * What removing the worktree would discard, one line each (#450): each change
+   * not committed, as git status shows it, then each commit no branch, tag or
+   * remote branch keeps. None when everything in it is kept elsewhere.
+   */
+  unsaved(folder: string): Promise<readonly string[]>;
   /** Removes a worktree the trierarch made; never a configured folder. */
   remove(folder: string): Promise<void>;
   worktrees(): Promise<readonly ObservedWorktree[]>;

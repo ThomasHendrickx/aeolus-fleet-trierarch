@@ -60,6 +60,11 @@ export function createGitWorkspace(options: { configuration: TrierarchConfigurat
       return { folder };
     },
     isClean: async (folder) => (await git(['-C', folder, 'status', '--porcelain'])).trim() === '',
+    unsaved: async (folder) => {
+      const changes = await git(['-C', folder, 'status', '--porcelain']);
+      const commits = await git(['-C', folder, 'log', '--format=commit %h %s', 'HEAD', '--not', '--branches', '--tags', '--remotes']);
+      return [...changes.split('\n'), ...commits.split('\n')].filter((line) => line !== '');
+    },
     remove: async (folder) => {
       const repository = repositoryOf(folder);
       if (repository === undefined) {

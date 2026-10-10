@@ -251,9 +251,9 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
 }
 
 /**
- * Its request was removed (row 7): the session stops, the lease ends
- * whatever the worktree holds, then the workspace; only then does the
- * trierarch confirm, and the request goes.
+ * Its request was removed (row 7): the session stops, the lease ends, then
+ * the workspace goes (#450); only then does the trierarch confirm, and the
+ * request goes.
  */
 async function release(state: TrierarchState, at: { shipId: Entry['shipId']; deps: RunPassDeps }): Promise<TrierarchState> {
   const { shipId, deps } = at;
@@ -265,12 +265,44 @@ async function release(state: TrierarchState, at: { shipId: Entry['shipId']; dep
   if ((await deps.fleet.ship(shipId)).kind === 'crewed') {
     await deps.fleet.release(shipId);
   }
-  const finished = await finishWorkspace(state, { entry, deps });
-  const next = removeEntry(finished.state, shipId);
+  const workspace = await releaseWorkspace({ entry, deps });
+  const next = removeEntry(state, shipId);
   await deps.state.save(next);
   await deps.fleet.confirmRelease(shipId);
-  log(deps, { ...about(state, { shipId, action: 'release' }), outcome: `released, ${describeWorkspace(entry, finished)}` });
+  log(deps, { ...about(state, { shipId, action: 'release' }), outcome: `released, ${workspace}` });
   return next;
+}
+
+/**
+ * The workspace of a released entry (row 7, #450): its identity goes, and a
+ * worktree the trierarch made is removed whatever it holds, so the next crew
+ * starts from a fresh one. What that discards is told to argo first, once per
+ * release; a failed remove tries again on the next pass. A configured folder
+ * is never removed. Answers what became of it, as the log line says it.
+ */
+async function releaseWorkspace(at: EntryAt): Promise<string> {
+  const { entry, deps } = at;
+  const { folder } = entry;
+  if (folder === undefined) {
+    return 'its worktree removed';
+  }
+  await harnessOf(entry, deps)?.removeIdentity(folder);
+  if (entry.workspace.kind === 'folder') {
+    return `its folder kept: ${folder}`;
+  }
+  const unsaved = await deps.workspace.unsaved(folder);
+  if (unsaved.length > 0) {
+    const machine = await deps.fleet.whoami();
+    await deps.fleet.reportToArgo({
+      text: `${machine.name}: released ${entry.shipName ?? entry.shipId} (${entry.shipId}) and removed its ${entry.workspace.repository} worktree, discarding what was not pushed: ${unsaved.join('; ')}`,
+      idempotencyKey: `trierarch:discarded:${entry.shipId}:${entry.since}`,
+    });
+  }
+  await deps.workspace.remove(folder);
+  if (unsaved.length === 0) {
+    return 'its worktree removed';
+  }
+  return `its worktree removed, discarding ${String(unsaved.length)} unpushed ${unsaved.length === 1 ? 'change' : 'changes'}, told to argo`;
 }
 
 /**
@@ -327,7 +359,7 @@ async function giveBack(state: TrierarchState, at: CarryOut & { action: Extract<
   let next = state;
   if (entry !== undefined) {
     await deps.processes.stop(shipId);
-    next = removeEntry((await finishWorkspace(state, { entry, deps })).state, shipId);
+    next = removeEntry(await finishWorkspace(state, { entry, deps }), shipId);
     await deps.state.save(next);
   }
   const machine = await deps.fleet.whoami();
@@ -376,35 +408,28 @@ async function refuse(state: TrierarchState, at: CarryOut & { action: Extract<Ac
 }
 
 /**
- * The workspace of an entry that ends: a worktree the trierarch made is
- * removed when clean, and kept and reported when not; a configured folder is
- * never removed. The identity goes either way.
+ * The workspace of an entry given back while its crew is not final: a
+ * worktree the trierarch made is removed when clean, and kept and reported
+ * when not; a configured folder is never removed. The identity goes either way.
  */
-async function finishWorkspace(state: TrierarchState, at: EntryAt): Promise<{ state: TrierarchState; workspace: 'removed' | 'kept'; path?: string }> {
+async function finishWorkspace(state: TrierarchState, at: EntryAt): Promise<TrierarchState> {
   const { entry, deps } = at;
   const { folder } = entry;
   if (folder === undefined) {
-    return { state, workspace: 'removed' };
+    return state;
   }
   await harnessOf(entry, deps)?.removeIdentity(folder);
   if (entry.workspace.kind === 'folder') {
-    return { state, workspace: 'kept', path: folder };
+    return state;
   }
   if (await deps.workspace.isClean(folder)) {
     await deps.workspace.remove(folder);
-    return { state, workspace: 'removed' };
+    return state;
   }
   deps.logger.warn(`Kept the worktree of ${entry.shipId}, which has changes: ${folder}`);
-  return { state: { ...state, kept: [...state.kept, { shipId: entry.shipId, repository: entry.workspace.repository, path: folder }] }, workspace: 'kept', path: folder };
+  return { ...state, kept: [...state.kept, { shipId: entry.shipId, repository: entry.workspace.repository, path: folder }] };
 }
 
-/** What became of an ended entry's workspace, as its log line says it. */
-function describeWorkspace(entry: Entry, finished: { workspace: 'removed' | 'kept'; path?: string }): string {
-  if (finished.workspace === 'removed') {
-    return 'its worktree removed';
-  }
-  return entry.workspace.kind === 'folder' ? `its folder kept: ${finished.path ?? ''}` : `its worktree kept with changes: ${finished.path ?? ''}`;
-}
 
 /**
  * The adapter of the entry's harness. Settings name only a harness the
