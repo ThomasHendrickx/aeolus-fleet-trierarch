@@ -77,6 +77,23 @@ describe('detecting Claude Code (#365)', () => {
     expect(detected?.options).toEqual({ model: modelOption(ALL_IDS), effort: EFFORT });
   });
 
+  it('reads the permission modes --help lists for --permission-mode, wrapped over several lines as Claude Code 2.1.296 prints them, and none when it lists none (#517)', async () => {
+    const help = [
+      HELP,
+      '  --permission-mode <mode>              Permission mode to use for the session',
+      '                                        (choices: "acceptEdits", "auto",',
+      '                                        "bypassPermissions", "manual",',
+      '                                        "dontAsk", "plan")',
+      '  --plugin-dir <path>                   Load plugins from a directory',
+    ].join('\n');
+
+    const detected = await aClaude({ help }).detector.detect({ version: '2.1.296', previous: undefined, now: NOW });
+    const withoutModes = await aClaude().detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
+
+    expect(detected?.permissionModes).toEqual(['acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan']);
+    expect(withoutModes).not.toHaveProperty('permissionModes');
+  });
+
   it('reads its version from --version', async () => {
     await expect(aClaude().detector.version()).resolves.toBe('2.1.293');
   });
