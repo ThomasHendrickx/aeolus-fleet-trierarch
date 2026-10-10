@@ -177,6 +177,99 @@ describe('Claude Code as a harness', () => {
     expect(await modeOf(['--permission-mode', 'plan'])).toEqual(['--permission-mode', 'default']);
   });
 
+  describe("never starts a crewed session in plan mode from any of Claude Code's settings sources, the one Claude Code takes winning (#507)", () => {
+    let managed: string;
+    let configDirectory: string;
+
+    beforeEach(() => {
+      managed = mkdtempSync(join(tmpdir(), 'trierarch-claude-managed-'));
+      configDirectory = mkdtempSync(join(tmpdir(), 'trierarch-claude-config-'));
+    });
+
+    afterEach(() => {
+      rmSync(managed, { recursive: true, force: true });
+      rmSync(configDirectory, { recursive: true, force: true });
+    });
+
+    const defaultModeIn = (settings: string, defaultMode: string) => {
+      mkdirSync(dirname(settings), { recursive: true });
+      writeFileSync(settings, JSON.stringify({ permissions: { defaultMode } }));
+    };
+    /** The words between claude and the adapter's own flags: the configured flags and the override, if any. */
+    const modeOf = async (flags: string[], at: { configDirectory?: string } = {}) => {
+      started = [];
+      await createClaudeCodeHarness({
+        configuration: { ...CONFIGURATION, harnesses: { 'claude-code': { flags, options: {} } } },
+        plugin: { root: PLUGIN_ROOT, data },
+        projects,
+        setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: managed, ...at }),
+        sessions: {
+          start: (session) => {
+            started.push(session);
+            return Promise.resolve();
+          },
+          type: () => Promise.resolve(),
+          screen: () => Promise.resolve(''),
+        },
+      }).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+      return started[0]?.command.slice(1, -3);
+    };
+
+    it("overrides a plan default mode in the managed settings, which win over the folder's", async () => {
+      defaultModeIn(join(folder, '.claude', 'settings.local.json'), 'acceptEdits');
+      defaultModeIn(join(managed, 'managed-settings.json'), 'plan');
+
+      expect(await modeOf([])).toEqual(['--permission-mode', 'default']);
+    });
+
+    it('takes the managed drop-ins after managed-settings.json, in alphabetical order, the last one winning', async () => {
+      defaultModeIn(join(folder, '.claude', 'settings.json'), 'plan');
+      defaultModeIn(join(managed, 'managed-settings.json'), 'plan');
+      defaultModeIn(join(managed, 'managed-settings.d', '20-edits.json'), 'acceptEdits');
+      defaultModeIn(join(managed, 'managed-settings.d', '10-plan.json'), 'plan');
+      expect(await modeOf([])).toEqual([]);
+
+      defaultModeIn(join(managed, 'managed-settings.d', '30-plan.json'), 'plan');
+      expect(await modeOf([])).toEqual(['--permission-mode', 'default']);
+    });
+
+    it("overrides a plan default mode given with --settings as JSON or as a file, relative to the folder, which wins over the folder's settings", async () => {
+      defaultModeIn(join(folder, '.claude', 'settings.local.json'), 'acceptEdits');
+      defaultModeIn(join(folder, 'crew-settings.json'), 'plan');
+      const inline = JSON.stringify({ permissions: { defaultMode: 'plan' } });
+
+      expect(await modeOf(['--settings', inline])).toEqual(['--settings', inline, '--permission-mode', 'default']);
+      expect(await modeOf([`--settings=${inline}`])).toEqual([`--settings=${inline}`, '--permission-mode', 'default']);
+      expect(await modeOf(['--settings', 'crew-settings.json'])).toEqual(['--settings', 'crew-settings.json', '--permission-mode', 'default']);
+    });
+
+    it('keeps a default mode the managed settings give over a plan in --settings', async () => {
+      defaultModeIn(join(managed, 'managed-settings.json'), 'acceptEdits');
+      const inline = JSON.stringify({ permissions: { defaultMode: 'plan' } });
+
+      expect(await modeOf(['--settings', inline])).toEqual(['--settings', inline]);
+    });
+
+    it("reads the user's settings from CLAUDE_CONFIG_DIR when it is set, as Claude Code does", async () => {
+      defaultModeIn(join(configDirectory, 'settings.json'), 'plan');
+      defaultModeIn(join(home, '.claude', 'settings.json'), 'acceptEdits');
+
+      expect(await modeOf([], { configDirectory })).toEqual(['--permission-mode', 'default']);
+    });
+
+    it('leaves out the settings sources Claude Code does not load: those --setting-sources leaves out, and the user, project and local settings with --restricted', async () => {
+      defaultModeIn(join(folder, '.claude', 'settings.json'), 'acceptEdits');
+      defaultModeIn(join(home, '.claude', 'settings.json'), 'plan');
+      expect(await modeOf(['--setting-sources', 'user'])).toEqual(['--setting-sources', 'user', '--permission-mode', 'default']);
+      expect(await modeOf(['--setting-sources=user,local'])).toEqual(['--setting-sources=user,local', '--permission-mode', 'default']);
+      expect(await modeOf(['--setting-sources', 'user,project'])).toEqual(['--setting-sources', 'user,project']);
+
+      defaultModeIn(join(home, '.claude', 'settings.json'), 'acceptEdits');
+      defaultModeIn(join(folder, '.claude', 'settings.json'), 'plan');
+      expect(await modeOf(['--restricted'])).toEqual(['--restricted']);
+    });
+  });
+
   it('passes a first prompt that starts with - after --, so it never reads as a flag', async () => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true, firstPrompt: '--dangerously-skip-permissions' });
 
