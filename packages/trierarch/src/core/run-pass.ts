@@ -68,7 +68,7 @@ export function createRunPass(deps: RunPassDeps): RunPass {
  * What runs: the sessions, the worktrees under the root, and for each entry
  * whose session runs (or should, after a restart of the machine) its inbox and
  * turn. An inbox is watched only while its session runs, so last seen still
- * means the session is alive.
+ * means the session is alive; a crewing one from the moment its session runs (#473).
  */
 async function observe(state: TrierarchState, deps: RunPassDeps): Promise<Observed> {
   const sessions = await deps.processes.list();
@@ -84,7 +84,8 @@ async function observe(state: TrierarchState, deps: RunPassDeps): Promise<Observ
       const model = entry.options[MODEL_OPTION];
       launches[entry.shipId] = await harness.launchSeen({ shipId: entry.shipId, ...(model !== undefined && { model }) });
     }
-    if (entry.state !== 'running' || folder === undefined || session?.status === 'exited') {
+    const isWatched = entry.state === 'running' || (entry.state === 'crewing' && session !== undefined);
+    if (!isWatched || folder === undefined || session?.status === 'exited') {
       continue;
     }
     const crewToken = await harness?.crewTokenOf(folder);
