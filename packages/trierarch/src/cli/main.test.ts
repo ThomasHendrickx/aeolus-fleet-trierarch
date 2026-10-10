@@ -20,7 +20,8 @@ const CONFIGURED = {
 let home: string;
 
 /** The machine a test runs main on: its environment, and a managed settings folder of the test's own, so no test reads the machine's (#516). */
-const machine = (env: Readonly<Record<string, string | undefined>>) => ({ env, managedSettings: join(home, 'managed') });
+/** The machine main runs on: Linux unless a test names another platform, and its managed settings in the test's own folder. */
+const machine = (env: Readonly<Record<string, string | undefined>>, platform = 'linux') => ({ env, managedSettings: join(home, 'managed'), platform });
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'trierarch-main-'));
@@ -256,14 +257,14 @@ describe('aeolus-trierarch', () => {
     });
   });
 
-  it('logs renders the log for the operator, and gives its records with --json', async () => {
+  it('logs renders the log the launchd agent writes for the operator, and gives its records with --json', async () => {
     const logs = join(home, '.aeolus', 'trierarch', 'logs');
     mkdirSync(logs, { recursive: true });
     const record = { time: '2026-10-06T15:00:00.000Z', shipId: 'shp_01m487vd5pdz6zh6s0jdnkg9p6', shipName: 'scout', action: 'wake', outcome: 'woken, deliveries wait' };
     writeFileSync(join(logs, 'trierarch.log'), `${JSON.stringify(record)}\nan older line\n`);
 
-    const text = await main(['logs'], machine({ HOME: home }));
-    const json = await main(['logs', '--json'], machine({ HOME: home }));
+    const text = await main(['logs'], machine({ HOME: home }, 'darwin'));
+    const json = await main(['logs', '--json'], machine({ HOME: home }, 'darwin'));
 
     expect(text.output).toBe('2026-10-06T15:00:00.000Z shp_01m487vd5pdz6zh6s0jdnkg9p6 (scout) wake: woken, deliveries wait\nan older line');
     expect(JSON.parse(json.output)).toEqual({ file: join(logs, 'trierarch.log'), lines: [record, { line: 'an older line' }] });
