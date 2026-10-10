@@ -121,7 +121,7 @@ describe('aeolus-trierarch', () => {
     mkdirSync(managedSettings);
     writeFileSync(join(managedSettings, 'managed-settings.json'), JSON.stringify({ permissions: { defaultMode: 'plan' } }));
 
-    const { output } = await main(['config', 'check', '--config', config], { env: { HOME: home }, managedSettings });
+    const { output } = await main(['config', 'check', '--config', config], { env: { HOME: home }, managedSettings, platform: 'linux' });
 
     expect(output).toContain('  first start: claude --permission-mode default (adapter) --disallowedTools');
   });
