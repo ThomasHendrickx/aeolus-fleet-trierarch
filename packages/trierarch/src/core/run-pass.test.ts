@@ -867,6 +867,56 @@ describe('a final crew crewed again after a release elsewhere follows the restar
   });
 });
 
+describe('a session is watched and woken from the moment it runs, whatever the crew status (#473)', () => {
+  it('wakes a ship crewed again after a release elsewhere before its session shows activity', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aReleasedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.fleet.deliver(shipId, 1);
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]?.state).toBe('crewing');
+    expect(trierarch.harness.wakes).toEqual([shipId]);
+  });
+
+  it('wakes a first crew before its session shows activity', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.fleet.deliver(shipId, 1);
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]?.state).toBe('crewing');
+    expect(trierarch.harness.wakes).toEqual([shipId]);
+  });
+
+  it('wakes a session in the pass its activity makes its crew final', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aReleasedShip(trierarch, { seen: { kind: 'active' } });
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.fleet.deliver(shipId, 1);
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]?.state).toBe('running');
+    expect(trierarch.harness.wakes).toEqual([shipId]);
+  });
+
+  it('wakes a crewing session no more once its start failed', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aReleasedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.fleet.deliver(shipId, 1);
+    trierarch.clock.advance(MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.wakes).toEqual([]);
+  });
+});
+
 describe('the gaps the loop closes (docs/trierarch.md)', () => {
   it('rule 2: a session of the trierarch with no assigned request is stopped', async () => {
     const trierarch = aTrierarch();
