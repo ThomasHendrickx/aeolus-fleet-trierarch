@@ -148,7 +148,7 @@ async function aTrierarchOnTheFleet(claudeCodeFlags: readonly string[] = CONFIGU
     flags: { fleetUrl: address, shipId: trierarchShip.shipId, secret: secretOf(trierarchShip.secret), isYes: true },
     prompter: quiet,
     fleetAt: (fleetUrl) => createRestFleet({ fleetUrl, crewToken: '' }),
-    claudeCode: createClaudeCodeSetup({ homeDirectory: home }),
+    claudeCode: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
     codex: { trust: () => Promise.reject(new Error('no Codex here')), trustAeolusHooks: () => Promise.reject(new Error('no Codex here')) },
     isCodexInstalled: false,
     service,
@@ -157,13 +157,13 @@ async function aTrierarchOnTheFleet(claudeCodeFlags: readonly string[] = CONFIGU
   });
   const fleet = createRestFleet(await readCrewFile(paths.crewToken));
   const sessions = standInSessions();
-  const harness = createClaudeCodeHarness({ configuration, plugin: { root: PLUGIN_ROOT, data: pluginData }, projects: join(home, '.claude', 'projects'), sessions, setup: createClaudeCodeSetup({ homeDirectory: home }) });
+  const harness = createClaudeCodeHarness({ configuration, plugin: { root: PLUGIN_ROOT, data: pluginData }, projects: join(home, '.claude', 'projects'), sessions, setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }) });
   const workspace = createGitWorkspace({ configuration, root: paths.worktrees });
   const state = createJsonState(paths.state);
   const clock = { now: () => new Date() };
   const logger = { warn: () => undefined, action: () => undefined };
   const setup = { configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
-  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {} }), state, setup, clock, logger, refuseModel: () => Promise.resolve() });
+  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }), state, setup, clock, logger, refuseModel: () => Promise.resolve() });
   const leasesOf = (shipId: ShipId) => database.lease.count({ where: { shipId, endedAt: null } });
   const worktree = join(paths.worktrees, 'aeolus-fleet', 'scout');
 

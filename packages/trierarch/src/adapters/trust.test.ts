@@ -42,7 +42,7 @@ describe("each harness's trust, read from its own files (#381)", () => {
   it("answers the repositories and folders Claude Code trusts, by name, from ~/.claude.json", async () => {
     claudeJson({ [AEOLUS_FLEET]: { hasTrustDialogAccepted: true }, [PAGASAE]: { hasTrustDialogAccepted: false }, [NOTES]: { hasTrustDialogAccepted: true } });
 
-    const trusted = await createTrust({ configuration: { ...configuration, harnesses: { 'claude-code': { flags: [], options: {} } } }, homeDirectory: home, env: {} }).trusted();
+    const trusted = await createTrust({ configuration: { ...configuration, harnesses: { 'claude-code': { flags: [], options: {} } } }, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }).trusted();
 
     expect(trusted).toEqual({ 'claude-code': { repositories: ['aeolus-fleet'], folders: ['notes'], unacceptedFlags: [SKIP] } });
   });
@@ -66,7 +66,7 @@ describe("each harness's trust, read from its own files (#381)", () => {
     );
     claudeJson({});
 
-    const trusted = await createTrust({ configuration, homeDirectory: home, env: {} }).trusted();
+    const trusted = await createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }).trusted();
 
     expect(trusted).toEqual({ 'claude-code': { repositories: [], folders: [], unacceptedFlags: [SKIP] }, codex: { repositories: ['aeolus-fleet'], folders: ['notes'], unacceptedFlags: [] } });
   });
@@ -75,7 +75,7 @@ describe("each harness's trust, read from its own files (#381)", () => {
     const codexHome = join(home, 'codex-home');
     codexToml(codexHome, `[projects."${PAGASAE}"]\ntrust_level = "trusted"\n`);
 
-    const trusted = await createTrust({ configuration, homeDirectory: home, env: { CODEX_HOME: codexHome } }).trusted();
+    const trusted = await createTrust({ configuration, homeDirectory: home, env: { CODEX_HOME: codexHome }, managedSettings: join(home, 'managed') }).trusted();
 
     expect(trusted.codex).toEqual({ repositories: ['pagasae'], folders: [], unacceptedFlags: [] });
   });
@@ -84,13 +84,13 @@ describe("each harness's trust, read from its own files (#381)", () => {
     mkdirSync(join(home, '.claude'));
     writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ skipDangerousModePermissionPrompt: true }));
 
-    const trusted = await createTrust({ configuration, homeDirectory: home, env: {} }).trusted();
+    const trusted = await createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }).trusted();
 
     expect(trusted['claude-code']?.unacceptedFlags).toEqual([]);
   });
 
   it('trusts nothing where a harness has no files yet', async () => {
-    const trusted = await createTrust({ configuration, homeDirectory: home, env: {} }).trusted();
+    const trusted = await createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }).trusted();
 
     expect(trusted).toEqual({ 'claude-code': { repositories: [], folders: [], unacceptedFlags: [SKIP] }, codex: { repositories: [], folders: [], unacceptedFlags: [] } });
   });

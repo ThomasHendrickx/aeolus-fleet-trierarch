@@ -14,9 +14,9 @@ import { codexTrustedFolders } from './codex-setup.js';
  * permissions mode is accepted in its settings (#403); Codex asks about no
  * flag.
  */
-export function createTrust(at: { configuration: TrierarchConfiguration; homeDirectory: string; env: Readonly<Record<string, string | undefined>> }): TrustPort {
-  const { configuration, homeDirectory, env } = at;
-  const claudeCode = createClaudeCodeSetup({ homeDirectory });
+export function createTrust(at: { configuration: TrierarchConfiguration; homeDirectory: string; env: Readonly<Record<string, string | undefined>>; managedSettings: string }): TrustPort {
+  const { configuration, homeDirectory, env, managedSettings } = at;
+  const claudeCode = createClaudeCodeSetup({ homeDirectory, managedSettings });
   const readers: Readonly<Record<string, (() => Promise<ReadonlySet<string>>) | undefined>> = {
     'claude-code': () => claudeCode.trustedFolders(),
     codex: () => codexTrustedFolders({ homeDirectory, env }),

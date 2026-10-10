@@ -30,8 +30,8 @@ export const PASS_INTERVAL_MS = 5000;
  * until it is told to stop. A failure is logged and the loop goes on: the next
  * pass starts from the saved state.
  */
-export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory: string; env: Readonly<Record<string, string | undefined>>; signal: AbortSignal; logger: Logger & { info(message: string): void } }): Promise<void> {
-  const { paths, homeDirectory, env, signal, logger } = input;
+export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory: string; env: Readonly<Record<string, string | undefined>>; managedSettings: string; signal: AbortSignal; logger: Logger & { info(message: string): void } }): Promise<void> {
+  const { paths, homeDirectory, env, managedSettings, signal, logger } = input;
   const configured = await loadConfiguration(paths.config);
   const crew = await readCrewFile(paths.crewToken);
   const fleet = createRestFleet(crew);
@@ -49,10 +49,10 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   // What the machine offers changes while it runs, as sessions refuse models (#382): each pass and report reads it afresh.
   let offered = { configuration, detected };
   const tmux = createTmux();
-  const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, sessions: tmux });
+  const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, managedSettings, sessions: tmux });
   const workspace = createGitWorkspace({ configuration, root: configuration.worktreeRoot ?? paths.worktrees });
   const state = createJsonState(paths.state);
-  const trust = createTrust({ configuration, homeDirectory, env });
+  const trust = createTrust({ configuration, homeDirectory, env, managedSettings });
   const clock = { now: () => new Date() };
   const setup: TrierarchSetup = {
     get configuration() {

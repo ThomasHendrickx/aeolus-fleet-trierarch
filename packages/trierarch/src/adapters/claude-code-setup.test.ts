@@ -24,7 +24,7 @@ describe("Claude Code's one-time questions, answered ahead", () => {
   it('trusts a folder, so Claude Code asks nothing there or in any folder under it, keeping everything else in ~/.claude.json and its mode', async () => {
     writeFileSync(claudeJson(), JSON.stringify({ numStartups: 7, projects: { '/elsewhere': { hasTrustDialogAccepted: false, history: [] } } }), { mode: 0o600 });
 
-    await createClaudeCodeSetup({ homeDirectory: home }).trust('/Users/thomas/.aeolus/trierarch/worktrees');
+    await createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).trust('/Users/thomas/.aeolus/trierarch/worktrees');
 
     expect(read(claudeJson())).toEqual({
       numStartups: 7,
@@ -39,20 +39,20 @@ describe("Claude Code's one-time questions, answered ahead", () => {
   it('keeps what Claude Code holds about a folder it trusts', async () => {
     writeFileSync(claudeJson(), JSON.stringify({ projects: { '/root': { allowedTools: ['Bash'] } } }));
 
-    await createClaudeCodeSetup({ homeDirectory: home }).trust('/root');
+    await createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).trust('/root');
 
     expect(read(claudeJson())).toEqual({ projects: { '/root': { allowedTools: ['Bash'], hasTrustDialogAccepted: true } } });
   });
 
   it('writes ~/.claude.json, readable by its user only, when there is none yet', async () => {
-    await createClaudeCodeSetup({ homeDirectory: home }).trust('/root');
+    await createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).trust('/root');
 
     expect(read(claudeJson())).toEqual({ projects: { '/root': { hasTrustDialogAccepted: true } } });
     expect(statSync(claudeJson()).mode & 0o777).toBe(0o600);
   });
 
   it('says whether a folder is trusted', async () => {
-    const setup = createClaudeCodeSetup({ homeDirectory: home });
+    const setup = createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') });
     await expect(setup.isTrusted('/root')).resolves.toBe(false);
 
     await setup.trust('/root');
@@ -63,14 +63,14 @@ describe("Claude Code's one-time questions, answered ahead", () => {
   it('refuses to touch a ~/.claude.json that is no JSON', async () => {
     writeFileSync(claudeJson(), '{ broken');
 
-    await expect(createClaudeCodeSetup({ homeDirectory: home }).trust('/root')).rejects.toThrow(`${claudeJson()} is no JSON`);
+    await expect(createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).trust('/root')).rejects.toThrow(`${claudeJson()} is no JSON`);
     expect(readFileSync(claudeJson(), 'utf8')).toBe('{ broken');
   });
 
   it('accepts bypass permissions mode once for the user, keeping the other settings', async () => {
     mkdirSync(join(home, '.claude'));
     writeFileSync(settingsJson(), JSON.stringify({ model: 'opus', permissions: { defaultMode: 'auto' } }));
-    const setup = createClaudeCodeSetup({ homeDirectory: home });
+    const setup = createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') });
     await expect(setup.isSkipPermissionsAccepted()).resolves.toBe(false);
 
     await setup.acceptSkipPermissions();
@@ -80,14 +80,14 @@ describe("Claude Code's one-time questions, answered ahead", () => {
   });
 
   it('accepts bypass permissions mode when there are no settings yet', async () => {
-    await createClaudeCodeSetup({ homeDirectory: home }).acceptSkipPermissions();
+    await createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).acceptSkipPermissions();
 
     expect(read(settingsJson())).toEqual({ skipDangerousModePermissionPrompt: true });
   });
 
   it('completes the onboarding, so a fresh machine shows no first-run screen, keeping everything else in ~/.claude.json and its mode', async () => {
     writeFileSync(claudeJson(), JSON.stringify({ numStartups: 7, projects: { '/root': { hasTrustDialogAccepted: true } } }), { mode: 0o600 });
-    const setup = createClaudeCodeSetup({ homeDirectory: home });
+    const setup = createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') });
     await expect(setup.isOnboardingComplete()).resolves.toBe(false);
 
     await setup.completeOnboarding();
@@ -98,7 +98,7 @@ describe("Claude Code's one-time questions, answered ahead", () => {
   });
 
   it('completes the onboarding when there is no ~/.claude.json yet', async () => {
-    await createClaudeCodeSetup({ homeDirectory: home }).completeOnboarding();
+    await createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).completeOnboarding();
 
     expect(read(claudeJson())).toEqual({ hasCompletedOnboarding: true, fullscreenUpsellSeenCount: 3 });
   });
@@ -106,7 +106,7 @@ describe("Claude Code's one-time questions, answered ahead", () => {
   it('keeps a fullscreen renderer offer seen more often than it is shown', async () => {
     writeFileSync(claudeJson(), JSON.stringify({ hasCompletedOnboarding: true, fullscreenUpsellSeenCount: 5 }));
 
-    await createClaudeCodeSetup({ homeDirectory: home }).completeOnboarding();
+    await createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).completeOnboarding();
 
     expect(read(claudeJson())).toEqual({ hasCompletedOnboarding: true, fullscreenUpsellSeenCount: 5 });
   });
@@ -114,6 +114,6 @@ describe("Claude Code's one-time questions, answered ahead", () => {
   it('sees the onboarding incomplete while the fullscreen renderer offer would still show', async () => {
     writeFileSync(claudeJson(), JSON.stringify({ hasCompletedOnboarding: true, fullscreenUpsellSeenCount: 2 }));
 
-    await expect(createClaudeCodeSetup({ homeDirectory: home }).isOnboardingComplete()).resolves.toBe(false);
+    await expect(createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).isOnboardingComplete()).resolves.toBe(false);
   });
 });

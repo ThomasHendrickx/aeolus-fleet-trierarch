@@ -111,8 +111,15 @@ function summaryOf(said: readonly string[], style: Style): string {
   return [`\n${style.tone('strong', 'Summary')}`, ...said.map((line) => `  ${line}`)].join('\n');
 }
 
+/** What a command line reads of the machine: its environment, and where Claude Code's managed settings live, a folder of its own in a test (#516). */
+export interface Machine {
+  env: Readonly<Record<string, string | undefined>>;
+  managedSettings: string;
+}
+
 /** Runs one command line of `aeolus-trierarch`. */
-export async function main(argv: readonly string[], env: Readonly<Record<string, string | undefined>> = process.env): Promise<Outcome> {
+export async function main(argv: readonly string[], machine: Machine): Promise<Outcome> {
+  const { env } = machine;
   const parsed = parse(argv);
   if (parsed === undefined) {
     return { output: USAGE, code: 2 };
@@ -193,7 +200,7 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
           flags: { ...(fleetUrl !== undefined && { fleetUrl }), ...(shipId !== undefined && { shipId }), ...(secret !== undefined && { secret }), isYes: switches.has('--yes') },
           prompter,
           fleetAt: (url) => createRestFleet({ fleetUrl: url, crewToken: '' }),
-          claudeCode: createClaudeCodeSetup({ homeDirectory }),
+          claudeCode: createClaudeCodeSetup({ homeDirectory, managedSettings: machine.managedSettings }),
           codex: createCodexSetup(),
           isCodexInstalled: (await runCommand('sh', { args: ['-c', 'command -v codex'] })).status === 0,
           service: serviceAt(),
@@ -210,11 +217,11 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
       if ((kind !== 'repository' && kind !== 'folder') || name === undefined || path === undefined) {
         throw new TrierarchFileError('add takes repository or folder, a name and a path: aeolus-trierarch add repository pagasae ~/Projects/pagasae');
       }
-      const report = await addPlace({ kind, name, path, paths, homeDirectory, claudeCode: createClaudeCodeSetup({ homeDirectory }), codex: createCodexSetup(), service: serviceAt(), running: () => readRunningFile(paths.running) });
+      const report = await addPlace({ kind, name, path, paths, homeDirectory, claudeCode: createClaudeCodeSetup({ homeDirectory, managedSettings: machine.managedSettings }), codex: createCodexSetup(), service: serviceAt(), running: () => readRunningFile(paths.running) });
       return { data: report, text: report.said.join('\n') };
     },
     'config check': async () => {
-      const { text, ...data } = await configCheck(paths, { claudeCode: createClaudeCodeSetup({ homeDirectory, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) }) });
+      const { text, ...data } = await configCheck(paths, { claudeCode: createClaudeCodeSetup({ homeDirectory, managedSettings: machine.managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) }) });
       return { data, text };
     },
     detect: async () => {
@@ -304,7 +311,7 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
         err: { write: (text) => process.stderr.write(text), isTerminal: process.stderr.isTTY },
         now: () => new Date(),
       });
-      await runTrierarch({ paths, homeDirectory, env, signal: untilStopped(), logger });
+      await runTrierarch({ paths, homeDirectory, env, managedSettings: machine.managedSettings, signal: untilStopped(), logger });
       return { data: { stopped: true }, text: 'aeolus-trierarch stopped.' };
     },
   };

@@ -19,6 +19,9 @@ const CONFIGURED = {
 
 let home: string;
 
+/** The machine a test runs main on: its environment, and a managed settings folder of the test's own, so no test reads the machine's (#516). */
+const machine = (env: Readonly<Record<string, string | undefined>>) => ({ env, managedSettings: join(home, 'managed') });
+
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'trierarch-main-'));
 });
@@ -29,17 +32,17 @@ afterEach(() => {
 
 describe('aeolus-trierarch', () => {
   it('prints its usage, exiting 2, for no command or an unknown one', async () => {
-    await expect(main([], { HOME: home })).resolves.toEqual({ output: USAGE, code: 2 });
-    await expect(main(['sail'], { HOME: home })).resolves.toEqual({ output: USAGE, code: 2 });
+    await expect(main([], machine({ HOME: home }))).resolves.toEqual({ output: USAGE, code: 2 });
+    await expect(main(['sail'], machine({ HOME: home }))).resolves.toEqual({ output: USAGE, code: 2 });
   });
 
   it('prints the installed version for --version and -v', async () => {
-    await expect(main(['--version'], { HOME: home })).resolves.toEqual({ output: runningVersion(), code: 0 });
-    await expect(main(['-v'], { HOME: home })).resolves.toEqual({ output: runningVersion(), code: 0 });
+    await expect(main(['--version'], machine({ HOME: home }))).resolves.toEqual({ output: runningVersion(), code: 0 });
+    await expect(main(['-v'], machine({ HOME: home }))).resolves.toEqual({ output: runningVersion(), code: 0 });
   });
 
   it('answers the installed version as JSON with --version --json', async () => {
-    const { output, code } = await main(['--version', '--json'], { HOME: home });
+    const { output, code } = await main(['--version', '--json'], machine({ HOME: home }));
 
     expect(code).toBe(0);
     expect(JSON.parse(output)).toEqual({ version: runningVersion() });
@@ -49,7 +52,7 @@ describe('aeolus-trierarch', () => {
     const config = join(home, 'elsewhere.json');
     writeFileSync(config, JSON.stringify(CONFIGURED));
 
-    const { output, code } = await main(['config', 'check', '--config', config], { HOME: home });
+    const { output, code } = await main(['config', 'check', '--config', config], machine({ HOME: home }));
 
     expect(code).toBe(0);
     expect(output).toContain(`The configuration at ${config} fits.`);
@@ -73,7 +76,7 @@ describe('aeolus-trierarch', () => {
       }),
     );
 
-    const { output } = await main(['config', 'check', '--config', config], { HOME: home });
+    const { output } = await main(['config', 'check', '--config', config], machine({ HOME: home }));
 
     expect(output).toContain('  effort=low: --effort low');
     expect(output).toContain('claude-haiku-4-5-20251001');
@@ -83,7 +86,7 @@ describe('aeolus-trierarch', () => {
     const config = join(home, 'both.json');
     writeFileSync(config, JSON.stringify({ ...CONFIGURED, harnesses: { ...CONFIGURED.harnesses, codex: { flags: ['--dangerously-bypass-approvals-and-sandbox'], options: {} } } }));
 
-    const { output } = await main(['config', 'check', '--config', config], { HOME: home });
+    const { output } = await main(['config', 'check', '--config', config], machine({ HOME: home }));
 
     expect(output).toContain(
       [
@@ -103,7 +106,7 @@ describe('aeolus-trierarch', () => {
     const config = join(home, 'settings.json');
     const firstStartWith = async (settings: object) => {
       writeFileSync(config, JSON.stringify({ ...CONFIGURATION, harnesses: { 'claude-code': { flags: ['--settings', JSON.stringify(settings)], options: {} } } }));
-      return (await main(['config', 'check', '--config', config], { HOME: home })).output.split('\n').find((line) => line.startsWith('  first start: claude'));
+      return (await main(['config', 'check', '--config', config], machine({ HOME: home }))).output.split('\n').find((line) => line.startsWith('  first start: claude'));
     };
 
     expect(await firstStartWith({ permissions: { defaultMode: 'plan' } })).toContain('(configuration) --permission-mode default (adapter) --disallowedTools');
@@ -117,7 +120,7 @@ describe('aeolus-trierarch', () => {
     mkdirSync(managedSettings);
     writeFileSync(join(managedSettings, 'managed-settings.json'), JSON.stringify({ permissions: { defaultMode: 'plan' } }));
 
-    const { output } = await main(['config', 'check', '--config', config], { HOME: home }, { managedSettings });
+    const { output } = await main(['config', 'check', '--config', config], { env: { HOME: home }, managedSettings });
 
     expect(output).toContain('  first start: claude --permission-mode default (adapter) --disallowedTools');
   });
@@ -126,7 +129,7 @@ describe('aeolus-trierarch', () => {
     const config = join(home, 'mode.json');
     writeFileSync(config, JSON.stringify({ ...CONFIGURATION, harnesses: { 'claude-code': { flags: ['--permission-mode', 'acceptEdits'], options: {} } } }));
 
-    const { output } = await main(['config', 'check', '--config', config], { HOME: home });
+    const { output } = await main(['config', 'check', '--config', config], machine({ HOME: home }));
 
     expect(output).toContain('  first start: claude --permission-mode acceptEdits (configuration) --disallowedTools');
   });
@@ -135,7 +138,7 @@ describe('aeolus-trierarch', () => {
     const config = join(home, 'elsewhere.json');
     writeFileSync(config, JSON.stringify(CONFIGURED));
 
-    const { output } = await main(['config', 'check', '--json', '--config', config], { HOME: home });
+    const { output } = await main(['config', 'check', '--json', '--config', config], machine({ HOME: home }));
 
     expect(JSON.parse(output)).toMatchObject({
       harnesses: {
@@ -164,7 +167,7 @@ describe('aeolus-trierarch', () => {
     const config = join(home, 'with-model.json');
     writeFileSync(config, JSON.stringify(CONFIGURATION));
 
-    const { output, code } = await main(['config', 'check', '--config', config], { HOME: home });
+    const { output, code } = await main(['config', 'check', '--config', config], machine({ HOME: home }));
 
     expect(code).toBe(1);
     expect(stripVTControlCharacters(output)).toBe(
@@ -176,14 +179,14 @@ describe('aeolus-trierarch', () => {
     const config = join(home, 'env.json');
     writeFileSync(config, JSON.stringify(CONFIGURED));
 
-    await expect(main(['config', 'check'], { HOME: home, AEOLUS_TRIERARCH_CONFIG: config })).resolves.toMatchObject({ code: 0 });
+    await expect(main(['config', 'check'], machine({ HOME: home, AEOLUS_TRIERARCH_CONFIG: config }))).resolves.toMatchObject({ code: 0 });
   });
 
   it('add takes the kind, the name and the path of a place, and names both kinds in its usage (#381)', async () => {
     const config = join(home, 'env.json');
     writeFileSync(config, JSON.stringify(CONFIGURATION));
 
-    const { output, code } = await main(['add', 'folder', 'drafts', join(home, 'drafts')], { HOME: home, AEOLUS_TRIERARCH_CONFIG: config });
+    const { output, code } = await main(['add', 'folder', 'drafts', join(home, 'drafts')], machine({ HOME: home, AEOLUS_TRIERARCH_CONFIG: config }));
 
     expect(code).toBe(1);
     expect(output).toBe(`${join(home, 'drafts')} is no folder.`);
@@ -192,7 +195,7 @@ describe('aeolus-trierarch', () => {
   });
 
   it('says to run init, exiting 1, when there is no configuration yet', async () => {
-    const { output, code } = await main(['config', 'check'], { HOME: home });
+    const { output, code } = await main(['config', 'check'], machine({ HOME: home }));
 
     expect(code).toBe(1);
     expect(output).toBe(`No configuration at ${join(home, '.aeolus', 'trierarch', 'config.json')}: run aeolus-trierarch init first`);
@@ -206,7 +209,7 @@ describe('aeolus-trierarch', () => {
   });
 
   it('prints its usage, exiting 2, for a flag it does not know', async () => {
-    await expect(main(['list', '--colour'], { HOME: home })).resolves.toEqual({ output: USAGE, code: 2 });
+    await expect(main(['list', '--colour'], machine({ HOME: home }))).resolves.toEqual({ output: USAGE, code: 2 });
   });
 
   it('lists the entries as JSON with --json, reading the saved state', async () => {
@@ -217,7 +220,7 @@ describe('aeolus-trierarch', () => {
     await trierarch.pass();
     await createJsonState(trierarchPaths({ homeDirectory: home }).state).save(trierarch.state.current());
 
-    const { output, code } = await main(['list', '--json'], { HOME: home });
+    const { output, code } = await main(['list', '--json'], machine({ HOME: home }));
 
     expect(code).toBe(0);
     expect(JSON.parse(output)).toEqual([expect.objectContaining({ shipId: scout, state: 'running', workspace: 'worktree aeolus-fleet' })]);
@@ -226,8 +229,8 @@ describe('aeolus-trierarch', () => {
   it('colours a failure on a colour terminal, and answers plain JSON with --json all the same', async () => {
     const colour = { HOME: home, FORCE_COLOR: '1' };
 
-    const text = await main(['config', 'check'], colour);
-    const json = await main(['config', 'check', '--json'], colour);
+    const text = await main(['config', 'check'], machine(colour));
+    const json = await main(['config', 'check', '--json'], machine(colour));
 
     expect(text.output).not.toBe(stripVTControlCharacters(text.output));
     expect(stripVTControlCharacters(text.output)).toBe(`No configuration at ${join(home, '.aeolus', 'trierarch', 'config.json')}: run aeolus-trierarch init first`);
@@ -235,7 +238,7 @@ describe('aeolus-trierarch', () => {
   });
 
   it('answers a failure as JSON with --json', async () => {
-    const { output, code } = await main(['config', 'check', '--json'], { HOME: home });
+    const { output, code } = await main(['config', 'check', '--json'], machine({ HOME: home }));
 
     expect(code).toBe(1);
     expect(JSON.parse(output)).toEqual({ error: `No configuration at ${join(home, '.aeolus', 'trierarch', 'config.json')}: run aeolus-trierarch init first` });
@@ -245,7 +248,7 @@ describe('aeolus-trierarch', () => {
     const config = join(home, 'config.json');
     writeFileSync(config, JSON.stringify(CONFIGURED));
 
-    const { output } = await main(['config', 'check', '--config', config, '--json'], { HOME: home });
+    const { output } = await main(['config', 'check', '--config', config, '--json'], machine({ HOME: home }));
 
     expect(JSON.parse(output)).toMatchObject({
       path: config,
@@ -259,8 +262,8 @@ describe('aeolus-trierarch', () => {
     const record = { time: '2026-10-06T15:00:00.000Z', shipId: 'shp_01m487vd5pdz6zh6s0jdnkg9p6', shipName: 'scout', action: 'wake', outcome: 'woken, deliveries wait' };
     writeFileSync(join(logs, 'trierarch.log'), `${JSON.stringify(record)}\nan older line\n`);
 
-    const text = await main(['logs'], { HOME: home });
-    const json = await main(['logs', '--json'], { HOME: home });
+    const text = await main(['logs'], machine({ HOME: home }));
+    const json = await main(['logs', '--json'], machine({ HOME: home }));
 
     expect(text.output).toBe('2026-10-06T15:00:00.000Z shp_01m487vd5pdz6zh6s0jdnkg9p6 (scout) wake: woken, deliveries wait\nan older line');
     expect(JSON.parse(json.output)).toEqual({ file: join(logs, 'trierarch.log'), lines: [record, { line: 'an older line' }] });
@@ -270,6 +273,6 @@ describe('aeolus-trierarch', () => {
     const config = join(home, 'config.json');
     writeFileSync(config, JSON.stringify(CONFIGURED));
 
-    await expect(main(['config', 'check', `--config=${config}`], { HOME: home })).resolves.toMatchObject({ code: 0 });
+    await expect(main(['config', 'check', `--config=${config}`], machine({ HOME: home }))).resolves.toMatchObject({ code: 0 });
   });
 });

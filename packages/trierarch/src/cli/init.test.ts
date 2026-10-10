@@ -158,7 +158,7 @@ function init(flags: Partial<InitFlags>, prompter: Prompter = new ScriptedPrompt
         return Promise.resolve({ crewToken: 'aeolus_ct_v1_trierarch' });
       },
     }),
-    claudeCode: createClaudeCodeSetup({ homeDirectory: home }),
+    claudeCode: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
     service,
     running: () => {
       reads += 1;
@@ -315,7 +315,7 @@ describe('aeolus-trierarch init, the whole setup', () => {
   it('trusts the worktree root for Claude Code, so a session in any worktree starts with no trust question', async () => {
     const report = await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET, isYes: true });
 
-    await expect(createClaudeCodeSetup({ homeDirectory: home }).isTrusted(paths.worktrees)).resolves.toBe(true);
+    await expect(createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).isTrusted(paths.worktrees)).resolves.toBe(true);
     expect(existsSync(paths.worktrees)).toBe(true);
     expect(report.trusted).toEqual([paths.worktrees]);
   });
@@ -325,7 +325,7 @@ describe('aeolus-trierarch init, the whole setup', () => {
 
     const report = await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET }, prompter);
 
-    await expect(createClaudeCodeSetup({ homeDirectory: home }).isOnboardingComplete()).resolves.toBe(true);
+    await expect(createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).isOnboardingComplete()).resolves.toBe(true);
     expect(report.said.join('\n')).toContain("Claude Code's onboarding is complete");
     expect(prompter.asked.join('\n')).not.toContain('onboarding');
   });
@@ -335,7 +335,7 @@ describe('aeolus-trierarch init, the whole setup', () => {
 
     const report = await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET }, prompter);
 
-    await expect(createClaudeCodeSetup({ homeDirectory: home }).isSkipPermissionsAccepted()).resolves.toBe(true);
+    await expect(createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).isSkipPermissionsAccepted()).resolves.toBe(true);
     expect(report.isSkipPermissionsAccepted).toBe(true);
   });
 
@@ -344,7 +344,7 @@ describe('aeolus-trierarch init, the whole setup', () => {
 
     const report = await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET }, prompter);
 
-    await expect(createClaudeCodeSetup({ homeDirectory: home }).isSkipPermissionsAccepted()).resolves.toBe(false);
+    await expect(createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).isSkipPermissionsAccepted()).resolves.toBe(false);
     expect(report.isSkipPermissionsAccepted).toBe(false);
     expect(report.said.join('\n')).toContain('waits on that question');
   });
@@ -506,7 +506,7 @@ describe('aeolus-trierarch init on a machine set up already', () => {
     await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', true], ['repository', ''], ['Keep the folder notes', true], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
 
     expect(configuration()).toEqual({ ...custom, harnesses: { 'claude-code': { ...custom.harnesses['claude-code'], flags: ['--verbose', '--remote-control'] } } });
-    await expect(createClaudeCodeSetup({ homeDirectory: home }).isTrusted(join(home, 'worktrees'))).resolves.toBe(true);
+    await expect(createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).isTrusted(join(home, 'worktrees'))).resolves.toBe(true);
   });
 
   it('trusts every configured folder for Claude Code too, a folder added since among them, so a crew request for a folder never waits on the trust question', async () => {
@@ -516,7 +516,7 @@ describe('aeolus-trierarch init on a machine set up already', () => {
 
     const report = await init({ isYes: true });
 
-    await expect(createClaudeCodeSetup({ homeDirectory: home }).isTrusted(notes)).resolves.toBe(true);
+    await expect(createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).isTrusted(notes)).resolves.toBe(true);
     expect(report.trusted).toEqual([paths.worktrees, notes]);
   });
 
@@ -525,7 +525,7 @@ describe('aeolus-trierarch init on a machine set up already', () => {
 
     const report = await init({ isYes: true });
 
-    await expect(createClaudeCodeSetup({ homeDirectory: home }).isTrusted(repository)).resolves.toBe(true);
+    await expect(createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).isTrusted(repository)).resolves.toBe(true);
     expect(report.trusted).toEqual([paths.worktrees, repository]);
   });
 
