@@ -888,6 +888,21 @@ describe('a final crew crewed again after a release elsewhere follows the restar
     ]);
   });
 
+  it('counts no activity within a minute as a failed start, nothing given back, when the fleet holds its crew final as its state was lost (#477)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, crewSettings());
+    trierarch.fleet.holdStatus(shipId, 'running');
+    trierarch.harness.seen.set(shipId, { kind: 'none' });
+    await trierarch.pass();
+    trierarch.clock.advance(MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'restarting', exits: [expect.any(String)] });
+    expect(trierarch.fleet.givenBack).toEqual([]);
+  });
+
   it('still gives the request back when its crew was not final yet as it was released elsewhere', async () => {
     const trierarch = aTrierarch();
     const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' } });
