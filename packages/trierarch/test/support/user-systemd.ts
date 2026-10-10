@@ -24,5 +24,8 @@ export async function userSystemd(machine: { platform: NodeJS.Platform; isSystem
     return { isUsable: false, reason: `systemctl --user does not run here: ${error instanceof Error ? error.message : String(error)}` };
   }
   const state = answer.stdout.trim();
+  if (state === '') {
+    return { isUsable: false, reason: `systemctl --user reaches no user manager: ${answer.stderr.trim()}` };
+  }
   return USABLE_STATES.includes(state) ? { isUsable: true } : { isUsable: false, reason: `the systemd user manager is ${state}` };
 }
