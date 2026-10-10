@@ -587,6 +587,19 @@ describe('aeolus-trierarch init, for Codex', () => {
     expect(report.codexTrusted).toEqual([]);
   });
 
+  it("leaves Claude Code's files alone where the configuration does not offer it: no trust, no onboarding, no bypass question", async () => {
+    withCodex();
+    const prompter = new ScriptedPrompter([['Change the configuration', false], ['Install the service', true]]);
+
+    const report = await init({}, prompter);
+
+    expect(existsSync(join(home, '.claude.json'))).toBe(false);
+    expect(existsSync(join(home, '.claude'))).toBe(false);
+    expect(report.trusted).toEqual([]);
+    expect(report.said.join('\n')).not.toContain('Claude Code');
+    expect(prompter.asked.join('\n')).not.toContain('bypass permissions');
+  });
+
   it('leaves Codex alone where the configuration does not offer it', async () => {
     await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET, isYes: true });
 
