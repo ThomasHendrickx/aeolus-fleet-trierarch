@@ -11,8 +11,12 @@ import { TrierarchFileError } from './files.js';
  * its first start there, even with `--dangerously-skip-permissions`; trusting
  * a folder covers every folder under it, so trusting the worktree root covers
  * every worktree. It asks once per user whether to accept bypass permissions
- * mode. Both answers live in Claude Code's own files, which this changes key
- * by key, keeping everything else and the file's mode.
+ * mode. On a machine where it never ran by hand it shows its onboarding (the
+ * theme, the login, the security notes) and later offers its fullscreen
+ * renderer (#403); a completed onboarding skips the first, and an offer seen
+ * as often as it is shown skips the second. The answers live in Claude Code's
+ * own files, which this changes key by key, keeping everything else and the
+ * file's mode.
  */
 export interface ClaudeCodeSetup {
   trust(folder: string): Promise<void>;
@@ -21,10 +25,15 @@ export interface ClaudeCodeSetup {
   trustedFolders(): Promise<ReadonlySet<string>>;
   acceptSkipPermissions(): Promise<void>;
   isSkipPermissionsAccepted(): Promise<boolean>;
+  completeOnboarding(): Promise<void>;
+  isOnboardingComplete(): Promise<boolean>;
 }
 
 const jsonObjectSchema = z.record(z.string(), z.unknown());
 type JsonObject = z.infer<typeof jsonObjectSchema>;
+
+/** How often Claude Code 2.1.295 offers its fullscreen renderer at most: once seen this often, it offers it no more. */
+const FULLSCREEN_OFFER_SHOWN_MAX = 3;
 
 /** A file only its user reads, as Claude Code keeps ~/.claude.json. */
 const PRIVATE_MODE = 0o600;
@@ -55,6 +64,7 @@ export function createClaudeCodeSetup(at: { homeDirectory: string }): ClaudeCode
   const state = join(at.homeDirectory, '.claude.json');
   const settings = join(at.homeDirectory, '.claude', 'settings.json');
   const projectsOf = (claude: JsonObject): JsonObject => jsonObjectSchema.safeParse(claude.projects).data ?? {};
+  const fullscreenOfferSeen = (claude: JsonObject): number => z.number().safeParse(claude.fullscreenUpsellSeenCount).data ?? 0;
 
   return {
     trust: async (folder) => {
@@ -75,5 +85,13 @@ export function createClaudeCodeSetup(at: { homeDirectory: string }): ClaudeCode
       await writeJsonObject(settings, { ...(await readJsonObject(settings)), skipDangerousModePermissionPrompt: true });
     },
     isSkipPermissionsAccepted: async () => (await readJsonObject(settings)).skipDangerousModePermissionPrompt === true,
+    completeOnboarding: async () => {
+      const claude = await readJsonObject(state);
+      await writeJsonObject(state, { ...claude, hasCompletedOnboarding: true, fullscreenUpsellSeenCount: Math.max(fullscreenOfferSeen(claude), FULLSCREEN_OFFER_SHOWN_MAX) });
+    },
+    isOnboardingComplete: async () => {
+      const claude = await readJsonObject(state);
+      return claude.hasCompletedOnboarding === true && fullscreenOfferSeen(claude) >= FULLSCREEN_OFFER_SHOWN_MAX;
+    },
   };
 }

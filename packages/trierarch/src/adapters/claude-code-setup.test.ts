@@ -84,4 +84,36 @@ describe("Claude Code's one-time questions, answered ahead", () => {
 
     expect(read(settingsJson())).toEqual({ skipDangerousModePermissionPrompt: true });
   });
+
+  it('completes the onboarding, so a fresh machine shows no first-run screen, keeping everything else in ~/.claude.json and its mode', async () => {
+    writeFileSync(claudeJson(), JSON.stringify({ numStartups: 7, projects: { '/root': { hasTrustDialogAccepted: true } } }), { mode: 0o600 });
+    const setup = createClaudeCodeSetup({ homeDirectory: home });
+    await expect(setup.isOnboardingComplete()).resolves.toBe(false);
+
+    await setup.completeOnboarding();
+
+    expect(read(claudeJson())).toEqual({ numStartups: 7, projects: { '/root': { hasTrustDialogAccepted: true } }, hasCompletedOnboarding: true, fullscreenUpsellSeenCount: 3 });
+    expect(statSync(claudeJson()).mode & 0o777).toBe(0o600);
+    await expect(setup.isOnboardingComplete()).resolves.toBe(true);
+  });
+
+  it('completes the onboarding when there is no ~/.claude.json yet', async () => {
+    await createClaudeCodeSetup({ homeDirectory: home }).completeOnboarding();
+
+    expect(read(claudeJson())).toEqual({ hasCompletedOnboarding: true, fullscreenUpsellSeenCount: 3 });
+  });
+
+  it('keeps a fullscreen renderer offer seen more often than it is shown', async () => {
+    writeFileSync(claudeJson(), JSON.stringify({ hasCompletedOnboarding: true, fullscreenUpsellSeenCount: 5 }));
+
+    await createClaudeCodeSetup({ homeDirectory: home }).completeOnboarding();
+
+    expect(read(claudeJson())).toEqual({ hasCompletedOnboarding: true, fullscreenUpsellSeenCount: 5 });
+  });
+
+  it('sees the onboarding incomplete while the fullscreen renderer offer would still show', async () => {
+    writeFileSync(claudeJson(), JSON.stringify({ hasCompletedOnboarding: true, fullscreenUpsellSeenCount: 2 }));
+
+    await expect(createClaudeCodeSetup({ homeDirectory: home }).isOnboardingComplete()).resolves.toBe(false);
+  });
 });

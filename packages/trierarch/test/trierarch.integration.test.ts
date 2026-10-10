@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { ShipId } from '@aeolus-fleet/common';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 // The shared Postgres container's URL, which the global setup provides to every file.
 import type {} from '../../core/test/postgres.global-setup.js';
@@ -36,7 +37,8 @@ import { CONFIGURATION } from './support/in-memory.js';
 // request assigned to it is crewed in a worktree of a real git repository,
 // with the folder's identity written through the aeolus plugin's own script,
 // and removing the request ends the lease. Only the sessions are stand-ins:
-// no Claude Code runs here.
+// no Claude Code runs here, but its stand-in shows its first-run screens, as
+// captured from Claude Code itself, until its own files say they are answered.
 
 const PLUGIN_ROOT = fileURLToPath(new URL('../../../plugins/aeolus', import.meta.url));
 const GIT_ENV = { GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 't@example.com' };
@@ -49,21 +51,49 @@ let paths: TrierarchPaths;
 let repository: string;
 let pluginData: string;
 
-/** Sessions as a map, standing in for tmux: started ones run until stopped, each showing a tool call on its screen. */
+const SKIP = '--dangerously-skip-permissions';
+
+function claudeCodeScreen(name: string): string {
+  return readFileSync(new URL(`./screens/claude-code-${name}.txt`, import.meta.url), 'utf8');
+}
+
+function jsonIn(path: string): Record<string, unknown> {
+  return existsSync(path) ? z.record(z.string(), z.unknown()).parse(JSON.parse(readFileSync(path, 'utf8'))) : {};
+}
+
+/**
+ * What Claude Code shows in the home folder (#403): its onboarding until it is
+ * completed in ~/.claude.json, then, launched with skip-permissions, its
+ * bypass permissions warning until that is accepted in ~/.claude/settings.json;
+ * else its first prompt makes a tool call.
+ */
+function claudeCodeShows(command: readonly string[]): string {
+  if (jsonIn(join(home, '.claude.json')).hasCompletedOnboarding !== true) {
+    return claudeCodeScreen('theme');
+  }
+  if (command.includes(SKIP) && jsonIn(join(home, '.claude', 'settings.json')).skipDangerousModePermissionPrompt !== true) {
+    return claudeCodeScreen('bypass');
+  }
+  return '❯ /aeolus:wake\n\n  Ran 1 shell command\n';
+}
+
+/** Sessions as a map, standing in for tmux: started ones run until stopped, each showing what Claude Code would show in this home. */
 function standInSessions(): Tmux {
   const sessions = new Map<ShipId, ObservedSession['status']>();
+  const commands = new Map<ShipId, readonly string[]>();
   return {
     list: () => Promise.resolve([...sessions].map(([shipId, status]) => ({ shipId, status }))),
     stop: (shipId) => {
       sessions.delete(shipId);
       return Promise.resolve();
     },
-    start: ({ shipId }) => {
+    start: ({ shipId, command }) => {
       sessions.set(shipId, 'running');
+      commands.set(shipId, command);
       return Promise.resolve();
     },
     type: () => Promise.resolve(),
-    screen: (shipId) => Promise.resolve(sessions.has(shipId) ? '❯ /aeolus:wake\n\n  Ran 1 shell command\n' : ''),
+    screen: (shipId) => Promise.resolve(sessions.has(shipId) ? claudeCodeShows(commands.get(shipId) ?? []) : ''),
   };
 }
 
@@ -94,8 +124,8 @@ afterEach(async () => {
   rmSync(home, { recursive: true, force: true });
 });
 
-/** A trierarch set up with init on a real fleet, with a ship scout of the fleet to crew, and one pass of its loop. */
-async function aTrierarchOnTheFleet() {
+/** A trierarch set up with init on a real fleet, with a ship scout of the fleet to crew, and one pass of its loop; Claude Code with the flags given. */
+async function aTrierarchOnTheFleet(claudeCodeFlags: readonly string[] = CONFIGURATION.harnesses['claude-code']?.flags ?? []) {
   const useCases = createUseCases({ prisma: database });
   const argo = operatorCaller(unwrap(await useCases.initialiseFleet({ name: 'home fleet', ...OPERATOR })));
   const trierarchShip = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'mac-mini', type: 'trierarch', fleetScopes: ['crew:run'] }));
@@ -103,7 +133,12 @@ async function aTrierarchOnTheFleet() {
 
   const service = { install: () => Promise.resolve(), restart: () => Promise.resolve(), status: () => Promise.resolve({ file: 'none', isInstalled: true, isRunning: true }) };
   // The places come with init, as an operator adds them: adding a place through init is what trusts it (#381).
-  const configuration = { ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: repository } }, folders: { notes: { path: join(home, 'notes') } } };
+  const configuration = {
+    ...CONFIGURATION,
+    harnesses: { 'claude-code': { options: {}, ...CONFIGURATION.harnesses['claude-code'], flags: [...claudeCodeFlags] } },
+    repositories: { 'aeolus-fleet': { path: repository } },
+    folders: { notes: { path: join(home, 'notes') } },
+  };
   mkdirSync(dirname(paths.config), { recursive: true });
   writeFileSync(paths.config, JSON.stringify(configuration));
   const quiet = { text: () => Promise.reject(new Error('asked')), secret: () => Promise.reject(new Error('asked')), confirm: () => Promise.reject(new Error('asked')), say: () => undefined, step: () => undefined };
@@ -122,7 +157,7 @@ async function aTrierarchOnTheFleet() {
   });
   const fleet = createRestFleet(await readCrewFile(paths.crewToken));
   const sessions = standInSessions();
-  const harness = createClaudeCodeHarness({ configuration, plugin: { root: PLUGIN_ROOT, data: pluginData }, projects: join(home, '.claude', 'projects'), sessions });
+  const harness = createClaudeCodeHarness({ configuration, plugin: { root: PLUGIN_ROOT, data: pluginData }, projects: join(home, '.claude', 'projects'), sessions, setup: createClaudeCodeSetup({ homeDirectory: home }) });
   const workspace = createGitWorkspace({ configuration, root: paths.worktrees });
   const state = createJsonState(paths.state);
   const clock = { now: () => new Date() };
@@ -158,6 +193,18 @@ describe('the trierarch on a real fleet', () => {
     await expect(leasesOf(scout.shipId)).resolves.toBe(0);
     expect(existsSync(worktree)).toBe(false);
     await expect(database.crewRequest.findUnique({ where: { shipId: scout.shipId } })).resolves.toBeNull();
+  });
+
+  it('on a fresh machine, where Claude Code never ran, crews its first session with no person: init answers its first-run screens and bypass permissions, and the session runs (#403)', async () => {
+    expect(existsSync(join(home, '.claude.json'))).toBe(false);
+    const { useCases, argo, trierarchShip, scout, pass } = await aTrierarchOnTheFleet([SKIP]);
+    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } }));
+    unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
+
+    await pass();
+    await pass();
+
+    await expect(database.crewRequest.findUniqueOrThrow({ where: { shipId: scout.shipId } })).resolves.toMatchObject({ status: 'running' });
   });
 
   it('removing the request removes a worktree with changes too and tells argo what it discards, so the ship crewed again starts in a fresh worktree (#450)', async () => {

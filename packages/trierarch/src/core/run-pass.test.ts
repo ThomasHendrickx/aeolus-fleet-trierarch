@@ -9,6 +9,11 @@ const SECOND_MS = 1000;
 const MINUTE_MS = 60 * SECOND_MS;
 const SCOUT_FOLDER = `${WORKTREE_ROOT}/aeolus-fleet/scout`;
 const WITH_CODEX = { ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: { flags: [], options: {} } } };
+const SKIP = '--dangerously-skip-permissions';
+/** Claude Code skipping permissions, as the operator configured it, or as an option the settings may pick. */
+const SKIPPING = { ...CONFIGURATION, harnesses: { 'claude-code': { flags: [SKIP], options: {} } } };
+const SKIPPING_AS_OPTION = { ...CONFIGURATION, harnesses: { 'claude-code': { flags: [], options: { permissions: { values: { ask: [], skip: [SKIP] }, default: 'ask' } } } } };
+const UNACCEPTED = `harness: claude-code still asks to accept ${SKIP}: accept it with aeolus-trierarch init`;
 
 /** A ship whose crew request is assigned to the trierarch, crewed by one pass and running from the next, once its session shows activity: its id. */
 async function aCrewedShip(trierarch: Trierarch, settings: Record<string, unknown> = {}) {
@@ -614,6 +619,18 @@ describe('the launch window: a crew is final once its session shows activity (#3
     expect(trierarch.state.current().entries).toEqual({});
   });
 
+  it('names the screen its session stopped at when it gives the request back', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none', screen: 'bypass permissions warning' } });
+    trierarch.clock.advance(MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([
+      { shipId, settingsVersion: 1, reason: "mac-studio: no activity within a minute of its start, stopped at claude-code's bypass permissions warning" },
+    ]);
+  });
+
   it('waits out the minute before it gives the request back', async () => {
     const trierarch = aTrierarch();
     const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' } });
@@ -1106,6 +1123,46 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
       `scout (${shipId}): this trierarch cannot crew settings version 1: workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it`,
     ]);
+  });
+
+  it('never crews settings whose flags wait on a question its harness still asks, and gives the request back saying to accept it with init (#403)', async () => {
+    const trierarch = aTrierarch(SKIPPING);
+    trierarch.trust.unaccept('claude-code', SKIP);
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, crewSettings());
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.launches).toEqual([]);
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 1, reason: `mac-studio: ${UNACCEPTED}` }]);
+  });
+
+  it('checks the flags the settings pick with an option against what its harness still asks (#403)', async () => {
+    const trierarch = aTrierarch(SKIPPING_AS_OPTION);
+    trierarch.trust.unaccept('claude-code', SKIP);
+    const asking = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(asking, crewSettings());
+    const skipping = trierarch.fleet.commission('ranger');
+    trierarch.fleet.request(skipping, crewSettings({ workspace: { kind: 'folder', name: 'notes' }, options: { permissions: 'skip' } }));
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.launches.map((launch) => launch.shipId)).toEqual([asking]);
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId: skipping, settingsVersion: 1, reason: `mac-studio: ${UNACCEPTED}` }]);
+  });
+
+  it('never starts a session again with a flag whose question its harness asks again (#403)', async () => {
+    const trierarch = aTrierarch(SKIPPING);
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.trust.unaccept('claude-code', SKIP);
+    trierarch.processes.exit(shipId);
+
+    await trierarch.pass();
+    trierarch.clock.advance(5 * SECOND_MS);
+    await trierarch.pass();
+
+    expect(trierarch.harness.launches).toHaveLength(1);
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`scout (${shipId}): this trierarch cannot crew settings version 1: ${UNACCEPTED}`]);
   });
 
   it('wakes an idle session once when deliveries come, and not again until it has received', async () => {

@@ -5,8 +5,9 @@ import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { AdapterFlag, HarnessPort } from '../core/ports.js';
 import { claudeCodeLaunchSeen } from './claude-code-screen.js';
+import type { ClaudeCodeSetup } from './claude-code-setup.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
-import { effectiveFlags } from './flags.js';
+import { effectiveFlags } from '../core/effective-flags.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
 import type { Tmux } from './tmux.js';
 
@@ -17,7 +18,10 @@ import type { Tmux } from './tmux.js';
  * without AskUserQuestion and plan mode: nobody watches the session's pane, so
  * it asks its questions over the fleet, and a question form or a plan approval
  * waiting there would take the keys of a wake (#457, #460). Plan mode goes as a
- * whole: without ExitPlanMode alone a session that entered it could never leave. A session's identity is written and read through the aeolus
+ * whole: without ExitPlanMode alone a session that entered it could never leave.
+ * Its onboarding is completed before every launch, so a session on a machine
+ * where Claude Code never ran by hand stops at no first-run screen (#403). A
+ * session's identity is written and read through the aeolus
  * plugin's own `aeolus-identity.sh`, never a copy of how the plugin names its
  * files.
  */
@@ -34,8 +38,11 @@ export const CLAUDE_CODE_ADAPTER_FLAGS: readonly AdapterFlag[] = [
   { flag: CONTINUE, when: 'restart' },
 ];
 
+/** Claude Code's flag that runs every tool without asking; it asks once per user to accept that (#403). */
+export const SKIP_PERMISSIONS = '--dangerously-skip-permissions';
+
 /** The flags of Claude Code that are risky: it then runs every tool without asking (#326). */
-export const CLAUDE_CODE_RISKY_FLAGS: readonly string[] = ['--dangerously-skip-permissions'];
+export const CLAUDE_CODE_RISKY_FLAGS: readonly string[] = [SKIP_PERMISSIONS];
 
 /**
  * The configured flags, with a name for the remote-control session where the
@@ -88,6 +95,8 @@ export function createClaudeCodeHarness(options: {
   sessions: Pick<Tmux, 'start' | 'type' | 'screen'>;
   /** Claude Code's projects folder, where it keeps each folder's conversations. */
   projects: string;
+  /** Claude Code's own files, where its onboarding is completed before each launch (#403). */
+  setup: Pick<ClaudeCodeSetup, 'completeOnboarding'>;
   /** The program to run; `claude` unless a test runs another. */
   command?: string;
 }): HarnessPort {
@@ -108,6 +117,7 @@ export function createClaudeCodeHarness(options: {
         isFirstStart: isFirstStart || !(await hasConversation(options.projects, folder)),
         ...(options.command !== undefined && { program: options.command }),
       });
+      await options.setup.completeOnboarding();
       await sessions.start({ shipId, folder, command: wordsOf(command) });
     },
     wake: async ({ shipId }) => {

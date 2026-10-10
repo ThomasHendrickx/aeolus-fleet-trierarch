@@ -1,6 +1,6 @@
 import type { CrewStatus, ShipId, TrierarchConfiguration } from '@aeolus-fleet/common';
 
-import { checkSettings, trustRefusal, type CheckedSettings, type Refusal } from './check-settings.js';
+import { checkSettings, trustRefusal, unacceptedRefusal, type CheckedSettings, type Refusal } from './check-settings.js';
 import { MODEL_OPTION } from './detected-options.js';
 import { putEntry, removeEntry, withState, type Entry, type KeptWorktree, type TrierarchState } from './entry.js';
 import type { ArgoReport, AssignedRequest, ClearRequestToMe, InboxAnswer, LaunchSeen, ObservedSession, ObservedWorktree, TrustedPlaces, Turn, WrittenStatus } from './ports.js';
@@ -262,15 +262,17 @@ function newVersionStep(entry: Entry, at: { request: AssignedRequest; state: Tri
 
 /**
  * A step that would start the entry's session, held while its harness does
- * not trust its repository or folder (#381): trust is checked before every
- * launch, a restart too. While the crew is not final the request is given
+ * not trust its repository or folder (#381), or still asks about a flag it
+ * launches with (#403): both are checked before every launch, a restart too. While the crew is not final the request is given
  * back and the entry ends (#382); once it is final, the entry stays as it is
  * and argo is told once per settings version.
  */
 function trustedStep(entry: Entry, at: { step: Step; request: AssignedRequest; state: TrierarchState; context: ReconcileContext }): Step {
   const { step, request, state, context } = at;
   const isLaunching = step.actions.some((action) => action.kind === 'crew' || action.kind === 'launch');
-  const refusal = isLaunching ? trustRefusal({ harness: entry.harness, workspace: entry.workspace, trusted: context.trusted }) : undefined;
+  const { harness, workspace, options } = entry;
+  const { trusted, configuration } = context;
+  const refusal = isLaunching ? (trustRefusal({ harness, workspace, trusted }) ?? unacceptedRefusal({ harness, configuration, options, trusted })) : undefined;
   if (refusal === undefined) {
     return step;
   }
@@ -306,10 +308,11 @@ function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean })
  * An entry crewing: crewed (again) until its session started, then in its
  * launch window (#382). Activity makes the crew final, so it runs from when
  * its session started. A model refused, or no activity within the minute,
- * gives the request back, its entry ending; for a crew already final, crewed
- * again after a release elsewhere, it is a failed start against the restart
- * budget instead (#469). A session gone, as after the machine restarts, is
- * crewed again.
+ * gives the request back, its entry ending, the reason naming the harness's
+ * screen the session stopped at when it knows it (#403); for a crew already
+ * final, crewed again after a release elsewhere, it is a failed start against
+ * the restart budget instead (#469). A session gone, as after the machine
+ * restarts, is crewed again.
  */
 function launchStep(entry: Entry, context: ReconcileContext): Step {
   const { observed, now } = context;
@@ -334,7 +337,10 @@ function launchStep(entry: Entry, context: ReconcileContext): Step {
       return failedStart(refused.reason, refused.actions);
     }
     case 'none':
-      return isWindowOver(launchedAt, now) ? failedStart(NO_ACTIVITY_REASON) : NOTHING;
+      if (!isWindowOver(launchedAt, now)) {
+        return NOTHING;
+      }
+      return failedStart(seen.screen === undefined ? NO_ACTIVITY_REASON : `${NO_ACTIVITY_REASON}, stopped at ${entry.harness}'s ${seen.screen}`);
   }
 }
 
