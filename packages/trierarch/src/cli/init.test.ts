@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import type { CodexSetup } from '../adapters/codex-setup.js';
+import type { RunningFile } from '../adapters/files.js';
 import { trierarchPaths, type TrierarchPaths } from '../adapters/paths.js';
 import type { Service, ServiceStatus } from '../adapters/service.js';
 import { newId } from '../../test/support/in-memory.js';
@@ -24,6 +25,9 @@ let service: FakeService;
 let repository: string;
 let codex: FakeCodexSetup;
 let isCodexInstalled: boolean;
+/** What running.json says on each read after the service starts, the last one from then on. */
+let saying: (RunningFile | undefined)[];
+let reads: number;
 
 /** A prompter that answers from a script, in order, each answer for a question containing its words; it fails on any question it was not given. */
 class ScriptedPrompter implements Prompter {
@@ -80,7 +84,7 @@ class FakeService implements Pick<Service, 'install' | 'restart' | 'status'> {
     return Promise.resolve();
   }
   status(): Promise<ServiceStatus> {
-    return Promise.resolve({ file: '/LaunchAgents/dev.aeolus-fleet.trierarch.plist', isInstalled: this.isInstalled, isRunning: this.isInstalled });
+    return Promise.resolve({ file: '/LaunchAgents/dev.aeolus-fleet.trierarch.plist', isInstalled: this.isInstalled, isRunning: this.isInstalled, pid: 2 });
   }
 }
 
@@ -123,6 +127,8 @@ beforeEach(() => {
   paths = trierarchPaths({ homeDirectory: home });
   registered = [];
   service = new FakeService();
+  saying = [{ pid: 2, version: '0.21.0' }];
+  reads = 0;
   repository = join(home, 'Projects', 'aeolus-fleet');
   mkdirSync(join(repository, '.git'), { recursive: true });
 });
@@ -147,6 +153,11 @@ function init(flags: Partial<InitFlags>, prompter: Prompter = new ScriptedPrompt
     }),
     claudeCode: createClaudeCodeSetup({ homeDirectory: home }),
     service,
+    running: () => {
+      reads += 1;
+      return Promise.resolve(saying[Math.min(reads, saying.length) - 1]);
+    },
+    sleep: () => Promise.resolve(),
     detect: (at) => {
       detections.push(at);
       return Promise.resolve(detected);
@@ -212,6 +223,22 @@ describe('aeolus-trierarch init, the whole setup', () => {
     expect(existsSync(paths.configSchema)).toBe(true);
     expect(service.isInstalled).toBe(true);
     expect(report).toMatchObject({ isSetUpAlready: false, configuration: 'written', service: 'installed' });
+  });
+
+  it('waits for the installed trierarch to say its version before it reports, so the status that follows shows it (#402)', async () => {
+    saying = [undefined, { pid: 2, version: '0.21.0' }];
+
+    await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET, isYes: true });
+
+    expect(reads).toBe(2);
+  });
+
+  it('says when the installed trierarch has not said its version after 30 seconds (#402)', async () => {
+    saying = [undefined];
+
+    const report = await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET, isYes: true });
+
+    expect(report.said.at(-1)).toBe('The new process has not said its version after 30 seconds: aeolus-trierarch status shows the version it runs once it does.');
   });
 
   it('refuses with --yes when a flag is missing, naming it, and registers nothing', async () => {
@@ -375,6 +402,17 @@ describe('aeolus-trierarch init on a machine set up already', () => {
     expect(service.restarts).toBe(1);
     expect(report).toMatchObject({ configuration: 'changed', service: 'restarted' });
     expect(prompter.isDone).toBe(true);
+  });
+
+  it('waits for the restarted trierarch to say its version before it reports, so the status that follows shows it (#402)', async () => {
+    saying = [{ pid: 1, version: '0.21.0' }, { pid: 2, version: '0.21.0' }];
+    reads = 0;
+    const prompter = new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', false], ['repository', ''], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', true]]);
+
+    const report = await init({}, prompter);
+
+    expect(reads).toBe(2);
+    expect(report.said.at(-1)).toBe('The trierarch restarted with the new configuration.');
   });
 
   it('keeps or drops each repository it offers, as answered', async () => {

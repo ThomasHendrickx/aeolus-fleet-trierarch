@@ -4,9 +4,10 @@ import { z } from 'zod';
 
 import type { ClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import type { CodexSetup } from '../adapters/codex-setup.js';
-import { loadConfiguration, TrierarchFileError } from '../adapters/files.js';
+import { loadConfiguration, TrierarchFileError, type RunningFile } from '../adapters/files.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
 import type { Service } from '../adapters/service.js';
+import { NOT_SAID_YET, startNewProcess } from './new-process.js';
 import { absolutePath, nameRefusal, placeRefusal, type PlaceKind } from './places.js';
 
 /**
@@ -15,7 +16,8 @@ import { absolutePath, nameRefusal, placeRefusal, type PlaceKind } from './place
  * is what trusts it: it is checked as init checks it, written to the
  * configuration, and trusted for every configured harness that asks. Then the
  * service restarts so the trierarch reads it; its sessions run on their own
- * tmux server and keep running. A place it holds under the same name and path
+ * tmux server and keep running. It reports once the new process has said its
+ * version (#402). A place it holds under the same name and path
  * is trusted again.
  */
 
@@ -29,6 +31,10 @@ export interface AddPlace {
   readonly claudeCode: Pick<ClaudeCodeSetup, 'trust'>;
   readonly codex: Pick<CodexSetup, 'trust'>;
   readonly service: Pick<Service, 'status' | 'restart'>;
+  /** What running.json says now: the restarted process writes it as it starts. */
+  readonly running: () => Promise<RunningFile | undefined>;
+  /** Waits between reads of running.json; a test passes one that does not wait. */
+  readonly sleep?: (ms: number) => Promise<void>;
 }
 
 export interface AddReport {
@@ -86,7 +92,7 @@ export async function addPlace(at: AddPlace): Promise<AddReport> {
     said.push('The service is not installed: run aeolus-trierarch install to run it.');
     return { kind, name, path, trustedBy, service: 'notInstalled', said };
   }
-  await service.restart();
-  said.push('The trierarch restarted to offer it; its sessions kept running.');
+  const { hasSaidVersion } = await startNewProcess({ start: () => service.restart(), service, running: at.running, ...(at.sleep !== undefined && { sleep: at.sleep }) });
+  said.push('The trierarch restarted to offer it; its sessions kept running.', ...(hasSaidVersion ? [] : [NOT_SAID_YET]));
   return { kind, name, path, trustedBy, service: 'restarted', said };
 }
