@@ -43,6 +43,17 @@ describe('the detected file (#365)', () => {
     await expect(file.load()).resolves.toEqual(detected);
   });
 
+  it('keeps the permission modes Claude Code lists (#517)', async () => {
+    const file = createDetectedFile(join(folder, 'detected.json'));
+    const detected: Detected = {
+      'claude-code': { version: '2.1.296', detectedAt: AT, confirmedAt: AT, options: {}, permissionModes: ['acceptEdits', 'manual', 'plan'] },
+    };
+
+    await file.save(detected);
+
+    await expect(file.load()).resolves.toEqual(detected);
+  });
+
   it('holds nothing before the first detection', async () => {
     await expect(createDetectedFile(join(folder, 'detected.json')).load()).resolves.toEqual({});
   });
