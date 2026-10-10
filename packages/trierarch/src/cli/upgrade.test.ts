@@ -58,6 +58,10 @@ const npm: Npm = {
 };
 
 const service = {
+  rewrite: () => {
+    steps.push(`rewrite ${installed}`);
+    return Promise.resolve();
+  },
   stop: () => {
     steps.push(`stop ${installed}`);
     return Promise.resolve();
@@ -66,7 +70,7 @@ const service = {
     steps.push(`start ${installed}`);
     return Promise.resolve();
   },
-  status: (): Promise<ServiceStatus> => Promise.resolve({ file: '/LaunchAgents/dev.aeolus-fleet.trierarch.plist', isInstalled: isServiceInstalled, isRunning: isServiceInstalled }),
+  status: (): Promise<ServiceStatus> => Promise.resolve({ file: '/LaunchAgents/dev.aeolus-fleet.trierarch.plist', isInstalled: isServiceInstalled, isRunning: isServiceInstalled, ...(isServiceInstalled && { pid: 2 }) }),
 };
 
 function upgrade(version?: string) {
@@ -78,7 +82,7 @@ describe('aeolus-trierarch upgrade', () => {
     const report = await upgrade();
 
     expect(installs).toEqual([`${PACKAGE}@0.17.2`]);
-    expect(steps).toEqual(['stop 0.17.2', 'start 0.17.2']);
+    expect(steps).toEqual(['rewrite 0.17.2', 'stop 0.17.2', 'start 0.17.2']);
     expect(report).toMatchObject({ from: '0.17.1', to: '0.17.2', isUpgraded: true });
     expect(report.said.join('\n')).toContain('Upgraded the trierarch from 0.17.1 to 0.17.2');
   });
@@ -88,6 +92,12 @@ describe('aeolus-trierarch upgrade', () => {
 
     expect(installs).toEqual([`${PACKAGE}@0.17.0`]);
     expect(lookups).toBe(0);
+  });
+
+  it('rewrites the service\'s file before it stops the old process, so the stop already ends the trierarch only, as init writes it (#485)', async () => {
+    await upgrade();
+
+    expect(steps.slice(0, 2)).toEqual(['rewrite 0.17.2', 'stop 0.17.2']);
   });
 
   it('says it is already on a version and does nothing more', async () => {
@@ -131,6 +141,15 @@ describe('aeolus-trierarch upgrade', () => {
 
     expect(reads).toBe(3);
     expect(waits).toEqual([1000, 1000]);
+    expect(report.said.join('\n')).toContain('The service runs 0.17.2 now.');
+  });
+
+  it('takes running.json as the new process\'s only once its pid is the one the service runs, as every start waits (#466)', async () => {
+    saying = [{ pid: 1, version: '0.17.2' }, { pid: 2, version: '0.17.2' }];
+
+    const report = await upgrade();
+
+    expect(reads).toBe(2);
     expect(report.said.join('\n')).toContain('The service runs 0.17.2 now.');
   });
 

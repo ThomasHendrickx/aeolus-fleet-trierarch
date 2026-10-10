@@ -13,7 +13,7 @@ import { createStyle, isColourTerminal, type Style } from '../adapters/style.js'
 import { trierarchPaths } from '../adapters/paths.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
 import { runCommand } from '../adapters/run-command.js';
-import { createService, serviceEnvironment, type ServiceStatus } from '../adapters/service.js';
+import { createService, serviceEnvironment } from '../adapters/service.js';
 import { createTmux } from '../adapters/tmux.js';
 import { runningVersion } from '../adapters/version.js';
 import { createDetectHarnesses } from '../core/detect-harnesses.js';
@@ -24,9 +24,9 @@ import { addPlace } from './add.js';
 import { initTrierarch } from './init.js';
 import { describeList, inspectList } from './list.js';
 import { followLog, tailLog } from './logs.js';
-import { NOT_SAID_YET, startNewProcess } from './new-process.js';
 import { createTerminalPrompter } from './prompter.js';
 import { runTrierarch } from './run.js';
+import { describeService, runServiceCommand } from './service-command.js';
 import { describeStatus, inspectStatus, leaseFrom } from './status.js';
 import { uninstallTrierarch } from './uninstall.js';
 import { PACKAGE, upgradeTrierarch } from './upgrade.js';
@@ -101,10 +101,6 @@ function parse(argv: readonly string[]): { words: string[]; values: Map<string, 
     }
   }
   return { words, values, switches };
-}
-
-function describeService(verb: string, status: ServiceStatus): string {
-  return status.isRunning ? `The trierarch ${verb}: it runs${status.pid === undefined ? '' : ` as pid ${String(status.pid)}`}.` : `The trierarch ${verb}: it does not run.`;
 }
 
 /** What init did, at the end of its steps: a heading, then each thing it did on its own line. */
@@ -260,10 +256,8 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
       return { data: undefined, text: '' };
     },
     start: async () => {
-      const service = serviceAt();
-      await service.start();
-      const status = await service.status();
-      return { data: status, text: describeService('started', status) };
+      const { status, text } = await runServiceCommand({ command: 'start', service: serviceAt(), logs: paths.logs, running: () => readRunningFile(paths.running) });
+      return { data: status, text };
     },
     stop: async () => {
       const service = serviceAt();
@@ -272,15 +266,18 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
       return { data: status, text: `${describeService('stopped', status)} It starts again at the next login, or with aeolus-trierarch start.` };
     },
     restart: async () => {
-      const service = serviceAt();
-      const { status, hasSaidVersion } = await startNewProcess({ start: () => service.restart(), service, running: () => readRunningFile(paths.running) });
-      return { data: status, text: [describeService('restarted', status), ...(hasSaidVersion ? [] : [NOT_SAID_YET])].join(' ') };
+      const { status, text } = await runServiceCommand({ command: 'restart', service: serviceAt(), logs: paths.logs, running: () => readRunningFile(paths.running) });
+      return { data: status, text };
     },
     install: async () => {
-      const service = serviceAt();
-      await (switches.has('--no-load') ? service.write() : service.install());
-      const status = await service.status();
-      return { data: status, text: `Installed ${status.file}. Logs: ${paths.logs}` };
+      if (switches.has('--no-load')) {
+        const service = serviceAt();
+        await service.write();
+        const status = await service.status();
+        return { data: status, text: `Installed ${status.file}. Logs: ${paths.logs}` };
+      }
+      const { status, text } = await runServiceCommand({ command: 'install', service: serviceAt(), logs: paths.logs, running: () => readRunningFile(paths.running) });
+      return { data: status, text };
     },
     uninstall: async () => {
       const report = await uninstallTrierarch({ service: serviceAt(), uninstall: createUninstall({ processes: createTmux(), state: createJsonState(paths.state) }), home: paths.home });
