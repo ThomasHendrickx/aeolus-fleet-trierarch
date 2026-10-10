@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { SHIP_PROTOCOL } from '../../../packages/core/src/adapters/trpc/ship-protocol.ts';
+import { NO_TERMINAL_QUESTIONS } from '../../../packages/trierarch/src/core/no-terminal-questions.ts';
 
 const claudeSkill = readFileSync(new URL('../skills/crew-a-ship/SKILL.md', import.meta.url), 'utf8');
 const codexSkill = readFileSync(new URL('../skills/aeolus-crew/SKILL.md', import.meta.url), 'utf8');
@@ -44,6 +45,11 @@ describe('the crew-a-ship skill', () => {
   it('has a crewed session ask its questions over the fleet, to the sender of its task, never through an interactive question form, in both harnesses (#457)', () => {
     expect(claudeSkill).toContain('Ask your questions over the fleet: `send -` them to the sender of your task, never through AskUserQuestion or another interactive question form.');
     expect(codexSkill).toContain('Ask your questions over the fleet: `send -` them to the sender of your task, never through request_user_input or another interactive question form.');
+  });
+
+  it('tells every crewed session, in both harnesses, the line the trierarch gives its sessions: no human reads its terminal, ask over the fleet, and argo for what only the operator can answer (#585)', () => {
+    expect(claudeSkill).toContain(NO_TERMINAL_QUESTIONS);
+    expect(codexSkill).toContain(NO_TERMINAL_QUESTIONS);
   });
 
   it('tells a squadron member how to check in, take up its role, report and stand down', () => {

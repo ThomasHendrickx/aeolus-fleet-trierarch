@@ -8,13 +8,15 @@ import { claudeCodeLaunchSeen } from './claude-code-screen.js';
 import { SETTING_SOURCES, type ClaudeCodeSetup, type SettingsDefaultMode, type SettingSource } from './claude-code-setup.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
 import { effectiveFlags } from '../core/effective-flags.js';
+import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
 import type { Tmux } from './tmux.js';
 
 /**
  * Claude Code as a harness (docs/architecture.md, "First adapters"): `claude`
  * in the folder, `--continue` on a restart when the folder has a conversation
- * to continue, `/aeolus:wake` typed to wake an idle session, and always
+ * to continue, `/aeolus:wake` typed to wake an idle session, each prompt with
+ * the line that no human reads its terminal (#585), and always
  * without AskUserQuestion and plan mode: nobody watches the session's pane, so
  * it asks its questions over the fleet, and a question form or a plan approval
  * waiting there would take the keys of a wake (#457, #460). Plan mode goes as a
@@ -169,7 +171,7 @@ export function createClaudeCodeHarness(options: {
       if (settings === undefined) {
         throw new Error(`The configuration has no harness ${harness}`);
       }
-      const prompt = isFirstStart && firstPrompt !== undefined ? firstPrompt : WAKE_PROMPT;
+      const prompt = isFirstStart && firstPrompt !== undefined ? firstPromptOf(firstPrompt) : wakePromptOf(WAKE_PROMPT);
       const flags = effectiveFlags(settings, picked);
       const command = claudeCodeCommandLine({
         flags,
@@ -184,7 +186,7 @@ export function createClaudeCodeHarness(options: {
       await sessions.start({ shipId, folder, command: wordsOf(command) });
     },
     wake: async ({ shipId }) => {
-      await sessions.type({ shipId, text: WAKE_PROMPT });
+      await sessions.type({ shipId, text: wakePromptOf(WAKE_PROMPT) });
     },
     launchSeen: async ({ shipId, model }) => claudeCodeLaunchSeen({ screen: await sessions.screen(shipId), ...(model !== undefined && { model }) }),
   };

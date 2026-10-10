@@ -7,6 +7,7 @@ import type { ShipId, TrierarchConfiguration } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
+import { NO_TERMINAL_QUESTIONS } from '../core/no-terminal-questions.js';
 import { CODEX_ADAPTER_FLAGS, CODEX_TYPING_SETTLE_MS, codexCommandLine, createCodexHarness } from './codex.js';
 import { runCommand } from './run-command.js';
 
@@ -78,28 +79,28 @@ describe('Codex as a harness', () => {
     await expect(harness().crewTokenOf(folder)).resolves.toBe('aeolus_ct_v1_scout');
   });
 
-  it('starts codex with the first prompt on the first start, last and after -- behind the configured flags and the picked option', async () => {
+  it('starts codex with the first prompt on the first start, last and after -- behind the configured flags and the picked option, ending in the line that no human reads its terminal (#585)', async () => {
     await harness().launch({ ...launchOf(shipId), options: { model: 'terra' }, isFirstStart: true, firstPrompt: 'Review the open pull requests.' });
 
-    expect(started).toEqual([{ shipId, folder, command: ['codex', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-terra', '--no-daemon', '--config=tools.experimental_request_user_input.enabled=false', '--', 'Review the open pull requests.'] }]);
+    expect(started).toEqual([{ shipId, folder, command: ['codex', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-terra', '--no-daemon', '--config=tools.experimental_request_user_input.enabled=false', '--', `Review the open pull requests.\n\n${NO_TERMINAL_QUESTIONS}`] }]);
   });
 
   it('passes a first prompt that starts with - after --, so it never reads as a flag', async () => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true, firstPrompt: '--dangerously-bypass-approvals-and-sandbox' });
 
-    expect(started[0]?.command.slice(-2)).toEqual(['--', '--dangerously-bypass-approvals-and-sandbox']);
+    expect(started[0]?.command.slice(-2)).toEqual(['--', `--dangerously-bypass-approvals-and-sandbox\n\n${NO_TERMINAL_QUESTIONS}`]);
   });
 
-  it('starts codex with $aeolus-wake on a first start without a first prompt', async () => {
+  it('starts codex with $aeolus-wake on a first start without a first prompt, the line that no human reads its terminal after it (#585)', async () => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
 
-    expect(started[0]?.command.slice(-2)).toEqual(['--', '$aeolus-wake']);
+    expect(started[0]?.command.slice(-2)).toEqual(['--', `$aeolus-wake ${NO_TERMINAL_QUESTIONS}`]);
   });
 
-  it("resumes the folder's last conversation on a restart, with $aeolus-wake and never the first prompt again", async () => {
+  it("resumes the folder's last conversation on a restart, with $aeolus-wake and the line that no human reads its terminal, never the first prompt again (#585)", async () => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false, firstPrompt: 'Review the open pull requests.' });
 
-    expect(started[0]?.command).toEqual(['codex', 'resume', '--last', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-sol', '--no-daemon', '--config=tools.experimental_request_user_input.enabled=false', '--', '$aeolus-wake']);
+    expect(started[0]?.command).toEqual(['codex', 'resume', '--last', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-sol', '--no-daemon', '--config=tools.experimental_request_user_input.enabled=false', '--', `$aeolus-wake ${NO_TERMINAL_QUESTIONS}`]);
   });
 
   it('adds --no-daemon once even when the operator configured it too, so the session owns its work and a stop stops it', async () => {
@@ -148,10 +149,10 @@ describe('Codex as a harness', () => {
     ]);
   });
 
-  it("wakes a session by typing $aeolus-wake, closed by a space so the skill picker leaves Enter alone, and settling before Enter so Codex takes no paste", async () => {
+  it('wakes a session by typing $aeolus-wake and the line that no human reads its terminal, the space after the skill closing its picker so it leaves Enter alone, and settling before Enter so Codex takes no paste (#585)', async () => {
     await harness().wake({ shipId, folder });
 
-    expect(typed).toEqual([{ shipId, text: '$aeolus-wake ', settleMs: CODEX_TYPING_SETTLE_MS }]);
+    expect(typed).toEqual([{ shipId, text: `$aeolus-wake ${NO_TERMINAL_QUESTIONS}`, settleMs: CODEX_TYPING_SETTLE_MS }]);
   });
 
   it("sees in its session's screen the model it launched with refused", async () => {
