@@ -5,6 +5,8 @@ import { userSystemd } from './user-systemd.js';
 
 /** `systemctl --user is-system-running` answering a state, with its exit status as systemd gives it. */
 const answering = (state: string) => () => Promise.resolve<CommandResult>({ status: state === 'running' ? 0 : 1, stdout: `${state}\n`, stderr: '' });
+/** `systemctl --user` where it reaches no user manager: nothing on stdout, why on stderr. */
+const unreachable = () => Promise.resolve<CommandResult>({ status: 1, stdout: '', stderr: 'Failed to connect to bus: No medium found\n' });
 const missing = () => Promise.reject(new Error('spawn systemctl ENOENT'));
 
 describe('whether the systemd tests can run on this machine', () => {
@@ -18,6 +20,10 @@ describe('whether the systemd tests can run on this machine', () => {
 
   it('skips them, saying why, where the user manager is in another state', async () => {
     expect(await userSystemd({ platform: 'linux', isSystemRunning: answering('offline') })).toEqual({ isUsable: false, reason: 'the systemd user manager is offline' });
+  });
+
+  it('skips them, saying why, where systemctl reaches no user manager', async () => {
+    expect(await userSystemd({ platform: 'linux', isSystemRunning: unreachable })).toEqual({ isUsable: false, reason: 'systemctl --user reaches no user manager: Failed to connect to bus: No medium found' });
   });
 
   it('skips them, saying why, where systemctl does not run', async () => {
