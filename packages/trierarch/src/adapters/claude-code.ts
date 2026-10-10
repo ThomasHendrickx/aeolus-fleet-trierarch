@@ -14,9 +14,10 @@ import type { Tmux } from './tmux.js';
  * Claude Code as a harness (docs/architecture.md, "First adapters"): `claude`
  * in the folder, `--continue` on a restart when the folder has a conversation
  * to continue, `/aeolus:wake` typed to wake an idle session, and always
- * without AskUserQuestion: nobody watches the session's pane, so it asks its
- * questions over the fleet, and a form waiting there would take the keys of a
- * wake (#457). A session's identity is written and read through the aeolus
+ * without AskUserQuestion and plan mode: nobody watches the session's pane, so
+ * it asks its questions over the fleet, and a question form or a plan approval
+ * waiting there would take the keys of a wake (#457, #460). Plan mode goes as a
+ * whole: without ExitPlanMode alone a session that entered it could never leave. A session's identity is written and read through the aeolus
  * plugin's own `aeolus-identity.sh`, never a copy of how the plugin names its
  * files.
  */
@@ -26,10 +27,10 @@ export const WAKE_PROMPT = '/aeolus:wake';
 const REMOTE_CONTROL = '--remote-control';
 const CONTINUE = '--continue';
 const END_OF_FLAGS = '--';
-const NO_QUESTION_FORM = '--disallowedTools=AskUserQuestion';
+const NO_PANE_PROMPTS = '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode';
 
 export const CLAUDE_CODE_ADAPTER_FLAGS: readonly AdapterFlag[] = [
-  { flag: NO_QUESTION_FORM, when: 'always' },
+  { flag: NO_PANE_PROMPTS, when: 'always' },
   { flag: CONTINUE, when: 'restart' },
 ];
 
@@ -56,12 +57,12 @@ function namedRemoteControl(flags: readonly string[], name: string): CommandPart
   ];
 }
 
-/** `claude`, the flags, AskUserQuestion disallowed, `--continue` on a restart, then the prompt last after `--`: no flag takes it (`--remote-control [name]` has an optional value), and it never reads as a flag. */
+/** `claude`, the flags, AskUserQuestion and plan mode disallowed, `--continue` on a restart, then the prompt last after `--`: no flag takes it (`--remote-control [name]` has an optional value), and it never reads as a flag. */
 export function claudeCodeCommandLine(at: { flags: readonly string[]; sessionName: string; prompt: string; isFirstStart: boolean; program?: string }): CommandPart[] {
   return partsWithWords([
     { words: [at.program ?? 'claude'] },
     ...namedRemoteControl(at.flags, at.sessionName),
-    { words: [NO_QUESTION_FORM], source: 'adapter' },
+    { words: [NO_PANE_PROMPTS], source: 'adapter' },
     { words: at.isFirstStart ? [] : [CONTINUE], source: 'adapter' },
     { words: [END_OF_FLAGS, at.prompt] },
   ]);

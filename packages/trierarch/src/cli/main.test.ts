@@ -87,14 +87,14 @@ describe('aeolus-trierarch', () => {
 
     expect(output).toContain(
       [
-        '  first start: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --disallowedTools=AskUserQuestion (adapter) -- "<first prompt>"',
-        '  restart: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --disallowedTools=AskUserQuestion (adapter) --continue (adapter) -- /aeolus:wake',
+        '  first start: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter) -- "<first prompt>"',
+        '  restart: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter) --continue (adapter) -- /aeolus:wake',
       ].join('\n'),
     );
     expect(output).toContain(
       [
-        '  first start: codex --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter) -- "<first prompt>"',
-        '  restart: codex resume --last --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter) -- $aeolus-wake',
+        '  first start: codex --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- "<first prompt>"',
+        '  restart: codex resume --last --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- $aeolus-wake',
       ].join('\n'),
     );
   });
@@ -110,7 +110,7 @@ describe('aeolus-trierarch', () => {
         'claude-code': {
           flags: ['--remote-control', '--effort', 'high'],
           adapterFlags: [
-            { flag: '--disallowedTools=AskUserQuestion', when: 'always' },
+            { flag: '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', when: 'always' },
             { flag: '--continue', when: 'restart' },
           ],
           restart: [
@@ -118,7 +118,7 @@ describe('aeolus-trierarch', () => {
             { words: ['--remote-control'], source: 'configuration' },
             { words: ['[<repository or folder>] <ship>'], source: 'adapter' },
             { words: ['--effort', 'high'], source: 'configuration' },
-            { words: ['--disallowedTools=AskUserQuestion'], source: 'adapter' },
+            { words: ['--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode'], source: 'adapter' },
             { words: ['--continue'], source: 'adapter' },
             { words: ['--', '/aeolus:wake'] },
           ],

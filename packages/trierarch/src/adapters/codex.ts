@@ -10,7 +10,8 @@ import type { Tmux } from './tmux.js';
 /**
  * Codex as a harness (docs/architecture.md, "First adapters"): `codex` in the
  * folder, `codex resume --last` on a restart (the folder's last conversation;
- * one ship per folder), always with `--no-daemon`, and `$aeolus-wake` typed
+ * one ship per folder), always with `--no-daemon` and without the question
+ * tool, and `$aeolus-wake` typed
  * to wake an idle session. The identity and the turn marker go through the
  * aeolus plugin for Codex, in Codex's own plugin data folder.
  */
@@ -29,20 +30,30 @@ export const CODEX_TYPING_SETTLE_MS = 1000;
  * pane is gone, so a release or a crash would stop the pane but not the work.
  */
 const NO_DAEMON = '--no-daemon';
+/**
+ * Added to every launch: Codex's question tool (request_user_input) waits for
+ * an answer in the pane, which nobody watches, and would take the keys of a
+ * wake. The session asks its questions over the fleet instead (#460).
+ */
+const NO_QUESTION_TOOL = '--config=tools.experimental_request_user_input.enabled=false';
 const END_OF_FLAGS = '--';
 
-export const CODEX_ADAPTER_FLAGS: readonly AdapterFlag[] = [{ flag: NO_DAEMON, when: 'always' }];
+export const CODEX_ADAPTER_FLAGS: readonly AdapterFlag[] = [
+  { flag: NO_DAEMON, when: 'always' },
+  { flag: NO_QUESTION_TOOL, when: 'always' },
+];
 
 /** The flags of Codex that are risky: it then runs every command without approval and outside its sandbox (#326). */
 export const CODEX_RISKY_FLAGS: readonly string[] = ['--dangerously-bypass-approvals-and-sandbox'];
 
-/** `codex`, or `codex resume --last` on a restart, then the configured flags, --no-daemon once, and the prompt last after `--`, so it never reads as a flag. */
+/** `codex`, or `codex resume --last` on a restart, then the configured flags, --no-daemon once, the question tool off, and the prompt last after `--`, so it never reads as a flag. */
 export function codexCommandLine(at: { flags: readonly string[]; prompt: string; isFirstStart: boolean; program?: string }): CommandPart[] {
   const program = at.program ?? 'codex';
   return partsWithWords([
     { words: at.isFirstStart ? [program] : [program, 'resume', '--last'] },
     { words: at.flags.filter((flag) => flag !== NO_DAEMON), source: 'configuration' },
     { words: [NO_DAEMON], source: 'adapter' },
+    { words: [NO_QUESTION_TOOL], source: 'adapter' },
     { words: [END_OF_FLAGS, at.prompt] },
   ]);
 }
