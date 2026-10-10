@@ -1,6 +1,6 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -59,6 +59,7 @@ describe.runIf(hasUserSystemd)('the systemd user unit on this machine', () => {
         exec: (command, args) => runCommand(command, { args }),
         now: () => new Date(),
       }).write();
+      mkdirSync(dirname(unitFile), { recursive: true });
       writeFileSync(unitFile, readFileSync(join(folder, '.config', 'systemd', 'user', SYSTEMD_UNIT), 'utf8'));
       await systemctl('daemon-reload');
       await systemctl('start', name);
