@@ -1,3 +1,5 @@
+import { constants } from 'node:fs';
+import { access } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +13,7 @@ import { createJsonState } from '../adapters/json-state.js';
 import { createLogger, readLogLine, renderLogLine } from '../adapters/log.js';
 import { createStyle, isColourTerminal, type Style } from '../adapters/style.js';
 import { trierarchPaths } from '../adapters/paths.js';
+import { aeolusPluginVersion } from '../adapters/plugin.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
 import { runCommand } from '../adapters/run-command.js';
 import { createService, serviceEnvironment } from '../adapters/service.js';
@@ -43,7 +46,7 @@ export const USAGE = [
   '  detect                detect again what each configured harness offers (models, effort) and keep it beside the configuration',
   '',
   'Look:',
-  '  status                the version, the service, the fleet and its own lease, caps in use, entries by state, kept worktrees and orphans',
+  '  status                the version, the aeolus plugin per harness, the service, the fleet and its own lease, caps in use, entries by state, kept worktrees and orphans',
   '  list                  the ships it crews: ship, state, harness, workspace, since, restarts',
   '  logs [--lines <n>] [--follow]   the last lines of the log, and with --follow each new one',
   '',
@@ -156,6 +159,7 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
     const report = await inspectStatus({
       configuration,
       version: runningVersion(),
+      pluginVersion: (harness) => aeolusPluginVersion({ homeDirectory, env, harness }),
       running: () => readRunningFile(paths.running),
       crew,
       service: serviceAt(),
@@ -224,6 +228,14 @@ export async function main(argv: readonly string[], env: Readonly<Record<string,
         ...(version !== undefined && { version }),
         installedVersion: runningVersion,
         npm: {
+          globalFolder: async () => {
+            const path = (await runCommand('npm', { args: ['root', '--global'] })).stdout.trim();
+            const isWritable = await access(path, constants.W_OK).then(
+              () => true,
+              () => false,
+            );
+            return { path, isWritable };
+          },
           latest: async () => (await runCommand('npm', { args: ['view', PACKAGE, 'version'] })).stdout,
           install: (spec) => runCommand('npm', { args: ['install', '--global', spec] }),
         },

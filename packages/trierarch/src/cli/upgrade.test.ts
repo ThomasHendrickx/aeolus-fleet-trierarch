@@ -13,6 +13,7 @@ let lookups: number;
 let installs: string[];
 let failing: CommandResult | undefined;
 let failingWrite: CommandResult | undefined;
+let isGlobalFolderWritable: boolean;
 let steps: string[];
 let isServiceInstalled: boolean;
 /** What running.json says on each read after the new process starts, the last one from then on. */
@@ -27,6 +28,7 @@ beforeEach(() => {
   installs = [];
   failing = undefined;
   failingWrite = undefined;
+  isGlobalFolderWritable = true;
   steps = [];
   isServiceInstalled = true;
   saying = [{ pid: 2, version: '0.17.2' }];
@@ -45,6 +47,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 const npm: Npm = {
+  globalFolder: () => Promise.resolve({ path: '/usr/local/lib/node_modules', isWritable: isGlobalFolderWritable }),
   latest: () => {
     lookups += 1;
     return Promise.resolve(latest);
@@ -149,6 +152,26 @@ describe('aeolus-trierarch upgrade', () => {
       `npm install --global ${PACKAGE}@0.17.2 failed: npm error code EACCES\nnpm error permission denied\nThe trierarch keeps running 0.17.1. Fix what npm says, then run aeolus-trierarch upgrade again.`,
     );
     expect(steps).toEqual([]);
+  });
+
+  it('stops before it installs when npm\'s global folder is not the user\'s to write, saying exactly what to run instead (#480)', async () => {
+    isGlobalFolderWritable = false;
+
+    await expect(upgrade()).rejects.toThrow(
+      `npm's global folder /usr/local/lib/node_modules is not yours to write: a system Node install owns it. Run instead:\n  sudo npm install --global ${PACKAGE}@0.17.2\n  aeolus-trierarch install\nThe trierarch keeps running 0.17.1.`,
+    );
+    expect(installs).toEqual([]);
+    expect(steps).toEqual([]);
+  });
+
+  it('says only the install to run instead when npm\'s global folder is not the user\'s to write and the service is not installed (#480)', async () => {
+    isGlobalFolderWritable = false;
+    isServiceInstalled = false;
+
+    await expect(upgrade()).rejects.toThrow(
+      `npm's global folder /usr/local/lib/node_modules is not yours to write: a system Node install owns it. Run instead:\n  sudo npm install --global ${PACKAGE}@0.17.2\nThe trierarch keeps running 0.17.1.`,
+    );
+    expect(installs).toEqual([]);
   });
 
   it('refuses a version that is no MAJOR.MINOR.PATCH', async () => {

@@ -1,5 +1,7 @@
-import { readdir } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+
+import { z } from 'zod';
 
 import type { AeolusPlugin } from './plugin-identity.js';
 
@@ -35,6 +37,36 @@ export async function findAeolusPlugin(at: { homeDirectory: string; env: Readonl
     throw new Error(`The aeolus plugin is not installed for ${places.name} (nothing in ${cache}): install it, or set ${places.rootVariable}`);
   }
   return { root: join(cache, newest), data };
+}
+
+/** The part of a plugin's manifest the version is read from. */
+const manifestSchema = z.object({ version: z.string() });
+
+/**
+ * The version of the aeolus plugin a harness uses, as the manifest that
+ * harness reads says it (#480); none when the harness has no aeolus plugin or
+ * its manifest says no version.
+ */
+export async function aeolusPluginVersion(at: { homeDirectory: string; env: Readonly<Record<string, string | undefined>>; harness: string }): Promise<string | undefined> {
+  if (at.harness !== 'claude-code' && at.harness !== 'codex') {
+    return undefined;
+  }
+  const plugin = await findAeolusPlugin({ ...at, harness: at.harness }).catch(() => undefined);
+  if (plugin === undefined) {
+    return undefined;
+  }
+  const manifest = join(plugin.root, at.harness === 'codex' ? '.codex-plugin' : '.claude-plugin', 'plugin.json');
+  const text = await readFile(manifest, 'utf8').catch(() => undefined);
+  if (text === undefined) {
+    return undefined;
+  }
+  try {
+    const parsed = manifestSchema.safeParse(JSON.parse(text));
+    return parsed.success ? parsed.data.version : undefined;
+  } catch {
+    // A manifest that is no JSON says no version.
+    return undefined;
+  }
 }
 
 function byVersion(left: string, right: string): number {
