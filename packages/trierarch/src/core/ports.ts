@@ -172,8 +172,12 @@ export interface ObservedWorktree {
   readonly shipId?: ShipId;
 }
 
-/** The configured repositories and folders each configured harness trusts, by name (#381). */
-export type TrustedPlaces = Readonly<Record<string, { readonly repositories: readonly string[]; readonly folders: readonly string[] }>>;
+/**
+ * The configured repositories and folders each configured harness trusts, by
+ * name (#381), and its flags whose one-time question is not accepted yet: a
+ * session launched with one waits on that question (#403).
+ */
+export type TrustedPlaces = Readonly<Record<string, { readonly repositories: readonly string[]; readonly folders: readonly string[]; readonly unacceptedFlags: readonly string[] }>>;
 
 /**
  * What each harness trusts now, as its own files say (#381). Init trusts a

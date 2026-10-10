@@ -38,8 +38,11 @@ export const CLAUDE_CODE_ADAPTER_FLAGS: readonly AdapterFlag[] = [
   { flag: CONTINUE, when: 'restart' },
 ];
 
+/** Claude Code's flag that runs every tool without asking; it asks once per user to accept that (#403). */
+export const SKIP_PERMISSIONS = '--dangerously-skip-permissions';
+
 /** The flags of Claude Code that are risky: it then runs every tool without asking (#326). */
-export const CLAUDE_CODE_RISKY_FLAGS: readonly string[] = ['--dangerously-skip-permissions'];
+export const CLAUDE_CODE_RISKY_FLAGS: readonly string[] = [SKIP_PERMISSIONS];
 
 /**
  * The configured flags, with a name for the remote-control session where the
