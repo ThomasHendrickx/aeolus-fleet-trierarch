@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import { initialConfiguration } from '../adapters/files.js';
 import { trierarchPaths, type TrierarchPaths } from '../adapters/paths.js';
+import type { RunningFile } from '../adapters/files.js';
 import type { ServiceStatus } from '../adapters/service.js';
 import { addPlace, type AddPlace } from './add.js';
 
@@ -18,6 +19,9 @@ let codexTrusted: string[];
 let isCodexFailing: boolean;
 let restarts: number;
 let isServiceInstalled: boolean;
+/** What running.json says on each read after the restart, the last one from then on. */
+let saying: (RunningFile | undefined)[];
+let reads: number;
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'trierarch-add-'));
@@ -28,6 +32,8 @@ beforeEach(() => {
   isCodexFailing = false;
   restarts = 0;
   isServiceInstalled = true;
+  saying = [{ pid: 2, version: '0.21.0' }];
+  reads = 0;
   writeConfiguration(initialConfiguration());
 });
 
@@ -60,12 +66,17 @@ function add(place: Pick<AddPlace, 'kind' | 'name' | 'path'>) {
       },
     },
     service: {
-      status: (): Promise<ServiceStatus> => Promise.resolve({ file: '/LaunchAgents/dev.aeolus-fleet.trierarch.plist', isInstalled: isServiceInstalled, isRunning: isServiceInstalled }),
+      status: (): Promise<ServiceStatus> => Promise.resolve({ file: '/LaunchAgents/dev.aeolus-fleet.trierarch.plist', isInstalled: isServiceInstalled, isRunning: isServiceInstalled, pid: 2 }),
       restart: () => {
         restarts += 1;
         return Promise.resolve();
       },
     },
+    running: () => {
+      reads += 1;
+      return Promise.resolve(saying[Math.min(reads, saying.length) - 1]);
+    },
+    sleep: () => Promise.resolve(),
   });
 }
 
@@ -83,6 +94,23 @@ describe('aeolus-trierarch add (#381)', () => {
       'Claude Code trusts it.',
       'The trierarch restarted to offer it; its sessions kept running.',
     ]);
+  });
+
+  it('waits for the restarted trierarch to say its version before it reports, so the status that follows shows it (#402)', async () => {
+    saying = [{ pid: 1, version: '0.21.0' }, { pid: 2, version: '0.21.0' }];
+
+    const report = await add({ kind: 'repository', name: 'pagasae', path: pagasae });
+
+    expect(reads).toBe(2);
+    expect(report.said.at(-1)).toBe('The trierarch restarted to offer it; its sessions kept running.');
+  });
+
+  it('says when the restarted trierarch has not said its version after 30 seconds (#402)', async () => {
+    saying = [{ pid: 1, version: '0.21.0' }];
+
+    const report = await add({ kind: 'repository', name: 'pagasae', path: pagasae });
+
+    expect(report.said.at(-1)).toBe('The new process has not said its version after 30 seconds: aeolus-trierarch status shows the version it runs once it does.');
   });
 
   it('adds a folder, keeping everything else the configuration holds', async () => {
