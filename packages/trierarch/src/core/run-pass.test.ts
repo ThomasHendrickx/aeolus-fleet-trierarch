@@ -1,7 +1,7 @@
 import type { ShipId } from '@aeolus-fleet/common';
 import { describe, expect, it } from 'vitest';
 
-import { aTrierarch, CONFIGURATION, crewSettings, NOTES_FOLDER, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
+import { aTrierarch, CODEX_SCREENS_CHECKED_ON, CONFIGURATION, crewSettings, NOTES_FOLDER, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
 import type { LaunchSeen } from './ports.js';
 import { RESTART_BUDGET } from './restart-policy.js';
 
@@ -1570,5 +1570,86 @@ describe('what the loop logs (aeolus-trierarch logs)', () => {
         next: 'the next pass tries again; aeolus-trierarch status and list show where it stands',
       },
     ]);
+  });
+});
+
+describe('a launch on a harness version its launch screens were not checked on (#594)', () => {
+  const UNCHECKED = '0.163.0';
+  /** Codex as detection found it on the machine, at the version given. */
+  const codexAt = (version: string) => ({ codex: { version, detectedAt: new Date('2026-10-09T08:00:00Z'), confirmedAt: null, options: {} } });
+
+  /** A ship crewed with Codex by one pass, whose session shows what is given in its launch window: its id. */
+  async function aCodexLaunch(trierarch: Trierarch, seen: LaunchSeen) {
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.codex.seen.set(shipId, seen);
+    trierarch.fleet.request(shipId, crewSettings({ harness: 'codex' }));
+    await trierarch.pass();
+    return shipId;
+  }
+
+  it('tells argo once per harness and version when a session on a version its screens were not checked on shows no activity within a minute, naming the machine, the ship and both versions, and gives the request back as before', async () => {
+    const trierarch = aTrierarch(WITH_CODEX, codexAt(UNCHECKED));
+    const shipId = await aCodexLaunch(trierarch, { kind: 'none' });
+    trierarch.clock.advance(MINUTE_MS);
+    await trierarch.pass();
+    await aCodexLaunch(trierarch, { kind: 'none' });
+    trierarch.clock.advance(MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo).toEqual([
+      {
+        text: `mac-studio: scout (${shipId}) showed no activity within a minute of its start on codex ${UNCHECKED}, a version its launch screens were not checked on (they were on ${CODEX_SCREENS_CHECKED_ON}): check codex's screens against ${UNCHECKED}`,
+        idempotencyKey: `trierarch:unchecked-screens:codex:${UNCHECKED}`,
+      },
+    ]);
+    expect(trierarch.fleet.givenBack.map((each) => each.reason)).toEqual(['mac-studio: no activity within a minute of its start', 'mac-studio: no activity within a minute of its start']);
+  });
+
+  it('tells argo nothing when the session shows no activity on the version its screens were checked on', async () => {
+    const trierarch = aTrierarch(WITH_CODEX, codexAt(CODEX_SCREENS_CHECKED_ON));
+    await aCodexLaunch(trierarch, { kind: 'none' });
+    trierarch.clock.advance(MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+
+  it('tells argo nothing when a session on a version its screens were not checked on shows activity', async () => {
+    const trierarch = aTrierarch(WITH_CODEX, codexAt(UNCHECKED));
+    await aCodexLaunch(trierarch, { kind: 'active' });
+    trierarch.clock.advance(MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+
+  it('tells argo nothing for a harness whose screens name no checked version', async () => {
+    const trierarch = aTrierarch(CONFIGURATION, DETECTED);
+    await aLaunchedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.clock.advance(MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+
+  it('tells argo when a restarted session on a version its screens were not checked on shows no activity within a minute', async () => {
+    const trierarch = aTrierarch(WITH_CODEX, codexAt(UNCHECKED));
+    const shipId = await aCodexLaunch(trierarch, { kind: 'active' });
+    await trierarch.pass();
+    trierarch.codex.seen.set(shipId, { kind: 'none' });
+    trierarch.processes.exit(shipId);
+    await trierarch.pass();
+    trierarch.clock.advance(5 * SECOND_MS);
+    await trierarch.pass();
+    trierarch.clock.advance(MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo.map((report) => report.idempotencyKey)).toEqual([`trierarch:unchecked-screens:codex:${UNCHECKED}`]);
+    expect(trierarch.state.current().entries[shipId]?.state).toBe('restarting');
   });
 });
