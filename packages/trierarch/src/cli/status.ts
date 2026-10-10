@@ -12,7 +12,8 @@ import { PLAIN, stateTone, type Style } from '../adapters/style.js';
 
 /**
  * `aeolus-trierarch status`: how the trierarch stands on this machine, from
- * what is on it. The service and its process, the fleet and the trierarch's
+ * what is on it. The aeolus plugin version per configured harness, the
+ * service and its process, the fleet and the trierarch's
  * own lease (one whoami, no message), the caps in use, the entries by state,
  * and the worktrees kept or orphaned.
  */
@@ -25,6 +26,8 @@ export interface StatusReport {
   readonly version: string;
   /** The version the running service runs, as it said when it started; none when it does not run or did not say. */
   readonly runningVersion?: string;
+  /** The aeolus plugin version per configured harness; null where the harness has none (#480). */
+  readonly plugins: Readonly<Record<string, string | null>>;
   readonly service: ServiceStatus;
   readonly fleet: { readonly url: string; readonly shipId?: string; readonly lease: Lease };
   readonly caps: { readonly ships: { readonly used: number; readonly cap: number }; readonly running: { readonly used: number; readonly cap: number } };
@@ -50,6 +53,8 @@ export function leaseFrom(whoami: () => Promise<unknown>): () => Promise<Lease> 
 export async function inspectStatus(at: {
   configuration: TrierarchConfiguration;
   version: string;
+  /** The aeolus plugin version the harness uses; none when it has no aeolus plugin. */
+  pluginVersion: (harness: string) => Promise<string | undefined>;
   running: () => Promise<RunningFile | undefined>;
   crew: CrewFile;
   service: Pick<Service, 'status'>;
@@ -57,7 +62,16 @@ export async function inspectStatus(at: {
   processes: ProcessPort;
   state: StatePort;
 }): Promise<StatusReport> {
-  const [service, lease, sessions, state, running] = await Promise.all([at.service.status(), at.lease(), at.processes.list(), at.state.load(), at.running()]);
+  const harnesses = Object.keys(at.configuration.harnesses);
+  const [service, lease, sessions, state, running, pluginVersions] = await Promise.all([
+    at.service.status(),
+    at.lease(),
+    at.processes.list(),
+    at.state.load(),
+    at.running(),
+    Promise.all(harnesses.map((harness) => at.pluginVersion(harness))),
+  ]);
+  const plugins = Object.fromEntries(harnesses.map((harness, index) => [harness, pluginVersions[index] ?? null]));
   // Only the service's own process counts: a file left by an earlier process, or by a `run` outside the service, says nothing of it.
   const runningVersion = service.isRunning && running !== undefined && running.pid === service.pid ? running.version : undefined;
   const entries: Record<EntryState, number> = { crewing: 0, running: 0, restarting: 0, crashed: 0, releasing: 0 };
@@ -67,6 +81,7 @@ export async function inspectStatus(at: {
   return {
     version: at.version,
     ...(runningVersion !== undefined && { runningVersion }),
+    plugins,
     service,
     fleet: { url: at.crew.fleetUrl, ...(at.crew.shipId !== undefined && { shipId: at.crew.shipId }), lease },
     caps: {
@@ -114,12 +129,22 @@ function describeVersion(report: StatusReport, style: Style): string {
   return style.tone('busy', `${report.version} installed, ${report.runningVersion} running: restart the service to run the installed one (${RESTART})`);
 }
 
+/** Each configured harness with the aeolus plugin version it uses, or that it has none. */
+function describePlugins(plugins: StatusReport['plugins'], style: Style): string {
+  const harnesses = Object.entries(plugins);
+  if (harnesses.length === 0) {
+    return 'no harness configured';
+  }
+  return harnesses.map(([harness, version]) => (version === null ? style.tone('bad', `${harness} not found (install the aeolus plugin for it)`) : `${harness} ${version}`)).join(', ');
+}
+
 /** Each line its label and how it stands; where the style colours, the label strong and each state in its tone. */
 export function describeStatus(report: StatusReport, style: Style = PLAIN): string {
   const counted = Object.entries(report.entries).filter(([, count]) => count > 0);
   const line = (label: string, text: string): string => `${style.tone('strong', `${label}:`)} ${text}`;
   return [
     line('Version', describeVersion(report, style)),
+    line('Aeolus plugin', describePlugins(report.plugins, style)),
     line('Service', describeService(report.service, style)),
     line('Fleet', describeFleet(report.fleet, style)),
     line('Caps', `${String(report.caps.ships.used)} of ${String(report.caps.ships.cap)} ships crewed here, ${String(report.caps.running.used)} of ${String(report.caps.running.cap)} sessions running`),

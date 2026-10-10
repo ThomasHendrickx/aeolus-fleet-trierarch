@@ -70,7 +70,7 @@ describe('aeolus-trierarch status', () => {
   });
 
   it('says the aeolus plugin version per configured harness, and where a harness has none (#480)', async () => {
-    const configuration = { ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: { flags: [] } } };
+    const configuration = { ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: { flags: [], options: {} } } };
 
     const report = await inspect(aTrierarch(), { configuration, pluginVersions: { 'claude-code': '0.20.4' } });
 
