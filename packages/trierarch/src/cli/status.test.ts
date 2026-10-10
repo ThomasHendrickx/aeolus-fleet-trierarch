@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { FleetRefusal } from '../adapters/rest-fleet.js';
 import type { RunningFile } from '../adapters/files.js';
 import type { ServiceStatus } from '../adapters/service.js';
-import { aTrierarch, CONFIGURATION, newId, WORKTREE_ROOT } from '../../test/support/in-memory.js';
+import { aTrierarch, CONFIGURATION, crewSettings, newId, WORKTREE_ROOT } from '../../test/support/in-memory.js';
 import { describeStatus, inspectStatus, leaseFrom, type Lease } from './status.js';
 import { createStyle } from '../adapters/style.js';
 
@@ -73,13 +73,15 @@ describe('aeolus-trierarch status', () => {
 
   it('lists kept worktrees and orphans', async () => {
     const trierarch = aTrierarch();
+    // A worktree with changes is kept when its crew is given back before it is final: its launch fails, then settings it cannot crew come.
+    trierarch.harness.isFailingLaunch = true;
     const scout = trierarch.fleet.commission('scout');
     trierarch.fleet.request(scout);
     await trierarch.pass();
     trierarch.workspace.change(`${WORKTREE_ROOT}/aeolus-fleet/scout`);
-    trierarch.fleet.removeRequest(scout);
+    trierarch.fleet.requestAgain(scout, crewSettings({ harness: 'codex' }));
     await trierarch.pass();
-    trierarch.workspace.folders.set(`${WORKTREE_ROOT}/aeolus-fleet/stray`, { hasChanges: false });
+    trierarch.workspace.folders.set(`${WORKTREE_ROOT}/aeolus-fleet/stray`, { hasChanges: false, unsaved: [] });
     await trierarch.pass();
 
     const text = describeStatus(await inspect(trierarch));

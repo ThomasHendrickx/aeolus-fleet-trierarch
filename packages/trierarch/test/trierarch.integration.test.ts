@@ -159,13 +159,36 @@ describe('the trierarch on a real fleet', () => {
     await expect(database.crewRequest.findUnique({ where: { shipId: scout.shipId } })).resolves.toBeNull();
   });
 
+  it('removing the request removes a worktree with changes too and tells argo what it discards, so the ship crewed again starts in a fresh worktree (#450)', async () => {
+    const { useCases, argo, trierarchShip, scout, pass, worktree } = await aTrierarchOnTheFleet();
+    const settings = { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} };
+    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings }));
+    unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
+    await pass();
+    writeFileSync(join(worktree, 'draft.md'), 'work in progress\n');
+    unwrap(await useCases.removeCrewRequest(argo, { shipId: scout.shipId }));
+    await pass();
+    expect(existsSync(worktree)).toBe(false);
+    await expect(database.message.findMany({ where: { senderShipId: trierarchShip.shipId }, select: { payload: true } })).resolves.toEqual([
+      { payload: `mac-mini: released scout (${scout.shipId}) and removed its aeolus-fleet worktree, discarding what was not pushed: ?? draft.md` },
+    ]);
+
+    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings }));
+    unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
+    await pass();
+
+    expect(existsSync(join(worktree, 'README.md'))).toBe(true);
+    expect(existsSync(join(worktree, 'draft.md'))).toBe(false);
+  });
+
   it('clears a kept worktree when argo asks, and confirms it removed it (#325, decision 0032)', async () => {
     const { useCases, argo, trierarchShip, scout, pass, worktree } = await aTrierarchOnTheFleet();
     unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } }));
     unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
     await pass();
+    // A worktree with changes is kept when its crew is given back before it is final: settings this trierarch cannot crew come while it crews.
     writeFileSync(join(worktree, 'draft.md'), 'work in progress\n');
-    unwrap(await useCases.removeCrewRequest(argo, { shipId: scout.shipId }));
+    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'codex', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } }));
     await pass();
     expect(existsSync(worktree)).toBe(true);
 

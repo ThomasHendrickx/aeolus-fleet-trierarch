@@ -410,20 +410,24 @@ export class InMemoryHarness implements HarnessPort {
 }
 
 export class InMemoryWorkspace implements WorkspacePort {
-  /** Folders on disk, with whether they hold changes. */
-  readonly folders = new Map<string, { shipId?: ShipId; hasChanges: boolean }>([[NOTES_FOLDER, { hasChanges: false }]]);
+  /** Folders on disk, with whether they hold changes, and what removing one would discard, as git says it. */
+  readonly folders = new Map<string, { shipId?: ShipId; hasChanges: boolean; unsaved: string[] }>([[NOTES_FOLDER, { hasChanges: false, unsaved: [] }]]);
 
   prepare(at: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace }): Promise<{ folder: string }> {
     const { shipId, shipName, workspace } = at;
     const folder = workspace.kind === 'folder' ? NOTES_FOLDER : `${WORKTREE_ROOT}/${workspace.repository}/${shipName}`;
     if (!this.folders.has(folder)) {
-      this.folders.set(folder, { shipId, hasChanges: false });
+      this.folders.set(folder, { shipId, hasChanges: false, unsaved: [] });
     }
     return Promise.resolve({ folder });
   }
 
   isClean(folder: string): Promise<boolean> {
     return Promise.resolve(this.folders.get(folder)?.hasChanges !== true);
+  }
+
+  unsaved(folder: string): Promise<readonly string[]> {
+    return Promise.resolve([...(this.folders.get(folder)?.unsaved ?? [])]);
   }
 
   /** Set to make every remove fail, as when git refuses. */
@@ -448,11 +452,12 @@ export class InMemoryWorkspace implements WorkspacePort {
     );
   }
 
-  /** Someone changes a file in the folder. */
-  change(folder: string): void {
+  /** Someone changes a file in the folder, as git status shows the change. */
+  change(folder: string, status = ' M README.md'): void {
     const found = this.folders.get(folder);
     if (found !== undefined) {
       found.hasChanges = true;
+      found.unsaved.push(status);
     }
   }
 }

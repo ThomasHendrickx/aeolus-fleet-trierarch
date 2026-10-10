@@ -112,6 +112,29 @@ describe('workspaces in git', () => {
     expect(await workspace().isClean(made)).toBe(false);
   });
 
+  it('says what removing a worktree discards: nothing for a fresh one', async () => {
+    const { folder: made } = await workspace().prepare(scout);
+
+    expect(await workspace().unsaved(made)).toEqual([]);
+  });
+
+  it('says what removing a worktree discards: each change not committed, as git status shows it, and each commit no branch, tag or remote branch keeps (#450)', async () => {
+    const upstream = join(folder, 'upstream');
+    await git(['clone', '-q', repository, upstream]);
+    await git(['-C', repository, 'remote', 'add', 'origin', upstream]);
+    const { folder: made } = await workspace().prepare({ ...scout, workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'main' } });
+    writeFileSync(join(made, 'done.md'), 'done\n');
+    await git(['-C', made, 'add', '.']);
+    await git(['-C', made, 'commit', '-q', '-m', 'work not pushed']);
+    writeFileSync(join(made, 'README.md'), 'changed\n');
+    writeFileSync(join(made, 'draft.md'), 'draft\n');
+
+    const unsaved = await workspace().unsaved(made);
+
+    const commit = (await git(['-C', made, 'rev-parse', '--short', 'HEAD'])).trim();
+    expect(unsaved).toEqual([' M README.md', '?? draft.md', `commit ${commit} work not pushed`]);
+  });
+
   it('removes a worktree it made', async () => {
     const { folder: made } = await workspace().prepare(scout);
 

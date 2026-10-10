@@ -41,6 +41,21 @@ async function crashForGood(trierarch: Trierarch, shipId: ShipId) {
   }
 }
 
+/**
+ * A ship whose crew is given back before it is final, with changes in its
+ * worktree, so the trierarch keeps the worktree: its id. Its launch fails, so
+ * its crew stays not final, then a new settings version it cannot crew comes.
+ */
+async function aKeptWorktree(trierarch: Trierarch) {
+  trierarch.harness.isFailingLaunch = true;
+  const shipId = await aCrewedShip(trierarch);
+  trierarch.workspace.change(SCOUT_FOLDER);
+  trierarch.fleet.requestAgain(shipId, crewSettings({ harness: 'codex' }));
+  await trierarch.pass();
+  trierarch.harness.isFailingLaunch = false;
+  return shipId;
+}
+
 const statusesOf = (trierarch: Trierarch, shipId: ShipId) => trierarch.fleet.statuses.filter((each) => each.shipId === shipId).map((each) => each.status);
 
 describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => {
@@ -196,7 +211,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.fleet.requests.has(shipId)).toBe(false);
   });
 
-  it('row 7: keeps and reports a worktree with changes, and ends the lease all the same (gap rules 1 and 4)', async () => {
+  it('row 7: removes a worktree with changes too, keeps none, ends the lease and confirms (#450)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     trierarch.workspace.change(SCOUT_FOLDER);
@@ -205,18 +220,68 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     await trierarch.pass();
 
     expect(trierarch.fleet.shipOf(shipId).status).toBe('awaitingCrew');
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
+    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
     expect(trierarch.harness.identities.has(SCOUT_FOLDER)).toBe(false);
-    expect(trierarch.state.current().kept).toEqual([{ shipId, repository: 'aeolus-fleet', path: SCOUT_FOLDER }]);
+    expect(trierarch.state.current().kept).toEqual([]);
     expect(trierarch.fleet.confirmed).toEqual([shipId]);
   });
 
-  it('drops a kept worktree once it is gone from disk, as when a human removed it by hand (#325)', async () => {
+  it('row 7: tells argo what removing the worktree discards, naming the machine, the ship and each unpushed change (#450)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.change(SCOUT_FOLDER, ' M README.md');
+    trierarch.workspace.change(SCOUT_FOLDER, '?? draft.md');
+    trierarch.fleet.removeRequest(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
+      `mac-studio: released scout (${shipId}) and removed its aeolus-fleet worktree, discarding what was not pushed:  M README.md; ?? draft.md`,
+    ]);
+  });
+
+  it('row 7: tells argo nothing when the worktree it removes holds nothing unpushed (#450)', async () => {
+    const trierarch = aTrierarch();
+    trierarch.fleet.removeRequest(await aCrewedShip(trierarch));
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+
+  it('row 7: tells argo once when removing the worktree fails and the next pass removes it (#450)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.change(SCOUT_FOLDER);
+    trierarch.fleet.removeRequest(shipId);
+    trierarch.workspace.isFailingRemove = true;
+    await trierarch.pass();
+    trierarch.workspace.isFailingRemove = false;
+
+    await trierarch.pass();
+
+    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.fleet.confirmed).toEqual([shipId]);
+    expect(trierarch.fleet.toArgo).toHaveLength(1);
+  });
+
+  it('a ship crewed again after its release starts in a fresh worktree, without what the crew before left (#450)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     trierarch.workspace.change(SCOUT_FOLDER);
     trierarch.fleet.removeRequest(shipId);
     await trierarch.pass();
+    trierarch.fleet.request(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]?.folder).toBe(SCOUT_FOLDER);
+    expect(trierarch.workspace.folders.get(SCOUT_FOLDER)).toMatchObject({ hasChanges: false, unsaved: [] });
+  });
+
+  it('drops a kept worktree once it is gone from disk, as when a human removed it by hand (#325)', async () => {
+    const trierarch = aTrierarch();
+    await aKeptWorktree(trierarch);
     trierarch.workspace.folders.delete(SCOUT_FOLDER);
 
     await trierarch.pass();
@@ -227,10 +292,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
 
   it('keeps a kept worktree that is still on disk, pass after pass', async () => {
     const trierarch = aTrierarch();
-    const shipId = await aCrewedShip(trierarch);
-    trierarch.workspace.change(SCOUT_FOLDER);
-    trierarch.fleet.removeRequest(shipId);
-    await trierarch.pass();
+    const shipId = await aKeptWorktree(trierarch);
 
     await trierarch.pass();
 
@@ -239,10 +301,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
 
   it('clears a kept worktree its clear request names: removes it, drops it from kept and confirms it removed (decision 0032)', async () => {
     const trierarch = aTrierarch();
-    const shipId = await aCrewedShip(trierarch);
-    trierarch.workspace.change(SCOUT_FOLDER);
-    trierarch.fleet.removeRequest(shipId);
-    await trierarch.pass();
+    const shipId = await aKeptWorktree(trierarch);
     trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
 
     await trierarch.pass();
@@ -256,7 +315,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
   it('confirms a clear request for a worktree it does not keep as not-kept, and removes nothing (decision 0032)', async () => {
     const trierarch = aTrierarch();
     const shipId = trierarch.fleet.commission('scout');
-    trierarch.workspace.folders.set(SCOUT_FOLDER, { hasChanges: true });
+    trierarch.workspace.folders.set(SCOUT_FOLDER, { hasChanges: true, unsaved: [] });
     trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
 
     await trierarch.pass();
@@ -267,10 +326,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
 
   it('drops a kept worktree from kept once a ship is crewed in it again, so a clear request removes nothing in use (decision 0032)', async () => {
     const trierarch = aTrierarch();
-    const shipId = await aCrewedShip(trierarch);
-    trierarch.workspace.change(SCOUT_FOLDER);
-    trierarch.fleet.removeRequest(shipId);
-    await trierarch.pass();
+    const shipId = await aKeptWorktree(trierarch);
     trierarch.fleet.request(shipId);
     await trierarch.pass();
     trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
@@ -285,10 +341,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
 
   it('keeps a kept worktree and its clear request when removing it fails, so the next pass tries again', async () => {
     const trierarch = aTrierarch();
-    const shipId = await aCrewedShip(trierarch);
-    trierarch.workspace.change(SCOUT_FOLDER);
-    trierarch.fleet.removeRequest(shipId);
-    await trierarch.pass();
+    const shipId = await aKeptWorktree(trierarch);
     trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
     trierarch.workspace.isFailingRemove = true;
 
@@ -343,7 +396,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     const trierarch = aTrierarch();
     const shipId = trierarch.fleet.commission('scout');
     trierarch.fleet.request(shipId);
-    trierarch.workspace.folders.set(SCOUT_FOLDER, { shipId, hasChanges: false });
+    trierarch.workspace.folders.set(SCOUT_FOLDER, { shipId, hasChanges: false, unsaved: [] });
 
     await trierarch.pass();
 
@@ -597,7 +650,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
   it('rule 2: a worktree under its root with no assigned request is reported as an orphan, never deleted', async () => {
     const trierarch = aTrierarch();
     const orphan = `${WORKTREE_ROOT}/aeolus-fleet/lookout`;
-    trierarch.workspace.folders.set(orphan, { hasChanges: false });
+    trierarch.workspace.folders.set(orphan, { hasChanges: false, unsaved: [] });
 
     await trierarch.pass();
 
@@ -943,7 +996,7 @@ describe('what the loop logs (aeolus-trierarch logs)', () => {
     expect(logged(trierarch).at(-1)).toBe('wake: woken, deliveries wait');
   });
 
-  it('logs a release, saying whether its worktree was removed or kept', async () => {
+  it('logs a release, saying its worktree was removed and how much it discarded', async () => {
     const clean = aTrierarch();
     clean.fleet.removeRequest(await aCrewedShip(clean));
     const changed = aTrierarch();
@@ -955,15 +1008,12 @@ describe('what the loop logs (aeolus-trierarch logs)', () => {
     await changed.pass();
 
     expect(logged(clean).at(-1)).toBe('release: released, its worktree removed');
-    expect(logged(changed).at(-1)).toBe(`release: released, its worktree kept with changes: ${SCOUT_FOLDER}`);
+    expect(logged(changed).at(-1)).toBe('release: released, its worktree removed, discarding 1 unpushed change, told to argo');
   });
 
   it('logs a clear, saying whether it removed the kept worktree or kept none', async () => {
     const trierarch = aTrierarch();
-    const shipId = await aCrewedShip(trierarch);
-    trierarch.workspace.change(SCOUT_FOLDER);
-    trierarch.fleet.removeRequest(shipId);
-    await trierarch.pass();
+    const shipId = await aKeptWorktree(trierarch);
     trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
     await trierarch.pass();
     trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
