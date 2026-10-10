@@ -26,7 +26,7 @@ The server stores the settings without meaning and checks only their size. The s
 - optionally the harness. Without one, the trierarch it goes to crews it with its default harness: the first in its configuration, which is also the first in its report;
 - the workspace: a new git worktree of a repository (`{ kind: worktree, repository, ref? }`) or a folder (`{ kind: folder, name }`), each named in the trierarch's local configuration;
 - optionally the squadron the ship is a member of, so it checks in at its flagship as a crew line's squadron id does. With a squadron, the session starts with that squadron's crew line and template, as squadrons crews a new member, instead of a plain first prompt;
-- an optional first prompt, at most 8 KB and never starting with `-` (it would read as a flag), given on the first start of each settings version only;
+- an optional first prompt, at most 8 KB and never starting with `-` (it would read as a flag), given on the first start of each settings version and on the start after a release elsewhere (row 11) only;
 - options, checked against the JSON Schema the trierarch reports for that harness, or for its default harness when the settings name none. Only the options that schema declares (its `properties`) are checked; an option it does not declare is ignored: no flag, no refusal. A declared option with a value the harness does not offer does not fit;
 - optional machine labels: label value ids of the fleet, any owner's, that the machine's trierarch ship must carry, every one (exact matches, AND; see Machine labels below).
 
@@ -179,7 +179,7 @@ The ship, its crew request, its session and its worktree live and end together:
 | 8 | the trierarch stops mid-crew (a lost `register` reply among them) | perhaps crewed, by its own lost token | crewing, saved locally before it registered | none, or a stray | perhaps half made |
 | 9 | the trierarch is uninstalled | crewed | still assigned to it | stopped first | uninstall lists kept worktrees and deletes nothing |
 | 10 | the machine goes silent | as it was | still assigned to it, the machine flagged | unknown | unknown |
-| 11 | released elsewhere | awaiting crew, then crewed again by the trierarch | unchanged, crewing, then running | stopped, then started | removed before it is crewed again, with changes too: argo is told what it discards; then created fresh |
+| 11 | released elsewhere | awaiting crew, then crewed again by the trierarch | unchanged, crewing, then running | stopped, then started as a first start: its first prompt, never continuing the old conversation | removed before it is crewed again, with changes too: argo is told what it discards; then created fresh |
 | 12 | Restart or Edit: the request written again, a new settings version | crewed, released and crewed again by the trierarch | the new version: crewing, then running | stopped, then started with a fresh restart budget | kept |
 
 The rules that close the gaps:
