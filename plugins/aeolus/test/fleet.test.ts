@@ -74,6 +74,8 @@ async function identityFile(): Promise<string> {
 }
 
 const registered = { status: 200, body: { crewToken: CREW_TOKEN } };
+/** The fleet's refusal while every pool connection is taken: nothing was stored (#542). */
+const busy = { status: 503, body: { code: 'SERVICE_UNAVAILABLE', message: 'The fleet is busy; nothing was stored. Make the same call again (for send, with the same idempotency key).' } };
 const whoami = { status: 200, body: { shipId: SHIP_ID, fleetId: 'flt_01m3tbfspe96yf1rnr4ank9h1c', name: 'scout', type: 'implementer' } };
 
 function expectNoToken(result: Run): void {
@@ -299,6 +301,61 @@ describe('aeolus-fleet calls', () => {
 
     expect(result.status).toBe(1);
     expect(result.stdout).toContain('BAD_REQUEST: model: Required');
+  });
+
+  it('makes the same call again by itself while the fleet is busy, so a send keeps its idempotency key', async () => {
+    fleet = await crewedAt([busy, busy, { status: 200, body: { messageId: 'msg_01m3tbfspe96yf1rnr4ank9h1d' } }]);
+    const input = JSON.stringify({ selector: { kind: 'ship', name: 'orchestrator-1' }, payload: 'done', idempotencyKey: 'send-1', model: 'claude-opus-5-5' });
+
+    const result = await run('aeolus-fleet.sh', { args: ['send', '-'], stdin: input, env: { AEOLUS_BUSY_WAITS: '0.01 0.01 0.01 0.01' } });
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ messageId: 'msg_01m3tbfspe96yf1rnr4ank9h1d' });
+    expect(fleet.calls.map((call) => [call.path, call.body])).toEqual([
+      ['/api/v1/ship/send', input],
+      ['/api/v1/ship/send', input],
+      ['/api/v1/ship/send', input],
+    ]);
+  });
+
+  it('waits longer before each next call while the fleet stays busy', async () => {
+    fleet = await crewedAt([busy, busy, { status: 200, body: {} }]);
+    const stub = fleet;
+    const calledAt: number[] = [];
+    const watching = setInterval(() => {
+      if (calledAt.length < stub.calls.length) {
+        calledAt.push(Date.now());
+      }
+    }, 5);
+
+    await run('aeolus-fleet.sh', { args: ['whoami'], env: { AEOLUS_BUSY_WAITS: '0.2 0.6' } });
+    clearInterval(watching);
+
+    const [first = 0, second = 0, third = 0] = calledAt;
+    expect(second - first).toBeGreaterThanOrEqual(150);
+    expect(third - second).toBeGreaterThanOrEqual(550);
+  });
+
+  it('says the fleet is busy, and exits 1, once every wait is spent, calling once more than it waits', async () => {
+    fleet = await crewedAt([busy]);
+
+    const result = await run('aeolus-fleet.sh', { args: ['receive'], env: { AEOLUS_BUSY_WAITS: '0.01 0.01 0.01' } });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('SERVICE_UNAVAILABLE: The fleet is busy');
+    expect(fleet.calls).toHaveLength(4);
+  });
+
+  it('waits 1, 2, 4 and 8 seconds while the fleet stays busy, unless AEOLUS_BUSY_WAITS says otherwise', () => {
+    expect(readFileSync(join(SCRIPTS, 'aeolus-fleet.sh'), 'utf8')).toContain('BUSY_WAITS="${AEOLUS_BUSY_WAITS:-1 2 4 8}"');
+  });
+
+  it('calls once, without waiting, on any other refusal', async () => {
+    fleet = await crewedAt([{ status: 500, body: { code: 'INTERNAL_SERVER_ERROR', message: 'Failed' } }]);
+
+    await run('aeolus-fleet.sh', { args: ['whoami'], env: { AEOLUS_BUSY_WAITS: '0.01' } });
+
+    expect(fleet.calls).toHaveLength(1);
   });
 
   it('says the fleet did not answer, and exits 6, when it cannot be reached', async () => {

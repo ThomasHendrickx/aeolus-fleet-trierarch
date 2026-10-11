@@ -13,6 +13,11 @@
 #   aeolus-fleet.sh whoami|reportLog|deregister
 #   aeolus-fleet.sh protocol    the ship protocol, as the fleet states it
 #
+# While the fleet is busy (503 SERVICE_UNAVAILABLE: nothing was stored), the
+# script makes the same call again by itself, with the same input, so a send
+# keeps its idempotency key: after each wait in AEOLUS_BUSY_WAITS (seconds,
+# 1 2 4 8 by default), then it says the refusal as any other.
+#
 # Exit codes:
 #   0  done: the fleet's answer is printed
 #   1  the fleet refused: its code and message are printed
@@ -27,14 +32,32 @@ set -uo pipefail
 # The longest a call may take: receive and inbox wait up to 25 seconds.
 MAX_SECONDS=60
 
+# The waits before each next call while the fleet answers busy: bounded, longer each time.
+BUSY_WAITS="${AEOLUS_BUSY_WAITS:-1 2 4 8}"
+
 usage() {
   echo "usage: aeolus-fleet.sh register|receive|ack|pong|send|report|inbox|whoami|reportLog|deregister|protocol ..." >&2
   exit 2
 }
 
-# One call to the fleet: <method> <path> <crew token or empty> <body or empty>.
-# Sets status and body; exits 6 when the fleet does not answer.
+# One call to the fleet: <method> <path> <crew token or empty> <body or empty>,
+# made again after each of BUSY_WAITS while the fleet answers busy. Sets status
+# and body; exits 6 when the fleet does not answer.
 call_fleet() {
+  local wait
+  call_fleet_once "$@"
+  for wait in $BUSY_WAITS; do
+    fleet_busy || return 0
+    sleep "$wait"
+    call_fleet_once "$@"
+  done
+}
+
+fleet_busy() {
+  [ "$status" = 503 ] && [ "$(aeolus_json_string "$body" code)" = SERVICE_UNAVAILABLE ]
+}
+
+call_fleet_once() {
   local method="$1" path="$2" token="$3" input="$4" answer
   local args=(-sS --max-time "$MAX_SECONDS" -w '\n%{http_code}' -X "$method" "${fleet_url}${path}")
   [ -n "$input" ] && args+=(-H 'content-type: application/json')
