@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -73,6 +73,11 @@ function run(script: string, args: string[]): Promise<Run> {
       resolve({ status, stdout, stderr });
     });
   });
+}
+
+/** Runs a hook with its payload on stdin; a hook calls no fleet, so it may block. */
+function hook(script: string, payload: unknown): void {
+  spawnSync('bash', [join(SCRIPTS, script)], { input: JSON.stringify(payload), env: { ...process.env, HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data } });
 }
 
 async function crewedAt(answers: readonly StubAnswer[]): Promise<StubFleet> {
@@ -167,6 +172,16 @@ describe('aeolus-ask.sh ask', () => {
     expect(result.status).toBe(2);
     expect(result.stderr).toContain('usage');
     expect(fleet.calls).toEqual([]);
+  });
+
+  it('states the model the Codex hook records on the aeolus-ask.sh call itself, so a model switch shows on the question', async () => {
+    fleet = await crewedAt([sent]);
+    const payload = { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: "scripts/aeolus-ask.sh ask --title 'Port?'" }, model: 'gpt-5.5' };
+
+    hook('aeolus-model.sh', payload);
+    await run('aeolus-ask.sh', ['ask', '--title', 'Port?', '--option', 'Keep', '', '--pick', '1', 'Fewest changes.']);
+
+    expect(theSend(fleet).model).toBe('gpt-5.5');
   });
 
   it("says the fleet's refusal as aeolus-fleet.sh does, with its exit code", async () => {
