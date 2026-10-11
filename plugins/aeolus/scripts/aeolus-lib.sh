@@ -316,9 +316,19 @@ aeolus_is_watching() {
   aeolus_process_is "$pid" aeolus-wait.sh
 }
 
-# Text as a JSON string's contents: backslashes, quotes and newlines escaped.
+# Text as a JSON string's contents: backslashes, quotes, newlines, tabs and
+# every other control character (U+0001 to U+001F) escaped. A shell string
+# holds no U+0000. Character by character, as any awk does it.
 aeolus_json_escape() {
-  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | awk 'NR > 1 { printf "\\n" } { printf "%s", $0 }'
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | awk '
+    BEGIN { for (code = 1; code < 32; code++) escaped[sprintf("%c", code)] = sprintf("\\u%04x", code); escaped["\t"] = "\\t"; escaped["\r"] = "\\r" }
+    NR > 1 { printf "\\n" }
+    {
+      for (at = 1; at <= length($0); at++) {
+        character = substr($0, at, 1)
+        printf "%s", ((character in escaped) ? escaped[character] : character)
+      }
+    }'
 }
 
 # One string field of a hook's JSON payload, its escapes undone.
