@@ -39,6 +39,7 @@ const stateSchema = z.object({
       hasStarted: z.boolean(),
       launchedAt: z.string().optional(),
       isReleasedElsewhere: z.literal(true).optional(),
+      isIdentityGone: z.literal(true).optional(),
       wake: z.object({ waiting: z.int().nonnegative(), isPending: z.boolean() }),
     }),
   ),

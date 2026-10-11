@@ -194,7 +194,7 @@ The rules that close the gaps:
 2. Every pass of the loop also looks for strays. A session of the trierarch with no assigned request is stopped. A worktree under its root with no assigned request is reported as an orphan, never deleted. A request that is no longer assigned to it without being removed (its ship retired) has its session stopped and its identity removed; its worktree is then an orphan.
 3. After a stop mid-crew, the loop resumes from its assigned requests and its saved state. An entry still crewing whose ship is crewed was lost between register and its reply: the trierarch releases the ship (`crew:run`) and crews it again. A half-made worktree of an assigned ship is used; one of a ship no longer assigned is an orphan (rule 2).
 4. A worktree with changes never holds up releasing the ship: the lease ends before the worktree goes, so the ship can be crewed elsewhere.
-5. The trierarch watches a ship's inbox only while its session runs, so "last seen" still means the session is alive. It reports on the ship's behalf when its session crashes or restarts ("blocked: session crashed, restarting").
+5. The trierarch watches a ship's inbox only while its session runs, so "last seen" still means the session is alive. It reports on the ship's behalf when its session crashes or restarts ("blocked: session crashed, restarting"). A running session whose folder holds no identity, as after its harness's plugin was uninstalled, cannot be watched or woken: the trierarch logs it and tells argo once, as plain text naming the machine and the ship, until the identity is back (#659); Restart in the console crews it again.
 
 ```mermaid
 stateDiagram-v2

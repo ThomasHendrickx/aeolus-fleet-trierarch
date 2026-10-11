@@ -48,6 +48,8 @@ export interface Entry {
   readonly launchedAt?: string;
   /** Set as it goes back to crewing after a release elsewhere (row 11): its worktree goes before it is crewed again (#475). */
   readonly isReleasedElsewhere?: true;
+  /** Set once argo is told its running session's folder holds no identity (#659), so it is told once; cleared when the identity is back. */
+  readonly isIdentityGone?: true;
   /** The inbox count last seen, and whether a wake waits for the session to turn idle. */
   readonly wake: { readonly waiting: number; readonly isPending: boolean };
 }

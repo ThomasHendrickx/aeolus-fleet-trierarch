@@ -71,6 +71,7 @@ const aPopulatedState = (): Populated<TrierarchState> => {
         hasStarted: true,
         launchedAt: '2026-10-06T07:58:30.000Z',
         isReleasedElsewhere: true,
+        isIdentityGone: true,
         wake: { waiting: 2, isPending: true },
       },
     },
