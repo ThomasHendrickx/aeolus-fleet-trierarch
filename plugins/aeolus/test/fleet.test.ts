@@ -127,6 +127,15 @@ describe('aeolus-fleet register', () => {
     expect(JSON.parse(fleet.calls[0]?.body ?? '')).toMatchObject({ location: { kind: 'OTHER', description: 'a "lab" box' } });
   });
 
+  it('states words with a tab and control characters as valid JSON', async () => {
+    fleet = await startStubFleet([registered, whoami]);
+    const description = 'a\tlab\rbox\u0001\u001f\nby the door';
+
+    await run('aeolus-fleet.sh', { args: ['register', fleet.url, SHIP_ID, SECRET, `OTHER:${description}`] });
+
+    expect(JSON.parse(fleet.calls[0]?.body ?? '')).toMatchObject({ location: { kind: 'OTHER', description } });
+  });
+
   it('states the harness AEOLUS_HARNESS names, as a Codex session sets it', async () => {
     fleet = await startStubFleet([registered, whoami]);
 
