@@ -835,6 +835,39 @@ describe('the SessionStart hook', () => {
     expect(statSync(identityFile(), { throwIfNoEntry: false })).toBeDefined();
   });
 
+  it('removes the .wake.log.wait.<pid> files an earlier wake bridge left when it was killed (#688)', () => {
+    crew();
+    const ships = dirname(identityFile());
+    const gone = spawnSync('true').pid;
+    const left = [`0123456789abcdef0123456789abcdef.wake.log.wait.${String(gone)}`, `${basename(identityFile(), '.identity')}.wake.log.wait.${String(gone)}`];
+    for (const name of left) writeFileSync(join(ships, name), '');
+
+    expect(hook(payloadFor(folder)).status).toBe(0);
+
+    expect(readdirSync(ships).filter((name) => name.includes('.wake.log.wait.'))).toEqual([]);
+  });
+
+  it('keeps the .wake.log.wait.<pid> file of a wake bridge an earlier plugin still runs, which reads it when its watcher ends (#688)', () => {
+    crew();
+    const ships = dirname(identityFile());
+    const bin = join(data, 'bin');
+    mkdirSync(bin, { recursive: true });
+    const bridge = join(bin, 'aeolus-codex-wake.sh');
+    writeFileSync(bridge, '#!/usr/bin/env bash\nsleep 30\n');
+    chmodSync(bridge, 0o700);
+    const running = spawn('bash', [bridge]);
+    const name = `${basename(identityFile(), '.identity')}.wake.log.wait.${String(running.pid)}`;
+    writeFileSync(join(ships, name), '');
+
+    try {
+      expect(hook(payloadFor(folder)).status).toBe(0);
+
+      expect(readdirSync(ships)).toContain(name);
+    } finally {
+      running.kill();
+    }
+  });
+
   it('says nothing to a folder that crews no ship', () => {
     expect(hook(payloadFor(folder))).toMatchObject({ status: 0, stdout: '' });
   });
@@ -1881,5 +1914,81 @@ describe('no plugin script prints a shell error for an optional file that is mis
     const errors = await stderrOfEach();
 
     expect(errors.filter((error) => aShellErrorForAMissingFile.test(error))).toEqual([]);
+  });
+});
+
+describe('no plugin script prints a shell error for a file that vanishes between its check and its read (#688)', () => {
+  const aShellErrorForAMissingFile = /No such file or directory|cannot open/;
+
+  /**
+   * The env to run a script with, so that the file vanishes right after the
+   * script first looks at it with [ ]: the race a single read must survive.
+   */
+  function vanishingAfterItsCheck(file: string): Record<string, string> {
+    const shim = join(data, 'vanish.sh');
+    writeFileSync(
+      shim,
+      '[() { builtin [ "$@"; local status=$? arg; for arg in "$@"; do if builtin [ "$arg" = "$AEOLUS_TEST_VANISH" ]; then rm -f "$arg"; fi; done; return "$status"; }\n',
+    );
+    return { BASH_ENV: shim, AEOLUS_TEST_VANISH: file };
+  }
+
+  const sibling = (suffix: string) => identityFile().replace(/\.identity$/, suffix);
+
+  it("the watcher's waiting count", async () => {
+    fleet = await startStubFleet([inbox(1)]);
+    crew(fleet.url);
+    const waitingFile = sibling('.waiting');
+    writeFileSync(waitingFile, '1 0\n');
+
+    const { stderr } = await start('aeolus-wait.sh', { env: { AEOLUS_MAX_SECONDS: '1', ...vanishingAfterItsCheck(waitingFile) } }).done;
+
+    expect(stderr).not.toMatch(aShellErrorForAMissingFile);
+  });
+
+  it("the watcher's pid, asked whether a watcher runs", () => {
+    crew();
+    writeFileSync(pidFile(), '12345\n');
+
+    expect(run('aeolus-watch-status.sh', { env: vanishingAfterItsCheck(pidFile()) }).stderr).not.toMatch(aShellErrorForAMissingFile);
+  });
+
+  it("the watcher's pid, when the ship is forgotten", () => {
+    crew();
+    writeFileSync(pidFile(), '12345\n');
+
+    expect(run('aeolus-identity.sh', { args: ['delete'], env: vanishingAfterItsCheck(pidFile()) }).stderr).not.toMatch(aShellErrorForAMissingFile);
+  });
+
+  it("the wake bridge's pid, when the ship is forgotten", () => {
+    crew();
+    writeFileSync(wakePidFile(), '12345\n');
+
+    expect(run('aeolus-identity.sh', { args: ['delete'], env: vanishingAfterItsCheck(wakePidFile()) }).stderr).not.toMatch(aShellErrorForAMissingFile);
+  });
+
+  it("a squadron member's report time", () => {
+    run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', CREW_TOKEN, 'team-one'] });
+    run('aeolus-identity.sh', { args: ['check-in', '30m'] });
+    const reportedFile = sibling('.reported');
+    writeFileSync(reportedFile, `${String(Math.floor(Date.now() / 1000))}\n`);
+
+    const result = run('aeolus-report-due.sh', {
+      stdin: JSON.stringify({ hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { file_path: '/tmp/x' } }),
+      env: vanishingAfterItsCheck(reportedFile),
+    });
+
+    expect(result.stderr).not.toMatch(aShellErrorForAMissingFile);
+  });
+
+  it('the model a send states', async () => {
+    fleet = await startStubFleet([{ status: 200, body: { messageId: 'msg_1' } }]);
+    crew(fleet.url);
+    const modelFile = sibling('.model');
+    writeFileSync(modelFile, 'gpt-5.5\n');
+
+    const { stderr } = await start('aeolus-fleet.sh', { args: ['send', '-'], stdin: '{"payload":"hello"}\n', env: vanishingAfterItsCheck(modelFile) }).done;
+
+    expect(stderr).not.toMatch(aShellErrorForAMissingFile);
   });
 });

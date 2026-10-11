@@ -83,7 +83,7 @@ while :; do
       [ -n "$waiting" ] || waiting=0
       seen=0
       is_owed=0
-      [ -f "$waiting_file" ] && read -r seen is_owed < "$waiting_file"
+      { read -r seen is_owed < "$waiting_file"; } 2>/dev/null
       was_owed="$is_owed"
       if [ "$waiting" -eq 0 ]; then
         is_owed=0

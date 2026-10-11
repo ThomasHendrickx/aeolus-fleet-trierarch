@@ -33,7 +33,7 @@ if printf '%s' "$payload" | grep -q '/api/v1/ship/report'; then
   exit 0
 fi
 
-if [ ! -f "$reported_file" ]; then
+if ! last="$(head -n 1 "$reported_file" 2>/dev/null)"; then
   echo "$now" > "$reported_file"
   exit 0
 fi
@@ -41,7 +41,6 @@ case "$check_in" in
   *h) interval=$(( ${check_in%h} * SECONDS_PER_HOUR )) ;;
   *) interval=$(( ${check_in%m} * SECONDS_PER_MINUTE )) ;;
 esac
-last="$(head -n 1 "$reported_file")"
 case "$last" in
   ''|*[!0-9]*) last=0 ;;
 esac
