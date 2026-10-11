@@ -27,7 +27,7 @@ if [ -n "${PLUGIN_ROOT:-}" ]; then
   [ -n "$model" ] && context="${context} The active model is ${model}."
   [ -n "$session_id" ] && context="${context} The Codex task id is ${session_id}."
   if [ ! -f "$identity" ]; then
-    context="${context} This folder crews no Aeolus ship. When an Aeolus skill runs, pass AEOLUS_DATA and AEOLUS_FOLDER with the values above to its scripts."
+    context="${context} This folder crews no Aeolus ship. When an Aeolus skill runs, pass AEOLUS_DATA and AEOLUS_FOLDER with the values above, and AEOLUS_HARNESS=codex, to its scripts."
     printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(aeolus_json_escape "$context")"
     exit 0
   fi

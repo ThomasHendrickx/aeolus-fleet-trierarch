@@ -6,8 +6,9 @@ import { PLUGIN_DATA_FOLDER } from './plugin.js';
 import { runCommand } from './run-command.js';
 
 /**
- * Whether Codex keeps the aeolus plugin's data folder, where the crew
- * identities live, when its aeolus-fleet marketplace is removed (#660).
+ * Whether Codex keeps the aeolus plugin's data folder, which holds its log
+ * and the crew identities not yet moved to ~/.aeolus/crews (decision 0015),
+ * when its aeolus-fleet marketplace is removed (#660).
  * Trierarch upgrade removes that marketplace to point it elsewhere, so it asks
  * first: the Codex given installs an aeolus plugin of its own from a local
  * aeolus-fleet marketplace in a throwaway CODEX_HOME, a mark goes in the

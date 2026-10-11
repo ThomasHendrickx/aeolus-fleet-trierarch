@@ -58,7 +58,7 @@ afterEach(() => {
 const realCodex = await runCommand('codex', { args: ['--version'] }).catch(() => undefined);
 
 describe('the real Codex on this machine', () => {
-  it("keeps the aeolus plugin's data, the crew identities, when its aeolus-fleet marketplace is removed (#660)", async (context) => {
+  it("keeps the aeolus plugin's data, its log and the crew identities not yet moved to ~/.aeolus/crews, when its aeolus-fleet marketplace is removed (#660)", async (context) => {
     if (realCodex?.status !== 0) {
       context.skip('no codex on this machine');
     }
