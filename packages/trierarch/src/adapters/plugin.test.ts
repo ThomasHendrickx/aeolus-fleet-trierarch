@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe('finding the aeolus plugin', () => {
-  it("takes the newest version in Claude Code's plugin cache, and the plugin's data folder", async () => {
+  it("takes the newest version in Claude Code's plugin cache, the plugin's data folder, and ~/.aeolus/crews/claude-code for the identities (#658)", async () => {
     for (const version of ['0.9.0', '0.16.0', '0.10.2']) {
       mkdirSync(join(home, '.claude', 'plugins', 'cache', 'aeolus-fleet', 'aeolus', version), { recursive: true });
     }
@@ -25,11 +25,12 @@ describe('finding the aeolus plugin', () => {
     await expect(findAeolusPlugin({ homeDirectory: home, env: {} })).resolves.toEqual({
       root: join(home, '.claude', 'plugins', 'cache', 'aeolus-fleet', 'aeolus', '0.16.0'),
       data: join(home, '.claude', 'plugins', 'data', 'aeolus-aeolus-fleet'),
+      crews: join(home, '.aeolus', 'crews', 'claude-code'),
     });
   });
 
   it('takes AEOLUS_PLUGIN_ROOT and AEOLUS_PLUGIN_DATA when set', async () => {
-    await expect(findAeolusPlugin({ homeDirectory: home, env: { AEOLUS_PLUGIN_ROOT: '/plugin', AEOLUS_PLUGIN_DATA: '/data' } })).resolves.toEqual({ root: '/plugin', data: '/data' });
+    await expect(findAeolusPlugin({ homeDirectory: home, env: { AEOLUS_PLUGIN_ROOT: '/plugin', AEOLUS_PLUGIN_DATA: '/data' } })).resolves.toEqual({ root: '/plugin', data: '/data', crews: join(home, '.aeolus', 'crews', 'claude-code') });
   });
 
   it('says the plugin is not installed when the cache has none', async () => {
@@ -38,7 +39,7 @@ describe('finding the aeolus plugin', () => {
 });
 
 describe('finding the aeolus plugin for Codex', () => {
-  it("takes the newest version in Codex's plugin cache, and the plugin's data folder", async () => {
+  it("takes the newest version in Codex's plugin cache, the plugin's data folder, and ~/.aeolus/crews/codex for the identities (#658)", async () => {
     for (const version of ['0.17.2', '0.9.0']) {
       mkdirSync(join(home, '.codex', 'plugins', 'cache', 'aeolus-fleet', 'aeolus', version), { recursive: true });
     }
@@ -46,6 +47,7 @@ describe('finding the aeolus plugin for Codex', () => {
     await expect(findAeolusPlugin({ homeDirectory: home, env: {}, harness: 'codex' })).resolves.toEqual({
       root: join(home, '.codex', 'plugins', 'cache', 'aeolus-fleet', 'aeolus', '0.17.2'),
       data: join(home, '.codex', 'plugins', 'data', 'aeolus-aeolus-fleet'),
+      crews: join(home, '.aeolus', 'crews', 'codex'),
     });
   });
 
@@ -56,13 +58,14 @@ describe('finding the aeolus plugin for Codex', () => {
     await expect(findAeolusPlugin({ homeDirectory: home, env: { CODEX_HOME: codexHome }, harness: 'codex' })).resolves.toEqual({
       root: join(codexHome, 'plugins', 'cache', 'aeolus-fleet', 'aeolus', '0.17.2'),
       data: join(codexHome, 'plugins', 'data', 'aeolus-aeolus-fleet'),
+      crews: join(home, '.aeolus', 'crews', 'codex'),
     });
   });
 
   it('takes AEOLUS_CODEX_PLUGIN_ROOT and AEOLUS_CODEX_PLUGIN_DATA when set, never the variables for Claude Code', async () => {
     const env = { AEOLUS_PLUGIN_ROOT: '/claude-plugin', AEOLUS_CODEX_PLUGIN_ROOT: '/plugin', AEOLUS_CODEX_PLUGIN_DATA: '/data' };
 
-    await expect(findAeolusPlugin({ homeDirectory: home, env, harness: 'codex' })).resolves.toEqual({ root: '/plugin', data: '/data' });
+    await expect(findAeolusPlugin({ homeDirectory: home, env, harness: 'codex' })).resolves.toEqual({ root: '/plugin', data: '/data', crews: join(home, '.aeolus', 'crews', 'codex') });
   });
 
   it('says the plugin is not installed for Codex when its cache has none', async () => {

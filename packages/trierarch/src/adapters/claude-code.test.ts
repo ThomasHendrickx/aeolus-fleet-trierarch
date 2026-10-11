@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -14,11 +15,13 @@ import { createClaudeCodeSetup } from './claude-code-setup.js';
 import { wordsOf } from './command-line.js';
 import { runCommand } from './run-command.js';
 
-// With the aeolus plugin's own scripts from this repository, in a temporary data folder.
+// With the aeolus plugin's own scripts from this repository, in a temporary data folder and home.
 
 const PLUGIN_ROOT = fileURLToPath(new URL('../../../../plugins/aeolus', import.meta.url));
 
 let data: string;
+/** Where the identities of Claude Code sessions live in the test's home (#658). */
+let crews: string;
 let folder: string;
 /** Claude Code's projects folder, where it keeps each folder's conversations. */
 let projects: string;
@@ -39,6 +42,7 @@ beforeEach(() => {
   typed = [];
   screens = new Map();
   home = mkdtempSync(join(tmpdir(), 'trierarch-home-'));
+  crews = join(home, '.aeolus', 'crews', 'claude-code');
   claudeJsonAtStart = [];
 });
 
@@ -59,7 +63,7 @@ function aConversationIn(folder: string): void {
 function harness() {
   return createClaudeCodeHarness({
     configuration: CONFIGURATION,
-    plugin: { root: PLUGIN_ROOT, data },
+    plugin: { root: PLUGIN_ROOT, data, crews },
     projects,
     setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
     permissionModes: () => undefined,
@@ -97,11 +101,24 @@ describe('Claude Code as a harness', () => {
   it("writes the folder's identity through the plugin, saying the trierarch wakes it, with the squadron", async () => {
     await harness().prepareIdentity({ folder, identity: { ...identity, squadron: 'hemma-feature-a1b2c3' } });
 
-    const path = (await runCommand('bash', { args: [`${PLUGIN_ROOT}/scripts/aeolus-identity.sh`, 'path'], env: { AEOLUS_FOLDER: folder, AEOLUS_DATA: data } })).stdout.trim();
+    const path = (await runCommand('bash', { args: [`${PLUGIN_ROOT}/scripts/aeolus-identity.sh`, 'path'], env: { AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_CREWS: crews } })).stdout.trim();
     const written = readFileSync(path, 'utf8');
     expect(written).toContain(`shipId=${shipId}\n`);
     expect(written).toContain('squadron=hemma-feature-a1b2c3\n');
     expect(written).toContain('wakeBy=trierarch\n');
+  });
+
+  it("writes the folder's identity in ~/.aeolus/crews/claude-code, outside the plugin's data folder (#658)", async () => {
+    await harness().prepareIdentity({ folder, identity });
+
+    expect(readFileSync(join(crews, `${createHash('sha256').update(folder).digest('hex').slice(0, 32)}.identity`), 'utf8')).toContain('crewToken=aeolus_ct_v1_scout\n');
+  });
+
+  it("reads the crew token of a folder crewed by a plugin from before #658, its identity still in the plugin's data folder", async () => {
+    mkdirSync(join(data, 'ships'));
+    writeFileSync(join(data, 'ships', `${createHash('sha256').update(folder).digest('hex').slice(0, 32)}.identity`), `shipId=${shipId}\ncrewToken=aeolus_ct_v1_scout\n`);
+
+    await expect(harness().crewTokenOf(folder)).resolves.toBe('aeolus_ct_v1_scout');
   });
 
   it("reads the crew token from the folder's identity, and none once it is removed", async () => {
@@ -150,7 +167,7 @@ describe('Claude Code as a harness', () => {
       started = [];
       await createClaudeCodeHarness({
         configuration: { ...CONFIGURATION, harnesses: { 'claude-code': { flags, options: {} } } },
-        plugin: { root: PLUGIN_ROOT, data },
+        plugin: { root: PLUGIN_ROOT, data, crews },
         projects,
         setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
         permissionModes: () => undefined,
@@ -203,7 +220,7 @@ describe('Claude Code as a harness', () => {
       started = [];
       await createClaudeCodeHarness({
         configuration: { ...CONFIGURATION, harnesses: { 'claude-code': { flags, options: {} } } },
-        plugin: { root: PLUGIN_ROOT, data },
+        plugin: { root: PLUGIN_ROOT, data, crews },
         projects,
         setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: managed, ...(at.configDirectory !== undefined && { configDirectory: at.configDirectory }) }),
         permissionModes: () => at.permissionModes,
@@ -324,7 +341,7 @@ describe('Claude Code as a harness', () => {
     const withFlags = (flags: string[]) =>
       createClaudeCodeHarness({
         configuration: { ...CONFIGURATION, harnesses: { 'claude-code': { flags, options: {} } } },
-        plugin: { root: PLUGIN_ROOT, data },
+        plugin: { root: PLUGIN_ROOT, data, crews },
         projects,
         setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
         permissionModes: () => undefined,
@@ -396,7 +413,7 @@ describe('Claude Code as a harness', () => {
 
     const marked = await runCommand('bash', {
       args: [`${PLUGIN_ROOT}/scripts/aeolus-turn.sh`],
-      env: { AEOLUS_FOLDER: folder, AEOLUS_DATA: data },
+      env: { AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_CREWS: crews },
       input: JSON.stringify({ cwd: folder, hook_event_name: 'UserPromptSubmit' }),
     });
 

@@ -1,7 +1,8 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -19,10 +20,13 @@ const SHIP_ID = 'shp_01m3tbfspe96yf1rnr4ank9h1a';
 
 let data: string;
 let folder: string;
+/** A throwaway home: the identities live under it, never in the real one. */
+let home: string;
 let fleet: StubFleet | undefined;
 
 beforeEach(() => {
   data = mkdtempSync(join(tmpdir(), 'aeolus-data-'));
+  home = mkdtempSync(join(tmpdir(), 'aeolus-home-'));
   folder = mkdtempSync(join(tmpdir(), 'aeolus folder "one"-'));
 });
 
@@ -33,6 +37,7 @@ afterEach(async () => {
   await fleet?.close();
   fleet = undefined;
   rmSync(data, { recursive: true, force: true });
+  rmSync(home, { recursive: true, force: true });
   rmSync(folder, { recursive: true, force: true });
 });
 
@@ -47,7 +52,7 @@ function run(script: string, options: { args?: string[]; env?: Record<string, st
   const result = spawnSync('bash', [join(SCRIPTS, script), ...(options.args ?? [])], {
     input: options.stdin ?? '',
     encoding: 'utf8',
-    env: { ...process.env, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_RETRY_SECONDS: '0', AEOLUS_POLL_SECONDS: '0.05', ...options.env },
+    env: { ...process.env, HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_RETRY_SECONDS: '0', AEOLUS_POLL_SECONDS: '0.05', ...options.env },
   });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
@@ -55,7 +60,7 @@ function run(script: string, options: { args?: string[]; env?: Record<string, st
 /** Runs a script without waiting for it, for one that keeps running. */
 function start(script: string, options: { args?: string[]; env?: Record<string, string>; stdin?: string } = {}) {
   const child = spawn('bash', [join(SCRIPTS, script), ...(options.args ?? [])], {
-    env: { ...process.env, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_RETRY_SECONDS: '0', AEOLUS_POLL_SECONDS: '0.05', ...options.env },
+    env: { ...process.env, HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_RETRY_SECONDS: '0', AEOLUS_POLL_SECONDS: '0.05', ...options.env },
   });
   child.stdin.end(options.stdin ?? '');
   let stdout = '';
@@ -70,20 +75,23 @@ function start(script: string, options: { args?: string[]; env?: Record<string, 
   return { child, exited };
 }
 
-function crew(fleetUrl = 'https://fleet.example.com'): void {
-  expect(run('aeolus-identity.sh', { args: ['write', fleetUrl, SHIP_ID, 'scout', CREW_TOKEN] }).status).toBe(0);
+/** What a Codex skill's commands set: each harness keeps its sessions' identities in a crews folder of its own (#658). */
+const AS_CODEX = { AEOLUS_HARNESS: 'codex' };
+
+function crew(fleetUrl = 'https://fleet.example.com', env: Record<string, string> = {}): void {
+  expect(run('aeolus-identity.sh', { args: ['write', fleetUrl, SHIP_ID, 'scout', CREW_TOKEN], env }).status).toBe(0);
 }
 
-function identityFile(): string {
-  return run('aeolus-identity.sh', { args: ['path'] }).stdout.trim();
+function identityFile(env: Record<string, string> = {}): string {
+  return run('aeolus-identity.sh', { args: ['path'], env }).stdout.trim();
 }
 
 function pidFile(): string {
   return identityFile().replace(/\.identity$/, '.watch.pid');
 }
 
-function wakePidFile(): string {
-  return identityFile().replace(/\.identity$/, '.wake.pid');
+function wakePidFile(env: Record<string, string> = {}): string {
+  return identityFile(env).replace(/\.identity$/, '.wake.pid');
 }
 
 function wakeThreadFile(): string {
@@ -103,8 +111,8 @@ function aTurnEnded(): void {
 }
 
 /** The turn marker, through the plugin's own script. */
-function turn(): Run {
-  return run('aeolus-identity.sh', { args: ['turn'] });
+function turn(env: Record<string, string> = {}): Run {
+  return run('aeolus-identity.sh', { args: ['turn'], env });
 }
 
 /** The plugin's log, each line read by the trierarch's own log reader, as aeolus-trierarch logs reads its log. */
@@ -1009,7 +1017,7 @@ describe('the Stop hook', () => {
 
   it('re-arms the Codex wake bridge for the task by itself at the end of every turn', async () => {
     fleet = await startStubFleet([inbox(1)]);
-    crew(fleet.url);
+    crew(fleet.url, AS_CODEX);
     aTurnEnded();
     const bin = join(data, 'bin');
     const calls = join(data, 'codex.calls');
@@ -1160,8 +1168,8 @@ describe("a squadron member's check-in interval", () => {
 describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
   const TURN_MARKER = /^(busy|idle) \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
-  function crewedByATrierarch(): void {
-    expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', 'https://fleet.example.com', SHIP_ID, 'scout', CREW_TOKEN] }).status).toBe(0);
+  function crewedByATrierarch(env: Record<string, string> = {}): void {
+    expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', 'https://fleet.example.com', SHIP_ID, 'scout', CREW_TOKEN], env }).status).toBe(0);
   }
 
   function sessionStart(env: Record<string, string>) {
@@ -1212,13 +1220,13 @@ describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
   });
 
   it('starts no Codex wake bridge at session start, and says the trierarch wakes it', () => {
-    crewedByATrierarch();
+    crewedByATrierarch(AS_CODEX);
 
     const context = sessionStart({ PLUGIN_DATA: data, PLUGIN_ROOT: SCRIPTS.replace(/\/scripts\/$/, '') });
 
     expect(context).toContain('The trierarch wakes this session when work arrives: start no watcher.');
     expect(context).not.toContain('wake-up');
-    expect(statSync(wakePidFile(), { throwIfNoEntry: false })).toBeUndefined();
+    expect(statSync(wakePidFile(AS_CODEX), { throwIfNoEntry: false })).toBeUndefined();
   });
 
   it('refuses to start a watcher in the background, saying the trierarch wakes the session', () => {
@@ -1246,10 +1254,10 @@ describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
   });
 
   it('arms no Codex wake bridge at the end of a turn', () => {
-    crewedByATrierarch();
+    crewedByATrierarch(AS_CODEX);
 
     expect(codexHook('aeolus-stop.sh', { hook_event_name: 'Stop', stop_hook_active: false })).toMatchObject({ status: 0, stdout: '' });
-    expect(statSync(wakePidFile(), { throwIfNoEntry: false })).toBeUndefined();
+    expect(statSync(wakePidFile(AS_CODEX), { throwIfNoEntry: false })).toBeUndefined();
   });
 
   it('marks the turn busy when a prompt is submitted, with when', () => {
@@ -1274,12 +1282,12 @@ describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
   });
 
   it('marks the turn in a Codex session alike', () => {
-    crewedByATrierarch();
+    crewedByATrierarch(AS_CODEX);
 
     codexHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: '/aeolus:wake' });
-    expect(turn().stdout).toMatch(/^busy /);
+    expect(turn(AS_CODEX).stdout).toMatch(/^busy /);
     codexHook('aeolus-stop.sh', { hook_event_name: 'Stop', stop_hook_active: false });
-    expect(turn().stdout).toMatch(/^idle /);
+    expect(turn(AS_CODEX).stdout).toMatch(/^idle /);
   });
 
   it('says no turn has been marked before the first prompt', () => {
@@ -1598,5 +1606,96 @@ describe("the plugin's log is capped: at its size limit it moves aside as aeolus
 
     expect(read(previous())).toBeUndefined();
     expect(statSync(log()).size).toBeGreaterThan(MIB);
+  });
+});
+
+describe("where a folder's identity lives (#658)", () => {
+  /** The crews folder of Claude Code sessions in the throwaway home. */
+  const crews = () => join(home, '.aeolus', 'crews', 'claude-code');
+  /** The name the plugin gives a folder's identity file: the start of the SHA-256 of the folder's path. */
+  const identityName = () => `${createHash('sha256').update(realpathSync(folder)).digest('hex').slice(0, 32)}.identity`;
+  const anIdentity = `fleetUrl=https://fleet.example.com\nshipId=${SHIP_ID}\nshipName=scout\ncrewToken=${CREW_TOKEN}\nfolder=/somewhere\n`;
+
+  /** A session crewed by a plugin from before #658: its identity and turn marker in the plugin's data folder. */
+  function anOldLayout(): void {
+    mkdirSync(join(data, 'ships'), { mode: 0o700 });
+    writeFileSync(join(data, 'ships', identityName()), anIdentity, { mode: 0o600 });
+    writeFileSync(join(data, 'ships', identityName().replace(/\.identity$/, '.turn')), 'idle 2026-10-11T10:00:00Z\n');
+  }
+
+  /** The next session start, as Claude Code runs the hook. */
+  function aSessionStart() {
+    return run('aeolus-session-start.sh', {
+      stdin: JSON.stringify({ session_id: 'c5858406-be86-46cd-8591-f4fb39b1fa61', cwd: folder, hook_event_name: 'SessionStart', source: 'startup' }),
+      env: { AEOLUS_FOLDER: '', AEOLUS_DATA: '', CLAUDE_PROJECT_DIR: folder, CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin' },
+    });
+  }
+
+  it("keeps it in ~/.aeolus/crews/claude-code, outside the plugin's data folder", () => {
+    crew();
+
+    expect(identityFile()).toBe(join(crews(), identityName()));
+    expect(readFileSync(join(crews(), identityName()), 'utf8')).toContain(`crewToken=${CREW_TOKEN}\n`);
+  });
+
+  it('keeps the crews folder readable by its owner only', () => {
+    crew();
+
+    expect(statSync(crews()).mode & 0o777).toBe(0o700);
+  });
+
+  it('keeps it in the folder AEOLUS_CREWS names, as the trierarch names it', () => {
+    const named = join(home, 'named-crews');
+
+    expect(run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'scout', CREW_TOKEN], env: { AEOLUS_CREWS: named } }).status).toBe(0);
+
+    expect(readFileSync(join(named, identityName()), 'utf8')).toContain(`crewToken=${CREW_TOKEN}\n`);
+  });
+
+  it('moves the identities of a session on the old layout to ~/.aeolus/crews/claude-code at the next session start', () => {
+    anOldLayout();
+
+    aSessionStart();
+
+    expect(readFileSync(join(crews(), identityName()), 'utf8')).toBe(anIdentity);
+    expect(readFileSync(join(crews(), identityName().replace(/\.identity$/, '.turn')), 'utf8')).toBe('idle 2026-10-11T10:00:00Z\n');
+  });
+
+  it('tells the session after the move which ship its folder crews', () => {
+    anOldLayout();
+
+    expect(aSessionStart().stdout).toContain(`This folder crews the Aeolus ship scout (${SHIP_ID})`);
+  });
+
+  it('leaves a link at the old place, so a session on an older plugin still finds the identity there', () => {
+    anOldLayout();
+
+    aSessionStart();
+
+    expect(lstatSync(join(data, 'ships')).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(data, 'ships'))).toBe(crews());
+    expect(readFileSync(join(data, 'ships', identityName()), 'utf8')).toBe(anIdentity);
+  });
+
+  it('keeps the identity already in ~/.aeolus/crews when the old place holds one for the same folder', () => {
+    crew();
+    rmSync(join(data, 'ships'), { force: true });
+    anOldLayout();
+    writeFileSync(join(data, 'ships', identityName()), anIdentity.replace(CREW_TOKEN, 'aeolus_ct_v1_older'));
+
+    aSessionStart();
+
+    expect(readFileSync(join(crews(), identityName()), 'utf8')).toContain(`crewToken=${CREW_TOKEN}\n`);
+  });
+
+  it('moves nothing the next time: a session start after the move keeps the link and the identity', () => {
+    anOldLayout();
+    aSessionStart();
+
+    aSessionStart();
+
+    expect(lstatSync(join(data, 'ships')).isSymbolicLink()).toBe(true);
+    expect(readFileSync(join(crews(), identityName()), 'utf8')).toBe(anIdentity);
+    expect(dirname(identityFile())).toBe(crews());
   });
 });

@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,14 +14,18 @@ const SCRIPTS = join(PLUGIN, 'scripts');
 
 let data: string;
 let folder: string;
+/** A throwaway home: the identities live under it, never in the real one. */
+let home: string;
 
 beforeEach(() => {
   data = mkdtempSync(join(tmpdir(), 'aeolus-codex-data-'));
+  home = mkdtempSync(join(tmpdir(), 'aeolus-codex-home-'));
   folder = mkdtempSync(join(tmpdir(), 'aeolus codex folder-'));
 });
 
 afterEach(() => {
   rmSync(data, { recursive: true, force: true });
+  rmSync(home, { recursive: true, force: true });
   rmSync(folder, { recursive: true, force: true });
 });
 
@@ -42,6 +47,7 @@ function runScript(script: string, options: ScriptOptions = {}) {
     encoding: 'utf8',
     env: {
       ...process.env,
+      HOME: home,
       AEOLUS_DATA: '',
       AEOLUS_FOLDER: '',
       AEOLUS_CODEX_WAKE_DISABLED: '1',
@@ -154,6 +160,7 @@ describe('the Codex plugin package', () => {
 
     expect(readme).toContain('network_access = true');
     expect(readme).toContain('writable_roots');
+    expect(readme).toContain('"/Users/<you>/.aeolus/crews/codex"');
     expect(readme).toContain('unprivileged user namespaces');
   });
 
@@ -229,14 +236,33 @@ describe('the Codex plugin package', () => {
 });
 
 describe('Codex plugin state', () => {
-  it('keeps one identity per working folder in the Codex plugin data directory', () => {
+  it('keeps one identity per working folder in ~/.aeolus/crews/codex, outside the plugin data directory (#658)', () => {
     const written = runScript('aeolus-identity.sh', {
       args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout', 'aeolus_ct_v1_crew'],
     });
 
     expect(written.status).toBe(0);
     expect(runScript('aeolus-identity.sh', { args: ['show'] }).stdout).toContain(`folder: ${realpathSync(folder)}`);
-    expect(runScript('aeolus-identity.sh', { args: ['path'] }).stdout).toContain(data);
+    expect(runScript('aeolus-identity.sh', { args: ['path'] }).stdout).toContain(join(home, '.aeolus', 'crews', 'codex'));
+  });
+
+  it("finds the same identity from a Codex skill's command, run with AEOLUS_DATA, AEOLUS_FOLDER and AEOLUS_HARNESS=codex (#658)", () => {
+    runScript('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout', 'aeolus_ct_v1_crew'] });
+
+    const shown = runScript('aeolus-identity.sh', { args: ['show'], env: { PLUGIN_DATA: '', PLUGIN_ROOT: '', AEOLUS_DATA: data, AEOLUS_FOLDER: folder, AEOLUS_HARNESS: 'codex' } });
+
+    expect(shown.stdout).toContain('ship: scout');
+  });
+
+  it('moves the identity of a Codex session on the old layout to ~/.aeolus/crews/codex at the next session start, leaving a link (#658)', () => {
+    const name = `${createHash('sha256').update(realpathSync(folder)).digest('hex').slice(0, 32)}.identity`;
+    mkdirSync(join(data, 'ships'), { mode: 0o700 });
+    writeFileSync(join(data, 'ships', name), 'fleetUrl=https://fleet.example.com\nshipId=shp_01m3tbfspe96yf1rnr4ank9h1a\nshipName=scout\ncrewToken=aeolus_ct_v1_crew\n', { mode: 0o600 });
+
+    runScript('aeolus-session-start.sh', { input: JSON.stringify({ cwd: folder, hook_event_name: 'SessionStart', source: 'startup' }) });
+
+    expect(readFileSync(join(home, '.aeolus', 'crews', 'codex', name), 'utf8')).toContain('crewToken=aeolus_ct_v1_crew\n');
+    expect(lstatSync(join(data, 'ships')).isSymbolicLink()).toBe(true);
   });
 
   it('adds the plugin paths and restored ship to Codex context at session start without exposing its token', () => {

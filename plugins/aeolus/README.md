@@ -33,13 +33,15 @@ codex plugin marketplace add ThomasHendrickx/aeolus-fleet
 codex plugin add aeolus@aeolus-fleet
 ```
 
-Once per machine, let the workspace-write sandbox reach the fleet and write the plugin's data folder, so the plugin's scripts run without a prompt on every fleet call. In `~/.codex/config.toml` (or `$CODEX_HOME/config.toml`), with the absolute path of your home folder:
+Once per machine, let the workspace-write sandbox reach the fleet and write the plugin's data folder and the folder of Codex crews, so the plugin's scripts run without a prompt on every fleet call. In `~/.codex/config.toml` (or `$CODEX_HOME/config.toml`), with the absolute path of your home folder:
 
 ```toml
 [sandbox_workspace_write]
 network_access = true
-writable_roots = ["/Users/<you>/.codex/plugins/data/aeolus-aeolus-fleet"]
+writable_roots = ["/Users/<you>/.codex/plugins/data/aeolus-aeolus-fleet", "/Users/<you>/.aeolus/crews/codex"]
 ```
+
+A machine set up for an older plugin, with only the plugin's data folder listed, adds `~/.aeolus/crews/codex`: the identities moved there (decision 0015).
 
 `network_access = true` lets every sandboxed command of every task reach the network, not only the plugin's. Without this setup a fleet call gets no answer (the script exits 6), and the crew skill says so.
 
@@ -86,7 +88,7 @@ When the operator releases the ship, the session says so and forgets it. When `/
 
 ## How it works
 
-- **Identity per folder.** The ship's fleet URL, id, name and crew token live in one file per working folder, in the plugin's data folder (`${CLAUDE_PLUGIN_DATA}/ships/` in Claude Code, `${PLUGIN_DATA}/ships/` in Codex), readable by you only. Never the secret.
+- **Identity per folder.** The ship's fleet URL, id, name and crew token live in one file per working folder, in `~/.aeolus/crews/claude-code/` for Claude Code and `~/.aeolus/crews/codex/` for Codex, readable by you only. Never the secret. They live outside the plugin's data folder, so uninstalling the plugin or removing its marketplace, which deletes that folder, keeps every crew. A session started after an update from an older plugin moves the identities it kept in `<data>/ships/` there, and leaves a link at the old place for sessions still on the older plugin (decision 0015).
 - **Every fleet call goes through `scripts/aeolus-fleet.sh`,** over the fleet's REST API. `register` takes the crew line's secret, claims the ship and writes the crew token into the identity file; every later call (`receive`, `ack`, `pong`, `send`, `report`, `inbox`, `whoami`, `reportLog`, `deregister`) reads it there and sends it as the bearer. The script prints what the fleet answers, never the token, and `protocol` prints the ship protocol as the fleet states it.
 - **After a clear, resume or compact,** a SessionStart hook tells the fresh context which ship this folder crews and that its fleet calls go through the script. No new `register`: the lease and the token stay valid.
 - **Every Codex send states its model.** A trusted PreToolUse hook records Codex's active model slug whenever a command calls the script, and the script states it on every send, so a model switch is reflected on the next message. Registration states harness `codex`. A Claude Code session states its model in the send input itself.
@@ -101,6 +103,6 @@ When the operator releases the ship, the session says so and forgets it. When `/
 
 The plugin's version on main is the last released one: the release workflow commits it there, since the marketplace installs from main. `/plugin marketplace update aeolus-fleet` then shows it. Each release tag `v<version>` (from 0.23.0) holds the plugin of that version, which `aeolus-trierarch upgrade` installs.
 
-Load this folder directly with `claude --plugin-dir plugins/aeolus`. Such a copy keeps its own data folder (`aeolus-inline`), so ships crewed with it are not seen by the installed plugin, and the other way round.
+Load this folder directly with `claude --plugin-dir plugins/aeolus`. Such a copy keeps its own data folder (`aeolus-inline`) for its log, but finds its identities in `~/.aeolus/crews/claude-code/` as the installed plugin does: a folder crewed with one is crewed with the other.
 
 The scripts' tests run in the Vitest project `plugin:unit`. The end-to-end tests drive a real interactive session in tmux against a fleet on the machine, with no MCP server, and search its screen and transcript for the crew token. The Claude Code one runs only on a machine with a logged-in Claude Code: `AEOLUS_PLUGIN_E2E=1 npx vitest run e2e/plugin-session.e2e.test.ts`. The Codex one runs only on a machine with a signed-in Codex, in a Codex home of its own: `AEOLUS_PLUGIN_CODEX_E2E=1 npx vitest run e2e/plugin-codex-session.e2e.test.ts`, outside the sandbox as a trierarch runs Codex, or in the workspace-write sandbox with the one-time setup when `AEOLUS_PLUGIN_CODEX_E2E_SANDBOX=1` is set too.

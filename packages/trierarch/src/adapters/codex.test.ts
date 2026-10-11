@@ -1,6 +1,6 @@
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { ShipId, TrierarchConfiguration } from '@aeolus-fleet/common';
@@ -27,6 +27,8 @@ const WITH_CODEX: TrierarchConfiguration = {
 };
 
 let data: string;
+/** Where the identities of Codex sessions live, in a home of the test's own (#658). */
+let crews: string;
 let folder: string;
 let started: { shipId: ShipId; folder: string; command: readonly string[] }[];
 /** What each ship's session shows, by ship id. */
@@ -39,6 +41,7 @@ let untrustedAtStart: (readonly string[])[];
 
 beforeEach(() => {
   data = mkdtempSync(join(tmpdir(), 'trierarch-codex-plugin-data-'));
+  crews = join(mkdtempSync(join(tmpdir(), 'trierarch-codex-home-')), '.aeolus', 'crews', 'codex');
   folder = realpathSync(mkdtempSync(join(tmpdir(), 'trierarch-codex-session-')));
   started = [];
   typed = [];
@@ -49,13 +52,14 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(data, { recursive: true, force: true });
+  rmSync(dirname(dirname(dirname(crews))), { recursive: true, force: true });
   rmSync(folder, { recursive: true, force: true });
 });
 
 function harness() {
   return createCodexHarness({
     configuration: WITH_CODEX,
-    plugin: { root: PLUGIN_ROOT, data },
+    plugin: { root: PLUGIN_ROOT, data, crews },
     setup: {
       trustAeolusHooks: () => {
         const trusted = [...untrustedHooks];
@@ -85,11 +89,12 @@ const identity = { fleetUrl: 'https://fleet.example.com', shipId, shipName: 'sco
 const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'codex', workspace: { kind: 'worktree', repository: 'aeolus-fleet' } }) as const;
 
 describe('Codex as a harness', () => {
-  it("writes the folder's identity through the plugin in Codex's plugin data, saying the trierarch wakes it", async () => {
+  it("writes the folder's identity through the plugin in ~/.aeolus/crews/codex, saying the trierarch wakes it (#658)", async () => {
     await harness().prepareIdentity({ folder, identity });
 
-    const path = (await runCommand('bash', { args: [`${PLUGIN_ROOT}/scripts/aeolus-identity.sh`, 'path'], env: { AEOLUS_FOLDER: folder, AEOLUS_DATA: data } })).stdout.trim();
-    expect(path.startsWith(data)).toBe(true);
+    const path = (await runCommand('bash', { args: [`${PLUGIN_ROOT}/scripts/aeolus-identity.sh`, 'path'], env: { AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_CREWS: crews } })).stdout.trim();
+    expect(path.startsWith(crews)).toBe(true);
+    expect(readdirSync(crews)).toContain(basename(path));
     expect(readFileSync(path, 'utf8')).toContain('wakeBy=trierarch\n');
     await expect(harness().crewTokenOf(folder)).resolves.toBe('aeolus_ct_v1_scout');
   });
@@ -129,7 +134,7 @@ describe('Codex as a harness', () => {
   it("starts no session when Codex's hooks cannot be trusted, since it would stop at the hooks review (#581)", async () => {
     const failing = createCodexHarness({
       configuration: WITH_CODEX,
-      plugin: { root: PLUGIN_ROOT, data },
+      plugin: { root: PLUGIN_ROOT, data, crews },
       setup: { trustAeolusHooks: () => Promise.reject(new Error('codex app-server did not answer hooks/list')) },
       sessions: {
         start: (session) => {
@@ -148,7 +153,7 @@ describe('Codex as a harness', () => {
   it('adds --no-daemon once even when the operator configured it too, so the session owns its work and a stop stops it', async () => {
     const withNoDaemon = createCodexHarness({
       configuration: { ...WITH_CODEX, harnesses: { codex: { flags: ['--no-daemon'], options: {} } } },
-      plugin: { root: PLUGIN_ROOT, data },
+      plugin: { root: PLUGIN_ROOT, data, crews },
       setup: { trustAeolusHooks: () => Promise.resolve([]) },
       sessions: {
         start: (session) => {

@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,10 +23,13 @@ const DELIVERY_ID = 'dlv_01m3tbfspe96yf1rnr4ank9h1b';
 
 let data: string;
 let folder: string;
+/** A throwaway home: the identities live under it, never in the real one. */
+let home: string;
 let fleet: StubFleet | undefined;
 
 beforeEach(() => {
   data = mkdtempSync(join(tmpdir(), 'aeolus-data-'));
+  home = mkdtempSync(join(tmpdir(), 'aeolus-home-'));
   folder = mkdtempSync(join(tmpdir(), 'aeolus-folder-'));
 });
 
@@ -33,6 +37,7 @@ afterEach(async () => {
   await fleet?.close();
   fleet = undefined;
   rmSync(data, { recursive: true, force: true });
+  rmSync(home, { recursive: true, force: true });
   rmSync(folder, { recursive: true, force: true });
 });
 
@@ -45,7 +50,7 @@ interface Run {
 /** Runs a script as a session's command does, without blocking the stub fleet in this process. */
 function run(script: string, options: { args?: string[]; env?: Record<string, string>; stdin?: string } = {}): Promise<Run> {
   const child = spawn('bash', [join(SCRIPTS, script), ...(options.args ?? [])], {
-    env: { ...process.env, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, ...options.env },
+    env: { ...process.env, HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, ...options.env },
   });
   child.stdin.end(options.stdin ?? '');
   let stdout = '';
@@ -430,5 +435,34 @@ describe('aeolus-identity show', () => {
 
     expect(shown.stdout).not.toContain('crewToken');
     expect(shown.stdout).not.toContain('crew token');
+  });
+});
+
+describe('a crew outlives the plugin (#658)', () => {
+  it("answers whoami after the plugin's data folder is deleted, as uninstalling the plugin does", async () => {
+    fleet = await crewedAt([whoami]);
+
+    rmSync(data, { recursive: true, force: true });
+    const result = await run('aeolus-fleet.sh', { args: ['whoami'] });
+
+    expect(result.status).toBe(0);
+    expect(fleet.calls).toEqual([{ method: 'GET', path: '/api/v1/ship/whoami', authorization: `Bearer ${CREW_TOKEN}`, body: '' }]);
+  });
+
+  it("answers whoami for a session on the old layout, once the next session start moved it, after the plugin's data folder is deleted", async () => {
+    fleet = await startStubFleet([whoami]);
+    const name = `${createHash('sha256').update(realpathSync(folder)).digest('hex').slice(0, 32)}.identity`;
+    mkdirSync(join(data, 'ships'), { mode: 0o700 });
+    writeFileSync(join(data, 'ships', name), `fleetUrl=${fleet.url}\nshipId=${SHIP_ID}\nshipName=scout\ncrewToken=${CREW_TOKEN}\nfolder=${folder}\n`, { mode: 0o600 });
+    await run('aeolus-session-start.sh', {
+      stdin: JSON.stringify({ cwd: folder, hook_event_name: 'SessionStart', source: 'startup' }),
+      env: { AEOLUS_FOLDER: '', AEOLUS_DATA: '', CLAUDE_PROJECT_DIR: folder, CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin' },
+    });
+
+    rmSync(data, { recursive: true, force: true });
+    const result = await run('aeolus-fleet.sh', { args: ['whoami'] });
+
+    expect(result.status).toBe(0);
+    expect(fleet.calls).toEqual([{ method: 'GET', path: '/api/v1/ship/whoami', authorization: `Bearer ${CREW_TOKEN}`, body: '' }]);
   });
 });

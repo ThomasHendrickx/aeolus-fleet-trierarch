@@ -48,10 +48,50 @@ aeolus_key() {
   printf '%s' "$1" | aeolus_sha256
 }
 
+# The harness the plugin runs in: AEOLUS_HARNESS (a Codex skill's commands set
+# it), else codex in a Codex hook, which has PLUGIN_ROOT, else claude-code.
+aeolus_harness() {
+  if [ -n "${AEOLUS_HARNESS:-}" ]; then
+    printf '%s' "$AEOLUS_HARNESS"
+  elif [ -n "${PLUGIN_ROOT:-}" ]; then
+    printf codex
+  else
+    printf claude-code
+  fi
+}
+
+# Where the identities of the harness's sessions live (decision 0015):
+# ~/.aeolus/crews/<harness>, outside the plugin's data folder, so uninstalling
+# the plugin cannot delete them (#658). AEOLUS_CREWS names another folder, as
+# the trierarch does. A plugin from before kept them in <data>/ships: the first
+# script to look moves them here and leaves a link there.
 aeolus_ships_dir() {
-  local data
-  data="$(aeolus_data)" || return 1
-  printf '%s/ships' "$data"
+  local crews="${AEOLUS_CREWS:-${HOME:?}/.aeolus/crews/$(aeolus_harness)}"
+  aeolus_move_ships "$crews"
+  printf '%s' "$crews"
+}
+
+# Moves what an older plugin kept in <data>/ships to the crews folder, then
+# links <data>/ships to the crews folder so a session still on an older plugin
+# finds its identity. A file the crews folder already holds wins: the old one
+# stays, and so does <data>/ships without a link. Deleting the data folder
+# deletes the link, never what it points to. Never fails its caller.
+aeolus_move_ships() {
+  local crews="$1" data old entry
+  data="${AEOLUS_DATA:-${PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-}}}"
+  if [ ! -d "$crews" ]; then
+    (umask 077 && mkdir -p "$crews") 2>/dev/null || return 0
+  fi
+  [ -n "$data" ] && [ -d "$data" ] || return 0
+  old="$data/ships"
+  if [ -d "$old" ] && [ ! -L "$old" ]; then
+    for entry in "$old"/*; do
+      [ -e "$entry" ] || continue
+      [ -e "$crews/${entry##*/}" ] || mv "$entry" "$crews/" 2>/dev/null || true
+    done
+    rmdir "$old" 2>/dev/null || return 0
+  fi
+  [ -e "$old" ] || [ -L "$old" ] || ln -s "$crews" "$old" 2>/dev/null || true
 }
 
 # The identity file of the session's folder: fleet URL, ship id, ship name,

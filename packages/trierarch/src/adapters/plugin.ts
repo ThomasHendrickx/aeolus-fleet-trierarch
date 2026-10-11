@@ -27,13 +27,17 @@ function placesOf(at: { homeDirectory: string; env: Readonly<Record<string, stri
  * plugin cache and the plugin's data folder, unless variables name others
  * (AEOLUS_PLUGIN_ROOT and AEOLUS_PLUGIN_DATA for Claude Code,
  * AEOLUS_CODEX_PLUGIN_ROOT and AEOLUS_CODEX_PLUGIN_DATA for Codex). The
- * folders follow CLAUDE_CONFIG_DIR and CODEX_HOME as the harnesses do.
+ * folders follow CLAUDE_CONFIG_DIR and CODEX_HOME as the harnesses do. The
+ * identities of the harness's sessions live in ~/.aeolus/crews/<harness>, as
+ * the plugin keeps them (decision 0015).
  */
 export async function findAeolusPlugin(at: { homeDirectory: string; env: Readonly<Record<string, string | undefined>>; harness?: PluginHarness }): Promise<AeolusPlugin> {
-  const places = placesOf({ ...at, harness: at.harness ?? 'claude-code' });
+  const harness = at.harness ?? 'claude-code';
+  const places = placesOf({ ...at, harness });
   const data = places.data ?? join(places.plugins, 'data', PLUGIN_DATA_FOLDER);
+  const crews = join(at.homeDirectory, '.aeolus', 'crews', harness);
   if (places.root !== undefined) {
-    return { root: places.root, data };
+    return { root: places.root, data, crews };
   }
   const cache = join(places.plugins, 'cache', 'aeolus-fleet', 'aeolus');
   const versions = (await readdir(cache).catch(() => [])).filter((name) => /^\d+\.\d+\.\d+$/.test(name)).sort(byVersion);
@@ -41,7 +45,7 @@ export async function findAeolusPlugin(at: { homeDirectory: string; env: Readonl
   if (newest === undefined) {
     throw new Error(`The aeolus plugin is not installed for ${places.name} (nothing in ${cache}): install it, or set ${places.rootVariable}`);
   }
-  return { root: join(cache, newest), data };
+  return { root: join(cache, newest), data, crews };
 }
 
 /** The part of a plugin's manifest the version is read from. */
