@@ -1588,6 +1588,81 @@ describe("the plugin's log is capped: at its size limit it moves aside as aeolus
     expect(readdirSync(join(data, 'logs')).sort()).toEqual(['aeolus.log', 'aeolus.log.1']);
   });
 
+  /**
+   * Two writers at a log that reached its limit, the first held at a step of
+   * its move aside (its look at the size, or the move itself) until the second
+   * has written its record: the moment two writers rotating at once collide.
+   * Answers once both are done.
+   */
+  async function twoWritersWithTheFirstHeldAt(step: 'wc' | 'mv'): Promise<void> {
+    const bin = join(data, 'bin');
+    const held = join(data, 'held');
+    mkdirSync(bin, { recursive: true });
+    const real = spawnSync('bash', ['-c', `command -v ${step}`], { encoding: 'utf8' }).stdout.trim();
+    writeFileSync(
+      join(bin, step),
+      [
+        '#!/usr/bin/env bash',
+        // mv also moves the turn marker into place: hold only the move of the log.
+        `[ ${step} = wc ] || [ "\${*: -1}" = "${log()}.1" ] || exec ${real} "$@"`,
+        `if mkdir "${held}" 2>/dev/null; then`,
+        '  for _ in $(seq 500); do',
+        `    cat "${log()}" "${previous()}" 2>/dev/null | grep -q '"action":"turn"' && break`,
+        '    sleep 0.01',
+        '  done',
+        'fi',
+        `exec ${real} "$@"`,
+        '',
+      ].join('\n'),
+    );
+    chmodSync(join(bin, step), 0o755);
+    const aWriter = () =>
+      start('aeolus-turn.sh', {
+        stdin: JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt: 'hello' }),
+        env: { AEOLUS_LOG_MAX_BYTES: '1000', PATH: `${bin}:${process.env.PATH ?? ''}` },
+      });
+
+    const first = aWriter();
+    await expect.poll(() => statSync(held, { throwIfNoEntry: false }) !== undefined).toBe(true);
+    const second = aWriter();
+    const exits = await Promise.all([first.exited, second.exited]);
+
+    expect(exits.map((exit) => exit.status)).toEqual([0, 0]);
+  }
+
+  /** The records both logs hold after the filler a test started the log with. */
+  function recordsAfter(older: string) {
+    return `${(read(previous()) ?? '').slice(older.length)}${read(log()) ?? ''}`
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => readLogLine(line));
+  }
+
+  const twoTurns = [
+    { shipId: SHIP_ID, action: 'turn' },
+    { shipId: SHIP_ID, action: 'turn' },
+  ];
+
+  it('moves the log aside once when a writer found it at the limit while another moved it aside, and loses no record', async () => {
+    crew();
+    const older = aLogOf(1000);
+
+    await twoWritersWithTheFirstHeldAt('wc');
+
+    expect(read(previous())?.startsWith(older)).toBe(true);
+    expect(recordsAfter(older)).toMatchObject(twoTurns);
+  });
+
+  it('moves the log aside once when a writer reaches the limit while another is moving it aside, and loses no record', async () => {
+    crew();
+    const older = aLogOf(1000);
+
+    await twoWritersWithTheFirstHeldAt('mv');
+
+    expect(read(previous())?.startsWith(older)).toBe(true);
+    expect(recordsAfter(older)).toMatchObject(twoTurns);
+  });
+
   it('caps the log at 1 MiB by default', () => {
     crew();
     aLogOf(MIB);
