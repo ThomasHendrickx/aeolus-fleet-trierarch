@@ -107,6 +107,23 @@ function turn(): Run {
   return run('aeolus-identity.sh', { args: ['turn'] });
 }
 
+/** The plugin's log, each line read by the trierarch's own log reader, as aeolus-trierarch logs reads its log. */
+function logged() {
+  const file = join(data, 'logs', 'aeolus.log');
+  if (!statSync(file, { throwIfNoEntry: false })) return [];
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((line) => line !== '')
+    .map((line) => readLogLine(line));
+}
+
+/** What each record of the plugin's log says, without when. */
+function actions() {
+  return logged().map((record) => ('time' in record ? { ...record, time: undefined } : record));
+}
+
+const scout = { time: undefined, shipId: SHIP_ID, shipName: 'scout' };
+
 describe('aeolus-identity', () => {
   it("writes the folder's ship and shows it, never the crew token", () => {
     crew();
@@ -548,6 +565,83 @@ describe("the watcher's wake rule: one wake per rise in the waiting count, given
 });
 
 describe('the Codex wake bridge', () => {
+  const THREAD_ID = '01a103c9-80b0-7ab1-82e3-6f4a2f70ad86';
+
+  /** A codex on PATH that writes down each call; the env to run the bridge with it, and the calls file. */
+  function aCodex() {
+    const bin = join(data, 'bin');
+    const calls = join(data, 'codex.calls');
+    mkdirSync(bin, { recursive: true });
+    const codex = join(bin, 'codex');
+    writeFileSync(codex, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "${calls}"\n`);
+    chmodSync(codex, 0o700);
+    return { env: { PATH: `${bin}:${process.env.PATH ?? ''}` }, calls };
+  }
+
+  const queued = (calls: string) => (statSync(calls, { throwIfNoEntry: false }) ? readFileSync(calls, 'utf8') : '');
+
+  it("logs arming for the Codex task in the plugin's log, and keeps no log of its own", async () => {
+    fleet = await startStubFleet([inbox(1)]);
+    crew(fleet.url);
+    aTurnEnded();
+    const codex = aCodex();
+
+    await start('aeolus-codex-wake.sh', { args: ['start', THREAD_ID], env: codex.env }).exited;
+    await expect.poll(() => queued(codex.calls), { timeout: 5_000 }).toContain(`queue --thread ${THREAD_ID}`);
+
+    expect(actions()).toContainEqual({ ...scout, action: 'wakeBridge', outcome: `armed for Codex task ${THREAD_ID}` });
+    expect(readdirSync(data, { recursive: true }).map(String).filter((name) => name.includes('.wake.log'))).toEqual([]);
+  });
+
+  it('logs a re-arm for the task it already wakes as already armed', async () => {
+    let release = (): void => undefined;
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    fleet = await startStubFleet([inbox(0), { ...inbox(1), hold }]);
+    crew(fleet.url);
+    aTurnEnded();
+    const codex = aCodex();
+    await start('aeolus-codex-wake.sh', { args: ['start', THREAD_ID], env: codex.env }).exited;
+
+    try {
+      await start('aeolus-codex-wake.sh', { args: ['start', THREAD_ID], env: codex.env }).exited;
+
+      expect(actions().filter((record) => 'action' in record && record.action === 'wakeBridge')).toEqual([
+        { ...scout, action: 'wakeBridge', outcome: `armed for Codex task ${THREAD_ID}` },
+        { ...scout, action: 'wakeBridge', outcome: `already armed for Codex task ${THREAD_ID}` },
+      ]);
+    } finally {
+      release();
+      await expect.poll(() => queued(codex.calls), { timeout: 5_000 }).toContain(`queue --thread ${THREAD_ID}`);
+    }
+  });
+
+  it('logs the wake it queues to the Codex task', async () => {
+    fleet = await startStubFleet([inbox(1)]);
+    crew(fleet.url);
+    aTurnEnded();
+    const codex = aCodex();
+
+    await start('aeolus-codex-wake.sh', { args: ['run', THREAD_ID], env: codex.env }).exited;
+
+    expect(actions().at(-1)).toEqual({ ...scout, action: 'wakeBridge', outcome: `queued a wake to Codex task ${THREAD_ID}: 1 delivery waits` });
+  });
+
+  it('logs not arming when its first fleet check cannot connect, as a failure with what happens next', () => {
+    crew('http://127.0.0.1:1');
+    const codex = aCodex();
+
+    run('aeolus-codex-wake.sh', { args: ['start', THREAD_ID], env: codex.env });
+
+    expect(actions().at(-1)).toEqual({
+      ...scout,
+      action: 'wakeBridge',
+      outcome: 'failed: cannot reach the fleet, so automatic wake-up is not armed',
+      next: 'the session arms it again before it ends its turn',
+    });
+  });
+
   it('refuses to look armed when its first fleet check cannot connect', () => {
     crew('http://127.0.0.1:1');
     const bin = join(data, 'bin');
@@ -1171,23 +1265,6 @@ describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
 describe("the plugin's log: what the watcher and hooks do, one record per line in the trierarch's log format", () => {
   const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
-  /** The plugin's log, each line read by the trierarch's own log reader, as aeolus-trierarch logs reads its log. */
-  function logged() {
-    const file = join(data, 'logs', 'aeolus.log');
-    if (!statSync(file, { throwIfNoEntry: false })) return [];
-    return readFileSync(file, 'utf8')
-      .split('\n')
-      .filter((line) => line !== '')
-      .map((line) => readLogLine(line));
-  }
-
-  /** What each record says, without when. */
-  function actions() {
-    return logged().map((record) => ('time' in record ? { ...record, time: undefined } : record));
-  }
-
-  const scout = { time: undefined, shipId: SHIP_ID, shipName: 'scout' };
-
   it("writes each record as the trierarch's log does: when, the ship, the action and its outcome", async () => {
     fleet = await startStubFleet([inbox(2)]);
     crew(fleet.url);
@@ -1407,5 +1484,83 @@ describe("the plugin's log: what the watcher and hooks do, one record per line i
 
     expect(logged()).toHaveLength(1);
     expect(readFileSync(join(data, 'logs', 'aeolus.log'), 'utf8')).not.toContain(CREW_TOKEN);
+  });
+});
+
+describe("the plugin's log is capped: at its size limit it moves aside as aeolus.log.1 and a new log starts", () => {
+  const MIB = 1024 * 1024;
+  const log = () => join(data, 'logs', 'aeolus.log');
+  const previous = () => join(data, 'logs', 'aeolus.log.1');
+
+  /** A log of exactly this many bytes of filler lines. */
+  function aLogOf(bytes: number, marker = 'x'): string {
+    mkdirSync(join(data, 'logs'), { recursive: true });
+    const line = `${marker.repeat(99)}\n`;
+    const content = line.repeat(Math.floor(bytes / line.length)) + marker.repeat(bytes % line.length);
+    writeFileSync(log(), content);
+    return content;
+  }
+
+  const read = (file: string) => (statSync(file, { throwIfNoEntry: false }) ? readFileSync(file, 'utf8') : undefined);
+
+  /** A prompt submitted, logged by a plugin whose log limit is 1000 bytes. */
+  function aPromptSubmittedUnderALimitOf1000Bytes(): void {
+    const submitted = run('aeolus-turn.sh', {
+      stdin: JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt: 'hello' }),
+      env: { AEOLUS_LOG_MAX_BYTES: '1000' },
+    });
+    expect(submitted.status).toBe(0);
+  }
+
+  it('moves a log that reached the limit aside before the next record, which starts the new log', () => {
+    crew();
+    const older = aLogOf(1000);
+
+    aPromptSubmittedUnderALimitOf1000Bytes();
+
+    expect(read(previous())).toBe(older);
+    expect(readLogLine((read(log()) ?? '').trimEnd())).toMatchObject({ shipId: SHIP_ID, action: 'turn' });
+  });
+
+  it('keeps appending to a log one byte under the limit', () => {
+    crew();
+    const older = aLogOf(999);
+
+    aPromptSubmittedUnderALimitOf1000Bytes();
+
+    expect(read(previous())).toBeUndefined();
+    expect(read(log())?.startsWith(`${older}{`)).toBe(true);
+  });
+
+  it('keeps one previous log: a second move aside replaces the first', () => {
+    crew();
+    aLogOf(1000, 'a');
+    aPromptSubmittedUnderALimitOf1000Bytes();
+    const second = aLogOf(1000, 'b');
+
+    aPromptSubmittedUnderALimitOf1000Bytes();
+
+    expect(read(previous())).toBe(second);
+    expect(readdirSync(join(data, 'logs')).sort()).toEqual(['aeolus.log', 'aeolus.log.1']);
+  });
+
+  it('caps the log at 1 MiB by default', () => {
+    crew();
+    aLogOf(MIB);
+
+    aPromptSubmitted();
+
+    expect(statSync(previous()).size).toBe(MIB);
+    expect(statSync(log()).size).toBeLessThan(1000);
+  });
+
+  it('keeps appending to a log one byte under 1 MiB by default', () => {
+    crew();
+    aLogOf(MIB - 1);
+
+    aPromptSubmitted();
+
+    expect(read(previous())).toBeUndefined();
+    expect(statSync(log()).size).toBeGreaterThan(MIB);
   });
 });
