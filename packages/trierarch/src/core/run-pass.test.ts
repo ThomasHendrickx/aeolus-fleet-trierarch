@@ -1653,3 +1653,49 @@ describe('a launch on a harness version its launch screens were not checked on (
     expect(trierarch.state.current().entries[shipId]?.state).toBe('restarting');
   });
 });
+
+describe('a running ship whose identity is gone (#659)', () => {
+  const identityGone = (shipId: ShipId) =>
+    `mac-studio: scout (${shipId}): its session runs, but its folder holds no identity, so the trierarch no longer watches its inbox or wakes it. Restart it in the console to crew it again.`;
+
+  it('tells argo once and logs it once while its folder holds no identity', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    await trierarch.harness.removeIdentity(SCOUT_FOLDER);
+
+    await trierarch.pass();
+    trierarch.clock.advance(MINUTE_MS);
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([identityGone(shipId)]);
+    expect(trierarch.logger.actions.filter((each) => each.action === 'identityGone').map((each) => each.outcome)).toEqual(['its folder holds no identity, so it is no longer woken; argo told']);
+  });
+
+  it('tells argo again when its identity is gone again after it came back', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    const identity = trierarch.harness.identities.get(SCOUT_FOLDER);
+    await trierarch.harness.removeIdentity(SCOUT_FOLDER);
+    await trierarch.pass();
+    if (identity !== undefined) {
+      await trierarch.harness.prepareIdentity({ folder: SCOUT_FOLDER, identity });
+    }
+    trierarch.clock.advance(MINUTE_MS);
+    await trierarch.pass();
+    await trierarch.harness.removeIdentity(SCOUT_FOLDER);
+    trierarch.clock.advance(MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([identityGone(shipId), identityGone(shipId)]);
+  });
+
+  it('tells argo nothing while its folder holds its identity', async () => {
+    const trierarch = aTrierarch();
+    await aCrewedShip(trierarch);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+});
