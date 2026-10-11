@@ -1,6 +1,6 @@
 import { setTimeout as wait } from 'node:timers/promises';
 
-import { assignedCrewRequestsOutputSchema, clearRequestsOutputSchema, FLEET_BUSY_WAITS_MS, giveBackCrewRequestOutputSchema, idSchema, receivedDeliverySchema, shipDetailOutputSchema, type ShipId } from '@aeolus-fleet/common';
+import { assignedCrewRequestsOutputSchema, busyWaitMs, clearRequestsOutputSchema, FLEET_BUSY_WAITS_MS, giveBackCrewRequestOutputSchema, idSchema, receivedDeliverySchema, shipDetailOutputSchema, type ShipId } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
 import type { Delivery, FleetPort } from '../core/ports.js';
@@ -14,7 +14,7 @@ import { runningVersion } from './version.js';
  * session's register, inbox and report. A refusal the trierarch does not expect throws
  * with the fleet's code and message. While the fleet is busy (nothing stored),
  * each call is made again by itself with the same body, after each of the busy
- * waits, so a send keeps its idempotency key.
+ * waits (each drawn by `busyWaitMs`), so a send keeps its idempotency key.
  */
 
 /** What the trierarch states as model and harness: it is software, not a model, as squadrons is (#157). */
@@ -57,12 +57,13 @@ export interface RestFleet extends FleetPort {
   registerSelf(crew: { shipId: ShipId; secret: string }): Promise<{ crewToken: string }>;
 }
 
-export function createRestFleet(options: { fleetUrl: string; crewToken: string; busyWaitsMs?: readonly number[] }): RestFleet {
+export function createRestFleet(options: { fleetUrl: string; crewToken: string; busyWaitsMs?: readonly number[]; random?: () => number }): RestFleet {
   const fleetUrl = options.fleetUrl.replace(/\/$/, '');
   /** A call that got no answer: said with the fleet's url, unless it was stopped on purpose. */
   const unreachable = (error: unknown, signal: AbortSignal | undefined): unknown =>
     signal?.aborted === true ? error : new Error(`The fleet at ${fleetUrl} cannot be reached: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   const busyWaitsMs = options.busyWaitsMs ?? FLEET_BUSY_WAITS_MS;
+  const random = options.random ?? Math.random;
   async function call<T>(request: FleetCall<T>): Promise<T> {
     for (const waitMs of busyWaitsMs) {
       try {
@@ -71,7 +72,7 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string; 
         if (!(error instanceof FleetRefusal && error.code === FLEET_BUSY)) {
           throw error;
         }
-        await wait(waitMs, undefined, request.signal === undefined ? {} : { signal: request.signal });
+        await wait(busyWaitMs(waitMs, random), undefined, request.signal === undefined ? {} : { signal: request.signal });
       }
     }
     return callOnce(request);
