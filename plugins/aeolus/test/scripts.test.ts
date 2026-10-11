@@ -835,6 +835,39 @@ describe('the SessionStart hook', () => {
     expect(statSync(identityFile(), { throwIfNoEntry: false })).toBeDefined();
   });
 
+  it('removes the .wake.log.wait.<pid> files an earlier wake bridge left when it was killed (#688)', () => {
+    crew();
+    const ships = dirname(identityFile());
+    const gone = spawnSync('true').pid;
+    const left = [`0123456789abcdef0123456789abcdef.wake.log.wait.${String(gone)}`, `${basename(identityFile(), '.identity')}.wake.log.wait.${String(gone)}`];
+    for (const name of left) writeFileSync(join(ships, name), '');
+
+    expect(hook(payloadFor(folder)).status).toBe(0);
+
+    expect(readdirSync(ships).filter((name) => name.includes('.wake.log.wait.'))).toEqual([]);
+  });
+
+  it('keeps the .wake.log.wait.<pid> file of a wake bridge an earlier plugin still runs, which reads it when its watcher ends (#688)', () => {
+    crew();
+    const ships = dirname(identityFile());
+    const bin = join(data, 'bin');
+    mkdirSync(bin, { recursive: true });
+    const bridge = join(bin, 'aeolus-codex-wake.sh');
+    writeFileSync(bridge, '#!/usr/bin/env bash\nsleep 30\n');
+    chmodSync(bridge, 0o700);
+    const running = spawn('bash', [bridge]);
+    const name = `${basename(identityFile(), '.identity')}.wake.log.wait.${String(running.pid)}`;
+    writeFileSync(join(ships, name), '');
+
+    try {
+      expect(hook(payloadFor(folder)).status).toBe(0);
+
+      expect(readdirSync(ships)).toContain(name);
+    } finally {
+      running.kill();
+    }
+  });
+
   it('says nothing to a folder that crews no ship', () => {
     expect(hook(payloadFor(folder))).toMatchObject({ status: 0, stdout: '' });
   });
