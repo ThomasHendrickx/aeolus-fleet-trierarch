@@ -7,7 +7,7 @@
 #
 #   aeolus-fleet.sh register <fleetUrl> <shipId> <secret> <location> [<squadronId>]
 #       location: DEVICE, CLOUD, SERVER or OTHER:<a few words>; the harness is
-#       AEOLUS_HARNESS, else claude-code
+#       the one aeolus_register_harness works out
 #   aeolus-fleet.sh receive|send|report|inbox [<json input>|-]   - reads the input from stdin
 #   aeolus-fleet.sh ack|pong <deliveryId>
 #   aeolus-fleet.sh whoami|reportLog|deregister
@@ -128,11 +128,15 @@ register() {
     OTHER:?*) location="{\"kind\":\"OTHER\",\"description\":\"$(aeolus_json_escape "${4#OTHER:}")\"}" ;;
     *) echo "aeolus: the location is DEVICE, CLOUD, SERVER or OTHER:<a few words>" >&2; exit 2 ;;
   esac
+  # Every later call of the session finds the identity in this harness's crews folder.
+  AEOLUS_HARNESS="$(aeolus_register_harness)"
+  export AEOLUS_HARNESS
+  identity="$(aeolus_identity_file)" || exit 2
   if [ -f "$identity" ]; then
     echo "aeolus: this folder already crews $(aeolus_identity_get "$identity" shipName) ($(aeolus_identity_get "$identity" shipId)); one folder crews one ship, and deregistering frees it"
     exit 4
   fi
-  call_fleet POST /api/v1/ship/register "" "{\"shipId\":\"$(aeolus_json_escape "$ship_id")\",\"secret\":\"$(aeolus_json_escape "$secret")\",\"location\":${location},\"harness\":\"$(aeolus_json_escape "${AEOLUS_HARNESS:-claude-code}")\"}"
+  call_fleet POST /api/v1/ship/register "" "{\"shipId\":\"$(aeolus_json_escape "$ship_id")\",\"secret\":\"$(aeolus_json_escape "$secret")\",\"location\":${location},\"harness\":\"$(aeolus_json_escape "$AEOLUS_HARNESS")\"}"
   [ "$status" = 200 ] || refused register
   token="$(aeolus_json_string "$body" crewToken)"
   [ -n "$token" ] || { echo "aeolus: the fleet answered register without a crew token"; exit 1; }

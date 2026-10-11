@@ -69,6 +69,23 @@ aeolus_harness() {
   fi
 }
 
+# The harness a register states and crews for, where no identity can tell it
+# yet: AEOLUS_HARNESS, else codex in a Codex hook, else claude-code in Claude
+# Code, which sets CLAUDECODE in every shell it starts and CLAUDE_PLUGIN_ROOT in
+# its hooks, else codex: the plugin runs in these two only, and a Codex skill's
+# command that left out AEOLUS_HARNESS sets none of them (#711).
+aeolus_register_harness() {
+  if [ -n "${AEOLUS_HARNESS:-}" ]; then
+    printf '%s' "$AEOLUS_HARNESS"
+  elif [ -n "${PLUGIN_ROOT:-}" ]; then
+    printf codex
+  elif [ -n "${CLAUDECODE:-}" ] || [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+    printf claude-code
+  else
+    printf codex
+  fi
+}
+
 # Whether the crews folder is known rather than guessed: AEOLUS_CREWS or
 # AEOLUS_HARNESS names it, or a hook of either harness runs. A Codex command
 # without AEOLUS_HARNESS guesses claude-code, so it must not move (#679).
