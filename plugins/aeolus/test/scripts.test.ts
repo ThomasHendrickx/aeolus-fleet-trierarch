@@ -2,7 +2,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -825,8 +825,8 @@ describe('the SessionStart hook', () => {
 
   it('removes the .wake.log files an earlier plugin left beside the identities, and keeps the identities', () => {
     crew();
-    const ships = join(data, 'ships');
-    const left = ['0123456789abcdef0123456789abcdef.wake.log', identityFile().replace(/^.*\//, '').replace(/\.identity$/, '.wake.log')];
+    const ships = dirname(identityFile());
+    const left = ['0123456789abcdef0123456789abcdef.wake.log', basename(identityFile()).replace(/\.identity$/, '.wake.log')];
     for (const name of left) writeFileSync(join(ships, name), 'aeolus: automatic wake-up armed\n');
 
     expect(hook(payloadFor(folder)).status).toBe(0);
