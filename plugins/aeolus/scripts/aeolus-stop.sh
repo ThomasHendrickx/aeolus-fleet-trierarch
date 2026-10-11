@@ -19,13 +19,19 @@ aeolus_hook_folder "$payload"
 identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
 [ -f "$identity" ] || exit 0
 
-if aeolus_woken_by_trierarch "$identity"; then
+# Lets the turn end: the session is idle.
+let_end() {
   aeolus_mark_turn idle
+  aeolus_log "$identity" turn 'idle: the turn ended'
+}
+
+if aeolus_woken_by_trierarch "$identity"; then
+  let_end
   exit 0
 fi
 
 if [ -n "${PLUGIN_ROOT:-}" ]; then
-  aeolus_mark_turn idle
+  let_end
   session_id="$(aeolus_json_string "$payload" session_id)"
   [ -n "$session_id" ] && [ "${AEOLUS_CODEX_WAKE_DISABLED:-}" != 1 ] || exit 0
   "$(dirname "$0")/aeolus-codex-wake.sh" start "$session_id" >/dev/null 2>&1 || true
@@ -34,11 +40,12 @@ fi
 
 if printf '%s' "$payload" | grep -Eq '"stop_hook_active"[[:space:]]*:[[:space:]]*true' \
   || aeolus_is_watching || [ -f "$(aeolus_refused_file)" ]; then
-  aeolus_mark_turn idle
+  let_end
   exit 0
 fi
 
 root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 ship_name="$(aeolus_identity_get "$identity" shipName)"
+aeolus_log "$identity" askWatcher 'kept the turn open: no watcher runs'
 reason="aeolus: no watcher runs for ${ship_name}, so nothing wakes this session when work arrives: start \"${root}/scripts/aeolus-wait.sh\" as a background task (run_in_background), then end your turn"
 printf '{"decision":"block","reason":"%s"}\n' "$(aeolus_json_escape "$reason")"

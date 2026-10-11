@@ -10,4 +10,5 @@ aeolus_hook_folder "$payload"
 identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
 [ -f "$identity" ] || exit 0
 aeolus_mark_turn busy
+aeolus_log "$identity" turn 'busy: a prompt was submitted'
 exit 0

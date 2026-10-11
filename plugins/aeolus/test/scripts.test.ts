@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { readLogLine } from '../../../packages/trierarch/src/adapters/log.js';
 import { startStubFleet, type StubFleet } from './stub-fleet.js';
 
 // The aeolus plugin's bash scripts, as a session runs them: in its folder,
@@ -1164,5 +1165,247 @@ describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
     run('aeolus-identity.sh', { args: ['delete'] });
 
     expect(readdirSync(data, { recursive: true }).map(String).filter((name) => name.endsWith('.turn'))).toEqual([]);
+  });
+});
+
+describe("the plugin's log: what the watcher and hooks do, one record per line in the trierarch's log format", () => {
+  const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+  /** The plugin's log, each line read by the trierarch's own log reader, as aeolus-trierarch logs reads its log. */
+  function logged() {
+    const file = join(data, 'logs', 'aeolus.log');
+    if (!statSync(file, { throwIfNoEntry: false })) return [];
+    return readFileSync(file, 'utf8')
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => readLogLine(line));
+  }
+
+  /** What each record says, without when. */
+  function actions() {
+    return logged().map((record) => ('time' in record ? { ...record, time: undefined } : record));
+  }
+
+  const scout = { time: undefined, shipId: SHIP_ID, shipName: 'scout' };
+
+  it("writes each record as the trierarch's log does: when, the ship, the action and its outcome", async () => {
+    fleet = await startStubFleet([inbox(2)]);
+    crew(fleet.url);
+    aTurnEnded();
+
+    await start('aeolus-wait.sh').exited;
+
+    const records = logged();
+    expect(records.length).toBeGreaterThan(0);
+    for (const record of records) {
+      expect(record).toMatchObject({ shipId: SHIP_ID, shipName: 'scout' });
+      expect('time' in record && record.time).toMatch(ISO_TIME);
+    }
+  });
+
+  it('logs the watcher starting and the wake it gives', async () => {
+    fleet = await startStubFleet([inbox(0), inbox(2)]);
+    crew(fleet.url);
+    aTurnEnded();
+
+    await start('aeolus-wait.sh').exited;
+
+    expect(actions().slice(1)).toEqual([
+      { ...scout, action: 'watch', outcome: 'started' },
+      { ...scout, action: 'wake', outcome: 'woken, 2 deliveries wait' },
+    ]);
+  });
+
+  it('logs a wake it holds while the session is busy once, not on every check', async () => {
+    fleet = await startStubFleet([inbox(1)]);
+    const stub = fleet;
+    crew(stub.url);
+    aPromptSubmitted();
+    const watcher = start('aeolus-wait.sh');
+
+    try {
+      await expect.poll(() => stub.calls.length).toBeGreaterThanOrEqual(3);
+      expect(actions().filter((record) => 'action' in record && record.action === 'wake')).toEqual([
+        { ...scout, action: 'wake', outcome: 'held, 1 deliveries wait while the session is busy' },
+      ]);
+    } finally {
+      watcher.child.kill();
+    }
+  });
+
+  it('logs that a second watcher did not start', () => {
+    crew();
+    const watcher = aRunningWatcher();
+
+    try {
+      run('aeolus-wait.sh');
+
+      expect(actions()).toEqual([{ ...scout, action: 'watch', outcome: 'not started: a watcher runs for this ship' }]);
+    } finally {
+      watcher.kill();
+    }
+  });
+
+  it('logs the release on LEASE_ENDED, after which the plugin forgot the ship', async () => {
+    fleet = await startStubFleet([{ status: 401, body: { code: 'LEASE_ENDED', message: 'This ship was released' } }]);
+    crew(fleet.url);
+
+    await start('aeolus-wait.sh').exited;
+
+    expect(actions().at(-1)).toEqual({ ...scout, action: 'release', outcome: 'released by the operator; the plugin forgot it' });
+  });
+
+  it('logs a refused crew token as a failure, with what happens next', async () => {
+    fleet = await startStubFleet([{ status: 401, body: { code: 'UNAUTHORIZED', message: 'Call with the crew token' } }]);
+    crew(fleet.url);
+
+    await start('aeolus-wait.sh').exited;
+
+    expect(actions().at(-1)).toEqual({
+      ...scout,
+      action: 'watch',
+      outcome: 'failed: the fleet refused the crew token',
+      next: 'no watcher is asked for until one reaches the fleet with the crew token',
+    });
+  });
+
+  it('logs a failing fleet once, not every retry, and when it answers again', async () => {
+    fleet = await startStubFleet([{ status: 500, body: {} }, { status: 503, body: {} }, inbox(0), inbox(1)]);
+    crew(fleet.url);
+    aTurnEnded();
+
+    await start('aeolus-wait.sh').exited;
+
+    expect(actions().slice(2, 4)).toEqual([
+      { ...scout, action: 'watch', outcome: 'failed: the fleet answered HTTP 500', next: 'retries, a little later each time' },
+      { ...scout, action: 'watch', outcome: 'the fleet answers again' },
+    ]);
+  });
+
+  it('logs a fleet that does not answer at all', async () => {
+    crew('http://127.0.0.1:9');
+    const watcher = start('aeolus-wait.sh', { env: { AEOLUS_RETRY_SECONDS: '1' } });
+
+    try {
+      await expect.poll(() => actions().at(-1)).toEqual({
+        ...scout,
+        action: 'watch',
+        outcome: 'failed: no answer from the fleet',
+        next: 'retries, a little later each time',
+      });
+    } finally {
+      watcher.child.kill();
+    }
+  });
+
+  it('logs that the watcher stopped at its time limit', async () => {
+    fleet = await startStubFleet([inbox(0)]);
+    crew(fleet.url);
+
+    await start('aeolus-wait.sh', { env: { AEOLUS_WAIT_SECONDS: '0', AEOLUS_MAX_SECONDS: '1' } }).exited;
+
+    expect(actions().at(-1)).toEqual({ ...scout, action: 'watch', outcome: 'stopped after almost 2 hours; the session starts it again' });
+  });
+
+  it('logs the turn busy when a prompt is submitted, and idle when it ends', () => {
+    crew();
+    const watcher = aRunningWatcher();
+
+    try {
+      aPromptSubmitted();
+      claudeHook('aeolus-stop.sh', { hook_event_name: 'Stop', stop_hook_active: false });
+
+      expect(actions()).toEqual([
+        { ...scout, action: 'turn', outcome: 'busy: a prompt was submitted' },
+        { ...scout, action: 'turn', outcome: 'idle: the turn ended' },
+      ]);
+    } finally {
+      watcher.kill();
+    }
+  });
+
+  it('logs that the Stop hook kept the turn open to ask for the watcher', () => {
+    crew();
+
+    claudeHook('aeolus-stop.sh', { hook_event_name: 'Stop', stop_hook_active: false });
+
+    expect(actions()).toEqual([{ ...scout, action: 'askWatcher', outcome: 'kept the turn open: no watcher runs' }]);
+  });
+
+  it('logs a watcher the guard refused, and why', () => {
+    crew();
+    const watcher = aRunningWatcher();
+
+    try {
+      claudeHook('aeolus-watch-guard.sh', {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Bash',
+        tool_input: { command: '"/plugin/scripts/aeolus-wait.sh"', run_in_background: true },
+      });
+
+      expect(actions()).toEqual([{ ...scout, action: 'refuseWatcher', outcome: 'refused: a watcher runs for this ship' }]);
+    } finally {
+      watcher.kill();
+    }
+  });
+
+  it('logs what the SessionStart hook told a fresh context, and after what', () => {
+    crew();
+
+    run('aeolus-session-start.sh', {
+      stdin: JSON.stringify({ session_id: 'c5858406-be86-46cd-8591-f4fb39b1fa61', cwd: folder, hook_event_name: 'SessionStart', source: 'clear' }),
+      env: { AEOLUS_FOLDER: '', AEOLUS_DATA: '', CLAUDE_PROJECT_DIR: folder, CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin' },
+    });
+
+    expect(actions()).toEqual([{ ...scout, action: 'sessionStart', outcome: 'told the session after clear which ship it crews, and to start the watcher' }]);
+  });
+
+  it('logs a report reminder', () => {
+    run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', CREW_TOKEN, 'team-one'] });
+    run('aeolus-identity.sh', { args: ['check-in', '30m'] });
+    writeFileSync(identityFile().replace(/\.identity$/, '.reported'), `${String(Math.floor(Date.now() / 1000) - 31 * 60)}\n`);
+
+    claudeHook('aeolus-report-due.sh', { hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { file_path: '/tmp/x' } });
+
+    expect(actions()).toEqual([
+      { time: undefined, shipId: SHIP_ID, shipName: 'tester-k3x9', action: 'remind', outcome: 'reminded to report: 30m passed since the last report' },
+    ]);
+  });
+
+  it('logs the model the session runs when it changes, not on every fleet call', () => {
+    crew();
+    const aFleetCall = (model: string) => ({
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Bash',
+      tool_input: { command: '"/plugin/scripts/aeolus-fleet.sh" inbox' },
+      model,
+    });
+
+    claudeHook('aeolus-model.sh', aFleetCall('gpt-5.5'));
+    claudeHook('aeolus-model.sh', aFleetCall('gpt-5.5'));
+    claudeHook('aeolus-model.sh', aFleetCall('gpt-5.5-mini'));
+
+    expect(actions()).toEqual([
+      { ...scout, action: 'model', outcome: 'the session runs gpt-5.5' },
+      { ...scout, action: 'model', outcome: 'the session runs gpt-5.5-mini' },
+    ]);
+  });
+
+  it('logs nothing for a folder that crews no ship', () => {
+    aPromptSubmitted();
+    aTurnEnded();
+    run('aeolus-wait.sh');
+
+    expect(logged()).toEqual([]);
+  });
+
+  it('keeps the log when the plugin forgets the ship, and never logs the crew token', () => {
+    crew();
+    aPromptSubmitted();
+
+    run('aeolus-identity.sh', { args: ['delete'] });
+
+    expect(logged()).toHaveLength(1);
+    expect(readFileSync(join(data, 'logs', 'aeolus.log'), 'utf8')).not.toContain(CREW_TOKEN);
   });
 });

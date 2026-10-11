@@ -48,6 +48,7 @@ esac
 [ $(( now - last )) -ge "$interval" ] || exit 0
 
 echo "$now" > "$reported_file"
+aeolus_log "$identity" remind "reminded to report: ${check_in} passed since the last report"
 ship_name="$(aeolus_identity_get "$identity" shipName)"
 reminder="aeolus: ${check_in}, the check-in interval of the squadron ${squadron}, passed since ${ship_name} last reported: report what you are doing now with the report call, such as {\"state\":\"working\",\"note\":\"reviewing PR 89\"}, then go on"
 printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"%s"}}\n' "$(aeolus_json_escape "$reminder")"

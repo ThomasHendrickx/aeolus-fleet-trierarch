@@ -164,6 +164,34 @@ aeolus_wake_log_file() {
   printf '%s/%s.wake.log' "$dir" "$(aeolus_key "$folder")"
 }
 
+# The plugin's log, in the trierarch's log format: one JSON object per line,
+# an action the watcher or a hook took for a ship and how it came out (time,
+# shipId, shipName, action, outcome, and next for a failure). One log per
+# plugin data folder, as the trierarch keeps one per machine; it outlasts the
+# ships it names, so forgetting a ship keeps what was logged of it.
+aeolus_log_file() {
+  local data
+  data="$(aeolus_data)" || return 1
+  printf '%s/logs/aeolus.log' "$data"
+}
+
+# Appends one record for the ship of an identity file: the action, its outcome,
+# and for a failure what happens next. Logs nothing without the identity file,
+# and never fails its caller. Never the crew token.
+aeolus_log() {
+  local identity="$1" action="$2" outcome="$3" next="${4:-}" file record
+  [ -f "$identity" ] || return 0
+  file="$(aeolus_log_file 2>/dev/null)" || return 0
+  mkdir -p "$(dirname "$file")" 2>/dev/null || return 0
+  record="{\"time\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\""
+  record="${record},\"shipId\":\"$(aeolus_json_escape "$(aeolus_identity_get "$identity" shipId)")\""
+  record="${record},\"shipName\":\"$(aeolus_json_escape "$(aeolus_identity_get "$identity" shipName)")\""
+  record="${record},\"action\":\"${action}\",\"outcome\":\"$(aeolus_json_escape "$outcome")\""
+  [ -z "$next" ] || record="${record},\"next\":\"$(aeolus_json_escape "$next")\""
+  # One write of a short line to a file opened for appending: concurrent hooks and watchers never interleave.
+  printf '%s}\n' "$record" >> "$file" 2>/dev/null || true
+}
+
 # One field of an identity file: fleetUrl, shipId, shipName, crewToken or folder.
 aeolus_identity_get() {
   local file="$1" field="$2"
