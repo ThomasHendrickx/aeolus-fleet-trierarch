@@ -46,7 +46,7 @@ function run(script: string, options: { args?: string[]; env?: Record<string, st
   const result = spawnSync('bash', [join(SCRIPTS, script), ...(options.args ?? [])], {
     input: options.stdin ?? '',
     encoding: 'utf8',
-    env: { ...process.env, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_RETRY_SECONDS: '0', ...options.env },
+    env: { ...process.env, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_RETRY_SECONDS: '0', AEOLUS_POLL_SECONDS: '0.05', ...options.env },
   });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
@@ -54,7 +54,7 @@ function run(script: string, options: { args?: string[]; env?: Record<string, st
 /** Runs a script without waiting for it, for one that keeps running. */
 function start(script: string, options: { args?: string[]; env?: Record<string, string>; stdin?: string } = {}) {
   const child = spawn('bash', [join(SCRIPTS, script), ...(options.args ?? [])], {
-    env: { ...process.env, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_RETRY_SECONDS: '0', ...options.env },
+    env: { ...process.env, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_RETRY_SECONDS: '0', AEOLUS_POLL_SECONDS: '0.05', ...options.env },
   });
   child.stdin.end(options.stdin ?? '');
   let stdout = '';
@@ -90,6 +90,21 @@ function wakeThreadFile(): string {
 }
 
 const inbox = (waiting: number) => ({ status: 200, body: { waiting } });
+
+/** The session took a prompt: its turn is busy. */
+function aPromptSubmitted(): void {
+  expect(claudeHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: 'hello' }).status).toBe(0);
+}
+
+/** The session ended its turn: it is idle. */
+function aTurnEnded(): void {
+  expect(claudeHook('aeolus-stop.sh', { hook_event_name: 'Stop', stop_hook_active: true }).status).toBe(0);
+}
+
+/** The turn marker, through the plugin's own script. */
+function turn(): Run {
+  return run('aeolus-identity.sh', { args: ['turn'] });
+}
 
 describe('aeolus-identity', () => {
   it("writes the folder's ship and shows it, never the crew token", () => {
@@ -207,6 +222,7 @@ describe('aeolus-wait', () => {
   it("asks the inbox check with the crew token, keeps asking while none wait, and exits 0 once some do", async () => {
     fleet = await startStubFleet([inbox(0), inbox(0), inbox(2)]);
     crew(fleet.url);
+    aTurnEnded();
 
     const { status, stdout } = await start('aeolus-wait.sh').exited;
 
@@ -229,6 +245,7 @@ describe('aeolus-wait', () => {
     });
     fleet = await startStubFleet([{ ...inbox(1), hold: isLockSeen }]);
     crew(fleet.url);
+    aTurnEnded();
 
     const { exited } = start('aeolus-wait.sh', { env: { AEOLUS_WAIT_SECONDS: '0' } });
     await expect.poll(() => run('aeolus-watch-status.sh').status).toBe(0);
@@ -290,6 +307,7 @@ describe('aeolus-wait', () => {
     ]);
     const stub = fleet;
     crew(stub.url);
+    aTurnEnded();
     const watcher = start('aeolus-wait.sh');
     await expect.poll(() => stub.calls.length).toBe(1);
     expect(run('aeolus-identity.sh', { args: ['write', stub.url, SHIP_ID, 'scout', 'aeolus_ct_v1_new_crew'] }).status).toBe(0);
@@ -310,6 +328,7 @@ describe('aeolus-wait', () => {
   it('retries a failing fleet quietly, then exits 0 once deliveries wait', async () => {
     fleet = await startStubFleet([{ status: 500, body: {} }, { status: 503, body: {} }, inbox(1)]);
     crew(fleet.url);
+    aTurnEnded();
 
     await expect(start('aeolus-wait.sh').exited).resolves.toEqual({
       status: 0,
@@ -342,6 +361,105 @@ describe('aeolus-wait', () => {
   });
 });
 
+describe("the watcher's wake rule: one wake per rise in the waiting count, given only when the session is idle", () => {
+  it('holds the wake while the session is busy, and gives it once the turn ends', async () => {
+    fleet = await startStubFleet([inbox(1)]);
+    const stub = fleet;
+    crew(stub.url);
+    aPromptSubmitted();
+    const watcher = start('aeolus-wait.sh');
+    let isExited = false;
+    void watcher.exited.then(() => {
+      isExited = true;
+    });
+
+    await expect.poll(() => stub.calls.length).toBeGreaterThanOrEqual(3);
+    expect(isExited).toBe(false);
+    claudeHook('aeolus-stop.sh', { hook_event_name: 'Stop', stop_hook_active: false });
+
+    await expect(watcher.exited).resolves.toEqual({ status: 0, stdout: 'aeolus: 1 deliveries wait for scout: receive them\n' });
+  });
+
+  it('wakes no session that has not ended a turn yet', async () => {
+    fleet = await startStubFleet([inbox(1)]);
+    const stub = fleet;
+    crew(stub.url);
+    const watcher = start('aeolus-wait.sh');
+    let isExited = false;
+    void watcher.exited.then(() => {
+      isExited = true;
+    });
+
+    try {
+      await expect.poll(() => stub.calls.length).toBeGreaterThanOrEqual(3);
+      expect(isExited).toBe(false);
+    } finally {
+      watcher.child.kill();
+    }
+  });
+
+  it('marks the turn busy when a prompt is submitted, in a folder no trierarch crews', () => {
+    crew();
+
+    claudeHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: 'hello' });
+
+    expect(turn().stdout).toMatch(/^busy /);
+  });
+
+  it('marks the turn busy when it wakes the session', async () => {
+    fleet = await startStubFleet([inbox(1)]);
+    crew(fleet.url);
+    aTurnEnded();
+
+    await start('aeolus-wait.sh').exited;
+
+    expect(turn().stdout).toMatch(/^busy /);
+  });
+
+  it('wakes once per rise: started again, it wakes not for the deliveries it already woke for, but for one more', async () => {
+    fleet = await startStubFleet([inbox(2), inbox(2), inbox(2), inbox(3)]);
+    crew(fleet.url);
+    aTurnEnded();
+    await start('aeolus-wait.sh').exited;
+    aTurnEnded();
+
+    await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: 'aeolus: 3 deliveries wait for scout: receive them\n' });
+    expect(fleet.calls).toHaveLength(4);
+  });
+
+  it('wakes again once the count rises after the session received what waited', async () => {
+    fleet = await startStubFleet([inbox(2), inbox(0), inbox(1)]);
+    crew(fleet.url);
+    aTurnEnded();
+    await start('aeolus-wait.sh').exited;
+    aTurnEnded();
+
+    await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: 'aeolus: 1 deliveries wait for scout: receive them\n' });
+    expect(fleet.calls).toHaveLength(3);
+  });
+
+  it('keeps a wake it held for a busy session when it is started again', async () => {
+    fleet = await startStubFleet([inbox(1)]);
+    crew(fleet.url);
+    aPromptSubmitted();
+    await expect(start('aeolus-wait.sh', { env: { AEOLUS_MAX_SECONDS: '1' } }).exited).resolves.toMatchObject({ status: 6 });
+    aTurnEnded();
+
+    await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: 'aeolus: 1 deliveries wait for scout: receive them\n' });
+  });
+
+  it('forgets what it saw with the ship', async () => {
+    fleet = await startStubFleet([inbox(1)]);
+    crew(fleet.url);
+    aTurnEnded();
+    await start('aeolus-wait.sh').exited;
+
+    run('aeolus-identity.sh', { args: ['delete'] });
+
+    expect(readdirSync(data, { recursive: true }).map(String).filter((name) => name.startsWith('ships/'))).toEqual([]);
+  });
+});
+
 describe('the Codex wake bridge', () => {
   it('refuses to look armed when its first fleet check cannot connect', () => {
     crew('http://127.0.0.1:1');
@@ -363,6 +481,7 @@ describe('the Codex wake bridge', () => {
   it('waits without model tokens, then queues one message to the exact Codex task', async () => {
     fleet = await startStubFleet([inbox(1)]);
     crew(fleet.url);
+    aTurnEnded();
     const bin = join(data, 'bin');
     const calls = join(data, 'codex.calls');
     mkdirSync(bin);
@@ -384,6 +503,7 @@ describe('the Codex wake bridge', () => {
   it('detaches from SessionStart and still queues the task when a delivery arrives', async () => {
     fleet = await startStubFleet([inbox(1)]);
     crew(fleet.url);
+    aTurnEnded();
     const bin = join(data, 'bin');
     const calls = join(data, 'codex.calls');
     mkdirSync(bin);
@@ -407,6 +527,7 @@ describe('the Codex wake bridge', () => {
   it('replaces a stale same-task pid instead of trusting an unrelated live process', async () => {
     fleet = await startStubFleet([inbox(1)]);
     crew(fleet.url);
+    aTurnEnded();
     const unrelated = spawn('sleep', ['30']);
     const bin = join(data, 'bin');
     const calls = join(data, 'codex.calls');
@@ -609,6 +730,27 @@ describe('the Stop hook', () => {
     });
   });
 
+  it('leaves the turn busy while it keeps the turn open to ask for the watcher', () => {
+    crew();
+    aPromptSubmitted();
+
+    claudeHook('aeolus-stop.sh', endingTheTurn);
+
+    expect(turn().stdout).toMatch(/^busy /);
+  });
+
+  it('marks the turn idle when it lets the turn end', () => {
+    crew();
+    const watcher = aRunningWatcher();
+
+    try {
+      claudeHook('aeolus-stop.sh', endingTheTurn);
+      expect(turn().stdout).toMatch(/^idle /);
+    } finally {
+      watcher.kill();
+    }
+  });
+
   it('lets the turn end while a watcher runs', () => {
     crew();
     const watcher = aRunningWatcher();
@@ -641,6 +783,7 @@ describe('the Stop hook', () => {
   it('asks for the watcher again once a watcher reached the fleet with the crew token', async () => {
     fleet = await startStubFleet([{ status: 401, body: { code: 'UNAUTHORIZED', message: 'Call with the crew token' } }, inbox(1)]);
     crew(fleet.url);
+    aTurnEnded();
     await start('aeolus-wait.sh').exited;
     await start('aeolus-wait.sh').exited;
 
@@ -650,6 +793,7 @@ describe('the Stop hook', () => {
   it('re-arms the Codex wake bridge for the task by itself at the end of every turn', async () => {
     fleet = await startStubFleet([inbox(1)]);
     crew(fleet.url);
+    aTurnEnded();
     const bin = join(data, 'bin');
     const calls = join(data, 'codex.calls');
     mkdirSync(bin);
@@ -803,11 +947,6 @@ describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
     expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', 'https://fleet.example.com', SHIP_ID, 'scout', CREW_TOKEN] }).status).toBe(0);
   }
 
-  /** The turn marker as the trierarch reads it, through the plugin's own script. */
-  function turn(): Run {
-    return run('aeolus-identity.sh', { args: ['turn'] });
-  }
-
   function sessionStart(env: Record<string, string>) {
     const envFile = join(data, 'session.env');
     writeFileSync(envFile, '');
@@ -930,15 +1069,6 @@ describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
     crewedByATrierarch();
 
     expect(turn()).toMatchObject({ status: 1, stdout: 'aeolus: no turn marked yet\n' });
-  });
-
-  it('marks no turn in a folder without the line, which behaves as today', () => {
-    crew();
-
-    claudeHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: 'hello' });
-
-    expect(turn().status).toBe(1);
-    expect(readdirSync(data, { recursive: true }).map(String).filter((name) => name.endsWith('.turn'))).toEqual([]);
   });
 
   it('forgets the turn marker with the ship', () => {

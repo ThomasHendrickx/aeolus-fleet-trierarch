@@ -44,11 +44,11 @@ afterEach(async () => {
 });
 
 /** Runs a script as a session's command does, with the recording curl first on PATH. */
-function run(script: string, args: string[] = []): Promise<number | null> {
-  const child = spawn('bash', [join(SCRIPTS, script), ...args], {
+function run(script: string, options: { args?: string[]; stdin?: string } = {}): Promise<number | null> {
+  const child = spawn('bash', [join(SCRIPTS, script), ...(options.args ?? [])], {
     env: { ...process.env, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, PATH: `${bin}:${process.env.PATH ?? ''}` },
   });
-  child.stdin.end('');
+  child.stdin.end(options.stdin ?? '');
   child.stdout.resume();
   child.stderr.resume();
   return new Promise((resolve) => {
@@ -58,7 +58,7 @@ function run(script: string, args: string[] = []): Promise<number | null> {
 
 async function crewedAt(answers: readonly StubAnswer[]): Promise<StubFleet> {
   const started = await startStubFleet(answers);
-  expect(await run('aeolus-identity.sh', ['write', started.url, SHIP_ID, 'scout', CREW_TOKEN])).toBe(0);
+  expect(await run('aeolus-identity.sh', { args: ['write', started.url, SHIP_ID, 'scout', CREW_TOKEN] })).toBe(0);
   return started;
 }
 
@@ -73,7 +73,7 @@ describe("the crew token and the secret stay off curl's command line", () => {
   it('aeolus-fleet sends the crew token as the bearer, and no curl argument holds it', async () => {
     fleet = await crewedAt([whoami]);
 
-    expect(await run('aeolus-fleet.sh', ['whoami'])).toBe(0);
+    expect(await run('aeolus-fleet.sh', { args: ['whoami'] })).toBe(0);
 
     expect(fleet.calls[0]?.authorization).toBe(`Bearer ${CREW_TOKEN}`);
     expect(curlCommandLines()).toContain('/api/v1/ship/whoami');
@@ -83,7 +83,7 @@ describe("the crew token and the secret stay off curl's command line", () => {
   it('aeolus-fleet register asks whoami with the new crew token, and no curl argument holds it', async () => {
     fleet = await startStubFleet([{ status: 200, body: { crewToken: CREW_TOKEN } }, whoami]);
 
-    expect(await run('aeolus-fleet.sh', ['register', fleet.url, SHIP_ID, SECRET, 'SERVER'])).toBe(0);
+    expect(await run('aeolus-fleet.sh', { args: ['register', fleet.url, SHIP_ID, SECRET, 'SERVER'] })).toBe(0);
 
     expect(fleet.calls[1]?.authorization).toBe(`Bearer ${CREW_TOKEN}`);
     expect(curlCommandLines()).toContain('/api/v1/ship/whoami');
@@ -93,7 +93,7 @@ describe("the crew token and the secret stay off curl's command line", () => {
   it("aeolus-fleet register sends the crew line's secret in the body, and no curl argument holds it", async () => {
     fleet = await startStubFleet([{ status: 200, body: { crewToken: CREW_TOKEN } }, whoami]);
 
-    expect(await run('aeolus-fleet.sh', ['register', fleet.url, SHIP_ID, SECRET, 'SERVER'])).toBe(0);
+    expect(await run('aeolus-fleet.sh', { args: ['register', fleet.url, SHIP_ID, SECRET, 'SERVER'] })).toBe(0);
 
     expect(JSON.parse(fleet.calls[0]?.body ?? '')).toMatchObject({ shipId: SHIP_ID, secret: SECRET });
     expect(curlCommandLines()).toContain('/api/v1/ship/register');
@@ -112,6 +112,8 @@ describe("the crew token and the secret stay off curl's command line", () => {
 
   it('the watcher sends the crew token as the bearer, and no curl argument holds it', async () => {
     fleet = await crewedAt([{ status: 200, body: { waiting: 1 } }]);
+    // The session ended its turn, so the watcher may wake it.
+    expect(await run('aeolus-stop.sh', { stdin: JSON.stringify({ hook_event_name: 'Stop', stop_hook_active: true }) })).toBe(0);
 
     expect(await run('aeolus-wait.sh')).toBe(0);
 

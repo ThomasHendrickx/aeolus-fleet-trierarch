@@ -81,9 +81,8 @@ aeolus_refused_file() {
   printf '%s/%s.refused' "$dir" "$(aeolus_key "$folder")"
 }
 
-# When a squadron member last reported, or was last reminded to: seconds since
-# the epoch. The report reminder counts its check-in interval from it.
-# The turn marker of a folder a trierarch crews: busy or idle, with when.
+# The turn marker of a crewed folder: busy or idle, with when. The trierarch, or
+# else the plugin's own watcher, wakes the session only while it is idle.
 aeolus_turn_file() {
   local folder dir
   folder="$(aeolus_folder)" || return 1
@@ -98,15 +97,33 @@ aeolus_woken_by_trierarch() {
   [ "$(aeolus_identity_get "$identity" wakeBy)" = trierarch ]
 }
 
-# Writes the turn marker, busy or idle with the time in UTC, for a folder a
-# trierarch crews; nothing for any other folder.
+# Writes the turn marker, busy or idle with the time in UTC.
 aeolus_mark_turn() {
-  local identity="$1" state="$2" file
-  aeolus_woken_by_trierarch "$identity" || return 0
+  local state="$1" file
   file="$(aeolus_turn_file)" || return 0
   printf '%s %s\n' "$state" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$file.tmp" && mv "$file.tmp" "$file"
 }
 
+# Whether the turn marker says the session is idle. No marker is not idle: the
+# session has not ended a turn yet.
+aeolus_is_idle() {
+  local file
+  file="$(aeolus_turn_file)" || return 1
+  [ -f "$file" ] && [ "$(cut -d ' ' -f 1 "$file")" = idle ]
+}
+
+# What the watcher saw of the waiting count: the count, and 1 when a wake is
+# owed for a rise in it, else 0. Kept across watchers, so a watcher started
+# again does not wake the session for what it already woke it for.
+aeolus_waiting_file() {
+  local folder dir
+  folder="$(aeolus_folder)" || return 1
+  dir="$(aeolus_ships_dir)" || return 1
+  printf '%s/%s.waiting' "$dir" "$(aeolus_key "$folder")"
+}
+
+# When a squadron member last reported, or was last reminded to: seconds since
+# the epoch. The report reminder counts its check-in interval from it.
 aeolus_reported_file() {
   local folder dir
   folder="$(aeolus_folder)" || return 1

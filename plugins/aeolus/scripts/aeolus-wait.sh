@@ -4,6 +4,10 @@
 # 25 seconds per call, and exits only when there is something to say, which
 # wakes the session. No tokens are spent while it waits.
 #
+# The trierarch's wake rule: one wake per rise in the waiting count, given only
+# when the turn marker says the session is idle, and nothing more until the
+# count rises again.
+#
 # Exit codes:
 #   0  deliveries wait: receive them
 #   2  this folder crews no ship
@@ -16,6 +20,9 @@ set -uo pipefail
 
 # How long one inbox check waits while nothing waits; the fleet's maximum.
 WAIT_SECONDS="${AEOLUS_WAIT_SECONDS:-25}"
+# The pause between inbox checks while deliveries wait, since the check then
+# answers at once: the trierarch's pass interval.
+POLL_SECONDS="${AEOLUS_POLL_SECONDS:-5}"
 # The first pause after a failed call; it doubles up to the most.
 RETRY_SECONDS="${AEOLUS_RETRY_SECONDS:-2}"
 RETRY_MAX_SECONDS="${AEOLUS_RETRY_MAX_SECONDS:-60}"
@@ -36,6 +43,7 @@ fi
 
 pid_file="$(aeolus_pid_file)"
 refused_file="$(aeolus_refused_file)"
+waiting_file="$(aeolus_waiting_file)"
 echo "$$" > "$pid_file"
 trap 'rm -f "$pid_file"' EXIT
 
@@ -62,10 +70,24 @@ while :; do
       rm -f "$refused_file"
       delay="$RETRY_SECONDS"
       waiting="$(printf '%s' "$body" | sed -n 's/.*"waiting"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
-      if [ -n "$waiting" ] && [ "$waiting" -gt 0 ]; then
+      [ -n "$waiting" ] || waiting=0
+      seen=0
+      is_owed=0
+      [ -f "$waiting_file" ] && read -r seen is_owed < "$waiting_file"
+      if [ "$waiting" -eq 0 ]; then
+        is_owed=0
+      elif [ "$waiting" -gt "${seen:-0}" ]; then
+        is_owed=1
+      fi
+      if [ "$is_owed" = 1 ] && aeolus_is_idle; then
+        printf '%s 0\n' "$waiting" > "$waiting_file"
+        # The wake starts a turn, as a prompt does.
+        aeolus_mark_turn busy
         echo "aeolus: ${waiting} deliveries wait for ${ship_name}: receive them"
         exit 0
       fi
+      printf '%s %s\n' "$waiting" "$is_owed" > "$waiting_file"
+      [ "$waiting" -eq 0 ] || sleep "$POLL_SECONDS"
       continue
       ;;
     401)
