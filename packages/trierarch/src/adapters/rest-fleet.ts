@@ -57,13 +57,14 @@ export interface RestFleet extends FleetPort {
   registerSelf(crew: { shipId: ShipId; secret: string }): Promise<{ crewToken: string }>;
 }
 
-export function createRestFleet(options: { fleetUrl: string; crewToken: string; busyWaitsMs?: readonly number[]; random?: () => number }): RestFleet {
+export function createRestFleet(options: { fleetUrl: string; crewToken: string; busyWaitsMs?: readonly number[]; random?: () => number; wait?: (waitMs: number, signal?: AbortSignal) => Promise<void> }): RestFleet {
   const fleetUrl = options.fleetUrl.replace(/\/$/, '');
   /** A call that got no answer: said with the fleet's url, unless it was stopped on purpose. */
   const unreachable = (error: unknown, signal: AbortSignal | undefined): unknown =>
     signal?.aborted === true ? error : new Error(`The fleet at ${fleetUrl} cannot be reached: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   const busyWaitsMs = options.busyWaitsMs ?? FLEET_BUSY_WAITS_MS;
   const random = options.random ?? Math.random;
+  const waitBusy = options.wait ?? ((waitMs: number, signal?: AbortSignal) => wait(waitMs, undefined, signal === undefined ? {} : { signal }));
   async function call<T>(request: FleetCall<T>): Promise<T> {
     for (const waitMs of busyWaitsMs) {
       try {
@@ -72,7 +73,7 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string; 
         if (!(error instanceof FleetRefusal && error.code === FLEET_BUSY)) {
           throw error;
         }
-        await wait(busyWaitMs(waitMs, random), undefined, request.signal === undefined ? {} : { signal: request.signal });
+        await waitBusy(busyWaitMs(waitMs, random), request.signal);
       }
     }
     return callOnce(request);
