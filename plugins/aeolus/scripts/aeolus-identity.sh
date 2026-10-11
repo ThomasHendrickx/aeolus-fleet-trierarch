@@ -44,9 +44,9 @@ case "$command" in
     case "${2%[mh]}" in
       *[!0-9]*) echo "usage: aeolus-identity.sh check-in <n>m|<n>h" >&2; exit 2 ;;
     esac
-    [ -f "$file" ] || { echo "aeolus: this folder crews no ship" >&2; exit 1; }
+    text="$(aeolus_identity_read "$file")" || { echo "aeolus: this folder crews no ship" >&2; exit 1; }
     umask 077
-    { grep -v '^checkIn=' "$file" || true; printf 'checkIn=%s\n' "$2"; } > "$file.tmp"
+    { printf '%s\n' "$text" | grep -v '^checkIn=' || true; printf 'checkIn=%s\n' "$2"; } > "$file.tmp"
     mv "$file.tmp" "$file"
     echo "aeolus: check-in interval ${2}"
     ;;

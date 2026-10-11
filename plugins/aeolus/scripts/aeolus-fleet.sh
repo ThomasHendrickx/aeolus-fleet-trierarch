@@ -121,7 +121,7 @@ json_unescape() {
 
 register() {
   [ "$#" -eq 4 ] || [ "$#" -eq 5 ] || usage
-  local ship_id="$2" secret="$3" location squadron="${5:-}" token name
+  local ship_id="$2" secret="$3" location squadron="${5:-}" token name crewed
   fleet_url="${1%/}"
   case "$4" in
     DEVICE|CLOUD|SERVER) location="{\"kind\":\"$4\"}" ;;
@@ -132,8 +132,8 @@ register() {
   AEOLUS_HARNESS="$(aeolus_register_harness)"
   export AEOLUS_HARNESS
   identity="$(aeolus_identity_file)" || exit 2
-  if [ -f "$identity" ]; then
-    echo "aeolus: this folder already crews $(aeolus_identity_get "$identity" shipName) ($(aeolus_identity_get "$identity" shipId)); one folder crews one ship, and deregistering frees it"
+  if crewed="$(aeolus_identity_read "$identity")"; then
+    echo "aeolus: this folder already crews $(aeolus_identity_field "$crewed" shipName) ($(aeolus_identity_field "$crewed" shipId)); one folder crews one ship, and deregistering frees it"
     exit 4
   fi
   call_fleet POST /api/v1/ship/register "" "{\"shipId\":\"$(aeolus_json_escape "$ship_id")\",\"secret\":\"$(aeolus_json_escape "$secret")\",\"location\":${location},\"harness\":\"$(aeolus_json_escape "$AEOLUS_HARNESS")\"}"
