@@ -157,22 +157,37 @@ aeolus_wake_thread_file() {
   printf '%s/%s.wake.thread' "$dir" "$(aeolus_key "$folder")"
 }
 
-aeolus_wake_log_file() {
-  local folder dir
-  folder="$(aeolus_folder)" || return 1
-  dir="$(aeolus_ships_dir)" || return 1
-  printf '%s/%s.wake.log' "$dir" "$(aeolus_key "$folder")"
-}
-
 # The plugin's log, in the trierarch's log format: one JSON object per line,
-# an action the watcher or a hook took for a ship and how it came out (time,
-# shipId, shipName, action, outcome, and next for a failure). One log per
-# plugin data folder, as the trierarch keeps one per machine; it outlasts the
-# ships it names, so forgetting a ship keeps what was logged of it.
+# an action the watcher, a hook or the Codex wake bridge took for a ship and how
+# it came out (time, shipId, shipName, action, outcome, and next for a
+# failure). One log per plugin data folder, as the trierarch keeps one per
+# machine; it outlasts the ships it names, so forgetting a ship keeps what was
+# logged of it.
 aeolus_log_file() {
   local data
   data="$(aeolus_data)" || return 1
   printf '%s/logs/aeolus.log' "$data"
+}
+
+# The plugin log's size limit in bytes. A log that reached it moves aside as
+# aeolus.log.1, replacing an older one, before the next record starts a new
+# log: the plugin keeps at most about twice the limit.
+AEOLUS_LOG_MAX_BYTES="${AEOLUS_LOG_MAX_BYTES:-1048576}"
+
+# Moves the log aside once it reached its limit. One writer moves it: the
+# others, finding the lock taken, append on, and the one holding the lock looks
+# at the size again, so a log just moved aside by another is not moved twice.
+# A lock older than a minute was left by a writer stopped while moving it.
+aeolus_log_rotate() {
+  local file="$1" size
+  size="$(wc -c < "$file" 2>/dev/null)" || return 0
+  [ "${size// /}" -ge "$AEOLUS_LOG_MAX_BYTES" ] || return 0
+  [ -z "$(find "${file}.lock" -maxdepth 0 -mmin +1 2>/dev/null)" ] || rmdir "${file}.lock" 2>/dev/null
+  mkdir "${file}.lock" 2>/dev/null || return 0
+  size="$(wc -c < "$file" 2>/dev/null)" || size=0
+  [ "${size// /}" -lt "$AEOLUS_LOG_MAX_BYTES" ] || mv -f "$file" "${file}.1" 2>/dev/null
+  rmdir "${file}.lock" 2>/dev/null
+  return 0
 }
 
 # Appends one record for the ship of an identity file: the action, its outcome,
@@ -183,6 +198,7 @@ aeolus_log() {
   [ -f "$identity" ] || return 0
   file="$(aeolus_log_file 2>/dev/null)" || return 0
   mkdir -p "$(dirname "$file")" 2>/dev/null || return 0
+  aeolus_log_rotate "$file"
   record="{\"time\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\""
   record="${record},\"shipId\":\"$(aeolus_json_escape "$(aeolus_identity_get "$identity" shipId)")\""
   record="${record},\"shipName\":\"$(aeolus_json_escape "$(aeolus_identity_get "$identity" shipName)")\""

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Local Codex wake bridge. It waits through the fleet's REST inbox without
-# model tokens, then queues one message to the exact Desktop or CLI task.
+# model tokens, then queues one message to the exact Desktop or CLI task. What
+# it does goes in the plugin's log, as the watcher's and the hooks' do.
 set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
@@ -31,7 +32,6 @@ fi
 
 wake_pid_file="$(aeolus_wake_pid_file)"
 wake_thread_file="$(aeolus_wake_thread_file)"
-wake_log_file="$(aeolus_wake_log_file)"
 
 if [ "$mode" = start ]; then
   if [ -f "$wake_pid_file" ]; then
@@ -39,6 +39,7 @@ if [ "$mode" = start ]; then
     old_thread="$(head -n 1 "$wake_thread_file" 2>/dev/null || true)"
     if aeolus_process_is "$old_pid" aeolus-codex-wake.sh; then
       if [ "$old_thread" = "$thread_id" ]; then
+        aeolus_log "$identity" wakeBridge "already armed for Codex task ${thread_id}"
         echo "aeolus: automatic wake-up is already armed for this Codex task"
         exit 0
       fi
@@ -47,21 +48,23 @@ if [ "$mode" = start ]; then
     rm -f "$wake_pid_file" "$wake_thread_file"
   fi
   if ! probe="$("$(dirname "$0")/aeolus-inbox.sh" 2>&1)"; then
-    printf 'aeolus: cannot reach the fleet, so automatic wake-up is not armed: %s\n' "$probe" | tee -a "$wake_log_file" >&2
+    aeolus_log "$identity" wakeBridge 'failed: cannot reach the fleet, so automatic wake-up is not armed' 'the session arms it again before it ends its turn'
+    printf 'aeolus: cannot reach the fleet, so automatic wake-up is not armed: %s\n' "$probe" >&2
     exit 8
   fi
   AEOLUS_DATA="$(aeolus_data)" AEOLUS_FOLDER="$(aeolus_folder)" \
-    nohup "$0" run "$thread_id" >> "$wake_log_file" 2>&1 </dev/null &
+    nohup "$0" run "$thread_id" >/dev/null 2>&1 </dev/null &
   bridge_pid=$!
   printf '%s\n' "$bridge_pid" > "$wake_pid_file"
   printf '%s\n' "$thread_id" > "$wake_thread_file"
+  aeolus_log "$identity" wakeBridge "armed for Codex task ${thread_id}"
   echo "aeolus: automatic wake-up armed for Codex task ${thread_id}"
   exit 0
 fi
 
 printf '%s\n' "$$" > "$wake_pid_file"
 printf '%s\n' "$thread_id" > "$wake_thread_file"
-wait_output="${wake_log_file}.wait.$$"
+wait_output="${wake_pid_file%.pid}.wait.$$"
 wait_pid=''
 cleanup() {
   [ -z "$wait_pid" ] || kill "$wait_pid" 2>/dev/null || true
@@ -89,6 +92,9 @@ case "$status" in
     [ "$waiting" = 1 ] && noun='delivery'
     message="Aeolus has ${waiting} ${noun} waiting for ${ship_name}. Use \$aeolus-crew to receive and handle them, then re-arm automatic wake-up before ending the turn."
     codex queue --thread "$thread_id" --message "$message"
+    verb='deliveries wait'
+    [ "$waiting" = 1 ] && verb='delivery waits'
+    aeolus_log "$identity" wakeBridge "queued a wake to Codex task ${thread_id}: ${waiting} ${verb}"
     ;;
   3|5)
     codex queue --thread "$thread_id" --message "$answer"
