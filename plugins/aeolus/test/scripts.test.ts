@@ -868,6 +868,39 @@ describe('the SessionStart hook', () => {
     }
   });
 
+  it('removes the .wake.wait.<pid> files a wake bridge left when it was killed (#707)', () => {
+    crew();
+    const ships = dirname(identityFile());
+    const gone = spawnSync('true').pid;
+    const left = [`0123456789abcdef0123456789abcdef.wake.wait.${String(gone)}`, `${basename(identityFile(), '.identity')}.wake.wait.${String(gone)}`];
+    for (const name of left) writeFileSync(join(ships, name), '');
+
+    expect(hook(payloadFor(folder)).status).toBe(0);
+
+    expect(readdirSync(ships).filter((name) => name.includes('.wake.wait.'))).toEqual([]);
+  });
+
+  it('keeps the .wake.wait.<pid> file of a wake bridge that still runs, which reads it when its watcher ends (#707)', () => {
+    crew();
+    const ships = dirname(identityFile());
+    const bin = join(data, 'bin');
+    mkdirSync(bin, { recursive: true });
+    const bridge = join(bin, 'aeolus-codex-wake.sh');
+    writeFileSync(bridge, '#!/usr/bin/env bash\nsleep 30\n');
+    chmodSync(bridge, 0o700);
+    const running = spawn('bash', [bridge]);
+    const name = `${basename(identityFile(), '.identity')}.wake.wait.${String(running.pid)}`;
+    writeFileSync(join(ships, name), '');
+
+    try {
+      expect(hook(payloadFor(folder)).status).toBe(0);
+
+      expect(readdirSync(ships)).toContain(name);
+    } finally {
+      running.kill();
+    }
+  });
+
   it('says nothing to a folder that crews no ship', () => {
     expect(hook(payloadFor(folder))).toMatchObject({ status: 0, stdout: '' });
   });
@@ -1917,23 +1950,26 @@ describe('no plugin script prints a shell error for an optional file that is mis
   });
 });
 
+/**
+ * The env to run a script with, so that the file vanishes right after the
+ * script first looks at it with [ ]: the race a single read must survive.
+ * Looking for the harness whose crews folder holds the identity only asks
+ * whether it is there, so that look leaves the file in place.
+ */
+function vanishingAfterItsCheck(file: string): Record<string, string> {
+  const shim = join(data, 'vanish.sh');
+  writeFileSync(
+    shim,
+    '[() { builtin [ "$@"; local status=$? arg; builtin [ "${FUNCNAME[1]:-}" = aeolus_harness ] && return "$status"; for arg in "$@"; do if builtin [ "$arg" = "$AEOLUS_TEST_VANISH" ]; then rm -f "$arg"; fi; done; return "$status"; }\n',
+  );
+  return { BASH_ENV: shim, AEOLUS_TEST_VANISH: file };
+}
+
+/** A file beside the folder's identity: its name with another suffix. */
+const sibling = (suffix: string) => identityFile().replace(/\.identity$/, suffix);
+
 describe('no plugin script prints a shell error for a file that vanishes between its check and its read (#688)', () => {
   const aShellErrorForAMissingFile = /No such file or directory|cannot open/;
-
-  /**
-   * The env to run a script with, so that the file vanishes right after the
-   * script first looks at it with [ ]: the race a single read must survive.
-   */
-  function vanishingAfterItsCheck(file: string): Record<string, string> {
-    const shim = join(data, 'vanish.sh');
-    writeFileSync(
-      shim,
-      '[() { builtin [ "$@"; local status=$? arg; for arg in "$@"; do if builtin [ "$arg" = "$AEOLUS_TEST_VANISH" ]; then rm -f "$arg"; fi; done; return "$status"; }\n',
-    );
-    return { BASH_ENV: shim, AEOLUS_TEST_VANISH: file };
-  }
-
-  const sibling = (suffix: string) => identityFile().replace(/\.identity$/, suffix);
 
   it("the watcher's waiting count", async () => {
     fleet = await startStubFleet([inbox(1)]);
@@ -1990,5 +2026,200 @@ describe('no plugin script prints a shell error for a file that vanishes between
     const { stderr } = await start('aeolus-fleet.sh', { args: ['send', '-'], stdin: '{"payload":"hello"}\n', env: vanishingAfterItsCheck(modelFile) }).done;
 
     expect(stderr).not.toMatch(aShellErrorForAMissingFile);
+  });
+});
+
+describe('no plugin script prints a shell error for a file that vanishes between its check and its read (#707)', () => {
+  const aShellErrorForAMissingFile = /No such file or directory|cannot open/;
+  const THREAD_ID = '01a103c9-80b0-7ab1-82e3-6f4a2f70ad86';
+
+  /** A codex on PATH that queues nothing; the env to run the wake bridge with it. */
+  function aCodex(): Record<string, string> {
+    const bin = join(data, 'bin');
+    mkdirSync(bin, { recursive: true });
+    const codex = join(bin, 'codex');
+    writeFileSync(codex, '#!/usr/bin/env bash\nexit 0\n');
+    chmodSync(codex, 0o700);
+    return { PATH: `${bin}:${process.env.PATH ?? ''}` };
+  }
+
+  /** Runs a hook as Claude Code does, with the env added. */
+  function claudeHookWith(script: string, { payload, env }: { payload: Record<string, unknown>; env: Record<string, string> }) {
+    return run(script, {
+      stdin: JSON.stringify({ session_id: 'c5858406-be86-46cd-8591-f4fb39b1fa61', cwd: folder, ...payload }),
+      env: { AEOLUS_FOLDER: '', AEOLUS_DATA: '', CLAUDE_PROJECT_DIR: folder, CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin', ...env },
+    });
+  }
+
+  /** Runs one function of aeolus-lib.sh, as the scripts that source it do. */
+  function inTheLibrary(call: string, env: Record<string, string>): Run {
+    const result = spawnSync('bash', ['-c', `. "${join(SCRIPTS, 'aeolus-lib.sh')}"; ${call}`], {
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, ...env },
+    });
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  }
+
+  it('the turn marker, asked whether the session is idle', async () => {
+    fleet = await startStubFleet([inbox(0), inbox(1)]);
+    crew(fleet.url);
+    aTurnEnded();
+
+    const { stderr } = await start('aeolus-wait.sh', { env: { AEOLUS_MAX_SECONDS: '1', ...vanishingAfterItsCheck(sibling('.turn')) } }).done;
+
+    expect(stderr).not.toMatch(aShellErrorForAMissingFile);
+  });
+
+  it('the turn marker, when the plugin shows it', () => {
+    crew();
+    aTurnEnded();
+
+    expect(turn(vanishingAfterItsCheck(sibling('.turn'))).stderr).not.toMatch(aShellErrorForAMissingFile);
+  });
+
+  it("the wake bridge's pid, when a bridge is armed", () => {
+    crew('http://127.0.0.1:1');
+    writeFileSync(wakePidFile(), '12345\n');
+
+    const { stderr } = run('aeolus-codex-wake.sh', { args: ['start', THREAD_ID], env: { ...aCodex(), ...vanishingAfterItsCheck(wakePidFile()) } });
+
+    expect(stderr).not.toMatch(aShellErrorForAMissingFile);
+  });
+
+  it("the wake bridge's pid, when the bridge ends", async () => {
+    fleet = await startStubFleet([inbox(1)]);
+    crew(fleet.url);
+    aTurnEnded();
+
+    const { stderr } = await start('aeolus-codex-wake.sh', { args: ['run', THREAD_ID], env: { ...aCodex(), ...vanishingAfterItsCheck(wakePidFile()) } }).done;
+
+    expect(stderr).not.toMatch(aShellErrorForAMissingFile);
+  });
+
+  describe('the identity', () => {
+    it('when the plugin shows the ship', () => {
+      crew();
+
+      expect(run('aeolus-identity.sh', { args: ['show'], env: vanishingAfterItsCheck(identityFile()) }).stderr).not.toMatch(aShellErrorForAMissingFile);
+    });
+
+    it('when a fleet call is made', async () => {
+      fleet = await startStubFleet([{ status: 200, body: { name: 'scout' } }]);
+      crew(fleet.url);
+
+      const { stderr } = await start('aeolus-fleet.sh', { args: ['whoami'], env: vanishingAfterItsCheck(identityFile()) }).done;
+
+      expect(stderr).not.toMatch(aShellErrorForAMissingFile);
+    });
+
+    it('when the inbox is checked', async () => {
+      fleet = await startStubFleet([inbox(0)]);
+      crew(fleet.url);
+
+      const { stderr } = await start('aeolus-inbox.sh', { env: vanishingAfterItsCheck(identityFile()) }).done;
+
+      expect(stderr).not.toMatch(aShellErrorForAMissingFile);
+    });
+
+    it('when the watcher starts', async () => {
+      fleet = await startStubFleet([inbox(0)]);
+      crew(fleet.url);
+
+      const { stderr } = await start('aeolus-wait.sh', { env: { AEOLUS_MAX_SECONDS: '1', ...vanishingAfterItsCheck(identityFile()) } }).done;
+
+      expect(stderr).not.toMatch(aShellErrorForAMissingFile);
+    });
+
+    it('when the wake bridge is armed', () => {
+      crew('http://127.0.0.1:1');
+
+      const { stderr } = run('aeolus-codex-wake.sh', { args: ['start', THREAD_ID], env: { ...aCodex(), ...vanishingAfterItsCheck(identityFile()) } });
+
+      expect(stderr).not.toMatch(aShellErrorForAMissingFile);
+    });
+
+    it('when the SessionStart hook tells a Claude Code session its ship', () => {
+      crew();
+      const envFile = join(data, 'session.env');
+      writeFileSync(envFile, '');
+
+      const { stderr } = claudeHookWith('aeolus-session-start.sh', {
+        payload: { hook_event_name: 'SessionStart', source: 'startup' },
+        env: { CLAUDE_ENV_FILE: envFile, ...vanishingAfterItsCheck(identityFile()) },
+      });
+
+      expect(stderr).not.toMatch(aShellErrorForAMissingFile);
+    });
+
+    it('when the SessionStart hook tells a Codex session its ship', () => {
+      crew('https://fleet.example.com', AS_CODEX);
+
+      const { stderr } = run('aeolus-session-start.sh', {
+        stdin: JSON.stringify({ session_id: THREAD_ID, cwd: folder, hook_event_name: 'SessionStart', source: 'startup' }),
+        env: {
+          AEOLUS_FOLDER: '',
+          AEOLUS_DATA: '',
+          CLAUDE_PROJECT_DIR: '',
+          PLUGIN_DATA: data,
+          PLUGIN_ROOT: SCRIPTS.replace(/\/scripts\/$/, ''),
+          AEOLUS_CODEX_WAKE_DISABLED: '1',
+          ...vanishingAfterItsCheck(identityFile(AS_CODEX)),
+        },
+      });
+
+      expect(stderr).not.toMatch(aShellErrorForAMissingFile);
+    });
+
+    it('when the Stop hook ends the turn', () => {
+      crew();
+
+      const { stderr } = claudeHookWith('aeolus-stop.sh', { payload: { hook_event_name: 'Stop', stop_hook_active: false }, env: vanishingAfterItsCheck(identityFile()) });
+
+      expect(stderr).not.toMatch(aShellErrorForAMissingFile);
+    });
+
+    it('when the watcher guard refuses a second watcher', () => {
+      crew();
+      const watcher = aRunningWatcher();
+
+      try {
+        const { stderr } = claudeHookWith('aeolus-watch-guard.sh', {
+          payload: { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: '"/plugin/scripts/aeolus-wait.sh"', run_in_background: true } },
+          env: vanishingAfterItsCheck(identityFile()),
+        });
+
+        expect(stderr).not.toMatch(aShellErrorForAMissingFile);
+      } finally {
+        watcher.kill();
+      }
+    });
+
+    it("when a squadron member's report is due", () => {
+      run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', CREW_TOKEN, 'team-one'] });
+      run('aeolus-identity.sh', { args: ['check-in', '30m'] });
+
+      const { stderr } = claudeHookWith('aeolus-report-due.sh', {
+        payload: { hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { file_path: '/tmp/x' } },
+        env: vanishingAfterItsCheck(identityFile()),
+      });
+
+      expect(stderr).not.toMatch(aShellErrorForAMissingFile);
+    });
+
+    it("when the plugin's log records what a ship did", () => {
+      crew();
+
+      const { stderr } = inTheLibrary(`aeolus_log "${identityFile()}" turn 'busy: a prompt was submitted'`, vanishingAfterItsCheck(identityFile()));
+
+      expect(stderr).not.toMatch(aShellErrorForAMissingFile);
+    });
+
+    it('when the crew token it holds now is asked for', () => {
+      crew();
+
+      const { stderr } = inTheLibrary(`aeolus_identity_token "${identityFile()}"`, vanishingAfterItsCheck(identityFile()));
+
+      expect(stderr).not.toMatch(aShellErrorForAMissingFile);
+    });
   });
 });
