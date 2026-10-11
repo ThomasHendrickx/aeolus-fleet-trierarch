@@ -20,7 +20,14 @@ export AEOLUS_DATA="${PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-}}"
 root="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}"
 # The Codex wake bridge logs to the plugin's log now: a .wake.log an earlier
 # plugin left beside the identities is no longer written, so it goes (#678).
-ships="$(aeolus_ships_dir 2>/dev/null)" && rm -f "$ships"/*.wake.log
+# Its bridge kept its watcher's output in <key>.wake.log.wait.<pid> and left it
+# when killed: one whose pid is no live bridge goes (#688).
+if ships="$(aeolus_ships_dir 2>/dev/null)"; then
+  rm -f "$ships"/*.wake.log
+  for wait_output in "$ships"/*.wake.log.wait.*; do
+    aeolus_process_is "${wait_output##*.}" aeolus-codex-wake.sh || rm -f "$wait_output"
+  done
+fi
 
 if [ -n "${PLUGIN_ROOT:-}" ]; then
   model="$(aeolus_json_string "$payload" model)"
