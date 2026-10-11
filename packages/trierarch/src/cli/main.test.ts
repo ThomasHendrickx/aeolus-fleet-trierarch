@@ -377,6 +377,9 @@ describe('aeolus-trierarch with CLAUDE_CONFIG_DIR and CODEX_HOME set (#521)', ()
     expect(existsSync(join(home, '.claude.json'))).toBe(false);
   });
 
+});
+
+describe('aeolus-trierarch upgrade', () => {
   it('upgrade updates the aeolus plugin and exits 1, saying why, when it could not be updated (#581)', async () => {
     // Stand-ins on PATH: npm says the trierarch is on its latest version already, Codex's plugin upgrade fails.
     const bin = join(home, 'bin');

@@ -8,6 +8,8 @@ import type { AeolusPlugin } from './plugin-identity.js';
 /** The harnesses that install the aeolus plugin, each in its own plugin folders. */
 export type PluginHarness = 'claude-code' | 'codex';
 
+export const PLUGIN_HARNESSES: readonly PluginHarness[] = ['claude-code', 'codex'];
+
 /** Where each harness keeps its plugins, and the variables that point elsewhere. */
 function placesOf(at: { homeDirectory: string; env: Readonly<Record<string, string | undefined>>; harness: PluginHarness }) {
   const { homeDirectory, env } = at;
