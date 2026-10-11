@@ -31,7 +31,8 @@ function codexCache(codexHome = join(home, '.codex')): string {
 }
 
 /** A version of the aeolus plugin for Codex, as Codex installs it, with a script a running session uses. */
-function aCodexVersion(version: string, cache = codexCache(), installedAt = hoursAgo(24)): void {
+function aCodexVersion(version: string, at: { cache?: string; installedAt?: Date } = {}): void {
+  const { cache = codexCache(), installedAt = hoursAgo(24) } = at;
   mkdirSync(join(cache, version, 'scripts'), { recursive: true });
   writeFileSync(join(cache, version, 'scripts', 'aeolus-fleet.sh'), `# ${version}\n`);
   utimesSync(join(cache, version), installedAt, installedAt);
@@ -126,7 +127,7 @@ describe('the aeolus plugin update for Codex', () => {
 
   it('keeps the versions in the plugin folders of CODEX_HOME when it is set', async () => {
     const codexHome = join(home, 'elsewhere');
-    aCodexVersion('0.21.0', codexCache(codexHome));
+    aCodexVersion('0.21.0', { cache: codexCache(codexHome) });
     processes = [aProcess({ startedAt: hoursAgo(1) })];
     aProgram(codex, { then: codexUpgrading('0.22.0', codexCache(codexHome)) });
 
@@ -136,8 +137,8 @@ describe('the aeolus plugin update for Codex', () => {
   });
 
   it('removes the version folders no running Codex session uses: each one whose next version came before every session started (#653)', async () => {
-    aCodexVersion('0.20.5', codexCache(), hoursAgo(48));
-    aCodexVersion('0.21.0', codexCache(), hoursAgo(24));
+    aCodexVersion('0.20.5', { installedAt: hoursAgo(48) });
+    aCodexVersion('0.21.0', { installedAt: hoursAgo(24) });
     processes = [aProcess({ startedAt: hoursAgo(2) })];
     aProgram(codex, { then: codexUpgrading('0.22.0') });
 
@@ -147,8 +148,8 @@ describe('the aeolus plugin update for Codex', () => {
   });
 
   it('keeps every version folder a Codex session that started before its next version may use (#653)', async () => {
-    aCodexVersion('0.20.5', codexCache(), hoursAgo(48));
-    aCodexVersion('0.21.0', codexCache(), hoursAgo(24));
+    aCodexVersion('0.20.5', { installedAt: hoursAgo(48) });
+    aCodexVersion('0.21.0', { installedAt: hoursAgo(24) });
     processes = [aProcess({ startedAt: hoursAgo(30) })];
     aProgram(codex, { then: codexUpgrading('0.22.0') });
 
@@ -158,8 +159,8 @@ describe('the aeolus plugin update for Codex', () => {
   });
 
   it('keeps only the new version when no Codex session runs (#653)', async () => {
-    aCodexVersion('0.20.5', codexCache(), hoursAgo(48));
-    aCodexVersion('0.21.0', codexCache(), hoursAgo(24));
+    aCodexVersion('0.20.5', { installedAt: hoursAgo(48) });
+    aCodexVersion('0.21.0', { installedAt: hoursAgo(24) });
     aProgram(codex, { then: codexUpgrading('0.22.0') });
 
     await update().update('codex');
@@ -199,8 +200,8 @@ describe('the aeolus plugin update for Codex', () => {
   });
 
   it('keeps a version folder for a session that started within a minute after its next version came, as ps counts whole seconds (#653)', async () => {
-    aCodexVersion('0.20.5', codexCache(), hoursAgo(48));
-    aCodexVersion('0.21.0', codexCache(), hoursAgo(24));
+    aCodexVersion('0.20.5', { installedAt: hoursAgo(48) });
+    aCodexVersion('0.21.0', { installedAt: hoursAgo(24) });
     processes = [aProcess({ startedAt: new Date(hoursAgo(24).getTime() + 59_000) })];
     aProgram(codex, { then: codexUpgrading('0.22.0') });
 
@@ -210,8 +211,8 @@ describe('the aeolus plugin update for Codex', () => {
   });
 
   it('removes a version folder for a session that started a minute after its next version came (#653)', async () => {
-    aCodexVersion('0.20.5', codexCache(), hoursAgo(48));
-    aCodexVersion('0.21.0', codexCache(), hoursAgo(24));
+    aCodexVersion('0.20.5', { installedAt: hoursAgo(48) });
+    aCodexVersion('0.21.0', { installedAt: hoursAgo(24) });
     processes = [aProcess({ startedAt: new Date(hoursAgo(24).getTime() + 60_000) })];
     aProgram(codex, { then: codexUpgrading('0.22.0') });
 
@@ -242,8 +243,8 @@ describe('the aeolus plugin update for Codex', () => {
   });
 
   it("removes nothing when Codex's upgrade fails (#653)", async () => {
-    aCodexVersion('0.20.5', codexCache(), hoursAgo(48));
-    aCodexVersion('0.21.0', codexCache(), hoursAgo(24));
+    aCodexVersion('0.20.5', { installedAt: hoursAgo(48) });
+    aCodexVersion('0.21.0', { installedAt: hoursAgo(24) });
     aProgram(codex, { status: 1, stderr: 'Error: could not reach github.com\n' });
 
     await expect(update().update('codex')).rejects.toThrow('could not reach github.com');

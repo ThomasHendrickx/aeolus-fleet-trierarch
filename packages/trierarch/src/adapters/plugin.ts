@@ -71,7 +71,8 @@ export async function aeolusPluginVersion(at: { homeDirectory: string; env: Read
   }
 }
 
-function byVersion(left: string, right: string): number {
+/** Orders versions such as 0.9.0 and 0.10.0 by their numbers. */
+export function byVersion(left: string, right: string): number {
   const [a, b] = [left, right].map((version) => version.split('.').map(Number));
   for (let index = 0; index < 3; index += 1) {
     const difference = (a?.[index] ?? 0) - (b?.[index] ?? 0);

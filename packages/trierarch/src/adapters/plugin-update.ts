@@ -1,17 +1,23 @@
-import { cp, mkdtemp, readdir, rm, stat } from 'node:fs/promises';
+import { cp, mkdtemp, readdir, rm, stat, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
-import type { PluginHarness } from './plugin.js';
+import { byVersion, type PluginHarness } from './plugin.js';
 import { runCommand } from './run-command.js';
+import { runningProcesses, type RunningProcess } from './running-processes.js';
 
 /**
  * The aeolus plugin updated through each harness's own command (#581).
  * Codex's plugin upgrade installs the new version and deletes every other
  * version folder, so a Codex session still running on the old version would
  * lose its plugin scripts: the version folders there before are kept aside and
- * put back beside the new one, also when the upgrade fails. Claude Code keeps
- * old versions beside the new one itself.
+ * put back beside the new one, also when the upgrade fails. After an upgrade
+ * that succeeded, a version folder no running session can use is removed
+ * (#653): a session uses the newest version there was when it started, so a
+ * version is left behind once its next version came before every running
+ * Codex process, and the trierarch, started. A version counts from when the
+ * upgrade installed it. Claude Code keeps old versions beside the new one
+ * itself.
  */
 export interface PluginUpdate {
   update(harness: PluginHarness): Promise<void>;
@@ -39,22 +45,64 @@ async function versionFolders(cache: string): Promise<string[]> {
   return folders;
 }
 
-/** Runs `upgrade` with every version folder in `cache` kept aside, and puts back each one it deleted. */
-async function keepingVersions(cache: string, upgrade: () => Promise<void>): Promise<void> {
+/** ps says elapsed time in whole seconds, and a session takes a moment to read its plugin: a start this close after a version came may still have found the one before. */
+const START_MARGIN_MS = 60 * 1000;
+
+const VERSION = /^\d+\.\d+\.\d+$/;
+
+/** Marks each version folder the upgrade installed with the time it did, whatever times Codex gave its files. */
+async function markInstalled(cache: string, at: { before: readonly string[]; now: Date }): Promise<void> {
+  for (const version of await versionFolders(cache)) {
+    if (!at.before.includes(version)) {
+      await utimes(join(cache, version), at.now, at.now);
+    }
+  }
+}
+
+/** Removes each version folder whose next version came before the earliest start, every older one when nothing runs. */
+async function removeUnused(cache: string, earliestStart: Date | undefined): Promise<void> {
+  const versions = (await versionFolders(cache)).filter((name) => VERSION.test(name)).sort(byVersion);
+  for (const [index, version] of versions.entries()) {
+    const next = versions[index + 1];
+    if (next === undefined) {
+      continue;
+    }
+    const nextCame = (await stat(join(cache, next))).mtime.getTime();
+    if (earliestStart === undefined || earliestStart.getTime() >= nextCame + START_MARGIN_MS) {
+      await rm(join(cache, version), { recursive: true, force: true });
+    }
+  }
+}
+
+/** The earliest start of a process that may use a Codex plugin version: a Codex one, or the trierarch. */
+function earliestStartOf(processes: readonly RunningProcess[], trierarchPid: number | undefined): Date | undefined {
+  const users = processes.filter((process) => basename(process.program) === 'codex' || process.pid === trierarchPid);
+  return users.map((process) => process.startedAt).reduce<Date | undefined>((earliest, startedAt) => (earliest === undefined || startedAt < earliest ? startedAt : earliest), undefined);
+}
+
+/** Runs `upgrade` with every version folder in `cache` kept aside, and puts back each one it deleted; then removes the unused ones. */
+async function keepingVersions(cache: string, at: { upgrade: () => Promise<void>; afterUpgrade: (before: readonly string[]) => Promise<void> }): Promise<void> {
   const versions = await versionFolders(cache);
+  const times = new Map(await Promise.all(versions.map(async (version) => [version, await stat(join(cache, version))] as const)));
   const aside = await mkdtemp(join(tmpdir(), 'aeolus-plugin-versions-'));
   try {
     for (const version of versions) {
       await cp(join(cache, version), join(aside, version), { recursive: true, preserveTimestamps: true });
     }
     try {
-      await upgrade();
+      await at.upgrade();
     } finally {
       const left = new Set(await versionFolders(cache));
       for (const version of versions.filter((name) => !left.has(name))) {
         await cp(join(aside, version), join(cache, version), { recursive: true, preserveTimestamps: true });
+        // cp keeps the times of files, not of folders: the folder's time says when its version came.
+        const time = times.get(version);
+        if (time !== undefined) {
+          await utimes(join(cache, version), time.atime, time.mtime);
+        }
       }
     }
+    await at.afterUpgrade(versions);
   } finally {
     await rm(aside, { recursive: true, force: true });
   }
@@ -65,7 +113,15 @@ export function createPluginUpdate(at: {
   env: Readonly<Record<string, string | undefined>>;
   /** The programs to run; `codex` and `claude` unless a test runs others. */
   commands?: Partial<Record<PluginHarness, string>>;
+  /** The clock; a test passes its own. */
+  now?: () => Date;
+  /** The processes running on this machine now; ps unless a test says them. */
+  processes?: (now: Date) => Promise<readonly RunningProcess[]>;
+  /** The running trierarch's pid, none when none runs: it took its plugin scripts from the newest version when it started. */
+  trierarchPid: () => Promise<number | undefined>;
 }): PluginUpdate {
+  const now = at.now ?? (() => new Date());
+  const processes = at.processes ?? runningProcesses;
   const codex = at.commands?.codex ?? 'codex';
   const claude = at.commands?.['claude-code'] ?? 'claude';
   const codexCache = join(at.env.CODEX_HOME ?? join(at.homeDirectory, '.codex'), 'plugins', 'cache', MARKETPLACE, 'aeolus');
@@ -73,7 +129,14 @@ export function createPluginUpdate(at: {
   return {
     update: async (harness) => {
       if (harness === 'codex') {
-        await keepingVersions(codexCache, () => run(codex, ['plugin', 'marketplace', 'upgrade', MARKETPLACE]));
+        await keepingVersions(codexCache, {
+          upgrade: () => run(codex, ['plugin', 'marketplace', 'upgrade', MARKETPLACE]),
+          afterUpgrade: async (before) => {
+            const upgradedAt = now();
+            await markInstalled(codexCache, { before, now: upgradedAt });
+            await removeUnused(codexCache, earliestStartOf(await processes(upgradedAt), await at.trierarchPid()));
+          },
+        });
         return;
       }
       await run(claude, ['plugin', 'marketplace', 'update', MARKETPLACE]);

@@ -239,7 +239,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       const version = words[1];
       // No configuration yet: the trierarch offers no harness, and updates no plugin.
       const configuration = await loadConfiguration(paths.config).catch(() => undefined);
-      const pluginUpdate = createPluginUpdate({ homeDirectory, env });
+      const pluginUpdate = createPluginUpdate({ homeDirectory, env, trierarchPid: async () => (await readRunningFile(paths.running))?.pid });
       const report = await upgradeTrierarch({
         ...(version !== undefined && { version }),
         installedVersion: runningVersion,
