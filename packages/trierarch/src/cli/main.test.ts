@@ -389,7 +389,7 @@ describe('aeolus-trierarch upgrade', () => {
       chmodSync(join(bin, name), 0o700);
     };
     program('npm', `echo ${runningVersion()}`);
-    program('codex', 'echo "Error: could not reach github.com" >&2; exit 1');
+    program('codex', 'if [ "$4" = ThomasHendrickx/aeolus-fleet ]; then echo "Error: could not reach github.com" >&2; exit 1; fi');
     vi.stubEnv('PATH', `${bin}:/usr/bin:/bin`);
     const paths = trierarchPaths({ homeDirectory: home });
     mkdirSync(paths.home, { recursive: true });

@@ -150,7 +150,7 @@ describe('the aeolus plugin update for Codex', () => {
   });
 
   it('adds the marketplace also when Codex had none to remove (#652)', async () => {
-    aProgram(codex, { then: "if (process.argv[4] === 'remove') { process.stderr.write('Error: marketplace `aeolus-fleet` is not configured or installed'); process.exit(1); }" });
+    aProgram(codex, { then: "if (probe === '' && process.argv[4] === 'remove') { process.stderr.write('Error: marketplace `aeolus-fleet` is not configured or installed'); process.exit(1); }" });
 
     await update().update('codex', 'v0.23.0');
 
@@ -158,7 +158,7 @@ describe('the aeolus plugin update for Codex', () => {
   });
 
   it("says what Codex said when it cannot add the marketplace, and upgrades nothing (#652)", async () => {
-    aProgram(codex, { then: "if (process.argv[4] === 'add') { process.stderr.write('Error: could not reach github.com'); process.exit(1); }" });
+    aProgram(codex, { then: "if (probe === '' && process.argv[4] === 'add') { process.stderr.write('Error: could not reach github.com'); process.exit(1); }" });
 
     await expect(update().update('codex', 'v0.23.0')).rejects.toThrow('codex plugin marketplace add ThomasHendrickx/aeolus-fleet --ref v0.23.0 failed: Error: could not reach github.com');
     expect(ran()).not.toContain('codex plugin marketplace upgrade aeolus-fleet');
