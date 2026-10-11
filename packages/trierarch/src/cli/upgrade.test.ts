@@ -25,7 +25,7 @@ let waits: number[];
 let pluginVersions: Record<string, string | undefined>;
 let offered: PluginHarness[];
 let failingPluginUpdate: PluginHarness | undefined;
-let failingHookTrust: boolean;
+let isHookTrustFailing: boolean;
 let isPluginLatest: boolean;
 
 beforeEach(() => {
@@ -33,7 +33,7 @@ beforeEach(() => {
   // The configuration offers no harness unless a test says so: the plugin then stays as it is.
   offered = [];
   failingPluginUpdate = undefined;
-  failingHookTrust = false;
+  isHookTrustFailing = false;
   isPluginLatest = false;
   installed = '0.17.1';
   latest = '0.17.2';
@@ -123,7 +123,7 @@ const plugin = {
   version: (harness: PluginHarness) => Promise.resolve(pluginVersions[harness]),
   trustCodexHooks: () => {
     steps.push('trust codex hooks');
-    return failingHookTrust ? Promise.reject(new Error('codex app-server ended before it answered (exit 1)')) : Promise.resolve(['aeolus@aeolus-fleet:hooks/hooks.json:stop:0:0']);
+    return isHookTrustFailing ? Promise.reject(new Error('codex app-server ended before it answered (exit 1)')) : Promise.resolve(['aeolus@aeolus-fleet:hooks/hooks.json:stop:0:0']);
   },
 };
 
@@ -333,7 +333,7 @@ describe('aeolus-trierarch upgrade', () => {
 
   it("says when Codex's hooks could not be trusted after the update, as a failed plugin update (#581)", async () => {
     offered = ['codex'];
-    failingHookTrust = true;
+    isHookTrustFailing = true;
 
     const report = await upgrade();
 
