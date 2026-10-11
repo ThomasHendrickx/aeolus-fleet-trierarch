@@ -1,7 +1,14 @@
 {
   "name": "@aeolus-fleet/trierarch",
   "version": "0.0.0",
-  "description": "Aeolus trierarch: keeps the ships whose crew requests are assigned to it crewed on its machine, as a ship of the fleet with crew:run.",
+  "description": "Keeps Claude Code and Codex sessions running on your machine for an Aeolus fleet: start, restart, wake.",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "tmux",
+    "git-worktree",
+    "ai-agents"
+  ],
   "license": "Apache-2.0",
   "type": "module",
   "repository": {
