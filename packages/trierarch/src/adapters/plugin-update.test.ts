@@ -318,11 +318,11 @@ describe('the aeolus plugin update for Codex', () => {
     expect(beforeRemove).toContain('probe: codex plugin marketplace remove aeolus-fleet');
   });
 
-  it("refuses to remove the aeolus-fleet marketplace when Codex would delete the aeolus plugin's data with it, the crew identities, and changes nothing (#660)", async () => {
+  it("refuses to remove the aeolus-fleet marketplace when Codex would delete the aeolus plugin's data with it, its log and the crew identities not yet moved to ~/.aeolus/crews, and changes nothing (#660, #679)", async () => {
     aCodexVersion('0.21.0');
     aProgram(codex, { then: DELETES_DATA_ON_REMOVE });
 
-    await expect(update().update('codex', 'v0.23.0')).rejects.toThrow("Codex would delete the aeolus plugin's data, the crew identities on this machine, when its aeolus-fleet marketplace is removed: the upgrade leaves the marketplace as it is");
+    await expect(update().update('codex', 'v0.23.0')).rejects.toThrow("Codex would delete the aeolus plugin's data on this machine, its log and the crew identities not yet moved to ~/.aeolus/crews, when its aeolus-fleet marketplace is removed: the upgrade leaves the marketplace as it is");
     expect(ran()).toEqual([]);
     expect(readdirSync(codexCache())).toEqual(['0.21.0']);
   });
