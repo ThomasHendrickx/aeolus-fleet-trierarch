@@ -1,4 +1,4 @@
-import { CREW_REQUEST_REASON_MAX_LENGTH } from '@aeolus-fleet/common';
+import { CREW_REQUEST_REASON_MAX_LENGTH, type ShipId } from '@aeolus-fleet/common';
 
 import { putEntry, removeEntry, withState, type Entry, type TrierarchState } from './entry.js';
 import { MODEL_OPTION } from './detected-options.js';
@@ -76,6 +76,7 @@ async function observe(state: TrierarchState, deps: RunPassDeps): Promise<Observ
   const worktrees = await deps.workspace.worktrees();
   const ships: Record<string, Observed['ships'][string]> = {};
   const launches: Record<string, LaunchSeen> = {};
+  const withoutIdentity: ShipId[] = [];
   for (const entry of Object.values(state.entries)) {
     const session = sessions.find((each) => each.shipId === entry.shipId);
     const { folder } = entry;
@@ -89,12 +90,17 @@ async function observe(state: TrierarchState, deps: RunPassDeps): Promise<Observ
     if (!isWatched || folder === undefined || session?.status === 'exited') {
       continue;
     }
-    const crewToken = await harness?.crewTokenOf(folder);
-    if (harness !== undefined && crewToken !== undefined) {
-      ships[entry.shipId] = { inbox: await deps.fleet.inbox(crewToken), turn: await harness.turnOf(folder) };
+    if (harness === undefined) {
+      continue;
     }
+    const crewToken = await harness.crewTokenOf(folder);
+    if (crewToken === undefined) {
+      withoutIdentity.push(entry.shipId);
+      continue;
+    }
+    ships[entry.shipId] = { inbox: await deps.fleet.inbox(crewToken), turn: await harness.turnOf(folder) };
   }
-  return { sessions, worktrees, ships, launches };
+  return { sessions, worktrees, ships, launches, withoutIdentity };
 }
 
 function log(deps: RunPassDeps, logged: Omit<LoggedAction, 'time'>): void {
@@ -130,6 +136,9 @@ async function carryOut(state: TrierarchState, at: CarryOut): Promise<TrierarchS
       return state;
     case 'screensUnchecked':
       await screensUnchecked({ action, deps });
+      return state;
+    case 'identityGone':
+      await identityGone({ action, deps });
       return state;
     case 'confirm':
       await deps.fleet.confirmRelease(action.shipId);
@@ -436,6 +445,22 @@ async function screensUnchecked(at: CarryOut & { action: Extract<Action, { kind:
     idempotencyKey: `trierarch:unchecked-screens:${harness}:${version}`,
   });
   log(deps, { shipId, ...(shipName !== undefined && { shipName }), action: 'screensUnchecked', outcome: `no activity on ${harness} ${version}, its screens checked on ${checkedOn}; argo told` });
+}
+
+/**
+ * A running session's folder holds no identity (#659): the trierarch cannot
+ * see its inbox, so nothing wakes it while its lease still holds. Argo is
+ * told, naming the machine and the ship, as only a crew again recovers it.
+ */
+async function identityGone(at: CarryOut & { action: Extract<Action, { kind: 'identityGone' }> }): Promise<void> {
+  const { action, deps } = at;
+  const { shipId, shipName } = action;
+  const machine = await deps.fleet.whoami();
+  await deps.fleet.reportToArgo({
+    text: `${machine.name}: ${shipName ?? shipId} (${shipId}): its session runs, but its folder holds no identity, so the trierarch no longer watches its inbox or wakes it. Restart it in the console to crew it again.`,
+    idempotencyKey: `trierarch:identity-gone:${shipId}:${deps.clock.now().toISOString()}`,
+  });
+  log(deps, { shipId, ...(shipName !== undefined && { shipName }), action: 'identityGone', outcome: 'its folder holds no identity, so it is no longer woken; argo told' });
 }
 
 /** Tells argo, once per settings version, that this trierarch cannot crew them. */
