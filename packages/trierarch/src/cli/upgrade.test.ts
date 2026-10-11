@@ -213,6 +213,40 @@ describe('aeolus-trierarch upgrade', () => {
     expect(installs).toEqual([]);
   });
 
+  it('says to run upgrade at the version after the install, before install restarts the service, when the configuration offers a harness (#718)', async () => {
+    isGlobalFolderWritable = false;
+    offered = ['codex'];
+
+    await expect(upgrade()).rejects.toThrow(
+      `npm's global folder /usr/local/lib/node_modules is not yours to write: a system Node install owns it. Run instead:\n  sudo npm install --global ${PACKAGE}@0.17.2\n  aeolus-trierarch upgrade 0.17.2\n  aeolus-trierarch install\naeolus-trierarch upgrade 0.17.2 updates the aeolus plugin to 0.17.2. The trierarch keeps running 0.17.1.`,
+    );
+    expect(steps).toEqual([]);
+  });
+
+  it('ends with the aeolus plugin of the new version once the commands it says to run instead have run (#718)', async () => {
+    isGlobalFolderWritable = false;
+    offered = ['codex', 'claude-code'];
+    installed = '0.23.0';
+    latest = '0.24.0';
+
+    const refusal = await upgrade().then(
+      () => '',
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    const commands = refusal.split('\n').filter((line) => line.startsWith('  ')).map((line) => line.trim());
+    for (const command of commands) {
+      if (command.startsWith('sudo npm install --global ')) {
+        // The user's sudo install, which upgrade never runs itself.
+        installed = command.slice(command.lastIndexOf('@') + 1);
+      } else if (command.startsWith('aeolus-trierarch upgrade ')) {
+        await upgrade(command.slice('aeolus-trierarch upgrade '.length));
+      }
+    }
+
+    expect(installed).toBe('0.24.0');
+    expect(pluginTags).toEqual({ codex: 'v0.24.0', 'claude-code': 'v0.24.0' });
+  });
+
   it('refuses a version that is no MAJOR.MINOR.PATCH', async () => {
     await expect(upgrade('latest')).rejects.toThrow('latest is no version: give one such as 0.17.2');
     expect(installs).toEqual([]);
