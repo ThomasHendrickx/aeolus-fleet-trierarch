@@ -2,6 +2,7 @@ import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { AdapterFlag, HarnessPort } from '../core/ports.js';
 import { CODEX_SCREENS_CHECKED_ON, codexLaunchSeen } from './codex-screen.js';
+import type { CodexSetup } from './codex-setup.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
 import { effectiveFlags } from '../core/effective-flags.js';
 import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
@@ -15,7 +16,9 @@ import type { Tmux } from './tmux.js';
  * tool, and `$aeolus-wake` typed
  * to wake an idle session, each prompt with the line that no human reads its
  * terminal (#585). The identity and the turn marker go through the
- * aeolus plugin for Codex, in Codex's own plugin data folder.
+ * aeolus plugin for Codex, in Codex's own plugin data folder. The plugin's new
+ * or changed hooks are trusted before every launch: a plugin update changes
+ * them, and Codex would stop the session at its hooks review (#581).
  */
 
 export const WAKE_PROMPT = '$aeolus-wake';
@@ -64,6 +67,8 @@ export function createCodexHarness(options: {
   configuration: TrierarchConfiguration;
   plugin: AeolusPlugin;
   sessions: Pick<Tmux, 'start' | 'type' | 'screen'>;
+  /** Codex's own answers, where the aeolus plugin's hooks are trusted before each launch (#581). */
+  setup: Pick<CodexSetup, 'trustAeolusHooks'>;
   /** The program to run; `codex` unless a test runs another. */
   command?: string;
 }): HarnessPort {
@@ -79,6 +84,7 @@ export function createCodexHarness(options: {
       }
       const prompt = isFirstStart && firstPrompt !== undefined ? firstPromptOf(firstPrompt) : wakePromptOf(WAKE_PROMPT);
       const command = codexCommandLine({ flags: effectiveFlags(settings, picked), prompt, isFirstStart, ...(options.command !== undefined && { program: options.command }) });
+      await options.setup.trustAeolusHooks(folder);
       await sessions.start({ shipId, folder, command: wordsOf(command) });
     },
     wake: async ({ shipId }) => {
