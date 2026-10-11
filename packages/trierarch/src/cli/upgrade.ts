@@ -1,5 +1,5 @@
 import { TrierarchFileError, type RunningFile } from '../adapters/files.js';
-import type { PluginHarness } from '../adapters/plugin.js';
+import { byVersion, type PluginHarness } from '../adapters/plugin.js';
 import type { CommandResult } from '../adapters/run-command.js';
 import type { Service } from '../adapters/service.js';
 import { NOT_SAID_YET_REASON, startNewProcess } from './new-process.js';
@@ -45,7 +45,8 @@ export interface Npm {
 export interface PluginUpgrade {
   /** The harnesses the configuration offers. */
   readonly harnesses: readonly PluginHarness[];
-  update(harness: PluginHarness): Promise<void>;
+  /** `tag`: the release tag to install the plugin from; none installs it from main. */
+  update(harness: PluginHarness, tag: string | undefined): Promise<void>;
   /** The plugin's version as the harness reads it; none when it has no aeolus plugin. */
   version(harness: PluginHarness): Promise<string | undefined>;
   /** Trusts the plugin's new or changed Codex hooks: their keys. */
@@ -67,18 +68,25 @@ function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Updates the aeolus plugin for each harness on offer, each on its own: one that fails leaves the others to update. */
-async function upgradePlugin(plugin: PluginUpgrade | undefined): Promise<{ isPluginUpdated: boolean; said: string[] }> {
+/** The first release whose tag holds the aeolus plugin of its version (#652): the ones before set the plugin's version on main only. */
+const FIRST_PLUGIN_TAG = '0.23.0';
+
+/** Updates the aeolus plugin of `version` for each harness on offer, each on its own: one that fails leaves the others to update. */
+async function upgradePlugin(plugin: PluginUpgrade | undefined, version: string): Promise<{ isPluginUpdated: boolean; said: string[] }> {
   const said: string[] = [];
   let isPluginUpdated = true;
-  if (plugin === undefined) {
+  if (plugin === undefined || plugin.harnesses.length === 0) {
     return { isPluginUpdated, said };
+  }
+  const tag = byVersion(version, FIRST_PLUGIN_TAG) >= 0 ? `v${version}` : undefined;
+  if (tag === undefined) {
+    said.push(`Releases up to 0.22.0 tag no aeolus plugin of their version: the plugin comes from main, the latest released one.`);
   }
   for (const harness of plugin.harnesses) {
     const name = HARNESS_NAMES[harness];
     const before = await plugin.version(harness);
     try {
-      await plugin.update(harness);
+      await plugin.update(harness, tag);
     } catch (error) {
       isPluginUpdated = false;
       said.push(`The aeolus plugin for ${name} was not updated: ${reasonOf(error)}. It stays on ${before ?? 'no version'}; fix what it says, then run aeolus-trierarch upgrade again.`);
@@ -86,7 +94,7 @@ async function upgradePlugin(plugin: PluginUpgrade | undefined): Promise<{ isPlu
     }
     const after = await plugin.version(harness);
     const keeps = harness === 'codex' ? ' Running Codex sessions keep the version they started with.' : '';
-    said.push(after === before ? `The aeolus plugin for ${name} is on ${after ?? 'no version'}, the latest, already.` : `Updated the aeolus plugin for ${name} from ${before ?? 'no version'} to ${after ?? 'no version'}.${keeps}`);
+    said.push(after === before ? `The aeolus plugin for ${name} is on ${after ?? 'no version'} already.` : `Updated the aeolus plugin for ${name} from ${before ?? 'no version'} to ${after ?? 'no version'}.${keeps}`);
     if (harness === 'codex') {
       try {
         const trusted = await plugin.trustCodexHooks();
@@ -125,7 +133,7 @@ export async function upgradeTrierarch(at: {
   }
   const target = at.version ?? (await at.npm.latest()).trim();
   if (target === from) {
-    const plugin = await upgradePlugin(at.plugin);
+    const plugin = await upgradePlugin(at.plugin, target);
     return { from, to: from, isUpgraded: false, isPluginUpdated: plugin.isPluginUpdated, said: [`The trierarch is already on ${from}.`, ...plugin.said] };
   }
 
@@ -144,7 +152,7 @@ export async function upgradeTrierarch(at: {
     );
   }
   const to = at.installedVersion();
-  const plugin = await upgradePlugin(at.plugin);
+  const plugin = await upgradePlugin(at.plugin, to);
   const said = [`Upgraded the trierarch from ${from} to ${to}.`, ...plugin.said];
 
   if ((await at.service.status()).isInstalled) {

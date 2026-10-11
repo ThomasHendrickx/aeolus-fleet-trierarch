@@ -398,6 +398,6 @@ describe('aeolus-trierarch upgrade', () => {
     const { output, code } = await main(['upgrade'], machine({ HOME: home }));
 
     expect(code).toBe(1);
-    expect(output).toContain('The aeolus plugin for Codex was not updated: codex plugin marketplace upgrade aeolus-fleet failed: Error: could not reach github.com.');
+    expect(output).toContain('The aeolus plugin for Codex was not updated: codex plugin marketplace add ThomasHendrickx/aeolus-fleet failed: Error: could not reach github.com.');
   });
 });

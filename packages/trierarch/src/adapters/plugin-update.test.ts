@@ -59,12 +59,17 @@ process.exit(${String(at.status ?? 0)});
   chmodSync(path, 0o700);
 }
 
+/** `code` run only when the stand-in runs as `codex plugin marketplace upgrade`. */
+function onUpgrade(code: string): string {
+  return `if (process.argv[4] === 'upgrade') {\n${code}\n}`;
+}
+
 /** Codex's own plugin upgrade: the new version in, every other version folder deleted. */
 function codexUpgrading(to: string, cache = codexCache()): string {
-  return `const cache = ${JSON.stringify(cache)};
+  return onUpgrade(`const cache = ${JSON.stringify(cache)};
 for (const name of readdirSync(cache)) rmSync(join(cache, name), { recursive: true });
 mkdirSync(join(cache, ${JSON.stringify(to)}, 'scripts'), { recursive: true });
-writeFileSync(join(cache, ${JSON.stringify(to)}, 'scripts', 'aeolus-fleet.sh'), '# ${to}\\n');`;
+writeFileSync(join(cache, ${JSON.stringify(to)}, 'scripts', 'aeolus-fleet.sh'), '# ${to}\\n');`);
 }
 
 /** Claude Code's user settings in `configDirectory`. */
@@ -160,7 +165,7 @@ describe('the aeolus plugin update for Codex', () => {
 
   it("puts the version folders running sessions use back when Codex's upgrade fails, saying what Codex said (#581)", async () => {
     aCodexVersion('0.21.0');
-    aProgram(codex, { then: `rmSync(join(${JSON.stringify(codexCache())}, '0.21.0'), { recursive: true });`, status: 1, stderr: 'Error: could not reach github.com\n' });
+    aProgram(codex, { then: onUpgrade(`rmSync(join(${JSON.stringify(codexCache())}, '0.21.0'), { recursive: true }); process.stderr.write('Error: could not reach github.com\\n'); process.exit(1);`) });
 
     await expect(update().update('codex', 'v0.23.0')).rejects.toThrow('codex plugin marketplace upgrade aeolus-fleet failed: Error: could not reach github.com');
     expect(readFileSync(join(codexCache(), '0.21.0', 'scripts', 'aeolus-fleet.sh'), 'utf8')).toBe('# 0.21.0\n');
@@ -266,7 +271,7 @@ describe('the aeolus plugin update for Codex', () => {
     aCodexVersion('0.21.0');
     processes = [aProcess({ startedAt: hoursAgo(1) })];
     const installed = join(codexCache(), '0.22.0');
-    aProgram(codex, { then: `${codexUpgrading('0.22.0')}\nrequire('node:fs').utimesSync(${JSON.stringify(installed)}, new Date(${String(hoursAgo(48).getTime())}), new Date(${String(hoursAgo(48).getTime())}));` });
+    aProgram(codex, { then: `${codexUpgrading('0.22.0')}\n${onUpgrade(`require('node:fs').utimesSync(${JSON.stringify(installed)}, new Date(${String(hoursAgo(48).getTime())}), new Date(${String(hoursAgo(48).getTime())}));`)}` });
 
     await update().update('codex', 'v0.23.0');
 
@@ -276,7 +281,7 @@ describe('the aeolus plugin update for Codex', () => {
   it('leaves folders that name no version alone (#653)', async () => {
     aCodexVersion('0.21.0');
     mkdirSync(join(codexCache(), 'local'));
-    aProgram(codex, { then: `rmSync(join(${JSON.stringify(codexCache())}, '0.21.0'), { recursive: true }); mkdirSync(join(${JSON.stringify(codexCache())}, '0.22.0'));` });
+    aProgram(codex, { then: onUpgrade(`rmSync(join(${JSON.stringify(codexCache())}, '0.21.0'), { recursive: true }); mkdirSync(join(${JSON.stringify(codexCache())}, '0.22.0'));`) });
 
     await update().update('codex', 'v0.23.0');
 
@@ -286,9 +291,9 @@ describe('the aeolus plugin update for Codex', () => {
   it("removes nothing when Codex's upgrade fails (#653)", async () => {
     aCodexVersion('0.20.5', { installedAt: hoursAgo(48) });
     aCodexVersion('0.21.0', { installedAt: hoursAgo(24) });
-    aProgram(codex, { status: 1, stderr: 'Error: could not reach github.com\n' });
+    aProgram(codex, { then: onUpgrade("process.stderr.write('Error: could not reach github.com'); process.exit(1);") });
 
-    await expect(update().update('codex', 'v0.23.0')).rejects.toThrow('could not reach github.com');
+    await expect(update().update('codex', 'v0.23.0')).rejects.toThrow('codex plugin marketplace upgrade aeolus-fleet failed: Error: could not reach github.com');
     expect(readdirSync(codexCache()).sort()).toEqual(['0.20.5', '0.21.0']);
   });
 
