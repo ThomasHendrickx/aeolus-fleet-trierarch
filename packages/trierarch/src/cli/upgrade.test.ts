@@ -131,8 +131,18 @@ const plugin = {
   },
 };
 
+/** The installed version's own `upgrade <version> --json`: on the version already, it updates the aeolus plugin as that version does. */
+let upgradeInstalledPlugin: (version: string) => Promise<CommandResult>;
+
+beforeEach(() => {
+  upgradeInstalledPlugin = async (version) => {
+    const report = await upgrade(version);
+    return { status: report.isPluginUpdated ? 0 : 1, stdout: JSON.stringify(report, null, 2), stderr: '' };
+  };
+});
+
 function upgrade(version?: string) {
-  return upgradeTrierarch({ ...(version !== undefined && { version }), installedVersion: () => installed, npm, writeInstalledServiceFile, service, running, sleep, plugin });
+  return upgradeTrierarch({ ...(version !== undefined && { version }), installedVersion: () => installed, npm, writeInstalledServiceFile, upgradeInstalledPlugin: (to) => upgradeInstalledPlugin(to), service, running, sleep, plugin });
 }
 
 describe('aeolus-trierarch upgrade', () => {
@@ -245,6 +255,54 @@ describe('aeolus-trierarch upgrade', () => {
 
     expect(installed).toBe('0.24.0');
     expect(pluginTags).toEqual({ codex: 'v0.24.0', 'claude-code': 'v0.24.0' });
+  });
+
+  it("runs the aeolus plugin step of the version it installed, not the one of the version it replaces (#725)", async () => {
+    offered = ['codex'];
+    upgradeInstalledPlugin = (version) => {
+      steps.push(`plugin step of ${installed} at ${version}`);
+      return Promise.resolve({ status: 0, stdout: JSON.stringify({ from: version, to: version, isUpgraded: false, isPluginUpdated: true, said: [`The trierarch is already on ${version}.`, 'Updated the aeolus plugin for Codex from 0.21.0 to 0.17.2.'] }), stderr: '' });
+    };
+
+    const report = await upgrade();
+
+    expect(steps).toEqual(['plugin step of 0.17.2 at 0.17.2', 'write 0.17.2', 'reload', 'stop 0.17.2', 'start 0.17.2']);
+    expect(report.said).toEqual(expect.arrayContaining(['Updated the aeolus plugin for Codex from 0.21.0 to 0.17.2.']));
+    expect(report.said).not.toContain('The trierarch is already on 0.17.2.');
+    expect(report.isPluginUpdated).toBe(true);
+  });
+
+  it('says the aeolus plugin was not updated when the version it installed says so (#725)', async () => {
+    offered = ['codex'];
+    upgradeInstalledPlugin = (version) =>
+      Promise.resolve({ status: 1, stdout: JSON.stringify({ from: version, to: version, isUpgraded: false, isPluginUpdated: false, said: [`The trierarch is already on ${version}.`, 'The aeolus plugin for Codex was not updated: offline.'] }), stderr: '' });
+
+    const report = await upgrade();
+
+    expect(report.isPluginUpdated).toBe(false);
+    expect(report.said).toContain('The aeolus plugin for Codex was not updated: offline.');
+  });
+
+  it('says the aeolus plugin was not updated, and goes on with the restart, when the version it installed answers no report (#725)', async () => {
+    offered = ['codex'];
+    upgradeInstalledPlugin = () => Promise.resolve({ status: 1, stdout: '', stderr: 'node: bad option\n' });
+
+    const report = await upgrade();
+
+    expect(report.isPluginUpdated).toBe(false);
+    expect(report.said).toContain('The aeolus plugin was not updated: the trierarch 0.17.2 said node: bad option. Fix what it says, then run aeolus-trierarch upgrade again.');
+    expect(steps).toEqual(['write 0.17.2', 'reload', 'stop 0.17.2', 'start 0.17.2']);
+  });
+
+  it('hands no plugin step to the version it installed when the configuration offers no harness (#725)', async () => {
+    upgradeInstalledPlugin = (version) => {
+      steps.push(`plugin step at ${version}`);
+      return Promise.resolve({ status: 0, stdout: '', stderr: '' });
+    };
+
+    await upgrade();
+
+    expect(steps).not.toContain('plugin step at 0.17.2');
   });
 
   it('refuses a version that is no MAJOR.MINOR.PATCH', async () => {
