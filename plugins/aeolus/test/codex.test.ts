@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { scriptEnvironment } from './script-environment.js';
+
 const PLUGIN = fileURLToPath(new URL('..', import.meta.url));
 const REPOSITORY = fileURLToPath(new URL('../../..', import.meta.url));
 const SCRIPTS = join(PLUGIN, 'scripts');
@@ -45,8 +47,7 @@ function runScript(script: string, options: ScriptOptions = {}) {
     cwd: folder,
     input,
     encoding: 'utf8',
-    env: {
-      ...process.env,
+    env: scriptEnvironment({
       HOME: home,
       AEOLUS_DATA: '',
       AEOLUS_FOLDER: '',
@@ -56,7 +57,7 @@ function runScript(script: string, options: ScriptOptions = {}) {
       PLUGIN_DATA: data,
       PLUGIN_ROOT: PLUGIN,
       ...env,
-    },
+    }),
   });
 }
 

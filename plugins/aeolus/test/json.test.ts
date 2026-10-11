@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { scriptEnvironment } from './script-environment.js';
+
 // aeolus-lib.sh reads a hook payload's string fields with aeolus_json_string
 // and writes JSON with aeolus_json_escape: what one escapes, the other undoes.
 
@@ -11,7 +13,7 @@ const LIB = join(fileURLToPath(new URL('../scripts/', import.meta.url)), 'aeolus
 
 /** Calls one aeolus-lib.sh function with its arguments, as a script that sources the lib does. */
 function lib(fn: string, ...args: string[]): string {
-  const result = spawnSync('bash', ['-c', `source "$1"; shift; "$@"`, 'bash', LIB, fn, ...args], { encoding: 'utf8' });
+  const result = spawnSync('bash', ['-c', `source "$1"; shift; "$@"`, 'bash', LIB, fn, ...args], { encoding: 'utf8', env: scriptEnvironment() });
   expect(result.stderr).toBe('');
   return result.stdout;
 }

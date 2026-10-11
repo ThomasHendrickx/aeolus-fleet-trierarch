@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { startStubFleet, type StubAnswer, type StubFleet } from './stub-fleet.js';
+import { scriptEnvironment } from './script-environment.js';
 
 // The crew token never leaves the identity file except to the fleet (#445),
 // and neither the token nor the crew line's secret appears on curl's command
@@ -50,7 +51,7 @@ afterEach(async () => {
 /** Runs a script as a session's command does, with the recording curl first on PATH. */
 function run(script: string, options: { args?: string[]; stdin?: string } = {}): Promise<number | null> {
   const child = spawn('bash', [join(SCRIPTS, script), ...(options.args ?? [])], {
-    env: { ...process.env, HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, PATH: `${bin}:${process.env.PATH ?? ''}` },
+    env: scriptEnvironment({ HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, PATH: `${bin}:${process.env.PATH ?? ''}` }),
   });
   child.stdin.end(options.stdin ?? '');
   child.stdout.resume();

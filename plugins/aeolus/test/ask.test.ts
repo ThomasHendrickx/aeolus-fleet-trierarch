@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import { startStubFleet, type StubAnswer, type StubFleet } from './stub-fleet.js';
+import { scriptEnvironment } from './script-environment.js';
 
 // aeolus-ask.sh: a crewed session asks argo a question (decision 0038), and
 // withdraws or replaces it, without writing its JSON by hand. It sends
@@ -57,7 +58,7 @@ interface Run {
 /** Runs a script as a session's command does, without blocking the stub fleet in this process. */
 function run(script: string, args: string[]): Promise<Run> {
   const child = spawn('bash', [join(SCRIPTS, script), ...args], {
-    env: { ...process.env, HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data },
+    env: scriptEnvironment({ HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data }),
   });
   child.stdin.end();
   let stdout = '';
@@ -77,7 +78,7 @@ function run(script: string, args: string[]): Promise<Run> {
 
 /** Runs a hook with its payload on stdin; a hook calls no fleet, so it may block. */
 function hook(script: string, payload: unknown): void {
-  spawnSync('bash', [join(SCRIPTS, script)], { input: JSON.stringify(payload), env: { ...process.env, HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data } });
+  spawnSync('bash', [join(SCRIPTS, script)], { input: JSON.stringify(payload), env: scriptEnvironment({ HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data }) });
 }
 
 async function crewedAt(answers: readonly StubAnswer[]): Promise<StubFleet> {
