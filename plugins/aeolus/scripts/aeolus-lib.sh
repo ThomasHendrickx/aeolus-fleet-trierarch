@@ -356,9 +356,36 @@ aeolus_json_escape() {
     }'
 }
 
-# One string field of a hook's JSON payload, its escapes undone.
+# One string field of a hook's JSON payload, every escape undone: a \uXXXX
+# (a surrogate pair too) as its UTF-8 bytes, but \u0000, which a shell string
+# cannot hold, as nothing. Byte by byte in the C locale, as any awk does it.
 aeolus_json_string() {
-  printf '%s' "$1" | tr -d '\n' | sed -E -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"(([^\"\\\\]|\\\\.)*)\".*/\\1/p" | sed -e 's/\\"/"/g' -e 's/\\\\/\\/g'
+  printf '%s' "$1" | tr -d '\n' | sed -E -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"(([^\"\\\\]|\\\\.)*)\".*/\\1/p" | LC_ALL=C awk '
+    function hex(digits,   value, at) {
+      for (at = 1; at <= 4; at++) value = value * 16 + index("0123456789abcdef", tolower(substr(digits, at, 1))) - 1
+      return value
+    }
+    function utf8(code) {
+      if (code < 128) return sprintf("%c", code)
+      if (code < 2048) return sprintf("%c%c", 192 + int(code / 64), 128 + code % 64)
+      if (code < 65536) return sprintf("%c%c%c", 224 + int(code / 4096), 128 + int(code / 64) % 64, 128 + code % 64)
+      return sprintf("%c%c%c%c", 240 + int(code / 262144), 128 + int(code / 4096) % 64, 128 + int(code / 64) % 64, 128 + code % 64)
+    }
+    BEGIN { unescaped["b"] = "\b"; unescaped["f"] = "\f"; unescaped["n"] = "\n"; unescaped["r"] = "\r"; unescaped["t"] = "\t" }
+    {
+      for (at = 1; at <= length($0); at++) {
+        character = substr($0, at, 1)
+        if (character != "\\") { printf "%s", character; continue }
+        letter = substr($0, ++at, 1)
+        if (letter != "u") { printf "%s", ((letter in unescaped) ? unescaped[letter] : letter); continue }
+        code = hex(substr($0, at + 1, 4)); at += 4
+        if (code >= 55296 && code < 56320 && substr($0, at + 1, 2) == "\\u") {
+          low = hex(substr($0, at + 3, 4))
+          if (low >= 56320 && low < 57344) { code = 65536 + (code - 55296) * 1024 + low - 56320; at += 6 }
+        }
+        if (code > 0) printf "%s", utf8(code)
+      }
+    }'
 }
 
 # A hook's folder: Claude Code's project folder, else the payload's cwd. The
