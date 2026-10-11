@@ -117,6 +117,14 @@ describe('the Codex plugin package', () => {
     expect(crew).toContain('sandbox_workspace_write');
   });
 
+  it('shows the ship as /aeolus:ship does: answered by aeolus-status.sh, shown as it prints it', () => {
+    const ship = readFileSync(join(PLUGIN, 'skills/aeolus-ship/SKILL.md'), 'utf8');
+
+    expect(ship).toContain('`scripts/aeolus-status.sh`');
+    expect(ship).toContain('exactly as it prints it');
+    expect(ship).not.toContain('aeolus-fleet.sh');
+  });
+
   it('wakes a session as /aeolus:wake does: identity and lease, waiting deliveries, the wake bridge armed again, and a status report', () => {
     const wake = readFileSync(join(PLUGIN, 'skills/aeolus-wake/SKILL.md'), 'utf8');
 

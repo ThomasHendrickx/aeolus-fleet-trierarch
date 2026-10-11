@@ -63,9 +63,16 @@ describe('/aeolus:wake', () => {
   });
 });
 
-describe('/aeolus:ship and /aeolus:deregister', () => {
-  it('ask whoami and deregister through aeolus-fleet.sh', () => {
-    expect(command('ship')).toContain('"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-fleet.sh" whoami');
+describe('/aeolus:ship', () => {
+  it('is answered by aeolus-status.sh, shown as it prints it, not by the model', () => {
+    expect(command('ship')).toContain('"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-status.sh"');
+    expect(command('ship')).toContain('exactly as it prints it');
+    expect(command('ship')).not.toContain('aeolus-fleet.sh');
+  });
+});
+
+describe('/aeolus:deregister', () => {
+  it('deregisters through aeolus-fleet.sh', () => {
     expect(command('deregister')).toContain('"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-fleet.sh" deregister');
   });
 });
