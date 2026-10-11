@@ -64,15 +64,25 @@ function start(script: string, options: { args?: string[]; env?: Record<string, 
   });
   child.stdin.end(options.stdin ?? '');
   let stdout = '';
+  let stderr = '';
   child.stdout.on('data', (chunk: Buffer) => {
     stdout += chunk.toString('utf8');
+  });
+  child.stderr.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString('utf8');
   });
   const exited = new Promise<{ status: number | null; stdout: string }>((resolve) => {
     child.on('exit', (status) => {
       resolve({ status, stdout });
     });
   });
-  return { child, exited };
+  /** Once its output is all read too: with what it printed on stderr. */
+  const done = new Promise<Run>((resolve) => {
+    child.on('close', (status) => {
+      resolve({ status, stdout, stderr });
+    });
+  });
+  return { child, exited, done };
 }
 
 /** What a Codex skill's commands set: each harness keeps its sessions' identities in a crews folder of its own (#658). */
@@ -1600,46 +1610,66 @@ describe("the plugin's log is capped: at its size limit it moves aside as aeolus
     expect(readdirSync(join(data, 'logs')).sort()).toEqual(['aeolus.log', 'aeolus.log.1']);
   });
 
+  /** What a held step waits for: the other writer wrote its record, or moved the log aside and let go of the lock. */
+  const until = {
+    aRecordWritten: () => `cat "${log()}" "${previous()}" 2>/dev/null | grep -q '"action":"turn"'`,
+    theLogMovedAside: () => `[ -f "${previous()}" ] && [ ! -d "${log()}.lock" ]`,
+  };
+
+  interface Hold {
+    /** The command of the move aside to hold: the look at the size, the move, or the lock let go. */
+    step: 'wc' | 'mv' | 'rmdir';
+    until: string;
+    /** Holds once the step has run, not before it. */
+    isAfter?: boolean;
+  }
+
   /**
-   * Two writers at a log that reached its limit, the first held at a step of
-   * its move aside (its look at the size, or the move itself) until the second
-   * has written its record: the moment two writers rotating at once collide.
-   * Answers once both are done.
+   * Two writers at a log that reached its limit, each step given held the
+   * first time a writer takes it: the moments two writers rotating at once
+   * collide. The first writer starts alone and reaches the first hold; the
+   * second starts then. Answers both runs once both are done.
    */
-  async function twoWritersWithTheFirstHeldAt(step: 'wc' | 'mv'): Promise<void> {
+  async function twoWritersHeldAt(...holds: Hold[]): Promise<Run[]> {
     const bin = join(data, 'bin');
-    const held = join(data, 'held');
     mkdirSync(bin, { recursive: true });
-    const real = spawnSync('bash', ['-c', `command -v ${step}`], { encoding: 'utf8' }).stdout.trim();
-    writeFileSync(
-      join(bin, step),
-      [
-        '#!/usr/bin/env bash',
-        // mv also moves the turn marker into place: hold only the move of the log.
-        `[ ${step} = wc ] || [ "\${*: -1}" = "${log()}.1" ] || exec ${real} "$@"`,
-        `if mkdir "${held}" 2>/dev/null; then`,
-        '  for _ in $(seq 500); do',
-        `    cat "${log()}" "${previous()}" 2>/dev/null | grep -q '"action":"turn"' && break`,
-        '    sleep 0.01',
-        '  done',
-        'fi',
-        `exec ${real} "$@"`,
-        '',
-      ].join('\n'),
-    );
-    chmodSync(join(bin, step), 0o755);
+    const only = { wc: '', mv: `${log()}.1`, rmdir: `${log()}.lock` };
+    for (const hold of holds) {
+      const real = spawnSync('bash', ['-c', `command -v ${hold.step}`], { encoding: 'utf8' }).stdout.trim();
+      writeFileSync(
+        join(bin, hold.step),
+        [
+          '#!/usr/bin/env bash',
+          // mv and rmdir also serve the turn marker: hold only those of the move aside.
+          only[hold.step] === '' ? '' : `[ "\${*: -1}" = "${only[hold.step]}" ] || exec ${real} "$@"`,
+          `if mkdir "${join(data, `held-${hold.step}`)}" 2>/dev/null; then`,
+          hold.isAfter === true ? `  ${real} "$@"; status=$?` : '',
+          '  for _ in $(seq 500); do',
+          `    ${hold.until} && break`,
+          '    sleep 0.01',
+          '  done',
+          hold.isAfter === true ? '  exit "$status"' : '',
+          'fi',
+          `exec ${real} "$@"`,
+          '',
+        ].join('\n'),
+      );
+      chmodSync(join(bin, hold.step), 0o755);
+    }
     const aWriter = () =>
       start('aeolus-turn.sh', {
         stdin: JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt: 'hello' }),
         env: { AEOLUS_LOG_MAX_BYTES: '1000', PATH: `${bin}:${process.env.PATH ?? ''}` },
       });
+    const firstHeld = join(data, `held-${holds[0]?.step ?? 'wc'}`);
 
     const first = aWriter();
-    await expect.poll(() => statSync(held, { throwIfNoEntry: false }) !== undefined).toBe(true);
+    await expect.poll(() => statSync(firstHeld, { throwIfNoEntry: false }) !== undefined).toBe(true);
     const second = aWriter();
-    const exits = await Promise.all([first.exited, second.exited]);
+    const runs = await Promise.all([first.done, second.done]);
 
-    expect(exits.map((exit) => exit.status)).toEqual([0, 0]);
+    expect(runs.map((done) => done.status)).toEqual([0, 0]);
+    return runs;
   }
 
   /** The records both logs hold after the filler a test started the log with. */
@@ -1659,7 +1689,7 @@ describe("the plugin's log is capped: at its size limit it moves aside as aeolus
     crew();
     const older = aLogOf(1000);
 
-    await twoWritersWithTheFirstHeldAt('wc');
+    await twoWritersHeldAt({ step: 'wc', until: until.aRecordWritten() });
 
     expect(read(previous())?.startsWith(older)).toBe(true);
     expect(recordsAfter(older)).toMatchObject(twoTurns);
@@ -1669,9 +1699,23 @@ describe("the plugin's log is capped: at its size limit it moves aside as aeolus
     crew();
     const older = aLogOf(1000);
 
-    await twoWritersWithTheFirstHeldAt('mv');
+    await twoWritersHeldAt({ step: 'mv', until: until.aRecordWritten() });
 
     expect(read(previous())?.startsWith(older)).toBe(true);
+    expect(recordsAfter(older)).toMatchObject(twoTurns);
+  });
+
+  it('prints nothing when a writer finds the log it found at the limit already moved aside by another', async () => {
+    crew();
+    const older = aLogOf(1000);
+
+    const runs = await twoWritersHeldAt(
+      { step: 'wc', until: until.theLogMovedAside() },
+      { step: 'rmdir', until: until.aRecordWritten(), isAfter: true },
+    );
+
+    expect(runs.map((done) => done.stderr)).toEqual(['', '']);
+    expect(read(previous())).toBe(older);
     expect(recordsAfter(older)).toMatchObject(twoTurns);
   });
 
@@ -1784,5 +1828,58 @@ describe("where a folder's identity lives (#658)", () => {
     expect(lstatSync(join(data, 'ships')).isSymbolicLink()).toBe(true);
     expect(readFileSync(join(crews(), identityName()), 'utf8')).toBe(anIdentity);
     expect(dirname(identityFile())).toBe(crews());
+  });
+});
+
+describe('no plugin script prints a shell error for an optional file that is missing', () => {
+  /**
+   * Every script, run as a session or a hook runs it, in a folder whose
+   * watcher, wake bridge, turn marker, waiting count, report time, model and
+   * log were never written.
+   */
+  const scripts: readonly (readonly string[])[] = [
+    ['aeolus-identity.sh', 'show'],
+    ['aeolus-identity.sh', 'turn'],
+    ['aeolus-identity.sh', 'path'],
+    ['aeolus-watch-status.sh'],
+    ['aeolus-status.sh'],
+    ['aeolus-report-due.sh'],
+    ['aeolus-model.sh'],
+    ['aeolus-fleet.sh', 'whoami'],
+    ['aeolus-fleet.sh', 'send', '-'],
+    ['aeolus-inbox.sh'],
+    ['aeolus-wait.sh'],
+    ['aeolus-watch-guard.sh'],
+    ['aeolus-turn.sh'],
+    ['aeolus-stop.sh'],
+    ['aeolus-session-start.sh'],
+    ['aeolus-codex-wake.sh', 'start', 'thread-1'],
+    ['aeolus-identity.sh', 'delete'],
+  ];
+  const payload = () => JSON.stringify({ hook_event_name: 'Stop', cwd: folder, model: 'claude-opus-5-5', tool_input: { command: 'ls' } });
+  const aShellErrorForAMissingFile = /No such file or directory|cannot open/;
+
+  async function stderrOfEach(): Promise<string[]> {
+    const errors: string[] = [];
+    for (const [script = '', ...args] of scripts) {
+      const { stderr } = await start(script, { args, stdin: payload(), env: { AEOLUS_MAX_SECONDS: '1' } }).done;
+      errors.push(`${script} ${args.join(' ')}: ${stderr}`);
+    }
+    return errors;
+  }
+
+  it('in a folder that crews no ship', async () => {
+    const errors = await stderrOfEach();
+
+    expect(errors.filter((error) => aShellErrorForAMissingFile.test(error))).toEqual([]);
+  });
+
+  it('in a folder that crews a ship', async () => {
+    fleet = await startStubFleet([{ status: 200, body: { waiting: 1, deliveries: [] } }]);
+    crew(fleet.url);
+
+    const errors = await stderrOfEach();
+
+    expect(errors.filter((error) => aShellErrorForAMissingFile.test(error))).toEqual([]);
   });
 });
