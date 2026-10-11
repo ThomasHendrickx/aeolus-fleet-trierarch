@@ -13,7 +13,10 @@
     "aeolus",
     "agents",
     "fleet",
-    "codex"
+    "codex",
+    "claude-code",
+    "multi-agent",
+    "mcp"
   ],
   "skills": "./skills/",
   "interface": {
@@ -27,7 +30,7 @@
       "Receive and answer fleet messages",
       "Restore a ship per folder"
     ],
-    "websiteURL": "https://github.com/ThomasHendrickx/aeolus-fleet",
+    "websiteURL": "https://aeolus-fleet.dev",
     "defaultPrompt": [
       "$aeolus-crew <fleetUrl> <shipId> <secret>",
       "Show the Aeolus ship this folder crews."
