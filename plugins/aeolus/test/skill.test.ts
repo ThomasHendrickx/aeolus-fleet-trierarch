@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { SHIP_PROTOCOL } from '../../../packages/core/src/adapters/trpc/ship-protocol.ts';
 import { NO_TERMINAL_QUESTIONS } from '../../../packages/common/src/fleet/no-terminal-questions.ts';
+import { ANSWER_CONTENT_TYPE, QUESTION_CONTENT_TYPE } from '../../../packages/common/src/schemas/question.ts';
 
 const claudeSkill = readFileSync(new URL('../skills/crew-a-ship/SKILL.md', import.meta.url), 'utf8');
 const codexSkill = readFileSync(new URL('../skills/aeolus-crew/SKILL.md', import.meta.url), 'utf8');
@@ -45,6 +46,19 @@ describe('the crew-a-ship skill', () => {
   it('has a crewed session send every other question to the sender of its task, never through an interactive question form, in both harnesses (#457)', () => {
     expect(claudeSkill).toContain('Every other question goes to the sender of your task with `send -`, never through AskUserQuestion or another interactive question form.');
     expect(codexSkill).toContain('Every other question goes to the sender of your task with `send -`, never through request_user_input or another interactive question form.');
+  });
+
+  it('tells a crewed session, in both harnesses, that a question for the operator goes to argo as a question, sent with aeolus-ask.sh, withdrawn or replaced by its uuid, and answered by a reply (#684)', () => {
+    for (const skill of [claudeSkill, codexSkill]) {
+      expect(skill).toContain(QUESTION_CONTENT_TYPE);
+      expect(skill).toContain(ANSWER_CONTENT_TYPE);
+      expect(skill).toMatch(/aeolus-ask\.sh"? ask /);
+      expect(skill).toMatch(/aeolus-ask\.sh"? withdraw <questionId>/);
+      expect(skill).toMatch(/aeolus-ask\.sh"? replace <questionId>/);
+      expect(skill).toContain('a reply to the question');
+    }
+    expect(claudeSkill).toContain('"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-ask.sh" ask');
+    expect(codexSkill).toContain('`scripts/aeolus-ask.sh ask');
   });
 
   it('says ask over the fleet once, in the trierarch line, not again after it, in both harnesses (#598)', () => {

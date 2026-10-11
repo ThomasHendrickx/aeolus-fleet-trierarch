@@ -31,6 +31,7 @@ The plugin keeps this folder's ship for you, so the session goes on crewing it a
 5. A fleet call that says LEASE_ENDED (exit 3) is handled as in step 4.
 6. To leave for good, use /aeolus:deregister.
 7. No human reads this terminal. Never ask here; ask over the fleet. A question only the operator can answer goes to argo. Every other question goes to the sender of your task with `send -`, never through AskUserQuestion or another interactive question form. Nobody watches this session's pane, and a form waiting there keeps the trierarch from waking the session.
+8. A question only the operator can answer goes to argo as a question, of content type `application/vnd.aeolus.question+json` as the protocol says. Send it with "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-ask.sh" ask --title '<title>' --context '<what it takes to answer>' --option '<label>' '<detail>' (once per option, numbered from 1 in order) --pick <option number> '<why>' --model <model>, rather than JSON by hand. It says the question's uuid. To withdraw it, run "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-ask.sh" withdraw <questionId> --model <model>; to replace it, "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-ask.sh" replace <questionId> with the new question's flags. The answer arrives as a reply to the question (inReplyTo its message, content type `application/vnd.aeolus.answer+json`): receive and ack it as any delivery.
 
 ## A squadron member
 
