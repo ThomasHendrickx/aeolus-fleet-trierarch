@@ -22,7 +22,7 @@ export interface Observed {
   readonly ships: Readonly<Record<string, { readonly inbox: InboxAnswer; readonly turn: Turn }>>;
   /** For each entry crewing whose session started: what its screen shows in its launch window (#382). */
   readonly launches: Readonly<Record<string, LaunchSeen>>;
-  /** The entries it would watch whose folder holds no identity, so it cannot see their inbox (#659). */
+  /** The entries it would watch or report on whose folder holds no identity, so it cannot see their inbox or report for them (#659, #664). */
   readonly withoutIdentity: readonly ShipId[];
 }
 
@@ -54,7 +54,7 @@ export type Action =
   | { readonly kind: 'modelRefused'; readonly shipId: ShipId; readonly shipName?: string; readonly harness: string; readonly version: string; readonly model: string }
   /** A session on a harness version its launch screens were not checked on showed no activity (#594): argo told once per harness and version. */
   | { readonly kind: 'screensUnchecked'; readonly shipId: ShipId; readonly shipName?: string; readonly harness: string; readonly version: string; readonly checkedOn: string }
-  /** A running session's folder holds no identity (#659): argo told, as nothing reaches it until a human crews it again. */
+  /** A ship's folder holds no identity while it runs, restarts or crashed (#659, #664): argo told, as nothing reaches it until a human crews it again. */
   | { readonly kind: 'identityGone'; readonly shipId: ShipId; readonly shipName?: string }
   | { readonly kind: 'argo'; readonly report: ArgoReport }
   /** A clear request (decision 0032): remove the kept worktree it names, or, when none is kept, confirm alone. */
@@ -91,6 +91,9 @@ const CRASHED_NOTE = 'blocked: session crashed, restart budget spent';
 
 /** The statuses the reconciler writes; crewing and running at the first crew are the crew's own to write. */
 const WRITTEN: ReadonlySet<Entry['state']> = new Set(['running', 'restarting', 'crashed']);
+
+/** The states whose folder holds the ship's identity: a crewing one has none until it registers (#664). */
+export const HOLDS_IDENTITY: ReadonlySet<Entry['state']> = new Set(['running', 'restarting', 'crashed']);
 
 interface Step {
   readonly entry?: Entry;
@@ -493,13 +496,14 @@ function crashReport(entry: Entry, at: { exits: number; now: Date; failedStart?:
 }
 
 /**
- * A running entry whose folder holds no identity (#659), as when its
- * harness's plugin was uninstalled: its inbox cannot be seen, so it is woken
- * no more. Argo is told once per loss; once the identity is back, a later
- * loss is told again.
+ * An entry running, restarting or crashed whose folder holds no identity
+ * (#659, #664), as when its harness's plugin was uninstalled: its inbox cannot
+ * be seen and no report goes on its behalf, so it is woken no more. Argo is
+ * told once per loss, whatever state it moves between; once the identity is
+ * back, a later loss is told again.
  */
 function identityStep(entry: Entry, observed: Observed): Step {
-  const isGone = entry.state === 'running' && observed.withoutIdentity.includes(entry.shipId);
+  const isGone = HOLDS_IDENTITY.has(entry.state) && observed.withoutIdentity.includes(entry.shipId);
   const { isIdentityGone, ...back } = entry;
   if (isGone && isIdentityGone === undefined) {
     return { entry: { ...entry, isIdentityGone: true }, actions: [{ kind: 'identityGone', shipId: entry.shipId, ...(entry.shipName !== undefined && { shipName: entry.shipName }) }], starts: 0 };

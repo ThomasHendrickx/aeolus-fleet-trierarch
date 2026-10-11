@@ -3,7 +3,7 @@ import { CREW_REQUEST_REASON_MAX_LENGTH, type ShipId } from '@aeolus-fleet/commo
 import { putEntry, removeEntry, withState, type Entry, type TrierarchState } from './entry.js';
 import { MODEL_OPTION } from './detected-options.js';
 import type { FleetPort, HarnessPort, LaunchSeen, LoggedAction, Logger, ProcessPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
-import { reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
+import { HOLDS_IDENTITY, reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
 import type { RefuseModel } from './refuse-model.js';
 import type { Clock } from './shared/clock.js';
 
@@ -86,11 +86,9 @@ async function observe(state: TrierarchState, deps: RunPassDeps): Promise<Observ
       const model = entry.options[MODEL_OPTION];
       launches[entry.shipId] = await harness.launchSeen({ shipId: entry.shipId, ...(model !== undefined && { model }) });
     }
-    const isWatched = entry.state === 'running' || (entry.state === 'crewing' && session !== undefined);
-    if (!isWatched || folder === undefined || session?.status === 'exited') {
-      continue;
-    }
-    if (harness === undefined) {
+    const isWatched = (entry.state === 'running' || (entry.state === 'crewing' && session !== undefined)) && session?.status !== 'exited';
+    // Its identity is looked at too while the trierarch would report on its behalf, as when its session exits in this pass (#664).
+    if ((!isWatched && !HOLDS_IDENTITY.has(entry.state)) || folder === undefined || harness === undefined) {
       continue;
     }
     const crewToken = await harness.crewTokenOf(folder);
@@ -98,7 +96,9 @@ async function observe(state: TrierarchState, deps: RunPassDeps): Promise<Observ
       withoutIdentity.push(entry.shipId);
       continue;
     }
-    ships[entry.shipId] = { inbox: await deps.fleet.inbox(crewToken), turn: await harness.turnOf(folder) };
+    if (isWatched) {
+      ships[entry.shipId] = { inbox: await deps.fleet.inbox(crewToken), turn: await harness.turnOf(folder) };
+    }
   }
   return { sessions, worktrees, ships, launches, withoutIdentity };
 }
@@ -198,10 +198,13 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
       return state;
     case 'report': {
       const crewToken = entry.folder === undefined ? undefined : await harnessOf(entry, deps)?.crewTokenOf(entry.folder);
-      if (crewToken !== undefined) {
-        await deps.fleet.report({ crewToken, state: 'blocked', note: action.note });
-        log(deps, { ...about(state, { shipId: entry.shipId, action: 'report' }), outcome: `reported ${action.note}` });
+      if (crewToken === undefined) {
+        // Argo is told by the identityGone action (#664).
+        log(deps, { ...about(state, { shipId: entry.shipId, action: 'report' }), outcome: `not reported ${action.note}, as its folder holds no identity` });
+        return state;
       }
+      await deps.fleet.report({ crewToken, state: 'blocked', note: action.note });
+      log(deps, { ...about(state, { shipId: entry.shipId, action: 'report' }), outcome: `reported ${action.note}` });
       return state;
     }
   }
@@ -448,16 +451,17 @@ async function screensUnchecked(at: CarryOut & { action: Extract<Action, { kind:
 }
 
 /**
- * A running session's folder holds no identity (#659): the trierarch cannot
- * see its inbox, so nothing wakes it while its lease still holds. Argo is
- * told, naming the machine and the ship, as only a crew again recovers it.
+ * A ship's folder holds no identity (#659, #664): the trierarch cannot report
+ * on its behalf or see its inbox, so nothing wakes it while its lease still
+ * holds. Argo is told, naming the machine and the ship, as only a crew again
+ * recovers it.
  */
 async function identityGone(at: CarryOut & { action: Extract<Action, { kind: 'identityGone' }> }): Promise<void> {
   const { action, deps } = at;
   const { shipId, shipName } = action;
   const machine = await deps.fleet.whoami();
   await deps.fleet.reportToArgo({
-    text: `${machine.name}: ${shipName ?? shipId} (${shipId}): its session runs, but its folder holds no identity, so the trierarch no longer watches its inbox or wakes it. Restart it in the console to crew it again.`,
+    text: `${machine.name}: ${shipName ?? shipId} (${shipId}): its folder holds no identity, so the trierarch can no longer report on its behalf, watch its inbox or wake it. Restart it in the console to crew it again.`,
     idempotencyKey: `trierarch:identity-gone:${shipId}:${deps.clock.now().toISOString()}`,
   });
   log(deps, { shipId, ...(shipName !== undefined && { shipName }), action: 'identityGone', outcome: 'its folder holds no identity, so it is no longer woken; argo told' });
