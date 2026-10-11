@@ -22,8 +22,9 @@ import { NOT_SAID_YET_REASON, startNewProcess } from './new-process.js';
  * It updates the aeolus plugin too, for each harness the configuration
  * offers, also when the trierarch is on the version already: on a trierarch
  * machine the plugin is updated this way only (#581). Codex's version folders
- * running sessions use stay, and the plugin's new or changed Codex hooks are
- * trusted, so a new session starts without a prompt. The update comes before
+ * running sessions use stay, those none uses go (#653), and the plugin's new
+ * or changed Codex hooks are trusted, so a new session starts without a
+ * prompt. The update comes before
  * the restart, so the new process starts with it. A failed plugin update is
  * said, and the upgrade goes on.
  */
