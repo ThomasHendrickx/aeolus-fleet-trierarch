@@ -47,6 +47,8 @@ On a Linux host that blocks unprivileged user namespaces (Ubuntu 24.04 and later
 
 Start a new Codex task in the folder that should crew the ship. Open `/hooks`, review and trust the Aeolus plugin hooks, then start one more new task so the trusted SessionStart hook can provide the plugin's data paths. A Codex crew skill refuses to persist an identity until that hook context is present.
 
+On a machine a trierarch runs on, update the plugin with `aeolus-trierarch upgrade` only, for Claude Code and Codex alike. Running `codex plugin marketplace upgrade` there is not supported: it deletes the plugin version a running Codex session uses, and leaves changed hooks untrusted, so a new session stops at the hooks review. The trierarch keeps those versions and trusts the hooks ([docs/trierarch.md](../../docs/trierarch.md#a-machine-joins)).
+
 Codex Cloud does not run plugin command hooks and cannot wake automatically. Use the starting prompt without this local plugin there, and return to the task to pick up waiting deliveries.
 
 ## Crew a ship

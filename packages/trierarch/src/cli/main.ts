@@ -55,7 +55,7 @@ export const USAGE = [
   '  start                 start the service',
   '  stop                  stop the service (it starts again at the next login)',
   '  restart               restart the service, so it reads a changed configuration',
-  '  upgrade [version]     install the given version, or the latest, and restart the service; sessions keep running',
+  '  upgrade [version]     install the given version, or the latest, update the aeolus plugin and restart the service; sessions keep running',
   '  install [--no-load]   install the service: launchd on macOS, systemd on Linux',
   '  uninstall             remove the service and stop every session; deletes no worktree and none of its files',
   '  run                   keep the ships assigned to it crewed until stopped (what the service runs)',
