@@ -4,13 +4,14 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { cappedLogStream, isWritingTo } from '../adapters/capped-log.js';
 import { createClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import { createCodexSetup } from '../adapters/codex-setup.js';
 import { createDetectedFile } from '../adapters/detected-file.js';
 import { createDetectors } from '../adapters/detectors.js';
 import { loadConfiguration, readCrewFile, readRunningFile, TrierarchFileError } from '../adapters/files.js';
 import { createJsonState } from '../adapters/json-state.js';
-import { createLogger, readLogLine, renderLogLine } from '../adapters/log.js';
+import { createLogger, readLogLine, renderLogLine, type LogStream } from '../adapters/log.js';
 import { createStyle, isColourTerminal, type Style } from '../adapters/style.js';
 import { trierarchPaths } from '../adapters/paths.js';
 import { aeolusPluginVersion, PLUGIN_HARNESSES } from '../adapters/plugin.js';
@@ -324,10 +325,14 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       return { data: report, text: report.said.join('\n') };
     },
     run: async () => {
+      const now = (): Date => new Date();
+      // Where launchd writes stdout and stderr to the log file, the trierarch caps it; the journal caps itself.
+      const file = join(paths.logs, 'trierarch.log');
+      const capped = (stream: LogStream, descriptor: number): LogStream => (isWritingTo(descriptor, file) ? cappedLogStream({ file, stream, now }) : stream);
       const logger = createLogger({
-        out: { write: (text) => process.stdout.write(text), isTerminal: process.stdout.isTTY },
-        err: { write: (text) => process.stderr.write(text), isTerminal: process.stderr.isTTY },
-        now: () => new Date(),
+        out: capped({ write: (text) => process.stdout.write(text), isTerminal: process.stdout.isTTY }, process.stdout.fd),
+        err: capped({ write: (text) => process.stderr.write(text), isTerminal: process.stderr.isTTY }, process.stderr.fd),
+        now,
       });
       await runTrierarch({ paths, homeDirectory, env, managedSettings: machine.managedSettings, signal: untilStopped(), logger });
       return { data: { stopped: true }, text: 'aeolus-trierarch stopped.' };
