@@ -2,7 +2,7 @@ import type { LaunchSeen } from '../core/ports.js';
 import { launchSeenWith, type LaunchTexts } from './launch-screen.js';
 
 /**
- * Codex's screen in a session's launch window (#382), as Codex 0.160.1
+ * Codex's screen in a session's launch window (#382), as Codex 0.162.1
  * writes it: the one place its texts are matched, tested on screens captured
  * from real sessions (test/screens). "• Working" shows even with no tool
  * call, so it is no activity.
@@ -13,6 +13,9 @@ const CODEX_TEXTS: LaunchTexts = {
   refused: /"type":"invalid_request_error","message":"The '([^']+)' model is not supported/gu,
   screens: [],
 };
+
+/** The Codex version the texts above were checked on, the version its screens in test/screens were captured on (#594). */
+export const CODEX_SCREENS_CHECKED_ON = '0.162.1';
 
 export function codexLaunchSeen(at: { screen: string; model?: string }): LaunchSeen {
   return launchSeenWith(CODEX_TEXTS, at);

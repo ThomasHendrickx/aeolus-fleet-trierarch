@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
-import { codexLaunchSeen } from './codex-screen.js';
+import { CODEX_SCREENS_CHECKED_ON, codexLaunchSeen } from './codex-screen.js';
 
-// On screens of Codex 0.160.1, captured from real sessions (#382).
+// On screens of Codex 0.162.1, captured from real sessions (#382, #594).
 
 function screen(name: string): string {
   return readFileSync(new URL(`../../test/screens/codex-${name}.txt`, import.meta.url), 'utf8');
@@ -17,6 +17,10 @@ function promptedOnly(name: string): string {
 }
 
 describe('what a Codex screen shows in its launch window', () => {
+  it.each(['ran', 'explored', 'refused', 'refused-default', 'woken'])('is checked on the Codex version its screen was captured on (%s)', (name) => {
+    expect(screen(name)).toContain(`>_ OpenAI Codex (v${CODEX_SCREENS_CHECKED_ON})`);
+  });
+
   it.each(['ran', 'explored'])('sees activity once its first prompt made a tool call (%s)', (name) => {
     expect(codexLaunchSeen({ screen: screen(name), model: 'gpt-5.6-sol' })).toEqual({ kind: 'active' });
   });
@@ -38,6 +42,6 @@ describe('what a Codex screen shows in its launch window', () => {
   });
 
   it('sees the model refused that a session launched without one used', () => {
-    expect(codexLaunchSeen({ screen: screen('refused-default') })).toEqual({ kind: 'refused', model: 'gpt-6.1-sol' });
+    expect(codexLaunchSeen({ screen: screen('refused-default') })).toEqual({ kind: 'refused', model: 'gpt-nonexistent-9' });
   });
 });
