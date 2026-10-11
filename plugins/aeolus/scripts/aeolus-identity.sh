@@ -77,14 +77,12 @@ case "$command" in
   delete)
     wake_pid_file="$(aeolus_wake_pid_file)"
     wake_thread_file="$(aeolus_wake_thread_file)"
-    if [ -f "$wake_pid_file" ]; then
-      wake_pid="$(head -n 1 "$wake_pid_file")"
+    if wake_pid="$(head -n 1 "$wake_pid_file" 2>/dev/null)"; then
       aeolus_process_is "$wake_pid" aeolus-codex-wake.sh && kill "$wake_pid" 2>/dev/null || true
       rm -f "$wake_pid_file" "$wake_thread_file"
     fi
     pid_file="$(aeolus_pid_file)"
-    if [ -f "$pid_file" ]; then
-      pid="$(head -n 1 "$pid_file")"
+    if pid="$(head -n 1 "$pid_file" 2>/dev/null)"; then
       aeolus_process_is "$pid" aeolus-wait.sh && kill "$pid" 2>/dev/null || true
       rm -f "$pid_file"
     fi

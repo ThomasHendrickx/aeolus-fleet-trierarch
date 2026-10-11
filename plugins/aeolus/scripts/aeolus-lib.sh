@@ -311,8 +311,7 @@ aeolus_process_is() {
 aeolus_is_watching() {
   local pid_file pid
   pid_file="$(aeolus_pid_file)" || return 1
-  [ -f "$pid_file" ] || return 1
-  pid="$(head -n 1 "$pid_file")"
+  pid="$(head -n 1 "$pid_file" 2>/dev/null)" || return 1
   aeolus_process_is "$pid" aeolus-wait.sh
 }
 
