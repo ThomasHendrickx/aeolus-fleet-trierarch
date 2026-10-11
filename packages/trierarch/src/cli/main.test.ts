@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
@@ -375,5 +375,26 @@ describe('aeolus-trierarch with CLAUDE_CONFIG_DIR and CODEX_HOME set (#521)', ()
     expect(code, output).toBe(0);
     expect(json(join(home, 'claude-config', '.claude.json'))).toMatchObject({ projects: { [drafts]: { hasTrustDialogAccepted: true } } });
     expect(existsSync(join(home, '.claude.json'))).toBe(false);
+  });
+
+  it('upgrade updates the aeolus plugin and exits 1, saying why, when it could not be updated (#581)', async () => {
+    // Stand-ins on PATH: npm says the trierarch is on its latest version already, Codex's plugin upgrade fails.
+    const bin = join(home, 'bin');
+    mkdirSync(bin);
+    const program = (name: string, script: string) => {
+      writeFileSync(join(bin, name), `#!/bin/sh\n${script}\n`);
+      chmodSync(join(bin, name), 0o700);
+    };
+    program('npm', `echo ${runningVersion()}`);
+    program('codex', 'echo "Error: could not reach github.com" >&2; exit 1');
+    vi.stubEnv('PATH', `${bin}:/usr/bin:/bin`);
+    const paths = trierarchPaths({ homeDirectory: home });
+    mkdirSync(paths.home, { recursive: true });
+    writeFileSync(paths.config, JSON.stringify({ ...CONFIGURATION, harnesses: { codex: { flags: [], options: {} } } }));
+
+    const { output, code } = await main(['upgrade'], machine({ HOME: home }));
+
+    expect(code).toBe(1);
+    expect(output).toContain('The aeolus plugin for Codex was not updated: codex plugin marketplace upgrade aeolus-fleet failed: Error: could not reach github.com.');
   });
 });
