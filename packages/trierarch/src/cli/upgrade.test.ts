@@ -347,6 +347,36 @@ describe('aeolus-trierarch upgrade', () => {
     expect(report.said).toContain('Releases up to 0.22.0 tag no aeolus plugin of their version: the plugin comes from main, the latest released one.');
   });
 
+  it('says plainly on a Codex downgrade that new Codex sessions keep starting on the newer plugin, kept for the sessions running on it (#652)', async () => {
+    offered = ['codex'];
+    pluginVersions = { codex: '0.24.0' };
+    isPluginLatest = true;
+
+    const report = await upgrade('0.23.0');
+
+    expect(report.said).toContain('New Codex sessions keep starting on the aeolus plugin 0.24.0, not on 0.23.0: Codex starts on the newest version it has, and 0.24.0 stays for the Codex sessions running on it.');
+  });
+
+  it('says no such thing when Codex has the aeolus plugin of the version (#652)', async () => {
+    offered = ['codex'];
+    pluginVersions = { codex: '0.23.0' };
+    isPluginLatest = true;
+
+    const report = await upgrade('0.23.0');
+
+    expect(report.said.join('\n')).not.toContain('New Codex sessions');
+  });
+
+  it('says no such thing for Claude Code, which starts on the version it installed (#652)', async () => {
+    offered = ['claude-code'];
+    pluginVersions = { 'claude-code': '0.24.0' };
+    isPluginLatest = true;
+
+    const report = await upgrade('0.23.0');
+
+    expect(report.said.join('\n')).not.toContain('sessions keep starting');
+  });
+
   it('says nothing of main when the release tag holds the aeolus plugin (#652)', async () => {
     offered = ['codex'];
 
