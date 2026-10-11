@@ -157,7 +157,7 @@ async function aTrierarchOnTheFleet(claudeCodeFlags: readonly string[] = CONFIGU
   });
   const fleet = createRestFleet(await readCrewFile(paths.crewToken));
   const sessions = standInSessions();
-  const harness = createClaudeCodeHarness({ configuration, plugin: { root: PLUGIN_ROOT, data: pluginData }, projects: join(home, '.claude', 'projects'), sessions, setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }), permissionModes: () => undefined });
+  const harness = createClaudeCodeHarness({ configuration, plugin: { root: PLUGIN_ROOT, data: pluginData, crews: join(home, '.aeolus', 'crews', 'claude-code') }, projects: join(home, '.claude', 'projects'), sessions, setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }), permissionModes: () => undefined });
   const workspace = createGitWorkspace({ configuration, root: paths.worktrees });
   const state = createJsonState(paths.state);
   const clock = { now: () => new Date() };
@@ -182,7 +182,7 @@ describe('the trierarch on a real fleet', () => {
     await expect(leasesOf(scout.shipId)).resolves.toBe(1);
     await expect(database.crewRequest.findUniqueOrThrow({ where: { shipId: scout.shipId } })).resolves.toMatchObject({ status: 'running' });
     expect(existsSync(join(worktree, 'README.md'))).toBe(true);
-    const identityPath = await runCommand('bash', { args: [`${PLUGIN_ROOT}/scripts/aeolus-identity.sh`, 'path'], env: { AEOLUS_FOLDER: worktree, AEOLUS_DATA: pluginData } });
+    const identityPath = await runCommand('bash', { args: [`${PLUGIN_ROOT}/scripts/aeolus-identity.sh`, 'path'], env: { AEOLUS_FOLDER: worktree, AEOLUS_DATA: pluginData, AEOLUS_CREWS: join(home, '.aeolus', 'crews', 'claude-code') } });
     const identity = readFileSync(identityPath.stdout.trim(), 'utf8');
     expect(identity).toContain(`shipId=${scout.shipId}\n`);
     expect(identity).toContain('wakeBy=trierarch\n');

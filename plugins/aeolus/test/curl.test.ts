@@ -21,12 +21,15 @@ const REAL_CURL = spawnSync('bash', ['-c', 'command -v curl'], { encoding: 'utf8
 
 let data: string;
 let folder: string;
+/** A throwaway home: the identities live under it, never in the real one. */
+let home: string;
 let bin: string;
 let curlArguments: string;
 let fleet: StubFleet | undefined;
 
 beforeEach(() => {
   data = mkdtempSync(join(tmpdir(), 'aeolus-data-'));
+  home = mkdtempSync(join(tmpdir(), 'aeolus-home-'));
   folder = mkdtempSync(join(tmpdir(), 'aeolus-folder-'));
   bin = join(data, 'bin');
   curlArguments = join(data, 'curl.arguments');
@@ -40,13 +43,14 @@ afterEach(async () => {
   await fleet?.close();
   fleet = undefined;
   rmSync(data, { recursive: true, force: true });
+  rmSync(home, { recursive: true, force: true });
   rmSync(folder, { recursive: true, force: true });
 });
 
 /** Runs a script as a session's command does, with the recording curl first on PATH. */
 function run(script: string, options: { args?: string[]; stdin?: string } = {}): Promise<number | null> {
   const child = spawn('bash', [join(SCRIPTS, script), ...(options.args ?? [])], {
-    env: { ...process.env, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, PATH: `${bin}:${process.env.PATH ?? ''}` },
+    env: { ...process.env, HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, PATH: `${bin}:${process.env.PATH ?? ''}` },
   });
   child.stdin.end(options.stdin ?? '');
   child.stdout.resume();

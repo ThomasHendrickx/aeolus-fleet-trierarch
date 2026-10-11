@@ -47,7 +47,7 @@ afterEach(() => {
 function run(script: string, options: { args?: string[]; env?: Record<string, string> } = {}) {
   const result = spawnSync('bash', [join(SCRIPTS, script), ...(options.args ?? [])], {
     encoding: 'utf8',
-    env: { ...process.env, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_GH: join(bin, 'gh'), PATH: `${bin}:/usr/bin:/bin`, ...options.env },
+    env: { ...process.env, AEOLUS_CREWS: join(data, 'crews'), AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_GH: join(bin, 'gh'), PATH: `${bin}:/usr/bin:/bin`, ...options.env },
   });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
