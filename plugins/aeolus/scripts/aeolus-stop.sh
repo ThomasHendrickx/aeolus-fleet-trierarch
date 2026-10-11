@@ -6,9 +6,11 @@
 #   Claude Code: a session wakes only through its own background task, which a
 #   hook cannot start, so when no watcher runs the hook keeps the turn open once
 #   and asks the session to start it.
-# In a folder a trierarch crews (wakeBy=trierarch), it only marks the turn idle:
-# the trierarch wakes the session. Silent when the folder crews no ship, a
-# watcher runs, or the fleet refused the crew token. Never fails the session.
+# Marks the turn idle whenever it lets the turn end, so the watcher wakes the
+# session only then. In a folder a trierarch crews (wakeBy=trierarch), that is
+# all it does: the trierarch wakes the session. Silent when the folder crews no
+# ship, a watcher runs, or the fleet refused the crew token. Never fails the
+# session.
 set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
@@ -18,20 +20,23 @@ identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
 [ -f "$identity" ] || exit 0
 
 if aeolus_woken_by_trierarch "$identity"; then
-  aeolus_mark_turn "$identity" idle
+  aeolus_mark_turn idle
   exit 0
 fi
 
 if [ -n "${PLUGIN_ROOT:-}" ]; then
+  aeolus_mark_turn idle
   session_id="$(aeolus_json_string "$payload" session_id)"
   [ -n "$session_id" ] && [ "${AEOLUS_CODEX_WAKE_DISABLED:-}" != 1 ] || exit 0
   "$(dirname "$0")/aeolus-codex-wake.sh" start "$session_id" >/dev/null 2>&1 || true
   exit 0
 fi
 
-printf '%s' "$payload" | grep -Eq '"stop_hook_active"[[:space:]]*:[[:space:]]*true' && exit 0
-aeolus_is_watching && exit 0
-[ -f "$(aeolus_refused_file)" ] && exit 0
+if printf '%s' "$payload" | grep -Eq '"stop_hook_active"[[:space:]]*:[[:space:]]*true' \
+  || aeolus_is_watching || [ -f "$(aeolus_refused_file)" ]; then
+  aeolus_mark_turn idle
+  exit 0
+fi
 
 root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 ship_name="$(aeolus_identity_get "$identity" shipName)"
