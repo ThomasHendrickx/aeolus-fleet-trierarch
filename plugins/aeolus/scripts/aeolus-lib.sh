@@ -180,11 +180,12 @@ AEOLUS_LOG_MAX_BYTES="${AEOLUS_LOG_MAX_BYTES:-1048576}"
 # A lock older than a minute was left by a writer stopped while moving it.
 aeolus_log_rotate() {
   local file="$1" size
-  size="$(wc -c < "$file" 2>/dev/null)" || return 0
+  [ -f "$file" ] || return 0
+  size="$(wc -c 2>/dev/null < "$file")" || return 0
   [ "${size// /}" -ge "$AEOLUS_LOG_MAX_BYTES" ] || return 0
   [ -z "$(find "${file}.lock" -maxdepth 0 -mmin +1 2>/dev/null)" ] || rmdir "${file}.lock" 2>/dev/null
   mkdir "${file}.lock" 2>/dev/null || return 0
-  size="$(wc -c < "$file" 2>/dev/null)" || size=0
+  size="$(wc -c 2>/dev/null < "$file")" || size=0
   [ "${size// /}" -lt "$AEOLUS_LOG_MAX_BYTES" ] || mv -f "$file" "${file}.1" 2>/dev/null
   rmdir "${file}.lock" 2>/dev/null
   return 0

@@ -32,6 +32,8 @@ fi
 
 wake_pid_file="$(aeolus_wake_pid_file)"
 wake_thread_file="$(aeolus_wake_thread_file)"
+# What happens after the bridge failed: the Codex skills re-arm it before a turn ends.
+NEXT='the session arms it again before it ends its turn'
 
 if [ "$mode" = start ]; then
   if [ -f "$wake_pid_file" ]; then
@@ -48,7 +50,7 @@ if [ "$mode" = start ]; then
     rm -f "$wake_pid_file" "$wake_thread_file"
   fi
   if ! probe="$("$(dirname "$0")/aeolus-inbox.sh" 2>&1)"; then
-    aeolus_log "$identity" wakeBridge 'failed: cannot reach the fleet, so automatic wake-up is not armed' 'the session arms it again before it ends its turn'
+    aeolus_log "$identity" wakeBridge 'failed: cannot reach the fleet, so automatic wake-up is not armed' "$NEXT"
     printf 'aeolus: cannot reach the fleet, so automatic wake-up is not armed: %s\n' "$probe" >&2
     exit 8
   fi
@@ -91,7 +93,10 @@ case "$status" in
     noun='deliveries'
     [ "$waiting" = 1 ] && noun='delivery'
     message="Aeolus has ${waiting} ${noun} waiting for ${ship_name}. Use \$aeolus-crew to receive and handle them, then re-arm automatic wake-up before ending the turn."
-    codex queue --thread "$thread_id" --message "$message"
+    if ! queued="$(codex queue --thread "$thread_id" --message "$message" 2>&1)"; then
+      aeolus_log "$identity" wakeBridge "failed: codex did not queue the wake to Codex task ${thread_id}: ${queued}" "$NEXT"
+      exit 1
+    fi
     verb='deliveries wait'
     [ "$waiting" = 1 ] && verb='delivery waits'
     aeolus_log "$identity" wakeBridge "queued a wake to Codex task ${thread_id}: ${waiting} ${verb}"
@@ -100,7 +105,7 @@ case "$status" in
     codex queue --thread "$thread_id" --message "$answer"
     ;;
   *)
-    printf '%s' "$answer" >&2
+    aeolus_log "$identity" wakeBridge "failed: the watcher stopped: ${answer}" "$NEXT"
     exit "$status"
     ;;
 esac
