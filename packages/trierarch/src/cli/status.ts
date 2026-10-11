@@ -13,7 +13,7 @@ import { PLAIN, stateTone, type Style } from '../adapters/style.js';
 /**
  * `aeolus-trierarch status`: how the trierarch stands on this machine, from
  * what is on it. The aeolus plugin version per configured harness, the
- * service and its process, the fleet and the trierarch's
+ * configured repositories by name, the service and its process, the fleet and the trierarch's
  * own lease (one whoami, no message), the caps in use, the entries by state,
  * and the worktrees kept or orphaned.
  */
@@ -28,6 +28,8 @@ export interface StatusReport {
   readonly runningVersion?: string;
   /** The aeolus plugin version per configured harness; null where the harness has none (#480). */
   readonly plugins: Readonly<Record<string, string | null>>;
+  /** The repositories the configuration offers, by name (#579). */
+  readonly repositories: readonly string[];
   readonly service: ServiceStatus;
   readonly fleet: { readonly url: string; readonly shipId?: string; readonly lease: Lease };
   readonly caps: { readonly ships: { readonly used: number; readonly cap: number }; readonly running: { readonly used: number; readonly cap: number } };
@@ -82,6 +84,7 @@ export async function inspectStatus(at: {
     version: at.version,
     ...(runningVersion !== undefined && { runningVersion }),
     plugins,
+    repositories: Object.keys(at.configuration.repositories),
     service,
     fleet: { url: at.crew.fleetUrl, ...(at.crew.shipId !== undefined && { shipId: at.crew.shipId }), lease },
     caps: {
@@ -145,6 +148,7 @@ export function describeStatus(report: StatusReport, style: Style = PLAIN): stri
   return [
     line('Version', describeVersion(report, style)),
     line('Aeolus plugin', describePlugins(report.plugins, style)),
+    line('Repositories', report.repositories.length === 0 ? 'none' : report.repositories.join(', ')),
     line('Service', describeService(report.service, style)),
     line('Fleet', describeFleet(report.fleet, style)),
     line('Caps', `${String(report.caps.ships.used)} of ${String(report.caps.ships.cap)} ships crewed here, ${String(report.caps.running.used)} of ${String(report.caps.running.cap)} sessions running`),
