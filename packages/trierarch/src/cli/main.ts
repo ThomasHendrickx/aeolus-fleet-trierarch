@@ -46,7 +46,7 @@ export const USAGE = [
   '  detect                detect again what each configured harness offers (models, effort) and keep it beside the configuration',
   '',
   'Look:',
-  '  status                the version, the aeolus plugin per harness, the service, the fleet and its own lease, caps in use, entries by state, kept worktrees and orphans',
+  '  status                the version, the aeolus plugin per harness, the repositories, the service, the fleet and its own lease, caps in use, entries by state, kept worktrees and orphans',
   '  list                  the ships it crews: ship, state, harness, workspace, since, restarts',
   '  logs [--lines <n>] [--follow]   the last lines of the log (the journal on Linux), and with --follow each new one',
   '',
