@@ -254,6 +254,26 @@ describe('Codex plugin state', () => {
     expect(shown.stdout).toContain('ship: scout');
   });
 
+  it("finds the same identity from a Codex skill's command run without AEOLUS_HARNESS (#687)", () => {
+    runScript('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout', 'aeolus_ct_v1_crew'] });
+
+    const shown = runScript('aeolus-identity.sh', { args: ['show'], env: { PLUGIN_DATA: '', PLUGIN_ROOT: '', AEOLUS_DATA: data, AEOLUS_FOLDER: folder } });
+
+    expect(shown.stdout).toContain('ship: scout');
+  });
+
+  it('finds the Claude Code identity first from a command run without AEOLUS_HARNESS, when both harnesses crew the folder (#687)', () => {
+    runScript('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout', 'aeolus_ct_v1_crew'] });
+    runScript('aeolus-identity.sh', {
+      args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1b', 'lookout', 'aeolus_ct_v1_other'],
+      env: { PLUGIN_ROOT: '', AEOLUS_HARNESS: 'claude-code' },
+    });
+
+    const shown = runScript('aeolus-identity.sh', { args: ['show'], env: { PLUGIN_DATA: '', PLUGIN_ROOT: '', AEOLUS_DATA: data, AEOLUS_FOLDER: folder } });
+
+    expect(shown.stdout).toContain('ship: lookout');
+  });
+
   it('moves the identity of a Codex session on the old layout to ~/.aeolus/crews/codex at the next session start, leaving a link (#658)', () => {
     const name = `${createHash('sha256').update(realpathSync(folder)).digest('hex').slice(0, 32)}.identity`;
     mkdirSync(join(data, 'ships'), { mode: 0o700 });
