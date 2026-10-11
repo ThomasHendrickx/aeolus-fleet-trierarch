@@ -67,6 +67,16 @@ mkdirSync(join(cache, ${JSON.stringify(to)}, 'scripts'), { recursive: true });
 writeFileSync(join(cache, ${JSON.stringify(to)}, 'scripts', 'aeolus-fleet.sh'), '# ${to}\\n');`;
 }
 
+/** Claude Code's user settings in `configDirectory`. */
+function aSettingsFile(configDirectory: string, settings: Record<string, unknown>): void {
+  mkdirSync(configDirectory, { recursive: true });
+  writeFileSync(join(configDirectory, 'settings.json'), `${JSON.stringify(settings, null, 2)}\n`);
+}
+
+function settingsIn(configDirectory: string): unknown {
+  return JSON.parse(readFileSync(join(configDirectory, 'settings.json'), 'utf8'));
+}
+
 function ran(): string[] {
   return existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter((line) => line !== '') : [];
 }
@@ -101,9 +111,40 @@ describe('the aeolus plugin update for Codex', () => {
     aCodexVersion('0.21.0');
     aProgram(codex, { then: codexUpgrading('0.22.0') });
 
-    await update().update('codex');
+    await update().update('codex', 'v0.23.0');
 
-    expect(ran()).toEqual(['codex plugin marketplace upgrade aeolus-fleet']);
+    expect(ran().at(-1)).toBe('codex plugin marketplace upgrade aeolus-fleet');
+  });
+
+  it("points Codex's aeolus-fleet marketplace at the release tag it is given before the upgrade, adding it again since Codex adds no second source (#652)", async () => {
+    aProgram(codex);
+
+    await update().update('codex', 'v0.23.0');
+
+    expect(ran()).toEqual(['codex plugin marketplace remove aeolus-fleet', 'codex plugin marketplace add ThomasHendrickx/aeolus-fleet --ref v0.23.0', 'codex plugin marketplace upgrade aeolus-fleet']);
+  });
+
+  it("points Codex's aeolus-fleet marketplace at main when it is given no tag (#652)", async () => {
+    aProgram(codex);
+
+    await update().update('codex', undefined);
+
+    expect(ran()).toContain('codex plugin marketplace add ThomasHendrickx/aeolus-fleet');
+  });
+
+  it('adds the marketplace also when Codex had none to remove (#652)', async () => {
+    aProgram(codex, { then: "if (process.argv[4] === 'remove') { process.stderr.write('Error: marketplace `aeolus-fleet` is not configured or installed'); process.exit(1); }" });
+
+    await update().update('codex', 'v0.23.0');
+
+    expect(ran().at(-1)).toBe('codex plugin marketplace upgrade aeolus-fleet');
+  });
+
+  it("says what Codex said when it cannot add the marketplace, and upgrades nothing (#652)", async () => {
+    aProgram(codex, { then: "if (process.argv[4] === 'add') { process.stderr.write('Error: could not reach github.com'); process.exit(1); }" });
+
+    await expect(update().update('codex', 'v0.23.0')).rejects.toThrow('codex plugin marketplace add ThomasHendrickx/aeolus-fleet --ref v0.23.0 failed: Error: could not reach github.com');
+    expect(ran()).not.toContain('codex plugin marketplace upgrade aeolus-fleet');
   });
 
   it('keeps the version folders running Codex sessions use beside the new one, as they were (#581)', async () => {
@@ -111,7 +152,7 @@ describe('the aeolus plugin update for Codex', () => {
     processes = [aProcess({ startedAt: hoursAgo(1) })];
     aProgram(codex, { then: codexUpgrading('0.22.0') });
 
-    await update().update('codex');
+    await update().update('codex', 'v0.23.0');
 
     expect(readdirSync(codexCache()).sort()).toEqual(['0.21.0', '0.22.0']);
     expect(readFileSync(join(codexCache(), '0.21.0', 'scripts', 'aeolus-fleet.sh'), 'utf8')).toBe('# 0.21.0\n');
@@ -121,7 +162,7 @@ describe('the aeolus plugin update for Codex', () => {
     aCodexVersion('0.21.0');
     aProgram(codex, { then: `rmSync(join(${JSON.stringify(codexCache())}, '0.21.0'), { recursive: true });`, status: 1, stderr: 'Error: could not reach github.com\n' });
 
-    await expect(update().update('codex')).rejects.toThrow('codex plugin marketplace upgrade aeolus-fleet failed: Error: could not reach github.com');
+    await expect(update().update('codex', 'v0.23.0')).rejects.toThrow('codex plugin marketplace upgrade aeolus-fleet failed: Error: could not reach github.com');
     expect(readFileSync(join(codexCache(), '0.21.0', 'scripts', 'aeolus-fleet.sh'), 'utf8')).toBe('# 0.21.0\n');
   });
 
@@ -131,7 +172,7 @@ describe('the aeolus plugin update for Codex', () => {
     processes = [aProcess({ startedAt: hoursAgo(1) })];
     aProgram(codex, { then: codexUpgrading('0.22.0', codexCache(codexHome)) });
 
-    await update({ CODEX_HOME: codexHome }).update('codex');
+    await update({ CODEX_HOME: codexHome }).update('codex', 'v0.23.0');
 
     expect(readdirSync(codexCache(codexHome)).sort()).toEqual(['0.21.0', '0.22.0']);
   });
@@ -142,7 +183,7 @@ describe('the aeolus plugin update for Codex', () => {
     processes = [aProcess({ startedAt: hoursAgo(2) })];
     aProgram(codex, { then: codexUpgrading('0.22.0') });
 
-    await update().update('codex');
+    await update().update('codex', 'v0.23.0');
 
     expect(readdirSync(codexCache()).sort()).toEqual(['0.21.0', '0.22.0']);
   });
@@ -153,7 +194,7 @@ describe('the aeolus plugin update for Codex', () => {
     processes = [aProcess({ startedAt: hoursAgo(30) })];
     aProgram(codex, { then: codexUpgrading('0.22.0') });
 
-    await update().update('codex');
+    await update().update('codex', 'v0.23.0');
 
     expect(readdirSync(codexCache()).sort()).toEqual(['0.20.5', '0.21.0', '0.22.0']);
   });
@@ -163,7 +204,7 @@ describe('the aeolus plugin update for Codex', () => {
     aCodexVersion('0.21.0', { installedAt: hoursAgo(24) });
     aProgram(codex, { then: codexUpgrading('0.22.0') });
 
-    await update().update('codex');
+    await update().update('codex', 'v0.23.0');
 
     expect(readdirSync(codexCache())).toEqual(['0.22.0']);
   });
@@ -173,7 +214,7 @@ describe('the aeolus plugin update for Codex', () => {
     processes = [aProcess({ program: 'node', startedAt: hoursAgo(30) }), aProcess({ program: '/opt/codex-tools/codexer', startedAt: hoursAgo(30) })];
     aProgram(codex, { then: codexUpgrading('0.22.0') });
 
-    await update().update('codex');
+    await update().update('codex', 'v0.23.0');
 
     expect(readdirSync(codexCache())).toEqual(['0.22.0']);
   });
@@ -183,7 +224,7 @@ describe('the aeolus plugin update for Codex', () => {
     processes = [aProcess({ program: '/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex', startedAt: hoursAgo(30) })];
     aProgram(codex, { then: codexUpgrading('0.22.0') });
 
-    await update().update('codex');
+    await update().update('codex', 'v0.23.0');
 
     expect(readdirSync(codexCache()).sort()).toEqual(['0.21.0', '0.22.0']);
   });
@@ -194,7 +235,7 @@ describe('the aeolus plugin update for Codex', () => {
     processes = [aProcess({ pid: 777, program: 'node', startedAt: hoursAgo(30) })];
     aProgram(codex, { then: codexUpgrading('0.22.0') });
 
-    await update().update('codex');
+    await update().update('codex', 'v0.23.0');
 
     expect(readdirSync(codexCache()).sort()).toEqual(['0.21.0', '0.22.0']);
   });
@@ -205,7 +246,7 @@ describe('the aeolus plugin update for Codex', () => {
     processes = [aProcess({ startedAt: new Date(hoursAgo(24).getTime() + 59_000) })];
     aProgram(codex, { then: codexUpgrading('0.22.0') });
 
-    await update().update('codex');
+    await update().update('codex', 'v0.23.0');
 
     expect(readdirSync(codexCache()).sort()).toEqual(['0.20.5', '0.21.0', '0.22.0']);
   });
@@ -216,7 +257,7 @@ describe('the aeolus plugin update for Codex', () => {
     processes = [aProcess({ startedAt: new Date(hoursAgo(24).getTime() + 60_000) })];
     aProgram(codex, { then: codexUpgrading('0.22.0') });
 
-    await update().update('codex');
+    await update().update('codex', 'v0.23.0');
 
     expect(readdirSync(codexCache()).sort()).toEqual(['0.21.0', '0.22.0']);
   });
@@ -227,7 +268,7 @@ describe('the aeolus plugin update for Codex', () => {
     const installed = join(codexCache(), '0.22.0');
     aProgram(codex, { then: `${codexUpgrading('0.22.0')}\nrequire('node:fs').utimesSync(${JSON.stringify(installed)}, new Date(${String(hoursAgo(48).getTime())}), new Date(${String(hoursAgo(48).getTime())}));` });
 
-    await update().update('codex');
+    await update().update('codex', 'v0.23.0');
 
     expect(readdirSync(codexCache()).sort()).toEqual(['0.21.0', '0.22.0']);
   });
@@ -237,7 +278,7 @@ describe('the aeolus plugin update for Codex', () => {
     mkdirSync(join(codexCache(), 'local'));
     aProgram(codex, { then: `rmSync(join(${JSON.stringify(codexCache())}, '0.21.0'), { recursive: true }); mkdirSync(join(${JSON.stringify(codexCache())}, '0.22.0'));` });
 
-    await update().update('codex');
+    await update().update('codex', 'v0.23.0');
 
     expect(readdirSync(codexCache()).sort()).toEqual(['0.22.0', 'local']);
   });
@@ -247,29 +288,63 @@ describe('the aeolus plugin update for Codex', () => {
     aCodexVersion('0.21.0', { installedAt: hoursAgo(24) });
     aProgram(codex, { status: 1, stderr: 'Error: could not reach github.com\n' });
 
-    await expect(update().update('codex')).rejects.toThrow('could not reach github.com');
+    await expect(update().update('codex', 'v0.23.0')).rejects.toThrow('could not reach github.com');
     expect(readdirSync(codexCache()).sort()).toEqual(['0.20.5', '0.21.0']);
   });
 
   it('runs the upgrade where Codex has no aeolus plugin version yet', async () => {
     aProgram(codex);
 
-    await update().update('codex');
+    await update().update('codex', 'v0.23.0');
 
-    expect(ran()).toEqual(['codex plugin marketplace upgrade aeolus-fleet']);
+    expect(ran().at(-1)).toBe('codex plugin marketplace upgrade aeolus-fleet');
   });
 });
 
 describe('the aeolus plugin update for Claude Code', () => {
-  it("updates Claude Code's aeolus-fleet marketplace, then the aeolus plugin from it", async () => {
-    await update().update('claude-code');
+  it("points Claude Code's aeolus-fleet marketplace at the release tag it is given, updates it, then the aeolus plugin from it (#652)", async () => {
+    await update().update('claude-code', 'v0.23.0');
 
-    expect(ran()).toEqual(['claude plugin marketplace update aeolus-fleet', 'claude plugin update aeolus@aeolus-fleet']);
+    expect(ran()).toEqual(['claude plugin marketplace add ThomasHendrickx/aeolus-fleet#v0.23.0', 'claude plugin marketplace update aeolus-fleet', 'claude plugin update aeolus@aeolus-fleet']);
+  });
+
+  it("points Claude Code's aeolus-fleet marketplace at main when it is given no tag (#652)", async () => {
+    await update().update('claude-code', undefined);
+
+    expect(ran()[0]).toBe('claude plugin marketplace add ThomasHendrickx/aeolus-fleet');
+  });
+
+  it("drops the aeolus-fleet marketplace Claude Code's settings declare before adding it again, since Claude Code adds no other source while they declare one, and keeps the rest (#652)", async () => {
+    aSettingsFile(join(home, '.claude'), { theme: 'dark', extraKnownMarketplaces: { 'aeolus-fleet': { source: { source: 'github', repo: 'ThomasHendrickx/aeolus-fleet', ref: 'v0.22.0' } }, other: { source: { source: 'github', repo: 'someone/other' } } } });
+
+    await update().update('claude-code', 'v0.23.0');
+
+    expect(settingsIn(join(home, '.claude'))).toEqual({ theme: 'dark', extraKnownMarketplaces: { other: { source: { source: 'github', repo: 'someone/other' } } } });
+  });
+
+  it('drops it from the settings in CLAUDE_CONFIG_DIR when it is set (#652)', async () => {
+    const configDirectory = join(home, 'claude-elsewhere');
+    aSettingsFile(configDirectory, { extraKnownMarketplaces: { 'aeolus-fleet': { source: { source: 'github', repo: 'ThomasHendrickx/aeolus-fleet' } } } });
+
+    await update({ CLAUDE_CONFIG_DIR: configDirectory }).update('claude-code', 'v0.23.0');
+
+    expect(settingsIn(configDirectory)).toEqual({ extraKnownMarketplaces: {} });
+  });
+
+  it('leaves settings that declare no aeolus-fleet marketplace as they are, and writes none where there are none (#652)', async () => {
+    aSettingsFile(join(home, '.claude'), { theme: 'dark' });
+    const before = readFileSync(join(home, '.claude', 'settings.json'), 'utf8');
+
+    await update().update('claude-code', 'v0.23.0');
+    await update({ CLAUDE_CONFIG_DIR: join(home, 'none') }).update('claude-code', 'v0.23.0');
+
+    expect(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')).toBe(before);
+    expect(existsSync(join(home, 'none', 'settings.json'))).toBe(false);
   });
 
   it('says what Claude Code said when its update fails', async () => {
     aProgram(claude, { status: 1, stderr: 'Plugin "aeolus@aeolus-fleet" is not installed\n' });
 
-    await expect(update().update('claude-code')).rejects.toThrow('claude plugin marketplace update aeolus-fleet failed: Plugin "aeolus@aeolus-fleet" is not installed');
+    await expect(update().update('claude-code', 'v0.23.0')).rejects.toThrow('claude plugin marketplace add ThomasHendrickx/aeolus-fleet#v0.23.0 failed: Plugin "aeolus@aeolus-fleet" is not installed');
   });
 });

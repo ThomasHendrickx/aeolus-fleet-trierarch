@@ -27,6 +27,8 @@ let offered: PluginHarness[];
 let failingPluginUpdate: PluginHarness | undefined;
 let isHookTrustFailing: boolean;
 let isPluginLatest: boolean;
+/** The release tag each harness installed the aeolus plugin from, none for main. */
+let pluginTags: Partial<Record<PluginHarness, string | undefined>>;
 
 beforeEach(() => {
   pluginVersions = { 'claude-code': '0.21.0', codex: '0.21.0' };
@@ -35,6 +37,7 @@ beforeEach(() => {
   failingPluginUpdate = undefined;
   isHookTrustFailing = false;
   isPluginLatest = false;
+  pluginTags = {};
   installed = '0.17.1';
   latest = '0.17.2';
   lookups = 0;
@@ -110,8 +113,9 @@ const plugin = {
   get harnesses() {
     return offered;
   },
-  update: (harness: PluginHarness) => {
+  update: (harness: PluginHarness, tag: string | undefined) => {
     steps.push(`update ${harness}`);
+    pluginTags[harness] = tag;
     if (failingPluginUpdate === harness) {
       return Promise.reject(new Error('codex plugin marketplace upgrade aeolus-fleet failed: could not reach github.com'));
     }
@@ -298,13 +302,57 @@ describe('aeolus-trierarch upgrade', () => {
     expect(report.isPluginUpdated).toBe(true);
   });
 
-  it('says the aeolus plugin is on the latest version already when the update brings none (#581)', async () => {
+  it('says the aeolus plugin is on its version already when the update brings none (#581)', async () => {
     offered = ['codex'];
     isPluginLatest = true;
 
     const report = await upgrade();
 
-    expect(report.said).toContain('The aeolus plugin for Codex is on 0.21.0, the latest, already.');
+    expect(report.said).toContain('The aeolus plugin for Codex is on 0.21.0 already.');
+  });
+
+  it('installs the aeolus plugin of the version it upgrades to, from that release tag, for each harness (#652)', async () => {
+    offered = ['claude-code', 'codex'];
+
+    await upgrade('0.23.0');
+
+    expect(pluginTags).toEqual({ 'claude-code': 'v0.23.0', codex: 'v0.23.0' });
+  });
+
+  it('installs the aeolus plugin of the latest version on npm from its release tag when no version is given (#652)', async () => {
+    latest = '0.24.1';
+    offered = ['codex'];
+
+    await upgrade();
+
+    expect(pluginTags).toEqual({ codex: 'v0.24.1' });
+  });
+
+  it('installs the aeolus plugin of the version the trierarch is on already from its release tag (#652)', async () => {
+    installed = '0.23.0';
+    offered = ['claude-code'];
+
+    const report = await upgrade('0.23.0');
+
+    expect(report.isUpgraded).toBe(false);
+    expect(pluginTags).toEqual({ 'claude-code': 'v0.23.0' });
+  });
+
+  it('installs the aeolus plugin from main for a version up to 0.22.0, whose release tag holds no plugin of its version, and says so (#652)', async () => {
+    offered = ['claude-code', 'codex'];
+
+    const report = await upgrade('0.22.0');
+
+    expect(pluginTags).toEqual({ 'claude-code': undefined, codex: undefined });
+    expect(report.said).toContain('Releases up to 0.22.0 tag no aeolus plugin of their version: the plugin comes from main, the latest released one.');
+  });
+
+  it('says nothing of main when the release tag holds the aeolus plugin (#652)', async () => {
+    offered = ['codex'];
+
+    const report = await upgrade('0.23.0');
+
+    expect(report.said.join('\n')).not.toContain('from main');
   });
 
   it('updates the aeolus plugin also when the trierarch is on the version already (#581)', async () => {
