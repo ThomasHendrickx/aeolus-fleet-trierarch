@@ -18,6 +18,9 @@ cwd="${CLAUDE_PROJECT_DIR:-}"
 export AEOLUS_FOLDER="$cwd"
 export AEOLUS_DATA="${PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-}}"
 root="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}"
+# The Codex wake bridge logs to the plugin's log now: a .wake.log an earlier
+# plugin left beside the identities is no longer written, so it goes (#678).
+ships="$(aeolus_ships_dir 2>/dev/null)" && rm -f "$ships"/*.wake.log
 
 if [ -n "${PLUGIN_ROOT:-}" ]; then
   model="$(aeolus_json_string "$payload" model)"
