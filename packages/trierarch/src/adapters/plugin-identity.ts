@@ -3,20 +3,24 @@ import { readFile } from 'node:fs/promises';
 import type { HarnessPort, Turn } from '../core/ports.js';
 import { runCommand } from './run-command.js';
 
-/** The aeolus plugin as a harness installed it: its scripts and its data folder. */
+/** The aeolus plugin as a harness installed it: its scripts, its data folder, and where its sessions' identities live. */
 export interface AeolusPlugin {
   readonly root: string;
   readonly data: string;
+  /** ~/.aeolus/crews/<harness> (#658). */
+  readonly crews: string;
 }
 
 /**
  * A session's identity and turn, through the aeolus plugin's own
  * `aeolus-identity.sh`, never a copy of how the plugin names its files. The
- * same for every harness; each keeps them in its own plugin's data folder.
+ * same for every harness; each keeps them in a crews folder of its own. The
+ * data folder goes along, so the script moves an identity an older plugin
+ * kept there.
  */
 export function createPluginIdentity(plugin: AeolusPlugin): Pick<HarnessPort, 'prepareIdentity' | 'crewTokenOf' | 'removeIdentity' | 'turnOf'> {
   const identity = async (folder: string, args: readonly string[]): Promise<{ status: number; stdout: string; stderr: string }> =>
-    runCommand('bash', { args: [`${plugin.root}/scripts/aeolus-identity.sh`, ...args], env: { AEOLUS_FOLDER: folder, AEOLUS_DATA: plugin.data } });
+    runCommand('bash', { args: [`${plugin.root}/scripts/aeolus-identity.sh`, ...args], env: { AEOLUS_FOLDER: folder, AEOLUS_DATA: plugin.data, AEOLUS_CREWS: plugin.crews } });
 
   return {
     prepareIdentity: async ({ folder, identity: crew }) => {

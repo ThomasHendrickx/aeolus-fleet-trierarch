@@ -27,8 +27,6 @@ import { newKey } from '../packages/core/test/support/keys.js';
 
 const isEnabled = process.env.AEOLUS_PLUGIN_E2E === '1';
 const PLUGIN_DIR = fileURLToPath(new URL('../plugins/aeolus', import.meta.url));
-/** Where Claude Code keeps the data of a plugin loaded with --plugin-dir. */
-const PLUGIN_DATA = join(homedir(), '.claude', 'plugins', 'data', 'aeolus-inline');
 const TMUX_SESSION = 'aeolus-plugin-e2e';
 /** A session takes a while to start, think and call the fleet. */
 const SESSION_TIMEOUT_MS = 240_000;
@@ -39,6 +37,8 @@ let useCases: UseCases;
 let argo: Caller;
 let server: FastifyInstance;
 let folder: string;
+/** Where the session keeps its identity (AEOLUS_CREWS), apart from the crews on this machine. */
+let crews: string;
 let shipId: ShipId;
 let crewLine: string;
 
@@ -77,16 +77,15 @@ async function until(check: () => boolean | Promise<boolean>, what: string): Pro
   }
 }
 
-/** This test's ship's identity file in the plugin's data folder, found by its ship id. */
+/** This test's ship's identity file in the session's crews folder, found by its ship id. */
 function identityFile(): string | undefined {
-  const ships = join(PLUGIN_DATA, 'ships');
-  if (!existsSync(ships)) {
+  if (!existsSync(crews)) {
     return undefined;
   }
-  const name = readdirSync(ships).find(
-    (file) => file.endsWith('.identity') && readFileSync(join(ships, file), 'utf8').includes(`shipId=${shipId}\n`),
+  const name = readdirSync(crews).find(
+    (file) => file.endsWith('.identity') && readFileSync(join(crews, file), 'utf8').includes(`shipId=${shipId}\n`),
   );
-  return name === undefined ? undefined : join(ships, name);
+  return name === undefined ? undefined : join(crews, name);
 }
 
 /** Whether a live watcher holds this ship's lock. */
@@ -143,6 +142,7 @@ describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Claude Code ses
     crewLine = `/aeolus:crew ${fleetUrl} ${shipId} ${commissioned.secret ?? ''}`;
 
     folder = mkdtempSync(join(tmpdir(), 'aeolus-plugin-e2e-'));
+    crews = mkdtempSync(join(tmpdir(), 'aeolus-plugin-e2e-crews-'));
     try {
       tmux('kill-session', '-t', TMUX_SESSION);
     } catch {
@@ -156,11 +156,7 @@ describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Claude Code ses
     } catch {
       // Already gone.
     }
-    const file = identityFile();
-    if (file !== undefined) {
-      rmSync(file, { force: true });
-      rmSync(file.replace(/\.identity$/, '.watch.pid'), { force: true });
-    }
+    rmSync(crews, { recursive: true, force: true });
     rmSync(folder, { recursive: true, force: true });
     await server.close();
     await database.$disconnect();
@@ -169,7 +165,7 @@ describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Claude Code ses
   it('crews the ship with the crew line, and answers a message sent while it is idle, without anyone touching it', async () => {
     // No MCP server at all: the plugin's scripts make every fleet call.
     tmux(
-      'new-session', '-d', '-s', TMUX_SESSION, '-x', '200', '-y', '50', '-c', folder,
+      'new-session', '-d', '-s', TMUX_SESSION, '-x', '200', '-y', '50', '-c', folder, '-e', `AEOLUS_CREWS=${crews}`,
       `claude --plugin-dir '${PLUGIN_DIR}' --mcp-config '{"mcpServers":{}}' --strict-mcp-config --dangerously-skip-permissions`,
     );
     await until(() => {

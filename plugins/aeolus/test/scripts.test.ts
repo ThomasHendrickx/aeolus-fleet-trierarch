@@ -75,20 +75,23 @@ function start(script: string, options: { args?: string[]; env?: Record<string, 
   return { child, exited };
 }
 
-function crew(fleetUrl = 'https://fleet.example.com'): void {
-  expect(run('aeolus-identity.sh', { args: ['write', fleetUrl, SHIP_ID, 'scout', CREW_TOKEN] }).status).toBe(0);
+/** What a Codex skill's commands set: each harness keeps its sessions' identities in a crews folder of its own (#658). */
+const AS_CODEX = { AEOLUS_HARNESS: 'codex' };
+
+function crew(fleetUrl = 'https://fleet.example.com', env: Record<string, string> = {}): void {
+  expect(run('aeolus-identity.sh', { args: ['write', fleetUrl, SHIP_ID, 'scout', CREW_TOKEN], env }).status).toBe(0);
 }
 
-function identityFile(): string {
-  return run('aeolus-identity.sh', { args: ['path'] }).stdout.trim();
+function identityFile(env: Record<string, string> = {}): string {
+  return run('aeolus-identity.sh', { args: ['path'], env }).stdout.trim();
 }
 
 function pidFile(): string {
   return identityFile().replace(/\.identity$/, '.watch.pid');
 }
 
-function wakePidFile(): string {
-  return identityFile().replace(/\.identity$/, '.wake.pid');
+function wakePidFile(env: Record<string, string> = {}): string {
+  return identityFile(env).replace(/\.identity$/, '.wake.pid');
 }
 
 function wakeThreadFile(): string {
@@ -108,8 +111,8 @@ function aTurnEnded(): void {
 }
 
 /** The turn marker, through the plugin's own script. */
-function turn(): Run {
-  return run('aeolus-identity.sh', { args: ['turn'] });
+function turn(env: Record<string, string> = {}): Run {
+  return run('aeolus-identity.sh', { args: ['turn'], env });
 }
 
 /** The plugin's log, each line read by the trierarch's own log reader, as aeolus-trierarch logs reads its log. */
@@ -1014,7 +1017,7 @@ describe('the Stop hook', () => {
 
   it('re-arms the Codex wake bridge for the task by itself at the end of every turn', async () => {
     fleet = await startStubFleet([inbox(1)]);
-    crew(fleet.url);
+    crew(fleet.url, AS_CODEX);
     aTurnEnded();
     const bin = join(data, 'bin');
     const calls = join(data, 'codex.calls');
@@ -1165,8 +1168,8 @@ describe("a squadron member's check-in interval", () => {
 describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
   const TURN_MARKER = /^(busy|idle) \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
-  function crewedByATrierarch(): void {
-    expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', 'https://fleet.example.com', SHIP_ID, 'scout', CREW_TOKEN] }).status).toBe(0);
+  function crewedByATrierarch(env: Record<string, string> = {}): void {
+    expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', 'https://fleet.example.com', SHIP_ID, 'scout', CREW_TOKEN], env }).status).toBe(0);
   }
 
   function sessionStart(env: Record<string, string>) {
@@ -1217,13 +1220,13 @@ describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
   });
 
   it('starts no Codex wake bridge at session start, and says the trierarch wakes it', () => {
-    crewedByATrierarch();
+    crewedByATrierarch(AS_CODEX);
 
     const context = sessionStart({ PLUGIN_DATA: data, PLUGIN_ROOT: SCRIPTS.replace(/\/scripts\/$/, '') });
 
     expect(context).toContain('The trierarch wakes this session when work arrives: start no watcher.');
     expect(context).not.toContain('wake-up');
-    expect(statSync(wakePidFile(), { throwIfNoEntry: false })).toBeUndefined();
+    expect(statSync(wakePidFile(AS_CODEX), { throwIfNoEntry: false })).toBeUndefined();
   });
 
   it('refuses to start a watcher in the background, saying the trierarch wakes the session', () => {
@@ -1251,10 +1254,10 @@ describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
   });
 
   it('arms no Codex wake bridge at the end of a turn', () => {
-    crewedByATrierarch();
+    crewedByATrierarch(AS_CODEX);
 
     expect(codexHook('aeolus-stop.sh', { hook_event_name: 'Stop', stop_hook_active: false })).toMatchObject({ status: 0, stdout: '' });
-    expect(statSync(wakePidFile(), { throwIfNoEntry: false })).toBeUndefined();
+    expect(statSync(wakePidFile(AS_CODEX), { throwIfNoEntry: false })).toBeUndefined();
   });
 
   it('marks the turn busy when a prompt is submitted, with when', () => {
@@ -1279,12 +1282,12 @@ describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
   });
 
   it('marks the turn in a Codex session alike', () => {
-    crewedByATrierarch();
+    crewedByATrierarch(AS_CODEX);
 
     codexHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: '/aeolus:wake' });
-    expect(turn().stdout).toMatch(/^busy /);
+    expect(turn(AS_CODEX).stdout).toMatch(/^busy /);
     codexHook('aeolus-stop.sh', { hook_event_name: 'Stop', stop_hook_active: false });
-    expect(turn().stdout).toMatch(/^idle /);
+    expect(turn(AS_CODEX).stdout).toMatch(/^idle /);
   });
 
   it('says no turn has been marked before the first prompt', () => {

@@ -84,9 +84,9 @@ function codex(...args: string[]): string {
   return execFileSync('codex', args, { encoding: 'utf8', env: { ...process.env, CODEX_HOME: codexHome } });
 }
 
-/** This test's ship's identity file in the Codex plugin's data folder, found by its ship id. */
+/** This test's ship's identity file in the session's crews folder (AEOLUS_CREWS, in its Codex home), found by its ship id. */
 function identityFile(): string | undefined {
-  const ships = join(codexHome, 'plugins', 'data', 'aeolus-aeolus-fleet', 'ships');
+  const ships = join(codexHome, 'aeolus-crews');
   if (!existsSync(ships)) {
     return undefined;
   }
@@ -139,7 +139,7 @@ describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Codex session',
       [
         `[projects.${JSON.stringify(folder)}]`,
         'trust_level = "trusted"',
-        ...(isSandboxed ? ['[sandbox_workspace_write]', 'network_access = true', `writable_roots = [${JSON.stringify(data)}]`] : []),
+        ...(isSandboxed ? ['[sandbox_workspace_write]', 'network_access = true', `writable_roots = [${JSON.stringify(data)}, ${JSON.stringify(join(codexHome, 'aeolus-crews'))}]`] : []),
         '',
       ].join('\n'),
     );
@@ -167,7 +167,7 @@ describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Codex session',
   it('crews the ship with the Codex crew line and answers a message when woken', async () => {
     const flags = isSandboxed ? ['--sandbox', 'workspace-write', '--ask-for-approval', 'never'] : ['--dangerously-bypass-approvals-and-sandbox'];
     tmux(
-      'new-session', '-d', '-s', TMUX_SESSION, '-x', '200', '-y', '50', '-c', folder, '-e', `CODEX_HOME=${codexHome}`,
+      'new-session', '-d', '-s', TMUX_SESSION, '-x', '200', '-y', '50', '-c', folder, '-e', `CODEX_HOME=${codexHome}`, '-e', `AEOLUS_CREWS=${join(codexHome, 'aeolus-crews')}`,
       ['codex', ...flags, '--dangerously-bypass-hook-trust', '--no-daemon'].join(' '),
     );
     await until(() => pane().includes('Aeolus') || pane().includes('›'), 'the session to start');
