@@ -32,6 +32,10 @@ let started: { shipId: ShipId; folder: string; command: readonly string[] }[];
 /** What each ship's session shows, by ship id. */
 let screens: Map<ShipId, string>;
 let typed: { shipId: ShipId; text: string; settleMs?: number }[];
+/** The aeolus plugin's hooks Codex does not trust yet, as a plugin update leaves them (#581). */
+let untrustedHooks: Set<string>;
+/** The hooks Codex did not trust when each session started. */
+let untrustedAtStart: (readonly string[])[];
 
 beforeEach(() => {
   data = mkdtempSync(join(tmpdir(), 'trierarch-codex-plugin-data-'));
@@ -39,6 +43,8 @@ beforeEach(() => {
   started = [];
   typed = [];
   screens = new Map();
+  untrustedHooks = new Set(['aeolus@aeolus-fleet:hooks/hooks.json:stop:0:0']);
+  untrustedAtStart = [];
 });
 
 afterEach(() => {
@@ -50,9 +56,17 @@ function harness() {
   return createCodexHarness({
     configuration: WITH_CODEX,
     plugin: { root: PLUGIN_ROOT, data },
+    setup: {
+      trustAeolusHooks: () => {
+        const trusted = [...untrustedHooks];
+        untrustedHooks.clear();
+        return Promise.resolve(trusted);
+      },
+    },
     sessions: {
       start: (session) => {
         started.push(session);
+        untrustedAtStart.push([...untrustedHooks]);
         return Promise.resolve();
       },
       type: (at) => {
@@ -104,10 +118,38 @@ describe('Codex as a harness', () => {
     expect(started[0]?.command).toEqual(['codex', 'resume', '--last', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-sol', '--no-daemon', '--config=tools.experimental_request_user_input.enabled=false', '--', `$aeolus-wake ${NO_TERMINAL_QUESTIONS}`]);
   });
 
+  it("trusts the aeolus plugin's new or changed hooks before every start, a restart too, so a session after a plugin update never stops at Codex's hooks review (#581)", async () => {
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+    untrustedHooks.add('aeolus@aeolus-fleet:hooks/hooks.json:user_prompt_submit:0:0');
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false });
+
+    expect(untrustedAtStart).toEqual([[], []]);
+  });
+
+  it("starts no session when Codex's hooks cannot be trusted, since it would stop at the hooks review (#581)", async () => {
+    const failing = createCodexHarness({
+      configuration: WITH_CODEX,
+      plugin: { root: PLUGIN_ROOT, data },
+      setup: { trustAeolusHooks: () => Promise.reject(new Error('codex app-server did not answer hooks/list')) },
+      sessions: {
+        start: (session) => {
+          started.push(session);
+          return Promise.resolve();
+        },
+        type: () => Promise.resolve(),
+        screen: () => Promise.resolve(''),
+      },
+    });
+
+    await expect(failing.launch({ ...launchOf(shipId), options: {}, isFirstStart: true })).rejects.toThrow('codex app-server did not answer hooks/list');
+    expect(started).toEqual([]);
+  });
+
   it('adds --no-daemon once even when the operator configured it too, so the session owns its work and a stop stops it', async () => {
     const withNoDaemon = createCodexHarness({
       configuration: { ...WITH_CODEX, harnesses: { codex: { flags: ['--no-daemon'], options: {} } } },
       plugin: { root: PLUGIN_ROOT, data },
+      setup: { trustAeolusHooks: () => Promise.resolve([]) },
       sessions: {
         start: (session) => {
           started.push(session);
