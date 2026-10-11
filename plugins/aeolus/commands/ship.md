@@ -1,11 +1,6 @@
 ---
-description: Show the Aeolus ship this folder crews, its inbox, its watcher and whether its lease holds
+description: Show the Aeolus ship this folder crews, as a script answers it with the plugin's version, the ship, its fleet and folder, what wakes the session, its lease and its inbox
 ---
-Report, in a short list, the Aeolus ship this folder crews. Do not receive or ack anything.
+Run `"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-status.sh"` and show what it prints exactly as it prints it, in a code block, adding nothing and leaving nothing out. The script answers, not you: make no other call, and do not receive or ack anything.
 
-1. Run `"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-identity.sh" show`. If this folder crews no ship, say so and that /aeolus:crew with the crew line crews one, and stop.
-2. Run `"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-fleet.sh" whoami`: the ship's name, id and type, and whether the lease holds (an answer of LEASE_ENDED means the operator released the ship; then go on as the aeolus crew-a-ship skill says for LEASE_ENDED).
-3. Run `"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-inbox.sh"` for how many deliveries wait.
-4. Run `"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-watch-status.sh"` for whether the watcher runs.
-
-List: name, id, type, fleet URL, folder, deliveries waiting, watcher running or not, lease valid or not.
+If it exits 3 (the lease ended), go on as the aeolus crew-a-ship skill says for LEASE_ENDED.
