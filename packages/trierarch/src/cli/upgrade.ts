@@ -26,7 +26,11 @@ import { NOT_SAID_YET_REASON, startNewProcess } from './new-process.js';
  * or changed Codex hooks are trusted, so a new session starts without a
  * prompt. The update comes before
  * the restart, so the new process starts with it. A failed plugin update is
- * said, and the upgrade goes on.
+ * said, and the upgrade goes on. The plugin comes from the release tag of the
+ * version it upgrades to, from main for releases up to 0.22.0, whose tags
+ * hold no plugin of their version (#652). A Codex downgrade keeps the newer
+ * version folder for the sessions running on it, so new Codex sessions start
+ * on it too: upgrade says so.
  */
 
 export const PACKAGE = '@aeolus-fleet/trierarch';
@@ -95,6 +99,10 @@ async function upgradePlugin(plugin: PluginUpgrade | undefined, version: string)
     const after = await plugin.version(harness);
     const keeps = harness === 'codex' ? ' Running Codex sessions keep the version they started with.' : '';
     said.push(after === before ? `The aeolus plugin for ${name} is on ${after ?? 'no version'} already.` : `Updated the aeolus plugin for ${name} from ${before ?? 'no version'} to ${after ?? 'no version'}.${keeps}`);
+    // Codex starts on its newest version folder, and upgrade keeps a newer one for the sessions running on it (#652).
+    if (harness === 'codex' && tag !== undefined && after !== undefined && byVersion(after, version) > 0) {
+      said.push(`New Codex sessions keep starting on the aeolus plugin ${after}, not on ${version}: Codex starts on the newest version it has, and ${after} stays for the Codex sessions running on it.`);
+    }
     if (harness === 'codex') {
       try {
         const trusted = await plugin.trustCodexHooks();
