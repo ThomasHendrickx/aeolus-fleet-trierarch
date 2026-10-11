@@ -218,6 +218,92 @@ describe('aeolus-watch-status', () => {
   });
 });
 
+describe('aeolus-status: version, running, lease and inbox, answered by the script', () => {
+  const version = z.object({ version: z.string() }).parse(JSON.parse(readFileSync(join(SCRIPTS, '../.claude-plugin/plugin.json'), 'utf8'))).version;
+  const whoami = { status: 200, body: { shipId: SHIP_ID, fleetId: 'flt_01m3tbfspe96yf1rnr4ank9h1c', name: 'scout', type: 'implementer' } };
+
+  it('says the version and that this folder crews no ship, and calls no fleet', () => {
+    expect(run('aeolus-status.sh')).toMatchObject({
+      status: 2,
+      stdout: `Version: ${version}\nShip: none: this folder crews no ship; its crew line crews one\n`,
+    });
+  });
+
+  it('asks whoami and the inbox with the crew token, and says the ship, the watcher, the lease and the deliveries waiting', async () => {
+    fleet = await startStubFleet([whoami, inbox(2)]);
+    crew(fleet.url);
+
+    const { status, stdout } = await start('aeolus-status.sh').exited;
+
+    expect(status).toBe(0);
+    expect(stdout).toBe(
+      `Version: ${version}\nShip: scout (${SHIP_ID}), type implementer\nRunning: no watcher runs\nLease: holds\nInbox: 2 deliveries wait\n`,
+    );
+    expect(fleet.calls.map((call) => [call.method, call.path, call.authorization])).toEqual([
+      ['GET', '/api/v1/ship/whoami', `Bearer ${CREW_TOKEN}`],
+      ['POST', '/api/v1/ship/inbox', `Bearer ${CREW_TOKEN}`],
+    ]);
+    expect(stdout).not.toContain(CREW_TOKEN);
+  });
+
+  it('says one delivery waits, and none', async () => {
+    fleet = await startStubFleet([whoami, inbox(1), whoami, inbox(0)]);
+    crew(fleet.url);
+
+    expect((await start('aeolus-status.sh').exited).stdout).toContain('Inbox: 1 delivery waits\n');
+    expect((await start('aeolus-status.sh').exited).stdout).toContain('Inbox: none wait\n');
+  });
+
+  it('says the watcher runs while an aeolus watcher process holds the lock', async () => {
+    fleet = await startStubFleet([whoami, inbox(0)]);
+    crew(fleet.url);
+    const bin = join(data, 'bin');
+    mkdirSync(bin);
+    const watcher = join(bin, 'aeolus-wait.sh');
+    writeFileSync(watcher, '#!/usr/bin/env bash\nsleep 30\n');
+    chmodSync(watcher, 0o700);
+    const process = spawn('bash', [watcher]);
+    writeFileSync(pidFile(), `${String(process.pid)}\n`);
+
+    try {
+      expect((await start('aeolus-status.sh').exited).stdout).toContain('Running: the watcher runs\n');
+    } finally {
+      process.kill();
+    }
+  });
+
+  it('says the trierarch wakes the session when it does, not a watcher', async () => {
+    fleet = await startStubFleet([whoami, inbox(0)]);
+    expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', fleet.url, SHIP_ID, 'scout', CREW_TOKEN] }).status).toBe(0);
+
+    expect((await start('aeolus-status.sh').exited).stdout).toContain('Running: the trierarch wakes this session\n');
+  });
+
+  it('exits 3 on LEASE_ENDED, says the lease ended and the plugin forgot the ship, and asks no inbox', async () => {
+    fleet = await startStubFleet([{ status: 401, body: { code: 'LEASE_ENDED', message: 'This ship was released' } }]);
+    crew(fleet.url);
+
+    const { status, stdout } = await start('aeolus-status.sh').exited;
+
+    expect(status).toBe(3);
+    expect(stdout).toBe(
+      `Version: ${version}\nShip: scout (${SHIP_ID})\nRunning: no watcher runs\nLease: ended: the operator released the ship, and the plugin forgot it\nInbox: none: the ship was released\n`,
+    );
+    expect(fleet.calls).toHaveLength(1);
+    expect(statSync(identityFile(), { throwIfNoEntry: false })).toBeUndefined();
+  });
+
+  it('exits 6 and says so when the fleet does not answer', async () => {
+    crew('http://127.0.0.1:9');
+
+    const { status, stdout } = await start('aeolus-status.sh').exited;
+
+    expect(status).toBe(6);
+    expect(stdout).toContain('Lease: unknown: no answer from http://127.0.0.1:9\n');
+    expect(stdout).toContain('Inbox: unknown: no answer from the fleet\n');
+  });
+});
+
 describe('aeolus-wait', () => {
   it("asks the inbox check with the crew token, keeps asking while none wait, and exits 0 once some do", async () => {
     fleet = await startStubFleet([inbox(0), inbox(0), inbox(2)]);
