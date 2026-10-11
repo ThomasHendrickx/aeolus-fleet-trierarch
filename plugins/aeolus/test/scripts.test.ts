@@ -218,7 +218,7 @@ describe('aeolus-watch-status', () => {
   });
 });
 
-describe('aeolus-status: version, running, lease and inbox, answered by the script', () => {
+describe('aeolus-status: the version, the ship, its fleet and folder, what wakes it, the lease and the inbox, answered by the script', () => {
   const version = z.object({ version: z.string() }).parse(JSON.parse(readFileSync(join(SCRIPTS, '../.claude-plugin/plugin.json'), 'utf8'))).version;
   const whoami = { status: 200, body: { shipId: SHIP_ID, fleetId: 'flt_01m3tbfspe96yf1rnr4ank9h1c', name: 'scout', type: 'implementer' } };
 
@@ -229,7 +229,7 @@ describe('aeolus-status: version, running, lease and inbox, answered by the scri
     });
   });
 
-  it('asks whoami and the inbox with the crew token, and says the ship, the watcher, the lease and the deliveries waiting', async () => {
+  it('asks whoami and the inbox with the crew token, and says the ship, its fleet and folder, the watcher, the lease and the deliveries waiting', async () => {
     fleet = await startStubFleet([whoami, inbox(2)]);
     crew(fleet.url);
 
@@ -237,7 +237,7 @@ describe('aeolus-status: version, running, lease and inbox, answered by the scri
 
     expect(status).toBe(0);
     expect(stdout).toBe(
-      `Version: ${version}\nShip: scout (${SHIP_ID}), type implementer\nRunning: no watcher runs\nLease: holds\nInbox: 2 deliveries wait\n`,
+      `Version: ${version}\nShip: scout (${SHIP_ID}), type implementer\nFleet: ${fleet.url}\nFolder: ${realpathSync(folder)}\nRunning: no watcher runs\nLease: holds\nInbox: 2 deliveries wait\n`,
     );
     expect(fleet.calls.map((call) => [call.method, call.path, call.authorization])).toEqual([
       ['GET', '/api/v1/ship/whoami', `Bearer ${CREW_TOKEN}`],
@@ -287,7 +287,7 @@ describe('aeolus-status: version, running, lease and inbox, answered by the scri
 
     expect(status).toBe(3);
     expect(stdout).toBe(
-      `Version: ${version}\nShip: scout (${SHIP_ID})\nRunning: no watcher runs\nLease: ended: the operator released the ship, and the plugin forgot it\nInbox: none: the ship was released\n`,
+      `Version: ${version}\nShip: scout (${SHIP_ID})\nFleet: ${fleet.url}\nFolder: ${realpathSync(folder)}\nRunning: no watcher runs\nLease: ended: the operator released the ship, and the plugin forgot it\nInbox: none: the ship was released\n`,
     );
     expect(fleet.calls).toHaveLength(1);
     expect(statSync(identityFile(), { throwIfNoEntry: false })).toBeUndefined();
