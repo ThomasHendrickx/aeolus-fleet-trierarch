@@ -260,7 +260,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
         running: () => readRunningFile(paths.running),
         plugin: {
           harnesses: PLUGIN_HARNESSES.filter((harness) => configuration?.harnesses[harness] !== undefined),
-          update: (harness) => pluginUpdate.update(harness),
+          update: (harness, tag) => pluginUpdate.update(harness, tag),
           version: (harness) => aeolusPluginVersion({ homeDirectory, env, harness }),
           trustCodexHooks: () => createCodexSetup().trustAeolusHooks(configuration?.worktreeRoot ?? paths.worktrees),
         },

@@ -1,13 +1,22 @@
-import { cp, mkdtemp, readdir, rm, stat, utimes } from 'node:fs/promises';
+import { cp, mkdtemp, readdir, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+
+import { z } from 'zod';
 
 import { byVersion, type PluginHarness } from './plugin.js';
 import { runCommand } from './run-command.js';
 import { runningProcesses, type RunningProcess } from './running-processes.js';
 
 /**
- * The aeolus plugin updated through each harness's own command (#581).
+ * The aeolus plugin updated through each harness's own command (#581), from
+ * the release tag it is given, or main without one (#652): each harness's
+ * aeolus-fleet marketplace is pointed at it first. Neither harness adds a
+ * second source for a marketplace. Codex's is removed and added again, which
+ * keeps the plugin and its cache. Claude Code's is never removed, since that
+ * uninstalls the plugin and deletes its data, the crew identities: the
+ * marketplace its settings declare is dropped from them, and adding it again
+ * declares the new source.
  * Codex's plugin upgrade installs the new version and deletes every other
  * version folder, so a Codex session still running on the old version would
  * lose its plugin scripts: the version folders there before are kept aside and
@@ -20,10 +29,12 @@ import { runningProcesses, type RunningProcess } from './running-processes.js';
  * itself.
  */
 export interface PluginUpdate {
-  update(harness: PluginHarness): Promise<void>;
+  /** `tag`: the release tag to install the plugin from; none installs it from main. */
+  update(harness: PluginHarness, tag: string | undefined): Promise<void>;
 }
 
 const MARKETPLACE = 'aeolus-fleet';
+const REPOSITORY = 'ThomasHendrickx/aeolus-fleet';
 const PLUGIN = 'aeolus@aeolus-fleet';
 
 async function run(command: string, args: readonly string[]): Promise<void> {
@@ -31,6 +42,26 @@ async function run(command: string, args: readonly string[]): Promise<void> {
   if (result.status !== 0) {
     throw new Error(`${[command, ...args].join(' ')} failed: ${`${result.stdout}${result.stderr}`.trim()}`);
   }
+}
+
+const settingsSchema = z.record(z.string(), z.unknown());
+const marketplacesSchema = z.record(z.string(), z.unknown());
+
+/** Drops the aeolus-fleet marketplace from the `extraKnownMarketplaces` of Claude Code's settings, leaving everything else as it is. */
+async function dropDeclaredMarketplace(path: string): Promise<void> {
+  const text = await readFile(path, 'utf8').catch(() => undefined);
+  if (text === undefined) {
+    return;
+  }
+  const settings = settingsSchema.parse(JSON.parse(text));
+  const declared = marketplacesSchema.safeParse(settings.extraKnownMarketplaces).data;
+  if (declared?.[MARKETPLACE] === undefined) {
+    return;
+  }
+  const others = Object.fromEntries(Object.entries(declared).filter(([name]) => name !== MARKETPLACE));
+  const temporary = `${path}.aeolus-trierarch.tmp`;
+  await writeFile(temporary, `${JSON.stringify({ ...settings, extraKnownMarketplaces: others }, null, 2)}\n`, { mode: (await stat(path)).mode & 0o777 });
+  await rename(temporary, path);
 }
 
 /** The folders under `cache`, none where it does not exist. */
@@ -124,13 +155,19 @@ export function createPluginUpdate(at: {
   const processes = at.processes ?? runningProcesses;
   const codex = at.commands?.codex ?? 'codex';
   const claude = at.commands?.['claude-code'] ?? 'claude';
+  const claudeSettings = join(at.env.CLAUDE_CONFIG_DIR ?? join(at.homeDirectory, '.claude'), 'settings.json');
   const codexCache = join(at.env.CODEX_HOME ?? join(at.homeDirectory, '.codex'), 'plugins', 'cache', MARKETPLACE, 'aeolus');
 
   return {
-    update: async (harness) => {
+    update: async (harness, tag) => {
       if (harness === 'codex') {
         await keepingVersions(codexCache, {
-          upgrade: () => run(codex, ['plugin', 'marketplace', 'upgrade', MARKETPLACE]),
+          upgrade: async () => {
+            // There may be no marketplace to remove: adding it says what is wrong.
+            await runCommand(codex, { args: ['plugin', 'marketplace', 'remove', MARKETPLACE] });
+            await run(codex, ['plugin', 'marketplace', 'add', REPOSITORY, ...(tag === undefined ? [] : ['--ref', tag])]);
+            await run(codex, ['plugin', 'marketplace', 'upgrade', MARKETPLACE]);
+          },
           afterUpgrade: async (before) => {
             const upgradedAt = now();
             await markInstalled(codexCache, { before, now: upgradedAt });
@@ -139,6 +176,8 @@ export function createPluginUpdate(at: {
         });
         return;
       }
+      await dropDeclaredMarketplace(claudeSettings);
+      await run(claude, ['plugin', 'marketplace', 'add', tag === undefined ? REPOSITORY : `${REPOSITORY}#${tag}`]);
       await run(claude, ['plugin', 'marketplace', 'update', MARKETPLACE]);
       await run(claude, ['plugin', 'update', PLUGIN]);
     },

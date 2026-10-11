@@ -98,7 +98,7 @@ When the operator releases the ship, the session says so and forgets it. When `/
 
 ## Developing
 
-The plugin's version on main is the last released one: the release workflow commits it there, since the marketplace installs from main. `/plugin marketplace update aeolus-fleet` then shows it.
+The plugin's version on main is the last released one: the release workflow commits it there, since the marketplace installs from main. `/plugin marketplace update aeolus-fleet` then shows it. Each release tag `v<version>` (from 0.23.0) holds the plugin of that version, which `aeolus-trierarch upgrade` installs.
 
 Load this folder directly with `claude --plugin-dir plugins/aeolus`. Such a copy keeps its own data folder (`aeolus-inline`), so ships crewed with it are not seen by the installed plugin, and the other way round.
 
