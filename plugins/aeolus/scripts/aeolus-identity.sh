@@ -51,25 +51,24 @@ case "$command" in
     echo "aeolus: check-in interval ${2}"
     ;;
   show)
-    if [ ! -f "$file" ]; then
+    if ! text="$(aeolus_identity_read "$file")"; then
       echo "aeolus: this folder crews no ship"
       exit 1
     fi
-    echo "ship: $(aeolus_identity_get "$file" shipName) ($(aeolus_identity_get "$file" shipId))"
-    echo "fleet: $(aeolus_identity_get "$file" fleetUrl)"
-    echo "folder: $(aeolus_identity_get "$file" folder)"
-    squadron="$(aeolus_identity_get "$file" squadron)"
+    echo "ship: $(aeolus_identity_field "$text" shipName) ($(aeolus_identity_field "$text" shipId))"
+    echo "fleet: $(aeolus_identity_field "$text" fleetUrl)"
+    echo "folder: $(aeolus_identity_field "$text" folder)"
+    squadron="$(aeolus_identity_field "$text" squadron)"
     [ -n "$squadron" ] && echo "squadron: ${squadron}"
-    check_in="$(aeolus_identity_get "$file" checkIn)"
+    check_in="$(aeolus_identity_field "$text" checkIn)"
     [ -n "$check_in" ] && echo "check-in: ${check_in}"
-    if [ "$(aeolus_identity_get "$file" wakeBy)" = trierarch ]; then
+    if aeolus_woken_by_trierarch "$text"; then
       echo "wakes: the trierarch"
     fi
     ;;
   turn)
     turn_file="$(aeolus_turn_file)"
-    [ -f "$turn_file" ] || { echo "aeolus: no turn marked yet"; exit 1; }
-    cat "$turn_file"
+    cat "$turn_file" 2>/dev/null || { echo "aeolus: no turn marked yet"; exit 1; }
     ;;
   path)
     echo "$file"

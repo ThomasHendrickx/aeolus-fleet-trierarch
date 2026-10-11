@@ -20,16 +20,16 @@ version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".
 echo "Version: ${version:-unknown}"
 
 identity="$(aeolus_identity_file)" || exit 2
-if [ ! -f "$identity" ]; then
+if ! identity_text="$(aeolus_identity_read "$identity")"; then
   echo "Ship: none: this folder crews no ship; its crew line crews one"
   exit 2
 fi
-ship="$(aeolus_identity_get "$identity" shipName) ($(aeolus_identity_get "$identity" shipId))"
-fleet_url="$(aeolus_identity_get "$identity" fleetUrl)"
-folder="$(aeolus_identity_get "$identity" folder)"
+ship="$(aeolus_identity_field "$identity_text" shipName) ($(aeolus_identity_field "$identity_text" shipId))"
+fleet_url="$(aeolus_identity_field "$identity_text" fleetUrl)"
+folder="$(aeolus_identity_field "$identity_text" folder)"
 
 # Read before whoami: on LEASE_ENDED the plugin forgets the ship and stops its watcher.
-if aeolus_woken_by_trierarch "$identity"; then
+if aeolus_woken_by_trierarch "$identity_text"; then
   running="the trierarch wakes this session"
 elif aeolus_is_watching; then
   running="the watcher runs"

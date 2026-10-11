@@ -16,12 +16,12 @@ thread_id="${2:-}"
 [ -n "$thread_id" ] || usage
 
 identity="$(aeolus_identity_file)" || exit 2
-if [ ! -f "$identity" ]; then
+if ! identity_text="$(aeolus_identity_read "$identity")"; then
   echo "aeolus: this folder crews no ship; run \$aeolus-crew with the crew line first"
   exit 2
 fi
 # A session a trierarch crews: the trierarch wakes it, so no bridge of its own.
-if aeolus_woken_by_trierarch "$identity"; then
+if aeolus_woken_by_trierarch "$identity_text"; then
   echo "aeolus: the trierarch wakes this session; no wake bridge armed"
   exit 0
 fi
@@ -36,8 +36,7 @@ wake_thread_file="$(aeolus_wake_thread_file)"
 NEXT='the session arms it again before it ends its turn'
 
 if [ "$mode" = start ]; then
-  if [ -f "$wake_pid_file" ]; then
-    old_pid="$(head -n 1 "$wake_pid_file")"
+  if old_pid="$(head -n 1 "$wake_pid_file" 2>/dev/null)"; then
     old_thread="$(head -n 1 "$wake_thread_file" 2>/dev/null || true)"
     if aeolus_process_is "$old_pid" aeolus-codex-wake.sh; then
       if [ "$old_thread" = "$thread_id" ]; then
@@ -70,7 +69,7 @@ wait_output="${wake_pid_file%.pid}.wait.$$"
 wait_pid=''
 cleanup() {
   [ -z "$wait_pid" ] || kill "$wait_pid" 2>/dev/null || true
-  if [ -f "$wake_pid_file" ] && [ "$(head -n 1 "$wake_pid_file")" = "$$" ]; then
+  if [ "$(head -n 1 "$wake_pid_file" 2>/dev/null)" = "$$" ]; then
     rm -f "$wake_pid_file" "$wake_thread_file"
   fi
   rm -f "$wait_output"
@@ -87,7 +86,7 @@ answer="$(cat "$wait_output")"
 
 case "$status" in
   0)
-    ship_name="$(aeolus_identity_get "$identity" shipName)"
+    ship_name="$(aeolus_identity_field "$identity_text" shipName)"
     waiting="$(printf '%s' "$answer" | sed -n 's/^aeolus: \([0-9][0-9]*\) deliveries\{0,1\} wait.*/\1/p')"
     [ -n "$waiting" ] || waiting='some'
     noun='deliveries'
