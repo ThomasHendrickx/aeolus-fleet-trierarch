@@ -10,6 +10,9 @@ export type PluginHarness = 'claude-code' | 'codex';
 
 export const PLUGIN_HARNESSES: readonly PluginHarness[] = ['claude-code', 'codex'];
 
+/** The aeolus plugin's data folder in a harness's plugin folders, as both harnesses name it. */
+export const PLUGIN_DATA_FOLDER = 'aeolus-aeolus-fleet';
+
 /** Where each harness keeps its plugins, and the variables that point elsewhere. */
 function placesOf(at: { homeDirectory: string; env: Readonly<Record<string, string | undefined>>; harness: PluginHarness }) {
   const { homeDirectory, env } = at;
@@ -28,7 +31,7 @@ function placesOf(at: { homeDirectory: string; env: Readonly<Record<string, stri
  */
 export async function findAeolusPlugin(at: { homeDirectory: string; env: Readonly<Record<string, string | undefined>>; harness?: PluginHarness }): Promise<AeolusPlugin> {
   const places = placesOf({ ...at, harness: at.harness ?? 'claude-code' });
-  const data = places.data ?? join(places.plugins, 'data', 'aeolus-aeolus-fleet');
+  const data = places.data ?? join(places.plugins, 'data', PLUGIN_DATA_FOLDER);
   if (places.root !== undefined) {
     return { root: places.root, data };
   }
