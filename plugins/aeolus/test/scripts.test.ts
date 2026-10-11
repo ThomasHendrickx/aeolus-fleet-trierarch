@@ -2249,7 +2249,10 @@ describe('the plugin reads the identity once, never looking for it first (#719)'
   it('register in a folder that already crews a ship names that ship', () => {
     crew();
 
-    const { status, stdout } = run('aeolus-fleet.sh', { args: ['register', 'http://127.0.0.1:1', SHIP_ID, 'a-secret', 'DEVICE'], env: vanishingAfterItsCheck(identityFile()) });
+    const { status, stdout } = run('aeolus-fleet.sh', {
+      args: ['register', 'http://127.0.0.1:1', SHIP_ID, 'a-secret', 'DEVICE'],
+      env: { AEOLUS_HARNESS: 'claude-code', ...vanishingAfterItsCheck(identityFile()) },
+    });
 
     expect({ status, stdout }).toEqual({
       status: 4,
