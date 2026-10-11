@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { scriptEnvironment } from './script-environment.js';
+
 // A ship reports an issue (#229): the session writes a draft, the plugin
 // strips it for the public repository, files it with gh when it can, and
 // otherwise leaves the draft and a prefilled link.
@@ -47,7 +49,7 @@ afterEach(() => {
 function run(script: string, options: { args?: string[]; env?: Record<string, string> } = {}) {
   const result = spawnSync('bash', [join(SCRIPTS, script), ...(options.args ?? [])], {
     encoding: 'utf8',
-    env: { ...process.env, AEOLUS_CREWS: join(data, 'crews'), AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_GH: join(bin, 'gh'), PATH: `${bin}:/usr/bin:/bin`, ...options.env },
+    env: scriptEnvironment({ AEOLUS_CREWS: join(data, 'crews'), AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_GH: join(bin, 'gh'), PATH: `${bin}:/usr/bin:/bin`, ...options.env }),
   });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }

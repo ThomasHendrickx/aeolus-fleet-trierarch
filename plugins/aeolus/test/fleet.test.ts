@@ -9,6 +9,7 @@ import { FLEET_BUSY_WAITS_MS } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { startStubFleet, type StubAnswer, type StubFleet } from './stub-fleet.js';
+import { scriptEnvironment } from './script-environment.js';
 
 // aeolus-fleet.sh, the one door of a session's fleet calls: it registers with
 // the crew line's secret and keeps the crew token in the folder's identity
@@ -50,7 +51,7 @@ interface Run {
 /** Runs a script as a session's command does, without blocking the stub fleet in this process. */
 function run(script: string, options: { args?: string[]; env?: Record<string, string>; stdin?: string } = {}): Promise<Run> {
   const child = spawn('bash', [join(SCRIPTS, script), ...(options.args ?? [])], {
-    env: { ...process.env, HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, ...options.env },
+    env: scriptEnvironment({ HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, ...options.env }),
   });
   child.stdin.end(options.stdin ?? '');
   let stdout = '';

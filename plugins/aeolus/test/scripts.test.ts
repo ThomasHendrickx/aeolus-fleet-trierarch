@@ -10,6 +10,7 @@ import { z } from 'zod';
 
 import { readLogLine } from '../../../packages/trierarch/src/adapters/log.js';
 import { startStubFleet, type StubFleet } from './stub-fleet.js';
+import { scriptEnvironment } from './script-environment.js';
 
 // The aeolus plugin's bash scripts, as a session runs them: in its folder,
 // with the plugin's data folder, against a stub of the fleet's REST door.
@@ -52,7 +53,7 @@ function run(script: string, options: { args?: string[]; env?: Record<string, st
   const result = spawnSync('bash', [join(SCRIPTS, script), ...(options.args ?? [])], {
     input: options.stdin ?? '',
     encoding: 'utf8',
-    env: { ...process.env, HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_RETRY_SECONDS: '0', AEOLUS_POLL_SECONDS: '0.05', ...options.env },
+    env: scriptEnvironment({ HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_RETRY_SECONDS: '0', AEOLUS_POLL_SECONDS: '0.05', ...options.env }),
   });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
@@ -60,7 +61,7 @@ function run(script: string, options: { args?: string[]; env?: Record<string, st
 /** Runs a script without waiting for it, for one that keeps running. */
 function start(script: string, options: { args?: string[]; env?: Record<string, string>; stdin?: string } = {}) {
   const child = spawn('bash', [join(SCRIPTS, script), ...(options.args ?? [])], {
-    env: { ...process.env, HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_RETRY_SECONDS: '0', AEOLUS_POLL_SECONDS: '0.05', ...options.env },
+    env: scriptEnvironment({ HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_RETRY_SECONDS: '0', AEOLUS_POLL_SECONDS: '0.05', ...options.env }),
   });
   child.stdin.end(options.stdin ?? '');
   let stdout = '';
@@ -2055,7 +2056,7 @@ describe('no plugin script prints a shell error for a file that vanishes between
   function inTheLibrary(call: string, env: Record<string, string>): Run {
     const result = spawnSync('bash', ['-c', `. "${join(SCRIPTS, 'aeolus-lib.sh')}"; ${call}`], {
       encoding: 'utf8',
-      env: { ...process.env, HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, ...env },
+      env: scriptEnvironment({ HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, ...env }),
     });
     return { status: result.status, stdout: result.stdout, stderr: result.stderr };
   }
