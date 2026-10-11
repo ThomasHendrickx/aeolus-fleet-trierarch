@@ -32,7 +32,7 @@ RETRY_MAX_SECONDS="${AEOLUS_RETRY_MAX_SECONDS:-60}"
 MAX_SECONDS="${AEOLUS_MAX_SECONDS:-6900}"
 
 identity="$(aeolus_identity_file)" || exit 2
-if [ ! -f "$identity" ]; then
+if ! identity_text="$(aeolus_identity_read "$identity")"; then
   echo "aeolus: this folder crews no ship; run /aeolus:crew with the crew line first"
   exit 2
 fi
@@ -49,9 +49,9 @@ echo "$$" > "$pid_file"
 trap 'rm -f "$pid_file"' EXIT
 aeolus_log "$identity" watch started
 
-fleet_url="$(aeolus_identity_get "$identity" fleetUrl)"
-ship_name="$(aeolus_identity_get "$identity" shipName)"
-crew_token="$(aeolus_identity_get "$identity" crewToken)"
+fleet_url="$(aeolus_identity_field "$identity_text" fleetUrl)"
+ship_name="$(aeolus_identity_field "$identity_text" shipName)"
+crew_token="$(aeolus_identity_field "$identity_text" crewToken)"
 delay="$RETRY_SECONDS"
 # Whether the last call failed: a failing fleet is logged once, not every retry.
 is_failing=0

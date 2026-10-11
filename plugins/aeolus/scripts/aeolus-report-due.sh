@@ -14,9 +14,9 @@ SECONDS_PER_HOUR=3600
 payload="$(cat)"
 aeolus_hook_folder "$payload"
 identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
-[ -f "$identity" ] || exit 0
-squadron="$(aeolus_identity_get "$identity" squadron)"
-check_in="$(aeolus_identity_get "$identity" checkIn)"
+identity_text="$(aeolus_identity_read "$identity")" || exit 0
+squadron="$(aeolus_identity_field "$identity_text" squadron)"
+check_in="$(aeolus_identity_field "$identity_text" checkIn)"
 [ -n "$squadron" ] && [ -n "$check_in" ] || exit 0
 
 reported_file="$(aeolus_reported_file)" || exit 0
@@ -48,6 +48,6 @@ esac
 
 echo "$now" > "$reported_file"
 aeolus_log "$identity" remind "reminded to report: ${check_in} passed since the last report"
-ship_name="$(aeolus_identity_get "$identity" shipName)"
+ship_name="$(aeolus_identity_field "$identity_text" shipName)"
 reminder="aeolus: ${check_in}, the check-in interval of the squadron ${squadron}, passed since ${ship_name} last reported: report what you are doing now with the report call, such as {\"state\":\"working\",\"note\":\"reviewing PR 89\"}, then go on"
 printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"%s"}}\n' "$(aeolus_json_escape "$reminder")"

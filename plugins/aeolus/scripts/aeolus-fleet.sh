@@ -155,11 +155,11 @@ if [ "$command" = register ]; then
   exit 0
 fi
 
-if [ ! -f "$identity" ]; then
+if ! identity_text="$(aeolus_identity_read "$identity")"; then
   echo "aeolus: this folder crews no ship; crew one with its crew line first"
   exit 2
 fi
-fleet_url="$(aeolus_identity_get "$identity" fleetUrl)"
+fleet_url="$(aeolus_identity_field "$identity_text" fleetUrl)"
 
 if [ "$command" = protocol ]; then
   call_fleet GET /api/v1/openapi.json "" ""
@@ -209,7 +209,7 @@ if [ "$command" = send ] && model="$(head -n 1 "$model_file" 2>/dev/null)"; then
   fi
 fi
 
-token="$(aeolus_identity_get "$identity" crewToken)"
+token="$(aeolus_identity_field "$identity_text" crewToken)"
 call_fleet "$method" "/api/v1/ship/${command}" "$token" "$input"
 # Crewed again during the call: the file holds a new crew token, so the call
 # is made once more with it.

@@ -148,11 +148,10 @@ aeolus_turn_file() {
   printf '%s/%s.turn' "$dir" "$(aeolus_key "$folder")"
 }
 
-# Whether the folder's identity says the trierarch wakes its sessions
+# Whether an identity's text says the trierarch wakes its sessions
 # (wakeBy=trierarch): then the plugin asks for no watcher of its own.
 aeolus_woken_by_trierarch() {
-  local identity="$1"
-  [ "$(aeolus_identity_get "$identity" wakeBy)" = trierarch ]
+  [ "$(aeolus_identity_field "$1" wakeBy)" = trierarch ]
 }
 
 # Writes the turn marker, busy or idle with the time in UTC.
@@ -165,9 +164,10 @@ aeolus_mark_turn() {
 # Whether the turn marker says the session is idle. No marker is not idle: the
 # session has not ended a turn yet.
 aeolus_is_idle() {
-  local file
+  local file state
   file="$(aeolus_turn_file)" || return 1
-  [ -f "$file" ] && [ "$(cut -d ' ' -f 1 "$file")" = idle ]
+  state="$(cut -d ' ' -f 1 "$file" 2>/dev/null)" || return 1
+  [ "$state" = idle ]
 }
 
 # What the watcher saw of the waiting count: the count, and 1 when a wake is
@@ -253,32 +253,42 @@ aeolus_log_rotate() {
 # and for a failure what happens next. Logs nothing without the identity file,
 # and never fails its caller. Never the crew token.
 aeolus_log() {
-  local identity="$1" action="$2" outcome="$3" next="${4:-}" file record
-  [ -f "$identity" ] || return 0
+  local identity="$1" action="$2" outcome="$3" next="${4:-}" text file record
+  text="$(aeolus_identity_read "$identity")" || return 0
   file="$(aeolus_log_file 2>/dev/null)" || return 0
   mkdir -p "$(dirname "$file")" 2>/dev/null || return 0
   aeolus_log_rotate "$file"
   record="{\"time\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\""
-  record="${record},\"shipId\":\"$(aeolus_json_escape "$(aeolus_identity_get "$identity" shipId)")\""
-  record="${record},\"shipName\":\"$(aeolus_json_escape "$(aeolus_identity_get "$identity" shipName)")\""
+  record="${record},\"shipId\":\"$(aeolus_json_escape "$(aeolus_identity_field "$text" shipId)")\""
+  record="${record},\"shipName\":\"$(aeolus_json_escape "$(aeolus_identity_field "$text" shipName)")\""
   record="${record},\"action\":\"${action}\",\"outcome\":\"$(aeolus_json_escape "$outcome")\""
   [ -z "$next" ] || record="${record},\"next\":\"$(aeolus_json_escape "$next")\""
   # One write of a short line to a file opened for appending: concurrent hooks and watchers never interleave.
   printf '%s}\n' "$record" >> "$file" 2>/dev/null || true
 }
 
-# One field of an identity file: fleetUrl, shipId, shipName, crewToken or folder.
+# The text of an identity file, read once, so a script works from one view of
+# it. Fails when the folder crews no ship, also when the file went since a
+# script looked for it.
+aeolus_identity_read() {
+  cat "$1" 2>/dev/null
+}
+
+# One field of an identity's text: fleetUrl, shipId, shipName, crewToken or folder.
+aeolus_identity_field() {
+  local text="$1" field="$2"
+  printf '%s\n' "$text" | sed -n "s/^${field}=//p" | head -n 1
+}
+
+# One field of an identity file as it is now, or nothing once it is gone.
 aeolus_identity_get() {
-  local file="$1" field="$2"
-  sed -n "s/^${field}=//p" "$file" | head -n 1
+  aeolus_identity_field "$(aeolus_identity_read "$1")" "$2"
 }
 
 # The crew token the identity file holds now, or nothing once it is gone: the
 # folder may have been crewed again since a script read it.
 aeolus_identity_token() {
-  local file="$1"
-  [ -f "$file" ] || return 0
-  aeolus_identity_get "$file" crewToken
+  aeolus_identity_get "$1" crewToken
 }
 
 # The crew token as the bearer, a curl config line for `curl -K -` to read on

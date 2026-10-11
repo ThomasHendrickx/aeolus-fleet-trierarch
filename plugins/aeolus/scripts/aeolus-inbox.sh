@@ -5,9 +5,9 @@ set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
 identity="$(aeolus_identity_file)" || exit 2
-[ -f "$identity" ] || { echo "aeolus: this folder crews no ship"; exit 2; }
-aeolus_bearer_config "$(aeolus_identity_get "$identity" crewToken)" \
-  | curl -K - -sS --fail-with-body --max-time 15 -X POST "$(aeolus_identity_get "$identity" fleetUrl)/api/v1/ship/inbox" \
+identity_text="$(aeolus_identity_read "$identity")" || { echo "aeolus: this folder crews no ship"; exit 2; }
+aeolus_bearer_config "$(aeolus_identity_field "$identity_text" crewToken)" \
+  | curl -K - -sS --fail-with-body --max-time 15 -X POST "$(aeolus_identity_field "$identity_text" fleetUrl)/api/v1/ship/inbox" \
     -H 'content-type: application/json' -d '{}'
 status=$?
 echo

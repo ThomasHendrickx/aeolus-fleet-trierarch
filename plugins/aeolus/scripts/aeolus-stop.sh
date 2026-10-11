@@ -17,7 +17,7 @@ set -uo pipefail
 payload="$(cat)"
 aeolus_hook_folder "$payload"
 identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
-[ -f "$identity" ] || exit 0
+identity_text="$(aeolus_identity_read "$identity")" || exit 0
 
 # Lets the turn end: the session is idle.
 let_end() {
@@ -25,7 +25,7 @@ let_end() {
   aeolus_log "$identity" turn 'idle: the turn ended'
 }
 
-if aeolus_woken_by_trierarch "$identity"; then
+if aeolus_woken_by_trierarch "$identity_text"; then
   let_end
   exit 0
 fi
@@ -45,7 +45,7 @@ if printf '%s' "$payload" | grep -Eq '"stop_hook_active"[[:space:]]*:[[:space:]]
 fi
 
 root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-ship_name="$(aeolus_identity_get "$identity" shipName)"
+ship_name="$(aeolus_identity_field "$identity_text" shipName)"
 aeolus_log "$identity" askWatcher 'kept the turn open: no watcher runs'
 reason="aeolus: no watcher runs for ${ship_name}, so nothing wakes this session when work arrives: start \"${root}/scripts/aeolus-wait.sh\" as a background task (run_in_background), then end your turn"
 printf '{"decision":"block","reason":"%s"}\n' "$(aeolus_json_escape "$reason")"

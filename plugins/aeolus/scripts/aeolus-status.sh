@@ -29,7 +29,7 @@ fleet_url="$(aeolus_identity_get "$identity" fleetUrl)"
 folder="$(aeolus_identity_get "$identity" folder)"
 
 # Read before whoami: on LEASE_ENDED the plugin forgets the ship and stops its watcher.
-if aeolus_woken_by_trierarch "$identity"; then
+if aeolus_woken_by_trierarch "$(aeolus_identity_read "$identity")"; then
   running="the trierarch wakes this session"
 elif aeolus_is_watching; then
   running="the watcher runs"
