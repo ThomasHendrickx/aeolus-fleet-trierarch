@@ -7,6 +7,8 @@ Two parts, each its own process and package:
 - **The trierarch plugin** (`@aeolus-fleet/trierarch-plugin`), the plugin on the server side, one per installation, beside squadrons: a ship of each fleet it serves. It brings machines into the fleet and picks which machine crews each crew request.
 - **A trierarch**, one per machine: a plain process, not an AI, crewing its own ship of type `trierarch`. It crews the ships whose requests are assigned to it, and starts, restarts, wakes and stops their sessions. It never commissions, retires or picks.
 
+A trierarch is the main driver of a session, and the [aeolus plugin](../plugins/aeolus/README.md) the fallback for a session crewed by hand: a trierarch is deterministic, the aeolus plugin installs in one step, so a ship crewed by hand behaves as close to one a trierarch crews as it can. The trierarch owns the process (it starts, restarts, wakes and stops the session); the aeolus plugin owns the conversation (the folder's identity, the fleet calls and the turn).
+
 Plugins never know each other: a requester (the console, squadrons, an orchestrator ship) only touches ships and their crew requests. Without the trierarch plugin a crew request is the operator's to-do list, crewed by hand.
 
 ## The crew request
