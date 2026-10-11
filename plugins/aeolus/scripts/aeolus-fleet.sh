@@ -16,7 +16,9 @@
 # While the fleet is busy (503 SERVICE_UNAVAILABLE: nothing was stored), the
 # script makes the same call again by itself, with the same input, so a send
 # keeps its idempotency key: after each wait in AEOLUS_BUSY_WAITS (seconds,
-# 1 2 4 8 by default), then it says the refusal as any other.
+# 1 2 4 8 by default, as FLEET_BUSY_WAITS_MS in common), each drawn between
+# half and all of it so sessions refused together do not call again together,
+# then it says the refusal as any other. AEOLUS_BUSY_DRAW (0 to 1) fixes the draw.
 #
 # Exit codes:
 #   0  done: the fleet's answer is printed
@@ -48,9 +50,15 @@ call_fleet() {
   call_fleet_once "$@"
   for wait in $BUSY_WAITS; do
     fleet_busy || return 0
-    sleep "$wait"
+    sleep "$(busy_wait "$wait")"
     call_fleet_once "$@"
   done
+}
+
+# A busy wait drawn between half and all of it: <wait in seconds>.
+busy_wait() {
+  local draw="${AEOLUS_BUSY_DRAW:-$((RANDOM % 1001))e-3}"
+  awk -v wait="$1" -v draw="$draw" 'BEGIN { printf "%.3f", wait / 2 + wait / 2 * draw }'
 }
 
 fleet_busy() {
