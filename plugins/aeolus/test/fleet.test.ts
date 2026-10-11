@@ -79,6 +79,11 @@ async function identityFile(): Promise<string> {
   return (await run('aeolus-identity.sh', { args: ['path'] })).stdout.trim();
 }
 
+/** A Claude Code session's command: Claude Code sets CLAUDECODE in every shell it starts. */
+const AS_CLAUDE_CODE = { CLAUDECODE: '1', CLAUDE_PLUGIN_ROOT: '', PLUGIN_ROOT: '', AEOLUS_HARNESS: '' };
+/** A Codex skill's command that left out AEOLUS_HARNESS: no hook's plugin root, and none of Claude Code's variables. */
+const AS_CODEX_COMMAND = { CLAUDECODE: '', CLAUDE_PLUGIN_ROOT: '', PLUGIN_ROOT: '', AEOLUS_HARNESS: '' };
+
 const registered = { status: 200, body: { crewToken: CREW_TOKEN } };
 /** The fleet's refusal while every pool connection is taken: nothing was stored (#542). */
 const busy = { status: 503, body: { code: 'SERVICE_UNAVAILABLE', message: 'The fleet is busy; nothing was stored. Make the same call again (for send, with the same idempotency key).' } };
@@ -90,10 +95,10 @@ function expectNoToken(result: Run): void {
 }
 
 describe('aeolus-fleet register', () => {
-  it('registers with the secret, the location and the harness claude-code, and keeps the crew token in the identity file', async () => {
+  it('registers from a Claude Code command with the secret, the location and the harness claude-code, and keeps the crew token in the identity file', async () => {
     fleet = await startStubFleet([registered, whoami]);
 
-    const result = await run('aeolus-fleet.sh', { args: ['register', `${fleet.url}/`, SHIP_ID, SECRET, 'SERVER'] });
+    const result = await run('aeolus-fleet.sh', { args: ['register', `${fleet.url}/`, SHIP_ID, SECRET, 'SERVER'], env: AS_CLAUDE_CODE });
 
     expect(result.status).toBe(0);
     expect(fleet.calls[0]).toEqual({
@@ -142,6 +147,17 @@ describe('aeolus-fleet register', () => {
     await run('aeolus-fleet.sh', { args: ['register', fleet.url, SHIP_ID, SECRET, 'DEVICE'], env: { AEOLUS_HARNESS: 'codex' } });
 
     expect(JSON.parse(fleet.calls[0]?.body ?? '')).toMatchObject({ harness: 'codex' });
+  });
+
+  it("states the harness codex from a Codex skill's command run without AEOLUS_HARNESS, and keeps the identity in the codex crews folder (#711)", async () => {
+    fleet = await startStubFleet([registered, whoami]);
+    const key = createHash('sha256').update(realpathSync(folder)).digest('hex').slice(0, 32);
+
+    const result = await run('aeolus-fleet.sh', { args: ['register', fleet.url, SHIP_ID, SECRET, 'DEVICE'], env: AS_CODEX_COMMAND });
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(fleet.calls[0]?.body ?? '')).toMatchObject({ harness: 'codex' });
+    expect(readFileSync(join(home, '.aeolus', 'crews', 'codex', `${key}.identity`), 'utf8')).toContain(`crewToken=${CREW_TOKEN}\n`);
   });
 
   it("keeps a squadron member's squadron", async () => {
