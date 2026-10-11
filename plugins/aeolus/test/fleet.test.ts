@@ -180,7 +180,7 @@ describe('aeolus-fleet register', () => {
   it('refuses while the folder already crews a ship, calling nothing', async () => {
     fleet = await crewedAt([registered, whoami]);
 
-    const result = await run('aeolus-fleet.sh', { args: ['register', fleet.url, SHIP_ID, SECRET, 'DEVICE'] });
+    const result = await run('aeolus-fleet.sh', { args: ['register', fleet.url, SHIP_ID, SECRET, 'DEVICE'], env: AS_CLAUDE_CODE });
 
     expect(result.status).toBe(4);
     expect(result.stdout).toContain('this folder already crews scout');
