@@ -1654,10 +1654,11 @@ describe('a launch on a harness version its launch screens were not checked on (
   });
 });
 
-describe('a running ship whose identity is gone (#659)', () => {
-  const identityGone = (shipId: ShipId) =>
-    `mac-studio: scout (${shipId}): its session runs, but its folder holds no identity, so the trierarch no longer watches its inbox or wakes it. Restart it in the console to crew it again.`;
+/** What argo is told when a ship's folder holds no identity (#659, #664). */
+const identityGone = (shipId: ShipId) =>
+  `mac-studio: scout (${shipId}): its folder holds no identity, so the trierarch can no longer report on its behalf, watch its inbox or wake it. Restart it in the console to crew it again.`;
 
+describe('a running ship whose identity is gone (#659)', () => {
   it('tells argo once and logs it once while its folder holds no identity', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
@@ -1697,5 +1698,68 @@ describe('a running ship whose identity is gone (#659)', () => {
     await trierarch.pass();
 
     expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+});
+
+describe('a ship the trierarch would report as blocked whose identity is gone (#664)', () => {
+  const logged = (trierarch: Trierarch) => trierarch.logger.actions.map(({ action, outcome }) => `${action}: ${outcome}`);
+
+  it('tells argo once when its session exits in the same pass its identity is gone', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.processes.exit(shipId);
+    await trierarch.harness.removeIdentity(SCOUT_FOLDER);
+
+    await trierarch.pass();
+    trierarch.clock.advance(5 * SECOND_MS);
+    await trierarch.pass();
+    trierarch.clock.advance(MINUTE_MS);
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([identityGone(shipId)]);
+  });
+
+  it('logs the blocked report it cannot send, and argo told, when its session exits in the same pass its identity is gone', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.processes.exit(shipId);
+    await trierarch.harness.removeIdentity(SCOUT_FOLDER);
+
+    await trierarch.pass();
+
+    expect(logged(trierarch).slice(1)).toEqual([
+      'report: not reported blocked: session crashed, restarting, as its folder holds no identity',
+      'identityGone: its folder holds no identity, so it is no longer woken; argo told',
+    ]);
+  });
+
+  it('tells argo once when its identity is gone while it restarts', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.processes.exit(shipId);
+    await trierarch.pass();
+    await trierarch.harness.removeIdentity(SCOUT_FOLDER);
+
+    await trierarch.pass();
+    trierarch.clock.advance(5 * SECOND_MS);
+    await trierarch.pass();
+    trierarch.clock.advance(MINUTE_MS);
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([identityGone(shipId)]);
+  });
+
+  it('tells argo once when its identity is gone once it crashed', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    await crashForGood(trierarch, shipId);
+    const crashed = trierarch.fleet.toArgo.length;
+    await trierarch.harness.removeIdentity(SCOUT_FOLDER);
+
+    await trierarch.pass();
+    trierarch.clock.advance(MINUTE_MS);
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo.slice(crashed).map((report) => report.text)).toEqual([identityGone(shipId)]);
   });
 });
