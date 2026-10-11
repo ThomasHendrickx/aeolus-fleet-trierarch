@@ -13,7 +13,8 @@ import { createJsonState } from '../adapters/json-state.js';
 import { createLogger, readLogLine, renderLogLine } from '../adapters/log.js';
 import { createStyle, isColourTerminal, type Style } from '../adapters/style.js';
 import { trierarchPaths } from '../adapters/paths.js';
-import { aeolusPluginVersion } from '../adapters/plugin.js';
+import { aeolusPluginVersion, PLUGIN_HARNESSES } from '../adapters/plugin.js';
+import { createPluginUpdate } from '../adapters/plugin-update.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
 import { runCommand, streamCommand } from '../adapters/run-command.js';
 import { createService, serviceEnvironment } from '../adapters/service.js';
@@ -54,7 +55,7 @@ export const USAGE = [
   '  start                 start the service',
   '  stop                  stop the service (it starts again at the next login)',
   '  restart               restart the service, so it reads a changed configuration',
-  '  upgrade [version]     install the given version, or the latest, and restart the service; sessions keep running',
+  '  upgrade [version]     install the given version, or the latest, update the aeolus plugin and restart the service; sessions keep running',
   '  install [--no-load]   install the service: launchd on macOS, systemd on Linux',
   '  uninstall             remove the service and stop every session; deletes no worktree and none of its files',
   '  run                   keep the ships assigned to it crewed until stopped (what the service runs)',
@@ -72,6 +73,8 @@ export interface Outcome {
 interface Answer {
   readonly data: unknown;
   readonly text: string;
+  /** The exit code when the command did not do all it was asked; 0 otherwise. */
+  readonly code?: number;
 }
 
 const VALUE_FLAGS = new Set(['--config', '--fleet-url', '--ship-id', '--secret', '--lines']);
@@ -234,6 +237,9 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
     status: inspect,
     upgrade: async () => {
       const version = words[1];
+      // No configuration yet: the trierarch offers no harness, and updates no plugin.
+      const configuration = await loadConfiguration(paths.config).catch(() => undefined);
+      const pluginUpdate = createPluginUpdate({ homeDirectory, env });
       const report = await upgradeTrierarch({
         ...(version !== undefined && { version }),
         installedVersion: runningVersion,
@@ -252,12 +258,20 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
         writeInstalledServiceFile: () => runCommand(process.execPath, { args: [script, 'install', '--no-load', ...(config !== undefined ? ['--config', config] : [])] }),
         service: serviceAt(),
         running: () => readRunningFile(paths.running),
+        plugin: {
+          harnesses: PLUGIN_HARNESSES.filter((harness) => configuration?.harnesses[harness] !== undefined),
+          update: (harness) => pluginUpdate.update(harness),
+          version: (harness) => aeolusPluginVersion({ homeDirectory, env, harness }),
+          trustCodexHooks: () => createCodexSetup().trustAeolusHooks(configuration?.worktreeRoot ?? paths.worktrees),
+        },
       });
+      // A plugin that could not be updated is said, and shows in the exit code (#581).
+      const code = report.isPluginUpdated ? 0 : 1;
       if (!report.isUpgraded) {
-        return { data: report, text: report.said.join('\n') };
+        return { data: report, text: report.said.join('\n'), code };
       }
       const status = await inspect();
-      return { data: { ...report, status: status.data }, text: [...report.said, '', status.text].join('\n') };
+      return { data: { ...report, status: status.data }, text: [...report.said, '', status.text].join('\n'), code };
     },
     list: async () => {
       const entries = await inspectList(createJsonState(paths.state));
@@ -326,8 +340,8 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
     return { output: USAGE, code: 2 };
   }
   try {
-    const { data, text } = await command();
-    return { output: isJson && data !== undefined ? JSON.stringify(data, null, 2) : text, code: 0 };
+    const { data, text, code = 0 } = await command();
+    return { output: isJson && data !== undefined ? JSON.stringify(data, null, 2) : text, code };
   } catch (error) {
     // A refusal, a file it cannot use, or a program that failed (launchctl, systemctl): said, not thrown at the operator.
     const message = error instanceof Error ? error.message : String(error);
