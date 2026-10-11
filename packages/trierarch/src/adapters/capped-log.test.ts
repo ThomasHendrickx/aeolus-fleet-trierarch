@@ -111,6 +111,7 @@ describe("the trierarch's log file is capped: at its size limit it moves aside a
   it('appends on without moving the log aside while another writer holds the lock', () => {
     const older = aLogOf(1000);
     mkdirSync(`${log()}.lock`);
+    utimesSync(`${log()}.lock`, NOW, NOW);
     const stream = aStream({ maxBytes: 1000 });
 
     stream.write(RECORD);
