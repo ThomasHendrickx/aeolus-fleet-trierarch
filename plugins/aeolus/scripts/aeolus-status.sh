@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The status of this folder's ship, answered by the script, not the model, as
 # aeolus-trierarch status answers for a trierarch: the plugin's version, the
-# ship, what wakes the session, whether the lease holds and how many
-# deliveries wait. Its fleet calls go through aeolus-fleet.sh, so the crew
+# ship, its fleet and folder, what wakes the session, whether the lease holds
+# and how many deliveries wait. Its fleet calls go through aeolus-fleet.sh, so the crew
 # token stays in the identity file and LEASE_ENDED forgets the ship as any
 # other call does. Claims nothing.
 #
@@ -26,6 +26,7 @@ if [ ! -f "$identity" ]; then
 fi
 ship="$(aeolus_identity_get "$identity" shipName) ($(aeolus_identity_get "$identity" shipId))"
 fleet_url="$(aeolus_identity_get "$identity" fleetUrl)"
+folder="$(aeolus_identity_get "$identity" folder)"
 
 # Read before whoami: on LEASE_ENDED the plugin forgets the ship and stops its watcher.
 if aeolus_woken_by_trierarch "$identity"; then
@@ -70,6 +71,8 @@ case "$code" in
 esac
 
 echo "Ship: ${ship}"
+echo "Fleet: ${fleet_url}"
+echo "Folder: ${folder}"
 echo "Running: ${running}"
 echo "Lease: ${lease}"
 echo "Inbox: ${inbox}"
