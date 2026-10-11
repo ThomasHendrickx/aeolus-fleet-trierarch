@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -265,6 +265,18 @@ describe('Codex plugin state', () => {
     expect(lstatSync(join(data, 'ships')).isSymbolicLink()).toBe(true);
   });
 
+  it("never moves a Codex session's old identities into Claude Code's crews folder, from a command run without AEOLUS_HARNESS (#679)", () => {
+    const name = `${createHash('sha256').update(realpathSync(folder)).digest('hex').slice(0, 32)}.identity`;
+    mkdirSync(join(data, 'ships'), { mode: 0o700 });
+    writeFileSync(join(data, 'ships', name), 'fleetUrl=https://fleet.example.com\nshipId=shp_01m3tbfspe96yf1rnr4ank9h1a\nshipName=scout\ncrewToken=aeolus_ct_v1_crew\n', { mode: 0o600 });
+
+    runScript('aeolus-identity.sh', { args: ['show'], env: { PLUGIN_DATA: '', PLUGIN_ROOT: '', AEOLUS_DATA: data, AEOLUS_FOLDER: folder } });
+
+    expect(existsSync(join(home, '.aeolus', 'crews', 'claude-code', name))).toBe(false);
+    expect(readFileSync(join(data, 'ships', name), 'utf8')).toContain('crewToken=aeolus_ct_v1_crew\n');
+    expect(lstatSync(join(data, 'ships')).isSymbolicLink()).toBe(false);
+  });
+
   it('adds the plugin paths and restored ship to Codex context at session start without exposing its token', () => {
     expect(
       runScript('aeolus-identity.sh', {
@@ -309,6 +321,14 @@ describe('Codex plugin state', () => {
 
     expect(hook.stdout).toContain('Aeolus Codex hooks are active.');
     expect(hook.stdout).toContain('This folder crews no Aeolus ship.');
+  });
+
+  it("tells an uncrewed Codex session to pass AEOLUS_HARNESS=codex to an Aeolus skill's scripts, with AEOLUS_DATA and AEOLUS_FOLDER (#679)", () => {
+    const hook = runScript('aeolus-session-start.sh', {
+      input: JSON.stringify({ session_id: '01a10348-c3ff-7951-9962-349fca3538e8', cwd: folder, hook_event_name: 'SessionStart', source: 'startup' }),
+    });
+
+    expect(hook.stdout).toContain('pass AEOLUS_DATA and AEOLUS_FOLDER with the values above, and AEOLUS_HARNESS=codex, to its scripts.');
   });
 
   it('surfaces a wake bridge startup failure in the restored session context', () => {
