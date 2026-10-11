@@ -201,12 +201,15 @@ describe('the fleet over REST while it is busy (#546)', () => {
   });
 
   it('draws each wait between half and all of it, so callers refused together do not call again together (#610)', async () => {
-    await aFleetAnswering([BUSY, { status: 200, body: { shipId: newId('ship'), name: 'trierarch' } }], async (fleetUrl, asked) => {
-      await createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_x', busyWaitsMs: [400], random: () => 0 }).whoami();
+    await aFleetAnswering([BUSY, BUSY, { status: 200, body: { shipId: newId('ship'), name: 'trierarch' } }], async (fleetUrl) => {
+      const draws = [0, 1];
+      const waited: number[] = [];
+      await createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_x', busyWaitsMs: [400, 400], random: () => draws.shift() ?? 0, wait: (waitMs) => {
+        waited.push(waitMs);
+        return Promise.resolve();
+      } }).whoami();
 
-      const [first = 0, second = 0] = asked.map(({ at }) => at);
-      expect(second - first).toBeGreaterThanOrEqual(190);
-      expect(second - first).toBeLessThan(350);
+      expect(waited).toEqual([200, 400]);
     });
   });
 
