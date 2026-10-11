@@ -813,6 +813,18 @@ describe('the SessionStart hook', () => {
     expect(env).toContain('export AEOLUS_FOLDER=');
   });
 
+  it('removes the .wake.log files an earlier plugin left beside the identities, and keeps the identities', () => {
+    crew();
+    const ships = join(data, 'ships');
+    const left = ['0123456789abcdef0123456789abcdef.wake.log', identityFile().replace(/^.*\//, '').replace(/\.identity$/, '.wake.log')];
+    for (const name of left) writeFileSync(join(ships, name), 'aeolus: automatic wake-up armed\n');
+
+    expect(hook(payloadFor(folder)).status).toBe(0);
+
+    expect(readdirSync(ships).filter((name) => name.endsWith('.wake.log'))).toEqual([]);
+    expect(statSync(identityFile(), { throwIfNoEntry: false })).toBeDefined();
+  });
+
   it('says nothing to a folder that crews no ship', () => {
     expect(hook(payloadFor(folder))).toMatchObject({ status: 0, stdout: '' });
   });
