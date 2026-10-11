@@ -49,14 +49,23 @@ aeolus_key() {
 }
 
 # The harness the plugin runs in: AEOLUS_HARNESS (a Codex skill's commands set
-# it), else codex in a Codex hook, which has PLUGIN_ROOT, else claude-code.
+# it), else codex in a Codex hook, which has PLUGIN_ROOT, else the harness whose
+# crews folder holds the folder's identity, claude-code first (#687), else
+# claude-code.
 aeolus_harness() {
+  local folder key
   if [ -n "${AEOLUS_HARNESS:-}" ]; then
     printf '%s' "$AEOLUS_HARNESS"
   elif [ -n "${PLUGIN_ROOT:-}" ]; then
     printf codex
   else
-    printf claude-code
+    folder="$(aeolus_folder 2>/dev/null)" || folder=""
+    key="$(aeolus_key "$folder")"
+    if [ -n "$folder" ] && [ ! -f "${HOME:?}/.aeolus/crews/claude-code/$key.identity" ] && [ -f "$HOME/.aeolus/crews/codex/$key.identity" ]; then
+      printf codex
+    else
+      printf claude-code
+    fi
   fi
 }
 
