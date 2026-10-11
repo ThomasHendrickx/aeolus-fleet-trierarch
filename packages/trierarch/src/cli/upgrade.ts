@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import { TrierarchFileError, type RunningFile } from '../adapters/files.js';
 import { byVersion, type PluginHarness } from '../adapters/plugin.js';
 import type { CommandResult } from '../adapters/run-command.js';
@@ -25,7 +27,9 @@ import { NOT_SAID_YET_REASON, startNewProcess } from './new-process.js';
  * machine the plugin is updated this way only (#581). Codex's version folders
  * running sessions use stay, those none uses go (#653), and the plugin's new
  * or changed Codex hooks are trusted, so a new session starts without a
- * prompt. The update comes before
+ * prompt. After an install, the installed version runs that step, as its
+ * own upgrade at its version, so one upgrade always ends with the plugin
+ * step of the version it upgrades to (#725). The update comes before
  * the restart, so the new process starts with it. A failed plugin update is
  * said, and the upgrade goes on. The plugin comes from the release tag of the
  * version it upgrades to, from main for releases up to 0.22.0, whose tags
@@ -121,6 +125,29 @@ async function upgradePlugin(plugin: PluginUpgrade | undefined, version: string)
 
 const VERSION = /^\d+\.\d+\.\d+$/;
 
+function alreadyOn(version: string): string {
+  return `The trierarch is already on ${version}.`;
+}
+
+/** What the installed version's `upgrade --json` says that the plugin step needs. */
+const installedReportSchema = z.object({ isPluginUpdated: z.boolean(), said: z.array(z.string()) });
+
+/** The plugin step as the installed version ran it, from what its upgrade at its own version answered. */
+function pluginStepOf(answer: CommandResult, version: string): { isPluginUpdated: boolean; said: string[] } {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(answer.stdout);
+  } catch {
+    raw = undefined;
+  }
+  const parsed = installedReportSchema.safeParse(raw);
+  if (!parsed.success) {
+    const output = `${answer.stdout}${answer.stderr}`.trim();
+    return { isPluginUpdated: false, said: [`The aeolus plugin was not updated: the trierarch ${version} said ${output}. Fix what it says, then run aeolus-trierarch upgrade again.`] };
+  }
+  return { isPluginUpdated: parsed.data.isPluginUpdated, said: parsed.data.said.filter((line) => line !== alreadyOn(version)) };
+}
+
 export async function upgradeTrierarch(at: {
   version?: string;
   /** The version installed now, read afresh each time: the install replaces it. */
@@ -128,6 +155,8 @@ export async function upgradeTrierarch(at: {
   npm: Npm;
   /** The installed version's `install --no-load`: this process still runs the code of the version it replaces. */
   writeInstalledServiceFile: () => Promise<CommandResult>;
+  /** The installed version's `upgrade <version> --json`: on its version already, it runs the plugin step as that version runs it. */
+  upgradeInstalledPlugin: (version: string) => Promise<CommandResult>;
   service: Pick<Service, 'reload' | 'stop' | 'start' | 'status'>;
   /** What running.json says now: the new process writes it as it starts. */
   running: () => Promise<RunningFile | undefined>;
@@ -143,7 +172,7 @@ export async function upgradeTrierarch(at: {
   const target = at.version ?? (await at.npm.latest()).trim();
   if (target === from) {
     const plugin = await upgradePlugin(at.plugin, target);
-    return { from, to: from, isUpgraded: false, isPluginUpdated: plugin.isPluginUpdated, said: [`The trierarch is already on ${from}.`, ...plugin.said] };
+    return { from, to: from, isUpgraded: false, isPluginUpdated: plugin.isPluginUpdated, said: [alreadyOn(from), ...plugin.said] };
   }
 
   const spec = `${PACKAGE}@${target}`;
@@ -169,7 +198,8 @@ export async function upgradeTrierarch(at: {
     );
   }
   const to = at.installedVersion();
-  const plugin = await upgradePlugin(at.plugin, to);
+  // This process runs the code of the version it replaces: the installed version runs its own plugin step (#725).
+  const plugin = at.plugin === undefined || at.plugin.harnesses.length === 0 ? { isPluginUpdated: true, said: [] } : pluginStepOf(await at.upgradeInstalledPlugin(to), to);
   const said = [`Upgraded the trierarch from ${from} to ${to}.`, ...plugin.said];
 
   if ((await at.service.status()).isInstalled) {

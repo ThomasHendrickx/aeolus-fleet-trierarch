@@ -257,6 +257,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
           install: (spec) => runCommand('npm', { args: ['install', '--global', spec] }),
         },
         writeInstalledServiceFile: () => runCommand(process.execPath, { args: [script, 'install', '--no-load', ...(config !== undefined ? ['--config', config] : [])] }),
+        upgradeInstalledPlugin: (to) => runCommand(process.execPath, { args: [script, 'upgrade', to, '--json', ...(config !== undefined ? ['--config', config] : [])] }),
         service: serviceAt(),
         running: () => readRunningFile(paths.running),
         plugin: {
