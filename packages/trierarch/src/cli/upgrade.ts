@@ -18,7 +18,8 @@ import { NOT_SAID_YET_REASON, startNewProcess } from './new-process.js';
  * It never upgrades on its own. A failed install leaves the old version
  * running. Where npm's global folder is not the user's to write, as under a
  * system Node install, it installs nothing and says what to run instead
- * (#480): it never runs sudo itself.
+ * (#480): it never runs sudo itself. What it says to run then includes
+ * upgrade again at the new version, which updates the plugin (#718).
  * It updates the aeolus plugin too, for each harness the configuration
  * offers, also when the trierarch is on the version already: on a trierarch
  * machine the plugin is updated this way only (#581). Codex's version folders
@@ -148,9 +149,17 @@ export async function upgradeTrierarch(at: {
   const spec = `${PACKAGE}@${target}`;
   const folder = await at.npm.globalFolder();
   if (!folder.isWritable) {
-    const instead = [`sudo npm install --global ${spec}`, ...((await at.service.status()).isInstalled ? ['aeolus-trierarch install'] : [])];
+    // Upgrade at the version it installed updates the plugin only, before install restarts the service on it (#718).
+    const isPluginOffered = at.plugin !== undefined && at.plugin.harnesses.length > 0;
+    const pluginStep = `aeolus-trierarch upgrade ${target}`;
+    const instead = [
+      `sudo npm install --global ${spec}`,
+      ...(isPluginOffered ? [pluginStep] : []),
+      ...((await at.service.status()).isInstalled ? ['aeolus-trierarch install'] : []),
+    ];
+    const pluginSaid = isPluginOffered ? `${pluginStep} updates the aeolus plugin to ${target}. ` : '';
     throw new TrierarchFileError(
-      `npm's global folder ${folder.path} is not yours to write: a system Node install owns it. Run instead:\n${instead.map((line) => `  ${line}`).join('\n')}\nThe trierarch keeps running ${from}.`,
+      `npm's global folder ${folder.path} is not yours to write: a system Node install owns it. Run instead:\n${instead.map((line) => `  ${line}`).join('\n')}\n${pluginSaid}The trierarch keeps running ${from}.`,
     );
   }
   const installed = await at.npm.install(spec);
