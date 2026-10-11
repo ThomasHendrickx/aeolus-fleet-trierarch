@@ -628,6 +628,42 @@ describe('the Codex wake bridge', () => {
     expect(actions().at(-1)).toEqual({ ...scout, action: 'wakeBridge', outcome: `queued a wake to Codex task ${THREAD_ID}: 1 delivery waits` });
   });
 
+  it('logs a watcher that stopped without a wake as a failure, with what it said', async () => {
+    crew();
+    const watcher = aRunningWatcher();
+    const codex = aCodex();
+
+    try {
+      await start('aeolus-codex-wake.sh', { args: ['run', THREAD_ID], env: codex.env }).exited;
+
+      expect(actions().at(-1)).toEqual({
+        ...scout,
+        action: 'wakeBridge',
+        outcome: 'failed: the watcher stopped: aeolus: already watching: a watcher runs for this ship; do not start another',
+        next: 'the session arms it again before it ends its turn',
+      });
+    } finally {
+      watcher.kill();
+    }
+  });
+
+  it('logs a wake codex refused to queue as a failure, with what codex said', async () => {
+    fleet = await startStubFleet([inbox(1)]);
+    crew(fleet.url);
+    aTurnEnded();
+    const codex = aCodex();
+    writeFileSync(join(data, 'bin', 'codex'), '#!/usr/bin/env bash\necho "no such thread" >&2\nexit 1\n');
+
+    await start('aeolus-codex-wake.sh', { args: ['run', THREAD_ID], env: codex.env }).exited;
+
+    expect(actions().at(-1)).toEqual({
+      ...scout,
+      action: 'wakeBridge',
+      outcome: `failed: codex did not queue the wake to Codex task ${THREAD_ID}: no such thread`,
+      next: 'the session arms it again before it ends its turn',
+    });
+  });
+
   it('logs not arming when its first fleet check cannot connect, as a failure with what happens next', () => {
     crew('http://127.0.0.1:1');
     const codex = aCodex();
