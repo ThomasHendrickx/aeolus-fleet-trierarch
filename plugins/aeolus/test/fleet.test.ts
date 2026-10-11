@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { FLEET_BUSY_WAITS_MS } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { startStubFleet, type StubAnswer, type StubFleet } from './stub-fleet.js';
@@ -328,7 +329,7 @@ describe('aeolus-fleet calls', () => {
       }
     }, 5);
 
-    await run('aeolus-fleet.sh', { args: ['whoami'], env: { AEOLUS_BUSY_WAITS: '0.2 0.6' } });
+    await run('aeolus-fleet.sh', { args: ['whoami'], env: { AEOLUS_BUSY_WAITS: '0.2 0.6', AEOLUS_BUSY_DRAW: '1' } });
     clearInterval(watching);
 
     const [first = 0, second = 0, third = 0] = calledAt;
@@ -346,8 +347,28 @@ describe('aeolus-fleet calls', () => {
     expect(fleet.calls).toHaveLength(4);
   });
 
-  it('waits 1, 2, 4 and 8 seconds while the fleet stays busy, unless AEOLUS_BUSY_WAITS says otherwise', () => {
-    expect(readFileSync(join(SCRIPTS, 'aeolus-fleet.sh'), 'utf8')).toContain('BUSY_WAITS="${AEOLUS_BUSY_WAITS:-1 2 4 8}"');
+  it('draws each wait between half and all of it, so callers refused together do not call again together (#610)', async () => {
+    fleet = await crewedAt([busy, { status: 200, body: {} }]);
+    const stub = fleet;
+    const calledAt: number[] = [];
+    const watching = setInterval(() => {
+      if (calledAt.length < stub.calls.length) {
+        calledAt.push(Date.now());
+      }
+    }, 5);
+
+    await run('aeolus-fleet.sh', { args: ['whoami'], env: { AEOLUS_BUSY_WAITS: '0.8', AEOLUS_BUSY_DRAW: '0' } });
+    clearInterval(watching);
+
+    const [first = 0, second = 0] = calledAt;
+    expect(second - first).toBeGreaterThanOrEqual(350);
+    expect(second - first).toBeLessThan(700);
+  });
+
+  it("waits common's busy waits while the fleet stays busy, unless AEOLUS_BUSY_WAITS says otherwise", () => {
+    const seconds = FLEET_BUSY_WAITS_MS.map((waitMs) => String(waitMs / 1000)).join(' ');
+
+    expect(readFileSync(join(SCRIPTS, 'aeolus-fleet.sh'), 'utf8')).toContain(`BUSY_WAITS="\${AEOLUS_BUSY_WAITS:-${seconds}}"`);
   });
 
   it('calls once, without waiting, on any other refusal', async () => {
