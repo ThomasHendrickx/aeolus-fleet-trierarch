@@ -4,6 +4,7 @@ import { basename, join } from 'node:path';
 
 import { z } from 'zod';
 
+import { codexKeepsPluginData } from './codex-plugin-data.js';
 import { byVersion, type PluginHarness } from './plugin.js';
 import { runCommand } from './run-command.js';
 import { runningProcesses, type RunningProcess } from './running-processes.js';
@@ -13,7 +14,9 @@ import { runningProcesses, type RunningProcess } from './running-processes.js';
  * the release tag it is given, or main without one (#652): each harness's
  * aeolus-fleet marketplace is pointed at it first. Neither harness adds a
  * second source for a marketplace. Codex's is removed and added again, which
- * keeps the plugin and its cache. Claude Code's is never removed, since that
+ * keeps the plugin and its cache, once a throwaway Codex home proves this
+ * Codex keeps the plugin's data, the crew identities, when it is removed
+ * (#660); the upgrade changes nothing otherwise. Claude Code's is never removed, since that
  * uninstalls the plugin and deletes its data, the crew identities: the
  * marketplace its settings declare is dropped from them, and adding it again
  * declares the new source.
@@ -161,6 +164,9 @@ export function createPluginUpdate(at: {
   return {
     update: async (harness, tag) => {
       if (harness === 'codex') {
+        if (!(await codexKeepsPluginData(codex))) {
+          throw new Error(`Codex would delete the aeolus plugin's data, the crew identities on this machine, when its ${MARKETPLACE} marketplace is removed: the upgrade leaves the marketplace as it is`);
+        }
         await keepingVersions(codexCache, {
           upgrade: async () => {
             // There may be no marketplace to remove: adding it says what is wrong.

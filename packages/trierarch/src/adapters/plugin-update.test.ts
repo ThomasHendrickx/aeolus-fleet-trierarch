@@ -9,7 +9,9 @@ import type { RunningProcess } from './running-processes.js';
 
 // Against stand-ins for `codex` and `claude`: each logs the words it runs with.
 // The Codex one does what Codex's own plugin upgrade does (#581): it installs
-// the new version and deletes every other version folder.
+// the new version and deletes every other version folder. What it runs in
+// another CODEX_HOME than the test's, the proof that Codex keeps the plugin's
+// data (#660), it logs as `probe:`.
 
 let home: string;
 let log: string;
@@ -50,7 +52,8 @@ function aProgram(path: string, at: { then?: string; status?: number; stderr?: s
     `#!/usr/bin/env node
 const { appendFileSync, mkdirSync, readdirSync, rmSync, writeFileSync } = require('node:fs');
 const { join } = require('node:path');
-appendFileSync(${JSON.stringify(log)}, require('node:path').basename(process.argv[1]) + ' ' + process.argv.slice(2).join(' ') + '\\n');
+const probe = process.env.CODEX_HOME !== ${JSON.stringify(process.env.CODEX_HOME)} ? 'probe: ' : '';
+appendFileSync(${JSON.stringify(log)}, probe + require('node:path').basename(process.argv[1]) + ' ' + process.argv.slice(2).join(' ') + '\\n');
 ${at.then ?? ''}
 process.stderr.write(${JSON.stringify(at.stderr ?? '')});
 process.exit(${String(at.status ?? 0)});
@@ -82,9 +85,18 @@ function settingsIn(configDirectory: string): unknown {
   return JSON.parse(readFileSync(join(configDirectory, 'settings.json'), 'utf8'));
 }
 
-function ran(): string[] {
+/** Each run of a stand-in, the proof's too. */
+function runs(): string[] {
   return existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter((line) => line !== '') : [];
 }
+
+/** What the stand-ins ran where the update runs them, the proof's runs left out. */
+function ran(): string[] {
+  return runs().filter((line) => !line.startsWith('probe: '));
+}
+
+/** The words of a Codex that deletes its plugins' data when a marketplace is removed. */
+const DELETES_DATA_ON_REMOVE = "if (process.argv[4] === 'remove' && process.env.CODEX_HOME !== undefined) rmSync(join(process.env.CODEX_HOME, 'plugins', 'data'), { recursive: true, force: true });";
 
 function update(env: Record<string, string> = {}) {
   return createPluginUpdate({
@@ -138,7 +150,7 @@ describe('the aeolus plugin update for Codex', () => {
   });
 
   it('adds the marketplace also when Codex had none to remove (#652)', async () => {
-    aProgram(codex, { then: "if (process.argv[4] === 'remove') { process.stderr.write('Error: marketplace `aeolus-fleet` is not configured or installed'); process.exit(1); }" });
+    aProgram(codex, { then: "if (probe === '' && process.argv[4] === 'remove') { process.stderr.write('Error: marketplace `aeolus-fleet` is not configured or installed'); process.exit(1); }" });
 
     await update().update('codex', 'v0.23.0');
 
@@ -146,7 +158,7 @@ describe('the aeolus plugin update for Codex', () => {
   });
 
   it("says what Codex said when it cannot add the marketplace, and upgrades nothing (#652)", async () => {
-    aProgram(codex, { then: "if (process.argv[4] === 'add') { process.stderr.write('Error: could not reach github.com'); process.exit(1); }" });
+    aProgram(codex, { then: "if (probe === '' && process.argv[4] === 'add') { process.stderr.write('Error: could not reach github.com'); process.exit(1); }" });
 
     await expect(update().update('codex', 'v0.23.0')).rejects.toThrow('codex plugin marketplace add ThomasHendrickx/aeolus-fleet --ref v0.23.0 failed: Error: could not reach github.com');
     expect(ran()).not.toContain('codex plugin marketplace upgrade aeolus-fleet');
@@ -295,6 +307,31 @@ describe('the aeolus plugin update for Codex', () => {
 
     await expect(update().update('codex', 'v0.23.0')).rejects.toThrow('codex plugin marketplace upgrade aeolus-fleet failed: Error: could not reach github.com');
     expect(readdirSync(codexCache()).sort()).toEqual(['0.20.5', '0.21.0']);
+  });
+
+  it("proves Codex keeps the aeolus plugin's data before it removes the aeolus-fleet marketplace (#660)", async () => {
+    aProgram(codex);
+
+    await update().update('codex', 'v0.23.0');
+
+    const beforeRemove = runs().slice(0, runs().indexOf('codex plugin marketplace remove aeolus-fleet'));
+    expect(beforeRemove).toContain('probe: codex plugin marketplace remove aeolus-fleet');
+  });
+
+  it("refuses to remove the aeolus-fleet marketplace when Codex would delete the aeolus plugin's data with it, the crew identities, and changes nothing (#660)", async () => {
+    aCodexVersion('0.21.0');
+    aProgram(codex, { then: DELETES_DATA_ON_REMOVE });
+
+    await expect(update().update('codex', 'v0.23.0')).rejects.toThrow("Codex would delete the aeolus plugin's data, the crew identities on this machine, when its aeolus-fleet marketplace is removed: the upgrade leaves the marketplace as it is");
+    expect(ran()).toEqual([]);
+    expect(readdirSync(codexCache())).toEqual(['0.21.0']);
+  });
+
+  it('changes nothing when Codex cannot run the proof, saying what Codex said (#660)', async () => {
+    aProgram(codex, { then: "if (process.argv.slice(2).join(' ') === 'plugin add aeolus@aeolus-fleet') { process.stderr.write('Error: plugin aeolus not found'); process.exit(1); }" });
+
+    await expect(update().update('codex', 'v0.23.0')).rejects.toThrow('codex plugin add aeolus@aeolus-fleet failed: Error: plugin aeolus not found');
+    expect(ran()).toEqual([]);
   });
 
   it('runs the upgrade where Codex has no aeolus plugin version yet', async () => {
