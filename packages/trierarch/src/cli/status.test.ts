@@ -48,6 +48,7 @@ describe('aeolus-trierarch status', () => {
       version: '0.18.0',
       runningVersion: '0.18.0',
       plugins: { 'claude-code': '0.20.4' },
+      repositories: ['aeolus-fleet'],
       service: RUNNING,
       fleet: { url: 'https://fleet.example.com', shipId, lease: 'valid' },
       caps: { ships: { used: 2, cap: 8 }, running: { used: 1, cap: 4 } },
@@ -59,6 +60,7 @@ describe('aeolus-trierarch status', () => {
       [
         'Version: 0.18.0',
         'Aeolus plugin: claude-code 0.20.4',
+        'Repositories: aeolus-fleet',
         'Service: running, pid 4242, since 2026-10-06T07:00:00.000Z',
         `Fleet: https://fleet.example.com, the lease of ${shipId} is valid`,
         'Caps: 2 of 8 ships crewed here, 1 of 4 sessions running',
@@ -76,6 +78,22 @@ describe('aeolus-trierarch status', () => {
 
     expect(report.plugins).toEqual({ 'claude-code': '0.20.4', codex: null });
     expect(describeStatus(report)).toContain('Aeolus plugin: claude-code 0.20.4, codex not found (install the aeolus plugin for it)');
+  });
+
+  it('names every configured repository (#579)', async () => {
+    const configuration = { ...CONFIGURATION, repositories: { ...CONFIGURATION.repositories, pagasae: { path: '/home/thomas/Projects/pagasae' } } };
+
+    const report = await inspect(aTrierarch(), { configuration });
+
+    expect(report.repositories).toEqual(['aeolus-fleet', 'pagasae']);
+    expect(describeStatus(report)).toContain('Repositories: aeolus-fleet, pagasae\n');
+  });
+
+  it('says when no repository is configured (#579)', async () => {
+    const report = await inspect(aTrierarch(), { configuration: { ...CONFIGURATION, repositories: {} } });
+
+    expect(report.repositories).toEqual([]);
+    expect(describeStatus(report)).toContain('Repositories: none\n');
   });
 
   it('colours how the service, the lease and the entries stand on a colour terminal, saying the same as in plain text', async () => {
