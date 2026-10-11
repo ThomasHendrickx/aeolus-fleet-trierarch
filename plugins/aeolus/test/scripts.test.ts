@@ -2224,3 +2224,40 @@ describe('no plugin script prints a shell error for a file that vanishes between
     });
   });
 });
+
+describe('the plugin reads the identity once, never looking for it first (#719)', () => {
+  it('a squadron member keeping its check-in interval keeps its ship', () => {
+    crew();
+
+    run('aeolus-identity.sh', { args: ['check-in', '30m'], env: vanishingAfterItsCheck(identityFile()) });
+
+    expect(run('aeolus-identity.sh', { args: ['show'] }).stdout).toBe(
+      `ship: scout (${SHIP_ID})\nfleet: https://fleet.example.com\nfolder: ${folder}\ncheck-in: 30m\n`,
+    );
+  });
+
+  it('the turn hook marking a turn busy leaves the identity in place', () => {
+    crew();
+
+    run('aeolus-turn.sh', {
+      stdin: JSON.stringify({ session_id: 'c5858406-be86-46cd-8591-f4fb39b1fa61', cwd: folder, hook_event_name: 'UserPromptSubmit', prompt: 'hello' }),
+      env: { AEOLUS_FOLDER: '', AEOLUS_DATA: '', CLAUDE_PROJECT_DIR: folder, CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin', ...vanishingAfterItsCheck(identityFile()) },
+    });
+
+    expect(run('aeolus-identity.sh', { args: ['show'] }).stdout).toMatch(/^ship: scout /);
+  });
+
+  it('register in a folder that already crews a ship names that ship', () => {
+    crew();
+
+    const { status, stdout } = run('aeolus-fleet.sh', {
+      args: ['register', 'http://127.0.0.1:1', SHIP_ID, 'a-secret', 'DEVICE'],
+      env: { AEOLUS_HARNESS: 'claude-code', ...vanishingAfterItsCheck(identityFile()) },
+    });
+
+    expect({ status, stdout }).toEqual({
+      status: 4,
+      stdout: `aeolus: this folder already crews scout (${SHIP_ID}); one folder crews one ship, and deregistering frees it\n`,
+    });
+  });
+});
