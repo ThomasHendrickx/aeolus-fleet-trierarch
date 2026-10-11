@@ -167,7 +167,7 @@ describe('aeolus-identity', () => {
 
       expect(run('aeolus-identity.sh', { args: ['show'] }).stdout).toContain('ship: scout');
       expect(run('aeolus-identity.sh', { args: ['show'], env: { AEOLUS_FOLDER: other } }).stdout).toContain('ship: lookout');
-      expect(readdirSync(join(data, 'ships'))).toHaveLength(2);
+      expect(readdirSync(join(home, '.aeolus', 'crews', 'claude-code'))).toHaveLength(2);
     } finally {
       rmSync(other, { recursive: true, force: true });
     }
@@ -205,7 +205,7 @@ describe('aeolus-identity', () => {
       await new Promise((resolve) => setTimeout(resolve, 100));
       expect(sleeper.exitCode).toBeNull();
       expect(wakeSleeper.exitCode).toBeNull();
-      expect(readdirSync(join(data, 'ships'))).toEqual([]);
+      expect(readdirSync(join(home, '.aeolus', 'crews', 'claude-code'))).toEqual([]);
     } finally {
       sleeper.kill();
       wakeSleeper.kill();

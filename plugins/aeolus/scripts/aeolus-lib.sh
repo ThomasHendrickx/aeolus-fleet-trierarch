@@ -60,11 +60,18 @@ aeolus_harness() {
   fi
 }
 
+# Whether the crews folder is known rather than guessed: AEOLUS_CREWS or
+# AEOLUS_HARNESS names it, or a hook of either harness runs. A Codex command
+# without AEOLUS_HARNESS guesses claude-code, so it must not move (#679).
+aeolus_crews_known() {
+  [ -n "${AEOLUS_CREWS:-}" ] || [ -n "${AEOLUS_HARNESS:-}" ] || [ -n "${PLUGIN_ROOT:-}" ] || [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]
+}
+
 # Where the identities of the harness's sessions live (decision 0015):
 # ~/.aeolus/crews/<harness>, outside the plugin's data folder, so uninstalling
 # the plugin cannot delete them (#658). AEOLUS_CREWS names another folder, as
 # the trierarch does. A plugin from before kept them in <data>/ships: the first
-# script to look moves them here and leaves a link there.
+# script that knows its harness moves them here and leaves a link there.
 aeolus_ships_dir() {
   local crews="${AEOLUS_CREWS:-${HOME:?}/.aeolus/crews/$(aeolus_harness)}"
   aeolus_move_ships "$crews"
@@ -75,13 +82,15 @@ aeolus_ships_dir() {
 # links <data>/ships to the crews folder so a session still on an older plugin
 # finds its identity. A file the crews folder already holds wins: the old one
 # stays, and so does <data>/ships without a link. Deleting the data folder
-# deletes the link, never what it points to. Never fails its caller.
+# deletes the link, never what it points to. Moves only when the crews folder
+# is known, never guessed. Never fails its caller.
 aeolus_move_ships() {
   local crews="$1" data old entry
   data="${AEOLUS_DATA:-${PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-}}}"
   if [ ! -d "$crews" ]; then
     (umask 077 && mkdir -p "$crews") 2>/dev/null || return 0
   fi
+  aeolus_crews_known || return 0
   [ -n "$data" ] && [ -d "$data" ] || return 0
   old="$data/ships"
   if [ -d "$old" ] && [ ! -L "$old" ]; then
