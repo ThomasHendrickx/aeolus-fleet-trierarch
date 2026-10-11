@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { CODEX_SCREENS_CHECKED_ON, codexLaunchSeen } from './codex-screen.js';
 
-// On screens of Codex 0.162.1, captured from real sessions (#382, #594).
+// On screens of Codex 0.162.1, captured from real sessions (#382, #594), its folder trust and hooks review screens too (#602).
 
 function screen(name: string): string {
   return readFileSync(new URL(`../../test/screens/codex-${name}.txt`, import.meta.url), 'utf8');
@@ -31,6 +31,13 @@ describe('what a Codex screen shows in its launch window', () => {
 
   it('sees none while it only says it is working', () => {
     expect(codexLaunchSeen({ screen: `${promptedOnly('ran')}\n\n• Working (3s • esc to interrupt)\n`, model: 'gpt-5.6-sol' })).toEqual({ kind: 'none' });
+  });
+
+  it.each([
+    ['trust', 'folder trust question'],
+    ['hooks', 'hooks review'],
+  ])('names the screen it stopped at before its first prompt (%s)', (name, shown) => {
+    expect(codexLaunchSeen({ screen: screen(name), model: 'gpt-5.6-sol' })).toEqual({ kind: 'none', screen: shown });
   });
 
   it('sees the model it launched with refused', () => {

@@ -5,13 +5,17 @@ import { launchSeenWith, type LaunchTexts } from './launch-screen.js';
  * Codex's screen in a session's launch window (#382), as Codex 0.162.1
  * writes it: the one place its texts are matched, tested on screens captured
  * from real sessions (test/screens). "• Working" shows even with no tool
- * call, so it is no activity.
+ * call, so it is no activity. codex-setup answers its folder trust and hooks
+ * review screens ahead; they are named here for when one still shows (#602).
  */
 const CODEX_TEXTS: LaunchTexts = {
   // A tool call done: "• Ran echo hi", "• Explored", "• Called aeolus.whoami", "• Edited file.ts".
   activity: /^• (?:Ran \S|Explored$|Called \S|Edited \S)/mu,
   refused: /"type":"invalid_request_error","message":"The '([^']+)' model is not supported/gu,
-  screens: [],
+  screens: [
+    { name: 'folder trust question', text: /^ {2}Trust this folder\?/mu },
+    { name: 'hooks review', text: /^ {2}Hooks need review$/mu },
+  ],
 };
 
 /** The Codex version the texts above were checked on, the version its screens in test/screens were captured on (#594). */
