@@ -107,10 +107,10 @@ Its report, sent on start and again whenever it changes: its state (`working` wh
 
 Labels (decision 0031) select machines. Each pass, before assignment, the trierarch plugin:
 
-1. defines the labels `os` (`macos`, `linux`, `windows`), `arch` (`arm64`, `amd64`) and `trierarch` (`machine`), which its ship then owns. A key another ship owns already is left alone: the trierarch plugin neither defines nor assigns it;
+1. defines the labels `os` (`macos`, `linux`, `windows`), `arch` (`arm64`, `amd64`) and `trierarch` (`machine`, `plugin`), which its ship then owns. A key another ship owns already is left alone: the trierarch plugin neither defines nor assigns it;
 2. labels each trierarch ship with the `os` and `arch` its last report names: the value it reports now goes on first, then any other value of that label comes off. A trierarch whose report names neither carries neither;
-3. labels each trierarch ship `trierarch=machine`, whatever it reports. Its own ship stays unlabelled, as no ship labels itself (decision 0031);
-4. declares `trierarch=*` to `trierarch=*` (decision 0037), so every trierarch ship may reach every other once a networking plugin supplies the rules. It declares once per process and ship, as each declaration makes the networking plugin supply the fleet again.
+3. labels each trierarch ship `trierarch=machine`, whatever it reports, and its own ship `trierarch=plugin` (decision 0031);
+4. declares `trierarch=*` to `trierarch=*` (decision 0037), so every trierarch ship and its own ship may reach each other once a networking plugin supplies the rules. It declares once per process and ship, as each declaration makes the networking plugin supply the fleet again.
 
 Switched off for a fleet, the trierarch plugin withdraws its declared rules at once; while the fleet does not answer, the switch holds and its next pass withdraws them. A fleet deleted from it has them withdrawn first, and the delete is refused while the fleet does not answer. The labels it assigned stay.
 
