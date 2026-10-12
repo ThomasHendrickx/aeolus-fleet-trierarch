@@ -39,7 +39,9 @@ import { CONFIGURATION } from './support/in-memory.js';
 // with the folder's identity written through the aeolus plugin's own script,
 // and removing the request ends the lease. Only the sessions are stand-ins:
 // no Claude Code runs here, but its stand-in shows its first-run screens, as
-// captured from Claude Code itself, until its own files say they are answered.
+// captured from Claude Code itself, until its own files say they are answered,
+// and past them runs the aeolus plugin's own launch hook as its first prompt
+// would: the session starts and makes a tool call (#490).
 
 const PLUGIN_ROOT = fileURLToPath(new URL('../../../plugins/aeolus', import.meta.url));
 const GIT_ENV = { GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 't@example.com' };
@@ -63,19 +65,35 @@ function jsonIn(path: string): Record<string, unknown> {
 }
 
 /**
- * What Claude Code shows in the home folder (#403): its onboarding until it is
- * completed in ~/.claude.json, then, launched with skip-permissions, its
- * bypass permissions warning until that is accepted in ~/.claude/settings.json;
- * else its first prompt makes a tool call.
+ * The first-run screen Claude Code shows in the home folder (#403): its
+ * onboarding until it is completed in ~/.claude.json, then, launched with
+ * skip-permissions, its bypass permissions warning until that is accepted in
+ * ~/.claude/settings.json; else none, and its first prompt runs.
  */
-function claudeCodeShows(command: readonly string[]): string {
+function claudeCodeStopsAt(command: readonly string[]): string | undefined {
   if (jsonIn(join(home, '.claude.json')).hasCompletedOnboarding !== true) {
     return claudeCodeScreen('theme');
   }
   if (command.includes(SKIP) && jsonIn(join(home, '.claude', 'settings.json')).skipDangerousModePermissionPrompt !== true) {
     return claudeCodeScreen('bypass');
   }
-  return '❯ /aeolus:wake\n\n  Ran 1 shell command\n';
+  return undefined;
+}
+
+function claudeCodeShows(command: readonly string[]): string {
+  return claudeCodeStopsAt(command) ?? '❯ /aeolus:wake\n\n  Ran 1 shell command\n';
+}
+
+/** Runs the aeolus plugin's launch hook for each event, as Claude Code does in the session started in the folder with the launch id given. */
+async function launchHooks(at: { folder: string; env: Readonly<Record<string, string>> }, events: readonly Record<string, unknown>[]): Promise<void> {
+  for (const event of events) {
+    const hooked = await runCommand('bash', {
+      args: [`${PLUGIN_ROOT}/scripts/aeolus-launch.sh`],
+      env: { ...at.env, AEOLUS_FOLDER: at.folder, AEOLUS_DATA: pluginData, AEOLUS_CREWS: join(home, '.aeolus', 'crews', 'claude-code') },
+      input: JSON.stringify({ cwd: at.folder, transcript_path: join(home, 'transcript.jsonl'), ...event }),
+    });
+    expect(hooked.status, hooked.stderr).toBe(0);
+  }
 }
 
 /** Sessions as a map, standing in for tmux: started ones run until stopped, each showing what Claude Code would show in this home. */
@@ -88,10 +106,12 @@ function standInSessions(): Tmux {
       sessions.delete(shipId);
       return Promise.resolve();
     },
-    start: ({ shipId, command }) => {
+    start: async ({ shipId, folder, command, env = {} }) => {
       sessions.set(shipId, 'running');
       commands.set(shipId, command);
-      return Promise.resolve();
+      if (claudeCodeStopsAt(command) === undefined) {
+        await launchHooks({ folder, env }, [{ hook_event_name: 'SessionStart', source: 'startup' }, { hook_event_name: 'PreToolUse', tool_name: 'Bash' }]);
+      }
     },
     type: () => Promise.resolve(),
     screen: (shipId) => Promise.resolve(sessions.has(shipId) ? claudeCodeShows(commands.get(shipId) ?? []) : ''),

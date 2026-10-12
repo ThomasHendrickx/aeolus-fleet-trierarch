@@ -11,6 +11,11 @@ export interface AeolusPlugin {
   readonly crews: string;
 }
 
+/** Runs the plugin's own `aeolus-identity.sh` for the folder, with the plugin's data and crews folders. */
+export function runIdentity(plugin: AeolusPlugin, at: { folder: string; args: readonly string[] }): Promise<{ status: number; stdout: string; stderr: string }> {
+  return runCommand('bash', { args: [`${plugin.root}/scripts/aeolus-identity.sh`, ...at.args], env: { AEOLUS_FOLDER: at.folder, AEOLUS_DATA: plugin.data, AEOLUS_CREWS: plugin.crews } });
+}
+
 /**
  * A session's identity and turn, through the aeolus plugin's own
  * `aeolus-identity.sh`, never a copy of how the plugin names its files. The
@@ -19,8 +24,7 @@ export interface AeolusPlugin {
  * kept there.
  */
 export function createPluginIdentity(plugin: AeolusPlugin): Pick<HarnessPort, 'prepareIdentity' | 'crewTokenOf' | 'removeIdentity' | 'turnOf'> {
-  const identity = async (folder: string, args: readonly string[]): Promise<{ status: number; stdout: string; stderr: string }> =>
-    runCommand('bash', { args: [`${plugin.root}/scripts/aeolus-identity.sh`, ...args], env: { AEOLUS_FOLDER: folder, AEOLUS_DATA: plugin.data, AEOLUS_CREWS: plugin.crews } });
+  const identity = (folder: string, args: readonly string[]) => runIdentity(plugin, { folder, args });
 
   return {
     prepareIdentity: async ({ folder, identity: crew }) => {
