@@ -5,7 +5,7 @@ import { scriptEnvironment } from './script-environment.js';
 // A test run inside a crewed session inherits its harness and crew variables and
 // CI does not, so a script under test sees only the ones its test sets (#717, #726).
 
-/** The environment of a test run started from a session that crews a ship with the plugin. */
+/** The environment of a test run started from a session the trierarch launched to crew a ship with the plugin. */
 const A_HARNESS_CALLER = {
   PATH: '/usr/bin:/bin',
   CLAUDECODE: '1',
@@ -18,9 +18,10 @@ const A_HARNESS_CALLER = {
   PLUGIN_DATA: '/plugin-data',
   AEOLUS_FOLDER: '/crewed-folder',
   AEOLUS_DATA: '/plugin-data',
+  AEOLUS_LAUNCH: 'lnc-2026-10-12T05:00:00.000Z',
 };
 
-describe('scriptEnvironment (#717, #726)', () => {
+describe('scriptEnvironment (#717, #726, #752)', () => {
   it("leaves out every harness and crew variable of the caller's that the scripts read", () => {
     expect(scriptEnvironment({}, A_HARNESS_CALLER)).toEqual({ PATH: '/usr/bin:/bin' });
   });
