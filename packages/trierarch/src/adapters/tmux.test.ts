@@ -46,6 +46,14 @@ describe('sessions in tmux', () => {
     expect(sessions.stdout.trim()).toMatch(new RegExp(`^trierarch-${shipId} .*${folder.split('/').at(-1) ?? ''}$`));
   });
 
+  it('starts the command with the environment given, such as its launch id (#490)', async () => {
+    const shipId = newId('ship');
+
+    await tmux.start({ shipId, folder, command: ['sh', '-c', 'echo "launch $AEOLUS_LAUNCH"; sleep 30'], env: { AEOLUS_LAUNCH: 'launch-1' } });
+
+    await expect.poll(async () => tmux.screen(shipId), { timeout: 5000 }).toContain('launch launch-1');
+  });
+
   it('keeps a session whose command ended, so the exit is seen', async () => {
     const shipId = newId('ship');
 
