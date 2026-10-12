@@ -1,9 +1,10 @@
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import type { TrierarchConfiguration } from '@aeolus-fleet/common';
+import type { ShipId, TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { AdapterFlag, HarnessPort, SessionRuntime } from '../core/ports.js';
+import { createHostClaudeCodeHomes, createShipClaudeCodeHomes } from './claude-code-home.js';
 import { claudeCodeScreenStoppedAt } from './claude-code-screen.js';
 import { SETTING_SOURCES, type ClaudeCodeSetup, type SettingsDefaultMode, type SettingSource } from './claude-code-setup.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
@@ -30,7 +31,10 @@ import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
  * where Claude Code never ran by hand stops at no first-run screen (#403). A
  * session's identity is written and read through the aeolus
  * plugin's own `aeolus-identity.sh`, never a copy of how the plugin names its
- * files.
+ * files. On the host every session shares the user's home; with ship homes,
+ * for sessions in containers, each ship's identity, conversations and Claude
+ * Code's files live in a home of its own, removed with its identity
+ * (decision 0039).
  */
 
 export const WAKE_PROMPT = '/aeolus:wake';
@@ -159,44 +163,59 @@ export function createClaudeCodeHarness(options: {
   /** Claude Code's projects folder, where it keeps each folder's conversations. */
   projects: string;
   /** Claude Code's own files, where its onboarding is completed before each launch (#403) and its settings' default mode is read (#505, #507). */
-  setup: Pick<ClaudeCodeSetup, 'completeOnboarding' | 'defaultPermissionMode'>;
+  setup: Pick<ClaudeCodeSetup, 'completeOnboarding' | 'defaultPermissionMode' | 'isSkipPermissionsAccepted'>;
+  /** For sessions in containers: a home of each ship's own under `homes`, in place of the host's (decision 0039). */
+  shipHomes?: { homes: string; managedSettings: string };
   /** The permission modes the installed Claude Code lists, as detection last found them (#517); undefined before it found any. */
   permissionModes: () => readonly string[] | undefined;
   /** The program to run; `claude` unless a test runs another. */
   command?: string;
 }): HarnessPort {
   const { configuration, plugin, sessions } = options;
-  const marks = createLaunchMarks(plugin);
+  const homes =
+    options.shipHomes === undefined
+      ? createHostClaudeCodeHomes({ plugin, projects: options.projects, setup: options.setup })
+      : createShipClaudeCodeHomes({ ...options.shipHomes, pluginRoot: plugin.root, host: options.setup });
+  const identityOf = (shipId: ShipId) => createPluginIdentity(homes.of(shipId).plugin);
+  const marksOf = (shipId: ShipId) => createLaunchMarks(homes.of(shipId).plugin);
 
   return {
-    ...createPluginIdentity(plugin),
+    prepareIdentity: (at) => identityOf(at.identity.shipId).prepareIdentity(at),
+    crewTokenOf: (session) => identityOf(session.shipId).crewTokenOf(session),
+    removeIdentity: async (session) => {
+      await identityOf(session.shipId).removeIdentity(session);
+      await homes.remove(session.shipId);
+    },
+    turnOf: (session) => identityOf(session.shipId).turnOf(session),
     launch: async ({ shipId, shipName, folder, workspace, harness, options: picked, isFirstStart, launchId, firstPrompt }) => {
       const settings = configuration.harnesses[harness];
       if (settings === undefined) {
         throw new Error(`The configuration has no harness ${harness}`);
       }
+      const home = homes.of(shipId);
+      await homes.prepare({ shipId, folder });
       const prompt = isFirstStart && firstPrompt !== undefined ? firstPromptOf(firstPrompt) : wakePromptOf(WAKE_PROMPT);
       const flags = effectiveFlags(settings, picked);
       const command = claudeCodeCommandLine({
         flags,
         sessionName: `[${workspace.kind === 'worktree' ? workspace.repository : workspace.name}] ${shipName}`,
         prompt,
-        isFirstStart: isFirstStart || !(await hasConversation(options.projects, folder)),
-        defaultPermissionMode: await claudeCodeSettingsDefaultMode(options.setup, { flags, folder }),
+        isFirstStart: isFirstStart || !(await hasConversation(home.projects, folder)),
+        defaultPermissionMode: await claudeCodeSettingsDefaultMode(home.setup, { flags, folder }),
         permissionModes: options.permissionModes(),
         ...(options.command !== undefined && { program: options.command }),
       });
-      await options.setup.completeOnboarding();
+      const marks = marksOf(shipId);
       await marks.clear(folder);
       await sessions.start({ shipId, folder, command: wordsOf(command), env: { [LAUNCH_VARIABLE]: launchId } });
     },
     wake: async ({ shipId }) => {
       await sessions.type({ shipId, text: wakePromptOf(WAKE_PROMPT) });
     },
-    marksLaunches: () => marks.isMarking(),
+    marksLaunches: () => createLaunchMarks(plugin).isMarking(),
     // The marker says what the session did; the screen only names one that stopped it before its hooks ran (#490).
     launchSeen: async ({ shipId, folder, launchId, model }) => {
-      const marker = await marks.read({ folder, launchId });
+      const marker = await marksOf(shipId).read({ folder, launchId });
       if (marker?.refused !== undefined) {
         const refused = model ?? marker.refused.model;
         return { kind: 'refused', ...(refused !== undefined && { model: refused }) };
