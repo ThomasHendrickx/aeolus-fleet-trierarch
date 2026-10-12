@@ -46,6 +46,8 @@ export interface Entry {
   readonly hasStarted: boolean;
   /** When the session crewing checks in its launch window started (#382), ISO 8601; none before its launch. */
   readonly launchedAt?: string;
+  /** The launch id that session was started with (#490), set with launchedAt. */
+  readonly launchId?: string;
   /** Set as it goes back to crewing after a release elsewhere (row 11): its worktree goes before it is crewed again (#475). */
   readonly isReleasedElsewhere?: true;
   /** Set once argo is told its running session's folder holds no identity (#659), so it is told once; cleared when the identity is back. */

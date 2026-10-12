@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -163,7 +164,7 @@ async function aTrierarchOnTheFleet(claudeCodeFlags: readonly string[] = CONFIGU
   const clock = { now: () => new Date() };
   const logger = { warn: () => undefined, action: () => undefined };
   const setup = { configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
-  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }), state, setup, clock, logger, refuseModel: () => Promise.resolve() });
+  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }), state, setup, clock, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID });
   const leasesOf = (shipId: ShipId) => database.lease.count({ where: { shipId, endedAt: null } });
   const worktree = join(paths.worktrees, 'aeolus-fleet', 'scout');
 

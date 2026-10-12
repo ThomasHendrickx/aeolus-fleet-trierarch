@@ -188,6 +188,8 @@ export function createClaudeCodeHarness(options: {
     wake: async ({ shipId }) => {
       await sessions.type({ shipId, text: wakePromptOf(WAKE_PROMPT) });
     },
+    // Until the launch marker is read (#490), the screen alone says what the session did.
+    marksLaunches: () => Promise.resolve(true),
     launchSeen: async ({ shipId, model }) => claudeCodeLaunchSeen({ screen: await sessions.screen(shipId), ...(model !== undefined && { model }) }),
   };
 }

@@ -1,6 +1,6 @@
 import type { CrewStatus, ShipId, TrierarchConfiguration } from '@aeolus-fleet/common';
 
-import { checkSettings, trustRefusal, unacceptedRefusal, type CheckedSettings, type Refusal } from './check-settings.js';
+import { checkSettings, launchMarkerRefusal, trustRefusal, unacceptedRefusal, type CheckedSettings, type Refusal } from './check-settings.js';
 import { MODEL_OPTION } from './detected-options.js';
 import { putEntry, removeEntry, withState, type Entry, type KeptWorktree, type TrierarchState } from './entry.js';
 import type { ArgoReport, AssignedRequest, ClearRequestToMe, InboxAnswer, LaunchSeen, ObservedSession, ObservedWorktree, TrustedPlaces, Turn, WrittenStatus } from './ports.js';
@@ -79,12 +79,16 @@ export interface ReconcileContext {
   readonly versions: Readonly<Record<string, string>>;
   /** Each harness's version its launch screens were checked on, where its adapter names one (#594). */
   readonly screensCheckedOn: Readonly<Record<string, string>>;
+  /** Whether each harness's aeolus plugin marks launches (#490): checked before every launch. */
+  readonly marksLaunches: Readonly<Record<string, boolean>>;
 }
 
 /** How long after its start a crewing session has to show activity (#382): its first prompt made a tool call. */
 export const LAUNCH_WINDOW_MS = 60_000;
 
 const NO_ACTIVITY_REASON = 'no activity within a minute of its start';
+/** What a refusal names when the session refused a model it does not name, as its harness's own default. */
+const DEFAULT_MODEL = 'its default model';
 
 const RESTARTING_NOTE = 'blocked: session crashed, restarting';
 const CRASHED_NOTE = 'blocked: session crashed, restart budget spent';
@@ -173,7 +177,7 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
       actions.push({ kind: 'confirm', shipId: request.shipId });
       continue;
     }
-    const checked = checkSettings(request.settings, { shipId: request.shipId, configuration, state: next, trusted: context.trusted });
+    const checked = checkSettings(request.settings, { shipId: request.shipId, configuration, state: next, trusted: context.trusted, marksLaunches: context.marksLaunches });
     if (!checked.isOk) {
       actions.push(...uncrewable({ request, refusal: checked.error, state: next }));
       continue;
@@ -251,7 +255,7 @@ function entryOf(checked: CheckedSettings, at: { shipId: ShipId; settingsVersion
  */
 function newVersionStep(entry: Entry, at: { request: AssignedRequest; state: TrierarchState; context: ReconcileContext }): Step {
   const { request, state, context } = at;
-  const checked = checkSettings(request.settings, { shipId: entry.shipId, configuration: context.configuration, state, trusted: context.trusted });
+  const checked = checkSettings(request.settings, { shipId: entry.shipId, configuration: context.configuration, state, trusted: context.trusted, marksLaunches: context.marksLaunches });
   if (!checked.isOk) {
     const uncrewed = uncrewable({ request, refusal: checked.error, state, entry });
     if (uncrewed.some((action) => action.kind === 'giveBack')) {
@@ -282,8 +286,10 @@ function trustedStep(entry: Entry, at: { step: Step; request: AssignedRequest; s
   const { step, request, state, context } = at;
   const isLaunching = step.actions.some((action) => action.kind === 'crew' || action.kind === 'launch');
   const { harness, workspace, options } = entry;
-  const { trusted, configuration } = context;
-  const refusal = isLaunching ? (trustRefusal({ harness, workspace, trusted }) ?? unacceptedRefusal({ harness, configuration, options, trusted })) : undefined;
+  const { trusted, configuration, marksLaunches } = context;
+  const refusal = isLaunching
+    ? (trustRefusal({ harness, workspace, trusted }) ?? unacceptedRefusal({ harness, configuration, options, trusted }) ?? launchMarkerRefusal({ harness, marksLaunches }))
+    : undefined;
   if (refusal === undefined) {
     return step;
   }
@@ -328,7 +334,8 @@ function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean; i
  */
 function launchStep(entry: Entry, context: ReconcileContext & { isFinal: boolean }): Step {
   const { observed, now, isFinal } = context;
-  const { launchedAt, ...running } = entry;
+  const { launchedAt } = entry;
+  const running = withoutLaunch(entry);
   const seen = observed.launches[entry.shipId];
   if (launchedAt === undefined || seen === undefined) {
     return { actions: [{ kind: 'crew', shipId: entry.shipId, isResumed: true }], starts: 1 };
@@ -381,8 +388,8 @@ function screensUnchecked(entry: Entry, context: Pick<ReconcileContext, 'version
 
 /** The entry with no launch window open. */
 function withoutLaunch(entry: Entry): Entry {
-  const { launchedAt, ...rest } = entry;
-  return launchedAt === undefined ? entry : rest;
+  const { launchedAt, launchId, ...rest } = entry;
+  return launchedAt === undefined && launchId === undefined ? entry : rest;
 }
 
 function isWindowOver(launchedAt: string, now: Date): boolean {
@@ -395,11 +402,11 @@ function isWindowOver(launchedAt: string, now: Date): boolean {
  * The harness's own default refused drops nothing: the machine never offered
  * it as a model.
  */
-function modelRefusal(entry: Entry, at: { model: string; versions: ReconcileContext['versions'] }): { reason: string; actions: Action[] } {
+function modelRefusal(entry: Entry, at: { model: string | undefined; versions: ReconcileContext['versions'] }): { reason: string; actions: Action[] } {
   const { harness } = entry;
   const version = at.versions[harness];
-  const reason = `${harness}${version === undefined ? '' : ` ${version}`} refused ${at.model}`;
-  if (entry.options[MODEL_OPTION] === undefined || version === undefined) {
+  const reason = `${harness}${version === undefined ? '' : ` ${version}`} refused ${at.model ?? DEFAULT_MODEL}`;
+  if (entry.options[MODEL_OPTION] === undefined || version === undefined || at.model === undefined) {
     return { reason, actions: [] };
   }
   return { reason, actions: [{ kind: 'modelRefused', shipId: entry.shipId, ...(entry.shipName !== undefined && { shipName: entry.shipName }), harness, version, model: at.model }] };

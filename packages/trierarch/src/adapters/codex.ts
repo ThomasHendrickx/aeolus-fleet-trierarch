@@ -91,6 +91,8 @@ export function createCodexHarness(options: {
       // The space after the skill closes Codex's skill picker, which would otherwise take the Enter.
       await sessions.type({ shipId, text: wakePromptOf(WAKE_PROMPT), settleMs: CODEX_TYPING_SETTLE_MS });
     },
+    // Until the launch marker is read (#490), the screen alone says what the session did.
+    marksLaunches: () => Promise.resolve(true),
     launchSeen: async ({ shipId, model }) => codexLaunchSeen({ screen: await sessions.screen(shipId), ...(model !== undefined && { model }) }),
   };
 }

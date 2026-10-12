@@ -86,7 +86,9 @@ const shipId = newId('ship');
 const identity = { fleetUrl: 'https://fleet.example.com', shipId, shipName: 'scout', crewToken: 'aeolus_ct_v1_scout' };
 
 /** The launch of the ship scout in a worktree of aeolus-fleet. */
-const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'codex', workspace: { kind: 'worktree', repository: 'aeolus-fleet' } }) as const;
+/** The launch id the trierarch started the session with. */
+const LAUNCH_ID = 'launch-1';
+const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'codex', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, launchId: LAUNCH_ID }) as const;
 
 describe('Codex as a harness', () => {
   it("writes the folder's identity through the plugin in ~/.aeolus/crews/codex, saying the trierarch wakes it (#658)", async () => {
@@ -210,7 +212,7 @@ describe('Codex as a harness', () => {
     screens.set(shipId, woken);
 
     expect(woken).toContain(`› ${typed[0]?.text ?? ''}\n\n• I’m using the aeolus-wake skill`);
-    await expect(harness().launchSeen({ shipId })).resolves.toEqual({ kind: 'active' });
+    await expect(harness().launchSeen({ shipId, folder, launchId: LAUNCH_ID })).resolves.toEqual({ kind: 'active' });
   });
 
   it('names the Codex version its launch screens were checked on, so a launch on another version that shows no activity is told to argo (#594)', () => {
@@ -220,6 +222,6 @@ describe('Codex as a harness', () => {
   it("sees in its session's screen the model it launched with refused", async () => {
     screens.set(shipId, readFileSync(new URL('../../test/screens/codex-refused.txt', import.meta.url), 'utf8'));
 
-    await expect(harness().launchSeen({ shipId, model: 'gpt-nonexistent-9' })).resolves.toEqual({ kind: 'refused', model: 'gpt-nonexistent-9' });
+    await expect(harness().launchSeen({ shipId, folder, launchId: LAUNCH_ID, model: 'gpt-nonexistent-9' })).resolves.toEqual({ kind: 'refused', model: 'gpt-nonexistent-9' });
   });
 });

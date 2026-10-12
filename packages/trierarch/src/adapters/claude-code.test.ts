@@ -89,7 +89,9 @@ const identity = { fleetUrl: 'https://fleet.example.com', shipId, shipName: 'sco
 const parsed = (text: string | undefined): unknown => (text === undefined ? undefined : JSON.parse(text));
 
 /** The launch of the ship scout in a worktree of aeolus-fleet. */
-const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' } }) as const;
+/** The launch id the trierarch started the session with. */
+const LAUNCH_ID = 'launch-1';
+const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, launchId: LAUNCH_ID }) as const;
 
 describe('Claude Code as a harness', () => {
   it("completes Claude Code's onboarding before it starts a session, so a fresh machine shows no first-run screen (#403)", async () => {
@@ -424,6 +426,6 @@ describe('Claude Code as a harness', () => {
   it("sees in its session's screen the model it launched with refused", async () => {
     screens.set(shipId, readFileSync(new URL('../../test/screens/claude-code-refused.txt', import.meta.url), 'utf8'));
 
-    await expect(harness().launchSeen({ shipId, model: 'claude-nonexistent-9' })).resolves.toEqual({ kind: 'refused', model: 'claude-nonexistent-9' });
+    await expect(harness().launchSeen({ shipId, folder, launchId: LAUNCH_ID, model: 'claude-nonexistent-9' })).resolves.toEqual({ kind: 'refused', model: 'claude-nonexistent-9' });
   });
 });
