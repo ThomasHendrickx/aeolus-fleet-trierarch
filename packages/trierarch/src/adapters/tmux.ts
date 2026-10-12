@@ -17,8 +17,8 @@ import { runCommand } from './run-command.js';
  * group on a restart (#537), and the unit's stop leaves it alone (#479).
  */
 export interface Tmux extends ProcessPort {
-  /** Starts the command in the folder, in a new session for the ship; an exited one is replaced. */
-  start(session: { shipId: ShipId; folder: string; command: readonly string[] }): Promise<void>;
+  /** Starts the command in the folder, with the environment given, in a new session for the ship; an exited one is replaced. */
+  start(session: { shipId: ShipId; folder: string; command: readonly string[]; env?: Readonly<Record<string, string>> }): Promise<void>;
   /** Types the text into the ship's session and presses Enter, after `settleMs` when given. */
   type(at: { shipId: ShipId; text: string; settleMs?: number }): Promise<void>;
   /** What the ship's session shows: its last lines, wrapped ones joined; empty with no session. */
@@ -69,7 +69,7 @@ export function createTmux(options: { server?: string; launch?: readonly string[
     stop: async (shipId) => {
       await tmux(['kill-session', '-t', `=${sessionName(shipId)}`]);
     },
-    start: async ({ shipId, folder, command }) => {
+    start: async ({ shipId, folder, command, env = {} }) => {
       const name = sessionName(shipId);
       await tmux(['kill-session', '-t', `=${name}`]);
       // Start with the shell, keep the pane on exit, then run the command: so even a command that ends at once leaves its exit to see.
@@ -80,7 +80,8 @@ export function createTmux(options: { server?: string; launch?: readonly string[
         throw new Error(`tmux new-session failed: ${started.stderr.trim()}`);
       }
       await must(['set-option', '-w', '-t', `=${name}:`, 'remain-on-exit', 'on']);
-      await must(['respawn-pane', '-k', '-t', `=${name}:`, '-c', folder, '--', ...command]);
+      const environment = Object.entries(env).flatMap(([variable, value]) => ['-e', `${variable}=${value}`]);
+      await must(['respawn-pane', '-k', '-t', `=${name}:`, '-c', folder, ...environment, '--', ...command]);
     },
     type: async ({ shipId, text, settleMs }) => {
       const target = `=${sessionName(shipId)}:`;
