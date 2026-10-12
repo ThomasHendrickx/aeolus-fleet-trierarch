@@ -101,11 +101,12 @@ Its report, sent on start and again whenever it changes: its state (`working` wh
   "kept": [{ "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88", "repository": "aeolus-fleet" }],
   "orphans": [{ "repository": "aeolus-fleet", "name": "lookout" }],
   "machine": { "os": "macos", "arch": "arm64" },
-  "version": "0.20.0"
+  "runtime": "host",
+  "version": "0.25.0"
 }
 ```
 
-`workspaces` offers only the repositories and folders every configured harness trusts (see Trust below), so the trierarch plugin never assigns a request to a place a harness would stop at. Each harness gives the `version` the trierarch detected and when it last confirmed its models (`modelsConfirmedAt`, null while none is; see Detected options); the console's machine card shows both. Its shape lives in `common`, as the type `trierarch`'s report details. Paths stay on the machine (decision 0032): a kept worktree is named by the ship it belonged to and its repository, an orphan by its repository and its folder's name under the worktree root (`<root>/<repository>/<name>`). It holds no entry per ship: each request carries its own status. `machine` is read from the trierarch's process: `os` is `macos`, `linux` or `windows`, and `arch` is `arm64` or `amd64`; a platform outside these is left out.
+`workspaces` offers only the repositories and folders every configured harness trusts (see Trust below), so the trierarch plugin never assigns a request to a place a harness would stop at. Each harness gives the `version` the trierarch detected and when it last confirmed its models (`modelsConfirmedAt`, null while none is; see Detected options); the console's machine card shows both. Its shape lives in `common`, as the type `trierarch`'s report details. Paths stay on the machine (decision 0032): a kept worktree is named by the ship it belonged to and its repository, an orphan by its repository and its folder's name under the worktree root (`<root>/<repository>/<name>`). It holds no entry per ship: each request carries its own status. `machine` is read from the trierarch's process: `os` is `macos`, `linux` or `windows`, and `arch` is `arm64` or `amd64`; a platform outside these is left out. `runtime` is where the machine runs its sessions, `host` or `container`, as its configuration picks it (see Session runtime below): a fact, never a label, and placement never reads it.
 
 ### Machine labels
 
