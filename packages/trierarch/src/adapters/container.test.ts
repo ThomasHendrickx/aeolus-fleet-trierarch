@@ -134,12 +134,14 @@ describe('the container a session runs in', () => {
   const folder = '/home/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/implementer-b';
   let tokenFolder: string;
   let tokenFile: string;
-  const homes = '/home/thomas/.aeolus/trierarch/homes';
+  /** The ships' homes, in a folder of the test's own: the runtime makes a home as it starts a container. */
+  let homes: string;
 
   beforeEach(() => {
     tokenFolder = mkdtempSync(join(tmpdir(), 'trierarch-token-'));
     tokenFile = join(tokenFolder, 'model-token');
     writeFileSync(tokenFile, `${MODEL_TOKEN}\n`, { mode: 0o600 });
+    homes = join(tokenFolder, 'homes');
   });
 
   afterEach(() => {
