@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -120,16 +120,16 @@ describe('Claude Code as a harness', () => {
     mkdirSync(join(data, 'ships'));
     writeFileSync(join(data, 'ships', `${createHash('sha256').update(folder).digest('hex').slice(0, 32)}.identity`), `shipId=${shipId}\ncrewToken=aeolus_ct_v1_scout\n`);
 
-    await expect(harness().crewTokenOf(folder)).resolves.toBe('aeolus_ct_v1_scout');
+    await expect(harness().crewTokenOf({ shipId, folder })).resolves.toBe('aeolus_ct_v1_scout');
   });
 
   it("reads the crew token from the folder's identity, and none once it is removed", async () => {
     await harness().prepareIdentity({ folder, identity });
-    await expect(harness().crewTokenOf(folder)).resolves.toBe('aeolus_ct_v1_scout');
+    await expect(harness().crewTokenOf({ shipId, folder })).resolves.toBe('aeolus_ct_v1_scout');
 
-    await harness().removeIdentity(folder);
+    await harness().removeIdentity({ shipId, folder });
 
-    await expect(harness().crewTokenOf(folder)).resolves.toBeUndefined();
+    await expect(harness().crewTokenOf({ shipId, folder })).resolves.toBeUndefined();
   });
 
   it('starts claude with the first prompt on the first start, last and after -- so no flag takes it, ending in the line that no human reads its terminal (#585)', async () => {
@@ -411,7 +411,7 @@ describe('Claude Code as a harness', () => {
 
   it("reads the turn from the plugin's turn marker: unknown before the first prompt, then busy or idle", async () => {
     await harness().prepareIdentity({ folder, identity });
-    await expect(harness().turnOf(folder)).resolves.toBe('unknown');
+    await expect(harness().turnOf({ shipId, folder })).resolves.toBe('unknown');
 
     const marked = await runCommand('bash', {
       args: [`${PLUGIN_ROOT}/scripts/aeolus-turn.sh`],
@@ -420,7 +420,7 @@ describe('Claude Code as a harness', () => {
     });
 
     expect(marked.status).toBe(0);
-    await expect(harness().turnOf(folder)).resolves.toBe('busy');
+    await expect(harness().turnOf({ shipId, folder })).resolves.toBe('busy');
   });
 
 });
@@ -515,5 +515,141 @@ describe("Claude Code's launch window, from the launch marker its session's hook
 
     await expect(harness({ pluginRoot: older }).marksLaunches()).resolves.toBe(false);
     rmSync(older, { recursive: true, force: true });
+  });
+});
+
+describe('Claude Code in containers, each ship with a home of its own (decision 0039)', () => {
+  /** Where the ships' homes are kept, apart from the host's own home. */
+  let homes: string;
+  const other = newId('ship');
+  const otherIdentity = { fleetUrl: 'https://fleet.example.com', shipId: other, shipName: 'lookout', crewToken: 'aeolus_ct_v1_lookout' };
+
+  beforeEach(() => {
+    homes = mkdtempSync(join(tmpdir(), 'trierarch-homes-'));
+  });
+
+  afterEach(() => {
+    rmSync(homes, { recursive: true, force: true });
+  });
+
+  function inContainers() {
+    return createClaudeCodeHarness({
+      configuration: CONFIGURATION,
+      plugin: { root: PLUGIN_ROOT, data, crews },
+      projects,
+      setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
+      shipHomes: { homes, managedSettings: join(home, 'managed') },
+      permissionModes: () => undefined,
+      sessions: {
+        start: (session) => {
+          started.push(session);
+          return Promise.resolve();
+        },
+        type: () => Promise.resolve(),
+        screen: () => Promise.resolve(''),
+      },
+    });
+  }
+
+  /** Every file under the folder, by its path in it. */
+  function filesIn(root: string, under = ''): string[] {
+    const at = join(root, under);
+    if (!existsSync(at)) {
+      return [];
+    }
+    return readdirSync(at, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? filesIn(root, join(under, entry.name)) : [join(under, entry.name)]));
+  }
+
+  /** The identity file of the folder, as the plugin names it in a home. */
+  const identityFile = () => `.aeolus/crews/claude-code/${createHash('sha256').update(folder).digest('hex').slice(0, 32)}.identity`;
+
+  it("keeps each ship's identity in its own home alone, never in the host's home or another ship's", async () => {
+    await inContainers().prepareIdentity({ folder, identity });
+    await inContainers().prepareIdentity({ folder, identity: otherIdentity });
+
+    const scoutHome = filesIn(join(homes, shipId));
+    expect({ scoutHome, host: filesIn(crews), holdsOther: readFileSync(join(homes, shipId, identityFile()), 'utf8').includes('lookout') }).toEqual({ scoutHome: [identityFile()], host: [], holdsOther: false });
+  });
+
+  it("reads the crew token from the ship's own home, and none from another ship's", async () => {
+    await inContainers().prepareIdentity({ folder, identity });
+
+    await expect(inContainers().crewTokenOf({ shipId, folder })).resolves.toBe('aeolus_ct_v1_scout');
+    await expect(inContainers().crewTokenOf({ shipId: other, folder })).resolves.toBeUndefined();
+  });
+
+  it("completes Claude Code's onboarding and trusts the workspace in the ship's own home before every launch, the host's home untouched", async () => {
+    await inContainers().launch({ ...launchOf(shipId), options: {}, isFirstStart: false });
+
+    const shipSetup = createClaudeCodeSetup({ homeDirectory: join(homes, shipId), managedSettings: join(home, 'managed') });
+    expect({ isOnboarded: await shipSetup.isOnboardingComplete(), isTrusted: await shipSetup.isTrusted(folder), host: existsSync(join(home, '.claude.json')) }).toEqual({ isOnboarded: true, isTrusted: true, host: false });
+  });
+
+  it("makes the ship's home for its owner alone", async () => {
+    await inContainers().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+
+    expect(statSync(join(homes, shipId)).mode & 0o777).toBe(0o700);
+  });
+
+  it("accepts bypass permissions mode in the ship's home when the operator accepted it on the host (#403)", async () => {
+    await createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).acceptSkipPermissions();
+
+    await inContainers().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+
+    await expect(createClaudeCodeSetup({ homeDirectory: join(homes, shipId), managedSettings: join(home, 'managed') }).isSkipPermissionsAccepted()).resolves.toBe(true);
+  });
+
+  it("leaves bypass permissions mode unaccepted in the ship's home while the operator has not accepted it on the host", async () => {
+    await inContainers().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+
+    await expect(createClaudeCodeSetup({ homeDirectory: join(homes, shipId), managedSettings: join(home, 'managed') }).isSkipPermissionsAccepted()).resolves.toBe(false);
+  });
+
+  it("continues on a restart the conversation the ship's own home keeps, not one the host's home keeps", async () => {
+    aConversationIn(folder);
+    await inContainers().launch({ ...launchOf(shipId), options: {}, isFirstStart: false });
+    const kept = join(homes, shipId, '.claude', 'projects', folder.replace(/[^a-zA-Z0-9]/g, '-'));
+    mkdirSync(kept, { recursive: true });
+    writeFileSync(join(kept, '0b8e3f2a-5c1d-4e7f-9a6b-2d4c8e1f3a5b.jsonl'), '{}\n');
+
+    await inContainers().launch({ ...launchOf(shipId), options: {}, isFirstStart: false });
+
+    expect(started.map((each) => each.command.includes('--continue'))).toEqual([false, true]);
+  });
+
+  it("clears the launch marker in the ship's own home before a launch", async () => {
+    const inShipHome = { AEOLUS_FOLDER: folder, AEOLUS_DATA: join(homes, shipId, '.claude', 'plugins', 'data', 'aeolus-aeolus-fleet'), AEOLUS_CREWS: join(homes, shipId, '.aeolus', 'crews', 'claude-code') };
+    const written = await runCommand('bash', { args: [`${PLUGIN_ROOT}/scripts/aeolus-identity.sh`, 'write', '--wake-by', 'trierarch', identity.fleetUrl, shipId, identity.shipName, identity.crewToken], env: inShipHome });
+    expect(written.status).toBe(0);
+    const marked = await runCommand('bash', {
+      args: [`${PLUGIN_ROOT}/scripts/aeolus-launch.sh`],
+      env: { ...inShipHome, AEOLUS_LAUNCH: 'launch-0' },
+      input: JSON.stringify({ cwd: folder, transcript_path: '/a/transcript.jsonl', hook_event_name: 'SessionStart', source: 'startup' }),
+    });
+    expect(marked.status).toBe(0);
+
+    await inContainers().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+
+    const marker = await runCommand('bash', { args: [`${PLUGIN_ROOT}/scripts/aeolus-identity.sh`, 'launch'], env: inShipHome });
+    expect(marker.status).toBe(1);
+  });
+
+  it("removes the ship's home with its identity, as a release does, and leaves another ship's", async () => {
+    await inContainers().prepareIdentity({ folder, identity });
+    await inContainers().prepareIdentity({ folder, identity: otherIdentity });
+
+    await inContainers().removeIdentity({ shipId, folder });
+
+    expect({ scout: existsSync(join(homes, shipId)), other: existsSync(join(homes, other)) }).toEqual({ scout: false, other: true });
+  });
+});
+
+describe('Claude Code on the host', () => {
+  it("keeps the host's home when a ship's identity is removed", async () => {
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+
+    await harness().removeIdentity({ shipId, folder });
+
+    expect(existsSync(join(home, '.claude.json'))).toBe(true);
   });
 });

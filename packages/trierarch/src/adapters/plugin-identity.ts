@@ -42,15 +42,15 @@ export function createPluginIdentity(plugin: AeolusPlugin): Pick<HarnessPort, 'p
         throw new Error(`aeolus-identity.sh write failed: ${written.stderr.trim()}`);
       }
     },
-    crewTokenOf: async (folder) => {
+    crewTokenOf: async ({ folder }) => {
       const path = (await identity(folder, ['path'])).stdout.trim();
       const text = await readFile(path, 'utf8').catch(() => '');
       return /^crewToken=(.+)$/m.exec(text)?.[1];
     },
-    removeIdentity: async (folder) => {
+    removeIdentity: async ({ folder }) => {
       await identity(folder, ['delete']);
     },
-    turnOf: async (folder): Promise<Turn> => {
+    turnOf: async ({ folder }): Promise<Turn> => {
       const turn = await identity(folder, ['turn']);
       const [state] = turn.stdout.split(' ');
       return turn.status === 0 && (state === 'busy' || state === 'idle') ? state : 'unknown';

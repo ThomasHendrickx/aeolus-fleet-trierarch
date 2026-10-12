@@ -25,5 +25,24 @@ run_health_checks() {
   done
 }
 
+# The aeolus plugin of this image, into the home the container has: the
+# image's own, or the ship's own the trierarch mounts over it (decision 0039).
+# Its install is linked from the image, so a container runs its image's plugin
+# whatever an earlier one left in the home; its data folder stays in the home.
+# The settings that enable it are merged into the home's settings, keeping
+# what the trierarch wrote there.
+link_plugin() {
+  local plugins="$HOME/.claude/plugins" settings="$HOME/.claude/settings.json" entry merged
+  mkdir -p "$plugins"
+  for entry in /opt/aeolus-session/plugins/*; do
+    [[ ${entry##*/} != data ]] || continue
+    rm -rf "${plugins:?}/${entry##*/}"
+    ln -s "$entry" "$plugins/${entry##*/}"
+  done
+  merged=$(jq -s '.[0] * .[1]' <(cat "$settings" 2> /dev/null || echo '{}') /opt/aeolus-session/settings.json) || return 1
+  printf '%s\n' "$merged" > "$settings.aeolus-session.tmp" && mv "$settings.aeolus-session.tmp" "$settings"
+}
+
+link_plugin || echo "aeolus-session-init: could not link the aeolus plugin into $HOME" >&2
 run_health_checks &
 exec "$@"

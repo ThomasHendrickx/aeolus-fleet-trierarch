@@ -94,13 +94,13 @@ async function observe(state: TrierarchState, deps: RunPassDeps): Promise<Observ
     if ((!isWatched && !HOLDS_IDENTITY.has(entry.state)) || folder === undefined || harness === undefined) {
       continue;
     }
-    const crewToken = await harness.crewTokenOf(folder);
+    const crewToken = await harness.crewTokenOf({ shipId: entry.shipId, folder });
     if (crewToken === undefined) {
       withoutIdentity.push(entry.shipId);
       continue;
     }
     if (isWatched) {
-      ships[entry.shipId] = { inbox: await deps.fleet.inbox(crewToken), turn: await harness.turnOf(folder) };
+      ships[entry.shipId] = { inbox: await deps.fleet.inbox(crewToken), turn: await harness.turnOf({ shipId: entry.shipId, folder }) };
     }
   }
   return { sessions, worktrees, ships, launches, withoutIdentity };
@@ -199,7 +199,7 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
       }
       return state;
     case 'report': {
-      const crewToken = entry.folder === undefined ? undefined : await harnessOf(entry, deps)?.crewTokenOf(entry.folder);
+      const crewToken = entry.folder === undefined ? undefined : await harnessOf(entry, deps)?.crewTokenOf({ shipId: entry.shipId, folder: entry.folder });
       if (crewToken === undefined) {
         // Argo is told by the identityGone action (#664).
         log(deps, { ...about(state, { shipId: entry.shipId, action: 'report' }), outcome: `not reported ${action.note}, as its folder holds no identity` });
@@ -333,7 +333,7 @@ async function releaseWorkspace(at: EntryAt & { cause: ReleaseCause }): Promise<
   if (folder === undefined) {
     return 'its worktree removed';
   }
-  await harnessOf(entry, deps)?.removeIdentity(folder);
+  await harnessOf(entry, deps)?.removeIdentity({ shipId: entry.shipId, folder });
   if (entry.workspace.kind === 'folder') {
     return `its folder kept: ${folder}`;
   }
@@ -384,7 +384,7 @@ async function forget(state: TrierarchState, at: EntryAt): Promise<TrierarchStat
   const { entry, deps } = at;
   await deps.processes.stop(entry.shipId);
   if (entry.folder !== undefined) {
-    await harnessOf(entry, deps)?.removeIdentity(entry.folder);
+    await harnessOf(entry, deps)?.removeIdentity({ shipId: entry.shipId, folder: entry.folder });
   }
   const next = removeEntry(state, entry.shipId);
   await deps.state.save(next);
@@ -518,7 +518,7 @@ async function finishWorkspace(state: TrierarchState, at: EntryAt): Promise<Trie
   if (folder === undefined) {
     return state;
   }
-  await harnessOf(entry, deps)?.removeIdentity(folder);
+  await harnessOf(entry, deps)?.removeIdentity({ shipId: entry.shipId, folder });
   if (entry.workspace.kind === 'folder') {
     return state;
   }

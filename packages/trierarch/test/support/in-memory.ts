@@ -387,12 +387,12 @@ export class InMemoryHarness implements HarnessPort {
     return Promise.resolve();
   }
 
-  crewTokenOf(folder: string): Promise<string | undefined> {
-    return Promise.resolve(this.identities.get(folder)?.crewToken);
+  crewTokenOf(session: { shipId: ShipId; folder: string }): Promise<string | undefined> {
+    return Promise.resolve(this.identities.get(session.folder)?.crewToken);
   }
 
-  removeIdentity(folder: string): Promise<void> {
-    this.identities.delete(folder);
+  removeIdentity(session: { shipId: ShipId; folder: string }): Promise<void> {
+    this.identities.delete(session.folder);
     return Promise.resolve();
   }
 
@@ -407,8 +407,8 @@ export class InMemoryHarness implements HarnessPort {
     return Promise.resolve();
   }
 
-  turnOf(folder: string): Promise<Turn> {
-    return Promise.resolve(this.turns.get(folder) ?? 'unknown');
+  turnOf(session: { shipId: ShipId; folder: string }): Promise<Turn> {
+    return Promise.resolve(this.turns.get(session.folder) ?? 'unknown');
   }
 
   wake(session: { shipId: ShipId }): Promise<void> {

@@ -1662,7 +1662,7 @@ describe('a running ship whose identity is gone (#659)', () => {
   it('tells argo once and logs it once while its folder holds no identity', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    await trierarch.harness.removeIdentity(SCOUT_FOLDER);
+    await trierarch.harness.removeIdentity({ shipId, folder: SCOUT_FOLDER });
 
     await trierarch.pass();
     trierarch.clock.advance(MINUTE_MS);
@@ -1676,14 +1676,14 @@ describe('a running ship whose identity is gone (#659)', () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     const identity = trierarch.harness.identities.get(SCOUT_FOLDER);
-    await trierarch.harness.removeIdentity(SCOUT_FOLDER);
+    await trierarch.harness.removeIdentity({ shipId, folder: SCOUT_FOLDER });
     await trierarch.pass();
     if (identity !== undefined) {
       await trierarch.harness.prepareIdentity({ folder: SCOUT_FOLDER, identity });
     }
     trierarch.clock.advance(MINUTE_MS);
     await trierarch.pass();
-    await trierarch.harness.removeIdentity(SCOUT_FOLDER);
+    await trierarch.harness.removeIdentity({ shipId, folder: SCOUT_FOLDER });
     trierarch.clock.advance(MINUTE_MS);
 
     await trierarch.pass();
@@ -1708,7 +1708,7 @@ describe('a ship the trierarch would report as blocked whose identity is gone (#
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     trierarch.processes.exit(shipId);
-    await trierarch.harness.removeIdentity(SCOUT_FOLDER);
+    await trierarch.harness.removeIdentity({ shipId, folder: SCOUT_FOLDER });
 
     await trierarch.pass();
     trierarch.clock.advance(5 * SECOND_MS);
@@ -1723,7 +1723,7 @@ describe('a ship the trierarch would report as blocked whose identity is gone (#
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     trierarch.processes.exit(shipId);
-    await trierarch.harness.removeIdentity(SCOUT_FOLDER);
+    await trierarch.harness.removeIdentity({ shipId, folder: SCOUT_FOLDER });
 
     await trierarch.pass();
 
@@ -1738,7 +1738,7 @@ describe('a ship the trierarch would report as blocked whose identity is gone (#
     const shipId = await aCrewedShip(trierarch);
     trierarch.processes.exit(shipId);
     await trierarch.pass();
-    await trierarch.harness.removeIdentity(SCOUT_FOLDER);
+    await trierarch.harness.removeIdentity({ shipId, folder: SCOUT_FOLDER });
 
     await trierarch.pass();
     trierarch.clock.advance(5 * SECOND_MS);
@@ -1754,7 +1754,7 @@ describe('a ship the trierarch would report as blocked whose identity is gone (#
     const shipId = await aCrewedShip(trierarch);
     await crashForGood(trierarch, shipId);
     const crashed = trierarch.fleet.toArgo.length;
-    await trierarch.harness.removeIdentity(SCOUT_FOLDER);
+    await trierarch.harness.removeIdentity({ shipId, folder: SCOUT_FOLDER });
 
     await trierarch.pass();
     trierarch.clock.advance(MINUTE_MS);

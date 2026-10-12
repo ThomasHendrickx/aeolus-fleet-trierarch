@@ -1,5 +1,7 @@
 import { join } from 'node:path';
 
+import type { ShipId } from '@aeolus-fleet/common';
+
 /**
  * Where the trierarch keeps its files (docs/architecture.md, "Files on the
  * machine"): everything under `~/.aeolus/trierarch/`. The configuration's
@@ -17,6 +19,8 @@ export interface TrierarchPaths {
   readonly running: string;
   readonly logs: string;
   readonly worktrees: string;
+  /** The homes of the ships whose sessions run in containers, one folder per ship (decision 0039). */
+  readonly homes: string;
 }
 
 export function trierarchPaths(at: { homeDirectory: string; config?: string }): TrierarchPaths {
@@ -31,5 +35,11 @@ export function trierarchPaths(at: { homeDirectory: string; config?: string }): 
     running: join(home, 'running.json'),
     logs: join(home, 'logs'),
     worktrees: join(home, 'worktrees'),
+    homes: join(home, 'homes'),
   };
+}
+
+/** A ship's own home among the homes: the one place a ship id becomes its home's path. */
+export function shipHome(homes: string, shipId: ShipId): string {
+  return join(homes, shipId);
 }
