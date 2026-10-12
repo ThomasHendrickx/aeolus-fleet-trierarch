@@ -44,6 +44,15 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
     await expect.poll(async () => runtime.list(), POLL).toEqual([{ shipId, status: 'exited' }]);
   });
 
+  it('reads the screen of a session whose command ended, so the launch window names what stopped it', async () => {
+    const runtime = at.runtime();
+    const shipId = newId('ship');
+    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'echo "Invalid API key"; exit 1'] });
+    await expect.poll(async () => runtime.list(), POLL).toEqual([{ shipId, status: 'exited' }]);
+
+    await expect(runtime.screen(shipId)).resolves.toContain('Invalid API key');
+  });
+
   it('replaces an exited session when the ship starts again', async () => {
     const runtime = at.runtime();
     const shipId = newId('ship');

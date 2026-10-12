@@ -2,10 +2,12 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { newId } from '../../test/support/in-memory.js';
+import { buildTestSessionImage, rootlessPodman } from '../../test/support/podman.js';
 import { userSystemd } from '../../test/support/user-systemd.js';
+import { createContainerRuntime } from './container.js';
 import { trierarchPaths } from './paths.js';
 import { runCommand } from './run-command.js';
 import { createService, serviceEnvironment, SYSTEMD_UNIT } from './service.js';
@@ -130,6 +132,65 @@ describe('the systemd user unit on this machine', () => {
     const pid = (await runCommand('tmux', { args: ['-L', 'sessions', 'display-message', '-p', '#{pid}'] })).stdout.trim();
     const scope = unitOf(pid);
     scopes.push(scope);
+    expect({ isScope: scope.endsWith('.scope'), isThisProcess: scope === unitOf(String(process.pid)) }).toEqual({ isScope: true, isThisProcess: false });
+  });
+});
+
+/** Container sessions need the user manager and a rootless Podman both. */
+const podman = systemd.isUsable ? await rootlessPodman({ platform: process.platform, info: () => runCommand('podman', { args: ['info', '--format', '{{.Host.Security.Rootless}}'] }) }) : systemd;
+
+describe('container sessions under the systemd user unit on this machine', () => {
+  let image = '';
+  let containerFolder: string;
+  let container: string;
+  let scope: string;
+
+  // First, so a skip runs neither the setup nor the cleanup, which need systemctl and podman.
+  beforeEach((context) => {
+    if (!podman.isUsable) {
+      context.skip(podman.reason);
+    }
+  });
+
+  beforeAll(async () => {
+    if (podman.isUsable) {
+      image = await buildTestSessionImage(`localhost/aeolus-trierarch-test:${newId('ship').slice(-8)}`);
+    }
+  }, 60_000);
+
+  afterAll(async () => {
+    if (image !== '') {
+      await runCommand('podman', { args: ['image', 'rm', '--force', image] });
+    }
+  });
+
+  beforeEach(() => {
+    containerFolder = mkdtempSync(join(tmpdir(), 'trierarch-systemd-container-'));
+    container = '';
+    scope = '';
+  });
+
+  afterEach(async () => {
+    if (container !== '') {
+      await runCommand('podman', { args: ['rm', '--force', '--time', '0', container] });
+    }
+    rmSync(containerFolder, { recursive: true, force: true });
+    if (scope !== '') {
+      await expect.poll(async () => loadState(scope)).toBe('not-found');
+    }
+  });
+
+  it("starts the container's monitor in a scope of its own under a systemd unit, so a restart or upgrade of the service ends no session (#479, #537)", async () => {
+    const tokenFile = join(containerFolder, 'model-token');
+    writeFileSync(tokenFile, 'sk-ant-oat01-test-token\n', { mode: 0o600 });
+    const shipId = newId('ship');
+    const runtime = createContainerRuntime({ binary: 'podman', image, tokenFile, memory: '512m', cpus: 1, owner: `trierarch-test-${shipId.slice(-8)}`, launch: UNDER_SYSTEMD });
+
+    await runtime.start({ shipId, folder: containerFolder, command: ['sleep', '30'] });
+
+    container = `trierarch-${shipId}`;
+    const monitor = (await runCommand('podman', { args: ['inspect', '--format', '{{.State.ConmonPid}}', container] })).stdout.trim();
+    scope = unitOf(monitor);
     expect({ isScope: scope.endsWith('.scope'), isThisProcess: scope === unitOf(String(process.pid)) }).toEqual({ isScope: true, isThisProcess: false });
   });
 });
