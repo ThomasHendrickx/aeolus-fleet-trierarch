@@ -56,17 +56,33 @@ check "the aeolus plugin is installed at $VERSION" in_session bash -c "
   ' '$VERSION'
 "
 
-# A nested container from an image built in place, so the test pulls nothing:
-# /usr/bin/true and the libraries it loads.
-check 'a nested rootless podman runs a container' in_session bash -c '
+# Nested containers from an image built in place, so the test pulls nothing:
+# /usr/bin/true, /usr/bin/sleep and the libraries they load.
+SMALL_IMAGE='
   set -euo pipefail
   root=$(mktemp -d)
-  for file in /usr/bin/true $(ldd /usr/bin/true | grep -o "/[^ ]*"); do
+  for file in /usr/bin/true /usr/bin/sleep $(ldd /usr/bin/true /usr/bin/sleep | grep -o "/[^ :]*" | sort -u); do
     mkdir -p "$root$(dirname "$file")"
     cp -L "$file" "$root$file"
   done
   tar -C "$root" -c . | podman import --quiet - localhost/smoke:latest > /dev/null
+'
+
+check 'a nested rootless podman runs a container' in_session bash -c "$SMALL_IMAGE"'
   podman run --rm localhost/smoke:latest /usr/bin/true
+'
+
+# Podman runs health checks from systemd timers, and the container has no
+# systemd: without its init, Testcontainers waits forever for a healthy container.
+check "a nested container's health check runs" in_session bash -c "$SMALL_IMAGE"'
+  podman run --detach --name healthy --health-cmd /usr/bin/true --health-interval 1s \
+    localhost/smoke:latest /usr/bin/sleep 60 > /dev/null
+  for attempt in $(seq 20); do
+    [[ $(podman inspect healthy --format "{{.State.Health.Status}}") == healthy ]] && exit 0
+    sleep 0.5
+  done
+  podman inspect healthy --format "{{.State.Health.Status}}"
+  exit 1
 '
 
 if [[ $failures -gt 0 ]]; then
