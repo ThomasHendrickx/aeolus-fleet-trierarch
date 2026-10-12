@@ -49,9 +49,8 @@ export function createRunPass(deps: RunPassDeps): RunPass {
       const observed = await observe(state, deps);
       const trusted = await deps.trust.trusted();
       const versions = Object.fromEntries(Object.entries(deps.setup.detected ?? {}).flatMap(([harness, found]) => (found === undefined ? [] : [[harness, found.version]])));
-      const screensCheckedOn = Object.fromEntries(Object.entries(deps.harnesses).flatMap(([harness, port]) => (port.screensCheckedOn === undefined ? [] : [[harness, port.screensCheckedOn]])));
       const marksLaunches = Object.fromEntries(await Promise.all(Object.entries(deps.harnesses).map(async ([harness, port]) => [harness, await port.marksLaunches()] as const)));
-      const reconciled = reconcile(state, { requests, clears, observed, now: deps.clock.now(), configuration: deps.setup.configuration, trusted, versions, screensCheckedOn, marksLaunches });
+      const reconciled = reconcile(state, { requests, clears, observed, now: deps.clock.now(), configuration: deps.setup.configuration, trusted, versions, marksLaunches });
       state = reconciled.state;
       await deps.state.save(state);
       for (action of reconciled.actions) {
@@ -137,9 +136,6 @@ async function carryOut(state: TrierarchState, at: CarryOut): Promise<TrierarchS
       return giveBack(state, { action, deps });
     case 'modelRefused':
       await modelRefused({ action, deps });
-      return state;
-    case 'screensUnchecked':
-      await screensUnchecked({ action, deps });
       return state;
     case 'identityGone':
       await identityGone({ action, deps });
@@ -440,22 +436,6 @@ async function modelRefused(at: CarryOut & { action: Extract<Action, { kind: 'mo
     idempotencyKey: `trierarch:refused-model:${harness}:${version}:${model}`,
   });
   log(deps, { shipId, ...(shipName !== undefined && { shipName }), action: 'modelRefused', outcome: `${harness} ${version} refused ${model}, offered no more at this version` });
-}
-
-/**
- * A session showed no activity on a harness version its launch screens were
- * not checked on (#594): argo is told once per harness and version, so a
- * changed screen is checked instead of the launch only failing.
- */
-async function screensUnchecked(at: CarryOut & { action: Extract<Action, { kind: 'screensUnchecked' }> }): Promise<void> {
-  const { action, deps } = at;
-  const { shipId, shipName, harness, version, checkedOn } = action;
-  const machine = await deps.fleet.whoami();
-  await deps.fleet.reportToArgo({
-    text: `${machine.name}: ${shipName ?? shipId} (${shipId}) showed no activity within a minute of its start on ${harness} ${version}, a version its launch screens were not checked on (they were on ${checkedOn}): check ${harness}'s screens against ${version}`,
-    idempotencyKey: `trierarch:unchecked-screens:${harness}:${version}`,
-  });
-  log(deps, { shipId, ...(shipName !== undefined && { shipName }), action: 'screensUnchecked', outcome: `no activity on ${harness} ${version}, its screens checked on ${checkedOn}; argo told` });
 }
 
 /**

@@ -379,16 +379,8 @@ export class InMemoryHarness implements HarnessPort {
   isMarkingLaunches = true;
   /** Set to make every launch fail, as when the harness's CLI cannot start: the entry stays crewing. */
   isFailingLaunch = false;
-  readonly screensCheckedOn?: string;
 
-  constructor(
-    private readonly processes: InMemoryProcesses,
-    at: { screensCheckedOn?: string } = {},
-  ) {
-    if (at.screensCheckedOn !== undefined) {
-      this.screensCheckedOn = at.screensCheckedOn;
-    }
-  }
+  constructor(private readonly processes: InMemoryProcesses) {}
 
   prepareIdentity(at: { folder: string; identity: Identity }): Promise<void> {
     this.identities.set(at.folder, at.identity);
@@ -566,16 +558,13 @@ export class InMemoryTrust implements TrustPort {
 }
 
 /** A trierarch on in-memory ports. */
-/** The Codex version the fake Codex's launch screens were checked on; Claude Code's fake names none. */
-export const CODEX_SCREENS_CHECKED_ON = '0.162.1';
-
 export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION, detected: Detected = {}) {
   const state = new InMemoryState();
   const fleet = new InMemoryFleet();
   const processes = new InMemoryProcesses();
   const harness = new InMemoryHarness(processes);
   // Each harness keeps its own identities, as the aeolus plugin does per harness.
-  const codex = new InMemoryHarness(processes, { screensCheckedOn: CODEX_SCREENS_CHECKED_ON });
+  const codex = new InMemoryHarness(processes);
   const workspace = new InMemoryWorkspace();
   const trust = new InMemoryTrust(configuration);
   const clock = new TestClock();

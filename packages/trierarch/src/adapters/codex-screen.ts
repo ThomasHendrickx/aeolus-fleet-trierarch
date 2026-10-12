@@ -15,9 +15,6 @@ const CODEX_TEXTS: LaunchTexts = {
   ],
 };
 
-/** The Codex version the texts above were checked on, the version its screens in test/screens were captured on (#594). */
-export const CODEX_SCREENS_CHECKED_ON = '0.162.1';
-
 export function codexScreenStoppedAt(screen: string): string | undefined {
   return screenStoppedAt(CODEX_TEXTS, screen);
 }

@@ -145,12 +145,6 @@ export interface HarnessPort {
   }): Promise<void>;
   turnOf(folder: string): Promise<Turn>;
   wake(session: { shipId: ShipId; folder: string }): Promise<void>;
-  /**
-   * The version of the harness its launch screen texts were checked on (#594):
-   * a session on another version that shows no activity is told to argo. None
-   * when its adapter names none.
-   */
-  readonly screensCheckedOn?: string;
   /** What the session did in its launch window (#382), as its hooks marked the launch it was started for (#490), for the model it launched with; any model refused when it launched with none. */
   launchSeen(session: { shipId: ShipId; folder: string; launchId: string; model?: string }): Promise<LaunchSeen>;
   /** Whether the harness's aeolus plugin marks launches (#490); one older than the launch marker does not, and its sessions are not crewed. */

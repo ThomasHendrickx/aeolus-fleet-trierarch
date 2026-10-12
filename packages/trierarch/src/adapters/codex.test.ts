@@ -9,7 +9,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
 import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
 import { CODEX_ADAPTER_FLAGS, CODEX_TYPING_SETTLE_MS, codexCommandLine, createCodexHarness } from './codex.js';
-import { CODEX_SCREENS_CHECKED_ON } from './codex-screen.js';
 import { runCommand } from './run-command.js';
 
 // With the aeolus plugin's own scripts from this repository, in a temporary data folder standing for Codex's.
@@ -212,10 +211,6 @@ describe('Codex as a harness', () => {
     screens.set(shipId, woken);
 
     expect(woken).toContain(`› ${typed[0]?.text ?? ''}\n\n• I’m using the aeolus-wake skill`);
-  });
-
-  it('names the Codex version its launch screens were checked on, so a launch on another version that shows no activity is told to argo (#594)', () => {
-    expect(harness().screensCheckedOn).toBe(CODEX_SCREENS_CHECKED_ON);
   });
 
 });
