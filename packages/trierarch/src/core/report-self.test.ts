@@ -52,9 +52,18 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
       kept: [{ shipId: kept.shipId, repository: 'aeolus-fleet' }],
       orphans: [{ repository: 'aeolus-fleet', name: 'stray' }],
       machine: { os: 'macos', arch: 'arm64' },
+      runtime: 'host',
       version: '0.1.0',
     });
     expect(trierarchReportDetailsSchema.safeParse(report?.details).success).toBe(true);
+  });
+
+  it('reports the container runtime as a fact when its configuration runs the sessions in containers (decision 0039)', async () => {
+    const trierarch = aTrierarch({ ...CONFIGURATION, runtime: { kind: 'container', binary: 'podman', memory: '4g', cpus: 2 } });
+
+    await trierarch.reportSelf();
+
+    expect(trierarch.fleet.selfReports[0]?.details.runtime).toBe('container');
   });
 
   it('reports per harness the version detected and when its models were last confirmed, and neither for a harness not detected (#365)', async () => {

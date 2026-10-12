@@ -80,8 +80,10 @@ export async function createHarnesses(at: {
   /** What detection last found, read at each launch (#517). */
   detected: () => Detected;
   sessions: Pick<SessionRuntime, 'start' | 'type' | 'screen'>;
+  /** For sessions in containers: a home of each ship's own (decision 0039). */
+  shipHomes?: { homes: string; managedSettings: string };
 }): Promise<{ harnesses: Record<string, HarnessPort>; plugins: Record<string, AeolusPlugin> }> {
-  const { configuration, homeDirectory, env, managedSettings, detected, sessions } = at;
+  const { configuration, homeDirectory, env, managedSettings, detected, sessions, shipHomes } = at;
   const harnesses: Record<string, HarnessPort> = {};
   const plugins: Record<string, AeolusPlugin> = {};
   for (const name of Object.keys(configuration.harnesses)) {
@@ -90,7 +92,7 @@ export async function createHarnesses(at: {
     }
     const plugin = await findAeolusPlugin({ homeDirectory, env, harness: name });
     plugins[name] = plugin;
-    harnesses[name] = name === 'codex' ? createCodexHarness({ configuration, plugin, sessions, setup: createCodexSetup() }) : createClaudeCodeHarness({ configuration, plugin, sessions, permissionModes: () => detected()['claude-code']?.permissionModes, projects: join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects'), setup: createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) }) });
+    harnesses[name] = name === 'codex' ? createCodexHarness({ configuration, plugin, sessions, setup: createCodexSetup() }) : createClaudeCodeHarness({ configuration, plugin, sessions, permissionModes: () => detected()['claude-code']?.permissionModes, projects: join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects'), setup: createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) }), ...(shipHomes !== undefined && { shipHomes }) });
   }
   return { harnesses, plugins };
 }

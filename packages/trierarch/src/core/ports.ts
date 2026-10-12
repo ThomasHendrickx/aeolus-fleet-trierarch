@@ -205,6 +205,18 @@ export interface TrustPort {
   trusted(): Promise<TrustedPlaces>;
 }
 
+/** How a container runtime runs: as the user (rootless), as root, or not at all. */
+export type RuntimeMode = 'rootless' | 'rootful' | 'missing';
+
+/** What the container runtime's checks read of the machine (decision 0039). */
+export interface ContainerHostPort {
+  runtimeMode(binary: string): Promise<RuntimeMode>;
+  /** The groups of the user that runs the trierarch, by name. */
+  userGroups(): Promise<readonly string[]>;
+  /** Whether the machine's model token file holds a token. */
+  isModelTokenWritten(): Promise<boolean>;
+}
+
 export interface WorkspacePort {
   /** Makes the workspace, or finds the one a stop mid-crew left half made: its folder. */
   prepare(workspace: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace }): Promise<{ folder: string }>;

@@ -80,6 +80,7 @@ To stop the trierarch: `aeolus-trierarch stop`, or `aeolus-trierarch uninstall` 
 }
 ```
 
+- **runtime** (optional): where the sessions run, on the host when left out, or each in a container of its own: `{ "kind": "container", "binary": "podman", "memory": "4g", "cpus": 2 }`, with the model token in `~/.aeolus/trierarch/model-token`. What a container holds and what `config check` refuses with it: [docs/trierarch.md](../../docs/trierarch.md#session-runtime).
 - **caps**: how many ships it takes (the trierarch plugin assigns it no more), and how many sessions run at once.
 - **repositories**: by name. A crew request for a worktree of one gets a git worktree under `~/.aeolus/trierarch/worktrees/<repository>/<ship>`, detached at the settings' ref or the repository's HEAD. It fetches the repository first, and a ref `origin` has a branch for checks out that remote branch (`origin/<ref>`), so a ship starts from current code; when the fetch fails it uses what the repository has. `worktreeRoot` moves that root.
 - **folders**: by name, used as they are, one ship per folder, never removed.

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { cappedLogStream, isWritingTo } from '../adapters/capped-log.js';
 import { createClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import { createCodexSetup } from '../adapters/codex-setup.js';
+import { createContainerHost } from '../adapters/container-host.js';
 import { createDetectedFile } from '../adapters/detected-file.js';
 import { createDetectors } from '../adapters/detectors.js';
 import { loadConfiguration, readCrewFile, readRunningFile, TrierarchFileError } from '../adapters/files.js';
@@ -228,7 +229,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       return { data: report, text: report.said.join('\n') };
     },
     'config check': async () => {
-      const { text, ...data } = await configCheck(paths, { claudeCode: claudeCodeSetup() });
+      const { text, ...data } = await configCheck(paths, { files: { claudeCode: claudeCodeSetup() }, host: createContainerHost({ modelTokenFile: paths.modelToken }) });
       return { data, text };
     },
     detect: async () => {

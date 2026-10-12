@@ -77,6 +77,8 @@ function detailsOf(setup: TrierarchSetup, at: { state: TrierarchState; trusted: 
     kept: state.kept.map(({ shipId, repository }) => ({ shipId, repository })),
     orphans: state.orphans.map(({ repository, name }) => ({ repository, name })),
     ...(setup.machine === undefined || Object.keys(setup.machine).length === 0 ? {} : { machine: setup.machine }),
+    // A fact for the console, never a label: placement does not read it (decision 0039).
+    runtime: configuration.runtime?.kind ?? 'host',
     version,
   };
 }
