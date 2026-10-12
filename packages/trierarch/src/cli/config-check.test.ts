@@ -39,7 +39,7 @@ describe('config check, with the session runtime (decision 0039)', () => {
   it('says the sessions run on the host when the configuration names no runtime', async () => {
     configured(SESSIONS);
 
-    const report = await configCheck(paths, FILES, host);
+    const report = await configCheck(paths, { files: FILES, host });
 
     expect({ runtime: report.runtime, says: report.text.includes('Sessions run on the host.') }).toEqual({ runtime: { kind: 'host' }, says: true });
   });
@@ -47,7 +47,7 @@ describe('config check, with the session runtime (decision 0039)', () => {
   it('says the sessions run in containers, with their caps and where the model token is read, when the container runtime fits', async () => {
     configured({ ...SESSIONS, runtime: CONTAINER });
 
-    const report = await configCheck(paths, FILES, host);
+    const report = await configCheck(paths, { files: FILES, host });
 
     expect(report.text).toContain(`Sessions run in containers of podman, each capped at 4g of memory and 2 cpus, with the model token in ${join(home, '.aeolus', 'trierarch', 'model-token')}.`);
   });
@@ -57,7 +57,7 @@ describe('config check, with the session runtime (decision 0039)', () => {
     host.groups = ['docker'];
     host.hasModelToken = false;
 
-    const refused = await configCheck(paths, FILES, host).catch((error: unknown) => error);
+    const refused = await configCheck(paths, { files: FILES, host }).catch((error: unknown) => error);
 
     expect(refused).toBeInstanceOf(TrierarchFileError);
     expect(refused instanceof Error ? refused.message.split('\n') : []).toEqual([
