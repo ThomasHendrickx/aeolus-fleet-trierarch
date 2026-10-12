@@ -1,0 +1,55 @@
+# The session image (decision 0039): one trierarch session per container, with
+# the harness, tmux, the aeolus plugin of this image's version, Playwright's
+# browser dependencies and a nested rootless Podman for a repository's tests.
+#
+# Built from the repository root, with the version set on the packages and the
+# plugin first (npm run set-version), so the plugin carries the image's version:
+#   podman build --file packages/trierarch/image/Containerfile --build-arg VERSION=<version> .
+FROM docker.io/library/ubuntu:24.04
+
+ARG VERSION
+ARG NODE_MAJOR=26
+ARG CLAUDE_CODE_VERSION=latest
+ARG PLAYWRIGHT_VERSION=1.63.0
+
+LABEL org.opencontainers.image.title="aeolus-session" \
+      org.opencontainers.image.description="An Aeolus trierarch session: Claude Code, tmux, the aeolus plugin and a nested rootless Podman" \
+      org.opencontainers.image.source="https://github.com/ThomasHendrickx/aeolus-fleet" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.version="${VERSION}"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get install --yes --no-install-recommends \
+      ca-certificates curl git gnupg jq less openssh-client tmux tini \
+      podman uidmap fuse-overlayfs slirp4netns passt \
+ && curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
+ && apt-get install --yes --no-install-recommends nodejs \
+ && npx --yes "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium \
+ && npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+ && npm cache clean --force \
+ && rm -rf /var/lib/apt/lists/* /root/.npm
+
+# The nested rootless Podman: the session user (ubuntu, uid 1000) gets the
+# ids the outer container maps above its own; the id maps need setuid helpers.
+# Without systemd: cgroups, events and sysctls are left to the outer runtime,
+# and storage goes through fuse-overlayfs, since overlay cannot stack on overlay.
+RUN chmod u+s /usr/bin/newuidmap /usr/bin/newgidmap \
+ && echo 'ubuntu:1001:64535' > /etc/subuid \
+ && echo 'ubuntu:1001:64535' > /etc/subgid
+COPY packages/trierarch/image/containers.conf /etc/containers/containers.conf
+COPY packages/trierarch/image/storage.conf /etc/containers/storage.conf
+COPY packages/trierarch/image/session-init.sh /usr/local/bin/aeolus-session-init
+
+# The aeolus plugin of this version, from its marketplace in the image.
+COPY .claude-plugin/marketplace.json /opt/aeolus-fleet/.claude-plugin/marketplace.json
+COPY plugins/aeolus /opt/aeolus-fleet/plugins/aeolus
+
+USER ubuntu
+WORKDIR /home/ubuntu
+RUN claude plugin marketplace add /opt/aeolus-fleet \
+ && claude plugin install aeolus@aeolus-fleet
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/aeolus-session-init"]
+CMD ["sleep", "infinity"]

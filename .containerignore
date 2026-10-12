@@ -1,0 +1,7 @@
+# The session image's build context (packages/trierarch/image/Containerfile):
+# only what the image copies.
+*
+!.claude-plugin/marketplace.json
+!plugins/aeolus
+plugins/aeolus/test
+!packages/trierarch/image
