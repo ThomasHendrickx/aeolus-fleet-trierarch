@@ -125,7 +125,12 @@ describe('the container a session runs in', () => {
     return { runner, run };
   }
 
-  const valuesOf = (args: readonly string[], flag: string) => args.flatMap((arg, at) => (arg === flag ? [args[at + 1] ?? ''] : []));
+  /** The values a flag of the runtime's own takes: those before the image, not the session command's. */
+  const valuesOf = (args: readonly string[], flag: string) => {
+    const image = args.indexOf('ghcr.io/thomashendrickx/aeolus-session:0.25.0');
+    const own = image === -1 ? args : args.slice(0, image);
+    return own.flatMap((arg, at) => (arg === flag ? [own[at + 1] ?? ''] : []));
+  };
 
   it('runs the configured binary', async () => {
     const { run } = await started({ binary: 'docker' });
@@ -171,9 +176,8 @@ describe('the container a session runs in', () => {
 
   it('hands the model token through an env file, never on a command line (#445)', async () => {
     const { runner, run } = await started();
-    const envFile = run.envFile ?? '';
 
-    expect({ onCommandLine: runner.calls.some((call) => call.args.some((arg) => arg.includes(MODEL_TOKEN))), envFile }).toEqual({ onCommandLine: false, envFile: expect.any(String) });
+    expect({ onCommandLine: runner.calls.some((call) => call.args.some((arg) => arg.includes(MODEL_TOKEN))), hasEnvFile: run.envFile !== undefined }).toEqual({ onCommandLine: false, hasEnvFile: true });
   });
 
   it('writes the env file for its owner alone and removes it once the container runs', async () => {
