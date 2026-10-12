@@ -11,6 +11,8 @@ import { runIdentity } from './plugin-identity.js';
  */
 export interface LaunchMarker {
   readonly isStarted: boolean;
+  /** The transcript the harness keeps of the session, as its session start named it; for Codex its session log. */
+  readonly transcript?: string;
   readonly isActive: boolean;
   /** Set once a turn failed because the model was not found, with the model's id when the refusal named it. */
   readonly refused?: { readonly model?: string };
@@ -26,10 +28,14 @@ export function launchMarkerOf(text: string, launchId: string): LaunchMarker | u
     return undefined;
   }
   const event = (name: string) => events.find((line) => line.startsWith(`${name} `))?.split(' ');
+  const started = event('started');
+  // Everything after when, as a path may hold spaces.
+  const transcript = started?.slice(2).join(' ');
   const refused = event('refused');
   const model = refused?.[2];
   return {
-    isStarted: event('started') !== undefined,
+    isStarted: started !== undefined,
+    ...(transcript !== undefined && transcript !== '' && { transcript }),
     isActive: event('active') !== undefined,
     ...(refused !== undefined && { refused: model === undefined || model === '' ? {} : { model } }),
   };

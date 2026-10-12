@@ -1,8 +1,11 @@
+import { readFile } from 'node:fs/promises';
+
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { AdapterFlag, HarnessPort } from '../core/ports.js';
 import { LAUNCH_VARIABLE } from './claude-code.js';
-import { CODEX_SCREENS_CHECKED_ON, codexModelRefused, codexScreenStoppedAt } from './codex-screen.js';
+import { CODEX_SCREENS_CHECKED_ON, codexScreenStoppedAt } from './codex-screen.js';
+import { codexModelRefusedIn } from './codex-session-log.js';
 import type { CodexSetup } from './codex-setup.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
 import { effectiveFlags } from '../core/effective-flags.js';
@@ -65,6 +68,15 @@ export function codexCommandLine(at: { flags: readonly string[]; prompt: string;
   ]);
 }
 
+/** The session log at the path given; none before Codex wrote it, or once it is gone. */
+async function sessionLog(path: string): Promise<string | undefined> {
+  try {
+    return await readFile(path, 'utf8');
+  } catch {
+    return undefined;
+  }
+}
+
 export function createCodexHarness(options: {
   configuration: TrierarchConfiguration;
   plugin: AeolusPlugin;
@@ -96,18 +108,18 @@ export function createCodexHarness(options: {
       await sessions.type({ shipId, text: wakePromptOf(WAKE_PROMPT), settleMs: CODEX_TYPING_SETTLE_MS });
     },
     marksLaunches: () => marks.isMarking(),
-    // The marker says what the session did (#490); Codex has no hook for a failed turn, so a refusal is read on the screen, which also names one that stopped it before its hooks ran.
+    // The marker says what the session did (#490); Codex has no hook for a failed turn, so a refusal is read from the session log its session start named.
     launchSeen: async ({ shipId, folder, launchId, model }) => {
-      const screen = await sessions.screen(shipId);
-      const refused = codexModelRefused({ screen, ...(model !== undefined && { model }) });
+      const marker = await marks.read({ folder, launchId });
+      const log = marker?.transcript === undefined ? undefined : await sessionLog(marker.transcript);
+      const refused = log === undefined ? undefined : codexModelRefusedIn({ log, ...(model !== undefined && { model }) });
       if (refused !== undefined) {
         return { kind: 'refused', model: refused };
       }
-      const marker = await marks.read({ folder, launchId });
       if (marker?.isActive === true) {
         return { kind: 'active' };
       }
-      const stoppedAt = marker?.isStarted === true ? undefined : codexScreenStoppedAt(screen);
+      const stoppedAt = marker?.isStarted === true ? undefined : codexScreenStoppedAt(await sessions.screen(shipId));
       return { kind: 'none', ...(stoppedAt !== undefined && { screen: stoppedAt }) };
     },
   };
