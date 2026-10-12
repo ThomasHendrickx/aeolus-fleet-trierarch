@@ -75,7 +75,7 @@ describe('workspaces as per-ship clones', () => {
     rmSync(repository, { recursive: true, force: true });
 
     expect(existsSync(join(made, '.git', 'objects', 'info', 'alternates'))).toBe(false);
-    await git(['-C', made, 'fsck', '--quiet']);
+    await git(['-C', made, 'fsck', '--no-progress']);
     expect((await git(['-C', made, 'log', '--format=%s'])).trim()).toBe('README.md');
   });
 
