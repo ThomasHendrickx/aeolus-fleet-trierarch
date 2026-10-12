@@ -17,8 +17,8 @@ import type {
   LoggedAction,
   ObservedSession,
   ObservedWorktree,
-  ProcessPort,
   SelfReport,
+  SessionRuntime,
   StatePort,
   TrustedPlaces,
   TrustPort,
@@ -341,7 +341,7 @@ export class InMemoryFleet implements FleetPort {
   }
 }
 
-export class InMemoryProcesses implements ProcessPort {
+export class InMemoryProcesses implements Pick<SessionRuntime, 'list' | 'stop'> {
   readonly sessions = new Map<ShipId, ObservedSession['status']>();
 
   list(): Promise<readonly ObservedSession[]> {

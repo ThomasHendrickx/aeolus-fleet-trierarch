@@ -2,7 +2,7 @@ import { CREW_REQUEST_REASON_MAX_LENGTH, type ShipId } from '@aeolus-fleet/commo
 
 import { putEntry, removeEntry, withState, type Entry, type TrierarchState } from './entry.js';
 import { MODEL_OPTION } from './detected-options.js';
-import type { FleetPort, HarnessPort, LaunchSeen, LoggedAction, Logger, ProcessPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
+import type { FleetPort, HarnessPort, LaunchSeen, LoggedAction, Logger, SessionRuntime, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { HOLDS_IDENTITY, reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
 import type { RefuseModel } from './refuse-model.js';
 import type { Clock } from './shared/clock.js';
@@ -23,7 +23,7 @@ export interface RunPassDeps {
   fleet: FleetPort;
   /** One adapter per harness the configuration offers, by its name. */
   harnesses: Readonly<Record<string, HarnessPort>>;
-  processes: ProcessPort;
+  processes: Pick<SessionRuntime, 'list' | 'stop'>;
   workspace: WorkspacePort;
   /** What each harness trusts, read each pass so it is checked before every launch (#381). */
   trust: TrustPort;

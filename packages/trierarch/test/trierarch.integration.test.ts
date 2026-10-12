@@ -27,10 +27,9 @@ import { createGitWorkspace } from '../src/adapters/git-workspace.js';
 import { createJsonState } from '../src/adapters/json-state.js';
 import { trierarchPaths, type TrierarchPaths } from '../src/adapters/paths.js';
 import { createRestFleet } from '../src/adapters/rest-fleet.js';
-import type { Tmux } from '../src/adapters/tmux.js';
 import { createTrust } from '../src/adapters/trust.js';
 import { initTrierarch } from '../src/cli/init.js';
-import type { ObservedSession } from '../src/core/ports.js';
+import type { ObservedSession, SessionRuntime } from '../src/core/ports.js';
 import { createRunPass } from '../src/core/run-pass.js';
 import { CONFIGURATION } from './support/in-memory.js';
 
@@ -96,8 +95,8 @@ async function launchHooks(at: { folder: string; env: Readonly<Record<string, st
   }
 }
 
-/** Sessions as a map, standing in for tmux: started ones run until stopped, each showing what Claude Code would show in this home. */
-function standInSessions(): Tmux {
+/** Sessions as a map, standing in for the session runtime: started ones run until stopped, each showing what Claude Code would show in this home. */
+function standInSessions(): SessionRuntime {
   const sessions = new Map<ShipId, ObservedSession['status']>();
   const commands = new Map<ShipId, readonly string[]>();
   return {

@@ -6,7 +6,7 @@ import type { Action } from './reconciler.js';
 
 /**
  * The trierarch's ports (docs/architecture.md, "The trierarch"). Adapters
- * implement them in D2b: REST for the fleet, tmux for processes, git worktree
+ * implement them in D2b: REST for the fleet, tmux for the sessions, git worktree
  * and folders for workspaces, Claude Code for the harness, a JSON file for
  * state. Each throws only for a system failure.
  */
@@ -159,15 +159,26 @@ export interface HarnessPort {
  */
 export type LaunchSeen = { readonly kind: 'active' } | { readonly kind: 'refused'; readonly model?: string } | { readonly kind: 'none'; readonly screen?: string };
 
-/** A session the process supervisor runs, by ship id: running, or exited and kept so the exit is seen. */
+/** A session the session runtime runs, by ship id: running, or exited and kept so the exit is seen. */
 export interface ObservedSession {
   readonly shipId: ShipId;
   readonly status: 'running' | 'exited';
 }
 
-export interface ProcessPort {
+/**
+ * Where the sessions run (decision 0039): one session per ship, by ship id,
+ * kept on exit so an exit is seen. The reconciler lists and stops them; the
+ * harness adapters start, type into and read them.
+ */
+export interface SessionRuntime {
   list(): Promise<readonly ObservedSession[]>;
   stop(shipId: ShipId): Promise<void>;
+  /** Starts the command in the folder, with the environment given, in a new session for the ship; an exited one is replaced. */
+  start(session: { shipId: ShipId; folder: string; command: readonly string[]; env?: Readonly<Record<string, string>> }): Promise<void>;
+  /** Types the text into the ship's session and presses Enter, after `settleMs` when given. */
+  type(at: { shipId: ShipId; text: string; settleMs?: number }): Promise<void>;
+  /** What the ship's session shows: its last lines, wrapped ones joined; empty with no session. */
+  screen(shipId: ShipId): Promise<string>;
 }
 
 /** A worktree under the trierarch's root (`<root>/<repository>/<name>`), with the ship it is named after when it is one. */

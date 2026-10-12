@@ -2,7 +2,7 @@ import type { TrierarchReportDetails } from '@aeolus-fleet/common';
 
 import { optionsSchemaOf } from './options-schema.js';
 import type { TrierarchState } from './entry.js';
-import type { FleetPort, ProcessPort, SelfReport, StatePort, TrierarchSetup, TrustedPlaces, TrustPort } from './ports.js';
+import type { FleetPort, SelfReport, SessionRuntime, StatePort, TrierarchSetup, TrustedPlaces, TrustPort } from './ports.js';
 
 /** Reports the trierarch's own ship when something changed; the first call, at start, always reports. */
 export type ReportSelf = () => Promise<void>;
@@ -14,7 +14,7 @@ export type ReportSelf = () => Promise<void>;
  * from its configuration and saved state. It reports on start, then only
  * when the report would differ from the last one it sent.
  */
-export function createReportSelf(deps: { fleet: FleetPort; processes: ProcessPort; trust: TrustPort; state: StatePort; setup: TrierarchSetup }): ReportSelf {
+export function createReportSelf(deps: { fleet: FleetPort; processes: Pick<SessionRuntime, 'list' | 'stop'>; trust: TrustPort; state: StatePort; setup: TrierarchSetup }): ReportSelf {
   let lastSent: string | undefined;
   return async () => {
     const state = await deps.state.load();

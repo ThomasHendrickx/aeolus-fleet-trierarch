@@ -4,8 +4,10 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { newId } from '../../test/support/in-memory.js';
+import { sessionRuntimeContract } from '../../test/support/session-runtime-contract.js';
 import { runCommand } from './run-command.js';
-import { createTmux, sessionsLaunch, type Tmux } from './tmux.js';
+import type { SessionRuntime } from '../core/ports.js';
+import { createTmux, sessionsLaunch } from './tmux.js';
 
 // Against the real tmux, on a tmux server of the test's own, its socket in the
 // test's own folder: kill-server leaves the socket behind (#537). The folder
@@ -16,7 +18,7 @@ const SOCKET_ROOT = '/tmp';
 
 let server: string;
 let folder: string;
-let tmux: Tmux;
+let tmux: SessionRuntime;
 
 beforeEach(() => {
   server = `trierarch-test-${newId('ship').slice(-8)}`;
@@ -31,90 +33,18 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
-describe('sessions in tmux', () => {
-  it('lists none before any starts', async () => {
-    await expect(tmux.list()).resolves.toEqual([]);
-  });
+describe('the session runtime contract, on tmux', () => {
+  sessionRuntimeContract({ runtime: () => tmux, folder: () => folder });
+});
 
-  it("starts the command in the folder, in a session named after the ship, and lists it running", async () => {
+describe('sessions in tmux', () => {
+  it('names the session after the ship, in the folder', async () => {
     const shipId = newId('ship');
 
     await tmux.start({ shipId, folder, command: ['sleep', '30'] });
 
-    await expect(tmux.list()).resolves.toEqual([{ shipId, status: 'running' }]);
     const sessions = await runCommand('tmux', { args: ['-L', server, 'list-sessions', '-F', '#{session_name} #{pane_current_path}'] });
     expect(sessions.stdout.trim()).toMatch(new RegExp(`^trierarch-${shipId} .*${folder.split('/').at(-1) ?? ''}$`));
-  });
-
-  it('starts the command with the environment given, such as its launch id (#490)', async () => {
-    const shipId = newId('ship');
-
-    await tmux.start({ shipId, folder, command: ['sh', '-c', 'echo "launch $AEOLUS_LAUNCH"; sleep 30'], env: { AEOLUS_LAUNCH: 'launch-1' } });
-
-    await expect.poll(async () => tmux.screen(shipId), { timeout: 5000 }).toContain('launch launch-1');
-  });
-
-  it('keeps a session whose command ended, so the exit is seen', async () => {
-    const shipId = newId('ship');
-
-    await tmux.start({ shipId, folder, command: ['sh', '-c', 'exit 3'] });
-
-    await expect.poll(async () => tmux.list(), { timeout: 5000 }).toEqual([{ shipId, status: 'exited' }]);
-  });
-
-  it('replaces an exited session when the ship starts again', async () => {
-    const shipId = newId('ship');
-    await tmux.start({ shipId, folder, command: ['sh', '-c', 'exit 3'] });
-    await expect.poll(async () => tmux.list(), { timeout: 5000 }).toEqual([{ shipId, status: 'exited' }]);
-
-    await tmux.start({ shipId, folder, command: ['sleep', '30'] });
-
-    await expect(tmux.list()).resolves.toEqual([{ shipId, status: 'running' }]);
-  });
-
-  it('types text into the session and presses Enter', async () => {
-    const shipId = newId('ship');
-    await tmux.start({ shipId, folder, command: ['sh', '-c', 'read line; echo "got $line"; sleep 30'] });
-
-    await tmux.type({ shipId, text: '/aeolus:wake' });
-
-    await expect
-      .poll(async () => (await runCommand('tmux', { args: ['-L', server, 'capture-pane', '-p', '-t', `=trierarch-${shipId}:`] })).stdout, { timeout: 5000 })
-      .toContain('got /aeolus:wake');
-  });
-
-  it('waits the settle time between the text and Enter when asked', async () => {
-    const shipId = newId('ship');
-    const settleMs = 300;
-    await tmux.start({ shipId, folder, command: ['sh', '-c', 'read line; echo "got $line"; sleep 30'] });
-    const before = Date.now();
-
-    await tmux.type({ shipId, text: '$aeolus-wake ', settleMs });
-
-    expect(Date.now() - before).toBeGreaterThanOrEqual(settleMs);
-    await expect
-      .poll(async () => (await runCommand('tmux', { args: ['-L', server, 'capture-pane', '-p', '-t', `=trierarch-${shipId}:`] })).stdout, { timeout: 5000 })
-      .toContain('got $aeolus-wake');
-  });
-
-  it("reads what the session's screen shows", async () => {
-    const shipId = newId('ship');
-    await tmux.start({ shipId, folder, command: ['sh', '-c', 'echo "Ran 1 shell command"; sleep 30'] });
-
-    await expect.poll(async () => tmux.screen(shipId), { timeout: 5000 }).toContain('Ran 1 shell command');
-  });
-
-  it('reads an empty screen for a ship with no session', async () => {
-    await expect(tmux.screen(newId('ship'))).resolves.toBe('');
-  });
-
-  it('stops a session', async () => {
-    const shipId = newId('ship');
-    await tmux.start({ shipId, folder, command: ['sleep', '30'] });
-
-    await tmux.stop(shipId);
-
-    await expect(tmux.list()).resolves.toEqual([]);
   });
 
   it('lists only its own sessions', async () => {
