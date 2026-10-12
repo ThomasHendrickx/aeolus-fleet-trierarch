@@ -10,6 +10,16 @@
             "commandWindows": "bash \"%PLUGIN_ROOT%\\scripts\\aeolus-session-start.sh\""
           }
         ]
+      },
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/aeolus-launch.sh\"",
+            "commandWindows": "bash \"%PLUGIN_ROOT%\\scripts\\aeolus-launch.sh\""
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -43,6 +53,15 @@
             "commandWindows": "bash \"%PLUGIN_ROOT%\\scripts\\aeolus-model.sh\""
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/aeolus-launch.sh\"",
+            "commandWindows": "bash \"%PLUGIN_ROOT%\\scripts\\aeolus-launch.sh\""
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -63,6 +82,18 @@
             "type": "command",
             "command": "bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/aeolus-stop.sh\"",
             "commandWindows": "bash \"%PLUGIN_ROOT%\\scripts\\aeolus-stop.sh\""
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "matcher": "model_not_found",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/aeolus-launch.sh\"",
+            "commandWindows": "bash \"%PLUGIN_ROOT%\\scripts\\aeolus-launch.sh\""
           }
         ]
       }

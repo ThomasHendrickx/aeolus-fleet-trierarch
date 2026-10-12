@@ -6,6 +6,8 @@
 #   aeolus-identity.sh check-in <interval>   a squadron member keeps its check-in interval: <n>m or <n>h
 #   aeolus-identity.sh show     the ship and its fleet (never the token); exit 1 when none
 #   aeolus-identity.sh turn     the turn marker of a folder a trierarch crews: busy or idle, with when; exit 1 when none
+#   aeolus-identity.sh launch   the launch marker of a folder a trierarch crews: the launch id, then what the hooks saw; exit 1 when none
+#   aeolus-identity.sh launch clear   forgets the launch marker, before the trierarch starts a launch
 #   aeolus-identity.sh path     the identity file of this folder, whether it exists or not
 #   aeolus-identity.sh delete   stops the folder's watcher and forgets the ship
 set -euo pipefail
@@ -70,6 +72,14 @@ case "$command" in
     turn_file="$(aeolus_turn_file)"
     cat "$turn_file" 2>/dev/null || { echo "aeolus: no turn marked yet"; exit 1; }
     ;;
+  launch)
+    launch_file="$(aeolus_launch_file)"
+    if [ "${2:-}" = clear ]; then
+      rm -f "$launch_file"
+      exit 0
+    fi
+    cat "$launch_file" 2>/dev/null || { echo "aeolus: no launch marked yet"; exit 1; }
+    ;;
   path)
     echo "$file"
     ;;
@@ -85,11 +95,11 @@ case "$command" in
       aeolus_process_is "$pid" aeolus-wait.sh && kill "$pid" 2>/dev/null || true
       rm -f "$pid_file"
     fi
-    rm -f "$file" "$(aeolus_refused_file)" "$(aeolus_reported_file)" "$(aeolus_turn_file)" "$(aeolus_waiting_file)" "$(aeolus_model_file)"
+    rm -f "$file" "$(aeolus_refused_file)" "$(aeolus_reported_file)" "$(aeolus_turn_file)" "$(aeolus_launch_file)" "$(aeolus_waiting_file)" "$(aeolus_model_file)"
     echo "aeolus: this folder crews no ship any more"
     ;;
   *)
-    echo "usage: aeolus-identity.sh write|check-in|show|turn|path|delete" >&2
+    echo "usage: aeolus-identity.sh write|check-in|show|turn|launch|path|delete" >&2
     exit 2
     ;;
 esac

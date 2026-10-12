@@ -165,6 +165,15 @@ aeolus_turn_file() {
   printf '%s/%s.turn' "$dir" "$(aeolus_key "$folder")"
 }
 
+# The launch marker of a crewed folder (#490): the launch id the trierarch
+# started the session for, then what its hooks saw of that launch, with when.
+aeolus_launch_file() {
+  local folder dir
+  folder="$(aeolus_folder)" || return 1
+  dir="$(aeolus_ships_dir)" || return 1
+  printf '%s/%s.launch' "$dir" "$(aeolus_key "$folder")"
+}
+
 # Whether an identity's text says the trierarch wakes its sessions
 # (wakeBy=trierarch): then the plugin asks for no watcher of its own.
 aeolus_woken_by_trierarch() {
