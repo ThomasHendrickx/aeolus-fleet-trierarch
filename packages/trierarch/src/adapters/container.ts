@@ -20,6 +20,12 @@ export const SESSION_HOME = '/home/ubuntu';
 const SESSION_USER = 'uid=1000,gid=1000';
 /** The tmux session inside each container: one per container, so one name serves. */
 const TMUX_TARGET = '=session:';
+/**
+ * The most processes and threads a container may hold, a hard cap beside
+ * memory and cpus (decision 0039): room for Claude Code, a test run with its
+ * workers, a browser and a nested Postgres, and none for a runaway fork.
+ */
+const PIDS_LIMIT = 4096;
 /** How many lines back a screen is read, as on the host. */
 const SCREEN_LINES = 200;
 
@@ -141,6 +147,8 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
           options.memory,
           '--cpus',
           String(options.cpus),
+          '--pids-limit',
+          String(PIDS_LIMIT),
           `--userns=keep-id:${SESSION_USER}`,
           '--device',
           '/dev/fuse',
