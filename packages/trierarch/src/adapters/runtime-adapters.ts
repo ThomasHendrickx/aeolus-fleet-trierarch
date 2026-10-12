@@ -1,3 +1,5 @@
+import { realpath } from 'node:fs/promises';
+
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { SessionRuntime, WorkspacePort } from '../core/ports.js';
@@ -23,7 +25,7 @@ export interface RuntimeAdapters {
  * the host, tmux and a worktree per ship; in containers, a container per ship
  * from the image of the trierarch's own version, with the configured binary
  * and caps and the machine's model token, a clone per ship in place of the
- * worktree, and a home of each ship's own.
+ * worktree, by its real path, and a home of each ship's own.
  */
 export function runtimeAdaptersOf(at: { configuration: TrierarchConfiguration; paths: TrierarchPaths; version: string; launch: readonly string[]; managedSettings: string }): RuntimeAdapters {
   const { configuration, paths, version, launch, managedSettings } = at;
@@ -32,9 +34,11 @@ export function runtimeAdaptersOf(at: { configuration: TrierarchConfiguration; p
   if (runtime?.kind !== 'container') {
     return { sessions: createTmux({ launch }), workspace: createGitWorkspace({ configuration, root }) };
   }
+  const clones = createCloneWorkspace({ configuration, root });
   return {
     sessions: createContainerRuntime({ binary: runtime.binary, image: `${SESSION_IMAGE}:${version}`, tokenFile: paths.modelToken, homes: paths.homes, memory: runtime.memory, cpus: runtime.cpus, launch }),
-    workspace: createCloneWorkspace({ configuration, root }),
+    // The container mounts the folder at the path it is given, where the plugin inside keys it by \`pwd -P\` as the host's does: one path for both, the real one.
+    workspace: { ...clones, prepare: async (at) => ({ folder: await realpath((await clones.prepare(at)).folder) }) },
     shipHomes: { homes: paths.homes, managedSettings },
   };
 }
