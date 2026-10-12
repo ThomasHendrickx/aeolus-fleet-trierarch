@@ -24,10 +24,13 @@ identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
 identity_text="$(aeolus_identity_read "$identity")" || exit 0
 
 # Lets the turn end: the session is idle, and what the turn took is handled.
+# On a pushed lease the fleet is told, after what it did not take before.
 let_end() {
+  aeolus_send_owed "$identity"
   aeolus_store_end_turn "$identity"
   aeolus_mark_turn idle
   aeolus_log "$identity" turn 'idle: the turn ended'
+  aeolus_report_turn "$(aeolus_identity_read "$identity")"
 }
 
 root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"

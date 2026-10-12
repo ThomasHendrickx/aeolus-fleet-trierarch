@@ -248,7 +248,24 @@ describe('the Codex plugin package', () => {
 
     expect(hooks.SessionStart).toContainEqual({ matcher: 'startup|resume', hooks: [launchHook] });
     expect(hooks.PreToolUse).toContainEqual({ hooks: [launchHook] });
-    expect(hooks.StopFailure).toEqual([{ matcher: 'model_not_found', hooks: [launchHook] }]);
+    expect(hooks.StopFailure).toContainEqual({ matcher: 'model_not_found', hooks: [launchHook] });
+  });
+
+  it('tells a died turn apart at every failed turn, whatever the error (#756, D3)', () => {
+    const hook = z.object({ type: z.string(), command: z.string(), commandWindows: z.string() });
+    const hooks = z
+      .object({ hooks: z.record(z.string(), z.array(z.object({ matcher: z.string().optional(), hooks: z.array(hook) }))) })
+      .parse(json(join(PLUGIN, 'hooks/hooks.json'))).hooks;
+
+    expect(hooks.StopFailure).toContainEqual({
+      hooks: [
+        {
+          type: 'command',
+          command: 'bash "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/aeolus-turn-died.sh"',
+          commandWindows: 'bash "%PLUGIN_ROOT%\\scripts\\aeolus-turn-died.sh"',
+        },
+      ],
+    });
   });
 });
 

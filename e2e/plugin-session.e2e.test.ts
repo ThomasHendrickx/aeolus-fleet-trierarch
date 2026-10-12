@@ -105,10 +105,13 @@ function isWatching(): boolean {
 }
 
 /**
- * Sends argo's message to the ship and waits until the ship acknowledged it
- * and answered it. The model read it from a hook, which put it into the turn
- * (a denied first tool call, or a Stop that kept the turn open), and never
- * received it itself: the watcher's receive is its only claim.
+ * Sends argo's message to the ship and waits until the ship acknowledged it,
+ * answered it and the turn that took it ended. The model read it from a hook,
+ * which put it into the turn (the prompt that starts the turn, a denied first
+ * tool call, or a Stop that kept the turn open), and never received it
+ * itself: the watcher's push receive is its only claim. The fleet saw every
+ * step (decision 0040): received, handed with hand-over number 1,
+ * acknowledged and handled.
  */
 async function expectAnswered(payload: string, answer: string): Promise<void> {
   const { messageId } = unwrap(
@@ -120,11 +123,19 @@ async function expectAnswered(payload: string, answer: string): Promise<void> {
   );
   await until(async () => {
     const delivery = await database.delivery.findFirstOrThrow({ where: { messageId } });
-    return delivery.state === 'acknowledged';
+    return delivery.state === 'acknowledged' || delivery.state === 'handled';
   }, `the ship to acknowledge ${messageId}`);
   const reply = await waitForReply(messageId);
   expect(reply.payload).toContain(answer);
-  expect((await database.delivery.findFirstOrThrow({ where: { messageId } })).attempts).toBe(1);
+  await until(
+    async () => (await database.delivery.findFirstOrThrow({ where: { messageId } })).state === 'handled',
+    `the hooks to report ${messageId} handled`,
+  );
+  const delivery = await database.delivery.findFirstOrThrow({ where: { messageId } });
+  expect(delivery.attempts).toBe(1);
+  const steps = await database.event.findMany({ where: { deliveryId: delivery.id, type: { startsWith: 'Delivery' } }, orderBy: { seq: 'asc' } });
+  expect(steps.map((step) => step.type)).toEqual(['DeliveryReceived', 'DeliveryHanded', 'DeliveryAcknowledged', 'DeliveryHandled']);
+  expect(steps[1]?.details).toMatchObject({ handOverNumber: 1 });
   expect(transcripts().some((transcript) => transcript.includes(`: message ${messageId}, text/plain. The plugin acknowledged it for you`))).toBe(true);
 }
 
@@ -191,6 +202,10 @@ describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Claude Code ses
     await until(isWatching, 'the watcher to run');
     await expectAnswered('Answer this message with a reply whose payload is exactly: PONG 1', 'PONG 1');
     await until(isWatching, 'the watcher to run again');
+    const lease = await database.lease.findFirstOrThrow({ where: { shipId, endedAt: null } });
+    expect(lease.pushedAt).not.toBeNull();
+    const turns = await database.event.findMany({ where: { shipId, type: 'TurnReported' }, orderBy: { seq: 'asc' } });
+    expect(turns.map((reported) => reported.details)).toEqual(expect.arrayContaining([expect.objectContaining({ turn: 'busy' }), expect.objectContaining({ turn: 'idle' })]));
   }, 2 * SESSION_TIMEOUT_MS);
 
   it('answers again after /clear: the watcher outlives it, and the hook tells the fresh context which ship it crews', async () => {

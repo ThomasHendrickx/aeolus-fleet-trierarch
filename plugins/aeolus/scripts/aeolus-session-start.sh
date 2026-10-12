@@ -83,6 +83,11 @@ fi
 
 identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
 identity_text="$(aeolus_identity_read "$identity")" || exit 0
+# A person started the session again (#756, D6): what the store holds waits
+# for the first prompt. Never after /clear or a compact: the session lives on.
+case "$source_event" in
+  startup|resume) ! aeolus_reports_here "$identity_text" || aeolus_store_session_started "$identity" ;;
+esac
 
 ship_name="$(aeolus_identity_field "$identity_text" shipName)"
 ship_id="$(aeolus_identity_field "$identity_text" shipId)"

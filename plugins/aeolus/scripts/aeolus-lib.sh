@@ -417,10 +417,14 @@ aeolus_hook_folder() {
 # The store of a crewed folder (#756): one entry per delivery the watcher
 # received to hand to the session, so a restart of the watcher or the computer
 # picks up where it was. Beside the turn marker, never the crew token. An entry
-# is <deliveryId>.json (the delivery as the fleet's receive answered it) and
-# <deliveryId>.state (received, handed or confirmed, with when); a ping in the
-# turn has <deliveryId>.shown, and once pong answered it <deliveryId>.ponged; a
-# long payload is in <deliveryId>.payload. Handled, an entry is removed.
+# is <deliveryId>.json (the delivery as the fleet's push receive answered it),
+# <deliveryId>.state (received, handed or confirmed, with when),
+# <deliveryId>.lease (the key of the lease it was received under, D7) and
+# <deliveryId>.number (its last hand-over number, D4), with
+# <deliveryId>.unreported while the fleet has not taken that hand-over yet; a
+# ping in the turn has <deliveryId>.shown, and once pong answered it
+# <deliveryId>.ponged; a long payload is in <deliveryId>.payload. Handled, an
+# entry is removed.
 aeolus_store_dir() {
   local folder dir
   folder="$(aeolus_folder)" || return 1
@@ -436,6 +440,132 @@ aeolus_is_delivery_id() {
   esac
 }
 
+# The key of the lease a crew token stands for, never the token itself: each
+# crew of a folder holds one lease (#756, D7). <crew token>
+aeolus_lease_key() {
+  printf '%s' "$1" | aeolus_sha256 | cut -c1-16
+}
+
+# The key of the lease the folder's crew holds now; fails once it is gone.
+aeolus_current_lease_key() {
+  local identity token
+  identity="$(aeolus_identity_file)" || return 1
+  token="$(aeolus_identity_token "$identity")"
+  [ -n "$token" ] || return 1
+  aeolus_lease_key "$token"
+}
+
+# Marks that the watcher's push receive made the folder's lease pushed (#756,
+# D1): the lease key. From then on until the lease ends the hooks and the
+# watcher report the turn and how each message ended.
+aeolus_pushed_file() {
+  local folder dir
+  folder="$(aeolus_folder)" || return 1
+  dir="$(aeolus_ships_dir)" || return 1
+  printf '%s/%s.pushed' "$dir" "$(aeolus_key "$folder")"
+}
+
+# Whether this session reports its turn and its messages to the fleet: a
+# Claude Code session crewed by hand whose lease the watcher pushed. A folder
+# a trierarch crews and a Codex task do not report yet. <identity text>
+aeolus_reports_here() {
+  [ -z "${PLUGIN_ROOT:-}" ] || return 1
+  ! aeolus_woken_by_trierarch "$1" || return 1
+  [ "$(cat "$(aeolus_pushed_file)" 2>/dev/null)" = "$(aeolus_lease_key "$(aeolus_identity_field "$1" crewToken)")" ]
+}
+
+# The turn as the fleet last took it: the turn marker's line it reported.
+aeolus_turn_reported_file() {
+  local file
+  file="$(aeolus_turn_file)" || return 1
+  printf '%s.reported' "$file"
+}
+
+# Reports the turn marker to the fleet, busy or idle with the time it was
+# marked, unless the fleet took that line already: a report the fleet did not
+# take is sent again with the next one, keeping its own time (3.15). One call,
+# bounded as an acknowledgement is, so no hook waits long. <identity text>
+aeolus_report_turn() {
+  local marker state at
+  aeolus_reports_here "$1" || return 0
+  marker="$(head -n 1 "$(aeolus_turn_file)" 2>/dev/null)" || return 0
+  [ -n "$marker" ] || return 0
+  [ "$(cat "$(aeolus_turn_reported_file)" 2>/dev/null)" != "$marker" ] || return 0
+  state="${marker%% *}"
+  at="${marker#* }"
+  if AEOLUS_CALL_MAX_SECONDS="${AEOLUS_CONFIRM_SECONDS:-3}" AEOLUS_BUSY_WAITS='' \
+    "$(dirname "${BASH_SOURCE[0]}")/aeolus-fleet.sh" turn "{\"turn\":\"${state}\",\"at\":\"${at}\"}" >/dev/null 2>&1; then
+    printf '%s\n' "$marker" > "$(aeolus_turn_reported_file)"
+  fi
+  return 0
+}
+
+# Drops the entries received under another lease than the folder's crew holds
+# now (#756, D7): the folder was crewed again. An unconfirmed one comes back by
+# push receive; a confirmed one stays acknowledged, handled unknown.
+aeolus_store_drop_older_leases() {
+  local dir lease file id identity
+  dir="$(aeolus_store_dir)" || return 0
+  [ -d "$dir" ] || return 0
+  lease="$(aeolus_current_lease_key)" || return 0
+  identity="$(aeolus_identity_file)" || return 0
+  for file in "$dir"/*.state; do
+    [ -f "$file" ] || continue
+    id="${file##*/}"
+    id="${id%.state}"
+    if [ "$(cat "$dir/$id.lease" 2>/dev/null)" != "$lease" ]; then
+      aeolus_store_drop "$id"
+      aeolus_log "$identity" handover "dropped ${id}: it was received under an older lease"
+    fi
+  done
+}
+
+# Gets an entry ready to hand to the session (#756, D4): an entry the fleet
+# took a hand-over of gets the next number, one whose hand-over the fleet has
+# not taken yet keeps its number, so a lost answer counts no attempt. Marks it
+# handed, unless it is handed once more, which keeps it as it is. Prints the
+# input of the fleet's handed. <deliveryId> [once-more]
+aeolus_store_handing() {
+  local id="$1" is_once_more="${2:-}" dir number
+  dir="$(aeolus_store_dir)" || return 1
+  number="$(cat "$dir/$id.number" 2>/dev/null)" || number=0
+  if [ ! -e "$dir/$id.unreported" ]; then
+    number=$((${number:-0} + 1))
+    printf '%s\n' "$number" > "$dir/$id.number" || return 1
+    : > "$dir/$id.unreported"
+  fi
+  [ -n "$is_once_more" ] || aeolus_store_mark "$id" handed
+  printf '{"deliveryId":"%s","handOverNumber":%s%s}' "$id" "$number" "${is_once_more:+,\"isOnceMore\":true}"
+}
+
+# What the fleet answered a hand-over with: its state, or the code it refused
+# it with. <identity file> <deliveryId> <state or code>. Returns 0 when the
+# entry is handed (or the fleet holds it acknowledged already: the answer to
+# a confirmation was lost, and the session has not seen it), 1 when it is
+# dropped (undeliverable at its fifth attempt, or no longer the session's), 2
+# when the fleet did not take the hand-over: hand it again later.
+aeolus_store_handed() {
+  local identity="$1" id="$2" outcome="$3" dir
+  dir="$(aeolus_store_dir)" || return 2
+  case "$outcome" in
+    handed|acknowledged)
+      rm -f "$dir/$id.unreported"
+      return 0
+      ;;
+    undeliverable)
+      aeolus_store_drop "$id"
+      aeolus_log "$identity" handover "dropped ${id}: undeliverable at its fifth attempt"
+      return 1
+      ;;
+    DELIVERY_NOT_IN_FLIGHT|DELIVERY_HELD_BY_ANOTHER_SHIP|DELIVERY_NOT_ACKNOWLEDGED|DELIVERY_HANDED_ONCE_MORE)
+      aeolus_store_drop "$id"
+      aeolus_log "$identity" handover "dropped ${id}: the fleet refused the hand-over: ${outcome}"
+      return 1
+      ;;
+  esac
+  return 2
+}
+
 # Writes an entry's state, with the time in UTC: <deliveryId> <state>.
 aeolus_store_mark() {
   local dir
@@ -447,14 +577,20 @@ aeolus_store_mark() {
 # store is keyed by the delivery id, so the same delivery received again is one
 # entry, as it was. Prints its id; fails for an answer that holds none.
 aeolus_store_put() {
-  local delivery="$1" dir id
+  local delivery="$1" dir id number
   id="$(aeolus_json_string "$delivery" deliveryId)"
   aeolus_is_delivery_id "$id" || return 1
   dir="$(aeolus_store_dir)" || return 1
   (umask 077 && mkdir -p "$dir") || return 1
   if [ ! -f "$dir/$id.state" ]; then
     printf '%s' "$delivery" > "$dir/$id.json" || return 1
+    aeolus_current_lease_key > "$dir/$id.lease" || return 1
     aeolus_store_mark "$id" received || return 1
+  fi
+  # The fleet's last hand-over number counts on, when the store lost its own.
+  number="$(printf '%s' "$delivery" | sed -n 's/.*"handOverNumber"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
+  if [ -n "$number" ] && [ "$number" -gt "$(cat "$dir/$id.number" 2>/dev/null || echo 0)" ]; then
+    printf '%s\n' "$number" > "$dir/$id.number"
   fi
   printf '%s' "$id"
 }
@@ -470,6 +606,7 @@ aeolus_store_state() {
 # turn: delivery ids are time-ordered, so their order is the order of sending.
 aeolus_store_first() {
   local dir file id state wanted
+  aeolus_store_drop_older_leases
   dir="$(aeolus_store_dir)" || return 1
   for file in "$dir"/*.state; do
     [ -f "$file" ] || continue
@@ -491,7 +628,7 @@ aeolus_store_first() {
 aeolus_store_drop() {
   local dir
   dir="$(aeolus_store_dir)" || return 0
-  rm -f "$dir/$1.json" "$dir/$1.state" "$dir/$1.shown" "$dir/$1.ponged" "$dir/$1.payload"
+  rm -f "$dir/$1.json" "$dir/$1.state" "$dir/$1.lease" "$dir/$1.number" "$dir/$1.unreported" "$dir/$1.shown" "$dir/$1.ponged" "$dir/$1.payload"
 }
 
 # Removes every entry, as on LEASE_ENDED.
@@ -509,16 +646,117 @@ aeolus_store_ponged() {
   [ ! -f "$dir/$1.state" ] || : > "$dir/$1.ponged"
 }
 
-# At the end of a turn: a confirmed message is handled, and so is a ping pong
-# answered; a ping not answered goes back to received, to be handed again.
-aeolus_store_end_turn() {
-  local identity="$1" dir file id
+# The code a fleet call was refused with, as aeolus-fleet.sh says it, but not
+# SERVICE_UNAVAILABLE: busy is no refusal of the call itself. Nothing when the
+# fleet answered without a code, or not at all. <what aeolus-fleet.sh said>
+aeolus_refusal_code() {
+  local code
+  code="$(printf '%s' "$1" | sed -n 's/^aeolus: the fleet refused [A-Za-z]*: \([A-Z_]*\):.*/\1/p')"
+  [ "$code" = SERVICE_UNAVAILABLE ] || printf '%s' "$code"
+}
+
+# Reports how a message ended to the fleet: handled or notHandled. The fleet
+# took it, or refused it as no longer the session's: the entry is dropped. Not
+# taken (busy, or no answer): the entry keeps that state, to be reported again
+# with the next call (3.15). <identity file> <deliveryId> <handled|notHandled>
+aeolus_report_end() {
+  local identity="$1" id="$2" call="$3" output status
+  output="$(AEOLUS_CALL_MAX_SECONDS="${AEOLUS_CONFIRM_SECONDS:-3}" "$(dirname "${BASH_SOURCE[0]}")/aeolus-fleet.sh" "$call" "$id" 2>/dev/null)"
+  status=$?
+  case "$status" in
+    0)
+      aeolus_store_drop "$id"
+      aeolus_log "$identity" handover "${call} ${id}: reported"
+      ;;
+    3) ;;
+    *)
+      if [ -n "$(aeolus_refusal_code "$output")" ]; then
+        aeolus_store_drop "$id"
+        aeolus_log "$identity" handover "dropped ${id}: the fleet refused ${call}: ${output}"
+        return 0
+      fi
+      aeolus_log "$identity" handover "failed: ${call} ${id} not reported: ${output:-no answer}" 'reported again with the next call'
+      ;;
+  esac
+  return 0
+}
+
+# Sends the fleet what it has not taken yet: the turn, and each message
+# handled or not handled. <identity file>
+aeolus_send_owed() {
+  local identity="$1" text dir file id state
+  text="$(aeolus_identity_read "$identity")" || return 0
+  aeolus_reports_here "$text" || return 0
+  aeolus_report_turn "$text"
   dir="$(aeolus_store_dir)" || return 0
   for file in "$dir"/*.state; do
     [ -f "$file" ] || continue
     id="${file##*/}"
     id="${id%.state}"
-    if [ -e "$dir/$id.shown" ]; then
+    state="$(aeolus_store_state "$id")"
+    case "$state" in
+      handled|notHandled) aeolus_report_end "$identity" "$id" "$state" ;;
+    esac
+  done
+}
+
+# A ping in the turn, at its end, on a pushed lease (3.17): handled when the
+# fleet takes its handled, since only a pong acknowledged it; refused as not
+# acknowledged, it was not answered and goes back to received, to be handed
+# again. Not taken: handled when pong answered it here, else received again.
+aeolus_end_ping() {
+  local identity="$1" id="$2" dir output status
+  dir="$(aeolus_store_dir)" || return 0
+  output="$(AEOLUS_CALL_MAX_SECONDS="${AEOLUS_CONFIRM_SECONDS:-3}" "$(dirname "${BASH_SOURCE[0]}")/aeolus-fleet.sh" handled "$id" 2>/dev/null)"
+  status=$?
+  case "$status" in
+    0)
+      aeolus_store_drop "$id"
+      aeolus_log "$identity" handover "handled ${id}: the ping was answered with pong"
+      return 0
+      ;;
+    3) return 0 ;;
+  esac
+  case "$output" in
+    *DELIVERY_NOT_ACKNOWLEDGED*) ;;
+    *)
+      if [ -n "$(aeolus_refusal_code "$output")" ]; then
+        aeolus_store_drop "$id"
+        aeolus_log "$identity" handover "dropped ${id}: the fleet refused handled: ${output}"
+        return 0
+      fi
+      if [ -e "$dir/$id.ponged" ]; then
+        rm -f "$dir/$id.shown"
+        aeolus_store_mark "$id" handled
+        aeolus_log "$identity" handover "failed: handled ${id} not reported: ${output:-no answer}" 'reported again with the next call'
+        return 0
+      fi
+      ;;
+  esac
+  rm -f "$dir/$id.shown"
+  aeolus_store_mark "$id" received
+  aeolus_log "$identity" handover "received ${id} again: the ping was not answered with pong" 'handed again at the next idle'
+}
+
+# At the end of a turn: a confirmed message is handled, and so is a ping pong
+# answered; a ping not answered goes back to received, to be handed again. On
+# a pushed lease each is reported to the fleet.
+aeolus_store_end_turn() {
+  local identity="$1" dir file id is_reporting=0
+  dir="$(aeolus_store_dir)" || return 0
+  ! aeolus_reports_here "$(aeolus_identity_read "$identity")" || is_reporting=1
+  for file in "$dir"/*.state; do
+    [ -f "$file" ] || continue
+    id="${file##*/}"
+    id="${id%.state}"
+    if [ "$(aeolus_store_state "$id")" = onceMore ] && [ -e "$dir/$id.shown" ]; then
+      rm -f "$dir/$id.shown"
+      aeolus_store_mark "$id" handled
+      aeolus_log "$identity" handover "handled ${id}: the turn it was handed once more to ended"
+      aeolus_report_end "$identity" "$id" handled
+    elif [ -e "$dir/$id.shown" ] && [ "$is_reporting" = 1 ]; then
+      aeolus_end_ping "$identity" "$id"
+    elif [ -e "$dir/$id.shown" ]; then
       if [ -e "$dir/$id.ponged" ]; then
         aeolus_store_drop "$id"
         aeolus_log "$identity" handover "handled ${id}: the ping was answered with pong"
@@ -527,11 +765,93 @@ aeolus_store_end_turn() {
         aeolus_store_mark "$id" received
         aeolus_log "$identity" handover "received ${id} again: the ping was not answered with pong" 'handed again at the next idle'
       fi
+    elif [ "$(aeolus_store_state "$id")" = confirmed ] && [ "$is_reporting" = 1 ]; then
+      aeolus_store_mark "$id" handled
+      aeolus_log "$identity" handover "handled ${id}: the turn that took it ended"
+      aeolus_report_end "$identity" "$id" handled
     elif [ "$(aeolus_store_state "$id")" = confirmed ]; then
       aeolus_store_drop "$id"
       aeolus_log "$identity" handover "handled ${id}: the turn that took it ended"
     fi
   done
+}
+
+# A turn that took messages died, without Stop (#756, D3): a confirmed message
+# is to be handed once more, at the next prompt; one handed once more already,
+# whose turn died too, is not handled. Pings are left as they are: the next
+# turn end takes them.
+aeolus_store_died_turn() {
+  local identity="$1" dir file id state
+  dir="$(aeolus_store_dir)" || return 0
+  for file in "$dir"/*.state; do
+    [ -f "$file" ] || continue
+    id="${file##*/}"
+    id="${id%.state}"
+    state="$(aeolus_store_state "$id")"
+    if [ "$state" = confirmed ]; then
+      aeolus_store_mark "$id" onceMore
+      aeolus_log "$identity" handover "${id} to hand once more: the turn that took it died"
+    elif [ "$state" = onceMore ] && [ -e "$dir/$id.shown" ]; then
+      rm -f "$dir/$id.shown"
+      aeolus_store_mark "$id" notHandled
+      aeolus_log "$identity" handover "not handled ${id}: the turn it was handed once more to died too"
+    fi
+  done
+}
+
+# A hook hands an entry over and reports it to the fleet (#756): as
+# aeolus_store_handed returns, and 1 on LEASE_ENDED, when the store went with
+# the ship. <identity file> <deliveryId> [once-more]
+aeolus_report_handed() {
+  local identity="$1" id="$2" output status outcome
+  output="$(AEOLUS_CALL_MAX_SECONDS="${AEOLUS_CONFIRM_SECONDS:-3}" "$(dirname "${BASH_SOURCE[0]}")/aeolus-fleet.sh" handed "$(aeolus_store_handing "$id" "${3:-}")" 2>/dev/null)"
+  status=$?
+  case "$status" in
+    0) outcome="$(aeolus_json_string "$output" state)" ;;
+    3) return 1 ;;
+    *) outcome="$(aeolus_refusal_code "$output")" ;;
+  esac
+  aeolus_store_handed "$identity" "$id" "$outcome"
+}
+
+# A person started the session again, after it died or was closed (#756, D6):
+# what the store holds is marked for the first prompt. A received or handed
+# message is reported handed with the next number, for the prompt to confirm;
+# a confirmed one is kept to hand once more; one handed once more already is
+# not handled, since its session died too. <identity file>
+aeolus_store_session_started() {
+  local identity="$1" dir file id state
+  aeolus_store_drop_older_leases
+  aeolus_store_died_turn "$identity"
+  dir="$(aeolus_store_dir)" || return 0
+  for file in "$dir"/*.state; do
+    [ -f "$file" ] || continue
+    id="${file##*/}"
+    id="${id%.state}"
+    [ ! -e "$dir/$id.shown" ] || continue
+    state="$(aeolus_store_state "$id")"
+    case "$state" in
+      received|handed)
+        aeolus_report_handed "$identity" "$id" && aeolus_log "$identity" handover "handed ${id} for the first prompt: the session started again"
+        ;;
+    esac
+  done
+  aeolus_send_owed "$identity"
+}
+
+# Puts the oldest message to hand once more into the turn (#756, D3), once the
+# fleet took the hand-over with isOnceMore and the next number: it stays
+# acknowledged, so no ack. A refusal drops it; not taken, it waits for the
+# next prompt. <identity file> <shipName> <plugin root> <prefix>; prints the
+# text, ending with an x; fails when nothing goes in.
+aeolus_put_once_more() {
+  local identity="$1" ship="$2" root="$3" prefix="$4" id dir
+  id="$(aeolus_store_first onceMore)" || return 1
+  dir="$(aeolus_store_dir)" || return 1
+  aeolus_report_handed "$identity" "$id" once-more || return 1
+  : > "$dir/$id.shown"
+  aeolus_log "$identity" handover "handed ${id} once more: put into the turn"
+  aeolus_turn_text "$id" "$ship" "$root" "${prefix}aeolus: handed before: the turn that took this message ended before it did, so it comes in once more."$'\n\n'
 }
 
 # The most a hook puts into a turn: Claude Code's cap on hook context (#756, D2).

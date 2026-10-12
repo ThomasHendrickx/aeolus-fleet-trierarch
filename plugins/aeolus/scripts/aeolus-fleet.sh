@@ -10,6 +10,8 @@
 #       the one aeolus_register_harness works out
 #   aeolus-fleet.sh receive|send|report|inbox [<json input>|-]   - reads the input from stdin
 #   aeolus-fleet.sh ack|pong <deliveryId>
+#   aeolus-fleet.sh pushReceive|handed|turn <json input>   - the watcher's and the hooks' calls (#756), never the model's
+#   aeolus-fleet.sh handled|notHandled <deliveryId>        - the hooks' calls (#756), never the model's
 #   aeolus-fleet.sh whoami|reportLog|deregister
 #   aeolus-fleet.sh protocol    the ship protocol, as the fleet states it
 #
@@ -39,7 +41,7 @@ MAX_SECONDS="${AEOLUS_CALL_MAX_SECONDS:-60}"
 BUSY_WAITS="${AEOLUS_BUSY_WAITS:-1 2 4 8}"
 
 usage() {
-  echo "usage: aeolus-fleet.sh register|receive|ack|pong|send|report|inbox|whoami|reportLog|deregister|protocol ..." >&2
+  echo "usage: aeolus-fleet.sh register|receive|ack|pong|send|report|inbox|whoami|reportLog|deregister|protocol|pushReceive|handed|handled|notHandled|turn ..." >&2
   exit 2
 }
 
@@ -177,13 +179,13 @@ if [ "$command" = protocol ]; then
 fi
 
 case "$command" in
-  receive|send|report|inbox)
+  receive|send|report|inbox|pushReceive|handed|turn)
     input="${2:-}"
     [ -n "$input" ] || input='{}'
     [ "$input" = - ] && input="$(cat)"
     method=POST
     ;;
-  ack|pong)
+  ack|pong|handled|notHandled)
     [ "$#" -eq 2 ] || usage
     input="{\"deliveryId\":\"$(aeolus_json_escape "$2")\"}"
     method=POST

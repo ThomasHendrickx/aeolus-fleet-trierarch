@@ -105,6 +105,15 @@
             "commandWindows": "bash \"%PLUGIN_ROOT%\\scripts\\aeolus-launch.sh\""
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/aeolus-turn-died.sh\"",
+            "commandWindows": "bash \"%PLUGIN_ROOT%\\scripts\\aeolus-turn-died.sh\""
+          }
+        ]
       }
     ]
   }

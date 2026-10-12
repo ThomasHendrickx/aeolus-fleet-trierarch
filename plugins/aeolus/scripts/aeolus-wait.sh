@@ -9,12 +9,14 @@
 # count rises again.
 #
 # In Claude Code the wake hands one message over (#756), whenever deliveries
-# wait while the session is idle, rise or not: the watcher receives
-# one delivery, keeps it in the folder's store as handed, and exits saying so,
-# without its content. The hooks acknowledge it, then put it into the turn. A
-# message the store still holds unconfirmed while the session is idle is
-# handed over again at once, without a receive. The Codex wake bridge runs it
-# with AEOLUS_WAKE_ONLY=1: it wakes the task, which receives for itself.
+# wait while the session is idle, rise or not: the watcher takes one delivery
+# with a push receive, which makes the lease pushed, reports it handed with its
+# hand-over number, keeps it in the folder's store as handed, reports the turn
+# busy and exits saying so, without its content. The hooks acknowledge it, then
+# put it into the turn. A message the store still holds unconfirmed while the
+# session is idle is handed over again at once, without a receive. The Codex
+# wake bridge runs it with AEOLUS_WAKE_ONLY=1: it wakes the task, which
+# receives for itself.
 #
 # Exit codes:
 #   0  a message is handed over (Claude Code), or deliveries wait: receive them
@@ -64,11 +66,31 @@ crew_token="$(aeolus_identity_field "$identity_text" crewToken)"
 is_handing_over=1
 [ "${AEOLUS_WAKE_ONLY:-}" != 1 ] || is_handing_over=0
 
-# Hands a store entry over: it is the session's to confirm, its turn starts.
-# <deliveryId> <what the log says>.
+# Hands a store entry over: reports it handed with its number, and once the
+# fleet took that, it is the session's to confirm, its turn starts. An entry
+# the fleet answers undeliverable or no longer in flight is dropped, and the
+# watcher watches on; a hand-over the fleet did not take is made again with
+# the same number. <deliveryId> <what the log says>.
 hand_over() {
-  aeolus_store_mark "$1" handed
+  local outcome
+  call /api/v1/ship/handed "$(aeolus_store_handing "$1")" $((WAIT_SECONDS + 15))
+  if [ "$status" = 200 ]; then
+    answered
+    outcome="$(aeolus_json_string "$body" state)"
+  else
+    outcome="$(aeolus_json_string "$body" code)"
+  fi
+  aeolus_store_handed "$identity" "$1" "$outcome"
+  case $? in
+    0) ;;
+    1) return 0 ;;
+    *)
+      on_refusal
+      return 0
+      ;;
+  esac
   aeolus_mark_turn busy
+  aeolus_report_turn "$(aeolus_identity_read "$identity")"
   aeolus_log "$identity" wake "$2"
   echo "aeolus: a message for ${ship_name} is handed to this session: it reaches you at your next tool call, or when you end your turn. Do not receive or ack it."
   exit 0
@@ -150,6 +172,8 @@ answered() {
 }
 
 while :; do
+  # What the fleet did not take yet goes first, also on a watcher's last pass.
+  aeolus_send_owed "$identity"
   left=$((MAX_SECONDS - SECONDS))
   if [ "$left" -le 0 ]; then
     aeolus_log "$identity" watch 'stopped after almost 2 hours; the session starts it again'
@@ -158,6 +182,7 @@ while :; do
   fi
   if [ "$is_handing_over" = 1 ] && aeolus_is_idle && id="$(aeolus_store_first received handed)"; then
     hand_over "$id" "handed ${id} over again: it was not confirmed"
+    continue
   fi
   wait_now="$WAIT_SECONDS"
   [ "$wait_now" -le "$left" ] || wait_now="$left"
@@ -189,14 +214,18 @@ while :; do
       echo "aeolus: ${waiting} deliveries wait for ${ship_name}: receive them"
       exit 0
     fi
-    # Deliveries wait, so the receive answers at once.
-    call /api/v1/ship/receive '{"max":1}' $((WAIT_SECONDS + 15))
+    # Deliveries wait, so the push receive answers at once.
+    call /api/v1/ship/pushReceive '{"max":1}' $((WAIT_SECONDS + 15))
     if [ "$status" != 200 ]; then
       on_refusal
       continue
     fi
     answered
-    id="$(aeolus_store_put "$(printf '%s' "$body" | tr -d '\n')")" && hand_over "$id" "woken, ${waiting} deliveries wait: handed ${id} over"
+    aeolus_lease_key "$crew_token" > "$(aeolus_pushed_file)"
+    if id="$(aeolus_store_put "$(printf '%s' "$body" | tr -d '\n')")"; then
+      hand_over "$id" "woken, ${waiting} deliveries wait: handed ${id} over"
+      continue
+    fi
     # Nothing handed, as when another ship of its type took the delivery first.
     aeolus_log "$identity" wake "woken, ${waiting} deliveries wait: the receive handed nothing over"
     continue
