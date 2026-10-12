@@ -1,7 +1,12 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
+import { trierarchPaths } from '../adapters/paths.js';
 import type { Delivery } from '../core/ports.js';
-import { loop } from './run.js';
+import { loop, runTrierarch } from './run.js';
 
 /** A receive that waits, as the fleet's long poll does, until the stop aborts it. */
 function longPoll(signal: AbortSignal): Promise<Delivery[]> {
@@ -140,5 +145,22 @@ describe('the run loop', () => {
 
     expect(handled).toEqual(['dlv_1']);
     expect(passes).toBe(1);
+  });
+});
+
+describe('the run, with the container runtime (decision 0039)', () => {
+  it('refuses to start on a configuration config check refuses, as one with no model token, so no session runs without what holds it to its ship', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'trierarch-run-'));
+    const paths = trierarchPaths({ homeDirectory: home });
+    mkdirSync(paths.home, { recursive: true });
+    writeFileSync(
+      paths.config,
+      JSON.stringify({ runtime: { kind: 'container', binary: 'podman', memory: '4g', cpus: 2 }, caps: { ships: 1, running: 1 }, repositories: {}, folders: {}, harnesses: { 'claude-code': { flags: [], options: {} } } }),
+    );
+
+    const started = runTrierarch({ paths, homeDirectory: home, env: { HOME: home }, managedSettings: join(home, 'managed'), signal: new AbortController().signal, logger: { ...quiet, info: () => undefined } });
+
+    await expect(started).rejects.toThrow(`the model token file ${paths.modelToken} is missing or empty`);
+    rmSync(home, { recursive: true, force: true });
   });
 });
