@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -88,6 +88,7 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
   });
 
   it("starts a session from the image of the trierarch's own version, with the configured caps and the machine's model token", async () => {
+    mkdirSync(paths.home, { recursive: true });
     writeFileSync(paths.modelToken, `${MODEL_TOKEN}\n`, { mode: 0o600 });
 
     await adaptersOf({ ...CONTAINER, binary }).sessions.start({ shipId, folder: repository, command: ['claude'] });

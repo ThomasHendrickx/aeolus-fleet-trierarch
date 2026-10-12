@@ -36,6 +36,11 @@ export interface ConfigCheckReport {
   readonly text: string;
 }
 
+/** The configuration's session runtime refused, with every reason: config check and the run both say it so. */
+export function runtimeRefused(config: string, refusals: readonly string[]): TrierarchFileError {
+  return new TrierarchFileError([`The configuration at ${config} cannot run its sessions in containers:`, ...refusals.map((refusal) => `  ${refusal}`)].join('\n'));
+}
+
 /** Where the sessions run, in a line. */
 function runtimeLine(runtime: ConfigCheckReport['runtime'], modelTokenFile: string): string {
   return runtime.kind === 'host'
@@ -61,7 +66,7 @@ export async function configCheck(paths: TrierarchPaths, machine: CheckedMachine
   }
   const refusals = await createCheckSessionRuntime({ host, modelTokenFile: paths.modelToken })(configured);
   if (refusals.length > 0) {
-    throw new TrierarchFileError([`The configuration at ${paths.config} cannot run its sessions in containers:`, ...refusals.map((refusal) => `  ${refusal}`)].join('\n'));
+    throw runtimeRefused(paths.config, refusals);
   }
   const runtime = configured.runtime ?? { kind: 'host' };
   // The detected options too (#365), as the running trierarch has them.

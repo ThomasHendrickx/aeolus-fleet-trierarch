@@ -1,17 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as wait } from 'node:timers/promises';
 
+import { createContainerHost } from '../adapters/container-host.js';
 import { loadConfiguration, readCrewFile, writeRunningFile } from '../adapters/files.js';
 import { createDetectedFile } from '../adapters/detected-file.js';
 import { createDetectors } from '../adapters/detectors.js';
-import { createGitWorkspace } from '../adapters/git-workspace.js';
 import { adapterFlagsOf, createHarnesses, riskyFlagsOf } from '../adapters/harnesses.js';
 import { createJsonState } from '../adapters/json-state.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
-import { createTmux, sessionsLaunch } from '../adapters/tmux.js';
+import { runtimeAdaptersOf } from '../adapters/runtime-adapters.js';
+import { sessionsLaunch } from '../adapters/tmux.js';
 import { createTrust } from '../adapters/trust.js';
 import { runningVersion } from '../adapters/version.js';
+import { createCheckSessionRuntime } from '../core/check-session-runtime.js';
 import { createDetectHarnesses } from '../core/detect-harnesses.js';
 import { modelOptionsIgnored, withDetectedOptions } from '../core/detected-options.js';
 import { createRefuseModel } from '../core/refuse-model.js';
@@ -21,6 +23,7 @@ import { machineOf } from '../core/machine.js';
 import type { Delivery, Logger, TrierarchSetup } from '../core/ports.js';
 import { createReportSelf } from '../core/report-self.js';
 import { createRunPass } from '../core/run-pass.js';
+import { runtimeRefused } from './config-check.js';
 
 /** How often the loop runs a pass: restarts, wakes and releases wait at most this long. */
 export const PASS_INTERVAL_MS = 5000;
@@ -34,6 +37,11 @@ export const PASS_INTERVAL_MS = 5000;
 export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory: string; env: Readonly<Record<string, string | undefined>>; managedSettings: string; signal: AbortSignal; logger: Logger & { info(message: string): void } }): Promise<void> {
   const { paths, homeDirectory, env, managedSettings, signal, logger } = input;
   const configured = await loadConfiguration(paths.config);
+  // A session in a container is held to its ship only on a runtime config check takes (decision 0039): none starts otherwise.
+  const refusals = await createCheckSessionRuntime({ host: createContainerHost({ modelTokenFile: paths.modelToken }), modelTokenFile: paths.modelToken })(configured);
+  if (refusals.length > 0) {
+    throw runtimeRefused(paths.config, refusals);
+  }
   const crew = await readCrewFile(paths.crewToken);
   const fleet = createRestFleet(crew);
   // Detected again only for a harness whose version changed since (#365); the operator's own options win.
@@ -49,9 +57,9 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const configuration = withDetectedOptions(configured, detected);
   // What the machine offers changes while it runs, as sessions refuse models (#382): each pass and report reads it afresh.
   let offered = { configuration, detected };
-  const tmux = createTmux({ launch: sessionsLaunch({ platform: process.platform, env }) });
-  const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, managedSettings, detected: () => offered.detected, sessions: tmux });
-  const workspace = createGitWorkspace({ configuration, root: configuration.worktreeRoot ?? paths.worktrees });
+  const version = runningVersion();
+  const { sessions, workspace, shipHomes } = runtimeAdaptersOf({ configuration, paths, version, launch: sessionsLaunch({ platform: process.platform, env }), managedSettings });
+  const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, managedSettings, detected: () => offered.detected, sessions, ...(shipHomes !== undefined && { shipHomes }) });
   const state = createJsonState(paths.state);
   const trust = createTrust({ configuration, homeDirectory, env, managedSettings });
   const clock = { now: () => new Date() };
@@ -59,7 +67,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     get configuration() {
       return offered.configuration;
     },
-    version: runningVersion(),
+    version,
     adapterFlags: adapterFlagsOf(configuration),
     riskyFlags: riskyFlagsOf(configuration),
     machine: machineOf({ platform: process.platform, arch: process.arch }),
@@ -77,8 +85,8 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     logger,
   });
   const handle = createHandleDelivery({ fleet, logger });
-  const runPass = createRunPass({ fleet, harnesses, processes: tmux, workspace, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID });
-  const reportSelf = createReportSelf({ fleet, processes: tmux, trust, state, setup });
+  const runPass = createRunPass({ fleet, harnesses, processes: sessions, workspace, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID });
+  const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup });
   // Each pass ends with the trierarch's own report: the first at start, then only when it changed.
   const pass = async (): Promise<void> => {
     await runPass();

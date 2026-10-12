@@ -158,7 +158,7 @@ describe('the run, with the container runtime (decision 0039)', () => {
       JSON.stringify({ runtime: { kind: 'container', binary: 'podman', memory: '4g', cpus: 2 }, caps: { ships: 1, running: 1 }, repositories: {}, folders: {}, harnesses: { 'claude-code': { flags: [], options: {} } } }),
     );
 
-    const started = runTrierarch({ paths, homeDirectory: home, env: { HOME: home }, managedSettings: join(home, 'managed'), signal: new AbortController().signal, logger: { ...quiet, info: () => undefined } });
+    const started = runTrierarch({ paths, homeDirectory: home, env: { HOME: home }, managedSettings: join(home, 'managed'), signal: new AbortController().signal, logger: { ...quiet, info: () => undefined, action: () => undefined } });
 
     await expect(started).rejects.toThrow(`the model token file ${paths.modelToken} is missing or empty`);
     rmSync(home, { recursive: true, force: true });
