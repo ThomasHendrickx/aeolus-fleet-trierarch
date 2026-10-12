@@ -37,7 +37,7 @@ export function runtimeAdaptersOf(at: { configuration: TrierarchConfiguration; p
   const clones = createCloneWorkspace({ configuration, root });
   return {
     sessions: createContainerRuntime({ binary: runtime.binary, image: `${SESSION_IMAGE}:${version}`, tokenFile: paths.modelToken, homes: paths.homes, memory: runtime.memory, cpus: runtime.cpus, launch }),
-    // The container mounts the folder at the path it is given, where the plugin inside keys it by \`pwd -P\` as the host's does: one path for both, the real one.
+    // The container mounts the folder at the path it is given, where the plugin inside keys it by `pwd -P` as the host's does: one path for both, the real one.
     workspace: { ...clones, prepare: async (at) => ({ folder: await realpath((await clones.prepare(at)).folder) }) },
     shipHomes: { homes: paths.homes, managedSettings },
   };
