@@ -4,9 +4,10 @@
 # did in its launch window (#490), so the trierarch reads it instead of the
 # screen: started, with the transcript its harness keeps; active at the first
 # tool call; refused when a turn failed because the model was not found (Claude
-# Code's StopFailure). Each with when. A marker of another launch starts over,
-# so nothing from an earlier session counts. Silent without a launch id, and in
-# a folder that crews no ship. Never fails the session.
+# Code's StopFailure), with the model id its message names. Each with when. A
+# marker of another launch starts over, so nothing from an earlier session
+# counts. Silent without a launch id, and in a folder that crews no ship. Never
+# fails the session.
 set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
@@ -33,7 +34,10 @@ case "$(aeolus_json_string "$payload" hook_event_name)" in
   SessionStart) mark started "$(aeolus_json_string "$payload" transcript_path)" ;;
   PreToolUse) mark active ;;
   StopFailure)
-    [ "$(aeolus_json_string "$payload" error)" = model_not_found ] && mark refused
+    # Its input names no model, so the id is the one its message names, when it names one.
+    if [ "$(aeolus_json_string "$payload" error)" = model_not_found ]; then
+      mark refused "$(aeolus_json_string "$payload" last_assistant_message | sed -E -n 's/.*the selected model \(([^()[:space:]]+)\).*/\1/p')"
+    fi
     ;;
 esac
 exit 0
