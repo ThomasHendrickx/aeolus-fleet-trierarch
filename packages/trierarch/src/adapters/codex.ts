@@ -1,11 +1,13 @@
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { AdapterFlag, HarnessPort } from '../core/ports.js';
-import { CODEX_SCREENS_CHECKED_ON, codexLaunchSeen } from './codex-screen.js';
+import { LAUNCH_VARIABLE } from './claude-code.js';
+import { CODEX_SCREENS_CHECKED_ON, codexModelRefused, codexScreenStoppedAt } from './codex-screen.js';
 import type { CodexSetup } from './codex-setup.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
 import { effectiveFlags } from '../core/effective-flags.js';
 import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
+import { createLaunchMarks } from './launch-marker.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
 import type { Tmux } from './tmux.js';
 
@@ -73,11 +75,12 @@ export function createCodexHarness(options: {
   command?: string;
 }): HarnessPort {
   const { configuration, plugin, sessions } = options;
+  const marks = createLaunchMarks(plugin);
 
   return {
     ...createPluginIdentity(plugin),
     screensCheckedOn: CODEX_SCREENS_CHECKED_ON,
-    launch: async ({ shipId, folder, harness, options: picked, isFirstStart, firstPrompt }) => {
+    launch: async ({ shipId, folder, harness, options: picked, isFirstStart, launchId, firstPrompt }) => {
       const settings = configuration.harnesses[harness];
       if (settings === undefined) {
         throw new Error(`The configuration has no harness ${harness}`);
@@ -85,12 +88,27 @@ export function createCodexHarness(options: {
       const prompt = isFirstStart && firstPrompt !== undefined ? firstPromptOf(firstPrompt) : wakePromptOf(WAKE_PROMPT);
       const command = codexCommandLine({ flags: effectiveFlags(settings, picked), prompt, isFirstStart, ...(options.command !== undefined && { program: options.command }) });
       await options.setup.trustAeolusHooks(folder);
-      await sessions.start({ shipId, folder, command: wordsOf(command) });
+      await marks.clear(folder);
+      await sessions.start({ shipId, folder, command: wordsOf(command), env: { [LAUNCH_VARIABLE]: launchId } });
     },
     wake: async ({ shipId }) => {
       // The space after the skill closes Codex's skill picker, which would otherwise take the Enter.
       await sessions.type({ shipId, text: wakePromptOf(WAKE_PROMPT), settleMs: CODEX_TYPING_SETTLE_MS });
     },
-    launchSeen: async ({ shipId, model }) => codexLaunchSeen({ screen: await sessions.screen(shipId), ...(model !== undefined && { model }) }),
+    marksLaunches: () => marks.isMarking(),
+    // The marker says what the session did (#490); Codex has no hook for a failed turn, so a refusal is read on the screen, which also names one that stopped it before its hooks ran.
+    launchSeen: async ({ shipId, folder, launchId, model }) => {
+      const screen = await sessions.screen(shipId);
+      const refused = codexModelRefused({ screen, ...(model !== undefined && { model }) });
+      if (refused !== undefined) {
+        return { kind: 'refused', model: refused };
+      }
+      const marker = await marks.read({ folder, launchId });
+      if (marker?.isActive === true) {
+        return { kind: 'active' };
+      }
+      const stoppedAt = marker?.isStarted === true ? undefined : codexScreenStoppedAt(screen);
+      return { kind: 'none', ...(stoppedAt !== undefined && { screen: stoppedAt }) };
+    },
   };
 }

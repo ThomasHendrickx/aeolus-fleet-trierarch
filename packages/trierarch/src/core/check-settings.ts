@@ -46,6 +46,15 @@ export function unacceptedRefusal(at: { harness: string; configuration: Trierarc
   return flag === undefined ? undefined : { field: 'harness', reason: `${harness} still asks to accept ${flag}: accept it with aeolus-trierarch init` };
 }
 
+/**
+ * Why a harness may not start a session: its aeolus plugin is older than the
+ * launch marker (#490), so the launch window could see nothing of the
+ * session. Upgrade updates the plugin, so the reason says to run it.
+ */
+export function launchMarkerRefusal(at: { harness: string; marksLaunches: Readonly<Record<string, boolean>> }): Refusal | undefined {
+  return at.marksLaunches[at.harness] === false ? { field: 'harness', reason: `${at.harness}'s aeolus plugin marks no launches: run aeolus-trierarch upgrade` } : undefined;
+}
+
 /** The field an issue names, as `options.model`, when it names one. */
 function fieldOf(path: readonly PropertyKey[]): { field?: string } {
   return path.length === 0 ? {} : { field: path.map(String).join('.') };
@@ -59,7 +68,10 @@ function fieldOf(path: readonly PropertyKey[]): { field?: string } {
  * and that no flag it launches with waits on a question (#403). The trierarch plugin checked them already; this machine's
  * configuration may have changed since.
  */
-export function checkSettings(raw: unknown, context: { shipId: ShipId; configuration: TrierarchConfiguration; state: TrierarchState; trusted: TrustedPlaces }): Result<CheckedSettings, Refusal> {
+export function checkSettings(
+  raw: unknown,
+  context: { shipId: ShipId; configuration: TrierarchConfiguration; state: TrierarchState; trusted: TrustedPlaces; marksLaunches: Readonly<Record<string, boolean>> },
+): Result<CheckedSettings, Refusal> {
   const parsed = crewSettingsSchema.safeParse(raw);
   if (!parsed.success) {
     const [issue] = parsed.error.issues;
@@ -101,7 +113,7 @@ export function checkSettings(raw: unknown, context: { shipId: ShipId; configura
     }
     options[name] = value;
   }
-  const unaccepted = unacceptedRefusal({ harness: harnessName, configuration, options, trusted });
+  const unaccepted = unacceptedRefusal({ harness: harnessName, configuration, options, trusted }) ?? launchMarkerRefusal({ harness: harnessName, marksLaunches: context.marksLaunches });
   if (unaccepted !== undefined) {
     return err(unaccepted);
   }

@@ -14,6 +14,7 @@ const SKIP = '--dangerously-skip-permissions';
 const SKIPPING = { ...CONFIGURATION, harnesses: { 'claude-code': { flags: [SKIP], options: {} } } };
 const SKIPPING_AS_OPTION = { ...CONFIGURATION, harnesses: { 'claude-code': { flags: [], options: { permissions: { values: { ask: [], skip: [SKIP] }, default: 'ask' } } } } };
 const UNACCEPTED = `harness: claude-code still asks to accept ${SKIP}: accept it with aeolus-trierarch init`;
+const UNMARKED = "harness: claude-code's aeolus plugin marks no launches: run aeolus-trierarch upgrade";
 
 /** A ship whose crew request is assigned to the trierarch, crewed by one pass and running from the next, once its session shows activity: its id. */
 async function aCrewedShip(trierarch: Trierarch, settings: Record<string, unknown> = {}) {
@@ -606,13 +607,14 @@ describe('the launch window: a crew is final once its session shows activity (#3
     expect(trierarch.state.current().entries[shipId]?.state).toBe('running');
   });
 
-  it('reads the screen of its session for the model it launched with', async () => {
+  it('starts its session with a fresh launch id and reads that launch of its session, for the model it launched with (#490)', async () => {
     const trierarch = aTrierarch();
 
     const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' }, settings: { options: { model: 'sonnet' } } });
     await trierarch.pass();
 
-    expect(trierarch.harness.asked).toEqual([{ shipId, model: 'sonnet' }]);
+    expect(trierarch.harness.launchIds).toEqual(['launch-1']);
+    expect(trierarch.harness.asked).toEqual([{ shipId, folder: SCOUT_FOLDER, launchId: 'launch-1', model: 'sonnet' }]);
   });
 
   it('gives the request back when its session refused the model it launched with, naming the harness, its version and the model: the session stops, its identity and clean worktree go', async () => {
@@ -666,8 +668,18 @@ describe('the launch window: a crew is final once its session shows activity (#3
 
     await trierarch.pass();
 
-    expect(trierarch.harness.asked).toEqual([{ shipId }]);
+    expect(trierarch.harness.asked).toEqual([{ shipId, folder: SCOUT_FOLDER, launchId: 'launch-1' }]);
     expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 1, reason: 'mac-studio: claude-code 2.1.295 refused claude-opus-5-5' }]);
+  });
+
+  it('says its default model was refused when its session refused a model it does not name (#490)', async () => {
+    const trierarch = aTrierarch({ ...CONFIGURATION, harnesses: { 'claude-code': { flags: [], options: {} } } }, DETECTED);
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'refused' } });
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 1, reason: 'mac-studio: claude-code 2.1.295 refused its default model' }]);
+    expect(trierarch.refusals).toEqual([]);
   });
 
   it('names the harness without a version when detection found none', async () => {
@@ -786,13 +798,14 @@ describe('the restart window: a restarted final crew is checked, never held back
     expect(trierarch.harness.wakes).toEqual([shipId]);
   });
 
-  it('reads the screen of a restarted session for the model it launched with', async () => {
+  it('starts a restarted session with a fresh launch id and reads that launch, for the model it launched with (#490)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aRestartedShip(trierarch, { seen: { kind: 'none' }, settings: { options: { model: 'sonnet' } } });
 
     await trierarch.pass();
 
-    expect(trierarch.harness.asked.slice(1)).toEqual([{ shipId, model: 'sonnet' }]);
+    expect(trierarch.harness.launchIds).toEqual(['launch-1', 'launch-2']);
+    expect(trierarch.harness.asked.slice(1)).toEqual([{ shipId, folder: SCOUT_FOLDER, launchId: 'launch-2', model: 'sonnet' }]);
   });
 
   it('counts no activity within a minute of a restart as a failed start: the session stops and restarts after its wait, nothing given back', async () => {
@@ -1394,6 +1407,32 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
 
     expect(trierarch.harness.launches).toHaveLength(1);
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`scout (${shipId}): this trierarch cannot crew settings version 1: ${UNACCEPTED}`]);
+  });
+
+  it('never crews settings for a harness whose aeolus plugin marks no launches, and gives the request back saying to upgrade (#490)', async () => {
+    const trierarch = aTrierarch();
+    trierarch.harness.isMarkingLaunches = false;
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, crewSettings());
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.launches).toEqual([]);
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 1, reason: `mac-studio: ${UNMARKED}` }]);
+  });
+
+  it('never starts a session again for a harness whose aeolus plugin marks no launches, and tells argo once (#490)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.isMarkingLaunches = false;
+    trierarch.processes.exit(shipId);
+
+    await trierarch.pass();
+    trierarch.clock.advance(5 * SECOND_MS);
+    await trierarch.pass();
+
+    expect(trierarch.harness.launches).toHaveLength(1);
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`scout (${shipId}): this trierarch cannot crew settings version 1: ${UNMARKED}`]);
   });
 
   it('wakes an idle session once when deliveries come, and not again until it has received', async () => {

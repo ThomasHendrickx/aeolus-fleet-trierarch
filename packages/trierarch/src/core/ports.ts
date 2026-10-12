@@ -139,6 +139,8 @@ export interface HarnessPort {
     harness: string;
     options: Readonly<Record<string, string>>;
     isFirstStart: boolean;
+    /** Fresh for each start (#490): the session's hooks mark this launch, and nothing of another counts. */
+    launchId: string;
     firstPrompt?: string;
   }): Promise<void>;
   turnOf(folder: string): Promise<Turn>;
@@ -149,17 +151,19 @@ export interface HarnessPort {
    * when its adapter names none.
    */
   readonly screensCheckedOn?: string;
-  /** What the session's screen shows in its launch window (#382), for the model it launched with; any model refused when it launched with none. */
-  launchSeen(session: { shipId: ShipId; model?: string }): Promise<LaunchSeen>;
+  /** What the session did in its launch window (#382), as its hooks marked the launch it was started for (#490), for the model it launched with; any model refused when it launched with none. */
+  launchSeen(session: { shipId: ShipId; folder: string; launchId: string; model?: string }): Promise<LaunchSeen>;
+  /** Whether the harness's aeolus plugin marks launches (#490); one older than the launch marker does not, and its sessions are not crewed. */
+  marksLaunches(): Promise<boolean>;
 }
 
 /**
- * What a session's screen shows in its launch window (#382): activity once
- * its first prompt made a tool call, the model refused, or neither yet, with
- * the harness's own screen it stopped at when it knows that screen (#403),
- * such as `bypass permissions warning`.
+ * What a session did in its launch window (#382): activity once its first
+ * prompt made a tool call, the model refused (by its id when that is known),
+ * or neither yet, with the harness's own screen it stopped at when it knows
+ * that screen (#403), such as `bypass permissions warning`.
  */
-export type LaunchSeen = { readonly kind: 'active' } | { readonly kind: 'refused'; readonly model: string } | { readonly kind: 'none'; readonly screen?: string };
+export type LaunchSeen = { readonly kind: 'active' } | { readonly kind: 'refused'; readonly model?: string } | { readonly kind: 'none'; readonly screen?: string };
 
 /** A session the process supervisor runs, by ship id: running, or exited and kept so the exit is seen. */
 export interface ObservedSession {

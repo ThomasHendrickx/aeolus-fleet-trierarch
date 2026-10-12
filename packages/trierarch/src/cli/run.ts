@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { setTimeout as wait } from 'node:timers/promises';
 
 import { loadConfiguration, readCrewFile, writeRunningFile } from '../adapters/files.js';
@@ -76,7 +77,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     logger,
   });
   const handle = createHandleDelivery({ fleet, logger });
-  const runPass = createRunPass({ fleet, harnesses, processes: tmux, workspace, trust, state, setup, clock, logger, refuseModel });
+  const runPass = createRunPass({ fleet, harnesses, processes: tmux, workspace, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID });
   const reportSelf = createReportSelf({ fleet, processes: tmux, trust, state, setup });
   // Each pass ends with the trierarch's own report: the first at start, then only when it changed.
   const pass = async (): Promise<void> => {

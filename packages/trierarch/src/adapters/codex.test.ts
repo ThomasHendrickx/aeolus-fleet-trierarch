@@ -30,7 +30,7 @@ let data: string;
 /** Where the identities of Codex sessions live, in a home of the test's own (#658). */
 let crews: string;
 let folder: string;
-let started: { shipId: ShipId; folder: string; command: readonly string[] }[];
+let started: { shipId: ShipId; folder: string; command: readonly string[]; env?: Readonly<Record<string, string>> }[];
 /** What each ship's session shows, by ship id. */
 let screens: Map<ShipId, string>;
 let typed: { shipId: ShipId; text: string; settleMs?: number }[];
@@ -85,8 +85,10 @@ function harness() {
 const shipId = newId('ship');
 const identity = { fleetUrl: 'https://fleet.example.com', shipId, shipName: 'scout', crewToken: 'aeolus_ct_v1_scout' };
 
+/** The launch id the trierarch started the session with. */
+const LAUNCH_ID = 'launch-1';
 /** The launch of the ship scout in a worktree of aeolus-fleet. */
-const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'codex', workspace: { kind: 'worktree', repository: 'aeolus-fleet' } }) as const;
+const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'codex', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, launchId: LAUNCH_ID }) as const;
 
 describe('Codex as a harness', () => {
   it("writes the folder's identity through the plugin in ~/.aeolus/crews/codex, saying the trierarch wakes it (#658)", async () => {
@@ -102,7 +104,7 @@ describe('Codex as a harness', () => {
   it('starts codex with the first prompt on the first start, last and after -- behind the configured flags and the picked option, ending in the line that no human reads its terminal (#585)', async () => {
     await harness().launch({ ...launchOf(shipId), options: { model: 'terra' }, isFirstStart: true, firstPrompt: 'Review the open pull requests.' });
 
-    expect(started).toEqual([{ shipId, folder, command: ['codex', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-terra', '--no-daemon', '--config=tools.experimental_request_user_input.enabled=false', '--', `Review the open pull requests.\n\n${NO_TERMINAL_QUESTIONS}`] }]);
+    expect(started).toEqual([{ shipId, folder, command: ['codex', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-terra', '--no-daemon', '--config=tools.experimental_request_user_input.enabled=false', '--', `Review the open pull requests.\n\n${NO_TERMINAL_QUESTIONS}`], env: { AEOLUS_LAUNCH: LAUNCH_ID } }]);
   });
 
   it('passes a first prompt that starts with - after --, so it never reads as a flag', async () => {
@@ -210,16 +212,77 @@ describe('Codex as a harness', () => {
     screens.set(shipId, woken);
 
     expect(woken).toContain(`› ${typed[0]?.text ?? ''}\n\n• I’m using the aeolus-wake skill`);
-    await expect(harness().launchSeen({ shipId })).resolves.toEqual({ kind: 'active' });
   });
 
   it('names the Codex version its launch screens were checked on, so a launch on another version that shows no activity is told to argo (#594)', () => {
     expect(harness().screensCheckedOn).toBe(CODEX_SCREENS_CHECKED_ON);
   });
 
-  it("sees in its session's screen the model it launched with refused", async () => {
+  it("sees in its session's screen the model it launched with refused, as Codex has no hook for a failed turn", async () => {
     screens.set(shipId, readFileSync(new URL('../../test/screens/codex-refused.txt', import.meta.url), 'utf8'));
 
-    await expect(harness().launchSeen({ shipId, model: 'gpt-nonexistent-9' })).resolves.toEqual({ kind: 'refused', model: 'gpt-nonexistent-9' });
+    await expect(harness().launchSeen({ shipId, folder, launchId: LAUNCH_ID, model: 'gpt-nonexistent-9' })).resolves.toEqual({ kind: 'refused', model: 'gpt-nonexistent-9' });
+  });
+});
+
+describe("Codex's launch window, from the launch marker its session's hooks keep (#490)", () => {
+  /** Runs the plugin's launch hook as Codex runs it in a session started for the launch given. */
+  async function hooked(payload: Record<string, unknown>, launchId = LAUNCH_ID): Promise<void> {
+    const marked = await runCommand('bash', {
+      args: [`${PLUGIN_ROOT}/scripts/aeolus-launch.sh`],
+      env: { AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_CREWS: crews, AEOLUS_LAUNCH: launchId },
+      input: JSON.stringify({ cwd: folder, ...payload }),
+    });
+    expect(marked.status).toBe(0);
+  }
+
+  const sessionStarted = { hook_event_name: 'SessionStart', source: 'startup' };
+  const aToolCall = { hook_event_name: 'PreToolUse', tool_name: 'shell' };
+  const seen = () => harness().launchSeen({ shipId, folder, launchId: LAUNCH_ID, model: 'gpt-5.6-sol' });
+  const hooksReview = () => readFileSync(new URL('../../test/screens/codex-hooks.txt', import.meta.url), 'utf8');
+
+  beforeEach(async () => {
+    await harness().prepareIdentity({ folder, identity });
+  });
+
+  it('starts a session with its launch id, the marker of an earlier launch cleared first', async () => {
+    await hooked(sessionStarted, 'launch-0');
+
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+
+    expect(started.map((each) => each.env)).toEqual([{ AEOLUS_LAUNCH: LAUNCH_ID }]);
+    const marker = await runCommand('bash', { args: [`${PLUGIN_ROOT}/scripts/aeolus-identity.sh`, 'launch'], env: { AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_CREWS: crews } });
+    expect(marker.status).toBe(1);
+  });
+
+  it('sees activity once the hooks marked a tool call of its launch', async () => {
+    await hooked(sessionStarted);
+    await hooked(aToolCall);
+
+    await expect(seen()).resolves.toEqual({ kind: 'active' });
+  });
+
+  it('names no screen once its session started', async () => {
+    screens.set(shipId, hooksReview());
+    await hooked(sessionStarted);
+
+    await expect(seen()).resolves.toEqual({ kind: 'none' });
+  });
+
+  it('names the screen its session stopped at when it never started', async () => {
+    screens.set(shipId, hooksReview());
+
+    await expect(seen()).resolves.toEqual({ kind: 'none', screen: 'hooks review' });
+  });
+
+  it('counts nothing the hooks marked for another launch', async () => {
+    await hooked(sessionStarted, 'launch-0');
+    await hooked(aToolCall, 'launch-0');
+
+    await expect(seen()).resolves.toEqual({ kind: 'none' });
+  });
+
+  it('says its aeolus plugin marks launches', async () => {
+    await expect(harness().marksLaunches()).resolves.toBe(true);
   });
 });

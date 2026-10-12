@@ -1450,11 +1450,20 @@ describe("the launch marker: what a session's hooks saw of the launch the triera
     expect(launch().stdout).toMatch(new RegExp(`^launch ${LAUNCH}\\nstarted ${WHEN} .*\\nactive ${WHEN}\\n$`, 'u'));
   });
 
-  it('records the model refused when the turn failed because the model was not found', () => {
+  it('records the model refused, by the id its message names, when the turn failed because the model was not found', () => {
     crewedByATrierarch();
     claudeLaunchHook(sessionStarted);
 
     claudeLaunchHook(modelRefused);
+
+    expect(launch().stdout).toMatch(new RegExp(`\\nrefused ${WHEN} claude-nonexistent-9\\n$`, 'u'));
+  });
+
+  it('records the refusal without an id when its message names no model', () => {
+    crewedByATrierarch();
+    claudeLaunchHook(sessionStarted);
+
+    claudeLaunchHook({ ...modelRefused, last_assistant_message: 'The model could not be found.' });
 
     expect(launch().stdout).toMatch(new RegExp(`\\nrefused ${WHEN}\\n$`, 'u'));
   });

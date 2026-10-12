@@ -33,6 +33,8 @@ export interface RunPassDeps {
   logger: Logger;
   /** Keeps a model a session refused as refused, so the machine offers it no more (#382). */
   refuseModel: RefuseModel;
+  /** A fresh launch id for each start of a session (#490). */
+  newLaunchId: () => string;
 }
 
 const NEXT_AFTER_FAILURE = 'the next pass tries again; aeolus-trierarch status and list show where it stands';
@@ -48,7 +50,8 @@ export function createRunPass(deps: RunPassDeps): RunPass {
       const trusted = await deps.trust.trusted();
       const versions = Object.fromEntries(Object.entries(deps.setup.detected ?? {}).flatMap(([harness, found]) => (found === undefined ? [] : [[harness, found.version]])));
       const screensCheckedOn = Object.fromEntries(Object.entries(deps.harnesses).flatMap(([harness, port]) => (port.screensCheckedOn === undefined ? [] : [[harness, port.screensCheckedOn]])));
-      const reconciled = reconcile(state, { requests, clears, observed, now: deps.clock.now(), configuration: deps.setup.configuration, trusted, versions, screensCheckedOn });
+      const marksLaunches = Object.fromEntries(await Promise.all(Object.entries(deps.harnesses).map(async ([harness, port]) => [harness, await port.marksLaunches()] as const)));
+      const reconciled = reconcile(state, { requests, clears, observed, now: deps.clock.now(), configuration: deps.setup.configuration, trusted, versions, screensCheckedOn, marksLaunches });
       state = reconciled.state;
       await deps.state.save(state);
       for (action of reconciled.actions) {
@@ -82,9 +85,10 @@ async function observe(state: TrierarchState, deps: RunPassDeps): Promise<Observ
     const { folder } = entry;
     const harness = harnessOf(entry, deps);
     // A crewing session's launch window (#382), and a final crew's first minute after a restart (#397).
-    if ((entry.state === 'crewing' || entry.state === 'running') && entry.launchedAt !== undefined && session !== undefined && harness !== undefined) {
+    const { launchId } = entry;
+    if ((entry.state === 'crewing' || entry.state === 'running') && entry.launchedAt !== undefined && launchId !== undefined && folder !== undefined && session !== undefined && harness !== undefined) {
       const model = entry.options[MODEL_OPTION];
-      launches[entry.shipId] = await harness.launchSeen({ shipId: entry.shipId, ...(model !== undefined && { model }) });
+      launches[entry.shipId] = await harness.launchSeen({ shipId: entry.shipId, folder, launchId, ...(model !== undefined && { model }) });
     }
     const isWatched = (entry.state === 'running' || (entry.state === 'crewing' && session !== undefined)) && session?.status !== 'exited';
     // Its identity is looked at too while the trierarch would report on its behalf, as when its session exits in this pass (#664).
@@ -173,6 +177,7 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
       return crew(state, { entry, isResumed: action.isResumed, deps });
     case 'launch':
       if (entry.folder !== undefined) {
+        const launchId = deps.newLaunchId();
         await harnessOf(entry, deps)?.launch({
           shipId: entry.shipId,
           // An entry saved before the ship's name was kept goes by its id.
@@ -182,10 +187,11 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
           harness: entry.harness,
           options: entry.options,
           isFirstStart: false,
+          launchId,
         });
         log(deps, { ...about(state, { shipId: entry.shipId, action: 'launch' }), outcome: `started again in ${entry.folder}` });
         // Its first minute is checked from now, while it runs (#397).
-        const next = putEntry(state, { ...entry, launchedAt: deps.clock.now().toISOString() });
+        const next = putEntry(state, { ...entry, launchedAt: deps.clock.now().toISOString(), launchId });
         await deps.state.save(next);
         return next;
       }
@@ -261,6 +267,7 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
     folder,
     identity: { fleetUrl: deps.fleet.url, shipId: crewing.shipId, shipName: ship.name, crewToken, ...(crewing.squadron !== undefined && { squadron: crewing.squadron }) },
   });
+  const launchId = deps.newLaunchId();
   await harness.launch({
     shipId: crewing.shipId,
     shipName: ship.name,
@@ -269,10 +276,11 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
     harness: crewing.harness,
     options: crewing.options,
     isFirstStart: !crewing.hasStarted,
+    launchId,
     ...(!crewing.hasStarted && crewing.firstPrompt !== undefined && { firstPrompt: crewing.firstPrompt }),
   });
   // Crewing still: its launch window is open, and only activity in it makes the crew final (#382).
-  const next = putEntry(state, { ...crewing, shipName: ship.name, folder, hasStarted: true, launchedAt: deps.clock.now().toISOString() });
+  const next = putEntry(state, { ...crewing, shipName: ship.name, folder, hasStarted: true, launchedAt: deps.clock.now().toISOString(), launchId });
   await deps.state.save(next);
   log(deps, { shipId: crewing.shipId, shipName: ship.name, action: 'crew', outcome: `crewed, ${crewing.harness} started in ${folder}` });
   return next;

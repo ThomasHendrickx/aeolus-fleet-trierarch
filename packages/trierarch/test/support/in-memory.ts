@@ -367,12 +367,16 @@ export class InMemoryProcesses implements ProcessPort {
 export class InMemoryHarness implements HarnessPort {
   readonly identities = new Map<string, Identity>();
   readonly launches: { shipId: ShipId; shipName: string; folder: string; workspace: TrierarchWorkspace; isFirstStart: boolean; firstPrompt?: string }[] = [];
+  /** The launch id of each launch, in order (#490). */
+  readonly launchIds: string[] = [];
   readonly wakes: ShipId[] = [];
   readonly turns = new Map<string, Turn>();
   /** What each ship's session shows in its launch window: activity unless a test sets otherwise. */
   readonly seen = new Map<ShipId, LaunchSeen>();
-  /** Each screen it was asked to read, with the model the session launched with. */
-  readonly asked: { shipId: ShipId; model?: string }[] = [];
+  /** Each launch it was asked about, by its folder and launch id, with the model the session launched with. */
+  readonly asked: { shipId: ShipId; folder: string; launchId: string; model?: string }[] = [];
+  /** Whether its aeolus plugin marks launches (#490): set to false for one older than the launch marker. */
+  isMarkingLaunches = true;
   /** Set to make every launch fail, as when the harness's CLI cannot start: the entry stays crewing. */
   isFailingLaunch = false;
   readonly screensCheckedOn?: string;
@@ -400,12 +404,13 @@ export class InMemoryHarness implements HarnessPort {
     return Promise.resolve();
   }
 
-  launch(session: { shipId: ShipId; shipName: string; folder: string; workspace: TrierarchWorkspace; isFirstStart: boolean; firstPrompt?: string }): Promise<void> {
+  launch(session: { shipId: ShipId; shipName: string; folder: string; workspace: TrierarchWorkspace; isFirstStart: boolean; launchId: string; firstPrompt?: string }): Promise<void> {
     if (this.isFailingLaunch) {
       return Promise.reject(new Error(`the harness could not start ${session.shipId}`));
     }
-    const { shipId, shipName, folder, workspace, isFirstStart, firstPrompt } = session;
+    const { shipId, shipName, folder, workspace, isFirstStart, launchId, firstPrompt } = session;
     this.launches.push({ shipId, shipName, folder, workspace, isFirstStart, ...(firstPrompt !== undefined && { firstPrompt }) });
+    this.launchIds.push(launchId);
     this.processes.sessions.set(shipId, 'running');
     return Promise.resolve();
   }
@@ -419,7 +424,11 @@ export class InMemoryHarness implements HarnessPort {
     return Promise.resolve();
   }
 
-  launchSeen(session: { shipId: ShipId; model?: string }): Promise<LaunchSeen> {
+  marksLaunches(): Promise<boolean> {
+    return Promise.resolve(this.isMarkingLaunches);
+  }
+
+  launchSeen(session: { shipId: ShipId; folder: string; launchId: string; model?: string }): Promise<LaunchSeen> {
     this.asked.push(session);
     return Promise.resolve(this.seen.get(session.shipId) ?? { kind: 'active' });
   }
@@ -592,7 +601,13 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
     refusals.push(refused);
     return Promise.resolve();
   };
-  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, workspace, trust, state, setup, clock, logger, refuseModel });
+  // Launch ids in the order the trierarch asks for them.
+  let launches = 0;
+  const newLaunchId = (): string => {
+    launches += 1;
+    return `launch-${String(launches)}`;
+  };
+  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, workspace, trust, state, setup, clock, logger, refuseModel, newLaunchId });
   const uninstall = createUninstall({ processes, state });
   const reportSelf = createReportSelf({ fleet, processes, trust, state, setup });
 

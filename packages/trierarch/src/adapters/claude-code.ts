@@ -4,11 +4,12 @@ import { join } from 'node:path';
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { AdapterFlag, HarnessPort } from '../core/ports.js';
-import { claudeCodeLaunchSeen } from './claude-code-screen.js';
+import { claudeCodeScreenStoppedAt } from './claude-code-screen.js';
 import { SETTING_SOURCES, type ClaudeCodeSetup, type SettingsDefaultMode, type SettingSource } from './claude-code-setup.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
 import { effectiveFlags } from '../core/effective-flags.js';
 import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
+import { createLaunchMarks } from './launch-marker.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
 import type { Tmux } from './tmux.js';
 
@@ -34,6 +35,9 @@ import type { Tmux } from './tmux.js';
  */
 
 export const WAKE_PROMPT = '/aeolus:wake';
+
+/** The variable a session's launch id is passed in, for the plugin's hooks to mark that launch (#490). */
+export const LAUNCH_VARIABLE = 'AEOLUS_LAUNCH';
 
 const REMOTE_CONTROL = '--remote-control';
 const CONTINUE = '--continue';
@@ -163,10 +167,11 @@ export function createClaudeCodeHarness(options: {
   command?: string;
 }): HarnessPort {
   const { configuration, plugin, sessions } = options;
+  const marks = createLaunchMarks(plugin);
 
   return {
     ...createPluginIdentity(plugin),
-    launch: async ({ shipId, shipName, folder, workspace, harness, options: picked, isFirstStart, firstPrompt }) => {
+    launch: async ({ shipId, shipName, folder, workspace, harness, options: picked, isFirstStart, launchId, firstPrompt }) => {
       const settings = configuration.harnesses[harness];
       if (settings === undefined) {
         throw new Error(`The configuration has no harness ${harness}`);
@@ -183,11 +188,25 @@ export function createClaudeCodeHarness(options: {
         ...(options.command !== undefined && { program: options.command }),
       });
       await options.setup.completeOnboarding();
-      await sessions.start({ shipId, folder, command: wordsOf(command) });
+      await marks.clear(folder);
+      await sessions.start({ shipId, folder, command: wordsOf(command), env: { [LAUNCH_VARIABLE]: launchId } });
     },
     wake: async ({ shipId }) => {
       await sessions.type({ shipId, text: wakePromptOf(WAKE_PROMPT) });
     },
-    launchSeen: async ({ shipId, model }) => claudeCodeLaunchSeen({ screen: await sessions.screen(shipId), ...(model !== undefined && { model }) }),
+    marksLaunches: () => marks.isMarking(),
+    // The marker says what the session did; the screen only names one that stopped it before its hooks ran (#490).
+    launchSeen: async ({ shipId, folder, launchId, model }) => {
+      const marker = await marks.read({ folder, launchId });
+      if (marker?.refused !== undefined) {
+        const refused = model ?? marker.refused.model;
+        return { kind: 'refused', ...(refused !== undefined && { model: refused }) };
+      }
+      if (marker?.isActive === true) {
+        return { kind: 'active' };
+      }
+      const screen = marker?.isStarted === true ? undefined : claudeCodeScreenStoppedAt(await sessions.screen(shipId));
+      return { kind: 'none', ...(screen !== undefined && { screen }) };
+    },
   };
 }
