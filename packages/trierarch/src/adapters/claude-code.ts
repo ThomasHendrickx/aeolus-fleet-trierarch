@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
-import type { AdapterFlag, HarnessPort } from '../core/ports.js';
+import type { AdapterFlag, HarnessPort, SessionRuntime } from '../core/ports.js';
 import { claudeCodeScreenStoppedAt } from './claude-code-screen.js';
 import { SETTING_SOURCES, type ClaudeCodeSetup, type SettingsDefaultMode, type SettingSource } from './claude-code-setup.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
@@ -11,7 +11,6 @@ import { effectiveFlags } from '../core/effective-flags.js';
 import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
 import { createLaunchMarks } from './launch-marker.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
-import type { Tmux } from './tmux.js';
 
 /**
  * Claude Code as a harness (docs/architecture.md, "First adapters"): `claude`
@@ -156,7 +155,7 @@ async function hasConversation(projects: string, folder: string): Promise<boolea
 export function createClaudeCodeHarness(options: {
   configuration: TrierarchConfiguration;
   plugin: AeolusPlugin;
-  sessions: Pick<Tmux, 'start' | 'type' | 'screen'>;
+  sessions: Pick<SessionRuntime, 'start' | 'type' | 'screen'>;
   /** Claude Code's projects folder, where it keeps each folder's conversations. */
   projects: string;
   /** Claude Code's own files, where its onboarding is completed before each launch (#403) and its settings' default mode is read (#505, #507). */

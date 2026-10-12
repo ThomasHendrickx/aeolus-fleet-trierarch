@@ -1,4 +1,4 @@
-import type { ProcessPort, StatePort } from './ports.js';
+import type { SessionRuntime, StatePort } from './ports.js';
 
 /**
  * Use case: the trierarch is uninstalled (docs/trierarch.md, lifecycle row
@@ -7,7 +7,7 @@ import type { ProcessPort, StatePort } from './ports.js';
  */
 export type Uninstall = () => Promise<{ worktrees: readonly string[] }>;
 
-export function createUninstall(deps: { processes: ProcessPort; state: StatePort }): Uninstall {
+export function createUninstall(deps: { processes: Pick<SessionRuntime, 'list' | 'stop'>; state: StatePort }): Uninstall {
   return async () => {
     const state = await deps.state.load();
     for (const session of await deps.processes.list()) {

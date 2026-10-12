@@ -2,7 +2,7 @@ import { join } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
-import type { AdapterFlag, Detected, HarnessPort } from '../core/ports.js';
+import type { AdapterFlag, Detected, HarnessPort, SessionRuntime } from '../core/ports.js';
 import { CLAUDE_CODE_ADAPTER_FLAGS, CLAUDE_CODE_RISKY_FLAGS, claudeCodeCommandLine, claudeCodeSettingsDefaultMode, createClaudeCodeHarness, WAKE_PROMPT as CLAUDE_CODE_WAKE_PROMPT } from './claude-code.js';
 import { createClaudeCodeSetup, type ClaudeCodeSetup } from './claude-code-setup.js';
 import { createCodexSetup } from './codex-setup.js';
@@ -11,7 +11,6 @@ import type { CommandPart } from './command-line.js';
 import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
 import type { AeolusPlugin } from './plugin-identity.js';
 import { findAeolusPlugin } from './plugin.js';
-import type { Tmux } from './tmux.js';
 
 /** What the settings' first prompt and a ship's session name stand for where config check shows a command line. */
 const FIRST_PROMPT = '<first prompt>';
@@ -80,7 +79,7 @@ export async function createHarnesses(at: {
   managedSettings: string;
   /** What detection last found, read at each launch (#517). */
   detected: () => Detected;
-  sessions: Pick<Tmux, 'start' | 'type' | 'screen'>;
+  sessions: Pick<SessionRuntime, 'start' | 'type' | 'screen'>;
 }): Promise<{ harnesses: Record<string, HarnessPort>; plugins: Record<string, AeolusPlugin> }> {
   const { configuration, homeDirectory, env, managedSettings, detected, sessions } = at;
   const harnesses: Record<string, HarnessPort> = {};

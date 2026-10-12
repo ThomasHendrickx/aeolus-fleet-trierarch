@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { newId } from '../../test/support/in-memory.js';
 import { runCommand } from './run-command.js';
-import { createTmux, sessionsLaunch, type Tmux } from './tmux.js';
+import type { SessionRuntime } from '../core/ports.js';
+import { createTmux, sessionsLaunch } from './tmux.js';
 
 // Against the real tmux, on a tmux server of the test's own, its socket in the
 // test's own folder: kill-server leaves the socket behind (#537). The folder
@@ -16,7 +17,7 @@ const SOCKET_ROOT = '/tmp';
 
 let server: string;
 let folder: string;
-let tmux: Tmux;
+let tmux: SessionRuntime;
 
 beforeEach(() => {
   server = `trierarch-test-${newId('ship').slice(-8)}`;

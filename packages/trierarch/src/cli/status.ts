@@ -7,7 +7,7 @@ import type { CrewFile, RunningFile } from '../adapters/files.js';
 import { FleetRefusal } from '../adapters/rest-fleet.js';
 import type { Service, ServiceStatus } from '../adapters/service.js';
 import type { KeptWorktree } from '../core/entry.js';
-import type { ProcessPort, StatePort } from '../core/ports.js';
+import type { SessionRuntime, StatePort } from '../core/ports.js';
 import { PLAIN, stateTone, type Style } from '../adapters/style.js';
 
 /**
@@ -61,7 +61,7 @@ export async function inspectStatus(at: {
   crew: CrewFile;
   service: Pick<Service, 'status'>;
   lease: () => Promise<Lease>;
-  processes: ProcessPort;
+  processes: Pick<SessionRuntime, 'list' | 'stop'>;
   state: StatePort;
 }): Promise<StatusReport> {
   const harnesses = Object.keys(at.configuration.harnesses);
