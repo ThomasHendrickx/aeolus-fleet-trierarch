@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -60,8 +60,8 @@ function configuration(runtime?: TrierarchConfiguration['runtime']): TrierarchCo
   return { caps: { ships: 2, running: 2 }, repositories: { demo: { path: repository } }, folders: {}, harnesses: { 'claude-code': { flags: [], options: {} } }, ...(runtime !== undefined && { runtime }) };
 }
 
-function adaptersOf(runtime?: TrierarchConfiguration['runtime']) {
-  return runtimeAdaptersOf({ configuration: configuration(runtime), paths, version: '0.25.0', launch: [], managedSettings: join(home, 'managed') });
+function adaptersOf(runtime?: TrierarchConfiguration['runtime'], worktreeRoot?: string) {
+  return runtimeAdaptersOf({ configuration: { ...configuration(runtime), ...(worktreeRoot !== undefined && { worktreeRoot }) }, paths, version: '0.25.0', launch: [], managedSettings: join(home, 'managed') });
 }
 
 describe('the adapters the session runtime picks (decision 0039)', () => {
@@ -77,6 +77,15 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
     const { folder } = await adaptersOf({ ...CONTAINER, binary }).workspace.prepare({ shipId, shipName: 'scout', workspace: { kind: 'worktree', repository: 'demo' } });
 
     expect({ folder, isClone: statSync(join(folder, '.git')).isDirectory() }).toEqual({ folder: join(paths.worktrees, 'demo', 'scout'), isClone: true });
+  });
+
+  it('gives sessions in containers their folder by its real path, as the aeolus plugin in the container and on the host both key it (pwd -P), through a worktree root that is a link', async () => {
+    mkdirSync(join(home, 'real-root'));
+    symlinkSync(join(home, 'real-root'), join(home, 'linked-root'));
+
+    const { folder } = await adaptersOf({ ...CONTAINER, binary }, join(home, 'linked-root')).workspace.prepare({ shipId, shipName: 'scout', workspace: { kind: 'worktree', repository: 'demo' } });
+
+    expect(folder).toBe(join(home, 'real-root', 'demo', 'scout'));
   });
 
   it("gives sessions in containers a home of each ship's own under the trierarch's homes", () => {
