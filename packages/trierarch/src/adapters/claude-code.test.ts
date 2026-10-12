@@ -25,7 +25,7 @@ let crews: string;
 let folder: string;
 /** Claude Code's projects folder, where it keeps each folder's conversations. */
 let projects: string;
-let started: { shipId: ShipId; folder: string; command: readonly string[] }[];
+let started: { shipId: ShipId; folder: string; command: readonly string[]; env?: Readonly<Record<string, string>> }[];
 /** What each ship's session shows, by ship id. */
 let screens: Map<ShipId, string>;
 let typed: { shipId: ShipId; text: string }[];
@@ -60,10 +60,10 @@ function aConversationIn(folder: string): void {
   writeFileSync(join(kept, '0b8e3f2a-5c1d-4e7f-9a6b-2d4c8e1f3a5b.jsonl'), '{}\n');
 }
 
-function harness() {
+function harness(at: { pluginRoot?: string } = {}) {
   return createClaudeCodeHarness({
     configuration: CONFIGURATION,
-    plugin: { root: PLUGIN_ROOT, data, crews },
+    plugin: { root: at.pluginRoot ?? PLUGIN_ROOT, data, crews },
     projects,
     setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
     permissionModes: () => undefined,
@@ -88,9 +88,9 @@ const identity = { fleetUrl: 'https://fleet.example.com', shipId, shipName: 'sco
 
 const parsed = (text: string | undefined): unknown => (text === undefined ? undefined : JSON.parse(text));
 
-/** The launch of the ship scout in a worktree of aeolus-fleet. */
 /** The launch id the trierarch started the session with. */
 const LAUNCH_ID = 'launch-1';
+/** The launch of the ship scout in a worktree of aeolus-fleet. */
 const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, launchId: LAUNCH_ID }) as const;
 
 describe('Claude Code as a harness', () => {
@@ -423,9 +423,97 @@ describe('Claude Code as a harness', () => {
     await expect(harness().turnOf(folder)).resolves.toBe('busy');
   });
 
-  it("sees in its session's screen the model it launched with refused", async () => {
-    screens.set(shipId, readFileSync(new URL('../../test/screens/claude-code-refused.txt', import.meta.url), 'utf8'));
+});
 
-    await expect(harness().launchSeen({ shipId, folder, launchId: LAUNCH_ID, model: 'claude-nonexistent-9' })).resolves.toEqual({ kind: 'refused', model: 'claude-nonexistent-9' });
+describe("Claude Code's launch window, from the launch marker its session's hooks keep (#490)", () => {
+  /** Runs the plugin's launch hook as Claude Code runs it in a session started for the launch given. */
+  async function hooked(payload: Record<string, unknown>, launchId = LAUNCH_ID): Promise<void> {
+    const marked = await runCommand('bash', {
+      args: [`${PLUGIN_ROOT}/scripts/aeolus-launch.sh`],
+      env: { AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_CREWS: crews, AEOLUS_LAUNCH: launchId },
+      input: JSON.stringify({ cwd: folder, transcript_path: '/a/transcript.jsonl', ...payload }),
+    });
+    expect(marked.status).toBe(0);
+  }
+
+  const sessionStarted = { hook_event_name: 'SessionStart', source: 'startup' };
+  const aToolCall = { hook_event_name: 'PreToolUse', tool_name: 'Read' };
+  const modelRefused = { hook_event_name: 'StopFailure', error: 'model_not_found', last_assistant_message: "There's an issue with the selected model (claude-nonexistent-9). It may not exist." };
+  const seen = (model?: string) => harness().launchSeen({ shipId, folder, launchId: LAUNCH_ID, ...(model !== undefined && { model }) });
+
+  beforeEach(async () => {
+    await harness().prepareIdentity({ folder, identity });
+  });
+
+  it('starts a session with its launch id, the marker of an earlier launch cleared first', async () => {
+    await hooked(sessionStarted, 'launch-0');
+
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+
+    expect(started.map((each) => each.env)).toEqual([{ AEOLUS_LAUNCH: LAUNCH_ID }]);
+    const marker = await runCommand('bash', { args: [`${PLUGIN_ROOT}/scripts/aeolus-identity.sh`, 'launch'], env: { AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_CREWS: crews } });
+    expect(marker.status).toBe(1);
+  });
+
+  it('sees activity once the hooks marked a tool call of its launch', async () => {
+    await hooked(sessionStarted);
+    await hooked(aToolCall);
+
+    await expect(seen('claude-opus-5-5')).resolves.toEqual({ kind: 'active' });
+  });
+
+  it('sees the model it launched with refused once the hooks marked a refusal', async () => {
+    await hooked(sessionStarted);
+    await hooked(modelRefused);
+
+    await expect(seen('claude-nonexistent-9')).resolves.toEqual({ kind: 'refused', model: 'claude-nonexistent-9' });
+  });
+
+  it('sees the model the refusal names refused when it launched with none', async () => {
+    await hooked(sessionStarted);
+    await hooked(modelRefused);
+
+    await expect(seen()).resolves.toEqual({ kind: 'refused', model: 'claude-nonexistent-9' });
+  });
+
+  it('sees a refusal that names no model as a refusal of no id when it launched with none', async () => {
+    await hooked(sessionStarted);
+    await hooked({ ...modelRefused, last_assistant_message: 'The model could not be found.' });
+
+    await expect(seen()).resolves.toEqual({ kind: 'refused' });
+  });
+
+  it('reads no screen once its session started: none, whatever the screen shows', async () => {
+    screens.set(shipId, readFileSync(new URL('../../test/screens/claude-code-bypass.txt', import.meta.url), 'utf8'));
+    await hooked(sessionStarted);
+
+    await expect(seen()).resolves.toEqual({ kind: 'none' });
+  });
+
+  it('names the screen its session stopped at when it never started', async () => {
+    screens.set(shipId, readFileSync(new URL('../../test/screens/claude-code-bypass.txt', import.meta.url), 'utf8'));
+
+    await expect(seen()).resolves.toEqual({ kind: 'none', screen: 'bypass permissions warning' });
+  });
+
+  it('counts nothing the hooks marked for another launch', async () => {
+    screens.set(shipId, readFileSync(new URL('../../test/screens/claude-code-bypass.txt', import.meta.url), 'utf8'));
+    await hooked(sessionStarted, 'launch-0');
+    await hooked(aToolCall, 'launch-0');
+
+    await expect(seen()).resolves.toEqual({ kind: 'none', screen: 'bypass permissions warning' });
+  });
+
+  it('says its aeolus plugin marks launches', async () => {
+    await expect(harness().marksLaunches()).resolves.toBe(true);
+  });
+
+  it('says an aeolus plugin older than the launch marker, whose identity script has no launch command, marks none', async () => {
+    const older = mkdtempSync(join(tmpdir(), 'trierarch-older-plugin-'));
+    mkdirSync(join(older, 'scripts'));
+    writeFileSync(join(older, 'scripts', 'aeolus-identity.sh'), 'echo "usage: aeolus-identity.sh write|check-in|show|turn|path|delete" >&2\nexit 2\n');
+
+    await expect(harness({ pluginRoot: older }).marksLaunches()).resolves.toBe(false);
+    rmSync(older, { recursive: true, force: true });
   });
 });
