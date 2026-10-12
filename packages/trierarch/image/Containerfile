@@ -40,6 +40,7 @@ RUN chmod u+s /usr/bin/newuidmap /usr/bin/newgidmap \
  && echo 'ubuntu:1001:64535' > /etc/subgid
 COPY packages/trierarch/image/containers.conf /etc/containers/containers.conf
 COPY packages/trierarch/image/storage.conf /etc/containers/storage.conf
+COPY packages/trierarch/image/session-init.sh /usr/local/bin/aeolus-session-init
 
 # The aeolus plugin of this version, from its marketplace in the image.
 COPY .claude-plugin/marketplace.json /opt/aeolus-fleet/.claude-plugin/marketplace.json
@@ -50,5 +51,5 @@ WORKDIR /home/ubuntu
 RUN claude plugin marketplace add /opt/aeolus-fleet \
  && claude plugin install aeolus@aeolus-fleet
 
-ENTRYPOINT ["/usr/bin/tini", "--"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/aeolus-session-init"]
 CMD ["sleep", "infinity"]

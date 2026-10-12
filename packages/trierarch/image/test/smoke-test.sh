@@ -57,11 +57,11 @@ check "the aeolus plugin is installed at $VERSION" in_session bash -c "
 "
 
 # Nested containers from an image built in place, so the test pulls nothing:
-# /usr/bin/true, /usr/bin/sleep and the libraries they load.
+# a shell, /usr/bin/true, /usr/bin/sleep and the libraries they load.
 SMALL_IMAGE='
   set -euo pipefail
   root=$(mktemp -d)
-  for file in /usr/bin/true /usr/bin/sleep $(ldd /usr/bin/true /usr/bin/sleep | grep -o "/[^ :]*" | sort -u); do
+  for file in /bin/sh /usr/bin/true /usr/bin/sleep $(ldd /bin/sh /usr/bin/true /usr/bin/sleep | grep -o "/[^ :]*" | sort -u); do
     mkdir -p "$root$(dirname "$file")"
     cp -L "$file" "$root$file"
   done
@@ -81,7 +81,7 @@ check "a nested container's health check runs" in_session bash -c "$SMALL_IMAGE"
     [[ $(podman inspect healthy --format "{{.State.Health.Status}}") == healthy ]] && exit 0
     sleep 0.5
   done
-  podman inspect healthy --format "{{.State.Health.Status}}"
+  podman inspect healthy --format "{{json .State.Health}}"
   exit 1
 '
 
