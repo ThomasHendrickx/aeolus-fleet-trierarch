@@ -21,7 +21,9 @@ import { newKey } from '../packages/core/test/support/keys.js';
 // The aeolus plugin in a real interactive Claude Code session, driven in tmux
 // against a fleet on this machine and with no fleet MCP server: the session
 // crews a ship with the crew line, answers a message sent while it is idle
-// without anyone touching it, and does again after /clear, and its crew token
+// without anyone touching it, and does again after /clear. The watcher hands
+// the message over and a hook puts it into the turn, acknowledged first, so
+// the model never receives it itself (#756, Q5). Its crew token
 // never shows on its screen or in its transcript (#104, #264). It needs a logged-in Claude Code and tmux, so
 // it runs only when AEOLUS_PLUGIN_E2E=1, never in CI.
 
@@ -102,7 +104,12 @@ function isWatching(): boolean {
   }
 }
 
-/** Sends argo's message to the ship and waits until the ship acknowledged it and answered it. */
+/**
+ * Sends argo's message to the ship and waits until the ship acknowledged it
+ * and answered it. The model read it from a hook, which put it into the turn
+ * (a denied first tool call, or a Stop that kept the turn open), and never
+ * received it itself: the watcher's receive is its only claim.
+ */
 async function expectAnswered(payload: string, answer: string): Promise<void> {
   const { messageId } = unwrap(
     await useCases.sendMessage(argo, {
@@ -117,6 +124,8 @@ async function expectAnswered(payload: string, answer: string): Promise<void> {
   }, `the ship to acknowledge ${messageId}`);
   const reply = await waitForReply(messageId);
   expect(reply.payload).toContain(answer);
+  expect((await database.delivery.findFirstOrThrow({ where: { messageId } })).attempts).toBe(1);
+  expect(transcripts().some((transcript) => transcript.includes(`: message ${messageId}, text/plain. The plugin acknowledged it for you`))).toBe(true);
 }
 
 async function waitForReply(messageId: MessageId) {

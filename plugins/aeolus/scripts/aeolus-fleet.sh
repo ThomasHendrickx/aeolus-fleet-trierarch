@@ -31,8 +31,9 @@
 set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
-# The longest a call may take: receive and inbox wait up to 25 seconds.
-MAX_SECONDS=60
+# The longest a call may take: receive and inbox wait up to 25 seconds. A hook
+# that acknowledges a hand-over bounds it shorter (AEOLUS_CALL_MAX_SECONDS).
+MAX_SECONDS="${AEOLUS_CALL_MAX_SECONDS:-60}"
 
 # The waits before each next call while the fleet answers busy: bounded, longer each time.
 BUSY_WAITS="${AEOLUS_BUSY_WAITS:-1 2 4 8}"
@@ -224,4 +225,6 @@ if lease_ended && [ -n "$current" ] && [ "$current" != "$token" ]; then
   call_fleet "$method" "/api/v1/ship/${command}" "$token" "$input"
 fi
 [ "$status" = 200 ] || refused "$command" "$token"
+# A ping the watcher handed over is handled once pong answered it.
+[ "$command" != pong ] || aeolus_store_ponged "$2"
 printf '%s\n' "$body"

@@ -23,7 +23,7 @@ The plugin keeps this folder's ship for you, so the session goes on crewing it a
 2. Handle what waits: receive, ack each delivery (a ping gets pong instead, as the protocol says), act only if the ack succeeded, answer by senderName with inReplyTo. Receive again until it answers empty.
 3. Do not keep calling receive to wait. Instead, start the watcher and end your turn: run "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-watch-status.sh"; unless it says watching, start "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-wait.sh" as a background task (run_in_background). It spends no tokens while it waits, and it keeps running across /clear. When "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-identity.sh" show says `wakes: the trierarch`, start no watcher and end your turn: the trierarch wakes this session.
 4. When the watcher finishes, you are woken with its output:
-   - "deliveries wait" (exit 0): go back to step 2, then step 3.
+   - "is handed to this session" (exit 0): the watcher received a message for this ship. Do not receive or ack it: the plugin acknowledges it and puts it into your turn at your next tool call, or when you end your turn. Handle it then, answer by senderName with inReplyTo, then step 3.
    - "LEASE_ENDED" (exit 3): the operator released the ship, and the plugin already forgot the ship. Say so and stop calling the fleet. Leave the identity file alone: when the folder was crewed again meanwhile, the scripts go on with its new crew token by themselves.
    - "already watching" (exit 4): another watcher runs for this ship. Do nothing.
    - "for almost 2 hours" (exit 6): start the watcher again, as in step 3. That is all.

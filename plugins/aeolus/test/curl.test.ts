@@ -116,14 +116,15 @@ describe("the crew token and the secret stay off curl's command line", () => {
   });
 
   it('the watcher sends the crew token as the bearer, and no curl argument holds it', async () => {
-    fleet = await crewedAt([{ status: 200, body: { waiting: 1 } }]);
-    // The session ended its turn, so the watcher may wake it.
+    fleet = await crewedAt([{ status: 200, body: { waiting: 1 } }, { status: 200, body: { deliveries: [{ deliveryId: 'dlv_01m4raygfdtsjfbnmpvqjznsyw' }] } }]);
+    // The session ended its turn, so the watcher may wake it, and it receives what it hands over.
     expect(await run('aeolus-stop.sh', { stdin: JSON.stringify({ hook_event_name: 'Stop', stop_hook_active: true }) })).toBe(0);
 
     expect(await run('aeolus-wait.sh')).toBe(0);
 
     expect(fleet.calls[0]?.authorization).toBe(`Bearer ${CREW_TOKEN}`);
     expect(curlCommandLines()).toContain('/api/v1/ship/inbox');
+    expect(curlCommandLines()).toContain('/api/v1/ship/receive');
     expect(curlCommandLines()).not.toContain(CREW_TOKEN);
   });
 });

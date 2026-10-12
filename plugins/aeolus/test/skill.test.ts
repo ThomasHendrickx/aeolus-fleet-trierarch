@@ -104,6 +104,12 @@ describe('the crew-a-ship skill', () => {
     expect(claudeSkill).toContain('payload `{"squadron":"<squadron>","model":"<model>"}`, where <model> is the exact model id this session runs');
   });
 
+  it('tells the session that a message the watcher handed over comes into its turn acknowledged, never by its own receive (#756)', () => {
+    expect(claudeSkill).toContain(
+      '"is handed to this session" (exit 0): the watcher received a message for this ship. Do not receive or ack it: the plugin acknowledges it and puts it into your turn at your next tool call, or when you end your turn.',
+    );
+  });
+
   it('tells the session to start the watcher again when it exits 6 at its 2-hour limit', () => {
     expect(claudeSkill).toContain('"for almost 2 hours" (exit 6): start the watcher again, as in step 3. That is all.');
   });

@@ -8,6 +8,7 @@
 #   aeolus-identity.sh turn     the turn marker of a folder a trierarch crews: busy or idle, with when; exit 1 when none
 #   aeolus-identity.sh launch   the launch marker of a folder a trierarch crews: the launch id, then what the hooks saw; exit 1 when none
 #   aeolus-identity.sh launch clear   forgets the launch marker, before the trierarch starts a launch
+#   aeolus-identity.sh store    what the folder's store holds (#756): each delivery id, its state and when, oldest first
 #   aeolus-identity.sh path     the identity file of this folder, whether it exists or not
 #   aeolus-identity.sh delete   stops the folder's watcher and forgets the ship
 set -euo pipefail
@@ -80,6 +81,14 @@ case "$command" in
     fi
     cat "$launch_file" 2>/dev/null || { echo "aeolus: no launch marked yet"; exit 1; }
     ;;
+  store)
+    store_dir="$(aeolus_store_dir)"
+    for state_file in "$store_dir"/*.state; do
+      [ -f "$state_file" ] || continue
+      id="${state_file##*/}"
+      printf '%s %s\n' "${id%.state}" "$(cat "$state_file")"
+    done
+    ;;
   path)
     echo "$file"
     ;;
@@ -95,11 +104,12 @@ case "$command" in
       aeolus_process_is "$pid" aeolus-wait.sh && kill "$pid" 2>/dev/null || true
       rm -f "$pid_file"
     fi
+    aeolus_store_forget
     rm -f "$file" "$(aeolus_refused_file)" "$(aeolus_reported_file)" "$(aeolus_turn_file)" "$(aeolus_launch_file)" "$(aeolus_waiting_file)" "$(aeolus_model_file)"
     echo "aeolus: this folder crews no ship any more"
     ;;
   *)
-    echo "usage: aeolus-identity.sh write|check-in|show|turn|launch|path|delete" >&2
+    echo "usage: aeolus-identity.sh write|check-in|show|turn|launch|store|path|delete" >&2
     exit 2
     ;;
 esac

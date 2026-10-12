@@ -77,7 +77,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 143' INT TERM
 
-AEOLUS_MAX_SECONDS=2147483647 "$(dirname "$0")/aeolus-wait.sh" > "$wait_output" 2>&1 &
+AEOLUS_WAKE_ONLY=1 AEOLUS_MAX_SECONDS=2147483647 "$(dirname "$0")/aeolus-wait.sh" > "$wait_output" 2>&1 &
 wait_pid=$!
 wait "$wait_pid"
 status=$?

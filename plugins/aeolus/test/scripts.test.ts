@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import { readLogLine } from '../../../packages/trierarch/src/adapters/log.js';
-import { startStubFleet, type StubFleet } from './stub-fleet.js';
+import { startRoutedStubFleet, startStubFleet, type StubAnswer, type StubFleet } from './stub-fleet.js';
 import { scriptEnvironment } from './script-environment.js';
 
 // The aeolus plugin's bash scripts, as a session runs them: in its folder,
@@ -110,6 +110,51 @@ function wakeThreadFile(): string {
 }
 
 const inbox = (waiting: number) => ({ status: 200, body: { waiting } });
+
+// The hand-over (#756): what the watcher receives and hands to the session.
+const DELIVERY_ID = 'dlv_01m4raygfdtsjfbnmpvqjznsyw';
+const MESSAGE_ID = 'msg_01m4raygfdtsjfbnmpvqjznsyv';
+const PING_DELIVERY_ID = 'dlv_01m4rb0m3d6r4xgnmnhm1k8b2q';
+const HANDED_OVER = 'aeolus: a message for scout is handed to this session: it reaches you at your next tool call, or when you end your turn. Do not receive or ack it.\n';
+const NO_WAITS = { AEOLUS_BUSY_WAITS: '0 0 0 0' };
+/** How the Codex wake bridge runs the watcher: it wakes the task, which receives for itself. */
+const WAKE_ONLY = { AEOLUS_WAKE_ONLY: '1' };
+
+/** A delivery as the fleet's receive answers it. */
+function aDelivery(overrides: Record<string, unknown> = {}) {
+  return {
+    deliveryId: DELIVERY_ID,
+    messageId: MESSAGE_ID,
+    senderShipId: 'shp_01m4ajt7abh4rypkmdnjene67g',
+    senderName: 'orchestrator-1',
+    senderType: 'orchestrator',
+    recipient: { kind: 'ship', shipId: SHIP_ID },
+    payload: 'Review "PR 12"\nand say what you found',
+    contentType: 'text/plain',
+    model: 'claude-opus-5-5',
+    inReplyTo: null,
+    sentAt: '2026-10-12T15:15:54.467Z',
+    attempts: 1,
+    ...overrides,
+  };
+}
+
+/** A second delivery, sent after the first. */
+const anotherDelivery = () => aDelivery({ deliveryId: 'dlv_01m4rb7cq8m6d0x3ycsn1f4c2t', messageId: 'msg_01m4rb7cq8m6d0x3ycsn1f4c2s' });
+const aPing = () => aDelivery({ deliveryId: PING_DELIVERY_ID, senderName: 'argo', senderType: 'operator', payload: 'ping', contentType: 'application/vnd.aeolus.ping' });
+const receiving = (...deliveries: unknown[]): StubAnswer => ({ status: 200, body: { deliveries } });
+const acknowledged: StubAnswer = { status: 200, body: {} };
+const busy: StubAnswer = { status: 503, body: { code: 'SERVICE_UNAVAILABLE', message: 'The fleet is busy: nothing was stored. Make the same call again.' } };
+const notInFlight: StubAnswer = { status: 409, body: { code: 'DELIVERY_NOT_IN_FLIGHT', message: 'Delivery is undeliverable, not in flight' } };
+const leaseEnded: StubAnswer = { status: 401, body: { code: 'LEASE_ENDED', message: 'The lease ended' } };
+
+/** A stub fleet whose inbox answers these counts and whose receive hands these deliveries over, one per call. */
+function aWakingFleet(counts: readonly StubAnswer[], receives: readonly StubAnswer[] = [receiving(aDelivery())]): Promise<StubFleet> {
+  return startRoutedStubFleet({ '/api/v1/ship/inbox': counts, '/api/v1/ship/receive': receives, '/api/v1/ship/ack': [acknowledged] });
+}
+
+const inboxCalls = (stub: StubFleet) => stub.calls.filter((call) => call.path === '/api/v1/ship/inbox');
+
 
 /** The session took a prompt: its turn is busy. */
 function aPromptSubmitted(): void {
@@ -343,15 +388,15 @@ describe('aeolus-status: the version, the ship, its fleet and folder, what wakes
 
 describe('aeolus-wait', () => {
   it("asks the inbox check with the crew token, keeps asking while none wait, and exits 0 once some do", async () => {
-    fleet = await startStubFleet([inbox(0), inbox(0), inbox(2)]);
+    fleet = await aWakingFleet([inbox(0), inbox(0), inbox(2)]);
     crew(fleet.url);
     aTurnEnded();
 
     const { status, stdout } = await start('aeolus-wait.sh').exited;
 
     expect(status).toBe(0);
-    expect(stdout).toBe('aeolus: 2 deliveries wait for scout: receive them\n');
-    expect(fleet.calls).toHaveLength(3);
+    expect(stdout).toBe(HANDED_OVER);
+    expect(inboxCalls(fleet)).toHaveLength(3);
     expect(fleet.calls[0]).toEqual({
       method: 'POST',
       path: '/api/v1/ship/inbox',
@@ -366,7 +411,7 @@ describe('aeolus-wait', () => {
     const isLockSeen = new Promise<void>((resolve) => {
       answer = resolve;
     });
-    fleet = await startStubFleet([{ ...inbox(1), hold: isLockSeen }]);
+    fleet = await startStubFleet([{ ...inbox(1), hold: isLockSeen }, receiving(aDelivery())]);
     crew(fleet.url);
     aTurnEnded();
 
@@ -427,6 +472,7 @@ describe('aeolus-wait', () => {
     fleet = await startStubFleet([
       { status: 401, body: { code: 'LEASE_ENDED', message: 'This ship was released' }, hold: held },
       inbox(1),
+      receiving(aDelivery()),
     ]);
     const stub = fleet;
     crew(stub.url);
@@ -436,7 +482,7 @@ describe('aeolus-wait', () => {
     expect(run('aeolus-identity.sh', { args: ['write', stub.url, SHIP_ID, 'scout', 'aeolus_ct_v1_new_crew'] }).status).toBe(0);
     answerLeaseEnded();
 
-    await expect(watcher.exited).resolves.toEqual({ status: 0, stdout: 'aeolus: 1 deliveries wait for scout: receive them\n' });
+    await expect(watcher.exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
     expect(stub.calls[1]?.authorization).toBe('Bearer aeolus_ct_v1_new_crew');
     expect(readFileSync(identityFile(), 'utf8')).toContain('crewToken=aeolus_ct_v1_new_crew\n');
   });
@@ -449,15 +495,15 @@ describe('aeolus-wait', () => {
   });
 
   it('retries a failing fleet quietly, then exits 0 once deliveries wait', async () => {
-    fleet = await startStubFleet([{ status: 500, body: {} }, { status: 503, body: {} }, inbox(1)]);
+    fleet = await startStubFleet([{ status: 500, body: {} }, { status: 503, body: {} }, inbox(1), receiving(aDelivery())]);
     crew(fleet.url);
     aTurnEnded();
 
     await expect(start('aeolus-wait.sh').exited).resolves.toEqual({
       status: 0,
-      stdout: 'aeolus: 1 deliveries wait for scout: receive them\n',
+      stdout: HANDED_OVER,
     });
-    expect(fleet.calls).toHaveLength(3);
+    expect(fleet.calls).toHaveLength(4);
   });
 
   it('exits 2 when the folder crews no ship', () => {
@@ -486,7 +532,7 @@ describe('aeolus-wait', () => {
 
 describe("the watcher's wake rule: one wake per rise in the waiting count, given only when the session is idle", () => {
   it('holds the wake while the session is busy, and gives it once the turn ends', async () => {
-    fleet = await startStubFleet([inbox(1)]);
+    fleet = await aWakingFleet([inbox(1)]);
     const stub = fleet;
     crew(stub.url);
     aPromptSubmitted();
@@ -496,15 +542,15 @@ describe("the watcher's wake rule: one wake per rise in the waiting count, given
       isExited = true;
     });
 
-    await expect.poll(() => stub.calls.length).toBeGreaterThanOrEqual(3);
+    await expect.poll(() => inboxCalls(stub).length).toBeGreaterThanOrEqual(3);
     expect(isExited).toBe(false);
     claudeHook('aeolus-stop.sh', { hook_event_name: 'Stop', stop_hook_active: false });
 
-    await expect(watcher.exited).resolves.toEqual({ status: 0, stdout: 'aeolus: 1 deliveries wait for scout: receive them\n' });
+    await expect(watcher.exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
   });
 
   it('wakes no session that has not ended a turn yet', async () => {
-    fleet = await startStubFleet([inbox(1)]);
+    fleet = await aWakingFleet([inbox(1)]);
     const stub = fleet;
     crew(stub.url);
     const watcher = start('aeolus-wait.sh');
@@ -514,7 +560,7 @@ describe("the watcher's wake rule: one wake per rise in the waiting count, given
     });
 
     try {
-      await expect.poll(() => stub.calls.length).toBeGreaterThanOrEqual(3);
+      await expect.poll(() => inboxCalls(stub).length).toBeGreaterThanOrEqual(3);
       expect(isExited).toBe(false);
     } finally {
       watcher.child.kill();
@@ -530,7 +576,7 @@ describe("the watcher's wake rule: one wake per rise in the waiting count, given
   });
 
   it('marks the turn busy when it wakes the session', async () => {
-    fleet = await startStubFleet([inbox(1)]);
+    fleet = await aWakingFleet([inbox(1)]);
     crew(fleet.url);
     aTurnEnded();
 
@@ -539,40 +585,40 @@ describe("the watcher's wake rule: one wake per rise in the waiting count, given
     expect(turn().stdout).toMatch(/^busy /);
   });
 
-  it('wakes once per rise: started again, it wakes not for the deliveries it already woke for, but for one more', async () => {
+  it('wakes once per rise, for the Codex wake bridge: started again, it wakes not for the deliveries it already woke for, but for one more', async () => {
     fleet = await startStubFleet([inbox(2), inbox(2), inbox(2), inbox(3)]);
     crew(fleet.url);
     aTurnEnded();
-    await start('aeolus-wait.sh').exited;
+    await start('aeolus-wait.sh', { env: WAKE_ONLY }).exited;
     aTurnEnded();
 
-    await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: 'aeolus: 3 deliveries wait for scout: receive them\n' });
+    await expect(start('aeolus-wait.sh', { env: WAKE_ONLY }).exited).resolves.toEqual({ status: 0, stdout: 'aeolus: 3 deliveries wait for scout: receive them\n' });
     expect(fleet.calls).toHaveLength(4);
   });
 
-  it('wakes again once the count rises after the session received what waited', async () => {
+  it('wakes again once the count rises after the session received what waited, for the Codex wake bridge', async () => {
     fleet = await startStubFleet([inbox(2), inbox(0), inbox(1)]);
     crew(fleet.url);
     aTurnEnded();
-    await start('aeolus-wait.sh').exited;
+    await start('aeolus-wait.sh', { env: WAKE_ONLY }).exited;
     aTurnEnded();
 
-    await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: 'aeolus: 1 deliveries wait for scout: receive them\n' });
+    await expect(start('aeolus-wait.sh', { env: WAKE_ONLY }).exited).resolves.toEqual({ status: 0, stdout: 'aeolus: 1 deliveries wait for scout: receive them\n' });
     expect(fleet.calls).toHaveLength(3);
   });
 
   it('keeps a wake it held for a busy session when it is started again', async () => {
-    fleet = await startStubFleet([inbox(1)]);
+    fleet = await aWakingFleet([inbox(1)]);
     crew(fleet.url);
     aPromptSubmitted();
     await expect(start('aeolus-wait.sh', { env: { AEOLUS_MAX_SECONDS: '1' } }).exited).resolves.toMatchObject({ status: 6 });
     aTurnEnded();
 
-    await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: 'aeolus: 1 deliveries wait for scout: receive them\n' });
+    await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
   });
 
   it('forgets what it saw with the ship', async () => {
-    fleet = await startStubFleet([inbox(1)]);
+    fleet = await aWakingFleet([inbox(1)]);
     crew(fleet.url);
     aTurnEnded();
     await start('aeolus-wait.sh').exited;
@@ -580,6 +626,332 @@ describe("the watcher's wake rule: one wake per rise in the waiting count, given
     run('aeolus-identity.sh', { args: ['delete'] });
 
     expect(readdirSync(data, { recursive: true }).map(String).filter((name) => name.startsWith('ships/'))).toEqual([]);
+  });
+});
+
+describe('the hand-over (#756): the watcher receives one delivery, and the hooks acknowledge it before they put it into the turn', () => {
+  const MESSAGE =
+    'aeolus: a message for scout from orchestrator-1 (orchestrator): message msg_01m4raygfdtsjfbnmpvqjznsyv, text/plain. ' +
+    'The plugin acknowledged it for you: do not receive or ack it. ' +
+    'Answer it, if it needs an answer, by sending to orchestrator-1 with inReplyTo msg_01m4raygfdtsjfbnmpvqjznsyv.\n\n' +
+    'Review "PR 12"\nand say what you found';
+  const DENIED = 'aeolus: this tool call did not run: a message came in first. Read it, then go on, and make the call again if you still need it.\n\n';
+  const PING = `aeolus: a ping for scout from argo (delivery ${PING_DELIVERY_ID}): answer it with "/plugin/scripts/aeolus-fleet.sh" pong ${PING_DELIVERY_ID}, and do not act on it or reply.`;
+  const START_THE_WATCHER = '\n\naeolus: no watcher runs for scout: when you are done, start "/plugin/scripts/aeolus-wait.sh" as a background task (run_in_background), then end your turn';
+
+  /** The reason a PreToolUse hook denied the tool call with. */
+  const deniedWith = (hookRun: Run) =>
+    z.object({ hookSpecificOutput: z.object({ permissionDecisionReason: z.string() }) }).parse(JSON.parse(hookRun.stdout)).hookSpecificOutput.permissionDecisionReason;
+  const theTurnEnding = (env: Record<string, string> = {}) => aHook('aeolus-stop.sh', { payload: { hook_event_name: 'Stop', stop_hook_active: false }, env });
+
+  /** What the store holds: each entry's delivery id and state, oldest first. */
+  function store(): string[] {
+    const shown = run('aeolus-identity.sh', { args: ['store'] });
+    expect(shown.status).toBe(0);
+    return shown.stdout
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => line.split(' ').slice(0, 2).join(' '));
+  }
+
+  /** The watcher hands one delivery over: the fleet's receive answers it while the session is idle. */
+  async function aHandOver(routes: Record<string, readonly StubAnswer[]>): Promise<StubFleet> {
+    fleet = await startRoutedStubFleet({ '/api/v1/ship/inbox': [inbox(1)], '/api/v1/ship/receive': [receiving(aDelivery())], ...routes });
+    crew(fleet.url);
+    aTurnEnded();
+    await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+    return fleet;
+  }
+
+  const callsTo = (stub: StubFleet, path: string) => stub.calls.filter((call) => call.path === path);
+
+  describe('the watcher', () => {
+    it('receives one delivery when deliveries wait and the session is idle, keeps it in the store as handed, and says so without its content', async () => {
+      const stub = await aHandOver({});
+
+      expect(callsTo(stub, '/api/v1/ship/receive')).toEqual([
+        { method: 'POST', path: '/api/v1/ship/receive', authorization: `Bearer ${CREW_TOKEN}`, body: '{"max":1}' },
+      ]);
+      expect(store()).toEqual([`${DELIVERY_ID} handed`]);
+    });
+
+    it('hands the next message over whenever one waits while the session is idle, though the count did not rise since the last hand-over', async () => {
+      fleet = await aWakingFleet([inbox(1)], [receiving(aDelivery()), receiving(anotherDelivery())]);
+      crew(fleet.url);
+      aTurnEnded();
+      await start('aeolus-wait.sh').exited;
+      await aMessageTaken();
+
+      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+      expect(store()).toEqual([`${anotherDelivery().deliveryId} handed`]);
+    });
+
+    it('marks the turn busy when it hands a message over, as a wake does', async () => {
+      await aHandOver({});
+
+      expect(turn().stdout).toMatch(/^busy /);
+    });
+
+    it('keeps watching when the receive hands it nothing, as when another ship of its type took the delivery first', async () => {
+      fleet = await startRoutedStubFleet({ '/api/v1/ship/inbox': [inbox(1), inbox(2)], '/api/v1/ship/receive': [receiving(), receiving(aDelivery())] });
+      crew(fleet.url);
+      aTurnEnded();
+
+      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+      expect(callsTo(fleet, '/api/v1/ship/receive')).toHaveLength(2);
+    });
+
+    it('hands a message a failed confirmation left received over again at the next idle, without receiving it again', async () => {
+      const stub = await aHandOver({ '/api/v1/ship/ack': [busy] });
+      await aFirstToolCall();
+      aTurnEnded();
+
+      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+      expect(callsTo(stub, '/api/v1/ship/receive')).toHaveLength(1);
+      expect(store()).toEqual([`${DELIVERY_ID} handed`]);
+    });
+
+    it('exits 3 and forgets the ship and its store on LEASE_ENDED at the receive', async () => {
+      fleet = await startRoutedStubFleet({ '/api/v1/ship/inbox': [inbox(1)], '/api/v1/ship/receive': [leaseEnded] });
+      crew(fleet.url);
+      aTurnEnded();
+
+      await expect(start('aeolus-wait.sh').exited).resolves.toMatchObject({ status: 3 });
+      expect(run('aeolus-identity.sh', { args: ['show'] }).status).toBe(1);
+    });
+  });
+
+  describe('the first tool call of the turn (PreToolUse)', () => {
+    it('acknowledges a handed message first, then denies the tool call with the message as its reason, so the model reads it before it acts', async () => {
+      const stub = await aHandOver({ '/api/v1/ship/ack': [acknowledged] });
+
+      const { status, stdout } = await aFirstToolCall();
+
+      expect(status).toBe(0);
+      expect(callsTo(stub, '/api/v1/ship/ack')).toEqual([
+        { method: 'POST', path: '/api/v1/ship/ack', authorization: `Bearer ${CREW_TOKEN}`, body: `{"deliveryId":"${DELIVERY_ID}"}` },
+      ]);
+      expect(JSON.parse(stdout)).toEqual({
+        hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: DENIED + MESSAGE },
+      });
+      expect(store()).toEqual([`${DELIVERY_ID} confirmed`]);
+    });
+
+    it('names the message it answers, when it is a reply', async () => {
+      fleet = await startRoutedStubFleet({
+        '/api/v1/ship/inbox': [inbox(1)],
+        '/api/v1/ship/receive': [receiving(aDelivery({ inReplyTo: 'msg_01m4r9zzzzzzzzzzzzzzzzzzzz' }))],
+        '/api/v1/ship/ack': [acknowledged],
+      });
+      crew(fleet.url);
+      aTurnEnded();
+      await start('aeolus-wait.sh').exited;
+
+      const reason = deniedWith(await aFirstToolCall());
+
+      expect(reason).toContain('message msg_01m4raygfdtsjfbnmpvqjznsyv, text/plain, in reply to msg_01m4r9zzzzzzzzzzzzzzzzzzzz.');
+    });
+
+    it('says nothing and lets the tool call run when nothing is handed', async () => {
+      fleet = await startRoutedStubFleet({});
+      crew(fleet.url);
+
+      expect(await aFirstToolCall()).toEqual({ status: 0, stdout: '', stderr: '' });
+      expect(fleet.calls).toEqual([]);
+    });
+
+    it('lets the second tool call run: a confirmed message is put into the turn once', async () => {
+      await aHandOver({ '/api/v1/ship/ack': [acknowledged] });
+      await aFirstToolCall();
+
+      expect((await aFirstToolCall()).stdout).toBe('');
+    });
+
+    it('lets the tool call run and shows nothing while the fleet stays busy, and keeps the message received for the next hand-over', async () => {
+      const stub = await aHandOver({ '/api/v1/ship/ack': [busy] });
+
+      expect((await aFirstToolCall()).stdout).toBe('');
+      expect(callsTo(stub, '/api/v1/ship/ack')).toHaveLength(5);
+      expect(store()).toEqual([`${DELIVERY_ID} received`]);
+    });
+
+    it('gives an acknowledgement up after the time it is bounded to, and keeps the message received', async () => {
+      await aHandOver({ '/api/v1/ship/ack': [{ status: 200, body: {}, hold: new Promise(() => undefined) }] });
+      const before = Date.now();
+
+      expect((await aFirstToolCall({ AEOLUS_CONFIRM_SECONDS: '1' })).stdout).toBe('');
+      expect(Date.now() - before).toBeLessThan(5_000);
+      expect(store()).toEqual([`${DELIVERY_ID} received`]);
+    });
+
+    it('bounds each acknowledgement to 3 seconds unless told otherwise, so the retries end inside a hook\'s time', () => {
+      expect(readFileSync(join(SCRIPTS, 'aeolus-lib.sh'), 'utf8')).toContain('AEOLUS_CONFIRM_SECONDS:-3}');
+    });
+
+    it('drops a message the fleet no longer holds in flight, and shows nothing', async () => {
+      await aHandOver({ '/api/v1/ship/ack': [notInFlight] });
+
+      expect((await aFirstToolCall()).stdout).toBe('');
+      expect(store()).toEqual([]);
+    });
+
+    it('drops the store with the ship on LEASE_ENDED, and shows nothing', async () => {
+      await aHandOver({ '/api/v1/ship/ack': [leaseEnded] });
+
+      expect((await aFirstToolCall()).stdout).toBe('');
+      expect(run('aeolus-identity.sh', { args: ['show'] }).status).toBe(1);
+      expect(readdirSync(dirname(identityFile()))).toEqual([]);
+    });
+
+    it('puts a message over 10,000 characters in as its first part and the path of a file that holds the whole payload', async () => {
+      const payload = `${'x'.repeat(9_000)}${'é'.repeat(3_000)}`;
+      fleet = await startRoutedStubFleet({
+        '/api/v1/ship/inbox': [inbox(1)],
+        '/api/v1/ship/receive': [receiving(aDelivery({ payload }))],
+        '/api/v1/ship/ack': [acknowledged],
+      });
+      crew(fleet.url);
+      aTurnEnded();
+      await start('aeolus-wait.sh').exited;
+
+      const reason = deniedWith(await aFirstToolCall());
+      const file = /the whole payload is in (.+)\.$/.exec(reason)?.[1] ?? '';
+
+      expect(Buffer.byteLength(reason)).toBeLessThanOrEqual(10_000);
+      expect(reason).toContain(`\n\n${'x'.repeat(8_000)}`);
+      expect(readFileSync(file, 'utf8')).toBe(payload);
+    });
+
+    it('puts a message of 10,000 characters with its heading in whole', async () => {
+      const heading = DENIED.length + MESSAGE.length - 'Review "PR 12"\nand say what you found'.length;
+      const payload = 'y'.repeat(10_000 - heading);
+      fleet = await startRoutedStubFleet({
+        '/api/v1/ship/inbox': [inbox(1)],
+        '/api/v1/ship/receive': [receiving(aDelivery({ payload }))],
+        '/api/v1/ship/ack': [acknowledged],
+      });
+      crew(fleet.url);
+      aTurnEnded();
+      await start('aeolus-wait.sh').exited;
+
+      const reason = deniedWith(await aFirstToolCall());
+
+      expect(reason).toHaveLength(10_000);
+      expect(reason.endsWith(payload)).toBe(true);
+    });
+
+    it('hands a ping over without acknowledging it, asking for pong, so the pong proves the model read it', async () => {
+      fleet = await startRoutedStubFleet({ '/api/v1/ship/inbox': [inbox(1)], '/api/v1/ship/receive': [receiving(aPing())] });
+      crew(fleet.url);
+      aTurnEnded();
+      await start('aeolus-wait.sh').exited;
+
+      const reason = deniedWith(await aFirstToolCall());
+
+      expect(reason).toBe(DENIED + PING);
+      expect(callsTo(fleet, '/api/v1/ship/ack')).toEqual([]);
+    });
+  });
+
+  describe('the end of the turn (Stop)', () => {
+    it('acknowledges a message still handed when the turn ends without a tool call, and keeps the turn open with it, asking for the watcher', async () => {
+      await aHandOver({ '/api/v1/ship/ack': [acknowledged] });
+
+      expect(JSON.parse((await theTurnEnding()).stdout)).toEqual({ decision: 'block', reason: MESSAGE + START_THE_WATCHER });
+      expect(store()).toEqual([`${DELIVERY_ID} confirmed`]);
+      expect(turn().stdout).toMatch(/^busy /);
+    });
+
+    it('asks for no watcher with the message while one runs', async () => {
+      await aHandOver({ '/api/v1/ship/ack': [acknowledged] });
+      const watcher = aRunningWatcher();
+
+      try {
+        expect(JSON.parse((await theTurnEnding()).stdout)).toEqual({ decision: 'block', reason: MESSAGE });
+      } finally {
+        watcher.kill();
+      }
+    });
+
+    it('ends a confirmed message as handled once it lets the turn end', async () => {
+      await aHandOver({ '/api/v1/ship/ack': [acknowledged] });
+      await aFirstToolCall();
+      const watcher = aRunningWatcher();
+
+      try {
+        expect((await theTurnEnding()).stdout).toBe('');
+        expect(store()).toEqual([]);
+        expect(turn().stdout).toMatch(/^idle /);
+      } finally {
+        watcher.kill();
+      }
+    });
+
+    it('keeps a confirmed message while it keeps the turn open to ask for the watcher', async () => {
+      await aHandOver({ '/api/v1/ship/ack': [acknowledged] });
+      await aFirstToolCall();
+
+      expect(JSON.parse((await theTurnEnding()).stdout)).toMatchObject({ decision: 'block' });
+      expect(store()).toEqual([`${DELIVERY_ID} confirmed`]);
+    });
+
+    it('removes the file of a long payload with its message once it is handled', async () => {
+      fleet = await startRoutedStubFleet({
+        '/api/v1/ship/inbox': [inbox(1)],
+        '/api/v1/ship/receive': [receiving(aDelivery({ payload: 'z'.repeat(12_000) }))],
+        '/api/v1/ship/ack': [acknowledged],
+      });
+      crew(fleet.url);
+      aTurnEnded();
+      await start('aeolus-wait.sh').exited;
+      const reason = deniedWith(await aFirstToolCall());
+      const file = /the whole payload is in (.+)\.$/.exec(reason)?.[1] ?? '';
+
+      aTurnEnded();
+
+      expect(statSync(file, { throwIfNoEntry: false })).toBeUndefined();
+    });
+
+    it('ends a ping answered with pong as handled at the turn end', async () => {
+      fleet = await startRoutedStubFleet({ '/api/v1/ship/inbox': [inbox(1)], '/api/v1/ship/receive': [receiving(aPing())], '/api/v1/ship/pong': [acknowledged] });
+      crew(fleet.url);
+      aTurnEnded();
+      await start('aeolus-wait.sh').exited;
+      await aFirstToolCall();
+      expect((await start('aeolus-fleet.sh', { args: ['pong', PING_DELIVERY_ID] }).done).status).toBe(0);
+
+      aTurnEnded();
+
+      expect(store()).toEqual([]);
+    });
+
+    it('takes a ping not answered with pong back to received at the turn end, to be handed again', async () => {
+      fleet = await startRoutedStubFleet({ '/api/v1/ship/inbox': [inbox(1)], '/api/v1/ship/receive': [receiving(aPing())] });
+      crew(fleet.url);
+      aTurnEnded();
+      await start('aeolus-wait.sh').exited;
+      await aFirstToolCall();
+
+      aTurnEnded();
+
+      expect(store()).toEqual([`${PING_DELIVERY_ID} received`]);
+    });
+
+    it('acknowledges in a folder a trierarch crews too, for a line that landed mid-turn', async () => {
+      await aHandOver({ '/api/v1/ship/ack': [acknowledged] });
+      const text = readFileSync(identityFile(), 'utf8');
+      writeFileSync(identityFile(), `${text}wakeBy=trierarch\n`);
+
+      expect(JSON.parse((await theTurnEnding()).stdout)).toEqual({ decision: 'block', reason: MESSAGE });
+    });
+  });
+
+  it('forgets the store with the ship', async () => {
+    await aHandOver({});
+
+    run('aeolus-identity.sh', { args: ['delete'] });
+
+    expect(readdirSync(dirname(identityFile()))).toEqual([]);
   });
 });
 
@@ -981,6 +1353,22 @@ function claudeHook(script: string, payload: Record<string, unknown>) {
   });
 }
 
+/** Runs a hook as Claude Code does, with the test's own variables over it. */
+function aHook(script: string, { payload, env = {} }: { payload: Record<string, unknown>; env?: Record<string, string> }): Promise<Run> {
+  return start(script, {
+    stdin: JSON.stringify({ session_id: 'c5858406-be86-46cd-8591-f4fb39b1fa61', cwd: folder, ...payload }),
+    env: { AEOLUS_FOLDER: '', AEOLUS_DATA: '', CLAUDE_PROJECT_DIR: folder, CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin', ...NO_WAITS, ...env },
+  }).done;
+}
+
+const aFirstToolCall = (env: Record<string, string> = {}) =>
+  aHook('aeolus-handover.sh', { payload: { hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: { file_path: '/tmp/x' } }, env });
+/** The session takes a handed message at its first tool call, and its turn ends: the message is handled. */
+async function aMessageTaken(): Promise<void> {
+  await aFirstToolCall();
+  aTurnEnded();
+}
+
 describe('the watcher guard (PreToolUse on Bash)', () => {
   const startingTheWatcher = {
     hook_event_name: 'PreToolUse',
@@ -1095,7 +1483,7 @@ describe('the Stop hook', () => {
   });
 
   it('asks for the watcher again once a watcher reached the fleet with the crew token', async () => {
-    fleet = await startStubFleet([{ status: 401, body: { code: 'UNAUTHORIZED', message: 'Call with the crew token' } }, inbox(1)]);
+    fleet = await startStubFleet([{ status: 401, body: { code: 'UNAUTHORIZED', message: 'Call with the crew token' } }, inbox(1), receiving(aDelivery())]);
     crew(fleet.url);
     aTurnEnded();
     await start('aeolus-wait.sh').exited;
@@ -1541,7 +1929,7 @@ describe("the plugin's log: what the watcher and hooks do, one record per line i
   const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
   it("writes each record as the trierarch's log does: when, the ship, the action and its outcome", async () => {
-    fleet = await startStubFleet([inbox(2)]);
+    fleet = await startStubFleet([inbox(2), receiving(aDelivery())]);
     crew(fleet.url);
     aTurnEnded();
 
@@ -1556,7 +1944,7 @@ describe("the plugin's log: what the watcher and hooks do, one record per line i
   });
 
   it('logs the watcher starting and the wake it gives', async () => {
-    fleet = await startStubFleet([inbox(0), inbox(2)]);
+    fleet = await startStubFleet([inbox(0), inbox(2), receiving(aDelivery())]);
     crew(fleet.url);
     aTurnEnded();
 
@@ -1564,7 +1952,7 @@ describe("the plugin's log: what the watcher and hooks do, one record per line i
 
     expect(actions().slice(1)).toEqual([
       { ...scout, action: 'watch', outcome: 'started' },
-      { ...scout, action: 'wake', outcome: 'woken, 2 deliveries wait' },
+      { ...scout, action: 'wake', outcome: `woken, 2 deliveries wait: handed ${DELIVERY_ID} over` },
     ]);
   });
 
@@ -1622,7 +2010,7 @@ describe("the plugin's log: what the watcher and hooks do, one record per line i
   });
 
   it('logs a failing fleet once, not every retry, and when it answers again', async () => {
-    fleet = await startStubFleet([{ status: 500, body: {} }, { status: 503, body: {} }, inbox(0), inbox(1)]);
+    fleet = await startStubFleet([{ status: 500, body: {} }, { status: 503, body: {} }, inbox(0), inbox(1), receiving(aDelivery())]);
     crew(fleet.url);
     aTurnEnded();
 

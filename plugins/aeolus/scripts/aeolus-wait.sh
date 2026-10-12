@@ -8,8 +8,16 @@
 # when the turn marker says the session is idle, and nothing more until the
 # count rises again.
 #
+# In Claude Code the wake hands one message over (#756), whenever deliveries
+# wait while the session is idle, rise or not: the watcher receives
+# one delivery, keeps it in the folder's store as handed, and exits saying so,
+# without its content. The hooks acknowledge it, then put it into the turn. A
+# message the store still holds unconfirmed while the session is idle is
+# handed over again at once, without a receive. The Codex wake bridge runs it
+# with AEOLUS_WAKE_ONLY=1: it wakes the task, which receives for itself.
+#
 # Exit codes:
-#   0  deliveries wait: receive them
+#   0  a message is handed over (Claude Code), or deliveries wait: receive them
 #   2  this folder crews no ship
 #   3  LEASE_ENDED: the operator released the ship, and the plugin forgot it
 #   4  a watcher already runs for this ship
@@ -52,90 +60,66 @@ aeolus_log "$identity" watch started
 fleet_url="$(aeolus_identity_field "$identity_text" fleetUrl)"
 ship_name="$(aeolus_identity_field "$identity_text" shipName)"
 crew_token="$(aeolus_identity_field "$identity_text" crewToken)"
+# The Codex wake bridge runs the watcher to wake its task, which receives for itself.
+is_handing_over=1
+[ "${AEOLUS_WAKE_ONLY:-}" != 1 ] || is_handing_over=0
+
+# Hands a store entry over: it is the session's to confirm, its turn starts.
+# <deliveryId> <what the log says>.
+hand_over() {
+  aeolus_store_mark "$1" handed
+  aeolus_mark_turn busy
+  aeolus_log "$identity" wake "$2"
+  echo "aeolus: a message for ${ship_name} is handed to this session: it reaches you at your next tool call, or when you end your turn. Do not receive or ack it."
+  exit 0
+}
+
+# One call to the fleet with the crew token: <path> <body> <seconds>. Sets
+# status and body.
+call() {
+  local answer
+  answer="$(aeolus_bearer_config "$crew_token" | curl -K - -sS --max-time "$3" -w '\n%{http_code}' -X POST "${fleet_url}$1" \
+    -H 'content-type: application/json' \
+    -d "$2" 2>/dev/null)"
+  status="$(printf '%s' "$answer" | tail -n 1)"
+  body="$(printf '%s' "$answer" | sed '$d')"
+}
+
 delay="$RETRY_SECONDS"
 # Whether the last call failed: a failing fleet is logged once, not every retry.
 is_failing=0
 RETRY_NEXT='retries, a little later each time'
 
-while :; do
-  left=$((MAX_SECONDS - SECONDS))
-  if [ "$left" -le 0 ]; then
-    aeolus_log "$identity" watch 'stopped after almost 2 hours; the session starts it again'
-    echo "aeolus: watched ${ship_name} for almost 2 hours, the most a background task runs: start the watcher again"
-    exit 6
-  fi
-  wait_now="$WAIT_SECONDS"
-  [ "$wait_now" -le "$left" ] || wait_now="$left"
-  answer="$(aeolus_bearer_config "$crew_token" | curl -K - -sS --max-time $((wait_now + 15)) -w '\n%{http_code}' -X POST "${fleet_url}/api/v1/ship/inbox" \
-    -H 'content-type: application/json' \
-    -d "{\"waitSeconds\":${wait_now}}" 2>/dev/null)"
-  status="$(printf '%s' "$answer" | tail -n 1)"
-  body="$(printf '%s' "$answer" | sed '$d')"
+# A call the fleet did not answer with OK. A refused crew token exits 5, and
+# LEASE_ENDED for the file's own crew token forgets the ship and exits 3; for
+# another, the folder was crewed again while it watched, and it watches on with
+# the new crew token. Anything else is a failure: it waits, a little longer each
+# time, and the watcher tries again.
+on_refusal() {
+  local current
   case "$status" in
-    200)
-      rm -f "$refused_file"
-      delay="$RETRY_SECONDS"
-      if [ "$is_failing" = 1 ]; then
-        aeolus_log "$identity" watch 'the fleet answers again'
-        is_failing=0
-      fi
-      waiting="$(printf '%s' "$body" | sed -n 's/.*"waiting"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
-      [ -n "$waiting" ] || waiting=0
-      seen=0
-      is_owed=0
-      { read -r seen is_owed < "$waiting_file"; } 2>/dev/null
-      was_owed="$is_owed"
-      if [ "$waiting" -eq 0 ]; then
-        is_owed=0
-      elif [ "$waiting" -gt "${seen:-0}" ]; then
-        is_owed=1
-      fi
-      if [ "$is_owed" = 1 ] && aeolus_is_idle; then
-        printf '%s 0\n' "$waiting" > "$waiting_file"
-        # The wake starts a turn, as a prompt does.
-        aeolus_mark_turn busy
-        aeolus_log "$identity" wake "woken, ${waiting} deliveries wait"
-        echo "aeolus: ${waiting} deliveries wait for ${ship_name}: receive them"
-        exit 0
-      fi
-      if [ "$is_owed" = 1 ] && { [ "$was_owed" != 1 ] || [ "$waiting" != "${seen:-0}" ]; }; then
-        aeolus_log "$identity" wake "held, ${waiting} deliveries wait while the session is busy"
-      fi
-      printf '%s %s\n' "$waiting" "$is_owed" > "$waiting_file"
-      [ "$waiting" -eq 0 ] || sleep "$POLL_SECONDS"
-      continue
-      ;;
     401)
       if printf '%s' "$body" | grep -q 'LEASE_ENDED'; then
-        # Crewed again while it watched: watch on with the new crew token.
         current="$(aeolus_identity_token "$identity")"
         if [ -n "$current" ] && [ "$current" != "$crew_token" ]; then
           fleet_url="$(aeolus_identity_get "$identity" fleetUrl)"
           ship_name="$(aeolus_identity_get "$identity" shipName)"
           crew_token="$current"
-          continue
+          return 0
         fi
-        # The lease of the file's own crew token ended: forget the ship. The pid
-        # file goes first, so forgetting does not stop this watcher mid-sentence.
+        # The pid file goes first, so forgetting does not stop this watcher mid-sentence.
         rm -f "$pid_file"
         aeolus_log "$identity" release 'released by the operator; the plugin forgot it'
         [ -n "$current" ] && "$(dirname "$0")/aeolus-identity.sh" delete >/dev/null
         echo "aeolus: LEASE_ENDED: the operator released ${ship_name}; this session no longer crews it, and the plugin forgot it"
         exit 3
       fi
-      : > "$refused_file"
-      aeolus_log "$identity" watch 'failed: the fleet refused the crew token' 'no watcher is asked for until one reaches the fleet with the crew token'
-      echo "aeolus: the fleet refused the crew token of ${ship_name}"
-      exit 5
+      refused_token
       ;;
     403)
-      : > "$refused_file"
-      aeolus_log "$identity" watch 'failed: the fleet refused the crew token' 'no watcher is asked for until one reaches the fleet with the crew token'
-      echo "aeolus: the fleet refused the crew token of ${ship_name}"
-      exit 5
+      refused_token
       ;;
   esac
-  # No answer, or a server failure: try again quietly, a little later each time.
   if [ "$is_failing" = 0 ]; then
     case "$status" in
       ''|000) aeolus_log "$identity" watch 'failed: no answer from the fleet' "$RETRY_NEXT" ;;
@@ -146,4 +130,80 @@ while :; do
   sleep "$delay"
   delay=$((delay * 2))
   [ "$delay" -le "$RETRY_MAX_SECONDS" ] || delay="$RETRY_MAX_SECONDS"
+}
+
+refused_token() {
+  : > "$refused_file"
+  aeolus_log "$identity" watch 'failed: the fleet refused the crew token' 'no watcher is asked for until one reaches the fleet with the crew token'
+  echo "aeolus: the fleet refused the crew token of ${ship_name}"
+  exit 5
+}
+
+# The fleet answered: the crew token holds again.
+answered() {
+  rm -f "$refused_file"
+  delay="$RETRY_SECONDS"
+  if [ "$is_failing" = 1 ]; then
+    aeolus_log "$identity" watch 'the fleet answers again'
+    is_failing=0
+  fi
+}
+
+while :; do
+  left=$((MAX_SECONDS - SECONDS))
+  if [ "$left" -le 0 ]; then
+    aeolus_log "$identity" watch 'stopped after almost 2 hours; the session starts it again'
+    echo "aeolus: watched ${ship_name} for almost 2 hours, the most a background task runs: start the watcher again"
+    exit 6
+  fi
+  if [ "$is_handing_over" = 1 ] && aeolus_is_idle && id="$(aeolus_store_first received handed)"; then
+    hand_over "$id" "handed ${id} over again: it was not confirmed"
+  fi
+  wait_now="$WAIT_SECONDS"
+  [ "$wait_now" -le "$left" ] || wait_now="$left"
+  call /api/v1/ship/inbox "{\"waitSeconds\":${wait_now}}" $((wait_now + 15))
+  if [ "$status" != 200 ]; then
+    on_refusal
+    continue
+  fi
+  answered
+  waiting="$(printf '%s' "$body" | sed -n 's/.*"waiting"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
+  [ -n "$waiting" ] || waiting=0
+  seen=0
+  is_owed=0
+  { read -r seen is_owed < "$waiting_file"; } 2>/dev/null
+  was_owed="$is_owed"
+  # A hand-over is owed whenever deliveries wait: each is handed over on its
+  # own, and a drop to none and a rise again may fall within one inbox wait.
+  if [ "$waiting" -eq 0 ]; then
+    is_owed=0
+  elif [ "$is_handing_over" = 1 ] || [ "$waiting" -gt "${seen:-0}" ]; then
+    is_owed=1
+  fi
+  if [ "$is_owed" = 1 ] && aeolus_is_idle; then
+    printf '%s 0\n' "$waiting" > "$waiting_file"
+    if [ "$is_handing_over" = 0 ]; then
+      # The wake starts a turn, as a prompt does.
+      aeolus_mark_turn busy
+      aeolus_log "$identity" wake "woken, ${waiting} deliveries wait"
+      echo "aeolus: ${waiting} deliveries wait for ${ship_name}: receive them"
+      exit 0
+    fi
+    # Deliveries wait, so the receive answers at once.
+    call /api/v1/ship/receive '{"max":1}' $((WAIT_SECONDS + 15))
+    if [ "$status" != 200 ]; then
+      on_refusal
+      continue
+    fi
+    answered
+    id="$(aeolus_store_put "$(printf '%s' "$body" | tr -d '\n')")" && hand_over "$id" "woken, ${waiting} deliveries wait: handed ${id} over"
+    # Nothing handed, as when another ship of its type took the delivery first.
+    aeolus_log "$identity" wake "woken, ${waiting} deliveries wait: the receive handed nothing over"
+    continue
+  fi
+  if [ "$is_owed" = 1 ] && { [ "$was_owed" != 1 ] || [ "$waiting" != "${seen:-0}" ]; }; then
+    aeolus_log "$identity" wake "held, ${waiting} deliveries wait while the session is busy"
+  fi
+  printf '%s %s\n' "$waiting" "$is_owed" > "$waiting_file"
+  [ "$waiting" -eq 0 ] || sleep "$POLL_SECONDS"
 done

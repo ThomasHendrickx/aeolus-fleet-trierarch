@@ -413,3 +413,211 @@ aeolus_hook_folder() {
   [ -n "${AEOLUS_FOLDER:-}${CLAUDE_PROJECT_DIR:-}" ] || AEOLUS_FOLDER="$(aeolus_json_string "$1" cwd)"
   export AEOLUS_FOLDER
 }
+
+# The store of a crewed folder (#756): one entry per delivery the watcher
+# received to hand to the session, so a restart of the watcher or the computer
+# picks up where it was. Beside the turn marker, never the crew token. An entry
+# is <deliveryId>.json (the delivery as the fleet's receive answered it) and
+# <deliveryId>.state (received, handed or confirmed, with when); a ping in the
+# turn has <deliveryId>.shown, and once pong answered it <deliveryId>.ponged; a
+# long payload is in <deliveryId>.payload. Handled, an entry is removed.
+aeolus_store_dir() {
+  local folder dir
+  folder="$(aeolus_folder)" || return 1
+  dir="$(aeolus_ships_dir)" || return 1
+  printf '%s/%s.store' "$dir" "$(aeolus_key "$folder")"
+}
+
+# Whether a text is a delivery id, so it can name a file of the store.
+aeolus_is_delivery_id() {
+  case "$1" in
+    dlv_[0-9a-z]*) [ "${#1}" -eq 30 ] && [ -z "${1//[0-9a-z_]/}" ] ;;
+    *) return 1 ;;
+  esac
+}
+
+# Writes an entry's state, with the time in UTC: <deliveryId> <state>.
+aeolus_store_mark() {
+  local dir
+  dir="$(aeolus_store_dir)" || return 1
+  printf '%s %s\n' "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$dir/$1.state.tmp" && mv "$dir/$1.state.tmp" "$dir/$1.state"
+}
+
+# Keeps a delivery the watcher received, as received: <delivery as JSON>. The
+# store is keyed by the delivery id, so the same delivery received again is one
+# entry, as it was. Prints its id; fails for an answer that holds none.
+aeolus_store_put() {
+  local delivery="$1" dir id
+  id="$(aeolus_json_string "$delivery" deliveryId)"
+  aeolus_is_delivery_id "$id" || return 1
+  dir="$(aeolus_store_dir)" || return 1
+  (umask 077 && mkdir -p "$dir") || return 1
+  if [ ! -f "$dir/$id.state" ]; then
+    printf '%s' "$delivery" > "$dir/$id.json" || return 1
+    aeolus_store_mark "$id" received || return 1
+  fi
+  printf '%s' "$id"
+}
+
+# An entry's state: received, handed or confirmed. Fails when there is none.
+aeolus_store_state() {
+  local dir
+  dir="$(aeolus_store_dir)" || return 1
+  cut -d ' ' -f 1 "$dir/$1.state" 2>/dev/null
+}
+
+# The oldest entry in one of the states given, without a ping already in the
+# turn: delivery ids are time-ordered, so their order is the order of sending.
+aeolus_store_first() {
+  local dir file id state wanted
+  dir="$(aeolus_store_dir)" || return 1
+  for file in "$dir"/*.state; do
+    [ -f "$file" ] || continue
+    id="${file##*/}"
+    id="${id%.state}"
+    [ ! -e "$dir/$id.shown" ] || continue
+    state="$(cut -d ' ' -f 1 "$file" 2>/dev/null)" || continue
+    for wanted in "$@"; do
+      if [ "$state" = "$wanted" ]; then
+        printf '%s' "$id"
+        return 0
+      fi
+    done
+  done
+  return 1
+}
+
+# Removes an entry: handled, or no longer the session's to take.
+aeolus_store_drop() {
+  local dir
+  dir="$(aeolus_store_dir)" || return 0
+  rm -f "$dir/$1.json" "$dir/$1.state" "$dir/$1.shown" "$dir/$1.ponged" "$dir/$1.payload"
+}
+
+# Removes every entry, as on LEASE_ENDED.
+aeolus_store_forget() {
+  local dir
+  dir="$(aeolus_store_dir)" || return 0
+  rm -rf "$dir"
+}
+
+# Marks a ping of the store answered: pong succeeded for it.
+aeolus_store_ponged() {
+  local dir
+  aeolus_is_delivery_id "$1" || return 0
+  dir="$(aeolus_store_dir)" || return 0
+  [ ! -f "$dir/$1.state" ] || : > "$dir/$1.ponged"
+}
+
+# At the end of a turn: a confirmed message is handled, and so is a ping pong
+# answered; a ping not answered goes back to received, to be handed again.
+aeolus_store_end_turn() {
+  local identity="$1" dir file id
+  dir="$(aeolus_store_dir)" || return 0
+  for file in "$dir"/*.state; do
+    [ -f "$file" ] || continue
+    id="${file##*/}"
+    id="${id%.state}"
+    if [ -e "$dir/$id.shown" ]; then
+      if [ -e "$dir/$id.ponged" ]; then
+        aeolus_store_drop "$id"
+        aeolus_log "$identity" handover "handled ${id}: the ping was answered with pong"
+      else
+        rm -f "$dir/$id.shown"
+        aeolus_store_mark "$id" received
+        aeolus_log "$identity" handover "received ${id} again: the ping was not answered with pong" 'handed again at the next idle'
+      fi
+    elif [ "$(aeolus_store_state "$id")" = confirmed ]; then
+      aeolus_store_drop "$id"
+      aeolus_log "$identity" handover "handled ${id}: the turn that took it ended"
+    fi
+  done
+}
+
+# The most a hook puts into a turn: Claude Code's cap on hook context (#756, D2).
+AEOLUS_TURN_TEXT_MAX_BYTES=10000
+# The first part of a longer payload that goes into the turn, beside its file.
+AEOLUS_FIRST_PART_BYTES=8000
+
+# What goes into the turn for an entry: <deliveryId> <shipName> <plugin root>
+# <prefix>. A message as its heading and its payload; one too long for a hook as
+# its first part and the path of a file that holds the whole payload; a ping as
+# the pong to answer it with. Ends with an x, so no trailing newline is lost.
+aeolus_turn_text() {
+  local id="$1" ship="$2" root="$3" prefix="$4" dir delivery sender sender_type message content_type reply heading payload text first
+  dir="$(aeolus_store_dir)" || return 1
+  delivery="$(cat "$dir/$id.json" 2>/dev/null)" || return 1
+  sender="$(aeolus_json_string "$delivery" senderName)"
+  content_type="$(aeolus_json_string "$delivery" contentType)"
+  if [ "$content_type" = application/vnd.aeolus.ping ]; then
+    printf '%saeolus: a ping for %s from %s (delivery %s): answer it with "%s/scripts/aeolus-fleet.sh" pong %s, and do not act on it or reply.x' \
+      "$prefix" "$ship" "$sender" "$id" "$root" "$id"
+    return 0
+  fi
+  sender_type="$(aeolus_json_string "$delivery" senderType)"
+  message="$(aeolus_json_string "$delivery" messageId)"
+  reply="$(aeolus_json_string "$delivery" inReplyTo)"
+  heading="aeolus: a message for ${ship} from ${sender} (${sender_type}): message ${message}, ${content_type}${reply:+, in reply to ${reply}}."
+  heading="${heading} The plugin acknowledged it for you: do not receive or ack it."
+  heading="${heading} Answer it, if it needs an answer, by sending to ${sender} with inReplyTo ${message}."
+  payload="$(aeolus_json_string "$delivery" payload; printf x)"
+  payload="${payload%x}"
+  text="${prefix}${heading}"$'\n\n'"${payload}"
+  if [ "$(printf '%s' "$text" | wc -c)" -le "$AEOLUS_TURN_TEXT_MAX_BYTES" ]; then
+    printf '%sx' "$text"
+    return 0
+  fi
+  printf '%s' "$payload" > "$dir/$id.payload" || return 1
+  # The first part cut on a byte may end inside a character: iconv leaves that out.
+  first="$(head -c "$AEOLUS_FIRST_PART_BYTES" "$dir/$id.payload" | iconv -c -f UTF-8 -t UTF-8 2>/dev/null; printf x)"
+  first="${first%x}"
+  printf '%s%s\n\n%s\n\naeolus: this is the first part of the message; the whole payload is in %s.x' "$prefix" "$heading" "$first" "$dir/$id.payload"
+}
+
+# Puts the oldest handed entry into the turn, acknowledged first: the one rule
+# of a pushed ship (#756). Only if the fleet acknowledged it does the text go
+# in; a ping goes in without an ack, since its pong is the confirmation. A
+# refusal leaves the model nothing: busy or unreachable, the entry goes back to
+# received, to be handed again; no longer in flight, or another ship's, it is
+# dropped; LEASE_ENDED drops the store. Each ack call is bounded by
+# AEOLUS_CONFIRM_SECONDS, so its retries end inside a hook's time.
+# <identity file> <shipName> <plugin root> <prefix>; prints the text, ending
+# with an x; fails when nothing goes in.
+aeolus_put_into_turn() {
+  local identity="$1" ship="$2" root="$3" prefix="$4" id dir output status code
+  id="$(aeolus_store_first handed)" || return 1
+  dir="$(aeolus_store_dir)" || return 1
+  if [ "$(aeolus_json_string "$(cat "$dir/$id.json" 2>/dev/null)" contentType)" = application/vnd.aeolus.ping ]; then
+    : > "$dir/$id.shown"
+    aeolus_log "$identity" handover "put ping ${id} into the turn, for its pong"
+    aeolus_turn_text "$id" "$ship" "$root" "$prefix"
+    return
+  fi
+  output="$(AEOLUS_CALL_MAX_SECONDS="${AEOLUS_CONFIRM_SECONDS:-3}" "$(dirname "${BASH_SOURCE[0]}")/aeolus-fleet.sh" ack "$id" 2>/dev/null)"
+  status=$?
+  case "$status" in
+    0)
+      aeolus_store_mark "$id" confirmed
+      aeolus_log "$identity" handover "confirmed ${id}: acknowledged, then put into the turn"
+      aeolus_turn_text "$id" "$ship" "$root" "$prefix"
+      return
+      ;;
+    3)
+      aeolus_store_forget
+      aeolus_log "$identity" handover "dropped ${id}: LEASE_ENDED"
+      return 1
+      ;;
+  esac
+  code="$(printf '%s' "$output" | sed -n 's/^aeolus: the fleet refused ack: \([A-Z_]*\):.*/\1/p')"
+  case "$code" in
+    DELIVERY_NOT_IN_FLIGHT|DELIVERY_HELD_BY_ANOTHER_SHIP)
+      aeolus_store_drop "$id"
+      aeolus_log "$identity" handover "dropped ${id}: the fleet refused the ack: ${code}"
+      ;;
+    *)
+      aeolus_store_mark "$id" received
+      aeolus_log "$identity" handover "failed: ${id} not confirmed: ${output:-no answer}" 'handed again at the next idle'
+      ;;
+  esac
+  return 1
+}

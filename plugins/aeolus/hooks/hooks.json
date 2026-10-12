@@ -35,6 +35,15 @@
     ],
     "PreToolUse": [
       {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/aeolus-handover.sh\"",
+            "commandWindows": "bash \"%PLUGIN_ROOT%\\scripts\\aeolus-handover.sh\""
+          }
+        ]
+      },
+      {
         "matcher": "^Bash$",
         "hooks": [
           {
