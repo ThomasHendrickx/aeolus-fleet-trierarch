@@ -120,16 +120,16 @@ describe('Claude Code as a harness', () => {
     mkdirSync(join(data, 'ships'));
     writeFileSync(join(data, 'ships', `${createHash('sha256').update(folder).digest('hex').slice(0, 32)}.identity`), `shipId=${shipId}\ncrewToken=aeolus_ct_v1_scout\n`);
 
-    await expect(harness().crewTokenOf(folder)).resolves.toBe('aeolus_ct_v1_scout');
+    await expect(harness().crewTokenOf({ shipId, folder })).resolves.toBe('aeolus_ct_v1_scout');
   });
 
   it("reads the crew token from the folder's identity, and none once it is removed", async () => {
     await harness().prepareIdentity({ folder, identity });
-    await expect(harness().crewTokenOf(folder)).resolves.toBe('aeolus_ct_v1_scout');
+    await expect(harness().crewTokenOf({ shipId, folder })).resolves.toBe('aeolus_ct_v1_scout');
 
-    await harness().removeIdentity(folder);
+    await harness().removeIdentity({ shipId, folder });
 
-    await expect(harness().crewTokenOf(folder)).resolves.toBeUndefined();
+    await expect(harness().crewTokenOf({ shipId, folder })).resolves.toBeUndefined();
   });
 
   it('starts claude with the first prompt on the first start, last and after -- so no flag takes it, ending in the line that no human reads its terminal (#585)', async () => {
@@ -411,7 +411,7 @@ describe('Claude Code as a harness', () => {
 
   it("reads the turn from the plugin's turn marker: unknown before the first prompt, then busy or idle", async () => {
     await harness().prepareIdentity({ folder, identity });
-    await expect(harness().turnOf(folder)).resolves.toBe('unknown');
+    await expect(harness().turnOf({ shipId, folder })).resolves.toBe('unknown');
 
     const marked = await runCommand('bash', {
       args: [`${PLUGIN_ROOT}/scripts/aeolus-turn.sh`],
@@ -420,7 +420,7 @@ describe('Claude Code as a harness', () => {
     });
 
     expect(marked.status).toBe(0);
-    await expect(harness().turnOf(folder)).resolves.toBe('busy');
+    await expect(harness().turnOf({ shipId, folder })).resolves.toBe('busy');
   });
 
 });

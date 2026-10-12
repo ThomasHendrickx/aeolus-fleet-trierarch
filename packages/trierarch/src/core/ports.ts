@@ -126,9 +126,9 @@ export type Turn = 'busy' | 'idle' | 'unknown';
 export interface HarnessPort {
   /** Writes the folder's identity with wakeBy=trierarch, as the aeolus plugin does. */
   prepareIdentity(at: { folder: string; identity: Identity }): Promise<void>;
-  /** The crew token of the folder's identity, when there is one. */
-  crewTokenOf(folder: string): Promise<string | undefined>;
-  removeIdentity(folder: string): Promise<void>;
+  /** The crew token of the session's identity, when there is one. */
+  crewTokenOf(session: { shipId: ShipId; folder: string }): Promise<string | undefined>;
+  removeIdentity(session: { shipId: ShipId; folder: string }): Promise<void>;
   /** Starts the harness in the folder: the first start with the settings' first prompt, later ones continuing. */
   launch(session: {
     shipId: ShipId;
@@ -143,7 +143,7 @@ export interface HarnessPort {
     launchId: string;
     firstPrompt?: string;
   }): Promise<void>;
-  turnOf(folder: string): Promise<Turn>;
+  turnOf(session: { shipId: ShipId; folder: string }): Promise<Turn>;
   wake(session: { shipId: ShipId; folder: string }): Promise<void>;
   /** What the session did in its launch window (#382), as its hooks marked the launch it was started for (#490), for the model it launched with; any model refused when it launched with none. */
   launchSeen(session: { shipId: ShipId; folder: string; launchId: string; model?: string }): Promise<LaunchSeen>;

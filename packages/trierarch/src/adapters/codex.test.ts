@@ -97,7 +97,7 @@ describe('Codex as a harness', () => {
     expect(path.startsWith(crews)).toBe(true);
     expect(readdirSync(crews)).toContain(basename(path));
     expect(readFileSync(path, 'utf8')).toContain('wakeBy=trierarch\n');
-    await expect(harness().crewTokenOf(folder)).resolves.toBe('aeolus_ct_v1_scout');
+    await expect(harness().crewTokenOf({ shipId, folder })).resolves.toBe('aeolus_ct_v1_scout');
   });
 
   it('starts codex with the first prompt on the first start, last and after -- behind the configured flags and the picked option, ending in the line that no human reads its terminal (#585)', async () => {
