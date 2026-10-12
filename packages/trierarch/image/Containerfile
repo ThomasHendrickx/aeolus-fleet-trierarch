@@ -51,5 +51,14 @@ WORKDIR /home/ubuntu
 RUN claude plugin marketplace add /opt/aeolus-fleet \
  && claude plugin install aeolus@aeolus-fleet
 
+# The trierarch mounts a home of the ship's own over /home/ubuntu, so the
+# plugin's install and the settings that enable it live outside the home; the
+# init links them into whatever home the container has at every start.
+USER root
+RUN mkdir -p /opt/aeolus-session \
+ && mv /home/ubuntu/.claude/plugins /opt/aeolus-session/plugins \
+ && mv /home/ubuntu/.claude/settings.json /opt/aeolus-session/settings.json
+USER ubuntu
+
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/aeolus-session-init"]
 CMD ["sleep", "infinity"]
