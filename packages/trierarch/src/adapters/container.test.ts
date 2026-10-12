@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -25,6 +25,8 @@ describe('the session runtime contract, on rootless Podman', () => {
   let image = '';
   let owner: string;
   let folder: string;
+  /** Where the ships' homes are kept, apart from the folder, as on the machine. */
+  let homes: string;
   let runtime: SessionRuntime;
 
   // First, so a skip runs neither the setup nor the cleanup, which need podman.
@@ -51,7 +53,8 @@ describe('the session runtime contract, on rootless Podman', () => {
     folder = realpathSync(mkdtempSync(join(tmpdir(), 'trierarch-container-')));
     const tokenFile = join(folder, 'model-token');
     writeFileSync(tokenFile, `${MODEL_TOKEN}\n`, { mode: 0o600 });
-    runtime = createContainerRuntime({ binary: 'podman', image, owner, tokenFile, ...CAPS });
+    homes = realpathSync(mkdtempSync(join(tmpdir(), 'trierarch-homes-')));
+    runtime = createContainerRuntime({ binary: 'podman', image, owner, tokenFile, homes, ...CAPS });
   });
 
   afterEach(async () => {
@@ -61,6 +64,7 @@ describe('the session runtime contract, on rootless Podman', () => {
       await runCommand('podman', { args: ['rm', '--force', '--time', '0', ...ids] });
     }
     rmSync(folder, { recursive: true, force: true });
+    rmSync(homes, { recursive: true, force: true });
   });
 
   sessionRuntimeContract({ runtime: () => runtime, folder: () => folder });
@@ -71,6 +75,36 @@ describe('the session runtime contract, on rootless Podman', () => {
     await runtime.start({ shipId, folder, command: ['sh', '-c', `[ "$${MODEL_TOKEN_VARIABLE}" = "${MODEL_TOKEN}" ] && echo "token handed"; sleep 30`] });
 
     await expect.poll(async () => runtime.screen(shipId), { timeout: 5000 }).toContain('token handed');
+  });
+
+  it("gives the session its own ship's home as its home, and nothing of another ship's", async () => {
+    const [scout, other] = [newId('ship'), newId('ship')];
+    for (const [shipId, name] of [
+      [scout, 'scout'],
+      [other, 'other'],
+    ] as const) {
+      mkdirSync(join(homes, shipId));
+      writeFileSync(join(homes, shipId, `${name}.identity`), `shipName=${name}\n`);
+    }
+
+    // Only the shell's builtins: the test image holds no ls or cat.
+    await runtime.start({
+      shipId: scout,
+      folder,
+      command: ['sh', '-c', `cd; echo "home $(pwd)"; for file in * .*; do echo "holds $file"; done; read line < ${join(homes, other, 'other.identity')} && echo "read $line"; sleep 30`],
+    });
+
+    await expect.poll(async () => runtime.screen(scout), { timeout: 5000 }).toContain('holds scout.identity');
+    const screen = await runtime.screen(scout);
+    expect({ home: screen.includes('home /home/ubuntu'), other: screen.includes('other'), read: screen.includes('read ') }).toEqual({ home: true, other: false, read: false });
+  });
+
+  it("makes the ship's home when it has none yet, for its owner alone", async () => {
+    const shipId = newId('ship');
+
+    await runtime.start({ shipId, folder, command: ['sleep', '30'] });
+
+    expect(statSync(join(homes, shipId)).mode & 0o777).toBe(0o700);
   });
 
   it('caps the memory and the cpus of the container', async () => {
@@ -100,6 +134,7 @@ describe('the container a session runs in', () => {
   const folder = '/home/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/implementer-b';
   let tokenFolder: string;
   let tokenFile: string;
+  const homes = '/home/thomas/.aeolus/trierarch/homes';
 
   beforeEach(() => {
     tokenFolder = mkdtempSync(join(tmpdir(), 'trierarch-token-'));
@@ -112,7 +147,7 @@ describe('the container a session runs in', () => {
   });
 
   function runtimeWith(runner: ReturnType<typeof recordingRunner>, options: { launch?: readonly string[]; binary?: string } = {}): SessionRuntime {
-    return createContainerRuntime({ binary: options.binary ?? 'podman', image: 'ghcr.io/thomashendrickx/aeolus-session:0.25.0', tokenFile, ...CAPS, run: runner.run, ...(options.launch !== undefined && { launch: options.launch }) });
+    return createContainerRuntime({ binary: options.binary ?? 'podman', image: 'ghcr.io/thomashendrickx/aeolus-session:0.25.0', tokenFile, homes, ...CAPS, run: runner.run, ...(options.launch !== undefined && { launch: options.launch }) });
   }
 
   async function started(options: { launch?: readonly string[]; binary?: string; env?: Record<string, string> } = {}) {
@@ -162,10 +197,15 @@ describe('the container a session runs in', () => {
     expect(run.args).toEqual(expect.arrayContaining(['--userns=keep-id:uid=1000,gid=1000', '--device', '/dev/fuse', '--device', '/dev/net/tun', '--cap-add', 'SYS_ADMIN', '--security-opt', 'unmask=ALL']));
   });
 
-  it('mounts only the session\'s folder, at its own path, so never the runtime\'s socket', async () => {
+  it("mounts only the session's folder, at its own path, and its ship's own home as the container's home, so never the runtime's socket", async () => {
     const { run } = await started();
 
-    expect({ volumes: valuesOf(run.args, '--volume'), workdir: valuesOf(run.args, '--workdir'), others: run.args.filter((arg) => arg.startsWith('-v') || arg.startsWith('--mount')) }).toEqual({ volumes: [`${folder}:${folder}`], workdir: [folder], others: [] });
+    expect({ volumes: valuesOf(run.args, '--volume'), workdir: valuesOf(run.args, '--workdir'), home: valuesOf(run.args, '--env'), others: run.args.filter((arg) => arg.startsWith('-v') || arg.startsWith('--mount')) }).toEqual({
+      volumes: [`${folder}:${folder}`, `${homes}/${shipId}:/home/ubuntu`],
+      workdir: [folder],
+      home: ['HOME=/home/ubuntu'],
+      others: [],
+    });
   });
 
   it('gives the container no restart policy: the trierarch starts a dead one again itself', async () => {
