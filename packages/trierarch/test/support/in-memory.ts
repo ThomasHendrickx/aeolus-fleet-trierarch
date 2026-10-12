@@ -5,6 +5,7 @@ import { createHandleDelivery } from '../../src/core/handle-delivery.js';
 import type {
   ArgoReport,
   AssignedRequest,
+  ContainerHostPort,
   Detected,
   Delivery,
   FleetPort,
@@ -17,6 +18,7 @@ import type {
   LoggedAction,
   ObservedSession,
   ObservedWorktree,
+  RuntimeMode,
   SelfReport,
   SessionRuntime,
   StatePort,
@@ -612,3 +614,24 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
 
 export type Trierarch = ReturnType<typeof aTrierarch>;
 
+
+/** The machine as the container runtime's checks read it: a rootless Podman, the user in no docker group, the model token written. */
+export class InMemoryContainerHost implements ContainerHostPort {
+  mode: RuntimeMode = 'rootless';
+  groups: readonly string[] = ['thomas', 'sudo'];
+  hasModelToken = true;
+  readonly asked: string[] = [];
+
+  runtimeMode(binary: string): Promise<RuntimeMode> {
+    this.asked.push(binary);
+    return Promise.resolve(this.mode);
+  }
+
+  userGroups(): Promise<readonly string[]> {
+    return Promise.resolve(this.groups);
+  }
+
+  isModelTokenWritten(): Promise<boolean> {
+    return Promise.resolve(this.hasModelToken);
+  }
+}
