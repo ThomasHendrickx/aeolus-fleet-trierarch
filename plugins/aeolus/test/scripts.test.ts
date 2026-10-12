@@ -1395,6 +1395,139 @@ describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
   });
 });
 
+describe("the launch marker: what a session's hooks saw of the launch the trierarch started it for (#490)", () => {
+  const LAUNCH = 'lnc-2026-10-12T05:00:00.000Z';
+  const TRANSCRIPT = '/home/someone/.claude/projects/-a folder/c5858406.jsonl';
+  const WHEN = '\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z';
+
+  function crewedByATrierarch(): void {
+    expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', 'https://fleet.example.com', SHIP_ID, 'scout', CREW_TOKEN] }).status).toBe(0);
+  }
+
+  /** Runs the launch hook as Claude Code does, in a session the trierarch started with the launch id given, or none (null). */
+  function claudeLaunchHook(payload: Record<string, unknown>, launch: string | null = LAUNCH) {
+    return run('aeolus-launch.sh', {
+      stdin: JSON.stringify({ session_id: 'c5858406-be86-46cd-8591-f4fb39b1fa61', transcript_path: TRANSCRIPT, cwd: folder, ...payload }),
+      env: { AEOLUS_FOLDER: '', AEOLUS_DATA: '', CLAUDE_PROJECT_DIR: folder, CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin', ...(launch !== null && { AEOLUS_LAUNCH: launch }) },
+    });
+  }
+
+  /** Runs the launch hook as Codex does: PLUGIN_ROOT and PLUGIN_DATA set, the folder only in the payload. */
+  function codexLaunchHook(payload: Record<string, unknown>) {
+    return run('aeolus-launch.sh', {
+      stdin: JSON.stringify({ session_id: '01a103c9-80b0-7ab1-82e3-6f4a2f70ad86', cwd: folder, ...payload }),
+      env: { AEOLUS_FOLDER: '', AEOLUS_DATA: '', CLAUDE_PROJECT_DIR: '', PLUGIN_DATA: data, PLUGIN_ROOT: SCRIPTS.replace(/\/scripts\/$/, ''), AEOLUS_LAUNCH: LAUNCH },
+    });
+  }
+
+  const sessionStarted = { hook_event_name: 'SessionStart', source: 'startup' };
+  const aToolCall = { hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: { file_path: '/etc/hostname' } };
+  const modelRefused = {
+    hook_event_name: 'StopFailure',
+    error: 'model_not_found',
+    last_assistant_message: "There's an issue with the selected model (claude-nonexistent-9). It may not exist or you may not have access to it.",
+  };
+
+  function launch(env: Record<string, string> = {}): Run {
+    return run('aeolus-identity.sh', { args: ['launch'], env });
+  }
+
+  it('records that the session started, with its transcript, for the launch it belongs to', () => {
+    crewedByATrierarch();
+
+    claudeLaunchHook(sessionStarted);
+
+    expect(launch().stdout).toMatch(new RegExp(`^launch ${LAUNCH}\\nstarted ${WHEN} ${TRANSCRIPT}\\n$`, 'u'));
+  });
+
+  it('records activity at the first tool call of any tool, once', () => {
+    crewedByATrierarch();
+    claudeLaunchHook(sessionStarted);
+
+    claudeLaunchHook(aToolCall);
+    claudeLaunchHook({ ...aToolCall, tool_name: 'Bash', tool_input: { command: 'ls' } });
+
+    expect(launch().stdout).toMatch(new RegExp(`^launch ${LAUNCH}\\nstarted ${WHEN} .*\\nactive ${WHEN}\\n$`, 'u'));
+  });
+
+  it('records the model refused when the turn failed because the model was not found', () => {
+    crewedByATrierarch();
+    claudeLaunchHook(sessionStarted);
+
+    claudeLaunchHook(modelRefused);
+
+    expect(launch().stdout).toMatch(new RegExp(`\\nrefused ${WHEN}\\n$`, 'u'));
+  });
+
+  it('records no refusal for a turn that failed for another reason, such as a rate limit', () => {
+    crewedByATrierarch();
+    claudeLaunchHook(sessionStarted);
+
+    claudeLaunchHook({ ...modelRefused, error: 'rate_limit' });
+
+    expect(launch().stdout).not.toContain('refused');
+  });
+
+  it('starts the marker over for another launch, so nothing from an earlier session counts', () => {
+    crewedByATrierarch();
+    claudeLaunchHook(sessionStarted, 'lnc-earlier');
+    claudeLaunchHook(aToolCall, 'lnc-earlier');
+
+    claudeLaunchHook(sessionStarted);
+
+    expect(launch().stdout).toMatch(new RegExp(`^launch ${LAUNCH}\\nstarted ${WHEN} .*\\n$`, 'u'));
+  });
+
+  it('records nothing for a session started without a launch id, as one crewed by hand', () => {
+    crewedByATrierarch();
+
+    claudeLaunchHook(sessionStarted, null);
+    claudeLaunchHook(aToolCall, null);
+
+    expect(launch()).toMatchObject({ status: 1, stdout: 'aeolus: no launch marked yet\n' });
+  });
+
+  it('records nothing in a folder that crews no ship', () => {
+    claudeLaunchHook(sessionStarted);
+
+    expect(launch().status).toBe(1);
+  });
+
+  it('never fails the session, and says nothing to it', () => {
+    crewedByATrierarch();
+
+    expect(claudeLaunchHook(sessionStarted)).toMatchObject({ status: 0, stdout: '', stderr: '' });
+    expect(claudeLaunchHook(aToolCall)).toMatchObject({ status: 0, stdout: '', stderr: '' });
+  });
+
+  it('records the start and the first tool call of a Codex session, in the Codex crews folder', () => {
+    run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', 'https://fleet.example.com', SHIP_ID, 'scout', CREW_TOKEN], env: AS_CODEX });
+
+    codexLaunchHook({ ...sessionStarted, transcript_path: '/home/someone/.codex/sessions/2026/10/12/rollout-x.jsonl' });
+    codexLaunchHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'ls' } });
+
+    expect(launch(AS_CODEX).stdout).toMatch(new RegExp(`^launch ${LAUNCH}\\nstarted ${WHEN} /home/someone/\\.codex/sessions/2026/10/12/rollout-x\\.jsonl\\nactive ${WHEN}\\n$`, 'u'));
+  });
+
+  it('clears the marker when the trierarch asks, before it starts the next launch', () => {
+    crewedByATrierarch();
+    claudeLaunchHook(sessionStarted);
+
+    expect(run('aeolus-identity.sh', { args: ['launch', 'clear'] }).status).toBe(0);
+
+    expect(launch().status).toBe(1);
+  });
+
+  it('forgets the launch marker with the ship', () => {
+    crewedByATrierarch();
+    claudeLaunchHook(sessionStarted);
+
+    run('aeolus-identity.sh', { args: ['delete'] });
+
+    expect(readdirSync(home, { recursive: true }).map(String).filter((name) => name.endsWith('.launch'))).toEqual([]);
+  });
+});
+
 describe("the plugin's log: what the watcher and hooks do, one record per line in the trierarch's log format", () => {
   const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 

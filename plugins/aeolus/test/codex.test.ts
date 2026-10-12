@@ -234,6 +234,22 @@ describe('the Codex plugin package', () => {
       },
     ]);
   });
+
+  it('marks the launch at the start, at every tool call and at a failed turn, in both harnesses (#490)', () => {
+    const hook = z.object({ type: z.string(), command: z.string(), commandWindows: z.string() });
+    const hooks = z
+      .object({ hooks: z.record(z.string(), z.array(z.object({ matcher: z.string().optional(), hooks: z.array(hook) }))) })
+      .parse(json(join(PLUGIN, 'hooks/hooks.json'))).hooks;
+    const launchHook = {
+      type: 'command',
+      command: 'bash "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/aeolus-launch.sh"',
+      commandWindows: 'bash "%PLUGIN_ROOT%\\scripts\\aeolus-launch.sh"',
+    };
+
+    expect(hooks.SessionStart).toContainEqual({ matcher: 'startup|resume', hooks: [launchHook] });
+    expect(hooks.PreToolUse).toContainEqual({ hooks: [launchHook] });
+    expect(hooks.StopFailure).toEqual([{ matcher: 'model_not_found', hooks: [launchHook] }]);
+  });
 });
 
 describe('Codex plugin state', () => {
