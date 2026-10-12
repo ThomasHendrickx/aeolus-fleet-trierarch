@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -6,6 +6,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { idSchema, type ShipId } from '@aeolus-fleet/common';
 
 import type { ObservedSession, SessionRuntime } from '../core/ports.js';
+import { shipHome } from './paths.js';
 import { runCommand, type CommandResult } from './run-command.js';
 
 const PREFIX = 'trierarch-';
@@ -13,6 +14,8 @@ const OWNER_LABEL = 'aeolus.trierarch';
 const CONTAINER_OWNER = 'aeolus-trierarch';
 /** The variable Claude Code reads its long-lived model token from (`claude setup-token`). */
 export const MODEL_TOKEN_VARIABLE = 'CLAUDE_CODE_OAUTH_TOKEN';
+/** The session user's home in the image, where each container gets its ship's own home. */
+export const SESSION_HOME = '/home/ubuntu';
 /** The image's session user (ubuntu), whose subordinate ids the nested Podman maps. */
 const SESSION_USER = 'uid=1000,gid=1000';
 /** The tmux session inside each container: one per container, so one name serves. */
@@ -43,6 +46,8 @@ export interface ContainerRuntimeOptions {
   readonly image: string;
   /** The file holding the machine's long-lived model token, read at every start. */
   readonly tokenFile: string;
+  /** Where the ships' homes are kept on the host, one folder per ship, each mounted as its container's home. */
+  readonly homes: string;
   /** The memory cap of each container, as the runtime takes it (`4g`). */
   readonly memory: string;
   readonly cpus: number;
@@ -74,7 +79,9 @@ function envFileOf(env: Readonly<Record<string, string>>): string {
  * named after its ship id, with tmux inside, so typing and screen reads are an
  * exec into it. Rootless only, with hard memory and cpu caps and no restart
  * policy: the trierarch starts a dead container again itself. The container
- * sees its folder and nothing else of the host, never the runtime's socket.
+ * sees its folder and its ship's own home, as its home, and nothing else of
+ * the host, never the runtime's socket. The home is made, for its owner
+ * alone, when the ship has none yet.
  *
  * The model token and the session's environment reach the container through
  * an env file only its owner reads, removed once the container runs, never a
@@ -115,6 +122,8 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
       const token = (await readFile(options.tokenFile, 'utf8')).trim();
       const content = envFileOf({ ...env, [MODEL_TOKEN_VARIABLE]: token });
       await stop(shipId);
+      const home = shipHome(options.homes, shipId);
+      await mkdir(home, { recursive: true, mode: 0o700 });
       const secrets = await mkdtemp(join(tmpdir(), 'aeolus-trierarch-env-'));
       try {
         const envFile = join(secrets, 'session.env');
@@ -143,6 +152,10 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
           'unmask=ALL',
           '--volume',
           `${folder}:${folder}`,
+          '--volume',
+          `${home}:${SESSION_HOME}`,
+          '--env',
+          `HOME=${SESSION_HOME}`,
           '--workdir',
           folder,
           '--env-file',

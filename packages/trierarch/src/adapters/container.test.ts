@@ -96,7 +96,7 @@ describe('the session runtime contract, on rootless Podman', () => {
 
     await expect.poll(async () => runtime.screen(scout), { timeout: 5000 }).toContain('holds scout.identity');
     const screen = await runtime.screen(scout);
-    expect({ home: screen.includes('home /home/ubuntu'), other: screen.includes('other'), read: screen.includes('read ') }).toEqual({ home: true, other: false, read: false });
+    expect({ home: screen.includes('home /home/ubuntu'), other: screen.includes('holds other.identity'), read: screen.includes('read shipName') }).toEqual({ home: true, other: false, read: false });
   });
 
   it("makes the ship's home when it has none yet, for its owner alone", async () => {
