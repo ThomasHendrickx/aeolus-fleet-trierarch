@@ -45,16 +45,31 @@ check 'tmux starts a session and reads its screen' in_session bash -c '
   tmux capture-pane -p -t smoke | grep -q smoke-screen
 '
 
-check "the aeolus plugin is installed at $VERSION" in_session bash -c "
+PLUGIN_AT_VERSION="
   claude plugin list --json | node -e '
     const plugins = JSON.parse(require(\"node:fs\").readFileSync(0, \"utf8\"));
     const aeolus = plugins.find((plugin) => plugin.id === \"aeolus@aeolus-fleet\");
-    if (aeolus?.version !== process.argv[1]) {
+    if (aeolus?.version !== process.argv[1] || aeolus?.enabled !== true) {
       console.error(\"aeolus plugin:\", JSON.stringify(aeolus));
       process.exit(1);
     }
   ' '$VERSION'
 "
+
+check "the aeolus plugin is installed at $VERSION" in_session bash -c "$PLUGIN_AT_VERSION"
+
+# The trierarch mounts a home of the ship's own over the image's: the image's
+# plugin still reaches it, and what the plugin writes stays in that home.
+SHIP_HOME=$(mktemp -d)
+trap 'rm -rf "$SHIP_HOME"' EXIT
+in_ship_home() {
+  "$RUNTIME" run --rm --pull=never \
+    --userns=keep-id:uid=1000,gid=1000 \
+    --volume "$SHIP_HOME:/home/ubuntu" \
+    "$IMAGE" "$@"
+}
+
+check "the aeolus plugin is installed at $VERSION in a home of the ship's own" in_ship_home bash -c "$PLUGIN_AT_VERSION"
 
 # Nested containers from an image built in place, so the test pulls nothing:
 # a shell, /usr/bin/true, /usr/bin/sleep and the libraries they load.
