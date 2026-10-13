@@ -117,8 +117,6 @@ const MESSAGE_ID = 'msg_01m4raygfdtsjfbnmpvqjznsyv';
 const PING_DELIVERY_ID = 'dlv_01m4rb0m3d6r4xgnmnhm1k8b2q';
 const HANDED_OVER = 'aeolus: a message for scout is handed to this session: it reaches you at your next tool call, or when you end your turn. Do not receive or ack it.\n';
 const NO_WAITS = { AEOLUS_BUSY_WAITS: '0 0 0 0' };
-/** How the Codex wake bridge runs the watcher: it wakes the task, which receives for itself. */
-const WAKE_ONLY = { AEOLUS_WAKE_ONLY: '1' };
 
 /** A delivery as the fleet's receive answers it. */
 function aDelivery(overrides: Record<string, unknown> = {}) {
@@ -160,6 +158,17 @@ function aWakingFleet(counts: readonly StubAnswer[], receives: readonly StubAnsw
 
 const inboxCalls = (stub: StubFleet) => stub.calls.filter((call) => call.path === '/api/v1/ship/inbox');
 
+
+/** A codex on PATH that writes down each call; the env to run the bridge with it, and the calls file. */
+function aCodex() {
+  const bin = join(data, 'bin');
+  const calls = join(data, 'codex.calls');
+  mkdirSync(bin, { recursive: true });
+  const codex = join(bin, 'codex');
+  writeFileSync(codex, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "${calls}"\n`);
+  chmodSync(codex, 0o700);
+  return { env: { PATH: `${bin}:${process.env.PATH ?? ''}` }, calls };
+}
 
 /** The session took a prompt: its turn is busy. */
 function aPromptSubmitted(): void {
@@ -536,7 +545,7 @@ describe('aeolus-wait', () => {
   });
 });
 
-describe("the watcher's wake rule: one wake per rise in the waiting count, given only when the session is idle", () => {
+describe("the watcher's wake rule: given only when the session is idle", () => {
   it('holds the wake while the session is busy, and gives it once the turn ends', async () => {
     fleet = await aWakingFleet([inbox(1)]);
     const stub = fleet;
@@ -589,28 +598,6 @@ describe("the watcher's wake rule: one wake per rise in the waiting count, given
     await start('aeolus-wait.sh').exited;
 
     expect(turn().stdout).toMatch(/^busy /);
-  });
-
-  it('wakes once per rise, for the Codex wake bridge: started again, it wakes not for the deliveries it already woke for, but for one more', async () => {
-    fleet = await startStubFleet([inbox(2), inbox(2), inbox(2), inbox(3)]);
-    crew(fleet.url);
-    aTurnEnded();
-    await start('aeolus-wait.sh', { env: WAKE_ONLY }).exited;
-    aTurnEnded();
-
-    await expect(start('aeolus-wait.sh', { env: WAKE_ONLY }).exited).resolves.toEqual({ status: 0, stdout: 'aeolus: 3 deliveries wait for scout: receive them\n' });
-    expect(fleet.calls).toHaveLength(4);
-  });
-
-  it('wakes again once the count rises after the session received what waited, for the Codex wake bridge', async () => {
-    fleet = await startStubFleet([inbox(2), inbox(0), inbox(1)]);
-    crew(fleet.url);
-    aTurnEnded();
-    await start('aeolus-wait.sh', { env: WAKE_ONLY }).exited;
-    aTurnEnded();
-
-    await expect(start('aeolus-wait.sh', { env: WAKE_ONLY }).exited).resolves.toEqual({ status: 0, stdout: 'aeolus: 1 deliveries wait for scout: receive them\n' });
-    expect(fleet.calls).toHaveLength(3);
   });
 
   it('keeps a wake it held for a busy session when it is started again', async () => {
@@ -1315,6 +1302,233 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
     });
   });
 
+  describe('in Codex: the wake bridge hands a message over, and the prompt it queues confirms it (2b, Codex)', () => {
+    const THREAD_ID = '01a103c9-80b0-7ab1-82e3-6f4a2f70ad86';
+    const QUEUED =
+      "Aeolus handed a message for scout to this task: it comes into this turn through the plugin's hooks, acknowledged. " +
+      'Do not receive or ack it. Handle it as the aeolus-crew skill says, then re-arm automatic wake-up before ending the turn.';
+
+    /** Runs a hook as Codex does: PLUGIN_ROOT and PLUGIN_DATA set, the task id in the payload, no Claude Code variables. */
+    const aCodexHook = (script: string, payload: Record<string, unknown>) =>
+      start(script, {
+        stdin: JSON.stringify({ session_id: THREAD_ID, turn_id: 'turn-1', cwd: folder, model: 'gpt-5.5', ...payload }),
+        env: {
+          AEOLUS_FOLDER: '',
+          AEOLUS_DATA: '',
+          CLAUDE_PROJECT_DIR: '',
+          CLAUDE_PLUGIN_DATA: '',
+          CLAUDE_PLUGIN_ROOT: '',
+          PLUGIN_DATA: data,
+          PLUGIN_ROOT: SCRIPTS.replace(/\/scripts\/$/, ''),
+          AEOLUS_CODEX_WAKE_DISABLED: '1',
+          ...NO_WAITS,
+        },
+      }).done;
+
+    /** The Codex task's turn ends, and the Stop hook lets it end. */
+    const aCodexTurnEnds = () => aCodexHook('aeolus-stop.sh', { hook_event_name: 'Stop', stop_hook_active: false, last_assistant_message: 'done' });
+
+    /** The wake bridge runs once for the task, with a codex on PATH that writes down what it queues. */
+    async function aCodexHandOver(routes: Record<string, readonly StubAnswer[]>) {
+      fleet = await startRoutedStubFleet({
+        '/api/v1/ship/inbox': [inbox(1)],
+        '/api/v1/ship/pushReceive': [receiving(aDelivery())],
+        '/api/v1/ship/handed': [handedOk],
+        '/api/v1/ship/handled': [taken],
+        ...routes,
+      });
+      crew(fleet.url, AS_CODEX);
+      await aCodexTurnEnds();
+      const codex = aCodex();
+      await expect(start('aeolus-codex-wake.sh', { args: ['run', THREAD_ID], env: { ...AS_CODEX, ...codex.env } }).exited).resolves.toMatchObject({ status: 0 });
+      return { stub: fleet, queued: () => readFileSync(codex.calls, 'utf8') };
+    }
+
+    describe('the wake bridge', () => {
+      it('push-receives one delivery while the task is idle, reports it handed with its number and keeps it in the store as handed', async () => {
+        const { stub } = await aCodexHandOver({});
+
+        expect(callsTo(stub, '/api/v1/ship/pushReceive').map((call) => call.body)).toEqual(['{"max":1}']);
+        expect(callsTo(stub, '/api/v1/ship/receive')).toEqual([]);
+        expect(callsTo(stub, '/api/v1/ship/handed').map((call) => call.body)).toEqual([`{"deliveryId":"${DELIVERY_ID}","handOverNumber":1}`]);
+        expect(store()).toEqual([`${DELIVERY_ID} handed`]);
+      });
+
+      it('queues one prompt to the task, saying the message comes into that turn through the hooks, without its content', async () => {
+        const { queued } = await aCodexHandOver({});
+
+        expect(queued()).toBe(`queue --thread ${THREAD_ID} --message ${QUEUED}\n`);
+        expect(actions().at(-1)).toEqual({ ...scout, action: 'wakeBridge', outcome: `queued a hand-over of ${DELIVERY_ID} to Codex task ${THREAD_ID}` });
+      });
+    });
+
+    describe('the queued prompt (UserPromptSubmit)', () => {
+      const theQueuedPrompt = () => aCodexHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: QUEUED });
+
+      it('acknowledges the handed message first, then adds it to the context of the turn the prompt starts', async () => {
+        const { stub } = await aCodexHandOver({ '/api/v1/ship/ack': [acknowledged] });
+
+        const prompted = await theQueuedPrompt();
+
+        expect(callsTo(stub, '/api/v1/ship/ack')).toEqual([
+          { method: 'POST', path: '/api/v1/ship/ack', authorization: `Bearer ${CREW_TOKEN}`, body: `{"deliveryId":"${DELIVERY_ID}"}` },
+        ]);
+        expect(JSON.parse(prompted.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: MESSAGE } });
+        expect(store()).toEqual([`${DELIVERY_ID} confirmed`]);
+      });
+
+      it('adds nothing while the fleet refuses the acknowledgement, and keeps the message received for the next hand-over', async () => {
+        await aCodexHandOver({ '/api/v1/ship/ack': [busy] });
+
+        expect((await theQueuedPrompt()).stdout).toBe('');
+        expect(store()).toEqual([`${DELIVERY_ID} received`]);
+      });
+
+      it('puts a ping in without an acknowledgement: its pong confirms it', async () => {
+        const { stub } = await aCodexHandOver({ '/api/v1/ship/pushReceive': [receiving(aPing())] });
+
+        const prompted = await theQueuedPrompt();
+
+        expect(callsTo(stub, '/api/v1/ship/ack')).toEqual([]);
+        expect(JSON.parse(prompted.stdout)).toEqual({
+          hookSpecificOutput: {
+            hookEventName: 'UserPromptSubmit',
+            additionalContext: PING.replace('"/plugin/scripts/', `"${SCRIPTS}`),
+          },
+        });
+      });
+
+      it('reports the turn busy to the fleet, with the time it marked it', async () => {
+        const { stub } = await aCodexHandOver({ '/api/v1/ship/ack': [acknowledged], '/api/v1/ship/turn': [taken] });
+        await theQueuedPrompt();
+        await aCodexTurnEnds();
+
+        await aCodexHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: 'go on' });
+
+        const [state, at] = turn(AS_CODEX).stdout.trim().split(' ');
+        expect(state).toBe('busy');
+        const reported = callsTo(stub, '/api/v1/ship/turn').map((call) => call.body);
+        // The watcher's busy and the queued prompt's are one report when they fall in the same second, else two.
+        expect(reported.map((body) => z.object({ turn: z.string() }).parse(JSON.parse(body)).turn).slice(-2)).toEqual(['idle', 'busy']);
+        expect(reported.at(-1)).toBe(`{"turn":"busy","at":"${at ?? ''}"}`);
+      });
+    });
+
+    describe('the end of the turn (Stop)', () => {
+      it('reports the message the turn took handled, drops it and says nothing', async () => {
+        const { stub } = await aCodexHandOver({ '/api/v1/ship/ack': [acknowledged] });
+        await aCodexHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: QUEUED });
+
+        expect((await aCodexTurnEnds()).stdout).toBe('');
+        expect(callsTo(stub, '/api/v1/ship/handled').map((call) => call.body)).toEqual([`{"deliveryId":"${DELIVERY_ID}"}`]);
+        expect(store()).toEqual([]);
+      });
+
+      it('reports the turn idle to the fleet, with the time it marked it', async () => {
+        const { stub } = await aCodexHandOver({ '/api/v1/ship/ack': [acknowledged], '/api/v1/ship/turn': [taken] });
+        await aCodexHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: QUEUED });
+
+        await aCodexTurnEnds();
+
+        const [state, at] = turn(AS_CODEX).stdout.trim().split(' ');
+        expect(state).toBe('idle');
+        expect(callsTo(stub, '/api/v1/ship/turn').map((call) => call.body).at(-1)).toBe(`{"turn":"idle","at":"${at ?? ''}"}`);
+      });
+    });
+
+    it('tells a task on a pushed lease at session start that the message comes into the turn through the hooks, not to receive what waits', async () => {
+      await aCodexHandOver({});
+
+      const started = await aCodexHook('aeolus-session-start.sh', { hook_event_name: 'SessionStart', source: 'resume' });
+
+      const context = hookOutputSchema.parse(JSON.parse(started.stdout)).hookSpecificOutput.additionalContext;
+      expect(context).toContain(
+        "Go on as the aeolus-crew skill says: fetch the protocol. Receive and ack nothing: this ship is pushed, so the wake bridge hands each message over and it comes into the turn through the plugin's hooks. Then end the turn.",
+      );
+      expect(context).not.toContain('receive and handle what waits');
+    });
+
+    describe('an interrupted turn (Interrupt): a died turn (3.7, D3)', () => {
+      const ONCE_MORE = 'aeolus: handed before: the turn that took this message ended before it did, so it comes in once more.\n\n';
+      const anInterrupt = () => aCodexHook('aeolus-turn-died.sh', { hook_event_name: 'Interrupt', permission_mode: 'default', transcript_path: null });
+      const aPrompt = () => aCodexHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: 'go on' });
+
+      /** The bridge hands a message over, and the queued prompt confirms it. */
+      async function aConfirmedMessage(routes: Record<string, readonly StubAnswer[]>) {
+        const { stub } = await aCodexHandOver({ '/api/v1/ship/ack': [acknowledged], '/api/v1/ship/handed': [handedOk, handedAs('acknowledged')], ...routes });
+        await aCodexHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: QUEUED });
+        return stub;
+      }
+
+      it('keeps the message the turn took to hand once more at the next prompt, says nothing, and reports the turn idle', async () => {
+        const stub = await aConfirmedMessage({ '/api/v1/ship/turn': [taken] });
+
+        expect(await anInterrupt()).toEqual({ status: 0, stdout: '', stderr: '' });
+        expect(store()).toEqual([`${DELIVERY_ID} onceMore`]);
+        const [state, at] = turn(AS_CODEX).stdout.trim().split(' ');
+        expect(state).toBe('idle');
+        expect(callsTo(stub, '/api/v1/ship/turn').map((call) => call.body).at(-1)).toBe(`{"turn":"idle","at":"${at ?? ''}"}`);
+        expect(callsTo(stub, '/api/v1/ship/handled')).toEqual([]);
+      });
+
+      it('lets the next prompt put the message in once more, reported handed once more with the next number', async () => {
+        const stub = await aConfirmedMessage({});
+        await anInterrupt();
+
+        const prompted = await aPrompt();
+
+        expect(callsTo(stub, '/api/v1/ship/handed').map((call) => call.body).at(-1)).toBe(`{"deliveryId":"${DELIVERY_ID}","handOverNumber":2,"isOnceMore":true}`);
+        expect(JSON.parse(prompted.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: ONCE_MORE + MESSAGE } });
+      });
+
+      it('reports the message not handled when the turn it was handed once more to is interrupted too, and drops it', async () => {
+        const stub = await aConfirmedMessage({ '/api/v1/ship/notHandled': [taken] });
+        await anInterrupt();
+        await aPrompt();
+
+        await anInterrupt();
+
+        expect(callsTo(stub, '/api/v1/ship/notHandled').map((call) => call.body)).toEqual([`{"deliveryId":"${DELIVERY_ID}"}`]);
+        expect(store()).toEqual([]);
+      });
+    });
+  });
+
+  describe('what a session on a pushed lease is told: the message comes into the turn through the hooks, never by its own receive', () => {
+    const PUSHED =
+      'Go on as the aeolus crew-a-ship skill says: fetch the protocol. Receive and ack nothing: this ship is pushed, so the watcher hands each message over and it comes into the turn through the plugin\'s hooks.';
+    const contextAt = async (source: string) =>
+      hookOutputSchema.parse(JSON.parse((await aHook('aeolus-session-start.sh', { payload: { hook_event_name: 'SessionStart', source } })).stdout)).hookSpecificOutput.additionalContext;
+
+    it('says so at session start, and not to receive what waits', async () => {
+      await aHandOver({});
+
+      const context = await contextAt('clear');
+
+      expect(context).toContain(PUSHED);
+      expect(context).not.toContain('receive and handle what waits');
+    });
+
+    it('still says to receive what waits on a lease the watcher has not pushed: it pulls', async () => {
+      fleet = await startRoutedStubFleet({});
+      crew(fleet.url);
+
+      expect(await contextAt('clear')).toContain('receive and handle what waits');
+    });
+
+    it('shows the lease pushed', async () => {
+      await aHandOver({});
+
+      expect(run('aeolus-identity.sh', { args: ['show'] }).stdout).toContain('\ndelivery: pushed\n');
+    });
+
+    it('shows nothing pushed for a lease the watcher has not pushed', () => {
+      crew();
+
+      expect(run('aeolus-identity.sh', { args: ['show'] }).stdout).not.toContain('delivery:');
+    });
+  });
+
   it('reports no turn and nothing handled for a lease the watcher has not pushed: the ship pulls', async () => {
     fleet = await startRoutedStubFleet({});
     crew(fleet.url);
@@ -1337,21 +1551,10 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
 describe('the Codex wake bridge', () => {
   const THREAD_ID = '01a103c9-80b0-7ab1-82e3-6f4a2f70ad86';
 
-  /** A codex on PATH that writes down each call; the env to run the bridge with it, and the calls file. */
-  function aCodex() {
-    const bin = join(data, 'bin');
-    const calls = join(data, 'codex.calls');
-    mkdirSync(bin, { recursive: true });
-    const codex = join(bin, 'codex');
-    writeFileSync(codex, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "${calls}"\n`);
-    chmodSync(codex, 0o700);
-    return { env: { PATH: `${bin}:${process.env.PATH ?? ''}` }, calls };
-  }
-
   const queued = (calls: string) => (statSync(calls, { throwIfNoEntry: false }) ? readFileSync(calls, 'utf8') : '');
 
   it("logs arming for the Codex task in the plugin's log, and keeps no log of its own", async () => {
-    fleet = await startStubFleet([inbox(1)]);
+    fleet = await aWakingFleet([inbox(1)]);
     crew(fleet.url);
     aTurnEnded();
     const codex = aCodex();
@@ -1368,7 +1571,7 @@ describe('the Codex wake bridge', () => {
     const hold = new Promise<void>((resolve) => {
       release = resolve;
     });
-    fleet = await startStubFleet([inbox(0), { ...inbox(1), hold }]);
+    fleet = await aWakingFleet([inbox(0), { ...inbox(1), hold }]);
     crew(fleet.url);
     aTurnEnded();
     const codex = aCodex();
@@ -1388,14 +1591,14 @@ describe('the Codex wake bridge', () => {
   });
 
   it('logs the wake it queues to the Codex task', async () => {
-    fleet = await startStubFleet([inbox(1)]);
+    fleet = await aWakingFleet([inbox(1)]);
     crew(fleet.url);
     aTurnEnded();
     const codex = aCodex();
 
     await start('aeolus-codex-wake.sh', { args: ['run', THREAD_ID], env: codex.env }).exited;
 
-    expect(actions().at(-1)).toEqual({ ...scout, action: 'wakeBridge', outcome: `queued a wake to Codex task ${THREAD_ID}: 1 delivery waits` });
+    expect(actions().at(-1)).toEqual({ ...scout, action: 'wakeBridge', outcome: `queued a hand-over of ${DELIVERY_ID} to Codex task ${THREAD_ID}` });
   });
 
   it('logs a watcher that stopped without a wake as a failure, with what it said', async () => {
@@ -1418,7 +1621,7 @@ describe('the Codex wake bridge', () => {
   });
 
   it('logs a wake codex refused to queue as a failure, with what codex said', async () => {
-    fleet = await startStubFleet([inbox(1)]);
+    fleet = await aWakingFleet([inbox(1)]);
     crew(fleet.url);
     aTurnEnded();
     const codex = aCodex();
@@ -1429,7 +1632,7 @@ describe('the Codex wake bridge', () => {
     expect(actions().at(-1)).toEqual({
       ...scout,
       action: 'wakeBridge',
-      outcome: `failed: codex did not queue the wake to Codex task ${THREAD_ID}: no such thread`,
+      outcome: `failed: codex did not queue the hand-over to Codex task ${THREAD_ID}: no such thread`,
       next: 'the session arms it again before it ends its turn',
     });
   });
@@ -1466,7 +1669,7 @@ describe('the Codex wake bridge', () => {
   });
 
   it('waits without model tokens, then queues one message to the exact Codex task', async () => {
-    fleet = await startStubFleet([inbox(1)]);
+    fleet = await aWakingFleet([inbox(1)]);
     crew(fleet.url);
     aTurnEnded();
     const bin = join(data, 'bin');
@@ -1483,12 +1686,12 @@ describe('the Codex wake bridge', () => {
     }).exited;
 
     expect(result.status).toBe(0);
-    expect(readFileSync(calls, 'utf8')).toContain(`queue --thread ${threadId} --message Aeolus has 1 delivery waiting for scout.`);
+    expect(readFileSync(calls, 'utf8')).toContain(`queue --thread ${threadId} --message Aeolus handed a message for scout to this task:`);
     expect(readFileSync(calls, 'utf8')).not.toContain(CREW_TOKEN);
   });
 
   it('detaches from SessionStart and still queues the task when a delivery arrives', async () => {
-    fleet = await startStubFleet([inbox(1)]);
+    fleet = await aWakingFleet([inbox(1)]);
     crew(fleet.url);
     aTurnEnded();
     const bin = join(data, 'bin');
@@ -1512,7 +1715,7 @@ describe('the Codex wake bridge', () => {
   });
 
   it('replaces a stale same-task pid instead of trusting an unrelated live process', async () => {
-    fleet = await startStubFleet([inbox(1)]);
+    fleet = await aWakingFleet([inbox(1)]);
     crew(fleet.url);
     aTurnEnded();
     const unrelated = spawn('sleep', ['30']);
@@ -1867,7 +2070,7 @@ describe('the Stop hook', () => {
   });
 
   it('re-arms the Codex wake bridge for the task by itself at the end of every turn', async () => {
-    fleet = await startStubFleet([inbox(1)]);
+    fleet = await aWakingFleet([inbox(1)]);
     crew(fleet.url, AS_CODEX);
     aTurnEnded();
     const bin = join(data, 'bin');
@@ -2992,7 +3195,7 @@ describe('no plugin script prints a shell error for a file that vanishes between
   });
 
   it("the wake bridge's pid, when the bridge ends", async () => {
-    fleet = await startStubFleet([inbox(1)]);
+    fleet = await aWakingFleet([inbox(1)]);
     crew(fleet.url);
     aTurnEnded();
 

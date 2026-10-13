@@ -3,9 +3,10 @@
 # the trierarch, or else the watcher, wakes the session only once it is idle
 # again (the Stop hook marks that). Never fails the session.
 #
-# In Claude Code the prompt that starts a turn confirms a message handed to the
-# session (#756): it acknowledges the message, and only if that succeeded adds
-# it to the turn's context. On a lease the watcher pushed it also reports the
+# The prompt that starts a turn confirms a message handed to the session
+# (#756): in Codex the prompt the wake bridge queues, in either harness a
+# person's. It acknowledges the message, and only if that succeeded adds it to
+# the turn's context. On a lease the watcher pushed it also reports the
 # turn busy, and a confirmed message it finds had its turn die without Stop
 # (D3): that message comes in once more, as handed before, and one that comes
 # in once more and dies again is reported not handled. Otherwise silent.
@@ -24,9 +25,8 @@ fi
 aeolus_mark_turn busy
 aeolus_log "$identity" turn 'busy: a prompt was submitted'
 aeolus_report_turn "$identity_text"
-[ -z "${PLUGIN_ROOT:-}" ] || exit 0
 
-root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+root="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}"
 ship_name="$(aeolus_identity_field "$identity_text" shipName)"
 text="$(aeolus_put_into_turn "$identity" "$ship_name" "$root" '')" \
   || { aeolus_reports_here "$identity_text" && text="$(aeolus_put_once_more "$identity" "$ship_name" "$root" '')"; } \

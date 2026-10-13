@@ -4,22 +4,17 @@
 # 25 seconds per call, and exits only when there is something to say, which
 # wakes the session. No tokens are spent while it waits.
 #
-# The trierarch's wake rule: one wake per rise in the waiting count, given only
-# when the turn marker says the session is idle, and nothing more until the
-# count rises again.
-#
-# In Claude Code the wake hands one message over (#756), whenever deliveries
-# wait while the session is idle, rise or not: the watcher takes one delivery
+# The wake hands one message over (#756), given only when the turn marker says
+# the session is idle, whenever deliveries wait: the watcher takes one delivery
 # with a push receive, which makes the lease pushed, reports it handed with its
 # hand-over number, keeps it in the folder's store as handed, reports the turn
 # busy and exits saying so, without its content. The hooks acknowledge it, then
 # put it into the turn. A message the store still holds unconfirmed while the
 # session is idle is handed over again at once, without a receive. The Codex
-# wake bridge runs it with AEOLUS_WAKE_ONLY=1: it wakes the task, which
-# receives for itself.
+# wake bridge runs it too, and queues a prompt to the task when it exits.
 #
 # Exit codes:
-#   0  a message is handed over (Claude Code), or deliveries wait: receive them
+#   0  a message is handed over
 #   2  this folder crews no ship
 #   3  LEASE_ENDED: the operator released the ship, and the plugin forgot it
 #   4  a watcher already runs for this ship
@@ -62,10 +57,6 @@ aeolus_log "$identity" watch started
 fleet_url="$(aeolus_identity_field "$identity_text" fleetUrl)"
 ship_name="$(aeolus_identity_field "$identity_text" shipName)"
 crew_token="$(aeolus_identity_field "$identity_text" crewToken)"
-# The Codex wake bridge runs the watcher to wake its task, which receives for itself.
-is_handing_over=1
-[ "${AEOLUS_WAKE_ONLY:-}" != 1 ] || is_handing_over=0
-
 # Hands a store entry over: reports it handed with its number, and once the
 # fleet took that, it is the session's to confirm, its turn starts. An entry
 # the fleet answers undeliverable or no longer in flight is dropped, and the
@@ -180,7 +171,7 @@ while :; do
     echo "aeolus: watched ${ship_name} for almost 2 hours, the most a background task runs: start the watcher again"
     exit 6
   fi
-  if [ "$is_handing_over" = 1 ] && aeolus_is_idle && id="$(aeolus_store_first received handed)"; then
+  if aeolus_is_idle && id="$(aeolus_store_first received handed)"; then
     hand_over "$id" "handed ${id} over again: it was not confirmed"
     continue
   fi
@@ -200,20 +191,10 @@ while :; do
   was_owed="$is_owed"
   # A hand-over is owed whenever deliveries wait: each is handed over on its
   # own, and a drop to none and a rise again may fall within one inbox wait.
-  if [ "$waiting" -eq 0 ]; then
-    is_owed=0
-  elif [ "$is_handing_over" = 1 ] || [ "$waiting" -gt "${seen:-0}" ]; then
-    is_owed=1
-  fi
+  is_owed=0
+  [ "$waiting" -eq 0 ] || is_owed=1
   if [ "$is_owed" = 1 ] && aeolus_is_idle; then
     printf '%s 0\n' "$waiting" > "$waiting_file"
-    if [ "$is_handing_over" = 0 ]; then
-      # The wake starts a turn, as a prompt does.
-      aeolus_mark_turn busy
-      aeolus_log "$identity" wake "woken, ${waiting} deliveries wait"
-      echo "aeolus: ${waiting} deliveries wait for ${ship_name}: receive them"
-      exit 0
-    fi
     # Deliveries wait, so the push receive answers at once.
     call /api/v1/ship/pushReceive '{"max":1}' $((WAIT_SECONDS + 15))
     if [ "$status" != 200 ]; then

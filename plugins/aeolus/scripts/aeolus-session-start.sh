@@ -59,7 +59,13 @@ if [ -n "${PLUGIN_ROOT:-}" ]; then
       told='and that its wake bridge failed to arm'
     fi
   fi
-  context="${context} This folder crews the Aeolus ship ${ship_name} (${ship_id}) in the fleet at ${fleet_url}. Every fleet call goes through ${root}/scripts/aeolus-fleet.sh, run with AEOLUS_DATA and AEOLUS_FOLDER as above and AEOLUS_HARNESS=codex; it adds the crew token: never read the identity file or pass a crew token. Do not register again. Go on as the aeolus-crew skill says: fetch the protocol, receive and handle what waits, then end the turn."
+  context="${context} This folder crews the Aeolus ship ${ship_name} (${ship_id}) in the fleet at ${fleet_url}. Every fleet call goes through ${root}/scripts/aeolus-fleet.sh, run with AEOLUS_DATA and AEOLUS_FOLDER as above and AEOLUS_HARNESS=codex; it adds the crew token: never read the identity file or pass a crew token. Do not register again."
+  # A pushed lease (#756): the bridge hands each message over, so the task receives nothing itself.
+  if aeolus_reports_here "$identity_text"; then
+    context="${context} Go on as the aeolus-crew skill says: fetch the protocol. Receive and ack nothing: this ship is pushed, so the wake bridge hands each message over and it comes into the turn through the plugin's hooks. Then end the turn."
+  else
+    context="${context} Go on as the aeolus-crew skill says: fetch the protocol, receive and handle what waits, then end the turn."
+  fi
   if aeolus_woken_by_trierarch "$identity_text"; then
     context="${context} The trierarch wakes this session when work arrives: start no watcher."
     told='and that the trierarch wakes it'
@@ -105,6 +111,12 @@ if aeolus_woken_by_trierarch "$identity_text"; then
   printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(aeolus_json_escape "$context")"
   exit 0
 fi
-context="${context} Go on as the aeolus crew-a-ship skill says: fetch the protocol, receive and handle what waits; then, unless \"${root}/scripts/aeolus-watch-status.sh\" says watching, start \"${root}/scripts/aeolus-wait.sh\" as a background task; then end your turn. When the watcher exits 6 (its 2-hour limit), just start it again."
+# A pushed lease (#756): the watcher hands each message over, so the session receives nothing itself.
+if aeolus_reports_here "$identity_text"; then
+  handle="fetch the protocol. Receive and ack nothing: this ship is pushed, so the watcher hands each message over and it comes into the turn through the plugin's hooks. Then"
+else
+  handle='fetch the protocol, receive and handle what waits; then'
+fi
+context="${context} Go on as the aeolus crew-a-ship skill says: ${handle}, unless \"${root}/scripts/aeolus-watch-status.sh\" says watching, start \"${root}/scripts/aeolus-wait.sh\" as a background task; then end your turn. When the watcher exits 6 (its 2-hour limit), just start it again."
 aeolus_log "$identity" sessionStart "told the session after ${source_event:-start} which ship it crews, and to start the watcher"
 printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(aeolus_json_escape "$context")"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# StopFailure hook, on every error: the turn ended without Stop, so it died
-# (#756, D3). On a lease the watcher pushed, a confirmed message the turn took
+# StopFailure hook (Claude Code), on every error, and Interrupt hook (Codex):
+# the turn ended without Stop, so it died (#756, D3). On a lease the watcher pushed, a confirmed message the turn took
 # is kept to hand once more at the next prompt, and one handed once more
 # already, whose turn died too, is reported not handled. The session is idle
 # again, and the turn is reported so. Says nothing; never fails the session.

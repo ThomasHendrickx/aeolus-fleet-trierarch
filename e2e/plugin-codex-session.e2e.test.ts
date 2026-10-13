@@ -20,8 +20,11 @@ import { newKey } from '../packages/core/test/support/keys.js';
 
 // The aeolus plugin in a real interactive Codex session, driven in tmux
 // against a fleet on this machine and with no fleet MCP server: the session
-// crews a ship with the Codex crew line and answers a message when woken,
-// and its crew token never shows in its pane or its transcript (#104, #264).
+// crews a ship with the Codex crew line, and answers a message sent while it
+// is idle, without anyone touching it: the wake bridge hands it over and
+// queues a prompt, and the hooks acknowledge it, put it into that turn and
+// report it handled (#756). Its crew token never shows in its pane or its
+// transcript (#104, #264).
 // It installs this folder's plugin into a Codex home of its own, with the
 // signed-in Codex's auth.json, so the machine's Codex is left as it was. It
 // needs a signed-in Codex and tmux, so it runs only when
@@ -96,6 +99,12 @@ function identityFile(): string | undefined {
   return name === undefined ? undefined : join(ships, name);
 }
 
+/** A file beside this test's ship's identity file, its content, or nothing when there is none. */
+function sibling(suffix: string): string | undefined {
+  const file = identityFile()?.replace(/\.identity$/, suffix);
+  return file !== undefined && existsSync(file) ? readFileSync(file, 'utf8') : undefined;
+}
+
 /** The session's transcripts: Codex keeps them under its home's sessions folder. */
 function transcripts(): string[] {
   const sessions = join(codexHome, 'sessions');
@@ -164,7 +173,7 @@ describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Codex session',
     await database.$disconnect();
   });
 
-  it('crews the ship with the Codex crew line and answers a message when woken', async () => {
+  it('crews the ship with the Codex crew line, and answers a message sent while it is idle, without anyone touching it', async () => {
     const flags = isSandboxed ? ['--sandbox', 'workspace-write', '--ask-for-approval', 'never'] : ['--dangerously-bypass-approvals-and-sandbox'];
     tmux(
       'new-session', '-d', '-s', TMUX_SESSION, '-x', '200', '-y', '50', '-c', folder, '-e', `CODEX_HOME=${codexHome}`, '-e', `AEOLUS_CREWS=${join(codexHome, 'aeolus-crews')}`,
@@ -174,6 +183,8 @@ describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Codex session',
 
     await type(crewLine);
     await until(() => identityFile() !== undefined, 'the identity file');
+    // The message is sent once the crew turn ended and the wake bridge is armed: the bridge hands it over.
+    await until(() => sibling('.wake.pid') !== undefined && sibling('.turn')?.startsWith('idle ') === true, 'the crew turn to end, with the wake bridge armed');
 
     const { messageId } = unwrap(
       await useCases.sendMessage(argo, {
@@ -182,9 +193,22 @@ describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Codex session',
         idempotencyKey: `e2e-${String(Date.now())}`,
       }),
     );
-    await type('$aeolus-wake ');
     const reply = await waitForReply(messageId);
     expect(reply.payload).toContain('PONG 1');
+    await until(
+      async () => (await database.delivery.findFirstOrThrow({ where: { messageId } })).state === 'handled',
+      `the hooks to report ${messageId} handled`,
+    );
+    const delivery = await database.delivery.findFirstOrThrow({ where: { messageId } });
+    expect(delivery.attempts).toBe(1);
+    const steps = await database.event.findMany({ where: { deliveryId: delivery.id, type: { startsWith: 'Delivery' } }, orderBy: { seq: 'asc' } });
+    expect(steps.map((step) => step.type)).toEqual(['DeliveryReceived', 'DeliveryHanded', 'DeliveryAcknowledged', 'DeliveryHandled']);
+    expect(steps[1]?.details).toMatchObject({ handOverNumber: 1 });
+    const lease = await database.lease.findFirstOrThrow({ where: { shipId, endedAt: null } });
+    expect(lease.pushedAt).not.toBeNull();
+    const turns = await database.event.findMany({ where: { shipId, type: 'TurnReported' }, orderBy: { seq: 'asc' } });
+    expect(turns.map((reported) => reported.details)).toEqual(expect.arrayContaining([expect.objectContaining({ turn: 'busy' }), expect.objectContaining({ turn: 'idle' })]));
+    expect(transcripts().some((transcript) => transcript.includes(`: message ${messageId}, text/plain. The plugin acknowledged it for you`))).toBe(true);
     // The hook recorded the active model, and the script stated it.
     const modelFile = identityFile()?.replace(/\.identity$/, '.model');
     expect(modelFile !== undefined && existsSync(modelFile)).toBe(true);

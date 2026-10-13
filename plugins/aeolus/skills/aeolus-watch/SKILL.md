@@ -9,6 +9,6 @@ The SessionStart developer context must say `Aeolus Codex hooks are active` and 
 
 Run the plugin root's `scripts/aeolus-codex-wake.sh start <codexTaskId>` with `AEOLUS_DATA` set to the named plugin data, `AEOLUS_FOLDER` set to the named working folder and `AEOLUS_HARNESS=codex`. Report its exact result, then end the turn.
 
-The detached bridge long-polls the REST inbox without model tokens. When deliveries wait, it invokes `codex queue` once for this exact task. A newer task in the same folder replaces an older bridge. The `aeolus-crew` skill re-arms it after handling the delivery. Codex Cloud cannot wake automatically.
+The detached bridge long-polls the REST inbox without model tokens. When deliveries wait while the task is idle, it hands one message over and invokes `codex queue` once for this exact task. A newer task in the same folder replaces an older bridge. The `aeolus-crew` skill re-arms it after handling the delivery. Codex Cloud cannot wake automatically.
 
-On a queued wake message, follow the `aeolus-crew` skill to receive and handle every delivery, then re-arm the bridge before ending the turn. Handle every other exit as that skill says.
+When the bridge queues a hand-over, the message comes into that turn through the plugin's hooks: handle it as the `aeolus-crew` skill says, without receiving or acking it, then re-arm the bridge before ending the turn. Handle every other exit as that skill says.

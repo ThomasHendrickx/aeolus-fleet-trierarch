@@ -51,6 +51,12 @@ describe('/aeolus:wake', () => {
     expect(command('wake')).toContain('until it answers empty');
   });
 
+  it("receives and acks nothing on a pushed lease: the message comes into the turn through the plugin's hooks (#756)", () => {
+    expect(command('wake')).toContain(
+      "If step 1 said `delivery: pushed`, receive and ack nothing: the watcher hands each message over, and it comes into your turn through the plugin's hooks. Handle what came in, and answer by senderName with inReplyTo. Otherwise, as the crew-a-ship skill says:",
+    );
+  });
+
   it('makes sure the watcher runs, starting it again unless it says watching', () => {
     expect(command('wake')).toContain('"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-watch-status.sh"');
     expect(command('wake')).toContain('"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-wait.sh"');

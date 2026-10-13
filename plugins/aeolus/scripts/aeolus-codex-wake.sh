@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Local Codex wake bridge. It waits through the fleet's REST inbox without
-# model tokens, then queues one message to the exact Desktop or CLI task. What
-# it does goes in the plugin's log, as the watcher's and the hooks' do.
+# Local Codex wake bridge. It runs the watcher, which waits through the fleet's
+# REST inbox without model tokens and hands one message over while the task is
+# idle (#756), then queues one prompt to the exact Desktop or CLI task. The
+# prompt starts a turn, and the UserPromptSubmit hook acknowledges the message
+# and puts it into that turn. What it does goes in the plugin's log, as the
+# watcher's and the hooks' do.
 set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
@@ -77,7 +80,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 143' INT TERM
 
-AEOLUS_WAKE_ONLY=1 AEOLUS_MAX_SECONDS=2147483647 "$(dirname "$0")/aeolus-wait.sh" > "$wait_output" 2>&1 &
+AEOLUS_MAX_SECONDS=2147483647 "$(dirname "$0")/aeolus-wait.sh" > "$wait_output" 2>&1 &
 wait_pid=$!
 wait "$wait_pid"
 status=$?
@@ -87,18 +90,13 @@ answer="$(cat "$wait_output")"
 case "$status" in
   0)
     ship_name="$(aeolus_identity_field "$identity_text" shipName)"
-    waiting="$(printf '%s' "$answer" | sed -n 's/^aeolus: \([0-9][0-9]*\) deliveries\{0,1\} wait.*/\1/p')"
-    [ -n "$waiting" ] || waiting='some'
-    noun='deliveries'
-    [ "$waiting" = 1 ] && noun='delivery'
-    message="Aeolus has ${waiting} ${noun} waiting for ${ship_name}. Use \$aeolus-crew to receive and handle them, then re-arm automatic wake-up before ending the turn."
+    delivery_id="$(aeolus_store_first handed)"
+    message="Aeolus handed a message for ${ship_name} to this task: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it. Handle it as the aeolus-crew skill says, then re-arm automatic wake-up before ending the turn."
     if ! queued="$(codex queue --thread "$thread_id" --message "$message" 2>&1)"; then
-      aeolus_log "$identity" wakeBridge "failed: codex did not queue the wake to Codex task ${thread_id}: ${queued}" "$NEXT"
+      aeolus_log "$identity" wakeBridge "failed: codex did not queue the hand-over to Codex task ${thread_id}: ${queued}" "$NEXT"
       exit 1
     fi
-    verb='deliveries wait'
-    [ "$waiting" = 1 ] && verb='delivery waits'
-    aeolus_log "$identity" wakeBridge "queued a wake to Codex task ${thread_id}: ${waiting} ${verb}"
+    aeolus_log "$identity" wakeBridge "queued a hand-over of ${delivery_id} to Codex task ${thread_id}"
     ;;
   3|5)
     codex queue --thread "$thread_id" --message "$answer"

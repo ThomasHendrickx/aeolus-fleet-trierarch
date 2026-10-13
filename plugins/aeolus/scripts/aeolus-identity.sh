@@ -4,7 +4,7 @@
 #   aeolus-identity.sh write [--wake-by trierarch] <fleetUrl> <shipId> <shipName> <crewToken> [<squadronId>]
 #                       with --wake-by trierarch, the trierarch wakes the folder's sessions, not a watcher
 #   aeolus-identity.sh check-in <interval>   a squadron member keeps its check-in interval: <n>m or <n>h
-#   aeolus-identity.sh show     the ship and its fleet (never the token); exit 1 when none
+#   aeolus-identity.sh show     the ship and its fleet (never the token), and whether its lease is pushed; exit 1 when none
 #   aeolus-identity.sh turn     the turn marker of a folder a trierarch crews: busy or idle, with when; exit 1 when none
 #   aeolus-identity.sh launch   the launch marker of a folder a trierarch crews: the launch id, then what the hooks saw; exit 1 when none
 #   aeolus-identity.sh launch clear   forgets the launch marker, before the trierarch starts a launch
@@ -67,6 +67,10 @@ case "$command" in
     [ -n "$check_in" ] && echo "check-in: ${check_in}"
     if aeolus_woken_by_trierarch "$text"; then
       echo "wakes: the trierarch"
+    fi
+    # The watcher or the wake bridge pushed this lease (#756): the hooks put each message into the turn.
+    if aeolus_reports_here "$text"; then
+      echo "delivery: pushed"
     fi
     ;;
   turn)

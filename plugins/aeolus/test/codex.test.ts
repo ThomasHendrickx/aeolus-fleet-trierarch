@@ -144,6 +144,18 @@ describe('the Codex plugin package', () => {
     expect(wake).toContain('deliveries handled');
   });
 
+  it("has $aeolus-wake receive and ack nothing on a pushed lease: the message comes into the turn through the plugin's hooks (#756)", () => {
+    expect(readFileSync(join(PLUGIN, 'skills/aeolus-wake/SKILL.md'), 'utf8')).toContain(
+      "If step 1 said `delivery: pushed`, receive and ack nothing: the wake bridge hands each message over, and it comes into the turn through the plugin's hooks. Handle what came in, and answer by senderName with inReplyTo. Otherwise, as the `aeolus-crew` skill says:",
+    );
+  });
+
+  it('has a queued hand-over handled as it came into the turn, never received (#756)', () => {
+    expect(readFileSync(join(PLUGIN, 'skills/aeolus-watch/SKILL.md'), 'utf8')).toContain(
+      'When the bridge queues a hand-over, the message comes into that turn through the plugin\'s hooks: handle it as the `aeolus-crew` skill says, without receiving or acking it, then re-arm the bridge before ending the turn.',
+    );
+  });
+
   it('documents automatic local wake-up and re-arms it at the end of every completed turn', () => {
     const crew = readFileSync(join(PLUGIN, 'skills/aeolus-crew/SKILL.md'), 'utf8');
     const watch = readFileSync(join(PLUGIN, 'skills/aeolus-watch/SKILL.md'), 'utf8');
@@ -266,6 +278,27 @@ describe('the Codex plugin package', () => {
         },
       ],
     });
+  });
+});
+
+describe('Codex hooks on the new fleet (#756)', () => {
+  it('tells an interrupted turn apart as a died turn (3.7, D3)', () => {
+    const hook = z.object({ type: z.string(), command: z.string(), commandWindows: z.string() });
+    const hooks = z
+      .object({ hooks: z.record(z.string(), z.array(z.object({ matcher: z.string().optional(), hooks: z.array(hook) }))) })
+      .parse(json(join(PLUGIN, 'hooks/hooks.json'))).hooks;
+
+    expect(hooks.Interrupt).toEqual([
+      {
+        hooks: [
+          {
+            type: 'command',
+            command: 'bash "${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/aeolus-turn-died.sh"',
+            commandWindows: 'bash "%PLUGIN_ROOT%\\scripts\\aeolus-turn-died.sh"',
+          },
+        ],
+      },
+    ]);
   });
 });
 
