@@ -82,6 +82,8 @@ What it finds is kept in `~/.aeolus/trierarch/detected.json`, apart from the ope
 
 ### What a trierarch reports
 
+The `runtime` field in the report below is **unreleased, next version**; it is absent in 0.24.0.
+
 Its report, sent on start and again whenever it changes: its state (`working` while a session runs, `idle` with none), a one-line note such as "4 of 6 running, 1 crashed" (the sessions that run of `caps.ships`, and the crashed ones when there are any), and `details`, read from its local configuration and what runs. Each harness's `flags` are the flags its configuration gives it, and its `riskyFlags` those of them its adapter calls risky, so a reader needs no harness knowledge: `--dangerously-skip-permissions` for Claude Code and `--dangerously-bypass-approvals-and-sandbox` for Codex. The console marks them:
 
 ```json trierarch report details
@@ -223,6 +225,8 @@ Removing a crew request is the one way to stop a ship's crew through a trierarch
 Stopping a session must stop its work, or a release and a restarted crash would leave work running with no one watching it. So a harness adapter starts each session as a process that owns its work. Codex by default runs a session's turns in its shared app-server daemon, which keeps a turn running after the session's pane is gone: the codex adapter always adds `--no-daemon`, as mechanism, the way the Claude Code adapter adds `--continue` on a restart. Neither is the operator's flag.
 
 ## Session runtime
+
+**Container runtime: unreleased, next version.** npm 0.24.0 runs sessions on the host only; do not add `runtime` to its configuration. The container configuration and behaviour below describe the next version.
 
 A trierarch runs its sessions on the host, each in a tmux session of its own tmux server, or each in a container of its own (decision 0039). The machine's configuration picks the runtime, host by default, for every session on the machine: a crew request never names it, no label carries it and placement never reads it. The trierarch states it in its report's details as a fact, which the console's machine card shows.
 
