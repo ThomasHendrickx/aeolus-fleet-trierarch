@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
@@ -298,6 +298,10 @@ describe('aeolus-trierarch', () => {
   });
 });
 
+// Init runs real processes and writes configuration files. Use the shell-script
+// suite's budget while a full test run shares the machine.
+const INIT_TIMEOUT_MS = 30_000;
+
 /** `codex debug models` cut to what detection reads: two models it shows, both confirmed by a probe. */
 const CODEX_CATALOG = JSON.stringify({ models: [{ slug: 'gpt-6.1-sol', visibility: 'list' }, { slug: 'gpt-6-luna', visibility: 'list' }] });
 
@@ -313,10 +317,11 @@ function standInPrograms(): void {
   const program = (name: string, script: string) => {
     writeFileSync(join(bin, name), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
   };
-  program('sh', 'exec /bin/sh "$@"');
-  program('claude', 'exit 1');
+  // Reuse system executables: first executions of fresh shell scripts are slow on macOS.
+  symlinkSync('/bin/sh', join(bin, 'sh'));
+  symlinkSync('/usr/bin/false', join(bin, 'claude'));
   program('codex', `case "$1" in\n  --version) echo "codex-cli 0.160.1" ;;\n  debug) echo '${CODEX_CATALOG}' ;;\n  exec) echo OK ;;\n  app-server) read -r line; exit 1 ;;\n  *) exit 1 ;;\nesac`);
-  program('systemctl', 'exit 0');
+  symlinkSync('/usr/bin/true', join(bin, 'systemctl'));
   vi.stubEnv('PATH', bin);
 }
 
@@ -355,7 +360,7 @@ describe('aeolus-trierarch with CLAUDE_CONFIG_DIR and CODEX_HOME set (#521)', ()
     expect(output).toContain(`(hasCompletedOnboarding in ${claudeJson})`);
     expect(output).toContain(`(skipDangerousModePermissionPrompt in ${settings})`);
     expect(output).not.toContain('~/.claude');
-  });
+  }, INIT_TIMEOUT_MS);
 
   it('init detects the default Codex model from config.toml in CODEX_HOME', async () => {
     await aSetUpMachine({ isServiceInstalled: true });
@@ -363,7 +368,7 @@ describe('aeolus-trierarch with CLAUDE_CONFIG_DIR and CODEX_HOME set (#521)', ()
     const { output } = await main(['init', '--yes'], machine(both()));
 
     expect(output).toContain('codex 0.160.1: model gpt-6.1-sol, gpt-6-luna (default);');
-  });
+  }, INIT_TIMEOUT_MS);
 
   it('add trusts a place in .claude.json under CLAUDE_CONFIG_DIR, leaving ~/.claude.json alone', async () => {
     await aSetUpMachine({ isServiceInstalled: false });
