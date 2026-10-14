@@ -23,7 +23,7 @@ Declared state on the ship, in the fleet core (decision 0029): "keep this ship c
 | Status | crewing, running, restarting, crashed, releasing, with the restart attempt (0 on the first start) and when the session started; and who crewed it, the trierarch or argo | The assigned trierarch | `crew:run` |
 | Give-back | The trierarchs that gave it back before their crew was final, each with the settings version it tried, the reason and when; cleared on every new settings version | The assigned trierarch | `crew:run` |
 
-The server refuses settings over their size and settings that are not crew settings, with the reason placement would give, and never acts on them; what fits a trierarch (harness, workspace, options) stays placement's to explain. The settings have a fixed core (decision 0027), whose schema lives in `common`:
+The server refuses settings over their size, settings that are not crew settings and a machine label that is no label value of the fleet, with the reason, and never acts on them; what fits a trierarch (harness, workspace, options) stays placement's to explain. The settings have a fixed core (decision 0027), whose schema lives in `common`:
 
 - optionally the harness. Without one, the trierarch it goes to crews it with its default harness: the first in its configuration, which is also the first in its report;
 - the workspace: a new git worktree of a repository (`{ kind: worktree, repository, ref? }`) or a folder (`{ kind: folder, name }`), each named in the trierarch's local configuration;
