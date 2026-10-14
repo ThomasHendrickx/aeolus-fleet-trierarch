@@ -209,9 +209,16 @@ export function createClaudeCodeHarness(options: {
       await marks.clear(folder);
       await sessions.start({ shipId, folder, command: wordsOf(command), env: { [LAUNCH_VARIABLE]: launchId } });
     },
-    wake: async ({ shipId }) => {
-      await sessions.type({ shipId, text: wakePromptOf(WAKE_PROMPT) });
+    handOver: async (session) => {
+      const line = await identityOf(session.shipId).handOverLine(session);
+      if (line === undefined) {
+        return 'nothing';
+      }
+      await sessions.type({ shipId: session.shipId, text: wakePromptOf(line) });
+      return 'handed';
     },
+    isHolding: (session) => identityOf(session.shipId).isHolding(session),
+    sessionDied: (session) => identityOf(session.shipId).sessionDied(session),
     marksLaunches: () => createLaunchMarks(plugin).isMarking(),
     // The marker says what the session did; the screen only names one that stopped it before its hooks ran (#490).
     launchSeen: async ({ shipId, folder, launchId, model }) => {

@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,10 +55,10 @@ afterEach(() => {
   rmSync(folder, { recursive: true, force: true });
 });
 
-function harness() {
+function harness(at: { pluginRoot?: string } = {}) {
   return createCodexHarness({
     configuration: WITH_CODEX,
-    plugin: { root: PLUGIN_ROOT, data, crews },
+    plugin: { root: at.pluginRoot ?? PLUGIN_ROOT, data, crews },
     setup: {
       trustAeolusHooks: () => {
         const trusted = [...untrustedHooks];
@@ -198,19 +198,15 @@ describe('Codex as a harness', () => {
     ]);
   });
 
-  it('wakes a session by typing $aeolus-wake and the line that no human reads its terminal, the space after the skill closing its picker so it leaves Enter alone, and settling before Enter so Codex takes no paste (#585)', async () => {
-    await harness().wake({ shipId, folder });
+  it("hands a message over through the plugin, and types the line it prints with the line that no human reads its terminal, settling before Enter so Codex takes no paste (#756, #585)", async () => {
+    const line = "Aeolus handed a message for scout to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it.";
+    const root = mkdtempSync(join(data, 'plugin-'));
+    mkdirSync(join(root, 'scripts'));
+    writeFileSync(join(root, 'scripts', 'aeolus-push.sh'), `[ "$1" = hand ] || exit 2\necho "${line}"\n`);
 
-    expect(typed).toEqual([{ shipId, text: `$aeolus-wake ${NO_TERMINAL_QUESTIONS}`, settleMs: CODEX_TYPING_SETTLE_MS }]);
-  });
+    await expect(harness({ pluginRoot: root }).handOver({ shipId, folder })).resolves.toBe('handed');
 
-  // The screen is captured from a real idle Codex 0.162.1 session in tmux after this adapter's wake typed into it (#589).
-  it('wakes a real idle Codex: the typed wake is submitted as one prompt, not left in the skill picker, and the session runs the wake skill', async () => {
-    await harness().wake({ shipId, folder });
-    const woken = readFileSync(new URL('../../test/screens/codex-woken.txt', import.meta.url), 'utf8');
-    screens.set(shipId, woken);
-
-    expect(woken).toContain(`› ${typed[0]?.text ?? ''}\n\n• I’m using the aeolus-wake skill`);
+    expect(typed).toEqual([{ shipId, text: `${line} ${NO_TERMINAL_QUESTIONS}`, settleMs: CODEX_TYPING_SETTLE_MS }]);
   });
 
 });

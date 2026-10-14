@@ -466,10 +466,9 @@ aeolus_pushed_file() {
 }
 
 # Whether this session reports its turn and its messages to the fleet: a
-# session crewed by hand, in Claude Code or Codex, whose lease the watcher
-# pushed. A folder a trierarch crews does not report yet. <identity text>
+# session in Claude Code or Codex whose lease the watcher, the Codex wake
+# bridge or the trierarch pushed. <identity text>
 aeolus_reports_here() {
-  ! aeolus_woken_by_trierarch "$1" || return 1
   [ "$(cat "$(aeolus_pushed_file)" 2>/dev/null)" = "$(aeolus_lease_key "$(aeolus_identity_field "$1" crewToken)")" ]
 }
 

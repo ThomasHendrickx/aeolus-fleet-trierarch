@@ -795,7 +795,7 @@ describe('the restart window: a restarted final crew is checked, never held back
 
     await trierarch.pass();
 
-    expect(trierarch.harness.wakes).toEqual([shipId]);
+    expect(trierarch.harness.handOvers).toEqual([shipId]);
   });
 
   it('starts a restarted session with a fresh launch id and reads that launch, for the model it launched with (#490)', async () => {
@@ -1026,7 +1026,7 @@ describe('a session is watched and woken from the moment it runs, whatever the c
     await trierarch.pass();
 
     expect(trierarch.state.current().entries[shipId]?.state).toBe('crewing');
-    expect(trierarch.harness.wakes).toEqual([shipId]);
+    expect(trierarch.harness.handOvers).toEqual([shipId]);
   });
 
   it('wakes a first crew before its session shows activity', async () => {
@@ -1038,7 +1038,7 @@ describe('a session is watched and woken from the moment it runs, whatever the c
     await trierarch.pass();
 
     expect(trierarch.state.current().entries[shipId]?.state).toBe('crewing');
-    expect(trierarch.harness.wakes).toEqual([shipId]);
+    expect(trierarch.harness.handOvers).toEqual([shipId]);
   });
 
   it('wakes a session in the pass its activity makes its crew final', async () => {
@@ -1050,7 +1050,7 @@ describe('a session is watched and woken from the moment it runs, whatever the c
     await trierarch.pass();
 
     expect(trierarch.state.current().entries[shipId]?.state).toBe('running');
-    expect(trierarch.harness.wakes).toEqual([shipId]);
+    expect(trierarch.harness.handOvers).toEqual([shipId]);
   });
 
   it('wakes a crewing session no more once its start failed', async () => {
@@ -1062,7 +1062,7 @@ describe('a session is watched and woken from the moment it runs, whatever the c
 
     await trierarch.pass();
 
-    expect(trierarch.harness.wakes).toEqual([]);
+    expect(trierarch.harness.handOvers).toEqual([]);
   });
 });
 
@@ -1435,30 +1435,107 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`scout (${shipId}): this trierarch cannot crew settings version 1: ${UNMARKED}`]);
   });
 
-  it('wakes an idle session once when deliveries come, and not again until it has received', async () => {
+  it('hands one message over to an idle session while deliveries wait (#756, 2a)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
     trierarch.fleet.deliver(shipId, 1);
 
     await trierarch.pass();
-    await trierarch.pass();
 
-    expect(trierarch.harness.wakes).toEqual([shipId]);
+    expect(trierarch.harness.handOvers).toEqual([shipId]);
   });
 
-  it('wakes a busy session once it turns idle', async () => {
+  it('hands nothing more while the hand-over keeps the session busy', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.fleet.deliver(shipId, 2);
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.harness.handOvers).toEqual([shipId]);
+  });
+
+  it('hands the next message over once the session is idle again, though the count did not rise', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.fleet.deliver(shipId, 1);
+    await trierarch.pass();
+
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    await trierarch.pass();
+
+    expect(trierarch.harness.handOvers).toEqual([shipId, shipId]);
+  });
+
+  it('hands over what the store holds to an idle session, though nothing waits at the fleet: received, not confirmed or to hand once more (3.2, 3.7, 3.9)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.holding.add(SCOUT_FOLDER);
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.handOvers).toEqual([shipId]);
+  });
+
+  it('hands nothing to an idle session while nothing waits and its store holds nothing', async () => {
+    const trierarch = aTrierarch();
+    await aCrewedShip(trierarch);
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.handOvers).toEqual([]);
+  });
+
+  it('tells the store its session died before it starts the session again (3.5 to 3.7)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.processes.exit(shipId);
+
+    await trierarch.pass();
+    trierarch.clock.advance(5 * SECOND_MS);
+    await trierarch.pass();
+
+    expect(trierarch.harness.died).toEqual([{ shipId, launchesBefore: 1 }]);
+    expect(trierarch.harness.launches).toHaveLength(2);
+  });
+
+  it('tells the store its session died when the machine restarted, before it starts it again (3.10)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.processes.restartMachine();
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.died).toEqual([{ shipId, launchesBefore: 1 }]);
+  });
+
+  it('tells the store nothing while its session runs on, as after the trierarch itself restarted (3.3)', async () => {
+    const trierarch = aTrierarch();
+    await aCrewedShip(trierarch);
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.died).toEqual([]);
+  });
+
+  it('hands nothing to a busy session, and hands over once it turns idle', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     trierarch.harness.turns.set(SCOUT_FOLDER, 'busy');
     trierarch.fleet.deliver(shipId, 1);
     await trierarch.pass();
-    expect(trierarch.harness.wakes).toEqual([]);
+    expect(trierarch.harness.handOvers).toEqual([]);
 
     trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
     await trierarch.pass();
 
-    expect(trierarch.harness.wakes).toEqual([shipId]);
+    expect(trierarch.harness.handOvers).toEqual([shipId]);
   });
 
   it('starts no more sessions than its running cap', async () => {
@@ -1516,7 +1593,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
 
     await trierarch.pass();
 
-    expect(trierarch.codex.wakes).toEqual([shipId]);
+    expect(trierarch.codex.handOvers).toEqual([shipId]);
   });
 });
 
@@ -1543,7 +1620,7 @@ describe('what the loop logs (aeolus-trierarch logs)', () => {
     expect(logged(trierarch).slice(1)).toEqual(['report: reported blocked: session crashed, restarting', `launch: started again in ${SCOUT_FOLDER}`]);
   });
 
-  it('logs a wake', async () => {
+  it('logs a hand-over', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
@@ -1551,7 +1628,20 @@ describe('what the loop logs (aeolus-trierarch logs)', () => {
 
     await trierarch.pass();
 
-    expect(logged(trierarch).at(-1)).toBe('wake: woken, deliveries wait');
+    expect(logged(trierarch).at(-1)).toBe('wake: handed a message over');
+  });
+
+  it('logs nothing when the plugin had nothing to hand over, as when another ship of its type took the delivery first', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.isHandingNothing = true;
+    trierarch.fleet.deliver(shipId, 1);
+    const before = logged(trierarch).length;
+
+    await trierarch.pass();
+
+    expect(logged(trierarch)).toHaveLength(before);
   });
 
   it('logs a release, saying its worktree was removed and how much it discarded', async () => {

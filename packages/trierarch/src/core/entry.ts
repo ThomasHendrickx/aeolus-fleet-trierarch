@@ -52,8 +52,6 @@ export interface Entry {
   readonly isReleasedElsewhere?: true;
   /** Set once argo is told its running session's folder holds no identity (#659), so it is told once; cleared when the identity is back. */
   readonly isIdentityGone?: true;
-  /** The inbox count last seen, and whether a wake waits for the session to turn idle. */
-  readonly wake: { readonly waiting: number; readonly isPending: boolean };
 }
 
 /** A worktree kept because it had changes, until a human clears it: reported by its ship and repository, never its path. */

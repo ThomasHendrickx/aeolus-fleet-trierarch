@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# The trierarch's hand-over (#756), for a folder it crews: what the watcher
+# does for a session crewed by hand, one call at a time, through the same
+# store, so the trierarch never writes the store itself. The plugin's hooks
+# then acknowledge each message before they put it into the turn.
+#
+#   aeolus-push.sh hand   given while the turn marker says idle: hands one
+#                         message over and prints the line to type into the
+#                         session. A message to hand once more goes first, its
+#                         hand-over reported by the prompt the line starts;
+#                         then one received or handed and not confirmed, again
+#                         with the next number; else one push receive, which
+#                         makes the lease pushed, reported handed with its
+#                         number. Marks the turn busy, so the next pass waits.
+#   aeolus-push.sh died   the session died, before the trierarch starts it
+#                         again: a confirmed message is kept to hand once more,
+#                         one handed once more already is reported not handled,
+#                         and one received or handed is reported handed again
+#                         with the next number, for the next prompt to confirm.
+#
+# Exit codes:
+#   0  hand: a message is handed over: type the line; died: done
+#   1  hand: nothing is handed over
+#   2  this folder crews no ship, or the command is not one of these
+#   3  LEASE_ENDED: the store is forgotten
+set -uo pipefail
+. "$(dirname "$0")/aeolus-lib.sh"
+
+# How long the push receive may wait: it waits about 25 seconds when nothing
+# is there, and the trierarch's pass waits for it. A delivery taken after the
+# call gave up comes first again at the next push receive.
+PUSH_RECEIVE_SECONDS="${AEOLUS_PUSH_RECEIVE_SECONDS:-5}"
+
+identity="$(aeolus_identity_file)" || exit 2
+identity_text="$(aeolus_identity_read "$identity")" || { echo "aeolus: this folder crews no ship" >&2; exit 2; }
+ship_name="$(aeolus_identity_field "$identity_text" shipName)"
+
+# The message is the session's to confirm: the turn is busy from now, and the
+# line goes into the session. <what the log says>
+handed_over() {
+  aeolus_mark_turn busy
+  aeolus_report_turn "$(aeolus_identity_read "$identity")"
+  aeolus_log "$identity" wake "$1"
+  echo "Aeolus handed a message for ${ship_name} to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it."
+  exit 0
+}
+
+# Reports an entry handed: handed over, dropped (nothing to hand), not taken
+# (handed again at the next pass) or LEASE_ENDED. <deliveryId> <what the log says>
+hand_entry() {
+  aeolus_report_handed "$identity" "$1"
+  case $? in
+    0) handed_over "$2" ;;
+    1)
+      [ -d "$(aeolus_store_dir)" ] || exit 3
+      exit 1
+      ;;
+  esac
+  exit 1
+}
+
+hand() {
+  local id output
+  aeolus_send_owed "$identity"
+  if id="$(aeolus_store_first onceMore)"; then
+    handed_over "woken: ${id} to hand once more"
+  fi
+  if id="$(aeolus_store_first received handed)"; then
+    hand_entry "$id" "woken: handed ${id} over again: it was not confirmed"
+  fi
+  output="$(AEOLUS_CALL_MAX_SECONDS="$PUSH_RECEIVE_SECONDS" "$(dirname "$0")/aeolus-fleet.sh" pushReceive '{"max":1}' 2>/dev/null)"
+  case $? in
+    0) ;;
+    3)
+      aeolus_store_forget
+      exit 3
+      ;;
+    *)
+      aeolus_log "$identity" wake "failed: no push receive: ${output:-no answer}" 'the next pass tries again'
+      exit 1
+      ;;
+  esac
+  aeolus_lease_key "$(aeolus_identity_field "$identity_text" crewToken)" > "$(aeolus_pushed_file)"
+  if ! id="$(aeolus_store_put "$(printf '%s' "$output" | tr -d '\n')")"; then
+    # Nothing handed, as when another ship of its type took the delivery first.
+    exit 1
+  fi
+  hand_entry "$id" "woken: handed ${id} over"
+}
+
+case "${1:-}" in
+  hand) hand ;;
+  died)
+    aeolus_store_session_started "$identity"
+    exit 0
+    ;;
+  *)
+    echo "usage: aeolus-push.sh hand|died" >&2
+    exit 2
+    ;;
+esac

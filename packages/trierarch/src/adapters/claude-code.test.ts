@@ -403,10 +403,56 @@ describe('Claude Code as a harness', () => {
     expect(overrideWith()).toEqual(['--permission-mode', 'default']);
   });
 
-  it('wakes a session by typing /aeolus:wake with the line that no human reads its terminal as its argument (#585)', async () => {
-    await harness().wake({ shipId, folder });
+  describe('the hand-over (#756): through the plugin, which keeps the store', () => {
+    const LINE = "Aeolus handed a message for scout to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it.";
 
-    expect(typed).toEqual([{ shipId, text: `/aeolus:wake ${NO_TERMINAL_QUESTIONS}` }]);
+    /** A plugin whose aeolus-push.sh writes down each call and hands a message over unless told it has none, and whose store holds the states given. */
+    function aPlugin(at: { hasNothing?: boolean; store?: readonly string[] } = {}): { root: string; calls: () => string[] } {
+      const root = mkdtempSync(join(data, 'plugin-'));
+      mkdirSync(join(root, 'scripts'));
+      const calls = join(root, 'calls');
+      writeFileSync(
+        join(root, 'scripts', 'aeolus-push.sh'),
+        `printf '%s %s\\n' "$*" "$AEOLUS_FOLDER" >> "${calls}"\n[ "$1" = hand ] || exit 0\n${at.hasNothing === true ? 'exit 1' : `echo "${LINE.replace(/"/g, '\\"')}"`}\n`,
+      );
+      writeFileSync(join(root, 'scripts', 'aeolus-identity.sh'), `[ "$1" = store ] || exit 2\n${(at.store ?? []).map((state, index) => `echo "dlv_${String(index)} ${state} 2026-10-14T06:00:00Z"`).join('\n')}\n`);
+      return { root, calls: () => (existsSync(calls) ? readFileSync(calls, 'utf8').split('\n').filter((line) => line !== '') : []) };
+    }
+
+    it('hands a message over through the plugin, and types the line it prints with the line that no human reads its terminal (#585)', async () => {
+      const plugin = aPlugin();
+
+      await expect(harness({ pluginRoot: plugin.root }).handOver({ shipId, folder })).resolves.toBe('handed');
+
+      expect(plugin.calls()).toEqual([`hand ${folder}`]);
+      expect(typed).toEqual([{ shipId, text: `${LINE} ${NO_TERMINAL_QUESTIONS}` }]);
+    });
+
+    it('types nothing when the plugin hands nothing over', async () => {
+      const plugin = aPlugin({ hasNothing: true });
+
+      await expect(harness({ pluginRoot: plugin.root }).handOver({ shipId, folder })).resolves.toBe('nothing');
+
+      expect(typed).toEqual([]);
+    });
+
+    it("tells the plugin's store that the session died, before it starts again", async () => {
+      const plugin = aPlugin();
+
+      await harness({ pluginRoot: plugin.root }).sessionDied({ shipId, folder });
+
+      expect(plugin.calls()).toEqual([`died ${folder}`]);
+    });
+
+    it('holds a message to hand while the store keeps one received, handed or to hand once more, and none that is confirmed', async () => {
+      const holds = (store: readonly string[]) => harness({ pluginRoot: aPlugin({ store }).root }).isHolding({ shipId, folder });
+
+      await expect(holds([])).resolves.toBe(false);
+      await expect(holds(['confirmed'])).resolves.toBe(false);
+      await expect(holds(['confirmed', 'received'])).resolves.toBe(true);
+      await expect(holds(['handed'])).resolves.toBe(true);
+      await expect(holds(['onceMore'])).resolves.toBe(true);
+    });
   });
 
   it("reads the turn from the plugin's turn marker: unknown before the first prompt, then busy or idle", async () => {

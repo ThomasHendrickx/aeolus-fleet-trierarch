@@ -11,6 +11,7 @@ import type {
   FleetPort,
   FleetShipStatus,
   GiveBackAnswer,
+  HandOver,
   HarnessPort,
   LaunchSeen,
   Identity,
@@ -371,7 +372,14 @@ export class InMemoryHarness implements HarnessPort {
   readonly launches: { shipId: ShipId; shipName: string; folder: string; workspace: TrierarchWorkspace; isFirstStart: boolean; firstPrompt?: string }[] = [];
   /** The launch id of each launch, in order (#490). */
   readonly launchIds: string[] = [];
-  readonly wakes: ShipId[] = [];
+  /** Each hand-over the trierarch made, by ship (#756). */
+  readonly handOvers: ShipId[] = [];
+  /** The folders whose store holds a message to hand (#756). */
+  readonly holding = new Set<string>();
+  /** Each session the store was told died, with how many launches there had been then (#756). */
+  readonly died: { shipId: ShipId; launchesBefore: number }[] = [];
+  /** Set to make the plugin hand nothing over, as when another ship of its type took the delivery first. */
+  isHandingNothing = false;
   readonly turns = new Map<string, Turn>();
   /** What each ship's session shows in its launch window: activity unless a test sets otherwise. */
   readonly seen = new Map<ShipId, LaunchSeen>();
@@ -413,8 +421,23 @@ export class InMemoryHarness implements HarnessPort {
     return Promise.resolve(this.turns.get(session.folder) ?? 'unknown');
   }
 
-  wake(session: { shipId: ShipId }): Promise<void> {
-    this.wakes.push(session.shipId);
+  /** As the plugin does: one message handed over, the store keeps it until confirmed, and the turn is busy. */
+  handOver(session: { shipId: ShipId; folder: string }): Promise<HandOver> {
+    if (this.isHandingNothing) {
+      return Promise.resolve('nothing');
+    }
+    this.handOvers.push(session.shipId);
+    this.holding.delete(session.folder);
+    this.turns.set(session.folder, 'busy');
+    return Promise.resolve('handed');
+  }
+
+  isHolding(session: { shipId: ShipId; folder: string }): Promise<boolean> {
+    return Promise.resolve(this.holding.has(session.folder));
+  }
+
+  sessionDied(session: { shipId: ShipId; folder: string }): Promise<void> {
+    this.died.push({ shipId: session.shipId, launchesBefore: this.launches.filter((each) => each.shipId === session.shipId).length });
     return Promise.resolve();
   }
 

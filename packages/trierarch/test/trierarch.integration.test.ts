@@ -30,8 +30,10 @@ import { createRestFleet } from '../src/adapters/rest-fleet.js';
 import { createTrust } from '../src/adapters/trust.js';
 import { initTrierarch } from '../src/cli/init.js';
 import type { ObservedSession, SessionRuntime } from '../src/core/ports.js';
+import { RESTART_DELAYS_MS } from '../src/core/restart-policy.js';
 import { createRunPass } from '../src/core/run-pass.js';
 import { CONFIGURATION } from './support/in-memory.js';
+import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
 
 // The trierarch against a real fleet server on Postgres, over REST: a crew
 // request assigned to it is crewed in a worktree of a real git repository,
@@ -145,7 +147,7 @@ afterEach(async () => {
 });
 
 /** A trierarch set up with init on a real fleet, with a ship scout of the fleet to crew, and one pass of its loop; Claude Code with the flags given. */
-async function aTrierarchOnTheFleet(claudeCodeFlags: readonly string[] = CONFIGURATION.harnesses['claude-code']?.flags ?? []) {
+async function aTrierarchOnTheFleet(claudeCodeFlags: readonly string[] = CONFIGURATION.harnesses['claude-code']?.flags ?? [], at: { sessions?: SessionRuntime; clock?: { now: () => Date } } = {}) {
   const useCases = createUseCases({ prisma: database });
   const argo = operatorCaller(unwrap(await useCases.initialiseFleet({ name: 'home fleet', ...OPERATOR })));
   const trierarchShip = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'mac-mini', type: 'trierarch', fleetScopes: ['crew:run'] }));
@@ -176,18 +178,20 @@ async function aTrierarchOnTheFleet(claudeCodeFlags: readonly string[] = CONFIGU
     detect: () => Promise.resolve({}),
   });
   const fleet = createRestFleet(await readCrewFile(paths.crewToken));
-  const sessions = standInSessions();
+  const sessions = at.sessions ?? standInSessions();
   const harness = createClaudeCodeHarness({ configuration, plugin: { root: PLUGIN_ROOT, data: pluginData, crews: join(home, '.aeolus', 'crews', 'claude-code') }, projects: join(home, '.claude', 'projects'), sessions, setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }), permissionModes: () => undefined });
   const workspace = createGitWorkspace({ configuration, root: paths.worktrees });
   const state = createJsonState(paths.state);
-  const clock = { now: () => new Date() };
+  const clock = at.clock ?? { now: () => new Date() };
   const logger = { warn: () => undefined, action: () => undefined };
   const setup = { configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
-  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }), state, setup, clock, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID });
+  // A new run pass over the same files is the trierarch started again.
+  const aRunPass = () => createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }), state, setup, clock, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID });
+  const pass = aRunPass();
   const leasesOf = (shipId: ShipId) => database.lease.count({ where: { shipId, endedAt: null } });
   const worktree = join(paths.worktrees, 'aeolus-fleet', 'scout');
 
-  return { useCases, argo, trierarchShip, scout, pass, leasesOf, worktree };
+  return { useCases, argo, trierarchShip, scout, pass, aRunPass, leasesOf, worktree };
 }
 
 describe('the trierarch on a real fleet', () => {
@@ -268,5 +272,256 @@ describe('the trierarch on a real fleet', () => {
     await expect(database.event.findMany({ where: { type: 'WorktreeCleared' }, select: { details: true } })).resolves.toEqual([
       { details: { worktreeShipId: scout.shipId, repository: 'aeolus-fleet', outcome: 'removed' } },
     ]);
+  });
+});
+
+/**
+ * Sessions as a map, as standInSessions, whose turns run the aeolus plugin's
+ * own hooks as Claude Code runs them in the session's folder: its first
+ * prompt and each line typed into an idle session start a turn
+ * (UserPromptSubmit), and the test ends the turn (Stop), makes a tool call
+ * (PreToolUse) or lets the session die. A line typed while the turn is busy
+ * lands mid-turn, where no prompt hook runs (2a).
+ */
+function hookedSessions() {
+  const sessions = new Map<ShipId, { status: ObservedSession['status']; folder: string; isBusy: boolean }>();
+  /** Each line typed into a session, and what the hooks put into the turn it started, if any. */
+  const turns: { typed: string; context: string }[] = [];
+
+  async function hook(folder: string, run: { script: string; payload: Record<string, unknown> }): Promise<string> {
+    const { script, payload } = run;
+    const hooked = await runCommand('bash', {
+      args: [`${PLUGIN_ROOT}/scripts/${script}`],
+      env: { HOME: home, CLAUDE_PROJECT_DIR: folder, CLAUDE_PLUGIN_DATA: pluginData, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, AEOLUS_FOLDER: folder, AEOLUS_DATA: pluginData, AEOLUS_CREWS: join(home, '.aeolus', 'crews', 'claude-code') },
+      input: JSON.stringify({ session_id: 'c5858406-be86-46cd-8591-f4fb39b1fa61', cwd: folder, ...payload }),
+    });
+    expect(hooked.status, hooked.stderr).toBe(0);
+    return hooked.stdout;
+  }
+
+  async function prompt(shipId: ShipId, text: string): Promise<void> {
+    const session = sessions.get(shipId);
+    if (session === undefined || session.status === 'exited' || session.isBusy) {
+      return;
+    }
+    session.isBusy = true;
+    turns.push({ typed: text, context: await hook(session.folder, { script: 'aeolus-turn.sh', payload: { hook_event_name: 'UserPromptSubmit', prompt: text } }) });
+  }
+
+  const folderOf = (shipId: ShipId) => sessions.get(shipId)?.folder ?? '';
+  const runtime: SessionRuntime = {
+    list: () => Promise.resolve([...sessions].map(([shipId, { status }]) => ({ shipId, status }))),
+    stop: (shipId) => {
+      sessions.delete(shipId);
+      return Promise.resolve();
+    },
+    start: async ({ shipId, folder, command, env = {} }) => {
+      sessions.set(shipId, { status: 'running', folder, isBusy: false });
+      await launchHooks({ folder, env }, [{ hook_event_name: 'SessionStart', source: 'startup' }]);
+      await prompt(shipId, command.at(-1) ?? '');
+      await launchHooks({ folder, env }, [{ hook_event_name: 'PreToolUse', tool_name: 'Bash' }]);
+    },
+    type: async ({ shipId, text }) => {
+      await prompt(shipId, text);
+    },
+    screen: () => Promise.resolve('❯ \n'),
+  };
+
+  return {
+    runtime,
+    turns,
+    /** The turn ends by itself: the Stop hook lets it end. */
+    turnEnds: async (shipId: ShipId) => {
+      const session = sessions.get(shipId);
+      await hook(folderOf(shipId), { script: 'aeolus-stop.sh', payload: { hook_event_name: 'Stop', stop_hook_active: false } });
+      if (session !== undefined) {
+        session.isBusy = false;
+      }
+    },
+    /** The session starts a turn of its own, as when a background task of its own ends. */
+    turnStartsByItself: (shipId: ShipId) => {
+      const session = sessions.get(shipId);
+      if (session !== undefined) {
+        session.isBusy = true;
+      }
+    },
+    /** The first tool call of the turn: what the PreToolUse hook answered. */
+    toolCall: (shipId: ShipId) => hook(folderOf(shipId), { script: 'aeolus-handover.sh', payload: { hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: { file_path: '/tmp/x' } } }),
+    dies: (shipId: ShipId) => {
+      const session = sessions.get(shipId);
+      if (session !== undefined) {
+        session.status = 'exited';
+      }
+    },
+    /** The machine restarts: every session is gone. */
+    reboots: () => {
+      sessions.clear();
+    },
+  };
+}
+
+describe('the trierarch hands messages over on a real fleet (#756): the plugin keeps the store, the hooks confirm', () => {
+  /** How long a session that died first waits before it starts again. */
+  const RESTART_WAIT_MS = RESTART_DELAYS_MS[0];
+  const MESSAGE = 'Review PR 12 and say what you found';
+
+  /** A clock the test moves on, so a session that died starts again after its wait. */
+  function aClock() {
+    let offsetMs = 0;
+    return { now: () => new Date(Date.now() + offsetMs), advance: (ms: number) => (offsetMs += ms) };
+  }
+
+  /** A trierarch that crewed scout, whose first turn ended: the session is idle. */
+  async function aCrewedScout() {
+    const sessions = hookedSessions();
+    const clock = aClock();
+    const trierarch = await aTrierarchOnTheFleet(undefined, { sessions: sessions.runtime, clock });
+    const { useCases, argo, trierarchShip, scout, pass } = trierarch;
+    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } }));
+    unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
+    await pass();
+    await pass();
+    await sessions.turnEnds(scout.shipId);
+    const send = async () => unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', name: 'scout' }, payload: MESSAGE, idempotencyKey: newKey() })).messageId;
+    return { ...trierarch, sessions, clock, send };
+  }
+
+  /** The delivery's events in order: their type, with the hand-over number and once more of a hand-over. */
+  async function eventsOf(messageId: string) {
+    const events = await database.event.findMany({ where: { messageId, type: { startsWith: 'Delivery' } }, orderBy: { seq: 'asc' }, select: { type: true, details: true } });
+    return events.map(({ type, details }) => {
+      const handed = z.object({ handOverNumber: z.number().optional(), onceMore: z.boolean().optional() }).parse(details);
+      return type === 'DeliveryHanded' ? `${type} ${String(handed.handOverNumber)}${handed.onceMore === true ? ' once more' : ''}` : type;
+    });
+  }
+
+  const deliveryOf = (messageId: string) => database.delivery.findFirstOrThrow({ where: { messageId }, select: { state: true, attempts: true } });
+
+  it('hands a message to an idle session: received, handed, acknowledged by the prompt the line starts, handled when the turn ends (2a)', async () => {
+    const { scout, pass, sessions, send } = await aCrewedScout();
+    const messageId = await send();
+
+    await pass();
+    await sessions.turnEnds(scout.shipId);
+
+    expect(sessions.turns.at(-1)?.typed).toBe(`Aeolus handed a message for scout to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it. ${NO_TERMINAL_QUESTIONS}`);
+    expect(sessions.turns.at(-1)?.context).toContain(MESSAGE);
+    await expect(eventsOf(messageId)).resolves.toEqual(['DeliveryReceived', 'DeliveryHanded 1', 'DeliveryAcknowledged', 'DeliveryHandled']);
+    await expect(deliveryOf(messageId)).resolves.toEqual({ state: 'handled', attempts: 1 });
+  });
+
+  it('makes the lease pushed and reports the turn busy and idle (D1)', async () => {
+    const { scout, pass, sessions, send } = await aCrewedScout();
+    await send();
+
+    await pass();
+    await sessions.turnEnds(scout.shipId);
+
+    const lease = await database.lease.findFirstOrThrow({ where: { shipId: scout.shipId, endedAt: null }, select: { pushedAt: true } });
+    expect(lease.pushedAt).toBeInstanceOf(Date);
+    const turns = await database.event.findMany({ where: { shipId: scout.shipId, type: 'TurnReported' }, orderBy: { seq: 'asc' }, select: { details: true } });
+    expect(turns.map(({ details }) => z.object({ turn: z.string() }).parse(details).turn)).toEqual(['busy', 'idle']);
+  });
+
+  it('hands nothing more while the session is busy with a message, then the next one once it is idle again', async () => {
+    const { scout, pass, sessions, send } = await aCrewedScout();
+    const first = await send();
+    const second = await send();
+
+    await pass();
+    await pass();
+    expect(await eventsOf(second)).toEqual([]);
+    await sessions.turnEnds(scout.shipId);
+    await pass();
+    await sessions.turnEnds(scout.shipId);
+
+    await expect(eventsOf(first)).resolves.toEqual(['DeliveryReceived', 'DeliveryHanded 1', 'DeliveryAcknowledged', 'DeliveryHandled']);
+    await expect(eventsOf(second)).resolves.toEqual(['DeliveryReceived', 'DeliveryHanded 1', 'DeliveryAcknowledged', 'DeliveryHandled']);
+  });
+
+  it('a line that lands mid-turn is confirmed by the first tool call (2a race)', async () => {
+    const { scout, pass, sessions, send } = await aCrewedScout();
+    const messageId = await send();
+    sessions.turnStartsByItself(scout.shipId);
+
+    await pass();
+    const denied = await sessions.toolCall(scout.shipId);
+
+    expect(denied).toContain(MESSAGE);
+    await expect(eventsOf(messageId)).resolves.toEqual(['DeliveryReceived', 'DeliveryHanded 1', 'DeliveryAcknowledged']);
+  });
+
+  it('loses nothing when the trierarch restarts after a hand-over: the hooks confirm without it, and it hands nothing again (3.3)', async () => {
+    const { scout, pass, aRunPass, sessions, send } = await aCrewedScout();
+    const messageId = await send();
+    sessions.turnStartsByItself(scout.shipId);
+    await pass();
+
+    const restarted = aRunPass();
+    await sessions.toolCall(scout.shipId);
+    await sessions.turnEnds(scout.shipId);
+    await restarted();
+    await sessions.turnEnds(scout.shipId);
+
+    await expect(eventsOf(messageId)).resolves.toEqual(['DeliveryReceived', 'DeliveryHanded 1', 'DeliveryAcknowledged', 'DeliveryHandled']);
+  });
+
+  it('hands a message again with the next number when its session died before it took it, and the session started again confirms it (3.6)', async () => {
+    const { scout, pass, sessions, clock, send } = await aCrewedScout();
+    const messageId = await send();
+    sessions.turnStartsByItself(scout.shipId);
+    await pass();
+
+    sessions.dies(scout.shipId);
+    await pass();
+    clock.advance(RESTART_WAIT_MS);
+    await pass();
+    await sessions.turnEnds(scout.shipId);
+
+    await expect(eventsOf(messageId)).resolves.toEqual(['DeliveryReceived', 'DeliveryHanded 1', 'DeliveryHanded 2', 'DeliveryAcknowledged', 'DeliveryHandled']);
+    await expect(deliveryOf(messageId)).resolves.toEqual({ state: 'handled', attempts: 2 });
+  });
+
+  it('hands a message once more when its session died after it took it, and ends it handled when that turn ends (3.7)', async () => {
+    const { scout, pass, sessions, clock, send } = await aCrewedScout();
+    const messageId = await send();
+    await pass();
+
+    sessions.dies(scout.shipId);
+    await pass();
+    clock.advance(RESTART_WAIT_MS);
+    await pass();
+    await sessions.turnEnds(scout.shipId);
+
+    expect(sessions.turns.at(-1)?.context).toContain('aeolus: handed before');
+    await expect(eventsOf(messageId)).resolves.toEqual(['DeliveryReceived', 'DeliveryHanded 1', 'DeliveryAcknowledged', 'DeliveryHanded 2 once more', 'DeliveryHandled']);
+  });
+
+  it('reports a message not handled when the session it was handed once more to died too (3.7)', async () => {
+    const { scout, pass, sessions, clock, send } = await aCrewedScout();
+    const messageId = await send();
+    await pass();
+    for (let death = 0; death < 2; death += 1) {
+      sessions.dies(scout.shipId);
+      await pass();
+      clock.advance(10 * RESTART_WAIT_MS);
+      await pass();
+    }
+
+    await expect(eventsOf(messageId)).resolves.toEqual(['DeliveryReceived', 'DeliveryHanded 1', 'DeliveryAcknowledged', 'DeliveryHanded 2 once more', 'DeliveryNotHandled']);
+    await expect(deliveryOf(messageId)).resolves.toMatchObject({ state: 'notHandled' });
+  });
+
+  it('after the machine restarted, hands what the store holds by its state: a message never taken is handed again, then confirmed (3.10)', async () => {
+    const { scout, pass, aRunPass, sessions, send } = await aCrewedScout();
+    const messageId = await send();
+    sessions.turnStartsByItself(scout.shipId);
+    await pass();
+
+    sessions.reboots();
+    await aRunPass()();
+    await sessions.turnEnds(scout.shipId);
+
+    await expect(eventsOf(messageId)).resolves.toEqual(['DeliveryReceived', 'DeliveryHanded 1', 'DeliveryHanded 2', 'DeliveryAcknowledged', 'DeliveryHandled']);
   });
 });

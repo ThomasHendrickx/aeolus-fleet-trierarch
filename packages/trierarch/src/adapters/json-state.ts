@@ -41,7 +41,6 @@ const stateSchema = z.object({
       launchId: z.string().optional(),
       isReleasedElsewhere: z.literal(true).optional(),
       isIdentityGone: z.literal(true).optional(),
-      wake: z.object({ waiting: z.int().nonnegative(), isPending: z.boolean() }),
     }),
   ),
   kept: z.array(z.object({ shipId: idSchema('ship'), repository: z.string(), path: z.string() })),

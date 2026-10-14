@@ -18,8 +18,8 @@ import { decideRestart, exitsInWindow } from './restart-policy.js';
 export interface Observed {
   readonly sessions: readonly ObservedSession[];
   readonly worktrees: readonly ObservedWorktree[];
-  /** For each entry whose session it watches: its inbox and its turn. */
-  readonly ships: Readonly<Record<string, { readonly inbox: InboxAnswer; readonly turn: Turn }>>;
+  /** For each entry whose session it watches: its inbox, its turn, and whether its store holds a message to hand (#756). */
+  readonly ships: Readonly<Record<string, { readonly inbox: InboxAnswer; readonly turn: Turn; readonly isHolding: boolean }>>;
   /** For each entry crewing whose session started: what its screen shows in its launch window (#382). */
   readonly launches: Readonly<Record<string, LaunchSeen>>;
   /** The entries it would watch or report on whose folder holds no identity, so it cannot see their inbox or report for them (#659, #664). */
@@ -234,7 +234,6 @@ function entryOf(checked: CheckedSettings, at: { shipId: ShipId; settingsVersion
     since: at.now.toISOString(),
     exits: [],
     hasStarted: false,
-    wake: { waiting: 0, isPending: false },
   };
 }
 
@@ -498,16 +497,14 @@ function identityStep(entry: Entry, observed: Observed): Step {
   return !isGone && isIdentityGone !== undefined ? { entry: back, actions: [], starts: 0 } : NOTHING;
 }
 
-/** One wake per rise in the waiting count, given once the session is idle, and nothing more until it has received. */
+/**
+ * A hand-over (#756, 2a): one message to an idle session whenever deliveries
+ * wait at the fleet or its store holds one to hand. The hand-over marks the
+ * turn busy, so the next one waits until the session is idle again.
+ */
 function wakeStep(entry: Entry, seen: Observed['ships'][string] | undefined): Step {
-  if (seen?.inbox.kind !== 'waiting') {
+  if (seen?.inbox.kind !== 'waiting' || seen.turn !== 'idle') {
     return NOTHING;
   }
-  const { count } = seen.inbox;
-  const isPending = count === 0 ? false : entry.wake.isPending || count > entry.wake.waiting;
-  if (isPending && seen.turn === 'idle') {
-    return { entry: { ...entry, wake: { waiting: count, isPending: false } }, actions: [{ kind: 'wake', shipId: entry.shipId }], starts: 0 };
-  }
-  const wake = { waiting: count, isPending };
-  return wake.waiting === entry.wake.waiting && wake.isPending === entry.wake.isPending ? NOTHING : { entry: { ...entry, wake }, actions: [], starts: 0 };
+  return seen.inbox.count > 0 || seen.isHolding ? { actions: [{ kind: 'wake', shipId: entry.shipId }], starts: 0 } : NOTHING;
 }

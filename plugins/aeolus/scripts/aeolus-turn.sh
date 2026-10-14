@@ -6,7 +6,7 @@
 # The prompt that starts a turn confirms a message handed to the session
 # (#756): in Codex the prompt the wake bridge queues, in either harness a
 # person's. It acknowledges the message, and only if that succeeded adds it to
-# the turn's context. On a lease the watcher pushed it also reports the
+# the turn's context. On a pushed lease it also reports the
 # turn busy, and a confirmed message it finds had its turn die without Stop
 # (D3): that message comes in once more, as handed before, and one that comes
 # in once more and dies again is reported not handled. Otherwise silent.

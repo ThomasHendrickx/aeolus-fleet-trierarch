@@ -146,7 +146,7 @@ describe('the Codex plugin package', () => {
 
   it("has $aeolus-wake receive and ack nothing on a pushed lease: the message comes into the turn through the plugin's hooks (#756)", () => {
     expect(readFileSync(join(PLUGIN, 'skills/aeolus-wake/SKILL.md'), 'utf8')).toContain(
-      "If step 1 said `delivery: pushed`, receive and ack nothing: the wake bridge hands each message over, and it comes into the turn through the plugin's hooks. Handle what came in, and answer by senderName with inReplyTo. Otherwise, as the `aeolus-crew` skill says:",
+      "If step 1 said `delivery: pushed`, receive and ack nothing: the wake bridge or the trierarch hands each message over, and it comes into the turn through the plugin's hooks. Handle what came in, and answer by senderName with inReplyTo. Otherwise, as the `aeolus-crew` skill says:",
     );
   });
 

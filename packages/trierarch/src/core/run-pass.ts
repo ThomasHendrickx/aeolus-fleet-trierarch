@@ -100,7 +100,10 @@ async function observe(state: TrierarchState, deps: RunPassDeps): Promise<Observ
       continue;
     }
     if (isWatched) {
-      ships[entry.shipId] = { inbox: await deps.fleet.inbox(crewToken), turn: await harness.turnOf({ shipId: entry.shipId, folder }) };
+      const turn = await harness.turnOf({ shipId: entry.shipId, folder });
+      // The store is asked only when a hand-over could follow.
+      const isHolding = turn === 'idle' && (await harness.isHolding({ shipId: entry.shipId, folder }));
+      ships[entry.shipId] = { inbox: await deps.fleet.inbox(crewToken), turn, isHolding };
     }
   }
   return { sessions, worktrees, ships, launches, withoutIdentity };
@@ -173,8 +176,11 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
       return crew(state, { entry, isResumed: action.isResumed, deps });
     case 'launch':
       if (entry.folder !== undefined) {
+        const harness = harnessOf(entry, deps);
+        // The session that held its messages is gone: its store marks them for the session started now (#756).
+        await harness?.sessionDied({ shipId: entry.shipId, folder: entry.folder });
         const launchId = deps.newLaunchId();
-        await harnessOf(entry, deps)?.launch({
+        await harness?.launch({
           shipId: entry.shipId,
           // An entry saved before the ship's name was kept goes by its id.
           shipName: entry.shipName ?? entry.shipId,
@@ -193,9 +199,8 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
       }
       return state;
     case 'wake':
-      if (entry.folder !== undefined) {
-        await harnessOf(entry, deps)?.wake({ shipId: entry.shipId, folder: entry.folder });
-        log(deps, { ...about(state, { shipId: entry.shipId, action: 'wake' }), outcome: 'woken, deliveries wait' });
+      if (entry.folder !== undefined && (await harnessOf(entry, deps)?.handOver({ shipId: entry.shipId, folder: entry.folder })) === 'handed') {
+        log(deps, { ...about(state, { shipId: entry.shipId, action: 'wake' }), outcome: 'handed a message over' });
       }
       return state;
     case 'report': {

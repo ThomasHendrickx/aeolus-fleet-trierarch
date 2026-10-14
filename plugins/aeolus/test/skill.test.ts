@@ -112,10 +112,10 @@ describe('the crew-a-ship skill', () => {
 
   it("tells a session on a pushed lease to receive and ack nothing, in both harnesses: the message comes into the turn through the plugin's hooks (#756)", () => {
     expect(claudeSkill).toContain(
-      'When "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-identity.sh" show says `delivery: pushed`, receive and ack nothing: the watcher hands each message over, and it comes into your turn through the plugin\'s hooks. Otherwise handle what waits:',
+      'When "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-identity.sh" show says `delivery: pushed`, receive and ack nothing: the watcher or the trierarch hands each message over, and it comes into your turn through the plugin\'s hooks. Otherwise handle what waits:',
     );
     expect(codexSkill).toContain(
-      'When `scripts/aeolus-identity.sh show` says `delivery: pushed`, receive and ack nothing: the wake bridge hands each message over, and it comes into the turn through the plugin\'s hooks with the prompt it queues.',
+      'When `scripts/aeolus-identity.sh show` says `delivery: pushed`, receive and ack nothing: the wake bridge or the trierarch hands each message over, and it comes into the turn through the plugin\'s hooks with the prompt the bridge queues or the line the trierarch types.',
     );
   });
 

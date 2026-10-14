@@ -24,7 +24,6 @@ function aCrashedEntry(): Entry {
     since: '2026-10-06T22:00:00.000Z',
     exits: [],
     hasStarted: true,
-    wake: { waiting: 0, isPending: false },
   };
 }
 

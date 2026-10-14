@@ -87,9 +87,10 @@ export function createCodexHarness(options: {
 }): HarnessPort {
   const { configuration, plugin, sessions } = options;
   const marks = createLaunchMarks(plugin);
+  const { handOverLine, ...identity } = createPluginIdentity(plugin);
 
   return {
-    ...createPluginIdentity(plugin),
+    ...identity,
     launch: async ({ shipId, folder, harness, options: picked, isFirstStart, launchId, firstPrompt }) => {
       const settings = configuration.harnesses[harness];
       if (settings === undefined) {
@@ -101,9 +102,13 @@ export function createCodexHarness(options: {
       await marks.clear(folder);
       await sessions.start({ shipId, folder, command: wordsOf(command), env: { [LAUNCH_VARIABLE]: launchId } });
     },
-    wake: async ({ shipId }) => {
-      // The space after the skill closes Codex's skill picker, which would otherwise take the Enter.
-      await sessions.type({ shipId, text: wakePromptOf(WAKE_PROMPT), settleMs: CODEX_TYPING_SETTLE_MS });
+    handOver: async (session) => {
+      const line = await handOverLine(session);
+      if (line === undefined) {
+        return 'nothing';
+      }
+      await sessions.type({ shipId: session.shipId, text: wakePromptOf(line), settleMs: CODEX_TYPING_SETTLE_MS });
+      return 'handed';
     },
     marksLaunches: () => marks.isMarking(),
     // The marker says what the session did (#490); Codex has no hook for a failed turn, so a refusal is read from the session log its session start named.

@@ -123,6 +123,9 @@ export interface Identity {
 /** The turn a session is in, from the plugin's turn marker. */
 export type Turn = 'busy' | 'idle' | 'unknown';
 
+/** What a hand-over came to (#756): a message handed over, its line typed into the session, or nothing to hand. */
+export type HandOver = 'handed' | 'nothing';
+
 export interface HarnessPort {
   /** Writes the folder's identity with wakeBy=trierarch, as the aeolus plugin does. */
   prepareIdentity(at: { folder: string; identity: Identity }): Promise<void>;
@@ -144,7 +147,12 @@ export interface HarnessPort {
     firstPrompt?: string;
   }): Promise<void>;
   turnOf(session: { shipId: ShipId; folder: string }): Promise<Turn>;
-  wake(session: { shipId: ShipId; folder: string }): Promise<void>;
+  /** Hands one message over through the aeolus plugin, which keeps the store, and types the line it gives into the session (#756, 2a). */
+  handOver(session: { shipId: ShipId; folder: string }): Promise<HandOver>;
+  /** Whether the session's store holds a message to hand: received, handed and not confirmed, or to hand once more (#756). */
+  isHolding(session: { shipId: ShipId; folder: string }): Promise<boolean>;
+  /** Tells the session's store that its session died, before it starts again (#756, 3.5 to 3.7, 3.10). */
+  sessionDied(session: { shipId: ShipId; folder: string }): Promise<void>;
   /** What the session did in its launch window (#382), as its hooks marked the launch it was started for (#490), for the model it launched with; any model refused when it launched with none. */
   launchSeen(session: { shipId: ShipId; folder: string; launchId: string; model?: string }): Promise<LaunchSeen>;
   /** Whether the harness's aeolus plugin marks launches (#490); one older than the launch marker does not, and its sessions are not crewed. */
