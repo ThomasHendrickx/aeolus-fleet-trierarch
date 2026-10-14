@@ -3339,7 +3339,7 @@ describe('the plugin reads the identity once, never looking for it first (#719)'
     run('aeolus-identity.sh', { args: ['check-in', '30m'], env: vanishingAfterItsCheck(identityFile()) });
 
     expect(run('aeolus-identity.sh', { args: ['show'] }).stdout).toBe(
-      `ship: scout (${SHIP_ID})\nfleet: https://fleet.example.com\nfolder: ${folder}\ncheck-in: 30m\n`,
+      `ship: scout (${SHIP_ID})\nfleet: https://fleet.example.com\nfolder: ${realpathSync(folder)}\ncheck-in: 30m\n`,
     );
   });
 
