@@ -80,6 +80,9 @@ interface Answer {
 }
 
 const VALUE_FLAGS = new Set(['--config', '--fleet-url', '--ship-id', '--secret', '--lines']);
+/** Set for the installed version's upgrade that runs the plugin step of an upgrade (#725), which restarts the service itself (#829); older versions ignore it. */
+const PLUGIN_STEP_VARIABLE = 'AEOLUS_TRIERARCH_PLUGIN_STEP';
+
 const SWITCHES = new Set(['--json', '--yes', '--follow', '--no-load', '--version']);
 const DEFAULT_LINES = 50;
 const FOLLOW_INTERVAL_MS = 500;
@@ -244,6 +247,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       const pluginUpdate = createPluginUpdate({ homeDirectory, env, trierarchPid: async () => (await readRunningFile(paths.running))?.pid });
       const report = await upgradeTrierarch({
         ...(version !== undefined && { version }),
+        isPluginStepOfAnUpgrade: env[PLUGIN_STEP_VARIABLE] === '1',
         installedVersion: runningVersion,
         npm: {
           globalFolder: async () => {
@@ -258,7 +262,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
           install: (spec) => runCommand('npm', { args: ['install', '--global', spec] }),
         },
         writeInstalledServiceFile: () => runCommand(process.execPath, { args: [script, 'install', '--no-load', ...(config !== undefined ? ['--config', config] : [])] }),
-        upgradeInstalledPlugin: (to) => runCommand(process.execPath, { args: [script, 'upgrade', to, '--json', ...(config !== undefined ? ['--config', config] : [])] }),
+        upgradeInstalledPlugin: (to) => runCommand(process.execPath, { args: [script, 'upgrade', to, '--json', ...(config !== undefined ? ['--config', config] : [])], env: { [PLUGIN_STEP_VARIABLE]: '1' } }),
         service: serviceAt(),
         running: () => readRunningFile(paths.running),
         plugin: {

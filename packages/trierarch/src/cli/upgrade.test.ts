@@ -141,8 +141,8 @@ beforeEach(() => {
   };
 });
 
-function upgrade(version?: string) {
-  return upgradeTrierarch({ ...(version !== undefined && { version }), installedVersion: () => installed, npm, writeInstalledServiceFile, upgradeInstalledPlugin: (to) => upgradeInstalledPlugin(to), service, running, sleep, plugin });
+function upgrade(version?: string, at: { isPluginStepOfAnUpgrade?: boolean } = {}) {
+  return upgradeTrierarch({ ...(version !== undefined && { version }), ...at, installedVersion: () => installed, npm, writeInstalledServiceFile, upgradeInstalledPlugin: (to) => upgradeInstalledPlugin(to), service, running, sleep, plugin });
 }
 
 describe('aeolus-trierarch upgrade', () => {
@@ -186,6 +186,7 @@ describe('aeolus-trierarch upgrade', () => {
 
   it('says it is already on a version and does nothing more', async () => {
     latest = '0.17.1';
+    saying = [{ pid: 2, version: '0.17.1' }];
 
     const report = await upgrade();
 
@@ -255,6 +256,64 @@ describe('aeolus-trierarch upgrade', () => {
 
     expect(installed).toBe('0.24.0');
     expect(pluginTags).toEqual({ codex: 'v0.24.0', 'claude-code': 'v0.24.0' });
+  });
+
+  it('restarts the service on the version installed when it is on that version already but the service still runs another, as after an install by hand (#829)', async () => {
+    installed = '0.17.2';
+    latest = '0.17.2';
+    saying = [{ pid: 1, version: '0.17.1' }, { pid: 2, version: '0.17.2' }];
+
+    const report = await upgrade();
+
+    expect(installs).toEqual([]);
+    expect(steps).toEqual(['write 0.17.2', 'reload', 'stop 0.17.2', 'start 0.17.2']);
+    expect(report.said).toEqual(['The trierarch is already on 0.17.2.', 'The service ran 0.17.1, so it restarted on 0.17.2.', 'The service runs 0.17.2 now. Its sessions kept running: the new process takes them over.']);
+  });
+
+  it('runs the version the commands it says to run instead installed, once they have run, when npm\'s global folder is not the user\'s to write (#829)', async () => {
+    isGlobalFolderWritable = false;
+    offered = ['claude-code'];
+    saying = [{ pid: 1, version: '0.17.1' }];
+
+    const refusal = await upgrade().then(
+      () => '',
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    for (const command of refusal.split('\n').filter((line) => line.startsWith('  ')).map((line) => line.trim())) {
+      if (command.startsWith('sudo npm install --global ')) {
+        installed = command.slice(command.lastIndexOf('@') + 1);
+        saying = [{ pid: 1, version: '0.17.1' }, { pid: 2, version: '0.17.2' }];
+        reads = 0;
+      } else if (command.startsWith('aeolus-trierarch upgrade ')) {
+        await upgrade(command.slice('aeolus-trierarch upgrade '.length));
+      }
+    }
+
+    expect(steps).toContain('start 0.17.2');
+  });
+
+  it('leaves the restart to the upgrade it runs the plugin step for, which restarts the service itself (#829, #725)', async () => {
+    installed = '0.17.2';
+    latest = '0.17.2';
+    saying = [{ pid: 1, version: '0.17.1' }];
+
+    const report = await upgrade('0.17.2', { isPluginStepOfAnUpgrade: true });
+
+    expect(steps).toEqual([]);
+    expect(report.said).toEqual(['The trierarch is already on 0.17.2.']);
+  });
+
+  it('restarts the service once in an upgrade whose installed version runs the plugin step (#829, #725)', async () => {
+    offered = ['claude-code'];
+    saying = [{ pid: 1, version: '0.17.1' }, { pid: 2, version: '0.17.2' }];
+    upgradeInstalledPlugin = async (version) => {
+      const report = await upgrade(version, { isPluginStepOfAnUpgrade: true });
+      return { status: 0, stdout: JSON.stringify(report), stderr: '' };
+    };
+
+    await upgrade();
+
+    expect(steps.filter((step) => step.startsWith('start'))).toEqual(['start 0.17.2']);
   });
 
   it("runs the aeolus plugin step of the version it installed, not the one of the version it replaces (#725)", async () => {
@@ -479,6 +538,7 @@ describe('aeolus-trierarch upgrade', () => {
 
   it('updates the aeolus plugin also when the trierarch is on the version already (#581)', async () => {
     latest = '0.17.1';
+    saying = [{ pid: 2, version: '0.17.1' }];
     offered = ['codex'];
 
     const report = await upgrade();

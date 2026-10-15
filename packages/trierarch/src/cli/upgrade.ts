@@ -35,7 +35,10 @@ import { NOT_SAID_YET_REASON, startNewProcess } from './new-process.js';
  * version it upgrades to, from main for releases up to 0.22.0, whose tags
  * hold no plugin of their version (#652). A Codex downgrade keeps the newer
  * version folder for the sessions running on it, so new Codex sessions start
- * on it too: upgrade says so.
+ * on it too: upgrade says so. On the version already, it restarts the
+ * service when the service runs another version, as after an install by hand
+ * (#829), unless it runs as the plugin step of an upgrade, which restarts the
+ * service itself.
  */
 
 export const PACKAGE = '@aeolus-fleet/trierarch';
@@ -148,20 +151,63 @@ function pluginStepOf(answer: CommandResult, version: string): { isPluginUpdated
   return { isPluginUpdated: parsed.data.isPluginUpdated, said: parsed.data.said.filter((line) => line !== alreadyOn(version)) };
 }
 
-export async function upgradeTrierarch(at: {
-  version?: string;
-  /** The version installed now, read afresh each time: the install replaces it. */
-  installedVersion: () => string;
-  npm: Npm;
+/** What restarting the service on the installed version needs. */
+interface Restart {
   /** The installed version's `install --no-load`: this process still runs the code of the version it replaces. */
   writeInstalledServiceFile: () => Promise<CommandResult>;
-  /** The installed version's `upgrade <version> --json`: on its version already, it runs the plugin step as that version runs it. */
-  upgradeInstalledPlugin: (version: string) => Promise<CommandResult>;
   service: Pick<Service, 'reload' | 'stop' | 'start' | 'status'>;
   /** What running.json says now: the new process writes it as it starts. */
   running: () => Promise<RunningFile | undefined>;
   /** Waits between reads of running.json; a test passes one that does not wait. */
   sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Restarts the service on the installed version `to`, the old process on
+ * `from` stopped first, and says what runs once the new process said its
+ * version. Before the stop, the installed version writes the service's file
+ * and the supervisor reads it again (#485, #492).
+ */
+async function restartOn(at: Restart, versions: { from: string; to: string }): Promise<string> {
+  const { service } = at;
+  const { from, to } = versions;
+  const { hasSaidVersion } = await startNewProcess({
+    start: async () => {
+      const written = await at.writeInstalledServiceFile();
+      // aeolus-trierarch says a failure on stdout, node one it cannot run on stderr.
+      if (written.status !== 0) {
+        throw new TrierarchFileError(
+          `The trierarch ${to} could not write the service's file: ${`${written.stdout}${written.stderr}`.trim()}\nThe service keeps running ${from}. Fix what it says, then run aeolus-trierarch install to write the file and restart the service.`,
+        );
+      }
+      // Reloaded before the stop: on Linux the stop follows the reloaded unit, which ends the trierarch only (#479).
+      await service.reload();
+      // Stop waits until the old process has exited, so only the new one ever runs the loop.
+      await service.stop();
+      await service.start();
+    },
+    service,
+    running: at.running,
+    ...(at.sleep !== undefined && { sleep: at.sleep }),
+  });
+  return hasSaidVersion ? `The service runs ${to} now. Its sessions kept running: the new process takes them over.` : `The service started ${to}, but ${NOT_SAID_YET_REASON}`;
+}
+
+/** The version the service runs, when it runs one other than `installed`. */
+async function otherRunningVersion(at: Restart, installed: string): Promise<string | undefined> {
+  const [status, running] = await Promise.all([at.service.status(), at.running()]);
+  return status.isRunning && running !== undefined && running.version !== installed ? running.version : undefined;
+}
+
+export async function upgradeTrierarch(at: Restart & {
+  version?: string;
+  /** Runs as the plugin step of an upgrade of another process (#725), which restarts the service itself. */
+  isPluginStepOfAnUpgrade?: boolean;
+  /** The version installed now, read afresh each time: the install replaces it. */
+  installedVersion: () => string;
+  npm: Npm;
+  /** The installed version's `upgrade <version> --json`: on its version already, it runs the plugin step as that version runs it. */
+  upgradeInstalledPlugin: (version: string) => Promise<CommandResult>;
   /** The aeolus plugin; none updates nothing. */
   plugin?: PluginUpgrade;
 }): Promise<UpgradeReport> {
@@ -172,7 +218,12 @@ export async function upgradeTrierarch(at: {
   const target = at.version ?? (await at.npm.latest()).trim();
   if (target === from) {
     const plugin = await upgradePlugin(at.plugin, target);
-    return { from, to: from, isUpgraded: false, isPluginUpdated: plugin.isPluginUpdated, said: [alreadyOn(from), ...plugin.said] };
+    const said = [alreadyOn(from), ...plugin.said];
+    const running = at.isPluginStepOfAnUpgrade === true ? undefined : await otherRunningVersion(at, from);
+    if (running !== undefined) {
+      said.push(`The service ran ${running}, so it restarted on ${from}.`, await restartOn(at, { from: running, to: from }));
+    }
+    return { from, to: from, isUpgraded: false, isPluginUpdated: plugin.isPluginUpdated, said };
   }
 
   const spec = `${PACKAGE}@${target}`;
@@ -203,31 +254,7 @@ export async function upgradeTrierarch(at: {
   const said = [`Upgraded the trierarch from ${from} to ${to}.`, ...plugin.said];
 
   if ((await at.service.status()).isInstalled) {
-    const { service } = at;
-    const { hasSaidVersion } = await startNewProcess({
-      start: async () => {
-        const written = await at.writeInstalledServiceFile();
-        // aeolus-trierarch says a failure on stdout, node one it cannot run on stderr.
-        if (written.status !== 0) {
-          throw new TrierarchFileError(
-            `The trierarch ${to} could not write the service's file: ${`${written.stdout}${written.stderr}`.trim()}\nThe service keeps running ${from}. Fix what it says, then run aeolus-trierarch install to write the file and restart the service.`,
-          );
-        }
-        // Reloaded before the stop: on Linux the stop follows the reloaded unit, which ends the trierarch only (#479).
-        await service.reload();
-        // Stop waits until the old process has exited, so only the new one ever runs the loop.
-        await service.stop();
-        await service.start();
-      },
-      service,
-      running: at.running,
-      ...(at.sleep !== undefined && { sleep: at.sleep }),
-    });
-    said.push(
-      hasSaidVersion
-        ? `The service runs ${to} now. Its sessions kept running: the new process takes them over.`
-        : `The service started ${to}, but ${NOT_SAID_YET_REASON}`,
-    );
+    said.push(await restartOn(at, { from, to }));
   } else {
     said.push('The service is not installed: run aeolus-trierarch install to run it.');
   }
