@@ -148,6 +148,10 @@ const leaseEnded: StubAnswer = { status: 401, body: { code: 'LEASE_ENDED', messa
 /** The fleet's answer to handed: where the delivery stands now. */
 const handedAs = (state: 'handed' | 'acknowledged' | 'undeliverable'): StubAnswer => ({ status: 200, body: { state } });
 const handedOk = handedAs('handed');
+/** No answer within the hooks' bound: the fleet may have stored the call, but the answer never comes. */
+const unanswered: StubAnswer = { status: 200, body: {}, hold: new Promise(() => undefined) };
+/** The hooks' bound on a confirmation, short, so an unanswered ack ends soon. */
+const SHORT_CONFIRM = { AEOLUS_CONFIRM_SECONDS: '1' };
 /** An OK with nothing to say, as turn, handled and notHandled answer. */
 const taken: StubAnswer = { status: 200, body: {} };
 
@@ -732,6 +736,18 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       expect(store()).toEqual([`${DELIVERY_ID} handed`]);
     });
 
+    it('hands a message over again with the same number after an ack whose answer was lost, so the fleet answers acknowledged if it took the ack (#819)', async () => {
+      const stub = await aHandOver({ '/api/v1/ship/ack': [unanswered] });
+      await aFirstToolCall(SHORT_CONFIRM);
+      await aTurnEnds();
+
+      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+      expect(callsTo(stub, '/api/v1/ship/handed').map((call) => call.body)).toEqual([
+        `{"deliveryId":"${DELIVERY_ID}","handOverNumber":1}`,
+        `{"deliveryId":"${DELIVERY_ID}","handOverNumber":1}`,
+      ]);
+    });
+
     it('reports the same number again when the fleet did not take the hand-over, so a lost answer counts no attempt', async () => {
       const stub = await aHandOver({ '/api/v1/ship/handed': [{ status: 500, body: {} }, handedOk] });
 
@@ -1248,6 +1264,15 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
 
       expect(handedBodies(stub)).toEqual([handedNumber(1), handedNumber(2)]);
       expect(store()).toEqual([`${DELIVERY_ID} handed`]);
+    });
+
+    it('reports a message whose ack went unanswered handed with the same number at startup, so the fleet answers acknowledged if it took the ack (#819)', async () => {
+      const stub = await aHandOver({ '/api/v1/ship/ack': [unanswered] });
+      await aFirstToolCall(SHORT_CONFIRM);
+
+      await aSessionStart('startup');
+
+      expect(handedBodies(stub)).toEqual([handedNumber(1), handedNumber(1)]);
     });
 
     it('keeps a confirmed message whose session died to hand once more, and the first prompt puts it in as handed before', async () => {

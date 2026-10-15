@@ -520,14 +520,16 @@ aeolus_store_drop_older_leases() {
 
 # Gets an entry ready to hand to the session (#756, D4): an entry the fleet
 # took a hand-over of gets the next number, one whose hand-over the fleet has
-# not taken yet keeps its number, so a lost answer counts no attempt. Marks it
-# handed, unless it is handed once more, which keeps it as it is. Prints the
-# input of the fleet's handed. <deliveryId> [once-more]
+# not taken yet keeps its number, so a lost answer counts no attempt. One whose
+# ack went unanswered keeps its number too (#819): the fleet may hold it
+# acknowledged, and answers only the same number so, refusing a higher one.
+# Marks it handed, unless it is handed once more, which keeps it as it is.
+# Prints the input of the fleet's handed. <deliveryId> [once-more]
 aeolus_store_handing() {
   local id="$1" is_once_more="${2:-}" dir number
   dir="$(aeolus_store_dir)" || return 1
   number="$(cat "$dir/$id.number" 2>/dev/null)" || number=0
-  if [ ! -e "$dir/$id.unreported" ]; then
+  if [ ! -e "$dir/$id.unreported" ] && [ ! -e "$dir/$id.acking" ]; then
     number=$((${number:-0} + 1))
     printf '%s\n' "$number" > "$dir/$id.number" || return 1
     : > "$dir/$id.unreported"
@@ -626,7 +628,7 @@ aeolus_store_first() {
 aeolus_store_drop() {
   local dir
   dir="$(aeolus_store_dir)" || return 0
-  rm -f "$dir/$1.json" "$dir/$1.state" "$dir/$1.lease" "$dir/$1.number" "$dir/$1.unreported" "$dir/$1.shown" "$dir/$1.ponged" "$dir/$1.payload"
+  rm -f "$dir/$1.json" "$dir/$1.state" "$dir/$1.lease" "$dir/$1.number" "$dir/$1.unreported" "$dir/$1.acking" "$dir/$1.shown" "$dir/$1.ponged" "$dir/$1.payload"
 }
 
 # Removes every entry, as on LEASE_ENDED.
@@ -897,8 +899,10 @@ aeolus_turn_text() {
 # in; a ping goes in without an ack, since its pong is the confirmation. A
 # refusal leaves the model nothing: busy or unreachable, the entry goes back to
 # received, to be handed again; no longer in flight, or another ship's, it is
-# dropped; LEASE_ENDED drops the store. Each ack call is bounded by
-# AEOLUS_CONFIRM_SECONDS, so its retries end inside a hook's time.
+# dropped; LEASE_ENDED drops the store. The entry is marked acking until the
+# fleet answers, so an ack whose answer was lost, also when the session died
+# waiting for it, is handed again with the same number (#819). Each ack call
+# is bounded by AEOLUS_CONFIRM_SECONDS, so its retries end inside a hook's time.
 # <identity file> <shipName> <plugin root> <prefix>; prints the text, ending
 # with an x; fails when nothing goes in.
 aeolus_put_into_turn() {
@@ -911,8 +915,11 @@ aeolus_put_into_turn() {
     aeolus_turn_text "$id" "$ship" "$root" "$prefix"
     return
   fi
+  : > "$dir/$id.acking"
   output="$(AEOLUS_CALL_MAX_SECONDS="${AEOLUS_CONFIRM_SECONDS:-3}" "$(dirname "${BASH_SOURCE[0]}")/aeolus-fleet.sh" ack "$id" 2>/dev/null)"
   status=$?
+  # Only an ack the fleet never answered may be stored without the plugin knowing.
+  [ "$status" = 6 ] || rm -f "$dir/$id.acking"
   case "$status" in
     0)
       aeolus_store_mark "$id" confirmed
