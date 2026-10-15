@@ -51,7 +51,7 @@ const PRIVATE_FOLDER_MODE = 0o700;
  * is accepted only where the operator accepted it on the host (#403). It goes
  * with the ship's identity, as on a release.
  */
-export function createShipClaudeCodeHomes(at: { homes: string; managedSettings: string; pluginRoot: string; host: Pick<ClaudeCodeSetup, 'isSkipPermissionsAccepted'> }): ClaudeCodeHomes {
+export function createShipClaudeCodeHomes(at: { homes: string; managedSettings: string; pluginRoot: AeolusPlugin['root']; host: Pick<ClaudeCodeSetup, 'isSkipPermissionsAccepted'> }): ClaudeCodeHomes {
   const setupOf = (shipId: ShipId): ClaudeCodeSetup => createClaudeCodeSetup({ homeDirectory: shipHome(at.homes, shipId), managedSettings: at.managedSettings });
 
   return {

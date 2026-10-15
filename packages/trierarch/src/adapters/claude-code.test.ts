@@ -63,7 +63,7 @@ function aConversationIn(folder: string): void {
 function harness(at: { pluginRoot?: string } = {}) {
   return createClaudeCodeHarness({
     configuration: CONFIGURATION,
-    plugin: { root: at.pluginRoot ?? PLUGIN_ROOT, data, crews },
+    plugin: { root: () => Promise.resolve(at.pluginRoot ?? PLUGIN_ROOT), data, crews },
     projects,
     setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
     permissionModes: () => undefined,
@@ -169,7 +169,7 @@ describe('Claude Code as a harness', () => {
       started = [];
       await createClaudeCodeHarness({
         configuration: { ...CONFIGURATION, harnesses: { 'claude-code': { flags, options: {} } } },
-        plugin: { root: PLUGIN_ROOT, data, crews },
+        plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data, crews },
         projects,
         setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
         permissionModes: () => undefined,
@@ -222,7 +222,7 @@ describe('Claude Code as a harness', () => {
       started = [];
       await createClaudeCodeHarness({
         configuration: { ...CONFIGURATION, harnesses: { 'claude-code': { flags, options: {} } } },
-        plugin: { root: PLUGIN_ROOT, data, crews },
+        plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data, crews },
         projects,
         setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: managed, ...(at.configDirectory !== undefined && { configDirectory: at.configDirectory }) }),
         permissionModes: () => at.permissionModes,
@@ -343,7 +343,7 @@ describe('Claude Code as a harness', () => {
     const withFlags = (flags: string[]) =>
       createClaudeCodeHarness({
         configuration: { ...CONFIGURATION, harnesses: { 'claude-code': { flags, options: {} } } },
-        plugin: { root: PLUGIN_ROOT, data, crews },
+        plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data, crews },
         projects,
         setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
         permissionModes: () => undefined,
@@ -581,7 +581,7 @@ describe('Claude Code in containers, each ship with a home of its own (decision 
   function inContainers() {
     return createClaudeCodeHarness({
       configuration: CONFIGURATION,
-      plugin: { root: PLUGIN_ROOT, data, crews },
+      plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data, crews },
       projects,
       setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
       shipHomes: { homes, managedSettings: join(home, 'managed') },

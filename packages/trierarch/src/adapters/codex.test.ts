@@ -58,7 +58,7 @@ afterEach(() => {
 function harness(at: { pluginRoot?: string } = {}) {
   return createCodexHarness({
     configuration: WITH_CODEX,
-    plugin: { root: at.pluginRoot ?? PLUGIN_ROOT, data, crews },
+    plugin: { root: () => Promise.resolve(at.pluginRoot ?? PLUGIN_ROOT), data, crews },
     setup: {
       trustAeolusHooks: () => {
         const trusted = [...untrustedHooks];
@@ -135,7 +135,7 @@ describe('Codex as a harness', () => {
   it("starts no session when Codex's hooks cannot be trusted, since it would stop at the hooks review (#581)", async () => {
     const failing = createCodexHarness({
       configuration: WITH_CODEX,
-      plugin: { root: PLUGIN_ROOT, data, crews },
+      plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data, crews },
       setup: { trustAeolusHooks: () => Promise.reject(new Error('codex app-server did not answer hooks/list')) },
       sessions: {
         start: (session) => {
@@ -154,7 +154,7 @@ describe('Codex as a harness', () => {
   it('adds --no-daemon once even when the operator configured it too, so the session owns its work and a stop stops it', async () => {
     const withNoDaemon = createCodexHarness({
       configuration: { ...WITH_CODEX, harnesses: { codex: { flags: ['--no-daemon'], options: {} } } },
-      plugin: { root: PLUGIN_ROOT, data, crews },
+      plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data, crews },
       setup: { trustAeolusHooks: () => Promise.resolve([]) },
       sessions: {
         start: (session) => {

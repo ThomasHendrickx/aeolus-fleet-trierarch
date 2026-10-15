@@ -7,20 +7,21 @@ import { runCommand } from './run-command.js';
 
 /** The aeolus plugin as a harness installed it: its scripts, its data folder, and where its sessions' identities live. */
 export interface AeolusPlugin {
-  readonly root: string;
+  /** Where the plugin's scripts are, resolved at each use: a plugin upgrade moves them to its new version's folder (#828). */
+  readonly root: () => Promise<string>;
   readonly data: string;
   /** ~/.aeolus/crews/<harness> (#658). */
   readonly crews: string;
 }
 
 /** Runs the plugin's own `aeolus-identity.sh` for the folder, with the plugin's data and crews folders. */
-export function runIdentity(plugin: AeolusPlugin, at: { folder: string; args: readonly string[] }): Promise<{ status: number; stdout: string; stderr: string }> {
-  return runCommand('bash', { args: [`${plugin.root}/scripts/aeolus-identity.sh`, ...at.args], env: { AEOLUS_FOLDER: at.folder, AEOLUS_DATA: plugin.data, AEOLUS_CREWS: plugin.crews } });
+export async function runIdentity(plugin: AeolusPlugin, at: { folder: string; args: readonly string[] }): Promise<{ status: number; stdout: string; stderr: string }> {
+  return runCommand('bash', { args: [`${await plugin.root()}/scripts/aeolus-identity.sh`, ...at.args], env: { AEOLUS_FOLDER: at.folder, AEOLUS_DATA: plugin.data, AEOLUS_CREWS: plugin.crews } });
 }
 
 /** Runs the plugin's own `aeolus-push.sh` for the folder (#756), as `runIdentity` runs `aeolus-identity.sh`. */
-function runPush(plugin: AeolusPlugin, at: { folder: string; args: readonly string[] }): Promise<{ status: number; stdout: string; stderr: string }> {
-  return runCommand('bash', { args: [`${plugin.root}/scripts/aeolus-push.sh`, ...at.args], env: { AEOLUS_FOLDER: at.folder, AEOLUS_DATA: plugin.data, AEOLUS_CREWS: plugin.crews } });
+async function runPush(plugin: AeolusPlugin, at: { folder: string; args: readonly string[] }): Promise<{ status: number; stdout: string; stderr: string }> {
+  return runCommand('bash', { args: [`${await plugin.root()}/scripts/aeolus-push.sh`, ...at.args], env: { AEOLUS_FOLDER: at.folder, AEOLUS_DATA: plugin.data, AEOLUS_CREWS: plugin.crews } });
 }
 
 /** The states of a store entry the trierarch hands over (#756): received, handed and not confirmed, or to hand once more. */

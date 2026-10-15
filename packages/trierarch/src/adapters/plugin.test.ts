@@ -8,6 +8,12 @@ import { aeolusPluginVersion, findAeolusPlugin } from './plugin.js';
 
 let home: string;
 
+/** Where a found plugin is, with its root as it resolves now. */
+async function found(at: Parameters<typeof findAeolusPlugin>[0]) {
+  const plugin = await findAeolusPlugin(at);
+  return { root: await plugin.root(), data: plugin.data, crews: plugin.crews };
+}
+
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'trierarch-home-'));
 });
@@ -22,7 +28,7 @@ describe('finding the aeolus plugin', () => {
       mkdirSync(join(home, '.claude', 'plugins', 'cache', 'aeolus-fleet', 'aeolus', version), { recursive: true });
     }
 
-    await expect(findAeolusPlugin({ homeDirectory: home, env: {} })).resolves.toEqual({
+    await expect(found({ homeDirectory: home, env: {} })).resolves.toEqual({
       root: join(home, '.claude', 'plugins', 'cache', 'aeolus-fleet', 'aeolus', '0.16.0'),
       data: join(home, '.claude', 'plugins', 'data', 'aeolus-aeolus-fleet'),
       crews: join(home, '.aeolus', 'crews', 'claude-code'),
@@ -30,7 +36,7 @@ describe('finding the aeolus plugin', () => {
   });
 
   it('takes AEOLUS_PLUGIN_ROOT and AEOLUS_PLUGIN_DATA when set', async () => {
-    await expect(findAeolusPlugin({ homeDirectory: home, env: { AEOLUS_PLUGIN_ROOT: '/plugin', AEOLUS_PLUGIN_DATA: '/data' } })).resolves.toEqual({ root: '/plugin', data: '/data', crews: join(home, '.aeolus', 'crews', 'claude-code') });
+    await expect(found({ homeDirectory: home, env: { AEOLUS_PLUGIN_ROOT: '/plugin', AEOLUS_PLUGIN_DATA: '/data' } })).resolves.toEqual({ root: '/plugin', data: '/data', crews: join(home, '.aeolus', 'crews', 'claude-code') });
   });
 
   it('says the plugin is not installed when the cache has none', async () => {
@@ -44,7 +50,7 @@ describe('finding the aeolus plugin for Codex', () => {
       mkdirSync(join(home, '.codex', 'plugins', 'cache', 'aeolus-fleet', 'aeolus', version), { recursive: true });
     }
 
-    await expect(findAeolusPlugin({ homeDirectory: home, env: {}, harness: 'codex' })).resolves.toEqual({
+    await expect(found({ homeDirectory: home, env: {}, harness: 'codex' })).resolves.toEqual({
       root: join(home, '.codex', 'plugins', 'cache', 'aeolus-fleet', 'aeolus', '0.17.2'),
       data: join(home, '.codex', 'plugins', 'data', 'aeolus-aeolus-fleet'),
       crews: join(home, '.aeolus', 'crews', 'codex'),
@@ -55,7 +61,7 @@ describe('finding the aeolus plugin for Codex', () => {
     const codexHome = join(home, 'elsewhere');
     mkdirSync(join(codexHome, 'plugins', 'cache', 'aeolus-fleet', 'aeolus', '0.17.2'), { recursive: true });
 
-    await expect(findAeolusPlugin({ homeDirectory: home, env: { CODEX_HOME: codexHome }, harness: 'codex' })).resolves.toEqual({
+    await expect(found({ homeDirectory: home, env: { CODEX_HOME: codexHome }, harness: 'codex' })).resolves.toEqual({
       root: join(codexHome, 'plugins', 'cache', 'aeolus-fleet', 'aeolus', '0.17.2'),
       data: join(codexHome, 'plugins', 'data', 'aeolus-aeolus-fleet'),
       crews: join(home, '.aeolus', 'crews', 'codex'),
@@ -65,7 +71,7 @@ describe('finding the aeolus plugin for Codex', () => {
   it('takes AEOLUS_CODEX_PLUGIN_ROOT and AEOLUS_CODEX_PLUGIN_DATA when set, never the variables for Claude Code', async () => {
     const env = { AEOLUS_PLUGIN_ROOT: '/claude-plugin', AEOLUS_CODEX_PLUGIN_ROOT: '/plugin', AEOLUS_CODEX_PLUGIN_DATA: '/data' };
 
-    await expect(findAeolusPlugin({ homeDirectory: home, env, harness: 'codex' })).resolves.toEqual({ root: '/plugin', data: '/data', crews: join(home, '.aeolus', 'crews', 'codex') });
+    await expect(found({ homeDirectory: home, env, harness: 'codex' })).resolves.toEqual({ root: '/plugin', data: '/data', crews: join(home, '.aeolus', 'crews', 'codex') });
   });
 
   it('says the plugin is not installed for Codex when its cache has none', async () => {

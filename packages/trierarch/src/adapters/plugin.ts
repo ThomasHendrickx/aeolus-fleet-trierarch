@@ -24,7 +24,9 @@ function placesOf(at: { homeDirectory: string; env: Readonly<Record<string, stri
 
 /**
  * Where a harness installed the aeolus plugin: the newest version in its
- * plugin cache and the plugin's data folder, unless variables name others
+ * plugin cache, looked up again at each use so a plugin upgrade without a
+ * service restart moves along (#828), and the plugin's data folder, unless
+ * variables name others
  * (AEOLUS_PLUGIN_ROOT and AEOLUS_PLUGIN_DATA for Claude Code,
  * AEOLUS_CODEX_PLUGIN_ROOT and AEOLUS_CODEX_PLUGIN_DATA for Codex). The
  * folders follow CLAUDE_CONFIG_DIR and CODEX_HOME as the harnesses do. The
@@ -36,16 +38,22 @@ export async function findAeolusPlugin(at: { homeDirectory: string; env: Readonl
   const places = placesOf({ ...at, harness });
   const data = places.data ?? join(places.plugins, 'data', PLUGIN_DATA_FOLDER);
   const crews = join(at.homeDirectory, '.aeolus', 'crews', harness);
-  if (places.root !== undefined) {
-    return { root: places.root, data, crews };
+  const { root } = places;
+  if (root !== undefined) {
+    return { root: () => Promise.resolve(root), data, crews };
   }
   const cache = join(places.plugins, 'cache', 'aeolus-fleet', 'aeolus');
-  const versions = (await readdir(cache).catch(() => [])).filter((name) => /^\d+\.\d+\.\d+$/.test(name)).sort(byVersion);
-  const newest = versions.at(-1);
-  if (newest === undefined) {
-    throw new Error(`The aeolus plugin is not installed for ${places.name} (nothing in ${cache}): install it, or set ${places.rootVariable}`);
-  }
-  return { root: join(cache, newest), data, crews };
+  const newest = async (): Promise<string> => {
+    const versions = (await readdir(cache).catch(() => [])).filter((name) => /^\d+\.\d+\.\d+$/.test(name)).sort(byVersion);
+    const version = versions.at(-1);
+    if (version === undefined) {
+      throw new Error(`The aeolus plugin is not installed for ${places.name} (nothing in ${cache}): install it, or set ${places.rootVariable}`);
+    }
+    return join(cache, version);
+  };
+  // A trierarch without the plugin is refused at start, not at its first crew.
+  await newest();
+  return { root: newest, data, crews };
 }
 
 /** The part of a plugin's manifest the version is read from. */
@@ -60,11 +68,13 @@ export async function aeolusPluginVersion(at: { homeDirectory: string; env: Read
   if (at.harness !== 'claude-code' && at.harness !== 'codex') {
     return undefined;
   }
-  const plugin = await findAeolusPlugin({ ...at, harness: at.harness }).catch(() => undefined);
-  if (plugin === undefined) {
+  const root = await findAeolusPlugin({ ...at, harness: at.harness })
+    .then((plugin) => plugin.root())
+    .catch(() => undefined);
+  if (root === undefined) {
     return undefined;
   }
-  const manifest = join(plugin.root, at.harness === 'codex' ? '.codex-plugin' : '.claude-plugin', 'plugin.json');
+  const manifest = join(root, at.harness === 'codex' ? '.codex-plugin' : '.claude-plugin', 'plugin.json');
   const text = await readFile(manifest, 'utf8').catch(() => undefined);
   if (text === undefined) {
     return undefined;
