@@ -62,8 +62,8 @@ To stop the trierarch: `aeolus-trierarch stop`, or `aeolus-trierarch uninstall` 
 {
   "$schema": "./config.schema.json",
   "caps": { "ships": 4, "running": 2 },
-  "repositories": { "aeolus-fleet": { "path": "/Users/thomas/Projects/aeolus-fleet" } },
-  "folders": { "notes": { "path": "/Users/thomas/notes" } },
+  "repositories": { "aeolus-fleet": { "path": "/path/to/aeolus-fleet" } },
+  "folders": { "notes": { "path": "/path/to/notes" } },
   "harnesses": {
     "claude-code": {
       "flags": ["--remote-control"],
