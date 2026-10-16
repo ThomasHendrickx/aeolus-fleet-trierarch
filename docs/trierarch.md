@@ -138,7 +138,7 @@ Machine labels are checked only at placement, as the trierarch plugin never move
 
 Strategies to change this order come later. The operator does not pick the machine.
 
-A machine is silent when its trierarch's last seen is older than a threshold: 5 minutes, which the trierarch plugin's configuration may change. A trierarch no session crews has no last seen and is never silent. A silent trierarch gets no new requests; the ones it holds stay assigned to it, nothing moves. The flag shows on the machines page and in needs attention.
+A machine is silent when its trierarch's last seen is older than a threshold: 5 minutes, which the trierarch plugin's configuration may change. A trierarch no session crews has no last seen and is never silent. A silent trierarch gets no new requests; the ones it holds stay assigned to it, nothing moves. The flag shows on the machines page and on Health.
 
 ## Crewing a ship
 
