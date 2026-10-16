@@ -21,6 +21,10 @@ set -uo pipefail
 REPOSITORY='ThomasHendrickx/aeolus-fleet'
 # GitHub refuses a URL much past 8 KB; the title and the cut notice need room too.
 LINK_BODY_MAX=6000
+# The longest headline a message to argo opens with (the ship protocol).
+ARGO_HEADLINE_MAX=80
+# What the session sends argo follows this line, to the end of the output.
+TELL_ARGO='aeolus: tell argo, as text/markdown, the lines below:'
 SHIP_ID_PATTERN='shp_[0-9a-z]{26}'
 # The gh that files the issue: gh on PATH, unless AEOLUS_GH names another, as
 # the plugin's tests do so they never file a real issue.
@@ -177,6 +181,16 @@ url_encode() {
   printf '%s' "$out"
 }
 
+# The headline of the message to argo: cut to fit, ending in an ellipsis.
+argo_headline() {
+  local line="$1"
+  if [ "${#line}" -gt "$ARGO_HEADLINE_MAX" ]; then
+    line="${line:0:$((ARGO_HEADLINE_MAX - 1))}"
+    line="${line%"${line##*[![:space:]]}"}…"
+  fi
+  printf '%s\n' "$line"
+}
+
 plugin_version() {
   sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$(dirname "$0")/../.claude-plugin/plugin.json" | head -n 1
 }
@@ -213,7 +227,9 @@ case "${1:-}" in
     if command -v "$GH" >/dev/null 2>&1 && "$GH" auth status >/dev/null 2>&1; then
       if url="$("$GH" issue create --repo "$REPOSITORY" --title "$title" --body-file "$body_file")"; then
         echo "aeolus: issue filed: ${url}"
-        echo "aeolus: tell argo: Issue filed: ${url}"
+        echo "$TELL_ARGO"
+        argo_headline "Issue filed: ${REPOSITORY#*/} #${url##*/}, ${title}"
+        printf '\n%s\n' "$url"
         exit 0
       fi
     fi
@@ -223,7 +239,9 @@ case "${1:-}" in
     echo "aeolus: issue draft: ${draft}"
     echo "aeolus: open: ${link}"
     # The draft stays local; argo learns where it is only through the same filter.
-    echo "aeolus: tell argo: Issue draft: $(printf '%s' "$draft" | redact), open: ${link}"
+    echo "$TELL_ARGO"
+    argo_headline "Issue draft: ${title}"
+    printf '\nNot filed: gh is not signed in on this machine.\n\n- Draft: `%s`\n- [Open the prefilled issue](%s)\n' "$(printf '%s' "$draft" | redact)" "$link"
     ;;
   *)
     echo "usage: aeolus-issue.sh draft|redact|check|file" >&2

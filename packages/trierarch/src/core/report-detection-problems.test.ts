@@ -7,7 +7,7 @@ const AT = new Date('2026-10-08T15:00:00.000Z');
 const PROBLEM = "Claude Code 2.1.293's --help names no model alias, so this machine declares no Claude Code model until an update of Claude Code names one";
 
 describe("reporting detection's problems to argo (#365)", () => {
-  it('tells argo each problem once per harness version, however often the trierarch starts', async () => {
+  it('tells argo each problem once per harness version, however often the trierarch starts, under a headline naming the harness and its version (#849)', async () => {
     const fleet = new InMemoryFleet();
     const report = createReportDetectionProblems({ fleet });
     const detected = {
@@ -18,6 +18,6 @@ describe("reporting detection's problems to argo (#365)", () => {
     await report(detected);
     await report(detected);
 
-    expect(fleet.toArgo).toEqual([{ text: PROBLEM, idempotencyKey: 'trierarch:detection:claude-code:2.1.293' }]);
+    expect(fleet.toArgo).toEqual([{ text: `claude-code 2.1.293: detection found a problem\n\n${PROBLEM}`, idempotencyKey: 'trierarch:detection:claude-code:2.1.293' }]);
   });
 });

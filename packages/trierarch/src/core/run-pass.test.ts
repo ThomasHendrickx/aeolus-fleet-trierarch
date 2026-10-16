@@ -186,7 +186,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.fleet.requestOf(shipId).status).toBe('crashed');
     expect(trierarch.fleet.shipOf(shipId).status).toBe('crewed');
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
-      `scout (${shipId}): its session crashed ${String(RESTART_BUDGET + 1)} times within an hour, restart budget spent; status crashed. Restart it in the console to crew it again.`,
+      `scout crashed ${String(RESTART_BUDGET + 1)} times in an hour\n\n- Ship: scout (\`${shipId}\`)\n- Status: crashed, its restart budget spent\n\nRestart it in the console to crew it again.`,
     ]);
   });
 
@@ -232,7 +232,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.fleet.confirmed).toEqual([shipId]);
   });
 
-  it('row 7: tells argo what removing the worktree discards, naming the machine, the ship and each unpushed change (#450)', async () => {
+  it('row 7: tells argo what removing the worktree discards, in a headline naming the ship, then the ship, its worktree, the counts per kind and each unpushed change (#450, #849)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     trierarch.workspace.change(SCOUT_FOLDER, ' M README.md');
@@ -242,25 +242,49 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     await trierarch.pass();
 
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
-      `mac-studio: released scout (${shipId}) and removed its aeolus-fleet worktree, discarding what was not pushed:  M README.md; ?? draft.md`,
+      `scout released: unpushed work discarded\n\n- Ship: scout (\`${shipId}\`)\n- Worktree: aeolus-fleet\n- Discarded: 1 changed, 1 new\n\n- changed \`README.md\`\n- new \`draft.md\``,
     ]);
   });
 
-  it('row 7: names what it discards in at most 4000 characters, then how many more, so the report is never too large to send (#450)', async () => {
+  it('row 7: counts each kind of what it discards and names the first 5, then how many more are in the log (#450, #849)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    for (let file = 0; file < 1000; file += 1) {
-      trierarch.workspace.change(SCOUT_FOLDER, `?? notes/${String(file).padStart(4, '0')}.md`);
+    for (const line of [' D gone.md', 'D  staged-gone.md', ' M README.md', 'R  old.md -> new.md', 'A  added.md', '?? draft.md', `commit 1a2b3c4 work not pushed`]) {
+      trierarch.workspace.change(SCOUT_FOLDER, line);
     }
     trierarch.fleet.removeRequest(shipId);
 
     await trierarch.pass();
 
-    const [text = ''] = trierarch.fleet.toArgo.map((report) => report.text);
-    const named = text.split(': ').at(-1)?.split('; ') ?? [];
-    const more = Number(/; and (\d+) more$/.exec(text)?.[1]);
-    expect(text.length).toBeLessThanOrEqual(4000);
-    expect(named.length - 1 + more).toBe(1000);
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
+      [
+        'scout released: unpushed work discarded',
+        '',
+        `- Ship: scout (\`${shipId}\`)`,
+        '- Worktree: aeolus-fleet',
+        '- Discarded: 2 deleted, 1 changed, 1 renamed, 2 new, 1 commit',
+        '',
+        '- deleted `gone.md`',
+        '- deleted `staged-gone.md`',
+        '- changed `README.md`',
+        '- renamed `old.md -> new.md`',
+        '- new `added.md`',
+        "- and 2 more, in this trierarch's log",
+      ].join('\n'),
+    ]);
+  });
+
+  it('row 7: logs every line of what it discards, as argo is told only the first 5 (#849)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    for (let file = 0; file < 7; file += 1) {
+      trierarch.workspace.change(SCOUT_FOLDER, `?? notes/${String(file)}.md`);
+    }
+    trierarch.fleet.removeRequest(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.logger.warnings).toContain(`Discarded from the worktree of scout (${shipId}), ${SCOUT_FOLDER}: ?? notes/0.md; ?? notes/1.md; ?? notes/2.md; ?? notes/3.md; ?? notes/4.md; ?? notes/5.md; ?? notes/6.md`);
   });
 
   it('row 7: tells argo nothing when the worktree it removes holds nothing unpushed (#450)', async () => {
@@ -456,7 +480,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.state.current().kept).toEqual([]);
   });
 
-  it('row 11: tells argo what removing the worktree of a ship released elsewhere discards, naming the machine, the ship and each unpushed change (#475)', async () => {
+  it('row 11: tells argo what removing the worktree of a ship released elsewhere discards, saying why, then the ship, its worktree, the counts and each unpushed change (#475, #849)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     trierarch.workspace.change(SCOUT_FOLDER, ' M README.md');
@@ -466,7 +490,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     await trierarch.pass();
 
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
-      `mac-studio: scout (${shipId}) was released elsewhere, so the trierarch removed its aeolus-fleet worktree before crewing it again, discarding what was not pushed:  M README.md; ?? draft.md`,
+      `scout released elsewhere: unpushed work discarded\n\nThe trierarch removed its worktree before crewing it again.\n\n- Ship: scout (\`${shipId}\`)\n- Worktree: aeolus-fleet\n- Discarded: 1 changed, 1 new\n\n- changed \`README.md\`\n- new \`draft.md\``,
     ]);
   });
 
@@ -632,7 +656,7 @@ describe('the launch window: a crew is final once its session shows activity (#3
     expect(statusesOf(trierarch, shipId)).toEqual(['crewing']);
   });
 
-  it('keeps the model its session refused as refused for its harness, and tells argo once, naming the machine, the harness, its version, the model and the ship', async () => {
+  it('keeps the model its session refused as refused for its harness, and tells argo once, naming the harness, its version, the model and the ship', async () => {
     const trierarch = aTrierarch(CONFIGURATION, DETECTED);
     const refused = { seen: { kind: 'refused', model: 'sonnet' }, settings: { options: { model: 'sonnet' } } } as const;
     const shipId = await aLaunchedShip(trierarch, refused);
@@ -646,7 +670,7 @@ describe('the launch window: a crew is final once its session shows activity (#3
     ]);
     expect(trierarch.fleet.toArgo).toEqual([
       {
-        text: `mac-studio: claude-code 2.1.295 refused the model sonnet for scout (${shipId}): this machine offers it no more at this version, until aeolus-trierarch detect runs by hand`,
+        text: `claude-code refused the model sonnet for scout\n\n- Ship: scout (\`${shipId}\`)\n- Harness: claude-code 2.1.295\n- Model: sonnet\n\nThis machine offers the model no more at this version, until \`aeolus-trierarch detect\` runs by hand.`,
         idempotencyKey: 'trierarch:refused-model:claude-code:2.1.295:sonnet',
       },
     ]);
@@ -851,7 +875,7 @@ describe('the restart window: a restarted final crew is checked, never held back
     expect(trierarch.refusals).toEqual([{ harness: 'claude-code', id: 'sonnet', at: trierarch.clock.now() }]);
     expect(trierarch.fleet.toArgo).toEqual([
       {
-        text: `mac-studio: claude-code 2.1.295 refused the model sonnet for scout (${shipId}): this machine offers it no more at this version, until aeolus-trierarch detect runs by hand`,
+        text: `claude-code refused the model sonnet for scout\n\n- Ship: scout (\`${shipId}\`)\n- Harness: claude-code 2.1.295\n- Model: sonnet\n\nThis machine offers the model no more at this version, until \`aeolus-trierarch detect\` runs by hand.`,
         idempotencyKey: 'trierarch:refused-model:claude-code:2.1.295:sonnet',
       },
     ]);
@@ -872,7 +896,7 @@ describe('the restart window: a restarted final crew is checked, never held back
     expect(trierarch.processes.sessions.has(shipId)).toBe(false);
     expect(trierarch.fleet.givenBack).toEqual([]);
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
-      `scout (${shipId}): its session crashed ${String(RESTART_BUDGET + 1)} times within an hour, restart budget spent; its last start: no activity within a minute of its start; status crashed. Restart it in the console to crew it again.`,
+      `scout crashed ${String(RESTART_BUDGET + 1)} times in an hour\n\n- Ship: scout (\`${shipId}\`)\n- Status: crashed, its restart budget spent\n- Its last start: no activity within a minute of its start\n\nRestart it in the console to crew it again.`,
     ]);
   });
 
@@ -887,7 +911,7 @@ describe('the restart window: a restarted final crew is checked, never held back
     }
 
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
-      `scout (${shipId}): its session crashed ${String(RESTART_BUDGET + 1)} times within an hour, restart budget spent; its last start: no activity within a minute of its start, stopped at claude-code's bypass permissions warning; status crashed. Restart it in the console to crew it again.`,
+      `scout crashed ${String(RESTART_BUDGET + 1)} times in an hour\n\n- Ship: scout (\`${shipId}\`)\n- Status: crashed, its restart budget spent\n- Its last start: no activity within a minute of its start, stopped at claude-code's bypass permissions warning\n\nRestart it in the console to crew it again.`,
     ]);
   });
 
@@ -967,7 +991,7 @@ describe('a final crew crewed again after a release elsewhere follows the restar
     expect(trierarch.processes.sessions.has(shipId)).toBe(false);
     expect(trierarch.fleet.givenBack).toEqual([]);
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
-      `scout (${shipId}): its session crashed ${String(RESTART_BUDGET + 1)} times within an hour, restart budget spent; its last start: no activity within a minute of its start; status crashed. Restart it in the console to crew it again.`,
+      `scout crashed ${String(RESTART_BUDGET + 1)} times in an hour\n\n- Ship: scout (\`${shipId}\`)\n- Status: crashed, its restart budget spent\n- Its last start: no activity within a minute of its start\n\nRestart it in the console to crew it again.`,
     ]);
   });
 
@@ -984,7 +1008,7 @@ describe('a final crew crewed again after a release elsewhere follows the restar
     expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'crewing', folder: SCOUT_FOLDER });
     expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
-      `scout (${shipId}): this trierarch cannot crew settings version 1: workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it`,
+      `Cannot crew scout with its settings\n\n- Ship: scout (\`${shipId}\`)\n- Settings version: 1\n- Why: workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it`,
     ]);
   });
 
@@ -1253,7 +1277,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     await trierarch.pass();
 
     expect(trierarch.fleet.givenBack).toEqual([]);
-    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`scout (${shipId}): this trierarch cannot crew settings version 1: harness: This trierarch offers no harness codex`]);
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`Cannot crew scout with its settings\n\n- Ship: scout (\`${shipId}\`)\n- Settings version: 1\n- Why: harness: This trierarch offers no harness codex`]);
   });
 
   it('tells argo once per version instead when the fleet refuses the give-back (#382)', async () => {
@@ -1266,7 +1290,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     await trierarch.pass();
 
     expect(trierarch.fleet.requests.has(shipId)).toBe(true);
-    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`scout (${shipId}): this trierarch cannot crew settings version 1: harness: This trierarch offers no harness codex`]);
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`Cannot crew scout with its settings\n\n- Ship: scout (\`${shipId}\`)\n- Settings version: 1\n- Why: harness: This trierarch offers no harness codex`]);
   });
 
   it('gives back a new settings version it cannot crew while its crew is not final: the session stops, its identity and clean worktree go, the lease ends (#382)', async () => {
@@ -1365,7 +1389,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
 
     expect(trierarch.harness.launches).toHaveLength(1);
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
-      `scout (${shipId}): this trierarch cannot crew settings version 1: workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it`,
+      `Cannot crew scout with its settings\n\n- Ship: scout (\`${shipId}\`)\n- Settings version: 1\n- Why: workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it`,
     ]);
   });
 
@@ -1406,7 +1430,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     await trierarch.pass();
 
     expect(trierarch.harness.launches).toHaveLength(1);
-    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`scout (${shipId}): this trierarch cannot crew settings version 1: ${UNACCEPTED}`]);
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`Cannot crew scout with its settings\n\n- Ship: scout (\`${shipId}\`)\n- Settings version: 1\n- Why: ${UNACCEPTED}`]);
   });
 
   it('never crews settings for a harness whose aeolus plugin marks no launches, and gives the request back saying to upgrade (#490)', async () => {
@@ -1432,7 +1456,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     await trierarch.pass();
 
     expect(trierarch.harness.launches).toHaveLength(1);
-    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`scout (${shipId}): this trierarch cannot crew settings version 1: ${UNMARKED}`]);
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`Cannot crew scout with its settings\n\n- Ship: scout (\`${shipId}\`)\n- Settings version: 1\n- Why: ${UNMARKED}`]);
   });
 
   it('hands one message over to an idle session while deliveries wait (#756, 2a)', async () => {
@@ -1747,7 +1771,7 @@ describe('a Codex launch on a version other than the one its texts were captured
 
 /** What argo is told when a ship's folder holds no identity (#659, #664). */
 const identityGone = (shipId: ShipId) =>
-  `mac-studio: scout (${shipId}): its folder holds no identity, so the trierarch can no longer report on its behalf, watch its inbox or wake it. Restart it in the console to crew it again.`;
+  `scout is no longer woken: its folder holds no identity\n\n- Ship: scout (\`${shipId}\`)\n\nThe trierarch can no longer report on its behalf, watch its inbox or wake it. Restart it in the console to crew it again.`;
 
 describe('a running ship whose identity is gone (#659)', () => {
   it('tells argo once and logs it once while its folder holds no identity', async () => {
@@ -1939,6 +1963,6 @@ describe('a failing action fails alone (#827)', () => {
     await trierarch.pass();
     await trierarch.pass();
 
-    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`broken (${shipId}): this trierarch cannot crew settings version 1: crew failed 3 times: the harness could not start ${shipId}`]);
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`Cannot crew broken with its settings\n\n- Ship: broken (\`${shipId}\`)\n- Settings version: 1\n- Why: crew failed 3 times: the harness could not start ${shipId}`]);
   });
 });

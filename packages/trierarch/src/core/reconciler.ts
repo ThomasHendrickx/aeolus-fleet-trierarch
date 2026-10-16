@@ -1,5 +1,6 @@
 import type { CrewStatus, ShipId, TrierarchConfiguration } from '@aeolus-fleet/common';
 
+import { crashText } from './argo-reports.js';
 import { checkSettings, launchMarkerRefusal, trustRefusal, unacceptedRefusal, type CheckedSettings, type Refusal } from './check-settings.js';
 import { MODEL_OPTION } from './detected-options.js';
 import { putEntry, removeEntry, withState, type Entry, type KeptWorktree, type TrierarchState } from './entry.js';
@@ -474,9 +475,8 @@ function exitStep(entry: Entry, at: { now: Date; failedStart?: string }): Step {
 
 /** What argo is told when a session's restart budget is spent, with why its last start failed when it did (#397): a human decides. */
 function crashReport(entry: Entry, at: { exits: number; now: Date; failedStart?: string }): ArgoReport {
-  const lastStart = at.failedStart === undefined ? '' : `; its last start: ${at.failedStart}`;
   return {
-    text: `${entry.shipName ?? entry.shipId} (${entry.shipId}): its session crashed ${String(at.exits)} times within an hour, restart budget spent${lastStart}; status crashed. Restart it in the console to crew it again.`,
+    text: crashText(entry, { exits: at.exits, ...(at.failedStart !== undefined && { failedStart: at.failedStart }) }),
     idempotencyKey: `trierarch:crashed:${entry.shipId}:${at.now.toISOString()}`,
   };
 }

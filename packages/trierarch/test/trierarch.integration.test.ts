@@ -241,8 +241,11 @@ describe('the trierarch on a real fleet', () => {
     unwrap(await useCases.removeCrewRequest(argo, { shipId: scout.shipId }));
     await pass();
     expect(existsSync(worktree)).toBe(false);
-    await expect(database.message.findMany({ where: { senderShipId: trierarchShip.shipId }, select: { payload: true } })).resolves.toEqual([
-      { payload: `mac-mini: released scout (${scout.shipId}) and removed its aeolus-fleet worktree, discarding what was not pushed: ?? draft.md` },
+    await expect(database.message.findMany({ where: { senderShipId: trierarchShip.shipId }, select: { payload: true, contentType: true } })).resolves.toEqual([
+      {
+        payload: `scout released: unpushed work discarded\n\n- Ship: scout (\`${scout.shipId}\`)\n- Worktree: aeolus-fleet\n- Discarded: 1 new\n\n- new \`draft.md\``,
+        contentType: 'text/markdown',
+      },
     ]);
 
     unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings }));

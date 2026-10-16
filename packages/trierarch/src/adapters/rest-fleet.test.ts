@@ -181,12 +181,12 @@ describe('the fleet over REST', () => {
 });
 
 describe('the fleet over REST while it is busy (#546)', () => {
-  it('reports to argo again by itself with the same idempotency key while the fleet is busy', async () => {
+  it('reports to argo in markdown, again by itself with the same idempotency key while the fleet is busy (#849)', async () => {
     await aFleetAnswering([BUSY, BUSY, { status: 200, body: { messageId: newId('message') } }], async (fleetUrl, asked) => {
       await createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_x', busyWaitsMs: [1, 1, 1, 1] }).reportToArgo({ text: 'scout crashed', idempotencyKey: 'report-1' });
 
       expect(asked.map(({ url, body }) => [url, body])).toEqual(Array.from({ length: 3 }, () => ['/api/v1/ship/send', asked[0]?.body]));
-      expect(JSON.parse(asked[0]?.body ?? '')).toMatchObject({ idempotencyKey: 'report-1' });
+      expect(JSON.parse(asked[0]?.body ?? '')).toMatchObject({ idempotencyKey: 'report-1', contentType: 'text/markdown' });
     });
   });
 

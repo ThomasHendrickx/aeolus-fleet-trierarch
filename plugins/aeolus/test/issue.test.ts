@@ -203,7 +203,14 @@ describe('aeolus-issue file', () => {
 
     expect(status).toBe(0);
     expect(stdout).toBe(
-      `aeolus: issue filed: https://github.com/${REPOSITORY}/issues/240\naeolus: tell argo: Issue filed: https://github.com/${REPOSITORY}/issues/240\n`,
+      [
+        `aeolus: issue filed: https://github.com/${REPOSITORY}/issues/240`,
+        'aeolus: tell argo, as text/markdown, the lines below:',
+        'Issue filed: aeolus-fleet #240, The watcher woke [ship] four times with nothing…',
+        '',
+        `https://github.com/${REPOSITORY}/issues/240`,
+        '',
+      ].join('\n'),
     );
     const calls = readFileSync(ghCalls, 'utf8');
     expect(calls).toContain(`issue create --repo ${REPOSITORY} --title The watcher woke [ship] four times with nothing to read --body-file`);
@@ -231,7 +238,17 @@ describe('aeolus-issue file', () => {
     expect(readFileSync(ghCalls, 'utf8')).not.toContain('issue create');
   });
 
-  it('gives the line to send argo, the draft path going through the same filter', () => {
+  it('cuts the headline argo is told to 80 characters when the title is long (#849)', () => {
+    aGh({ isSignedIn: true });
+    const draft = run('aeolus-issue.sh', { args: ['draft'] }).stdout.trim();
+    writeFileSync(draft, `# ${'a'.repeat(100)}\n\nWhat happened\n`);
+
+    const lines = run('aeolus-issue.sh', { args: ['file', draft] }).stdout.split('\n');
+
+    expect(lines[2]).toBe(`Issue filed: aeolus-fleet #240, ${'a'.repeat(47)}…`);
+  });
+
+  it('gives the message to send argo, the draft path going through the same filter', () => {
     const dataUnderAnAddress = join(data, 'bob@example.org');
     mkdirSync(dataUnderAnAddress);
     run('aeolus-identity.sh', { args: ['write', FLEET_URL, SHIP_ID, 'l3lo'], stdin: CREW_TOKEN, env: { AEOLUS_DATA: dataUnderAnAddress } });
@@ -241,9 +258,10 @@ describe('aeolus-issue file', () => {
     const lines = run('aeolus-issue.sh', { args: ['file', draft], env: { AEOLUS_DATA: dataUnderAnAddress } }).stdout.trim().split('\n');
 
     const link = z.string().parse(lines[1]).replace(/^aeolus: open: /, '');
-    expect(lines[2]).toMatch(/^aeolus: tell argo: Issue draft: .*\[email\].*\.md, open: /);
-    expect(lines[2]).toContain(`, open: ${link}`);
-    expect(lines[2]).not.toContain('bob@example.org');
+    expect(lines.slice(2, 6)).toEqual(['aeolus: tell argo, as text/markdown, the lines below:', 'Issue draft: A title', '', 'Not filed: gh is not signed in on this machine.']);
+    expect(lines[7]).toMatch(/^- Draft: `.*\[email\].*\.md`$/);
+    expect(lines[8]).toBe(`- [Open the prefilled issue](${link})`);
+    expect(lines.slice(2).join('\n')).not.toContain('bob@example.org');
   });
 
   it('never calls a gh on PATH, signed in or not, but only the gh AEOLUS_GH names', () => {
@@ -309,17 +327,18 @@ describe('/aeolus:issue and $aeolus-issue', () => {
     }
   });
 
-  it('sends argo the line the script gives for it, never the report itself', () => {
+  it('sends argo the lines the script gives for it, as text/markdown, never the report itself (#849)', () => {
     for (const text of texts()) {
-      expect(text).toContain('tell argo:');
+      expect(text).toContain('`aeolus: tell argo, as text/markdown, the lines below:`');
+      expect(text).toContain('contentType `text/markdown`');
     }
   });
 
   it('sends argo one short message pointing at the issue or the draft, never the report itself', () => {
     for (const text of texts()) {
       expect(text).toContain('`{ "kind": "ship", "name": "argo" }`');
-      expect(text).toContain('Issue filed: <url>');
-      expect(text).toContain('Issue draft: <path>, open: <link>');
+      expect(text).toContain('`Issue filed: aeolus-fleet #<number>, <title>`');
+      expect(text).toContain('`Issue draft: <title>`');
       expect(text).toContain('never the report itself');
     }
   });

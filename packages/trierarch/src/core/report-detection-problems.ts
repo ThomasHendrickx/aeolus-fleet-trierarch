@@ -1,3 +1,4 @@
+import { detectionProblemText } from './argo-reports.js';
 import type { Detected, FleetPort } from './ports.js';
 
 export type ReportDetectionProblems = (detected: Detected) => Promise<void>;
@@ -12,7 +13,7 @@ export function createReportDetectionProblems(deps: { fleet: Pick<FleetPort, 're
   return async (detected) => {
     for (const [harness, found] of Object.entries(detected)) {
       if (found?.problem !== undefined) {
-        await deps.fleet.reportToArgo({ text: found.problem, idempotencyKey: `trierarch:detection:${harness}:${found.version}` });
+        await deps.fleet.reportToArgo({ text: detectionProblemText({ harness, version: found.version, problem: found.problem }), idempotencyKey: `trierarch:detection:${harness}:${found.version}` });
       }
     }
   };

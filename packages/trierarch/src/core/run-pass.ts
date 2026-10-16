@@ -1,6 +1,7 @@
 import { CREW_REQUEST_REASON_MAX_LENGTH, type ShipId } from '@aeolus-fleet/common';
 
 import { putEntry, removeEntry, withState, type Entry, type TrierarchState } from './entry.js';
+import { discardedText, identityGoneText, modelRefusedText, settingsRefusedText } from './argo-reports.js';
 import { MODEL_OPTION } from './detected-options.js';
 import type { FleetPort, HarnessPort, LaunchSeen, LoggedAction, Logger, SessionRuntime, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { HOLDS_IDENTITY, reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
@@ -402,9 +403,9 @@ async function releaseWorkspace(at: EntryAt & { cause: ReleaseCause }): Promise<
   }
   const unsaved = await deps.workspace.unsaved(folder);
   if (unsaved.length > 0) {
-    const machine = await deps.fleet.whoami();
+    deps.logger.warn(`Discarded from the worktree of ${entry.shipName ?? entry.shipId} (${entry.shipId}), ${folder}: ${unsaved.join('; ')}`);
     await deps.fleet.reportToArgo({
-      text: discardedText(`${machine.name}: ${removedBecause(entry, { cause, repository: entry.workspace.repository })}, discarding what was not pushed: `, unsaved),
+      text: discardedText(entry, { isReleasedElsewhere: cause === 'releasedElsewhere', repository: entry.workspace.repository, unsaved }),
       idempotencyKey: `trierarch:discarded:${entry.shipId}:${entry.since}`,
     });
   }
@@ -493,9 +494,8 @@ async function modelRefused(at: CarryOut & { action: Extract<Action, { kind: 'mo
   const { action, deps } = at;
   const { shipId, shipName, harness, version, model } = action;
   await deps.refuseModel({ harness, id: model, at: deps.clock.now() });
-  const machine = await deps.fleet.whoami();
   await deps.fleet.reportToArgo({
-    text: `${machine.name}: ${harness} ${version} refused the model ${model} for ${shipName ?? shipId} (${shipId}): this machine offers it no more at this version, until aeolus-trierarch detect runs by hand`,
+    text: modelRefusedText({ shipId, shipName }, { harness, version, model }),
     idempotencyKey: `trierarch:refused-model:${harness}:${version}:${model}`,
   });
   log(deps, { shipId, ...(shipName !== undefined && { shipName }), action: 'modelRefused', outcome: `${harness} ${version} refused ${model}, offered no more at this version` });
@@ -510,9 +510,8 @@ async function modelRefused(at: CarryOut & { action: Extract<Action, { kind: 'mo
 async function identityGone(at: CarryOut & { action: Extract<Action, { kind: 'identityGone' }> }): Promise<void> {
   const { action, deps } = at;
   const { shipId, shipName } = action;
-  const machine = await deps.fleet.whoami();
   await deps.fleet.reportToArgo({
-    text: `${machine.name}: ${shipName ?? shipId} (${shipId}): its folder holds no identity, so the trierarch can no longer report on its behalf, watch its inbox or wake it. Restart it in the console to crew it again.`,
+    text: identityGoneText({ shipId, shipName }),
     idempotencyKey: `trierarch:identity-gone:${shipId}:${deps.clock.now().toISOString()}`,
   });
   log(deps, { shipId, ...(shipName !== undefined && { shipName }), action: 'identityGone', outcome: 'its folder holds no identity, so it is no longer woken; argo told' });
@@ -522,53 +521,20 @@ async function identityGone(at: CarryOut & { action: Extract<Action, { kind: 'id
 async function refuse(state: TrierarchState, at: CarryOut & { action: Extract<Action, { kind: 'refuse' }> }): Promise<TrierarchState> {
   const { action, deps } = at;
   const ship = await deps.fleet.ship(action.shipId);
-  const name = ship.kind === 'awaitingCrew' || ship.kind === 'crewed' ? ship.name : action.shipId;
+  const name = ship.kind === 'awaitingCrew' || ship.kind === 'crewed' ? ship.name : undefined;
   const { field, reason } = action.refusal;
   await deps.fleet.reportToArgo({
-    text: `${name} (${action.shipId}): this trierarch cannot crew settings version ${String(action.settingsVersion)}: ${field === undefined ? reason : `${field}: ${reason}`}`,
+    text: settingsRefusedText({ shipId: action.shipId, shipName: name }, { settingsVersion: action.settingsVersion, why: field === undefined ? reason : `${field}: ${reason}` }),
     idempotencyKey: `trierarch:refused:${action.shipId}:${String(action.settingsVersion)}`,
   });
   const next = { ...state, refused: { ...state.refused, [action.shipId]: action.settingsVersion } };
   await deps.state.save(next);
-  deps.logger.warn(`Cannot crew ${name} (${action.shipId}), settings version ${String(action.settingsVersion)}: ${reason}`);
+  deps.logger.warn(`Cannot crew ${name ?? action.shipId} (${action.shipId}), settings version ${String(action.settingsVersion)}: ${reason}`);
   return next;
 }
 
 /** Why a worktree is removed whatever it holds: its request was removed (row 7), or its ship released elsewhere is crewed again (row 11). */
 type ReleaseCause = 'release' | 'releasedElsewhere';
-
-/** What argo is told was removed, and why, before the list of what that discards. */
-function removedBecause(entry: Entry, at: { cause: ReleaseCause; repository: string }): string {
-  const ship = `${entry.shipName ?? entry.shipId} (${entry.shipId})`;
-  const worktree = `its ${at.repository} worktree`;
-  switch (at.cause) {
-    case 'release':
-      return `released ${ship} and removed ${worktree}`;
-    case 'releasedElsewhere':
-      return `${ship} was released elsewhere, so the trierarch removed ${worktree} before crewing it again`;
-  }
-}
-
-/** At most this many characters tell argo what a release discards, so the report is always small enough to send. */
-const DISCARDED_TEXT_MAX_LENGTH = 4000;
-
-/** The heading, then as many of the discarded lines as fit, then how many more. */
-function discardedText(heading: string, unsaved: readonly string[]): string {
-  const whole = heading + unsaved.join('; ');
-  if (whole.length <= DISCARDED_TEXT_MAX_LENGTH) {
-    return whole;
-  }
-  const named: string[] = [];
-  const textOf = (rest: number): string => heading + [...named, `and ${String(rest)} more`].join('; ');
-  for (const line of unsaved) {
-    named.push(line);
-    if (textOf(unsaved.length - named.length).length > DISCARDED_TEXT_MAX_LENGTH) {
-      named.pop();
-      break;
-    }
-  }
-  return textOf(unsaved.length - named.length);
-}
 
 /**
  * The workspace of an entry given back while its crew is not final: a

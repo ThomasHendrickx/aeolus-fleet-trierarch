@@ -1,6 +1,6 @@
 import { setTimeout as wait } from 'node:timers/promises';
 
-import { assignedCrewRequestsOutputSchema, busyWaitMs, clearRequestsOutputSchema, FLEET_BUSY_WAITS_MS, giveBackCrewRequestOutputSchema, idSchema, receivedDeliverySchema, shipDetailOutputSchema, type ShipId } from '@aeolus-fleet/common';
+import { assignedCrewRequestsOutputSchema, busyWaitMs, clearRequestsOutputSchema, FLEET_BUSY_WAITS_MS, giveBackCrewRequestOutputSchema, idSchema, MARKDOWN_CONTENT_TYPE, receivedDeliverySchema, shipDetailOutputSchema, type ShipId } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
 import type { Delivery, FleetPort } from '../core/ports.js';
@@ -158,7 +158,7 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string; 
     reportToArgo: async ({ text, idempotencyKey }) => {
       await call({
         path: '/ship/send',
-        body: { selector: { kind: 'ship', name: 'argo' }, payload: text, contentType: 'text/plain', model: TRIERARCH_SELF.model, idempotencyKey },
+        body: { selector: { kind: 'ship', name: 'argo' }, payload: text, contentType: MARKDOWN_CONTENT_TYPE, model: TRIERARCH_SELF.model, idempotencyKey },
         answers: z.object({ messageId: idSchema('message') }),
       });
     },
