@@ -40,6 +40,7 @@ const stateSchema = z.object({
       launchedAt: z.string().optional(),
       launchId: z.string().optional(),
       isReleasedElsewhere: z.literal(true).optional(),
+      crewFailures: z.int().min(1).optional(),
       isIdentityGone: z.literal(true).optional(),
     }),
   ),

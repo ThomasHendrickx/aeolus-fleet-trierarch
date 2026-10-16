@@ -71,6 +71,7 @@ const aPopulatedState = (): Populated<TrierarchState> => {
         launchedAt: '2026-10-06T07:58:30.000Z',
         launchId: '6f1c2b9e-3d4a-4e5f-8a7b-9c0d1e2f3a4b',
         isReleasedElsewhere: true,
+        crewFailures: 2,
         isIdentityGone: true,
       },
     },

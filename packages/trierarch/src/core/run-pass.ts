@@ -14,8 +14,9 @@ import type { Clock } from './shared/clock.js';
  * crewing is saved before the trierarch registers), then carries the actions
  * out, saving after each one that changes the state. Each action is logged
  * with its ship and outcome. A failed one is logged with what happens next,
- * and the pass ends there: the next pass starts from the saved state and the
- * requests as the fleet holds them then.
+ * and fails alone (#827): the pass goes on from the saved state with the
+ * next action. A crew that fails 3 times in a row is given back, its last
+ * failure the reason, so another trierarch can crew the ship.
  */
 export type RunPass = () => Promise<void>;
 
@@ -39,10 +40,17 @@ export interface RunPassDeps {
 
 const NEXT_AFTER_FAILURE = 'the next pass tries again; aeolus-trierarch status and list show where it stands';
 
+/** How many crews of a settings version may fail in a row before the request is given back (#827): the restart budget's count. */
+export const CREW_FAILURE_BUDGET = 3;
+
+function reasonOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function createRunPass(deps: RunPassDeps): RunPass {
   return async () => {
     let state = await deps.state.load();
-    let action: Action | undefined;
+    let actions: readonly Action[];
     try {
       const requests = await deps.fleet.assignedRequests();
       const clears = await deps.fleet.pendingClears();
@@ -53,18 +61,61 @@ export function createRunPass(deps: RunPassDeps): RunPass {
       const reconciled = reconcile(state, { requests, clears, observed, now: deps.clock.now(), configuration: deps.setup.configuration, trusted, versions, marksLaunches });
       state = reconciled.state;
       await deps.state.save(state);
-      for (action of reconciled.actions) {
-        state = await carryOut(state, { action, deps });
-      }
+      actions = reconciled.actions;
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      if (action === undefined || action.kind === 'argo' || action.kind === 'status' || action.kind === 'refuse') {
-        deps.logger.warn(`The pass failed${action === undefined ? '' : ` at ${action.kind}`}: ${reason}; ${NEXT_AFTER_FAILURE}`);
-      } else {
-        log(deps, { ...about(state, { shipId: action.shipId, action: action.kind }), outcome: `failed: ${reason}`, next: NEXT_AFTER_FAILURE });
+      deps.logger.warn(`The pass failed: ${reasonOf(error)}; ${NEXT_AFTER_FAILURE}`);
+      return;
+    }
+    for (const action of actions) {
+      try {
+        state = await carryOut(state, { action, deps });
+      } catch (error) {
+        state = await failed({ action, deps, reason: reasonOf(error) });
       }
     }
   };
+}
+
+/**
+ * A failed action, logged with what happens next. The pass goes on from the
+ * saved state, which holds what the action saved before it failed. A failed
+ * crew counts against its settings version: the last one of the budget gives
+ * the request back. What fails here is logged too, and left to the next pass.
+ */
+async function failed(at: { action: Action; deps: RunPassDeps; reason: string }): Promise<TrierarchState> {
+  const { action, deps, reason } = at;
+  try {
+    const state = await deps.state.load();
+    if (action.kind === 'argo' || action.kind === 'status' || action.kind === 'refuse') {
+      deps.logger.warn(`The pass failed at ${action.kind}: ${reason}; ${NEXT_AFTER_FAILURE}`);
+      return state;
+    }
+    const entry = state.entries[action.shipId];
+    if (action.kind !== 'crew' || entry === undefined) {
+      log(deps, { ...about(state, { shipId: action.shipId, action: action.kind }), outcome: `failed: ${reason}`, next: NEXT_AFTER_FAILURE });
+      return state;
+    }
+    return await crewFailed(state, { entry, deps, reason });
+  } catch (error) {
+    deps.logger.warn(`The pass failed after ${action.kind} failed: ${reasonOf(error)}; ${NEXT_AFTER_FAILURE}`);
+    return deps.state.load();
+  }
+}
+
+/** A failed crew, counted against its settings version: the last one of the budget gives the request back (#827). */
+async function crewFailed(state: TrierarchState, at: EntryAt & { reason: string }): Promise<TrierarchState> {
+  const { entry, deps, reason } = at;
+  const crewFailures = (entry.crewFailures ?? 0) + 1;
+  const logged = { ...about(state, { shipId: entry.shipId, action: 'crew' }), outcome: `failed: ${reason}` };
+  if (crewFailures < CREW_FAILURE_BUDGET) {
+    const next = putEntry(state, { ...entry, crewFailures });
+    await deps.state.save(next);
+    log(deps, { ...logged, next: NEXT_AFTER_FAILURE });
+    return next;
+  }
+  log(deps, { ...logged, next: `failed ${String(CREW_FAILURE_BUDGET)} times in a row, so the trierarch gives it back` });
+  const given = `crew failed ${String(CREW_FAILURE_BUDGET)} times: ${reason}`;
+  return giveBack(state, { action: { kind: 'giveBack', shipId: entry.shipId, settingsVersion: entry.settingsVersion, reason: given, entry }, deps });
 }
 
 /**
@@ -223,10 +274,11 @@ interface EntryAt {
 }
 
 /**
- * Crews the ship (crew:run): gets its starting prompt and registers with the
- * secret, so the session never sees it; makes the workspace (or uses the one
- * it has), writes the folder's identity (with its squadron) and starts the
- * harness, writing status crewing: it runs once its session shows activity
+ * Crews the ship (crew:run): once its harness can start a session (#827),
+ * makes the workspace (or uses the one it has), gets its starting prompt and
+ * registers with the secret, so the session never sees it; writes the
+ * folder's identity (with its squadron) and starts the harness, writing
+ * status crewing: it runs once its session shows activity
  * in its launch window (#382). A resumed crew whose ship is
  * crewed holds the ship by its own lease, or lost its register reply: the
  * trierarch releases the ship and crews it again. A ship another session
@@ -258,12 +310,17 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
     await deps.state.save(state);
   }
   await deps.fleet.writeStatus(crewing.shipId, writtenStatusOf(withState(crewing, { state: 'crewing', now: deps.clock.now() })));
-  const { secret } = await deps.fleet.getStartingPrompt(crewing.shipId);
-  const { crewToken } = await deps.fleet.register({ shipId: crewing.shipId, secret });
+  // Registered only once the crew can start, so a crew that cannot never takes the ship's lease (#827).
+  const problem = await harness.startProblem();
+  if (problem !== undefined) {
+    return crewFailed(state, { entry: crewing, deps, reason: problem });
+  }
   const { folder } = await deps.workspace.prepare({ shipId: crewing.shipId, shipName: ship.name, workspace: crewing.workspace });
   // Kept at once, so an crewing still crewing knows the workspace and identity to remove if it ends (#382).
   state = putEntry(state, { ...crewing, shipName: ship.name, folder });
   await deps.state.save(state);
+  const { secret } = await deps.fleet.getStartingPrompt(crewing.shipId);
+  const { crewToken } = await deps.fleet.register({ shipId: crewing.shipId, secret });
   await harness.prepareIdentity({
     folder,
     identity: { fleetUrl: deps.fleet.url, shipId: crewing.shipId, shipName: ship.name, crewToken, ...(crewing.squadron !== undefined && { squadron: crewing.squadron }) },
@@ -281,7 +338,8 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
     ...(!crewing.hasStarted && crewing.firstPrompt !== undefined && { firstPrompt: crewing.firstPrompt }),
   });
   // Crewing still: its launch window is open, and only activity in it makes the crew final (#382).
-  const next = putEntry(state, { ...crewing, shipName: ship.name, folder, hasStarted: true, launchedAt: deps.clock.now().toISOString(), launchId });
+  const { crewFailures, ...started } = crewing;
+  const next = putEntry(state, { ...(crewFailures === undefined ? crewing : started), shipName: ship.name, folder, hasStarted: true, launchedAt: deps.clock.now().toISOString(), launchId });
   await deps.state.save(next);
   log(deps, { shipId: crewing.shipId, shipName: ship.name, action: 'crew', outcome: `crewed, ${crewing.harness} started in ${folder}` });
   return next;

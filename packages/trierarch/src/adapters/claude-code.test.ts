@@ -550,6 +550,14 @@ describe("Claude Code's launch window, from the launch marker its session's hook
     await expect(seen()).resolves.toEqual({ kind: 'none', screen: 'bypass permissions warning' });
   });
 
+  it("says no session can start while the aeolus plugin's scripts are gone, as after a plugin upgrade moved them (#827)", async () => {
+    await expect(harness({ pluginRoot: join(data, 'gone') }).startProblem()).resolves.toBe(`the aeolus plugin's scripts are not at ${join(data, 'gone', 'scripts')}`);
+  });
+
+  it("says nothing stops a session from starting while the aeolus plugin's scripts are there (#827)", async () => {
+    await expect(harness().startProblem()).resolves.toBeUndefined();
+  });
+
   it('says its aeolus plugin marks launches', async () => {
     await expect(harness().marksLaunches()).resolves.toBe(true);
   });

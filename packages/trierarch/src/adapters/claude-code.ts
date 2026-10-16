@@ -187,6 +187,7 @@ export function createClaudeCodeHarness(options: {
       await homes.remove(session.shipId);
     },
     turnOf: (session) => identityOf(session.shipId).turnOf(session),
+    startProblem: () => createPluginIdentity(plugin).startProblem(),
     launch: async ({ shipId, shipName, folder, workspace, harness, options: picked, isFirstStart, launchId, firstPrompt }) => {
       const settings = configuration.harnesses[harness];
       if (settings === undefined) {

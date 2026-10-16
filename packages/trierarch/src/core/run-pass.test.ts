@@ -1682,7 +1682,7 @@ describe('what the loop logs (aeolus-trierarch logs)', () => {
     expect(logged(trierarch)).toEqual(['leave: crewed by another session, so the trierarch leaves it']);
   });
 
-  it('logs a failure with its ship and what happens next, and ends the pass there', async () => {
+  it('logs a failure with its ship and what happens next', async () => {
     const trierarch = aTrierarch();
     const shipId = trierarch.fleet.commission('scout');
     trierarch.fleet.request(shipId);
@@ -1694,6 +1694,7 @@ describe('what the loop logs (aeolus-trierarch logs)', () => {
       {
         time: trierarch.clock.now(),
         shipId,
+        shipName: 'scout',
         action: 'crew',
         outcome: 'failed: the register reply was lost',
         next: 'the next pass tries again; aeolus-trierarch status and list show where it stands',
@@ -1851,5 +1852,93 @@ describe('a ship the trierarch would report as blocked whose identity is gone (#
     await trierarch.pass();
 
     expect(trierarch.fleet.toArgo.slice(crashed).map((report) => report.text)).toEqual([identityGone(shipId)]);
+  });
+});
+
+describe('a failing action fails alone (#827)', () => {
+  /** A ship crewed with Codex, commissioned first so its crew comes first in the pass: its id. */
+  function aCodexShip(trierarch: Trierarch) {
+    const shipId = trierarch.fleet.commission('broken');
+    trierarch.fleet.request(shipId, crewSettings({ harness: 'codex' }));
+    return shipId;
+  }
+
+  it('crews the other ships in the same pass when one crew always fails', async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    trierarch.codex.isFailingLaunch = true;
+    aCodexShip(trierarch);
+    const scout = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(scout);
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.launches.map((launch) => launch.shipId)).toEqual([scout]);
+    expect(trierarch.fleet.shipOf(scout).status).toBe('crewed');
+  });
+
+  it('registers no ship whose harness cannot start a session, and logs why', async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    trierarch.codex.problem = "the aeolus plugin's scripts are not at /home/thomas/.codex/plugins/cache/aeolus-fleet/aeolus/0.25.0";
+    const shipId = aCodexShip(trierarch);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.shipOf(shipId).status).toBe('awaitingCrew');
+    expect(trierarch.logger.actions.map((logged) => logged.outcome)).toContain(
+      "failed: the aeolus plugin's scripts are not at /home/thomas/.codex/plugins/cache/aeolus-fleet/aeolus/0.25.0",
+    );
+  });
+
+  it('keeps a request whose crew failed twice in a row', async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    trierarch.codex.isFailingLaunch = true;
+    const shipId = aCodexShip(trierarch);
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([]);
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'crewing' });
+  });
+
+  it('gives the request back once its crew failed 3 times in a row, the last failure as its reason, so another trierarch can crew it', async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    trierarch.codex.isFailingLaunch = true;
+    const shipId = aCodexShip(trierarch);
+
+    await trierarch.pass();
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 1, reason: `mac-studio: crew failed 3 times: the harness could not start ${shipId}` }]);
+    expect(trierarch.state.current().entries).toEqual({});
+    expect(trierarch.fleet.shipOf(shipId).status).toBe('awaitingCrew');
+  });
+
+  it('counts the failures of a new settings version afresh', async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    trierarch.codex.isFailingLaunch = true;
+    const shipId = aCodexShip(trierarch);
+    await trierarch.pass();
+    await trierarch.pass();
+    trierarch.fleet.requestAgain(shipId);
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([]);
+  });
+
+  it('tells argo instead when the fleet refuses to take the request back, as for a final crew', async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    trierarch.codex.isFailingLaunch = true;
+    trierarch.fleet.isRefusingGiveBack = true;
+    const shipId = aCodexShip(trierarch);
+
+    await trierarch.pass();
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`broken (${shipId}): this trierarch cannot crew settings version 1: crew failed 3 times: the harness could not start ${shipId}`]);
   });
 });

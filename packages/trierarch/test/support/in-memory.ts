@@ -389,6 +389,8 @@ export class InMemoryHarness implements HarnessPort {
   isMarkingLaunches = true;
   /** Set to make every launch fail, as when the harness's CLI cannot start: the entry stays crewing. */
   isFailingLaunch = false;
+  /** Set to say why no session of the harness can start, as when its aeolus plugin's scripts are gone (#827). */
+  problem: string | undefined = undefined;
 
   constructor(private readonly processes: InMemoryProcesses) {}
 
@@ -439,6 +441,10 @@ export class InMemoryHarness implements HarnessPort {
   sessionDied(session: { shipId: ShipId; folder: string }): Promise<void> {
     this.died.push({ shipId: session.shipId, launchesBefore: this.launches.filter((each) => each.shipId === session.shipId).length });
     return Promise.resolve();
+  }
+
+  startProblem(): Promise<string | undefined> {
+    return Promise.resolve(this.problem);
   }
 
   marksLaunches(): Promise<boolean> {

@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
 
@@ -39,7 +40,7 @@ export interface PluginHandOver {
  * data folder goes along, so the script moves an identity an older plugin
  * kept there.
  */
-export function createPluginIdentity(plugin: AeolusPlugin): Pick<HarnessPort, 'prepareIdentity' | 'crewTokenOf' | 'removeIdentity' | 'turnOf' | 'isHolding' | 'sessionDied'> & PluginHandOver {
+export function createPluginIdentity(plugin: AeolusPlugin): Pick<HarnessPort, 'prepareIdentity' | 'crewTokenOf' | 'removeIdentity' | 'turnOf' | 'isHolding' | 'sessionDied' | 'startProblem'> & PluginHandOver {
   const identity = (folder: string, args: readonly string[]) => runIdentity(plugin, { folder, args });
 
   return {
@@ -78,6 +79,14 @@ export function createPluginIdentity(plugin: AeolusPlugin): Pick<HarnessPort, 'p
       const handed = await runPush(plugin, { folder, args: ['hand'] });
       const line = handed.stdout.trim();
       return handed.status === 0 && line !== '' ? line : undefined;
+    },
+    // The identity script stands for the scripts: a session cannot start without them (#827).
+    startProblem: async () => {
+      const scripts = join(await plugin.root(), 'scripts');
+      return access(join(scripts, 'aeolus-identity.sh')).then(
+        () => undefined,
+        () => `the aeolus plugin's scripts are not at ${scripts}`,
+      );
     },
     sessionDied: async ({ folder }) => {
       const died = await runPush(plugin, { folder, args: ['died'] });

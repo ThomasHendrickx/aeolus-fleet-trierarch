@@ -50,6 +50,8 @@ export interface Entry {
   readonly launchId?: string;
   /** Set as it goes back to crewing after a release elsewhere (row 11): its worktree goes before it is crewed again (#475). */
   readonly isReleasedElsewhere?: true;
+  /** How many crews of its settings version failed in a row (#827); none once one starts. */
+  readonly crewFailures?: number;
   /** Set once argo is told its running session's folder holds no identity (#659), so it is told once; cleared when the identity is back. */
   readonly isIdentityGone?: true;
 }

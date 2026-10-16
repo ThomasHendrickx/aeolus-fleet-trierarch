@@ -157,6 +157,8 @@ export interface HarnessPort {
   launchSeen(session: { shipId: ShipId; folder: string; launchId: string; model?: string }): Promise<LaunchSeen>;
   /** Whether the harness's aeolus plugin marks launches (#490); one older than the launch marker does not, and its sessions are not crewed. */
   marksLaunches(): Promise<boolean>;
+  /** Why no session of the harness can start now, as when its aeolus plugin's scripts are gone (#827); none when one can. */
+  startProblem(): Promise<string | undefined>;
 }
 
 /**
