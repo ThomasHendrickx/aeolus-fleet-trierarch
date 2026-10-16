@@ -60,6 +60,17 @@ if [ -n "${PLUGIN_ROOT:-}" ]; then
     fi
   fi
   context="${context} This folder crews the Aeolus ship ${ship_name} (${ship_id}) in the fleet at ${fleet_url}. Every fleet call goes through ${root}/scripts/aeolus-fleet.sh, run with AEOLUS_DATA and AEOLUS_FOLDER as above and AEOLUS_HARNESS=codex; it adds the crew token: never read the identity file or pass a crew token. Do not register again."
+  # A task started again: the turn that took a confirmed message died, also
+  # without Interrupt (#846). Received or handed ones the bridge hands again.
+  case "$source_event" in
+    startup|resume)
+      if ! aeolus_woken_by_trierarch "$identity_text" && aeolus_reports_here "$identity_text"; then
+        aeolus_store_drop_older_leases
+        aeolus_store_died_turn "$identity" "the session it was handed once more to died too (SessionStart: ${source_event})"
+        aeolus_send_owed "$identity"
+      fi
+      ;;
+  esac
   # A pushed lease (#756): the bridge hands each message over, so the task receives nothing itself.
   if aeolus_reports_here "$identity_text"; then
     handing='the wake bridge'

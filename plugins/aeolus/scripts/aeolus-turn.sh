@@ -6,10 +6,12 @@
 # The prompt that starts a turn confirms a message handed to the session
 # (#756): in Codex the prompt the wake bridge queues, in either harness a
 # person's. It acknowledges the message, and only if that succeeded adds it to
-# the turn's context. On a pushed lease it also reports the
-# turn busy, and a confirmed message it finds had its turn die without Stop
-# (D3): that message comes in once more, as handed before, and one that comes
-# in once more and dies again is reported not handled. Otherwise silent.
+# the turn's context. On a pushed lease it also reports the turn busy, and puts
+# in a message a died turn left to hand once more, as handed before (D3).
+# Claude Code also fires it for a prompt injected into a running turn (a queued
+# command or task notification), so a prompt never closes a turn: only Stop
+# ends one, and StopFailure or Interrupt (aeolus-turn-died.sh) a died one
+# (#846). Otherwise silent.
 set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
@@ -19,7 +21,6 @@ identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
 identity_text="$(aeolus_identity_read "$identity")" || exit 0
 if aeolus_reports_here "$identity_text"; then
   aeolus_store_drop_older_leases
-  aeolus_store_died_turn "$identity" 'the turn it was handed once more to died too (a prompt came before Stop)'
   aeolus_send_owed "$identity"
 fi
 aeolus_mark_turn busy

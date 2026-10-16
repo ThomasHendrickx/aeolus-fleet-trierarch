@@ -1130,6 +1130,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
   describe('the prompt that starts a turn (UserPromptSubmit)', () => {
     const ONCE_MORE = 'aeolus: handed before: the turn that took this message ended before it did, so it comes in once more.\n\n';
     const aPrompt = () => aHook('aeolus-turn.sh', { payload: { hook_event_name: 'UserPromptSubmit', prompt: 'go on' } });
+    const aTurnFails = () => aHook('aeolus-turn-died.sh', { payload: { hook_event_name: 'StopFailure', error: 'rate_limit' } });
     /** The context a UserPromptSubmit hook added to the turn, or nothing. */
     const contextOf = (hookRun: Run) =>
       hookRun.stdout === ''
@@ -1168,37 +1169,43 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       expect(callsTo(stub, '/api/v1/ship/turn').map((call) => call.body).at(-1)).toBe(`{"turn":"busy","at":"${at ?? ''}"}`);
     });
 
-    it('hands a confirmed message once more when the turn that took it ended without Stop: reports it with the next number, and puts it in as handed before (D3)', async () => {
-      const stub = await aHandOver({ '/api/v1/ship/ack': [acknowledged], '/api/v1/ship/handed': [handedOk, handedAs('acknowledged')] });
+    it('reports a confirmed message handled when its turn ends, though prompts were injected into that turn mid-turn (#846)', async () => {
+      const stub = await aHandOver({ '/api/v1/ship/ack': [acknowledged], '/api/v1/ship/notHandled': [taken] });
       await aFirstToolCall();
-
-      const prompted = await aPrompt();
-
-      expect(handedBodies(stub)).toEqual([`{"deliveryId":"${DELIVERY_ID}","handOverNumber":1}`, `{"deliveryId":"${DELIVERY_ID}","handOverNumber":2,"isOnceMore":true}`]);
-      expect(contextOf(prompted)).toBe(ONCE_MORE + MESSAGE);
-      expect(store()).toEqual([`${DELIVERY_ID} onceMore`]);
-    });
-
-    it('reports a message handed once more handled when that turn ends', async () => {
-      const stub = await aHandOver({ '/api/v1/ship/ack': [acknowledged], '/api/v1/ship/handed': [handedOk, handedAs('acknowledged')] });
-      await aFirstToolCall();
+      await aPrompt();
+      await aPrompt();
+      await aPrompt();
       await aPrompt();
 
       await aTurnEnds();
 
+      expect(handedBodies(stub)).toEqual([`{"deliveryId":"${DELIVERY_ID}","handOverNumber":1}`]);
+      expect(callsTo(stub, '/api/v1/ship/notHandled')).toEqual([]);
       expect(callsTo(stub, '/api/v1/ship/handled').map((call) => call.body)).toEqual([DELIVERY]);
       expect(store()).toEqual([]);
     });
 
-    it('reports a message not handled when the turn it was handed once more to ended without Stop too, drops it and puts nothing in', async () => {
-      const stub = await aHandOver({ '/api/v1/ship/ack': [acknowledged], '/api/v1/ship/handed': [handedOk, handedAs('acknowledged')], '/api/v1/ship/notHandled': [taken] });
+    it('puts nothing into the turn for a prompt injected into it mid-turn, and keeps the confirmed message as it is (#846)', async () => {
+      await aHandOver({ '/api/v1/ship/ack': [acknowledged] });
       await aFirstToolCall();
-      await aPrompt();
 
       const prompted = await aPrompt();
 
-      expect(callsTo(stub, '/api/v1/ship/notHandled').map((call) => call.body)).toEqual([`{"deliveryId":"${DELIVERY_ID}","reason":"the turn it was handed once more to died too (a prompt came before Stop)"}`]);
       expect(prompted.stdout).toBe('');
+      expect(store()).toEqual([`${DELIVERY_ID} confirmed`]);
+    });
+
+    it('reports a message handed once more handled when the turn it was put into ends, though prompts were injected into it mid-turn (#846)', async () => {
+      const stub = await aHandOver({ '/api/v1/ship/ack': [acknowledged], '/api/v1/ship/handed': [handedOk, handedAs('acknowledged')], '/api/v1/ship/notHandled': [taken] });
+      await aFirstToolCall();
+      await aTurnFails();
+      expect(contextOf(await aPrompt())).toBe(ONCE_MORE + MESSAGE);
+      await aPrompt();
+
+      await aTurnEnds();
+
+      expect(callsTo(stub, '/api/v1/ship/notHandled')).toEqual([]);
+      expect(callsTo(stub, '/api/v1/ship/handled').map((call) => call.body)).toEqual([DELIVERY]);
       expect(store()).toEqual([]);
     });
 
@@ -1208,6 +1215,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
         '/api/v1/ship/handed': [handedOk, { status: 409, body: { code: 'DELIVERY_HANDED_ONCE_MORE', message: 'Delivery was handed once more already' } }],
       });
       await aFirstToolCall();
+      await aTurnFails();
 
       expect((await aPrompt()).stdout).toBe('');
       expect(store()).toEqual([]);
@@ -1340,6 +1348,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
     it('reports a message handed once more not handled when its session died too, and drops it', async () => {
       const stub = await aHandOver({ '/api/v1/ship/ack': [acknowledged], '/api/v1/ship/handed': [handedOk, handedAs('acknowledged')], '/api/v1/ship/notHandled': [taken] });
       await aFirstToolCall();
+      await aHook('aeolus-turn-died.sh', { payload: { hook_event_name: 'StopFailure', error: 'rate_limit' } });
       await aPrompt();
 
       await aSessionStart('startup');
@@ -1554,6 +1563,43 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
 
         expect(callsTo(stub, '/api/v1/ship/handed').map((call) => call.body).at(-1)).toBe(`{"deliveryId":"${DELIVERY_ID}","handOverNumber":2,"isOnceMore":true}`);
         expect(JSON.parse(prompted.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: ONCE_MORE + MESSAGE } });
+      });
+
+      it('reports the message the turn took handled when it ends, though prompts were injected into that turn mid-turn (#846)', async () => {
+        const stub = await aConfirmedMessage({ '/api/v1/ship/notHandled': [taken] });
+        await aPrompt();
+        await aPrompt();
+
+        await aCodexTurnEnds();
+
+        expect(callsTo(stub, '/api/v1/ship/handed').map((call) => call.body)).toEqual([`{"deliveryId":"${DELIVERY_ID}","handOverNumber":1}`]);
+        expect(callsTo(stub, '/api/v1/ship/notHandled')).toEqual([]);
+        expect(callsTo(stub, '/api/v1/ship/handled').map((call) => call.body)).toEqual([`{"deliveryId":"${DELIVERY_ID}"}`]);
+        expect(store()).toEqual([]);
+      });
+
+      it('keeps the message a task that died without Interrupt took to hand once more at resume, and the first prompt puts it in as handed before (#846)', async () => {
+        const stub = await aConfirmedMessage({});
+
+        await aCodexHook('aeolus-session-start.sh', { hook_event_name: 'SessionStart', source: 'resume' });
+
+        expect(store()).toEqual([`${DELIVERY_ID} onceMore`]);
+        const prompted = await aPrompt();
+        expect(callsTo(stub, '/api/v1/ship/handed').map((call) => call.body).at(-1)).toBe(`{"deliveryId":"${DELIVERY_ID}","handOverNumber":2,"isOnceMore":true}`);
+        expect(JSON.parse(prompted.stdout)).toEqual({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: ONCE_MORE + MESSAGE } });
+      });
+
+      it('reports a message handed once more not handled when its task died too and resumes, and drops it (#846)', async () => {
+        const stub = await aConfirmedMessage({ '/api/v1/ship/notHandled': [taken] });
+        await anInterrupt();
+        await aPrompt();
+
+        await aCodexHook('aeolus-session-start.sh', { hook_event_name: 'SessionStart', source: 'resume' });
+
+        expect(callsTo(stub, '/api/v1/ship/notHandled').map((call) => call.body)).toEqual([
+          `{"deliveryId":"${DELIVERY_ID}","reason":"the session it was handed once more to died too (SessionStart: resume)"}`,
+        ]);
+        expect(store()).toEqual([]);
       });
 
       it('reports the message not handled when the turn it was handed once more to is interrupted too, and drops it', async () => {
