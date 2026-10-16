@@ -11,7 +11,8 @@
 #   aeolus-fleet.sh receive|send|report|inbox [<json input>|-]   - reads the input from stdin
 #   aeolus-fleet.sh ack|pong <deliveryId>
 #   aeolus-fleet.sh pushReceive|handed|turn <json input>   - the watcher's and the hooks' calls (#756), never the model's
-#   aeolus-fleet.sh handled|notHandled <deliveryId>        - the hooks' calls (#756), never the model's
+#   aeolus-fleet.sh handled <deliveryId>, notHandled <deliveryId> [<reason>]
+#       - the hooks' calls (#756), never the model's; the reason says why (#847)
 #   aeolus-fleet.sh whoami|reportLog|deregister
 #   aeolus-fleet.sh protocol    the ship protocol, as the fleet states it
 #
@@ -186,9 +187,14 @@ case "$command" in
     [ "$input" = - ] && input="$(cat)"
     method=POST
     ;;
-  ack|pong|handled|notHandled)
+  ack|pong|handled)
     [ "$#" -eq 2 ] || usage
     input="{\"deliveryId\":\"$(aeolus_json_escape "$2")\"}"
+    method=POST
+    ;;
+  notHandled)
+    [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || usage
+    input="{\"deliveryId\":\"$(aeolus_json_escape "$2")\"${3:+,\"reason\":\"$(aeolus_json_escape "$3")\"}}"
     method=POST
     ;;
   whoami|reportLog)

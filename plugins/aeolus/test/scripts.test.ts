@@ -1197,7 +1197,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
 
       const prompted = await aPrompt();
 
-      expect(callsTo(stub, '/api/v1/ship/notHandled').map((call) => call.body)).toEqual([DELIVERY]);
+      expect(callsTo(stub, '/api/v1/ship/notHandled').map((call) => call.body)).toEqual([`{"deliveryId":"${DELIVERY_ID}","reason":"the turn it was handed once more to died too (a prompt came before Stop)"}`]);
       expect(prompted.stdout).toBe('');
       expect(store()).toEqual([]);
     });
@@ -1252,7 +1252,35 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
 
       await aTurnFails();
 
-      expect(callsTo(stub, '/api/v1/ship/notHandled').map((call) => call.body)).toEqual([`{"deliveryId":"${DELIVERY_ID}"}`]);
+      expect(callsTo(stub, '/api/v1/ship/notHandled').map((call) => call.body)).toEqual([`{"deliveryId":"${DELIVERY_ID}","reason":"the turn it was handed once more to died too (StopFailure: rate_limit)"}`]);
+      expect(store()).toEqual([]);
+    });
+
+    it('sends a reason the fleet takes: one line of at most 200 characters, however long the error of the failed turn (#847)', async () => {
+      const stub = await aHandOver({ '/api/v1/ship/ack': [acknowledged], '/api/v1/ship/handed': [handedOk, handedAs('acknowledged')], '/api/v1/ship/notHandled': [taken] });
+      const aLongFailure = () => aHook('aeolus-turn-died.sh', { payload: { hook_event_name: 'StopFailure', error: `overloaded\n${'x'.repeat(300)}` } });
+      await aFirstToolCall();
+      await aLongFailure();
+      await aPrompt();
+
+      await aLongFailure();
+
+      const [body] = callsTo(stub, '/api/v1/ship/notHandled').map((call) => z.object({ reason: z.string() }).parse(JSON.parse(call.body)));
+      expect(body?.reason).toHaveLength(200);
+      expect(body?.reason).toMatch(/^the turn it was handed once more to died too \(StopFailure: overloaded x+$/);
+    });
+
+    it('sends a not handled report the fleet did not take again with the next call, with its reason (#847)', async () => {
+      const stub = await aHandOver({ '/api/v1/ship/ack': [acknowledged], '/api/v1/ship/handed': [handedOk, handedAs('acknowledged')], '/api/v1/ship/notHandled': [busy, taken] });
+      await aFirstToolCall();
+      await aTurnFails();
+      await aPrompt();
+      await aTurnFails();
+
+      await aPrompt();
+
+      const reported = `{"deliveryId":"${DELIVERY_ID}","reason":"the turn it was handed once more to died too (StopFailure: rate_limit)"}`;
+      expect(callsTo(stub, '/api/v1/ship/notHandled').map((call) => call.body).at(-1)).toBe(reported);
       expect(store()).toEqual([]);
     });
 
@@ -1316,7 +1344,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
 
       await aSessionStart('startup');
 
-      expect(callsTo(stub, '/api/v1/ship/notHandled').map((call) => call.body)).toEqual([`{"deliveryId":"${DELIVERY_ID}"}`]);
+      expect(callsTo(stub, '/api/v1/ship/notHandled').map((call) => call.body)).toEqual([`{"deliveryId":"${DELIVERY_ID}","reason":"the session it was handed once more to died too (SessionStart: startup)"}`]);
       expect(store()).toEqual([]);
     });
 
@@ -1535,7 +1563,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
 
         await anInterrupt();
 
-        expect(callsTo(stub, '/api/v1/ship/notHandled').map((call) => call.body)).toEqual([`{"deliveryId":"${DELIVERY_ID}"}`]);
+        expect(callsTo(stub, '/api/v1/ship/notHandled').map((call) => call.body)).toEqual([`{"deliveryId":"${DELIVERY_ID}","reason":"the turn it was handed once more to died too (Interrupt)"}`]);
         expect(store()).toEqual([]);
       });
     });
@@ -1775,7 +1803,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
 
         await died();
 
-        expect(callsTo(stub, '/api/v1/ship/notHandled').map((call) => call.body)).toEqual([`{"deliveryId":"${DELIVERY_ID}"}`]);
+        expect(callsTo(stub, '/api/v1/ship/notHandled').map((call) => call.body)).toEqual([`{"deliveryId":"${DELIVERY_ID}","reason":"the session it was handed once more to died too (the trierarch starts it again)"}`]);
         expect(store()).toEqual([]);
       });
     });

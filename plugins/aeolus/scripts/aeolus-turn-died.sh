@@ -13,7 +13,9 @@ identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
 identity_text="$(aeolus_identity_read "$identity")" || exit 0
 aeolus_reports_here "$identity_text" || exit 0
 aeolus_store_drop_older_leases
-aeolus_store_died_turn "$identity"
+hook_event="$(aeolus_json_string "$payload" hook_event_name)"
+error="$(aeolus_json_string "$payload" error)"
+aeolus_store_died_turn "$identity" "the turn it was handed once more to died too (${hook_event:-a died turn}${error:+: ${error}})"
 aeolus_mark_turn idle
 aeolus_log "$identity" turn 'idle: the turn failed'
 aeolus_send_owed "$identity"

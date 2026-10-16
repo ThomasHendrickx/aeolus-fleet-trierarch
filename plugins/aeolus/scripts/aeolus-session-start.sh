@@ -94,7 +94,7 @@ identity_text="$(aeolus_identity_read "$identity")" || exit 0
 # A person started the session again (#756, D6): what the store holds waits
 # for the first prompt. Never after /clear or a compact: the session lives on.
 case "$source_event" in
-  startup|resume) aeolus_woken_by_trierarch "$identity_text" || ! aeolus_reports_here "$identity_text" || aeolus_store_session_started "$identity" ;;
+  startup|resume) aeolus_woken_by_trierarch "$identity_text" || ! aeolus_reports_here "$identity_text" || aeolus_store_session_started "$identity" "the session it was handed once more to died too (SessionStart: ${source_event})" ;;
 esac
 
 ship_name="$(aeolus_identity_field "$identity_text" shipName)"

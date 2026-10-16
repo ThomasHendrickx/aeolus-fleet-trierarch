@@ -19,7 +19,7 @@ identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
 identity_text="$(aeolus_identity_read "$identity")" || exit 0
 if aeolus_reports_here "$identity_text"; then
   aeolus_store_drop_older_leases
-  aeolus_store_died_turn "$identity"
+  aeolus_store_died_turn "$identity" 'the turn it was handed once more to died too (a prompt came before Stop)'
   aeolus_send_owed "$identity"
 fi
 aeolus_mark_turn busy

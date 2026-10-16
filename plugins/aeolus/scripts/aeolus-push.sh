@@ -91,7 +91,7 @@ hand() {
 case "${1:-}" in
   hand) hand ;;
   died)
-    aeolus_store_session_started "$identity"
+    aeolus_store_session_started "$identity" 'the session it was handed once more to died too (the trierarch starts it again)'
     exit 0
     ;;
   *)

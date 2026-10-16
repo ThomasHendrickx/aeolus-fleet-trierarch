@@ -420,7 +420,8 @@ aeolus_hook_folder() {
 # is <deliveryId>.json (the delivery as the fleet's push receive answered it),
 # <deliveryId>.state (received, handed or confirmed, with when),
 # <deliveryId>.lease (the key of the lease it was received under, D7) and
-# <deliveryId>.number (its last hand-over number, D4), with
+# <deliveryId>.number (its last hand-over number, D4), <deliveryId>.reason
+# (why it is not handled, for the fleet's notHandled, #847), with
 # <deliveryId>.unreported while the fleet has not taken that hand-over yet; a
 # ping in the turn has <deliveryId>.shown, and once pong answered it
 # <deliveryId>.ponged; a long payload is in <deliveryId>.payload. Handled, an
@@ -630,7 +631,7 @@ aeolus_store_first() {
 aeolus_store_drop() {
   local dir
   dir="$(aeolus_store_dir)" || return 0
-  rm -f "$dir/$1.json" "$dir/$1.state" "$dir/$1.lease" "$dir/$1.number" "$dir/$1.unreported" "$dir/$1.acking" "$dir/$1.shown" "$dir/$1.ponged" "$dir/$1.payload"
+  rm -f "$dir/$1.json" "$dir/$1.state" "$dir/$1.lease" "$dir/$1.number" "$dir/$1.unreported" "$dir/$1.acking" "$dir/$1.shown" "$dir/$1.ponged" "$dir/$1.payload" "$dir/$1.reason"
 }
 
 # Removes every entry, as on LEASE_ENDED.
@@ -660,10 +661,12 @@ aeolus_refusal_code() {
 # Reports how a message ended to the fleet: handled or notHandled. The fleet
 # took it, or refused it as no longer the session's: the entry is dropped. Not
 # taken (busy, or no answer): the entry keeps that state, to be reported again
-# with the next call (3.15). <identity file> <deliveryId> <handled|notHandled>
+# with the next call (3.15). Not handled goes with the reason the store keeps
+# for it (#847). <identity file> <deliveryId> <handled|notHandled>
 aeolus_report_end() {
-  local identity="$1" id="$2" call="$3" output status
-  output="$(AEOLUS_CALL_MAX_SECONDS="${AEOLUS_CONFIRM_SECONDS:-3}" "$(dirname "${BASH_SOURCE[0]}")/aeolus-fleet.sh" "$call" "$id" 2>/dev/null)"
+  local identity="$1" id="$2" call="$3" output status reason=''
+  [ "$call" != notHandled ] || reason="$(cat "$(aeolus_store_dir)/$id.reason" 2>/dev/null)"
+  output="$(AEOLUS_CALL_MAX_SECONDS="${AEOLUS_CONFIRM_SECONDS:-3}" "$(dirname "${BASH_SOURCE[0]}")/aeolus-fleet.sh" "$call" "$id" ${reason:+"$reason"} 2>/dev/null)"
   status=$?
   case "$status" in
     0)
@@ -778,12 +781,23 @@ aeolus_store_end_turn() {
   done
 }
 
+# The longest reason the fleet's notHandled takes (#847).
+AEOLUS_REASON_MAX_CHARACTERS=200
+
+# A reason as the fleet takes it: one line, cut to its longest, so a long or
+# odd hook error never gets the report refused. <reason>
+aeolus_one_line_reason() {
+  local reason="${1//[$'\r\n']/ }"
+  printf '%s' "${reason:0:$AEOLUS_REASON_MAX_CHARACTERS}"
+}
+
 # A turn that took messages died, without Stop (#756, D3): a confirmed message
 # is to be handed once more, at the next prompt; one handed once more already,
-# whose turn died too, is not handled. Pings are left as they are: the next
-# turn end takes them.
+# whose turn died too, is not handled, kept with the reason given, which
+# says what died and how, for the operator (#847). Pings are left as they
+# are: the next turn end takes them. <identity file> [<reason>]
 aeolus_store_died_turn() {
-  local identity="$1" dir file id state
+  local identity="$1" reason="${2:-the turn it was handed once more to died too}" dir file id state
   dir="$(aeolus_store_dir)" || return 0
   for file in "$dir"/*.state; do
     [ -f "$file" ] || continue
@@ -795,8 +809,9 @@ aeolus_store_died_turn() {
       aeolus_log "$identity" handover "${id} to hand once more: the turn that took it died"
     elif [ "$state" = onceMore ] && [ -e "$dir/$id.shown" ]; then
       rm -f "$dir/$id.shown"
+      printf '%s\n' "$(aeolus_one_line_reason "$reason")" > "$dir/$id.reason"
       aeolus_store_mark "$id" notHandled
-      aeolus_log "$identity" handover "not handled ${id}: the turn it was handed once more to died too"
+      aeolus_log "$identity" handover "not handled ${id}: ${reason}"
     fi
   done
 }
@@ -820,11 +835,12 @@ aeolus_report_handed() {
 # what the store holds is marked for the first prompt. A received or handed
 # message is reported handed with the next number, for the prompt to confirm;
 # a confirmed one is kept to hand once more; one handed once more already is
-# not handled, since its session died too. <identity file>
+# not handled, since its session died too, for the reason given.
+# <identity file> <reason>
 aeolus_store_session_started() {
   local identity="$1" dir file id state
   aeolus_store_drop_older_leases
-  aeolus_store_died_turn "$identity"
+  aeolus_store_died_turn "$identity" "$2"
   dir="$(aeolus_store_dir)" || return 0
   for file in "$dir"/*.state; do
     [ -f "$file" ] || continue
