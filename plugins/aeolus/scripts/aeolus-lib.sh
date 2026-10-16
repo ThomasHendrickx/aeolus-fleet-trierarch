@@ -542,8 +542,10 @@ aeolus_store_handing() {
 # it with. <identity file> <deliveryId> <state or code>. Returns 0 when the
 # entry is handed (or the fleet holds it acknowledged already: the answer to
 # a confirmation was lost, and the session has not seen it), 1 when it is
-# dropped (undeliverable at its fifth attempt, or no longer the session's), 2
-# when the fleet did not take the hand-over: hand it again later.
+# dropped (undeliverable at its fifth attempt, or refused with any delivery
+# code: no longer the session's to hand over), 2 when the fleet did not take
+# the hand-over: hand it again later. A refused delivery is never handed
+# again, so it blocks no other (#832).
 aeolus_store_handed() {
   local identity="$1" id="$2" outcome="$3" dir
   dir="$(aeolus_store_dir)" || return 2
@@ -557,7 +559,7 @@ aeolus_store_handed() {
       aeolus_log "$identity" handover "dropped ${id}: undeliverable at its fifth attempt"
       return 1
       ;;
-    DELIVERY_NOT_IN_FLIGHT|DELIVERY_HELD_BY_ANOTHER_SHIP|DELIVERY_NOT_ACKNOWLEDGED|DELIVERY_HANDED_ONCE_MORE)
+    DELIVERY_*)
       aeolus_store_drop "$id"
       aeolus_log "$identity" handover "dropped ${id}: the fleet refused the hand-over: ${outcome}"
       return 1
@@ -898,8 +900,8 @@ aeolus_turn_text() {
 # of a pushed ship (#756). Only if the fleet acknowledged it does the text go
 # in; a ping goes in without an ack, since its pong is the confirmation. A
 # refusal leaves the model nothing: busy or unreachable, the entry goes back to
-# received, to be handed again; no longer in flight, or another ship's, it is
-# dropped; LEASE_ENDED drops the store. The entry is marked acking until the
+# received, to be handed again; refused with any delivery code (no longer in
+# flight, another ship's), it is dropped (#832); LEASE_ENDED drops the store. The entry is marked acking until the
 # fleet answers, so an ack whose answer was lost, also when the session died
 # waiting for it, is handed again with the same number (#819). Each ack call
 # is bounded by AEOLUS_CONFIRM_SECONDS, so its retries end inside a hook's time.
@@ -935,7 +937,7 @@ aeolus_put_into_turn() {
   esac
   code="$(printf '%s' "$output" | sed -n 's/^aeolus: the fleet refused ack: \([A-Z_]*\):.*/\1/p')"
   case "$code" in
-    DELIVERY_NOT_IN_FLIGHT|DELIVERY_HELD_BY_ANOTHER_SHIP)
+    DELIVERY_*)
       aeolus_store_drop "$id"
       aeolus_log "$identity" handover "dropped ${id}: the fleet refused the ack: ${code}"
       ;;

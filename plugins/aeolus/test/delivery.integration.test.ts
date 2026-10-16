@@ -31,6 +31,9 @@ const ACK = '/api/v1/ship/ack';
 const PAYLOAD = 'Review PR 12 and say what you found';
 const HANDED_OVER = 'aeolus: a message for scout is handed to this session: it reaches you at your next tool call, or when you end your turn. Do not receive or ack it.\n';
 
+/** A call and every retry the plugin makes of it while the fleet is busy (AEOLUS_BUSY_WAITS, four by default). */
+const BUSY_ANSWERS = 5;
+
 interface Run {
   status: number | null;
   stdout: string;
@@ -39,7 +42,8 @@ interface Run {
 /**
  * The fleet's REST door with a fault in it: each call goes on to the real
  * fleet, and the answer to the next call on a path set to lose comes back to
- * no one, though the fleet stored it.
+ * no one, though the fleet stored it. A call on a path set busy never
+ * reaches the fleet, its retries neither: the door answers as a busy fleet does.
  */
 interface LossyDoor {
   url: string;
@@ -47,6 +51,8 @@ interface LossyDoor {
   loseNextAnswerTo(path: string): void;
   /** The next call on this path reaches the fleet, and its answer is held until the door closes; settles once the fleet answered. */
   holdNextAnswerTo(path: string): Promise<void>;
+  /** The next call on this path, and each time it is made again, is answered busy, 503 SERVICE_UNAVAILABLE: nothing stored. */
+  busyNext(path: string): void;
   close(): Promise<void>;
 }
 
@@ -63,9 +69,17 @@ function bodyOf(request: IncomingMessage): Promise<string> {
 async function startLossyDoor(fleetUrl: string): Promise<LossyDoor> {
   const losing = new Set<string>();
   const holding = new Map<string, () => void>();
+  const busy = new Map<string, number>();
   const server: Server = createServer((request, response) => {
     void bodyOf(request).then(async (body) => {
       const path = request.url ?? '';
+      const busyFor = busy.get(path) ?? 0;
+      if (busyFor > 0) {
+        busy.set(path, busyFor - 1);
+        response.writeHead(503, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ code: 'SERVICE_UNAVAILABLE', message: 'The fleet is busy: nothing was stored. Make the same call again.' }));
+        return;
+      }
       const method = request.method ?? 'GET';
       const headers: Record<string, string> = {};
       if (request.headers.authorization !== undefined) headers.authorization = request.headers.authorization;
@@ -100,6 +114,9 @@ async function startLossyDoor(fleetUrl: string): Promise<LossyDoor> {
       new Promise((resolve) => {
         holding.set(path, resolve);
       }),
+    busyNext: (path) => {
+      busy.set(path, BUSY_ANSWERS);
+    },
     close: () =>
       new Promise((resolve) => {
         server.closeAllConnections();
@@ -117,6 +134,7 @@ let fleet: FastifyInstance;
 let door: LossyDoor;
 let shipId: ShipId;
 let secret: string;
+let fleetUrl: string;
 let data: string;
 let folder: string;
 let home: string;
@@ -130,7 +148,8 @@ beforeEach(async () => {
   shipId = scout.shipId;
   secret = secretOf(scout.secret);
   fleet = createApp({ databaseUrl, publicUrl: FLEET_URL, logger: false, receiveWaitMs: 100 });
-  door = await startLossyDoor(await fleet.listen({ host: '127.0.0.1', port: 0 }));
+  fleetUrl = await fleet.listen({ host: '127.0.0.1', port: 0 });
+  door = await startLossyDoor(fleetUrl);
   data = mkdtempSync(join(tmpdir(), 'aeolus-data-'));
   home = mkdtempSync(join(tmpdir(), 'aeolus-home-'));
   folder = mkdtempSync(join(tmpdir(), 'aeolus-folder-'));
@@ -171,7 +190,7 @@ function start(script: string, options: { args?: string[]; env?: Record<string, 
 function aHook(script: string, payload: Record<string, unknown>) {
   return start(script, {
     stdin: JSON.stringify({ session_id: 'c5858406-be86-46cd-8591-f4fb39b1fa61', cwd: folder, ...payload }),
-    env: { AEOLUS_HARNESS: '', AEOLUS_FOLDER: '', AEOLUS_DATA: '', CLAUDE_PROJECT_DIR: folder, CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin', AEOLUS_BUSY_WAITS: '' },
+    env: { AEOLUS_HARNESS: '', AEOLUS_FOLDER: '', AEOLUS_DATA: '', CLAUDE_PROJECT_DIR: folder, CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin', AEOLUS_BUSY_WAITS: '0 0 0 0' },
   });
 }
 
@@ -217,5 +236,114 @@ describe('the plugin on a real fleet: a message the fleet holds acknowledged rea
     await aSessionStart();
 
     expect((await aPrompt()).stdout).toContain(PAYLOAD);
+  });
+});
+
+const SECOND_PAYLOAD = 'Then merge PR 13 once it is green';
+const aTurnFails = () => aHook('aeolus-turn-died.sh', { hook_event_name: 'StopFailure', error: 'rate_limit' }).done;
+
+/** What the folder's store holds: one line per entry. */
+const store = async () => (await start('aeolus-identity.sh', { args: ['store'] }).done).stdout;
+
+/** Another ship of the fleet, crewed: its id and the lease its crew holds. */
+async function aCrewedLookout(): Promise<{ shipId: ShipId; leaseId: string }> {
+  const lookout = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'lookout', type: 'reviewer' }));
+  const registered = await fetch(`${fleetUrl}/api/v1/ship/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ shipId: lookout.shipId, secret: secretOf(lookout.secret), location: { kind: 'DEVICE' }, harness: 'claude-code' }),
+  });
+  expect(registered.status).toBe(200);
+  const lease = await database.lease.findFirstOrThrow({ where: { shipId: lookout.shipId, endedAt: null } });
+  return { shipId: lookout.shipId, leaseId: lease.id };
+}
+
+/** Puts the first message's delivery in a state the fleet refuses the plugin's next call on, as another door or the operator would. */
+async function theFleetMoves(data: { state?: 'handed' | 'acknowledged' | 'undeliverable'; claimedByShipId?: string; claimedByLeaseId?: string; handedOnceMoreAt?: Date }): Promise<string> {
+  const delivery = await theDelivery();
+  await database.delivery.update({ where: { id: delivery.id }, data });
+  return delivery.id;
+}
+
+/** A second message, sent after the refused one, reaches the model: the refused delivery blocks nothing. */
+async function expectTheNextMessageReachesTheModel(): Promise<void> {
+  unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', shipId }, payload: SECOND_PAYLOAD, idempotencyKey: newKey() }));
+  await aTurnEnds();
+  await expect(theWatcher()).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+  expect((await aFirstToolCall().done).stdout).toContain(SECOND_PAYLOAD);
+}
+
+describe('the plugin on a real fleet: a delivery the fleet refuses is dropped, and blocks no other (#832)', () => {
+  /** The first message was handed over and its ack answered busy: the watcher hands it over again at the next idle. */
+  async function aMessageToHandOverAgain(): Promise<void> {
+    await aMessageHandedOver();
+    door.busyNext(ACK);
+    expect((await aFirstToolCall().done).stdout).toBe('');
+  }
+
+  it('drops a message whose hand-over the fleet refuses as held by another ship', async () => {
+    await aMessageToHandOverAgain();
+    const lookout = await aCrewedLookout();
+    const refused = await theFleetMoves({ claimedByShipId: lookout.shipId, claimedByLeaseId: lookout.leaseId });
+
+    await expectTheNextMessageReachesTheModel();
+    expect(await store()).not.toContain(refused);
+  });
+
+  it('drops a message whose hand-over the fleet refuses as not in flight', async () => {
+    await aMessageToHandOverAgain();
+    const refused = await theFleetMoves({ state: 'acknowledged' });
+
+    await expectTheNextMessageReachesTheModel();
+    expect(await store()).not.toContain(refused);
+  });
+
+  it('drops a message whose ack the fleet refuses as not in flight', async () => {
+    await aMessageHandedOver();
+    const refused = await theFleetMoves({ state: 'undeliverable' });
+    expect((await aFirstToolCall().done).stdout).toBe('');
+
+    await expectTheNextMessageReachesTheModel();
+    expect(await store()).not.toContain(refused);
+  });
+
+  it('drops a message whose ack the fleet refuses as held by another ship', async () => {
+    await aMessageHandedOver();
+    const lookout = await aCrewedLookout();
+    const refused = await theFleetMoves({ claimedByShipId: lookout.shipId, claimedByLeaseId: lookout.leaseId });
+    expect((await aFirstToolCall().done).stdout).toBe('');
+
+    await expectTheNextMessageReachesTheModel();
+    expect(await store()).not.toContain(refused);
+  });
+
+  it('drops a message the fleet refuses to hand once more as not acknowledged', async () => {
+    await aMessageHandedOver();
+    expect((await aFirstToolCall().done).stdout).toContain(PAYLOAD);
+    await aTurnFails();
+    const refused = await theFleetMoves({ state: 'handed' });
+
+    expect((await aPrompt()).stdout).toBe('');
+    expect(await store()).not.toContain(refused);
+  });
+
+  it('drops a message the fleet refuses to hand once more as handed once more already', async () => {
+    await aMessageHandedOver();
+    expect((await aFirstToolCall().done).stdout).toContain(PAYLOAD);
+    await aTurnFails();
+    const refused = await theFleetMoves({ handedOnceMoreAt: new Date() });
+
+    expect((await aPrompt()).stdout).toBe('');
+    expect(await store()).not.toContain(refused);
+  });
+
+  it('drops a message whose handled the fleet refuses as held by another ship', async () => {
+    await aMessageHandedOver();
+    expect((await aFirstToolCall().done).stdout).toContain(PAYLOAD);
+    const lookout = await aCrewedLookout();
+    const refused = await theFleetMoves({ claimedByShipId: lookout.shipId, claimedByLeaseId: lookout.leaseId });
+
+    await expectTheNextMessageReachesTheModel();
+    expect(await store()).not.toContain(refused);
   });
 });

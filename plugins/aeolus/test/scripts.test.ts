@@ -144,6 +144,8 @@ const receiving = (...deliveries: unknown[]): StubAnswer => ({ status: 200, body
 const acknowledged: StubAnswer = { status: 200, body: {} };
 const busy: StubAnswer = { status: 503, body: { code: 'SERVICE_UNAVAILABLE', message: 'The fleet is busy: nothing was stored. Make the same call again.' } };
 const notInFlight: StubAnswer = { status: 409, body: { code: 'DELIVERY_NOT_IN_FLIGHT', message: 'Delivery is undeliverable, not in flight' } };
+/** A refusal about the delivery whose code the plugin names nowhere: it drops the delivery as it does every delivery refusal. */
+const deliveryNotFound: StubAnswer = { status: 404, body: { code: 'DELIVERY_NOT_FOUND', message: 'No delivery with this id' } };
 const leaseEnded: StubAnswer = { status: 401, body: { code: 'LEASE_ENDED', message: 'The lease ended' } };
 /** The fleet's answer to handed: where the delivery stands now. */
 const handedAs = (state: 'handed' | 'acknowledged' | 'undeliverable'): StubAnswer => ({ status: 200, body: { state } });
@@ -782,6 +784,19 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       expect(store()).toEqual([`${anotherDelivery().deliveryId} handed`]);
     });
 
+    it('drops a message whose hand-over the fleet refuses with any delivery code, and watches on (#832)', async () => {
+      fleet = await startRoutedStubFleet({
+        '/api/v1/ship/inbox': [inbox(1)],
+        '/api/v1/ship/pushReceive': [receiving(aDelivery()), receiving(anotherDelivery())],
+        '/api/v1/ship/handed': [deliveryNotFound, handedOk],
+      });
+      crew(fleet.url);
+      aTurnEnded();
+
+      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+      expect(store()).toEqual([`${anotherDelivery().deliveryId} handed`]);
+    });
+
     it('drops a message the fleet no longer holds in flight when it reports the hand-over, and watches on', async () => {
       fleet = await startRoutedStubFleet({
         '/api/v1/ship/inbox': [inbox(1)],
@@ -897,6 +912,13 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
 
     it('drops a message the fleet no longer holds in flight, and shows nothing', async () => {
       await aHandOver({ '/api/v1/ship/ack': [notInFlight] });
+
+      expect((await aFirstToolCall()).stdout).toBe('');
+      expect(store()).toEqual([]);
+    });
+
+    it('drops a message whose ack the fleet refuses with any delivery code, and shows nothing (#832)', async () => {
+      await aHandOver({ '/api/v1/ship/ack': [deliveryNotFound] });
 
       expect((await aFirstToolCall()).stdout).toBe('');
       expect(store()).toEqual([]);
