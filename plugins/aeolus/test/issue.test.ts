@@ -33,7 +33,7 @@ beforeEach(() => {
   bin = join(data, 'bin');
   ghCalls = join(data, 'gh.calls');
   mkdirSync(bin);
-  expect(run('aeolus-identity.sh', { args: ['write', FLEET_URL, SHIP_ID, 'l3lo', CREW_TOKEN] }).status).toBe(0);
+  expect(run('aeolus-identity.sh', { args: ['write', FLEET_URL, SHIP_ID, 'l3lo'], stdin: CREW_TOKEN }).status).toBe(0);
 });
 
 afterEach(() => {
@@ -46,8 +46,9 @@ afterEach(() => {
  * aGh writes it: a gh installed on the machine is never called, so no test
  * files a real issue (#411).
  */
-function run(script: string, options: { args?: string[]; env?: Record<string, string> } = {}) {
+function run(script: string, options: { args?: string[]; env?: Record<string, string>; stdin?: string } = {}) {
   const result = spawnSync('bash', [join(SCRIPTS, script), ...(options.args ?? [])], {
+    input: options.stdin ?? '',
     encoding: 'utf8',
     env: scriptEnvironment({ AEOLUS_CREWS: join(data, 'crews'), AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_GH: join(bin, 'gh'), PATH: `${bin}:/usr/bin:/bin`, ...options.env }),
   });
@@ -233,7 +234,7 @@ describe('aeolus-issue file', () => {
   it('gives the line to send argo, the draft path going through the same filter', () => {
     const dataUnderAnAddress = join(data, 'bob@example.org');
     mkdirSync(dataUnderAnAddress);
-    run('aeolus-identity.sh', { args: ['write', FLEET_URL, SHIP_ID, 'l3lo', CREW_TOKEN], env: { AEOLUS_DATA: dataUnderAnAddress } });
+    run('aeolus-identity.sh', { args: ['write', FLEET_URL, SHIP_ID, 'l3lo'], stdin: CREW_TOKEN, env: { AEOLUS_DATA: dataUnderAnAddress } });
     const draft = run('aeolus-issue.sh', { args: ['draft'], env: { AEOLUS_DATA: dataUnderAnAddress } }).stdout.trim();
     writeFileSync(draft, '# A title\n\nWhat happened\n');
 

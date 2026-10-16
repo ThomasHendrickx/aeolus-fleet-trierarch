@@ -63,7 +63,7 @@ function run(script: string, options: { args?: string[]; stdin?: string } = {}):
 
 async function crewedAt(answers: readonly StubAnswer[]): Promise<StubFleet> {
   const started = await startStubFleet(answers);
-  expect(await run('aeolus-identity.sh', { args: ['write', started.url, SHIP_ID, 'scout', CREW_TOKEN] })).toBe(0);
+  expect(await run('aeolus-identity.sh', { args: ['write', started.url, SHIP_ID, 'scout'], stdin: CREW_TOKEN })).toBe(0);
   return started;
 }
 

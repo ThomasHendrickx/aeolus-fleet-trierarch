@@ -71,8 +71,8 @@ function run(script: string, options: { args?: string[]; env?: Record<string, st
 
 async function crewedAt(answers: readonly StubAnswer[], squadron?: string): Promise<StubFleet> {
   const started = await startStubFleet(answers);
-  const args = ['write', started.url, SHIP_ID, 'scout', CREW_TOKEN, ...(squadron === undefined ? [] : [squadron])];
-  expect((await run('aeolus-identity.sh', { args })).status).toBe(0);
+  const args = ['write', started.url, SHIP_ID, 'scout', ...(squadron === undefined ? [] : [squadron])];
+  expect((await run('aeolus-identity.sh', { args, stdin: CREW_TOKEN })).status).toBe(0);
   return started;
 }
 
@@ -314,7 +314,7 @@ describe('aeolus-fleet calls', () => {
     const stub = fleet;
     const call = run('aeolus-fleet.sh', { args: ['receive'] });
     await expect.poll(() => stub.calls.length).toBe(1);
-    expect((await run('aeolus-identity.sh', { args: ['write', stub.url, SHIP_ID, 'scout', NEW_CREW_TOKEN] })).status).toBe(0);
+    expect((await run('aeolus-identity.sh', { args: ['write', stub.url, SHIP_ID, 'scout'], stdin: NEW_CREW_TOKEN })).status).toBe(0);
     answerLeaseEnded();
 
     const result = await call;

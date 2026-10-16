@@ -57,10 +57,15 @@ interface Run {
 
 /** Runs a script as a session's command does, without blocking the stub fleet in this process. */
 function run(script: string, args: string[]): Promise<Run> {
+  return runWith(script, { args });
+}
+
+/** Runs a script as `run` does, with its input on stdin. */
+function runWith(script: string, { args, stdin = '' }: { args: string[]; stdin?: string }): Promise<Run> {
   const child = spawn('bash', [join(SCRIPTS, script), ...args], {
     env: scriptEnvironment({ HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data }),
   });
-  child.stdin.end();
+  child.stdin.end(stdin);
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', (chunk: Buffer) => {
@@ -83,7 +88,7 @@ function hook(script: string, payload: unknown): void {
 
 async function crewedAt(answers: readonly StubAnswer[]): Promise<StubFleet> {
   const started = await startStubFleet(answers);
-  expect((await run('aeolus-identity.sh', ['write', started.url, SHIP_ID, 'scout', CREW_TOKEN])).status).toBe(0);
+  expect((await runWith('aeolus-identity.sh', { args: ['write', started.url, SHIP_ID, 'scout'], stdin: CREW_TOKEN })).status).toBe(0);
   return started;
 }
 

@@ -90,7 +90,7 @@ function start(script: string, options: { args?: string[]; env?: Record<string, 
 const AS_CODEX = { AEOLUS_HARNESS: 'codex' };
 
 function crew(fleetUrl = 'https://fleet.example.com', env: Record<string, string> = {}): void {
-  expect(run('aeolus-identity.sh', { args: ['write', fleetUrl, SHIP_ID, 'scout', CREW_TOKEN], env }).status).toBe(0);
+  expect(run('aeolus-identity.sh', { args: ['write', fleetUrl, SHIP_ID, 'scout'], stdin: CREW_TOKEN, env }).status).toBe(0);
 }
 
 function identityFile(env: Record<string, string> = {}): string {
@@ -221,7 +221,7 @@ describe('aeolus-identity', () => {
   });
 
   it('keeps the squadron a member ship belongs to, and shows it', () => {
-    expect(run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', CREW_TOKEN, 'team-one'] }).status).toBe(0);
+    expect(run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', 'team-one'], stdin: CREW_TOKEN }).status).toBe(0);
 
     expect(readFileSync(identityFile(), 'utf8')).toContain('squadron=team-one\n');
     expect(run('aeolus-identity.sh', { args: ['show'] }).stdout).toContain('squadron: team-one');
@@ -237,7 +237,7 @@ describe('aeolus-identity', () => {
     crew();
     const other = mkdtempSync(join(tmpdir(), 'aeolus-other-'));
     try {
-      run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'lookout', 'aeolus_ct_v1_other'], env: { AEOLUS_FOLDER: other } });
+      run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'lookout'], stdin: 'aeolus_ct_v1_other', env: { AEOLUS_FOLDER: other } });
 
       expect(run('aeolus-identity.sh', { args: ['show'] }).stdout).toContain('ship: scout');
       expect(run('aeolus-identity.sh', { args: ['show'], env: { AEOLUS_FOLDER: other } }).stdout).toContain('ship: lookout');
@@ -253,7 +253,7 @@ describe('aeolus-identity', () => {
     try {
       expect(
         run('aeolus-identity.sh', {
-          args: ['write', 'https://fleet.example.com', SHIP_ID, 'scout', CREW_TOKEN],
+          args: ['write', 'https://fleet.example.com', SHIP_ID, 'scout'], stdin: CREW_TOKEN,
           env: { AEOLUS_FOLDER: linked },
         }).status,
       ).toBe(0);
@@ -374,7 +374,7 @@ describe('aeolus-status: the version, the ship, its fleet and folder, what wakes
 
   it('says the trierarch wakes the session when it does, not a watcher', async () => {
     fleet = await startStubFleet([whoami, inbox(0)]);
-    expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', fleet.url, SHIP_ID, 'scout', CREW_TOKEN] }).status).toBe(0);
+    expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', fleet.url, SHIP_ID, 'scout'], stdin: CREW_TOKEN }).status).toBe(0);
 
     expect((await start('aeolus-status.sh').exited).stdout).toContain('Running: the trierarch wakes this session\n');
   });
@@ -498,7 +498,7 @@ describe('aeolus-wait', () => {
     aTurnEnded();
     const watcher = start('aeolus-wait.sh');
     await expect.poll(() => stub.calls.length).toBe(1);
-    expect(run('aeolus-identity.sh', { args: ['write', stub.url, SHIP_ID, 'scout', 'aeolus_ct_v1_new_crew'] }).status).toBe(0);
+    expect(run('aeolus-identity.sh', { args: ['write', stub.url, SHIP_ID, 'scout'], stdin: 'aeolus_ct_v1_new_crew' }).status).toBe(0);
     answerLeaseEnded();
 
     await expect(watcher.exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
@@ -816,7 +816,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
     it('drops the entries of an older lease instead of handing them over: the folder was crewed again (D7)', async () => {
       const stub = await aHandOver({ '/api/v1/ship/ack': [busy] });
       await aFirstToolCall();
-      expect(run('aeolus-identity.sh', { args: ['write', stub.url, SHIP_ID, 'scout', 'aeolus_ct_v1_new_crew'] }).status).toBe(0);
+      expect(run('aeolus-identity.sh', { args: ['write', stub.url, SHIP_ID, 'scout'], stdin: 'aeolus_ct_v1_new_crew' }).status).toBe(0);
       await aTurnEnds();
 
       await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
@@ -1595,7 +1595,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
     const died = () => start('aeolus-push.sh', { args: ['died'], env: NO_WAITS }).done;
 
     function crewedByATrierarch(fleetUrl: string): void {
-      expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', fleetUrl, SHIP_ID, 'scout', CREW_TOKEN] }).status).toBe(0);
+      expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', fleetUrl, SHIP_ID, 'scout'], stdin: CREW_TOKEN }).status).toBe(0);
     }
 
     /** The trierarch hands one delivery over: the fleet's push receive answers it while the session is idle. */
@@ -1687,7 +1687,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       it('drops the entries of an older lease and receives again: the ship was crewed again (D7)', async () => {
         const stub = await aTrierarchHandOver({ '/api/v1/ship/ack': [busy] });
         await aPrompt();
-        expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', stub.url, SHIP_ID, 'scout', 'aeolus_ct_v1_new_crew'] }).status).toBe(0);
+        expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', stub.url, SHIP_ID, 'scout'], stdin: 'aeolus_ct_v1_new_crew' }).status).toBe(0);
         await aTurnEnds();
 
         expect(await hand()).toMatchObject({ status: 0, stdout: HAND_OVER_LINE });
@@ -1708,7 +1708,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
 
       it('tells a Codex task at its start to receive nothing on the lease it pushed, since the trierarch hands each message over', async () => {
         fleet = await startRoutedStubFleet({ '/api/v1/ship/pushReceive': [receiving(aDelivery())], '/api/v1/ship/handed': [handedOk], '/api/v1/ship/turn': [taken] });
-        expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', fleet.url, SHIP_ID, 'scout', CREW_TOKEN], env: AS_CODEX }).status).toBe(0);
+        expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', fleet.url, SHIP_ID, 'scout'], stdin: CREW_TOKEN, env: AS_CODEX }).status).toBe(0);
         expect((await start('aeolus-push.sh', { args: ['hand'], env: { ...NO_WAITS, ...AS_CODEX } }).done).status).toBe(0);
 
         const started = run('aeolus-session-start.sh', {
@@ -2142,7 +2142,7 @@ describe('the SessionStart hook', () => {
   });
 
   it("tells a member's fresh context to check in at its flagship before anything else", () => {
-    run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', CREW_TOKEN, 'team-one'] });
+    run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', 'team-one'], stdin: CREW_TOKEN });
 
     const { stdout } = hook(payloadFor(folder, 'compact'));
 
@@ -2172,7 +2172,7 @@ describe('the SessionStart hook', () => {
 
   it('keys the ship by the payload cwd, its JSON escapes undone, as the scripts do', () => {
     const windowsFolder = 'C:\\Users\\thomas\\fleet "work"';
-    run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'scout', CREW_TOKEN], env: { AEOLUS_FOLDER: windowsFolder } });
+    run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'scout'], stdin: CREW_TOKEN, env: { AEOLUS_FOLDER: windowsFolder } });
 
     const { stdout } = hook(payloadFor(windowsFolder));
 
@@ -2365,7 +2365,7 @@ describe("a squadron member's check-in interval", () => {
     'aeolus: 30m, the check-in interval of the squadron team-one, passed since tester-k3x9 last reported: report what you are doing now with the report call, such as {"state":"working","note":"reviewing PR 89"}, then go on';
 
   function aMember(interval = '30m'): void {
-    run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', CREW_TOKEN, 'team-one'] });
+    run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', 'team-one'], stdin: CREW_TOKEN });
     expect(run('aeolus-identity.sh', { args: ['check-in', interval] }).status).toBe(0);
   }
 
@@ -2392,7 +2392,7 @@ describe("a squadron member's check-in interval", () => {
   });
 
   it('refuses an interval in another form than <n>m or <n>h', () => {
-    run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', CREW_TOKEN, 'team-one'] });
+    run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', 'team-one'], stdin: CREW_TOKEN });
 
     expect(run('aeolus-identity.sh', { args: ['check-in', '30 min'] }).status).toBe(2);
     expect(run('aeolus-identity.sh', { args: ['show'] }).stdout).not.toContain('check-in');
@@ -2488,7 +2488,7 @@ describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
   const TURN_MARKER = /^(busy|idle) \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
   function crewedByATrierarch(env: Record<string, string> = {}): void {
-    expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', 'https://fleet.example.com', SHIP_ID, 'scout', CREW_TOKEN], env }).status).toBe(0);
+    expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', 'https://fleet.example.com', SHIP_ID, 'scout'], stdin: CREW_TOKEN, env }).status).toBe(0);
   }
 
   function sessionStart(env: Record<string, string>) {
@@ -2517,13 +2517,13 @@ describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
   });
 
   it('keeps the squadron beside it, for a member a trierarch crews', () => {
-    run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', CREW_TOKEN, 'team-one'] });
+    run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', 'team-one'], stdin: CREW_TOKEN });
 
     expect(readFileSync(identityFile(), 'utf8')).toMatch(/squadron=team-one\n[\s\S]*wakeBy=trierarch\n|wakeBy=trierarch\n[\s\S]*squadron=team-one\n/);
   });
 
   it('refuses to wake by anything but the trierarch', () => {
-    const written = run('aeolus-identity.sh', { args: ['write', '--wake-by', 'cron', 'https://fleet.example.com', SHIP_ID, 'scout', CREW_TOKEN] });
+    const written = run('aeolus-identity.sh', { args: ['write', '--wake-by', 'cron', 'https://fleet.example.com', SHIP_ID, 'scout'], stdin: CREW_TOKEN });
 
     expect(written.status).toBe(2);
     expect(statSync(identityFile(), { throwIfNoEntry: false })).toBeUndefined();
@@ -2631,7 +2631,7 @@ describe("the launch marker: what a session's hooks saw of the launch the triera
   const WHEN = '\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z';
 
   function crewedByATrierarch(): void {
-    expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', 'https://fleet.example.com', SHIP_ID, 'scout', CREW_TOKEN] }).status).toBe(0);
+    expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', 'https://fleet.example.com', SHIP_ID, 'scout'], stdin: CREW_TOKEN }).status).toBe(0);
   }
 
   /** Runs the launch hook as Claude Code does, in a session the trierarch started with the launch id given, or none (null). */
@@ -2740,7 +2740,7 @@ describe("the launch marker: what a session's hooks saw of the launch the triera
   });
 
   it('records the start and the first tool call of a Codex session, in the Codex crews folder', () => {
-    run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', 'https://fleet.example.com', SHIP_ID, 'scout', CREW_TOKEN], env: AS_CODEX });
+    run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', 'https://fleet.example.com', SHIP_ID, 'scout'], stdin: CREW_TOKEN, env: AS_CODEX });
 
     codexLaunchHook({ ...sessionStarted, transcript_path: '/home/someone/.codex/sessions/2026/10/12/rollout-x.jsonl' });
     codexLaunchHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'ls' } });
@@ -2943,7 +2943,7 @@ describe("the plugin's log: what the watcher and hooks do, one record per line i
   });
 
   it('logs a report reminder', () => {
-    run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', CREW_TOKEN, 'team-one'] });
+    run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', 'team-one'], stdin: CREW_TOKEN });
     run('aeolus-identity.sh', { args: ['check-in', '30m'] });
     writeFileSync(identityFile().replace(/\.identity$/, '.reported'), `${String(Math.floor(Date.now() / 1000) - 31 * 60)}\n`);
 
@@ -3217,7 +3217,7 @@ describe("where a folder's identity lives (#658)", () => {
   it('keeps it in the folder AEOLUS_CREWS names, as the trierarch names it', () => {
     const named = join(home, 'named-crews');
 
-    expect(run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'scout', CREW_TOKEN], env: { AEOLUS_CREWS: named } }).status).toBe(0);
+    expect(run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'scout'], stdin: CREW_TOKEN, env: { AEOLUS_CREWS: named } }).status).toBe(0);
 
     expect(readFileSync(join(named, identityName()), 'utf8')).toContain(`crewToken=${CREW_TOKEN}\n`);
   });
@@ -3377,7 +3377,7 @@ describe('no plugin script prints a shell error for a file that vanishes between
   });
 
   it("a squadron member's report time", () => {
-    run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', CREW_TOKEN, 'team-one'] });
+    run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', 'team-one'], stdin: CREW_TOKEN });
     run('aeolus-identity.sh', { args: ['check-in', '30m'] });
     const reportedFile = sibling('.reported');
     writeFileSync(reportedFile, `${String(Math.floor(Date.now() / 1000))}\n`);
@@ -3568,7 +3568,7 @@ describe('no plugin script prints a shell error for a file that vanishes between
     });
 
     it("when a squadron member's report is due", () => {
-      run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', CREW_TOKEN, 'team-one'] });
+      run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'tester-k3x9', 'team-one'], stdin: CREW_TOKEN });
       run('aeolus-identity.sh', { args: ['check-in', '30m'] });
 
       const { stderr } = claudeHookWith('aeolus-report-due.sh', {

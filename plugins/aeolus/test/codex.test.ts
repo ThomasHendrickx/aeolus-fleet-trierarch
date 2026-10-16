@@ -305,7 +305,7 @@ describe('Codex hooks on the new fleet (#756)', () => {
 describe('Codex plugin state', () => {
   it('keeps one identity per working folder in ~/.aeolus/crews/codex, outside the plugin data directory (#658)', () => {
     const written = runScript('aeolus-identity.sh', {
-      args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout', 'aeolus_ct_v1_crew'],
+      args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout'], input: 'aeolus_ct_v1_crew',
     });
 
     expect(written.status).toBe(0);
@@ -314,7 +314,7 @@ describe('Codex plugin state', () => {
   });
 
   it("finds the same identity from a Codex skill's command, run with AEOLUS_DATA, AEOLUS_FOLDER and AEOLUS_HARNESS=codex (#658)", () => {
-    runScript('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout', 'aeolus_ct_v1_crew'] });
+    runScript('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout'], input: 'aeolus_ct_v1_crew' });
 
     const shown = runScript('aeolus-identity.sh', { args: ['show'], env: { PLUGIN_DATA: '', PLUGIN_ROOT: '', AEOLUS_DATA: data, AEOLUS_FOLDER: folder, AEOLUS_HARNESS: 'codex' } });
 
@@ -322,7 +322,7 @@ describe('Codex plugin state', () => {
   });
 
   it("finds the same identity from a Codex skill's command run without AEOLUS_HARNESS (#687)", () => {
-    runScript('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout', 'aeolus_ct_v1_crew'] });
+    runScript('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout'], input: 'aeolus_ct_v1_crew' });
 
     const shown = runScript('aeolus-identity.sh', { args: ['show'], env: { PLUGIN_DATA: '', PLUGIN_ROOT: '', AEOLUS_DATA: data, AEOLUS_FOLDER: folder } });
 
@@ -330,9 +330,9 @@ describe('Codex plugin state', () => {
   });
 
   it('finds the Claude Code identity first from a command run without AEOLUS_HARNESS, when both harnesses crew the folder (#687)', () => {
-    runScript('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout', 'aeolus_ct_v1_crew'] });
+    runScript('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout'], input: 'aeolus_ct_v1_crew' });
     runScript('aeolus-identity.sh', {
-      args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1b', 'lookout', 'aeolus_ct_v1_other'],
+      args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1b', 'lookout'], input: 'aeolus_ct_v1_other',
       env: { PLUGIN_ROOT: '', AEOLUS_HARNESS: 'claude-code' },
     });
 
@@ -367,7 +367,7 @@ describe('Codex plugin state', () => {
   it('adds the plugin paths and restored ship to Codex context at session start without exposing its token', () => {
     expect(
       runScript('aeolus-identity.sh', {
-        args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout', 'aeolus_ct_v1_crew'],
+        args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout'], input: 'aeolus_ct_v1_crew',
         env: { AEOLUS_FOLDER: folder },
       }).status,
     ).toBe(0);
@@ -421,7 +421,7 @@ describe('Codex plugin state', () => {
   it('surfaces a wake bridge startup failure in the restored session context', () => {
     expect(
       runScript('aeolus-identity.sh', {
-        args: ['write', 'http://127.0.0.1:1', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout', 'aeolus_ct_v1_crew'],
+        args: ['write', 'http://127.0.0.1:1', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout'], input: 'aeolus_ct_v1_crew',
         env: { AEOLUS_FOLDER: folder },
       }).status,
     ).toBe(0);
@@ -447,7 +447,7 @@ describe('Codex in a folder a trierarch crews (wakeBy=trierarch)', () => {
   it('arms no wake bridge: the trierarch wakes the session, so a wake skill asking for one starts nothing', () => {
     expect(
       runScript('aeolus-identity.sh', {
-        args: ['write', '--wake-by', 'trierarch', 'http://127.0.0.1:1', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout', 'aeolus_ct_v1_crew'],
+        args: ['write', '--wake-by', 'trierarch', 'http://127.0.0.1:1', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout'], input: 'aeolus_ct_v1_crew',
         env: { AEOLUS_FOLDER: folder },
       }).status,
     ).toBe(0);
@@ -470,7 +470,7 @@ describe('Codex in a folder a trierarch crews (wakeBy=trierarch)', () => {
 
 describe('Codex fleet calls', () => {
   const crewed = () => {
-    expect(runScript('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout', 'aeolus_ct_v1_crew'], env: { AEOLUS_FOLDER: folder } }).status).toBe(0);
+    expect(runScript('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', 'shp_01m3tbfspe96yf1rnr4ank9h1a', 'scout'], input: 'aeolus_ct_v1_crew', env: { AEOLUS_FOLDER: folder } }).status).toBe(0);
     return runScript('aeolus-identity.sh', { args: ['path'], env: { AEOLUS_FOLDER: folder } }).stdout.trim().replace(/\.identity$/, '.model');
   };
   const bashCall = (command: string) =>

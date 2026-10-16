@@ -148,7 +148,8 @@ register() {
   call_fleet GET /api/v1/ship/whoami "$token" ""
   [ "$status" = 200 ] && name="$(aeolus_json_string "$body" name)"
   [ -n "$name" ] || name="$ship_id"
-  "$(dirname "$0")/aeolus-identity.sh" write "$fleet_url" "$ship_id" "$name" "$token" ${squadron:+"$squadron"} >/dev/null || exit 1
+  # printf is a builtin: the token reaches the identity script on stdin, on no command line (#822).
+  printf '%s\n' "$token" | "$(dirname "$0")/aeolus-identity.sh" write "$fleet_url" "$ship_id" "$name" ${squadron:+"$squadron"} >/dev/null || exit 1
   echo "aeolus: this folder now crews ${name} (${ship_id})"
 }
 

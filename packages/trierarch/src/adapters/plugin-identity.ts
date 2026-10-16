@@ -15,9 +15,9 @@ export interface AeolusPlugin {
   readonly crews: string;
 }
 
-/** Runs the plugin's own `aeolus-identity.sh` for the folder, with the plugin's data and crews folders. */
-export async function runIdentity(plugin: AeolusPlugin, at: { folder: string; args: readonly string[] }): Promise<{ status: number; stdout: string; stderr: string }> {
-  return runCommand('bash', { args: [`${await plugin.root()}/scripts/aeolus-identity.sh`, ...at.args], env: { AEOLUS_FOLDER: at.folder, AEOLUS_DATA: plugin.data, AEOLUS_CREWS: plugin.crews } });
+/** Runs the plugin's own `aeolus-identity.sh` for the folder, with the plugin's data and crews folders, and its input on stdin when there is one. */
+export async function runIdentity(plugin: AeolusPlugin, at: { folder: string; args: readonly string[]; input?: string }): Promise<{ status: number; stdout: string; stderr: string }> {
+  return runCommand('bash', { args: [`${await plugin.root()}/scripts/aeolus-identity.sh`, ...at.args], env: { AEOLUS_FOLDER: at.folder, AEOLUS_DATA: plugin.data, AEOLUS_CREWS: plugin.crews }, ...(at.input !== undefined && { input: at.input }) });
 }
 
 /** Runs the plugin's own `aeolus-push.sh` for the folder (#756), as `runIdentity` runs `aeolus-identity.sh`. */
@@ -44,17 +44,13 @@ export function createPluginIdentity(plugin: AeolusPlugin): Pick<HarnessPort, 'p
   const identity = (folder: string, args: readonly string[]) => runIdentity(plugin, { folder, args });
 
   return {
+    // The crew token goes on stdin, never as an argument: any local user reads a process's command line (#822).
     prepareIdentity: async ({ folder, identity: crew }) => {
-      const written = await identity(folder, [
-        'write',
-        '--wake-by',
-        'trierarch',
-        crew.fleetUrl,
-        crew.shipId,
-        crew.shipName,
-        crew.crewToken,
-        ...(crew.squadron === undefined ? [] : [crew.squadron]),
-      ]);
+      const written = await runIdentity(plugin, {
+        folder,
+        args: ['write', '--wake-by', 'trierarch', crew.fleetUrl, crew.shipId, crew.shipName, ...(crew.squadron === undefined ? [] : [crew.squadron])],
+        input: `${crew.crewToken}\n`,
+      });
       if (written.status !== 0) {
         throw new Error(`aeolus-identity.sh write failed: ${written.stderr.trim()}`);
       }

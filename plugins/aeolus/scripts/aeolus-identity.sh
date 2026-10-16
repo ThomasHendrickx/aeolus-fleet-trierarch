@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The ship this folder crews, kept in the plugin's data folder.
 #
-#   aeolus-identity.sh write [--wake-by trierarch] <fleetUrl> <shipId> <shipName> <crewToken> [<squadronId>]
+#   aeolus-identity.sh write [--wake-by trierarch] <fleetUrl> <shipId> <shipName> [<squadronId>]
+#                       the crew token on stdin, never on the command line, which any local user reads (#822);
 #                       with --wake-by trierarch, the trierarch wakes the folder's sessions, not a watcher
 #   aeolus-identity.sh check-in <interval>   a squadron member keeps its check-in interval: <n>m or <n>h
 #   aeolus-identity.sh show     the ship and its fleet (never the token), and whether its lease is pushed; exit 1 when none
@@ -19,20 +20,23 @@ command="${1:-}"
 
 case "$command" in
   write)
-    usage="usage: aeolus-identity.sh write [--wake-by trierarch] <fleetUrl> <shipId> <shipName> <crewToken> [<squadronId>]"
+    usage="usage: aeolus-identity.sh write [--wake-by trierarch] <fleetUrl> <shipId> <shipName> [<squadronId>], the crew token on stdin"
     wake_by=""
     if [ "${2:-}" = --wake-by ]; then
       [ "${3:-}" = trierarch ] || { echo "$usage" >&2; exit 2; }
       wake_by=trierarch
       set -- "$1" "${@:4}"
     fi
-    { [ "$#" -eq 5 ] || [ "$#" -eq 6 ]; } || { echo "$usage" >&2; exit 2; }
+    { [ "$#" -eq 4 ] || [ "$#" -eq 5 ]; } || { echo "$usage" >&2; exit 2; }
+    token=""
+    IFS= read -r token || true
+    [ -n "$token" ] || { echo "$usage" >&2; exit 2; }
     folder="$(aeolus_folder)"
     mkdir -p "$(dirname "$file")"
     umask 077
-    printf 'fleetUrl=%s\nshipId=%s\nshipName=%s\ncrewToken=%s\nfolder=%s\n' "${2%/}" "$3" "$4" "$5" "$folder" > "$file.tmp"
+    printf 'fleetUrl=%s\nshipId=%s\nshipName=%s\ncrewToken=%s\nfolder=%s\n' "${2%/}" "$3" "$4" "$token" "$folder" > "$file.tmp"
     # A squadron member keeps its squadron: it checks in at the flagship of that name.
-    [ "$#" -eq 6 ] && printf 'squadron=%s\n' "$6" >> "$file.tmp"
+    [ "$#" -eq 5 ] && printf 'squadron=%s\n' "$5" >> "$file.tmp"
     # A trierarch's session: the trierarch wakes it, so the plugin asks for no watcher.
     [ -n "$wake_by" ] && printf 'wakeBy=%s\n' "$wake_by" >> "$file.tmp"
     mv "$file.tmp" "$file"

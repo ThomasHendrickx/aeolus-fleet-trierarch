@@ -13,6 +13,7 @@ import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
 import { CLAUDE_CODE_ADAPTER_FLAGS, claudeCodeCommandLine, createClaudeCodeHarness } from './claude-code.js';
 import { createClaudeCodeSetup } from './claude-code-setup.js';
 import { wordsOf } from './command-line.js';
+import { recordingEnvironment, recordingPath } from '../../../../plugins/aeolus/test/command-lines.js';
 import { runCommand } from './run-command.js';
 
 // With the aeolus plugin's own scripts from this repository, in a temporary data folder and home.
@@ -108,6 +109,23 @@ describe('Claude Code as a harness', () => {
     expect(written).toContain(`shipId=${shipId}\n`);
     expect(written).toContain('squadron=hemma-feature-a1b2c3\n');
     expect(written).toContain('wakeBy=trierarch\n');
+  });
+
+  it("writes the folder's identity with the crew token on no command line, neither its own nor one the plugin's script starts (#822)", async () => {
+    const recording = recordingPath(data);
+    const callerPath = process.env.PATH ?? '';
+    // runCommand runs its program with this process's environment: the recording PATH for this one call.
+    Object.assign(process.env, recordingEnvironment(recording, callerPath));
+    try {
+      await harness().prepareIdentity({ folder, identity });
+    } finally {
+      process.env.PATH = callerPath;
+      delete process.env.AEOLUS_REAL_PATH;
+    }
+
+    expect(recording.commandLines()).toContain('aeolus-identity.sh write');
+    expect(recording.commandLines()).not.toContain(identity.crewToken);
+    await expect(harness().crewTokenOf({ shipId, folder })).resolves.toBe(identity.crewToken);
   });
 
   it("writes the folder's identity in ~/.aeolus/crews/claude-code, outside the plugin's data folder (#658)", async () => {
@@ -673,7 +691,7 @@ describe('Claude Code in containers, each ship with a home of its own (decision 
 
   it("clears the launch marker in the ship's own home before a launch", async () => {
     const inShipHome = { AEOLUS_FOLDER: folder, AEOLUS_DATA: join(homes, shipId, '.claude', 'plugins', 'data', 'aeolus-aeolus-fleet'), AEOLUS_CREWS: join(homes, shipId, '.aeolus', 'crews', 'claude-code') };
-    const written = await runCommand('bash', { args: [`${PLUGIN_ROOT}/scripts/aeolus-identity.sh`, 'write', '--wake-by', 'trierarch', identity.fleetUrl, shipId, identity.shipName, identity.crewToken], env: inShipHome });
+    const written = await runCommand('bash', { args: [`${PLUGIN_ROOT}/scripts/aeolus-identity.sh`, 'write', '--wake-by', 'trierarch', identity.fleetUrl, shipId, identity.shipName], env: inShipHome, input: identity.crewToken });
     expect(written.status).toBe(0);
     const marked = await runCommand('bash', {
       args: [`${PLUGIN_ROOT}/scripts/aeolus-launch.sh`],
