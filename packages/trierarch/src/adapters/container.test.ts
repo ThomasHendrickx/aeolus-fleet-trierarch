@@ -193,6 +193,12 @@ describe('the container a session runs in', () => {
     expect({ memory: valuesOf(run.args, '--memory'), cpus: valuesOf(run.args, '--cpus') }).toEqual({ memory: ['512m'], cpus: ['1'] });
   });
 
+  it('caps memory and swap together at the configured memory, so the runtime does not double the cap with swap', async () => {
+    const { run } = await started();
+
+    expect(valuesOf(run.args, '--memory-swap')).toEqual(['512m']);
+  });
+
   it('caps the processes of the container, so a fork bomb in one session cannot starve the machine', async () => {
     const { run } = await started();
 

@@ -143,6 +143,9 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
           containerName(shipId),
           '--label',
           `${OWNER_LABEL}=${owner}`,
+          // Without it, podman lets swap double the memory cap.
+          '--memory-swap',
+          options.memory,
           '--memory',
           options.memory,
           '--cpus',
