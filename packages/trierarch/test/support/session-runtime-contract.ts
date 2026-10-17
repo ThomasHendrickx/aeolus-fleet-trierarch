@@ -47,7 +47,10 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
   it('reads the screen of a session whose command ended, so the launch window names what stopped it', async () => {
     const runtime = at.runtime();
     const shipId = newId('ship');
-    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'echo "Invalid API key"; exit 1'] });
+    // The command ends only once its text is on the screen: a command that exits at once can end before tmux has drawn its output (#859).
+    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'echo "Invalid API key"; read line; exit 1'] });
+    await expect.poll(async () => runtime.screen(shipId), POLL).toContain('Invalid API key');
+    await runtime.type({ shipId, text: 'end' });
     await expect.poll(async () => runtime.list(), POLL).toEqual([{ shipId, status: 'exited' }]);
 
     await expect(runtime.screen(shipId)).resolves.toContain('Invalid API key');
