@@ -40,3 +40,25 @@ describe('aeolus_json_string (#706)', () => {
     expect(lib('aeolus_json_string', aPayload('a\\\\nb\\\\u0041c'), 'cwd')).toBe('a\\nb\\u0041c');
   });
 });
+
+describe('aeolus_json_string reads a top-level key only (#905)', () => {
+  it('ignores a nested key of the same name after the top-level one', () => {
+    expect(lib('aeolus_json_string', '{"name":"scout","owner":{"name":"argo"}}', 'name')).toBe('scout');
+  });
+
+  it('ignores a nested key of the same name before the top-level one, in an object or an array', () => {
+    expect(lib('aeolus_json_string', '{"owner":{"name":"argo"},"crews":[{"name":"mate"}],"name":"scout"}', 'name')).toBe('scout');
+  });
+
+  it('gives nothing when the key is only nested', () => {
+    expect(lib('aeolus_json_string', '{"owner":{"name":"argo"}}', 'name')).toBe('');
+  });
+
+  it('reads past a string value that holds the key and braces, as text', () => {
+    expect(lib('aeolus_json_string', '{"note":"{\\"name\\":\\"argo\\"}","name":"scout"}', 'name')).toBe('scout');
+  });
+
+  it('reads a key with whitespace and newlines around its colon', () => {
+    expect(lib('aeolus_json_string', '{\n  "owner": {"name": "argo"},\n  "name" :\n "scout"\n}', 'name')).toBe('scout');
+  });
+});

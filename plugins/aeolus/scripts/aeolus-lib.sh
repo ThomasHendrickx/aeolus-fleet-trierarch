@@ -393,11 +393,73 @@ aeolus_json_escape() {
     }'
 }
 
-# One string field of a hook's JSON payload, every escape undone: a \uXXXX
-# (a surrogate pair too) as its UTF-8 bytes, but \u0000, which a shell string
-# cannot hold, as nothing. Byte by byte in the C locale, as any awk does it.
+# The value of a key of a JSON object's top level, as its JSON text: a key of
+# the same name in a nested object or array is another field (#905). With
+# `first`, the first element of the array it holds. Byte by byte in the C
+# locale, as any awk does it. <json> <key> [first]
+aeolus_json_value() {
+  printf '%s' "$1" | tr -d '\n' | LC_ALL=C awk -v key="$2" -v is_first="${3:+1}" '
+    # The end of the string that opens at `from`: the index of its closing quote.
+    function string_end(text, from,   at) {
+      for (at = from + 1; at <= length(text); at++) {
+        if (substr(text, at, 1) == "\\") { at++; continue }
+        if (substr(text, at, 1) == "\"") return at
+      }
+      return length(text) + 1
+    }
+    # The end of the value that starts at `from`: the index of its last character.
+    function value_end(text, from,   at, character, depth) {
+      character = substr(text, from, 1)
+      if (character == "\"") return string_end(text, from)
+      if (character != "{" && character != "[") {
+        for (at = from; at <= length(text) && substr(text, at, 1) !~ /[],} \t\r]/; at++) {}
+        return at - 1
+      }
+      for (at = from; at <= length(text); at++) {
+        character = substr(text, at, 1)
+        if (character == "\"") at = string_end(text, at)
+        else if (character == "{" || character == "[") depth++
+        else if ((character == "}" || character == "]") && --depth == 0) return at
+      }
+      return length(text)
+    }
+    function skip_space(text, at) {
+      while (substr(text, at, 1) ~ /[ \t\r]/) at++
+      return at
+    }
+    {
+      text = $0
+      object = skip_space(text, 1)
+      if (substr(text, object, 1) != "{") exit
+      at = skip_space(text, object + 1)
+      while (substr(text, at, 1) == "\"") {
+        end = string_end(text, at)
+        name = substr(text, at + 1, end - at - 1)
+        colon = skip_space(text, end + 1)
+        if (substr(text, colon, 1) != ":") exit
+        value = skip_space(text, colon + 1)
+        if (name == key) {
+          if (is_first) {
+            if (substr(text, value, 1) != "[") exit
+            value = skip_space(text, value + 1)
+            if (substr(text, value, 1) == "]") exit
+          }
+          printf "%s", substr(text, value, value_end(text, value) - value + 1)
+          exit
+        }
+        at = skip_space(text, value_end(text, value) + 1)
+        if (substr(text, at, 1) != ",") exit
+        at = skip_space(text, at + 1)
+      }
+    }'
+}
+
+# One string field of a hook's JSON payload or an answer, a key of its
+# top-level object only, as aeolus_json_value reads it. Every escape undone: a
+# \uXXXX (a surrogate pair too) as its UTF-8 bytes, but \u0000, which a shell
+# string cannot hold, as nothing.
 aeolus_json_string() {
-  printf '%s' "$1" | tr -d '\n' | sed -E -n "s/.*\"$2\"[[:space:]]*:[[:space:]]*\"(([^\"\\\\]|\\\\.)*)\".*/\\1/p" | LC_ALL=C awk '
+  aeolus_json_value "$1" "$2" | LC_ALL=C awk '/^"/ { printf "%s", substr($0, 2, length($0) - 2) }' | LC_ALL=C awk '
     function hex(digits,   value, at) {
       for (at = 1; at <= 4; at++) value = value * 16 + index("0123456789abcdef", tolower(substr(digits, at, 1))) - 1
       return value
@@ -623,11 +685,13 @@ aeolus_store_mark() {
   printf '%s %s\n' "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$dir/$1.state.tmp" && mv "$dir/$1.state.tmp" "$dir/$1.state"
 }
 
-# Keeps a delivery the watcher received, as received: <delivery as JSON>. The
-# store is keyed by the delivery id, so the same delivery received again is one
-# entry, as it was. Prints its id; fails for an answer that holds none.
+# Keeps the delivery a push receive answered, as received: <the answer as
+# JSON>. The store is keyed by the delivery id, so the same delivery received
+# again is one entry, as it was. Prints its id; fails for an answer that holds
+# none.
 aeolus_store_put() {
-  local delivery="$1" dir id number
+  local delivery dir id number
+  delivery="$(aeolus_json_value "$1" deliveries first)"
   id="$(aeolus_json_string "$delivery" deliveryId)"
   aeolus_is_delivery_id "$id" || return 1
   dir="$(aeolus_store_dir)" || return 1
