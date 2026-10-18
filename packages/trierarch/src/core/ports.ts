@@ -111,13 +111,24 @@ export interface SelfReport {
   readonly details: TrierarchReportDetails;
 }
 
-/** What a session's folder identity holds for the trierarch: written through the aeolus plugin, never a copy of it. */
+/** What a session's folder identity holds for the trierarch: written through the aeolus plugin, never a copy of it. No crew token: the session calls over its ship's socket (decision 0026). */
 export interface Identity {
   readonly fleetUrl: string;
   readonly shipId: ShipId;
   readonly shipName: string;
-  readonly crewToken: string;
+  readonly socket: string;
   readonly squadron?: string;
+}
+
+/**
+ * The socket of each ship the trierarch crews (decision 0026): its session's
+ * fleet calls come over it, and the trierarch adds the crew token from its
+ * state.
+ */
+export interface ShipSocketsPort {
+  /** Opens the ship's socket, or keeps the one open; answers its path. */
+  open(shipId: ShipId): Promise<string>;
+  close(shipId: ShipId): Promise<void>;
 }
 
 /** The turn a session is in, from the plugin's turn marker. */
@@ -127,10 +138,13 @@ export type Turn = 'busy' | 'idle' | 'unknown';
 export type HandOver = 'handed' | 'nothing';
 
 export interface HarnessPort {
-  /** Writes the folder's identity with wakeBy=trierarch, as the aeolus plugin does. */
-  prepareIdentity(at: { folder: string; identity: Identity }): Promise<void>;
-  /** The crew token of the session's identity, when there is one. */
-  crewTokenOf(session: { shipId: ShipId; folder: string }): Promise<string | undefined>;
+  /**
+   * Writes the folder's identity with wakeBy=trierarch, as the aeolus plugin does. The
+   * crew token goes to the plugin only for the lease it stands for, never into the folder.
+   */
+  prepareIdentity(at: { folder: string; identity: Identity; crewToken: string }): Promise<void>;
+  /** Whether the session's folder still holds its identity (#659). */
+  hasIdentity(session: { shipId: ShipId; folder: string }): Promise<boolean>;
   removeIdentity(session: { shipId: ShipId; folder: string }): Promise<void>;
   /** Starts the harness in the folder: the first start with the settings' first prompt, later ones continuing. */
   launch(session: {

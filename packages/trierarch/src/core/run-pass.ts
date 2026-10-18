@@ -3,7 +3,7 @@ import { CREW_REQUEST_REASON_MAX_LENGTH, type ShipId } from '@aeolus-fleet/commo
 import { putEntry, removeEntry, withState, type Entry, type TrierarchState } from './entry.js';
 import { discardedText, identityGoneText, modelRefusedText, settingsRefusedText } from './argo-reports.js';
 import { MODEL_OPTION } from './detected-options.js';
-import type { FleetPort, HarnessPort, LaunchSeen, LoggedAction, Logger, SessionRuntime, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
+import type { FleetPort, HarnessPort, LaunchSeen, LoggedAction, Logger, SessionRuntime, ShipSocketsPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { HOLDS_IDENTITY, reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
 import type { RefuseModel } from './refuse-model.js';
 import type { Clock } from './shared/clock.js';
@@ -37,6 +37,8 @@ export interface RunPassDeps {
   refuseModel: RefuseModel;
   /** A fresh launch id for each start of a session (#490). */
   newLaunchId: () => string;
+  /** The ships' sockets its sessions call the fleet over (decision 0026). */
+  sockets: ShipSocketsPort;
 }
 
 const NEXT_AFTER_FAILURE = 'the next pass tries again; aeolus-trierarch status and list show where it stands';
@@ -146,11 +148,17 @@ async function observe(state: TrierarchState, deps: RunPassDeps): Promise<Observ
     if ((!isWatched && !HOLDS_IDENTITY.has(entry.state)) || folder === undefined || harness === undefined) {
       continue;
     }
-    const crewToken = await harness.crewTokenOf({ shipId: entry.shipId, folder });
+    const { crewToken } = entry;
+    // An entry with no crew token in the state is crewed again (decision 0026), so its identity says nothing.
     if (crewToken === undefined) {
+      continue;
+    }
+    if (!(await harness.hasIdentity({ shipId: entry.shipId, folder }))) {
       withoutIdentity.push(entry.shipId);
       continue;
     }
+    // Opened again after the trierarch stopped: its session keeps running and calls over it (decision 0026).
+    await deps.sockets.open(entry.shipId);
     if (isWatched) {
       const turn = await harness.turnOf({ shipId: entry.shipId, folder });
       // The store is asked only when a hand-over could follow.
@@ -256,8 +264,8 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
       }
       return state;
     case 'report': {
-      const crewToken = entry.folder === undefined ? undefined : await harnessOf(entry, deps)?.crewTokenOf({ shipId: entry.shipId, folder: entry.folder });
-      if (crewToken === undefined) {
+      const { crewToken } = entry;
+      if (crewToken === undefined || entry.folder === undefined || !(await harnessOf(entry, deps)?.hasIdentity({ shipId: entry.shipId, folder: entry.folder }))) {
         // Argo is told by the identityGone action (#664).
         log(deps, { ...about(state, { shipId: entry.shipId, action: 'report' }), outcome: `not reported ${action.note}, as its folder holds no identity` });
         return state;
@@ -322,9 +330,15 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   await deps.state.save(state);
   const { secret } = await deps.fleet.getStartingPrompt(crewing.shipId);
   const { crewToken } = await deps.fleet.register({ shipId: crewing.shipId, secret });
+  // The crew token stays in the state; the session calls over its ship's socket, opened before it starts (decision 0026).
+  crewing = { ...crewing, crewToken };
+  state = putEntry(state, { ...crewing, shipName: ship.name, folder });
+  await deps.state.save(state);
+  const socket = await deps.sockets.open(crewing.shipId);
   await harness.prepareIdentity({
     folder,
-    identity: { fleetUrl: deps.fleet.url, shipId: crewing.shipId, shipName: ship.name, crewToken, ...(crewing.squadron !== undefined && { squadron: crewing.squadron }) },
+    identity: { fleetUrl: deps.fleet.url, shipId: crewing.shipId, shipName: ship.name, socket, ...(crewing.squadron !== undefined && { squadron: crewing.squadron }) },
+    crewToken,
   });
   const launchId = deps.newLaunchId();
   await harness.launch({
@@ -397,7 +411,7 @@ async function releaseWorkspace(at: EntryAt & { cause: ReleaseCause }): Promise<
   if (folder === undefined) {
     return 'its worktree removed';
   }
-  await harnessOf(entry, deps)?.removeIdentity({ shipId: entry.shipId, folder });
+  await removeIdentity({ entry, deps, folder });
   if (entry.workspace.kind === 'folder') {
     return `its folder kept: ${folder}`;
   }
@@ -448,7 +462,7 @@ async function forget(state: TrierarchState, at: EntryAt): Promise<TrierarchStat
   const { entry, deps } = at;
   await deps.processes.stop(entry.shipId);
   if (entry.folder !== undefined) {
-    await harnessOf(entry, deps)?.removeIdentity({ shipId: entry.shipId, folder: entry.folder });
+    await removeIdentity({ entry, deps, folder: entry.folder });
   }
   const next = removeEntry(state, entry.shipId);
   await deps.state.save(next);
@@ -533,6 +547,13 @@ async function refuse(state: TrierarchState, at: CarryOut & { action: Extract<Ac
   return next;
 }
 
+/** The session's identity goes, and with it its ship's socket: nothing calls over it any more (decision 0026). */
+async function removeIdentity(at: EntryAt & { folder: string }): Promise<void> {
+  const { entry, deps, folder } = at;
+  await harnessOf(entry, deps)?.removeIdentity({ shipId: entry.shipId, folder });
+  await deps.sockets.close(entry.shipId);
+}
+
 /** Why a worktree is removed whatever it holds: its request was removed (row 7), or its ship released elsewhere is crewed again (row 11). */
 type ReleaseCause = 'release' | 'releasedElsewhere';
 
@@ -547,7 +568,7 @@ async function finishWorkspace(state: TrierarchState, at: EntryAt): Promise<Trie
   if (folder === undefined) {
     return state;
   }
-  await harnessOf(entry, deps)?.removeIdentity({ shipId: entry.shipId, folder });
+  await removeIdentity({ entry, deps, folder });
   if (entry.workspace.kind === 'folder') {
     return state;
   }

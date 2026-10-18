@@ -1,4 +1,4 @@
-import { access, readFile } from 'node:fs/promises';
+import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
@@ -40,26 +40,23 @@ export interface PluginHandOver {
  * data folder goes along, so the script moves an identity an older plugin
  * kept there.
  */
-export function createPluginIdentity(plugin: AeolusPlugin): Pick<HarnessPort, 'prepareIdentity' | 'crewTokenOf' | 'removeIdentity' | 'turnOf' | 'isHolding' | 'sessionDied' | 'startProblem'> & PluginHandOver {
+export function createPluginIdentity(plugin: AeolusPlugin): Pick<HarnessPort, 'prepareIdentity' | 'hasIdentity' | 'removeIdentity' | 'turnOf' | 'isHolding' | 'sessionDied' | 'startProblem'> & PluginHandOver {
   const identity = (folder: string, args: readonly string[]) => runIdentity(plugin, { folder, args });
 
   return {
-    // The crew token goes on stdin, never as an argument: any local user reads a process's command line (#822).
-    prepareIdentity: async ({ folder, identity: crew }) => {
+    // The identity names the ship's socket and holds no crew token: the trierarch keeps it (decision 0026).
+    // The token goes on stdin, never on the command line (#822), for the plugin to keep its lease.
+    prepareIdentity: async ({ folder, identity: crew, crewToken }) => {
       const written = await runIdentity(plugin, {
         folder,
-        args: ['write', '--wake-by', 'trierarch', crew.fleetUrl, crew.shipId, crew.shipName, ...(crew.squadron === undefined ? [] : [crew.squadron])],
-        input: `${crew.crewToken}\n`,
+        args: ['write', '--wake-by', 'trierarch', '--socket', crew.socket, crew.fleetUrl, crew.shipId, crew.shipName, ...(crew.squadron === undefined ? [] : [crew.squadron])],
+        input: crewToken,
       });
       if (written.status !== 0) {
         throw new Error(`aeolus-identity.sh write failed: ${written.stderr.trim()}`);
       }
     },
-    crewTokenOf: async ({ folder }) => {
-      const path = (await identity(folder, ['path'])).stdout.trim();
-      const text = await readFile(path, 'utf8').catch(() => '');
-      return /^crewToken=(.+)$/m.exec(text)?.[1];
-    },
+    hasIdentity: async ({ folder }) => (await identity(folder, ['show'])).status === 0,
     removeIdentity: async ({ folder }) => {
       await identity(folder, ['delete']);
     },

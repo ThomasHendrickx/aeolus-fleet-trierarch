@@ -6,6 +6,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { idSchema, type ShipId } from '@aeolus-fleet/common';
 
 import type { ObservedSession, SessionRuntime } from '../core/ports.js';
+import type { SessionRoots } from './caller-check.js';
 import { heldCommand } from './held-command.js';
 import { shipHome } from './paths.js';
 import { runCommand, type CommandResult } from './run-command.js';
@@ -55,6 +56,8 @@ export interface ContainerRuntimeOptions {
   readonly tokenFile: string;
   /** Where the ships' homes are kept on the host, one folder per ship, each mounted as its container's home. */
   readonly homes: string;
+  /** Where the ships' sockets are kept on the host, one folder per ship, each mounted at its own path (decision 0026). */
+  readonly sockets: string;
   /** The memory cap of each container, as the runtime takes it (`4g`). */
   readonly memory: string;
   readonly cpus: number;
@@ -86,8 +89,9 @@ function envFileOf(env: Readonly<Record<string, string>>): string {
  * named after its ship id, with tmux inside, so typing and screen reads are an
  * exec into it. Rootless only, with hard memory and cpu caps and no restart
  * policy: the trierarch starts a dead container again itself. The container
- * sees its folder and its ship's own home, as its home, and nothing else of
- * the host, never the runtime's socket. The home is made, for its owner
+ * sees its folder, its ship's own home, as its home, and its ship's socket
+ * folder, at its own path, and nothing else of the host, never the runtime's
+ * socket. The home is made, for its owner
  * alone, when the ship has none yet.
  *
  * The model token and the session's environment reach the container through
@@ -96,7 +100,7 @@ function envFileOf(env: Readonly<Record<string, string>>): string {
  * own, so the container's monitor is not in the service's control group and a
  * restart or upgrade ends no session (#479, #537).
  */
-export function createContainerRuntime(options: ContainerRuntimeOptions): SessionRuntime {
+export function createContainerRuntime(options: ContainerRuntimeOptions): SessionRuntime & SessionRoots {
   const owner = options.owner ?? CONTAINER_OWNER;
   const launch = options.launch ?? [];
   const run = options.run ?? runCommand;
@@ -130,6 +134,9 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
       const content = envFileOf({ ...env, [MODEL_TOKEN_VARIABLE]: token });
       await stop(shipId);
       const home = shipHome(options.homes, shipId);
+      const shipSockets = join(options.sockets, shipId);
+      // The runtime mounts only a folder that exists, and the ship's socket may not have made it yet.
+      await mkdir(shipSockets, { recursive: true, mode: 0o700 });
       await mkdir(home, { recursive: true, mode: 0o700 });
       const secrets = await mkdtemp(join(tmpdir(), 'aeolus-trierarch-env-'));
       try {
@@ -166,6 +173,9 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
           `${folder}:${folder}`,
           '--volume',
           `${home}:${SESSION_HOME}`,
+          // The session calls the fleet over its ship's socket, at the path its identity names.
+          '--volume',
+          `${shipSockets}:${shipSockets}`,
           '--env',
           `HOME=${SESSION_HOME}`,
           '--workdir',
@@ -202,6 +212,12 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
       // An exited container printed its last screen as it ended.
       const logged = await runtime(['logs', containerName(shipId)]);
       return logged.status === 0 ? logged.stdout : '';
+    },
+    // The container's first process as the host sees it: every process of the session runs under it; 0 once it runs no more.
+    sessionRootOf: async (shipId) => {
+      const inspected = await runtime(['inspect', '--format', '{{.State.Pid}}', containerName(shipId)]);
+      const pid = Number(inspected.stdout.trim());
+      return inspected.status === 0 && Number.isInteger(pid) && pid > 1 ? pid : undefined;
     },
   };
 }

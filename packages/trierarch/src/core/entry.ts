@@ -4,8 +4,9 @@ import type { ShipId, TrierarchWorkspace } from '@aeolus-fleet/common';
  * The trierarch's saved state (docs/trierarch.md): an entry per ship it
  * crews, by ship id, the worktrees it kept, the orphans it found, and the
  * settings versions it told argo it cannot crew. Plain data, saved whole as
- * JSON, never a secret: a session's crew token lives only in its folder's
- * identity file. The crew requests themselves live in the fleet.
+ * JSON in a file only the trierarch's user reads: it holds each crewed ship's
+ * crew token, which never reaches the ship's folder or home (decision 0026).
+ * The crew requests themselves live in the fleet.
  */
 export interface TrierarchState {
   readonly entries: Readonly<Record<string, Entry>>;
@@ -43,6 +44,8 @@ export interface Entry {
   readonly restartAt?: string;
   /** Where its workspace is, once made. */
   readonly folder?: string;
+  /** The crew token its register gave, kept here only: its session calls the fleet over its ship's socket (decision 0026). */
+  readonly crewToken?: string;
   readonly hasStarted: boolean;
   /** When the session crewing checks in its launch window started (#382), ISO 8601; none before its launch. */
   readonly launchedAt?: string;

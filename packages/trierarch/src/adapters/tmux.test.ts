@@ -8,7 +8,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId } from '../../test/support/in-memory.js';
 import { sessionRuntimeContract } from '../../test/support/session-runtime-contract.js';
 import { runCommand } from './run-command.js';
-import type { SessionRuntime } from '../core/ports.js';
 import { HOLD_AFTER_EXIT_MS } from './held-command.js';
 import { createTmux, sessionsLaunch } from './tmux.js';
 
@@ -21,7 +20,7 @@ const SOCKET_ROOT = '/tmp';
 
 let server: string;
 let folder: string;
-let tmux: SessionRuntime;
+let tmux: ReturnType<typeof createTmux>;
 
 beforeEach(() => {
   server = `trierarch-test-${newId('ship').slice(-8)}`;
@@ -76,6 +75,39 @@ describe('sessions in tmux', () => {
   });
 });
 
+/** The parents of a process up to the machine's first, through ps, which Linux and macOS both have. */
+async function ancestorsOf(pid: number): Promise<number[]> {
+  const ancestors: number[] = [];
+  for (let current = pid; current > 1; ) {
+    const parent = Number((await runCommand('ps', { args: ['-o', 'ppid=', '-p', String(current)] })).stdout.trim());
+    if (!Number.isInteger(parent) || parent < 1) {
+      break;
+    }
+    ancestors.push(parent);
+    current = parent;
+  }
+  return ancestors;
+}
+
+describe("a session's root: the process its ship's session runs under, for the socket's caller check (decision 0026)", () => {
+  it("is the session's pane, which every process of the session's command runs under", async () => {
+    const shipId = newId('ship');
+    const pidFile = join(folder, 'command.pid');
+
+    await tmux.start({ shipId, folder, command: ['sh', '-c', `echo $$ > ${pidFile}; sleep 30`] });
+
+    await expect.poll(() => existsSync(pidFile), { timeout: 5000 }).toBe(true);
+    const root = await tmux.sessionRootOf(shipId);
+    expect(root).toBeTypeOf('number');
+    const command = Number(readFileSync(pidFile, 'utf8'));
+    expect([command, ...(await ancestorsOf(command))]).toContain(root);
+  });
+
+  it('is none for a ship with no session', async () => {
+    await expect(tmux.sessionRootOf(newId('ship'))).resolves.toBeUndefined();
+  });
+});
+
 describe('a tmux server another process started (#883)', () => {
   /** Starts the server on the trierarch's socket as a process with its own variables would, such as a ship's session. */
   async function startServerFrom(variables: Readonly<Record<string, string>>): Promise<void> {
@@ -120,6 +152,36 @@ describe('a tmux server another process started (#883)', () => {
     const environment = await environmentOfASession({ AEOLUS_LAUNCH: 'launch-1' });
 
     expect(environment).toContain('AEOLUS_LAUNCH=launch-1');
+  });
+});
+
+describe("a session and the trierarch's tmux server (#880)", () => {
+  /** Waits for a file a session writes, then reads it. */
+  async function written(path: string): Promise<string> {
+    for (let tries = 0; tries < 100 && !existsSync(path); tries += 1) {
+      await wait(50);
+    }
+    return readFileSync(path, 'utf8');
+  }
+
+  it('gives a session no TMUX or TMUX_PANE that names the server', async () => {
+    const file = join(folder, 'environment');
+    await tmux.start({ shipId: newId('ship'), folder, command: ['sh', '-c', `env > ${file}.part && mv ${file}.part ${file}; sleep 30`] });
+
+    const environment = (await written(file)).split('\n');
+
+    expect(environment.filter((line) => line.startsWith('TMUX=') || line.startsWith('TMUX_PANE='))).toEqual([]);
+  });
+
+  it("leaves the trierarch's server and the other sessions running when a session runs a bare tmux kill-server", async () => {
+    const other = newId('ship');
+    await tmux.start({ shipId: other, folder, command: ['sleep', '30'] });
+    const done = join(folder, 'killed');
+    // A bare tmux in the session, as a test script would run it; its default socket is in the test's own folder.
+    await tmux.start({ shipId: newId('ship'), folder, command: ['sh', '-c', `TMUX_TMPDIR=${folder} tmux kill-server; touch ${done}; sleep 30`] });
+    await written(done);
+
+    await expect(tmux.list()).resolves.toContainEqual({ shipId: other, status: 'running' });
   });
 });
 

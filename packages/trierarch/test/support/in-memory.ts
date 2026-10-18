@@ -28,6 +28,7 @@ import type {
   Turn,
   WorkspacePort,
   WrittenStatus,
+  ShipSocketsPort,
 } from '../../src/core/ports.js';
 import { createReportSelf } from '../../src/core/report-self.js';
 import { createRunPass } from '../../src/core/run-pass.js';
@@ -315,7 +316,11 @@ export class InMemoryFleet implements FleetPort {
     return Promise.resolve();
   }
 
+  /** The crew token of each inbox call, in order. */
+  readonly inboxCalls: string[] = [];
+
   inbox(crewToken: string): Promise<InboxAnswer> {
+    this.inboxCalls.push(crewToken);
     const ship = [...this.ships.values()].find((each) => each.crewToken === crewToken);
     return Promise.resolve(ship === undefined ? { kind: 'leaseEnded' } : { kind: 'waiting', count: ship.waiting });
   }
@@ -394,13 +399,13 @@ export class InMemoryHarness implements HarnessPort {
 
   constructor(private readonly processes: InMemoryProcesses) {}
 
-  prepareIdentity(at: { folder: string; identity: Identity }): Promise<void> {
+  prepareIdentity(at: { folder: string; identity: Identity; crewToken: string }): Promise<void> {
     this.identities.set(at.folder, at.identity);
     return Promise.resolve();
   }
 
-  crewTokenOf(session: { shipId: ShipId; folder: string }): Promise<string | undefined> {
-    return Promise.resolve(this.identities.get(session.folder)?.crewToken);
+  hasIdentity(session: { shipId: ShipId; folder: string }): Promise<boolean> {
+    return Promise.resolve(this.identities.has(session.folder));
   }
 
   removeIdentity(session: { shipId: ShipId; folder: string }): Promise<void> {
@@ -588,6 +593,34 @@ export class InMemoryTrust implements TrustPort {
   }
 }
 
+/** The ships' sockets (decision 0026): which are open, and at each open whether its ship's session had started yet. */
+export class InMemoryShipSockets implements ShipSocketsPort {
+  readonly openShips = new Set<ShipId>();
+  /** Each open, in order, with how many launches of its ship there had been then. */
+  readonly opens: { shipId: ShipId; launchesBefore: number }[] = [];
+  constructor(private readonly harnesses: readonly InMemoryHarness[]) {}
+
+  static pathOf(shipId: ShipId): string {
+    return `/home/thomas/.aeolus/trierarch/sockets/${shipId}/fleet.sock`;
+  }
+
+  open(shipId: ShipId): Promise<string> {
+    this.openShips.add(shipId);
+    this.opens.push({ shipId, launchesBefore: this.harnesses.flatMap((harness) => harness.launches).filter((launch) => launch.shipId === shipId).length });
+    return Promise.resolve(InMemoryShipSockets.pathOf(shipId));
+  }
+
+  close(shipId: ShipId): Promise<void> {
+    this.openShips.delete(shipId);
+    return Promise.resolve();
+  }
+
+  /** The trierarch stopped: none of its sockets is open any more. */
+  stopTrierarch(): void {
+    this.openShips.clear();
+  }
+}
+
 /** A trierarch on in-memory ports. */
 export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION, detected: Detected = {}) {
   const state = new InMemoryState();
@@ -627,7 +660,8 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
     launches += 1;
     return `launch-${String(launches)}`;
   };
-  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, workspace, trust, state, setup, clock, logger, refuseModel, newLaunchId });
+  const sockets = new InMemoryShipSockets([harness, codex]);
+  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, workspace, trust, state, setup, clock, logger, refuseModel, newLaunchId, sockets });
   const uninstall = createUninstall({ processes, state });
   const reportSelf = createReportSelf({ fleet, processes, trust, state, setup });
 
@@ -638,7 +672,7 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
     return delivery;
   }
 
-  return { fleet, processes, harness, codex, workspace, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver, refusals };
+  return { fleet, processes, harness, codex, workspace, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver, refusals, sockets };
 }
 
 export type Trierarch = ReturnType<typeof aTrierarch>;

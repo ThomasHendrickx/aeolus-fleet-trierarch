@@ -1,7 +1,7 @@
 import type { ShipId } from '@aeolus-fleet/common';
 import { describe, expect, it } from 'vitest';
 
-import { aTrierarch, CONFIGURATION, crewSettings, NOTES_FOLDER, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
+import { aTrierarch, CONFIGURATION, crewSettings, InMemoryShipSockets, NOTES_FOLDER, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
 import type { LaunchSeen } from './ports.js';
 import { RESTART_BUDGET } from './restart-policy.js';
 
@@ -76,7 +76,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
       fleetUrl: 'https://fleet.example.com',
       shipId,
       shipName: 'scout',
-      crewToken: trierarch.fleet.shipOf(shipId).crewToken,
+      socket: InMemoryShipSockets.pathOf(shipId),
     });
     expect(trierarch.harness.launches).toEqual([
       { shipId, shipName: 'scout', folder: SCOUT_FOLDER, workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, isFirstStart: true, firstPrompt: 'Review the open pull requests.' },
@@ -436,7 +436,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
 
     expect(trierarch.state.current().entries[shipId]?.state).toBe('running');
     expect(trierarch.fleet.shipOf(shipId).crewToken).not.toBe(lostToken);
-    expect(trierarch.harness.identities.get(SCOUT_FOLDER)?.crewToken).toBe(trierarch.fleet.shipOf(shipId).crewToken);
+    expect(trierarch.state.current().entries[shipId]?.crewToken).toBe(trierarch.fleet.shipOf(shipId).crewToken);
   });
 
   it('row 8: a half-made worktree of an assigned ship is used when the crew resumes', async () => {
@@ -462,7 +462,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
 
     expect(trierarch.fleet.shipOf(shipId).status).toBe('crewed');
     expect(trierarch.fleet.shipOf(shipId).crewToken).not.toBe(firstToken);
-    expect(trierarch.harness.identities.get(SCOUT_FOLDER)?.crewToken).toBe(trierarch.fleet.shipOf(shipId).crewToken);
+    expect(trierarch.state.current().entries[shipId]?.crewToken).toBe(trierarch.fleet.shipOf(shipId).crewToken);
     expect(trierarch.harness.launches.map((launch) => launch.folder)).toEqual([SCOUT_FOLDER, SCOUT_FOLDER]);
     expect(trierarch.state.current().entries[shipId]?.state).toBe('running');
   });
@@ -552,7 +552,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.harness.launches).toHaveLength(2);
     expect(trierarch.workspace.folders.get(SCOUT_FOLDER)?.hasChanges).toBe(true);
     expect(trierarch.fleet.shipOf(shipId).status).toBe('crewed');
-    expect(trierarch.harness.identities.get(SCOUT_FOLDER)?.crewToken).toBe(trierarch.fleet.shipOf(shipId).crewToken);
+    expect(trierarch.state.current().entries[shipId]?.crewToken).toBe(trierarch.fleet.shipOf(shipId).crewToken);
   });
 
   it('row 12: a new settings version starts a fresh session with its first prompt, never continuing the old conversation (#443)', async () => {
@@ -1794,7 +1794,7 @@ describe('a running ship whose identity is gone (#659)', () => {
     await trierarch.harness.removeIdentity({ shipId, folder: SCOUT_FOLDER });
     await trierarch.pass();
     if (identity !== undefined) {
-      await trierarch.harness.prepareIdentity({ folder: SCOUT_FOLDER, identity });
+      await trierarch.harness.prepareIdentity({ folder: SCOUT_FOLDER, identity, crewToken: trierarch.fleet.shipOf(shipId).crewToken ?? '' });
     }
     trierarch.clock.advance(MINUTE_MS);
     await trierarch.pass();
@@ -1964,5 +1964,101 @@ describe('a failing action fails alone (#827)', () => {
     await trierarch.pass();
 
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`Cannot crew broken with its settings\n\n- Ship: broken (\`${shipId}\`)\n- Settings version: 1\n- Why: crew failed 3 times: the harness could not start ${shipId}`]);
+  });
+});
+
+describe('contained access: the crew token stays with the trierarch (decision 0026)', () => {
+  it("keeps the ship's crew token in its state, and writes the folder's identity with the ship's socket and no token", async () => {
+    const trierarch = aTrierarch();
+
+    const shipId = await aCrewedShip(trierarch);
+
+    expect(trierarch.state.current().entries[shipId]?.crewToken).toBe(trierarch.fleet.shipOf(shipId).crewToken);
+    expect(trierarch.harness.identities.get(SCOUT_FOLDER)).not.toHaveProperty('crewToken');
+    expect(trierarch.harness.identities.get(SCOUT_FOLDER)?.socket).toBe(InMemoryShipSockets.pathOf(shipId));
+  });
+
+  it("opens the ship's socket before its session starts", async () => {
+    const trierarch = aTrierarch();
+
+    const shipId = await aCrewedShip(trierarch);
+
+    expect(trierarch.sockets.opens[0]).toEqual({ shipId, launchesBefore: 0 });
+    expect(trierarch.sockets.openShips.has(shipId)).toBe(true);
+  });
+
+  it('watches the inbox with the crew token in its state', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.inboxCalls.at(-1)).toBe(trierarch.fleet.shipOf(shipId).crewToken);
+  });
+
+  it('opens the socket of each ship it crews again at its next pass after the trierarch stopped, and the session keeps running', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.sockets.stopTrierarch();
+
+    await trierarch.pass();
+
+    expect(trierarch.sockets.openShips.has(shipId)).toBe(true);
+    expect(trierarch.harness.launches).toHaveLength(1);
+  });
+
+  it('closes the socket and forgets the crew token when the request is removed', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.fleet.removeRequest(shipId);
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.sockets.openShips.has(shipId)).toBe(false);
+    expect(trierarch.state.current().entries[shipId]).toBeUndefined();
+  });
+
+  it('keeps the new crew token behind the same socket when the ship is crewed again', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.fleet.releaseElsewhere(shipId);
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]?.crewToken).toBe(trierarch.fleet.shipOf(shipId).crewToken);
+    expect(trierarch.harness.identities.get(SCOUT_FOLDER)?.socket).toBe(InMemoryShipSockets.pathOf(shipId));
+  });
+  /** The ship's entry as a trierarch before decision 0026 kept it: its crew token only in the folder's identity, none in the state. */
+  async function withoutCrewTokenInState(trierarch: ReturnType<typeof aTrierarch>, shipId: ShipId): Promise<void> {
+    const state = trierarch.state.current();
+    const entry = state.entries[shipId];
+    if (entry !== undefined) {
+      const { crewToken, ...older } = entry;
+      expect(crewToken).toBeDefined();
+      await trierarch.state.save({ ...state, entries: { ...state.entries, [shipId]: older } });
+    }
+  }
+
+  it.each(['running', 'restarting'] as const)('crews a %s ship again when its entry holds no crew token, in the same folder, without telling argo', async (entryState) => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    const first = trierarch.fleet.shipOf(shipId).crewToken;
+    await withoutCrewTokenInState(trierarch, shipId);
+    const state = trierarch.state.current();
+    const entry = state.entries[shipId];
+    if (entry !== undefined && entryState === 'restarting') {
+      await trierarch.state.save({ ...state, entries: { ...state.entries, [shipId]: { ...entry, state: 'restarting', restartAt: '2026-10-06T09:00:00.000Z' } } });
+    }
+
+    await trierarch.pass();
+
+    const crewToken = trierarch.state.current().entries[shipId]?.crewToken;
+    expect(crewToken).toBe(trierarch.fleet.shipOf(shipId).crewToken);
+    expect(crewToken).not.toBe(first);
+    expect(trierarch.state.current().entries[shipId]?.folder).toBe(SCOUT_FOLDER);
+    expect(trierarch.harness.launches).toHaveLength(2);
+    expect(trierarch.fleet.toArgo).toEqual([]);
   });
 });

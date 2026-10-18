@@ -181,7 +181,7 @@ export function createClaudeCodeHarness(options: {
 
   return {
     prepareIdentity: (at) => identityOf(at.identity.shipId).prepareIdentity(at),
-    crewTokenOf: (session) => identityOf(session.shipId).crewTokenOf(session),
+    hasIdentity: (session) => identityOf(session.shipId).hasIdentity(session),
     removeIdentity: async (session) => {
       await identityOf(session.shipId).removeIdentity(session);
       await homes.remove(session.shipId);

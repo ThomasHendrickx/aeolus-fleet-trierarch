@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +31,8 @@ import { createTrust } from '../src/adapters/trust.js';
 import { initTrierarch } from '../src/cli/init.js';
 import type { ObservedSession, SessionRuntime } from '../src/core/ports.js';
 import { RESTART_DELAYS_MS } from '../src/core/restart-policy.js';
+import { createCallerCheck } from '../src/adapters/caller-check.js';
+import { createShipSockets, type ShipSockets } from '../src/adapters/ship-sockets.js';
 import { createRunPass } from '../src/core/run-pass.js';
 import { CONFIGURATION } from './support/in-memory.js';
 import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
@@ -52,6 +54,8 @@ let server: FastifyInstance;
 let address: string;
 let home: string;
 let paths: TrierarchPaths;
+/** The ships' sockets of the trierarch under test, closed after each test. */
+let openSockets: ShipSockets | undefined;
 let repository: string;
 let pluginData: string;
 
@@ -141,6 +145,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  await openSockets?.closeAll();
+  openSockets = undefined;
   await server.close();
   await database.$disconnect();
   rmSync(home, { recursive: true, force: true });
@@ -185,13 +191,17 @@ async function aTrierarchOnTheFleet(claudeCodeFlags: readonly string[] = CONFIGU
   const clock = at.clock ?? { now: () => new Date() };
   const logger = { warn: () => undefined, action: () => undefined };
   const setup = { configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
+  // The real caller check: the plugin's scripts run as children of this process, as aeolus-push.sh does of the trierarch.
+  const mayCall = createCallerCheck({ platform: process.platform, sessionRootOf: () => Promise.resolve(undefined) });
+  const sockets = createShipSockets({ root: paths.sockets, fleetUrl: address, crewTokenOf: async (shipId) => (await state.load()).entries[shipId]?.crewToken, mayCall, log: () => undefined });
+  openSockets = sockets;
   // A new run pass over the same files is the trierarch started again.
-  const aRunPass = () => createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }), state, setup, clock, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID });
+  const aRunPass = () => createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }), state, setup, clock, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID, sockets });
   const pass = aRunPass();
   const leasesOf = (shipId: ShipId) => database.lease.count({ where: { shipId, endedAt: null } });
   const worktree = join(paths.worktrees, 'aeolus-fleet', 'scout');
 
-  return { useCases, argo, trierarchShip, scout, pass, aRunPass, leasesOf, worktree };
+  return { useCases, argo, trierarchShip, scout, pass, aRunPass, leasesOf, worktree, sockets };
 }
 
 describe('the trierarch on a real fleet', () => {
@@ -275,6 +285,95 @@ describe('the trierarch on a real fleet', () => {
     await expect(database.event.findMany({ where: { type: 'WorktreeCleared' }, select: { details: true } })).resolves.toEqual([
       { details: { worktreeShipId: scout.shipId, repository: 'aeolus-fleet', outcome: 'removed' } },
     ]);
+  });
+});
+
+describe("contained access on a real fleet (decision 0026): the session calls over its ship's socket, and only the trierarch holds the crew token", () => {
+  const SETTINGS = { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } as const;
+
+  /** A fleet call of the session in the worktree, through the aeolus plugin's own script, as Claude Code's Bash tool makes it. */
+  const fleetCall = (worktree: string, call: { args: readonly string[]; input?: string }) =>
+    runCommand('bash', {
+      args: [`${PLUGIN_ROOT}/scripts/aeolus-fleet.sh`, ...call.args],
+      env: { HOME: home, AEOLUS_FOLDER: worktree, AEOLUS_DATA: pluginData, AEOLUS_CREWS: join(home, '.aeolus', 'crews', 'claude-code'), AEOLUS_BUSY_WAITS: '' },
+      ...(call.input !== undefined && { input: call.input }),
+    });
+
+  /** The crew token the trierarch keeps for the ship in its state. */
+  const crewTokenOf = (shipId: ShipId) => z.object({ entries: z.record(z.string(), z.object({ crewToken: z.string() }).partial()) }).parse(JSON.parse(readFileSync(paths.state, 'utf8'))).entries[shipId]?.crewToken;
+
+  /** Every file the session's plugin keeps, its identity among them, and what each holds. */
+  function sessionFiles(): string[] {
+    const files: string[] = [];
+    const walk = (folder: string) => {
+      for (const entry of existsSync(folder) ? readdirSync(folder, { withFileTypes: true }) : []) {
+        const path = join(folder, entry.name);
+        if (entry.isDirectory()) {
+          walk(path);
+        } else if (entry.isFile()) {
+          files.push(readFileSync(path, 'utf8'));
+        }
+      }
+    };
+    walk(join(home, '.aeolus', 'crews'));
+    walk(pluginData);
+    return files;
+  }
+
+  async function aCrewedScout() {
+    const trierarch = await aTrierarchOnTheFleet();
+    const { useCases, argo, trierarchShip, scout, pass } = trierarch;
+    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: SETTINGS }));
+    unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
+    await pass();
+    return trierarch;
+  }
+
+  const eventsOf = async (shipId: ShipId) => (await database.event.findMany({ where: { shipId }, select: { type: true } })).map(({ type }) => type);
+
+  it('sends, acks and reports over the socket, with no crew token in what the session keeps', async () => {
+    const { useCases, argo, scout, worktree } = await aCrewedScout();
+    const crewToken = crewTokenOf(scout.shipId);
+    unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', name: 'scout' }, payload: 'chart the coast', idempotencyKey: newKey() }));
+
+    const sent = await fleetCall(worktree, { args: ['send', '-'], input: JSON.stringify({ selector: { kind: 'ship', name: 'argo' }, payload: 'on it', idempotencyKey: newKey(), model: 'claude-opus-5-5' }) });
+    const received = await fleetCall(worktree, { args: ['receive'] });
+    const [delivery] = z.object({ deliveries: z.array(z.object({ deliveryId: z.string() })) }).parse(JSON.parse(received.stdout)).deliveries;
+    const acked = await fleetCall(worktree, { args: ['ack', delivery?.deliveryId ?? 'no delivery'] });
+    const reported = await fleetCall(worktree, { args: ['report', '{"state":"working","note":"charting"}'] });
+
+    expect([sent, received, acked, reported].map((call) => call.status)).toEqual([0, 0, 0, 0]);
+    await expect(eventsOf(scout.shipId)).resolves.toEqual(expect.arrayContaining(['MessageAccepted', 'DeliveryAcknowledged', 'ShipReported']));
+    expect(crewToken).toMatch(/^aeolus_ct_/);
+    expect(sessionFiles().filter((file) => file.includes(crewToken ?? 'no crew token'))).toEqual([]);
+  });
+
+  it('gives a call no answer while the trierarch is down, and the fleet stores nothing', async () => {
+    const { scout, worktree, sockets } = await aCrewedScout();
+    await sockets.closeAll();
+
+    const sent = await fleetCall(worktree, { args: ['send', '-'], input: JSON.stringify({ selector: { kind: 'ship', name: 'argo' }, payload: 'on it', idempotencyKey: newKey(), model: 'claude-opus-5-5' }) });
+
+    expect(sent.status).toBe(6);
+    await expect(database.message.count({ where: { senderShipId: scout.shipId } })).resolves.toBe(0);
+  });
+
+  it("gives the ship's new crew token to its same socket once the ship is crewed again", async () => {
+    const { useCases, argo, trierarchShip, scout, pass, worktree } = await aCrewedScout();
+    const first = crewTokenOf(scout.shipId);
+    const socketOf = () => /^socket=(.*)$/m.exec(sessionFiles().join('\n'))?.[1];
+    const socket = socketOf();
+    unwrap(await useCases.removeCrewRequest(argo, { shipId: scout.shipId }));
+    await pass();
+    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: SETTINGS }));
+    unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
+    await pass();
+
+    const whoami = await fleetCall(worktree, { args: ['whoami'] });
+
+    expect(whoami.status, whoami.stdout).toBe(0);
+    expect(socketOf()).toBe(socket);
+    expect(crewTokenOf(scout.shipId)).not.toBe(first);
   });
 });
 

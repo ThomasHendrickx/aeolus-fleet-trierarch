@@ -72,6 +72,7 @@ const aPopulatedState = (): Populated<TrierarchState> => {
         launchId: '6f1c2b9e-3d4a-4e5f-8a7b-9c0d1e2f3a4b',
         isReleasedElsewhere: true,
         crewFailures: 2,
+        crewToken: 'aeolus_ct_v1_of_the_crew',
         isIdentityGone: true,
       },
     },

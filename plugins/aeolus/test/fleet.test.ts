@@ -440,6 +440,109 @@ describe('aeolus-fleet calls', () => {
   });
 });
 
+describe("a folder whose fleet calls go over its trierarch's socket (decision 0026)", () => {
+  let sockets: string;
+  let socket: string;
+
+  beforeEach(() => {
+    // Short, under /tmp: a Unix socket path is at most 104 bytes on macOS.
+    sockets = mkdtempSync('/tmp/aeolus-sock-');
+    socket = join(sockets, 'fleet.sock');
+  });
+
+  afterEach(() => {
+    rmSync(sockets, { recursive: true, force: true });
+  });
+
+  /** The folder's identity as the trierarch writes it: its socket and the crew token on stdin, which it keeps only as its lease. */
+  async function crewedOverTheSocket(answers: readonly StubAnswer[], crewToken = CREW_TOKEN): Promise<StubFleet> {
+    const started = await startStubFleet(answers, { socket });
+    const written = await run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', '--socket', socket, 'https://fleet.example.com', SHIP_ID, 'scout'], stdin: crewToken });
+    expect(written.status).toBe(0);
+    return started;
+  }
+
+  function identityText(): Promise<string> {
+    return run('aeolus-identity.sh', { args: ['path'] }).then(({ stdout }) => readFileSync(stdout.trim(), 'utf8'));
+  }
+
+  it('keeps the socket and the lease of the crew token in the identity file, never the crew token', async () => {
+    fleet = await crewedOverTheSocket([]);
+
+    const text = await identityText();
+
+    expect(text).toContain(`socket=${socket}\n`);
+    expect(text).toMatch(/^lease=[0-9a-f]{16}$/m);
+    expect(text).not.toContain(CREW_TOKEN);
+    expect(text).not.toContain('crewToken=');
+  });
+
+  it('keeps another lease once a new crew token reaches the folder', async () => {
+    fleet = await crewedOverTheSocket([]);
+    const first = /^lease=(.*)$/m.exec(await identityText())?.[1];
+    await fleet.close();
+
+    fleet = await crewedOverTheSocket([], NEW_CREW_TOKEN);
+
+    const next = /^lease=(.*)$/m.exec(await identityText())?.[1];
+    expect(next).toBeDefined();
+    expect(next).not.toBe(first);
+  });
+
+  it('refuses a socket without the crew token on stdin', async () => {
+    const written = await run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', '--socket', socket, 'https://fleet.example.com', SHIP_ID, 'scout'] });
+
+    expect(written.status).toBe(2);
+  });
+
+  it('refuses a socket for a folder no trierarch crews', async () => {
+    const written = await run('aeolus-identity.sh', { args: ['write', '--socket', socket, 'https://fleet.example.com', SHIP_ID, 'scout'] });
+
+    expect(written.status).toBe(2);
+  });
+
+  it('calls over the socket with no bearer, and prints what it answers', async () => {
+    fleet = await crewedOverTheSocket([{ status: 200, body: { shipId: SHIP_ID, name: 'scout' } }]);
+
+    const result = await run('aeolus-fleet.sh', { args: ['whoami'] });
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ shipId: SHIP_ID, name: 'scout' });
+    expect(fleet.calls).toEqual([{ method: 'GET', path: '/api/v1/ship/whoami', authorization: undefined, body: '' }]);
+  });
+
+  it('sends its input over the socket as it would to the fleet', async () => {
+    fleet = await crewedOverTheSocket([{ status: 200, body: { messageId: 'msg_01m3tbfspe96yf1rnr4ank9h1c' } }]);
+    const input = JSON.stringify({ selector: { kind: 'ship', name: 'argo' }, payload: 'hello', idempotencyKey: 'k-1', model: 'claude-opus-5-5' });
+
+    const result = await run('aeolus-fleet.sh', { args: ['send', '-'], stdin: input });
+
+    expect(result.status).toBe(0);
+    expect(fleet.calls).toEqual([{ method: 'POST', path: '/api/v1/ship/send', authorization: undefined, body: input }]);
+  });
+
+  it('says LEASE_ENDED and exits 3, and keeps the identity: the trierarch owns the folder', async () => {
+    fleet = await crewedOverTheSocket([{ status: 401, body: { code: 'LEASE_ENDED', message: 'This ship was released' } }]);
+
+    const result = await run('aeolus-fleet.sh', { args: ['whoami'] });
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain('LEASE_ENDED');
+    await expect(identityText()).resolves.toContain(`socket=${socket}\n`);
+  });
+
+  it('says there is no answer, and exits 6, while nothing listens on the socket', async () => {
+    fleet = await crewedOverTheSocket([]);
+    await fleet.close();
+    fleet = undefined;
+
+    const result = await run('aeolus-fleet.sh', { args: ['whoami'] });
+
+    expect(result.status).toBe(6);
+    expect(result.stdout).toContain('no answer');
+  });
+});
+
 describe('aeolus-fleet protocol', () => {
   it("prints the ship protocol from the fleet's OpenAPI description, with no crew token", async () => {
     const description = 'Aeolus carries messages between ships.\n\n1. Call "register" once.\n2. Loop: receive.';

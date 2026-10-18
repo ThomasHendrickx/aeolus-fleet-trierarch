@@ -3,11 +3,14 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { idSchema, type ShipId } from '@aeolus-fleet/common';
 
 import type { ObservedSession, SessionRuntime } from '../core/ports.js';
+import type { SessionRoots } from './caller-check.js';
 import { heldCommand } from './held-command.js';
 import { runCommand } from './run-command.js';
 
 const PREFIX = 'trierarch-';
 export const TMUX_SERVER = 'aeolus-trierarch';
+/** What a session's command runs through: without the variables that name the trierarch's tmux server (#880). */
+const WITHOUT_THE_SERVER = ['env', '-u', 'TMUX', '-u', 'TMUX_PANE', '--'];
 /** How many lines back a screen is read: the launch window's first prompt fits well within. */
 const SCREEN_LINES = 200;
 
@@ -37,8 +40,13 @@ function sessionName(shipId: ShipId): string {
  * (#881), so before each start the server's global environment is set back
  * to the trierarch's own: a variable the trierarch has not is removed, one it
  * has with another value is set to its own (#883).
+ *
+ * A session's command runs without the `TMUX` and `TMUX_PANE` tmux gives
+ * its pane: they name the trierarch's server, so a bare `tmux kill-server` in
+ * a session, such as a test script's, would end every ship's session (#880).
+ * A bare tmux in a session reaches its user's default server instead.
  */
-export function createTmux(options: { server?: string; launch?: readonly string[]; environment?: Readonly<Record<string, string | undefined>> } = {}): SessionRuntime {
+export function createTmux(options: { server?: string; launch?: readonly string[]; environment?: Readonly<Record<string, string | undefined>> } = {}): SessionRuntime & SessionRoots {
   const server = options.server ?? TMUX_SERVER;
   const launch = options.launch ?? [];
   const environment = options.environment ?? process.env;
@@ -104,7 +112,7 @@ export function createTmux(options: { server?: string; launch?: readonly string[
       }
       await must(['set-option', '-w', '-t', `=${name}:`, 'remain-on-exit', 'on']);
       const sessionVariables = Object.entries(env).flatMap(([variable, value]) => ['-e', `${variable}=${value}`]);
-      await must(['respawn-pane', '-k', '-t', `=${name}:`, '-c', folder, ...sessionVariables, '--', ...heldCommand(command)]);
+      await must(['respawn-pane', '-k', '-t', `=${name}:`, '-c', folder, ...sessionVariables, '--', ...WITHOUT_THE_SERVER, ...heldCommand(command)]);
     },
     type: async ({ shipId, text, settleMs }) => {
       const target = `=${sessionName(shipId)}:`;
@@ -117,6 +125,12 @@ export function createTmux(options: { server?: string; launch?: readonly string[
     screen: async (shipId) => {
       const result = await tmux(['capture-pane', '-p', '-J', '-S', `-${String(SCREEN_LINES)}`, '-t', `=${sessionName(shipId)}:`]);
       return result.status === 0 ? result.stdout : '';
+    },
+    // The pane's process: the session's command and all it starts run under it.
+    sessionRootOf: async (shipId) => {
+      const result = await tmux(['display-message', '-p', '-t', `=${sessionName(shipId)}:`, '#{pane_pid}']);
+      const pid = Number(result.stdout.trim());
+      return result.status === 0 && Number.isInteger(pid) && pid > 1 ? pid : undefined;
     },
   };
 }

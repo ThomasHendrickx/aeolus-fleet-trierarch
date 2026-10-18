@@ -82,7 +82,9 @@ function harness(at: { pluginRoot?: string } = {}) {
 }
 
 const shipId = newId('ship');
-const identity = { fleetUrl: 'https://fleet.example.com', shipId, shipName: 'scout', crewToken: 'aeolus_ct_v1_scout' };
+/** Handed to the plugin on stdin, which keeps only the lease it stands for. */
+const CREW_TOKEN = 'aeolus_ct_v1_of_the_crew';
+const identity = { fleetUrl: 'https://fleet.example.com', shipId, shipName: 'scout', socket: `/home/thomas/.aeolus/trierarch/sockets/${shipId}/fleet.sock` };
 
 /** The launch id the trierarch started the session with. */
 const LAUNCH_ID = 'launch-1';
@@ -91,13 +93,14 @@ const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harne
 
 describe('Codex as a harness', () => {
   it("writes the folder's identity through the plugin in ~/.aeolus/crews/codex, saying the trierarch wakes it (#658)", async () => {
-    await harness().prepareIdentity({ folder, identity });
+    await harness().prepareIdentity({ folder, identity, crewToken: CREW_TOKEN });
 
     const path = (await runCommand('bash', { args: [`${PLUGIN_ROOT}/scripts/aeolus-identity.sh`, 'path'], env: { AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_CREWS: crews } })).stdout.trim();
     expect(path.startsWith(crews)).toBe(true);
     expect(readdirSync(crews)).toContain(basename(path));
     expect(readFileSync(path, 'utf8')).toContain('wakeBy=trierarch\n');
-    await expect(harness().crewTokenOf({ shipId, folder })).resolves.toBe('aeolus_ct_v1_scout');
+    expect(readFileSync(path, 'utf8')).toContain(`socket=${identity.socket}\n`);
+    await expect(harness().hasIdentity({ shipId, folder })).resolves.toBe(true);
   });
 
   it('starts codex with the first prompt on the first start, last and after -- behind the configured flags and the picked option, ending in the line that no human reads its terminal (#585)', async () => {
@@ -231,7 +234,7 @@ describe("Codex's launch window, from the launch marker its session's hooks keep
   const hooksReview = () => readFileSync(new URL('../../test/screens/codex-hooks.txt', import.meta.url), 'utf8');
 
   beforeEach(async () => {
-    await harness().prepareIdentity({ folder, identity });
+    await harness().prepareIdentity({ folder, identity, crewToken: CREW_TOKEN });
   });
 
   it('starts a session with its launch id, the marker of an earlier launch cleared first', async () => {

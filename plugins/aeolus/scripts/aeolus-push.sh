@@ -84,7 +84,7 @@ hand() {
       exit 1
       ;;
   esac
-  aeolus_lease_key "$(aeolus_identity_field "$identity_text" crewToken)" > "$(aeolus_pushed_file)"
+  aeolus_identity_lease_key "$identity_text" > "$(aeolus_pushed_file)"
   if ! id="$(aeolus_store_put "$(printf '%s' "$output" | tr -d '\n')")"; then
     # Nothing handed, as when another ship of its type took the delivery first.
     exit 1

@@ -3,6 +3,7 @@ import { realpath } from 'node:fs/promises';
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { SessionRuntime, WorkspacePort } from '../core/ports.js';
+import type { SessionRoots } from './caller-check.js';
 import { createCloneWorkspace } from './clone-workspace.js';
 import { createContainerRuntime } from './container.js';
 import { createGitWorkspace } from './git-workspace.js';
@@ -14,7 +15,7 @@ const SESSION_IMAGE = 'ghcr.io/thomashendrickx/aeolus-session';
 
 /** What runs the sessions, where their workspaces go, and, in containers, where each ship's home is kept. */
 export interface RuntimeAdapters {
-  readonly sessions: SessionRuntime;
+  readonly sessions: SessionRuntime & SessionRoots;
   readonly workspace: WorkspacePort;
   /** The homes of the ships, one each, for sessions in containers; none on the host, where every session shares the user's. */
   readonly shipHomes?: { homes: string; managedSettings: string };
@@ -36,7 +37,7 @@ export function runtimeAdaptersOf(at: { configuration: TrierarchConfiguration; p
   }
   const clones = createCloneWorkspace({ configuration, root });
   return {
-    sessions: createContainerRuntime({ binary: runtime.binary, image: `${SESSION_IMAGE}:${version}`, tokenFile: paths.modelToken, homes: paths.homes, memory: runtime.memory, cpus: runtime.cpus, launch }),
+    sessions: createContainerRuntime({ binary: runtime.binary, image: `${SESSION_IMAGE}:${version}`, tokenFile: paths.modelToken, homes: paths.homes, sockets: paths.sockets, memory: runtime.memory, cpus: runtime.cpus, launch }),
     // The container mounts the folder at the path it is given, where the plugin inside keys it by `pwd -P` as the host's does: one path for both, the real one.
     workspace: { ...clones, prepare: async (at) => ({ folder: await realpath((await clones.prepare(at)).folder) }) },
     shipHomes: { homes: paths.homes, managedSettings },

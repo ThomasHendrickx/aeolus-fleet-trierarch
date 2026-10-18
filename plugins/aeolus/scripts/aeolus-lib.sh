@@ -300,7 +300,7 @@ aeolus_identity_read() {
   cat "$1" 2>/dev/null
 }
 
-# One field of an identity's text: fleetUrl, shipId, shipName, crewToken or folder.
+# One field of an identity's text: fleetUrl, shipId, shipName, crewToken, socket, lease or folder.
 aeolus_identity_field() {
   local text="$1" field="$2"
   printf '%s\n' "$text" | sed -n "s/^${field}=//p" | head -n 1
@@ -464,13 +464,25 @@ aeolus_lease_key() {
   printf '%s' "$1" | aeolus_sha256 | cut -c1-16
 }
 
-# The key of the lease the folder's crew holds now; fails once it is gone.
-aeolus_current_lease_key() {
-  local identity token
-  identity="$(aeolus_identity_file)" || return 1
-  token="$(aeolus_identity_token "$identity")"
+# The key of the lease an identity's crew holds: its lease, kept by a folder that
+# calls over its trierarch's socket, or that of its crew token. <identity text>
+aeolus_identity_lease_key() {
+  local lease token
+  lease="$(aeolus_identity_field "$1" lease)"
+  if [ -n "$lease" ]; then
+    printf '%s' "$lease"
+    return 0
+  fi
+  token="$(aeolus_identity_field "$1" crewToken)"
   [ -n "$token" ] || return 1
   aeolus_lease_key "$token"
+}
+
+# The key of the lease the folder's crew holds now; fails once it is gone.
+aeolus_current_lease_key() {
+  local identity
+  identity="$(aeolus_identity_file)" || return 1
+  aeolus_identity_lease_key "$(aeolus_identity_read "$identity")"
 }
 
 # Marks that the watcher's push receive made the folder's lease pushed (#756,
@@ -487,7 +499,7 @@ aeolus_pushed_file() {
 # session in Claude Code or Codex whose lease the watcher, the Codex wake
 # bridge or the trierarch pushed. <identity text>
 aeolus_reports_here() {
-  [ "$(cat "$(aeolus_pushed_file)" 2>/dev/null)" = "$(aeolus_lease_key "$(aeolus_identity_field "$1" crewToken)")" ]
+  [ "$(cat "$(aeolus_pushed_file)" 2>/dev/null)" = "$(aeolus_identity_lease_key "$1")" ]
 }
 
 # The turn as the fleet last took it: the turn marker's line it reported.

@@ -37,8 +37,8 @@ function bodyOf(request: IncomingMessage): Promise<string> {
   });
 }
 
-/** Starts a stub fleet that answers each call with what `answerFor` picks for it. */
-async function serve(answerFor: (call: StubCall) => StubAnswer): Promise<StubFleet> {
+/** Starts a stub fleet that answers each call with what `answerFor` picks for it: on a TCP port, or on a Unix socket at `socket`. */
+async function serve(answerFor: (call: StubCall) => StubAnswer, socket?: string): Promise<StubFleet> {
   const calls: StubCall[] = [];
   const server: Server = createServer((request, response) => {
     void bodyOf(request).then(async (body) => {
@@ -50,13 +50,20 @@ async function serve(answerFor: (call: StubCall) => StubAnswer): Promise<StubFle
       response.end(JSON.stringify(answer.body));
     });
   });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  if (typeof address !== 'object' || address === null) {
-    throw new Error('The stub fleet listens on no TCP port');
-  }
+  const url = await new Promise<string>((resolve) => {
+    if (socket !== undefined) {
+      server.listen(socket, () => {
+        resolve(`unix:${socket}`);
+      });
+      return;
+    }
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      resolve(typeof address === 'object' && address !== null ? `http://127.0.0.1:${String(address.port)}` : '');
+    });
+  });
   return {
-    url: `http://127.0.0.1:${String(address.port)}`,
+    url,
     calls,
     close: () =>
       new Promise((resolve) => {
@@ -73,9 +80,9 @@ function nextOf(script: readonly StubAnswer[], count: number): StubAnswer | unde
   return script[Math.min(count, script.length - 1)];
 }
 
-export function startStubFleet(answers: readonly StubAnswer[]): Promise<StubFleet> {
+export function startStubFleet(answers: readonly StubAnswer[], options: { socket?: string } = {}): Promise<StubFleet> {
   let count = 0;
-  return serve(() => nextOf(answers, count++) ?? { status: 500, body: {} });
+  return serve(() => nextOf(answers, count++) ?? { status: 500, body: {} }, options.socket);
 }
 
 /**
@@ -83,11 +90,11 @@ export function startStubFleet(answers: readonly StubAnswer[]): Promise<StubFlee
  * states apart what the inbox, receive and ack answer. A path without a
  * script answers 404.
  */
-export function startRoutedStubFleet(routes: Readonly<Record<string, readonly StubAnswer[]>>): Promise<StubFleet> {
+export function startRoutedStubFleet(routes: Readonly<Record<string, readonly StubAnswer[]>>, options: { socket?: string } = {}): Promise<StubFleet> {
   const counts = new Map<string, number>();
   return serve((call) => {
     const count = counts.get(call.path) ?? 0;
     counts.set(call.path, count + 1);
     return nextOf(routes[call.path] ?? [], count) ?? { status: 404, body: {} };
-  });
+  }, options.socket);
 }

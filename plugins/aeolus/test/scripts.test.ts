@@ -1822,6 +1822,50 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       });
     });
 
+    describe("over the trierarch's socket (decision 0026): the folder holds no crew token, and the hooks still report on its pushed lease", () => {
+      let sockets: string;
+
+      beforeEach(() => {
+        // Short, under /tmp: a Unix socket path is at most 104 bytes on macOS.
+        sockets = mkdtempSync('/tmp/aeolus-sock-');
+      });
+
+      afterEach(() => {
+        rmSync(sockets, { recursive: true, force: true });
+      });
+
+      /** The trierarch hands one delivery over to a folder it crews over its socket. */
+      async function aHandOverOverTheSocket(): Promise<StubFleet> {
+        const socket = join(sockets, 'fleet.sock');
+        fleet = await startRoutedStubFleet(
+          { '/api/v1/ship/pushReceive': [receiving(aDelivery())], '/api/v1/ship/handed': [handedOk], '/api/v1/ship/ack': [acknowledged], '/api/v1/ship/handled': [taken], '/api/v1/ship/turn': [taken] },
+          { socket },
+        );
+        expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', '--socket', socket, fleet.url, SHIP_ID, 'scout'], stdin: CREW_TOKEN }).status).toBe(0);
+        aTurnEnded();
+        expect(await hand()).toMatchObject({ status: 0, stdout: HAND_OVER_LINE });
+        return fleet;
+      }
+
+      it('makes the lease pushed', async () => {
+        await aHandOverOverTheSocket();
+
+        expect(run('aeolus-identity.sh', { args: ['show'] }).stdout).toContain('\ndelivery: pushed\n');
+      });
+
+      it('reports the turn busy at the prompt that starts it', async () => {
+        const stub = await aHandOverOverTheSocket();
+        await aPrompt();
+        await aTurnEnds();
+        stub.calls.length = 0;
+
+        await aPrompt();
+
+        const [, at] = turn().stdout.trim().split(' ');
+        expect(callsTo(stub, '/api/v1/ship/turn').map((call) => call.body)).toEqual([`{"turn":"busy","at":"${at ?? ''}"}`]);
+      });
+    });
+
     describe('died: the session died, before the trierarch starts it again (3.5 to 3.7, 3.10)', () => {
       it('marks the turn busy, as the trierarch starts the session again with a prompt, so no pass hands a message into that turn (#890)', async () => {
         fleet = await startRoutedStubFleet({ '/api/v1/ship/turn': [taken] });

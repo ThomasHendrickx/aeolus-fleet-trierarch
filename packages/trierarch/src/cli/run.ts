@@ -10,6 +10,8 @@ import { createJsonState } from '../adapters/json-state.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
 import { runtimeAdaptersOf } from '../adapters/runtime-adapters.js';
+import { createCallerCheck } from '../adapters/caller-check.js';
+import { createShipSockets } from '../adapters/ship-sockets.js';
 import { sessionsLaunch } from '../adapters/tmux.js';
 import { createTrust } from '../adapters/trust.js';
 import { runningVersion } from '../adapters/version.js';
@@ -85,7 +87,17 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     logger,
   });
   const handle = createHandleDelivery({ fleet, logger });
-  const runPass = createRunPass({ fleet, harnesses, processes: sessions, workspace, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID });
+  // Each session's fleet calls, with the crew token from the state at each call (decision 0026).
+  const sockets = createShipSockets({
+    root: paths.sockets,
+    fleetUrl: crew.fleetUrl,
+    crewTokenOf: async (shipId) => (await state.load()).entries[shipId]?.crewToken,
+    mayCall: createCallerCheck({ platform: process.platform, sessionRootOf: (shipId) => sessions.sessionRootOf(shipId) }),
+    log: (line) => {
+      logger.info(`fleet call ${line}`);
+    },
+  });
+  const runPass = createRunPass({ fleet, harnesses, processes: sessions, workspace, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets });
   const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup });
   // Each pass ends with the trierarch's own report: the first at start, then only when it changed.
   const pass = async (): Promise<void> => {
@@ -96,7 +108,12 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   await writeRunningFile(paths.running, { pid: process.pid, version: setup.version });
   const found = await Promise.all(Object.entries(plugins).map(async ([harness, plugin]) => `${harness} at ${await plugin.root()}`));
   logger.info(`aeolus-trierarch ${setup.version} runs for ${crew.fleetUrl}, with the aeolus plugin for ${found.join(' and ') || 'no harness'}`);
-  await loop({ receive: (stop) => fleet.receive(stop), handle, pass, signal, logger, intervalMs: PASS_INTERVAL_MS });
+  try {
+    await loop({ receive: (stop) => fleet.receive(stop), handle, pass, signal, logger, intervalMs: PASS_INTERVAL_MS });
+  } finally {
+    // While the trierarch is down a session's call gets no answer, as when the fleet is down (decision 0026).
+    await sockets.closeAll();
+  }
 }
 
 /**

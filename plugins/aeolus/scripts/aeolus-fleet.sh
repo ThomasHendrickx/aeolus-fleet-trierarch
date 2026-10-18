@@ -69,15 +69,27 @@ fleet_busy() {
   [ "$status" = 503 ] && [ "$(aeolus_json_string "$body" code)" = SERVICE_UNAVAILABLE ]
 }
 
+# A folder a trierarch crews calls over its ship's socket (decision 0026),
+# with no bearer: the trierarch adds the crew token and hands back the fleet's
+# answer unchanged. Any other calls the fleet with its own crew token.
 call_fleet_once() {
   local method="$1" path="$2" token="$3" input="$4" answer
-  local args=(-sS --max-time "$MAX_SECONDS" -w '\n%{http_code}' -X "$method" "${fleet_url}${path}")
+  local args=(-sS --max-time "$MAX_SECONDS" -w '\n%{http_code}' -X "$method")
+  if [ -n "${socket:-}" ]; then
+    args+=(--unix-socket "$socket" "http://trierarch${path}")
+  else
+    args+=("${fleet_url}${path}")
+  fi
   [ -n "$input" ] && args+=(-H 'content-type: application/json')
-  answer="$({ aeolus_bearer_config "$token"; aeolus_body_config "$input"; } | curl -K - "${args[@]}" 2>/dev/null)"
+  answer="$({ [ -n "${socket:-}" ] || aeolus_bearer_config "$token"; aeolus_body_config "$input"; } | curl -K - "${args[@]}" 2>/dev/null)"
   status="$(printf '%s' "$answer" | tail -n 1)"
   body="$(printf '%s' "$answer" | sed '$d')"
   if [ -z "$status" ] || [ "$status" = 000 ]; then
-    echo "aeolus: no answer from ${fleet_url}"
+    if [ -n "${socket:-}" ]; then
+      echo "aeolus: no answer from the trierarch at ${socket}"
+    else
+      echo "aeolus: no answer from ${fleet_url}"
+    fi
     exit 6
   fi
 }
@@ -169,6 +181,7 @@ if ! identity_text="$(aeolus_identity_read "$identity")"; then
   exit 2
 fi
 fleet_url="$(aeolus_identity_field "$identity_text" fleetUrl)"
+socket="$(aeolus_identity_field "$identity_text" socket)"
 
 if [ "$command" = protocol ]; then
   call_fleet GET /api/v1/openapi.json "" ""

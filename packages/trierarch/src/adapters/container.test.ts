@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createServer as createNetServer, type Server as NetServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -7,7 +8,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { newId } from '../../test/support/in-memory.js';
 import { buildTestSessionImage, rootlessPodman } from '../../test/support/podman.js';
 import { sessionRuntimeContract } from '../../test/support/session-runtime-contract.js';
-import type { SessionRuntime } from '../core/ports.js';
+import { createCallerCheck } from './caller-check.js';
 import { createContainerRuntime, MODEL_TOKEN_VARIABLE } from './container.js';
 import { heldCommand } from './held-command.js';
 import { runCommand, type CommandResult } from './run-command.js';
@@ -28,7 +29,11 @@ describe('the session runtime contract, on rootless Podman', () => {
   let folder: string;
   /** Where the ships' homes are kept, apart from the folder, as on the machine. */
   let homes: string;
-  let runtime: SessionRuntime;
+  /** Where the ships' sockets are kept, one folder per ship, as the trierarch keeps them. */
+  let sockets: string;
+  let runtime: ReturnType<typeof createContainerRuntime>;
+  /** The ships' sockets a test listens on, closed after it. */
+  const listening: NetServer[] = [];
 
   // First, so a skip runs neither the setup nor the cleanup, which need podman.
   beforeEach((context) => {
@@ -55,7 +60,9 @@ describe('the session runtime contract, on rootless Podman', () => {
     const tokenFile = join(folder, 'model-token');
     writeFileSync(tokenFile, `${MODEL_TOKEN}\n`, { mode: 0o600 });
     homes = realpathSync(mkdtempSync(join(tmpdir(), 'trierarch-homes-')));
-    runtime = createContainerRuntime({ binary: 'podman', image, owner, tokenFile, homes, ...CAPS });
+    // Short, under /tmp: a Unix socket path is at most 104 bytes on macOS.
+    sockets = realpathSync(mkdtempSync('/tmp/aeolus-sockets-'));
+    runtime = createContainerRuntime({ binary: 'podman', image, owner, tokenFile, homes, sockets, ...CAPS });
   });
 
   afterEach(async () => {
@@ -64,8 +71,10 @@ describe('the session runtime contract, on rootless Podman', () => {
     if (ids.length > 0) {
       await runCommand('podman', { args: ['rm', '--force', '--time', '0', ...ids] });
     }
+    await Promise.all(listening.splice(0).map((server) => new Promise((resolve) => server.close(resolve))));
     rmSync(folder, { recursive: true, force: true });
     rmSync(homes, { recursive: true, force: true });
+    rmSync(sockets, { recursive: true, force: true });
   });
 
   sessionRuntimeContract({ runtime: () => runtime, folder: () => folder });
@@ -98,6 +107,46 @@ describe('the session runtime contract, on rootless Podman', () => {
     await expect.poll(async () => runtime.screen(scout), { timeout: 5000 }).toContain('holds scout.identity');
     const screen = await runtime.screen(scout);
     expect({ home: screen.includes('home /home/ubuntu'), other: screen.includes('holds other.identity'), read: screen.includes('read shipName') }).toEqual({ home: true, other: false, read: false });
+  });
+
+  it("lets the session reach its own ship's socket at the path the trierarch keeps it, and no other ship's (decision 0026)", async () => {
+    const [scout, other] = [newId('ship'), newId('ship')];
+    for (const shipId of [scout, other]) {
+      mkdirSync(join(sockets, shipId), { mode: 0o700 });
+      const server = createNetServer();
+      await new Promise<void>((resolve) => server.listen(join(sockets, shipId, 'fleet.sock'), resolve));
+      listening.push(server);
+    }
+
+    // Only the shell's builtins: the test image holds no ls or cat.
+    await runtime.start({
+      shipId: scout,
+      folder,
+      command: ['sh', '-c', `[ -S ${join(sockets, scout, 'fleet.sock')} ] && echo "own socket"; [ -e ${join(sockets, other, 'fleet.sock')} ] && echo "other socket"; sleep 30`],
+    });
+
+    await expect.poll(async () => runtime.screen(scout), { timeout: 5000 }).toContain('own socket');
+    expect(await runtime.screen(scout)).not.toContain('other socket');
+  });
+
+  it.runIf(process.platform === 'linux')("lets the socket's caller check find a process of the ship's own container, in the container's own namespaces, and only for that ship (decision 0026)", async () => {
+    const [scout, other] = [newId('ship'), newId('ship')];
+    mkdirSync(join(sockets, scout), { mode: 0o700 });
+    const connections: Socket[] = [];
+    const server = createNetServer((connection) => connections.push(connection));
+    await new Promise<void>((resolve) => server.listen(join(sockets, scout, 'fleet.sock'), resolve));
+    listening.push(server);
+
+    // The test image holds no fleet client: its tmux, pointed at the socket, connects as one would.
+    await runtime.start({ shipId: scout, folder, command: ['sh', '-c', `tmux -S ${join(sockets, scout, 'fleet.sock')} list-sessions; sleep 30`] });
+
+    await expect.poll(() => connections.length, { timeout: 10_000 }).toBeGreaterThan(0);
+    const [connection] = connections;
+    const mayCall = createCallerCheck({ platform: 'linux', sessionRootOf: (shipId) => runtime.sessionRootOf(shipId) });
+    expect({ own: connection && (await mayCall(scout, connection)), other: connection && (await mayCall(other, connection)) }).toEqual({ own: true, other: false });
+    for (const each of connections) {
+      each.destroy();
+    }
   });
 
   it("makes the ship's home when it has none yet, for its owner alone", async () => {
@@ -137,20 +186,22 @@ describe('the container a session runs in', () => {
   let tokenFile: string;
   /** The ships' homes, in a folder of the test's own: the runtime makes a home as it starts a container. */
   let homes: string;
+  let sockets: string;
 
   beforeEach(() => {
     tokenFolder = mkdtempSync(join(tmpdir(), 'trierarch-token-'));
     tokenFile = join(tokenFolder, 'model-token');
     writeFileSync(tokenFile, `${MODEL_TOKEN}\n`, { mode: 0o600 });
     homes = join(tokenFolder, 'homes');
+    sockets = join(tokenFolder, 'sockets');
   });
 
   afterEach(() => {
     rmSync(tokenFolder, { recursive: true, force: true });
   });
 
-  function runtimeWith(runner: ReturnType<typeof recordingRunner>, options: { launch?: readonly string[]; binary?: string } = {}): SessionRuntime {
-    return createContainerRuntime({ binary: options.binary ?? 'podman', image: 'ghcr.io/thomashendrickx/aeolus-session:0.25.0', tokenFile, homes, ...CAPS, run: runner.run, ...(options.launch !== undefined && { launch: options.launch }) });
+  function runtimeWith(runner: ReturnType<typeof recordingRunner>, options: { launch?: readonly string[]; binary?: string } = {}): ReturnType<typeof createContainerRuntime> {
+    return createContainerRuntime({ binary: options.binary ?? 'podman', image: 'ghcr.io/thomashendrickx/aeolus-session:0.25.0', tokenFile, homes, sockets, ...CAPS, run: runner.run, ...(options.launch !== undefined && { launch: options.launch }) });
   }
 
   async function started(options: { launch?: readonly string[]; binary?: string; env?: Record<string, string> } = {}) {
@@ -218,15 +269,31 @@ describe('the container a session runs in', () => {
     expect(run.args).toEqual(expect.arrayContaining(['--userns=keep-id:uid=1000,gid=1000', '--device', '/dev/fuse', '--device', '/dev/net/tun', '--cap-add', 'SYS_ADMIN', '--security-opt', 'unmask=ALL']));
   });
 
-  it("mounts only the session's folder, at its own path, and its ship's own home as the container's home, so never the runtime's socket", async () => {
+  it("mounts only the session's folder, at its own path, its ship's own home as the container's home, and its ship's socket folder at its own path, so never the runtime's socket", async () => {
     const { run } = await started();
 
     expect({ volumes: valuesOf(run.args, '--volume'), workdir: valuesOf(run.args, '--workdir'), home: valuesOf(run.args, '--env'), others: run.args.filter((arg) => arg.startsWith('-v') || arg.startsWith('--mount')) }).toEqual({
-      volumes: [`${folder}:${folder}`, `${homes}/${shipId}:/home/ubuntu`],
+      volumes: [`${folder}:${folder}`, `${homes}/${shipId}:/home/ubuntu`, `${sockets}/${shipId}:${sockets}/${shipId}`],
       workdir: [folder],
       home: ['HOME=/home/ubuntu'],
       others: [],
     });
+  });
+
+  it("names the container's first process, as the host sees it, as the root of the ship's session", async () => {
+    const runner = recordingRunner((args) => (args[0] === 'inspect' ? { stdout: '4242\n' } : {}));
+
+    await expect(runtimeWith(runner).sessionRootOf(shipId)).resolves.toBe(4242);
+    expect(runner.calls.at(-1)?.args).toEqual(['inspect', '--format', '{{.State.Pid}}', `trierarch-${shipId}`]);
+  });
+
+  it.each([
+    { label: 'no container', answer: { status: 125, stdout: '' } },
+    { label: 'a container that runs no more', answer: { stdout: '0\n' } },
+  ])("names no root for $label", async ({ answer }) => {
+    const runner = recordingRunner((args) => (args[0] === 'inspect' ? answer : {}));
+
+    await expect(runtimeWith(runner).sessionRootOf(shipId)).resolves.toBeUndefined();
   });
 
   it('gives the container no restart policy: the trierarch starts a dead one again itself', async () => {
