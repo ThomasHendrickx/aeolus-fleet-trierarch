@@ -1823,6 +1823,16 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
     });
 
     describe('died: the session died, before the trierarch starts it again (3.5 to 3.7, 3.10)', () => {
+      it('marks the turn busy, as the trierarch starts the session again with a prompt, so no pass hands a message into that turn (#890)', async () => {
+        fleet = await startRoutedStubFleet({ '/api/v1/ship/turn': [taken] });
+        crewedByATrierarch(fleet.url);
+        aTurnEnded();
+
+        await died();
+
+        expect(turn().stdout).toMatch(/^busy /);
+      });
+
       it('keeps a confirmed message to hand once more: its session died after it took it', async () => {
         const stub = await aTrierarchHandOver({ '/api/v1/ship/ack': [acknowledged] });
         await aPrompt();

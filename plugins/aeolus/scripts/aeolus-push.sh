@@ -17,6 +17,10 @@
 #                         one handed once more already is reported not handled,
 #                         and one received or handed is reported handed again
 #                         with the next number, for the next prompt to confirm.
+#                         Marks the turn busy: the trierarch starts the session
+#                         again with a prompt, and a marker left idle by the
+#                         session that died would let a pass hand a message
+#                         into that turn (#890). Its Stop hook marks it idle.
 #
 # Exit codes:
 #   0  hand: a message is handed over: type the line; died: done
@@ -92,6 +96,8 @@ case "${1:-}" in
   hand) hand ;;
   died)
     aeolus_store_session_started "$identity" 'the session it was handed once more to died too (the trierarch starts it again)'
+    aeolus_mark_turn busy
+    aeolus_report_turn "$(aeolus_identity_read "$identity")"
     exit 0
     ;;
   *)
