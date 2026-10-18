@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
-import { SHIP_PROTOCOL } from '../../../packages/core/src/adapters/trpc/ship-protocol.ts';
+import { SHIP_PROTOCOL } from '@aeolus-fleet/core/testing';
+
 import { NO_TERMINAL_QUESTIONS } from '../../../packages/common/src/fleet/no-terminal-questions.ts';
 import { ANSWER_CONTENT_TYPE, QUESTION_CONTENT_TYPE } from '../../../packages/common/src/schemas/question.ts';
 

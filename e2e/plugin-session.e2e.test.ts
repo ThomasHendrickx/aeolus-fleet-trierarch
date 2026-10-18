@@ -13,10 +13,10 @@ import { createApp } from '../packages/core/src/app.js';
 import type { Caller } from '../packages/core/src/domain/shared/caller.js';
 import { createUseCases, systemClock, type UseCases } from '../packages/core/src/wiring.js';
 import { OPERATOR, operatorCaller } from '../packages/core/test/support/core-fixtures.js';
-import { createMigratedDatabase } from '../packages/core/test/support/database.js';
-import { unwrap } from '../packages/core/test/support/result.js';
+import { createMigratedDatabase } from '../packages/core/src/testing/database.js';
+import { unwrap } from '../packages/core/src/testing/result.js';
 import { freePort } from './support/web.js';
-import { newKey } from '../packages/core/test/support/keys.js';
+import { newKey } from '../packages/core/src/testing/keys.js';
 
 // The aeolus plugin in a real interactive Claude Code session, driven in tmux
 // against a fleet on this machine and with no fleet MCP server: the session

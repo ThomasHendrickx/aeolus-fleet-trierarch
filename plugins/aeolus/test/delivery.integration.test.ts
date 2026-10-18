@@ -9,15 +9,8 @@ import type { ShipId } from '@aeolus-fleet/common';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type {} from '../../../packages/core/test/postgres.global-setup.js';
-import { createPrismaClient, type PrismaClient } from '../../../packages/core/src/adapters/prisma/client.js';
-import { createApp } from '../../../packages/core/src/app.js';
-import type { Caller } from '../../../packages/core/src/domain/shared/caller.js';
-import { createUseCases, type UseCases } from '../../../packages/core/src/wiring.js';
-import { FLEET_URL, OPERATOR, operatorCaller, secretOf } from '../../../packages/core/test/support/core-fixtures.js';
-import { createMigratedDatabase } from '../../../packages/core/test/support/database.js';
-import { newKey } from '../../../packages/core/test/support/keys.js';
-import { unwrap } from '../../../packages/core/test/support/result.js';
+import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, FLEET_URL, newKey, OPERATOR, operatorCaller, secretOf, unwrap, type Caller, type PrismaClient, type UseCases } from '@aeolus-fleet/core/testing';
+
 import { scriptEnvironment } from './script-environment.js';
 
 // The aeolus plugin's scripts against a real fleet (#819): the watcher and the
