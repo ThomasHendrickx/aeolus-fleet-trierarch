@@ -1949,6 +1949,16 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
         expect(store()).toEqual([`${DELIVERY_ID} received`, `${FORCED_ID} handed`]);
       });
 
+      it('keeps a plain message the receive answers instead of the forced one, as when another ship of the type took it first, for the next idle, never into the busy turn (#926)', async () => {
+        fleet = await aWakingFleet([inbox(1, 1), inbox(1)], [receiving(aDelivery())]);
+        crew(fleet.url);
+        aPromptSubmitted();
+
+        await expect(start('aeolus-wait.sh', { env: { AEOLUS_MAX_SECONDS: '3', AEOLUS_POLL_SECONDS: '1' } }).exited).resolves.toMatchObject({ status: 6 });
+        expect(callsTo(fleet, '/api/v1/ship/handed')).toEqual([]);
+        expect(store()).toEqual([`${DELIVERY_ID} received`]);
+      });
+
       it('holds a forced message while a Codex task is busy: hand-crewed Codex gets it at its next idle', async () => {
         fleet = await aWakingFleet([inbox(1, 1)], [receiving(aForcedDelivery())]);
         const stub = fleet;
@@ -2000,6 +2010,27 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
         expect(await force()).toMatchObject({ status: 0, stdout: HAND_OVER_LINE });
         expect(handedBodies(stub).at(-1)).toBe(`{"deliveryId":"${FORCED_ID}","handOverNumber":1}`);
         expect(store()).toEqual([`${DELIVERY_ID} onceMore`, `${FORCED_ID} handed`]);
+      });
+
+      it('keeps a plain message the push receive answers instead of the forced one, as when another ship of the type took it first, and stops no busy turn for it (#926)', async () => {
+        fleet = await startRoutedStubFleet({ '/api/v1/ship/pushReceive': [receiving(aDelivery())], '/api/v1/ship/handed': [handedOk] });
+        crewedByATrierarch(fleet.url);
+        aPromptSubmitted();
+
+        expect(await force()).toMatchObject({ status: 1, stdout: '' });
+        expect(handedBodies(fleet)).toEqual([]);
+        expect(store()).toEqual([`${DELIVERY_ID} received`]);
+      });
+
+      it('hands the plain message it kept at the next idle (#926)', async () => {
+        fleet = await startRoutedStubFleet({ '/api/v1/ship/pushReceive': [receiving(aDelivery())], '/api/v1/ship/handed': [handedOk], '/api/v1/ship/turn': [taken] });
+        crewedByATrierarch(fleet.url);
+        aPromptSubmitted();
+        await force();
+        aTurnEnded();
+
+        expect(await hand()).toMatchObject({ status: 0, stdout: HAND_OVER_LINE });
+        expect(handedBodies(fleet)).toEqual([`{"deliveryId":"${DELIVERY_ID}","handOverNumber":1}`]);
       });
 
       it('answers 1 and prints nothing when the push receive hands nothing over', async () => {

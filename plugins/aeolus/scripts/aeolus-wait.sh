@@ -214,9 +214,17 @@ while :; do
     answered
     aeolus_lease_key "$crew_token" > "$(aeolus_pushed_file)"
     if id="$(aeolus_store_put "$(printf '%s' "$body" | tr -d '\n')")"; then
-      woken="woken, ${waiting} deliveries wait"
-      [ "$forced" -eq 0 ] || woken="${woken}, ${forced} forced"
-      hand_over "$id" "${woken}: handed ${id} over"
+      if aeolus_is_idle || aeolus_store_is_forced "$id"; then
+        woken="woken, ${waiting} deliveries wait"
+        [ "$forced" -eq 0 ] || woken="${woken}, ${forced} forced"
+        hand_over "$id" "${woken}: handed ${id} over"
+        continue
+      fi
+      # A plain message instead of the forced one, as when another ship of its
+      # type took that first: the busy turn never gets it; the next idle does.
+      aeolus_log "$identity" wake "woken, ${forced} forced: the receive answered ${id}, not forced: held for the next idle"
+      printf '%s 1\n' "$waiting" > "$waiting_file"
+      sleep "$POLL_SECONDS"
       continue
     fi
     # Nothing handed, as when another ship of its type took the delivery first.

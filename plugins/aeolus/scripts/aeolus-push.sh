@@ -16,6 +16,10 @@
 #                         idle or busy: hands it over first, before what the
 #                         store holds, with one push receive, which answers a
 #                         forced delivery first, and prints the line to type.
+#                         A plain one it answers instead, as when another ship
+#                         of the type took the forced one first, is kept for
+#                         the next idle while the turn is busy: nothing is
+#                         handed over, so no turn is stopped for it.
 #                         While the turn is busy the trierarch then stops it
 #                         and types the line as a new prompt: the stop is
 #                         marked first, so a stopped turn is not taken as one
@@ -85,13 +89,14 @@ hand() {
   if id="$(aeolus_store_first received handed)"; then
     hand_entry "$id" "woken: handed ${id} over again: it was not confirmed"
   fi
-  receive_and_hand 'woken'
+  push_receive
+  hand_entry "$id" "woken: handed ${id} over"
 }
 
-# One push receive, handed over: what the fleet answers first, a forced
-# delivery before any other. <what the log says first>
-receive_and_hand() {
-  local id output
+# One push receive: sets id to the entry of what the fleet answers first, a
+# forced delivery before any other. Exits 1 when it answers nothing.
+push_receive() {
+  local output
   output="$(AEOLUS_CALL_MAX_SECONDS="$PUSH_RECEIVE_SECONDS" "$(dirname "$0")/aeolus-fleet.sh" pushReceive '{"max":1}' 2>/dev/null)"
   case $? in
     0) ;;
@@ -109,7 +114,6 @@ receive_and_hand() {
     # Nothing handed, as when another ship of its type took the delivery first.
     exit 1
   fi
-  hand_entry "$id" "$1: handed ${id} over"
 }
 
 force() {
@@ -118,7 +122,12 @@ force() {
   mark="$(aeolus_forced_stop_file)" || exit 2
   : > "$mark"
   trap '[ "$is_stop_kept" = 1 ] || rm -f "$mark"' EXIT
-  receive_and_hand 'forced'
+  push_receive
+  if ! aeolus_is_idle && ! aeolus_store_is_forced "$id"; then
+    aeolus_log "$identity" wake "forced: the push receive answered ${id}, not forced: kept for the next idle"
+    exit 1
+  fi
+  hand_entry "$id" "forced: handed ${id} over"
 }
 
 case "${1:-}" in

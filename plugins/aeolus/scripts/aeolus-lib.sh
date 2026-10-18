@@ -719,6 +719,13 @@ aeolus_store_put() {
   printf '%s' "$id"
 }
 
+# Whether the entry's delivery is forced (decision 0040). <deliveryId>
+aeolus_store_is_forced() {
+  local dir
+  dir="$(aeolus_store_dir)" || return 1
+  grep -Eq '"isForced"[[:space:]]*:[[:space:]]*true' "$dir/$1.json" 2>/dev/null
+}
+
 # An entry's state: received, handed or confirmed. Fails when there is none.
 aeolus_store_state() {
   local dir
