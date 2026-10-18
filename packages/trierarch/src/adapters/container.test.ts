@@ -9,6 +9,7 @@ import { buildTestSessionImage, rootlessPodman } from '../../test/support/podman
 import { sessionRuntimeContract } from '../../test/support/session-runtime-contract.js';
 import type { SessionRuntime } from '../core/ports.js';
 import { createContainerRuntime, MODEL_TOKEN_VARIABLE } from './container.js';
+import { heldCommand } from './held-command.js';
 import { runCommand, type CommandResult } from './run-command.js';
 
 const podman = await rootlessPodman({ platform: process.platform, info: () => runCommand('podman', { args: ['info', '--format', '{{.Host.Security.Rootless}}'] }) });
@@ -197,6 +198,12 @@ describe('the container a session runs in', () => {
     const { run } = await started();
 
     expect(valuesOf(run.args, '--memory-swap')).toEqual(['512m']);
+  });
+
+  it("runs the session's command held a moment after it ends, so its last output reaches the screen (#888)", async () => {
+    const { run } = await started();
+
+    expect(run.args.slice(-heldCommand(['claude', '--name', 'implementer-b']).length)).toEqual(heldCommand(['claude', '--name', 'implementer-b']));
   });
 
   it('caps the processes of the container, so a fork bomb in one session cannot starve the machine', async () => {

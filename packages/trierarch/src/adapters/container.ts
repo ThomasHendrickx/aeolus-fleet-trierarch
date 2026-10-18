@@ -6,6 +6,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { idSchema, type ShipId } from '@aeolus-fleet/common';
 
 import type { ObservedSession, SessionRuntime } from '../core/ports.js';
+import { heldCommand } from './held-command.js';
 import { shipHome } from './paths.js';
 import { runCommand, type CommandResult } from './run-command.js';
 
@@ -176,7 +177,7 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
           '-c',
           SESSION_SCRIPT,
           'sh',
-          ...command,
+          ...heldCommand(command),
         ];
         const started = await run(program, { args });
         if (started.status !== 0) {

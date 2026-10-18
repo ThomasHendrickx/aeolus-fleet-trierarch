@@ -9,6 +9,7 @@ import { newId } from '../../test/support/in-memory.js';
 import { sessionRuntimeContract } from '../../test/support/session-runtime-contract.js';
 import { runCommand } from './run-command.js';
 import type { SessionRuntime } from '../core/ports.js';
+import { HOLD_AFTER_EXIT_MS } from './held-command.js';
 import { createTmux, sessionsLaunch } from './tmux.js';
 
 // Against the real tmux, on a tmux server of the test's own, its socket in the
@@ -40,6 +41,16 @@ describe('the session runtime contract, on tmux', () => {
 });
 
 describe('sessions in tmux', () => {
+  it("runs the session's command held a moment after it ends, so its last output reaches the screen (#888)", async () => {
+    const shipId = newId('ship');
+
+    await tmux.start({ shipId, folder, command: ['sleep', '30'] });
+
+    const shown = await runCommand('tmux', { args: ['-L', server, 'display-message', '-p', '-t', `=trierarch-${shipId}:`, '#{pane_start_command}'] });
+    // tmux shows the start command quoted its own way, so the test looks for the hold in it.
+    expect(shown.stdout).toContain(`sleep ${String(HOLD_AFTER_EXIT_MS / 1000)}`);
+  });
+
   it('names the session after the ship, in the folder', async () => {
     const shipId = newId('ship');
 

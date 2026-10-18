@@ -3,6 +3,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { idSchema, type ShipId } from '@aeolus-fleet/common';
 
 import type { ObservedSession, SessionRuntime } from '../core/ports.js';
+import { heldCommand } from './held-command.js';
 import { runCommand } from './run-command.js';
 
 const PREFIX = 'trierarch-';
@@ -103,7 +104,7 @@ export function createTmux(options: { server?: string; launch?: readonly string[
       }
       await must(['set-option', '-w', '-t', `=${name}:`, 'remain-on-exit', 'on']);
       const sessionVariables = Object.entries(env).flatMap(([variable, value]) => ['-e', `${variable}=${value}`]);
-      await must(['respawn-pane', '-k', '-t', `=${name}:`, '-c', folder, ...sessionVariables, '--', ...command]);
+      await must(['respawn-pane', '-k', '-t', `=${name}:`, '-c', folder, ...sessionVariables, '--', ...heldCommand(command)]);
     },
     type: async ({ shipId, text, settleMs }) => {
       const target = `=${sessionName(shipId)}:`;
