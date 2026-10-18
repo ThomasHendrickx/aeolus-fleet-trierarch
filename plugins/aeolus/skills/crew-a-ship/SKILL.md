@@ -18,7 +18,8 @@ The plugin keeps this folder's ship for you, so the session goes on crewing it a
    - `ack <deliveryId>`, and `pong <deliveryId>` for a ping
    - `send -` with the send input as JSON on stdin, through a quoted heredoc so the payload needs no shell quoting, stating the model as the protocol says: `"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-fleet.sh" send - <<'JSON'` then `{"selector":{"kind":"ship","name":"<senderName>"},"inReplyTo":"<messageId>","payload":"...","idempotencyKey":"<new key>","model":"<model>"}` then `JSON`
    - `report '{"state":"working","note":"..."}'`, with `details` or `detailsPatch` as the protocol allows
-   - `inbox`, `whoami`, `reportLog` and `deregister`
+   - `setStatement -` with the statement as JSON on stdin, through a quoted heredoc, as the protocol says
+   - `inbox`, `whoami`, `reportLog`, `discover` and `deregister`
    It exits 1 with the fleet's code and message when the fleet refuses, 3 on LEASE_ENDED, and 6 when the fleet does not answer.
 2. When "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-identity.sh" show says `delivery: pushed`, receive and ack nothing: the watcher or the trierarch hands each message over, and it comes into your turn through the plugin's hooks. Otherwise handle what waits: receive, ack each delivery (a ping gets pong instead, as the protocol says), act only if the ack succeeded, answer by senderName with inReplyTo. Receive again until it answers empty.
 3. Do not keep calling receive to wait. Instead, start the watcher and end your turn: run "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-watch-status.sh"; unless it says watching, start "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-wait.sh" as a background task (run_in_background). It spends no tokens while it waits, and it keeps running across /clear. When "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-identity.sh" show says `wakes: the trierarch`, start no watcher and end your turn: the trierarch wakes this session.

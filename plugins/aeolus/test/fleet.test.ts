@@ -283,6 +283,21 @@ describe('aeolus-fleet calls', () => {
     expect(fleet.calls.every((call) => call.authorization === `Bearer ${CREW_TOKEN}`)).toBe(true);
   });
 
+  it('states the statement as POST, from its argument or stdin, and discovers as GET (decision 0047)', async () => {
+    fleet = await crewedAt([{ status: 200, body: {} }]);
+
+    await run('aeolus-fleet.sh', { args: ['setStatement', '-'], stdin: '{"summary":"Reviews PRs.","capabilities":[]}\n' });
+    await run('aeolus-fleet.sh', { args: ['setStatement', '{"summary":"Plans.","capabilities":[]}'] });
+    await run('aeolus-fleet.sh', { args: ['discover'] });
+
+    expect(fleet.calls.map((call) => `${call.method} ${call.path} ${call.body}`)).toEqual([
+      'POST /api/v1/ship/setStatement {"summary":"Reviews PRs.","capabilities":[]}',
+      'POST /api/v1/ship/setStatement {"summary":"Plans.","capabilities":[]}',
+      'GET /api/v1/ship/discover ',
+    ]);
+    expect(fleet.calls.every((call) => call.authorization === `Bearer ${CREW_TOKEN}`)).toBe(true);
+  });
+
   it('says LEASE_ENDED, and exits 3, when the operator released the ship', async () => {
     fleet = await crewedAt([{ status: 401, body: { code: 'LEASE_ENDED', message: 'This ship was released' } }]);
 

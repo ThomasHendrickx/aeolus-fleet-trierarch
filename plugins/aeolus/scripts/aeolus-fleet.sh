@@ -8,12 +8,12 @@
 #   aeolus-fleet.sh register <fleetUrl> <shipId> <secret> <location> [<squadronId>]
 #       location: DEVICE, CLOUD, SERVER or OTHER:<a few words>; the harness is
 #       the one aeolus_register_harness works out
-#   aeolus-fleet.sh receive|send|report|inbox [<json input>|-]   - reads the input from stdin
+#   aeolus-fleet.sh receive|send|report|inbox|setStatement [<json input>|-]   - reads the input from stdin
 #   aeolus-fleet.sh ack|pong <deliveryId>
 #   aeolus-fleet.sh pushReceive|handed|turn <json input>   - the watcher's and the hooks' calls (#756), never the model's
 #   aeolus-fleet.sh handled <deliveryId>, notHandled <deliveryId> [<reason>]
 #       - the hooks' calls (#756), never the model's; the reason says why (#847)
-#   aeolus-fleet.sh whoami|reportLog|deregister
+#   aeolus-fleet.sh whoami|reportLog|discover|deregister
 #   aeolus-fleet.sh protocol    the ship protocol, as the fleet states it
 #
 # While the fleet is busy (503 SERVICE_UNAVAILABLE: nothing was stored), the
@@ -42,7 +42,7 @@ MAX_SECONDS="${AEOLUS_CALL_MAX_SECONDS:-60}"
 BUSY_WAITS="${AEOLUS_BUSY_WAITS:-1 2 4 8}"
 
 usage() {
-  echo "usage: aeolus-fleet.sh register|receive|ack|pong|send|report|inbox|whoami|reportLog|deregister|protocol|pushReceive|handed|handled|notHandled|turn ..." >&2
+  echo "usage: aeolus-fleet.sh register|receive|ack|pong|send|report|inbox|setStatement|whoami|reportLog|discover|deregister|protocol|pushReceive|handed|handled|notHandled|turn ..." >&2
   exit 2
 }
 
@@ -194,7 +194,7 @@ if [ "$command" = protocol ]; then
 fi
 
 case "$command" in
-  receive|send|report|inbox|pushReceive|handed|turn)
+  receive|send|report|inbox|setStatement|pushReceive|handed|turn)
     input="${2:-}"
     [ -n "$input" ] || input='{}'
     [ "$input" = - ] && input="$(cat)"
@@ -210,7 +210,7 @@ case "$command" in
     input="{\"deliveryId\":\"$(aeolus_json_escape "$2")\"${3:+,\"reason\":\"$(aeolus_json_escape "$3")\"}}"
     method=POST
     ;;
-  whoami|reportLog)
+  whoami|reportLog|discover)
     input=""
     method=GET
     ;;
