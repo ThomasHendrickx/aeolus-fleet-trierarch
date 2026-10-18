@@ -6,7 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { newId } from '../../test/support/in-memory.js';
 import { buildTestSessionImage, rootlessPodman } from '../../test/support/podman.js';
-import { userSystemd } from '../../test/support/user-systemd.js';
+import { USER_SYSTEMD_TESTS_VARIABLE, userSystemd } from '../../test/support/user-systemd.js';
 import { createContainerRuntime } from './container.js';
 import { trierarchPaths } from './paths.js';
 import { runCommand } from './run-command.js';
@@ -14,14 +14,15 @@ import { createService, serviceEnvironment, SYSTEMD_UNIT } from './service.js';
 import { createTmux, sessionsLaunch } from './tmux.js';
 
 // The unit the trierarch writes, run by the real systemd user manager under a
-// name of the test's own, so the machine's own trierarch is left alone. Its
-// command starts a tmux server the way the trierarch starts its sessions, in a
-// scope of its own. Runs wherever a systemd user manager starts units (a Linux
-// desktop or host, not CI), degraded included; elsewhere each test skips,
-// saying why (#552). Each test proves it leaves nothing on the machine (#537):
+// name of the test's own. Its command starts a tmux server the way the
+// trierarch starts its sessions, in a scope of its own. The user manager is the
+// machine's own, the one a live trierarch runs under, so the tests run only
+// where AEOLUS_TEST_USER_SYSTEMD=1 asks for them, as CI does on a runner that
+// hosts no trierarch (#886), and there wherever the user manager starts units,
+// degraded included; elsewhere each test skips, saying why (#552). Each test proves it leaves nothing on the machine (#537):
 // no unit, no scope, no tmux server, no socket.
 
-const systemd = await userSystemd({ platform: process.platform, isSystemRunning: () => runCommand('systemctl', { args: ['--user', 'is-system-running'] }) });
+const systemd = await userSystemd({ isAskedFor: process.env[USER_SYSTEMD_TESTS_VARIABLE] === '1', platform: process.platform, isSystemRunning: () => runCommand('systemctl', { args: ['--user', 'is-system-running'] }) });
 
 const SESSION_TIMEOUT_MS = 10_000;
 const TEST_TIMEOUT_MS = 60_000;
