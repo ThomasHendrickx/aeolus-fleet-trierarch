@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as wait } from 'node:timers/promises';
 
 import { createContainerHost } from '../adapters/container-host.js';
+import { requireCoreVersion } from '../adapters/core-version.js';
 import { loadConfiguration, readCrewFile, writeRunningFile } from '../adapters/files.js';
 import { createDetectedFile } from '../adapters/detected-file.js';
 import { createDetectors } from '../adapters/detectors.js';
@@ -45,6 +46,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     throw runtimeRefused(paths.config, refusals);
   }
   const crew = await readCrewFile(paths.crewToken);
+  await requireCoreVersion(crew.fleetUrl);
   const fleet = createRestFleet(crew);
   // Detected again only for a harness whose version changed since (#365); the operator's own options win.
   const detectedStore = createDetectedFile(paths.detected);
