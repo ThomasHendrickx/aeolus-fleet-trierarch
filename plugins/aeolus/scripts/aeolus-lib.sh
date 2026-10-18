@@ -233,6 +233,16 @@ aeolus_reported_file() {
   printf '%s/%s.reported' "$dir" "$(aeolus_key "$folder")"
 }
 
+# The questions the folder's ship asked: each question's uuid and the selector
+# of the ship it asked, one per line, so a withdrawal or replacement goes to the
+# ship that was asked (decision 0038), whoever owns the ship by then.
+aeolus_questions_file() {
+  local folder dir
+  folder="$(aeolus_folder)" || return 1
+  dir="$(aeolus_ships_dir)" || return 1
+  printf '%s/%s.questions' "$dir" "$(aeolus_key "$folder")"
+}
+
 # The model a hook last saw the session run, for aeolus-fleet.sh to state on
 # every send: Codex names its active model in each hook payload.
 aeolus_model_file() {

@@ -2,8 +2,10 @@
 # Asks the ship's owner a question as the ship protocol says (decisions 0038,
 # 0045), or withdraws or replaces one, so a session writes no JSON by hand.
 # whoami names the owner's ship (argo when argo owns the ship; argo by name
-# for a ship with no owner). Sends through aeolus-fleet.sh, which adds the
-# crew token, and prints what it prints.
+# for a ship with no owner). A withdrawal or replacement goes to the ship the
+# question asked, as the folder kept it, even after the owner changed; the
+# owner whoami names for a question the folder did not ask. Sends through
+# aeolus-fleet.sh, which adds the crew token, and prints what it prints.
 #
 #   aeolus-ask.sh ask <question> [--model <model>]
 #   aeolus-ask.sh withdraw <questionId> [--model <model>]
@@ -111,12 +113,32 @@ read_owner() {
   fi
 }
 
-# Sends the owner <content type> <payload as JSON> <idempotency key>; prints
-# what aeolus-fleet.sh prints, and sets sent to the message's id.
-send_owner() {
+# Sets asked to the selector of the ship the question <questionId> asked, as
+# the folder kept it; the owner whoami names now for a question it did not ask.
+read_asked() {
+  local file line
+  file="$(aeolus_questions_file)" && line="$(grep -m 1 "^$1 " "$file" 2>/dev/null)"
+  if [ -n "${line:-}" ]; then
+    asked="${line#* }"
+  else
+    read_owner
+    asked="$owner"
+  fi
+}
+
+# Keeps that question <questionId> asked the ship <selector>. Never fails its
+# caller: the question is sent already.
+keep_asked() {
+  local file
+  file="$(aeolus_questions_file)" || return 0
+  printf '%s %s\n' "$1" "$2" >> "$file" 2>/dev/null || true
+}
+
+# Sends the ship <selector> <content type> <payload as JSON> <idempotency key>;
+# prints what aeolus-fleet.sh prints, and sets sent to the message's id.
+send_to() {
   local input output status
-  read_owner
-  input="{\"selector\":${owner},\"contentType\":\"$1\",\"payload\":\"$(json "$2")\",\"idempotencyKey\":\"$3\"${model:+,\"model\":\"$(json "$model")\"}}"
+  input="{\"selector\":$1,\"contentType\":\"$2\",\"payload\":\"$(json "$3")\",\"idempotencyKey\":\"$4\"${model:+,\"model\":\"$(json "$model")\"}}"
   output="$(printf '%s' "$input" | "$(dirname "$0")/aeolus-fleet.sh" send -)"
   status=$?
   printf '%s\n' "$output"
@@ -129,7 +151,9 @@ command="${1:-}"
 case "$command" in
   ask)
     read_question "$@"
-    send_owner "$QUESTION_CONTENT_TYPE" "$question" "question-${id}"
+    read_owner
+    send_to "$owner" "$QUESTION_CONTENT_TYPE" "$question" "question-${id}"
+    keep_asked "$id" "$owner"
     echo "aeolus: asked your ship's owner question ${id} (message ${sent}); its answer arrives as a reply to that message. Withdraw or replace the question by its uuid ${id}."
     ;;
   withdraw)
@@ -137,7 +161,8 @@ case "$command" in
     is_uuid "$questionId" || usage "withdraw takes the question's uuid"
     shift
     read_model "$@"
-    send_owner "$WITHDRAWAL_CONTENT_TYPE" "{\"questionId\":\"${questionId}\"}" "question-withdrawal-${questionId}"
+    read_asked "$questionId"
+    send_to "$asked" "$WITHDRAWAL_CONTENT_TYPE" "{\"questionId\":\"${questionId}\"}" "question-withdrawal-${questionId}"
     echo "aeolus: withdrew question ${questionId} (message ${sent})"
     ;;
   replace)
@@ -145,7 +170,9 @@ case "$command" in
     is_uuid "$questionId" || usage "replace takes the question's uuid"
     shift
     read_question "$@"
-    send_owner "$REPLACEMENT_CONTENT_TYPE" "{\"questionId\":\"${questionId}\",\"question\":${question}}" "question-replacement-${id}"
+    read_asked "$questionId"
+    send_to "$asked" "$REPLACEMENT_CONTENT_TYPE" "{\"questionId\":\"${questionId}\",\"question\":${question}}" "question-replacement-${id}"
+    keep_asked "$id" "$asked"
     echo "aeolus: replaced question ${questionId} with question ${id} (message ${sent}); its answer arrives as a reply to that message. Withdraw or replace the question by its uuid ${id}."
     ;;
   *)

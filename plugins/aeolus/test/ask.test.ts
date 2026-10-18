@@ -273,3 +273,47 @@ describe('aeolus-ask.sh replace', () => {
     expect(fleet.calls).toEqual([]);
   });
 });
+
+describe('a question withdrawn or replaced after the ship changed owner (decision 0038)', () => {
+  const ARGO_ID = 'shp_01m3tbfspe96yf1rnr4ank9h1f';
+  /** whoami once argo took the ship over from thomas. */
+  const ownedByArgo = { status: 200, body: { ...ownedByThomas.body, ownerShipId: ARGO_ID, ownerName: 'argo' } };
+
+  /** A crewed folder that asks thomas, then finds argo owns the ship. */
+  async function askedThomasThenArgoOwns(): Promise<{ stub: StubFleet; questionId: string }> {
+    const stub = await startRoutedStubFleet({ [WHOAMI_PATH]: [ownedByThomas, ownedByArgo], [SEND_PATH]: [sent] });
+    expect((await runWith('aeolus-identity.sh', { args: ['write', stub.url, SHIP_ID, 'scout'], stdin: CREW_TOKEN })).status).toBe(0);
+    const asked = await run('aeolus-ask.sh', ['ask', ...aQuestion]);
+    expect(asked.status).toBe(0);
+    return { stub, questionId: questionSchema.parse(sendsOf(stub)[0]?.payload).id };
+  }
+
+  it('withdraws it at the ship it asked, not the owner whoami names now', async () => {
+    const { stub, questionId } = await askedThomasThenArgoOwns();
+    fleet = stub;
+
+    const result = await run('aeolus-ask.sh', ['withdraw', questionId, '--model', 'claude-opus-5-5']);
+
+    expect(result.status).toBe(0);
+    expect(sendsOf(stub).map(({ selector, contentType }) => [selector, contentType])).toEqual([
+      [{ kind: 'ship', shipId: OWNER_ID }, QUESTION_CONTENT_TYPE],
+      [{ kind: 'ship', shipId: OWNER_ID }, WITHDRAWAL_CONTENT_TYPE],
+    ]);
+  });
+
+  it('replaces it at the ship it asked, and withdraws the replacement there too', async () => {
+    const { stub, questionId } = await askedThomasThenArgoOwns();
+    fleet = stub;
+    const replaced = await run('aeolus-ask.sh', ['replace', questionId, ...aQuestion]);
+    const replacementId = replacementSchema.parse(sendsOf(stub)[1]?.payload).question.id;
+
+    const withdrawn = await run('aeolus-ask.sh', ['withdraw', replacementId, '--model', 'claude-opus-5-5']);
+
+    expect([replaced.status, withdrawn.status]).toEqual([0, 0]);
+    expect(sendsOf(stub).map(({ selector, contentType }) => [selector, contentType])).toEqual([
+      [{ kind: 'ship', shipId: OWNER_ID }, QUESTION_CONTENT_TYPE],
+      [{ kind: 'ship', shipId: OWNER_ID }, REPLACEMENT_CONTENT_TYPE],
+      [{ kind: 'ship', shipId: OWNER_ID }, WITHDRAWAL_CONTENT_TYPE],
+    ]);
+  });
+});
