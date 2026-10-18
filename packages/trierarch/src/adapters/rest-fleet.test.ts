@@ -126,14 +126,15 @@ describe('the fleet over REST', () => {
 
   it('reads each crew request assigned to it with whether its crew is final, as the fleet holds it (#477)', async () => {
     const shipId = newId('ship');
+    const ownerShipId = newId('ship');
     await aFleetThat(
       (response) =>
         response
           .writeHead(200, { 'content-type': 'application/json' })
-          .end(JSON.stringify([{ shipId, settings: { harness: 'codex' }, settingsVersion: 2, requestedAt: '2026-10-10T09:00:00.000Z', status: 'crewing', isFinal: true }])),
+          .end(JSON.stringify([{ shipId, settings: { harness: 'codex' }, settingsVersion: 2, requestedAt: '2026-10-10T09:00:00.000Z', status: 'crewing', isFinal: true, ownerShipId, ownerName: 'thomas' }])),
       async (fleetUrl) => {
         await expect(createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_x' }).assignedRequests()).resolves.toEqual([
-          { shipId, settings: { harness: 'codex' }, settingsVersion: 2, status: 'crewing', isFinal: true },
+          { shipId, settings: { harness: 'codex' }, settingsVersion: 2, status: 'crewing', isFinal: true, owner: { shipId: ownerShipId, name: 'thomas' } },
         ]);
       },
     );
@@ -183,6 +184,50 @@ describe('the fleet over REST', () => {
           kind: 'refused',
           code: 'CREW_REQUEST_FINAL',
           message: "scout's crew is final (running)",
+        });
+      },
+    );
+  });
+});
+
+describe("the fleet over REST: trouble to a ship's owner (decision 0045)", () => {
+  const assignedAnswer = (request: Record<string, unknown>) => (response: ServerResponse) =>
+    response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify([{ settings: { harness: 'codex' }, settingsVersion: 1, requestedAt: '2026-10-10T09:00:00.000Z', status: null, isFinal: false, ...request }]));
+
+  it("reads each assigned request with its ship's owner, by id and name", async () => {
+    const shipId = newId('ship');
+    const ownerShipId = newId('ship');
+    await aFleetThat(assignedAnswer({ shipId, ownerShipId, ownerName: 'thomas' }), async (fleetUrl) => {
+      await expect(createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_x' }).assignedRequests()).resolves.toMatchObject([{ shipId, owner: { shipId: ownerShipId, name: 'thomas' } }]);
+    });
+  });
+
+  it('reads a request whose ship has no owner as owned by none', async () => {
+    const shipId = newId('ship');
+    await aFleetThat(assignedAnswer({ shipId, ownerShipId: null, ownerName: null }), async (fleetUrl) => {
+      await expect(createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_x' }).assignedRequests()).resolves.toMatchObject([{ shipId, owner: null }]);
+    });
+  });
+
+  it("sends the owner's ship the report in markdown, by its id, and answers sent", async () => {
+    const ownerShipId = newId('ship');
+    await aFleetAnswering([{ status: 200, body: { messageId: newId('message') } }], async (fleetUrl, asked) => {
+      const answer = await createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_x' }).reportToOwner({ ownerShipId, text: 'scout crashed', idempotencyKey: 'report-1' });
+
+      expect(answer).toEqual({ kind: 'sent' });
+      expect(asked.map(({ url }) => url)).toEqual(['/api/v1/ship/send']);
+      expect(JSON.parse(asked[0]?.body ?? '')).toMatchObject({ selector: { kind: 'ship', shipId: ownerShipId }, payload: 'scout crashed', contentType: 'text/markdown', idempotencyKey: 'report-1' });
+    });
+  });
+
+  it('answers the code and message when the fleet refuses the report to the owner, rather than throwing', async () => {
+    await aFleetThat(
+      (response) => response.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ code: 'NOT_REACHABLE', message: 'no rule lets mac-studio reach thomas' })),
+      async (fleetUrl) => {
+        await expect(createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_x' }).reportToOwner({ ownerShipId: newId('ship'), text: 'scout crashed', idempotencyKey: 'report-1' })).resolves.toEqual({
+          kind: 'refused',
+          code: 'NOT_REACHABLE',
+          message: 'no rule lets mac-studio reach thomas',
         });
       },
     );

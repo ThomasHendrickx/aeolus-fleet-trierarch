@@ -1,7 +1,7 @@
 import { CREW_REQUEST_REASON_MAX_LENGTH, type ShipId } from '@aeolus-fleet/common';
 
 import { putEntry, removeEntry, withState, type Entry, type TrierarchState } from './entry.js';
-import { discardedText, identityGoneText, modelRefusedText, settingsRefusedText } from './argo-reports.js';
+import { crashText, discardedText, identityGoneText, modelRefusedText, ownerUnreachableText, settingsRefusedText } from './argo-reports.js';
 import { MODEL_OPTION } from './detected-options.js';
 import type { FleetPort, HarnessPort, LaunchSeen, LoggedAction, Logger, SessionRuntime, ShipSocketsPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { HOLDS_IDENTITY, reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
@@ -89,7 +89,7 @@ async function failed(at: { action: Action; deps: RunPassDeps; reason: string })
   const { action, deps, reason } = at;
   try {
     const state = await deps.state.load();
-    if (action.kind === 'argo' || action.kind === 'status' || action.kind === 'refuse') {
+    if (action.kind === 'status' || action.kind === 'refuse') {
       deps.logger.warn(`The pass failed at ${action.kind}: ${reason}; ${NEXT_AFTER_FAILURE}`);
       return state;
     }
@@ -187,8 +187,8 @@ interface CarryOut {
 async function carryOut(state: TrierarchState, at: CarryOut): Promise<TrierarchState> {
   const { action, deps } = at;
   switch (action.kind) {
-    case 'argo':
-      await deps.fleet.reportToArgo(action.report);
+    case 'crashed':
+      await crashed({ action, deps });
       return state;
     case 'status':
       await deps.fleet.writeStatus(action.shipId, action.written);
@@ -481,8 +481,8 @@ async function forget(state: TrierarchState, at: EntryAt): Promise<TrierarchStat
  * crew is not final (#382): an entry it crewed with ends first (its session
  * stops, its identity goes, its worktree too when clean), then the fleet
  * takes the request back, with the reason after this machine's name, cut to
- * 200 characters, and ends the lease. When the fleet refuses, argo is told
- * instead, once per settings version.
+ * 200 characters, and ends the lease. When the fleet refuses, the ship's
+ * owner is told instead, once per settings version.
  */
 async function giveBack(state: TrierarchState, at: CarryOut & { action: Extract<Action, { kind: 'giveBack' }> }): Promise<TrierarchState> {
   const { action, deps } = at;
@@ -537,20 +537,58 @@ async function identityGone(at: CarryOut & { action: Extract<Action, { kind: 'id
   log(deps, { shipId, ...(shipName !== undefined && { shipName }), action: 'identityGone', outcome: 'its folder holds no identity, so it is no longer woken; argo told' });
 }
 
-/** Tells argo, once per settings version, that this trierarch cannot crew them. */
+/** Tells the ship's owner, once per settings version, that this trierarch cannot crew them: the give-back notice. */
 async function refuse(state: TrierarchState, at: CarryOut & { action: Extract<Action, { kind: 'refuse' }> }): Promise<TrierarchState> {
   const { action, deps } = at;
   const ship = await deps.fleet.ship(action.shipId);
   const name = ship.kind === 'awaitingCrew' || ship.kind === 'crewed' ? ship.name : undefined;
   const { field, reason } = action.refusal;
-  await deps.fleet.reportToArgo({
-    text: settingsRefusedText({ shipId: action.shipId, shipName: name }, { settingsVersion: action.settingsVersion, why: field === undefined ? reason : `${field}: ${reason}` }),
-    idempotencyKey: `trierarch:refused:${action.shipId}:${String(action.settingsVersion)}`,
-  });
+  const text = settingsRefusedText({ shipId: action.shipId, shipName: name }, { settingsVersion: action.settingsVersion, why: field === undefined ? reason : `${field}: ${reason}` });
+  await reportTrouble(deps, { shipId: action.shipId, shipName: name, text: () => text, idempotencyKey: `trierarch:refused:${action.shipId}:${String(action.settingsVersion)}` });
   const next = { ...state, refused: { ...state.refused, [action.shipId]: action.settingsVersion } };
   await deps.state.save(next);
   deps.logger.warn(`Cannot crew ${name ?? action.shipId} (${action.shipId}), settings version ${String(action.settingsVersion)}: ${reason}`);
   return next;
+}
+
+/** A session's restart budget is spent (#397): its owner is told, in the words true for its reader. */
+async function crashed(at: CarryOut & { action: Extract<Action, { kind: 'crashed' }> }): Promise<void> {
+  const { action, deps } = at;
+  const { shipId, shipName, exits, failedStart, idempotencyKey } = action;
+  const told = await reportTrouble(deps, {
+    shipId,
+    shipName,
+    text: (isForArgo) => crashText({ shipId, shipName }, { exits, isForArgo, ...(failedStart !== undefined && { failedStart }) }),
+    idempotencyKey,
+  });
+  log(deps, { shipId, ...(shipName !== undefined && { shipName }), action: 'crashed', outcome: `crashed, its restart budget spent; ${told} told` });
+}
+
+/** argo's name: trouble of a ship argo owns, or of one with no owner, goes to argo by name. */
+const OPERATOR_SHIP_NAME = 'argo';
+
+/**
+ * Tells a ship's owner of trouble with its crew (decision 0045): its owner
+ * as the fleet holds it now, argo when argo owns it. When the fleet refuses
+ * the report to a person's ship, as when no rule lets this trierarch reach
+ * it, argo is told instead, with why, and it is logged. Answers the name of
+ * the ship told.
+ */
+async function reportTrouble(deps: RunPassDeps, trouble: { shipId: ShipId; shipName: string | undefined; text: (isForArgo: boolean) => string; idempotencyKey: string }): Promise<string> {
+  const { shipId, shipName, text, idempotencyKey } = trouble;
+  const owner = (await deps.fleet.assignedRequests()).find((request) => request.shipId === shipId)?.owner ?? null;
+  if (owner === null || owner.name === OPERATOR_SHIP_NAME) {
+    await deps.fleet.reportToArgo({ text: text(true), idempotencyKey });
+    return OPERATOR_SHIP_NAME;
+  }
+  const answer = await deps.fleet.reportToOwner({ ownerShipId: owner.shipId, text: text(false), idempotencyKey });
+  if (answer.kind === 'sent') {
+    return owner.name;
+  }
+  const { code, message } = answer;
+  deps.logger.warn(`Could not reach ${owner.name} (${owner.shipId}), the owner of ${shipName ?? shipId} (${shipId}): ${code}: ${message}; argo is told instead`);
+  await deps.fleet.reportToArgo({ text: ownerUnreachableText(text(true), { ownerName: owner.name, code, message }), idempotencyKey: `${idempotencyKey}:owner-unreachable` });
+  return OPERATOR_SHIP_NAME;
 }
 
 /** The session's identity goes, and with it its ship's socket: nothing calls over it any more (decision 0026). */

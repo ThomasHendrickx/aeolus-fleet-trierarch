@@ -66,9 +66,16 @@ describe('the crew-a-ship skill', () => {
     expect(codexSkill.match(/over the fleet/g)).toHaveLength(1);
   });
 
-  it('tells every crewed session, in both harnesses, the line the trierarch gives its sessions: no human reads its terminal, ask over the fleet, and argo for what only the operator can answer (#585)', () => {
+  it("tells every crewed session, in both harnesses, the line the trierarch gives its sessions: no human reads its terminal, ask over the fleet, and its ship's owner for what only a human can answer (#585)", () => {
     expect(claudeSkill).toContain(NO_TERMINAL_QUESTIONS);
     expect(codexSkill).toContain(NO_TERMINAL_QUESTIONS);
+  });
+
+  it("sends a question for its ship's owner to the owner's ship, never to argo alone, in both harnesses (decision 0045)", () => {
+    for (const skill of [claudeSkill, codexSkill]) {
+      expect(skill).toContain("A question for your ship's owner goes to the owner's ship as a question");
+      expect(skill).not.toContain('goes to argo as a question');
+    }
   });
 
   it('tells a squadron member how to check in, take up its role, report and stand down', () => {

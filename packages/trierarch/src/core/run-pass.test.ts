@@ -1,7 +1,7 @@
 import type { ShipId } from '@aeolus-fleet/common';
 import { describe, expect, it } from 'vitest';
 
-import { aTrierarch, CONFIGURATION, crewSettings, InMemoryShipSockets, NOTES_FOLDER, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
+import { aTrierarch, CONFIGURATION, crewSettings, InMemoryShipSockets, newId, NOTES_FOLDER, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
 import type { LaunchSeen } from './ports.js';
 import { RESTART_BUDGET } from './restart-policy.js';
 
@@ -2118,5 +2118,72 @@ describe('contained access: the crew token stays with the trierarch (decision 00
     expect(trierarch.state.current().entries[shipId]?.folder).toBe(SCOUT_FOLDER);
     expect(trierarch.harness.launches).toHaveLength(2);
     expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+});
+
+describe("trouble the trierarch reports goes to the ship's owner (decision 0045)", () => {
+  const THOMAS = { shipId: newId('ship'), name: 'thomas' };
+  const crashed = (shipId: ShipId) => `scout crashed ${String(RESTART_BUDGET + 1)} times in an hour\n\n- Ship: scout (\`${shipId}\`)\n- Status: crashed, its restart budget spent`;
+  const cannotCrew = (shipId: ShipId) => `Cannot crew scout with its settings\n\n- Ship: scout (\`${shipId}\`)\n- Settings version: 1\n- Why: harness: This trierarch offers no harness codex`;
+  const UNREACHABLE = 'Its owner thomas could not be reached: NOT_REACHABLE: no rule lets mac-studio reach thomas.';
+
+  it('sends the crash report to the owner when a person owns the ship, saying argo can restart it, and argo nothing', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.fleet.own(shipId, THOMAS);
+
+    await crashForGood(trierarch, shipId);
+
+    expect(trierarch.fleet.toOwners.map(({ ownerShipId, text }) => ({ ownerShipId, text }))).toEqual([{ ownerShipId: THOMAS.shipId, text: `${crashed(shipId)}\n\nargo can restart it in the console.` }]);
+    expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+
+  it('sends the crash report to argo when argo owns the ship, telling it to restart it', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+
+    await crashForGood(trierarch, shipId);
+
+    expect(trierarch.fleet.toArgo.map(({ text }) => text)).toEqual([`${crashed(shipId)}\n\nRestart it in the console to crew it again.`]);
+    expect(trierarch.fleet.toOwners).toEqual([]);
+  });
+
+  it('sends argo the crash report when the fleet refuses it to the owner, saying the owner could not be reached, and logs it', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.fleet.own(shipId, THOMAS);
+    trierarch.fleet.isRefusingOwnerReports = true;
+
+    await crashForGood(trierarch, shipId);
+
+    expect(trierarch.fleet.toArgo.map(({ text }) => text)).toEqual([`${crashed(shipId)}\n\nRestart it in the console to crew it again.\n\n${UNREACHABLE}`]);
+    expect(trierarch.logger.warnings).toContain(`Could not reach thomas (${THOMAS.shipId}), the owner of scout (${shipId}): NOT_REACHABLE: no rule lets mac-studio reach thomas; argo is told instead`);
+  });
+
+  it('sends the owner the notice that it cannot crew settings it cannot give back, once per settings version', async () => {
+    const trierarch = aTrierarch();
+    trierarch.fleet.isRefusingGiveBack = true;
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, crewSettings({ harness: 'codex' }));
+    trierarch.fleet.own(shipId, THOMAS);
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toOwners.map(({ ownerShipId, text }) => ({ ownerShipId, text }))).toEqual([{ ownerShipId: THOMAS.shipId, text: cannotCrew(shipId) }]);
+    expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+
+  it('sends argo that notice when the fleet refuses it to the owner, saying the owner could not be reached', async () => {
+    const trierarch = aTrierarch();
+    trierarch.fleet.isRefusingGiveBack = true;
+    trierarch.fleet.isRefusingOwnerReports = true;
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, crewSettings({ harness: 'codex' }));
+    trierarch.fleet.own(shipId, THOMAS);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo.map(({ text }) => text)).toEqual([`${cannotCrew(shipId)}\n\n${UNREACHABLE}`]);
   });
 });

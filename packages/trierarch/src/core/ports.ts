@@ -41,6 +41,14 @@ export interface AssignedRequest {
   readonly status: CrewStatus | null;
   /** Whether its crew is final as the fleet holds it (decision 0029): read, never derived from the status (#477). */
   readonly isFinal: boolean;
+  /** Its ship's owner as the fleet holds it now, where its trouble goes (decision 0045); null for a ship with none. */
+  readonly owner: ShipOwner | null;
+}
+
+/** A ship's owner: a person's ship, or argo (decision 0045). */
+export interface ShipOwner {
+  readonly shipId: ShipId;
+  readonly name: string;
 }
 
 /** A plain-text report to argo, the operator, stored once under its idempotency key. */
@@ -48,6 +56,14 @@ export interface ArgoReport {
   readonly text: string;
   readonly idempotencyKey: string;
 }
+
+/** A report to a ship's owner by its ship's id, stored once under its idempotency key (decision 0045). */
+export interface OwnerReport extends ArgoReport {
+  readonly ownerShipId: ShipId;
+}
+
+/** How the fleet answered a report to an owner: sent, or refused with its code and message, as when no rule lets the trierarch reach it. */
+export type OwnerReportAnswer = { readonly kind: 'sent' } | { readonly kind: 'refused'; readonly code: string; readonly message: string };
 
 /**
  * The fleet as the trierarch's own ship calls it, with `crew:run`: it reaches
@@ -96,6 +112,8 @@ export interface FleetPort {
   confirmCleared(cleared: ClearRequestToMe & { outcome: ClearOutcome }): Promise<void>;
   /** Sends argo a report, as the trierarch's own ship. */
   reportToArgo(report: ArgoReport): Promise<void>;
+  /** Sends a ship's owner a report, as the trierarch's own ship. A refusal is answered, not thrown. */
+  reportToOwner(report: OwnerReport): Promise<OwnerReportAnswer>;
   /** A session's inbox, asked with its crew token. */
   inbox(crewToken: string): Promise<InboxAnswer>;
   /** Reports on a ship's behalf, with its session's crew token. */
@@ -276,7 +294,7 @@ export interface LoggedAction {
   /** Known once the ship was first crewed. */
   readonly shipName?: string;
   /** What the loop did for the ship: an action it carried out, or leave when another session crews the ship. */
-  readonly action: Exclude<Action['kind'], 'argo' | 'status' | 'refuse'> | 'leave';
+  readonly action: Exclude<Action['kind'], 'status' | 'refuse'> | 'leave';
   readonly outcome: string;
   /** For a failure: what happens next, and where to look. */
   readonly next?: string;

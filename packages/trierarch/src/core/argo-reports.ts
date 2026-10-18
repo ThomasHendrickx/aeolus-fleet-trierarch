@@ -1,8 +1,8 @@
 import { argoMessage } from '@aeolus-fleet/common';
 
 /**
- * What the trierarch tells argo, in the shape the ship protocol gives a
- * message to argo: a headline naming the ship, then short facts in markdown.
+ * What the trierarch tells argo or a ship's owner, in the shape the ship
+ * protocol gives a message to argo: a headline naming the ship, then short facts in markdown.
  * The sender is the trierarch's own ship, named for its machine, so no text
  * names the machine again. Ids sit in the facts, never in the headline.
  */
@@ -22,12 +22,21 @@ const shipFact = (ship: ShipNamed): string => (ship.shipName === undefined ? `- 
 
 const paragraphs = (...parts: readonly string[]): string => parts.join('\n\n');
 
-export function crashText(ship: ShipNamed, at: { exits: number; failedStart?: string }): string {
+/**
+ * The crash report, true for its reader (decision 0045): argo restarts the
+ * ship in the console, so a person who owns it is told argo can.
+ */
+export function crashText(ship: ShipNamed, at: { exits: number; failedStart?: string; isForArgo: boolean }): string {
   const facts = [shipFact(ship), '- Status: crashed, its restart budget spent', ...(at.failedStart === undefined ? [] : [`- Its last start: ${at.failedStart}`])];
   return argoMessage({
     headline: `${nameOf(ship)} crashed ${String(at.exits)} times in an hour`,
-    body: paragraphs(facts.join('\n'), 'Restart it in the console to crew it again.'),
+    body: paragraphs(facts.join('\n'), at.isForArgo ? 'Restart it in the console to crew it again.' : 'argo can restart it in the console.'),
   });
+}
+
+/** What argo is told after the fleet refused a report to the ship's owner: the report, then why it came to argo. */
+export function ownerUnreachableText(report: string, at: { ownerName: string; code: string; message: string }): string {
+  return paragraphs(report, `Its owner ${at.ownerName} could not be reached: ${at.code}: ${at.message}.`);
 }
 
 export function discardedText(ship: ShipNamed, at: { isReleasedElsewhere: boolean; repository: string; unsaved: readonly string[] }): string {

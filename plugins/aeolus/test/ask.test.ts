@@ -15,19 +15,24 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { startStubFleet, type StubAnswer, type StubFleet } from './stub-fleet.js';
+import { startRoutedStubFleet, type StubAnswer, type StubFleet } from './stub-fleet.js';
 import { scriptEnvironment } from './script-environment.js';
 
-// aeolus-ask.sh: a crewed session asks argo a question (decision 0038), and
-// withdraws or replaces it, without writing its JSON by hand. It sends
-// through aeolus-fleet.sh, so the crew token stays out of sight.
+// aeolus-ask.sh: a crewed session asks its ship's owner a question (decisions
+// 0038, 0045), and withdraws or replaces it, without writing its JSON by hand.
+// It sends through aeolus-fleet.sh, so the crew token stays out of sight.
 
 const SCRIPTS = fileURLToPath(new URL('../scripts/', import.meta.url));
 const CREW_TOKEN = 'aeolus_ct_v1_kept_out_of_sight';
 const SHIP_ID = 'shp_01m3tbfspe96yf1rnr4ank9h1a';
 const MESSAGE_ID = 'msg_01m3tbfspe96yf1rnr4ank9h1c';
 const QUESTION_ID = '3f1c2a9e-7b4d-4e8a-9c1f-2d6b8e0a5c47';
+const OWNER_ID = 'shp_01m3tbfspe96yf1rnr4ank9h1d';
 const sent = { status: 200, body: { messageId: MESSAGE_ID } };
+const WHOAMI_PATH = '/api/v1/ship/whoami';
+const SEND_PATH = '/api/v1/ship/send';
+/** whoami of a ship a person owns. */
+const ownedByThomas = { status: 200, body: { shipId: SHIP_ID, fleetId: 'flt_01m3tbfspe96yf1rnr4ank9h1e', name: 'scout', type: 'reviewer', ownerShipId: OWNER_ID, ownerName: 'thomas' } };
 
 let data: string;
 let folder: string;
@@ -86,24 +91,30 @@ function hook(script: string, payload: unknown): void {
   spawnSync('bash', [join(SCRIPTS, script)], { input: JSON.stringify(payload), env: scriptEnvironment({ HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data }) });
 }
 
-async function crewedAt(answers: readonly StubAnswer[]): Promise<StubFleet> {
-  const started = await startStubFleet(answers);
+/** A crewed folder whose fleet answers whoami as the ship's owner says, and each send as the answers say. */
+async function crewedAt(answers: readonly StubAnswer[], whoami: StubAnswer = ownedByThomas): Promise<StubFleet> {
+  const started = await startRoutedStubFleet({ [WHOAMI_PATH]: [whoami, whoami], [SEND_PATH]: answers });
   expect((await runWith('aeolus-identity.sh', { args: ['write', started.url, SHIP_ID, 'scout'], stdin: CREW_TOKEN })).status).toBe(0);
   return started;
 }
 
 const sendSchema = z.object({
-  selector: z.object({ kind: z.literal('ship'), name: z.string() }),
+  selector: z.union([z.strictObject({ kind: z.literal('ship'), shipId: z.string() }), z.strictObject({ kind: z.literal('ship'), name: z.string() })]),
   contentType: z.string(),
   payload: z.string().transform((text): unknown => JSON.parse(text)),
   idempotencyKey: z.string().min(1),
   model: z.string(),
 });
 
-/** The one send the stub fleet received, its payload read as JSON. */
+/** The sends the stub fleet received, their payloads read as JSON. */
+function sendsOf(stub: StubFleet) {
+  return stub.calls.filter(({ path }) => path === SEND_PATH).map(({ body }) => sendSchema.parse(JSON.parse(body)));
+}
+
+/** The one send the stub fleet received, after whoami named the owner. */
 function theSend(stub: StubFleet) {
-  expect(stub.calls.map(({ path }) => path)).toEqual(['/api/v1/ship/send']);
-  return sendSchema.parse(JSON.parse(stub.calls[0]?.body ?? ''));
+  expect(stub.calls.map(({ path }) => path)).toEqual([WHOAMI_PATH, SEND_PATH]);
+  return sendSchema.parse(JSON.parse(stub.calls[1]?.body ?? ''));
 }
 
 const aQuestion = [
@@ -116,14 +127,14 @@ const aQuestion = [
 ];
 
 describe('aeolus-ask.sh ask', () => {
-  it('sends argo the question as the question content type, with a uuid of its own and the options numbered from 1, and says its uuid and message', async () => {
+  it("sends the ship's owner, as whoami names it, the question as the question content type, with a uuid of its own and the options numbered from 1, and says its uuid and message", async () => {
     fleet = await crewedAt([sent]);
 
     const result = await run('aeolus-ask.sh', ['ask', ...aQuestion]);
 
     expect(result.status).toBe(0);
     const send = theSend(fleet);
-    expect(send).toMatchObject({ selector: { kind: 'ship', name: 'argo' }, contentType: QUESTION_CONTENT_TYPE, model: 'claude-opus-5-5' });
+    expect(send).toMatchObject({ selector: { kind: 'ship', shipId: OWNER_ID }, contentType: QUESTION_CONTENT_TYPE, model: 'claude-opus-5-5' });
     const question = questionSchema.parse(send.payload);
     expect(question).toEqual({
       id: question.id,
@@ -137,17 +148,17 @@ describe('aeolus-ask.sh ask', () => {
     });
     expect(result.stdout).toContain(question.id);
     expect(result.stdout).toContain(MESSAGE_ID);
-    expect(fleet.calls[0]?.authorization).toBe(`Bearer ${CREW_TOKEN}`);
+    expect(fleet.calls[1]?.authorization).toBe(`Bearer ${CREW_TOKEN}`);
     expect(result.stdout + result.stderr).not.toContain(CREW_TOKEN);
   });
 
   it('gives every question a uuid and an idempotency key of its own', async () => {
-    fleet = await crewedAt([sent]);
+    fleet = await crewedAt([sent, sent]);
 
     await run('aeolus-ask.sh', ['ask', ...aQuestion]);
     await run('aeolus-ask.sh', ['ask', ...aQuestion]);
 
-    const sends = fleet.calls.map(({ body }) => sendSchema.parse(JSON.parse(body)));
+    const sends = sendsOf(fleet);
     const ids = sends.map(({ payload }) => questionSchema.parse(payload).id);
     expect(new Set(ids).size).toBe(2);
     expect(new Set(sends.map(({ idempotencyKey }) => idempotencyKey)).size).toBe(2);
@@ -190,6 +201,23 @@ describe('aeolus-ask.sh ask', () => {
     expect(theSend(fleet).model).toBe('gpt-5.5');
   });
 
+  it("asks argo by name when the ship has no owner, as argo's own ship has none", async () => {
+    fleet = await crewedAt([sent], { status: 200, body: { ...ownedByThomas.body, ownerShipId: null, ownerName: null } });
+
+    await run('aeolus-ask.sh', ['ask', ...aQuestion]);
+
+    expect(theSend(fleet).selector).toEqual({ kind: 'ship', name: 'argo' });
+  });
+
+  it("says the fleet's refusal of whoami with its exit code, and sends nothing, as it cannot know the owner", async () => {
+    fleet = await crewedAt([sent], { status: 503, body: { code: 'UNAVAILABLE', message: 'try again' } });
+
+    const result = await run('aeolus-ask.sh', ['ask', ...aQuestion]);
+
+    expect(result.status).toBe(1);
+    expect(sendsOf(fleet)).toEqual([]);
+  });
+
   it("says the fleet's refusal as aeolus-fleet.sh does, with its exit code", async () => {
     fleet = await crewedAt([{ status: 400, body: { code: 'VALIDATION', message: 'model is required' } }]);
 
@@ -201,14 +229,14 @@ describe('aeolus-ask.sh ask', () => {
 });
 
 describe('aeolus-ask.sh withdraw', () => {
-  it('sends argo a withdrawal naming the question', async () => {
+  it("sends the ship's owner a withdrawal naming the question", async () => {
     fleet = await crewedAt([sent]);
 
     const result = await run('aeolus-ask.sh', ['withdraw', QUESTION_ID, '--model', 'claude-opus-5-5']);
 
     expect(result.status).toBe(0);
     const send = theSend(fleet);
-    expect(send).toMatchObject({ selector: { kind: 'ship', name: 'argo' }, contentType: WITHDRAWAL_CONTENT_TYPE });
+    expect(send).toMatchObject({ selector: { kind: 'ship', shipId: OWNER_ID }, contentType: WITHDRAWAL_CONTENT_TYPE });
     expect(withdrawalSchema.parse(send.payload)).toEqual({ questionId: QUESTION_ID });
   });
 
@@ -223,14 +251,14 @@ describe('aeolus-ask.sh withdraw', () => {
 });
 
 describe('aeolus-ask.sh replace', () => {
-  it('sends argo a replacement naming the question, with the new question under a uuid of its own', async () => {
+  it("sends the ship's owner a replacement naming the question, with the new question under a uuid of its own", async () => {
     fleet = await crewedAt([sent]);
 
     const result = await run('aeolus-ask.sh', ['replace', QUESTION_ID, ...aQuestion]);
 
     expect(result.status).toBe(0);
     const send = theSend(fleet);
-    expect(send).toMatchObject({ selector: { kind: 'ship', name: 'argo' }, contentType: REPLACEMENT_CONTENT_TYPE });
+    expect(send).toMatchObject({ selector: { kind: 'ship', shipId: OWNER_ID }, contentType: REPLACEMENT_CONTENT_TYPE });
     const replacement = replacementSchema.parse(send.payload);
     expect(replacement).toMatchObject({ questionId: QUESTION_ID, question: { title: 'Which port does the console use in development?', pick: { option: 2 } } });
     expect(result.stdout).toContain(replacement.question.id);

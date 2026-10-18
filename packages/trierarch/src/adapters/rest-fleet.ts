@@ -162,8 +162,30 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string; 
         answers: z.object({ messageId: idSchema('message') }),
       });
     },
+    reportToOwner: async ({ ownerShipId, text, idempotencyKey }) => {
+      try {
+        await call({
+          path: '/ship/send',
+          body: { selector: { kind: 'ship', shipId: ownerShipId }, payload: text, contentType: MARKDOWN_CONTENT_TYPE, model: TRIERARCH_SELF.model, idempotencyKey },
+          answers: z.object({ messageId: idSchema('message') }),
+        });
+        return { kind: 'sent' };
+      } catch (error) {
+        if (error instanceof FleetRefusal) {
+          return { kind: 'refused', code: error.code, message: error.said };
+        }
+        throw error;
+      }
+    },
     assignedRequests: async () =>
-      (await call({ path: '/fleet/assignedCrewRequests', answers: assignedCrewRequestsOutputSchema })).map(({ shipId, settings, settingsVersion, status, isFinal }) => ({ shipId, settings, settingsVersion, status, isFinal })),
+      (await call({ path: '/fleet/assignedCrewRequests', answers: assignedCrewRequestsOutputSchema })).map(({ shipId, settings, settingsVersion, status, isFinal, ownerShipId, ownerName }) => ({
+        shipId,
+        settings,
+        settingsVersion,
+        status,
+        isFinal,
+        owner: ownerShipId === null || ownerName === null ? null : { shipId: ownerShipId, name: ownerName },
+      })),
     writeStatus: async (shipId, { status, attempt, startedAt }) => {
       await call({ path: '/fleet/reportCrewStatus', body: { shipId, status, attempt, startedAt: startedAt?.toISOString() ?? null }, answers: z.unknown() });
     },

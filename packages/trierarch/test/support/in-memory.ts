@@ -19,6 +19,8 @@ import type {
   LoggedAction,
   ObservedSession,
   ObservedWorktree,
+  OwnerReport,
+  OwnerReportAnswer,
   RuntimeMode,
   SelfReport,
   SessionRuntime,
@@ -28,6 +30,7 @@ import type {
   Turn,
   WorkspacePort,
   WrittenStatus,
+  ShipOwner,
   ShipSocketsPort,
 } from '../../src/core/ports.js';
 import { createReportSelf } from '../../src/core/report-self.js';
@@ -41,6 +44,9 @@ import { createUninstall } from '../../src/core/uninstall.js';
  */
 
 export const newId = createIdGenerator();
+
+/** argo, the owner of every ship a test gives no other. */
+export const ARGO: ShipOwner = { shipId: newId('ship'), name: 'argo' };
 export const WORKTREE_ROOT = '/home/thomas/.aeolus/trierarch/worktrees';
 export const NOTES_FOLDER = '/home/thomas/notes';
 
@@ -73,6 +79,8 @@ interface HeldRequest {
   status: CrewStatus | null;
   /** Kept as the fleet keeps it (decision 0029): set by the first running, restarting or crashed, cleared on every new settings version. */
   isFinal: boolean;
+  /** Its ship's owner as the fleet holds it now (decision 0045). */
+  owner: ShipOwner;
 }
 
 /** The statuses at which the fleet holds a crew final (decision 0029). */
@@ -98,6 +106,10 @@ export class InMemoryFleet implements FleetPort {
   readonly cleared: { shipId: ShipId; repository: string; outcome: ClearOutcome }[] = [];
   /** What the trierarch sent argo, once per idempotency key. */
   readonly toArgo: ArgoReport[] = [];
+  /** What the trierarch sent a ship's owner other than argo, once per idempotency key (decision 0045). */
+  readonly toOwners: OwnerReport[] = [];
+  /** Set to make the fleet refuse every send to an owner, as when no rule lets the trierarch reach it. */
+  isRefusingOwnerReports = false;
   readonly acked: string[] = [];
   readonly pongs: string[] = [];
   readonly reports: { crewToken: string; state: string; note: string }[] = [];
@@ -115,7 +127,12 @@ export class InMemoryFleet implements FleetPort {
 
   /** The ship's crew request, assigned to this trierarch, as a requester asks and the trierarch plugin assigns it. */
   request(shipId: ShipId, settings: unknown = crewSettings()): void {
-    this.requests.set(shipId, { settings, settingsVersion: 1, status: null, isFinal: false });
+    this.requests.set(shipId, { settings, settingsVersion: 1, status: null, isFinal: false, owner: ARGO });
+  }
+
+  /** argo gives the ship a new owner, as fleet.setOwner does. */
+  own(shipId: ShipId, owner: ShipOwner): void {
+    this.requestOf(shipId).owner = owner;
   }
 
   /** The request written again, as Restart (the same settings) or Edit (new ones) does: a new settings version. */
@@ -188,7 +205,7 @@ export class InMemoryFleet implements FleetPort {
   }
 
   assignedRequests(): Promise<readonly AssignedRequest[]> {
-    return Promise.resolve([...this.requests].map(([shipId, { settings, settingsVersion, status, isFinal }]) => ({ shipId, settings, settingsVersion, status, isFinal })));
+    return Promise.resolve([...this.requests].map(([shipId, { settings, settingsVersion, status, isFinal, owner }]) => ({ shipId, settings, settingsVersion, status, isFinal, owner })));
   }
 
   writeStatus(shipId: ShipId, written: WrittenStatus): Promise<void> {
@@ -242,6 +259,16 @@ export class InMemoryFleet implements FleetPort {
       this.toArgo.push(report);
     }
     return Promise.resolve();
+  }
+
+  reportToOwner(report: OwnerReport): Promise<OwnerReportAnswer> {
+    if (this.isRefusingOwnerReports) {
+      return Promise.resolve({ kind: 'refused', code: 'NOT_REACHABLE', message: 'no rule lets mac-studio reach thomas' });
+    }
+    if (!this.toOwners.some((each) => each.idempotencyKey === report.idempotencyKey)) {
+      this.toOwners.push(report);
+    }
+    return Promise.resolve({ kind: 'sent' });
   }
 
   pong(deliveryId: string): Promise<void> {

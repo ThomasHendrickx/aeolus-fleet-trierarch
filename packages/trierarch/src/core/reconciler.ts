@@ -1,10 +1,9 @@
 import type { CrewStatus, ShipId, TrierarchConfiguration } from '@aeolus-fleet/common';
 
-import { crashText } from './argo-reports.js';
 import { checkSettings, launchMarkerRefusal, trustRefusal, unacceptedRefusal, type CheckedSettings, type Refusal } from './check-settings.js';
 import { MODEL_OPTION } from './detected-options.js';
 import { putEntry, removeEntry, withState, type Entry, type KeptWorktree, type TrierarchState } from './entry.js';
-import type { ArgoReport, AssignedRequest, ClearRequestToMe, InboxAnswer, LaunchSeen, ObservedSession, ObservedWorktree, TrustedPlaces, Turn, WrittenStatus } from './ports.js';
+import type { AssignedRequest, ClearRequestToMe, InboxAnswer, LaunchSeen, ObservedSession, ObservedWorktree, TrustedPlaces, Turn, WrittenStatus } from './ports.js';
 import { decideRestart, exitsInWindow } from './restart-policy.js';
 
 /**
@@ -45,7 +44,7 @@ export type Action =
   | { readonly kind: 'status'; readonly shipId: ShipId; readonly written: WrittenStatus }
   /** Report on the ship's behalf, with its session's crew token. */
   | { readonly kind: 'report'; readonly shipId: ShipId; readonly note: string }
-  /** Tell argo it cannot crew this settings version: its crew is final, so it is not given back. */
+  /** Tell the ship's owner it cannot crew this settings version: its crew is final, so it is not given back. */
   | { readonly kind: 'refuse'; readonly shipId: ShipId; readonly settingsVersion: number; readonly refusal: Refusal }
   /**
    * Give back a request it cannot crew while its crew is not final (#382), with
@@ -57,7 +56,8 @@ export type Action =
   | { readonly kind: 'modelRefused'; readonly shipId: ShipId; readonly shipName?: string; readonly harness: string; readonly version: string; readonly model: string }
   /** A ship's folder holds no identity while it runs, restarts or crashed (#659, #664): argo told, as nothing reaches it until a human crews it again. */
   | { readonly kind: 'identityGone'; readonly shipId: ShipId; readonly shipName?: string }
-  | { readonly kind: 'argo'; readonly report: ArgoReport }
+  /** Its restart budget is spent (#397): its owner told, argo when argo owns it, with why its last start failed when it did. */
+  | { readonly kind: 'crashed'; readonly shipId: ShipId; readonly shipName?: string; readonly exits: number; readonly failedStart?: string; readonly idempotencyKey: string }
   /** A clear request (decision 0032): remove the kept worktree it names, or, when none is kept, confirm alone. */
   | { readonly kind: 'clear'; readonly shipId: ShipId; readonly repository: string; readonly kept?: KeptWorktree };
 
@@ -113,7 +113,7 @@ const NOTHING: Step = { actions: [], starts: 0 };
  * What the trierarch does with settings it cannot crew (#382): while the
  * crew is not final as the fleet holds it (#477), it gives the request back with
  * the field at fault as the reason, ending the entry it crewed with; once it
- * is final, it tells argo, once per settings version.
+ * is final, it tells the ship's owner, once per settings version.
  */
 function uncrewable(at: { request: AssignedRequest; refusal: Refusal; state: TrierarchState; entry?: Entry }): Action[] {
   const { request, refusal, state, entry } = at;
@@ -451,7 +451,7 @@ function restartWindowStep(entry: Entry, context: ReconcileContext): Step {
 /**
  * The session exited, or failed its start with the reason given (#397): it
  * starts again after its wait, or, with the restart budget spent, the entry
- * is crashed and argo told. A session that failed its start still runs, so it
+ * is crashed and its owner told. A session that failed its start still runs, so it
  * stops first.
  */
 function exitStep(entry: Entry, at: { now: Date; failedStart?: string }): Step {
@@ -472,17 +472,21 @@ function exitStep(entry: Entry, at: { now: Date; failedStart?: string }): Step {
         actions: [
           stop,
           { kind: 'report', shipId: entry.shipId, note: CRASHED_NOTE },
-          { kind: 'argo', report: crashReport(entry, { exits: exits.length, now, ...(failedStart !== undefined && { failedStart }) }) },
+          crashed(entry, { exits: exits.length, now, ...(failedStart !== undefined && { failedStart }) }),
         ],
         starts: 0,
       };
   }
 }
 
-/** What argo is told when a session's restart budget is spent, with why its last start failed when it did (#397): a human decides. */
-function crashReport(entry: Entry, at: { exits: number; now: Date; failedStart?: string }): ArgoReport {
+/** What the ship's owner is told when a session's restart budget is spent, with why its last start failed when it did (#397): a human decides. */
+function crashed(entry: Entry, at: { exits: number; now: Date; failedStart?: string }): Action {
   return {
-    text: crashText(entry, { exits: at.exits, ...(at.failedStart !== undefined && { failedStart: at.failedStart }) }),
+    kind: 'crashed',
+    shipId: entry.shipId,
+    ...(entry.shipName !== undefined && { shipName: entry.shipName }),
+    exits: at.exits,
+    ...(at.failedStart !== undefined && { failedStart: at.failedStart }),
     idempotencyKey: `trierarch:crashed:${entry.shipId}:${at.now.toISOString()}`,
   };
 }
