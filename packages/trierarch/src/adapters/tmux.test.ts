@@ -1,5 +1,7 @@
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+
+import { setTimeout as wait } from 'node:timers/promises';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -60,6 +62,53 @@ describe('sessions in tmux', () => {
 
     // tmux keeps its sockets in $TMUX_TMPDIR/tmux-<uid>/.
     expect(dirname(dirname(socket.stdout.trim()))).toBe(folder);
+  });
+});
+
+describe('a tmux server another process started (#883)', () => {
+  /** Starts the server on the trierarch's socket as a process with its own variables would, such as a ship's session. */
+  async function startServerFrom(variables: Readonly<Record<string, string>>): Promise<void> {
+    const assignments = Object.entries(variables).map(([variable, value]) => `${variable}=${value}`);
+    const started = await runCommand('env', { args: [...assignments, 'tmux', '-L', server, 'new-session', '-d', '-s', 'elsewhere', 'sleep 30'] });
+    expect(started.status).toBe(0);
+  }
+
+  /** The environment a session the trierarch starts sees, one line per variable. */
+  async function environmentOfASession(env: Readonly<Record<string, string>> = {}): Promise<string[]> {
+    const written = join(folder, 'environment');
+    await tmux.start({ shipId: newId('ship'), folder, command: ['sh', '-c', `env > ${written}.part && mv ${written}.part ${written}; sleep 30`], env });
+    for (let tries = 0; tries < 100 && !existsSync(written); tries += 1) {
+      await wait(50);
+    }
+    return readFileSync(written, 'utf8').split('\n');
+  }
+
+  it("gives a session none of that process's own variables", async () => {
+    // The trierarch has neither, as a service; a test run inside a session may.
+    vi.stubEnv('AEOLUS_FOLDER', undefined);
+    vi.stubEnv('CLAUDECODE', undefined);
+    await startServerFrom({ AEOLUS_FOLDER: '/home/another-ship', CLAUDECODE: '1' });
+
+    const environment = await environmentOfASession();
+
+    expect(environment.filter((line) => line.startsWith('AEOLUS_FOLDER=') || line.startsWith('CLAUDECODE='))).toEqual([]);
+  });
+
+  it("gives a session the trierarch's own value of a variable that process changed", async () => {
+    vi.stubEnv('AEOLUS_TEST_OWN', 'the trierarch');
+    await startServerFrom({ AEOLUS_TEST_OWN: 'another ship' });
+
+    const environment = await environmentOfASession();
+
+    expect(environment.filter((line) => line.startsWith('AEOLUS_TEST_OWN='))).toEqual(['AEOLUS_TEST_OWN=the trierarch']);
+  });
+
+  it('gives a session the variables the trierarch sets for it', async () => {
+    await startServerFrom({ AEOLUS_FOLDER: '/home/another-ship' });
+
+    const environment = await environmentOfASession({ AEOLUS_LAUNCH: 'launch-1' });
+
+    expect(environment).toContain('AEOLUS_LAUNCH=launch-1');
   });
 });
 

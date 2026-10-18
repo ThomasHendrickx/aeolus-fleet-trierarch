@@ -29,10 +29,18 @@ function sessionName(shipId: ShipId): string {
  * the trierarch stops. Under a systemd unit it starts in a scope of its own
  * (`systemd-run --scope`), so it is not left over in the service's control
  * group on a restart (#537), and the unit's stop leaves it alone (#479).
+ *
+ * A tmux server takes its global environment from the process that starts
+ * it, and every session gets it. Anything else may start the server on the
+ * trierarch's socket, such as a ship's session after a `tmux kill-server`
+ * (#881), so before each start the server's global environment is set back
+ * to the trierarch's own: a variable the trierarch has not is removed, one it
+ * has with another value is set to its own (#883).
  */
-export function createTmux(options: { server?: string; launch?: readonly string[] } = {}): SessionRuntime {
+export function createTmux(options: { server?: string; launch?: readonly string[]; environment?: Readonly<Record<string, string | undefined>> } = {}): SessionRuntime {
   const server = options.server ?? TMUX_SERVER;
   const launch = options.launch ?? [];
+  const environment = options.environment ?? process.env;
   const tmux = async (args: readonly string[]): Promise<{ status: number; stdout: string; stderr: string }> => runCommand('tmux', { args: ['-L', server, ...args] });
   const must = async (args: readonly string[]): Promise<string> => {
     const result = await tmux(args);
@@ -40,6 +48,28 @@ export function createTmux(options: { server?: string; launch?: readonly string[
       throw new Error(`tmux ${args.join(' ')} failed: ${result.stderr.trim()}`);
     }
     return result.stdout;
+  };
+
+  /** Sets the running server's global environment back to the trierarch's own; with no server running there is nothing to set. */
+  const resetEnvironment = async (): Promise<void> => {
+    const shown = await tmux(['show-environment', '-g']);
+    if (shown.status !== 0) {
+      return;
+    }
+    for (const line of shown.stdout.split('\n')) {
+      // A line `-NAME` is a variable removed already; `NAME=value` one the server holds.
+      const separator = line.indexOf('=');
+      if (line === '' || line.startsWith('-') || separator < 1) {
+        continue;
+      }
+      const variable = line.slice(0, separator);
+      const own = environment[variable];
+      if (own === undefined) {
+        await must(['set-environment', '-g', '-u', variable]);
+      } else if (own !== line.slice(separator + 1)) {
+        await must(['set-environment', '-g', variable, own]);
+      }
+    }
   };
 
   return {
@@ -63,6 +93,7 @@ export function createTmux(options: { server?: string; launch?: readonly string[
     start: async ({ shipId, folder, command, env = {} }) => {
       const name = sessionName(shipId);
       await tmux(['kill-session', '-t', `=${name}`]);
+      await resetEnvironment();
       // Start with the shell, keep the pane on exit, then run the command: so even a command that ends at once leaves its exit to see.
       // The one command that starts the server when none runs yet.
       const [program, ...args] = [...launch, 'tmux', '-L', server, 'new-session', '-d', '-s', name, '-c', folder, '-x', '200', '-y', '50'];
@@ -71,8 +102,8 @@ export function createTmux(options: { server?: string; launch?: readonly string[
         throw new Error(`tmux new-session failed: ${started.stderr.trim()}`);
       }
       await must(['set-option', '-w', '-t', `=${name}:`, 'remain-on-exit', 'on']);
-      const environment = Object.entries(env).flatMap(([variable, value]) => ['-e', `${variable}=${value}`]);
-      await must(['respawn-pane', '-k', '-t', `=${name}:`, '-c', folder, ...environment, '--', ...command]);
+      const sessionVariables = Object.entries(env).flatMap(([variable, value]) => ['-e', `${variable}=${value}`]);
+      await must(['respawn-pane', '-k', '-t', `=${name}:`, '-c', folder, ...sessionVariables, '--', ...command]);
     },
     type: async ({ shipId, text, settleMs }) => {
       const target = `=${sessionName(shipId)}:`;
