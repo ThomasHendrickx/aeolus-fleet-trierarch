@@ -12,6 +12,15 @@
 #                         with the next number; else one push receive, which
 #                         makes the lease pushed, reported handed with its
 #                         number. Marks the turn busy, so the next pass waits.
+#   aeolus-push.sh force  given while a forced message waits (decision 0040),
+#                         idle or busy: hands it over first, before what the
+#                         store holds, with one push receive, which answers a
+#                         forced delivery first, and prints the line to type.
+#                         While the turn is busy the trierarch then stops it
+#                         and types the line as a new prompt: the stop is
+#                         marked first, so a stopped turn is not taken as one
+#                         that died, and what it confirmed is handled when the
+#                         forced turn ends.
 #   aeolus-push.sh died   the session died, before the trierarch starts it
 #                         again: a confirmed message is kept to hand once more,
 #                         one handed once more already is reported not handled,
@@ -23,8 +32,8 @@
 #                         into that turn (#890). Its Stop hook marks it idle.
 #
 # Exit codes:
-#   0  hand: a message is handed over: type the line; died: done
-#   1  hand: nothing is handed over
+#   0  hand, force: a message is handed over: type the line; died: done
+#   1  hand, force: nothing is handed over
 #   2  this folder crews no ship, or the command is not one of these
 #   3  LEASE_ENDED: the store is forgotten
 set -uo pipefail
@@ -39,9 +48,13 @@ identity="$(aeolus_identity_file)" || exit 2
 identity_text="$(aeolus_identity_read "$identity")" || { echo "aeolus: this folder crews no ship" >&2; exit 2; }
 ship_name="$(aeolus_identity_field "$identity_text" shipName)"
 
+# Whether a forced stop's mark stays: only once a message is handed over.
+is_stop_kept=0
+
 # The message is the session's to confirm: the turn is busy from now, and the
 # line goes into the session. <what the log says>
 handed_over() {
+  is_stop_kept=1
   aeolus_mark_turn busy
   aeolus_report_turn "$(aeolus_identity_read "$identity")"
   aeolus_log "$identity" wake "$1"
@@ -64,7 +77,7 @@ hand_entry() {
 }
 
 hand() {
-  local id output
+  local id
   aeolus_send_owed "$identity"
   if id="$(aeolus_store_first onceMore)"; then
     handed_over "woken: ${id} to hand once more"
@@ -72,6 +85,13 @@ hand() {
   if id="$(aeolus_store_first received handed)"; then
     hand_entry "$id" "woken: handed ${id} over again: it was not confirmed"
   fi
+  receive_and_hand 'woken'
+}
+
+# One push receive, handed over: what the fleet answers first, a forced
+# delivery before any other. <what the log says first>
+receive_and_hand() {
+  local id output
   output="$(AEOLUS_CALL_MAX_SECONDS="$PUSH_RECEIVE_SECONDS" "$(dirname "$0")/aeolus-fleet.sh" pushReceive '{"max":1}' 2>/dev/null)"
   case $? in
     0) ;;
@@ -89,11 +109,21 @@ hand() {
     # Nothing handed, as when another ship of its type took the delivery first.
     exit 1
   fi
-  hand_entry "$id" "woken: handed ${id} over"
+  hand_entry "$id" "$1: handed ${id} over"
+}
+
+force() {
+  local mark
+  aeolus_send_owed "$identity"
+  mark="$(aeolus_forced_stop_file)" || exit 2
+  : > "$mark"
+  trap '[ "$is_stop_kept" = 1 ] || rm -f "$mark"' EXIT
+  receive_and_hand 'forced'
 }
 
 case "${1:-}" in
   hand) hand ;;
+  force) force ;;
   died)
     aeolus_store_session_started "$identity" 'the session it was handed once more to died too (the trierarch starts it again)'
     aeolus_mark_turn busy
@@ -101,7 +131,7 @@ case "${1:-}" in
     exit 0
     ;;
   *)
-    echo "usage: aeolus-push.sh hand|died" >&2
+    echo "usage: aeolus-push.sh hand|force|died" >&2
     exit 2
     ;;
 esac

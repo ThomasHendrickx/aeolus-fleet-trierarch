@@ -1516,6 +1516,45 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.harness.handOvers).toEqual([]);
   });
 
+  it('hands a forced message over to a busy session, stopping its turn (decision 0040)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'busy');
+    trierarch.fleet.deliver(shipId, 1);
+    trierarch.fleet.force(shipId, 1);
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.forcedOver).toEqual([{ shipId, isTurnStopped: true }]);
+    expect(trierarch.harness.handOvers).toEqual([]);
+  });
+
+  it('hands a forced message to an idle session first, before what its store holds, stopping no turn', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.holding.add(SCOUT_FOLDER);
+    trierarch.fleet.deliver(shipId, 2);
+    trierarch.fleet.force(shipId, 1);
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.forcedOver).toEqual([{ shipId, isTurnStopped: false }]);
+    expect(trierarch.harness.handOvers).toEqual([]);
+  });
+
+  it('hands nothing, forced or not, to a session whose turn is not marked yet', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.fleet.deliver(shipId, 1);
+    trierarch.fleet.force(shipId, 1);
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.forcedOver).toEqual([]);
+    expect(trierarch.harness.handOvers).toEqual([]);
+  });
+
   it('tells the store its session died before it starts the session again (3.5 to 3.7)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
@@ -1653,6 +1692,25 @@ describe('what the loop logs (aeolus-trierarch logs)', () => {
     await trierarch.pass();
 
     expect(logged(trierarch).at(-1)).toBe('wake: handed a message over');
+  });
+
+  it('logs a forced hand-over, saying when it stopped a busy turn for it', async () => {
+    const busy = aTrierarch();
+    const busyShip = await aCrewedShip(busy);
+    busy.harness.turns.set(SCOUT_FOLDER, 'busy');
+    busy.fleet.deliver(busyShip, 1);
+    busy.fleet.force(busyShip, 1);
+    const idle = aTrierarch();
+    const idleShip = await aCrewedShip(idle);
+    idle.harness.turns.set(SCOUT_FOLDER, 'idle');
+    idle.fleet.deliver(idleShip, 1);
+    idle.fleet.force(idleShip, 1);
+
+    await busy.pass();
+    await idle.pass();
+
+    expect(logged(busy).at(-1)).toBe('wake: stopped its turn and handed a forced message over');
+    expect(logged(idle).at(-1)).toBe('wake: handed a forced message over');
   });
 
   it('logs nothing when the plugin had nothing to hand over, as when another ship of its type took the delivery first', async () => {

@@ -5,7 +5,8 @@
 # wakes the session. No tokens are spent while it waits.
 #
 # The wake hands one message over (#756), given only when the turn marker says
-# the session is idle, whenever deliveries wait: the watcher takes one delivery
+# the session is idle, whenever deliveries wait, or at once while a forced one
+# waits, before any other (decision 0040), in Claude Code also mid-turn: the watcher takes one delivery
 # with a push receive, which makes the lease pushed, reports it handed with its
 # hand-over number, keeps it in the folder's store as handed, reports the turn
 # busy and exits saying so, without its content. The hooks acknowledge it, then
@@ -172,8 +173,13 @@ while :; do
     exit 6
   fi
   if aeolus_is_idle && id="$(aeolus_store_first received handed)"; then
-    hand_over "$id" "handed ${id} over again: it was not confirmed"
-    continue
+    # A forced delivery comes first (decision 0040): the inbox check, without
+    # a wait, says whether one waits; the receive below then hands it over.
+    call /api/v1/ship/inbox '{"waitSeconds":0}' 15
+    if [ "$status" != 200 ] || [ "$(aeolus_inbox_forced "$body")" -eq 0 ]; then
+      hand_over "$id" "handed ${id} over again: it was not confirmed"
+      continue
+    fi
   fi
   wait_now="$WAIT_SECONDS"
   [ "$wait_now" -le "$left" ] || wait_now="$left"
@@ -185,6 +191,7 @@ while :; do
   answered
   waiting="$(printf '%s' "$body" | sed -n 's/.*"waiting"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
   [ -n "$waiting" ] || waiting=0
+  forced="$(aeolus_inbox_forced "$body")"
   seen=0
   is_owed=0
   { read -r seen is_owed < "$waiting_file"; } 2>/dev/null
@@ -193,7 +200,10 @@ while :; do
   # own, and a drop to none and a rise again may fall within one inbox wait.
   is_owed=0
   [ "$waiting" -eq 0 ] || is_owed=1
-  if [ "$is_owed" = 1 ] && aeolus_is_idle; then
+  # A forced message is handed over at once (decision 0040): in Claude Code a
+  # busy turn gets it at its next tool call or Stop. A Codex task's hooks put
+  # nothing into a running turn, so there it waits for the next idle.
+  if [ "$is_owed" = 1 ] && { aeolus_is_idle || { [ "$forced" -gt 0 ] && [ "$(aeolus_harness)" != codex ]; }; }; then
     printf '%s 0\n' "$waiting" > "$waiting_file"
     # Deliveries wait, so the push receive answers at once.
     call /api/v1/ship/pushReceive '{"max":1}' $((WAIT_SECONDS + 15))
@@ -204,7 +214,9 @@ while :; do
     answered
     aeolus_lease_key "$crew_token" > "$(aeolus_pushed_file)"
     if id="$(aeolus_store_put "$(printf '%s' "$body" | tr -d '\n')")"; then
-      hand_over "$id" "woken, ${waiting} deliveries wait: handed ${id} over"
+      woken="woken, ${waiting} deliveries wait"
+      [ "$forced" -eq 0 ] || woken="${woken}, ${forced} forced"
+      hand_over "$id" "${woken}: handed ${id} over"
       continue
     fi
     # Nothing handed, as when another ship of its type took the delivery first.

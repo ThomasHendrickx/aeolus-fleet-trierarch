@@ -23,8 +23,8 @@ export interface Delivery {
   readonly payload: string;
 }
 
-/** What a session's inbox says: deliveries waiting, or the lease ended (released or retired elsewhere). */
-export type InboxAnswer = { readonly kind: 'waiting'; readonly count: number } | { readonly kind: 'leaseEnded' };
+/** What a session's inbox says: deliveries waiting, of them those forced and not handed over yet (decision 0040), or the lease ended (released or retired elsewhere). */
+export type InboxAnswer = { readonly kind: 'waiting'; readonly count: number; readonly forced: number } | { readonly kind: 'leaseEnded' };
 
 /** A clear request to the trierarch's ship: the kept worktree, by the ship it belonged to and its repository. */
 export interface ClearRequestToMe {
@@ -163,6 +163,12 @@ export interface HarnessPort {
   turnOf(session: { shipId: ShipId; folder: string }): Promise<Turn>;
   /** Hands one message over through the aeolus plugin, which keeps the store, and types the line it gives into the session (#756, 2a). */
   handOver(session: { shipId: ShipId; folder: string }): Promise<HandOver>;
+  /**
+   * Hands a forced message over first through the aeolus plugin (decision
+   * 0040), and types the line it gives into the session as a new prompt. A
+   * busy turn is stopped for it first: force means act now.
+   */
+  forceOver(session: { shipId: ShipId; folder: string; isTurnBusy: boolean }): Promise<HandOver>;
   /** Whether the session's store holds a message to hand: received, handed and not confirmed, or to hand once more (#756). */
   isHolding(session: { shipId: ShipId; folder: string }): Promise<boolean>;
   /** Tells the session's store that its session died, before it starts again (#756, 3.5 to 3.7, 3.10). */
@@ -201,6 +207,8 @@ export interface SessionRuntime {
   start(session: { shipId: ShipId; folder: string; command: readonly string[]; env?: Readonly<Record<string, string>> }): Promise<void>;
   /** Types the text into the ship's session and presses Enter, after `settleMs` when given. */
   type(at: { shipId: ShipId; text: string; settleMs?: number }): Promise<void>;
+  /** Stops the session's running turn as a person does, with Escape; the session goes on (decision 0040). */
+  interrupt(shipId: ShipId): Promise<void>;
   /** What the ship's session shows: its last lines, wrapped ones joined; empty with no session. */
   screen(shipId: ShipId): Promise<string>;
 }

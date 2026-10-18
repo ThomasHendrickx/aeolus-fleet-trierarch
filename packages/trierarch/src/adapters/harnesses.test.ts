@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
 import { createHarnesses, riskyFlagsOf } from './harnesses.js';
 
-const sessions = { start: () => Promise.resolve(), type: () => Promise.resolve(), screen: () => Promise.resolve('') };
+const sessions = { start: () => Promise.resolve(), type: () => Promise.resolve(), interrupt: () => Promise.resolve(), screen: () => Promise.resolve('') };
 /** The aeolus plugin's own scripts from this repository, as a harness installs them in its plugin cache. */
 const PLUGIN_ROOT = fileURLToPath(new URL('../../../../plugins/aeolus', import.meta.url));
 const env = { AEOLUS_PLUGIN_ROOT: '/claude-plugin', AEOLUS_CODEX_PLUGIN_ROOT: '/codex-plugin' };

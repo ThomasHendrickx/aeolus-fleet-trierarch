@@ -33,6 +33,8 @@ let started: { shipId: ShipId; folder: string; command: readonly string[]; env?:
 /** What each ship's session shows, by ship id. */
 let screens: Map<ShipId, string>;
 let typed: { shipId: ShipId; text: string; settleMs?: number }[];
+/** What was done to each session, in order: a turn stopped, or a line typed. */
+let steps: string[];
 /** The aeolus plugin's hooks Codex does not trust yet, as a plugin update leaves them (#581). */
 let untrustedHooks: Set<string>;
 /** The hooks Codex did not trust when each session started. */
@@ -44,6 +46,7 @@ beforeEach(() => {
   folder = realpathSync(mkdtempSync(join(tmpdir(), 'trierarch-codex-session-')));
   started = [];
   typed = [];
+  steps = [];
   screens = new Map();
   untrustedHooks = new Set(['aeolus@aeolus-fleet:hooks/hooks.json:stop:0:0']);
   untrustedAtStart = [];
@@ -74,6 +77,11 @@ function harness(at: { pluginRoot?: string } = {}) {
       },
       type: (at) => {
         typed.push(at);
+        steps.push(`type ${at.shipId}`);
+        return Promise.resolve();
+      },
+      interrupt: (shipId) => {
+        steps.push(`interrupt ${shipId}`);
         return Promise.resolve();
       },
       screen: (shipId) => Promise.resolve(screens.get(shipId) ?? ''),
@@ -146,6 +154,7 @@ describe('Codex as a harness', () => {
           return Promise.resolve();
         },
         type: () => Promise.resolve(),
+        interrupt: () => Promise.resolve(),
         screen: () => Promise.resolve(''),
       },
     });
@@ -165,6 +174,7 @@ describe('Codex as a harness', () => {
           return Promise.resolve();
         },
         type: () => Promise.resolve(),
+        interrupt: () => Promise.resolve(),
         screen: () => Promise.resolve(''),
       },
     });
@@ -209,6 +219,18 @@ describe('Codex as a harness', () => {
 
     await expect(harness({ pluginRoot: root }).handOver({ shipId, folder })).resolves.toBe('handed');
 
+    expect(typed).toEqual([{ shipId, text: `${line} ${NO_TERMINAL_QUESTIONS}`, settleMs: CODEX_TYPING_SETTLE_MS }]);
+  });
+
+  it("forces a message over to a busy task: the plugin's force hands it, then the turn is stopped and the line typed, settling before Enter (decision 0040)", async () => {
+    const line = "Aeolus handed a message for scout to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it.";
+    const root = mkdtempSync(join(data, 'plugin-'));
+    mkdirSync(join(root, 'scripts'));
+    writeFileSync(join(root, 'scripts', 'aeolus-push.sh'), `[ "$1" = force ] || exit 2\necho "${line}"\n`);
+
+    await expect(harness({ pluginRoot: root }).forceOver({ shipId, folder, isTurnBusy: true })).resolves.toBe('handed');
+
+    expect(steps).toEqual([`interrupt ${shipId}`, `type ${shipId}`]);
     expect(typed).toEqual([{ shipId, text: `${line} ${NO_TERMINAL_QUESTIONS}`, settleMs: CODEX_TYPING_SETTLE_MS }]);
   });
 

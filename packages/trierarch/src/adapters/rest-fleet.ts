@@ -1,6 +1,6 @@
 import { setTimeout as wait } from 'node:timers/promises';
 
-import { assignedCrewRequestsOutputSchema, busyWaitMs, clearRequestsOutputSchema, FLEET_BUSY_WAITS_MS, giveBackCrewRequestOutputSchema, idSchema, MARKDOWN_CONTENT_TYPE, receivedDeliverySchema, shipDetailOutputSchema, type ShipId } from '@aeolus-fleet/common';
+import { assignedCrewRequestsOutputSchema, busyWaitMs, clearRequestsOutputSchema, FLEET_BUSY_WAITS_MS, giveBackCrewRequestOutputSchema, idSchema, inboxOutputSchema, MARKDOWN_CONTENT_TYPE, receivedDeliverySchema, shipDetailOutputSchema, type ShipId } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
 import type { Delivery, FleetPort } from '../core/ports.js';
@@ -188,8 +188,8 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string; 
     },
     inbox: async (crewToken) => {
       try {
-        const { waiting } = await call({ path: '/ship/inbox', crewToken, body: {}, answers: z.object({ waiting: z.int() }) });
-        return { kind: 'waiting', count: waiting };
+        const { waiting, forced } = await call({ path: '/ship/inbox', crewToken, body: {}, answers: inboxOutputSchema });
+        return { kind: 'waiting', count: waiting, forced };
       } catch (error) {
         if (error instanceof FleetRefusal && (error.code === 'LEASE_ENDED' || error.code === 'UNAUTHORIZED')) {
           return { kind: 'leaseEnded' };

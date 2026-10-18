@@ -220,12 +220,13 @@ async function carryOut(state: TrierarchState, at: CarryOut): Promise<TrierarchS
     case 'crew':
     case 'launch':
     case 'wake':
+    case 'force':
     case 'report':
       return carryOutForEntry(state, { action, deps });
   }
 }
 
-async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: Extract<Action, { kind: 'crew' | 'launch' | 'wake' | 'report' }> }): Promise<TrierarchState> {
+async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: Extract<Action, { kind: 'crew' | 'launch' | 'wake' | 'force' | 'report' }> }): Promise<TrierarchState> {
   const { action, deps } = at;
   const entry = state.entries[action.shipId];
   if (entry === undefined) {
@@ -261,6 +262,11 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
     case 'wake':
       if (entry.folder !== undefined && (await harnessOf(entry, deps)?.handOver({ shipId: entry.shipId, folder: entry.folder })) === 'handed') {
         log(deps, { ...about(state, { shipId: entry.shipId, action: 'wake' }), outcome: 'handed a message over' });
+      }
+      return state;
+    case 'force':
+      if (entry.folder !== undefined && (await harnessOf(entry, deps)?.forceOver({ shipId: entry.shipId, folder: entry.folder, isTurnBusy: action.isTurnBusy })) === 'handed') {
+        log(deps, { ...about(state, { shipId: entry.shipId, action: 'wake' }), outcome: action.isTurnBusy ? 'stopped its turn and handed a forced message over' : 'handed a forced message over' });
       }
       return state;
     case 'report': {

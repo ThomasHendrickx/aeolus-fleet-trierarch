@@ -109,7 +109,7 @@ function wakeThreadFile(): string {
   return identityFile().replace(/\.identity$/, '.wake.thread');
 }
 
-const inbox = (waiting: number) => ({ status: 200, body: { waiting } });
+const inbox = (waiting: number, forced = 0) => ({ status: 200, body: { waiting, forced } });
 
 // The hand-over (#756): what the watcher receives and hands to the session.
 const DELIVERY_ID = 'dlv_01m4raygfdtsjfbnmpvqjznsyw';
@@ -1905,6 +1905,195 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
 
         expect(callsTo(stub, '/api/v1/ship/notHandled').map((call) => call.body)).toEqual([`{"deliveryId":"${DELIVERY_ID}","reason":"the session it was handed once more to died too (the trierarch starts it again)"}`]);
         expect(store()).toEqual([]);
+      });
+    });
+  });
+
+  describe('a forced message (decision 0040): it comes first, and a busy turn gets it now', () => {
+    const FORCED_ID = 'dlv_01m4rbd2k7v3q8x5ycsn1f4c2t';
+    const FORCED_MESSAGE_ID = 'msg_01m4rbd2k7v3q8x5ycsn1f4c2s';
+    const aForcedDelivery = () => aDelivery({ deliveryId: FORCED_ID, messageId: FORCED_MESSAGE_ID, payload: 'Stop: the release is cancelled', isForced: true });
+    const HAND_OVER_LINE = "Aeolus handed a message for scout to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it.\n";
+    const handedBodies = (stub: StubFleet) => callsTo(stub, '/api/v1/ship/handed').map((call) => call.body);
+    const handledBodies = (stub: StubFleet) => callsTo(stub, '/api/v1/ship/handled').map((call) => call.body);
+    const force = (env: Record<string, string> = {}) => start('aeolus-push.sh', { args: ['force'], env: { ...NO_WAITS, ...env } }).done;
+    const hand = (env: Record<string, string> = {}) => start('aeolus-push.sh', { args: ['hand'], env: { ...NO_WAITS, ...env } }).done;
+
+    describe('the watcher, for a session crewed by hand in Claude Code', () => {
+      it('hands a forced message over while the session is busy, for its next tool call or Stop', async () => {
+        fleet = await aWakingFleet([inbox(1, 1)], [receiving(aForcedDelivery())]);
+        crew(fleet.url);
+        aPromptSubmitted();
+
+        await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+        expect(store()).toEqual([`${FORCED_ID} handed`]);
+      });
+
+      it('lets the next tool call of the busy turn put the forced message in', async () => {
+        fleet = await aWakingFleet([inbox(1, 1)], [receiving(aForcedDelivery())]);
+        crew(fleet.url);
+        aPromptSubmitted();
+        await start('aeolus-wait.sh').exited;
+
+        expect(deniedWith(await aFirstToolCall())).toContain('Stop: the release is cancelled');
+        expect(callsTo(fleet, '/api/v1/ship/ack').map((call) => call.body)).toEqual([`{"deliveryId":"${FORCED_ID}"}`]);
+      });
+
+      it('hands a forced message before one the store holds unconfirmed, while the session is idle', async () => {
+        const stub = await aHandOver({ '/api/v1/ship/ack': [busy], '/api/v1/ship/inbox': [inbox(1), inbox(2, 1)], '/api/v1/ship/pushReceive': [receiving(aDelivery()), receiving(aForcedDelivery())] });
+        await aFirstToolCall();
+        await aTurnEnds();
+
+        await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+        expect(handedBodies(stub).at(-1)).toBe(`{"deliveryId":"${FORCED_ID}","handOverNumber":1}`);
+        expect(store()).toEqual([`${DELIVERY_ID} received`, `${FORCED_ID} handed`]);
+      });
+
+      it('holds a forced message while a Codex task is busy: hand-crewed Codex gets it at its next idle', async () => {
+        fleet = await aWakingFleet([inbox(1, 1)], [receiving(aForcedDelivery())]);
+        const stub = fleet;
+        crew(stub.url, AS_CODEX);
+        expect(run('aeolus-turn.sh', { stdin: JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt: 'go on' }), env: AS_CODEX }).status).toBe(0);
+
+        await expect(start('aeolus-wait.sh', { env: { ...AS_CODEX, AEOLUS_MAX_SECONDS: '1' } }).exited).resolves.toMatchObject({ status: 6 });
+        expect(callsTo(stub, '/api/v1/ship/pushReceive')).toEqual([]);
+      });
+    });
+
+    describe('under a trierarch: aeolus-push.sh force, given while a forced message waits', () => {
+      function crewedByATrierarch(fleetUrl: string, env: Record<string, string> = {}): void {
+        expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', fleetUrl, SHIP_ID, 'scout'], stdin: CREW_TOKEN, env }).status).toBe(0);
+      }
+      const aPrompt = () => aHook('aeolus-turn.sh', { payload: { hook_event_name: 'UserPromptSubmit', prompt: 'go on' } });
+
+      /** The trierarch hands a plain message over, and the prompt its line starts confirms it: the turn is busy with it. */
+      async function aBusyTurnWithAMessage(routes: Record<string, readonly StubAnswer[]>): Promise<StubFleet> {
+        fleet = await startRoutedStubFleet({
+          '/api/v1/ship/pushReceive': [receiving(aDelivery()), receiving(aForcedDelivery())],
+          '/api/v1/ship/handed': [handedOk],
+          '/api/v1/ship/ack': [acknowledged],
+          '/api/v1/ship/handled': [taken],
+          '/api/v1/ship/turn': [taken],
+          ...routes,
+        });
+        crewedByATrierarch(fleet.url);
+        aTurnEnded();
+        expect((await hand()).status).toBe(0);
+        await aPrompt();
+        return fleet;
+      }
+
+      it('push-receives the forced message while the turn is busy, reports it handed with number 1 and prints the line to type', async () => {
+        const stub = await aBusyTurnWithAMessage({});
+
+        expect(await force()).toMatchObject({ status: 0, stdout: HAND_OVER_LINE });
+        expect(callsTo(stub, '/api/v1/ship/pushReceive')).toHaveLength(2);
+        expect(handedBodies(stub).at(-1)).toBe(`{"deliveryId":"${FORCED_ID}","handOverNumber":1}`);
+        expect(store()).toEqual([`${DELIVERY_ID} confirmed`, `${FORCED_ID} handed`]);
+      });
+
+      it('hands the forced message before one to hand once more', async () => {
+        const stub = await aBusyTurnWithAMessage({});
+        await start('aeolus-push.sh', { args: ['died'], env: NO_WAITS }).done;
+        aTurnEnded();
+
+        expect(await force()).toMatchObject({ status: 0, stdout: HAND_OVER_LINE });
+        expect(handedBodies(stub).at(-1)).toBe(`{"deliveryId":"${FORCED_ID}","handOverNumber":1}`);
+        expect(store()).toEqual([`${DELIVERY_ID} onceMore`, `${FORCED_ID} handed`]);
+      });
+
+      it('answers 1 and prints nothing when the push receive hands nothing over', async () => {
+        fleet = await startRoutedStubFleet({ '/api/v1/ship/pushReceive': [receiving()] });
+        crewedByATrierarch(fleet.url);
+        aPromptSubmitted();
+
+        expect(await force()).toMatchObject({ status: 1, stdout: '' });
+      });
+
+      it('in Claude Code: the forced prompt puts the forced message in, and when the forced turn ends the stopped turn\'s message is handled too', async () => {
+        const stub = await aBusyTurnWithAMessage({ '/api/v1/ship/notHandled': [taken] });
+        await force();
+
+        const prompted = await aPrompt();
+        await aTurnEnds();
+
+        expect(prompted.stdout).toContain('Stop: the release is cancelled');
+        expect(handledBodies(stub)).toEqual([`{"deliveryId":"${DELIVERY_ID}"}`, `{"deliveryId":"${FORCED_ID}"}`]);
+        expect(callsTo(stub, '/api/v1/ship/notHandled')).toEqual([]);
+        expect(handedBodies(stub).filter((body) => body.includes('isOnceMore'))).toEqual([]);
+        expect(store()).toEqual([]);
+      });
+
+      describe('in Codex, whose stopped turn fires Interrupt: stopping is not dying', () => {
+        const aCodexHook = (script: string, payload: Record<string, unknown>) =>
+          start(script, {
+            stdin: JSON.stringify({ session_id: '01a103c9-80b0-7ab1-82e3-6f4a2f70ad86', turn_id: 'turn-1', cwd: folder, model: 'gpt-5.5', ...payload }),
+            env: {
+              AEOLUS_FOLDER: '',
+              AEOLUS_DATA: '',
+              CLAUDE_PROJECT_DIR: '',
+              CLAUDE_PLUGIN_DATA: '',
+              CLAUDE_PLUGIN_ROOT: '',
+              PLUGIN_DATA: data,
+              PLUGIN_ROOT: SCRIPTS.replace(/\/scripts\/$/, ''),
+              AEOLUS_CODEX_WAKE_DISABLED: '1',
+              ...NO_WAITS,
+            },
+          }).done;
+        const anInterrupt = () => aCodexHook('aeolus-turn-died.sh', { hook_event_name: 'Interrupt', permission_mode: 'default', transcript_path: null });
+        const aCodexPrompt = () => aCodexHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: 'go on' });
+        const aCodexTurnEnds = () => aCodexHook('aeolus-stop.sh', { hook_event_name: 'Stop', stop_hook_active: false, last_assistant_message: 'done' });
+
+        /** A Codex task a trierarch crews, busy with a confirmed message. */
+        async function aBusyCodexTurnWithAMessage(): Promise<StubFleet> {
+          fleet = await startRoutedStubFleet({
+            '/api/v1/ship/pushReceive': [receiving(aDelivery()), receiving(aForcedDelivery())],
+            '/api/v1/ship/handed': [handedOk],
+            '/api/v1/ship/ack': [acknowledged],
+            '/api/v1/ship/handled': [taken],
+            '/api/v1/ship/notHandled': [taken],
+            '/api/v1/ship/turn': [taken],
+          });
+          crewedByATrierarch(fleet.url, AS_CODEX);
+          await aCodexTurnEnds();
+          expect((await hand(AS_CODEX)).status).toBe(0);
+          await aCodexPrompt();
+          return fleet;
+        }
+
+        it('keeps the stopped turn\'s message confirmed at the Interrupt a forced stop fires, never to hand once more', async () => {
+          await aBusyCodexTurnWithAMessage();
+          await force(AS_CODEX);
+
+          await anInterrupt();
+
+          expect(store()).toEqual([`${DELIVERY_ID} confirmed`, `${FORCED_ID} handed`]);
+        });
+
+        it('handles the stopped turn\'s message when the forced turn ends', async () => {
+          const stub = await aBusyCodexTurnWithAMessage();
+          await force(AS_CODEX);
+          await anInterrupt();
+
+          const prompted = await aCodexPrompt();
+          await aCodexTurnEnds();
+
+          expect(prompted.stdout).toContain('Stop: the release is cancelled');
+          expect(handledBodies(stub)).toEqual([`{"deliveryId":"${DELIVERY_ID}"}`, `{"deliveryId":"${FORCED_ID}"}`]);
+          expect(callsTo(stub, '/api/v1/ship/notHandled')).toEqual([]);
+          expect(store()).toEqual([]);
+        });
+
+        it('takes an Interrupt of the forced turn itself as a died turn again', async () => {
+          await aBusyCodexTurnWithAMessage();
+          await force(AS_CODEX);
+          await anInterrupt();
+          await aCodexPrompt();
+
+          await anInterrupt();
+
+          expect(store()).toEqual([`${DELIVERY_ID} onceMore`, `${FORCED_ID} onceMore`]);
+        });
       });
     });
   });

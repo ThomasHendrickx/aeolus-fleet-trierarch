@@ -119,6 +119,7 @@ function standInSessions(): SessionRuntime {
       }
     },
     type: () => Promise.resolve(),
+    interrupt: () => Promise.resolve(),
     screen: (shipId) => Promise.resolve(sessions.has(shipId) ? claudeCodeShows(commands.get(shipId) ?? []) : ''),
   };
 }
@@ -383,12 +384,15 @@ describe("contained access on a real fleet (decision 0026): the session calls ov
  * prompt and each line typed into an idle session start a turn
  * (UserPromptSubmit), and the test ends the turn (Stop), makes a tool call
  * (PreToolUse) or lets the session die. A line typed while the turn is busy
- * lands mid-turn, where no prompt hook runs (2a).
+ * lands mid-turn, where no prompt hook runs (2a). Escape stops a busy turn
+ * and runs no hook, as in Claude Code (decision 0040).
  */
 function hookedSessions() {
   const sessions = new Map<ShipId, { status: ObservedSession['status']; folder: string; isBusy: boolean }>();
   /** Each line typed into a session, and what the hooks put into the turn it started, if any. */
   const turns: { typed: string; context: string }[] = [];
+  /** Each session whose turn was stopped, in order. */
+  const interrupts: ShipId[] = [];
 
   async function hook(folder: string, run: { script: string; payload: Record<string, unknown> }): Promise<string> {
     const { script, payload } = run;
@@ -426,12 +430,21 @@ function hookedSessions() {
     type: async ({ shipId, text }) => {
       await prompt(shipId, text);
     },
+    interrupt: (shipId) => {
+      interrupts.push(shipId);
+      const session = sessions.get(shipId);
+      if (session !== undefined) {
+        session.isBusy = false;
+      }
+      return Promise.resolve();
+    },
     screen: () => Promise.resolve('❯ \n'),
   };
 
   return {
     runtime,
     turns,
+    interrupts,
     /** The turn ends by itself: the Stop hook lets it end. */
     turnEnds: async (shipId: ShipId) => {
       const session = sessions.get(shipId);
@@ -539,6 +552,35 @@ describe('the trierarch hands messages over on a real fleet (#756): the plugin k
 
     await expect(eventsOf(first)).resolves.toEqual(['DeliveryReceived', 'DeliveryHanded 1', 'DeliveryAcknowledged', 'DeliveryHandled']);
     await expect(eventsOf(second)).resolves.toEqual(['DeliveryReceived', 'DeliveryHanded 1', 'DeliveryAcknowledged', 'DeliveryHandled']);
+  });
+
+  it("a forced message arriving mid-turn stops the turn and comes in as a new prompt, and the stopped turn's message is handled when the forced turn ends (decision 0040)", async () => {
+    const { scout, pass, sessions, send, useCases, argo } = await aCrewedScout();
+    const plain = await send();
+    await pass();
+    const forced = unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', name: 'scout' }, payload: 'Stop: the release is cancelled', idempotencyKey: newKey(), isForced: true })).messageId;
+
+    await pass();
+    await pass();
+    await sessions.turnEnds(scout.shipId);
+
+    expect(sessions.interrupts).toEqual([scout.shipId]);
+    expect(sessions.turns.at(-1)?.context).toContain('Stop: the release is cancelled');
+    await expect(eventsOf(plain)).resolves.toEqual(['DeliveryReceived', 'DeliveryHanded 1', 'DeliveryAcknowledged', 'DeliveryHandled']);
+    await expect(eventsOf(forced)).resolves.toEqual(['DeliveryReceived', 'DeliveryHanded 1', 'DeliveryAcknowledged', 'DeliveryHandled']);
+  });
+
+  it('a forced message to an idle session goes first, before an older one, and stops no turn (decision 0040)', async () => {
+    const { pass, sessions, send, useCases, argo } = await aCrewedScout();
+    const older = await send();
+    const forced = unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', name: 'scout' }, payload: 'Stop: the release is cancelled', idempotencyKey: newKey(), isForced: true })).messageId;
+
+    await pass();
+
+    expect(sessions.interrupts).toEqual([]);
+    expect(sessions.turns.at(-1)?.context).toContain('Stop: the release is cancelled');
+    await expect(eventsOf(forced)).resolves.toEqual(['DeliveryReceived', 'DeliveryHanded 1', 'DeliveryAcknowledged']);
+    await expect(eventsOf(older)).resolves.toEqual([]);
   });
 
   it('a line that lands mid-turn is confirmed by the first tool call (2a race)', async () => {

@@ -165,6 +165,24 @@ aeolus_turn_file() {
   printf '%s/%s.turn' "$dir" "$(aeolus_key "$folder")"
 }
 
+# The mark of a forced stop (decision 0040): the trierarch stops a busy turn to
+# hand a forced message over, and stopping is not dying. Codex's Interrupt hook
+# then leaves what the stopped turn confirmed confirmed, handled when the forced
+# turn ends. The prompt that starts the forced turn, or a turn end, clears it.
+aeolus_forced_stop_file() {
+  local file
+  file="$(aeolus_turn_file)" || return 1
+  printf '%s.forcedStop' "$file"
+}
+
+# How many forced deliveries the fleet's inbox check answered, not handed over
+# yet; 0 when it says none. <inbox answer>
+aeolus_inbox_forced() {
+  local forced
+  forced="$(printf '%s' "$1" | sed -n 's/.*"forced"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
+  printf '%s' "${forced:-0}"
+}
+
 # The launch marker of a crewed folder (#490): the launch id the trierarch
 # started the session for, then what its hooks saw of that launch, with when.
 aeolus_launch_file() {

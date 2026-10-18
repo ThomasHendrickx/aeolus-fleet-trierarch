@@ -25,12 +25,20 @@ async function runPush(plugin: AeolusPlugin, at: { folder: string; args: readonl
   return runCommand('bash', { args: [`${await plugin.root()}/scripts/aeolus-push.sh`, ...at.args], env: { AEOLUS_FOLDER: at.folder, AEOLUS_DATA: plugin.data, AEOLUS_CREWS: plugin.crews } });
 }
 
+/** The line a hand-over printed to type into the session, or none when it handed nothing. */
+function lineOf(handed: { status: number; stdout: string }): string | undefined {
+  const line = handed.stdout.trim();
+  return handed.status === 0 && line !== '' ? line : undefined;
+}
+
 /** The states of a store entry the trierarch hands over (#756): received, handed and not confirmed, or to hand once more. */
 const TO_HAND = new Set(['received', 'handed', 'onceMore']);
 
 /** What the plugin does for a hand-over: the line to type into the session, or none when nothing is handed. */
 export interface PluginHandOver {
   readonly handOverLine: (session: { shipId: ShipId; folder: string }) => Promise<string | undefined>;
+  /** The same for a forced message, handed over first (decision 0040). */
+  readonly forceOverLine: (session: { shipId: ShipId; folder: string }) => Promise<string | undefined>;
 }
 
 /**
@@ -68,11 +76,9 @@ export function createPluginIdentity(plugin: AeolusPlugin): Pick<HarnessPort, 'p
     // The store keeps one line per entry: its delivery id, its state and when.
     isHolding: async ({ folder }) => (await identity(folder, ['store'])).stdout.split('\n').some((line) => TO_HAND.has(line.split(' ')[1] ?? '')),
     // Exit 0 hands a message over and prints its line; anything else hands nothing.
-    handOverLine: async ({ folder }) => {
-      const handed = await runPush(plugin, { folder, args: ['hand'] });
-      const line = handed.stdout.trim();
-      return handed.status === 0 && line !== '' ? line : undefined;
-    },
+    handOverLine: async ({ folder }) => lineOf(await runPush(plugin, { folder, args: ['hand'] })),
+    // The plugin marks the stop before it hands over, so a stopped turn is not taken as one that died.
+    forceOverLine: async ({ folder }) => lineOf(await runPush(plugin, { folder, args: ['force'] })),
     // The identity script stands for the scripts: a session cannot start without them (#827).
     startProblem: async () => {
       const scripts = join(await plugin.root(), 'scripts');

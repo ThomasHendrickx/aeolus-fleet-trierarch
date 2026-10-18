@@ -127,7 +127,7 @@ case "$command" in
       rm -f "$pid_file"
     fi
     aeolus_store_forget
-    rm -f "$file" "$(aeolus_refused_file)" "$(aeolus_reported_file)" "$(aeolus_turn_file)" "$(aeolus_turn_reported_file)" "$(aeolus_pushed_file)" "$(aeolus_launch_file)" "$(aeolus_waiting_file)" "$(aeolus_model_file)"
+    rm -f "$file" "$(aeolus_refused_file)" "$(aeolus_reported_file)" "$(aeolus_turn_file)" "$(aeolus_turn_reported_file)" "$(aeolus_forced_stop_file)" "$(aeolus_pushed_file)" "$(aeolus_launch_file)" "$(aeolus_waiting_file)" "$(aeolus_model_file)"
     echo "aeolus: this folder crews no ship any more"
     ;;
   *)

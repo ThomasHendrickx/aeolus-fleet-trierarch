@@ -62,6 +62,8 @@ interface FleetShip {
   secret?: string;
   crewToken?: string;
   waiting: number;
+  /** Of those waiting, the forced ones not handed over yet (decision 0040). */
+  forced: number;
 }
 
 /** A crew request assigned to this trierarch, as the fleet holds it. */
@@ -250,7 +252,7 @@ export class InMemoryFleet implements FleetPort {
   /** A ship of the fleet awaiting crew, as a requester commissions it. */
   commission(name: string): ShipId {
     const shipId = newId('ship');
-    this.ships.set(shipId, { name, status: 'awaitingCrew', waiting: 0 });
+    this.ships.set(shipId, { name, status: 'awaitingCrew', waiting: 0, forced: 0 });
     return shipId;
   }
 
@@ -322,7 +324,7 @@ export class InMemoryFleet implements FleetPort {
   inbox(crewToken: string): Promise<InboxAnswer> {
     this.inboxCalls.push(crewToken);
     const ship = [...this.ships.values()].find((each) => each.crewToken === crewToken);
-    return Promise.resolve(ship === undefined ? { kind: 'leaseEnded' } : { kind: 'waiting', count: ship.waiting });
+    return Promise.resolve(ship === undefined ? { kind: 'leaseEnded' } : { kind: 'waiting', count: ship.waiting, forced: ship.forced });
   }
 
   report(crew: { crewToken: string; state: 'blocked' | 'working'; note: string }): Promise<void> {
@@ -338,6 +340,11 @@ export class InMemoryFleet implements FleetPort {
   /** Messages wait for the ship. */
   deliver(shipId: ShipId, count: number): void {
     this.shipOf(shipId).waiting = count;
+  }
+
+  /** Of the messages waiting for the ship, `count` are forced and not handed over yet (decision 0040). */
+  force(shipId: ShipId, count: number): void {
+    this.shipOf(shipId).forced = count;
   }
 
   shipOf(shipId: ShipId): FleetShip {
@@ -379,6 +386,8 @@ export class InMemoryHarness implements HarnessPort {
   readonly launchIds: string[] = [];
   /** Each hand-over the trierarch made, by ship (#756). */
   readonly handOvers: ShipId[] = [];
+  /** Each forced hand-over the trierarch made, by ship, and whether it stopped a busy turn for it (decision 0040). */
+  readonly forcedOver: { shipId: ShipId; isTurnStopped: boolean }[] = [];
   /** The folders whose store holds a message to hand (#756). */
   readonly holding = new Set<string>();
   /** Each session the store was told died, with how many launches there had been then (#756). */
@@ -435,6 +444,16 @@ export class InMemoryHarness implements HarnessPort {
     }
     this.handOvers.push(session.shipId);
     this.holding.delete(session.folder);
+    this.turns.set(session.folder, 'busy');
+    return Promise.resolve('handed');
+  }
+
+  /** As the plugin does: the forced message handed over first, a busy turn stopped for it, and the turn busy with it. */
+  forceOver(session: { shipId: ShipId; folder: string; isTurnBusy: boolean }): Promise<HandOver> {
+    if (this.isHandingNothing) {
+      return Promise.resolve('nothing');
+    }
+    this.forcedOver.push({ shipId: session.shipId, isTurnStopped: session.isTurnBusy });
     this.turns.set(session.folder, 'busy');
     return Promise.resolve('handed');
   }

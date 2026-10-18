@@ -23,6 +23,8 @@ if aeolus_reports_here "$identity_text"; then
   aeolus_store_drop_older_leases
   aeolus_send_owed "$identity"
 fi
+# The forced turn starts: a stop after this one is a died turn again.
+rm -f "$(aeolus_forced_stop_file)"
 aeolus_mark_turn busy
 aeolus_log "$identity" turn 'busy: a prompt was submitted'
 aeolus_report_turn "$identity_text"

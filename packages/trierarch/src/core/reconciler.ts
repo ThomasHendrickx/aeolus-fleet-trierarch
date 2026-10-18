@@ -34,6 +34,8 @@ export type Action =
   | { readonly kind: 'launch'; readonly shipId: ShipId }
   | { readonly kind: 'stop'; readonly shipId: ShipId }
   | { readonly kind: 'wake'; readonly shipId: ShipId }
+  /** Hand a forced message over first, stopping a busy turn for it (decision 0040). */
+  | { readonly kind: 'force'; readonly shipId: ShipId; readonly isTurnBusy: boolean }
   /** Its request was removed: stop, end the lease, the workspace, then confirm. */
   | { readonly kind: 'release'; readonly shipId: ShipId }
   /** A removed request it does not crew: confirm alone. */
@@ -504,10 +506,19 @@ function identityStep(entry: Entry, observed: Observed): Step {
 /**
  * A hand-over (#756, 2a): one message to an idle session whenever deliveries
  * wait at the fleet or its store holds one to hand. The hand-over marks the
- * turn busy, so the next one waits until the session is idle again.
+ * turn busy, so the next one waits until the session is idle again. A forced
+ * message goes first, idle or busy: a busy turn is stopped for it (decision
+ * 0040). Once handed over, it no longer counts as forced, so a turn is
+ * stopped once per forced message.
  */
 function wakeStep(entry: Entry, seen: Observed['ships'][string] | undefined): Step {
-  if (seen?.inbox.kind !== 'waiting' || seen.turn !== 'idle') {
+  if (seen?.inbox.kind !== 'waiting' || seen.turn === 'unknown') {
+    return NOTHING;
+  }
+  if (seen.inbox.forced > 0) {
+    return { actions: [{ kind: 'force', shipId: entry.shipId, isTurnBusy: seen.turn === 'busy' }], starts: 0 };
+  }
+  if (seen.turn !== 'idle') {
     return NOTHING;
   }
   return seen.inbox.count > 0 || seen.isHolding ? { actions: [{ kind: 'wake', shipId: entry.shipId }], starts: 0 } : NOTHING;

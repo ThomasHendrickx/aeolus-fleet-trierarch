@@ -12,6 +12,7 @@ import { effectiveFlags } from '../core/effective-flags.js';
 import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
 import { createLaunchMarks } from './launch-marker.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
+import { stopTurn } from './stop-turn.js';
 
 /**
  * Codex as a harness (docs/architecture.md, "First adapters"): `codex` in the
@@ -79,7 +80,7 @@ async function sessionLog(path: string): Promise<string | undefined> {
 export function createCodexHarness(options: {
   configuration: TrierarchConfiguration;
   plugin: AeolusPlugin;
-  sessions: Pick<SessionRuntime, 'start' | 'type' | 'screen'>;
+  sessions: Pick<SessionRuntime, 'start' | 'type' | 'interrupt' | 'screen'>;
   /** Codex's own answers, where the aeolus plugin's hooks are trusted before each launch (#581). */
   setup: Pick<CodexSetup, 'trustAeolusHooks'>;
   /** The program to run; `codex` unless a test runs another. */
@@ -87,7 +88,7 @@ export function createCodexHarness(options: {
 }): HarnessPort {
   const { configuration, plugin, sessions } = options;
   const marks = createLaunchMarks(plugin);
-  const { handOverLine, ...identity } = createPluginIdentity(plugin);
+  const { handOverLine, forceOverLine, ...identity } = createPluginIdentity(plugin);
 
   return {
     ...identity,
@@ -108,6 +109,17 @@ export function createCodexHarness(options: {
         return 'nothing';
       }
       await sessions.type({ shipId: session.shipId, text: wakePromptOf(line), settleMs: CODEX_TYPING_SETTLE_MS });
+      return 'handed';
+    },
+    forceOver: async ({ shipId, folder, isTurnBusy }) => {
+      const line = await forceOverLine({ shipId, folder });
+      if (line === undefined) {
+        return 'nothing';
+      }
+      if (isTurnBusy) {
+        await stopTurn(sessions, { shipId });
+      }
+      await sessions.type({ shipId, text: wakePromptOf(line), settleMs: CODEX_TYPING_SETTLE_MS });
       return 'handed';
     },
     marksLaunches: () => marks.isMarking(),

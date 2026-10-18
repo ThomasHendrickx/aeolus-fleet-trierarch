@@ -122,6 +122,9 @@ export function createTmux(options: { server?: string; launch?: readonly string[
       }
       await must(['send-keys', '-t', target, 'Enter']);
     },
+    interrupt: async (shipId) => {
+      await must(['send-keys', '-t', `=${sessionName(shipId)}:`, 'Escape']);
+    },
     screen: async (shipId) => {
       const result = await tmux(['capture-pane', '-p', '-J', '-S', `-${String(SCREEN_LINES)}`, '-t', `=${sessionName(shipId)}:`]);
       return result.status === 0 ? result.stdout : '';

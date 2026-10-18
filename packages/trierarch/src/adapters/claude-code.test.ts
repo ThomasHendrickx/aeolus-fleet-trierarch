@@ -29,6 +29,8 @@ let started: { shipId: ShipId; folder: string; command: readonly string[]; env?:
 /** What each ship's session shows, by ship id. */
 let screens: Map<ShipId, string>;
 let typed: { shipId: ShipId; text: string }[];
+/** What was done to each session, in order: a turn stopped, or a line typed. */
+let steps: string[];
 /** A home folder of its own, so no test touches Claude Code's own files on this machine. */
 let home: string;
 /** What ~/.claude.json held as each session started, or undefined when there was none. */
@@ -40,6 +42,7 @@ beforeEach(() => {
   projects = mkdtempSync(join(tmpdir(), 'trierarch-claude-projects-'));
   started = [];
   typed = [];
+  steps = [];
   screens = new Map();
   home = mkdtempSync(join(tmpdir(), 'trierarch-home-'));
   crews = join(home, '.aeolus', 'crews', 'claude-code');
@@ -76,6 +79,11 @@ function harness(at: { pluginRoot?: string } = {}) {
       },
       type: (at) => {
         typed.push(at);
+        steps.push(`type ${at.shipId}`);
+        return Promise.resolve();
+      },
+      interrupt: (shipId) => {
+        steps.push(`interrupt ${shipId}`);
         return Promise.resolve();
       },
       screen: (shipId) => Promise.resolve(screens.get(shipId) ?? ''),
@@ -183,6 +191,7 @@ describe('Claude Code as a harness', () => {
             return Promise.resolve();
           },
           type: () => Promise.resolve(),
+          interrupt: () => Promise.resolve(),
           screen: () => Promise.resolve(''),
         },
       }).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
@@ -236,6 +245,7 @@ describe('Claude Code as a harness', () => {
             return Promise.resolve();
           },
           type: () => Promise.resolve(),
+          interrupt: () => Promise.resolve(),
           screen: () => Promise.resolve(''),
         },
       }).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
@@ -357,6 +367,7 @@ describe('Claude Code as a harness', () => {
             return Promise.resolve();
           },
           type: () => Promise.resolve(),
+          interrupt: () => Promise.resolve(),
           screen: () => Promise.resolve(''),
         },
       });
@@ -417,7 +428,7 @@ describe('Claude Code as a harness', () => {
       const calls = join(root, 'calls');
       writeFileSync(
         join(root, 'scripts', 'aeolus-push.sh'),
-        `printf '%s %s\\n' "$*" "$AEOLUS_FOLDER" >> "${calls}"\n[ "$1" = hand ] || exit 0\n${at.hasNothing === true ? 'exit 1' : `echo "${LINE.replace(/"/g, '\\"')}"`}\n`,
+        `printf '%s %s\\n' "$*" "$AEOLUS_FOLDER" >> "${calls}"\ncase "$1" in hand|force) ;; *) exit 0 ;; esac\n${at.hasNothing === true ? 'exit 1' : `echo "${LINE.replace(/"/g, '\\"')}"`}\n`,
       );
       writeFileSync(join(root, 'scripts', 'aeolus-identity.sh'), `[ "$1" = store ] || exit 2\n${(at.store ?? []).map((state, index) => `echo "dlv_${String(index)} ${state} 2026-10-14T06:00:00Z"`).join('\n')}\n`);
       return { root, calls: () => (existsSync(calls) ? readFileSync(calls, 'utf8').split('\n').filter((line) => line !== '') : []) };
@@ -430,6 +441,32 @@ describe('Claude Code as a harness', () => {
 
       expect(plugin.calls()).toEqual([`hand ${folder}`]);
       expect(typed).toEqual([{ shipId, text: `${LINE} ${NO_TERMINAL_QUESTIONS}` }]);
+    });
+
+    it("forces a message over to a busy session: the plugin's force hands it, then the turn is stopped and the line typed as a new prompt (decision 0040)", async () => {
+      const plugin = aPlugin();
+
+      await expect(harness({ pluginRoot: plugin.root }).forceOver({ shipId, folder, isTurnBusy: true })).resolves.toBe('handed');
+
+      expect(plugin.calls()).toEqual([`force ${folder}`]);
+      expect(steps).toEqual([`interrupt ${shipId}`, `type ${shipId}`]);
+      expect(typed).toEqual([{ shipId, text: `${LINE} ${NO_TERMINAL_QUESTIONS}` }]);
+    });
+
+    it('forces a message over to an idle session without stopping a turn', async () => {
+      const plugin = aPlugin();
+
+      await expect(harness({ pluginRoot: plugin.root }).forceOver({ shipId, folder, isTurnBusy: false })).resolves.toBe('handed');
+
+      expect(steps).toEqual([`type ${shipId}`]);
+    });
+
+    it('stops no turn and types nothing when the plugin hands no forced message over', async () => {
+      const plugin = aPlugin({ hasNothing: true });
+
+      await expect(harness({ pluginRoot: plugin.root }).forceOver({ shipId, folder, isTurnBusy: true })).resolves.toBe('nothing');
+
+      expect(steps).toEqual([]);
     });
 
     it('types nothing when the plugin hands nothing over', async () => {
@@ -604,6 +641,7 @@ describe('Claude Code in containers, each ship with a home of its own (decision 
           return Promise.resolve();
         },
         type: () => Promise.resolve(),
+        interrupt: () => Promise.resolve(),
         screen: () => Promise.resolve(''),
       },
     });

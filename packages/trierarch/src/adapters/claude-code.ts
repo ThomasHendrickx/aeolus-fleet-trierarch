@@ -12,6 +12,7 @@ import { effectiveFlags } from '../core/effective-flags.js';
 import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
 import { createLaunchMarks } from './launch-marker.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
+import { stopTurn } from './stop-turn.js';
 
 /**
  * Claude Code as a harness (docs/architecture.md, "First adapters"): `claude`
@@ -159,7 +160,7 @@ async function hasConversation(projects: string, folder: string): Promise<boolea
 export function createClaudeCodeHarness(options: {
   configuration: TrierarchConfiguration;
   plugin: AeolusPlugin;
-  sessions: Pick<SessionRuntime, 'start' | 'type' | 'screen'>;
+  sessions: Pick<SessionRuntime, 'start' | 'type' | 'interrupt' | 'screen'>;
   /** Claude Code's projects folder, where it keeps each folder's conversations. */
   projects: string;
   /** Claude Code's own files, where its onboarding is completed before each launch (#403) and its settings' default mode is read (#505, #507). */
@@ -216,6 +217,17 @@ export function createClaudeCodeHarness(options: {
         return 'nothing';
       }
       await sessions.type({ shipId: session.shipId, text: wakePromptOf(line) });
+      return 'handed';
+    },
+    forceOver: async ({ shipId, folder, isTurnBusy }) => {
+      const line = await identityOf(shipId).forceOverLine({ shipId, folder });
+      if (line === undefined) {
+        return 'nothing';
+      }
+      if (isTurnBusy) {
+        await stopTurn(sessions, { shipId });
+      }
+      await sessions.type({ shipId, text: wakePromptOf(line) });
       return 'handed';
     },
     isHolding: (session) => identityOf(session.shipId).isHolding(session),

@@ -204,6 +204,9 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
       }
       await must(tmux(shipId, ['send-keys', '-t', TMUX_TARGET, 'Enter']));
     },
+    interrupt: async (shipId) => {
+      await must(tmux(shipId, ['send-keys', '-t', TMUX_TARGET, 'Escape']));
+    },
     screen: async (shipId) => {
       const shown = await runtime(tmux(shipId, ['capture-pane', '-p', '-J', '-S', `-${String(SCREEN_LINES)}`, '-t', TMUX_TARGET]));
       if (shown.status === 0) {

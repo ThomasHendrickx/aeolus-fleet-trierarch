@@ -139,6 +139,15 @@ describe('the fleet over REST', () => {
     );
   });
 
+  it("reads a session's inbox: how many deliveries wait, and how many of them are forced (decision 0040)", async () => {
+    await aFleetThat(
+      (response) => response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ waiting: 3, forced: 1 })),
+      async (fleetUrl) => {
+        await expect(createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_x' }).inbox('aeolus_ct_v1_session')).resolves.toEqual({ kind: 'waiting', count: 3, forced: 1 });
+      },
+    );
+  });
+
   it('gives a crew request back with the settings version it tried and the reason, and answers given back once the fleet takes it (#382)', async () => {
     const shipId = newId('ship');
     const asked: { method?: string; url?: string; body: string }[] = [];

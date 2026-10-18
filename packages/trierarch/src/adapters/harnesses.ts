@@ -79,7 +79,7 @@ export async function createHarnesses(at: {
   managedSettings: string;
   /** What detection last found, read at each launch (#517). */
   detected: () => Detected;
-  sessions: Pick<SessionRuntime, 'start' | 'type' | 'screen'>;
+  sessions: Pick<SessionRuntime, 'start' | 'type' | 'interrupt' | 'screen'>;
   /** For sessions in containers: a home of each ship's own (decision 0039). */
   shipHomes?: { homes: string; managedSettings: string };
 }): Promise<{ harnesses: Record<string, HarnessPort>; plugins: Record<string, AeolusPlugin> }> {

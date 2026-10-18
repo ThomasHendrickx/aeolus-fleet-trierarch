@@ -90,6 +90,19 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
     await expect.poll(async () => runtime.screen(shipId), POLL).toContain('got $aeolus-wake');
   });
 
+  it("stops the session's running turn as Escape does, keeping the session (decision 0040)", async () => {
+    const runtime = at.runtime();
+    const shipId = newId('ship');
+    // Shell builtins only, as a test image holds no more: the line read starts with Escape when it came first.
+    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'read line; case "$line" in "$(printf "\\033")"*) echo "got Escape" ;; *) echo "got no Escape" ;; esac; sleep 30'] });
+
+    await runtime.interrupt(shipId);
+    await runtime.type({ shipId, text: 'end' });
+
+    await expect.poll(async () => runtime.screen(shipId), POLL).toContain('got Escape');
+    await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running' }]);
+  });
+
   it("reads what the session's screen shows", async () => {
     const runtime = at.runtime();
     const shipId = newId('ship');
