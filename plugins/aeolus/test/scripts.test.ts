@@ -1890,6 +1890,62 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
     });
   });
 
+  describe("a session with another ship's AEOLUS_FOLDER in its environment (#884): its hooks refuse it, never acting as the other ship", () => {
+    const HOOKS = [
+      { script: 'aeolus-session-start.sh', payload: { hook_event_name: 'SessionStart', source: 'startup' } },
+      { script: 'aeolus-turn.sh', payload: { hook_event_name: 'UserPromptSubmit', prompt: 'go on' } },
+      { script: 'aeolus-handover.sh', payload: { hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: { file_path: '/tmp/x' } } },
+      { script: 'aeolus-stop.sh', payload: { hook_event_name: 'Stop', stop_hook_active: false } },
+      { script: 'aeolus-turn-died.sh', payload: { hook_event_name: 'StopFailure', error: 'rate_limit' } },
+    ] as const;
+    let ownFolder: string;
+
+    beforeEach(() => {
+      ownFolder = mkdtempSync(join(tmpdir(), 'aeolus folder "two"-'));
+    });
+
+    afterEach(() => {
+      rmSync(ownFolder, { recursive: true, force: true });
+    });
+
+    /** Runs a hook of the session in its own folder, with the folder of scout, which holds a handed message, inherited as AEOLUS_FOLDER. */
+    const aHookWithScoutsFolder = (script: string, payload: Readonly<Record<string, unknown>>) =>
+      start(script, {
+        stdin: JSON.stringify({ session_id: 'c5858406-be86-46cd-8591-f4fb39b1fa61', cwd: ownFolder, ...payload }),
+        env: { AEOLUS_FOLDER: folder, AEOLUS_DATA: '', CLAUDE_PROJECT_DIR: ownFolder, CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin', CLAUDE_ENV_FILE: join(data, 'session.env'), ...NO_WAITS },
+      }).done;
+
+    it.each(HOOKS)('$payload.hook_event_name stops with an error naming both folders', async ({ script, payload }) => {
+      await aHandOver({});
+
+      const hookRun = await aHookWithScoutsFolder(script, payload);
+
+      expect(hookRun.status).toBe(1);
+      expect(hookRun.stderr).toContain(`aeolus: refused AEOLUS_FOLDER ${folder}: this session's folder is ${ownFolder}`);
+    });
+
+    it.each(HOOKS)('$payload.hook_event_name calls the fleet for no ship, keeps the message of scout where it was and says nothing of scout', async ({ script, payload }) => {
+      const stub = await aHandOver({ '/api/v1/ship/ack': [acknowledged], '/api/v1/ship/turn': [taken], '/api/v1/ship/notHandled': [taken] });
+      const callsBefore = stub.calls.length;
+
+      const hookRun = await aHookWithScoutsFolder(script, payload);
+
+      expect(stub.calls.length).toBe(callsBefore);
+      expect(store()).toEqual([`${DELIVERY_ID} handed`]);
+      expect(hookRun.stdout).not.toContain('scout');
+    });
+
+    it("exports the session's own folder for its commands at session start, never the inherited one", async () => {
+      await aHandOver({});
+      writeFileSync(join(data, 'session.env'), '');
+
+      await aHookWithScoutsFolder('aeolus-session-start.sh', { hook_event_name: 'SessionStart', source: 'startup' });
+
+      const exported = spawnSync('bash', ['-c', '. "$1"; printf %s "$AEOLUS_FOLDER"', 'bash', join(data, 'session.env')], { env: { AEOLUS_FOLDER: folder } });
+      expect(exported.stdout.toString()).toBe(realpathSync(ownFolder));
+    });
+  });
+
   it('reports no turn and nothing handled for a lease the watcher has not pushed: the ship pulls', async () => {
     fleet = await startRoutedStubFleet({});
     crew(fleet.url);

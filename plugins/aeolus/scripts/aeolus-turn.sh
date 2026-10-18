@@ -16,7 +16,7 @@ set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
 payload="$(cat)"
-aeolus_hook_folder "$payload"
+aeolus_hook_folder "$payload" || exit 1
 identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
 identity_text="$(aeolus_identity_read "$identity")" || exit 0
 if aeolus_reports_here "$identity_text"; then

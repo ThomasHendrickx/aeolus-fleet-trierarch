@@ -407,11 +407,28 @@ aeolus_json_string() {
     }'
 }
 
-# A hook's folder: Claude Code's project folder, else the payload's cwd. The
-# session's working folder may have moved; the project folder has not.
+# A hook's folder: Claude Code's project folder, else the payload's cwd (Codex
+# has no project folder). The payload's cwd follows the session into a
+# subfolder, so it would key another ship (#334); the project folder stays.
+# A hook runs with the environment the harness inherited, never the session's
+# own exports, so an AEOLUS_FOLDER there can be another session's (#881): the
+# hook's own folder wins, and an AEOLUS_FOLDER that names another one is
+# refused, so the hook acts as no ship (#884).
 aeolus_hook_folder() {
-  [ -n "${AEOLUS_FOLDER:-}${CLAUDE_PROJECT_DIR:-}" ] || AEOLUS_FOLDER="$(aeolus_json_string "$1" cwd)"
+  local own inherited="${AEOLUS_FOLDER:-}"
+  own="${CLAUDE_PROJECT_DIR:-}"
+  [ -n "$own" ] || own="$(aeolus_json_string "$1" cwd)"
+  AEOLUS_FOLDER="${own:-$inherited}"
   export AEOLUS_FOLDER
+  if [ -n "$own" ] && [ -n "$inherited" ] && [ "$(aeolus_physical_folder "$own")" != "$(aeolus_physical_folder "$inherited")" ]; then
+    echo "aeolus: refused AEOLUS_FOLDER ${inherited}: this session's folder is ${own}" >&2
+    return 1
+  fi
+}
+
+# A folder as its physical path, so a link to it compares equal to it.
+aeolus_physical_folder() {
+  (cd "$1" 2>/dev/null && pwd -P) || printf '%s' "$1"
 }
 
 # The store of a crewed folder (#756): one entry per delivery the watcher

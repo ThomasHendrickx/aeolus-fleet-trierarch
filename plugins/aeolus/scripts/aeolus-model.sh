@@ -12,7 +12,7 @@ printf '%s' "$payload" | grep -Eq 'aeolus-(fleet|ask)\.sh' || exit 0
 # The payload's own key only: inside the command's text its quotes are escaped.
 model="$(printf '%s' "$payload" | tr -d '\n' | sed -E -n 's/^.*"model"[[:space:]]*:[[:space:]]*"([^"\\]+)".*$/\1/p')"
 [ -n "$model" ] || exit 0
-aeolus_hook_folder "$payload"
+aeolus_hook_folder "$payload" || exit 1
 file="$(aeolus_model_file 2>/dev/null)" || exit 0
 [ -d "$(dirname "$file")" ] || exit 0
 [ "$(cat "$file" 2>/dev/null)" = "$model" ] && exit 0

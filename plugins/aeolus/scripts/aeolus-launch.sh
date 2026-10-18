@@ -14,7 +14,7 @@ set -uo pipefail
 launch="${AEOLUS_LAUNCH:-}"
 [ -n "$launch" ] || exit 0
 payload="$(cat)"
-aeolus_hook_folder "$payload"
+aeolus_hook_folder "$payload" || exit 1
 identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
 aeolus_identity_read "$identity" >/dev/null || exit 0
 file="$(aeolus_launch_file 2>/dev/null)" || exit 0

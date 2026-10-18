@@ -12,7 +12,7 @@ set -uo pipefail
 
 payload="$(cat)"
 [ -z "${PLUGIN_ROOT:-}" ] || exit 0
-aeolus_hook_folder "$payload"
+aeolus_hook_folder "$payload" || exit 1
 identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
 identity_text="$(aeolus_identity_read "$identity")" || exit 0
 

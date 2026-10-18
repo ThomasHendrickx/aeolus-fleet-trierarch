@@ -10,7 +10,7 @@ set -uo pipefail
 payload="$(cat)"
 printf '%s' "$payload" | grep -q 'aeolus-wait\.sh' || exit 0
 printf '%s' "$payload" | grep -Eq '"run_in_background"[[:space:]]*:[[:space:]]*true' || exit 0
-aeolus_hook_folder "$payload"
+aeolus_hook_folder "$payload" || exit 1
 identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
 identity_text="$(aeolus_identity_read "$identity")"
 

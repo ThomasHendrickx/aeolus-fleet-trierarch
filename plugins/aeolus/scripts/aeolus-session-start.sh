@@ -2,20 +2,17 @@
 # SessionStart hook (startup, resume, clear, compact). Exports the session's
 # folder and the plugin's paths for the session's commands, then, when the
 # folder crews a ship, tells the fresh context which one and how to go on.
-# Silent otherwise. Never fails the session.
+# Silent otherwise. Never blocks the session: a refused folder is a non-blocking error.
 set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
 payload="$(cat)"
 source_event="$(aeolus_json_string "$payload" source)"
-# The folder the session started in: Claude Code's project folder, which stays
-# the same for the whole session. The payload's cwd follows the session into a
-# subfolder, so after /clear or a compact there it would key another ship (#334).
-# Codex has no project folder and keeps its cwd.
-cwd="${CLAUDE_PROJECT_DIR:-}"
-[ -n "$cwd" ] || cwd="$(aeolus_json_string "$payload" cwd)"
-[ -n "$cwd" ] || exit 0
-export AEOLUS_FOLDER="$cwd"
+# The folder the session started in. Refused, the session's commands still get
+# its own folder, and the hook tells the session of no ship (#884).
+refused=0
+aeolus_hook_folder "$payload" || refused=1
+[ -n "$AEOLUS_FOLDER" ] || exit 0
 export AEOLUS_DATA="${PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-}}"
 root="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}"
 # The Codex wake bridge logs to the plugin's log now: a .wake.log an earlier
@@ -31,6 +28,7 @@ if ships="$(aeolus_ships_dir 2>/dev/null)"; then
 fi
 
 if [ -n "${PLUGIN_ROOT:-}" ]; then
+  [ "$refused" -eq 0 ] || exit 1
   model="$(aeolus_json_string "$payload" model)"
   session_id="$(aeolus_json_string "$payload" session_id)"
   identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
@@ -100,6 +98,7 @@ if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
   printf 'export AEOLUS_FOLDER=%q\nexport AEOLUS_DATA=%q\nexport AEOLUS_ROOT=%q\n' "$AEOLUS_FOLDER" "$AEOLUS_DATA" "$root" >> "$CLAUDE_ENV_FILE"
 fi
 
+[ "$refused" -eq 0 ] || exit 1
 identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
 identity_text="$(aeolus_identity_read "$identity")" || exit 0
 # A person started the session again (#756, D6): what the store holds waits

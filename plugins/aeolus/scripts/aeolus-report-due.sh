@@ -12,7 +12,7 @@ SECONDS_PER_MINUTE=60
 SECONDS_PER_HOUR=3600
 
 payload="$(cat)"
-aeolus_hook_folder "$payload"
+aeolus_hook_folder "$payload" || exit 1
 identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
 identity_text="$(aeolus_identity_read "$identity")" || exit 0
 squadron="$(aeolus_identity_field "$identity_text" squadron)"
