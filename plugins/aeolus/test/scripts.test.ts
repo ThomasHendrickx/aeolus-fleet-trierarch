@@ -2185,7 +2185,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       await aHookWithScoutsFolder('aeolus-session-start.sh', { hook_event_name: 'SessionStart', source: 'startup' });
 
       const exported = spawnSync('bash', ['-c', '. "$1"; printf %s "$AEOLUS_FOLDER"', 'bash', join(data, 'session.env')], { env: { AEOLUS_FOLDER: folder } });
-      expect(exported.stdout.toString()).toBe(realpathSync(ownFolder));
+      expect(exported.stdout.toString()).toBe(ownFolder);
     });
   });
 
