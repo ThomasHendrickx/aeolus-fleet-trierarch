@@ -1,0 +1,27 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies & build output
+node_modules/
+dist/
+
+# Logs & coverage
+*.log
+coverage/
+
+# TypeScript build state
+*.tsbuildinfo
+
+# The published package's LICENSE, copied from the root one while npm packs it
+packages/*/LICENSE

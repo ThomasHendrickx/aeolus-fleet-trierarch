@@ -1,0 +1,47 @@
+{
+  "name": "aeolus-fleet-trierarch",
+  "private": true,
+  "description": "Aeolus trierarch: workspace root for @aeolus-fleet/trierarch, with the aeolus plugin for Claude Code and Codex and the session image.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "packageManager": "npm@11.19.1",
+  "engines": {
+    "node": ">=26"
+  },
+  "workspaces": [
+    "packages/trierarch"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @aeolus-fleet/trierarch",
+    "typecheck": "tsc --project tsconfig.json && npm run typecheck --workspaces",
+    "lint": "eslint --max-warnings 0 .",
+    "test": "vitest run",
+    "test:unit": "vitest run --project '*:unit'",
+    "test:integration": "vitest run --project '*:integration'",
+    "test:e2e": "vitest run --project '*:e2e'",
+    "set-version": "node scripts/set-version.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@testcontainers/postgresql": "^12.2.0",
+    "@types/node": "^26.6.3",
+    "eslint": "^10.11.0",
+    "eslint-plugin-check-file": "^3.3.2",
+    "testcontainers": "^12.2.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^5.0.3",
+    "zod": "^4.6.5"
+  },
+  "overrides": {
+    "@scalar/json-magic": {
+      "undici": "7.30.0"
+    },
+    "@prisma/config": {
+      "deepmerge-ts": "8.0.2"
+    },
+    "prisma": {
+      "mysql2": "3.24.5"
+    }
+  }
+}

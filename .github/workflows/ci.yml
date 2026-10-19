@@ -1,0 +1,154 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, 'hotfix/**']
+
+permissions:
+  contents: read
+
+# A later push to a pull request cancels its earlier run. A push to a release branch never
+# cancels another: every commit on a release branch needs its own CI result for the release
+# gate. Each push run gets a group of its own, since a shared group would still cancel a
+# pending run when a third push arrives.
+concurrency:
+  group: ci-${{ github.event_name == 'push' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
+
+jobs:
+  checks:
+    name: Typecheck, lint and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      # The trierarch's tmux adapter is tested against the real tmux.
+      - run: command -v tmux || (sudo apt-get update && sudo apt-get install -y tmux)
+      # The trierarch's systemd unit is tested against a real systemd user
+      # manager, here only: on a developer's machine it is the one a live
+      # trierarch runs under. Lingering starts the runner's own.
+      - name: Start the systemd user manager
+        run: |
+          sudo loginctl enable-linger "$USER"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          for _ in $(seq 30); do
+            state=$(XDG_RUNTIME_DIR="/run/user/$(id -u)" systemctl --user is-system-running || true)
+            case "$state" in running | degraded) exit 0 ;; esac
+            sleep 1
+          done
+          echo "the systemd user manager is ${state:-unreachable}" >&2
+          exit 1
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run test:unit
+        env:
+          AEOLUS_TEST_USER_SYSTEMD: '1'
+
+  trierarch-macos:
+    # The trierarch and the aeolus plugin's scripts run on macOS too, where
+    # Linux CI misses their regressions: BSD awk and sed for the scripts. On
+    # pushes only: a macOS runner costs about 10 times the minutes. The unit
+    # layer only: the runner has no Docker for the integration layer's
+    # Testcontainers.
+    name: Trierarch and plugin unit tests on macOS
+    if: github.event_name == 'push'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      # The trierarch's tmux adapter is tested against the real tmux.
+      - run: command -v tmux || brew install tmux
+      - run: npx vitest run --project trierarch:unit --project plugin:unit
+
+  guardrails:
+    # The CI checks in scripts/. Every check runs, so one failure does not hide the next.
+    name: Guardrails
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The pull request checks read every commit between base and head.
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - id: install
+        run: npm ci
+      - name: npm only
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: node scripts/check-package-manager.ts
+      - name: Every test file belongs to a Vitest project
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: node scripts/check-test-projects.ts
+      - name: Every use case has a test
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: node scripts/check-use-case-tests.ts
+      - name: TDD evidence
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && github.event_name == 'pull_request' }}
+        run: node scripts/check-tdd-evidence.ts "$BASE_SHA" "$HEAD_SHA"
+      - name: No em dash
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && github.event_name == 'pull_request' }}
+        run: node scripts/check-em-dash.ts "$BASE_SHA" "$HEAD_SHA"
+
+  integration:
+    name: Integration tests (Postgres in Testcontainers)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      # The images Testcontainers starts, from the Actions cache.
+      - uses: ./.github/actions/test-images
+      - run: npm run test:integration
+
+  session-image:
+    # The image a trierarch runs container sessions from (decision 0039), built
+    # as release.yml builds it, with a throwaway prerelease version so the
+    # plugin in it carries the image's version, then smoke-tested in rootless
+    # Podman as a session runs it.
+    name: Session image
+    runs-on: ubuntu-latest
+    env:
+      VERSION: 0.0.0-ci.${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - run: npm run set-version -- "$VERSION"
+      - run: podman build --file packages/trierarch/image/Containerfile --build-arg VERSION="$VERSION" --tag localhost/aeolus-session:ci .
+      - run: packages/trierarch/image/test/smoke-test.sh podman localhost/aeolus-session:ci "$VERSION"
+
+  publish-dry-run:
+    name: Publish dry run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      # The same steps as release.yml, with a throwaway prerelease version:
+      # 0.0.0 is already on npm, and npm requires a tag for a prerelease.
+      - run: npm run set-version -- "0.0.0-ci.${{ github.run_id }}"
+      - run: npm run build
+      - run: npm publish --dry-run --access public --tag dry-run --workspace @aeolus-fleet/trierarch

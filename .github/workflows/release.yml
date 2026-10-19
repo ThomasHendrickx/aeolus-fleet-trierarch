@@ -1,0 +1,211 @@
+# Publishes @aeolus-fleet/trierarch to npm, pushes the session image
+# (decision 0039) to ghcr.io with that version, and tags v<version> a commit
+# with the aeolus plugin's version on top of the released commit, so a version
+# on npm always matches a tag in git and the tag holds the plugin of that
+# version (aeolus-trierarch upgrade installs it from there). Then creates the
+# GitHub Release for the tag, with notes from the merged pull requests carrying
+# the label <version>, and sets the aeolus plugin to that version on main for
+# main releases, where the plugin marketplaces install from by default.
+#
+# The only way the package can be published: npm trusted publishing (OIDC) is
+# configured for exactly this file name, and tokens are disallowed (decision
+# 0011). Never add an NPM_TOKEN or any other npm secret. Provenance is automatic.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version for the trierarch, the aeolus plugin and the session image, MAJOR.MINOR.PATCH
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  # To push the release tag, create its GitHub Release, and push the plugin's version to main.
+  contents: write
+  # To read the merged pull requests carrying the release's label, for its notes.
+  pull-requests: read
+  # To read CI's result for the released commit.
+  actions: read
+  # To push the session image to ghcr.io.
+  packages: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish ${{ inputs.version }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          # Plain releases only: npm needs a dist-tag for a prerelease, which this workflow does not set.
+          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Version must be MAJOR.MINOR.PATCH, got '$VERSION'"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+
+      - name: Check the version is not tagged yet
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          # --exit-code: 0 when the tag exists, 2 when it does not, anything else is an error.
+          status=0
+          git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" > /dev/null || status=$?
+          if [[ $status -eq 0 ]]; then
+            echo "::error::Tag v$VERSION already exists: that version was released before"
+            exit 1
+          elif [[ $status -ne 2 ]]; then
+            echo "::error::Could not read the tags from origin (git ls-remote exited $status)"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Use npm 11.5.1 or later (needed for trusted publishing)
+        run: |
+          if ! node -e '
+            const [major, minor, patch] = process.argv[1].split(".").map(Number);
+            process.exit(major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)))) ? 0 : 1);
+          ' "$(npm --version)"; then
+            npm install --global npm@^11.5.1
+          fi
+          npm --version
+
+      - run: npm ci
+
+      # No second test run (decision 0011): CI's own result for this exact commit on
+      # the release branch is the gate, read before anything is built or published.
+      - name: Check the commit is on a release branch and passed CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run list --workflow ci.yml --commit "$GITHUB_SHA" --branch "$GITHUB_REF_NAME" --event push --json status,conclusion,url \
+            | node scripts/release-gate.ts "$GITHUB_REF" "$GITHUB_SHA"
+
+      - name: Set the version on the trierarch and the aeolus plugin
+        env:
+          VERSION: ${{ inputs.version }}
+        run: npm run set-version -- "$VERSION"
+
+      - run: npm run build
+
+      # Catches a problem in the package before it is published. A dry run
+      # refuses a version on npm already too, so it skips it, as the publish
+      # step below does.
+      - name: Dry run
+        env:
+          PACKAGE: '@aeolus-fleet/trierarch'
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$(npm view "$PACKAGE@$VERSION" version 2>/dev/null)" == "$VERSION" ]]; then
+            echo "$PACKAGE@$VERSION is on npm already: skipped"
+          else
+            npm publish --dry-run --access public --workspace "$PACKAGE"
+          fi
+
+      # Built before anything is published, so a broken image stops the release
+      # first. The plugin in it carries the version set above.
+      - name: Build the session image
+        env:
+          VERSION: ${{ inputs.version }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          IMAGE="ghcr.io/${OWNER,,}/aeolus-session:$VERSION"
+          podman build --file packages/trierarch/image/Containerfile --build-arg VERSION="$VERSION" --tag "$IMAGE" .
+          echo "SESSION_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      # Skips a version on npm already, so releasing a version again after it
+      # failed partway pushes the image again, tags it and sets the plugin.
+      # Dispatch it again from main: Re-run jobs replays the failed run's own
+      # copy of this file.
+      - name: Publish @aeolus-fleet/trierarch
+        env:
+          PACKAGE: '@aeolus-fleet/trierarch'
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "$(npm view "$PACKAGE@$VERSION" version 2>/dev/null)" == "$VERSION" ]]; then
+            echo "$PACKAGE@$VERSION is on npm already: skipped"
+          else
+            npm publish --access public --workspace "$PACKAGE"
+          fi
+
+      # After the package is on npm, before the tag: releasing a version again
+      # after it failed partway pushes the image again, which replaces it.
+      - name: Push the session image
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          printenv GH_TOKEN | podman login ghcr.io --username "$ACTOR" --password-stdin
+          podman push "$SESSION_IMAGE"
+
+      # After the package is on npm. The tag holds the released commit with the
+      # plugin's manifests at the version on top (set above), off main's
+      # history, so a harness installing the plugin from the tag gets the
+      # plugin of that version under its version. If this step fails, push the
+      # tag by hand: the version is already published and cannot be released again.
+      - name: Tag v${{ inputs.version }}, the released commit with the plugin's version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit --quiet --message "chore(release): the aeolus plugin is $VERSION" -- plugins/aeolus/.claude-plugin/plugin.json plugins/aeolus/.codex-plugin/plugin.json
+          git tag "v$VERSION" HEAD
+          git push origin "refs/tags/v$VERSION"
+
+      # Notes from the merged pull requests labelled with the version: git and the
+      # labels are the source, there is no changelog file. Skipped when the
+      # Release exists already, as when a release is dispatched again.
+      - name: Create the GitHub Release v${{ inputs.version }}
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v$VERSION" > /dev/null 2>&1; then
+            echo "The GitHub Release v$VERSION exists already"
+            exit 0
+          fi
+          gh pr list --state merged --label "$VERSION" --json number,title,url --limit 1000 \
+            | node scripts/release-notes.ts "$VERSION" > "$RUNNER_TEMP/release-notes.md"
+          gh release create "v$VERSION" --verify-tag --title "v$VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"
+
+      # The plugin marketplace installs from main, so main carries the plugin's
+      # released version (the package on main keeps 0.0.0). After the tag: if
+      # this step fails, the release is whole; set it by hand with
+      # npm run set-version -- --plugin-only <version>, commit and push.
+      - name: Set the aeolus plugin to ${{ inputs.version }} on main
+        if: github.ref == 'refs/heads/main'
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          for attempt in 1 2 3; do
+            git fetch --quiet origin main
+            git checkout --quiet --force -B plugin-version origin/main
+            npm run set-version -- --plugin-only "$VERSION"
+            if git diff --quiet; then
+              echo "main already carries the aeolus plugin at $VERSION"
+              exit 0
+            fi
+            git commit --quiet --all --message "chore(release): the aeolus plugin is $VERSION"
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "main moved meanwhile (attempt $attempt); trying again on top of it"
+          done
+          echo "::error::Could not push the aeolus plugin version to main"
+          exit 1
