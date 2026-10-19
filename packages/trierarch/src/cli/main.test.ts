@@ -394,7 +394,7 @@ describe('aeolus-trierarch upgrade', () => {
       chmodSync(join(bin, name), 0o700);
     };
     program('npm', `echo ${runningVersion()}`);
-    program('codex', 'if [ "$4" = ThomasHendrickx/aeolus-fleet ]; then echo "Error: could not reach github.com" >&2; exit 1; fi');
+    program('codex', 'if [ "$4" = ThomasHendrickx/aeolus-fleet-trierarch ]; then echo "Error: could not reach github.com" >&2; exit 1; fi');
     vi.stubEnv('PATH', `${bin}:/usr/bin:/bin`);
     const paths = trierarchPaths({ homeDirectory: home });
     mkdirSync(paths.home, { recursive: true });
@@ -403,6 +403,6 @@ describe('aeolus-trierarch upgrade', () => {
     const { output, code } = await main(['upgrade'], machine({ HOME: home }));
 
     expect(code).toBe(1);
-    expect(output).toContain('The aeolus plugin for Codex was not updated: codex plugin marketplace add ThomasHendrickx/aeolus-fleet failed: Error: could not reach github.com.');
+    expect(output).toContain('The aeolus plugin for Codex was not updated: codex plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch failed: Error: could not reach github.com.');
   });
 });
