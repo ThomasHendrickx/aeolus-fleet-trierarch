@@ -38,7 +38,7 @@ export interface PluginUpdate {
 }
 
 const MARKETPLACE = 'aeolus-fleet';
-const REPOSITORY = 'ThomasHendrickx/aeolus-fleet';
+const REPOSITORY = 'ThomasHendrickx/aeolus-fleet-trierarch';
 const PLUGIN = 'aeolus@aeolus-fleet';
 
 async function run(command: string, args: readonly string[]): Promise<void> {
