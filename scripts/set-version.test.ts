@@ -106,6 +106,15 @@ describe('setVersion', () => {
     expect(Object.keys(rawManifest('trierarch'))).toEqual(before);
   });
 
+  // The source condition points into src, which the tarball does not ship (aeolus-fleet#968).
+  it('removes the @aeolus-fleet/source condition from the exports, keeping types and default', () => {
+    setVersion(copy, '0.28.0');
+
+    expect(rawManifest('trierarch').exports).toEqual({
+      '.': { types: './dist/index.d.ts', default: './dist/index.js' },
+    });
+  });
+
   it('accepts a prerelease', () => {
     setVersion(copy, '0.0.0-ci.123');
 
