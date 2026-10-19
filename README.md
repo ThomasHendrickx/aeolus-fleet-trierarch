@@ -1,0 +1,3 @@
+# Aeolus trierarch
+
+`@aeolus-fleet/trierarch` keeps Claude Code and Codex sessions running on a machine for an [Aeolus](https://github.com/ThomasHendrickx/aeolus-fleet) fleet: it crews the ships assigned to the machine, and starts, restarts and wakes their sessions. This repository also holds the aeolus plugin, with which a Claude Code or Codex session crews a ship, its marketplaces for both harnesses, and the session image a trierarch runs container sessions from. How to run the trierarch: [packages/trierarch/README.md](packages/trierarch/README.md); the plugin: [plugins/aeolus/README.md](plugins/aeolus/README.md); what a trierarch does: [docs/trierarch.md](docs/trierarch.md). For the product, see [aeolus-fleet](https://github.com/ThomasHendrickx/aeolus-fleet).

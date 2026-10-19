@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": ["*.ts", "scripts/**/*.ts", "lint/**/*.ts", "e2e/**/*.ts", "plugins/**/*.ts"]
+}

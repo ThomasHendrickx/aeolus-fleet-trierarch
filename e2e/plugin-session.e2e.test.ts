@@ -5,18 +5,11 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { MessageId, ShipId } from '@aeolus-fleet/common';
+import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, newKey, OPERATOR, operatorCaller, unwrap, type Caller, type PrismaClient, type UseCases } from '@aeolus-fleet/core/testing';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { createPrismaClient, type PrismaClient } from '../packages/core/src/adapters/prisma/client.js';
-import { createApp } from '../packages/core/src/app.js';
-import type { Caller } from '../packages/core/src/domain/shared/caller.js';
-import { createUseCases, systemClock, type UseCases } from '../packages/core/src/wiring.js';
-import { OPERATOR, operatorCaller } from '../packages/core/test/support/core-fixtures.js';
-import { createMigratedDatabase } from '../packages/core/src/testing/database.js';
-import { unwrap } from '../packages/core/src/testing/result.js';
-import { freePort } from './support/web.js';
-import { newKey } from '../packages/core/src/testing/keys.js';
+import { freePort } from './support/free-port.js';
 
 // The aeolus plugin in a real interactive Claude Code session, driven in tmux
 // against a fleet on this machine and with no fleet MCP server: the session
@@ -153,7 +146,7 @@ describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Claude Code ses
     database = createPrismaClient(databaseUrl);
     const port = await freePort();
     const fleetUrl = `http://127.0.0.1:${String(port)}`;
-    useCases = createUseCases({ prisma: database, clock: systemClock });
+    useCases = createUseCases({ prisma: database });
     argo = operatorCaller(unwrap(await useCases.initialiseFleet({ name: 'home fleet', ...OPERATOR })));
     server = createApp({ databaseUrl, publicUrl: fleetUrl, logger: false });
     await server.listen({ host: '127.0.0.1', port });

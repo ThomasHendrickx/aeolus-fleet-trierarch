@@ -14,7 +14,7 @@ ARG PLAYWRIGHT_VERSION=1.63.0
 
 LABEL org.opencontainers.image.title="aeolus-session" \
       org.opencontainers.image.description="An Aeolus trierarch session: Claude Code, tmux, the aeolus plugin and a nested rootless Podman" \
-      org.opencontainers.image.source="https://github.com/ThomasHendrickx/aeolus-fleet" \
+      org.opencontainers.image.source="https://github.com/ThomasHendrickx/aeolus-fleet-trierarch" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${VERSION}"
 

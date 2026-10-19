@@ -138,7 +138,7 @@ describe('the aeolus plugin update for Codex', () => {
 
     await update().update('codex', 'v0.23.0');
 
-    expect(ran()).toEqual(['codex plugin marketplace remove aeolus-fleet', 'codex plugin marketplace add ThomasHendrickx/aeolus-fleet --ref v0.23.0', 'codex plugin marketplace upgrade aeolus-fleet']);
+    expect(ran()).toEqual(['codex plugin marketplace remove aeolus-fleet', 'codex plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch --ref v0.23.0', 'codex plugin marketplace upgrade aeolus-fleet']);
   });
 
   it("points Codex's aeolus-fleet marketplace at main when it is given no tag (#652)", async () => {
@@ -146,7 +146,7 @@ describe('the aeolus plugin update for Codex', () => {
 
     await update().update('codex', undefined);
 
-    expect(ran()).toContain('codex plugin marketplace add ThomasHendrickx/aeolus-fleet');
+    expect(ran()).toContain('codex plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch');
   });
 
   it('adds the marketplace also when Codex had none to remove (#652)', async () => {
@@ -160,7 +160,7 @@ describe('the aeolus plugin update for Codex', () => {
   it("says what Codex said when it cannot add the marketplace, and upgrades nothing (#652)", async () => {
     aProgram(codex, { then: "if (probe === '' && process.argv[4] === 'add') { process.stderr.write('Error: could not reach github.com'); process.exit(1); }" });
 
-    await expect(update().update('codex', 'v0.23.0')).rejects.toThrow('codex plugin marketplace add ThomasHendrickx/aeolus-fleet --ref v0.23.0 failed: Error: could not reach github.com');
+    await expect(update().update('codex', 'v0.23.0')).rejects.toThrow('codex plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch --ref v0.23.0 failed: Error: could not reach github.com');
     expect(ran()).not.toContain('codex plugin marketplace upgrade aeolus-fleet');
   });
 
@@ -347,13 +347,13 @@ describe('the aeolus plugin update for Claude Code', () => {
   it("points Claude Code's aeolus-fleet marketplace at the release tag it is given, updates it, then the aeolus plugin from it (#652)", async () => {
     await update().update('claude-code', 'v0.23.0');
 
-    expect(ran()).toEqual(['claude plugin marketplace add ThomasHendrickx/aeolus-fleet#v0.23.0', 'claude plugin marketplace update aeolus-fleet', 'claude plugin update aeolus@aeolus-fleet']);
+    expect(ran()).toEqual(['claude plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch#v0.23.0', 'claude plugin marketplace update aeolus-fleet', 'claude plugin update aeolus@aeolus-fleet']);
   });
 
   it("points Claude Code's aeolus-fleet marketplace at main when it is given no tag (#652)", async () => {
     await update().update('claude-code', undefined);
 
-    expect(ran()[0]).toBe('claude plugin marketplace add ThomasHendrickx/aeolus-fleet');
+    expect(ran()[0]).toBe('claude plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch');
   });
 
   it("drops the aeolus-fleet marketplace Claude Code's settings declare before adding it again, since Claude Code adds no other source while they declare one, and keeps the rest (#652)", async () => {
@@ -387,6 +387,6 @@ describe('the aeolus plugin update for Claude Code', () => {
   it('says what Claude Code said when its update fails', async () => {
     aProgram(claude, { status: 1, stderr: 'Plugin "aeolus@aeolus-fleet" is not installed\n' });
 
-    await expect(update().update('claude-code', 'v0.23.0')).rejects.toThrow('claude plugin marketplace add ThomasHendrickx/aeolus-fleet#v0.23.0 failed: Plugin "aeolus@aeolus-fleet" is not installed');
+    await expect(update().update('claude-code', 'v0.23.0')).rejects.toThrow('claude plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch#v0.23.0 failed: Plugin "aeolus@aeolus-fleet" is not installed');
   });
 });

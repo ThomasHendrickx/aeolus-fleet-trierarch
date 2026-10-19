@@ -1,0 +1,12 @@
+# Dependabot keeps the npm dependencies (one lockfile at the root) and the
+# GitHub Actions in .github/workflows up to date.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
