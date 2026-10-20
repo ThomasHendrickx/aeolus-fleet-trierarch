@@ -1,9 +1,11 @@
-# Puts the images Testcontainers starts on the runner from the Actions cache,
-# so a test job pulls nothing: ECR Public throttles anonymous pulls per IP, as
-# Docker Hub does, and CI runners share IPs. On a cache miss, after the
-# image list changed or the cache expired, it pulls them once with retries and
-# caches them. Needs the repository checked out, Node set up and npm ci run, since
-# the image list is core's, from node_modules.
+# Puts the images Testcontainers starts on the runner from the Actions cache, so
+# a test job pulls nothing: ECR Public throttles anonymous pulls per IP, as
+# Docker Hub does, and CI runners share IPs. On a cache miss, after the image
+# list changed or the cache expired, it pulls them once with retries and caches
+# them. Docker's official images come from Google's mirror of Docker Hub instead
+# of ECR Public, whose data limit failed every retry (aeolus-fleet#1022), tagged
+# with the name the tests start. Needs the repository checked out, Node set up
+# and npm ci run, since the image list is core's, from node_modules.
 name: Test images
 description: Loads the images Testcontainers starts from the Actions cache, pulling and caching them on a miss.
 runs:
@@ -32,16 +34,21 @@ runs:
       env:
         IMAGES: ${{ steps.images.outputs.list }}
       run: |
-        # The registry's limit is per second: waiting longer each attempt clears it.
+        # A registry's limit is per second: waiting longer each attempt clears it.
         for image in $IMAGES; do
+          source="$image"
+          if [[ $image == public.ecr.aws/docker/library/* ]]; then
+            source="mirror.gcr.io/library/${image#public.ecr.aws/docker/library/}"
+          fi
           for attempt in 1 2 3 4 5; do
-            docker pull --quiet "$image" && break
+            docker pull --quiet "$source" && break
             if [[ $attempt -eq 5 ]]; then
-              echo "::error::Could not pull $image"
+              echo "::error::Could not pull $source"
               exit 1
             fi
             sleep $((attempt * 10))
           done
+          docker tag "$source" "$image"
         done
         docker save --output "$RUNNER_TEMP/test-images.tar" $IMAGES
     - if: steps.restore.outputs.cache-hit != 'true'
