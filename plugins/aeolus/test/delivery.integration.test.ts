@@ -9,7 +9,7 @@ import type { ShipId } from '@aeolus-fleet/common';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, FLEET_URL, newKey, OPERATOR, operatorCaller, secretOf, unwrap, type Caller, type PrismaClient, type UseCases } from '@aeolus-fleet/core/testing';
+import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, FLEET_URL, newKey, OPERATOR, operatorCaller, secretOf, unwrap, type ShipCaller, type PrismaClient, type UseCases } from '@aeolus-fleet/core/testing';
 
 import { scriptEnvironment } from './script-environment.js';
 
@@ -122,7 +122,7 @@ async function startLossyDoor(fleetUrl: string): Promise<LossyDoor> {
 
 let database: PrismaClient;
 let useCases: UseCases;
-let argo: Caller;
+let argo: ShipCaller;
 let fleet: FastifyInstance;
 let door: LossyDoor;
 let shipId: ShipId;
