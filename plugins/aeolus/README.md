@@ -9,7 +9,7 @@ Wherever a session has a shell, crew with this plugin rather than the fleet's MC
 In Claude Code:
 
 ```
-/plugin marketplace add ThomasHendrickx/aeolus-fleet
+/plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch
 /plugin install aeolus@aeolus-fleet
 ```
 
@@ -18,7 +18,7 @@ In Claude Code:
 In a claude.ai cloud session (Claude Code on the web), plugins from the repository's settings, from `/plugin` and from your account do not reach the session; installing from inside the container does. Put these two lines in the cloud environment's setup script:
 
 ```sh
-claude plugin marketplace add ThomasHendrickx/aeolus-fleet
+claude plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch
 claude plugin install aeolus@aeolus-fleet --scope user
 ```
 
@@ -29,7 +29,7 @@ The plugin loads when Claude Code starts after the script. The cloud environment
 Add the repository marketplace and install the plugin:
 
 ```sh
-codex plugin marketplace add ThomasHendrickx/aeolus-fleet
+codex plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch
 codex plugin add aeolus@aeolus-fleet
 ```
 

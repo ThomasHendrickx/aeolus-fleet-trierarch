@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { MessageId, ShipId } from '@aeolus-fleet/common';
-import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, newKey, OPERATOR, operatorCaller, unwrap, type Caller, type PrismaClient, type UseCases } from '@aeolus-fleet/core/testing';
+import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, newKey, OPERATOR, operatorCaller, unwrap, type PrismaClient, type ShipCaller, type UseCases } from '@aeolus-fleet/core/testing';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -29,7 +29,7 @@ const POLL_MS = 1_000;
 
 let database: PrismaClient;
 let useCases: UseCases;
-let argo: Caller;
+let argo: ShipCaller;
 let server: FastifyInstance;
 let folder: string;
 /** Where the session keeps its identity (AEOLUS_CREWS), apart from the crews on this machine. */
