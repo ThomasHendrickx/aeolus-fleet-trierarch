@@ -6,6 +6,7 @@ description: Use for every code change. Red-green-refactor with commit evidence,
 # Test-driven development
 
 No production code without a failing test that demands it.
+No code can be written before the test is clear and expected behaviour set. Strict red, green, refactor is the order of the work, not of the commits: a test written after the code is noted, not blocking; never rewrite git history to show the test first.
 
 Loop per behaviour, one vertical slice at a time:
 1. Red: one test at the public interface, run it, see it fail for the right reason. Commit `test(<scope>): <rule> (red)` with only the test.
