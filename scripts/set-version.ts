@@ -6,8 +6,8 @@
  * a version of its own (decision 0049). The exports lose the
  * @aeolus-fleet/source condition: it points into src, which the tarball does
  * not ship (aeolus-fleet#968). Both manifests of the aeolus plugin carry the
- * same version. Used by the release workflow and the publish dry run and the
- * session image build in CI.
+ * same version. Used by the release and candidate workflows, the publish dry
+ * run and the session image build in CI.
  *
  * Usage: npm run set-version -- <version>
  *        npm run set-version -- --plugin-only <version>
