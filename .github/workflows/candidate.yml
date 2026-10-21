@@ -1,0 +1,105 @@
+# Builds a candidate of the trierarch's release train (decision 0049):
+# @aeolus-fleet/trierarch at the version it will be released as, packed with npm
+# pack and uploaded with its integrity.json as the Actions artifact
+# <version>-<short sha>. It publishes and tags nothing (decision 0011): staging
+# tries the candidate before the release. The session image and the aeolus
+# plugin are the release's alone.
+name: Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version the candidate will be released as, MAJOR.MINOR.PATCH
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  # To read CI's result for the candidate's commit.
+  actions: read
+
+env:
+  NEXT_TELEMETRY_DISABLED: '1'
+
+jobs:
+  candidate:
+    name: Candidate ${{ inputs.version }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          # The version it is released as: a plugin's core version check reads only a plain version.
+          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Version must be MAJOR.MINOR.PATCH, got '$VERSION'"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+
+      - name: Check the version is not tagged yet
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          # --exit-code: 0 when the tag exists, 2 when it does not, anything else is an error.
+          status=0
+          git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" > /dev/null || status=$?
+          if [[ $status -eq 0 ]]; then
+            echo "::error::Tag v$VERSION already exists: that version was released before"
+            exit 1
+          elif [[ $status -ne 2 ]]; then
+            echo "::error::Could not read the tags from origin (git ls-remote exited $status)"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+
+      - run: npm ci
+
+      # The release's own gate: a candidate is only what may be released.
+      - name: Check the commit is on a release branch and passed CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run list --workflow ci.yml --commit "$GITHUB_SHA" --branch "$GITHUB_REF_NAME" --event push --json status,conclusion,url \
+            | node scripts/release-gate.ts "$GITHUB_REF" "$GITHUB_SHA"
+
+      - name: Set the version on the trierarch and the aeolus plugin
+        env:
+          VERSION: ${{ inputs.version }}
+        run: npm run set-version -- "$VERSION"
+
+      - run: npm run build
+
+      # integrity.json: each tarball's name, version, file and sha512 integrity, which npm's dist.integrity equals once published.
+      - name: Pack the trierarch
+        run: |
+          mkdir "$RUNNER_TEMP/candidate"
+          npm pack --json --workspace @aeolus-fleet/trierarch \
+            --pack-destination "$RUNNER_TEMP/candidate" \
+            | node -e '
+              const packed = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+              const manifest = packed.map(({ name, version, filename, integrity }) => ({ name, version, filename, integrity }));
+              process.stdout.write(JSON.stringify(manifest, null, 2) + "\n");
+            ' > "$RUNNER_TEMP/candidate/integrity.json"
+          ls -l "$RUNNER_TEMP/candidate"
+          cat "$RUNNER_TEMP/candidate/integrity.json"
+
+      - name: Name the candidate
+        id: name
+        env:
+          VERSION: ${{ inputs.version }}
+        run: echo "name=$VERSION-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.name.outputs.name }}
+          path: |
+            ${{ runner.temp }}/candidate/*.tgz
+            ${{ runner.temp }}/candidate/integrity.json
+          if-no-files-found: error
