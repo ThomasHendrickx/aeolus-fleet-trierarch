@@ -3,49 +3,49 @@
   "skills": {
     "code-review": {
       "source": "ThomasHendrickx/skills",
-      "ref": "v3.4.0",
+      "ref": "v3.6.0",
       "sourceType": "github",
       "skillPath": "skills/code-review/SKILL.md",
       "computedHash": "6497fcc4c641205d111884fc4bc32fe65da80e206dae4970aae4b11f922429ad"
     },
     "domain-modelling": {
       "source": "ThomasHendrickx/skills",
-      "ref": "v3.4.0",
+      "ref": "v3.6.0",
       "sourceType": "github",
       "skillPath": "skills/domain-modelling/SKILL.md",
       "computedHash": "cfed78607594e8c581415454c91d1b5516ed2c8b11d44d420ba39351ccd43e23"
     },
     "pull-request": {
       "source": "ThomasHendrickx/skills",
-      "ref": "v3.4.0",
+      "ref": "v3.6.0",
       "sourceType": "github",
       "skillPath": "skills/pull-request/SKILL.md",
       "computedHash": "84e2dad9dd015a925e385aa4ff68814eeebe01d722c3a17bce92b3d121ac188b"
     },
     "software-development": {
       "source": "ThomasHendrickx/skills",
-      "ref": "v3.4.0",
+      "ref": "v3.6.0",
       "sourceType": "github",
       "skillPath": "skills/software-development/SKILL.md",
-      "computedHash": "b9631acdd1590bc7a5c4eaf44358fd1883773daeeaea5aed44d63c38f025df6c"
+      "computedHash": "dc3837a53ab5cfa0661309ec9b1db4a8c3367148e6cae7a01ac658a0e58a2c95"
     },
     "test-driven-development": {
       "source": "ThomasHendrickx/skills",
-      "ref": "v3.4.0",
+      "ref": "v3.6.0",
       "sourceType": "github",
       "skillPath": "skills/test-driven-development/SKILL.md",
-      "computedHash": "ca85588651e573d22a2bd8de1af9d1e222a0352fb7785fb93f531aed9e31c8da"
+      "computedHash": "4c0ceedc41f145005768d18d15947dce0e8bceb52a7596ec4e2c1038bf26ec7c"
     },
     "typescript": {
       "source": "ThomasHendrickx/skills",
-      "ref": "v3.4.0",
+      "ref": "v3.6.0",
       "sourceType": "github",
       "skillPath": "skills/typescript/SKILL.md",
       "computedHash": "d3ba152a23fea033309b5c0bbad27c56d0867d9cf9a9c7dd696329c132cf77e3"
     },
     "writing-for-agents": {
       "source": "ThomasHendrickx/skills",
-      "ref": "v3.4.0",
+      "ref": "v3.6.0",
       "sourceType": "github",
       "skillPath": "skills/writing-for-agents/SKILL.md",
       "computedHash": "10a1e2c3991be255508ed40fe5cefed7bf6ec54beb186d2030fef169a7971bc0"
