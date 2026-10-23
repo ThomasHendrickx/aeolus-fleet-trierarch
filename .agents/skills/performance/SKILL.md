@@ -15,7 +15,10 @@ API design:
 - Each call is cheap enough for a hot path.
 
 Toolbelt:
-- Paginate by default, with a cursor.
+- Paginate in the database query, with a cursor; never page in memory after reading every row.
+- A client never fetches every page; it fetches the next page when the user asks for it.
+- Filters, search, sort and counts run in the same database query, never in the client.
+- A screen asks for a page that fits it: 20 rows.
 - Read a snapshot or rollup instead of recomputing from history.
 - A cache states its staleness rule.
 - Every list query has an index; no full scan on a request path.
