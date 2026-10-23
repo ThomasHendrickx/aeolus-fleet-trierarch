@@ -25,7 +25,7 @@ Toolbelt:
 - Run independent calls in parallel, so one slow part does not block the page.
 
 Proof:
-- Before release, a performance test at the target scale passes on acceptance, reported in numbers.
+- A change that touches a read at scale is measured on demand with the staging performance run, reported in numbers.
 
 UI states:
 - Every call has loading, empty, error and partial states, as the `web-frontend` skill's interaction feedback rule says.
