@@ -16,10 +16,17 @@ import { z } from 'zod';
  * gets beside its working folder, at the latest main. They are named, never a
  * path, so only a repository the machine already trusts is checked out. Kept
  * here rather than in common: only the trierarch reads its configuration, and
- * a crew request never names them.
+ * a crew request never names them. With them, the price table the cost of a
+ * ship's tokens is estimated by (#353): per model, in US dollars per million
+ * tokens of each kind, in place of its list price or for a model with none.
  */
+const priceSchema = z.number().nonnegative();
+
 export const trierarchConfigurationSchema = commonConfigurationSchema
-  .extend({ repositories: z.record(trierarchNameSchema, z.strictObject({ path: z.string().min(1), checkouts: z.array(trierarchNameSchema).optional() })) })
+  .extend({
+    repositories: z.record(trierarchNameSchema, z.strictObject({ path: z.string().min(1), checkouts: z.array(trierarchNameSchema).optional() })),
+    prices: z.record(z.string().min(1), z.strictObject({ input: priceSchema, output: priceSchema, cacheRead: priceSchema, cacheWrite: priceSchema })).optional(),
+  })
   .superRefine((configuration, context) => {
     for (const [repository, { checkouts = [] }] of Object.entries(configuration.repositories)) {
       checkouts.forEach((checkout, index) => {
