@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as wait } from 'node:timers/promises';
 
+import { createClaudeCodeSetup } from '../adapters/claude-code-setup.js';
+import { createCodexSetup } from '../adapters/codex-setup.js';
 import { createContainerHost } from '../adapters/container-host.js';
 import { requireCoreVersion } from '../adapters/core-version.js';
-import { loadConfiguration, readCrewFile, writeRunningFile } from '../adapters/files.js';
+import { loadConfiguration, readCrewFile, writeRunningFile, type TrierarchConfiguration } from '../adapters/files.js';
 import { createDetectedFile } from '../adapters/detected-file.js';
 import { createDetectors } from '../adapters/detectors.js';
 import { adapterFlagsOf, createHarnesses, riskyFlagsOf } from '../adapters/harnesses.js';
@@ -17,6 +19,7 @@ import { createCallerCheck } from '../adapters/caller-check.js';
 import { createShipSockets } from '../adapters/ship-sockets.js';
 import { sessionsLaunch } from '../adapters/tmux.js';
 import { createTrust } from '../adapters/trust.js';
+import { createTrustedRepositoriesFile } from '../adapters/trusted-repositories-file.js';
 import { runningVersion } from '../adapters/version.js';
 import { createCheckSessionRuntime } from '../core/check-session-runtime.js';
 import { createDetectHarnesses } from '../core/detect-harnesses.js';
@@ -28,6 +31,7 @@ import { machineOf } from '../core/machine.js';
 import type { Delivery, Logger, TrierarchSetup } from '../core/ports.js';
 import { createReportSelf } from '../core/report-self.js';
 import { createRunPass } from '../core/run-pass.js';
+import { offeredRepositories } from '../core/trusted-repositories.js';
 import { runtimeRefused } from './config-check.js';
 
 /** How often the loop runs a pass: restarts, wakes and releases wait at most this long. */
@@ -60,11 +64,41 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   for (const harness of modelOptionsIgnored(configured)) {
     logger.warn(`${harness}: the configuration's model option is ignored: model ids come from detection only (#382); remove it`);
   }
-  const configuration = withDetectedOptions(configured, detected);
+  // The trusted repositories the trierarch plugin sent last (aeolus-fleet#384): each one's clone is trusted as the list arrives, as adding a place trusts it (#381).
+  const claudeCode = createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) });
+  const trustedRepositories = createTrustedRepositoriesFile({
+    file: paths.trustedRepositories,
+    clonesRoot: paths.repositories,
+    trustClones: async (clones) => {
+      if (configured.harnesses['claude-code'] !== undefined) {
+        for (const clone of clones) {
+          await claudeCode.trust(clone);
+        }
+      }
+      if (configured.harnesses.codex !== undefined && clones.length > 0) {
+        // As add does: a clone Codex does not trust is not offered until it does (#381).
+        await createCodexSetup()
+          .trust(clones)
+          .catch((error: unknown) => {
+            logger.warn(`Codex does not trust the trusted repositories' clones: ${error instanceof Error ? error.message : String(error)}`);
+          });
+      }
+    },
+  });
+  await trustedRepositories.load();
+  /** The configuration with each trusted repository beside the configured ones, read afresh at each use, as the list changes while it runs. */
+  const withTrusted = <C extends TrierarchConfiguration>(base: C): C => ({
+    ...base,
+    get repositories() {
+      return offeredRepositories(base.repositories, { trusted: trustedRepositories.current(), cloneOf: (name) => trustedRepositories.cloneOf(name) });
+    },
+  });
+  const configuration = withTrusted(withDetectedOptions(configured, detected));
   // What the machine offers changes while it runs, as sessions refuse models (#382): each pass and report reads it afresh.
   let offered = { configuration, detected };
   const version = runningVersion();
-  const { sessions, workspace, shipHomes } = runtimeAdaptersOf({ configuration, paths, version, launch: sessionsLaunch({ platform: process.platform, env }), managedSettings });
+  const clones = { root: paths.repositories, urlOf: (name: string) => (name in configured.repositories ? undefined : trustedRepositories.current().find((each) => each.name === name)?.url) };
+  const { sessions, workspace, shipHomes } = runtimeAdaptersOf({ configuration, paths, version, launch: sessionsLaunch({ platform: process.platform, env }), managedSettings, clones });
   const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, managedSettings, detected: () => offered.detected, sessions, ...(shipHomes !== undefined && { shipHomes }) });
   const state = createJsonState(paths.state);
   const trust = createTrust({ configuration, homeDirectory, env, managedSettings });
@@ -86,11 +120,11 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     detect: detectHarnesses,
     onDetected: (found) => {
       const kept = Object.fromEntries(Object.entries(found).filter(([harness]) => harness in configured.harnesses));
-      offered = { configuration: withDetectedOptions(configured, kept), detected: kept };
+      offered = { configuration: withTrusted(withDetectedOptions(configured, kept)), detected: kept };
     },
     logger,
   });
-  const handle = createHandleDelivery({ fleet, logger });
+  const handle = createHandleDelivery({ fleet, logger, trustedRepositories, ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
   const checkouts = createGitCheckouts({ configuration: configured, root: paths.checkouts });
   // Each session's fleet calls, with the crew token from the state at each call (decision 0026).
   const sockets = createShipSockets({

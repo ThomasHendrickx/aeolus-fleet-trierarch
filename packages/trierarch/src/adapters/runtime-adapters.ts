@@ -7,6 +7,7 @@ import type { SessionRoots } from './caller-check.js';
 import { createCloneWorkspace } from './clone-workspace.js';
 import { createContainerRuntime } from './container.js';
 import { createGitWorkspace } from './git-workspace.js';
+import type { TrustedClones } from './trusted-clones.js';
 import type { TrierarchPaths } from './paths.js';
 import { createTmux } from './tmux.js';
 
@@ -28,14 +29,22 @@ export interface RuntimeAdapters {
  * and caps and the machine's model token, a clone per ship in place of the
  * worktree, by its real path, and a home of each ship's own.
  */
-export function runtimeAdaptersOf(at: { configuration: TrierarchConfiguration; paths: TrierarchPaths; version: string; launch: readonly string[]; managedSettings: string }): RuntimeAdapters {
-  const { configuration, paths, version, launch, managedSettings } = at;
+export function runtimeAdaptersOf(at: {
+  configuration: TrierarchConfiguration;
+  paths: TrierarchPaths;
+  version: string;
+  launch: readonly string[];
+  managedSettings: string;
+  /** The trusted repositories a workspace clones first when the machine does not have them (aeolus-fleet#384). */
+  clones?: TrustedClones;
+}): RuntimeAdapters {
+  const { configuration, paths, version, launch, managedSettings, clones: trusted } = at;
   const root = configuration.worktreeRoot ?? paths.worktrees;
   const { runtime } = configuration;
   if (runtime?.kind !== 'container') {
-    return { sessions: createTmux({ launch }), workspace: createGitWorkspace({ configuration, root }) };
+    return { sessions: createTmux({ launch }), workspace: createGitWorkspace({ configuration, root, ...(trusted !== undefined && { clones: trusted }) }) };
   }
-  const clones = createCloneWorkspace({ configuration, root });
+  const clones = createCloneWorkspace({ configuration, root, ...(trusted !== undefined && { clones: trusted }) });
   return {
     sessions: createContainerRuntime({ binary: runtime.binary, image: `${SESSION_IMAGE}:${version}`, tokenFile: paths.modelToken, homes: paths.homes, sockets: paths.sockets, memory: runtime.memory, cpus: runtime.cpus, launch }),
     // The container mounts the folder at the path it is given, where the plugin inside keys it by `pwd -P` as the host's does: one path for both, the real one.

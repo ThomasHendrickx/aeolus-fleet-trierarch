@@ -753,8 +753,18 @@ export class InMemoryTrustedRepositories implements TrustedRepositoriesPort {
   }
 }
 
-/** A trierarch on in-memory ports; it knows the trierarch plugin's ship unless `pluginShipId` is null, as on a machine set up before. */
-export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION, detected: Detected = {}, at: { pluginShipId?: ShipId | null } = {}) {
+/** A trierarch on in-memory ports, knowing the trierarch plugin's ship. */
+export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION, detected: Detected = {}) {
+  return trierarchOn({ configuration, detected, pluginShipId: PLUGIN_SHIP_ID });
+}
+
+/** A trierarch on in-memory ports on a machine set up before init kept the trierarch plugin's ship (aeolus-fleet#384). */
+export function aTrierarchSetUpBefore() {
+  return trierarchOn({ configuration: CONFIGURATION, detected: {}, pluginShipId: undefined });
+}
+
+function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Detected; pluginShipId: ShipId | undefined }) {
+  const { configuration, detected, pluginShipId } = at;
   const state = new InMemoryState();
   const fleet = new InMemoryFleet();
   const processes = new InMemoryProcesses();
@@ -780,8 +790,7 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
     detected,
   };
   const trustedRepositories = new InMemoryTrustedRepositories();
-  const pluginShipId = at.pluginShipId === undefined ? PLUGIN_SHIP_ID : at.pluginShipId;
-  const handle = createHandleDelivery({ fleet, logger, trustedRepositories, ...(pluginShipId !== null && { pluginShipId }) });
+  const handle = createHandleDelivery({ fleet, logger, trustedRepositories, ...(pluginShipId !== undefined && { pluginShipId }) });
   /** The models sessions refused, as the trierarch kept them. */
   const refusals: { harness: string; id: string; at: Date }[] = [];
   const refuseModel = (refused: { harness: string; id: string; at: Date }): Promise<void> => {

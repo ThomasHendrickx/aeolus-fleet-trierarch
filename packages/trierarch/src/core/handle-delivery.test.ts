@@ -1,7 +1,7 @@
 import { PING_CONTENT_TYPE } from '@aeolus-fleet/common';
 import { describe, expect, it } from 'vitest';
 
-import { aTrierarch, CONFIGURATION, newId, PLUGIN_SHIP_ID } from '../../test/support/in-memory.js';
+import { aTrierarch, aTrierarchSetUpBefore, newId, PLUGIN_SHIP_ID } from '../../test/support/in-memory.js';
 
 describe("what arrives at the trierarch's own ship", () => {
   it('answers a ping with pong, and does not ack it', async () => {
@@ -66,7 +66,7 @@ describe("what arrives at the trierarch's own ship", () => {
     });
 
     it("takes none on a machine set up before init kept the trierarch plugin's ship, saying how to take them", async () => {
-      const trierarch = aTrierarch(CONFIGURATION, {}, { pluginShipId: null });
+      const trierarch = aTrierarchSetUpBefore();
 
       await trierarch.deliver({ contentType: CONTENT_TYPE, payload, senderShipId: PLUGIN_SHIP_ID });
 
