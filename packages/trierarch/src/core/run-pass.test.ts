@@ -1545,6 +1545,19 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.logger.warnings.some((warning) => warning.startsWith('The pass failed'))).toBe(false);
   });
 
+  it('keeps the harnesses whose aeolus plugin is missing in the state, and drops them once the plugin is back (#1212)', async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    trierarch.codex.pluginProblem = 'The aeolus plugin is not installed for Codex';
+    await trierarch.pass();
+
+    expect(trierarch.state.current().missingPlugins).toEqual(['codex']);
+
+    trierarch.codex.pluginProblem = undefined;
+    await trierarch.pass();
+
+    expect(trierarch.state.current().missingPlugins).toBeUndefined();
+  });
+
   it('a pass that fails is kept in the state with why and since when, and cleared once a pass succeeds (#1212)', async () => {
     const trierarch = aTrierarch();
     trierarch.fleet.isUnreachable = true;

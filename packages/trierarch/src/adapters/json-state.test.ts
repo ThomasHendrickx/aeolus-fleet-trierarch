@@ -80,6 +80,7 @@ const aPopulatedState = (): Populated<TrierarchState> => {
     orphans: [{ path: '/home/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/stray', repository: 'aeolus-fleet', name: 'stray' }],
     refused: { [newId('ship')]: 3 },
     lowResources: ['memory', 'disk'],
+    missingPlugins: ['codex'],
     passFailure: { reason: 'the fleet cannot be reached', since: '2026-10-06T08:00:00.000Z' },
   };
 };
