@@ -226,7 +226,8 @@ export interface SessionRuntime {
   list(): Promise<readonly ObservedSession[]>;
   stop(shipId: ShipId): Promise<void>;
   /** Starts the command in the folder, with the environment given, in a new session for the ship; an exited one is replaced. */
-  start(session: { shipId: ShipId; folder: string; command: readonly string[]; env?: Readonly<Record<string, string>> }): Promise<void>;
+  /** Starts the session in its folder; `readOnly` names its read-only checkouts (#1182), which a container mounts read-only and the host leaves as they are. */
+  start(session: { shipId: ShipId; folder: string; command: readonly string[]; env?: Readonly<Record<string, string>>; readOnly?: readonly string[] }): Promise<void>;
   /** Types the text into the ship's session and presses Enter, after `settleMs` when given. */
   type(at: { shipId: ShipId; text: string; settleMs?: number }): Promise<void>;
   /** Stops the session's running turn as a person does, with Escape; the session goes on (decision 0040). */
