@@ -44,6 +44,7 @@ describe('the trusted repositories a trierarch receives', () => {
     ['an scp-like URL whose host reads as an option', listOf([{ name: 'hemma', url: 'git@-oProxyCommand=x:a/b.git' }])],
     ['a URL that reads as an option', listOf([{ name: 'hemma', url: '--upload-pack=touch x' }])],
     ['a URL with a space', listOf([{ name: 'hemma', url: 'git@github.com:a/b c.git' }])],
+    ['an ssh URL whose user does not decode', listOf([{ name: 'hemma', url: 'ssh://%zz@github.com/a/b.git' }])],
   ])('refuses %s', (_label, payload) => {
     expect(readTrustedRepositories(payload)).toMatchObject({ isOk: false });
   });
