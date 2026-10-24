@@ -18,6 +18,14 @@ export interface TrierarchState {
   readonly refused: Readonly<Record<string, number>>;
   /** What the machine is low on, as argo was told (#400), so it is told once per drop, a restart too; none while it is low on nothing. */
   readonly lowResources?: readonly LowResource[];
+  /** Why the last pass failed and since when (#1212); none while passes succeed. */
+  readonly passFailure?: PassFailure;
+}
+
+/** A failing pass: the reason of the latest failure, and when the passes began to fail. */
+export interface PassFailure {
+  readonly reason: string;
+  readonly since: string;
 }
 
 /** Where an entry stands: the crew statuses the trierarch writes, and releasing while it ends. */

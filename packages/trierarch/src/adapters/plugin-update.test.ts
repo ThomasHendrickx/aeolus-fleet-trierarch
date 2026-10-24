@@ -174,7 +174,7 @@ describe('the aeolus plugin update for Codex', () => {
   });
 
   it('adds the marketplace also when Codex had none to remove (#652)', async () => {
-    aProgram(codex, { then: `${codexUpgrading('0.22.0')}\n${"if (probe === '' && process.argv[4] === 'remove') { process.stderr.write('Error: marketplace `aeolus-fleet` is not configured or installed'); process.exit(1); }"}` });
+    aProgram(codex, { then: `${codexUpgrading('0.22.0')}\nif (probe === '' && process.argv[4] === 'remove') { process.stderr.write('Error: marketplace \`aeolus-fleet\` is not configured or installed'); process.exit(1); }` });
 
     await update().update('codex', 'v0.23.0');
 

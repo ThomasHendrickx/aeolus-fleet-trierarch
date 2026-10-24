@@ -64,6 +64,7 @@ describe('aeolus-trierarch status', () => {
         'Service: running, pid 4242, since 2026-10-06T07:00:00.000Z',
         `Fleet: https://fleet.example.com, the lease of ${shipId} is valid`,
         'Caps: 2 of 8 ships crewed here, 1 of 4 sessions running',
+        'Last pass: succeeded',
         'Entries: running 1, restarting 1',
         'Kept worktrees: none',
         'Orphans: none',

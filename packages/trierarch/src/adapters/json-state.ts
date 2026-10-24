@@ -50,6 +50,7 @@ const stateSchema = z.object({
   orphans: z.array(z.object({ path: z.string(), repository: z.string(), name: z.string() })),
   refused: z.record(z.string(), z.int().positive()),
   lowResources: z.array(z.enum(LOW_RESOURCES)).optional(),
+  passFailure: z.object({ reason: z.string(), since: z.string() }).optional(),
 });
 
 /** The 0.17 state file: it alone kept the messages it applied. */

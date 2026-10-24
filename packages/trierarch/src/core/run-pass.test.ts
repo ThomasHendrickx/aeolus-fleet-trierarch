@@ -1530,7 +1530,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
   });
 
   it('a harness whose aeolus plugin is missing gives back only its own requests, with why, and the pass goes on for the others (#1212)', async () => {
-    const trierarch = aTrierarch();
+    const trierarch = aTrierarch(WITH_CODEX);
     trierarch.codex.pluginProblem = 'The aeolus plugin is not installed for Codex (nothing in /home/thomas/.codex/plugins/cache/aeolus-fleet/aeolus)';
     const codexShip = trierarch.fleet.commission('lookout');
     trierarch.fleet.request(codexShip, crewSettings({ harness: 'codex' }));
