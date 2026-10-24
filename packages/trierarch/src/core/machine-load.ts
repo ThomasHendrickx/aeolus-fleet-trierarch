@@ -4,7 +4,9 @@ import type { TrierarchReportDetails } from '@aeolus-fleet/common';
 export type MachineLoad = NonNullable<TrierarchReportDetails['load']>;
 
 /** What a machine can run low on, as argo is told (#400). */
-export type LowResource = 'memory' | 'disk';
+export const LOW_RESOURCES = ['memory', 'disk'] as const;
+
+export type LowResource = (typeof LOW_RESOURCES)[number];
 
 /** Below this share of memory available, the machine is low on memory: sessions and their watchers start to be stopped (the mac mini of 2026-10-08). */
 export const LOW_MEMORY_PERCENT = 10;

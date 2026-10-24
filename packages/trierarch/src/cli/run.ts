@@ -132,7 +132,8 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     refreshCheckouts: (shipId) => checkouts.refresh(shipId),
   });
   const runPass = createRunPass({ fleet, harnesses, processes: sessions, folderProcesses: createFolderProcesses(), workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets });
-  const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup });
+  // The machine and the harnesses' usage are read once their adapters are wired.
+  const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup, readLoad: () => Promise.resolve(undefined), readUsage: () => Promise.resolve({ subscriptions: [], ships: [] }) });
   const askForTrustedRepositories = createAskForTrustedRepositories({ fleet, logger, ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
   // Each pass ends with the trierarch's own report: the first at start, then only when it changed.
   const pass = async (): Promise<void> => {

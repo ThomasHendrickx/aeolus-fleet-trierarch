@@ -1,5 +1,7 @@
 import type { ShipId, TrierarchWorkspace } from '@aeolus-fleet/common';
 
+import type { LowResource } from './machine-load.js';
+
 /**
  * The trierarch's saved state (docs/trierarch.md): an entry per ship it
  * crews, by ship id, the worktrees it kept, the orphans it found, and the
@@ -14,6 +16,8 @@ export interface TrierarchState {
   readonly orphans: readonly Orphan[];
   /** By ship id: the settings version argo was told this trierarch cannot crew, so it is told once. */
   readonly refused: Readonly<Record<string, number>>;
+  /** What the machine is low on, as argo was told (#400), so it is told once per drop, a restart too; none while it is low on nothing. */
+  readonly lowResources?: readonly LowResource[];
 }
 
 /** Where an entry stands: the crew statuses the trierarch writes, and releasing while it ends. */

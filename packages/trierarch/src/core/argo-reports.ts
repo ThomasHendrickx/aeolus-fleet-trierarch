@@ -1,5 +1,7 @@
 import { argoMessage } from '@aeolus-fleet/common';
 
+import type { LowResource, MachineLoad } from './machine-load.js';
+
 /**
  * What the trierarch tells argo or a ship's owner, in the shape the ship
  * protocol gives a message to argo: a headline naming the ship, then short facts in markdown.
@@ -78,6 +80,30 @@ export function settingsRefusedText(ship: ShipNamed, at: { settingsVersion: numb
 
 export function detectionProblemText(at: { harness: string; version: string; problem: string }): string {
   return argoMessage({ headline: `${at.harness} ${at.version}: detection found a problem`, body: at.problem });
+}
+
+const GIB = 1024 ** 3;
+const GB = 1000 ** 3;
+const PERCENT = 100;
+
+/** Bytes as a reader counts them: memory in GiB, as the machine names it, a disk in GB, as its maker does. */
+const gibOf = (bytes: number): string => (bytes / GIB).toFixed(1);
+const gbOf = (bytes: number): string => (bytes / GB).toFixed(1);
+
+/**
+ * The machine is low on memory or disk (#400). The trierarch stops nothing
+ * for it: freeing memory or disk is the operator's.
+ */
+export function lowResourceText(resource: LowResource, load: MachineLoad): string {
+  const { memory, disk } = load;
+  const headline =
+    resource === 'memory'
+      ? `Low on memory: ${String(Math.round((memory.availableBytes / memory.totalBytes) * PERCENT))} % available`
+      : `Low on disk: ${String(Math.round((disk.freeBytes / disk.totalBytes) * PERCENT))} % free`;
+  return argoMessage({
+    headline,
+    body: paragraphs([`- Memory: ${gibOf(memory.availableBytes)} of ${gibOf(memory.totalBytes)} GiB available`, `- Disk: ${gbOf(disk.freeBytes)} of ${gbOf(disk.totalBytes)} GB free`].join('\n'), 'The trierarch stops no session for it.'),
+  });
 }
 
 /** The kinds of discarded lines, in the order the counts name them. */
