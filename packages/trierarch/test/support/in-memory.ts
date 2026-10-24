@@ -225,7 +225,13 @@ export class InMemoryFleet implements FleetPort {
     return held;
   }
 
+  /** Set to make the fleet unreachable: reading the assigned requests fails. */
+  isUnreachable = false;
+
   assignedRequests(): Promise<readonly AssignedRequest[]> {
+    if (this.isUnreachable) {
+      return Promise.reject(new Error('the fleet cannot be reached'));
+    }
     return Promise.resolve([...this.requests].map(([shipId, { settings, settingsVersion, status, isFinal, owner }]) => ({ shipId, settings, settingsVersion, status, isFinal, owner })));
   }
 
@@ -461,6 +467,8 @@ export class InMemoryHarness implements HarnessPort {
   isMarkingLaunches = true;
   /** Set to make every launch fail, as when the harness's CLI cannot start: the entry stays crewing. */
   isFailingLaunch = false;
+  /** Set to say why its aeolus plugin cannot be found, as when its cache folder is empty (#1212): nothing of it can be read. */
+  pluginProblem: string | undefined = undefined;
   /** Set to say why no session of the harness can start, as when its aeolus plugin's scripts are gone (#827). */
   problem: string | undefined = undefined;
 
@@ -531,6 +539,9 @@ export class InMemoryHarness implements HarnessPort {
   }
 
   marksLaunches(): Promise<boolean> {
+    if (this.pluginProblem !== undefined) {
+      return Promise.reject(new Error(this.pluginProblem));
+    }
     return Promise.resolve(this.isMarkingLaunches);
   }
 

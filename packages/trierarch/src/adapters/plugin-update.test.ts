@@ -70,6 +70,7 @@ function onUpgrade(code: string): string {
 /** Codex's own plugin upgrade: the new version in, every other version folder deleted. */
 function codexUpgrading(to: string, cache = codexCache()): string {
   return onUpgrade(`const cache = ${JSON.stringify(cache)};
+mkdirSync(cache, { recursive: true });
 for (const name of readdirSync(cache)) rmSync(join(cache, name), { recursive: true });
 mkdirSync(join(cache, ${JSON.stringify(to)}, 'scripts'), { recursive: true });
 writeFileSync(join(cache, ${JSON.stringify(to)}, 'scripts', 'aeolus-fleet.sh'), '# ${to}\\n');`);
@@ -134,11 +135,34 @@ describe('the aeolus plugin update for Codex', () => {
   });
 
   it("points Codex's aeolus-fleet marketplace at the release tag it is given before the upgrade, adding it again since Codex adds no second source (#652)", async () => {
-    aProgram(codex);
+    aProgram(codex, { then: codexUpgrading('0.22.0') });
 
     await update().update('codex', 'v0.23.0');
 
     expect(ran()).toEqual(['codex plugin marketplace remove aeolus-fleet', 'codex plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch --ref v0.23.0', 'codex plugin marketplace upgrade aeolus-fleet']);
+  });
+
+  it('installs the plugin when the upgrade left Codex with none, as when its cache folder was emptied (#1212)', async () => {
+    aProgram(codex);
+
+    await update().update('codex', 'v0.23.0');
+
+    expect(ran().slice(-2)).toEqual(['codex plugin marketplace upgrade aeolus-fleet', 'codex plugin add aeolus@aeolus-fleet']);
+  });
+
+  it('installs nothing beyond the upgrade when Codex has the plugin after it (#1212)', async () => {
+    aCodexVersion('0.21.0');
+    aProgram(codex, { then: codexUpgrading('0.22.0') });
+
+    await update().update('codex', 'v0.23.0');
+
+    expect(ran()).not.toContain('codex plugin add aeolus@aeolus-fleet');
+  });
+
+  it('says what Codex said when it cannot install the plugin (#1212)', async () => {
+    aProgram(codex, { then: "if (probe === '' && process.argv[3] === 'add' && process.argv[2] === 'plugin') { process.stderr.write('Error: plugin not found in aeolus-fleet'); process.exit(1); }" });
+
+    await expect(update().update('codex', 'v0.23.0')).rejects.toThrow('codex plugin add aeolus@aeolus-fleet failed: Error: plugin not found in aeolus-fleet');
   });
 
   it("points Codex's aeolus-fleet marketplace at main when it is given no tag (#652)", async () => {
@@ -150,7 +174,7 @@ describe('the aeolus plugin update for Codex', () => {
   });
 
   it('adds the marketplace also when Codex had none to remove (#652)', async () => {
-    aProgram(codex, { then: "if (probe === '' && process.argv[4] === 'remove') { process.stderr.write('Error: marketplace `aeolus-fleet` is not configured or installed'); process.exit(1); }" });
+    aProgram(codex, { then: `${codexUpgrading('0.22.0')}\n${"if (probe === '' && process.argv[4] === 'remove') { process.stderr.write('Error: marketplace `aeolus-fleet` is not configured or installed'); process.exit(1); }"}` });
 
     await update().update('codex', 'v0.23.0');
 
@@ -335,7 +359,7 @@ describe('the aeolus plugin update for Codex', () => {
   });
 
   it('runs the upgrade where Codex has no aeolus plugin version yet', async () => {
-    aProgram(codex);
+    aProgram(codex, { then: codexUpgrading('0.22.0') });
 
     await update().update('codex', 'v0.23.0');
 

@@ -105,6 +105,16 @@ describe('aeolus-trierarch status', () => {
     expect(stripVTControlCharacters(coloured)).toBe(describeStatus(report));
   });
 
+  it('says the last pass failed, since when and why, and that it succeeded when it did (#1212)', async () => {
+    const trierarch = aTrierarch();
+    expect(describeStatus(await inspect(trierarch))).toContain('Last pass: succeeded');
+
+    trierarch.fleet.isUnreachable = true;
+    await trierarch.pass();
+
+    expect(describeStatus(await inspect(trierarch))).toContain('Last pass: failing since 2026-10-06T08:00:00.000Z: the fleet cannot be reached');
+  });
+
   it('lists kept worktrees and orphans', async () => {
     const trierarch = aTrierarch();
     // A worktree with changes is kept when its crew is given back before it is final: its launch fails, then settings it cannot crew come.
