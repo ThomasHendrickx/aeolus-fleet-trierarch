@@ -168,7 +168,9 @@ describe('read-only checkouts in git (#1182)', () => {
 
     const refreshed = await checkouts().refresh(scout);
 
-    expect(refreshed[0]).toMatchObject({ repository: 'governance', problem: expect.stringContaining('governance') as unknown });
+    const [first] = refreshed;
+    expect(first?.repository).toBe('governance');
+    expect(first !== undefined && 'problem' in first ? first.problem : undefined).toContain('governance');
     expect(refreshed[1]).toEqual({ repository: 'skills', revision: skillsLatest });
   });
 

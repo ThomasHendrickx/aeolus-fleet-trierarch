@@ -282,6 +282,29 @@ export interface WorkspacePort {
   worktrees(): Promise<readonly ObservedWorktree[]>;
 }
 
+/** A read-only checkout a session gets beside its working folder (#1182): the configured repository it is of, and where it is. */
+export interface Checkout {
+  readonly repository: string;
+  readonly path: string;
+}
+
+/** What refreshing a checkout came to: the revision it now holds, or why it could not, as one line. */
+export type RefreshedCheckout = { readonly repository: string; readonly revision: string } | { readonly repository: string; readonly problem: string };
+
+/**
+ * The read-only checkouts of each ship (#1182): the repositories the
+ * configuration names for its working repository, at the latest main, one
+ * folder per ship. The session can change, commit and push nothing in them.
+ */
+export interface CheckoutsPort {
+  /** Makes the ship's checkouts its working repository names, keeping those it has; answers each, none for a repository that names none. */
+  prepare(at: { shipId: ShipId; repository: string }): Promise<readonly Checkout[]>;
+  /** Brings each of the ship's checkouts to the latest main of its repository; one that cannot be refreshed says why and holds what it held. */
+  refresh(shipId: ShipId): Promise<readonly RefreshedCheckout[]>;
+  /** Removes every checkout of the ship. */
+  remove(shipId: ShipId): Promise<void>;
+}
+
 export interface StatePort {
   load(): Promise<TrierarchState>;
   save(state: TrierarchState): Promise<void>;
