@@ -768,7 +768,7 @@ describe('the trusted repositories on a real fleet (aeolus-fleet#384)', () => {
     const mayCall = createCallerCheck({ platform: process.platform, sessionRootOf: () => Promise.resolve(undefined) });
     const sockets = createShipSockets({ root: paths.sockets, fleetUrl: address, crewTokenOf: async (shipId) => (await state.load()).entries[shipId]?.crewToken, mayCall, log: () => undefined, refreshCheckouts: (shipId) => checkouts.refresh(shipId) });
     openSockets = sockets;
-    const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, trust, state, setup, clock: { now: () => new Date() }, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID, sockets, checkouts });
+    const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, folderProcesses: { stopIn: () => Promise.resolve(0) }, workspace, trust, state, setup, clock: { now: () => new Date() }, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID, sockets, checkouts });
     const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup });
 
     await sendTrusted([{ name: 'hemma', url }]);
