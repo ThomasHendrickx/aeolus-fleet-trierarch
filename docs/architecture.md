@@ -37,7 +37,7 @@ Everything of the trierarch lives under `~/.aeolus/trierarch/`.
 | The trusted repositories the trierarch plugin sent last (aeolus-fleet#384) | `~/.aeolus/trierarch/trusted-repositories.json` | The trierarch, as the list arrives |
 | The clones of the trusted repositories, one folder per repository, each made before its first workspace | `~/.aeolus/trierarch/repositories/<name>/` | The trierarch |
 | With the container runtime, the machine's long-lived model token (`claude setup-token`), mode 600, handed to each container (decision 0039); never in the configuration | `~/.aeolus/trierarch/model-token` | The operator |
-| State: entries saved as crewing, kept worktrees, runtime state per ship. No secrets and no declared state (the fleet holds that); written atomically | `~/.aeolus/trierarch/state.json` | The trierarch |
+| State: entries saved as crewing, kept worktrees, runtime state per ship, what argo was told the machine is low on. No secrets and no declared state (the fleet holds that); written atomically | `~/.aeolus/trierarch/state.json` | The trierarch |
 | What detection found per harness: its version, when it was detected and its models last confirmed, and its options (#365) | `~/.aeolus/trierarch/detected.json` | The trierarch: `init`, a start after a harness updated, `aeolus-trierarch detect` |
 | The running trierarch's pid and version, so `status` tells the running version from the installed one | `~/.aeolus/trierarch/running.json` | The trierarch, as it starts |
 | Logs | `~/.aeolus/trierarch/logs/` on macOS; the user journal on Linux (`journalctl --user -u aeolus-trierarch`) | The trierarch's service |
