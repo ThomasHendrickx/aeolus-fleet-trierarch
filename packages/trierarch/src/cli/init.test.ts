@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import type { CodexSetup } from '../adapters/codex-setup.js';
-import type { RunningFile } from '../adapters/files.js';
+import { readCrewFile, type RunningFile } from '../adapters/files.js';
 import { trierarchPaths, type TrierarchPaths } from '../adapters/paths.js';
 import type { Service, ServiceStatus } from '../adapters/service.js';
 import { newId } from '../../test/support/in-memory.js';
@@ -253,6 +253,20 @@ describe('aeolus-trierarch init, the whole setup', () => {
     expect(registered).toEqual([]);
   });
 
+  it("keeps the trierarch plugin's ship the setup line names, which the trusted repositories come from (aeolus-fleet#384)", async () => {
+    const pluginShipId = newId('ship');
+
+    await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), pluginShipId, secret: SECRET, isYes: true });
+
+    await expect(readCrewFile(paths.crewToken)).resolves.toMatchObject({ pluginShipId });
+  });
+
+  it('refuses a --plugin-ship-id that is no ship id, and registers nothing', async () => {
+    await expect(init({ fleetUrl: FLEET_URL, shipId: newId('ship'), pluginShipId: 'trierarch-plugin', secret: SECRET, isYes: true })).rejects.toThrow('trierarch-plugin is no ship id: it starts with shp_.');
+
+    expect(registered).toEqual([]);
+  });
+
   it('refuses a --ship-id that is no ship id', async () => {
     await expect(init({ fleetUrl: FLEET_URL, shipId: 'trierarch-mac', secret: SECRET, isYes: true })).rejects.toThrow('trierarch-mac is no ship id: it starts with shp_.');
   });
@@ -397,6 +411,17 @@ describe('aeolus-trierarch init on a machine set up already', () => {
     expect(readFileSync(paths.config, 'utf8')).toBe(before);
     expect(report).toMatchObject({ isSetUpAlready: true, configuration: 'kept', service: 'unchanged' });
     expect(report.said[0]).toBe(`This machine is set up already: the trierarch crews ${shipId} at ${FLEET_URL}.`);
+  });
+
+  it("keeps the trierarch plugin's ship given alone, registering nothing, then restarts the trierarch so it takes the trusted repositories from it (aeolus-fleet#384)", async () => {
+    const pluginShipId = newId('ship');
+
+    const report = await init({ pluginShipId, isYes: true });
+
+    expect(registered).toEqual([]);
+    await expect(readCrewFile(paths.crewToken)).resolves.toEqual({ fleetUrl: FLEET_URL, shipId, pluginShipId, crewToken: 'aeolus_ct_v1_trierarch' });
+    expect(report.said).toContain(`It takes the trusted repositories from the trierarch plugin's ship ${pluginShipId}.`);
+    expect(service.done).toEqual(['rewrite', 'restart']);
   });
 
   it("rewrites the installed service's file, so a unit an earlier trierarch wrote runs as this one writes it from its next start (#479)", async () => {

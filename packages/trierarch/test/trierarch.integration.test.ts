@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import type { ShipId } from '@aeolus-fleet/common';
+import { defineLabelOutputSchema, type ShipId } from '@aeolus-fleet/common';
 import type { FastifyInstance } from 'fastify';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 import { z } from 'zod';
 
 import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, FLEET_URL, newKey, OPERATOR, operatorCaller, secretOf, unwrap, type PrismaClient } from '@aeolus-fleet/core/testing';
@@ -28,6 +28,10 @@ import { RESTART_DELAYS_MS } from '../src/core/restart-policy.js';
 import { createCallerCheck } from '../src/adapters/caller-check.js';
 import { createShipSockets, type ShipSockets } from '../src/adapters/ship-sockets.js';
 import { createRunPass } from '../src/core/run-pass.js';
+import { createHandleDelivery } from '../src/core/handle-delivery.js';
+import { createReportSelf } from '../src/core/report-self.js';
+import { TRUSTED_REPOSITORIES_CONTENT_TYPE } from '../src/core/trusted-repositories.js';
+import { createTrustedRepositoriesFile, trustedClonesOf, withTrustedRepositories } from '../src/adapters/trusted-repositories-file.js';
 import { CONFIGURATION } from './support/in-memory.js';
 import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
 
@@ -662,5 +666,126 @@ describe('the trierarch hands messages over on a real fleet (#756): the plugin k
     await sessions.turnEnds(scout.shipId);
 
     await expect(eventsOf(messageId)).resolves.toEqual(['DeliveryReceived', 'DeliveryHanded 1', 'DeliveryHanded 2', 'DeliveryAcknowledged', 'DeliveryHandled']);
+  });
+});
+
+describe('the trusted repositories on a real fleet (aeolus-fleet#384)', () => {
+  /** A ship call over REST with the crew token given, answering the fleet's JSON. */
+  async function shipCall(path: string, call: { body: unknown; crewToken?: string }): Promise<unknown> {
+    const { body, crewToken } = call;
+    const response = await fetch(`${address}/api/v1${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(crewToken !== undefined && { authorization: `Bearer ${crewToken}` }) },
+      body: JSON.stringify(body),
+    });
+    const answer: unknown = await response.json();
+    expect(response.ok, JSON.stringify(answer)).toBe(true);
+    return answer;
+  }
+
+  /**
+   * The trierarch plugin's ship as it runs (an agent ship here: core 0.28
+   * commissions no plugin ship, and the trierarch goes by the ship id alone):
+   * a ship that commissions the
+   * machine's trierarch ship, labels both trierarch=*, and declares that
+   * trierarch=* may send to trierarch=*, so its messages reach the machine.
+   */
+  async function aPluginWithAMachine() {
+    const useCases = createUseCases({ prisma: database });
+    const argo = operatorCaller(unwrap(await useCases.initialiseFleet({ name: 'home fleet', ...OPERATOR })));
+    const plugin = unwrap(
+      await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'trierarch-plugin', type: 'trierarch-plugin', scopes: ['fleet:commission', 'crew:assign', 'crew:run', 'labels:define', 'labels:assign'] }),
+    );
+    const { crewToken } = z.object({ crewToken: z.string() }).parse(await shipCall('/ship/register', { body: { shipId: plugin.shipId, secret: secretOf(plugin.secret), location: { kind: 'SERVER' }, harness: 'aeolus-trierarch-plugin' } }));
+    const machine = z
+      .object({ shipId: z.templateLiteral(['shp_', z.string()]), secret: z.string() })
+      .parse(await shipCall('/fleet/commission', { body: { name: 'mac-mini', type: 'trierarch', scopes: ['crew:run'], idempotencyKey: newKey() }, crewToken }));
+    const label = defineLabelOutputSchema.parse(await shipCall('/fleet/defineLabel', { body: { key: 'trierarch', values: ['plugin', 'machine'] }, crewToken }));
+    const valueOf = (value: string) => label.values.find((each) => each.value === value)?.id;
+    await shipCall('/fleet/assignLabel', { body: { shipId: plugin.shipId, valueId: valueOf('plugin') }, crewToken });
+    await shipCall('/fleet/assignLabel', { body: { shipId: machine.shipId, valueId: valueOf('machine') }, crewToken });
+    const term = { labelId: label.labelId, value: '*' };
+    await shipCall('/fleet/declareNetworkRules', { body: { rules: [{ verb: 'send', from: [term], to: [term] }] }, crewToken });
+    const scout = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'scout', type: 'reviewer' }));
+    const sendTrusted = (repositories: readonly { name: string; url: string }[]) =>
+      shipCall('/ship/send', { body: { selector: { kind: 'ship', shipId: machine.shipId }, contentType: TRUSTED_REPOSITORIES_CONTENT_TYPE, payload: JSON.stringify({ repositories }), idempotencyKey: newKey(), model: 'claude-opus-5-5' }, crewToken });
+    return { useCases, argo, plugin, machine, scout, sendTrusted };
+  }
+
+  it('a machine that never had a trusted repository takes the list from the plugin\'s ship, offers it, clones it and crews a ship in it', async () => {
+    const { useCases, argo, plugin, machine, scout, sendTrusted } = await aPluginWithAMachine();
+    // The list names an https URL, as the trierarch plugin sends; in this test git reads it as a local remote, and may clone a file URL.
+    const remote = join(home, 'remote', 'hemma.git');
+    await git(['clone', '-q', '--bare', repository, remote]);
+    const url = 'https://git.example.com/hemma.git';
+    Object.assign(process.env, { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: `url.file://${remote}.insteadOf`, GIT_CONFIG_VALUE_0: url });
+    onTestFinished(() => {
+      delete process.env.GIT_CONFIG_COUNT;
+      delete process.env.GIT_CONFIG_KEY_0;
+      delete process.env.GIT_CONFIG_VALUE_0;
+    });
+    const configuration = { ...CONFIGURATION, harnesses: { 'claude-code': { options: {}, ...CONFIGURATION.harnesses['claude-code'], flags: [] } }, repositories: {}, folders: { notes: { path: join(home, 'notes') } } };
+    mkdirSync(dirname(paths.config), { recursive: true });
+    writeFileSync(paths.config, JSON.stringify(configuration));
+    const quiet = { text: () => Promise.reject(new Error('asked')), secret: () => Promise.reject(new Error('asked')), confirm: () => Promise.reject(new Error('asked')), say: () => undefined, step: () => undefined };
+    const claudeCode = createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') });
+    await initTrierarch({
+      homeDirectory: home,
+      paths,
+      flags: { fleetUrl: address, shipId: machine.shipId, pluginShipId: plugin.shipId, secret: machine.secret, isYes: true },
+      prompter: quiet,
+      fleetAt: (fleetUrl) => createRestFleet({ fleetUrl, crewToken: '' }),
+      claudeCode,
+      codex: { trust: () => Promise.reject(new Error('no Codex here')), trustAeolusHooks: () => Promise.reject(new Error('no Codex here')) },
+      isCodexInstalled: false,
+      service: { install: () => Promise.resolve(), rewrite: () => Promise.resolve(), restart: () => Promise.resolve(), status: () => Promise.resolve({ file: 'none', isInstalled: true, isRunning: true }) },
+      running: () => Promise.resolve(undefined),
+      detect: () => Promise.resolve({}),
+    });
+    const crew = await readCrewFile(paths.crewToken);
+    const fleet = createRestFleet(crew);
+    const logger = { warn: () => undefined, action: () => undefined };
+    // As run composes them: the list kept beside the configuration, each clone trusted as the list arrives.
+    const trustedRepositories = createTrustedRepositoriesFile({
+      file: paths.trustedRepositories,
+      clonesRoot: paths.repositories,
+      trustClones: async (clones) => {
+        for (const clone of clones) {
+          await claudeCode.trust(clone);
+        }
+      },
+    });
+    await trustedRepositories.load();
+    const offered = withTrustedRepositories(configuration, trustedRepositories);
+    const handle = createHandleDelivery({ fleet, logger, trustedRepositories, ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
+    const sessions = standInSessions();
+    const harness = createClaudeCodeHarness({ configuration: offered, plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data: pluginData, crews: join(home, '.aeolus', 'crews', 'claude-code') }, projects: join(home, '.claude', 'projects'), sessions, setup: claudeCode, permissionModes: () => undefined });
+    const workspace = createGitWorkspace({ configuration: offered, root: paths.worktrees, clones: trustedClonesOf({ configured: configuration, held: trustedRepositories, root: paths.repositories, protocols: 'file' }) });
+    const state = createJsonState(paths.state);
+    const trust = createTrust({ configuration: offered, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') });
+    const setup = { configuration: offered, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
+    const checkouts = createGitCheckouts({ configuration, root: paths.checkouts });
+    const mayCall = createCallerCheck({ platform: process.platform, sessionRootOf: () => Promise.resolve(undefined) });
+    const sockets = createShipSockets({ root: paths.sockets, fleetUrl: address, crewTokenOf: async (shipId) => (await state.load()).entries[shipId]?.crewToken, mayCall, log: () => undefined, refreshCheckouts: (shipId) => checkouts.refresh(shipId) });
+    openSockets = sockets;
+    const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, folderProcesses: { stopIn: () => Promise.resolve(0) }, workspace, trust, state, setup, clock: { now: () => new Date() }, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID, sockets, checkouts });
+    const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup });
+
+    await sendTrusted([{ name: 'hemma', url }]);
+    for (const delivery of await fleet.receive()) {
+      await handle(delivery);
+    }
+    await reportSelf();
+
+    const reported = unwrap(await useCases.getShip(argo, { shipId: machine.shipId }));
+    expect(reported).toMatchObject({ report: { details: { workspaces: { repositories: ['hemma'] } } } });
+    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'hemma' }, options: {} } }));
+    unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: machine.shipId }));
+    await pass();
+    await pass();
+
+    await expect(database.crewRequest.findUniqueOrThrow({ where: { shipId: scout.shipId } })).resolves.toMatchObject({ status: 'running' });
+    expect(existsSync(join(paths.repositories, 'hemma', '.git'))).toBe(true);
+    expect(existsSync(join(paths.worktrees, 'hemma', 'scout', 'README.md'))).toBe(true);
   });
 });

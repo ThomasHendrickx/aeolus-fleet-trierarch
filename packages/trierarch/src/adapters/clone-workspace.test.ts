@@ -203,3 +203,30 @@ describe('workspaces as per-ship clones', () => {
     ]);
   });
 });
+
+describe('per-ship clones of a trusted repository the machine does not have (aeolus-fleet#384)', () => {
+  function trustedWorkspace(at: { isListed: boolean }) {
+    const clones = join(folder, 'repositories');
+    return createCloneWorkspace({
+      configuration: { ...CONFIGURATION, repositories: at.isListed ? { hemma: { path: join(clones, 'hemma') } } : {}, folders: {} },
+      root,
+      clones: { root: clones, urlOf: (name) => (at.isListed && name === 'hemma' ? `file://${repository}` : undefined), protocols: 'file' },
+    });
+  }
+  const crew = { shipId: newId('ship'), shipName: 'scout', workspace: { kind: 'worktree', repository: 'hemma' } } as const;
+
+  it("clones the repository first, then the ship's own clone from it", async () => {
+    const { folder: made } = await trustedWorkspace({ isListed: true }).prepare(crew);
+
+    expect(made).toBe(join(root, 'hemma', 'scout'));
+    expect((await git(['-C', made, 'rev-parse', 'HEAD'])).trim()).toBe((await git(['-C', repository, 'rev-parse', 'HEAD'])).trim());
+  });
+
+  it('removes the clone of a ship whose repository left the trusted repositories', async () => {
+    const { folder: made } = await trustedWorkspace({ isListed: true }).prepare(crew);
+
+    await trustedWorkspace({ isListed: false }).remove(made);
+
+    expect(existsSync(made)).toBe(false);
+  });
+});

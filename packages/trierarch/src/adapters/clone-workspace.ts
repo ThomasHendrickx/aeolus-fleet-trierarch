@@ -6,6 +6,7 @@ import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 import type { WorkspacePort } from '../core/ports.js';
 import { createGitWorkspace } from './git-workspace.js';
 import { runCommand } from './run-command.js';
+import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
 
 /**
  * Workspaces for sessions in containers (decision 0039; trierarch.md, "Session
@@ -22,8 +23,8 @@ import { runCommand } from './run-command.js';
  */
 
 const REMOTE = 'origin';
-export function createCloneWorkspace(options: { configuration: TrierarchConfiguration; root: string }): WorkspacePort {
-  const { configuration, root } = options;
+export function createCloneWorkspace(options: { configuration: TrierarchConfiguration; root: string; clones?: TrustedClones }): WorkspacePort {
+  const { configuration, root, clones } = options;
   const worktrees = createGitWorkspace(options);
   const git = async (args: readonly string[]): Promise<string> => {
     const result = await runCommand('git', { args });
@@ -41,9 +42,13 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
     return remote.status === 0 ? remote.stdout.trim() : (await git(['-C', repository, 'rev-parse', '--verify', `${ref}^{commit}`])).trim();
   };
   const exists = async (path: string): Promise<boolean> => (await stat(path).catch(() => undefined)) !== undefined;
-  const isUnderRoot = (folder: string): boolean => {
+  const isUnderRoot = async (folder: string): Promise<boolean> => {
     const [repository, ship, ...rest] = relative(root, folder).split(sep);
-    return repository !== undefined && ship !== undefined && rest.length === 0 && configuration.repositories[repository] !== undefined && ship !== '' && ship !== '..';
+    if (repository === undefined || ship === undefined || rest.length > 0 || ship === '' || ship === '..') {
+      return false;
+    }
+    // A clone whose repository left the trusted repositories is still one the trierarch made.
+    return configuration.repositories[repository] !== undefined || (await clonedPath(clones, repository)) !== undefined;
   };
 
   return {
@@ -57,6 +62,7 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
       if (repository === undefined) {
         throw new Error(`The configuration has no repository ${workspace.repository}`);
       }
+      await cloneWhenMissing(clones, { repository: workspace.repository, path: repository });
       const folder = join(root, workspace.repository, shipName);
       // A clone a stop mid-crew left is used as it is.
       if (!(await exists(folder))) {
@@ -76,7 +82,7 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
       return { folder };
     },
     remove: async (folder) => {
-      if (!isUnderRoot(folder)) {
+      if (!(await isUnderRoot(folder))) {
         throw new Error(`${folder} is no clone under ${root}: the trierarch removes only what it made`);
       }
       await rm(folder, { recursive: true, force: true });

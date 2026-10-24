@@ -29,6 +29,15 @@ describe('the crew file', () => {
     await expect(readCrewFile(path)).resolves.toEqual(crew);
   });
 
+  it("keeps the trierarch plugin's ship beside them, which the trusted repositories come from (aeolus-fleet#384)", async () => {
+    const path = join(folder, 'crew-token');
+    const crew = { fleetUrl: 'https://fleet.example.com', shipId: newId('ship'), pluginShipId: newId('ship'), crewToken: 'aeolus_ct_v1_trierarch' };
+
+    await writeCrewFile(path, crew);
+
+    await expect(readCrewFile(path)).resolves.toEqual(crew);
+  });
+
   it('reads a crew file written without the ship id', async () => {
     const path = join(folder, 'crew-token');
     writeFileSync(path, 'fleetUrl=https://fleet.example.com\ncrewToken=aeolus_ct_v1_trierarch\n');

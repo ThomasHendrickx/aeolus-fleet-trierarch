@@ -5,6 +5,7 @@ import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { ObservedWorktree, WorkspacePort } from '../core/ports.js';
 import { runCommand } from './run-command.js';
+import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
 
 /**
  * Workspaces (docs/architecture.md, "First adapters"): a git worktree of a
@@ -14,11 +15,14 @@ import { runCommand } from './run-command.js';
  * fetched first, and a ref the remote has a branch for is that remote branch,
  * so a ship starts from current code, not from a stale local branch. A fetch
  * that fails (offline, no remote) leaves what the repository has.
+ * A trusted repository the machine does not have yet is cloned first
+ * (aeolus-fleet#384).
  */
 
 const REMOTE = 'origin';
-export function createGitWorkspace(options: { configuration: TrierarchConfiguration; root: string }): WorkspacePort {
-  const { configuration, root } = options;
+
+export function createGitWorkspace(options: { configuration: TrierarchConfiguration; root: string; clones?: TrustedClones }): WorkspacePort {
+  const { configuration, root, clones } = options;
   const git = async (args: readonly string[]): Promise<string> => {
     const result = await runCommand('git', { args });
     if (result.status !== 0) {
@@ -32,9 +36,13 @@ export function createGitWorkspace(options: { configuration: TrierarchConfigurat
     return remote.status === 0 ? `${REMOTE}/${ref}` : ref;
   };
   const exists = async (path: string): Promise<boolean> => (await stat(path).catch(() => undefined)) !== undefined;
-  const repositoryOf = (folder: string): string | undefined => {
+  const repositoryOf = async (folder: string): Promise<string | undefined> => {
     const [repository] = relative(root, folder).split(sep);
-    return repository === undefined ? undefined : configuration.repositories[repository]?.path;
+    if (repository === undefined) {
+      return undefined;
+    }
+    // A clone whose repository left the trusted repositories still holds the worktrees made from it.
+    return configuration.repositories[repository]?.path ?? (await clonedPath(clones, repository));
   };
 
   return {
@@ -50,6 +58,7 @@ export function createGitWorkspace(options: { configuration: TrierarchConfigurat
       if (repository === undefined) {
         throw new Error(`The configuration has no repository ${workspace.repository}`);
       }
+      await cloneWhenMissing(clones, { repository: workspace.repository, path: repository });
       const folder = join(root, workspace.repository, shipName);
       // A worktree a stop mid-crew left is used as it is.
       if (!(await exists(folder))) {
@@ -66,7 +75,7 @@ export function createGitWorkspace(options: { configuration: TrierarchConfigurat
       return [...changes.split('\n'), ...commits.split('\n')].filter((line) => line !== '');
     },
     remove: async (folder) => {
-      const repository = repositoryOf(folder);
+      const repository = await repositoryOf(folder);
       if (repository === undefined) {
         throw new Error(`${folder} is no worktree under ${root}: the trierarch removes only what it made`);
       }

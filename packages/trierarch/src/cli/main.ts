@@ -42,7 +42,7 @@ export const USAGE = [
   '       aeolus-trierarch --version   the installed version (also -v)',
   '',
   'Set up:',
-  "  init [--fleet-url <url>] [--ship-id <shp_...>] [--secret <secret>] [--yes]   the whole setup: registers the trierarch's own ship, writes the configuration, answers Claude Code's and Codex's one-time questions and offers to install the service. Asks for what is missing; prefer typing the secret when asked, so it stays out of your shell history",
+  "  init [--fleet-url <url>] [--ship-id <shp_...>] [--plugin-ship-id <shp_...>] [--secret <secret>] [--yes]   the whole setup: registers the trierarch's own ship, keeps the trierarch plugin's ship the trusted repositories come from, writes the configuration, answers Claude Code's and Codex's one-time questions and offers to install the service. Asks for what is missing; prefer typing the secret when asked, so it stays out of your shell history",
   '  add repository <name> <path>   add a repository to make worktrees of, trusted for every configured harness, and restart the service; sessions keep running',
   '  add folder <name> <path>       add a folder to crew a ship in as it is, the same way',
   '  config check          check the configuration and give the effective flags per harness',
@@ -79,7 +79,7 @@ interface Answer {
   readonly code?: number;
 }
 
-const VALUE_FLAGS = new Set(['--config', '--fleet-url', '--ship-id', '--secret', '--lines']);
+const VALUE_FLAGS = new Set(['--config', '--fleet-url', '--ship-id', '--plugin-ship-id', '--secret', '--lines']);
 /** Set for the installed version's upgrade that runs the plugin step of an upgrade (#725), which restarts the service itself (#829); older versions ignore it. */
 const PLUGIN_STEP_VARIABLE = 'AEOLUS_TRIERARCH_PLUGIN_STEP';
 
@@ -205,10 +205,11 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
         const fleetUrl = values.get('--fleet-url');
         const shipId = values.get('--ship-id');
         const secret = values.get('--secret');
+        const pluginShipId = values.get('--plugin-ship-id');
         const report = await initTrierarch({
           homeDirectory,
           paths,
-          flags: { ...(fleetUrl !== undefined && { fleetUrl }), ...(shipId !== undefined && { shipId }), ...(secret !== undefined && { secret }), isYes: switches.has('--yes') },
+          flags: { ...(fleetUrl !== undefined && { fleetUrl }), ...(shipId !== undefined && { shipId }), ...(secret !== undefined && { secret }), ...(pluginShipId !== undefined && { pluginShipId }), isYes: switches.has('--yes') },
           prompter,
           fleetAt: (url) => createRestFleet({ fleetUrl: url, crewToken: '' }),
           claudeCode: claudeCodeSetup(),

@@ -3,6 +3,7 @@ import type { ClearOutcome, CrewStatus, ShipId, TrierarchConfiguration, Trierarc
 import type { TrierarchState } from './entry.js';
 import type { Machine } from './machine.js';
 import type { Action } from './reconciler.js';
+import type { TrustedRepository } from './trusted-repositories.js';
 
 /**
  * The trierarch's ports (docs/architecture.md, "The trierarch"). Adapters
@@ -110,6 +111,8 @@ export interface FleetPort {
   pendingClears(): Promise<readonly ClearRequestToMe[]>;
   /** Confirms a clear request: it removed the kept worktree, or keeps none; the request then goes. */
   confirmCleared(cleared: ClearRequestToMe & { outcome: ClearOutcome }): Promise<void>;
+  /** Asks the trierarch plugin's ship for the trusted repositories again, as the trierarch's own ship (aeolus-fleet#384). */
+  askForTrustedRepositories(pluginShipId: ShipId): Promise<void>;
   /** Sends argo a report, as the trierarch's own ship. */
   reportToArgo(report: ArgoReport): Promise<void>;
   /** Sends a ship's owner a report, as the trierarch's own ship. A refusal is answered, not thrown. */
@@ -398,4 +401,16 @@ export interface TrierarchSetup {
   readonly machine?: Machine;
   /** What detection found per harness (#365), for the version and confirmed time the report gives. */
   readonly detected?: Detected;
+}
+
+/**
+ * The trusted repositories the trierarch received last from the trierarch
+ * plugin (aeolus-fleet#384), kept across restarts: each one it offers and
+ * clones on its first workspace.
+ */
+export interface TrustedRepositoriesPort {
+  /** The list as last accepted; none before the first. */
+  current(): readonly TrustedRepository[];
+  /** Keeps the list, and trusts each one's clone for every configured harness, so a session may start in it (#381). */
+  accept(list: readonly TrustedRepository[]): Promise<void>;
 }

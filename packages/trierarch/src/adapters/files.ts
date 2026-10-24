@@ -79,12 +79,15 @@ export async function loadConfiguration(path: string): Promise<TrierarchConfigur
 export interface CrewFile {
   readonly fleetUrl: string;
   readonly shipId?: ShipId;
+  /** The trierarch plugin's ship, the one ship the trusted repositories are taken from (aeolus-fleet#384); none on a machine set up before. */
+  readonly pluginShipId?: ShipId;
   readonly crewToken: string;
 }
 
 export async function writeCrewFile(path: string, crew: CrewFile & { shipId: ShipId }): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await writeFile(path, `fleetUrl=${crew.fleetUrl}\nshipId=${crew.shipId}\ncrewToken=${crew.crewToken}\n`, { mode: 0o600 });
+  const plugin = crew.pluginShipId === undefined ? '' : `pluginShipId=${crew.pluginShipId}\n`;
+  await writeFile(path, `fleetUrl=${crew.fleetUrl}\nshipId=${crew.shipId}\n${plugin}crewToken=${crew.crewToken}\n`, { mode: 0o600 });
   await chmod(path, 0o600);
 }
 
@@ -102,7 +105,8 @@ export async function readCrewFile(path: string): Promise<CrewFile> {
     throw new TrierarchFileError(`The crew file at ${path} lacks its fleetUrl or crewToken line: run aeolus-trierarch init again`);
   }
   const shipId = idSchema('ship').safeParse(field('shipId'));
-  return { fleetUrl, ...(shipId.success && { shipId: shipId.data }), crewToken };
+  const pluginShipId = idSchema('ship').safeParse(field('pluginShipId'));
+  return { fleetUrl, ...(shipId.success && { shipId: shipId.data }), ...(pluginShipId.success && { pluginShipId: pluginShipId.data }), crewToken };
 }
 
 /** What the running trierarch says of itself: its pid and its version, as it started. */

@@ -38,10 +38,12 @@ import type {
   WrittenStatus,
   ShipOwner,
   ShipSocketsPort,
+  TrustedRepositoriesPort,
 } from '../../src/core/ports.js';
 import { createReportSelf } from '../../src/core/report-self.js';
 import { createRunPass } from '../../src/core/run-pass.js';
 import { createUninstall } from '../../src/core/uninstall.js';
+import type { TrustedRepository } from '../../src/core/trusted-repositories.js';
 
 /**
  * Hand-written in-memory ports for the trierarch's core, behaving as the
@@ -115,6 +117,10 @@ export class InMemoryFleet implements FleetPort {
   readonly toArgo: ArgoReport[] = [];
   /** What the trierarch sent a ship's owner other than argo, once per idempotency key (decision 0045). */
   readonly toOwners: OwnerReport[] = [];
+  /** The trierarch plugin's ships asked for the trusted repositories, in order (aeolus-fleet#384). */
+  readonly askedForTrustedRepositories: ShipId[] = [];
+  /** Set to refuse each ask for the trusted repositories, as a fleet that does not answer. */
+  isRefusingAsks = false;
   /** Set to make the fleet refuse every send to an owner, as when no rule lets the trierarch reach it. */
   isRefusingOwnerReports = false;
   readonly acked: string[] = [];
@@ -258,6 +264,14 @@ export class InMemoryFleet implements FleetPort {
     }
     this.clearRequests.splice(index, 1);
     this.cleared.push({ ...cleared });
+    return Promise.resolve();
+  }
+
+  askForTrustedRepositories(pluginShipId: ShipId): Promise<void> {
+    if (this.isRefusingAsks) {
+      return Promise.reject(new Error('the fleet refused it'));
+    }
+    this.askedForTrustedRepositories.push(pluginShipId);
     return Promise.resolve();
   }
 
@@ -731,8 +745,38 @@ export class InMemoryFolderProcesses implements FolderProcessesPort {
   }
 }
 
-/** A trierarch on in-memory ports. */
+
+/** The trierarch plugin's ship, as init kept it from the setup line: the one ship the trusted repositories come from. */
+export const PLUGIN_SHIP_ID: ShipId = 'shp_01m3tbfspe96yf1rnr4ank9p1a';
+
+/** The trusted repositories the trierarch accepted, in memory; each accept in order. */
+export class InMemoryTrustedRepositories implements TrustedRepositoriesPort {
+  readonly accepted: (readonly TrustedRepository[])[] = [];
+  private list: readonly TrustedRepository[] = [];
+
+  current(): readonly TrustedRepository[] {
+    return this.list;
+  }
+
+  accept(list: readonly TrustedRepository[]): Promise<void> {
+    this.accepted.push(list);
+    this.list = list;
+    return Promise.resolve();
+  }
+}
+
+/** A trierarch on in-memory ports, knowing the trierarch plugin's ship. */
 export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION, detected: Detected = {}) {
+  return trierarchOn({ configuration, detected, pluginShipId: PLUGIN_SHIP_ID });
+}
+
+/** A trierarch on in-memory ports on a machine set up before init kept the trierarch plugin's ship (aeolus-fleet#384). */
+export function aTrierarchSetUpBefore() {
+  return trierarchOn({ configuration: CONFIGURATION, detected: {}, pluginShipId: undefined });
+}
+
+function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Detected; pluginShipId: ShipId | undefined }) {
+  const { configuration, detected, pluginShipId } = at;
   const state = new InMemoryState();
   const fleet = new InMemoryFleet();
   const processes = new InMemoryProcesses();
@@ -757,7 +801,8 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
     machine: { os: 'macos' as const, arch: 'arm64' as const },
     detected,
   };
-  const handle = createHandleDelivery({ fleet, logger });
+  const trustedRepositories = new InMemoryTrustedRepositories();
+  const handle = createHandleDelivery({ fleet, logger, trustedRepositories, ...(pluginShipId !== undefined && { pluginShipId }) });
   /** The models sessions refused, as the trierarch kept them. */
   const refusals: { harness: string; id: string; at: Date }[] = [];
   const refuseModel = (refused: { harness: string; id: string; at: Date }): Promise<void> => {
@@ -778,13 +823,13 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
   const reportSelf = createReportSelf({ fleet, processes, trust, state, setup });
 
   /** A message arrives at the trierarch's own ship: its delivery, handled. */
-  async function deliver(message: { contentType: string; payload: string }): Promise<Delivery> {
+  async function deliver(message: { contentType: string; payload: string; senderShipId?: ShipId }): Promise<Delivery> {
     const delivery: Delivery = { deliveryId: newId('delivery'), messageId: newId('message'), senderShipId: newId('ship'), ...message };
     await handle(delivery);
     return delivery;
   }
 
-  return { fleet, processes, folderProcesses, harness, codex, workspace, checkouts, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver, refusals, sockets };
+  return { fleet, processes, folderProcesses, harness, codex, workspace, checkouts, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver, refusals, sockets, trustedRepositories };
 }
 
 export type Trierarch = ReturnType<typeof aTrierarch>;
