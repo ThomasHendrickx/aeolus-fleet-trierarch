@@ -31,6 +31,18 @@ describe('the crew-a-ship skill', () => {
     expect(claudeSkill).not.toMatch(/crewToken line|pass it to every fleet call/);
   });
 
+  it("lists a meeting's calls through aeolus-fleet.sh, open and add stating the model, and says how a session takes part (decision 0061)", () => {
+    for (const call of [
+      'openMeeting', 'meeting', 'requestMic', 'withdrawMicRequest', 'releaseMic', 'giveMic', 'takeMic', 'setMicPattern',
+      'addToMeeting', 'leaveMeeting', 'rejoinMeeting', 'revokeFromMeeting', 'transferMeeting', 'nameModerator', 'endMeeting',
+    ]) {
+      expect(claudeSkill).toContain(`\`${call}\``);
+    }
+    expect(claudeSkill).toContain('`openMeeting` and `addToMeeting` state the model as a send does');
+    expect(claudeSkill).toContain('contribute with `send -` to `{"kind":"meeting","meetingId":"<its id>"}`, never with inReplyTo');
+    expect(claudeSkill).toContain('Not holding the mic and with nothing to request, end your turn.');
+  });
+
   it('has a Codex session fetch the same protocol from the fleet, holding none of the rules, with its Codex crew line and harness', () => {
     expect(codexSkill).toContain('`scripts/aeolus-fleet.sh protocol`');
     for (const rule of protocolRules) {
