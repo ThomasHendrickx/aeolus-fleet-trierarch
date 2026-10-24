@@ -1,0 +1,40 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
+
+import { newId } from '../../test/support/in-memory.js';
+import { createUsage, folderMadeAt } from './usage.js';
+
+const NONE = { tokensOf: () => Promise.resolve([]), subscription: () => Promise.resolve(undefined) };
+
+describe("the harnesses' usage, each from its own reader (#353)", () => {
+  it("reads a ship's tokens and a subscription from the reader of its harness", async () => {
+    const tokens = [{ model: 'gpt-6.1-sol', tokens: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } }];
+    const windows = [{ windowMinutes: 300, usedPercent: 17, resetsAt: new Date('2026-10-12T08:00:00.000Z') }];
+    const usage = createUsage({ 'claude-code': NONE, codex: { tokensOf: () => Promise.resolve(tokens), subscription: () => Promise.resolve(windows) } });
+
+    expect([await usage.tokensOf({ shipId: newId('ship'), harness: 'codex', folder: '/code/scout' }), await usage.subscriptionOf('codex')]).toEqual([tokens, windows]);
+  });
+
+  it('says no tokens and no subscription of a harness it has no reader for', async () => {
+    const usage = createUsage({ 'claude-code': NONE });
+
+    expect([await usage.tokensOf({ shipId: newId('ship'), harness: 'gemini', folder: '/code/scout' }), await usage.subscriptionOf('gemini')]).toEqual([[], undefined]);
+  });
+
+  it('dates a folder from when it was made', async () => {
+    const before = Date.now();
+    const folder = await mkdtemp(join(tmpdir(), 'aeolus-made-'));
+    try {
+      const madeAt = (await folderMadeAt(folder)).getTime();
+
+      // Some filesystems keep whole seconds or less.
+      expect(madeAt).toBeGreaterThanOrEqual(before - 1000);
+      expect(madeAt).toBeLessThanOrEqual(Date.now());
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+});
