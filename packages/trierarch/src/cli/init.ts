@@ -27,6 +27,8 @@ export interface InitFlags {
   readonly fleetUrl?: string;
   readonly shipId?: string;
   readonly secret?: string;
+  /** The trierarch plugin's ship, which the setup line names: the one ship the trusted repositories are taken from (aeolus-fleet#384). */
+  readonly pluginShipId?: string;
   /** Asks nothing: every default is taken, and the fleet URL, ship id and secret must be flags. */
   readonly isYes: boolean;
 }
@@ -98,6 +100,18 @@ function asCap(answer: string): Accepted<number> {
 
 async function exists(path: string): Promise<boolean> {
   return (await stat(path).catch(() => undefined)) !== undefined;
+}
+
+/** The trierarch plugin's ship from its flag, refused before anything is registered when it is no ship id; none without the flag. */
+function pluginShipOf(flags: InitFlags): ShipId | undefined {
+  if (flags.pluginShipId === undefined) {
+    return undefined;
+  }
+  const accepted = asShipId(flags.pluginShipId.trim());
+  if ('why' in accepted) {
+    throw new TrierarchFileError(accepted.why);
+  }
+  return accepted.value;
 }
 
 /** The fleet URL, ship id and secret, from the flags or asked; with --yes all three must be flags. */
@@ -266,15 +280,17 @@ export async function initTrierarch(input: {
     said.push(line, ...(hasSaidVersion ? [] : [NOT_SAID_YET]));
   };
 
+  const pluginShipId = pluginShipOf(flags);
   // The ship: registered once per machine, never again.
   const crew = await readCrewFile(paths.crewToken).catch(() => undefined);
   let fleetUrl: string;
   let shipId: ShipId | undefined;
+  let isPluginShipNew = false;
   if (crew === undefined) {
     prompter.step('The fleet');
     const asked = await askCrew(flags, prompter);
     const { crewToken } = await input.fleetAt(asked.fleetUrl).registerSelf({ shipId: asked.shipId, secret: asked.secret });
-    await writeCrewFile(paths.crewToken, { fleetUrl: asked.fleetUrl, shipId: asked.shipId, crewToken });
+    await writeCrewFile(paths.crewToken, { fleetUrl: asked.fleetUrl, shipId: asked.shipId, ...(pluginShipId !== undefined && { pluginShipId }), crewToken });
     ({ fleetUrl, shipId } = asked);
     said.push(`Registered ${shipId} at ${fleetUrl}: its crew token is kept in ${paths.crewToken}, readable by you only. The secret is written nowhere.`);
   } else {
@@ -284,6 +300,17 @@ export async function initTrierarch(input: {
       throw new TrierarchFileError(`This machine is set up already: ${ship}. init never registers again: to register another ship, remove ${paths.crewToken} first`);
     }
     said.push(`This machine is set up already: ${ship}.`);
+    // A machine joined before the trusted repositories takes them once it knows the trierarch plugin's ship (aeolus-fleet#384).
+    if (pluginShipId !== undefined && pluginShipId !== crew.pluginShipId) {
+      if (shipId === undefined) {
+        throw new TrierarchFileError(`The crew file at ${paths.crewToken} lacks its ship id: remove it and run aeolus-trierarch init with the setup line`);
+      }
+      await writeCrewFile(paths.crewToken, { fleetUrl, shipId, pluginShipId, crewToken: crew.crewToken });
+      isPluginShipNew = true;
+    }
+  }
+  if (pluginShipId !== undefined) {
+    said.push(`It takes the trusted repositories from the trierarch plugin's ship ${pluginShipId}.`);
   }
   await mkdir(paths.home, { recursive: true, mode: 0o700 });
   await writeFile(paths.configSchema, `${JSON.stringify(configurationJsonSchema(), null, 2)}\n`);
@@ -336,7 +363,7 @@ export async function initTrierarch(input: {
     }
   } else {
     await service.rewrite();
-    if (configured !== 'kept' && (await prompter.confirm('Restart the trierarch so it reads the new configuration?', { isDefault: true }))) {
+    if ((configured !== 'kept' || isPluginShipNew) && (await prompter.confirm('Restart the trierarch so it reads the new configuration?', { isDefault: true }))) {
       await startNew(() => service.restart(), 'The trierarch restarted with the new configuration.');
       serviced = 'restarted';
     }
