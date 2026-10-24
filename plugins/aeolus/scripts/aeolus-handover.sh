@@ -6,13 +6,17 @@
 # anything it does runs. A ping goes in without an ack: its pong confirms it.
 # When the ack is refused the tool call runs, and the model never sees the
 # message. Silent with nothing handed, in a folder that crews no ship, and in
-# Codex, whose task receives for itself. Never fails the session.
+# Codex, whose task receives for itself. Silent too at a sub-agent's tool call,
+# which names its agent: the reason would go into the sub-agent's context, not
+# the session's turn, so the message waits for the turn's own tool call, Stop
+# or prompt (aeolus-fleet#1016). Never fails the session.
 set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
 payload="$(cat)"
 [ -z "${PLUGIN_ROOT:-}" ] || exit 0
 aeolus_hook_folder "$payload" || exit 1
+[ -z "$(aeolus_json_string "$payload" agent_id)" ] || exit 0
 identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
 identity_text="$(aeolus_identity_read "$identity")" || exit 0
 
