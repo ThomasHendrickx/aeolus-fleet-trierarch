@@ -1015,12 +1015,34 @@ AEOLUS_TURN_TEXT_MAX_BYTES=10000
 # The first part of a longer payload that goes into the turn, beside its file.
 AEOLUS_FIRST_PART_BYTES=8000
 
+# How a session takes part in a meeting, for a delivery naming it (decision
+# 0061): a contribution goes to the meeting, never with inReplyTo, and only
+# with the mic. <meetingId> <contentType> <plugin root>.
+aeolus_meeting_text() {
+  local meeting="$1" content_type="$2" root="$3" selector input
+  selector="{\"kind\":\"meeting\",\"meetingId\":\"${meeting}\"}"
+  input="'{\"meetingId\":\"${meeting}\"}'"
+  case "$content_type" in
+    application/vnd.aeolus.meeting.mic+json)
+      printf 'You hold the mic: contribute by sending to %s, never with inReplyTo, then release it with "%s/scripts/aeolus-fleet.sh" releaseMic %s.' "$selector" "$root" "$input"
+      ;;
+    application/vnd.aeolus.meeting.ended+json)
+      printf 'The meeting ended: contribute no more.'
+      ;;
+    *)
+      printf 'It is for every participant: contribute to the meeting by sending to %s, never with inReplyTo, and only while you hold the mic or moderate it. ' "$selector"
+      printf 'To speak, request the mic with "%s/scripts/aeolus-fleet.sh" requestMic %s and contribute once the mic notice comes. ' "$root" "$input"
+      printf 'Not holding the mic and with nothing to request, end your turn.'
+      ;;
+  esac
+}
+
 # What goes into the turn for an entry: <deliveryId> <shipName> <plugin root>
 # <prefix>. A message as its heading and its payload; one too long for a hook as
 # its first part and the path of a file that holds the whole payload; a ping as
 # the pong to answer it with. Ends with an x, so no trailing newline is lost.
 aeolus_turn_text() {
-  local id="$1" ship="$2" root="$3" prefix="$4" dir delivery sender sender_type message content_type reply heading payload text first
+  local id="$1" ship="$2" root="$3" prefix="$4" dir delivery sender sender_type message content_type reply meeting heading payload text first
   dir="$(aeolus_store_dir)" || return 1
   delivery="$(cat "$dir/$id.json" 2>/dev/null)" || return 1
   sender="$(aeolus_json_string "$delivery" senderName)"
@@ -1033,9 +1055,14 @@ aeolus_turn_text() {
   sender_type="$(aeolus_json_string "$delivery" senderType)"
   message="$(aeolus_json_string "$delivery" messageId)"
   reply="$(aeolus_json_string "$delivery" inReplyTo)"
-  heading="aeolus: a message for ${ship} from ${sender} (${sender_type}): message ${message}, ${content_type}${reply:+, in reply to ${reply}}."
+  meeting="$(aeolus_json_string "$delivery" meetingId)"
+  heading="aeolus: a message for ${ship} from ${sender} (${sender_type}): message ${message}, ${content_type}${reply:+, in reply to ${reply}}${meeting:+, in meeting ${meeting}}."
   heading="${heading} The plugin acknowledged it for you: do not receive or ack it."
-  heading="${heading} Answer it, if it needs an answer, by sending to ${sender} with inReplyTo ${message}."
+  if [ -z "$meeting" ]; then
+    heading="${heading} Answer it, if it needs an answer, by sending to ${sender} with inReplyTo ${message}."
+  else
+    heading="${heading} $(aeolus_meeting_text "$meeting" "$content_type" "$root")"
+  fi
   payload="$(aeolus_json_string "$delivery" payload; printf x)"
   payload="${payload%x}"
   text="${prefix}${heading}"$'\n\n'"${payload}"
