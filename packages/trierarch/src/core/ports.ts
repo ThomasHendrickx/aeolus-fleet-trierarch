@@ -3,6 +3,7 @@ import type { ClearOutcome, CrewStatus, ShipId, TrierarchConfiguration, Trierarc
 import type { TrierarchState } from './entry.js';
 import type { Machine } from './machine.js';
 import type { Action } from './reconciler.js';
+import type { TrustedRepository } from './trusted-repositories.js';
 
 /**
  * The trierarch's ports (docs/architecture.md, "The trierarch"). Adapters
@@ -398,4 +399,16 @@ export interface TrierarchSetup {
   readonly machine?: Machine;
   /** What detection found per harness (#365), for the version and confirmed time the report gives. */
   readonly detected?: Detected;
+}
+
+/**
+ * The trusted repositories the trierarch received last from the trierarch
+ * plugin (aeolus-fleet#384), kept across restarts: each one it offers and
+ * clones on its first workspace.
+ */
+export interface TrustedRepositoriesPort {
+  /** The list as last accepted; none before the first. */
+  current(): readonly TrustedRepository[];
+  /** Keeps the list, and trusts each one's clone for every configured harness, so a session may start in it (#381). */
+  accept(list: readonly TrustedRepository[]): Promise<void>;
 }
