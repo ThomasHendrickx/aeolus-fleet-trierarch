@@ -14,6 +14,7 @@ import type {
   Delivery,
   FleetPort,
   FleetShipStatus,
+  FolderProcessesPort,
   GiveBackAnswer,
   HandOver,
   HarnessPort,
@@ -706,6 +707,30 @@ export class InMemoryShipSockets implements ShipSocketsPort {
   }
 }
 
+/** What runs in each folder, as the machine's processes say it: a dev server a session left behind. */
+export class InMemoryFolderProcesses implements FolderProcessesPort {
+  /** The programs running in each folder. */
+  readonly running = new Map<string, string[]>();
+  /** Every folder whose processes were stopped, in order. */
+  readonly stoppedIn: string[] = [];
+  /** Set to make every stop fail, as when a process cannot be signalled. */
+  isFailingStop = false;
+
+  start(folder: string, program: string): void {
+    this.running.set(folder, [...(this.running.get(folder) ?? []), program]);
+  }
+
+  stopIn(folder: string): Promise<number> {
+    if (this.isFailingStop) {
+      return Promise.reject(new Error(`stopping the processes in ${folder} failed`));
+    }
+    const stopped = this.running.get(folder)?.length ?? 0;
+    this.running.delete(folder);
+    this.stoppedIn.push(folder);
+    return Promise.resolve(stopped);
+  }
+}
+
 /** A trierarch on in-memory ports. */
 export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION, detected: Detected = {}) {
   const state = new InMemoryState();
@@ -747,7 +772,8 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
   };
   const sockets = new InMemoryShipSockets([harness, codex]);
   const checkouts = new InMemoryCheckouts(configuration);
-  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId, sockets });
+  const folderProcesses = new InMemoryFolderProcesses();
+  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, folderProcesses, workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId, sockets });
   const uninstall = createUninstall({ processes, state });
   const reportSelf = createReportSelf({ fleet, processes, trust, state, setup });
 
@@ -758,7 +784,7 @@ export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION
     return delivery;
   }
 
-  return { fleet, processes, harness, codex, workspace, checkouts, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver, refusals, sockets };
+  return { fleet, processes, folderProcesses, harness, codex, workspace, checkouts, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver, refusals, sockets };
 }
 
 export type Trierarch = ReturnType<typeof aTrierarch>;

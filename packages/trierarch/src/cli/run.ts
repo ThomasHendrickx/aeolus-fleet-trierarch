@@ -7,6 +7,7 @@ import { loadConfiguration, readCrewFile, writeRunningFile } from '../adapters/f
 import { createDetectedFile } from '../adapters/detected-file.js';
 import { createDetectors } from '../adapters/detectors.js';
 import { adapterFlagsOf, createHarnesses, riskyFlagsOf } from '../adapters/harnesses.js';
+import { createFolderProcesses } from '../adapters/folder-processes.js';
 import { createGitCheckouts } from '../adapters/git-checkouts.js';
 import { createJsonState } from '../adapters/json-state.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
@@ -102,7 +103,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     },
     refreshCheckouts: (shipId) => checkouts.refresh(shipId),
   });
-  const runPass = createRunPass({ fleet, harnesses, processes: sessions, workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets });
+  const runPass = createRunPass({ fleet, harnesses, processes: sessions, folderProcesses: createFolderProcesses(), workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets });
   const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup });
   // Each pass ends with the trierarch's own report: the first at start, then only when it changed.
   const pass = async (): Promise<void> => {

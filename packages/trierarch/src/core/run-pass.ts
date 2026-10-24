@@ -1,9 +1,9 @@
 import { CREW_REQUEST_REASON_MAX_LENGTH, type ShipId } from '@aeolus-fleet/common';
 
-import { putEntry, removeEntry, withState, type Entry, type TrierarchState } from './entry.js';
+import { putEntry, removeEntry, withState, type Entry, type Orphan, type TrierarchState } from './entry.js';
 import { crashText, discardedText, identityGoneText, modelRefusedText, ownerUnreachableText, settingsRefusedText } from './argo-reports.js';
 import { MODEL_OPTION } from './detected-options.js';
-import type { Checkout, CheckoutsPort, FleetPort, HarnessPort, LaunchSeen, LoggedAction, Logger, SessionRuntime, ShipSocketsPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
+import type { Checkout, CheckoutsPort, FleetPort, FolderProcessesPort, HarnessPort, LaunchSeen, LoggedAction, Logger, SessionRuntime, ShipSocketsPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { HOLDS_IDENTITY, reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
 import type { RefuseModel } from './refuse-model.js';
 import type { Clock } from './shared/clock.js';
@@ -26,6 +26,8 @@ export interface RunPassDeps {
   /** One adapter per harness the configuration offers, by its name. */
   harnesses: Readonly<Record<string, HarnessPort>>;
   processes: Pick<SessionRuntime, 'list' | 'stop'>;
+  /** What still runs in an orphan worktree, stopped before it is removed (#1041). */
+  folderProcesses: FolderProcessesPort;
   workspace: WorkspacePort;
   /** Each ship's read-only checkouts (#1182), made before its session starts and removed with its identity. */
   checkouts: CheckoutsPort;
@@ -91,7 +93,7 @@ async function failed(at: { action: Action; deps: RunPassDeps; reason: string })
   const { action, deps, reason } = at;
   try {
     const state = await deps.state.load();
-    if (action.kind === 'status' || action.kind === 'refuse') {
+    if (action.kind === 'status' || action.kind === 'refuse' || action.kind === 'clearOrphan') {
       deps.logger.warn(`The pass failed at ${action.kind}: ${reason}; ${NEXT_AFTER_FAILURE}`);
       return state;
     }
@@ -219,6 +221,8 @@ async function carryOut(state: TrierarchState, at: CarryOut): Promise<TrierarchS
       return release(state, { shipId: action.shipId, deps });
     case 'clear':
       return clear(state, { action, deps });
+    case 'clearOrphan':
+      return clearOrphan(state, { orphan: action.orphan, isNew: action.isNew, deps });
     case 'crew':
     case 'launch':
     case 'wake':
@@ -468,6 +472,30 @@ async function clear(state: TrierarchState, at: CarryOut & { action: Extract<Act
   await deps.state.save(next);
   await deps.fleet.confirmCleared({ shipId, repository, outcome: 'removed' });
   log(deps, { shipId, action: 'clear', outcome: `its kept worktree removed: ${kept.path}` });
+  return next;
+}
+
+/**
+ * A worktree under the root no entry works in, as after its ship is retired
+ * (gap rule 2, #1041): what runs in it stops first, as it would be left
+ * running from a folder that is gone. Then it is removed, unless it holds
+ * unsaved work: that stays, reported as an orphan, for a human. A failure
+ * leaves it reported and tried again on the next pass.
+ */
+async function clearOrphan(state: TrierarchState, at: { orphan: Orphan; isNew: boolean; deps: RunPassDeps }): Promise<TrierarchState> {
+  const { orphan, isNew, deps } = at;
+  const stopped = await deps.folderProcesses.stopIn(orphan.path);
+  const unsaved = await deps.workspace.unsaved(orphan.path);
+  if (unsaved.length > 0) {
+    if (isNew) {
+      deps.logger.warn(`Kept the orphan worktree ${orphan.path}, which holds unsaved work: ${unsaved.join('; ')}`);
+    }
+    return state;
+  }
+  await deps.workspace.remove(orphan.path);
+  const next = { ...state, orphans: state.orphans.filter((each) => each.path !== orphan.path) };
+  await deps.state.save(next);
+  deps.logger.warn(`Removed the orphan worktree ${orphan.path}${stopped === 0 ? '' : `, after stopping ${String(stopped)} ${stopped === 1 ? 'process' : 'processes'} in it`}`);
   return next;
 }
 

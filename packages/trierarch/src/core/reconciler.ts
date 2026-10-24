@@ -2,7 +2,7 @@ import type { CrewStatus, ShipId, TrierarchConfiguration } from '@aeolus-fleet/c
 
 import { checkSettings, launchMarkerRefusal, trustRefusal, unacceptedRefusal, type CheckedSettings, type Refusal } from './check-settings.js';
 import { MODEL_OPTION } from './detected-options.js';
-import { putEntry, removeEntry, withState, type Entry, type KeptWorktree, type TrierarchState } from './entry.js';
+import { putEntry, removeEntry, withState, type Entry, type KeptWorktree, type Orphan, type TrierarchState } from './entry.js';
 import type { AssignedRequest, ClearRequestToMe, InboxAnswer, LaunchSeen, ObservedSession, ObservedWorktree, TrustedPlaces, Turn, WrittenStatus } from './ports.js';
 import { decideRestart, exitsInWindow } from './restart-policy.js';
 
@@ -59,7 +59,9 @@ export type Action =
   /** Its restart budget is spent (#397): its owner told, argo when argo owns it, with why its last start failed when it did. */
   | { readonly kind: 'crashed'; readonly shipId: ShipId; readonly shipName?: string; readonly exits: number; readonly failedStart?: string; readonly idempotencyKey: string }
   /** A clear request (decision 0032): remove the kept worktree it names, or, when none is kept, confirm alone. */
-  | { readonly kind: 'clear'; readonly shipId: ShipId; readonly repository: string; readonly kept?: KeptWorktree };
+  | { readonly kind: 'clear'; readonly shipId: ShipId; readonly repository: string; readonly kept?: KeptWorktree }
+  /** A worktree no entry works in (#1041): stop what runs in it, then remove it unless it holds unsaved work, which keeps it reported. Told once, while it is new. */
+  | { readonly kind: 'clearOrphan'; readonly orphan: Orphan; readonly isNew: boolean };
 
 export interface Reconciled {
   readonly state: TrierarchState;
@@ -207,6 +209,10 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
   for (const { shipId, repository } of context.clears) {
     const held = kept.find((each) => each.shipId === shipId && each.repository === repository);
     actions.push({ kind: 'clear', shipId, repository, ...(held !== undefined && { kept: held }) });
+  }
+  const reported = new Set(state.orphans.map((each) => each.path));
+  for (const orphan of orphans) {
+    actions.push({ kind: 'clearOrphan', orphan, isNew: !reported.has(orphan.path) });
   }
   return { state: { ...next, kept, orphans }, actions };
 }
