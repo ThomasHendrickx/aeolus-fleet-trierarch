@@ -25,6 +25,8 @@ export interface TrierarchPaths {
   readonly homes: string;
   /** Each crewed ship's socket, in a folder of its own: its session's fleet calls come over it (decision 0026). */
   readonly sockets: string;
+  /** Each crewed ship's read-only checkouts, in a folder of its own (#1182). */
+  readonly checkouts: string;
 }
 
 export function trierarchPaths(at: { homeDirectory: string; config?: string }): TrierarchPaths {
@@ -42,6 +44,7 @@ export function trierarchPaths(at: { homeDirectory: string; config?: string }): 
     worktrees: join(home, 'worktrees'),
     homes: join(home, 'homes'),
     sockets: join(home, 'sockets'),
+    checkouts: join(home, 'checkouts'),
   };
 }
 

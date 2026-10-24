@@ -136,6 +136,8 @@ export interface Identity {
   readonly shipName: string;
   readonly socket: string;
   readonly squadron?: string;
+  /** The session's read-only checkouts (#1182), which its start context names; none when it has none. */
+  readonly checkouts?: readonly Checkout[];
 }
 
 /**
@@ -171,6 +173,8 @@ export interface HarnessPort {
     shipName: string;
     folder: string;
     workspace: TrierarchWorkspace;
+    /** The session's read-only checkouts (#1182), which it may read beside its folder. */
+    checkouts: readonly Checkout[];
     harness: string;
     options: Readonly<Record<string, string>>;
     isFirstStart: boolean;
