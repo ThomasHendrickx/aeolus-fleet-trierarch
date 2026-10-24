@@ -66,7 +66,7 @@ export function createRunPass(deps: RunPassDeps): RunPass {
       const versions = Object.fromEntries(Object.entries(deps.setup.detected ?? {}).flatMap(([harness, found]) => (found === undefined ? [] : [[harness, found.version]])));
       const { marksLaunches, missingPlugins } = await launchMarks(deps);
       const reconciled = reconcile(state, { requests, clears, observed, now: deps.clock.now(), configuration: deps.setup.configuration, trusted, versions, marksLaunches, missingPlugins });
-      state = withoutPassFailure(reconciled.state);
+      state = succeeded(reconciled.state, missingPlugins);
       await deps.state.save(state);
       actions = reconciled.actions;
     } catch (error) {
@@ -101,10 +101,10 @@ async function launchMarks(deps: RunPassDeps): Promise<{ marksLaunches: Record<s
   return { marksLaunches, missingPlugins };
 }
 
-/** The state of a pass that succeeded: no failing pass is kept. */
-function withoutPassFailure(state: TrierarchState): TrierarchState {
+/** The state of a pass that succeeded: no failing pass is kept, and the harnesses whose plugin it could not find (#1212). */
+function succeeded(state: TrierarchState, missingPlugins: ReadonlySet<string>): TrierarchState {
   const { entries, kept, orphans, refused } = state;
-  return { entries, kept, orphans, refused };
+  return { entries, kept, orphans, refused, ...(missingPlugins.size > 0 && { missingPlugins: [...missingPlugins].sort() }) };
 }
 
 /**

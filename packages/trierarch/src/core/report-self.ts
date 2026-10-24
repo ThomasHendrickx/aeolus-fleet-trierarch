@@ -41,7 +41,10 @@ export function createReportSelf(deps: { fleet: FleetPort; processes: Pick<Sessi
 function selfReportOf(at: { setup: TrierarchSetup; state: TrierarchState; running: number; trusted: TrustedPlaces }): SelfReport {
   const { setup, state, running, trusted } = at;
   const crashed = Object.values(state.entries).filter((entry) => entry.state === 'crashed').length;
-  const note = `${String(running)} of ${String(setup.configuration.caps.ships)} running${crashed > 0 ? `, ${String(crashed)} crashed` : ''}`;
+  const missing = state.missingPlugins ?? [];
+  // A harness without its aeolus plugin cannot crew a ship (#1212): it is left out of the details, so no request is placed for it, and the note says why.
+  const notOffered = missing.map((harness) => `, ${harness} not offered: its aeolus plugin is not installed (run aeolus-trierarch upgrade)`).join('');
+  const note = `${String(running)} of ${String(setup.configuration.caps.ships)} running${crashed > 0 ? `, ${String(crashed)} crashed` : ''}${notOffered}`;
   return { state: running > 0 ? 'working' : 'idle', note, details: detailsOf(setup, { state, trusted }) };
 }
 
@@ -59,9 +62,10 @@ function offeredOf(names: readonly string[], trustedBy: readonly (readonly strin
 function detailsOf(setup: TrierarchSetup, at: { state: TrierarchState; trusted: TrustedPlaces }): TrierarchReportDetails {
   const { configuration, version } = setup;
   const { state, trusted } = at;
-  const byHarness = Object.keys(configuration.harnesses).map((harness) => trusted[harness] ?? { repositories: [], folders: [] });
+  const offered = Object.entries(configuration.harnesses).filter(([harness]) => state.missingPlugins?.includes(harness) !== true);
+  const byHarness = offered.map(([harness]) => harness).map((harness) => trusted[harness] ?? { repositories: [], folders: [] });
   return {
-    harnesses: Object.entries(configuration.harnesses).map(([harness, settings]) => {
+    harnesses: offered.map(([harness, settings]) => {
       const detected = setup.detected?.[harness];
       return {
         harness,
