@@ -117,6 +117,10 @@ export class InMemoryFleet implements FleetPort {
   readonly toArgo: ArgoReport[] = [];
   /** What the trierarch sent a ship's owner other than argo, once per idempotency key (decision 0045). */
   readonly toOwners: OwnerReport[] = [];
+  /** The trierarch plugin's ships asked for the trusted repositories, in order (aeolus-fleet#384). */
+  readonly askedForTrustedRepositories: ShipId[] = [];
+  /** Set to refuse each ask for the trusted repositories, as a fleet that does not answer. */
+  isRefusingAsks = false;
   /** Set to make the fleet refuse every send to an owner, as when no rule lets the trierarch reach it. */
   isRefusingOwnerReports = false;
   readonly acked: string[] = [];
@@ -260,6 +264,14 @@ export class InMemoryFleet implements FleetPort {
     }
     this.clearRequests.splice(index, 1);
     this.cleared.push({ ...cleared });
+    return Promise.resolve();
+  }
+
+  askForTrustedRepositories(pluginShipId: ShipId): Promise<void> {
+    if (this.isRefusingAsks) {
+      return Promise.reject(new Error('the fleet refused it'));
+    }
+    this.askedForTrustedRepositories.push(pluginShipId);
     return Promise.resolve();
   }
 

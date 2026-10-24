@@ -209,6 +209,16 @@ describe("the fleet over REST: trouble to a ship's owner (decision 0045)", () =>
     });
   });
 
+  it("asks the trierarch plugin's ship for the trusted repositories, by its id (aeolus-fleet#384)", async () => {
+    const pluginShipId = newId('ship');
+    await aFleetAnswering([{ status: 200, body: { messageId: newId('message') } }], async (fleetUrl, asked) => {
+      await createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_x' }).askForTrustedRepositories(pluginShipId);
+
+      expect(asked.map(({ url }) => url)).toEqual(['/api/v1/ship/send']);
+      expect(JSON.parse(asked[0]?.body ?? '')).toMatchObject({ selector: { kind: 'ship', shipId: pluginShipId }, contentType: 'application/vnd.aeolus.trierarch.trusted-repositories-request+json', payload: '{}' });
+    });
+  });
+
   it("sends the owner's ship the report in markdown, by its id, and answers sent", async () => {
     const ownerShipId = newId('ship');
     await aFleetAnswering([{ status: 200, body: { messageId: newId('message') } }], async (fleetUrl, asked) => {
