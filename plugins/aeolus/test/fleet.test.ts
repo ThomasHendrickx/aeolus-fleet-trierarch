@@ -298,6 +298,49 @@ describe('aeolus-fleet calls', () => {
     expect(fleet.calls.every((call) => call.authorization === `Bearer ${CREW_TOKEN}`)).toBe(true);
   });
 
+  it('makes every meeting call as POST with its input, from its argument or stdin (decision 0061)', async () => {
+    fleet = await crewedAt([{ status: 200, body: {} }]);
+    const calls = [
+      'openMeeting', 'meeting', 'requestMic', 'withdrawMicRequest', 'releaseMic', 'giveMic', 'takeMic', 'setMicPattern',
+      'addToMeeting', 'leaveMeeting', 'rejoinMeeting', 'revokeFromMeeting', 'transferMeeting', 'nameModerator', 'endMeeting',
+    ];
+
+    for (const call of calls) {
+      await run('aeolus-fleet.sh', { args: [call, '{"meetingId":"mtg_01m5qbm1q6rsy6gf15c9w4a8s5"}'] });
+    }
+    await run('aeolus-fleet.sh', { args: ['requestMic', '-'], stdin: '{"meetingId":"mtg_01m5qbm1q6rsy6gf15c9w4a8s5"}\n' });
+
+    expect(fleet.calls.map((call) => `${call.method} ${call.path} ${call.body}`)).toEqual([
+      ...calls.map((call) => `POST /api/v1/ship/${call} {"meetingId":"mtg_01m5qbm1q6rsy6gf15c9w4a8s5"}`),
+      'POST /api/v1/ship/requestMic {"meetingId":"mtg_01m5qbm1q6rsy6gf15c9w4a8s5"}',
+    ]);
+    expect(fleet.calls.every((call) => call.authorization === `Bearer ${CREW_TOKEN}`)).toBe(true);
+  });
+
+  it('states the model a hook recorded when it opens a meeting or adds to one, as on a send, since the added notices state it', async () => {
+    fleet = await crewedAt([{ status: 200, body: { meetingId: 'mtg_01m5qbm1q6rsy6gf15c9w4a8s5' } }]);
+    writeFileSync((await identityFile()).replace(/\.identity$/, '.model'), 'gpt-6-astra\n');
+
+    await run('aeolus-fleet.sh', { args: ['openMeeting', '-'], stdin: '{"ships":[{"name":"scout"}],"idempotencyKey":"open-1"}\n' });
+    await run('aeolus-fleet.sh', { args: ['addToMeeting', '{"meetingId":"mtg_01m5qbm1q6rsy6gf15c9w4a8s5","model":"stale"}'] });
+    await run('aeolus-fleet.sh', { args: ['requestMic', '{"meetingId":"mtg_01m5qbm1q6rsy6gf15c9w4a8s5"}'] });
+
+    expect(fleet.calls.map((call): unknown => JSON.parse(call.body))).toEqual([
+      { ships: [{ name: 'scout' }], idempotencyKey: 'open-1', model: 'gpt-6-astra' },
+      { meetingId: 'mtg_01m5qbm1q6rsy6gf15c9w4a8s5', model: 'gpt-6-astra' },
+      { meetingId: 'mtg_01m5qbm1q6rsy6gf15c9w4a8s5' },
+    ]);
+  });
+
+  it('names every call it makes in its usage, the meeting calls among them', async () => {
+    const result = await run('aeolus-fleet.sh');
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain(
+      'openMeeting|meeting|requestMic|withdrawMicRequest|releaseMic|giveMic|takeMic|setMicPattern|addToMeeting|leaveMeeting|rejoinMeeting|revokeFromMeeting|transferMeeting|nameModerator|endMeeting',
+    );
+  });
+
   it('says LEASE_ENDED, and exits 3, when the operator released the ship', async () => {
     fleet = await crewedAt([{ status: 401, body: { code: 'LEASE_ENDED', message: 'This ship was released' } }]);
 
