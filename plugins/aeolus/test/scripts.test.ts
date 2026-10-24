@@ -997,6 +997,54 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
     });
   });
 
+  describe('a delivery of a meeting (decision 0061)', () => {
+    const MEETING_ID = 'mtg_01m5qbm1q6rsy6gf15c9w4a8s5';
+    const inTheMeeting = (overrides: Record<string, unknown> = {}) => aDelivery({ meetingId: MEETING_ID, recipient: { kind: 'meeting', meetingId: MEETING_ID }, ...overrides });
+    const handedOver = async (delivery: unknown) => {
+      await aHandOver({ '/api/v1/ship/pushReceive': [receiving(delivery)], '/api/v1/ship/ack': [acknowledged] });
+      const ended = z.object({ reason: z.string() }).parse(JSON.parse((await theTurnEnding()).stdout));
+      return ended.reason.replace(START_THE_WATCHER, '');
+    };
+
+    it('has a contribution answered in the meeting, never with inReplyTo, only with the mic, and the turn ended when there is nothing to request', async () => {
+      expect(await handedOver(inTheMeeting())).toBe(
+        `aeolus: a message for scout from orchestrator-1 (orchestrator): message ${MESSAGE_ID}, text/plain, in meeting ${MEETING_ID}. ` +
+          'The plugin acknowledged it for you: do not receive or ack it. ' +
+          `It is for every participant: contribute to the meeting by sending to {"kind":"meeting","meetingId":"${MEETING_ID}"}, never with inReplyTo, and only while you hold the mic or moderate it. ` +
+          `To speak, request the mic with "/plugin/scripts/aeolus-fleet.sh" requestMic '{"meetingId":"${MEETING_ID}"}' and contribute once the mic notice comes. ` +
+          'Not holding the mic and with nothing to request, end your turn.\n\n' +
+          'Review "PR 12"\nand say what you found',
+      );
+    });
+
+    it('tells the session it was added to a meeting as it tells a contribution: speak only with the mic', async () => {
+      const added = await handedOver(inTheMeeting({ contentType: 'application/vnd.aeolus.meeting.added+json', payload: '{}' }));
+
+      expect(added).toContain(`application/vnd.aeolus.meeting.added+json, in meeting ${MEETING_ID}.`);
+      expect(added).toContain('Not holding the mic and with nothing to request, end your turn.');
+    });
+
+    it('tells the session of the mic notice that it holds the mic: contribute, never with inReplyTo, then release it', async () => {
+      expect(await handedOver(inTheMeeting({ contentType: 'application/vnd.aeolus.meeting.mic+json', payload: '{}' }))).toBe(
+        `aeolus: a message for scout from orchestrator-1 (orchestrator): message ${MESSAGE_ID}, application/vnd.aeolus.meeting.mic+json, in meeting ${MEETING_ID}. ` +
+          'The plugin acknowledged it for you: do not receive or ack it. ' +
+          `You hold the mic: contribute by sending to {"kind":"meeting","meetingId":"${MEETING_ID}"}, never with inReplyTo, ` +
+          `then release it with "/plugin/scripts/aeolus-fleet.sh" releaseMic '{"meetingId":"${MEETING_ID}"}'.\n\n{}`,
+      );
+    });
+
+    it('tells the session of the ended notice to contribute no more', async () => {
+      expect(await handedOver(inTheMeeting({ contentType: 'application/vnd.aeolus.meeting.ended+json', payload: '{}' }))).toBe(
+        `aeolus: a message for scout from orchestrator-1 (orchestrator): message ${MESSAGE_ID}, application/vnd.aeolus.meeting.ended+json, in meeting ${MEETING_ID}. ` +
+          'The plugin acknowledged it for you: do not receive or ack it. The meeting ended: contribute no more.\n\n{}',
+      );
+    });
+
+    it('has a delivery outside a meeting answered by its sender, as before', async () => {
+      expect(await handedOver(aDelivery({ meetingId: null }))).toBe(MESSAGE);
+    });
+  });
+
   describe('the end of the turn (Stop)', () => {
     it('acknowledges a message still handed when the turn ends without a tool call, and keeps the turn open with it, asking for the watcher', async () => {
       await aHandOver({ '/api/v1/ship/ack': [acknowledged] });
