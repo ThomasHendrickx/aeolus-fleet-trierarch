@@ -1,7 +1,7 @@
 import type { ShipId } from '@aeolus-fleet/common';
 import { describe, expect, it } from 'vitest';
 
-import { aTrierarch, CONFIGURATION, crewSettings, InMemoryShipSockets, newId, NOTES_FOLDER, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
+import { aTrierarch, CONFIGURATION, crewSettings, InMemoryCheckouts, InMemoryShipSockets, newId, NOTES_FOLDER, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
 import type { LaunchSeen } from './ports.js';
 import { RESTART_BUDGET } from './restart-policy.js';
 
@@ -2185,5 +2185,93 @@ describe("trouble the trierarch reports goes to the ship's owner (decision 0045)
     await trierarch.pass();
 
     expect(trierarch.fleet.toArgo.map(({ text }) => text)).toEqual([`${cannotCrew(shipId)}\n\n${UNREACHABLE}`]);
+  });
+});
+
+describe('read-only checkouts (#1182)', () => {
+  /** aeolus-fleet sessions get governance and skills as read-only checkouts. */
+  const WITH_CHECKOUTS = {
+    ...CONFIGURATION,
+    repositories: {
+      'aeolus-fleet': { path: '/home/thomas/Projects/aeolus-fleet', checkouts: ['governance', 'skills'] },
+      governance: { path: '/home/thomas/Projects/governance' },
+      skills: { path: '/home/thomas/Projects/skills' },
+    },
+  };
+  const checkoutsOf = (shipId: ShipId) => [
+    { repository: 'governance', path: InMemoryCheckouts.pathOf(shipId, 'governance') },
+    { repository: 'skills', path: InMemoryCheckouts.pathOf(shipId, 'skills') },
+  ];
+
+  it("makes the checkouts its repository names and writes each into the folder's identity, for the session's start context", async () => {
+    const trierarch = aTrierarch(WITH_CHECKOUTS);
+
+    const shipId = await aCrewedShip(trierarch);
+
+    expect(trierarch.harness.identities.get(SCOUT_FOLDER)).toEqual({
+      fleetUrl: 'https://fleet.example.com',
+      shipId,
+      shipName: 'scout',
+      socket: InMemoryShipSockets.pathOf(shipId),
+      checkouts: checkoutsOf(shipId),
+    });
+  });
+
+  it('starts the session with its checkouts', async () => {
+    const trierarch = aTrierarch(WITH_CHECKOUTS);
+
+    const shipId = await aCrewedShip(trierarch);
+
+    expect(trierarch.harness.launchedCheckouts).toEqual([{ shipId, checkouts: checkoutsOf(shipId) }]);
+  });
+
+  it('starts a session that died again with its checkouts', async () => {
+    const trierarch = aTrierarch(WITH_CHECKOUTS);
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.processes.exit(shipId);
+
+    await trierarch.pass();
+    trierarch.clock.advance(5 * SECOND_MS);
+    await trierarch.pass();
+
+    expect(trierarch.harness.launchedCheckouts.at(-1)).toEqual({ shipId, checkouts: checkoutsOf(shipId) });
+  });
+
+  it('gives a session in a configured folder no checkouts', async () => {
+    const trierarch = aTrierarch(WITH_CHECKOUTS);
+
+    const shipId = await aCrewedShip(trierarch, { workspace: { kind: 'folder', name: 'notes' } });
+
+    expect(trierarch.harness.launchedCheckouts).toEqual([{ shipId, checkouts: [] }]);
+    expect(trierarch.harness.identities.get(NOTES_FOLDER)).not.toHaveProperty('checkouts');
+  });
+
+  it('removes its checkouts when its request is removed', async () => {
+    const trierarch = aTrierarch(WITH_CHECKOUTS);
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.fleet.removeRequest(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.checkouts.removed).toEqual([shipId]);
+  });
+
+  it('removes its checkouts when it gives the request back before its crew is final', async () => {
+    const trierarch = aTrierarch(WITH_CHECKOUTS, DETECTED);
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'refused', model: 'sonnet' }, settings: { options: { model: 'sonnet' } } });
+
+    await trierarch.pass();
+
+    expect(trierarch.checkouts.removed).toEqual([shipId]);
+  });
+
+  it('removes its checkouts when its request is no longer assigned to it', async () => {
+    const trierarch = aTrierarch(WITH_CHECKOUTS);
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.fleet.unassign(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.checkouts.removed).toEqual([shipId]);
   });
 });
