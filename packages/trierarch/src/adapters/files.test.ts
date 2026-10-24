@@ -6,7 +6,7 @@ import { trierarchConfigurationSchema } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { newId } from '../../test/support/in-memory.js';
-import { initialConfiguration, loadConfiguration, readCrewFile, readRunningFile, writeCrewFile, writeRunningFile } from './files.js';
+import { configurationJsonSchema, initialConfiguration, loadConfiguration, readCrewFile, readRunningFile, writeCrewFile, writeRunningFile } from './files.js';
 
 let folder: string;
 
@@ -86,6 +86,35 @@ describe('the configuration file', () => {
     }
 
     await expect(loadConfiguration(path)).rejects.toThrow(says);
+  });
+
+  describe("a repository's read-only checkouts (#1182)", () => {
+    const withCheckouts = (checkouts: readonly string[]) => ({
+      ...initialConfiguration(),
+      repositories: { 'aeolus-company': { path: '/code/aeolus-company', checkouts }, governance: { path: '/code/governance' }, skills: { path: '/code/skills' } },
+    });
+
+    it('loads the configured repositories a session in a repository gets as read-only checkouts', async () => {
+      const path = join(folder, 'config.json');
+      writeFileSync(path, JSON.stringify(withCheckouts(['governance', 'skills'])));
+
+      await expect(loadConfiguration(path)).resolves.toMatchObject({ repositories: { 'aeolus-company': { checkouts: ['governance', 'skills'] } } });
+    });
+
+    it.each([
+      { label: 'a repository the configuration does not have', checkouts: ['hemma'], says: 'hemma is no repository of this configuration' },
+      { label: 'the repository itself, which is the working folder', checkouts: ['aeolus-company'], says: 'aeolus-company is the repository itself' },
+      { label: 'the same repository twice', checkouts: ['skills', 'skills'], says: 'skills is named twice' },
+    ])('refuses a checkout of $label', async ({ checkouts, says }) => {
+      const path = join(folder, 'config.json');
+      writeFileSync(path, JSON.stringify(withCheckouts(checkouts)));
+
+      await expect(loadConfiguration(path)).rejects.toThrow(says);
+    });
+
+    it('states the checkouts in the schema an editor checks it with', () => {
+      expect(JSON.stringify(configurationJsonSchema())).toContain('"checkouts"');
+    });
   });
 
   it('never holds the crew token: that lives in the crew file', async () => {
