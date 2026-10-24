@@ -4102,6 +4102,9 @@ describe("a ship's read-only checkouts, which its trierarch keeps (#1182)", () =
     return socket;
   }
 
+  /** Runs the refresh without waiting, so the stub on the socket, in this process, can answer. */
+  const refresh = () => start('aeolus-checkouts.sh', { args: ['refresh'] }).done;
+
   function sessionStart(env: Record<string, string>) {
     const envFile = join(data, 'session.env');
     writeFileSync(envFile, '');
@@ -4152,7 +4155,7 @@ describe("a ship's read-only checkouts, which its trierarch keeps (#1182)", () =
     const answer = { checkouts: [{ repository: 'governance', revision: '3f2a9c1' }, { repository: 'skills', problem: 'git fetch failed' }] };
     fleet = await startRoutedStubFleet({ '/trierarch/checkouts/refresh': [{ status: 200, body: answer }] }, { socket });
 
-    const refreshed = run('aeolus-checkouts.sh', { args: ['refresh'] });
+    const refreshed = await refresh();
 
     expect(refreshed.status).toBe(0);
     expect(JSON.parse(refreshed.stdout)).toEqual(answer);
@@ -4163,7 +4166,7 @@ describe("a ship's read-only checkouts, which its trierarch keeps (#1182)", () =
     const socket = crewedWithCheckouts([`governance=${GOVERNANCE}`]);
     fleet = await startRoutedStubFleet({ '/trierarch/checkouts/refresh': [{ status: 403, body: { code: 'FORBIDDEN', message: "This socket answers only its ship's own session" } }] }, { socket });
 
-    const refreshed = run('aeolus-checkouts.sh', { args: ['refresh'] });
+    const refreshed = await refresh();
 
     expect({ status: refreshed.status, stdout: refreshed.stdout }).toEqual({ status: 1, stdout: "aeolus: the trierarch refused the refresh: FORBIDDEN: This socket answers only its ship's own session\n" });
   });

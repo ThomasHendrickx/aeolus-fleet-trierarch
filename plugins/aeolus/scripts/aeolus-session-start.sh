@@ -89,6 +89,8 @@ if [ -n "${PLUGIN_ROOT:-}" ]; then
     check_in="$(aeolus_identity_field "$identity_text" checkIn)"
     [ -n "$check_in" ] && context="${context} Its check-in interval is ${check_in}: report at least once per interval; the plugin reminds you when one passes without a report."
   fi
+  checkouts="$(aeolus_checkouts_context "$identity_text" "${root}/scripts/aeolus-checkouts.sh refresh, with AEOLUS_DATA and AEOLUS_FOLDER as above and AEOLUS_HARNESS=codex")"
+  [ -n "$checkouts" ] && context="${context} ${checkouts}"
   aeolus_log "$identity" sessionStart "told the session after ${source_event:-start} which ship it crews, ${told}"
   printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(aeolus_json_escape "$context")"
   exit 0
@@ -117,6 +119,8 @@ if [ -n "$squadron" ]; then
   check_in="$(aeolus_identity_field "$identity_text" checkIn)"
   [ -n "$check_in" ] && context="${context} Its check-in interval is ${check_in}: report at least once per interval; the plugin reminds you when one passes without a report."
 fi
+checkouts="$(aeolus_checkouts_context "$identity_text" "\"${root}/scripts/aeolus-checkouts.sh\" refresh")"
+[ -n "$checkouts" ] && context="${context} ${checkouts}"
 if aeolus_woken_by_trierarch "$identity_text"; then
   # A pushed lease (#756): the trierarch hands each message over, so the session receives nothing itself.
   if aeolus_reports_here "$identity_text"; then
