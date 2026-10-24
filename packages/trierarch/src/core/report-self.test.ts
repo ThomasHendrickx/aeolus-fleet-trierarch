@@ -1,7 +1,7 @@
 import { trierarchReportDetailsSchema } from '@aeolus-fleet/common';
 import { describe, expect, it } from 'vitest';
 
-import { aTrierarch, CONFIGURATION, newId, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
+import { aMachineLoad, aTrierarch, CONFIGURATION, newId, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
 import { EMPTY_STATE, putEntry, type Entry } from './entry.js';
 
 /** A ship whose request is assigned to the trierarch, crewed, so its session runs. */
@@ -52,9 +52,34 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
       orphans: [{ repository: 'aeolus-fleet', name: 'stray' }],
       machine: { os: 'macos', arch: 'arm64' },
       runtime: 'host',
+      load: aMachineLoad(),
+      usage: { subscriptions: [], ships: [] },
       version: '0.1.0',
     });
     expect(trierarchReportDetailsSchema.safeParse(report?.details).success).toBe(true);
+  });
+
+  it('does not report again while the machine load moves within its steps (#400)', async () => {
+    const trierarch = aTrierarch();
+    await trierarch.reportSelf();
+    trierarch.machine.current = aMachineLoad({ cpu: { cores: 8, loadAverage: 3.9 } });
+    trierarch.clock.advance(60_000);
+
+    await trierarch.reportSelf();
+
+    expect(trierarch.fleet.selfReports).toHaveLength(1);
+  });
+
+  it('reports again, with the load it read, once the machine load takes another step (#400)', async () => {
+    const trierarch = aTrierarch();
+    await trierarch.reportSelf();
+    const busy = aMachineLoad({ cpu: { cores: 8, loadAverage: 4 } });
+    trierarch.machine.current = busy;
+    trierarch.clock.advance(60_000);
+
+    await trierarch.reportSelf();
+
+    expect(trierarch.fleet.selfReports.map((report) => report.details.load)).toEqual([aMachineLoad(), busy]);
   });
 
   it('reports the container runtime as a fact when its configuration runs the sessions in containers (decision 0039)', async () => {
