@@ -85,3 +85,17 @@ export function readTrustedRepositories(payload: string): Result<readonly Truste
   }
   return ok(repositories);
 }
+
+/**
+ * The repositories the trierarch offers and crews in: its configured ones,
+ * and each trusted repository beside them at its clone, cloned on its first
+ * workspace. A configured repository whose name is on the list stays as the
+ * machine configured it.
+ */
+export function offeredRepositories<R extends { readonly path: string }>(
+  configured: Readonly<Record<string, R>>,
+  at: { trusted: readonly TrustedRepository[]; cloneOf: (name: string) => string },
+): Readonly<Record<string, R | { readonly path: string }>> {
+  const cloned = at.trusted.filter(({ name }) => !(name in configured)).map(({ name }) => [name, { path: at.cloneOf(name) }] as const);
+  return { ...configured, ...Object.fromEntries(cloned) };
+}
