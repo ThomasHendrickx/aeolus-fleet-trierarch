@@ -874,6 +874,21 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       expect(reason).toContain('message msg_01m4raygfdtsjfbnmpvqjznsyv, text/plain, in reply to msg_01m4r9zzzzzzzzzzzzzzzzzzzz.');
     });
 
+    it("leaves a handed message unacknowledged at a sub-agent's tool call, whose context is not the session's turn (aeolus-fleet#1016)", async () => {
+      const stub = await aHandOver({ '/api/v1/ship/ack': [acknowledged] });
+
+      const hookRun = await aSubAgentToolCall();
+
+      expect({ stdout: hookRun.stdout, acks: callsTo(stub, '/api/v1/ship/ack'), store: store() }).toEqual({ stdout: '', acks: [], store: [`${DELIVERY_ID} handed`] });
+    });
+
+    it("puts a handed message into the turn at the session's own tool call after a sub-agent's (aeolus-fleet#1016)", async () => {
+      await aHandOver({ '/api/v1/ship/ack': [acknowledged] });
+      await aSubAgentToolCall();
+
+      expect(deniedWith(await aFirstToolCall())).toBe(DENIED + MESSAGE);
+    });
+
     it('says nothing and lets the tool call run when nothing is handed', async () => {
       fleet = await startRoutedStubFleet({});
       crew(fleet.url);
@@ -2636,6 +2651,11 @@ function aHook(script: string, { payload, env = {} }: { payload: Record<string, 
 
 const aFirstToolCall = (env: Record<string, string> = {}) =>
   aHook('aeolus-handover.sh', { payload: { hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: { file_path: '/tmp/x' } }, env });
+/** A tool call of a sub-agent, as a background Explore agent makes it while the session's turn has ended: Claude Code names the agent in the payload. */
+const aSubAgentToolCall = () =>
+  aHook('aeolus-handover.sh', {
+    payload: { hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: { file_path: '/tmp/x' }, agent_id: 'a81bad3ce5f450f9a', agent_type: 'Explore' },
+  });
 
 describe('the watcher guard (PreToolUse on Bash)', () => {
   const startingTheWatcher = {
