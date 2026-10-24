@@ -163,3 +163,76 @@ describe('workspaces in git', () => {
     ]);
   });
 });
+
+describe('workspaces of a trusted repository the machine does not have (aeolus-fleet#384)', () => {
+  let clones: string;
+  let hemma: string;
+
+  beforeEach(() => {
+    clones = join(folder, 'repositories');
+    hemma = join(clones, 'hemma');
+  });
+
+  /** The workspace offering hemma from the trusted repositories at the URL given; in a test git clones a file URL, as a remote. */
+  function trustedWorkspace(at: { url: string | undefined; protocols?: string; isListed?: boolean }) {
+    const isListed = at.isListed ?? true;
+    return createGitWorkspace({
+      configuration: { ...CONFIGURATION, repositories: isListed ? { hemma: { path: hemma } } : {}, folders: {} },
+      root,
+      clones: { root: clones, urlOf: (name) => (name === 'hemma' ? at.url : undefined), ...(at.protocols !== undefined && { protocols: at.protocols }) },
+    });
+  }
+  const remote = () => `file://${repository}`;
+  const crew = { shipId: newId('ship'), shipName: 'scout', workspace: { kind: 'worktree', repository: 'hemma' } } as const;
+
+  it('clones it first, with the machine\'s own access, then makes the worktree from the clone', async () => {
+    const { folder: made } = await trustedWorkspace({ url: remote(), protocols: 'file' }).prepare(crew);
+
+    expect(made).toBe(join(root, 'hemma', 'scout'));
+    expect(existsSync(join(made, 'README.md'))).toBe(true);
+    expect((await git(['-C', hemma, 'remote', 'get-url', 'origin'])).trim()).toBe(remote());
+  });
+
+  it('clones it once: a second ship gets a worktree of the same clone, fetched first', async () => {
+    const workspace = trustedWorkspace({ url: remote(), protocols: 'file' });
+    await workspace.prepare(crew);
+    writeFileSync(join(repository, 'later.md'), 'later\n');
+    await git(['-C', repository, 'add', '.']);
+    await git(['-C', repository, 'commit', '-q', '-m', 'later']);
+
+    const { folder: second } = await workspace.prepare({ ...crew, shipName: 'second', workspace: { kind: 'worktree', repository: 'hemma', ref: 'main' } });
+
+    expect(existsSync(join(second, 'later.md'))).toBe(true);
+  });
+
+  it('clones it again when a stop left a clone half made', async () => {
+    mkdirSync(`${hemma}.partial`, { recursive: true });
+    writeFileSync(join(`${hemma}.partial`, 'half'), '');
+
+    const { folder: made } = await trustedWorkspace({ url: remote(), protocols: 'file' }).prepare(crew);
+
+    expect(existsSync(join(made, 'README.md'))).toBe(true);
+    expect(existsSync(`${hemma}.partial`)).toBe(false);
+  });
+
+  it('clones over https or ssh only, whatever URL reached it', async () => {
+    await expect(trustedWorkspace({ url: remote() }).prepare(crew)).rejects.toThrow(/git clone of hemma failed/);
+
+    expect(existsSync(hemma)).toBe(false);
+  });
+
+  it('fails with git\'s reason and leaves no clone when the machine cannot clone it', async () => {
+    await expect(trustedWorkspace({ url: `file://${join(folder, 'gone')}`, protocols: 'file' }).prepare(crew)).rejects.toThrow(/git clone of hemma failed: .+/);
+
+    expect(existsSync(hemma)).toBe(false);
+    expect(existsSync(`${hemma}.partial`)).toBe(false);
+  });
+
+  it('removes a worktree of a clone whose repository left the trusted repositories', async () => {
+    const { folder: made } = await trustedWorkspace({ url: remote(), protocols: 'file' }).prepare(crew);
+
+    await trustedWorkspace({ url: undefined, isListed: false }).remove(made);
+
+    expect(existsSync(made)).toBe(false);
+  });
+});
