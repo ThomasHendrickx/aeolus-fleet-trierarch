@@ -111,6 +111,8 @@ export interface FleetPort {
   pendingClears(): Promise<readonly ClearRequestToMe[]>;
   /** Confirms a clear request: it removed the kept worktree, or keeps none; the request then goes. */
   confirmCleared(cleared: ClearRequestToMe & { outcome: ClearOutcome }): Promise<void>;
+  /** Asks the trierarch plugin's ship for the trusted repositories again, as the trierarch's own ship (aeolus-fleet#384). */
+  askForTrustedRepositories(pluginShipId: ShipId): Promise<void>;
   /** Sends argo a report, as the trierarch's own ship. */
   reportToArgo(report: ArgoReport): Promise<void>;
   /** Sends a ship's owner a report, as the trierarch's own ship. A refusal is answered, not thrown. */

@@ -20,6 +20,9 @@ export interface TrustedRepository {
 /** The content type of the message that carries the list from the trierarch plugin. */
 export const TRUSTED_REPOSITORIES_CONTENT_TYPE = 'application/vnd.aeolus.trierarch.trusted-repositories+json';
 
+/** The content type of the message a trierarch asks the trierarch plugin's ship for the list again with. */
+export const TRUSTED_REPOSITORIES_REQUEST_CONTENT_TYPE = 'application/vnd.aeolus.trierarch.trusted-repositories-request+json';
+
 const URL_REFUSED = 'a trusted repository is an https:// or ssh URL, never a path, a file URL or a credential';
 
 /**

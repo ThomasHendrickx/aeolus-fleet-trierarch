@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import { setTimeout as wait } from 'node:timers/promises';
 
 import { assignedCrewRequestsOutputSchema, busyWaitMs, clearRequestsOutputSchema, FLEET_BUSY_WAITS_MS, giveBackCrewRequestOutputSchema, idSchema, inboxOutputSchema, MARKDOWN_CONTENT_TYPE, receivedDeliverySchema, shipDetailOutputSchema, type ShipId } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
 import type { Delivery, FleetPort } from '../core/ports.js';
+import { TRUSTED_REPOSITORIES_REQUEST_CONTENT_TYPE } from '../core/trusted-repositories.js';
 import { runningVersion } from './version.js';
 
 /**
@@ -154,6 +156,13 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string; 
     },
     pong: async (deliveryId) => {
       await call({ path: '/ship/pong', body: { deliveryId }, answers: z.unknown() });
+    },
+    askForTrustedRepositories: async (pluginShipId) => {
+      await call({
+        path: '/ship/send',
+        body: { selector: { kind: 'ship', shipId: pluginShipId }, payload: '{}', contentType: TRUSTED_REPOSITORIES_REQUEST_CONTENT_TYPE, model: TRIERARCH_SELF.model, idempotencyKey: randomUUID() },
+        answers: z.object({ messageId: idSchema('message') }),
+      });
     },
     reportToArgo: async ({ text, idempotencyKey }) => {
       await call({

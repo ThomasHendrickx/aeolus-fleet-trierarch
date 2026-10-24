@@ -31,6 +31,7 @@ import { machineOf } from '../core/machine.js';
 import type { Delivery, Logger, TrierarchSetup } from '../core/ports.js';
 import { createReportSelf } from '../core/report-self.js';
 import { createRunPass } from '../core/run-pass.js';
+import { createAskForTrustedRepositories } from '../core/ask-for-trusted-repositories.js';
 import { runtimeRefused } from './config-check.js';
 
 /** How often the loop runs a pass: restarts, wakes and releases wait at most this long. */
@@ -132,8 +133,10 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   });
   const runPass = createRunPass({ fleet, harnesses, processes: sessions, folderProcesses: createFolderProcesses(), workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets });
   const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup });
+  const askForTrustedRepositories = createAskForTrustedRepositories({ fleet, logger, ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
   // Each pass ends with the trierarch's own report: the first at start, then only when it changed.
   const pass = async (): Promise<void> => {
+    await askForTrustedRepositories();
     await runPass();
     await reportSelf();
   };
