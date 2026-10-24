@@ -1,10 +1,11 @@
-import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, readdir, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { ObservedWorktree, WorkspacePort } from '../core/ports.js';
 import { runCommand } from './run-command.js';
+import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
 
 /**
  * Workspaces (docs/architecture.md, "First adapters"): a git worktree of a
@@ -14,28 +15,11 @@ import { runCommand } from './run-command.js';
  * fetched first, and a ref the remote has a branch for is that remote branch,
  * so a ship starts from current code, not from a stale local branch. A fetch
  * that fails (offline, no remote) leaves what the repository has.
- *
- * A trusted repository the machine does not have yet (aeolus-fleet#384) is
- * cloned first, once, with the machine's own access: over https or ssh only,
- * never asking for a password, into a partial folder renamed into place
- * whole, so a stop mid-clone leaves no half clone to crew from.
+ * A trusted repository the machine does not have yet is cloned first
+ * (aeolus-fleet#384).
  */
 
 const REMOTE = 'origin';
-
-/** The protocols a clone of a trusted repository may use, as git's GIT_ALLOW_PROTOCOL lists them. */
-const CLONE_PROTOCOLS = 'https:ssh';
-
-/** How long a clone may take before it is ended and the crew fails. */
-const CLONE_TIMEOUT_MS = 10 * 60 * 1000;
-
-/** Where the trusted repositories are cloned, and the URL of each that is on the list now. */
-export interface TrustedClones {
-  readonly root: string;
-  readonly urlOf: (repository: string) => string | undefined;
-  /** The protocols a clone may use; https and ssh unless a test gives a file remote. */
-  readonly protocols?: string;
-}
 
 export function createGitWorkspace(options: { configuration: TrierarchConfiguration; root: string; clones?: TrustedClones }): WorkspacePort {
   const { configuration, root, clones } = options;
@@ -57,30 +41,8 @@ export function createGitWorkspace(options: { configuration: TrierarchConfigurat
     if (repository === undefined) {
       return undefined;
     }
-    const configured = configuration.repositories[repository]?.path;
-    if (configured !== undefined || clones === undefined) {
-      return configured;
-    }
     // A clone whose repository left the trusted repositories still holds the worktrees made from it.
-    const cloned = join(clones.root, repository);
-    return (await exists(cloned)) ? cloned : undefined;
-  };
-  /** Clones a trusted repository into its path, whole or not at all, with the machine's own access. */
-  const clone = async (at: { repository: string; path: string; url: string }): Promise<void> => {
-    const partial = `${at.path}.partial`;
-    await rm(partial, { recursive: true, force: true });
-    await mkdir(join(at.path, '..'), { recursive: true });
-    const env: Record<string, string> = { GIT_ALLOW_PROTOCOL: clones?.protocols ?? CLONE_PROTOCOLS, GIT_TERMINAL_PROMPT: '0' };
-    // Never wait on a passphrase or host key question nobody answers; an operator's own ssh command is kept.
-    if (process.env.GIT_SSH_COMMAND === undefined) {
-      env.GIT_SSH_COMMAND = 'ssh -o BatchMode=yes';
-    }
-    const cloned = await runCommand('git', { args: ['clone', '--quiet', '--', at.url, partial], env, timeoutMs: CLONE_TIMEOUT_MS });
-    if (cloned.status !== 0) {
-      await rm(partial, { recursive: true, force: true });
-      throw new Error(`git clone of ${at.repository} failed: ${cloned.stderr.trim() || `exit ${String(cloned.status)}`}`);
-    }
-    await rename(partial, at.path);
+    return configuration.repositories[repository]?.path ?? (await clonedPath(clones, repository));
   };
 
   return {
@@ -96,10 +58,7 @@ export function createGitWorkspace(options: { configuration: TrierarchConfigurat
       if (repository === undefined) {
         throw new Error(`The configuration has no repository ${workspace.repository}`);
       }
-      const url = clones?.urlOf(workspace.repository);
-      if (url !== undefined && !(await exists(repository))) {
-        await clone({ repository: workspace.repository, path: repository, url });
-      }
+      await cloneWhenMissing(clones, { repository: workspace.repository, path: repository });
       const folder = join(root, workspace.repository, shipName);
       // A worktree a stop mid-crew left is used as it is.
       if (!(await exists(folder))) {
