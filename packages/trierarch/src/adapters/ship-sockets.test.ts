@@ -35,6 +35,21 @@ let logged: string[];
 let isCallerLet: boolean;
 let sockets: ShipSockets;
 let shipId: ShipId;
+/** The ships whose checkouts the trierarch was asked to refresh, in order (#1182). */
+let refreshed: ShipId[];
+/** Set to make a refresh fail as a whole, as when the checkouts root cannot be read. */
+let isRefreshFailing: boolean;
+
+/** What the trierarch's refresh answers for a ship: one checkout brought to main, one that could not be. */
+const REFRESHED = [
+  { repository: 'governance', revision: '3f2a9c1d' },
+  { repository: 'skills', problem: 'git fetch failed: no remote' },
+];
+
+function refreshCheckouts(ship: ShipId) {
+  refreshed.push(ship);
+  return isRefreshFailing ? Promise.reject(new Error('the checkouts root cannot be read')) : Promise.resolve(REFRESHED);
+}
 
 function bodyOf(message: IncomingMessage): Promise<string> {
   return new Promise((resolve) => {
@@ -65,7 +80,9 @@ beforeEach(async () => {
   tokens = new Map([[shipId, CREW_TOKEN]]);
   logged = [];
   isCallerLet = true;
-  sockets = createShipSockets({ root, fleetUrl, crewTokenOf: (ship) => Promise.resolve(tokens.get(ship)), mayCall: () => Promise.resolve(isCallerLet), log: (line) => logged.push(line) });
+  refreshed = [];
+  isRefreshFailing = false;
+  sockets = createShipSockets({ root, fleetUrl, crewTokenOf: (ship) => Promise.resolve(tokens.get(ship)), mayCall: () => Promise.resolve(isCallerLet), log: (line) => logged.push(line), refreshCheckouts });
 });
 
 afterEach(async () => {
@@ -217,7 +234,7 @@ describe("a caller outside the ship's session (the caller check)", () => {
   });
 
   it.runIf(process.platform === 'linux' || process.platform === 'darwin')("gets 403 when it is a process outside the ship's session and the trierarch, with nothing forwarded", async () => {
-    const checked = createShipSockets({ root, fleetUrl, crewTokenOf: () => Promise.resolve(CREW_TOKEN), mayCall: createCallerCheck({ platform: process.platform, sessionRootOf: () => Promise.resolve(undefined) }), log: () => undefined });
+    const checked = createShipSockets({ root, fleetUrl, crewTokenOf: () => Promise.resolve(CREW_TOKEN), mayCall: createCallerCheck({ platform: process.platform, sessionRootOf: () => Promise.resolve(undefined) }), log: () => undefined, refreshCheckouts });
     const socket = await checked.open(newId('ship'));
     const answered = join(root, 'answered');
     // Started by a shell that ends at once, so curl has another parent than this process.
@@ -226,6 +243,61 @@ describe("a caller outside the ship's session (the caller check)", () => {
     await expect.poll(() => (existsSync(answered) ? readFileSync(answered, 'utf8') : ''), { timeout: 5000 }).toBe('403');
     expect(calls).toEqual([]);
     await checked.closeAll();
+  });
+});
+
+describe("a refresh of the ship's read-only checkouts (#1182)", () => {
+  const REFRESH = { method: 'POST', path: '/trierarch/checkouts/refresh' };
+
+  it("refreshes its own ship's checkouts and answers the revision each now holds, or why it could not", async () => {
+    const socket = await sockets.open(shipId);
+
+    const answered = await callOver(socket, REFRESH);
+
+    expect(answered).toMatchObject({ status: 200, contentType: 'application/json' });
+    expect(answered !== 'no answer' && JSON.parse(answered.body)).toEqual({ checkouts: REFRESHED });
+    expect(refreshed).toEqual([shipId]);
+  });
+
+  it('answers it itself: nothing goes to the fleet', async () => {
+    const socket = await sockets.open(shipId);
+
+    await callOver(socket, REFRESH);
+
+    expect(calls).toEqual([]);
+  });
+
+  it("refreshes nothing for a caller outside the ship's session: 403", async () => {
+    isCallerLet = false;
+    const socket = await sockets.open(shipId);
+
+    await expect(callOver(socket, REFRESH)).resolves.toMatchObject({ status: 403 });
+    expect(refreshed).toEqual([]);
+  });
+
+  it('refreshes nothing on another method: 403, as any path it does not take', async () => {
+    const socket = await sockets.open(shipId);
+
+    await expect(callOver(socket, { method: 'GET', path: REFRESH.path })).resolves.toMatchObject({ status: 403 });
+    expect(refreshed).toEqual([]);
+  });
+
+  it('answers 500 with why when the refresh fails as a whole', async () => {
+    isRefreshFailing = true;
+    const socket = await sockets.open(shipId);
+
+    const answered = await callOver(socket, REFRESH);
+
+    expect(answered).toMatchObject({ status: 500 });
+    expect(answered !== 'no answer' && JSON.parse(answered.body)).toEqual({ code: 'INTERNAL_SERVER_ERROR', message: 'the checkouts root cannot be read' });
+  });
+
+  it('logs the refresh as one line, as any call', async () => {
+    const socket = await sockets.open(shipId);
+
+    await callOver(socket, REFRESH);
+
+    expect(logged).toEqual([`${shipId} POST /trierarch/checkouts/refresh 200`]);
   });
 });
 
