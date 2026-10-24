@@ -19,7 +19,7 @@ import { createCallerCheck } from '../adapters/caller-check.js';
 import { createShipSockets } from '../adapters/ship-sockets.js';
 import { sessionsLaunch } from '../adapters/tmux.js';
 import { createTrust } from '../adapters/trust.js';
-import { createTrustedRepositoriesFile } from '../adapters/trusted-repositories-file.js';
+import { createTrustedRepositoriesFile, trustedClonesOf, withTrustedRepositories } from '../adapters/trusted-repositories-file.js';
 import { runningVersion } from '../adapters/version.js';
 import { createCheckSessionRuntime } from '../core/check-session-runtime.js';
 import { createDetectHarnesses } from '../core/detect-harnesses.js';
@@ -31,7 +31,6 @@ import { machineOf } from '../core/machine.js';
 import type { Delivery, Logger, TrierarchSetup } from '../core/ports.js';
 import { createReportSelf } from '../core/report-self.js';
 import { createRunPass } from '../core/run-pass.js';
-import { offeredRepositories } from '../core/trusted-repositories.js';
 import { runtimeRefused } from './config-check.js';
 
 /** How often the loop runs a pass: restarts, wakes and releases wait at most this long. */
@@ -86,18 +85,12 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     },
   });
   await trustedRepositories.load();
-  /** The configuration with each trusted repository beside the configured ones, read afresh at each use, as the list changes while it runs. */
-  const withTrusted = <C extends TrierarchConfiguration>(base: C): C => ({
-    ...base,
-    get repositories() {
-      return offeredRepositories(base.repositories, { trusted: trustedRepositories.current(), cloneOf: (name) => trustedRepositories.cloneOf(name) });
-    },
-  });
+  const withTrusted = <C extends TrierarchConfiguration>(base: C): C => withTrustedRepositories(base, trustedRepositories);
   const configuration = withTrusted(withDetectedOptions(configured, detected));
   // What the machine offers changes while it runs, as sessions refuse models (#382): each pass and report reads it afresh.
   let offered = { configuration, detected };
   const version = runningVersion();
-  const clones = { root: paths.repositories, urlOf: (name: string) => (name in configured.repositories ? undefined : trustedRepositories.current().find((each) => each.name === name)?.url) };
+  const clones = trustedClonesOf({ configured, held: trustedRepositories, root: paths.repositories });
   const { sessions, workspace, shipHomes } = runtimeAdaptersOf({ configuration, paths, version, launch: sessionsLaunch({ platform: process.platform, env }), managedSettings, clones });
   const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, managedSettings, detected: () => offered.detected, sessions, ...(shipHomes !== undefined && { shipHomes }) });
   const state = createJsonState(paths.state);

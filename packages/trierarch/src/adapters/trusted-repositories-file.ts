@@ -2,7 +2,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import type { TrustedRepositoriesPort } from '../core/ports.js';
-import { readTrustedRepositories, type TrustedRepository } from '../core/trusted-repositories.js';
+import { offeredRepositories, readTrustedRepositories, type TrustedRepository } from '../core/trusted-repositories.js';
+import type { TrierarchConfiguration } from './files.js';
+import type { TrustedClones } from './trusted-clones.js';
 
 /**
  * The trusted repositories file, `~/.aeolus/trierarch/trusted-repositories.json`
@@ -33,5 +35,32 @@ export function createTrustedRepositoriesFile(at: {
       await writeFile(at.file, `${JSON.stringify({ repositories: list }, null, 2)}\n`);
       current = list;
     },
+  };
+}
+
+/** The trusted repositories as the trierarch holds them now, and where each one's clone is. */
+export type HeldTrustedRepositories = Pick<TrustedRepositoriesPort, 'current'> & { cloneOf(name: string): string };
+
+/**
+ * The configuration with each trusted repository beside the configured ones,
+ * at its clone, read afresh at each use, as the list changes while the
+ * trierarch runs: what it reports, checks, trusts and crews in.
+ */
+export function withTrustedRepositories<C extends TrierarchConfiguration>(base: C, held: HeldTrustedRepositories): C {
+  return {
+    ...base,
+    get repositories() {
+      return offeredRepositories(base.repositories, { trusted: held.current(), cloneOf: (name) => held.cloneOf(name) });
+    },
+  };
+}
+
+/** What a workspace clones first: each trusted repository the configuration does not name, from its URL on the list now. */
+export function trustedClonesOf(at: { configured: TrierarchConfiguration; held: HeldTrustedRepositories; root: string; protocols?: string }): TrustedClones {
+  const { configured, held } = at;
+  return {
+    root: at.root,
+    urlOf: (name) => (name in configured.repositories ? undefined : held.current().find((each) => each.name === name)?.url),
+    ...(at.protocols !== undefined && { protocols: at.protocols }),
   };
 }
