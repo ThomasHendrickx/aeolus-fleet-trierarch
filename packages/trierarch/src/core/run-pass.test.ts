@@ -1161,10 +1161,55 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.processes.sessions.has(stray)).toBe(false);
   });
 
-  it('rule 2: a worktree under its root with no assigned request is reported as an orphan, never deleted', async () => {
+  it('rule 2: a clean worktree under its root with no assigned request is removed, with what runs in it stopped first (#1041)', async () => {
     const trierarch = aTrierarch();
     const orphan = `${WORKTREE_ROOT}/aeolus-fleet/lookout`;
     trierarch.workspace.folders.set(orphan, { hasChanges: false, unsaved: [] });
+    trierarch.folderProcesses.start(orphan, 'astro dev');
+
+    await trierarch.pass();
+
+    expect(trierarch.folderProcesses.running.has(orphan)).toBe(false);
+    expect(trierarch.workspace.folders.has(orphan)).toBe(false);
+    expect(trierarch.state.current().orphans).toEqual([]);
+  });
+
+  it('rule 2: a worktree with no assigned request that holds unsaved work is kept and reported as an orphan, with what runs in it stopped (#1041)', async () => {
+    const trierarch = aTrierarch();
+    const orphan = `${WORKTREE_ROOT}/aeolus-fleet/lookout`;
+    trierarch.workspace.folders.set(orphan, { hasChanges: true, unsaved: [' M README.md'] });
+    trierarch.folderProcesses.start(orphan, 'wrangler dev');
+
+    await trierarch.pass();
+
+    expect(trierarch.folderProcesses.running.has(orphan)).toBe(false);
+    expect(trierarch.workspace.folders.has(orphan)).toBe(true);
+    expect(trierarch.state.current().orphans).toEqual([{ path: orphan, repository: 'aeolus-fleet', name: 'lookout' }]);
+  });
+
+  it('rule 2: an orphan it could not remove is reported and tried again on the next pass (#1041)', async () => {
+    const trierarch = aTrierarch();
+    const orphan = `${WORKTREE_ROOT}/aeolus-fleet/lookout`;
+    trierarch.workspace.folders.set(orphan, { hasChanges: false, unsaved: [] });
+    trierarch.workspace.isFailingRemove = true;
+
+    await trierarch.pass();
+
+    expect(trierarch.workspace.folders.has(orphan)).toBe(true);
+    expect(trierarch.state.current().orphans).toEqual([{ path: orphan, repository: 'aeolus-fleet', name: 'lookout' }]);
+
+    trierarch.workspace.isFailingRemove = false;
+    await trierarch.pass();
+
+    expect(trierarch.workspace.folders.has(orphan)).toBe(false);
+    expect(trierarch.state.current().orphans).toEqual([]);
+  });
+
+  it('rule 2: an orphan whose processes cannot be stopped is not removed (#1041)', async () => {
+    const trierarch = aTrierarch();
+    const orphan = `${WORKTREE_ROOT}/aeolus-fleet/lookout`;
+    trierarch.workspace.folders.set(orphan, { hasChanges: false, unsaved: [] });
+    trierarch.folderProcesses.isFailingStop = true;
 
     await trierarch.pass();
 
@@ -1172,9 +1217,21 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.state.current().orphans).toEqual([{ path: orphan, repository: 'aeolus-fleet', name: 'lookout' }]);
   });
 
-  it('rule 2: a request no longer assigned to it, as when its ship is retired, has its session stopped and its worktree left as an orphan', async () => {
+  it('rule 2: a worktree an entry works in is never cleared as an orphan, nor are the processes in it stopped (#1041)', async () => {
+    const trierarch = aTrierarch();
+    await aCrewedShip(trierarch);
+    trierarch.folderProcesses.start(SCOUT_FOLDER, 'astro dev');
+
+    await trierarch.pass();
+
+    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
+    expect(trierarch.folderProcesses.stoppedIn).toEqual([]);
+  });
+
+  it('rule 2: a request no longer assigned to it, as when its ship is retired, has its session stopped and its clean worktree removed with what runs in it (#1041)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
+    trierarch.folderProcesses.start(SCOUT_FOLDER, 'astro dev');
     trierarch.fleet.unassign(shipId);
 
     await trierarch.pass();
@@ -1182,6 +1239,19 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.processes.sessions.has(shipId)).toBe(false);
     expect(trierarch.state.current().entries).toEqual({});
     expect(trierarch.harness.identities.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.folderProcesses.running.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.state.current().orphans).toEqual([]);
+  });
+
+  it('rule 2: a request no longer assigned to it keeps its worktree as an orphan while it holds unsaved work (#1041)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.change(SCOUT_FOLDER);
+    trierarch.fleet.unassign(shipId);
+
+    await trierarch.pass();
+
     expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
     expect(trierarch.state.current().orphans).toEqual([{ path: SCOUT_FOLDER, repository: 'aeolus-fleet', name: 'scout' }]);
   });
