@@ -10,6 +10,9 @@
 #       the one aeolus_register_harness works out
 #   aeolus-fleet.sh receive|send|report|inbox|setStatement [<json input>|-]   - reads the input from stdin
 #   aeolus-fleet.sh ack|pong <deliveryId>
+#   aeolus-fleet.sh openMeeting|meeting|requestMic|withdrawMicRequest|releaseMic|giveMic|takeMic|setMicPattern
+#     |addToMeeting|leaveMeeting|rejoinMeeting|revokeFromMeeting|transferMeeting|nameModerator|endMeeting
+#       [<json input>|-]   - a meeting's calls (decision 0061), reading the input from stdin with -
 #   aeolus-fleet.sh pushReceive|handed|turn <json input>   - the watcher's and the hooks' calls (#756), never the model's
 #   aeolus-fleet.sh handled <deliveryId>, notHandled <deliveryId> [<reason>]
 #       - the hooks' calls (#756), never the model's; the reason says why (#847)
@@ -42,7 +45,7 @@ MAX_SECONDS="${AEOLUS_CALL_MAX_SECONDS:-60}"
 BUSY_WAITS="${AEOLUS_BUSY_WAITS:-1 2 4 8}"
 
 usage() {
-  echo "usage: aeolus-fleet.sh register|receive|ack|pong|send|report|inbox|setStatement|whoami|reportLog|discover|deregister|protocol|pushReceive|handed|handled|notHandled|turn ..." >&2
+  echo "usage: aeolus-fleet.sh register|receive|ack|pong|send|report|inbox|setStatement|whoami|reportLog|discover|deregister|protocol|pushReceive|handed|handled|notHandled|turn|openMeeting|meeting|requestMic|withdrawMicRequest|releaseMic|giveMic|takeMic|setMicPattern|addToMeeting|leaveMeeting|rejoinMeeting|revokeFromMeeting|transferMeeting|nameModerator|endMeeting ..." >&2
   exit 2
 }
 
@@ -194,7 +197,9 @@ if [ "$command" = protocol ]; then
 fi
 
 case "$command" in
-  receive|send|report|inbox|setStatement|pushReceive|handed|turn)
+  receive|send|report|inbox|setStatement|pushReceive|handed|turn \
+    | openMeeting|meeting|requestMic|withdrawMicRequest|releaseMic|giveMic|takeMic|setMicPattern \
+    | addToMeeting|leaveMeeting|rejoinMeeting|revokeFromMeeting|transferMeeting|nameModerator|endMeeting)
     input="${2:-}"
     [ -n "$input" ] || input='{}'
     [ "$input" = - ] && input="$(cat)"
@@ -223,10 +228,11 @@ case "$command" in
     ;;
 esac
 
-# A send states the model a hook recorded, when one did: it is added last, so
-# it wins over a model the input states (the last of two keys counts).
+# A send, an open and an add state the model a hook recorded, when one did (an
+# open's and an add's notices state it): it is added last, so it wins over a
+# model the input states (the last of two keys counts).
 model_file="$(aeolus_model_file)"
-if [ "$command" = send ] && model="$(head -n 1 "$model_file" 2>/dev/null)"; then
+if { [ "$command" = send ] || [ "$command" = openMeeting ] || [ "$command" = addToMeeting ]; } && model="$(head -n 1 "$model_file" 2>/dev/null)"; then
   model="$(aeolus_json_escape "$model")"
   input="$(printf '%s' "$input" | sed -e ':a' -e '$!{N;ba' -e '}' -e 's/[[:space:]]*$//')"
   if printf '%s' "$input" | grep -Eq '^[[:space:]]*\{[[:space:]]*\}$'; then
