@@ -236,6 +236,12 @@ export interface SessionRuntime {
   screen(shipId: ShipId): Promise<string>;
 }
 
+/** The processes running in a folder, whatever started them: a dev server a session left behind. */
+export interface FolderProcessesPort {
+  /** Stops every process whose working folder is the folder or inside it, and answers how many it stopped. */
+  stopIn(folder: string): Promise<number>;
+}
+
 /** A worktree under the trierarch's root (`<root>/<repository>/<name>`), with the ship it is named after when it is one. */
 export interface ObservedWorktree {
   readonly path: string;

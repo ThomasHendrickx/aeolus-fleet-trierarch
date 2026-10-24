@@ -115,7 +115,7 @@ describe('aeolus-trierarch status', () => {
     trierarch.workspace.change(`${WORKTREE_ROOT}/aeolus-fleet/scout`);
     trierarch.fleet.requestAgain(scout, crewSettings({ harness: 'codex' }));
     await trierarch.pass();
-    trierarch.workspace.folders.set(`${WORKTREE_ROOT}/aeolus-fleet/stray`, { hasChanges: false, unsaved: [] });
+    trierarch.workspace.folders.set(`${WORKTREE_ROOT}/aeolus-fleet/stray`, { hasChanges: true, unsaved: [' M README.md'] });
     await trierarch.pass();
 
     const text = describeStatus(await inspect(trierarch));

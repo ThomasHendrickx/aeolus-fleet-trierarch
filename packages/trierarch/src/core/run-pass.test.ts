@@ -362,7 +362,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
   it('confirms a clear request for a worktree it does not keep as not-kept, and removes nothing (decision 0032)', async () => {
     const trierarch = aTrierarch();
     const shipId = trierarch.fleet.commission('scout');
-    trierarch.workspace.folders.set(SCOUT_FOLDER, { hasChanges: true, unsaved: [] });
+    trierarch.workspace.folders.set(SCOUT_FOLDER, { hasChanges: true, unsaved: [' M README.md'] });
     trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
 
     await trierarch.pass();
