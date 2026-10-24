@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { readTrustedRepositories } from './trusted-repositories.js';
+import { offeredRepositories, readTrustedRepositories } from './trusted-repositories.js';
 
 const listOf = (repositories: readonly { name: unknown; url: unknown }[]) => JSON.stringify({ repositories });
 
@@ -53,5 +53,25 @@ describe('the trusted repositories a trierarch receives', () => {
       isOk: false,
       error: { reason: 'hemma: a trusted repository is an https:// or ssh URL, never a path, a file URL or a credential' },
     });
+  });
+});
+
+describe('the repositories a trierarch offers with the trusted repositories', () => {
+  const configured = { 'aeolus-fleet': { path: '/home/me/aeolus-fleet', checkouts: ['skills'] } };
+  const cloneOf = (name: string) => `/home/me/.aeolus/trierarch/repositories/${name}`;
+
+  it('offers each trusted repository beside the configured ones, at its clone', () => {
+    expect(offeredRepositories(configured, { trusted: [{ name: 'hemma', url: 'git@github.com:ThomasHendrickx/hemma.git' }], cloneOf })).toEqual({
+      'aeolus-fleet': { path: '/home/me/aeolus-fleet', checkouts: ['skills'] },
+      hemma: { path: '/home/me/.aeolus/trierarch/repositories/hemma' },
+    });
+  });
+
+  it('keeps a configured repository whose name is on the list as configured: the machine\'s own wins', () => {
+    expect(offeredRepositories(configured, { trusted: [{ name: 'aeolus-fleet', url: 'https://github.com/ThomasHendrickx/aeolus-fleet.git' }], cloneOf })).toEqual(configured);
+  });
+
+  it('offers the configured ones alone with no trusted repositories', () => {
+    expect(offeredRepositories(configured, { trusted: [], cloneOf })).toEqual(configured);
   });
 });
