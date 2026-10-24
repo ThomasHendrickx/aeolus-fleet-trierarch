@@ -90,6 +90,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     logger,
   });
   const handle = createHandleDelivery({ fleet, logger });
+  const checkouts = createGitCheckouts({ configuration: configured, root: paths.checkouts });
   // Each session's fleet calls, with the crew token from the state at each call (decision 0026).
   const sockets = createShipSockets({
     root: paths.sockets,
@@ -99,8 +100,8 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     log: (line) => {
       logger.info(`fleet call ${line}`);
     },
+    refreshCheckouts: (shipId) => checkouts.refresh(shipId),
   });
-  const checkouts = createGitCheckouts({ configuration: configured, root: paths.checkouts });
   const runPass = createRunPass({ fleet, harnesses, processes: sessions, workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets });
   const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup });
   // Each pass ends with the trierarch's own report: the first at start, then only when it changed.

@@ -5,6 +5,8 @@ import { join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
 
+import type { RefreshedCheckout } from '../core/ports.js';
+
 /**
  * The socket of each ship the trierarch crews (decision 0026): a session holds
  * no fleet credential, so its fleet calls come over a Unix socket of its
@@ -16,7 +18,9 @@ import type { ShipId } from '@aeolus-fleet/common';
  * trierarch (the caller check), and checks only the path (the ship API and the ship protocol,
  * never register or deregister) and the size, and logs one line per call
  * without the body. It queues nothing: when the fleet gives no answer, the
- * session gets none either.
+ * session gets none either. One call it answers itself, never the fleet's: a
+ * refresh of its ship's read-only checkouts (#1182), which answers the
+ * revision each now holds, or why it could not.
  */
 
 /** The most a call's body may hold: a 64 KB payload with the JSON around it. */
@@ -29,6 +33,8 @@ const SHIP_CALL = /^\/api\/v1\/ship\/([A-Za-z]+)$/;
 const CREW_CALLS = new Set(['register', 'deregister']);
 /** The ship protocol, which a session reads at each start (`aeolus-fleet.sh protocol`). */
 const PROTOCOL = '/api/v1/openapi.json';
+/** A refresh of the ship's read-only checkouts (`aeolus-checkouts.sh refresh`), which the trierarch answers itself (#1182). */
+const REFRESH_CHECKOUTS = '/trierarch/checkouts/refresh';
 
 export interface ShipSockets {
   /** Opens the ship's socket, or keeps the one open; answers its path. */
@@ -67,10 +73,13 @@ function bodyOf(incoming: IncomingMessage): Promise<Buffer | 'too large'> {
   });
 }
 
-function refuse(response: ServerResponse, refusal: { status: 403 | 413; message: string }): void {
+/** The code a refusal of each status says, as the fleet's refusals do. */
+const REFUSAL_CODES = { 403: 'FORBIDDEN', 413: 'PAYLOAD_TOO_LARGE', 500: 'INTERNAL_SERVER_ERROR' } as const;
+
+function refuse(response: ServerResponse, refusal: { status: keyof typeof REFUSAL_CODES; message: string }): void {
   const { status, message } = refusal;
   response.writeHead(status, { 'content-type': 'application/json', connection: 'close' });
-  response.end(JSON.stringify({ code: status === 403 ? 'FORBIDDEN' : 'PAYLOAD_TOO_LARGE', message }));
+  response.end(JSON.stringify({ code: REFUSAL_CODES[status], message }));
 }
 
 export function createShipSockets(options: {
@@ -80,6 +89,8 @@ export function createShipSockets(options: {
   /** Whether the process at the other end of the connection may call the ship's socket. */
   mayCall: (shipId: ShipId, connection: Socket) => Promise<boolean>;
   log: (line: string) => void;
+  /** Brings the ship's read-only checkouts to the latest main (#1182). */
+  refreshCheckouts: (shipId: ShipId) => Promise<readonly RefreshedCheckout[]>;
 }): ShipSockets {
   const servers = new Map<ShipId, { server: Server; path: string }>();
 
@@ -93,6 +104,18 @@ export function createShipSockets(options: {
     if (!(await options.mayCall(shipId, incoming.socket))) {
       refuse(response, { status: 403, message: "This socket answers only its ship's own session" });
       said('403');
+      return;
+    }
+    if (method === 'POST' && path === REFRESH_CHECKOUTS) {
+      try {
+        const checkouts = await options.refreshCheckouts(shipId);
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ checkouts }));
+        said('200');
+      } catch (error) {
+        refuse(response, { status: 500, message: error instanceof Error ? error.message : String(error) });
+        said('500');
+      }
       return;
     }
     if (!isForwarded(method, path)) {

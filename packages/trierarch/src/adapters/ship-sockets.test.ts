@@ -124,7 +124,7 @@ describe("a ship's socket", () => {
   });
 
   it('opens over a socket file a stopped trierarch left behind', async () => {
-    const first = createShipSockets({ root, fleetUrl, crewTokenOf: () => Promise.resolve(CREW_TOKEN), mayCall: () => Promise.resolve(true), log: () => undefined });
+    const first = createShipSockets({ root, fleetUrl, crewTokenOf: () => Promise.resolve(CREW_TOKEN), mayCall: () => Promise.resolve(true), log: () => undefined, refreshCheckouts });
     await first.open(shipId);
     await first.closeAll();
     const left = await sockets.open(shipId);
