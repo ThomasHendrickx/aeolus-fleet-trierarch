@@ -28,6 +28,15 @@ const URL_REFUSED = 'a trusted repository is an https:// or ssh URL, never a pat
  */
 const SCP_LIKE = /^[A-Za-z0-9_][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9.-]*:[^\s-]\S*$/;
 
+/** Whether the URL's user reads as an ssh option once decoded; a user that does not decode is no user git can take either. */
+function isOptionUser(username: string): boolean {
+  try {
+    return decodeURIComponent(username).startsWith('-');
+  } catch {
+    return true;
+  }
+}
+
 /**
  * Whether git may clone from the URL with the machine's own access: https
  * with no user (a user there is a token), or ssh with no password and no user
@@ -50,7 +59,7 @@ function isCloneable(url: string): boolean {
     return hasRepository && hasSafeHost && parsed.username === '' && parsed.password === '';
   }
   if (parsed.protocol === 'ssh:') {
-    return hasRepository && hasSafeHost && parsed.password === '' && !decodeURIComponent(parsed.username).startsWith('-');
+    return hasRepository && hasSafeHost && parsed.password === '' && !isOptionUser(parsed.username);
   }
   return false;
 }
