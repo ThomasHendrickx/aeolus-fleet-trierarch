@@ -1,7 +1,7 @@
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-import { idSchema, trierarchConfigurationSchema, type ShipId, type TrierarchConfiguration } from '@aeolus-fleet/common';
+import { idSchema, trierarchConfigurationSchema as commonConfigurationSchema, trierarchNameSchema, type ShipId } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
 /**
@@ -9,6 +9,32 @@ import { z } from 'zod';
  * its crew file, written by `init`: the fleet's URL and the trierarch's own
  * crew token, readable by its user only.
  */
+
+/**
+ * The configuration as common states it, with each repository's read-only
+ * checkouts (#1182): the configured repositories a session in that repository
+ * gets beside its working folder, at the latest main. They are named, never a
+ * path, so only a repository the machine already trusts is checked out. Kept
+ * here rather than in common: only the trierarch reads its configuration, and
+ * a crew request never names them.
+ */
+export const trierarchConfigurationSchema = commonConfigurationSchema
+  .extend({ repositories: z.record(trierarchNameSchema, z.strictObject({ path: z.string().min(1), checkouts: z.array(trierarchNameSchema).optional() })) })
+  .superRefine((configuration, context) => {
+    for (const [repository, { checkouts = [] }] of Object.entries(configuration.repositories)) {
+      checkouts.forEach((checkout, index) => {
+        const path = ['repositories', repository, 'checkouts', index];
+        if (checkout === repository) {
+          context.addIssue({ code: 'custom', path, message: `${checkout} is the repository itself, the session's working folder` });
+        } else if (!(checkout in configuration.repositories)) {
+          context.addIssue({ code: 'custom', path, message: `${checkout} is no repository of this configuration` });
+        } else if (checkouts.indexOf(checkout) !== index) {
+          context.addIssue({ code: 'custom', path, message: `${checkout} is named twice` });
+        }
+      });
+    }
+  });
+export type TrierarchConfiguration = z.infer<typeof trierarchConfigurationSchema>;
 
 /** A file the trierarch cannot use, with why, for the operator to read. */
 export class TrierarchFileError extends Error {}

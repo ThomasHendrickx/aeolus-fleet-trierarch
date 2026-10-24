@@ -16,6 +16,7 @@ import { adapterFlagsOf, riskyFlagsOf } from '../src/adapters/harnesses.js';
 import { createClaudeCodeSetup } from '../src/adapters/claude-code-setup.js';
 import { readCrewFile } from '../src/adapters/files.js';
 import { runCommand } from '../src/adapters/run-command.js';
+import { createGitCheckouts } from '../src/adapters/git-checkouts.js';
 import { createGitWorkspace } from '../src/adapters/git-workspace.js';
 import { createJsonState } from '../src/adapters/json-state.js';
 import { trierarchPaths, type TrierarchPaths } from '../src/adapters/paths.js';
@@ -187,10 +188,11 @@ async function aTrierarchOnTheFleet(claudeCodeFlags: readonly string[] = CONFIGU
   const setup = { configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
   // The real caller check: the plugin's scripts run as children of this process, as aeolus-push.sh does of the trierarch.
   const mayCall = createCallerCheck({ platform: process.platform, sessionRootOf: () => Promise.resolve(undefined) });
-  const sockets = createShipSockets({ root: paths.sockets, fleetUrl: address, crewTokenOf: async (shipId) => (await state.load()).entries[shipId]?.crewToken, mayCall, log: () => undefined });
+  const checkouts = createGitCheckouts({ configuration, root: paths.checkouts });
+  const sockets = createShipSockets({ root: paths.sockets, fleetUrl: address, crewTokenOf: async (shipId) => (await state.load()).entries[shipId]?.crewToken, mayCall, log: () => undefined, refreshCheckouts: (shipId) => checkouts.refresh(shipId) });
   openSockets = sockets;
   // A new run pass over the same files is the trierarch started again.
-  const aRunPass = () => createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }), state, setup, clock, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID, sockets });
+  const aRunPass = () => createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }), state, setup, clock, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID, sockets, checkouts });
   const pass = aRunPass();
   const leasesOf = (shipId: ShipId) => database.lease.count({ where: { shipId, endedAt: null } });
   const worktree = join(paths.worktrees, 'aeolus-fleet', 'scout');

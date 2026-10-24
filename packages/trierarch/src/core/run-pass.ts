@@ -3,7 +3,7 @@ import { CREW_REQUEST_REASON_MAX_LENGTH, type ShipId } from '@aeolus-fleet/commo
 import { putEntry, removeEntry, withState, type Entry, type TrierarchState } from './entry.js';
 import { crashText, discardedText, identityGoneText, modelRefusedText, ownerUnreachableText, settingsRefusedText } from './argo-reports.js';
 import { MODEL_OPTION } from './detected-options.js';
-import type { FleetPort, HarnessPort, LaunchSeen, LoggedAction, Logger, SessionRuntime, ShipSocketsPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
+import type { Checkout, CheckoutsPort, FleetPort, HarnessPort, LaunchSeen, LoggedAction, Logger, SessionRuntime, ShipSocketsPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { HOLDS_IDENTITY, reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
 import type { RefuseModel } from './refuse-model.js';
 import type { Clock } from './shared/clock.js';
@@ -27,6 +27,8 @@ export interface RunPassDeps {
   harnesses: Readonly<Record<string, HarnessPort>>;
   processes: Pick<SessionRuntime, 'list' | 'stop'>;
   workspace: WorkspacePort;
+  /** Each ship's read-only checkouts (#1182), made before its session starts and removed with its identity. */
+  checkouts: CheckoutsPort;
   /** What each harness trusts, read each pass so it is checked before every launch (#381). */
   trust: TrustPort;
   state: StatePort;
@@ -247,6 +249,7 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
           shipName: entry.shipName ?? entry.shipId,
           folder: entry.folder,
           workspace: entry.workspace,
+          checkouts: await checkoutsOf(entry, deps),
           harness: entry.harness,
           options: entry.options,
           isFirstStart: false,
@@ -341,9 +344,17 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   state = putEntry(state, { ...crewing, shipName: ship.name, folder });
   await deps.state.save(state);
   const socket = await deps.sockets.open(crewing.shipId);
+  const checkouts = await checkoutsOf(crewing, deps);
   await harness.prepareIdentity({
     folder,
-    identity: { fleetUrl: deps.fleet.url, shipId: crewing.shipId, shipName: ship.name, socket, ...(crewing.squadron !== undefined && { squadron: crewing.squadron }) },
+    identity: {
+      fleetUrl: deps.fleet.url,
+      shipId: crewing.shipId,
+      shipName: ship.name,
+      socket,
+      ...(crewing.squadron !== undefined && { squadron: crewing.squadron }),
+      ...(checkouts.length > 0 && { checkouts }),
+    },
     crewToken,
   });
   const launchId = deps.newLaunchId();
@@ -352,6 +363,7 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
     shipName: ship.name,
     folder,
     workspace: crewing.workspace,
+    checkouts,
     harness: crewing.harness,
     options: crewing.options,
     isFirstStart: !crewing.hasStarted,
@@ -591,11 +603,17 @@ async function reportTrouble(deps: RunPassDeps, trouble: { shipId: ShipId; shipN
   return OPERATOR_SHIP_NAME;
 }
 
-/** The session's identity goes, and with it its ship's socket: nothing calls over it any more (decision 0026). */
+/** The session's identity goes, and with it its ship's socket, as nothing calls over it any more (decision 0026), and its read-only checkouts (#1182). */
 async function removeIdentity(at: EntryAt & { folder: string }): Promise<void> {
   const { entry, deps, folder } = at;
   await harnessOf(entry, deps)?.removeIdentity({ shipId: entry.shipId, folder });
   await deps.sockets.close(entry.shipId);
+  await deps.checkouts.remove(entry.shipId);
+}
+
+/** The read-only checkouts a session in the entry's repository gets (#1182), made when missing; none in a configured folder. */
+async function checkoutsOf(entry: Entry, deps: RunPassDeps): Promise<readonly Checkout[]> {
+  return entry.workspace.kind === 'worktree' ? deps.checkouts.prepare({ shipId: entry.shipId, repository: entry.workspace.repository }) : [];
 }
 
 /** Why a worktree is removed whatever it holds: its request was removed (row 7), or its ship released elsewhere is crewed again (row 11). */

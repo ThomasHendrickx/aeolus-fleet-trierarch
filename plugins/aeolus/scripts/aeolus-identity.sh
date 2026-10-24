@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # The ship this folder crews, kept in the plugin's data folder.
 #
-#   aeolus-identity.sh write [--wake-by trierarch [--socket <path>]] <fleetUrl> <shipId> <shipName> [<squadronId>]
+#   aeolus-identity.sh write [--wake-by trierarch [--socket <path>] [--checkout <repository>=<path>]...] <fleetUrl> <shipId> <shipName> [<squadronId>]
 #                       the crew token on stdin, never on the command line, which any local user reads (#822);
 #                       with --wake-by trierarch, the trierarch wakes the folder's sessions, not a watcher;
-#                       with --socket, the folder calls the fleet over the trierarch's socket and keeps only the token's lease
+#                       with --socket, the folder calls the fleet over the trierarch's socket and keeps only the token's lease;
+#                       each --checkout, a read-only checkout the trierarch keeps beside the folder, which the start context names (#1182)
 #   aeolus-identity.sh check-in <interval>   a squadron member keeps its check-in interval: <n>m or <n>h
 #   aeolus-identity.sh show     the ship and its fleet (never the token), and whether its lease is pushed; exit 1 when none
 #   aeolus-identity.sh turn     the turn marker of a folder a trierarch crews: busy or idle, with when; exit 1 when none
@@ -21,19 +22,28 @@ command="${1:-}"
 
 case "$command" in
   write)
-    usage="usage: aeolus-identity.sh write [--wake-by trierarch [--socket <path>]] <fleetUrl> <shipId> <shipName> [<squadronId>], the crew token on stdin"
+    usage="usage: aeolus-identity.sh write [--wake-by trierarch [--socket <path>] [--checkout <repository>=<path>]...] <fleetUrl> <shipId> <shipName> [<squadronId>], the crew token on stdin"
     wake_by=""
     socket=""
+    checkouts=()
     shift
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --wake-by) [ "${2:-}" = trierarch ] || { echo "$usage" >&2; exit 2; }; wake_by=trierarch; shift 2 ;;
         --socket) [ -n "${2:-}" ] || { echo "$usage" >&2; exit 2; }; socket="$2"; shift 2 ;;
+        --checkout)
+          case "${2:-}" in
+            ?*=?*) checkouts+=("$2"); shift 2 ;;
+            *) echo "$usage" >&2; exit 2 ;;
+          esac
+          ;;
         *) break ;;
       esac
     done
     # Only a trierarch's folder calls over a socket: the trierarch adds the crew token (decision 0026).
     [ -z "$socket" ] || [ "$wake_by" = trierarch ] || { echo "$usage" >&2; exit 2; }
+    # Only a trierarch keeps checkouts beside a folder (#1182).
+    [ "${#checkouts[@]}" -eq 0 ] || [ "$wake_by" = trierarch ] || { echo "$usage" >&2; exit 2; }
     { [ "$#" -eq 3 ] || [ "$#" -eq 4 ]; } || { echo "$usage" >&2; exit 2; }
     IFS= read -r token || true
     [ -n "$token" ] || { echo "$usage" >&2; exit 2; }
@@ -51,6 +61,11 @@ case "$command" in
     printf 'folder=%s\n' "$folder" >> "$file.tmp"
     # A squadron member keeps its squadron: it checks in at the flagship of that name.
     [ "$#" -eq 4 ] && printf 'squadron=%s\n' "$4" >> "$file.tmp"
+    # Its read-only checkouts, one line each: the repository, then where it is.
+    # Spelled so an empty list is no unbound variable in the bash 3.2 macOS ships.
+    for checkout in ${checkouts[@]+"${checkouts[@]}"}; do
+      printf 'checkout=%s\n' "$checkout" >> "$file.tmp"
+    done
     # A trierarch's session: the trierarch wakes it, so the plugin asks for no watcher.
     [ -n "$wake_by" ] && printf 'wakeBy=%s\n' "$wake_by" >> "$file.tmp"
     mv "$file.tmp" "$file"

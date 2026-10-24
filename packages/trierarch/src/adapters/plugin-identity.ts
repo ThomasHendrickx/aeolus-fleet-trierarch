@@ -57,7 +57,19 @@ export function createPluginIdentity(plugin: AeolusPlugin): Pick<HarnessPort, 'p
     prepareIdentity: async ({ folder, identity: crew, crewToken }) => {
       const written = await runIdentity(plugin, {
         folder,
-        args: ['write', '--wake-by', 'trierarch', '--socket', crew.socket, crew.fleetUrl, crew.shipId, crew.shipName, ...(crew.squadron === undefined ? [] : [crew.squadron])],
+        args: [
+          'write',
+          '--wake-by',
+          'trierarch',
+          '--socket',
+          crew.socket,
+          // Each read-only checkout, which the session's start context names (#1182).
+          ...(crew.checkouts ?? []).flatMap((checkout) => ['--checkout', `${checkout.repository}=${checkout.path}`]),
+          crew.fleetUrl,
+          crew.shipId,
+          crew.shipName,
+          ...(crew.squadron === undefined ? [] : [crew.squadron]),
+        ],
         input: crewToken,
       });
       if (written.status !== 0) {

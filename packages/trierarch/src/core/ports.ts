@@ -136,6 +136,8 @@ export interface Identity {
   readonly shipName: string;
   readonly socket: string;
   readonly squadron?: string;
+  /** The session's read-only checkouts (#1182), which its start context names; none when it has none. */
+  readonly checkouts?: readonly Checkout[];
 }
 
 /**
@@ -171,6 +173,8 @@ export interface HarnessPort {
     shipName: string;
     folder: string;
     workspace: TrierarchWorkspace;
+    /** The session's read-only checkouts (#1182), which it may read beside its folder. */
+    checkouts: readonly Checkout[];
     harness: string;
     options: Readonly<Record<string, string>>;
     isFirstStart: boolean;
@@ -222,7 +226,8 @@ export interface SessionRuntime {
   list(): Promise<readonly ObservedSession[]>;
   stop(shipId: ShipId): Promise<void>;
   /** Starts the command in the folder, with the environment given, in a new session for the ship; an exited one is replaced. */
-  start(session: { shipId: ShipId; folder: string; command: readonly string[]; env?: Readonly<Record<string, string>> }): Promise<void>;
+  /** Starts the session in its folder; `readOnly` names its read-only checkouts (#1182), which a container mounts read-only and the host leaves as they are. */
+  start(session: { shipId: ShipId; folder: string; command: readonly string[]; env?: Readonly<Record<string, string>>; readOnly?: readonly string[] }): Promise<void>;
   /** Types the text into the ship's session and presses Enter, after `settleMs` when given. */
   type(at: { shipId: ShipId; text: string; settleMs?: number }): Promise<void>;
   /** Stops the session's running turn as a person does, with Escape; the session goes on (decision 0040). */
@@ -280,6 +285,29 @@ export interface WorkspacePort {
   /** Removes a worktree the trierarch made; never a configured folder. */
   remove(folder: string): Promise<void>;
   worktrees(): Promise<readonly ObservedWorktree[]>;
+}
+
+/** A read-only checkout a session gets beside its working folder (#1182): the configured repository it is of, and where it is. */
+export interface Checkout {
+  readonly repository: string;
+  readonly path: string;
+}
+
+/** What refreshing a checkout came to: the revision it now holds, or why it could not, as one line. */
+export type RefreshedCheckout = { readonly repository: string; readonly revision: string } | { readonly repository: string; readonly problem: string };
+
+/**
+ * The read-only checkouts of each ship (#1182): the repositories the
+ * configuration names for its working repository, at the latest main, one
+ * folder per ship. The session can change, commit and push nothing in them.
+ */
+export interface CheckoutsPort {
+  /** Makes the ship's checkouts its working repository names, keeping those it has; answers each, none for a repository that names none. */
+  prepare(at: { shipId: ShipId; repository: string }): Promise<readonly Checkout[]>;
+  /** Brings each of the ship's checkouts to the latest main of its repository; one that cannot be refreshed says why and holds what it held. */
+  refresh(shipId: ShipId): Promise<readonly RefreshedCheckout[]>;
+  /** Removes every checkout of the ship. */
+  remove(shipId: ShipId): Promise<void>;
 }
 
 export interface StatePort {

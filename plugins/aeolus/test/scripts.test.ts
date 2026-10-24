@@ -4079,3 +4079,111 @@ describe('the plugin reads the identity once, never looking for it first (#719)'
     });
   });
 });
+
+describe("a ship's read-only checkouts, which its trierarch keeps (#1182)", () => {
+  let sockets: string;
+  const GOVERNANCE = '/home/thomas/.aeolus/trierarch/checkouts/scout/governance';
+  const SKILLS = '/home/thomas/.aeolus/trierarch/checkouts/scout/skills';
+
+  beforeEach(() => {
+    // Short, under /tmp: a Unix socket path is at most 104 bytes on macOS.
+    sockets = mkdtempSync('/tmp/aeolus-sock-');
+  });
+
+  afterEach(() => {
+    rmSync(sockets, { recursive: true, force: true });
+  });
+
+  /** The trierarch writes the folder's identity with its socket and the checkouts given. */
+  function crewedWithCheckouts(checkouts: readonly string[], env: Record<string, string> = {}): string {
+    const socket = join(sockets, 'fleet.sock');
+    const args = ['write', '--wake-by', 'trierarch', '--socket', socket, ...checkouts.flatMap((checkout) => ['--checkout', checkout]), 'https://fleet.example.com', SHIP_ID, 'scout'];
+    expect(run('aeolus-identity.sh', { args, stdin: CREW_TOKEN, env }).status).toBe(0);
+    return socket;
+  }
+
+  /** Runs the refresh without waiting, so the stub on the socket, in this process, can answer. */
+  const refresh = () => start('aeolus-checkouts.sh', { args: ['refresh'] }).done;
+
+  function sessionStart(env: Record<string, string>) {
+    const envFile = join(data, 'session.env');
+    writeFileSync(envFile, '');
+    const { stdout } = run('aeolus-session-start.sh', {
+      stdin: JSON.stringify({ session_id: 'c5858406-be86-46cd-8591-f4fb39b1fa61', cwd: folder, hook_event_name: 'SessionStart', source: 'startup' }),
+      env: { AEOLUS_FOLDER: '', AEOLUS_DATA: '', CLAUDE_ENV_FILE: envFile, ...env },
+    });
+    return hookOutputSchema.parse(JSON.parse(stdout)).hookSpecificOutput.additionalContext;
+  }
+
+  const STATED = `Read-only checkouts beside this folder: governance at ${GOVERNANCE}, skills at ${SKILLS}. Read them; never change, commit or push in them.`;
+
+  it("names each checkout and where it is in a Claude Code session's start context", () => {
+    crewedWithCheckouts([`governance=${GOVERNANCE}`, `skills=${SKILLS}`]);
+
+    const context = sessionStart({ CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin' });
+
+    expect(context).toContain(STATED);
+    expect(context).toContain('To bring them to the latest main, run "/plugin/scripts/aeolus-checkouts.sh" refresh: it answers the revision each now holds, or why it could not.');
+  });
+
+  it("names each checkout and where it is in a Codex session's start context", () => {
+    crewedWithCheckouts([`governance=${GOVERNANCE}`, `skills=${SKILLS}`], AS_CODEX);
+
+    const context = sessionStart({ PLUGIN_DATA: data, PLUGIN_ROOT: SCRIPTS.replace(/\/scripts\/$/, '') });
+
+    expect(context).toContain(STATED);
+    expect(context).toContain('aeolus-checkouts.sh refresh');
+  });
+
+  it('names no checkouts for a ship that has none', () => {
+    crewedWithCheckouts([]);
+
+    const context = sessionStart({ CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin' });
+
+    expect(context).not.toContain('checkouts');
+  });
+
+  it('refuses a checkout that names no repository and path', () => {
+    const written = run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', '--checkout', GOVERNANCE, 'https://fleet.example.com', SHIP_ID, 'scout'], stdin: CREW_TOKEN });
+
+    expect(written.status).toBe(2);
+    expect(statSync(identityFile(), { throwIfNoEntry: false })).toBeUndefined();
+  });
+
+  it('asks the trierarch over its socket to refresh the checkouts, and prints its answer: the revision each now holds, or why it could not', async () => {
+    const socket = crewedWithCheckouts([`governance=${GOVERNANCE}`]);
+    const answer = { checkouts: [{ repository: 'governance', revision: '3f2a9c1' }, { repository: 'skills', problem: 'git fetch failed' }] };
+    fleet = await startRoutedStubFleet({ '/trierarch/checkouts/refresh': [{ status: 200, body: answer }] }, { socket });
+
+    const refreshed = await refresh();
+
+    expect(refreshed.status).toBe(0);
+    expect(JSON.parse(refreshed.stdout)).toEqual(answer);
+    expect(fleet.calls.map(({ method, path, authorization }) => ({ method, path, authorization }))).toEqual([{ method: 'POST', path: '/trierarch/checkouts/refresh', authorization: undefined }]);
+  });
+
+  it('says so and exits 1 when the trierarch refuses', async () => {
+    const socket = crewedWithCheckouts([`governance=${GOVERNANCE}`]);
+    fleet = await startRoutedStubFleet({ '/trierarch/checkouts/refresh': [{ status: 403, body: { code: 'FORBIDDEN', message: "This socket answers only its ship's own session" } }] }, { socket });
+
+    const refreshed = await refresh();
+
+    expect({ status: refreshed.status, stdout: refreshed.stdout }).toEqual({ status: 1, stdout: "aeolus: the trierarch refused the refresh: FORBIDDEN: This socket answers only its ship's own session\n" });
+  });
+
+  it('exits 6 when the trierarch does not answer', () => {
+    const socket = crewedWithCheckouts([`governance=${GOVERNANCE}`]);
+
+    const refreshed = run('aeolus-checkouts.sh', { args: ['refresh'] });
+
+    expect({ status: refreshed.status, stdout: refreshed.stdout }).toEqual({ status: 6, stdout: `aeolus: no answer from the trierarch at ${socket}\n` });
+  });
+
+  it('exits 2 in a folder no trierarch crews: no trierarch keeps its checkouts', () => {
+    expect(run('aeolus-identity.sh', { args: ['write', 'https://fleet.example.com', SHIP_ID, 'scout'], stdin: CREW_TOKEN }).status).toBe(0);
+
+    const refreshed = run('aeolus-checkouts.sh', { args: ['refresh'] });
+
+    expect({ status: refreshed.status, stdout: refreshed.stdout }).toEqual({ status: 2, stdout: 'aeolus: no trierarch crews this folder, so none keeps checkouts for it\n' });
+  });
+});

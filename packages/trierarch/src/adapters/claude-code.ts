@@ -45,6 +45,8 @@ export const LAUNCH_VARIABLE = 'AEOLUS_LAUNCH';
 
 const REMOTE_CONTROL = '--remote-control';
 const CONTINUE = '--continue';
+/** Lets the session read a folder beside its own without asking: each of its read-only checkouts (#1182). */
+const ADD_DIR = '--add-dir';
 const END_OF_FLAGS = '--';
 const NO_PANE_PROMPTS = '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode';
 const PERMISSION_MODE = '--permission-mode';
@@ -131,7 +133,17 @@ function namedRemoteControl(flags: readonly string[], name: string): CommandPart
 }
 
 /** `claude`, the flags without plan mode, `--permission-mode manual` (or `default`, as the installed Claude Code lists) when the settings' default mode is plan and the flags name none (or where it depends on the folder, with when it applies), AskUserQuestion and plan mode disallowed, `--continue` on a restart, then the prompt last after `--`: no flag takes it (`--remote-control [name]` has an optional value), and it never reads as a flag. */
-export function claudeCodeCommandLine(at: { flags: readonly string[]; sessionName: string; prompt: string; isFirstStart: boolean; defaultPermissionMode?: SettingsDefaultMode; permissionModes?: readonly string[] | undefined; program?: string }): CommandPart[] {
+export function claudeCodeCommandLine(at: {
+  flags: readonly string[];
+  sessionName: string;
+  prompt: string;
+  isFirstStart: boolean;
+  defaultPermissionMode?: SettingsDefaultMode;
+  permissionModes?: readonly string[] | undefined;
+  program?: string;
+  /** The session's read-only checkouts (#1182), which it reads beside its folder without asking. */
+  readOnly?: readonly string[];
+}): CommandPart[] {
   const flags = withoutPlanMode(at.flags);
   return partsWithWords([
     { words: [at.program ?? 'claude'] },
@@ -139,6 +151,7 @@ export function claudeCodeCommandLine(at: { flags: readonly string[]; sessionNam
     planOverride(flags, { defaultMode: at.defaultPermissionMode, permissionModes: at.permissionModes }),
     { words: [NO_PANE_PROMPTS], source: 'adapter' },
     { words: at.isFirstStart ? [] : [CONTINUE], source: 'adapter' },
+    { words: (at.readOnly ?? []).flatMap((path) => [ADD_DIR, path]), source: 'adapter' },
     { words: [END_OF_FLAGS, at.prompt] },
   ]);
 }
@@ -189,7 +202,7 @@ export function createClaudeCodeHarness(options: {
     },
     turnOf: (session) => identityOf(session.shipId).turnOf(session),
     startProblem: () => createPluginIdentity(plugin).startProblem(),
-    launch: async ({ shipId, shipName, folder, workspace, harness, options: picked, isFirstStart, launchId, firstPrompt }) => {
+    launch: async ({ shipId, shipName, folder, workspace, checkouts, harness, options: picked, isFirstStart, launchId, firstPrompt }) => {
       const settings = configuration.harnesses[harness];
       if (settings === undefined) {
         throw new Error(`The configuration has no harness ${harness}`);
@@ -206,10 +219,11 @@ export function createClaudeCodeHarness(options: {
         defaultPermissionMode: await claudeCodeSettingsDefaultMode(home.setup, { flags, folder }),
         permissionModes: options.permissionModes(),
         ...(options.command !== undefined && { program: options.command }),
+        readOnly: checkouts.map((checkout) => checkout.path),
       });
       const marks = marksOf(shipId);
       await marks.clear(folder);
-      await sessions.start({ shipId, folder, command: wordsOf(command), env: { [LAUNCH_VARIABLE]: launchId } });
+      await sessions.start({ shipId, folder, command: wordsOf(command), env: { [LAUNCH_VARIABLE]: launchId }, ...(checkouts.length > 0 && { readOnly: checkouts.map((checkout) => checkout.path) }) });
     },
     handOver: async (session) => {
       const line = await identityOf(session.shipId).handOverLine(session);

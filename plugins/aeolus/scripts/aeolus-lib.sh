@@ -334,6 +334,16 @@ aeolus_identity_field() {
   printf '%s\n' "$text" | sed -n "s/^${field}=//p" | head -n 1
 }
 
+# The sentence a start context gives a folder's read-only checkouts (#1182):
+# each by its repository and where it is, and how to refresh them. Nothing
+# when the identity names none. <identity text> <the refresh as the session runs it>
+aeolus_checkouts_context() {
+  local text="$1" refresh="$2" named
+  named="$(printf '%s\n' "$text" | sed -n 's/^checkout=\([^=]*\)=\(.*\)$/\1 at \2/p' | awk 'NR > 1 { printf ", " } { printf "%s", $0 }')"
+  [ -n "$named" ] || return 0
+  printf 'Read-only checkouts beside this folder: %s. Read them; never change, commit or push in them. To bring them to the latest main, run %s: it answers the revision each now holds, or why it could not.' "$named" "$refresh"
+}
+
 # One field of an identity file as it is now, or nothing once it is gone.
 aeolus_identity_get() {
   aeolus_identity_field "$(aeolus_identity_read "$1")" "$2"

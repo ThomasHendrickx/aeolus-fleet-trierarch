@@ -280,6 +280,16 @@ describe('the container a session runs in', () => {
     });
   });
 
+  it("mounts each of the session's read-only checkouts at its own path, read-only, so the session can change nothing in it (#1182)", async () => {
+    const governance = `/home/thomas/.aeolus/trierarch/checkouts/${shipId}/governance`;
+    const runner = recordingRunner();
+
+    await runtimeWith(runner).start({ shipId, folder, command: ['claude'], readOnly: [governance] });
+
+    const [run] = runner.runs();
+    expect(valuesOf(run?.args ?? [], '--volume')).toContain(`${governance}:${governance}:ro`);
+  });
+
   it("names the container's first process, as the host sees it, as the root of the ship's session", async () => {
     const runner = recordingRunner((args) => (args[0] === 'inspect' ? { stdout: '4242\n' } : {}));
 
