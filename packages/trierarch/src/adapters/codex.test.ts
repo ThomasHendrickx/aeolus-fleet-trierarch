@@ -29,7 +29,7 @@ let data: string;
 /** Where the identities of Codex sessions live, in a home of the test's own (#658). */
 let crews: string;
 let folder: string;
-let started: { shipId: ShipId; folder: string; command: readonly string[]; env?: Readonly<Record<string, string>> }[];
+let started: { shipId: ShipId; folder: string; command: readonly string[]; env?: Readonly<Record<string, string>>; readOnly?: readonly string[] }[];
 /** What each ship's session shows, by ship id. */
 let screens: Map<ShipId, string>;
 let typed: { shipId: ShipId; text: string; settleMs?: number }[];
@@ -121,6 +121,14 @@ describe('Codex as a harness', () => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true, firstPrompt: '--dangerously-bypass-approvals-and-sandbox' });
 
     expect(started[0]?.command.slice(-2)).toEqual(['--', `--dangerously-bypass-approvals-and-sandbox\n\n${NO_TERMINAL_QUESTIONS}`]);
+  });
+
+  it('starts codex with its read-only checkouts read-only (#1182)', async () => {
+    const checkout = `/home/thomas/.aeolus/trierarch/checkouts/${shipId}/governance`;
+
+    await harness().launch({ ...launchOf(shipId), checkouts: [{ repository: 'governance', path: checkout }], options: {}, isFirstStart: true });
+
+    expect(started[0]?.readOnly).toEqual([checkout]);
   });
 
   it('starts codex with $aeolus-wake on a first start without a first prompt, the line that no human reads its terminal after it (#585)', async () => {

@@ -25,7 +25,7 @@ let crews: string;
 let folder: string;
 /** Claude Code's projects folder, where it keeps each folder's conversations. */
 let projects: string;
-let started: { shipId: ShipId; folder: string; command: readonly string[]; env?: Readonly<Record<string, string>> }[];
+let started: { shipId: ShipId; folder: string; command: readonly string[]; env?: Readonly<Record<string, string>>; readOnly?: readonly string[] }[];
 /** What each ship's session shows, by ship id. */
 let screens: Map<ShipId, string>;
 let typed: { shipId: ShipId; text: string }[];
@@ -96,6 +96,14 @@ const shipId = newId('ship');
 const CREW_TOKEN = 'aeolus_ct_v1_of_the_crew';
 const identity = { fleetUrl: 'https://fleet.example.com', shipId, shipName: 'scout', socket: `/home/thomas/.aeolus/trierarch/sockets/${shipId}/fleet.sock` };
 
+const GOVERNANCE = `/home/thomas/.aeolus/trierarch/checkouts/${shipId}/governance`;
+const SKILLS = `/home/thomas/.aeolus/trierarch/checkouts/${shipId}/skills`;
+/** The ship's read-only checkouts (#1182). */
+const CHECKOUTS = [
+  { repository: 'governance', path: GOVERNANCE },
+  { repository: 'skills', path: SKILLS },
+];
+
 const parsed = (text: string | undefined): unknown => (text === undefined ? undefined : JSON.parse(text));
 
 /** The launch id the trierarch started the session with. */
@@ -120,6 +128,23 @@ describe('Claude Code as a harness', () => {
     expect(written).toContain('wakeBy=trierarch\n');
     expect(written).toContain(`socket=${identity.socket}\n`);
     expect(written).not.toContain('crewToken=');
+  });
+
+  it("writes each read-only checkout into the folder's identity through the plugin, for the session's start context (#1182)", async () => {
+    await harness().prepareIdentity({ folder, identity: { ...identity, checkouts: CHECKOUTS }, crewToken: CREW_TOKEN });
+
+    const path = (await runCommand('bash', { args: [`${PLUGIN_ROOT}/scripts/aeolus-identity.sh`, 'path'], env: { AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_CREWS: crews } })).stdout.trim();
+    expect(readFileSync(path, 'utf8')).toContain(`checkout=governance=${GOVERNANCE}\ncheckout=skills=${SKILLS}\n`);
+  });
+
+  it('lets the session read its read-only checkouts with --add-dir, before the prompt, and starts it with them read-only (#1182)', async () => {
+    await harness().launch({ ...launchOf(shipId), checkouts: CHECKOUTS, options: {}, isFirstStart: true });
+
+    const [session] = started;
+    const command = session?.command ?? [];
+    expect(command.slice(0, command.indexOf('--'))).toEqual(expect.arrayContaining(['--add-dir', GOVERNANCE, '--add-dir', SKILLS]));
+    expect(command.indexOf(SKILLS)).toBe(command.indexOf(GOVERNANCE) + 2);
+    expect(session?.readOnly).toEqual([GOVERNANCE, SKILLS]);
   });
 
   it("writes the folder's identity in ~/.aeolus/crews/claude-code, outside the plugin's data folder (#658)", async () => {
