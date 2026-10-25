@@ -161,6 +161,42 @@ describe('a machine whose session starts keep failing stops offering itself (aeo
     expect({ before, probe }).toEqual({ before: [], probe: ['claude-code'] });
   });
 
+  it('offers room for one start in its probe, above the ships it holds', async () => {
+    const trierarch = aTrierarch();
+    await aStart(trierarch, { name: 'scout', seen: { kind: 'active' } });
+    await failedStarts(trierarch, ['lookout', 'helm', 'bosun']);
+    trierarch.clock.advance(10 * MINUTE_MS);
+
+    await trierarch.reportSelf();
+
+    expect(trierarch.fleet.selfReports.at(-1)?.details.caps).toEqual({ ships: 2, running: 4 });
+  });
+
+  it('offers no more room while its probe start has not decided yet', async () => {
+    const trierarch = aTrierarch();
+    await failedStarts(trierarch, ['scout', 'lookout', 'helm']);
+    trierarch.clock.advance(10 * MINUTE_MS);
+    const probe = trierarch.fleet.commission('bosun');
+    trierarch.harness.seen.set(probe, { kind: 'none' });
+    trierarch.fleet.request(probe, crewSettings());
+
+    await trierarch.pass();
+    await trierarch.reportSelf();
+
+    expect(trierarch.fleet.selfReports.at(-1)?.details.caps).toEqual({ ships: 1, running: 4 });
+  });
+
+  it('offers its full room again once its probe start succeeds', async () => {
+    const trierarch = aTrierarch();
+    await failedStarts(trierarch, ['scout', 'lookout', 'helm']);
+    trierarch.clock.advance(10 * MINUTE_MS);
+
+    await aStart(trierarch, { name: 'bosun', seen: { kind: 'active' } });
+    await trierarch.reportSelf();
+
+    expect(trierarch.fleet.selfReports.at(-1)?.details.caps).toEqual({ ships: 8, running: 4 });
+  });
+
   it('stops offering itself again for 10 minutes when its probe start fails, telling argo nothing new', async () => {
     const trierarch = aTrierarch();
     await failedStarts(trierarch, ['scout', 'lookout', 'helm']);
