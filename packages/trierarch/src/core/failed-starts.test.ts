@@ -42,7 +42,8 @@ async function offeredHarnesses(trierarch: Trierarch) {
   return trierarch.fleet.selfReports.at(-1)?.details.harnesses.map((each) => each.harness);
 }
 
-const STOPPED_TOLD = { text: STOPPED_TEXT, idempotencyKey: expect.stringMatching(/^trierarch:stopped-offering:/) as unknown };
+/** What argo was told, by text: the fleet keeps one report per idempotency key, so two of the same text were told apart. */
+const toldArgo = (trierarch: Trierarch) => trierarch.fleet.toArgo.map((report) => report.text);
 
 describe('a machine whose session starts keep failing stops offering itself (aeolus-fleet#853)', () => {
   it('offers no harness and no place once the starts of 3 ships failed in a row, naming each harness with the last reason, and says so in its note', async () => {
@@ -71,7 +72,7 @@ describe('a machine whose session starts keep failing stops offering itself (aeo
 
     await failedStarts(trierarch, ['scout', 'lookout', 'helm', 'bosun']);
 
-    expect(trierarch.fleet.toArgo).toEqual([STOPPED_TOLD]);
+    expect(toldArgo(trierarch)).toEqual([STOPPED_TEXT]);
   });
 
   it('counts the failed starts of one ship once, so the failures of one ship\'s settings never stop the machine', async () => {
@@ -87,7 +88,7 @@ describe('a machine whose session starts keep failing stops offering itself (aeo
     await failedStarts(trierarch, ['lookout']);
 
     expect(await offeredHarnesses(trierarch)).toEqual(['claude-code']);
-    expect(trierarch.fleet.toArgo).toEqual([]);
+    expect(toldArgo(trierarch)).toEqual([]);
   });
 
   it('counts a crew that failed as a failed start', async () => {
@@ -171,7 +172,7 @@ describe('a machine whose session starts keep failing stops offering itself (aeo
     const probeAgain = await offeredHarnesses(trierarch);
 
     expect({ stoppedAgain, probeAgain }).toEqual({ stoppedAgain: [], probeAgain: ['claude-code'] });
-    expect(trierarch.fleet.toArgo).toEqual([STOPPED_TOLD]);
+    expect(toldArgo(trierarch)).toEqual([STOPPED_TEXT]);
   });
 
   it('offers itself for good once a start succeeds, and tells argo again when it stops again later', async () => {
@@ -185,7 +186,7 @@ describe('a machine whose session starts keep failing stops offering itself (aeo
     await failedStarts(trierarch, ['gunner']);
 
     expect(offered).toEqual(['claude-code']);
-    expect(trierarch.fleet.toArgo).toEqual([STOPPED_TOLD, STOPPED_TOLD]);
+    expect(toldArgo(trierarch)).toEqual([STOPPED_TEXT, STOPPED_TEXT]);
   });
 
   it('offers itself again when a start of a ship it holds succeeds while it does not offer itself', async () => {

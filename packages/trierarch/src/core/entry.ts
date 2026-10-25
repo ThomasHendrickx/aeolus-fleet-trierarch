@@ -1,5 +1,6 @@
 import type { ShipId, TrierarchWorkspace } from '@aeolus-fleet/common';
 
+import type { FailedStarts } from './failed-starts.js';
 import type { LowResource } from './machine-load.js';
 
 /**
@@ -22,6 +23,8 @@ export interface TrierarchState {
   readonly passFailure?: PassFailure;
   /** The harnesses whose aeolus-fleet plugin the last pass could not find (#1212): not offered in its report until it is back; none while every plugin is found. */
   readonly missingPlugins?: readonly string[];
+  /** The machine's failed session starts since one last succeeded (#853), and whether they stopped it offering itself; none while starts succeed. */
+  readonly failedStarts?: FailedStarts;
 }
 
 /** A failing pass: the reason of the latest failure, and when the passes began to fail. */

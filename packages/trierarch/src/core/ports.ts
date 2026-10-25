@@ -397,7 +397,10 @@ export interface AdapterFlag {
 
 /** The trierarch's configuration, its version, the flags each harness's adapter adds itself, and those its adapter calls risky. */
 export interface TrierarchSetup {
+  /** What the machine offers: its configuration with what detection found and the trusted repositories. */
   readonly configuration: TrierarchConfiguration;
+  /** The configuration as its file gives it: the trierarch started with another one offers its machine again after failed starts (#853). */
+  readonly configured: TrierarchConfiguration;
   readonly version: string;
   readonly adapterFlags: Readonly<Record<string, readonly AdapterFlag[]>>;
   readonly riskyFlags: Readonly<Record<string, readonly string[]>>;

@@ -189,7 +189,7 @@ async function aTrierarchOnTheFleet(claudeCodeFlags: readonly string[] = CONFIGU
   const state = createJsonState(paths.state);
   const clock = at.clock ?? { now: () => new Date() };
   const logger = { warn: () => undefined, action: () => undefined };
-  const setup = { configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
+  const setup = { configuration, configured: configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
   // The real caller check: the plugin's scripts run as children of this process, as aeolus-push.sh does of the trierarch.
   const mayCall = createCallerCheck({ platform: process.platform, sessionRootOf: () => Promise.resolve(undefined) });
   const checkouts = createGitCheckouts({ configuration, root: paths.checkouts });
@@ -763,13 +763,13 @@ describe('the trusted repositories on a real fleet (aeolus-fleet#384)', () => {
     const workspace = createGitWorkspace({ configuration: offered, root: paths.worktrees, clones: trustedClonesOf({ configured: configuration, held: trustedRepositories, root: paths.repositories, protocols: 'file' }) });
     const state = createJsonState(paths.state);
     const trust = createTrust({ configuration: offered, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') });
-    const setup = { configuration: offered, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
+    const setup = { configuration: offered, configured: configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
     const checkouts = createGitCheckouts({ configuration, root: paths.checkouts });
     const mayCall = createCallerCheck({ platform: process.platform, sessionRootOf: () => Promise.resolve(undefined) });
     const sockets = createShipSockets({ root: paths.sockets, fleetUrl: address, crewTokenOf: async (shipId) => (await state.load()).entries[shipId]?.crewToken, mayCall, log: () => undefined, refreshCheckouts: (shipId) => checkouts.refresh(shipId) });
     openSockets = sockets;
     const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, folderProcesses: { stopIn: () => Promise.resolve(0) }, workspace, trust, state, setup, clock: { now: () => new Date() }, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID, sockets, checkouts });
-    const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup, readLoad: () => Promise.resolve(undefined), readUsage: () => Promise.resolve({ subscriptions: [], ships: [] }) });
+    const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup, readLoad: () => Promise.resolve(undefined), readUsage: () => Promise.resolve({ subscriptions: [], ships: [] }), clock: { now: () => new Date() } });
 
     await sendTrusted([{ name: 'hemma', url }]);
     for (const delivery of await fleet.receive()) {
