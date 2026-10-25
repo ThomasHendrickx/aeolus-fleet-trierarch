@@ -1573,6 +1573,15 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.state.current().passFailure).toBeUndefined();
   });
 
+  it('keeps what the machine is low on across a pass that succeeds, so argo is not told again (#1212)', async () => {
+    const trierarch = aTrierarch();
+    await trierarch.state.save({ ...trierarch.state.current(), lowResources: ['memory', 'disk'] });
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().lowResources).toEqual(['memory', 'disk']);
+  });
+
   it('hands one message over to an idle session while deliveries wait (#756, 2a)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
