@@ -69,8 +69,14 @@ export async function runHold(options: HoldOptions): Promise<number> {
     resolveEnd = resolve;
   });
 
+  // A line is acted on once it is written, so whoever a result or a control response answers finds it in the events.
   const onLine = (line: string): void => {
-    events.write(`${line}\n`);
+    events.write(`${line}\n`, () => {
+      onWritten(line);
+    });
+  };
+
+  const onWritten = (line: string): void => {
     const event = parsedLine(line);
     if (typeof event !== 'object' || event === null) {
       return;

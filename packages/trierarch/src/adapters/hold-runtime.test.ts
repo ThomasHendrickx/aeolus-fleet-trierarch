@@ -45,6 +45,9 @@ afterEach(async () => {
 });
 
 /** A hold runtime over the test's sessions folder; a second one over the same folder is the trierarch started again. */
+/** Twenty turns started and interrupted, each a stdin line and a poll of the events. */
+const TWENTY_TURNS_MS = 30_000;
+
 function aRuntime(at: { version?: string; legacy?: Pick<SessionRuntime, 'list' | 'stop'>; bootedAt?: () => Date } = {}) {
   const runtime = createHoldRuntime({ sessions, program: TRIERARCH_PROGRAM, version: at.version ?? VERSION, platform: process.platform, ...(at.legacy !== undefined && { legacy: at.legacy }), ...(at.bootedAt !== undefined && { bootedAt: at.bootedAt }) });
   runtimes.push(runtime);
@@ -160,7 +163,7 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
       await runtime.interrupt(shipId);
       await expect(eventsOfType({ runtime: runtime, shipId: shipId }, 'result')).resolves.toHaveLength(turn);
     }
-  });
+  }, TWENTY_TURNS_MS);
 
   it('stops a running turn with SIGINT when the harness refuses the control request, and starts it again resuming its session, with no exit seen (H12)', async () => {
     const runtime = aRuntime();
