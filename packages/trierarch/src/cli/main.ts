@@ -211,7 +211,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
           paths,
           flags: { ...(fleetUrl !== undefined && { fleetUrl }), ...(shipId !== undefined && { shipId }), ...(secret !== undefined && { secret }), ...(pluginShipId !== undefined && { pluginShipId }), isYes: switches.has('--yes') },
           prompter,
-          fleetAt: (url) => createRestFleet({ fleetUrl: url, crewToken: '' }),
+          fleetAt: (url, crewToken = '') => createRestFleet({ fleetUrl: url, crewToken }),
           claudeCode: claudeCodeSetup(),
           codex: createCodexSetup(),
           isCodexInstalled: (await runCommand('sh', { args: ['-c', 'command -v codex'] })).status === 0,

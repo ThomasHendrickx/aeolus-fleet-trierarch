@@ -9,6 +9,7 @@ import { createClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import type { CodexSetup } from '../adapters/codex-setup.js';
 import { readCrewFile, type RunningFile } from '../adapters/files.js';
 import { trierarchPaths, type TrierarchPaths } from '../adapters/paths.js';
+import { FleetRefusal } from '../adapters/rest-fleet.js';
 import type { Service, ServiceStatus } from '../adapters/service.js';
 import { newId } from '../../test/support/in-memory.js';
 import { initTrierarch, type InitFlags } from './init.js';
@@ -21,6 +22,12 @@ const FLEET_URL = 'https://fleet.example.com';
 let home: string;
 let paths: TrierarchPaths;
 let registered: { fleetUrl: string; shipId: ShipId; secret: string }[];
+/** The crew token the fleet answers the next register with. */
+let nextCrewToken: string;
+/** Crew tokens whose lease ended: the ship was released since. */
+let endedLeases: Set<string>;
+/** Whether the trierarch's ship is crewed already, by a setup line run on another computer. */
+let isCrewedElsewhere: boolean;
 let service: FakeService;
 let repository: string;
 let codex: FakeCodexSetup;
@@ -133,6 +140,9 @@ beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'trierarch-init-'));
   paths = trierarchPaths({ homeDirectory: home });
   registered = [];
+  nextCrewToken = 'aeolus_ct_v1_trierarch';
+  endedLeases = new Set();
+  isCrewedElsewhere = false;
   service = new FakeService();
   saying = [{ pid: 2, version: '0.21.0' }];
   reads = 0;
@@ -152,11 +162,18 @@ function init(flags: Partial<InitFlags>, prompter: Prompter = new ScriptedPrompt
     paths,
     flags: { isYes: false, ...flags },
     prompter,
-    fleetAt: (fleetUrl) => ({
+    fleetAt: (fleetUrl, crewToken) => ({
       registerSelf: (crew) => {
+        if (isCrewedElsewhere) {
+          return Promise.reject(new FleetRefusal('CONFLICT', 'machine-1 is crewed: a session claims a ship only while it awaits crew'));
+        }
         registered.push({ fleetUrl, ...crew });
-        return Promise.resolve({ crewToken: 'aeolus_ct_v1_trierarch' });
+        return Promise.resolve({ crewToken: nextCrewToken });
       },
+      whoami: () =>
+        crewToken === undefined || endedLeases.has(crewToken)
+          ? Promise.reject(new FleetRefusal('LEASE_ENDED', 'the lease of this crew token has ended'))
+          : Promise.resolve({ shipId: registered[0]?.shipId ?? newId('ship'), name: 'machine-1' }),
     }),
     claudeCode: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
     service,
@@ -381,6 +398,26 @@ describe('aeolus-trierarch init, the whole setup', () => {
     expect(report.said.join('\n')).toContain('aeolus-trierarch install');
   });
 
+  it('says how to go on when its ship is crewed already, from a setup line run on another computer, and keeps no crew file (aeolus-fleet#1236)', async () => {
+    isCrewedElsewhere = true;
+    const shipId = newId('ship');
+    const pluginShipId = newId('ship');
+
+    await expect(init({ fleetUrl: FLEET_URL, shipId, pluginShipId, secret: SECRET, isYes: true })).rejects.toThrow(
+      `${shipId} is crewed already: its setup line ran on another computer, or there as another user. Run that setup line there again to finish its setup, or Release ${shipId} on its page in the console and run init here with its new secret: npx @aeolus-fleet/trierarch init --fleet-url ${FLEET_URL} --ship-id ${shipId} --plugin-ship-id ${pluginShipId} --secret <its new secret>`,
+    );
+    expect(existsSync(paths.crewToken)).toBe(false);
+  });
+
+  it('says it registers the ship at the fleet before it calls the fleet, so a slow fleet shows what it waits on', async () => {
+    const shipId = newId('ship');
+    const prompter = new ScriptedPrompter(defaults());
+
+    await init({ fleetUrl: FLEET_URL, shipId, secret: SECRET }, prompter);
+
+    expect(prompter.said).toContain(`Registering ${shipId} at ${FLEET_URL}...`);
+  });
+
   it('never writes the secret', async () => {
     await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET, isYes: true });
 
@@ -564,6 +601,86 @@ describe('aeolus-trierarch init on a machine set up already', () => {
 
     await expect(init({ isYes: true })).resolves.toMatchObject({ configuration: 'kept' });
     expect(readFileSync(paths.config, 'utf8')).toBe(before);
+  });
+});
+
+describe('aeolus-trierarch init after a setup that did not finish (aeolus-fleet#1236)', () => {
+  let shipId: ShipId;
+
+  beforeEach(async () => {
+    shipId = newId('ship');
+    // Stopped at its first configuration question, as Ctrl-C there or a closed terminal stops it: the ship is registered, nothing else is.
+    await expect(init({ fleetUrl: FLEET_URL, shipId, secret: SECRET })).rejects.toThrow('Not scripted');
+  });
+
+  it('finishes the setup when its setup line runs again, registering nothing while its crew token holds the lease', async () => {
+    const prompter = new ScriptedPrompter(defaults());
+
+    const report = await init({ fleetUrl: FLEET_URL, shipId, secret: SECRET }, prompter);
+
+    expect(registered).toHaveLength(1);
+    expect(prompter.isDone).toBe(true);
+    expect(report).toMatchObject({ configuration: 'written', service: 'installed' });
+    expect(report.said[0]).toBe(`The trierarch crews ${shipId} at ${FLEET_URL} already, so init registers nothing and goes on with the rest of the setup.`);
+  });
+
+  it('finishes the setup with --yes too', async () => {
+    const report = await init({ fleetUrl: FLEET_URL, shipId, secret: SECRET, isYes: true });
+
+    expect(registered).toHaveLength(1);
+    expect(report).toMatchObject({ configuration: 'written', service: 'installed' });
+  });
+
+  it('says it checks the lease at the fleet before it calls the fleet', async () => {
+    const prompter = new ScriptedPrompter(defaults());
+
+    await init({ fleetUrl: FLEET_URL, shipId, secret: SECRET }, prompter);
+
+    expect(prompter.said).toContain(`Checking that this machine still crews ${shipId} at ${FLEET_URL}...`);
+  });
+
+  it('registers the ship again with its new secret when it was released since, and keeps the new crew token', async () => {
+    endedLeases.add('aeolus_ct_v1_trierarch');
+    nextCrewToken = 'aeolus_ct_v1_trierarch-again';
+
+    const report = await init({ fleetUrl: FLEET_URL, shipId, secret: 'aeolus_sk_v1_new-secret', isYes: true });
+
+    expect(registered.at(-1)).toEqual({ fleetUrl: FLEET_URL, shipId, secret: 'aeolus_sk_v1_new-secret' });
+    await expect(readCrewFile(paths.crewToken)).resolves.toEqual({ fleetUrl: FLEET_URL, shipId, crewToken: 'aeolus_ct_v1_trierarch-again' });
+    expect(report).toMatchObject({ configuration: 'written', service: 'installed' });
+    expect(report.said[0]).toBe(`${shipId} was released since this machine registered it, so init registered it again at ${FLEET_URL}: its crew token is kept in ${paths.crewToken}, readable by you only. The secret is written nowhere.`);
+  });
+
+  it('asks for the new secret when its ship was released since and no secret is given', async () => {
+    endedLeases.add('aeolus_ct_v1_trierarch');
+    const prompter = new ScriptedPrompter([['secret', 'aeolus_sk_v1_new-secret'], ...defaults()]);
+
+    await init({ fleetUrl: FLEET_URL, shipId }, prompter);
+
+    expect(registered.at(-1)).toEqual({ fleetUrl: FLEET_URL, shipId, secret: 'aeolus_sk_v1_new-secret' });
+    expect(prompter.hidden).toHaveLength(1);
+  });
+
+  it('restarts an installed trierarch once its ship is registered again, so it runs with the new crew token', async () => {
+    await init({ isYes: true });
+    endedLeases.add('aeolus_ct_v1_trierarch');
+    nextCrewToken = 'aeolus_ct_v1_trierarch-again';
+    const prompter = new ScriptedPrompter([['Change the configuration', false], ['Restart', true]]);
+
+    const report = await init({ fleetUrl: FLEET_URL, shipId, secret: 'aeolus_sk_v1_new-secret' }, prompter);
+
+    expect(report.service).toBe('restarted');
+    expect(service.done).toEqual(['rewrite', 'restart']);
+  });
+
+  it('still refuses a setup line for another ship, saying how to register it', async () => {
+    await expect(init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET })).rejects.toThrow(`init never registers again: to register another ship, remove ${paths.crewToken} first`);
+    expect(registered).toHaveLength(1);
+  });
+
+  it('still refuses a setup line for its ship at another fleet', async () => {
+    await expect(init({ fleetUrl: 'https://other.example.com', shipId, secret: SECRET })).rejects.toThrow(`init never registers again: to register another ship, remove ${paths.crewToken} first`);
+    expect(registered).toHaveLength(1);
   });
 });
 
