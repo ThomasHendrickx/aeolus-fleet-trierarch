@@ -29,7 +29,7 @@ export function createReadLoad(deps: { machine: MachinePort; fleet: Pick<FleetPo
       await deps.fleet.reportToArgo({ text: lowResourceText(resource, load), idempotencyKey: `low-${resource}-${now.toISOString()}` });
     }
     if (low.length !== told.length || low.some((each) => !told.includes(each))) {
-      await deps.state.save({ entries: state.entries, kept: state.kept, orphans: state.orphans, refused: state.refused, ...(low.length > 0 && { lowResources: low }) });
+      await deps.state.save({ ...state, lowResources: low.length > 0 ? low : undefined });
     }
   };
 
