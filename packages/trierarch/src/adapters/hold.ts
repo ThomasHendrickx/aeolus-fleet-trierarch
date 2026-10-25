@@ -5,6 +5,7 @@ import { createServer, type Socket } from 'node:net';
 import type { Readable, Writable } from 'node:stream';
 import { createInterface } from 'node:readline';
 
+import { codexTurnCommand } from './codex.js';
 import type { HoldAnswer, HoldFiles, HoldRequest } from './hold-protocol.js';
 import { holdRequestSchema, parsedLine, REFUSED } from './hold-protocol.js';
 
@@ -24,6 +25,12 @@ import { holdRequestSchema, parsedLine, REFUSED } from './hold-protocol.js';
  * stdin, which keeps the process (H12, Thomas, 25 Oct: "Headless option 2").
  * When Claude Code refuses it, SIGINT stops the turn and the process, and the
  * hold starts it again resuming its session, so the trierarch sees no exit.
+ *
+ * Codex runs one `codex exec` per turn (H11): the start command is the first
+ * turn, and each line sent is the prompt of a `codex exec resume` of the
+ * thread the first named, started once the last turn's process has ended.
+ * Between turns no Codex process runs and the hold stays; its turn is stopped
+ * with SIGINT, which ends the process (H12).
  */
 
 /** The longest the hold waits for an interrupted turn to end before the forced line goes in anyway (timings-and-limits.md). */
@@ -82,6 +89,8 @@ export async function runHold(options: HoldOptions): Promise<number> {
   let sessionId: string | undefined;
   let isBusy = false;
   let isRestarting = false;
+  let isStopping = false;
+  const isCodex = harness === 'codex';
   let controls = 0;
   const waiters = new Set<Waiter>();
   const tell = (event: Parameters<Waiter>[0]): void => {
@@ -108,7 +117,7 @@ export async function runHold(options: HoldOptions): Promise<number> {
       return;
     }
     const type: unknown = Reflect.get(event, 'type');
-    const id: unknown = Reflect.get(event, 'session_id');
+    const id: unknown = Reflect.get(event, isCodex ? 'thread_id' : 'session_id');
     if (typeof id === 'string' && id !== sessionId) {
       sessionId = id;
       void writeFile(files.sessionId, id);
@@ -129,27 +138,47 @@ export async function runHold(options: HoldOptions): Promise<number> {
   guard.stdin.on('error', () => undefined);
   guard.unref();
 
+  /** Kills the harness's process group: the harness and every process it started. */
+  const killGroup = (running: ChildProcessByStdio<Writable, Readable, null>): void => {
+    try {
+      process.kill(-(running.pid ?? 0), 'SIGKILL');
+    } catch {
+      // Its group is gone already.
+    }
+  };
+
   const startHarness = (command: readonly string[]): ChildProcessByStdio<Writable, Readable, null> => {
     const [program = '', ...args] = command;
     // A process group of its own: a stop ends the harness and every process it started.
-    const child = spawn(program, args, { cwd: folder, env: { ...environment }, stdio: ['pipe', 'pipe', 'ignore'], detached: true });
-    if (child.pid !== undefined) {
-      guard.stdin.write(`${String(child.pid)}\n`);
+    const started = spawn(program, args, { cwd: folder, env: { ...environment }, stdio: ['pipe', 'pipe', 'ignore'], detached: true });
+    if (started.pid !== undefined) {
+      guard.stdin.write(`${String(started.pid)}\n`);
     }
-    child.stdin.on('error', () => undefined);
-    createInterface({ input: child.stdout }).on('line', onLine);
-    child.on('error', () => {
+    started.stdin.on('error', () => undefined);
+    // codex exec reads a stdin that is no terminal to its end before its turn: it gets none.
+    if (isCodex) {
+      started.stdin.end();
+    }
+    createInterface({ input: started.stdout }).on('line', onLine);
+    started.on('error', () => {
       resolveEnd(1);
     });
-    child.on('exit', (code) => {
+    started.on('exit', (code) => {
+      if (isCodex && child === started) {
+        isBusy = false;
+        child = undefined;
+      }
       tell({ type: 'exit' });
-      if (!isRestarting) {
+      if (isStopping || (!isRestarting && !isCodex)) {
         resolveEnd(code ?? 1);
       }
     });
-    return child;
+    return started;
   };
-  let child = startHarness(options.command);
+  let child: ChildProcessByStdio<Writable, Readable, null> | undefined = startHarness(options.command);
+  if (isCodex) {
+    isBusy = true;
+  }
 
   /** Waits until the waiter is told what it waits for, or the time is up. */
   const waitFor = (isIt: (event: Parameters<Waiter>[0]) => boolean, ms: number): Promise<Parameters<Waiter>[0] | undefined> =>
@@ -176,8 +205,50 @@ export async function runHold(options: HoldOptions): Promise<number> {
     return sessionId === undefined ? [program, ...flags, CONTINUE] : [program, ...flags, RESUME, sessionId];
   };
 
+  /** Ends Codex's running turn: SIGINT, then its process group killed when it has not ended within the wait (H12). */
+  const endCodexTurn = async (signal: 'SIGINT' | 'SIGKILL'): Promise<void> => {
+    const running = child;
+    if (running === undefined) {
+      return;
+    }
+    const exited = waitFor((event) => event.type === 'exit', INTERRUPT_WAIT_MS);
+    if (signal === 'SIGINT') {
+      running.kill('SIGINT');
+    } else {
+      killGroup(running);
+    }
+    if ((await exited) === undefined && child === running) {
+      killGroup(running);
+      await waitFor((event) => event.type === 'exit', INTERRUPT_WAIT_MS);
+    }
+  };
+
+  /** Codex's next turn, once the last turn's process has ended: a codex exec resume of the session's thread (H11). */
+  const sendCodex = async (line: string): Promise<HoldAnswer> => {
+    if (sessionId === undefined) {
+      return { isOk: false, error: 'Codex named no thread to resume yet' };
+    }
+    if (child !== undefined) {
+      const running = child;
+      if ((await waitFor((event) => event.type === 'exit', INTERRUPT_WAIT_MS)) === undefined && child === running) {
+        await endCodexTurn('SIGKILL');
+      }
+    }
+    isBusy = true;
+    child = startHarness(codexTurnCommand({ start: options.command, threadId: sessionId, line }));
+    return { isOk: true };
+  };
+
   const interrupt = async (): Promise<void> => {
     if (!isBusy) {
+      return;
+    }
+    if (isCodex) {
+      await endCodexTurn('SIGINT');
+      return;
+    }
+    const current = child;
+    if (current === undefined) {
       return;
     }
     const until = Date.now() + INTERRUPT_WAIT_MS;
@@ -186,7 +257,7 @@ export async function runHold(options: HoldOptions): Promise<number> {
       const requestId = `aeolus-interrupt-${String(controls)}`;
       const turnEnd = waitFor((event) => event.type === 'result' || event.type === 'exit', INTERRUPT_WAIT_MS);
       const answer = waitFor((event) => event.type === 'control' && event.requestId === requestId, INTERRUPT_WAIT_MS);
-      child.stdin.write(`${JSON.stringify({ type: 'control_request', request_id: requestId, request: { subtype: 'interrupt' } })}\n`);
+      current.stdin.write(`${JSON.stringify({ type: 'control_request', request_id: requestId, request: { subtype: 'interrupt' } })}\n`);
       const answered = await Promise.race([answer, turnEnd]);
       if (answered?.type !== 'control' || !answered.isRefused) {
         await turnEnd;
@@ -196,7 +267,7 @@ export async function runHold(options: HoldOptions): Promise<number> {
     // SIGINT ends the turn, and Claude Code's process with it: started again resuming its session, no exit for the trierarch to see.
     isRestarting = harness === 'claude-code';
     const exited = waitFor((event) => event.type === 'exit', Math.max(0, until - Date.now()));
-    child.kill('SIGINT');
+    current.kill('SIGINT');
     await exited;
     if (isRestarting) {
       isBusy = false;
@@ -208,8 +279,11 @@ export async function runHold(options: HoldOptions): Promise<number> {
   const answer = async (request: HoldRequest): Promise<HoldAnswer> => {
     switch (request.call) {
       case 'send':
+        if (isCodex) {
+          return sendCodex(request.line);
+        }
         isBusy = true;
-        child.stdin.write(`${request.line}\n`);
+        child?.stdin.write(`${request.line}\n`);
         return { isOk: true };
       case 'interrupt':
         await interrupt();
@@ -238,6 +312,11 @@ export async function runHold(options: HoldOptions): Promise<number> {
   await new Promise<void>((resolve) => server.listen(files.socket, resolve));
 
   const stop = (): void => {
+    isStopping = true;
+    if (child === undefined) {
+      resolveEnd(0);
+      return;
+    }
     try {
       process.kill(-(child.pid ?? 0), 'SIGTERM');
     } catch {

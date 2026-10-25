@@ -74,9 +74,12 @@ export function codexCommandLine(at: { flags: readonly string[]; prompt: string;
  */
 export function codexTurnCommand(at: { start: readonly string[]; threadId: string; line: string }): string[] {
   const end = at.start.lastIndexOf(END_OF_FLAGS);
-  const [program = 'codex', , ...rest] = end === -1 ? at.start : at.start.slice(0, end);
+  const words = end === -1 ? at.start : at.start.slice(0, end);
+  // The program is every word before exec: a test runs Codex's stand-in as Node and its script.
+  const exec = words.indexOf(EXEC);
+  const rest = words.slice(exec + 1);
   const flags = rest[0] === RESUME && rest[1] === LAST ? rest.slice(2) : rest;
-  return [program, EXEC, RESUME, at.threadId, ...flags, END_OF_FLAGS, at.line];
+  return [...words.slice(0, exec), EXEC, RESUME, at.threadId, ...flags, END_OF_FLAGS, at.line];
 }
 
 /** Codex's error events in `codex exec --json`: a failed turn, or an error the turn met. */
