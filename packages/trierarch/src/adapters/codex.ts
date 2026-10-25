@@ -41,6 +41,9 @@ const NO_DAEMON = '--no-daemon';
 const NO_QUESTION_TOOL = '--config=tools.experimental_request_user_input.enabled=false';
 const END_OF_FLAGS = '--';
 
+/** Why no Codex session starts on the host until Codex runs headless (headless S2). */
+const NOT_HEADLESS_YET = 'Codex does not run headless yet, and a session on the host has no terminal: it comes with S2 of the headless design';
+
 export const CODEX_ADAPTER_FLAGS: readonly AdapterFlag[] = [
   { flag: NO_DAEMON, when: 'always' },
   { flag: NO_QUESTION_TOOL, when: 'always' },
@@ -85,6 +88,8 @@ export function createCodexHarness(options: {
 
   return {
     ...identity,
+    // Codex still runs in a terminal, and the host gives a session none: no Codex session starts until S2 of the headless design.
+    startProblem: async () => (await identity.startProblem()) ?? NOT_HEADLESS_YET,
     launch: async ({ shipId, folder, checkouts, harness, options: picked, isFirstStart, launchId, firstPrompt }) => {
       const settings = configuration.harnesses[harness];
       if (settings === undefined) {
