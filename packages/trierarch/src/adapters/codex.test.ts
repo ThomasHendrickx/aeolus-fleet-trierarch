@@ -327,8 +327,8 @@ describe("Codex's launch window, from the launch marker its session's hooks keep
     await expect(harness({ pluginRoot: join(data, 'gone') }).startProblem()).resolves.toBe(`the aeolus plugin's scripts are not at ${join(data, 'gone', 'scripts')}`);
   });
 
-  it("says nothing stops a session from starting while the aeolus plugin's scripts are there (#827)", async () => {
-    await expect(harness().startProblem()).resolves.toBeUndefined();
+  it('says no session can start while the aeolus plugin\'s scripts are there either: Codex runs in a terminal, and a session on the host has none until Codex runs headless (headless S2)', async () => {
+    await expect(harness().startProblem()).resolves.toBe('Codex does not run headless yet, and a session on the host has no terminal: it comes with S2 of the headless design');
   });
 
   it('says its aeolus plugin marks launches', async () => {
