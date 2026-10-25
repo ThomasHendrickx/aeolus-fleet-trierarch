@@ -7,6 +7,8 @@ import type { FleetPort, SelfReport, SessionRuntime, StatePort, TrierarchSetup, 
 import type { ReadLoad } from './read-load.js';
 import type { ReadUsage } from './read-usage.js';
 
+const PLUGIN_MISSING_REASON = 'its aeolus plugin is not installed (run aeolus-trierarch upgrade)';
+
 /** Reports the trierarch's own ship when something changed; the first call, at start, always reports. */
 export type ReportSelf = () => Promise<void>;
 
@@ -41,7 +43,10 @@ export function createReportSelf(deps: { fleet: FleetPort; processes: Pick<Sessi
 function selfReportOf(at: { setup: TrierarchSetup; state: TrierarchState; running: number; trusted: TrustedPlaces }): SelfReport {
   const { setup, state, running, trusted } = at;
   const crashed = Object.values(state.entries).filter((entry) => entry.state === 'crashed').length;
-  const note = `${String(running)} of ${String(setup.configuration.caps.ships)} running${crashed > 0 ? `, ${String(crashed)} crashed` : ''}`;
+  const missing = state.missingPlugins ?? [];
+  // A harness without its aeolus plugin cannot crew a ship (#1212): it is left out of the details, so no request is placed for it, and the note says why.
+  const notOfferedNote = missing.map((harness) => `, ${harness} not offered: ${PLUGIN_MISSING_REASON}`).join('');
+  const note = `${String(running)} of ${String(setup.configuration.caps.ships)} running${crashed > 0 ? `, ${String(crashed)} crashed` : ''}${notOfferedNote}`;
   return { state: running > 0 ? 'working' : 'idle', note, details: detailsOf(setup, { state, trusted }) };
 }
 
@@ -59,9 +64,11 @@ function offeredOf(names: readonly string[], trustedBy: readonly (readonly strin
 function detailsOf(setup: TrierarchSetup, at: { state: TrierarchState; trusted: TrustedPlaces }): TrierarchReportDetails {
   const { configuration, version } = setup;
   const { state, trusted } = at;
-  const byHarness = Object.keys(configuration.harnesses).map((harness) => trusted[harness] ?? { repositories: [], folders: [] });
+  const missing = state.missingPlugins ?? [];
+  const offered = Object.entries(configuration.harnesses).filter(([harness]) => !missing.includes(harness));
+  const byHarness = offered.map(([harness]) => harness).map((harness) => trusted[harness] ?? { repositories: [], folders: [] });
   return {
-    harnesses: Object.entries(configuration.harnesses).map(([harness, settings]) => {
+    harnesses: offered.map(([harness, settings]) => {
       const detected = setup.detected?.[harness];
       return {
         harness,
@@ -81,6 +88,7 @@ function detailsOf(setup: TrierarchSetup, at: { state: TrierarchState; trusted: 
         byHarness.map((places) => places.folders),
       ),
     },
+    ...(missing.length > 0 && { notOffered: missing.map((harness) => ({ harness, reason: PLUGIN_MISSING_REASON })) }),
     caps: configuration.caps,
     // Paths stay on the machine: names only (decision 0032).
     kept: state.kept.map(({ shipId, repository }) => ({ shipId, repository })),

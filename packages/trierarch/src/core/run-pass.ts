@@ -64,13 +64,14 @@ export function createRunPass(deps: RunPassDeps): RunPass {
       const observed = await observe(state, deps);
       const trusted = await deps.trust.trusted();
       const versions = Object.fromEntries(Object.entries(deps.setup.detected ?? {}).flatMap(([harness, found]) => (found === undefined ? [] : [[harness, found.version]])));
-      const marksLaunches = Object.fromEntries(await Promise.all(Object.entries(deps.harnesses).map(async ([harness, port]) => [harness, await port.marksLaunches()] as const)));
-      const reconciled = reconcile(state, { requests, clears, observed, now: deps.clock.now(), configuration: deps.setup.configuration, trusted, versions, marksLaunches });
-      state = reconciled.state;
+      const { marksLaunches, missingPlugins } = await launchMarks(deps);
+      const reconciled = reconcile(state, { requests, clears, observed, now: deps.clock.now(), configuration: deps.setup.configuration, trusted, versions, marksLaunches, missingPlugins });
+      state = succeeded(reconciled.state, missingPlugins);
       await deps.state.save(state);
       actions = reconciled.actions;
     } catch (error) {
       deps.logger.warn(`The pass failed: ${reasonOf(error)}; ${NEXT_AFTER_FAILURE}`);
+      await deps.state.save({ ...state, passFailure: { reason: reasonOf(error), since: state.passFailure?.since ?? deps.clock.now().toISOString() } });
       return;
     }
     for (const action of actions) {
@@ -81,6 +82,29 @@ export function createRunPass(deps: RunPassDeps): RunPass {
       }
     }
   };
+}
+
+/** Whether each harness's aeolus plugin marks launches, and which harnesses have no plugin to ask (#1212): one missing never fails the pass for the others. */
+async function launchMarks(deps: RunPassDeps): Promise<{ marksLaunches: Record<string, boolean>; missingPlugins: Set<string> }> {
+  const marksLaunches: Record<string, boolean> = {};
+  const missingPlugins = new Set<string>();
+  await Promise.all(
+    Object.entries(deps.harnesses).map(async ([harness, port]) => {
+      try {
+        marksLaunches[harness] = await port.marksLaunches();
+      } catch (error) {
+        missingPlugins.add(harness);
+        deps.logger.warn(`The aeolus plugin for ${harness} cannot be used: ${reasonOf(error)}; its requests are given back until it is installed (aeolus-trierarch upgrade)`);
+      }
+    }),
+  );
+  return { marksLaunches, missingPlugins };
+}
+
+/** The state of a pass that succeeded: no failing pass is kept, and the harnesses whose plugin it could not find (#1212). */
+function succeeded(state: TrierarchState, missingPlugins: ReadonlySet<string>): TrierarchState {
+  // Every other field of the state (what the machine is low on, #400) stays as the pass found it.
+  return { ...state, passFailure: undefined, missingPlugins: missingPlugins.size > 0 ? [...missingPlugins].sort() : undefined };
 }
 
 /**

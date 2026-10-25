@@ -1529,6 +1529,59 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`Cannot crew scout with its settings\n\n- Ship: scout (\`${shipId}\`)\n- Settings version: 1\n- Why: ${UNMARKED}`]);
   });
 
+  it('a harness whose aeolus plugin is missing gives back only its own requests, with why, and the pass goes on for the others (#1212)', async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    trierarch.codex.pluginProblem = 'The aeolus plugin is not installed for Codex (nothing in /home/thomas/.codex/plugins/cache/aeolus-fleet/aeolus)';
+    const codexShip = trierarch.fleet.commission('lookout');
+    trierarch.fleet.request(codexShip, crewSettings({ harness: 'codex' }));
+    const claudeShip = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(claudeShip, crewSettings());
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId: codexShip, settingsVersion: 1, reason: "mac-studio: harness: codex's aeolus plugin is not installed: run aeolus-trierarch upgrade" }]);
+    expect(trierarch.harness.launches.map((launch) => launch.shipId)).toEqual([claudeShip]);
+    expect(trierarch.codex.launches).toEqual([]);
+    expect(trierarch.logger.warnings.some((warning) => warning.startsWith('The pass failed'))).toBe(false);
+  });
+
+  it('keeps the harnesses whose aeolus plugin is missing in the state, and drops them once the plugin is back (#1212)', async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    trierarch.codex.pluginProblem = 'The aeolus plugin is not installed for Codex';
+    await trierarch.pass();
+
+    expect(trierarch.state.current().missingPlugins).toEqual(['codex']);
+
+    trierarch.codex.pluginProblem = undefined;
+    await trierarch.pass();
+
+    expect(trierarch.state.current().missingPlugins).toBeUndefined();
+  });
+
+  it('a pass that fails is kept in the state with why and since when, and cleared once a pass succeeds (#1212)', async () => {
+    const trierarch = aTrierarch();
+    trierarch.fleet.isUnreachable = true;
+    await trierarch.pass();
+    trierarch.clock.advance(5 * SECOND_MS);
+    await trierarch.pass();
+
+    expect(trierarch.state.current().passFailure).toEqual({ reason: 'the fleet cannot be reached', since: '2026-10-06T08:00:00.000Z' });
+
+    trierarch.fleet.isUnreachable = false;
+    await trierarch.pass();
+
+    expect(trierarch.state.current().passFailure).toBeUndefined();
+  });
+
+  it('keeps what the machine is low on across a pass that succeeds, so argo is not told again (#1212)', async () => {
+    const trierarch = aTrierarch();
+    await trierarch.state.save({ ...trierarch.state.current(), lowResources: ['memory', 'disk'] });
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().lowResources).toEqual(['memory', 'disk']);
+  });
+
   it('hands one message over to an idle session while deliveries wait (#756, 2a)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);

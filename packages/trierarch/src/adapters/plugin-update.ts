@@ -174,6 +174,10 @@ export function createPluginUpdate(at: {
             await runCommand(codex, { args: ['plugin', 'marketplace', 'remove', MARKETPLACE] });
             await run(codex, ['plugin', 'marketplace', 'add', REPOSITORY, ...(tag === undefined ? [] : ['--ref', tag])]);
             await run(codex, ['plugin', 'marketplace', 'upgrade', MARKETPLACE]);
+            // The marketplace upgrade updates an installed plugin only: with its cache folder emptied there is none to update (#1212).
+            if ((await versionFolders(codexCache)).filter((name) => VERSION.test(name)).length === 0) {
+              await run(codex, ['plugin', 'add', PLUGIN]);
+            }
           },
           afterUpgrade: async (before) => {
             const upgradedAt = now();

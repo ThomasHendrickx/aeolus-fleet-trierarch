@@ -64,6 +64,7 @@ describe('aeolus-trierarch status', () => {
         'Service: running, pid 4242, since 2026-10-06T07:00:00.000Z',
         `Fleet: https://fleet.example.com, the lease of ${shipId} is valid`,
         'Caps: 2 of 8 ships crewed here, 1 of 4 sessions running',
+        'Last pass: succeeded',
         'Entries: running 1, restarting 1',
         'Kept worktrees: none',
         'Orphans: none',
@@ -103,6 +104,16 @@ describe('aeolus-trierarch status', () => {
 
     expect(coloured).not.toBe(describeStatus(report));
     expect(stripVTControlCharacters(coloured)).toBe(describeStatus(report));
+  });
+
+  it('says the last pass failed, since when and why, and that it succeeded when it did (#1212)', async () => {
+    const trierarch = aTrierarch();
+    expect(describeStatus(await inspect(trierarch))).toContain('Last pass: succeeded');
+
+    trierarch.fleet.isUnreachable = true;
+    await trierarch.pass();
+
+    expect(describeStatus(await inspect(trierarch))).toContain('Last pass: failing since 2026-10-06T08:00:00.000Z: the fleet cannot be reached');
   });
 
   it('lists kept worktrees and orphans', async () => {

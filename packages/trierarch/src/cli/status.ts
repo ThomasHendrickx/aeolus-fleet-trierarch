@@ -6,7 +6,7 @@ import { ENTRY_STATES, type EntryState } from '../core/entry.js';
 import type { CrewFile, RunningFile } from '../adapters/files.js';
 import { FleetRefusal } from '../adapters/rest-fleet.js';
 import type { Service, ServiceStatus } from '../adapters/service.js';
-import type { KeptWorktree } from '../core/entry.js';
+import type { KeptWorktree, PassFailure } from '../core/entry.js';
 import type { SessionRuntime, StatePort } from '../core/ports.js';
 import { PLAIN, stateTone, type Style } from '../adapters/style.js';
 
@@ -36,6 +36,8 @@ export interface StatusReport {
   readonly entries: Readonly<Record<EntryState, number>>;
   readonly kept: readonly KeptWorktree[];
   readonly orphans: readonly string[];
+  /** Why the last pass failed and since when (#1212); none when it succeeded. */
+  readonly passFailure?: PassFailure;
 }
 
 export function leaseFrom(whoami: () => Promise<unknown>): () => Promise<Lease> {
@@ -94,6 +96,7 @@ export async function inspectStatus(at: {
     entries,
     kept: state.kept,
     orphans: state.orphans.map((orphan) => orphan.path),
+    ...(state.passFailure !== undefined && { passFailure: state.passFailure }),
   };
 }
 
@@ -152,6 +155,7 @@ export function describeStatus(report: StatusReport, style: Style = PLAIN): stri
     line('Service', describeService(report.service, style)),
     line('Fleet', describeFleet(report.fleet, style)),
     line('Caps', `${String(report.caps.ships.used)} of ${String(report.caps.ships.cap)} ships crewed here, ${String(report.caps.running.used)} of ${String(report.caps.running.cap)} sessions running`),
+    line('Last pass', report.passFailure === undefined ? style.tone('good', 'succeeded') : style.tone('bad', `failing since ${report.passFailure.since}: ${report.passFailure.reason}`)),
     line('Entries', counted.length === 0 ? 'none' : counted.map(([state, count]) => style.tone(stateToneOf(state), `${state} ${String(count)}`)).join(', ')),
     line('Kept worktrees', report.kept.length === 0 ? 'none' : style.tone('busy', report.kept.map((kept) => `${kept.path} (${kept.shipId})`).join(', '))),
     line('Orphans', report.orphans.length === 0 ? 'none' : style.tone('busy', report.orphans.join(', '))),
