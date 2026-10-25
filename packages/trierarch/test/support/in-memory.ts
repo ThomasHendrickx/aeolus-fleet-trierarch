@@ -480,6 +480,9 @@ export class InMemoryHarness implements HarnessPort {
   }
 
   hasIdentity(session: { shipId: ShipId; folder: string }): Promise<boolean> {
+    if (this.pluginProblem !== undefined) {
+      return Promise.reject(new Error(this.pluginProblem));
+    }
     return Promise.resolve(this.identities.has(session.folder));
   }
 
@@ -501,6 +504,9 @@ export class InMemoryHarness implements HarnessPort {
   }
 
   turnOf(session: { shipId: ShipId; folder: string }): Promise<Turn> {
+    if (this.pluginProblem !== undefined) {
+      return Promise.reject(new Error(this.pluginProblem));
+    }
     return Promise.resolve(this.turns.get(session.folder) ?? 'unknown');
   }
 
@@ -526,6 +532,9 @@ export class InMemoryHarness implements HarnessPort {
   }
 
   isHolding(session: { shipId: ShipId; folder: string }): Promise<boolean> {
+    if (this.pluginProblem !== undefined) {
+      return Promise.reject(new Error(this.pluginProblem));
+    }
     return Promise.resolve(this.holding.has(session.folder));
   }
 
@@ -546,6 +555,9 @@ export class InMemoryHarness implements HarnessPort {
   }
 
   launchSeen(session: { shipId: ShipId; folder: string; launchId: string; model?: string }): Promise<LaunchSeen> {
+    if (this.pluginProblem !== undefined) {
+      return Promise.reject(new Error(this.pluginProblem));
+    }
     this.asked.push(session);
     return Promise.resolve(this.seen.get(session.shipId) ?? { kind: 'active' });
   }

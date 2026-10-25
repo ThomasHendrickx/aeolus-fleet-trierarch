@@ -1545,6 +1545,24 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.logger.warnings.some((warning) => warning.startsWith('The pass failed'))).toBe(false);
   });
 
+  it('a harness that loses its aeolus plugin under a running session is not offered, the owner is told once, and the pass goes on for the others (#1212)', async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    const codexShip = trierarch.fleet.commission('lookout');
+    trierarch.fleet.request(codexShip, crewSettings({ harness: 'codex' }));
+    await trierarch.pass();
+    await trierarch.pass();
+    trierarch.codex.pluginProblem = 'The aeolus plugin is not installed for Codex';
+    const claudeShip = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(claudeShip, crewSettings());
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().missingPlugins).toEqual(['codex']);
+    expect(trierarch.state.current().passFailure).toBeUndefined();
+    expect(trierarch.fleet.toArgo.map((report) => report.text.split('\n')[0])).toEqual(['Cannot crew lookout with its settings']);
+    expect(trierarch.harness.launches.map((launch) => launch.shipId)).toEqual([claudeShip]);
+  });
+
   it('keeps the harnesses whose aeolus plugin is missing in the state, and drops them once the plugin is back (#1212)', async () => {
     const trierarch = aTrierarch(WITH_CODEX);
     trierarch.codex.pluginProblem = 'The aeolus plugin is not installed for Codex';
