@@ -5,7 +5,7 @@ import type { ClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import type { CodexSetup } from '../adapters/codex-setup.js';
 import { configurationJsonSchema, initialConfiguration, loadConfiguration, readCrewFile, TrierarchFileError, writeCrewFile, type RunningFile } from '../adapters/files.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
-import type { RestFleet } from '../adapters/rest-fleet.js';
+import { FleetRefusal, type RestFleet } from '../adapters/rest-fleet.js';
 import type { Service } from '../adapters/service.js';
 import type { DetectHarnesses } from '../core/detect-harnesses.js';
 import { describeDetected } from './detect.js';
@@ -20,7 +20,9 @@ import type { Prompter } from './prompter.js';
  * configuration from the operator's answers; answers the offered harnesses' one-time
  * questions ahead, so a session nobody watches never waits on one; and offers
  * to install and start the service. On a machine set up already it says so,
- * never registers again, and offers to change the configuration.
+ * never registers again, and offers to change the configuration. Its setup
+ * line run again goes on with a setup that did not finish, and registers its
+ * ship again only once it was released (aeolus-fleet#1236).
  */
 
 export interface InitFlags {
@@ -112,6 +114,42 @@ function pluginShipOf(flags: InitFlags): ShipId | undefined {
     throw new TrierarchFileError(accepted.why);
   }
   return accepted.value;
+}
+
+type FleetAt = (fleetUrl: string, crewToken?: string) => Pick<RestFleet, 'registerSelf' | 'whoami'>;
+
+/**
+ * Registers the trierarch's ship, saying so first, as the fleet may be slow to
+ * answer. A ship crewed already was registered by its setup line run elsewhere:
+ * the refusal says how to go on, as the fleet's own words do not.
+ */
+async function registerShip(at: { fleetAt: FleetAt; prompter: Prompter; fleetUrl: string; shipId: ShipId; secret: string; pluginShipId: ShipId | undefined }): Promise<string> {
+  const { fleetUrl, shipId, pluginShipId } = at;
+  at.prompter.say(`Registering ${shipId} at ${fleetUrl}...`);
+  try {
+    return (await at.fleetAt(fleetUrl).registerSelf({ shipId, secret: at.secret })).crewToken;
+  } catch (error) {
+    if (error instanceof FleetRefusal && error.code === 'CONFLICT') {
+      const line = `npx @aeolus-fleet/trierarch init --fleet-url ${fleetUrl} --ship-id ${shipId}${pluginShipId === undefined ? '' : ` --plugin-ship-id ${pluginShipId}`} --secret <its new secret>`;
+      throw new TrierarchFileError(
+        `${shipId} is crewed already: its setup line ran on another computer, or there as another user. Run that setup line there again to finish its setup, or Release ${shipId} on its page in the console and run init here with its new secret: ${line}`,
+      );
+    }
+    throw error;
+  }
+}
+
+/** Whether the kept crew token still holds the lease: it no longer does once the ship was released. */
+async function isLeaseHeld(fleet: Pick<RestFleet, 'whoami'>): Promise<boolean> {
+  try {
+    await fleet.whoami();
+    return true;
+  } catch (error) {
+    if (error instanceof FleetRefusal && (error.code === 'LEASE_ENDED' || error.code === 'UNAUTHORIZED')) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 /** The fleet URL, ship id and secret, from the flags or asked; with --yes all three must be flags. */
@@ -259,7 +297,8 @@ export async function initTrierarch(input: {
   paths: TrierarchPaths;
   flags: InitFlags;
   prompter: Prompter;
-  fleetAt: (fleetUrl: string) => Pick<RestFleet, 'registerSelf'>;
+  /** The fleet at its URL, with the kept crew token for the calls a crew makes. */
+  fleetAt: FleetAt;
   claudeCode: ClaudeCodeSetup;
   codex: CodexSetup;
   /** Whether `codex` runs on this machine: only then, or when Codex is configured, does init ask about it. */
@@ -286,27 +325,45 @@ export async function initTrierarch(input: {
   let fleetUrl: string;
   let shipId: ShipId | undefined;
   let isPluginShipNew = false;
+  // Registered again after a release, so the crew file keeps the new crew token.
+  let isRegisteredAgain = false;
   if (crew === undefined) {
     prompter.step('The fleet');
     const asked = await askCrew(flags, prompter);
-    const { crewToken } = await input.fleetAt(asked.fleetUrl).registerSelf({ shipId: asked.shipId, secret: asked.secret });
+    const crewToken = await registerShip({ fleetAt: input.fleetAt, prompter, ...asked, pluginShipId });
     await writeCrewFile(paths.crewToken, { fleetUrl: asked.fleetUrl, shipId: asked.shipId, ...(pluginShipId !== undefined && { pluginShipId }), crewToken });
     ({ fleetUrl, shipId } = asked);
     said.push(`Registered ${shipId} at ${fleetUrl}: its crew token is kept in ${paths.crewToken}, readable by you only. The secret is written nowhere.`);
   } else {
     ({ fleetUrl, shipId } = crew);
     const ship = `the trierarch crews ${shipId ?? 'its ship'} at ${fleetUrl}`;
-    if (flags.shipId !== undefined || flags.secret !== undefined) {
+    // The setup line run again names the ship this machine crews: its setup may not have finished (aeolus-fleet#1236).
+    const isSetupLineAgain = shipId !== undefined && flags.shipId?.trim() === shipId && (flags.fleetUrl === undefined || flags.fleetUrl.trim().replace(/\/$/, '') === fleetUrl);
+    if (!isSetupLineAgain && (flags.shipId !== undefined || flags.secret !== undefined)) {
       throw new TrierarchFileError(`This machine is set up already: ${ship}. init never registers again: to register another ship, remove ${paths.crewToken} first`);
     }
-    said.push(`This machine is set up already: ${ship}.`);
+    let { crewToken } = crew;
+    if (shipId !== undefined && isSetupLineAgain) {
+      prompter.say(`Checking that this machine still crews ${shipId} at ${fleetUrl}...`);
+      if (await isLeaseHeld(input.fleetAt(fleetUrl, crewToken))) {
+        said.push(`The trierarch crews ${shipId} at ${fleetUrl} already, so init registers nothing and goes on with the rest of the setup.`);
+      } else {
+        const secret = flags.secret ?? (await prompter.secret(`${shipId} was released since this machine registered it. Its new secret (aeolus_sk_v1_..., not shown as you type)?`));
+        crewToken = await registerShip({ fleetAt: input.fleetAt, prompter, fleetUrl, shipId, secret, pluginShipId: pluginShipId ?? crew.pluginShipId });
+        isRegisteredAgain = true;
+        said.push(`${shipId} was released since this machine registered it, so init registered it again at ${fleetUrl}: its crew token is kept in ${paths.crewToken}, readable by you only. The secret is written nowhere.`);
+      }
+    } else {
+      said.push(`This machine is set up already: ${ship}.`);
+    }
     // A machine joined before the trusted repositories takes them once it knows the trierarch plugin's ship (aeolus-fleet#384).
-    if (pluginShipId !== undefined && pluginShipId !== crew.pluginShipId) {
+    isPluginShipNew = pluginShipId !== undefined && pluginShipId !== crew.pluginShipId;
+    if (isPluginShipNew || isRegisteredAgain) {
       if (shipId === undefined) {
         throw new TrierarchFileError(`The crew file at ${paths.crewToken} lacks its ship id: remove it and run aeolus-trierarch init with the setup line`);
       }
-      await writeCrewFile(paths.crewToken, { fleetUrl, shipId, pluginShipId, crewToken: crew.crewToken });
-      isPluginShipNew = true;
+      const keptPluginShipId = pluginShipId ?? crew.pluginShipId;
+      await writeCrewFile(paths.crewToken, { fleetUrl, shipId, ...(keptPluginShipId !== undefined && { pluginShipId: keptPluginShipId }), crewToken });
     }
   }
   if (pluginShipId !== undefined) {
