@@ -42,10 +42,10 @@
     "postpack": "rm LICENSE"
   },
   "dependencies": {
-    "@aeolus-fleet/common": "^0.28.0",
+    "@aeolus-fleet/common": "^0.31.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@aeolus-fleet/core": "^0.28.0"
+    "@aeolus-fleet/core": "^0.31.0"
   }
 }
