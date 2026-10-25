@@ -153,6 +153,19 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
     expect(back?.note).toBe('0 of 8 running');
   });
 
+  it('names a harness it does not offer, with the reason, in its details, and none once the plugin is back (#1212)', async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    await trierarch.state.save({ ...EMPTY_STATE, missingPlugins: ['codex'] });
+    await trierarch.reportSelf();
+
+    await trierarch.state.save(EMPTY_STATE);
+    await trierarch.reportSelf();
+
+    const [missing, back] = trierarch.fleet.selfReports;
+    expect(missing?.details.notOffered).toEqual([{ harness: 'codex', reason: 'its aeolus plugin is not installed (run aeolus-trierarch upgrade)' }]);
+    expect(back?.details.notOffered ?? []).toEqual([]);
+  });
+
   it('offers a place the missing harness alone does not trust (#1212)', async () => {
     const trierarch = aTrierarch(WITH_CODEX);
     trierarch.trust.untrust('codex', { kind: 'repository', name: 'aeolus-fleet' });
