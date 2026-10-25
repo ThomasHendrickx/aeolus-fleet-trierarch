@@ -420,14 +420,22 @@ export class InMemoryFleet implements FleetPort {
 
 export class InMemoryProcesses implements Pick<SessionRuntime, 'list' | 'stop'> {
   readonly sessions = new Map<ShipId, ObservedSession['status']>();
+  /** The sessions an older trierarch started, which this one does not speak to (H19). */
+  readonly otherVersion = new Set<ShipId>();
 
   list(): Promise<readonly ObservedSession[]> {
-    return Promise.resolve([...this.sessions].map(([shipId, status]) => ({ shipId, status })));
+    return Promise.resolve([...this.sessions].map(([shipId, status]) => ({ shipId, status, ...(this.otherVersion.has(shipId) && { isOtherVersion: true }) })));
   }
 
   stop(shipId: ShipId): Promise<void> {
     this.sessions.delete(shipId);
+    this.otherVersion.delete(shipId);
     return Promise.resolve();
+  }
+
+  /** The trierarch is upgraded: the ship's session keeps running, started by the older version. */
+  upgrade(shipId: ShipId): void {
+    this.otherVersion.add(shipId);
   }
 
   /** The session's process dies; tmux keeps the pane, so the exit is seen. */
@@ -500,6 +508,7 @@ export class InMemoryHarness implements HarnessPort {
     this.launchIds.push(launchId);
     this.launchedCheckouts.push({ shipId, checkouts });
     this.processes.sessions.set(shipId, 'running');
+    this.processes.otherVersion.delete(shipId);
     return Promise.resolve();
   }
 
