@@ -197,7 +197,6 @@ function configuration(): TrierarchConfiguration {
 function defaults(): [string, string | boolean][] {
   return [
     ['--dangerously-skip-permissions', false],
-    ['--remote-control', false],
     ['repository', ''],
     ['folder', ''],
     ['ships', '4'],
@@ -299,7 +298,6 @@ describe('aeolus-trierarch init, the whole setup', () => {
   it('sets the Claude Code flags as answered, the repositories it may make worktrees of, and the caps', async () => {
     const prompter = new ScriptedPrompter([
       ['--dangerously-skip-permissions', true],
-      ['--remote-control', true],
       ['repository', 'aeolus-fleet'],
       ['aeolus-fleet', '~/Projects/aeolus-fleet'],
       ['repository', ''],
@@ -315,7 +313,7 @@ describe('aeolus-trierarch init, the whole setup', () => {
     expect(configuration()).toMatchObject({
       caps: { ships: 6, running: 3 },
       repositories: { 'aeolus-fleet': { path: repository } },
-      harnesses: { 'claude-code': { flags: ['--dangerously-skip-permissions', '--remote-control'], options: {} } },
+      harnesses: { 'claude-code': { flags: ['--dangerously-skip-permissions'], options: {} } },
     });
     expect(prompter.isDone).toBe(true);
   });
@@ -323,7 +321,6 @@ describe('aeolus-trierarch init, the whole setup', () => {
   it('asks again for a repository that is no git checkout, and for a cap that is no positive whole number', async () => {
     const prompter = new ScriptedPrompter([
       ['--dangerously-skip-permissions', false],
-      ['--remote-control', false],
       ['repository', 'notes'],
       ['notes', join(home, 'notes')],
       ['notes', repository],
@@ -468,7 +465,7 @@ describe('aeolus-trierarch init on a machine set up already', () => {
   });
 
   it("rewrites the installed service's file before it restarts the trierarch, so the restart runs the new one", async () => {
-    const prompter = new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', false], ['repository', ''], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', true]]);
+    const prompter = new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['repository', ''], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', true]]);
 
     await init({}, prompter);
 
@@ -479,7 +476,6 @@ describe('aeolus-trierarch init on a machine set up already', () => {
     const prompter = new ScriptedPrompter([
       ['Change the configuration', true],
       ['--dangerously-skip-permissions', false],
-      ['--remote-control', true],
       ['repository', 'aeolus-fleet'],
       ['aeolus-fleet', repository],
       ['repository', ''],
@@ -491,7 +487,7 @@ describe('aeolus-trierarch init on a machine set up already', () => {
 
     const report = await init({}, prompter);
 
-    expect(configuration().harnesses['claude-code']?.flags).toEqual(['--remote-control']);
+    expect(configuration().harnesses['claude-code']?.flags).toEqual([]);
     expect(service.restarts).toBe(1);
     expect(report).toMatchObject({ configuration: 'changed', service: 'restarted' });
     expect(prompter.isDone).toBe(true);
@@ -500,7 +496,7 @@ describe('aeolus-trierarch init on a machine set up already', () => {
   it('waits for the restarted trierarch to say its version before it reports, so the status that follows shows it (#402)', async () => {
     saying = [{ pid: 1, version: '0.21.0' }, { pid: 2, version: '0.21.0' }];
     reads = 0;
-    const prompter = new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', false], ['repository', ''], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', true]]);
+    const prompter = new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['repository', ''], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', true]]);
 
     const report = await init({}, prompter);
 
@@ -509,9 +505,9 @@ describe('aeolus-trierarch init on a machine set up already', () => {
   });
 
   it('keeps or drops each repository it offers, as answered', async () => {
-    await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', false], ['repository', 'aeolus-fleet'], ['aeolus-fleet', repository], ['repository', ''], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
+    await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['repository', 'aeolus-fleet'], ['aeolus-fleet', repository], ['repository', ''], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
 
-    await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', false], ['Keep the repository aeolus-fleet', false], ['repository', ''], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
+    await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['Keep the repository aeolus-fleet', false], ['repository', ''], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
 
     expect(configuration().repositories).toEqual({});
   });
@@ -520,7 +516,7 @@ describe('aeolus-trierarch init on a machine set up already', () => {
     const notes = join(home, 'notes');
     mkdirSync(notes);
 
-    const report = await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', false], ['repository', ''], ['folder', 'notes'], ['notes', '~/notes'], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
+    const report = await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['repository', ''], ['folder', 'notes'], ['notes', '~/notes'], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
 
     expect(configuration().folders).toEqual({ notes: { path: notes } });
     expect(report.trusted).toEqual([paths.worktrees, notes]);
@@ -532,7 +528,6 @@ describe('aeolus-trierarch init on a machine set up already', () => {
     const prompter = new ScriptedPrompter([
       ['Change the configuration', true],
       ['--dangerously-skip-permissions', false],
-      ['--remote-control', false],
       ['repository', ''],
       ['folder', 'My Notes'],
       ['folder', 'notes'],
@@ -556,18 +551,28 @@ describe('aeolus-trierarch init on a machine set up already', () => {
     mkdirSync(notes);
     writeFileSync(paths.config, JSON.stringify({ ...configuration(), folders: { notes: { path: notes } } }));
 
-    await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', false], ['repository', ''], ['Keep the folder notes', false], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
+    await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['repository', ''], ['Keep the folder notes', false], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
 
     expect(configuration().folders).toEqual({});
+  });
+
+  it('asks nothing about Remote Control and leaves --remote-control out of the flags it writes: a session the trierarch runs has no terminal (headless H20)', async () => {
+    writeFileSync(paths.config, JSON.stringify({ ...configuration(), harnesses: { 'claude-code': { flags: ['--remote-control', '--verbose'], options: {} } } }));
+    const prompter = new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['repository', ''], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]);
+
+    await init({}, prompter);
+
+    expect(configuration().harnesses['claude-code']?.flags).toEqual(['--verbose']);
+    expect(prompter.isDone).toBe(true);
   });
 
   it('keeps everything else the configuration holds: folders, options and the worktree root', async () => {
     const custom = { ...configuration(), worktreeRoot: join(home, 'worktrees'), folders: { notes: { path: '/notes' } }, harnesses: { 'claude-code': { flags: ['--verbose'], options: { model: { values: { opus: ['--model', 'claude-opus-5-5'] }, default: 'opus' } } } } };
     writeFileSync(paths.config, JSON.stringify(custom));
 
-    await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['--remote-control', true], ['repository', ''], ['Keep the folder notes', true], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
+    await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['repository', ''], ['Keep the folder notes', true], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
 
-    expect(configuration()).toEqual({ ...custom, harnesses: { 'claude-code': { ...custom.harnesses['claude-code'], flags: ['--verbose', '--remote-control'] } } });
+    expect(configuration()).toEqual(custom);
     await expect(createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).isTrusted(join(home, 'worktrees'))).resolves.toBe(true);
   });
 

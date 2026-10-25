@@ -5,6 +5,7 @@ import { CONFIGURATION, InMemoryContainerHost } from '../../test/support/in-memo
 import { createCheckSessionRuntime } from './check-session-runtime.js';
 
 const MODEL_TOKEN_FILE = '/home/thomas/.aeolus/trierarch/model-token';
+const REMOTE_CONTROL_REFUSAL = 'claude-code launches with --remote-control: a session the trierarch runs has no terminal and no Remote Control, so remove it';
 const CONTAINER = { kind: 'container', binary: 'podman', memory: '4g', cpus: 2 } as const;
 
 /** A machine that runs its sessions in containers, with Claude Code launched without Remote Control. */
@@ -24,8 +25,8 @@ describe('checking the session runtime (decision 0039)', () => {
     await expect(check(inContainers())).resolves.toEqual([]);
   });
 
-  it('asks nothing of the machine for sessions on the host, Remote Control and Codex included', async () => {
-    const configuration = { ...CONFIGURATION, harnesses: { 'claude-code': { flags: ['--remote-control'], options: {} }, codex: { flags: [], options: {} } } };
+  it('asks nothing of the machine for sessions on the host, Codex included', async () => {
+    const configuration = { ...CONFIGURATION, harnesses: { 'claude-code': { flags: [], options: {} }, codex: { flags: [], options: {} } } };
     host.mode = 'rootful';
     host.hasModelToken = false;
 
@@ -56,9 +57,13 @@ describe('checking the session runtime (decision 0039)', () => {
     await expect(check(inContainers())).resolves.toEqual(['the user that runs the trierarch is in the docker group, which is root on the machine: take the user out of it']);
   });
 
-  it('refuses --remote-control in a harness flags, as a container session has no Remote Control', async () => {
+  it('refuses --remote-control on the host too, as a session the trierarch runs has no terminal and no Remote Control (headless H20)', async () => {
+    await expect(check({ ...CONFIGURATION, harnesses: { 'claude-code': { flags: ['--remote-control'], options: {} } } })).resolves.toEqual([REMOTE_CONTROL_REFUSAL]);
+  });
+
+  it('refuses --remote-control in a harness flags in containers', async () => {
     await expect(check(inContainers({ harnesses: { 'claude-code': { flags: ['--remote-control'], options: {} } } }))).resolves.toEqual([
-      'claude-code launches with --remote-control: a session in a container has no Remote Control, so remove it',
+      REMOTE_CONTROL_REFUSAL,
     ]);
   });
 
@@ -69,7 +74,7 @@ describe('checking the session runtime (decision 0039)', () => {
   it('refuses --remote-control in the flags of an option value', async () => {
     const harnesses = { 'claude-code': { flags: [], options: { remote: { values: { on: ['--remote-control'], off: [] }, default: 'off' } } } };
 
-    await expect(check(inContainers({ harnesses }))).resolves.toEqual(['claude-code launches with --remote-control: a session in a container has no Remote Control, so remove it']);
+    await expect(check(inContainers({ harnesses }))).resolves.toEqual([REMOTE_CONTROL_REFUSAL]);
   });
 
   it('refuses Codex, which is not proven in a container yet', async () => {

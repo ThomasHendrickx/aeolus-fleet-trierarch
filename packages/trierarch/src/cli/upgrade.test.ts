@@ -141,11 +141,45 @@ beforeEach(() => {
   };
 });
 
+/** The harnesses whose flags carried --remote-control, taken out of the configuration by the upgrade (headless H20). */
+let remoteControlIn: string[];
+/** How many times the upgrade took Remote Control out of the configuration. */
+let remoteControlRemovals: number;
+
+beforeEach(() => {
+  remoteControlIn = [];
+  remoteControlRemovals = 0;
+});
+
+const removeRemoteControl = () => {
+  remoteControlRemovals += 1;
+  const removed = remoteControlIn;
+  remoteControlIn = [];
+  return Promise.resolve(removed);
+};
+
 function upgrade(version?: string, at: { isPluginStepOfAnUpgrade?: boolean } = {}) {
-  return upgradeTrierarch({ ...(version !== undefined && { version }), ...at, installedVersion: () => installed, npm, writeInstalledServiceFile, upgradeInstalledPlugin: (to) => upgradeInstalledPlugin(to), service, running, sleep, plugin });
+  return upgradeTrierarch({ ...(version !== undefined && { version }), ...at, installedVersion: () => installed, npm, writeInstalledServiceFile, upgradeInstalledPlugin: (to) => upgradeInstalledPlugin(to), service, running, sleep, plugin, removeRemoteControl });
 }
 
 describe('aeolus-trierarch upgrade', () => {
+  it("takes --remote-control out of the configuration as the version it installs, and says so, before the service starts on it (headless H20)", async () => {
+    remoteControlIn = ['claude-code'];
+
+    const report = await upgrade();
+
+    expect(remoteControlIn).toEqual([]);
+    expect(report.said).toContain('Took --remote-control out of the flags of claude-code in the configuration: a session the trierarch runs has no terminal, so no Remote Control.');
+    expect(report.said.indexOf('Took --remote-control out of the flags of claude-code in the configuration: a session the trierarch runs has no terminal, so no Remote Control.')).toBeLessThan(report.said.findIndex((line) => line.startsWith('The service runs')));
+  });
+
+  it('says nothing of Remote Control when the configuration has none', async () => {
+    const report = await upgrade();
+
+    expect(remoteControlRemovals).toBe(1);
+    expect(report.said.join('\n')).not.toContain('remote-control');
+  });
+
   it('installs the latest version from npm, pinned to it, then stops the old process and starts the new one', async () => {
     const report = await upgrade();
 
