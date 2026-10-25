@@ -15,7 +15,10 @@ import { holdRequestSchema, parsedLine, REFUSED } from './hold-protocol.js';
  * harness writes to the session's events, keeps the harness's session id, and
  * answers the trierarch alone on its socket: send a line, interrupt the turn,
  * say its state. When the harness ends, the hold ends; when the hold is
- * stopped, the harness ends with it.
+ * stopped, the harness ends with it. A hold that dies without the chance to
+ * stop it, as SIGKILL leaves it, still ends its harness: a guard, a process of
+ * its own, holds a pipe from the hold and ends each harness's group once that
+ * pipe closes, which the hold's death does.
  *
  * Claude Code's turn is stopped with the interrupt control request on its
  * stdin, which keeps the process (H12, Thomas, 25 Oct: "Headless option 2").
@@ -29,6 +32,29 @@ export const INTERRUPT_WAIT_MS = 10_000;
 /** The flag that resumes a Claude Code session by its id, and the one that continues the folder's last, which a resume replaces. */
 const RESUME = '--resume';
 const CONTINUE = '--continue';
+
+/** How long the guard gives a harness's group to end after SIGTERM before SIGKILL. */
+const GUARD_GRACE_MS = 2_000;
+
+/**
+ * The guard, run by Node: each stdin line is the group of a harness the hold
+ * started; when stdin closes, every such group is ended. It is plain
+ * JavaScript so it needs nothing the hold was started with.
+ */
+const GUARD = `
+const groups = new Set();
+const end = (signal) => {
+  for (const group of groups) {
+    try { process.kill(-group, signal); } catch {}
+  }
+};
+const lines = require('node:readline').createInterface({ input: process.stdin });
+lines.on('line', (line) => { groups.add(Number(line)); });
+lines.on('close', () => {
+  end('SIGTERM');
+  setTimeout(() => { end('SIGKILL'); }, ${String(GUARD_GRACE_MS)});
+});
+`;
 
 export interface HoldOptions {
   readonly files: HoldFiles;
@@ -98,10 +124,18 @@ export async function runHold(options: HoldOptions): Promise<number> {
     }
   };
 
+  // A session of its own, so a signal to the hold's group does not end the guard before it ends the harness.
+  const guard = spawn(process.execPath, ['-e', GUARD], { env: {}, stdio: ['pipe', 'ignore', 'ignore'], detached: true });
+  guard.stdin.on('error', () => undefined);
+  guard.unref();
+
   const startHarness = (command: readonly string[]): ChildProcessByStdio<Writable, Readable, null> => {
     const [program = '', ...args] = command;
     // A process group of its own: a stop ends the harness and every process it started.
     const child = spawn(program, args, { cwd: folder, env: { ...environment }, stdio: ['pipe', 'pipe', 'ignore'], detached: true });
+    if (child.pid !== undefined) {
+      guard.stdin.write(`${String(child.pid)}\n`);
+    }
     child.stdin.on('error', () => undefined);
     createInterface({ input: child.stdout }).on('line', onLine);
     child.on('error', () => {
