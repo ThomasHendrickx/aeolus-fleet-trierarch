@@ -164,6 +164,7 @@ function upgrade(version?: string, at: { isPluginStepOfAnUpgrade?: boolean } = {
 
 describe('aeolus-trierarch upgrade', () => {
   it("takes --remote-control out of the configuration as the version it installs, and says so, before the service starts on it (headless H20)", async () => {
+    offered = ['claude-code'];
     remoteControlIn = ['claude-code'];
 
     const report = await upgrade();
@@ -174,6 +175,8 @@ describe('aeolus-trierarch upgrade', () => {
   });
 
   it('says nothing of Remote Control when the configuration has none', async () => {
+    offered = ['claude-code'];
+
     const report = await upgrade();
 
     expect(remoteControlRemovals).toBe(1);

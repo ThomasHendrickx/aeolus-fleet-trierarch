@@ -35,7 +35,10 @@ import { NOT_SAID_YET_REASON, startNewProcess } from './new-process.js';
  * version it upgrades to, from main for releases up to 0.22.0, whose tags
  * hold no plugin of their version (#652). A Codex downgrade keeps the newer
  * version folder for the sessions running on it, so new Codex sessions start
- * on it too: upgrade says so. On the version already, it restarts the
+ * on it too: upgrade says so. Its version's step takes `--remote-control` out
+ * of the configuration, saying so, as no session has Remote Control from
+ * 0.33.0 and the trierarch refuses to start with it (headless H20). On the
+ * version already, it restarts the
  * service when the service runs another version, as after an install by hand
  * (#829), unless it runs as the plugin step of an upgrade, which restarts the
  * service itself.
@@ -128,6 +131,11 @@ async function upgradePlugin(plugin: PluginUpgrade | undefined, version: string)
 
 const VERSION = /^\d+\.\d+\.\d+$/;
 
+/** What an upgrade says when it took Remote Control out of the configuration (headless H20). */
+function remoteControlRemoved(harnesses: readonly string[]): string {
+  return `Took --remote-control out of the flags of ${harnesses.join(', ')} in the configuration: a session the trierarch runs has no terminal, so no Remote Control.`;
+}
+
 function alreadyOn(version: string): string {
   return `The trierarch is already on ${version}.`;
 }
@@ -210,6 +218,8 @@ export async function upgradeTrierarch(at: Restart & {
   upgradeInstalledPlugin: (version: string) => Promise<CommandResult>;
   /** The aeolus plugin; none updates nothing. */
   plugin?: PluginUpgrade;
+  /** Takes Remote Control out of the configuration (headless H20): the harnesses whose flags carried it. */
+  removeRemoteControl: () => Promise<readonly string[]>;
 }): Promise<UpgradeReport> {
   const from = at.installedVersion();
   if (at.version !== undefined && !VERSION.test(at.version)) {
@@ -217,8 +227,9 @@ export async function upgradeTrierarch(at: Restart & {
   }
   const target = at.version ?? (await at.npm.latest()).trim();
   if (target === from) {
+    const removed = await at.removeRemoteControl();
     const plugin = await upgradePlugin(at.plugin, target);
-    const said = [alreadyOn(from), ...plugin.said];
+    const said = [alreadyOn(from), ...(removed.length === 0 ? [] : [remoteControlRemoved(removed)]), ...plugin.said];
     const running = at.isPluginStepOfAnUpgrade === true ? undefined : await otherRunningVersion(at, from);
     if (running !== undefined) {
       said.push(`The service ran ${running}, so it restarted on ${from}.`, await restartOn(at, { from: running, to: from }));

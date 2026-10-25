@@ -16,7 +16,7 @@ import { main, USAGE } from './main.js';
 /** The configuration as an operator writes it now (#382): no model, which comes from detection only, and an effort with its default. */
 const CONFIGURED = {
   ...CONFIGURATION,
-  harnesses: { 'claude-code': { flags: ['--remote-control'], options: { effort: { values: { high: ['--effort', 'high'], low: ['--effort', 'low'] }, default: 'high' } } } },
+  harnesses: { 'claude-code': { flags: ['--verbose'], options: { effort: { values: { high: ['--effort', 'high'], low: ['--effort', 'low'] }, default: 'high' } } } },
 };
 
 let home: string;
@@ -60,7 +60,7 @@ describe('aeolus-trierarch', () => {
 
     expect(code).toBe(0);
     expect(output).toContain(`The configuration at ${config} fits.`);
-    expect(output).toContain('claude-code: --remote-control --effort high');
+    expect(output).toContain('claude-code: --verbose --effort high');
   });
 
   it('config check gives the detected options too, an option the operator wrote winning by its name, and the detected model always (#365, #382)', async () => {
@@ -94,8 +94,8 @@ describe('aeolus-trierarch', () => {
 
     expect(output).toContain(
       [
-        `  first start: claude -p --input-format stream-json --output-format stream-json --verbose (adapter) --remote-control --effort high (configuration) --permission-mode default (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter)`,
-        `  restart: claude -p --input-format stream-json --output-format stream-json --verbose (adapter) --remote-control --effort high (configuration) --permission-mode default (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter) --continue (adapter)`,
+        `  first start: claude -p --input-format stream-json --output-format stream-json --verbose (adapter) --verbose --effort high (configuration) --permission-mode default (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter)`,
+        `  restart: claude -p --input-format stream-json --output-format stream-json --verbose (adapter) --verbose --effort high (configuration) --permission-mode default (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter) --continue (adapter)`,
       ].join('\n'),
     );
     expect(output).toContain(
@@ -164,7 +164,7 @@ describe('aeolus-trierarch', () => {
     expect(JSON.parse(output)).toMatchObject({
       harnesses: {
         'claude-code': {
-          flags: ['--remote-control', '--effort', 'high'],
+          flags: ['--verbose', '--effort', 'high'],
           adapterFlags: [
             { flag: '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', when: 'always' },
             { flag: '--continue', when: 'restart' },
@@ -172,7 +172,7 @@ describe('aeolus-trierarch', () => {
           restart: [
             { words: ['claude'] },
             { words: ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'], source: 'adapter' },
-            { words: ['--remote-control', '--effort', 'high'], source: 'configuration' },
+            { words: ['--verbose', '--effort', 'high'], source: 'configuration' },
             { words: ['--permission-mode', 'default'], source: 'adapter', when: 'the Claude Code settings for the folder make plan the default mode' },
             { words: ['--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode'], source: 'adapter' },
             { words: ['--continue'], source: 'adapter' },
@@ -271,7 +271,7 @@ describe('aeolus-trierarch', () => {
 
     expect(JSON.parse(output)).toMatchObject({
       path: config,
-      harnesses: { 'claude-code': { flags: ['--remote-control', '--effort', 'high'], options: { effort: { high: ['--effort', 'high'], low: ['--effort', 'low'] } } } },
+      harnesses: { 'claude-code': { flags: ['--verbose', '--effort', 'high'], options: { effort: { high: ['--effort', 'high'], low: ['--effort', 'low'] } } } },
     });
   });
 

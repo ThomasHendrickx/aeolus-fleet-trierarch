@@ -6,7 +6,7 @@ import { trierarchConfigurationSchema } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { newId } from '../../test/support/in-memory.js';
-import { configurationJsonSchema, initialConfiguration, loadConfiguration, readCrewFile, readRunningFile, writeCrewFile, writeRunningFile } from './files.js';
+import { configurationJsonSchema, initialConfiguration, loadConfiguration, readCrewFile, readRunningFile, removeRemoteControl, writeCrewFile, writeRunningFile } from './files.js';
 
 let folder: string;
 
@@ -70,6 +70,26 @@ describe('the running file', () => {
 });
 
 describe('the configuration file', () => {
+  it("takes --remote-control out of a harness's flags, keeping all else the file holds, and names the harness (headless H20)", async () => {
+    const path = join(folder, 'config.json');
+    const configured = { ...initialConfiguration(), worktreeRoot: '/worktrees', harnesses: { 'claude-code': { flags: ['--remote-control', '--verbose'], options: {} } } };
+    writeFileSync(path, JSON.stringify(configured));
+
+    await expect(removeRemoteControl(path)).resolves.toEqual(['claude-code']);
+
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ ...configured, harnesses: { 'claude-code': { flags: ['--verbose'], options: {} } } });
+  });
+
+  it('leaves a configuration without Remote Control as it is, and one that is missing', async () => {
+    const path = join(folder, 'config.json');
+    const text = JSON.stringify({ ...initialConfiguration(), harnesses: { 'claude-code': { flags: ['--verbose'], options: {} } } });
+    writeFileSync(path, text);
+
+    await expect(removeRemoteControl(path)).resolves.toEqual([]);
+    await expect(removeRemoteControl(join(folder, 'none.json'))).resolves.toEqual([]);
+    expect(readFileSync(path, 'utf8')).toBe(text);
+  });
+
   it('a fresh one fits its schema and adds no flag', () => {
     const configuration = initialConfiguration();
 

@@ -8,6 +8,7 @@ import type { TrierarchPaths } from '../adapters/paths.js';
 import { FleetRefusal, type RestFleet } from '../adapters/rest-fleet.js';
 import type { Service } from '../adapters/service.js';
 import type { DetectHarnesses } from '../core/detect-harnesses.js';
+import { withoutRemoteControl } from '../core/remote-control.js';
 import { describeDetected } from './detect.js';
 import { NOT_SAID_YET, startNewProcess } from './new-process.js';
 import { absolutePath, nameRefusal, placeRefusal } from './places.js';
@@ -54,7 +55,6 @@ export interface InitReport {
 
 const CLAUDE_CODE = 'claude-code';
 const SKIP_PERMISSIONS = '--dangerously-skip-permissions';
-const REMOTE_CONTROL = '--remote-control';
 const CODEX = 'codex';
 const BYPASS_APPROVALS = '--dangerously-bypass-approvals-and-sandbox';
 
@@ -260,22 +260,17 @@ async function askCodex(at: { base: TrierarchConfiguration; prompter: Prompter; 
 
 /** The configuration from the operator's answers, starting from what it holds: Claude Code's and Codex's flags, the repositories, the folders and the caps. Everything else is kept. */
 async function askConfiguration(at: { base: TrierarchConfiguration; prompter: Prompter; homeDirectory: string; isCodexInstalled: boolean }): Promise<TrierarchConfiguration> {
-  const { base, prompter } = at;
+  const { prompter } = at;
+  // A session the trierarch runs has no terminal, so no Remote Control: init offers it no more and keeps none (headless H20).
+  const base = withoutRemoteControl(at.base).configuration;
   const harness = base.harnesses[CLAUDE_CODE] ?? { flags: [], options: {} };
   prompter.step('Claude Code');
   const isSkipping = await prompter.confirm(`Launch Claude Code with ${SKIP_PERMISSIONS}? Its sessions then run every tool without asking.`, {
     isDefault: harness.flags.includes(SKIP_PERMISSIONS),
   });
-  const isRemote = await prompter.confirm(`Launch Claude Code with ${REMOTE_CONTROL}, so you can follow each session from claude.ai?`, {
-    isDefault: harness.flags.includes(REMOTE_CONTROL),
-  });
-  const flags = [
-    ...harness.flags.filter((flag) => flag !== SKIP_PERMISSIONS && flag !== REMOTE_CONTROL),
-    ...(isSkipping ? [SKIP_PERMISSIONS] : []),
-    ...(isRemote ? [REMOTE_CONTROL] : []),
-  ];
+  const flags = [...harness.flags.filter((flag) => flag !== SKIP_PERMISSIONS), ...(isSkipping ? [SKIP_PERMISSIONS] : [])];
   prompter.step('Codex');
-  const codex = await askCodex(at);
+  const codex = await askCodex({ ...at, base });
   prompter.step('Workspaces');
   const repositories = await askPlaces({ held: base.repositories, prompter, homeDirectory: at.homeDirectory, questions: REPOSITORY_QUESTIONS });
   const folders = await askPlaces({ held: base.folders, prompter, homeDirectory: at.homeDirectory, questions: FOLDER_QUESTIONS });

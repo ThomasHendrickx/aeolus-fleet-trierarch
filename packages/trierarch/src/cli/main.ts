@@ -10,7 +10,7 @@ import { createCodexSetup } from '../adapters/codex-setup.js';
 import { createContainerHost } from '../adapters/container-host.js';
 import { createDetectedFile } from '../adapters/detected-file.js';
 import { createDetectors } from '../adapters/detectors.js';
-import { loadConfiguration, readCrewFile, readRunningFile, TrierarchFileError } from '../adapters/files.js';
+import { loadConfiguration, readCrewFile, readRunningFile, removeRemoteControl, TrierarchFileError } from '../adapters/files.js';
 import { createJsonState } from '../adapters/json-state.js';
 import { createLogger, readLogLine, renderLogLine, type LogStream } from '../adapters/log.js';
 import { createStyle, isColourTerminal, type Style } from '../adapters/style.js';
@@ -249,6 +249,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       const report = await upgradeTrierarch({
         ...(version !== undefined && { version }),
         isPluginStepOfAnUpgrade: env[PLUGIN_STEP_VARIABLE] === '1',
+        removeRemoteControl: () => removeRemoteControl(paths.config),
         installedVersion: runningVersion,
         npm: {
           globalFolder: async () => {

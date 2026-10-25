@@ -715,8 +715,8 @@ describe('aeolus-trierarch init, for Codex', () => {
   });
 
   it('offers Codex where it is installed, with the flags as answered', async () => {
-    const [skip, remote, ...rest] = defaults();
-    const prompter = new ScriptedPrompter([skip ?? ['', false], remote ?? ['', false], ['Offer Codex', true], ['--dangerously-bypass-approvals-and-sandbox', true], ...rest]);
+    const [skip, ...rest] = defaults();
+    const prompter = new ScriptedPrompter([skip ?? ['', false], ['Offer Codex', true], ['--dangerously-bypass-approvals-and-sandbox', true], ...rest]);
 
     isCodexInstalled = true;
 
