@@ -76,6 +76,16 @@ async function eventsOfType(session: { runtime: SessionRuntime; shipId: ShipId }
   });
 }
 
+/** Whether a process of that pid still runs. */
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Each start of the stand-in, as it wrote it down. */
 const starts = () => written('fake-starts.jsonl').map((start) => startSchema.parse(start));
 
@@ -192,7 +202,7 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
     await expect(eventsOfType({ runtime: runtime, shipId: shipId }, 'result')).resolves.toEqual([expect.objectContaining({ is_error: true, result: 'Not logged in · Please run /login' })]);
   });
 
-  it('sees the session exited when its hold dies, and the harness ends with it', async () => {
+  it('sees the session exited when its hold dies', async () => {
     const runtime = aRuntime();
     const shipId = await aClaudeCodeSession(runtime);
     const hold = await runtime.sessionRootOf(shipId);
@@ -200,6 +210,19 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
     process.kill(hold ?? 0, 'SIGKILL');
 
     await expect.poll(async () => runtime.list()).toEqual([{ shipId, status: 'exited' }]);
+  });
+
+  it('ends the harness, and every process it started, when its hold dies abruptly (H8)', async () => {
+    const runtime = aRuntime();
+    const shipId = newId('ship');
+    // Neither reads stdin, so neither ends when the hold's end of it closes.
+    await runtime.start({ shipId, folder, command: ['sh', '-c', 'echo $$ > harness.pid; sleep 600 & echo $! > started.pid; wait'], harness: 'claude-code' });
+    await expect.poll(() => existsSync(join(folder, 'started.pid'))).toBe(true);
+    const pids = ['harness.pid', 'started.pid'].map((file) => Number(readFileSync(join(folder, file), 'utf8').trim()));
+
+    process.kill((await runtime.sessionRootOf(shipId)) ?? 0, 'SIGKILL');
+
+    await expect.poll(() => pids.filter(isAlive), { timeout: 3_000 }).toEqual([]);
   });
 
   it('lists a session whose hold another version of the trierarch started as of another version, as after an upgrade (H19)', async () => {
