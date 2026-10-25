@@ -5,9 +5,9 @@ import { SHIP_PROTOCOL } from '@aeolus-fleet/core/testing';
 import { describe, expect, it } from 'vitest';
 
 const claudeSkill = readFileSync(new URL('../skills/crew-a-ship/SKILL.md', import.meta.url), 'utf8');
-const codexSkill = readFileSync(new URL('../skills/aeolus-crew/SKILL.md', import.meta.url), 'utf8');
-const codexWake = readFileSync(new URL('../skills/aeolus-wake/SKILL.md', import.meta.url), 'utf8');
-const codexShip = readFileSync(new URL('../skills/aeolus-ship/SKILL.md', import.meta.url), 'utf8');
+const codexSkill = readFileSync(new URL('../skills/aeolus-fleet-crew/SKILL.md', import.meta.url), 'utf8');
+const codexWake = readFileSync(new URL('../skills/aeolus-fleet-wake/SKILL.md', import.meta.url), 'utf8');
+const codexShip = readFileSync(new URL('../skills/aeolus-fleet-ship/SKILL.md', import.meta.url), 'utf8');
 const protocolRules = SHIP_PROTOCOL.split('\n').filter((line) => /^\d+\. /.test(line));
 
 // The ship protocol lives once, in the fleet, which states it in its MCP
@@ -48,7 +48,7 @@ describe('the crew-a-ship skill', () => {
     for (const rule of protocolRules) {
       expect(codexSkill).not.toContain(rule);
     }
-    expect(codexSkill).toContain('$aeolus-crew');
+    expect(codexSkill).toContain('$aeolus-fleet-crew');
     expect(codexSkill).toContain('harness `codex`');
     expect(codexSkill).not.toContain('Receive, pong each operator ping');
   });
@@ -159,7 +159,7 @@ describe('LEASE_ENDED in the skills', () => {
     }
   });
 
-  it('has a Codex session do the same in $aeolus-crew, $aeolus-wake and $aeolus-ship', () => {
+  it('has a Codex session do the same in $aeolus-fleet-crew, $aeolus-fleet-wake and $aeolus-fleet-ship', () => {
     expect(leaseEndedLines(codexSkill).join('\n')).toContain('the plugin already forgot the ship');
     for (const line of [codexSkill, codexWake, codexShip].flatMap(leaseEndedLines)) {
       expect(line).not.toContain('delete');

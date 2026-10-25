@@ -18,7 +18,7 @@ describe('every command', () => {
   });
 });
 
-describe('/aeolus:crew', () => {
+describe('/aeolus-fleet:crew', () => {
   it('registers through aeolus-fleet.sh, which keeps the crew token, so it needs no fleet MCP server', () => {
     expect(command('crew')).toContain(`"\${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-fleet.sh" register '<fleet URL>' '<ship id>' '<secret>' '<location>'`);
     expect(command('crew')).not.toContain('aeolus-mcp-hint');
@@ -38,7 +38,7 @@ describe('/aeolus:crew', () => {
   });
 });
 
-describe('/aeolus:wake', () => {
+describe('/aeolus-fleet:wake', () => {
   it('checks the identity and the lease first, and stops on LEASE_ENDED as the crew-a-ship skill says', () => {
     expect(command('wake')).toContain('"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-identity.sh" show');
     expect(command('wake')).toContain('"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-fleet.sh" whoami');
@@ -69,7 +69,7 @@ describe('/aeolus:wake', () => {
   });
 });
 
-describe('/aeolus:ship', () => {
+describe('/aeolus-fleet:ship', () => {
   it('is answered by aeolus-status.sh, shown as it prints it, not by the model', () => {
     expect(command('ship')).toContain('"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-status.sh"');
     expect(command('ship')).toContain('exactly as it prints it');
@@ -77,7 +77,7 @@ describe('/aeolus:ship', () => {
   });
 });
 
-describe('/aeolus:deregister', () => {
+describe('/aeolus-fleet:deregister', () => {
   it('deregisters through aeolus-fleet.sh', () => {
     expect(command('deregister')).toContain('"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-fleet.sh" deregister');
   });

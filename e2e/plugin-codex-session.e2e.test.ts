@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { freePort } from './support/free-port.js';
 
-// The aeolus plugin in a real interactive Codex session, driven in tmux
+// The aeolus-fleet plugin in a real interactive Codex session, driven in tmux
 // against a fleet on this machine and with no fleet MCP server: the session
 // crews a ship with the Codex crew line, and answers a message sent while it
 // is idle, without anyone touching it: the wake bridge hands it over and
@@ -117,7 +117,7 @@ async function waitForReply(messageId: MessageId) {
   return database.message.findFirstOrThrow({ where: { inReplyToMessageId: messageId, senderShipId: shipId } });
 }
 
-describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Codex session', () => {
+describe.skipIf(!isEnabled)('the aeolus-fleet plugin in an interactive Codex session', () => {
   beforeAll(async () => {
     const databaseUrl = await createMigratedDatabase();
     database = createPrismaClient(databaseUrl);
@@ -129,13 +129,13 @@ describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Codex session',
     await server.listen({ host: '127.0.0.1', port });
     const commissioned = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'scout', type: 'reviewer' }));
     shipId = commissioned.shipId;
-    crewLine = `$aeolus-crew ${fleetUrl} ${shipId} ${commissioned.secret ?? ''}`;
+    crewLine = `$aeolus-fleet-crew ${fleetUrl} ${shipId} ${commissioned.secret ?? ''}`;
 
     folder = realpathSync(mkdtempSync(join(tmpdir(), 'aeolus-plugin-codex-e2e-')));
     execFileSync('git', ['init', '-q'], { cwd: folder });
     codexHome = mkdtempSync(join(tmpdir(), 'aeolus-codex-home-'));
     copyFileSync(join(SIGNED_IN_CODEX_HOME, 'auth.json'), join(codexHome, 'auth.json'));
-    const data = join(codexHome, 'plugins', 'data', 'aeolus-aeolus-fleet');
+    const data = join(codexHome, 'plugins', 'data', 'aeolus-fleet-aeolus-fleet');
     writeFileSync(
       join(codexHome, 'config.toml'),
       [
@@ -146,7 +146,7 @@ describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Codex session',
       ].join('\n'),
     );
     codex('plugin', 'marketplace', 'add', REPOSITORY);
-    codex('plugin', 'add', 'aeolus@aeolus-fleet');
+    codex('plugin', 'add', 'aeolus-fleet@aeolus-fleet');
     try {
       tmux('kill-session', '-t', TMUX_SESSION);
     } catch {

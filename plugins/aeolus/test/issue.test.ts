@@ -90,7 +90,7 @@ function aDraft(body = ''): string {
   return draft;
 }
 
-describe('aeolus-issue redact', () => {
+describe('aeolus-fleet-issue redact', () => {
   it('strips crew tokens, secrets, bearer values, the fleet host, home and folder paths, and ship names and ids, keeping the rest', () => {
     const { status, stdout } = run('aeolus-issue.sh', { args: ['redact', aDraft()] });
 
@@ -152,7 +152,7 @@ describe('the sensitive-information filter', () => {
 
   it.each([
     ['a commit sha', 'commit 3f2a9c1e8b7d6a5f4e3d2c1b0a9f8e7d6c5b4a39'],
-    ['a version', 'aeolus plugin 0.16.0'],
+    ['a version', 'aeolus-fleet plugin 0.16.0'],
     ['a timestamp', 'sent 2026-10-05T15:31:17.614Z'],
     ['a time of day', 'the watcher exited 4 at 15:31:17'],
     ['a github.com URL', 'see https://github.com/ThomasHendrickx/aeolus-fleet/issues/228'],
@@ -162,13 +162,13 @@ describe('the sensitive-information filter', () => {
     ['a digit run that is no card number', 'card 4111 1111 1111 1112 refused'],
     ['a CI run number', 'PR #231, run 37329449841'],
     ['an HTTP status and a duration', 'HTTP 404 after 25 seconds'],
-    ['a path without secrets', 'plugins/aeolus/scripts/aeolus-issue.sh'],
+    ['a path without secrets', 'plugins/aeolus-fleet/scripts/aeolus-issue.sh'],
   ])('keeps %s', (_kind, line) => {
     expect(redacted(line)).toBe(line);
   });
 });
 
-describe('aeolus-issue check', () => {
+describe('aeolus-fleet-issue check', () => {
   it('refuses a text that still carries a crew token, naming what it carries', () => {
     const text = join(data, 'text.md');
     writeFileSync(text, `the token is ${CREW_TOKEN}\n`);
@@ -195,7 +195,7 @@ describe('aeolus-issue check', () => {
   });
 });
 
-describe('aeolus-issue file', () => {
+describe('aeolus-fleet-issue file', () => {
   it('files the stripped issue on the repository with gh when it is signed in, saying it was filed by an Aeolus ship', () => {
     aGh({ isSignedIn: true });
 
@@ -216,7 +216,7 @@ describe('aeolus-issue file', () => {
     expect(calls).toContain(`issue create --repo ${REPOSITORY} --title The watcher woke [ship] four times with nothing to read --body-file`);
     const body = readFileSync(`${ghCalls}.body`, 'utf8');
     expect(body.match(/Filed by an Aeolus ship/g)).toHaveLength(1);
-    expect(body).toMatch(/aeolus plugin \d+\.\d+\.\d+, harness claude-code, OS \w+/);
+    expect(body).toMatch(/aeolus-fleet plugin \d+\.\d+\.\d+, harness claude-code, OS \w+/);
     expect(body).not.toContain(CREW_TOKEN);
     expect(body).not.toContain('l3lo');
   });
@@ -302,9 +302,9 @@ describe('aeolus-issue file', () => {
   });
 });
 
-describe('/aeolus:issue and $aeolus-issue', () => {
+describe('/aeolus-fleet:issue and $aeolus-fleet-issue', () => {
   /** The Claude Code command and the Codex skill. */
-  const texts = () => ['commands/issue.md', 'skills/aeolus-issue/SKILL.md'].map((path) => readFileSync(join(PLUGIN, path), 'utf8'));
+  const texts = () => ['commands/issue.md', 'skills/aeolus-fleet-issue/SKILL.md'].map((path) => readFileSync(join(PLUGIN, path), 'utf8'));
 
   it('investigates, writes the report into a draft, and files it through the plugin script, in both harnesses', () => {
     for (const text of texts()) {

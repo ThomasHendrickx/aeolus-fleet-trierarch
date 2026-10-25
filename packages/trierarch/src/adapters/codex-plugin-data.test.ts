@@ -58,7 +58,7 @@ afterEach(() => {
 const realCodex = await runCommand('codex', { args: ['--version'] }).catch(() => undefined);
 
 describe('the real Codex on this machine', () => {
-  it("keeps the aeolus plugin's data, its log and the crew identities not yet moved to ~/.aeolus/crews, when its aeolus-fleet marketplace is removed (#660)", async (context) => {
+  it("keeps the aeolus-fleet plugin's data, its log and the crew identities not yet moved to ~/.aeolus/crews, when its aeolus-fleet marketplace is removed (#660)", async (context) => {
     if (realCodex?.status !== 0) {
       context.skip('no codex on this machine');
     }
@@ -67,7 +67,7 @@ describe('the real Codex on this machine', () => {
   }, 60_000);
 });
 
-describe("the proof that Codex keeps the aeolus plugin's data on marketplace remove", () => {
+describe("the proof that Codex keeps the aeolus-fleet plugin's data on marketplace remove", () => {
   it('fails for a Codex that deletes the plugin data when the aeolus-fleet marketplace is removed (#660)', async () => {
     expect(await codexKeepsPluginData(aCodex({ then: DELETES_DATA_ON_REMOVE }))).toBe(false);
   });
@@ -76,10 +76,10 @@ describe("the proof that Codex keeps the aeolus plugin's data on marketplace rem
     expect(await codexKeepsPluginData(aCodex())).toBe(true);
   });
 
-  it('installs the aeolus plugin from an aeolus-fleet marketplace of its own, then removes that marketplace (#660)', async () => {
+  it('installs the aeolus-fleet plugin from an aeolus-fleet marketplace of its own, then removes that marketplace (#660)', async () => {
     await codexKeepsPluginData(aCodex());
 
-    expect(ran().map(({ words }) => words.replace(/ \/\S+$/, ' <folder>'))).toEqual(['plugin marketplace add <folder>', 'plugin add aeolus@aeolus-fleet', 'plugin marketplace remove aeolus-fleet']);
+    expect(ran().map(({ words }) => words.replace(/ \/\S+$/, ' <folder>'))).toEqual(['plugin marketplace add <folder>', 'plugin add aeolus-fleet@aeolus-fleet', 'plugin marketplace remove aeolus-fleet']);
   });
 
   it('runs Codex only in a throwaway CODEX_HOME, and removes it after (#660)', async () => {
@@ -94,8 +94,8 @@ describe("the proof that Codex keeps the aeolus plugin's data on marketplace rem
   });
 
   it('says what Codex said when it cannot run the proof (#660)', async () => {
-    const codex = aCodex({ then: "if (process.argv.slice(2).join(' ') === 'plugin add aeolus@aeolus-fleet') { process.stderr.write('Error: plugin aeolus not found'); process.exit(1); }" });
+    const codex = aCodex({ then: "if (process.argv.slice(2).join(' ') === 'plugin add aeolus-fleet@aeolus-fleet') { process.stderr.write('Error: plugin aeolus not found'); process.exit(1); }" });
 
-    await expect(codexKeepsPluginData(codex)).rejects.toThrow('codex plugin add aeolus@aeolus-fleet failed: Error: plugin aeolus not found');
+    await expect(codexKeepsPluginData(codex)).rejects.toThrow('codex plugin add aeolus-fleet@aeolus-fleet failed: Error: plugin aeolus not found');
   });
 });

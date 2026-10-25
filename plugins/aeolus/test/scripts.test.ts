@@ -12,7 +12,7 @@ import { readLogLine } from '../../../packages/trierarch/src/adapters/log.js';
 import { startRoutedStubFleet, startStubFleet, type StubAnswer, type StubFleet } from './stub-fleet.js';
 import { scriptEnvironment } from './script-environment.js';
 
-// The aeolus plugin's bash scripts, as a session runs them: in its folder,
+// The aeolus-fleet plugin's bash scripts, as a session runs them: in its folder,
 // with the plugin's data folder, against a stub of the fleet's REST door.
 
 const SCRIPTS = fileURLToPath(new URL('../scripts/', import.meta.url));
@@ -1453,7 +1453,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
     const THREAD_ID = '01a103c9-80b0-7ab1-82e3-6f4a2f70ad86';
     const QUEUED =
       "Aeolus handed a message for scout to this task: it comes into this turn through the plugin's hooks, acknowledged. " +
-      'Do not receive or ack it. Handle it as the aeolus-crew skill says, then re-arm automatic wake-up before ending the turn.';
+      'Do not receive or ack it. Handle it as the aeolus-fleet-crew skill says, then re-arm automatic wake-up before ending the turn.';
 
     /** Runs a hook as Codex does: PLUGIN_ROOT and PLUGIN_DATA set, the task id in the payload, no Claude Code variables. */
     const aCodexHook = (script: string, payload: Record<string, unknown>) =>
@@ -1590,7 +1590,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
 
       const context = hookOutputSchema.parse(JSON.parse(started.stdout)).hookSpecificOutput.additionalContext;
       expect(context).toContain(
-        "Go on as the aeolus-crew skill says: fetch the protocol. Receive and ack nothing: this ship is pushed, so the wake bridge hands each message over and it comes into the turn through the plugin's hooks. Then end the turn.",
+        "Go on as the aeolus-fleet-crew skill says: fetch the protocol. Receive and ack nothing: this ship is pushed, so the wake bridge hands each message over and it comes into the turn through the plugin's hooks. Then end the turn.",
       );
       expect(context).not.toContain('receive and handle what waits');
     });
@@ -3076,7 +3076,7 @@ describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
   it('marks the turn busy when a prompt is submitted, with when', () => {
     crewedByATrierarch();
 
-    expect(claudeHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: '/aeolus:wake' })).toMatchObject({ status: 0, stdout: '' });
+    expect(claudeHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: '/aeolus-fleet:wake' })).toMatchObject({ status: 0, stdout: '' });
 
     const { status, stdout } = turn();
     expect(status).toBe(0);
@@ -3086,7 +3086,7 @@ describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
 
   it('marks the turn idle when it ends, with when', () => {
     crewedByATrierarch();
-    claudeHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: '/aeolus:wake' });
+    claudeHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: '/aeolus-fleet:wake' });
 
     claudeHook('aeolus-stop.sh', { hook_event_name: 'Stop', stop_hook_active: false });
 
@@ -3097,7 +3097,7 @@ describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
   it('marks the turn in a Codex session alike', () => {
     crewedByATrierarch(AS_CODEX);
 
-    codexHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: '/aeolus:wake' });
+    codexHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: '/aeolus-fleet:wake' });
     expect(turn(AS_CODEX).stdout).toMatch(/^busy /);
     codexHook('aeolus-stop.sh', { hook_event_name: 'Stop', stop_hook_active: false });
     expect(turn(AS_CODEX).stdout).toMatch(/^idle /);
@@ -3111,7 +3111,7 @@ describe('a folder a trierarch crews (wakeBy=trierarch)', () => {
 
   it('forgets the turn marker with the ship', () => {
     crewedByATrierarch();
-    claudeHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: '/aeolus:wake' });
+    claudeHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: '/aeolus-fleet:wake' });
 
     run('aeolus-identity.sh', { args: ['delete'] });
 

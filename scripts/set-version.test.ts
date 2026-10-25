@@ -53,7 +53,7 @@ function pluginManifest(path: string): Record<string, unknown> {
 }
 
 describe('setVersion', () => {
-  it('sets the same version on both aeolus plugin manifests, keeping their other fields', () => {
+  it('sets the same version on both aeolus-fleet plugin manifests, keeping their other fields', () => {
     const before = PLUGIN_MANIFESTS.map(pluginManifest);
 
     setVersion(copy, '0.28.0');
@@ -150,14 +150,14 @@ describe('published manifests', () => {
 });
 
 describe('setPluginVersion', () => {
-  it("sets the aeolus plugin's version alone, leaving the packages as they are", () => {
+  it("sets the aeolus-fleet plugin's version alone, leaving the packages as they are", () => {
     const packagesBefore = PUBLISHED_PACKAGES.map((name) => rawManifest(name));
 
     setPluginVersion(copy, '0.28.0');
 
     expect(PLUGIN_MANIFESTS.map(pluginManifest)).toEqual([
-      expect.objectContaining({ name: 'aeolus', version: '0.28.0' }),
-      expect.objectContaining({ name: 'aeolus', version: '0.28.0' }),
+      expect.objectContaining({ name: 'aeolus-fleet', version: '0.28.0' }),
+      expect.objectContaining({ name: 'aeolus-fleet', version: '0.28.0' }),
     ]);
     expect(PUBLISHED_PACKAGES.map((name) => rawManifest(name))).toEqual(packagesBefore);
   });

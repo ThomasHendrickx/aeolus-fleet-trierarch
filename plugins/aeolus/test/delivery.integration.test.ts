@@ -13,7 +13,7 @@ import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, 
 
 import { scriptEnvironment } from './script-environment.js';
 
-// The aeolus plugin's scripts against a real fleet (#819): the watcher and the
+// The aeolus-fleet plugin's scripts against a real fleet (#819): the watcher and the
 // hooks of a pushed ship, run as a session runs them, reach the real core
 // through a door that can lose the fleet's answer to a call after the fleet
 // stored it. Whatever answer is lost, the model sees every message the fleet

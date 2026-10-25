@@ -62,14 +62,14 @@ function runScript(script: string, options: ScriptOptions = {}) {
 }
 
 describe('the Codex plugin package', () => {
-  it('publishes the existing aeolus plugin through a Codex manifest and the repository marketplace', () => {
+  it('publishes the existing aeolus-fleet plugin through a Codex manifest and the repository marketplace', () => {
     const claude = z.object({ version: z.string() }).parse(json(join(PLUGIN, '.claude-plugin/plugin.json')));
     const manifest = z
       .object({
-        name: z.literal('aeolus'),
+        name: z.literal('aeolus-fleet'),
         version: z.string(),
         skills: z.literal('./skills/'),
-        interface: z.object({ displayName: z.literal('Aeolus'), capabilities: z.array(z.string()) }),
+        interface: z.object({ displayName: z.literal('Aeolus Fleet'), capabilities: z.array(z.string()) }),
       })
       .parse(json(join(PLUGIN, '.codex-plugin/plugin.json')));
     const marketplace = z
@@ -77,8 +77,8 @@ describe('the Codex plugin package', () => {
         name: z.literal('aeolus-fleet'),
         plugins: z.array(
           z.object({
-            name: z.literal('aeolus'),
-            source: z.object({ source: z.literal('local'), path: z.literal('./plugins/aeolus') }),
+            name: z.literal('aeolus-fleet'),
+            source: z.object({ source: z.literal('local'), path: z.literal('./plugins/aeolus-fleet') }),
             policy: z.object({ installation: z.literal('AVAILABLE'), authentication: z.literal('ON_INSTALL') }),
           }),
         ),
@@ -91,7 +91,7 @@ describe('the Codex plugin package', () => {
   });
 
   it('offers Codex skills for crewing, inspecting, watching, waking and deregistering a ship', () => {
-    const skills = ['aeolus-crew', 'aeolus-ship', 'aeolus-watch', 'aeolus-wake', 'aeolus-deregister'];
+    const skills = ['aeolus-fleet-crew', 'aeolus-fleet-ship', 'aeolus-fleet-watch', 'aeolus-fleet-wake', 'aeolus-fleet-deregister'];
 
     for (const skill of skills) {
       const text = readFileSync(join(PLUGIN, 'skills', skill, 'SKILL.md'), 'utf8');
@@ -99,17 +99,17 @@ describe('the Codex plugin package', () => {
       expect(text).toContain('Codex');
     }
 
-    expect(readFileSync(join(PLUGIN, 'skills/aeolus-crew/SKILL.md'), 'utf8')).toContain('harness `codex`');
+    expect(readFileSync(join(PLUGIN, 'skills/aeolus-fleet-crew/SKILL.md'), 'utf8')).toContain('harness `codex`');
   });
 
   it('leaves the crew token to the scripts: no Codex skill has the session read or pass it', () => {
-    for (const skill of ['aeolus-crew', 'aeolus-ship', 'aeolus-watch', 'aeolus-wake', 'aeolus-deregister', 'aeolus-issue']) {
+    for (const skill of ['aeolus-fleet-crew', 'aeolus-fleet-ship', 'aeolus-fleet-watch', 'aeolus-fleet-wake', 'aeolus-fleet-deregister', 'aeolus-fleet-issue']) {
       expect(readFileSync(join(PLUGIN, 'skills', skill, 'SKILL.md'), 'utf8')).not.toMatch(/crewToken|the crew token/);
     }
   });
 
   it('crews through aeolus-fleet.sh with harness codex, needing no fleet MCP server, and fetches the protocol from the fleet', () => {
-    const crew = readFileSync(join(PLUGIN, 'skills/aeolus-crew/SKILL.md'), 'utf8');
+    const crew = readFileSync(join(PLUGIN, 'skills/aeolus-fleet-crew/SKILL.md'), 'utf8');
 
     expect(crew).toContain("`scripts/aeolus-fleet.sh register <fleetUrl> <shipId> <secret> <location> [<squadronId>]`");
     expect(crew).toContain('`scripts/aeolus-fleet.sh protocol`');
@@ -118,22 +118,22 @@ describe('the Codex plugin package', () => {
   });
 
   it('tells a session whose fleet calls get no answer about the one-time sandbox setup', () => {
-    const crew = readFileSync(join(PLUGIN, 'skills/aeolus-crew/SKILL.md'), 'utf8');
+    const crew = readFileSync(join(PLUGIN, 'skills/aeolus-fleet-crew/SKILL.md'), 'utf8');
 
     expect(crew).toContain('exits 6');
     expect(crew).toContain('sandbox_workspace_write');
   });
 
-  it('shows the ship as /aeolus:ship does: answered by aeolus-status.sh, shown as it prints it', () => {
-    const ship = readFileSync(join(PLUGIN, 'skills/aeolus-ship/SKILL.md'), 'utf8');
+  it('shows the ship as /aeolus-fleet:ship does: answered by aeolus-status.sh, shown as it prints it', () => {
+    const ship = readFileSync(join(PLUGIN, 'skills/aeolus-fleet-ship/SKILL.md'), 'utf8');
 
     expect(ship).toContain('`scripts/aeolus-status.sh`');
     expect(ship).toContain('exactly as it prints it');
     expect(ship).not.toContain('aeolus-fleet.sh');
   });
 
-  it('wakes a session as /aeolus:wake does: identity and lease, waiting deliveries, the wake bridge armed again, and a status report', () => {
-    const wake = readFileSync(join(PLUGIN, 'skills/aeolus-wake/SKILL.md'), 'utf8');
+  it('wakes a session as /aeolus-fleet:wake does: identity and lease, waiting deliveries, the wake bridge armed again, and a status report', () => {
+    const wake = readFileSync(join(PLUGIN, 'skills/aeolus-fleet-wake/SKILL.md'), 'utf8');
 
     expect(wake).toContain('scripts/aeolus-identity.sh show');
     expect(wake).toContain('`scripts/aeolus-fleet.sh whoami`');
@@ -144,21 +144,21 @@ describe('the Codex plugin package', () => {
     expect(wake).toContain('deliveries handled');
   });
 
-  it("has $aeolus-wake receive and ack nothing on a pushed lease: the message comes into the turn through the plugin's hooks (#756)", () => {
-    expect(readFileSync(join(PLUGIN, 'skills/aeolus-wake/SKILL.md'), 'utf8')).toContain(
-      "If step 1 said `delivery: pushed`, receive and ack nothing: the wake bridge or the trierarch hands each message over, and it comes into the turn through the plugin's hooks. Handle what came in, and answer by senderName with inReplyTo. Otherwise, as the `aeolus-crew` skill says:",
+  it("has $aeolus-fleet-wake receive and ack nothing on a pushed lease: the message comes into the turn through the plugin's hooks (#756)", () => {
+    expect(readFileSync(join(PLUGIN, 'skills/aeolus-fleet-wake/SKILL.md'), 'utf8')).toContain(
+      "If step 1 said `delivery: pushed`, receive and ack nothing: the wake bridge or the trierarch hands each message over, and it comes into the turn through the plugin's hooks. Handle what came in, and answer by senderName with inReplyTo. Otherwise, as the `aeolus-fleet-crew` skill says:",
     );
   });
 
   it('has a queued hand-over handled as it came into the turn, never received (#756)', () => {
-    expect(readFileSync(join(PLUGIN, 'skills/aeolus-watch/SKILL.md'), 'utf8')).toContain(
-      'When the bridge queues a hand-over, the message comes into that turn through the plugin\'s hooks: handle it as the `aeolus-crew` skill says, without receiving or acking it, then re-arm the bridge before ending the turn.',
+    expect(readFileSync(join(PLUGIN, 'skills/aeolus-fleet-watch/SKILL.md'), 'utf8')).toContain(
+      'When the bridge queues a hand-over, the message comes into that turn through the plugin\'s hooks: handle it as the `aeolus-fleet-crew` skill says, without receiving or acking it, then re-arm the bridge before ending the turn.',
     );
   });
 
   it('documents automatic local wake-up and re-arms it at the end of every completed turn', () => {
-    const crew = readFileSync(join(PLUGIN, 'skills/aeolus-crew/SKILL.md'), 'utf8');
-    const watch = readFileSync(join(PLUGIN, 'skills/aeolus-watch/SKILL.md'), 'utf8');
+    const crew = readFileSync(join(PLUGIN, 'skills/aeolus-fleet-crew/SKILL.md'), 'utf8');
+    const watch = readFileSync(join(PLUGIN, 'skills/aeolus-fleet-watch/SKILL.md'), 'utf8');
     const manifest = JSON.stringify(json(join(PLUGIN, '.codex-plugin/plugin.json')));
 
     expect(crew).toContain('aeolus-codex-wake.sh` `start <codexTaskId>`');

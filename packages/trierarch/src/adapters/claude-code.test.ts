@@ -15,9 +15,9 @@ import { createClaudeCodeSetup } from './claude-code-setup.js';
 import { wordsOf } from './command-line.js';
 import { runCommand } from './run-command.js';
 
-// With the aeolus plugin's own scripts from this repository, in a temporary data folder and home.
+// With the aeolus-fleet plugin's own scripts from this repository, in a temporary data folder and home.
 
-const PLUGIN_ROOT = fileURLToPath(new URL('../../../../plugins/aeolus', import.meta.url));
+const PLUGIN_ROOT = fileURLToPath(new URL('../../../../plugins/aeolus-fleet', import.meta.url));
 
 let data: string;
 /** Where the identities of Claude Code sessions live in the test's home (#658). */
@@ -185,13 +185,13 @@ describe('Claude Code as a harness', () => {
   });
 
   it('never starts a crewed session in plan mode, which it could not leave without plan mode: --permission-mode plan from the flags or an option is ignored, another permission mode kept (#465)', () => {
-    const wordsFor = (flags: string[]) => wordsOf(claudeCodeCommandLine({ flags, sessionName: '[aeolus-fleet] scout', prompt: '/aeolus:wake', isFirstStart: true }));
+    const wordsFor = (flags: string[]) => wordsOf(claudeCodeCommandLine({ flags, sessionName: '[aeolus-fleet] scout', prompt: '/aeolus-fleet:wake', isFirstStart: true }));
     const mode = (flags: string[]) => effectiveFlags({ flags, options: { mode: { values: { plan: ['--permission-mode', 'plan'], edits: ['--permission-mode', 'acceptEdits'] } } } }, { mode: 'plan' });
 
-    expect(wordsFor(['--permission-mode', 'plan', '--verbose'])).toEqual(['claude', '--verbose', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', '/aeolus:wake']);
-    expect(wordsFor(['--permission-mode=plan'])).toEqual(['claude', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', '/aeolus:wake']);
-    expect(wordsFor(mode(['--remote-control']))).toEqual(['claude', '--remote-control', '[aeolus-fleet] scout', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', '/aeolus:wake']);
-    expect(wordsFor(['--permission-mode', 'acceptEdits'])).toEqual(['claude', '--permission-mode', 'acceptEdits', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', '/aeolus:wake']);
+    expect(wordsFor(['--permission-mode', 'plan', '--verbose'])).toEqual(['claude', '--verbose', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', '/aeolus-fleet:wake']);
+    expect(wordsFor(['--permission-mode=plan'])).toEqual(['claude', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', '/aeolus-fleet:wake']);
+    expect(wordsFor(mode(['--remote-control']))).toEqual(['claude', '--remote-control', '[aeolus-fleet] scout', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', '/aeolus-fleet:wake']);
+    expect(wordsFor(['--permission-mode', 'acceptEdits'])).toEqual(['claude', '--permission-mode', 'acceptEdits', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', '/aeolus-fleet:wake']);
   });
 
   it("never starts a crewed session in plan mode when Claude Code's settings make plan its default mode: the user's, the project's or the project's local settings, the nearest one winning; a permission mode in the flags is kept (#505)", async () => {
@@ -344,24 +344,24 @@ describe('Claude Code as a harness', () => {
     expect(started[0]?.command.slice(-2)).toEqual(['--', `--dangerously-skip-permissions\n\n${NO_TERMINAL_QUESTIONS}`]);
   });
 
-  it('starts claude with /aeolus:wake on a first start without a first prompt, the line that no human reads its terminal as its argument (#585)', async () => {
+  it('starts claude with /aeolus-fleet:wake on a first start without a first prompt, the line that no human reads its terminal as its argument (#585)', async () => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
 
-    expect(started[0]?.command.slice(-2)).toEqual(['--', `/aeolus:wake ${NO_TERMINAL_QUESTIONS}`]);
+    expect(started[0]?.command.slice(-2)).toEqual(['--', `/aeolus-fleet:wake ${NO_TERMINAL_QUESTIONS}`]);
   });
 
-  it('continues the conversation on a restart, with /aeolus:wake and the line that no human reads its terminal, never the first prompt again (#585)', async () => {
+  it('continues the conversation on a restart, with /aeolus-fleet:wake and the line that no human reads its terminal, never the first prompt again (#585)', async () => {
     aConversationIn(folder);
 
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false, firstPrompt: 'Review the open pull requests.' });
 
-    expect(started[0]?.command).toEqual(['claude', '--remote-control', '[aeolus-fleet] scout', '--model', 'claude-opus-5-5', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--continue', '--', `/aeolus:wake ${NO_TERMINAL_QUESTIONS}`]);
+    expect(started[0]?.command).toEqual(['claude', '--remote-control', '[aeolus-fleet] scout', '--model', 'claude-opus-5-5', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--continue', '--', `/aeolus-fleet:wake ${NO_TERMINAL_QUESTIONS}`]);
   });
 
   it('starts fresh on a restart when the folder has no conversation to continue, as claude --continue would exit at once (#381)', async () => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false });
 
-    expect(started[0]?.command).toEqual(['claude', '--remote-control', '[aeolus-fleet] scout', '--model', 'claude-opus-5-5', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', `/aeolus:wake ${NO_TERMINAL_QUESTIONS}`]);
+    expect(started[0]?.command).toEqual(['claude', '--remote-control', '[aeolus-fleet] scout', '--model', 'claude-opus-5-5', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', `/aeolus-fleet:wake ${NO_TERMINAL_QUESTIONS}`]);
   });
 
   it('continues on a restart only a conversation of its own folder, not one of another folder (#381)', async () => {
@@ -408,14 +408,14 @@ describe('Claude Code as a harness', () => {
       { flag: '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', when: 'always' },
       { flag: '--continue', when: 'restart' },
     ]);
-    expect(claudeCodeCommandLine({ flags: ['--remote-control', '--model', 'claude-opus-5-5'], sessionName: '[aeolus-fleet] scout', prompt: '/aeolus:wake', isFirstStart: false })).toEqual([
+    expect(claudeCodeCommandLine({ flags: ['--remote-control', '--model', 'claude-opus-5-5'], sessionName: '[aeolus-fleet] scout', prompt: '/aeolus-fleet:wake', isFirstStart: false })).toEqual([
       { words: ['claude'] },
       { words: ['--remote-control'], source: 'configuration' },
       { words: ['[aeolus-fleet] scout'], source: 'adapter' },
       { words: ['--model', 'claude-opus-5-5'], source: 'configuration' },
       { words: ['--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode'], source: 'adapter' },
       { words: ['--continue'], source: 'adapter' },
-      { words: ['--', '/aeolus:wake'] },
+      { words: ['--', '/aeolus-fleet:wake'] },
     ]);
     expect(claudeCodeCommandLine({ flags: ['--verbose'], sessionName: '[aeolus-fleet] scout', prompt: '<first prompt>', isFirstStart: true })).toEqual([
       { words: ['claude'] },
@@ -431,7 +431,7 @@ describe('Claude Code as a harness', () => {
         claudeCodeCommandLine({
           flags: [],
           sessionName: '[aeolus-fleet] scout',
-          prompt: '/aeolus:wake',
+          prompt: '/aeolus-fleet:wake',
           isFirstStart: true,
           defaultPermissionMode: { kind: 'decided', mode: 'plan' },
           ...(permissionModes !== undefined && { permissionModes }),
@@ -616,19 +616,19 @@ describe("Claude Code's launch window, from the launch marker its session's hook
     await expect(seen()).resolves.toEqual({ kind: 'none', screen: 'bypass permissions warning' });
   });
 
-  it("says no session can start while the aeolus plugin's scripts are gone, as after a plugin upgrade moved them (#827)", async () => {
-    await expect(harness({ pluginRoot: join(data, 'gone') }).startProblem()).resolves.toBe(`the aeolus plugin's scripts are not at ${join(data, 'gone', 'scripts')}`);
+  it("says no session can start while the aeolus-fleet plugin's scripts are gone, as after a plugin upgrade moved them (#827)", async () => {
+    await expect(harness({ pluginRoot: join(data, 'gone') }).startProblem()).resolves.toBe(`the aeolus-fleet plugin's scripts are not at ${join(data, 'gone', 'scripts')}`);
   });
 
-  it("says nothing stops a session from starting while the aeolus plugin's scripts are there (#827)", async () => {
+  it("says nothing stops a session from starting while the aeolus-fleet plugin's scripts are there (#827)", async () => {
     await expect(harness().startProblem()).resolves.toBeUndefined();
   });
 
-  it('says its aeolus plugin marks launches', async () => {
+  it('says its aeolus-fleet plugin marks launches', async () => {
     await expect(harness().marksLaunches()).resolves.toBe(true);
   });
 
-  it('says an aeolus plugin older than the launch marker, whose identity script has no launch command, marks none', async () => {
+  it('says an aeolus-fleet plugin older than the launch marker, whose identity script has no launch command, marks none', async () => {
     const older = mkdtempSync(join(tmpdir(), 'trierarch-older-plugin-'));
     mkdirSync(join(older, 'scripts'));
     writeFileSync(join(older, 'scripts', 'aeolus-identity.sh'), 'echo "usage: aeolus-identity.sh write|check-in|show|turn|path|delete" >&2\nexit 2\n');
@@ -739,7 +739,7 @@ describe('Claude Code in containers, each ship with a home of its own (decision 
   });
 
   it("clears the launch marker in the ship's own home before a launch", async () => {
-    const inShipHome = { AEOLUS_FOLDER: folder, AEOLUS_DATA: join(homes, shipId, '.claude', 'plugins', 'data', 'aeolus-aeolus-fleet'), AEOLUS_CREWS: join(homes, shipId, '.aeolus', 'crews', 'claude-code') };
+    const inShipHome = { AEOLUS_FOLDER: folder, AEOLUS_DATA: join(homes, shipId, '.claude', 'plugins', 'data', 'aeolus-fleet-aeolus-fleet'), AEOLUS_CREWS: join(homes, shipId, '.aeolus', 'crews', 'claude-code') };
     const written = await runCommand('bash', { args: [`${PLUGIN_ROOT}/scripts/aeolus-identity.sh`, 'write', '--wake-by', 'trierarch', '--socket', identity.socket, identity.fleetUrl, shipId, identity.shipName], env: inShipHome, input: CREW_TOKEN });
     expect(written.status).toBe(0);
     const marked = await runCommand('bash', {
