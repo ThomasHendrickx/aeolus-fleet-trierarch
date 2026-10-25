@@ -37,14 +37,14 @@ import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
 
 // The trierarch against a real fleet server on Postgres, over REST: a crew
 // request assigned to it is crewed in a worktree of a real git repository,
-// with the folder's identity written through the aeolus plugin's own script,
+// with the folder's identity written through the aeolus-fleet plugin's own script,
 // and removing the request ends the lease. Only the sessions are stand-ins:
 // no Claude Code runs here, but its stand-in shows its first-run screens, as
 // captured from Claude Code itself, until its own files say they are answered,
-// and past them runs the aeolus plugin's own launch hook as its first prompt
+// and past them runs the aeolus-fleet plugin's own launch hook as its first prompt
 // would: the session starts and makes a tool call (#490).
 
-const PLUGIN_ROOT = fileURLToPath(new URL('../../../plugins/aeolus', import.meta.url));
+const PLUGIN_ROOT = fileURLToPath(new URL('../../../plugins/aeolus-fleet', import.meta.url));
 const GIT_ENV = { GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 't@example.com' };
 
 let database: PrismaClient;
@@ -84,10 +84,10 @@ function claudeCodeStopsAt(command: readonly string[]): string | undefined {
 }
 
 function claudeCodeShows(command: readonly string[]): string {
-  return claudeCodeStopsAt(command) ?? '❯ /aeolus:wake\n\n  Ran 1 shell command\n';
+  return claudeCodeStopsAt(command) ?? '❯ /aeolus-fleet:wake\n\n  Ran 1 shell command\n';
 }
 
-/** Runs the aeolus plugin's launch hook for each event, as Claude Code does in the session started in the folder with the launch id given. */
+/** Runs the aeolus-fleet plugin's launch hook for each event, as Claude Code does in the session started in the folder with the launch id given. */
 async function launchHooks(at: { folder: string; env: Readonly<Record<string, string>> }, events: readonly Record<string, unknown>[]): Promise<void> {
   for (const event of events) {
     const hooked = await runCommand('bash', {
@@ -291,7 +291,7 @@ describe('the trierarch on a real fleet', () => {
 describe("contained access on a real fleet (decision 0026): the session calls over its ship's socket, and only the trierarch holds the crew token", () => {
   const SETTINGS = { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } as const;
 
-  /** A fleet call of the session in the worktree, through the aeolus plugin's own script, as Claude Code's Bash tool makes it. */
+  /** A fleet call of the session in the worktree, through the aeolus-fleet plugin's own script, as Claude Code's Bash tool makes it. */
   const fleetCall = (worktree: string, call: { args: readonly string[]; input?: string }) =>
     runCommand('bash', {
       args: [`${PLUGIN_ROOT}/scripts/aeolus-fleet.sh`, ...call.args],
@@ -378,7 +378,7 @@ describe("contained access on a real fleet (decision 0026): the session calls ov
 });
 
 /**
- * Sessions as a map, as standInSessions, whose turns run the aeolus plugin's
+ * Sessions as a map, as standInSessions, whose turns run the aeolus-fleet plugin's
  * own hooks as Claude Code runs them in the session's folder: its first
  * prompt and each line typed into an idle session start a turn
  * (UserPromptSubmit), and the test ends the turn (Stop), makes a tool call

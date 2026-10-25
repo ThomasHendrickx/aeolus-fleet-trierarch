@@ -59,7 +59,7 @@ describe('aeolus-trierarch status', () => {
     expect(describeStatus(report)).toBe(
       [
         'Version: 0.18.0',
-        'Aeolus plugin: claude-code 0.20.4',
+        'Aeolus Fleet plugin: claude-code 0.20.4',
         'Repositories: aeolus-fleet',
         'Service: running, pid 4242, since 2026-10-06T07:00:00.000Z',
         `Fleet: https://fleet.example.com, the lease of ${shipId} is valid`,
@@ -72,13 +72,13 @@ describe('aeolus-trierarch status', () => {
     );
   });
 
-  it('says the aeolus plugin version per configured harness, and where a harness has none (#480)', async () => {
+  it('says the aeolus-fleet plugin version per configured harness, and where a harness has none (#480)', async () => {
     const configuration = { ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: { flags: [], options: {} } } };
 
     const report = await inspect(aTrierarch(), { configuration, pluginVersions: { 'claude-code': '0.20.4' } });
 
     expect(report.plugins).toEqual({ 'claude-code': '0.20.4', codex: null });
-    expect(describeStatus(report)).toContain('Aeolus plugin: claude-code 0.20.4, codex not found (install the aeolus plugin for it)');
+    expect(describeStatus(report)).toContain('Aeolus Fleet plugin: claude-code 0.20.4, codex not found (install the aeolus-fleet plugin for it)');
   });
 
   it('names every configured repository (#579)', async () => {

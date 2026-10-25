@@ -23,6 +23,6 @@ describe('the Claude Code screen a session stopped at before its hooks ran (#490
   });
 
   it('names none on a screen it does not know', () => {
-    expect(claudeCodeScreenStoppedAt('❯ /aeolus:wake\n')).toBeUndefined();
+    expect(claudeCodeScreenStoppedAt('❯ /aeolus-fleet:wake\n')).toBeUndefined();
   });
 });

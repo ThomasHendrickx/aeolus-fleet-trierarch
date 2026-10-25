@@ -167,7 +167,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
 
   await writeRunningFile(paths.running, { pid: process.pid, version: setup.version });
   const found = await Promise.all(Object.entries(plugins).map(async ([harness, plugin]) => `${harness} at ${await plugin.root()}`));
-  logger.info(`aeolus-trierarch ${setup.version} runs for ${crew.fleetUrl}, with the aeolus plugin for ${found.join(' and ') || 'no harness'}`);
+  logger.info(`aeolus-trierarch ${setup.version} runs for ${crew.fleetUrl}, with the aeolus-fleet plugin for ${found.join(' and ') || 'no harness'}`);
   try {
     await loop({ receive: (stop) => fleet.receive(stop), handle, pass, signal, logger, intervalMs: PASS_INTERVAL_MS });
   } finally {

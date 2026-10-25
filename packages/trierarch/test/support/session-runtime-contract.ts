@@ -72,9 +72,9 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
     const shipId = newId('ship');
     await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'read line; echo "got $line"; sleep 30'] });
 
-    await runtime.type({ shipId, text: '/aeolus:wake' });
+    await runtime.type({ shipId, text: '/aeolus-fleet:wake' });
 
-    await expect.poll(async () => runtime.screen(shipId), POLL).toContain('got /aeolus:wake');
+    await expect.poll(async () => runtime.screen(shipId), POLL).toContain('got /aeolus-fleet:wake');
   });
 
   it('waits the settle time between the text and Enter when asked', async () => {
@@ -84,10 +84,10 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
     await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'read line; echo "got $line"; sleep 30'] });
     const before = Date.now();
 
-    await runtime.type({ shipId, text: '$aeolus-wake ', settleMs });
+    await runtime.type({ shipId, text: '$aeolus-fleet-wake ', settleMs });
 
     expect(Date.now() - before).toBeGreaterThanOrEqual(settleMs);
-    await expect.poll(async () => runtime.screen(shipId), POLL).toContain('got $aeolus-wake');
+    await expect.poll(async () => runtime.screen(shipId), POLL).toContain('got $aeolus-fleet-wake');
   });
 
   it("stops the session's running turn as Escape does, keeping the session (decision 0040)", async () => {

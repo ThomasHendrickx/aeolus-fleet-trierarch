@@ -1,10 +1,10 @@
 # Publishes @aeolus-fleet/trierarch to npm, pushes the session image
 # (decision 0039) to ghcr.io with that version, and tags v<version> a commit
-# with the aeolus plugin's version on top of the released commit, so a version
+# with the aeolus-fleet plugin's version on top of the released commit, so a version
 # on npm always matches a tag in git and the tag holds the plugin of that
 # version (aeolus-trierarch upgrade installs it from there). Then creates the
 # GitHub Release for the tag, with notes from the merged pull requests carrying
-# the label <version>, and sets the aeolus plugin to that version on main for
+# the label <version>, and sets the aeolus-fleet plugin to that version on main for
 # main releases, where the plugin marketplaces install from by default.
 #
 # The only way the package can be published: npm trusted publishing (OIDC) is
@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version for the trierarch, the aeolus plugin and the session image, MAJOR.MINOR.PATCH
+        description: Version for the trierarch, the aeolus-fleet plugin and the session image, MAJOR.MINOR.PATCH
         required: true
         type: string
 
@@ -94,7 +94,7 @@ jobs:
           gh run list --workflow ci.yml --commit "$GITHUB_SHA" --branch "$GITHUB_REF_NAME" --event push --json status,conclusion,url \
             | node scripts/release-gate.ts "$GITHUB_REF" "$GITHUB_SHA"
 
-      - name: Set the version on the trierarch and the aeolus plugin
+      - name: Set the version on the trierarch and the aeolus-fleet plugin
         env:
           VERSION: ${{ inputs.version }}
         run: npm run set-version -- "$VERSION"
@@ -162,7 +162,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit --quiet --message "chore(release): the aeolus plugin is $VERSION" -- plugins/aeolus/.claude-plugin/plugin.json plugins/aeolus/.codex-plugin/plugin.json
+          git commit --quiet --message "chore(release): the aeolus-fleet plugin is $VERSION" -- plugins/aeolus-fleet/.claude-plugin/plugin.json plugins/aeolus-fleet/.codex-plugin/plugin.json
           git tag "v$VERSION" HEAD
           git push origin "refs/tags/v$VERSION"
 
@@ -186,7 +186,7 @@ jobs:
       # released version (the package on main keeps 0.0.0). After the tag: if
       # this step fails, the release is whole; set it by hand with
       # npm run set-version -- --plugin-only <version>, commit and push.
-      - name: Set the aeolus plugin to ${{ inputs.version }} on main
+      - name: Set the aeolus-fleet plugin to ${{ inputs.version }} on main
         if: github.ref == 'refs/heads/main'
         env:
           VERSION: ${{ inputs.version }}
@@ -198,14 +198,14 @@ jobs:
             git checkout --quiet --force -B plugin-version origin/main
             npm run set-version -- --plugin-only "$VERSION"
             if git diff --quiet; then
-              echo "main already carries the aeolus plugin at $VERSION"
+              echo "main already carries the aeolus-fleet plugin at $VERSION"
               exit 0
             fi
-            git commit --quiet --all --message "chore(release): the aeolus plugin is $VERSION"
+            git commit --quiet --all --message "chore(release): the aeolus-fleet plugin is $VERSION"
             if git push origin HEAD:main; then
               exit 0
             fi
             echo "main moved meanwhile (attempt $attempt); trying again on top of it"
           done
-          echo "::error::Could not push the aeolus plugin version to main"
+          echo "::error::Could not push the aeolus-fleet plugin version to main"
           exit 1

@@ -22,7 +22,7 @@ import { NOT_SAID_YET_REASON, startNewProcess } from './new-process.js';
  * system Node install, it installs nothing and says what to run instead
  * (#480): it never runs sudo itself. What it says to run then includes
  * upgrade again at the new version, which updates the plugin (#718).
- * It updates the aeolus plugin too, for each harness the configuration
+ * It updates the aeolus-fleet plugin too, for each harness the configuration
  * offers, also when the trierarch is on the version already: on a trierarch
  * machine the plugin is updated this way only (#581). Codex's version folders
  * running sessions use stay, those none uses go (#653), and the plugin's new
@@ -53,13 +53,13 @@ export interface Npm {
   install(spec: string): Promise<CommandResult>;
 }
 
-/** The aeolus plugin, as upgrade updates it. */
+/** The aeolus-fleet plugin, as upgrade updates it. */
 export interface PluginUpgrade {
   /** The harnesses the configuration offers. */
   readonly harnesses: readonly PluginHarness[];
   /** `tag`: the release tag to install the plugin from; none installs it from main. */
   update(harness: PluginHarness, tag: string | undefined): Promise<void>;
-  /** The plugin's version as the harness reads it; none when it has no aeolus plugin. */
+  /** The plugin's version as the harness reads it; none when it has no aeolus-fleet plugin. */
   version(harness: PluginHarness): Promise<string | undefined>;
   /** Trusts the plugin's new or changed Codex hooks: their keys. */
   trustCodexHooks(): Promise<readonly string[]>;
@@ -69,7 +69,7 @@ export interface UpgradeReport {
   readonly from: string;
   readonly to: string;
   readonly isUpgraded: boolean;
-  /** False when the aeolus plugin could not be updated, or its Codex hooks not trusted, for a harness on offer. */
+  /** False when the aeolus-fleet plugin could not be updated, or its Codex hooks not trusted, for a harness on offer. */
   readonly isPluginUpdated: boolean;
   readonly said: readonly string[];
 }
@@ -80,10 +80,10 @@ function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** The first release whose tag holds the aeolus plugin of its version (#652): the ones before set the plugin's version on main only. */
+/** The first release whose tag holds the aeolus-fleet plugin of its version (#652): the ones before set the plugin's version on main only. */
 const FIRST_PLUGIN_TAG = '0.23.0';
 
-/** Updates the aeolus plugin of `version` for each harness on offer, each on its own: one that fails leaves the others to update. */
+/** Updates the aeolus-fleet plugin of `version` for each harness on offer, each on its own: one that fails leaves the others to update. */
 async function upgradePlugin(plugin: PluginUpgrade | undefined, version: string): Promise<{ isPluginUpdated: boolean; said: string[] }> {
   const said: string[] = [];
   let isPluginUpdated = true;
@@ -92,7 +92,7 @@ async function upgradePlugin(plugin: PluginUpgrade | undefined, version: string)
   }
   const tag = byVersion(version, FIRST_PLUGIN_TAG) >= 0 ? `v${version}` : undefined;
   if (tag === undefined) {
-    said.push(`Releases up to 0.22.0 tag no aeolus plugin of their version: the plugin comes from main, the latest released one.`);
+    said.push(`Releases up to 0.22.0 tag no aeolus-fleet plugin of their version: the plugin comes from main, the latest released one.`);
   }
   for (const harness of plugin.harnesses) {
     const name = HARNESS_NAMES[harness];
@@ -101,25 +101,25 @@ async function upgradePlugin(plugin: PluginUpgrade | undefined, version: string)
       await plugin.update(harness, tag);
     } catch (error) {
       isPluginUpdated = false;
-      said.push(`The aeolus plugin for ${name} was not updated: ${reasonOf(error)}. It stays on ${before ?? 'no version'}; fix what it says, then run aeolus-trierarch upgrade again.`);
+      said.push(`The aeolus-fleet plugin for ${name} was not updated: ${reasonOf(error)}. It stays on ${before ?? 'no version'}; fix what it says, then run aeolus-trierarch upgrade again.`);
       continue;
     }
     const after = await plugin.version(harness);
     const keeps = harness === 'codex' ? ' Running Codex sessions keep the version they started with.' : '';
-    said.push(after === before ? `The aeolus plugin for ${name} is on ${after ?? 'no version'} already.` : `Updated the aeolus plugin for ${name} from ${before ?? 'no version'} to ${after ?? 'no version'}.${keeps}`);
+    said.push(after === before ? `The aeolus-fleet plugin for ${name} is on ${after ?? 'no version'} already.` : `Updated the aeolus-fleet plugin for ${name} from ${before ?? 'no version'} to ${after ?? 'no version'}.${keeps}`);
     // Codex starts on its newest version folder, and upgrade keeps a newer one for the sessions running on it (#652).
     if (harness === 'codex' && tag !== undefined && after !== undefined && byVersion(after, version) > 0) {
-      said.push(`New Codex sessions keep starting on the aeolus plugin ${after}, not on ${version}: Codex starts on the newest version it has, and ${after} stays for the Codex sessions running on it.`);
+      said.push(`New Codex sessions keep starting on the aeolus-fleet plugin ${after}, not on ${version}: Codex starts on the newest version it has, and ${after} stays for the Codex sessions running on it.`);
     }
     if (harness === 'codex') {
       try {
         const trusted = await plugin.trustCodexHooks();
         if (trusted.length > 0) {
-          said.push(`Codex trusts the aeolus plugin's ${String(trusted.length)} new or changed hooks.`);
+          said.push(`Codex trusts the aeolus-fleet plugin's ${String(trusted.length)} new or changed hooks.`);
         }
       } catch (error) {
         isPluginUpdated = false;
-        said.push(`Codex does not trust the aeolus plugin's hooks yet: ${reasonOf(error)}. Each Codex launch trusts them first, and starts no session while they cannot be; fix what it says, then run aeolus-trierarch upgrade again.`);
+        said.push(`Codex does not trust the aeolus-fleet plugin's hooks yet: ${reasonOf(error)}. Each Codex launch trusts them first, and starts no session while they cannot be; fix what it says, then run aeolus-trierarch upgrade again.`);
       }
     }
   }
@@ -146,7 +146,7 @@ function pluginStepOf(answer: CommandResult, version: string): { isPluginUpdated
   const parsed = installedReportSchema.safeParse(raw);
   if (!parsed.success) {
     const output = `${answer.stdout}${answer.stderr}`.trim();
-    return { isPluginUpdated: false, said: [`The aeolus plugin was not updated: the trierarch ${version} said ${output}. Fix what it says, then run aeolus-trierarch upgrade again.`] };
+    return { isPluginUpdated: false, said: [`The aeolus-fleet plugin was not updated: the trierarch ${version} said ${output}. Fix what it says, then run aeolus-trierarch upgrade again.`] };
   }
   return { isPluginUpdated: parsed.data.isPluginUpdated, said: parsed.data.said.filter((line) => line !== alreadyOn(version)) };
 }
@@ -208,7 +208,7 @@ export async function upgradeTrierarch(at: Restart & {
   npm: Npm;
   /** The installed version's `upgrade <version> --json`: on its version already, it runs the plugin step as that version runs it. */
   upgradeInstalledPlugin: (version: string) => Promise<CommandResult>;
-  /** The aeolus plugin; none updates nothing. */
+  /** The aeolus-fleet plugin; none updates nothing. */
   plugin?: PluginUpgrade;
 }): Promise<UpgradeReport> {
   const from = at.installedVersion();
@@ -237,7 +237,7 @@ export async function upgradeTrierarch(at: Restart & {
       ...(isPluginOffered ? [pluginStep] : []),
       ...((await at.service.status()).isInstalled ? ['aeolus-trierarch install'] : []),
     ];
-    const pluginSaid = isPluginOffered ? `${pluginStep} updates the aeolus plugin to ${target}. ` : '';
+    const pluginSaid = isPluginOffered ? `${pluginStep} updates the aeolus-fleet plugin to ${target}. ` : '';
     throw new TrierarchFileError(
       `npm's global folder ${folder.path} is not yours to write: a system Node install owns it. Run instead:\n${instead.map((line) => `  ${line}`).join('\n')}\n${pluginSaid}The trierarch keeps running ${from}.`,
     );

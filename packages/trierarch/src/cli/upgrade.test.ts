@@ -21,13 +21,13 @@ let isServiceInstalled: boolean;
 let saying: (RunningFile | undefined)[];
 let reads: number;
 let waits: number[];
-/** The aeolus plugin's version per harness, as each harness reads it. */
+/** The aeolus-fleet plugin's version per harness, as each harness reads it. */
 let pluginVersions: Record<string, string | undefined>;
 let offered: PluginHarness[];
 let failingPluginUpdate: PluginHarness | undefined;
 let isHookTrustFailing: boolean;
 let isPluginLatest: boolean;
-/** The release tag each harness installed the aeolus plugin from, none for main. */
+/** The release tag each harness installed the aeolus-fleet plugin from, none for main. */
 let pluginTags: Partial<Record<PluginHarness, string | undefined>>;
 
 beforeEach(() => {
@@ -108,7 +108,7 @@ const service = {
   status: (): Promise<ServiceStatus> => Promise.resolve({ file: '/LaunchAgents/dev.aeolus-fleet.trierarch.plist', isInstalled: isServiceInstalled, isRunning: isServiceInstalled, ...(isServiceInstalled && { pid: 2 }) }),
 };
 
-/** The aeolus plugin as each harness updates it: the update brings 0.22.0. */
+/** The aeolus-fleet plugin as each harness updates it: the update brings 0.22.0. */
 const plugin = {
   get harnesses() {
     return offered;
@@ -127,11 +127,11 @@ const plugin = {
   version: (harness: PluginHarness) => Promise.resolve(pluginVersions[harness]),
   trustCodexHooks: () => {
     steps.push('trust codex hooks');
-    return isHookTrustFailing ? Promise.reject(new Error('codex app-server ended before it answered (exit 1)')) : Promise.resolve(['aeolus@aeolus-fleet:hooks/hooks.json:stop:0:0']);
+    return isHookTrustFailing ? Promise.reject(new Error('codex app-server ended before it answered (exit 1)')) : Promise.resolve(['aeolus-fleet@aeolus-fleet:hooks/hooks.json:stop:0:0']);
   },
 };
 
-/** The installed version's own `upgrade <version> --json`: on the version already, it updates the aeolus plugin as that version does. */
+/** The installed version's own `upgrade <version> --json`: on the version already, it updates the aeolus-fleet plugin as that version does. */
 let upgradeInstalledPlugin: (version: string) => Promise<CommandResult>;
 
 beforeEach(() => {
@@ -229,12 +229,12 @@ describe('aeolus-trierarch upgrade', () => {
     offered = ['codex'];
 
     await expect(upgrade()).rejects.toThrow(
-      `npm's global folder /usr/local/lib/node_modules is not yours to write: a system Node install owns it. Run instead:\n  sudo npm install --global ${PACKAGE}@0.17.2\n  aeolus-trierarch upgrade 0.17.2\n  aeolus-trierarch install\naeolus-trierarch upgrade 0.17.2 updates the aeolus plugin to 0.17.2. The trierarch keeps running 0.17.1.`,
+      `npm's global folder /usr/local/lib/node_modules is not yours to write: a system Node install owns it. Run instead:\n  sudo npm install --global ${PACKAGE}@0.17.2\n  aeolus-trierarch upgrade 0.17.2\n  aeolus-trierarch install\naeolus-trierarch upgrade 0.17.2 updates the aeolus-fleet plugin to 0.17.2. The trierarch keeps running 0.17.1.`,
     );
     expect(steps).toEqual([]);
   });
 
-  it('ends with the aeolus plugin of the new version once the commands it says to run instead have run (#718)', async () => {
+  it('ends with the aeolus-fleet plugin of the new version once the commands it says to run instead have run (#718)', async () => {
     isGlobalFolderWritable = false;
     offered = ['codex', 'claude-code'];
     installed = '0.23.0';
@@ -316,40 +316,40 @@ describe('aeolus-trierarch upgrade', () => {
     expect(steps.filter((step) => step.startsWith('start'))).toEqual(['start 0.17.2']);
   });
 
-  it("runs the aeolus plugin step of the version it installed, not the one of the version it replaces (#725)", async () => {
+  it("runs the aeolus-fleet plugin step of the version it installed, not the one of the version it replaces (#725)", async () => {
     offered = ['codex'];
     upgradeInstalledPlugin = (version) => {
       steps.push(`plugin step of ${installed} at ${version}`);
-      return Promise.resolve({ status: 0, stdout: JSON.stringify({ from: version, to: version, isUpgraded: false, isPluginUpdated: true, said: [`The trierarch is already on ${version}.`, 'Updated the aeolus plugin for Codex from 0.21.0 to 0.17.2.'] }), stderr: '' });
+      return Promise.resolve({ status: 0, stdout: JSON.stringify({ from: version, to: version, isUpgraded: false, isPluginUpdated: true, said: [`The trierarch is already on ${version}.`, 'Updated the aeolus-fleet plugin for Codex from 0.21.0 to 0.17.2.'] }), stderr: '' });
     };
 
     const report = await upgrade();
 
     expect(steps).toEqual(['plugin step of 0.17.2 at 0.17.2', 'write 0.17.2', 'reload', 'stop 0.17.2', 'start 0.17.2']);
-    expect(report.said).toEqual(expect.arrayContaining(['Updated the aeolus plugin for Codex from 0.21.0 to 0.17.2.']));
+    expect(report.said).toEqual(expect.arrayContaining(['Updated the aeolus-fleet plugin for Codex from 0.21.0 to 0.17.2.']));
     expect(report.said).not.toContain('The trierarch is already on 0.17.2.');
     expect(report.isPluginUpdated).toBe(true);
   });
 
-  it('says the aeolus plugin was not updated when the version it installed says so (#725)', async () => {
+  it('says the aeolus-fleet plugin was not updated when the version it installed says so (#725)', async () => {
     offered = ['codex'];
     upgradeInstalledPlugin = (version) =>
-      Promise.resolve({ status: 1, stdout: JSON.stringify({ from: version, to: version, isUpgraded: false, isPluginUpdated: false, said: [`The trierarch is already on ${version}.`, 'The aeolus plugin for Codex was not updated: offline.'] }), stderr: '' });
+      Promise.resolve({ status: 1, stdout: JSON.stringify({ from: version, to: version, isUpgraded: false, isPluginUpdated: false, said: [`The trierarch is already on ${version}.`, 'The aeolus-fleet plugin for Codex was not updated: offline.'] }), stderr: '' });
 
     const report = await upgrade();
 
     expect(report.isPluginUpdated).toBe(false);
-    expect(report.said).toContain('The aeolus plugin for Codex was not updated: offline.');
+    expect(report.said).toContain('The aeolus-fleet plugin for Codex was not updated: offline.');
   });
 
-  it('says the aeolus plugin was not updated, and goes on with the restart, when the version it installed answers no report (#725)', async () => {
+  it('says the aeolus-fleet plugin was not updated, and goes on with the restart, when the version it installed answers no report (#725)', async () => {
     offered = ['codex'];
     upgradeInstalledPlugin = () => Promise.resolve({ status: 1, stdout: '', stderr: 'node: bad option\n' });
 
     const report = await upgrade();
 
     expect(report.isPluginUpdated).toBe(false);
-    expect(report.said).toContain('The aeolus plugin was not updated: the trierarch 0.17.2 said node: bad option. Fix what it says, then run aeolus-trierarch upgrade again.');
+    expect(report.said).toContain('The aeolus-fleet plugin was not updated: the trierarch 0.17.2 said node: bad option. Fix what it says, then run aeolus-trierarch upgrade again.');
     expect(steps).toEqual(['write 0.17.2', 'reload', 'stop 0.17.2', 'start 0.17.2']);
   });
 
@@ -418,7 +418,7 @@ describe('aeolus-trierarch upgrade', () => {
     expect(reads).toBe(0);
   });
 
-  it('updates the aeolus plugin for each harness the configuration offers before it restarts the service, so the new process starts with it (#581)', async () => {
+  it('updates the aeolus-fleet plugin for each harness the configuration offers before it restarts the service, so the new process starts with it (#581)', async () => {
     offered = ['claude-code', 'codex'];
 
     await upgrade();
@@ -426,13 +426,13 @@ describe('aeolus-trierarch upgrade', () => {
     expect(steps).toEqual(['update claude-code', 'update codex', 'trust codex hooks', 'write 0.17.2', 'reload', 'stop 0.17.2', 'start 0.17.2']);
   });
 
-  it("trusts the aeolus plugin's new or changed hooks in Codex after the update, so a new Codex session starts without a prompt (#581)", async () => {
+  it("trusts the aeolus-fleet plugin's new or changed hooks in Codex after the update, so a new Codex session starts without a prompt (#581)", async () => {
     offered = ['codex'];
 
     const report = await upgrade();
 
     expect(steps.slice(0, 2)).toEqual(['update codex', 'trust codex hooks']);
-    expect(report.said).toContain("Codex trusts the aeolus plugin's 1 new or changed hooks.");
+    expect(report.said).toContain("Codex trusts the aeolus-fleet plugin's 1 new or changed hooks.");
   });
 
   it("trusts no Codex hooks when the configuration does not offer Codex (#581)", async () => {
@@ -443,26 +443,26 @@ describe('aeolus-trierarch upgrade', () => {
     expect(steps).not.toContain('trust codex hooks');
   });
 
-  it('says the version each harness had the aeolus plugin on and the one it has now, and that running Codex sessions keep theirs (#581)', async () => {
+  it('says the version each harness had the aeolus-fleet plugin on and the one it has now, and that running Codex sessions keep theirs (#581)', async () => {
     offered = ['claude-code', 'codex'];
 
     const report = await upgrade();
 
-    expect(report.said).toContain('Updated the aeolus plugin for Claude Code from 0.21.0 to 0.22.0.');
-    expect(report.said).toContain('Updated the aeolus plugin for Codex from 0.21.0 to 0.22.0. Running Codex sessions keep the version they started with.');
+    expect(report.said).toContain('Updated the aeolus-fleet plugin for Claude Code from 0.21.0 to 0.22.0.');
+    expect(report.said).toContain('Updated the aeolus-fleet plugin for Codex from 0.21.0 to 0.22.0. Running Codex sessions keep the version they started with.');
     expect(report.isPluginUpdated).toBe(true);
   });
 
-  it('says the aeolus plugin is on its version already when the update brings none (#581)', async () => {
+  it('says the aeolus-fleet plugin is on its version already when the update brings none (#581)', async () => {
     offered = ['codex'];
     isPluginLatest = true;
 
     const report = await upgrade();
 
-    expect(report.said).toContain('The aeolus plugin for Codex is on 0.21.0 already.');
+    expect(report.said).toContain('The aeolus-fleet plugin for Codex is on 0.21.0 already.');
   });
 
-  it('installs the aeolus plugin of the version it upgrades to, from that release tag, for each harness (#652)', async () => {
+  it('installs the aeolus-fleet plugin of the version it upgrades to, from that release tag, for each harness (#652)', async () => {
     offered = ['claude-code', 'codex'];
 
     await upgrade('0.23.0');
@@ -470,7 +470,7 @@ describe('aeolus-trierarch upgrade', () => {
     expect(pluginTags).toEqual({ 'claude-code': 'v0.23.0', codex: 'v0.23.0' });
   });
 
-  it('installs the aeolus plugin of the latest version on npm from its release tag when no version is given (#652)', async () => {
+  it('installs the aeolus-fleet plugin of the latest version on npm from its release tag when no version is given (#652)', async () => {
     latest = '0.24.1';
     offered = ['codex'];
 
@@ -479,7 +479,7 @@ describe('aeolus-trierarch upgrade', () => {
     expect(pluginTags).toEqual({ codex: 'v0.24.1' });
   });
 
-  it('installs the aeolus plugin of the version the trierarch is on already from its release tag (#652)', async () => {
+  it('installs the aeolus-fleet plugin of the version the trierarch is on already from its release tag (#652)', async () => {
     installed = '0.23.0';
     offered = ['claude-code'];
 
@@ -489,13 +489,13 @@ describe('aeolus-trierarch upgrade', () => {
     expect(pluginTags).toEqual({ 'claude-code': 'v0.23.0' });
   });
 
-  it('installs the aeolus plugin from main for a version up to 0.22.0, whose release tag holds no plugin of its version, and says so (#652)', async () => {
+  it('installs the aeolus-fleet plugin from main for a version up to 0.22.0, whose release tag holds no plugin of its version, and says so (#652)', async () => {
     offered = ['claude-code', 'codex'];
 
     const report = await upgrade('0.22.0');
 
     expect(pluginTags).toEqual({ 'claude-code': undefined, codex: undefined });
-    expect(report.said).toContain('Releases up to 0.22.0 tag no aeolus plugin of their version: the plugin comes from main, the latest released one.');
+    expect(report.said).toContain('Releases up to 0.22.0 tag no aeolus-fleet plugin of their version: the plugin comes from main, the latest released one.');
   });
 
   it('says plainly on a Codex downgrade that new Codex sessions keep starting on the newer plugin, kept for the sessions running on it (#652)', async () => {
@@ -505,10 +505,10 @@ describe('aeolus-trierarch upgrade', () => {
 
     const report = await upgrade('0.23.0');
 
-    expect(report.said).toContain('New Codex sessions keep starting on the aeolus plugin 0.24.0, not on 0.23.0: Codex starts on the newest version it has, and 0.24.0 stays for the Codex sessions running on it.');
+    expect(report.said).toContain('New Codex sessions keep starting on the aeolus-fleet plugin 0.24.0, not on 0.23.0: Codex starts on the newest version it has, and 0.24.0 stays for the Codex sessions running on it.');
   });
 
-  it('says no such thing when Codex has the aeolus plugin of the version (#652)', async () => {
+  it('says no such thing when Codex has the aeolus-fleet plugin of the version (#652)', async () => {
     offered = ['codex'];
     pluginVersions = { codex: '0.23.0' };
     isPluginLatest = true;
@@ -528,7 +528,7 @@ describe('aeolus-trierarch upgrade', () => {
     expect(report.said.join('\n')).not.toContain('sessions keep starting');
   });
 
-  it('says nothing of main when the release tag holds the aeolus plugin (#652)', async () => {
+  it('says nothing of main when the release tag holds the aeolus-fleet plugin (#652)', async () => {
     offered = ['codex'];
 
     const report = await upgrade('0.23.0');
@@ -536,7 +536,7 @@ describe('aeolus-trierarch upgrade', () => {
     expect(report.said.join('\n')).not.toContain('from main');
   });
 
-  it('updates the aeolus plugin also when the trierarch is on the version already (#581)', async () => {
+  it('updates the aeolus-fleet plugin also when the trierarch is on the version already (#581)', async () => {
     latest = '0.17.1';
     saying = [{ pid: 2, version: '0.17.1' }];
     offered = ['codex'];
@@ -557,7 +557,7 @@ describe('aeolus-trierarch upgrade', () => {
     expect(steps).toEqual(['update codex', 'update claude-code', 'write 0.17.2', 'reload', 'stop 0.17.2', 'start 0.17.2']);
     expect(report.isPluginUpdated).toBe(false);
     expect(report.said).toContain(
-      'The aeolus plugin for Codex was not updated: codex plugin marketplace upgrade aeolus-fleet failed: could not reach github.com. It stays on 0.21.0; fix what it says, then run aeolus-trierarch upgrade again.',
+      'The aeolus-fleet plugin for Codex was not updated: codex plugin marketplace upgrade aeolus-fleet failed: could not reach github.com. It stays on 0.21.0; fix what it says, then run aeolus-trierarch upgrade again.',
     );
   });
 
@@ -569,11 +569,11 @@ describe('aeolus-trierarch upgrade', () => {
 
     expect(report.isPluginUpdated).toBe(false);
     expect(report.said).toContain(
-      "Codex does not trust the aeolus plugin's hooks yet: codex app-server ended before it answered (exit 1). Each Codex launch trusts them first, and starts no session while they cannot be; fix what it says, then run aeolus-trierarch upgrade again.",
+      "Codex does not trust the aeolus-fleet plugin's hooks yet: codex app-server ended before it answered (exit 1). Each Codex launch trusts them first, and starts no session while they cannot be; fix what it says, then run aeolus-trierarch upgrade again.",
     );
   });
 
-  it('leaves the aeolus plugin as it is when the trierarch cannot be installed (#581)', async () => {
+  it('leaves the aeolus-fleet plugin as it is when the trierarch cannot be installed (#581)', async () => {
     offered = ['codex'];
     failing = { status: 1, stdout: '', stderr: 'npm error code EACCES\n' };
 

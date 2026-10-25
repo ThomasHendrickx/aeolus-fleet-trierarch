@@ -95,13 +95,13 @@ describe('aeolus-trierarch', () => {
     expect(output).toContain(
       [
         `  first start: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --permission-mode default (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter) -- "<first prompt>\\n\\n${NO_TERMINAL_QUESTIONS}"`,
-        `  restart: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --permission-mode default (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter) --continue (adapter) -- "/aeolus:wake ${NO_TERMINAL_QUESTIONS}"`,
+        `  restart: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --permission-mode default (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter) --continue (adapter) -- "/aeolus-fleet:wake ${NO_TERMINAL_QUESTIONS}"`,
       ].join('\n'),
     );
     expect(output).toContain(
       [
         `  first start: codex --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- "<first prompt>\\n\\n${NO_TERMINAL_QUESTIONS}"`,
-        `  restart: codex resume --last --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- "$aeolus-wake ${NO_TERMINAL_QUESTIONS}"`,
+        `  restart: codex resume --last --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- "$aeolus-fleet-wake ${NO_TERMINAL_QUESTIONS}"`,
       ].join('\n'),
     );
   });
@@ -177,7 +177,7 @@ describe('aeolus-trierarch', () => {
             { words: ['--permission-mode', 'default'], source: 'adapter', when: 'the Claude Code settings for the folder make plan the default mode' },
             { words: ['--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode'], source: 'adapter' },
             { words: ['--continue'], source: 'adapter' },
-            { words: ['--', `/aeolus:wake ${NO_TERMINAL_QUESTIONS}`] },
+            { words: ['--', `/aeolus-fleet:wake ${NO_TERMINAL_QUESTIONS}`] },
           ],
         },
       },
@@ -385,7 +385,7 @@ describe('aeolus-trierarch with CLAUDE_CONFIG_DIR and CODEX_HOME set (#521)', ()
 });
 
 describe('aeolus-trierarch upgrade', () => {
-  it('upgrade updates the aeolus plugin and exits 1, saying why, when it could not be updated (#581)', async () => {
+  it('upgrade updates the aeolus-fleet plugin and exits 1, saying why, when it could not be updated (#581)', async () => {
     // Stand-ins on PATH: npm says the trierarch is on its latest version already, Codex's plugin upgrade fails.
     const bin = join(home, 'bin');
     mkdirSync(bin);
@@ -403,6 +403,6 @@ describe('aeolus-trierarch upgrade', () => {
     const { output, code } = await main(['upgrade'], machine({ HOME: home }));
 
     expect(code).toBe(1);
-    expect(output).toContain('The aeolus plugin for Codex was not updated: codex plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch failed: Error: could not reach github.com.');
+    expect(output).toContain('The aeolus-fleet plugin for Codex was not updated: codex plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch failed: Error: could not reach github.com.');
   });
 });

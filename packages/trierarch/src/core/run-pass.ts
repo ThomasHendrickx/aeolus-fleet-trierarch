@@ -85,7 +85,7 @@ export function createRunPass(deps: RunPassDeps): RunPass {
   };
 }
 
-/** Whether each harness's aeolus plugin marks launches, and which harnesses have no plugin to ask (#1212): one missing never fails the pass for the others. */
+/** Whether each harness's aeolus-fleet plugin marks launches, and which harnesses have no plugin to ask (#1212): one missing never fails the pass for the others. */
 async function launchMarks(deps: RunPassDeps): Promise<{ marksLaunches: Record<string, boolean>; missingPlugins: Set<string> }> {
   const marksLaunches: Record<string, boolean> = {};
   const missingPlugins = new Set<string>();
@@ -95,7 +95,7 @@ async function launchMarks(deps: RunPassDeps): Promise<{ marksLaunches: Record<s
         marksLaunches[harness] = await port.marksLaunches();
       } catch (error) {
         missingPlugins.add(harness);
-        deps.logger.warn(`The aeolus plugin for ${harness} cannot be used: ${reasonOf(error)}; its requests are given back until it is installed (aeolus-trierarch upgrade)`);
+        deps.logger.warn(`The aeolus-fleet plugin for ${harness} cannot be used: ${reasonOf(error)}; its requests are given back until it is installed (aeolus-trierarch upgrade)`);
       }
     }),
   );

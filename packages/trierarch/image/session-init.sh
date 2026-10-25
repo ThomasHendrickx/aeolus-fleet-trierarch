@@ -25,7 +25,7 @@ run_health_checks() {
   done
 }
 
-# The aeolus plugin of this image, into the home the container has: the
+# The aeolus-fleet plugin of this image, into the home the container has: the
 # image's own, or the ship's own the trierarch mounts over it (decision 0039).
 # Its install is linked from the image, so a container runs its image's plugin
 # whatever an earlier one left in the home; its data folder stays in the home.
@@ -43,6 +43,6 @@ link_plugin() {
   printf '%s\n' "$merged" > "$settings.aeolus-session.tmp" && mv "$settings.aeolus-session.tmp" "$settings"
 }
 
-link_plugin || echo "aeolus-session-init: could not link the aeolus plugin into $HOME" >&2
+link_plugin || echo "aeolus-session-init: could not link the aeolus-fleet plugin into $HOME" >&2
 run_health_checks &
 exec "$@"

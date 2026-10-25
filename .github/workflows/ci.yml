@@ -50,7 +50,7 @@ jobs:
           AEOLUS_TEST_USER_SYSTEMD: '1'
 
   trierarch-macos:
-    # The trierarch and the aeolus plugin's scripts run on macOS too, where
+    # The trierarch and the aeolus-fleet plugin's scripts run on macOS too, where
     # Linux CI misses their regressions: BSD awk and sed for the scripts. On
     # pushes only: a macOS runner costs about 10 times the minutes. The unit
     # layer only: the runner has no Docker for the integration layer's

@@ -138,7 +138,7 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
     expect(trierarch.fleet.selfReports.map(({ state, note }) => ({ state, note }))).toEqual([{ state: 'working', note: '1 of 8 running, 1 crashed' }]);
   });
 
-  it('offers no harness whose aeolus plugin is missing, says why in its note, and offers it again once the plugin is back (#1212)', async () => {
+  it('offers no harness whose aeolus-fleet plugin is missing, says why in its note, and offers it again once the plugin is back (#1212)', async () => {
     const trierarch = aTrierarch(WITH_CODEX);
     await trierarch.state.save({ ...EMPTY_STATE, missingPlugins: ['codex'] });
     await trierarch.reportSelf();
@@ -148,7 +148,7 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
 
     const [missing, back] = trierarch.fleet.selfReports;
     expect(missing?.details.harnesses.map((each) => each.harness)).toEqual(['claude-code']);
-    expect(missing?.note).toBe('0 of 8 running, codex not offered: its aeolus plugin is not installed (run aeolus-trierarch upgrade)');
+    expect(missing?.note).toBe('0 of 8 running, codex not offered: its aeolus-fleet plugin is not installed (run aeolus-trierarch upgrade)');
     expect(back?.details.harnesses.map((each) => each.harness)).toEqual(['claude-code', 'codex']);
     expect(back?.note).toBe('0 of 8 running');
   });
@@ -162,7 +162,7 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
     await trierarch.reportSelf();
 
     const [missing, back] = trierarch.fleet.selfReports;
-    expect(missing?.details.notOffered).toEqual([{ harness: 'codex', reason: 'its aeolus plugin is not installed (run aeolus-trierarch upgrade)' }]);
+    expect(missing?.details.notOffered).toEqual([{ harness: 'codex', reason: 'its aeolus-fleet plugin is not installed (run aeolus-trierarch upgrade)' }]);
     expect(back?.details.notOffered ?? []).toEqual([]);
   });
 

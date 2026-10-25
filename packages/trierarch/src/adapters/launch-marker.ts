@@ -2,7 +2,7 @@ import type { AeolusPlugin } from './plugin-identity.js';
 import { runIdentity } from './plugin-identity.js';
 
 /**
- * The launch marker the aeolus plugin's hooks keep for a session the
+ * The launch marker the aeolus-fleet plugin's hooks keep for a session the
  * trierarch started with a launch id (#490), read and cleared through the
  * plugin's own `aeolus-identity.sh launch`, never a copy of how the plugin
  * names its files. Its first line is the launch id, then one line per event
@@ -18,7 +18,7 @@ export interface LaunchMarker {
   readonly refused?: { readonly model?: string };
 }
 
-/** The exit of a plugin script that does not know the command it was given, as an aeolus plugin older than the launch marker answers `launch`. */
+/** The exit of a plugin script that does not know the command it was given, as an aeolus-fleet plugin older than the launch marker answers `launch`. */
 const USAGE_EXIT = 2;
 
 /** What the marker text says of the launch given; none when it is of another launch. */

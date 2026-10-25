@@ -14,7 +14,7 @@ const SKIP = '--dangerously-skip-permissions';
 const SKIPPING = { ...CONFIGURATION, harnesses: { 'claude-code': { flags: [SKIP], options: {} } } };
 const SKIPPING_AS_OPTION = { ...CONFIGURATION, harnesses: { 'claude-code': { flags: [], options: { permissions: { values: { ask: [], skip: [SKIP] }, default: 'ask' } } } } };
 const UNACCEPTED = `harness: claude-code still asks to accept ${SKIP}: accept it with aeolus-trierarch init`;
-const UNMARKED = "harness: claude-code's aeolus plugin marks no launches: run aeolus-trierarch upgrade";
+const UNMARKED = "harness: claude-code's aeolus-fleet plugin marks no launches: run aeolus-trierarch upgrade";
 
 /** A ship whose crew request is assigned to the trierarch, crewed by one pass and running from the next, once its session shows activity: its id. */
 async function aCrewedShip(trierarch: Trierarch, settings: Record<string, unknown> = {}) {
@@ -1525,7 +1525,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`Cannot crew scout with its settings\n\n- Ship: scout (\`${shipId}\`)\n- Settings version: 1\n- Why: ${UNACCEPTED}`]);
   });
 
-  it('never crews settings for a harness whose aeolus plugin marks no launches, and gives the request back saying to upgrade (#490)', async () => {
+  it('never crews settings for a harness whose aeolus-fleet plugin marks no launches, and gives the request back saying to upgrade (#490)', async () => {
     const trierarch = aTrierarch();
     trierarch.harness.isMarkingLaunches = false;
     const shipId = trierarch.fleet.commission('scout');
@@ -1537,7 +1537,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 1, reason: `mac-studio: ${UNMARKED}` }]);
   });
 
-  it('never starts a session again for a harness whose aeolus plugin marks no launches, and tells argo once (#490)', async () => {
+  it('never starts a session again for a harness whose aeolus-fleet plugin marks no launches, and tells argo once (#490)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     trierarch.harness.isMarkingLaunches = false;
@@ -1551,9 +1551,9 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([`Cannot crew scout with its settings\n\n- Ship: scout (\`${shipId}\`)\n- Settings version: 1\n- Why: ${UNMARKED}`]);
   });
 
-  it('a harness whose aeolus plugin is missing gives back only its own requests, with why, and the pass goes on for the others (#1212)', async () => {
+  it('a harness whose aeolus-fleet plugin is missing gives back only its own requests, with why, and the pass goes on for the others (#1212)', async () => {
     const trierarch = aTrierarch(WITH_CODEX);
-    trierarch.codex.pluginProblem = 'The aeolus plugin is not installed for Codex (nothing in /home/thomas/.codex/plugins/cache/aeolus-fleet/aeolus)';
+    trierarch.codex.pluginProblem = 'The aeolus-fleet plugin is not installed for Codex (nothing in /home/thomas/.codex/plugins/cache/aeolus-fleet/aeolus)';
     const codexShip = trierarch.fleet.commission('lookout');
     trierarch.fleet.request(codexShip, crewSettings({ harness: 'codex' }));
     const claudeShip = trierarch.fleet.commission('scout');
@@ -1561,19 +1561,19 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
 
     await trierarch.pass();
 
-    expect(trierarch.fleet.givenBack).toEqual([{ shipId: codexShip, settingsVersion: 1, reason: "mac-studio: harness: codex's aeolus plugin is not installed: run aeolus-trierarch upgrade" }]);
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId: codexShip, settingsVersion: 1, reason: "mac-studio: harness: codex's aeolus-fleet plugin is not installed: run aeolus-trierarch upgrade" }]);
     expect(trierarch.harness.launches.map((launch) => launch.shipId)).toEqual([claudeShip]);
     expect(trierarch.codex.launches).toEqual([]);
     expect(trierarch.logger.warnings.some((warning) => warning.startsWith('The pass failed'))).toBe(false);
   });
 
-  it('a harness that loses its aeolus plugin under a running session is not offered, the owner is told once, and the pass goes on for the others (#1212)', async () => {
+  it('a harness that loses its aeolus-fleet plugin under a running session is not offered, the owner is told once, and the pass goes on for the others (#1212)', async () => {
     const trierarch = aTrierarch(WITH_CODEX);
     const codexShip = trierarch.fleet.commission('lookout');
     trierarch.fleet.request(codexShip, crewSettings({ harness: 'codex' }));
     await trierarch.pass();
     await trierarch.pass();
-    trierarch.codex.pluginProblem = 'The aeolus plugin is not installed for Codex';
+    trierarch.codex.pluginProblem = 'The aeolus-fleet plugin is not installed for Codex';
     const claudeShip = trierarch.fleet.commission('scout');
     trierarch.fleet.request(claudeShip, crewSettings());
 
@@ -1585,9 +1585,9 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.harness.launches.map((launch) => launch.shipId)).toEqual([claudeShip]);
   });
 
-  it('keeps the harnesses whose aeolus plugin is missing in the state, and drops them once the plugin is back (#1212)', async () => {
+  it('keeps the harnesses whose aeolus-fleet plugin is missing in the state, and drops them once the plugin is back (#1212)', async () => {
     const trierarch = aTrierarch(WITH_CODEX);
-    trierarch.codex.pluginProblem = 'The aeolus plugin is not installed for Codex';
+    trierarch.codex.pluginProblem = 'The aeolus-fleet plugin is not installed for Codex';
     await trierarch.pass();
 
     expect(trierarch.state.current().missingPlugins).toEqual(['codex']);
@@ -2123,14 +2123,14 @@ describe('a failing action fails alone (#827)', () => {
 
   it('registers no ship whose harness cannot start a session, and logs why', async () => {
     const trierarch = aTrierarch(WITH_CODEX);
-    trierarch.codex.problem = "the aeolus plugin's scripts are not at /home/thomas/.codex/plugins/cache/aeolus-fleet/aeolus/0.25.0";
+    trierarch.codex.problem = "the aeolus-fleet plugin's scripts are not at /home/thomas/.codex/plugins/cache/aeolus-fleet/aeolus/0.25.0";
     const shipId = aCodexShip(trierarch);
 
     await trierarch.pass();
 
     expect(trierarch.fleet.shipOf(shipId).status).toBe('awaitingCrew');
     expect(trierarch.logger.actions.map((logged) => logged.outcome)).toContain(
-      "failed: the aeolus plugin's scripts are not at /home/thomas/.codex/plugins/cache/aeolus-fleet/aeolus/0.25.0",
+      "failed: the aeolus-fleet plugin's scripts are not at /home/thomas/.codex/plugins/cache/aeolus-fleet/aeolus/0.25.0",
     );
   });
 
