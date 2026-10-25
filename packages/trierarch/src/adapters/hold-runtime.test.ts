@@ -149,6 +149,19 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
     expect(written('fake-starts.jsonl')).toHaveLength(1);
   });
 
+  it('has the stopped turn in its events by the time an interrupt returns, every time (H12)', async () => {
+    const runtime = aRuntime();
+    const shipId = await aClaudeCodeSession(runtime);
+    const turns = 20;
+
+    for (let turn = 1; turn <= turns; turn += 1) {
+      await runtime.send({ shipId, line: userLine(`work slowly ${String(turn)}`) });
+      await expect.poll(async () => eventsOfType({ runtime: runtime, shipId: shipId }, 'assistant')).toHaveLength(turn);
+      await runtime.interrupt(shipId);
+      await expect(eventsOfType({ runtime: runtime, shipId: shipId }, 'result')).resolves.toHaveLength(turn);
+    }
+  });
+
   it('stops a running turn with SIGINT when the harness refuses the control request, and starts it again resuming its session, with no exit seen (H12)', async () => {
     const runtime = aRuntime();
     const shipId = await aClaudeCodeSession(runtime, ['--refuse-interrupt']);
