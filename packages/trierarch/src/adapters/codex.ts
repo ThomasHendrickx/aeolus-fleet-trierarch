@@ -82,6 +82,9 @@ export function codexTurnCommand(at: { start: readonly string[]; threadId: strin
   return [...words.slice(0, exec), EXEC, RESUME, at.threadId, ...flags, END_OF_FLAGS, at.line];
 }
 
+/** The event of `codex exec --json` that names the session's thread, which a later turn resumes (H11). */
+export const codexThreadStartedSchema = z.object({ type: z.literal('thread.started'), thread_id: z.string().min(1) });
+
 /** Codex's error events in `codex exec --json`: a failed turn, or an error the turn met. */
 const errorEventSchema = z.union([z.object({ type: z.literal('turn.failed'), error: z.object({ message: z.string() }) }), z.object({ type: z.literal('error'), message: z.string() })]);
 

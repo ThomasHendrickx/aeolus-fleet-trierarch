@@ -5,7 +5,7 @@ import { createServer, type Socket } from 'node:net';
 import type { Readable, Writable } from 'node:stream';
 import { createInterface } from 'node:readline';
 
-import { codexTurnCommand } from './codex.js';
+import { codexThreadStartedSchema, codexTurnCommand } from './codex.js';
 import type { HoldAnswer, HoldFiles, HoldRequest } from './hold-protocol.js';
 import { holdRequestSchema, parsedLine, REFUSED } from './hold-protocol.js';
 
@@ -76,6 +76,12 @@ export interface HoldOptions {
   readonly mayCall: (connection: Socket) => Promise<boolean>;
 }
 
+/** The session id a Claude Code event names, when it names one. */
+function sessionIdOf(event: object): string | undefined {
+  const id: unknown = Reflect.get(event, 'session_id');
+  return typeof id === 'string' ? id : undefined;
+}
+
 /** A waiter for the end of the running turn, or for an answer to a control request. */
 type Waiter = (event: { type: 'result' } | { type: 'control'; requestId: string; isRefused: boolean } | { type: 'exit' }) => void;
 
@@ -117,8 +123,8 @@ export async function runHold(options: HoldOptions): Promise<number> {
       return;
     }
     const type: unknown = Reflect.get(event, 'type');
-    const id: unknown = Reflect.get(event, isCodex ? 'thread_id' : 'session_id');
-    if (typeof id === 'string' && id !== sessionId) {
+    const id = isCodex ? codexThreadStartedSchema.safeParse(event).data?.thread_id : sessionIdOf(event);
+    if (id !== undefined && id !== sessionId) {
       sessionId = id;
       void writeFile(files.sessionId, id);
     }
