@@ -580,7 +580,17 @@ export class InMemoryWorkspace implements WorkspacePort {
     return Promise.resolve(this.folders.get(folder)?.hasChanges !== true);
   }
 
+  /** Folders under the root the trierarch did not make, or that git does not know: git cannot read or remove them. */
+  readonly notMade = new Set<string>();
+
+  isMade(folder: string): Promise<boolean> {
+    return Promise.resolve(!this.notMade.has(folder));
+  }
+
   unsaved(folder: string): Promise<readonly string[]> {
+    if (this.notMade.has(folder)) {
+      return Promise.reject(new Error(`${folder} is no worktree under ${WORKTREE_ROOT}: the trierarch removes only what it made`));
+    }
     return Promise.resolve([...(this.folders.get(folder)?.unsaved ?? [])]);
   }
 
@@ -588,6 +598,9 @@ export class InMemoryWorkspace implements WorkspacePort {
   isFailingRemove = false;
 
   remove(folder: string): Promise<void> {
+    if (this.notMade.has(folder)) {
+      return Promise.reject(new Error(`${folder} is no worktree under ${WORKTREE_ROOT}: the trierarch removes only what it made`));
+    }
     if (this.isFailingRemove) {
       return Promise.reject(new Error(`git worktree remove ${folder} failed`));
     }

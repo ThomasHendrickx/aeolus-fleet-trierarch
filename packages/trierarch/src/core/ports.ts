@@ -293,6 +293,8 @@ export interface WorkspacePort {
    * remote branch keeps. None when everything in it is kept elsewhere.
    */
   unsaved(folder: string): Promise<readonly string[]>;
+  /** Whether the folder is a worktree the trierarch made: one `<root>/<repository>/<ship>` of a repository it has, which git knows. Anything else under its root is not its to clear. */
+  isMade(folder: string): Promise<boolean>;
   /** Removes a worktree the trierarch made; never a configured folder. */
   remove(folder: string): Promise<void>;
   worktrees(): Promise<readonly ObservedWorktree[]>;

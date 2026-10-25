@@ -1187,6 +1187,28 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.state.current().orphans).toEqual([{ path: orphan, repository: 'aeolus-fleet', name: 'lookout' }]);
   });
 
+  it('rule 2: a folder under its root it did not make, and a worktree git no longer knows, are reported once as orphans it will not clear, nothing in them stopped, and fail no pass (#1041)', async () => {
+    const trierarch = aTrierarch();
+    const notMade = `${WORKTREE_ROOT}/aeolus-fleet-gateway-designer-release/app`;
+    const unknown = `${WORKTREE_ROOT}/aeolus-fleet/gone`;
+    for (const folder of [notMade, unknown]) {
+      trierarch.workspace.folders.set(folder, { hasChanges: false, unsaved: [] });
+      trierarch.workspace.notMade.add(folder);
+      trierarch.folderProcesses.start(folder, 'astro dev');
+    }
+
+    await trierarch.pass();
+    trierarch.clock.advance(5 * SECOND_MS);
+    await trierarch.pass();
+
+    expect(trierarch.logger.warnings.filter((warning) => warning.startsWith('The pass failed'))).toEqual([]);
+    expect(trierarch.logger.warnings.filter((warning) => warning.startsWith('Will not clear the orphan')).map((warning) => warning.split(' ').slice(0, 6).join(' '))).toHaveLength(2);
+    expect([...trierarch.workspace.folders.keys()]).toEqual(expect.arrayContaining([notMade, unknown]));
+    expect([...trierarch.folderProcesses.running.keys()].sort()).toEqual([unknown, notMade].sort());
+    expect(trierarch.state.current().orphans.map((orphan) => orphan.path).sort()).toEqual([unknown, notMade].sort());
+    expect(trierarch.state.current().passFailure).toBeUndefined();
+  });
+
   it('rule 2: an orphan it could not remove is reported and tried again on the next pass (#1041)', async () => {
     const trierarch = aTrierarch();
     const orphan = `${WORKTREE_ROOT}/aeolus-fleet/lookout`;

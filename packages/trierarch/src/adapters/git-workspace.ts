@@ -1,4 +1,4 @@
-import { mkdir, readdir, stat } from 'node:fs/promises';
+import { mkdir, readdir, realpath, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
@@ -73,6 +73,20 @@ export function createGitWorkspace(options: { configuration: TrierarchConfigurat
       const changes = await git(['-C', folder, 'status', '--porcelain']);
       const commits = await git(['-C', folder, 'log', '--format=commit %h %s', 'HEAD', '--not', '--branches', '--tags', '--remotes']);
       return [...changes.split('\n'), ...commits.split('\n')].filter((line) => line !== '');
+    },
+    isMade: async (folder) => {
+      const parts = relative(root, folder).split(sep);
+      const repository = parts.length === 2 ? await repositoryOf(folder) : undefined;
+      if (repository === undefined) {
+        return false;
+      }
+      const listed = await runCommand('git', { args: ['-C', repository, 'worktree', 'list', '--porcelain'] });
+      if (listed.status !== 0) {
+        return false;
+      }
+      // Git writes real paths, so a root reached over a link is compared by its real path too.
+      const known = new Set(listed.stdout.split('\n').flatMap((line) => (line.startsWith('worktree ') ? [line.slice('worktree '.length)] : [])));
+      return known.has(folder) || known.has(await realpath(folder).catch(() => folder));
     },
     remove: async (folder) => {
       const repository = await repositoryOf(folder);

@@ -510,6 +510,13 @@ async function clear(state: TrierarchState, at: CarryOut & { action: Extract<Act
  */
 async function clearOrphan(state: TrierarchState, at: { orphan: Orphan; isNew: boolean; deps: RunPassDeps }): Promise<TrierarchState> {
   const { orphan, isNew, deps } = at;
+  // Checked first: nothing is stopped or removed in a folder the trierarch did not make, and it is no failure to leave one (it stays in the state, reported once).
+  if (!(await deps.workspace.isMade(orphan.path))) {
+    if (isNew) {
+      deps.logger.warn(`Will not clear the orphan ${orphan.path}: the trierarch made no worktree of it, or git no longer knows it; it removes only what it made`);
+    }
+    return state;
+  }
   const stopped = await deps.folderProcesses.stopIn(orphan.path);
   const unsaved = await deps.workspace.unsaved(orphan.path);
   if (unsaved.length > 0) {

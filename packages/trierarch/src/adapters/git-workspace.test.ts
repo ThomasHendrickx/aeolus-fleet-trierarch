@@ -149,6 +149,16 @@ describe('workspaces in git', () => {
     expect(existsSync(notes)).toBe(true);
   });
 
+  it('says a worktree it made is made by it, and a folder under its root it did not make, or a worktree git does not know, is not (#1041)', async () => {
+    const { folder: made } = await workspace().prepare(scout);
+    const stranger = join(root, 'aeolus-fleet-gateway-designer-release', 'app');
+    const unknown = join(root, 'aeolus-fleet', 'gone');
+    mkdirSync(stranger, { recursive: true });
+    mkdirSync(unknown, { recursive: true });
+
+    expect([await workspace().isMade(made), await workspace().isMade(stranger), await workspace().isMade(unknown), await workspace().isMade(notes)]).toEqual([true, false, false, false]);
+  });
+
   it('uses a configured folder as it is', async () => {
     await expect(workspace().prepare({ ...scout, workspace: { kind: 'folder', name: 'notes' } })).resolves.toEqual({ folder: notes });
   });
