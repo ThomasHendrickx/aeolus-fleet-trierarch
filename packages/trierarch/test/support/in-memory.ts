@@ -888,7 +888,7 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
       { flag: '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', when: 'always' as const },
       { flag: '--continue', when: 'restart' as const },
     ], codex: [
-      { flag: '--no-daemon', when: 'always' as const },
+      { flag: '--json', when: 'always' as const },
       { flag: '--config=tools.experimental_request_user_input.enabled=false', when: 'always' as const },
     ] },
     riskyFlags: { 'claude-code': ['--dangerously-skip-permissions'], codex: ['--dangerously-bypass-approvals-and-sandbox'] },

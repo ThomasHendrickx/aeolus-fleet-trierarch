@@ -100,8 +100,8 @@ describe('aeolus-trierarch', () => {
     );
     expect(output).toContain(
       [
-        `  first start: codex --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- "<first prompt>\\n\\n${NO_TERMINAL_QUESTIONS}"`,
-        `  restart: codex resume --last --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- "$aeolus-wake ${NO_TERMINAL_QUESTIONS}"`,
+        `  first start: codex exec --dangerously-bypass-approvals-and-sandbox (configuration) --json (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- "<first prompt>\\n\\n${NO_TERMINAL_QUESTIONS}"`,
+        `  restart: codex exec resume --last --dangerously-bypass-approvals-and-sandbox (configuration) --json (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- "$aeolus-wake ${NO_TERMINAL_QUESTIONS}"`,
       ].join('\n'),
     );
   });
