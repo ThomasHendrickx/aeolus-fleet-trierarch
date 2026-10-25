@@ -73,6 +73,17 @@ describe("the machine's load, as the trierarch reads it (#400)", () => {
     expect(trierarch.fleet.toArgo.map((report) => report.text.split('\n')[0])).toEqual(['Low on disk: 2 % free']);
   });
 
+  it('keeps a failing pass and the missing plugins in the state when it saves what the machine is low on (#1212)', async () => {
+    const trierarch = aTrierarch();
+    const failing = { reason: 'the fleet cannot be reached', since: '2026-10-06T08:00:00.000Z' };
+    await trierarch.state.save({ ...trierarch.state.current(), passFailure: failing, missingPlugins: ['codex'] });
+    trierarch.machine.current = LOW_MEMORY;
+
+    await trierarch.readLoad();
+
+    expect(trierarch.state.current()).toMatchObject({ lowResources: ['memory'], passFailure: failing, missingPlugins: ['codex'] });
+  });
+
   it('tells argo again only after the machine recovered and dropped again', async () => {
     const trierarch = aTrierarch();
     trierarch.machine.current = LOW_MEMORY;
