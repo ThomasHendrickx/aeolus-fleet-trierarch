@@ -661,6 +661,18 @@ describe('aeolus-trierarch init after a setup that did not finish (aeolus-fleet#
     expect(prompter.hidden).toHaveLength(1);
   });
 
+  it('restarts an installed trierarch once its ship is registered again, so it runs with the new crew token', async () => {
+    await init({ isYes: true });
+    endedLeases.add('aeolus_ct_v1_trierarch');
+    nextCrewToken = 'aeolus_ct_v1_trierarch-again';
+    const prompter = new ScriptedPrompter([['Change the configuration', false], ['Restart', true]]);
+
+    const report = await init({ fleetUrl: FLEET_URL, shipId, secret: 'aeolus_sk_v1_new-secret' }, prompter);
+
+    expect(report.service).toBe('restarted');
+    expect(service.done).toEqual(['rewrite', 'restart']);
+  });
+
   it('still refuses a setup line for another ship, saying how to register it', async () => {
     await expect(init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET })).rejects.toThrow(`init never registers again: to register another ship, remove ${paths.crewToken} first`);
     expect(registered).toHaveLength(1);
