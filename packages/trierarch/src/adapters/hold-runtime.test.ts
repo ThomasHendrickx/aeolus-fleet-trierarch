@@ -362,16 +362,19 @@ describe('a Codex session held by a hold, one codex exec per turn (headless H11,
     await expect.poll(async () => eventsOfType({ runtime, shipId }, 'turn.completed')).toHaveLength(1);
   });
 
+  /** Longer than a hold call other than interrupt may take, as Codex may take to end after its Stop. */
+  const LINGER_MS = 2500;
+
   it("starts a line's turn only once the last turn's process has ended, never two at once on one thread", async () => {
     const runtime = aRuntime();
-    const shipId = await aCodexSession(runtime, { flags: ['--linger-ms', '500'] });
+    const shipId = await aCodexSession(runtime, { flags: ['--linger-ms', String(LINGER_MS)] });
     await expect.poll(hooks).toContain('Stop');
 
     await runtime.send({ shipId, line: 'the next one' });
 
-    await expect.poll(lives).toHaveLength(4);
+    await expect.poll(lives, { timeout: LINGER_MS * 2 }).toHaveLength(4);
     expect(lives().map((life) => life.at)).toEqual(['start', 'exit', 'start', 'exit']);
-  });
+  }, LINGER_MS * 4);
 
   it('stops a running turn with SIGINT and waits for its process to end; the forced line runs next, resuming the thread (H12)', async () => {
     const runtime = aRuntime();
