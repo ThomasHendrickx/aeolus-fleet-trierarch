@@ -12,54 +12,71 @@ import { createLaunchMarks } from './launch-marker.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
 
 /**
- * Codex as a harness (docs/architecture.md, "First adapters"): `codex` in the
- * folder, `codex resume --last` on a restart (the folder's last conversation;
- * one ship per folder), always with `--no-daemon` and without the question
- * tool, and `$aeolus-wake` sent
- * to wake an idle session, each prompt with the line that no human reads its
- * terminal (#585). The identity and the turn marker go through the
- * aeolus plugin for Codex, in Codex's own plugin data folder. The plugin's new
- * or changed hooks are trusted before every launch: a plugin update changes
- * them, and Codex would stop the session at its hooks review (#581).
+ * Codex as a harness (docs/architecture.md, "First adapters"), headless
+ * (headless H11): one `codex exec --json` per turn in the folder, the first
+ * with the first prompt, a restart `codex exec resume --last` (the folder's
+ * last conversation; one ship per folder), and every later turn `codex exec
+ * resume <thread id>`, which the hold starts for each line it is sent; between
+ * turns no Codex process runs. Always without the question tool, and
+ * `$aeolus-wake` sent to wake an idle session, each prompt with the line that
+ * no human reads its terminal (#585). The identity and the turn marker go
+ * through the aeolus plugin for Codex, in Codex's own plugin data folder,
+ * whose hooks run in `codex exec` as in a terminal. The plugin's new or
+ * changed hooks are trusted before every launch: a plugin update changes them,
+ * and Codex runs none it does not trust (#581).
  */
 
 export const WAKE_PROMPT = '$aeolus-wake';
 
+/** Added to every launch, as mechanism: the turn's events as JSON lines, which the hold keeps (headless H13, H14). */
+const JSON_EVENTS = '--json';
 /**
- * Added to every launch, as mechanism: without it Codex runs the session's
- * work in its shared app-server daemon, which keeps a turn running after the
- * pane is gone, so a release or a crash would stop the pane but not the work.
+ * Left out of the configured flags: `codex exec` does not take it, and runs
+ * its turn in its own process, so a stop stops its work. Configurations
+ * written for Codex in a terminal may still carry it.
  */
 const NO_DAEMON = '--no-daemon';
 /**
  * Added to every launch: Codex's question tool (request_user_input) waits for
- * an answer in the pane, which nobody watches, and would take the keys of a
- * wake. The session asks its questions over the fleet instead (#460).
+ * an answer nobody gives, and would hold the turn. The session asks its
+ * questions over the fleet instead (#460).
  */
 const NO_QUESTION_TOOL = '--config=tools.experimental_request_user_input.enabled=false';
 const END_OF_FLAGS = '--';
-
-/** Why no Codex session starts on the host until Codex runs headless (headless S2). */
-const NOT_HEADLESS_YET = 'Codex does not run headless yet, and a session on the host has no terminal: it comes with S2 of the headless design';
+const EXEC = 'exec';
+const RESUME = 'resume';
+const LAST = '--last';
 
 export const CODEX_ADAPTER_FLAGS: readonly AdapterFlag[] = [
-  { flag: NO_DAEMON, when: 'always' },
+  { flag: JSON_EVENTS, when: 'always' },
   { flag: NO_QUESTION_TOOL, when: 'always' },
 ];
 
 /** The flags of Codex that are risky: it then runs every command without approval and outside its sandbox (#326). */
 export const CODEX_RISKY_FLAGS: readonly string[] = ['--dangerously-bypass-approvals-and-sandbox'];
 
-/** `codex`, or `codex resume --last` on a restart, then the configured flags, --no-daemon once, the question tool off, and the prompt last after `--`, so it never reads as a flag. */
+/** `codex exec`, or `codex exec resume --last` on a restart, then the configured flags, --json, the question tool off, and the prompt last after `--`, so it never reads as a flag. */
 export function codexCommandLine(at: { flags: readonly string[]; prompt: string; isFirstStart: boolean; program?: string }): CommandPart[] {
   const program = at.program ?? 'codex';
   return partsWithWords([
-    { words: at.isFirstStart ? [program] : [program, 'resume', '--last'] },
+    { words: at.isFirstStart ? [program, EXEC] : [program, EXEC, RESUME, LAST] },
     { words: at.flags.filter((flag) => flag !== NO_DAEMON), source: 'configuration' },
-    { words: [NO_DAEMON], source: 'adapter' },
+    { words: [JSON_EVENTS], source: 'adapter' },
     { words: [NO_QUESTION_TOOL], source: 'adapter' },
     { words: [END_OF_FLAGS, at.prompt] },
   ]);
+}
+
+/**
+ * The command of a later turn (headless H11): the session's start command,
+ * resuming its thread by id instead of the folder's last conversation, with
+ * the line as its prompt after `--`.
+ */
+export function codexTurnCommand(at: { start: readonly string[]; threadId: string; line: string }): string[] {
+  const end = at.start.lastIndexOf(END_OF_FLAGS);
+  const [program = 'codex', , ...rest] = end === -1 ? at.start : at.start.slice(0, end);
+  const flags = rest[0] === RESUME && rest[1] === LAST ? rest.slice(2) : rest;
+  return [program, EXEC, RESUME, at.threadId, ...flags, END_OF_FLAGS, at.line];
 }
 
 /** Codex's error events in `codex exec --json`: a failed turn, or an error the turn met. */
@@ -114,8 +131,6 @@ export function createCodexHarness(options: {
 
   return {
     ...identity,
-    // Codex still runs in a terminal, and the host gives a session none: no Codex session starts until S2 of the headless design.
-    startProblem: async () => (await identity.startProblem()) ?? NOT_HEADLESS_YET,
     launch: async ({ shipId, folder, checkouts, harness, options: picked, isFirstStart, launchId, firstPrompt }) => {
       const settings = configuration.harnesses[harness];
       if (settings === undefined) {
