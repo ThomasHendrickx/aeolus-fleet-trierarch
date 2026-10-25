@@ -39,8 +39,16 @@ import type {
   ShipOwner,
   ShipSocketsPort,
   TrustedRepositoriesPort,
+  MachinePort,
+  ModelTokens,
+  SubscriptionWindow,
+  UsagePort,
 } from '../../src/core/ports.js';
+import type { MachineLoad } from '../../src/core/machine-load.js';
+import { createReadLoad } from '../../src/core/read-load.js';
+import { createReadUsage } from '../../src/core/read-usage.js';
 import { createReportSelf } from '../../src/core/report-self.js';
+import { priceTableOf } from '../../src/core/token-cost.js';
 import { createRunPass } from '../../src/core/run-pass.js';
 import { createUninstall } from '../../src/core/uninstall.js';
 import type { TrustedRepository } from '../../src/core/trusted-repositories.js';
@@ -766,6 +774,47 @@ export class InMemoryTrustedRepositories implements TrustedRepositoriesPort {
 }
 
 /** A trierarch on in-memory ports, knowing the trierarch plugin's ship. */
+const GIB = 1024 ** 3;
+
+/** A machine of 64 GiB memory, half of it available, 8 cores, and a 1 TB disk half free. */
+export function aMachineLoad(overrides: Partial<MachineLoad> = {}): MachineLoad {
+  return {
+    memory: { totalBytes: 64 * GIB, availableBytes: 32 * GIB },
+    swap: { totalBytes: 8 * GIB, usedBytes: 0 },
+    cpu: { cores: 8, loadAverage: 1 },
+    disk: { totalBytes: 1_000_000_000_000, freeBytes: 500_000_000_000 },
+    ...overrides,
+  };
+}
+
+/** The machine the trierarch runs on, its load as a test sets it. */
+export class InMemoryMachine implements MachinePort {
+  current: MachineLoad = aMachineLoad();
+  /** Set to make reading the load fail, as when the disk cannot be read. */
+  isFailing = false;
+
+  load(): Promise<MachineLoad> {
+    return this.isFailing ? Promise.reject(new Error('statfs failed')) : Promise.resolve(this.current);
+  }
+}
+
+/** What the harnesses' own files and CLIs say of their usage: each ship's tokens per model, and each harness's subscription windows, as a test sets them. */
+export class InMemoryUsage implements UsagePort {
+  readonly tokens = new Map<ShipId, readonly ModelTokens[]>();
+  readonly subscriptions = new Map<string, readonly SubscriptionWindow[]>();
+  /** Ships whose transcripts cannot be read. */
+  readonly unreadable = new Set<ShipId>();
+
+  tokensOf(ship: { shipId: ShipId; harness: string; folder: string }): Promise<readonly ModelTokens[]> {
+    return this.unreadable.has(ship.shipId) ? Promise.reject(new Error('EACCES')) : Promise.resolve(this.tokens.get(ship.shipId) ?? []);
+  }
+
+  subscriptionOf(harness: string): Promise<readonly SubscriptionWindow[] | undefined> {
+    return Promise.resolve(this.subscriptions.get(harness));
+  }
+}
+
+/** A trierarch on in-memory ports. */
 export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION, detected: Detected = {}) {
   return trierarchOn({ configuration, detected, pluginShipId: PLUGIN_SHIP_ID });
 }
@@ -820,7 +869,11 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
   const folderProcesses = new InMemoryFolderProcesses();
   const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, folderProcesses, workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId, sockets });
   const uninstall = createUninstall({ processes, state });
-  const reportSelf = createReportSelf({ fleet, processes, trust, state, setup });
+  const machine = new InMemoryMachine();
+  const usage = new InMemoryUsage();
+  const readLoad = createReadLoad({ machine, fleet, state, clock, logger });
+  const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configuration.harnesses), prices: priceTableOf(undefined) });
+  const reportSelf = createReportSelf({ fleet, processes, trust, state, setup, readLoad, readUsage });
 
   /** A message arrives at the trierarch's own ship: its delivery, handled. */
   async function deliver(message: { contentType: string; payload: string; senderShipId?: ShipId }): Promise<Delivery> {
@@ -829,7 +882,7 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
     return delivery;
   }
 
-  return { fleet, processes, folderProcesses, harness, codex, workspace, checkouts, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver, refusals, sockets, trustedRepositories };
+  return { fleet, processes, folderProcesses, harness, codex, workspace, checkouts, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver, refusals, sockets, trustedRepositories, machine, usage, readLoad, readUsage };
 }
 
 export type Trierarch = ReturnType<typeof aTrierarch>;

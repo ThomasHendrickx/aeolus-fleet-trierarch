@@ -1,8 +1,13 @@
 import { randomUUID } from 'node:crypto';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 
 import { createClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import { createCodexSetup } from '../adapters/codex-setup.js';
+import { createClaudeCodeUsage } from '../adapters/claude-code-usage.js';
+import { createCodexUsage } from '../adapters/codex-usage.js';
 import { createContainerHost } from '../adapters/container-host.js';
 import { requireCoreVersion } from '../adapters/core-version.js';
 import { loadConfiguration, readCrewFile, writeRunningFile, type TrierarchConfiguration } from '../adapters/files.js';
@@ -12,7 +17,9 @@ import { adapterFlagsOf, createHarnesses, riskyFlagsOf } from '../adapters/harne
 import { createFolderProcesses } from '../adapters/folder-processes.js';
 import { createGitCheckouts } from '../adapters/git-checkouts.js';
 import { createJsonState } from '../adapters/json-state.js';
-import type { TrierarchPaths } from '../adapters/paths.js';
+import { createMachine } from '../adapters/machine.js';
+import { shipHome, type TrierarchPaths } from '../adapters/paths.js';
+import { runCommand } from '../adapters/run-command.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
 import { runtimeAdaptersOf } from '../adapters/runtime-adapters.js';
 import { createCallerCheck } from '../adapters/caller-check.js';
@@ -20,6 +27,7 @@ import { createShipSockets } from '../adapters/ship-sockets.js';
 import { sessionsLaunch } from '../adapters/tmux.js';
 import { createTrust } from '../adapters/trust.js';
 import { createTrustedRepositoriesFile, trustedClonesOf, withTrustedRepositories } from '../adapters/trusted-repositories-file.js';
+import { createUsage, folderMadeAt } from '../adapters/usage.js';
 import { runningVersion } from '../adapters/version.js';
 import { createCheckSessionRuntime } from '../core/check-session-runtime.js';
 import { createDetectHarnesses } from '../core/detect-harnesses.js';
@@ -28,6 +36,9 @@ import { createRefuseModel } from '../core/refuse-model.js';
 import { createReportDetectionProblems } from '../core/report-detection-problems.js';
 import { createHandleDelivery } from '../core/handle-delivery.js';
 import { machineOf } from '../core/machine.js';
+import { createReadLoad } from '../core/read-load.js';
+import { createReadUsage } from '../core/read-usage.js';
+import { priceTableOf } from '../core/token-cost.js';
 import type { Delivery, Logger, TrierarchSetup } from '../core/ports.js';
 import { createReportSelf } from '../core/report-self.js';
 import { createRunPass } from '../core/run-pass.js';
@@ -132,7 +143,20 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     refreshCheckouts: (shipId) => checkouts.refresh(shipId),
   });
   const runPass = createRunPass({ fleet, harnesses, processes: sessions, folderProcesses: createFolderProcesses(), workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets });
-  const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup });
+  // The machine's load (#400) and the harnesses' usage (#353), each read on its own interval for the report.
+  const readLoad = createReadLoad({ machine: createMachine({ worktreeRoot: configuration.worktreeRoot ?? paths.worktrees }), fleet, state, clock, logger });
+  const usage = createUsage({
+    'claude-code': createClaudeCodeUsage({
+      // In containers each ship's conversations are in its own home (decision 0039).
+      projectsOf: (shipId) => (shipHomes === undefined ? join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects') : join(shipHome(shipHomes.homes, shipId), '.claude', 'projects')),
+      madeAt: folderMadeAt,
+      run: runCommand,
+      neutralFolder: () => mkdtemp(join(tmpdir(), 'aeolus-trierarch-probe-')),
+    }),
+    codex: createCodexUsage({ sessions: join(env.CODEX_HOME ?? join(homeDirectory, '.codex'), 'sessions'), madeAt: folderMadeAt }),
+  });
+  const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configured.harnesses), prices: priceTableOf(configured.prices) });
+  const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup, readLoad, readUsage });
   const askForTrustedRepositories = createAskForTrustedRepositories({ fleet, logger, ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
   // Each pass ends with the trierarch's own report: the first at start, then only when it changed.
   const pass = async (): Promise<void> => {

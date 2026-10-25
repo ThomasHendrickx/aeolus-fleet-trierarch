@@ -5,6 +5,7 @@ import { idSchema, trierarchWorkspaceSchema } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
 import { EMPTY_STATE, ENTRY_STATES, type TrierarchState } from '../core/entry.js';
+import { LOW_RESOURCES } from '../core/machine-load.js';
 import type { StatePort } from '../core/ports.js';
 
 /**
@@ -48,6 +49,7 @@ const stateSchema = z.object({
   kept: z.array(z.object({ shipId: idSchema('ship'), repository: z.string(), path: z.string() })),
   orphans: z.array(z.object({ path: z.string(), repository: z.string(), name: z.string() })),
   refused: z.record(z.string(), z.int().positive()),
+  lowResources: z.array(z.enum(LOW_RESOURCES)).optional(),
 });
 
 /** The 0.17 state file: it alone kept the messages it applied. */

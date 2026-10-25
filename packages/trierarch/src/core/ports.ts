@@ -2,6 +2,8 @@ import type { ClearOutcome, CrewStatus, ShipId, TrierarchConfiguration, Trierarc
 
 import type { TrierarchState } from './entry.js';
 import type { Machine } from './machine.js';
+import type { MachineLoad } from './machine-load.js';
+import type { TokenCounts } from './token-cost.js';
 import type { Action } from './reconciler.js';
 import type { TrustedRepository } from './trusted-repositories.js';
 
@@ -413,4 +415,30 @@ export interface TrustedRepositoriesPort {
   current(): readonly TrustedRepository[];
   /** Keeps the list, and trusts each one's clone for every configured harness, so a session may start in it (#381). */
   accept(list: readonly TrustedRepository[]): Promise<void>;
+}
+
+/** The machine the trierarch runs on, as it reads its load (#400): memory, swap, CPU, and the disk its worktree root is on. */
+export interface MachinePort {
+  load(): Promise<MachineLoad>;
+}
+
+/** The tokens of one model a ship's sessions used (#353). */
+export interface ModelTokens {
+  readonly model: string;
+  readonly tokens: TokenCounts;
+}
+
+/** One window of a harness's subscription (#353): how long it is, how much of it is used, and when it starts again. */
+export interface SubscriptionWindow {
+  readonly windowMinutes: number;
+  readonly usedPercent: number;
+  readonly resetsAt: Date;
+}
+
+/** What the harnesses say of their usage (#353), from their own files and CLIs. */
+export interface UsagePort {
+  /** The tokens the ship's sessions used since its folder was made, per model, from its harness's transcripts. */
+  tokensOf(ship: { shipId: ShipId; harness: string; folder: string }): Promise<readonly ModelTokens[]>;
+  /** How much of the harness's subscription is used now, per window; none when the harness cannot say. */
+  subscriptionOf(harness: string): Promise<readonly SubscriptionWindow[] | undefined>;
 }

@@ -126,6 +126,27 @@ describe('the configuration file', () => {
     });
   });
 
+  describe('the price table the cost of tokens is estimated by (#353)', () => {
+    const withPrices = (prices: unknown) => ({ ...initialConfiguration(), prices });
+
+    it('loads a price per model, in US dollars per million tokens of each kind', async () => {
+      const path = join(folder, 'config.json');
+      writeFileSync(path, JSON.stringify(withPrices({ 'claude-opus-5-5': { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 8 } })));
+
+      await expect(loadConfiguration(path)).resolves.toMatchObject({ prices: { 'claude-opus-5-5': { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 8 } } });
+    });
+
+    it.each([
+      { label: 'a negative price', prices: { 'gpt-6-sol': { input: -1, output: 10, cacheRead: 0.2, cacheWrite: 2.5 } } },
+      { label: 'a price without its cache write', prices: { 'gpt-6-sol': { input: 2, output: 10, cacheRead: 0.2 } } },
+    ])('refuses $label', async ({ prices }) => {
+      const path = join(folder, 'config.json');
+      writeFileSync(path, JSON.stringify(withPrices(prices)));
+
+      await expect(loadConfiguration(path)).rejects.toThrow('prices');
+    });
+  });
+
   it('never holds the crew token: that lives in the crew file', async () => {
     const path = join(folder, 'crew-token');
     await writeCrewFile(path, { fleetUrl: 'https://fleet.example.com', shipId: newId('ship'), crewToken: 'aeolus_ct_v1_trierarch' });

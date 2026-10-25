@@ -2,7 +2,10 @@ import type { TrierarchReportDetails } from '@aeolus-fleet/common';
 
 import { optionsSchemaOf } from './options-schema.js';
 import type { TrierarchState } from './entry.js';
+import { loadStepsOf } from './machine-load.js';
 import type { FleetPort, SelfReport, SessionRuntime, StatePort, TrierarchSetup, TrustedPlaces, TrustPort } from './ports.js';
+import type { ReadLoad } from './read-load.js';
+import type { ReadUsage } from './read-usage.js';
 
 /** Reports the trierarch's own ship when something changed; the first call, at start, always reports. */
 export type ReportSelf = () => Promise<void>;
@@ -11,20 +14,26 @@ export type ReportSelf = () => Promise<void>;
  * Use case: the trierarch reports as its own ship (docs/trierarch.md, "What
  * a trierarch reports"): working while a session runs, idle with none, a
  * note saying how many run of its cap and how many crashed, and its details
- * from its configuration and saved state. It reports on start, then only
- * when the report would differ from the last one it sent.
+ * from its configuration and saved state, with its machine's load (#400)
+ * and its harnesses' usage (#353) as last read. It reports on start, then
+ * only when the report would differ from the last one it sent; the load
+ * counts as changed only once it takes another step, as it always moves.
  */
-export function createReportSelf(deps: { fleet: FleetPort; processes: Pick<SessionRuntime, 'list' | 'stop'>; trust: TrustPort; state: StatePort; setup: TrierarchSetup }): ReportSelf {
+export function createReportSelf(deps: { fleet: FleetPort; processes: Pick<SessionRuntime, 'list' | 'stop'>; trust: TrustPort; state: StatePort; setup: TrierarchSetup; readLoad: ReadLoad; readUsage: ReadUsage }): ReportSelf {
   let lastSent: string | undefined;
   return async () => {
+    const load = await deps.readLoad();
+    const usage = await deps.readUsage();
     const state = await deps.state.load();
     const running = (await deps.processes.list()).filter((session) => session.status === 'running').length;
     const report = selfReportOf({ setup: deps.setup, state, running, trusted: await deps.trust.trusted() });
-    const sent = JSON.stringify(report);
+    const withUsage: SelfReport = { ...report, details: { ...report.details, ...(load !== undefined && { load }), usage } };
+    // What makes it another report: the load by its steps only.
+    const sent = JSON.stringify({ ...withUsage, details: { ...withUsage.details, load: load === undefined ? undefined : loadStepsOf(load) } });
     if (sent === lastSent) {
       return;
     }
-    await deps.fleet.reportSelf(report);
+    await deps.fleet.reportSelf(withUsage);
     lastSent = sent;
   };
 }

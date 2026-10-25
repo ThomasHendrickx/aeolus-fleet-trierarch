@@ -79,6 +79,7 @@ const aPopulatedState = (): Populated<TrierarchState> => {
     kept: [{ shipId: newId('ship'), repository: 'aeolus-fleet', path: '/home/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/lookout' }],
     orphans: [{ path: '/home/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/stray', repository: 'aeolus-fleet', name: 'stray' }],
     refused: { [newId('ship')]: 3 },
+    lowResources: ['memory', 'disk'],
   };
 };
 
