@@ -30,8 +30,8 @@ let data: string;
 let crews: string;
 let folder: string;
 let started: { shipId: ShipId; folder: string; command: readonly string[]; env?: Readonly<Record<string, string>>; readOnly?: readonly string[] }[];
-/** What each ship's session shows, by ship id. */
-let screens: Map<ShipId, string>;
+/** The event lines each ship's session wrote, by ship id. */
+let events: Map<ShipId, readonly string[]>;
 let sent: { shipId: ShipId; line: string }[];
 /** What was done to each session, in order: a turn stopped, or a line sent. */
 let steps: string[];
@@ -47,7 +47,7 @@ beforeEach(() => {
   started = [];
   sent = [];
   steps = [];
-  screens = new Map();
+  events = new Map();
   untrustedHooks = new Set(['aeolus@aeolus-fleet:hooks/hooks.json:stop:0:0']);
   untrustedAtStart = [];
 });
@@ -84,7 +84,7 @@ function harness(at: { pluginRoot?: string } = {}) {
         steps.push(`interrupt ${shipId}`);
         return Promise.resolve();
       },
-      events: (shipId) => Promise.resolve((screens.get(shipId) ?? '').split('\n')),
+      events: (shipId) => Promise.resolve(events.get(shipId) ?? []),
     },
   });
 }
@@ -258,10 +258,11 @@ describe("Codex's launch window, from the launch marker its session's hooks keep
   const sessionStarted = { hook_event_name: 'SessionStart', source: 'startup' };
   const aToolCall = { hook_event_name: 'PreToolUse', tool_name: 'shell' };
   const seen = () => harness().launchSeen({ shipId, folder, launchId: LAUNCH_ID, model: 'gpt-5.6-sol' });
-  /** Codex's real session logs (test/logs), as its hooks name them in transcript_path. */
-  const REFUSED_LOG = fileURLToPath(new URL('../../test/logs/codex-refused.jsonl', import.meta.url));
-  const ANSWERED_LOG = fileURLToPath(new URL('../../test/logs/codex-answered.jsonl', import.meta.url));
-  const hooksReview = () => readFileSync(new URL('../../test/screens/codex-hooks.txt', import.meta.url), 'utf8');
+  /** Codex's real events from `codex exec --json` (test/logs), captured from codex-cli 0.163.0 on 25 Oct. */
+  const eventsOf = (file: string) =>
+    readFileSync(new URL(`../../test/logs/${file}`, import.meta.url), 'utf8')
+      .split('\n')
+      .filter((line) => line !== '');
 
   beforeEach(async () => {
     await harness().prepareIdentity({ folder, identity, crewToken: CREW_TOKEN });
@@ -284,36 +285,36 @@ describe("Codex's launch window, from the launch marker its session's hooks keep
     await expect(seen()).resolves.toEqual({ kind: 'active' });
   });
 
-  it('sees the model it launched with refused in the session log its hooks named, as Codex has no hook for a failed turn', async () => {
-    await hooked({ ...sessionStarted, transcript_path: REFUSED_LOG });
+  it('sees the model it launched with refused in its failed turn event, as Codex has no hook for a failed turn (headless H13)', async () => {
+    events.set(shipId, eventsOf('codex-events-refused.jsonl'));
+    await hooked(sessionStarted);
 
     await expect(harness().launchSeen({ shipId, folder, launchId: LAUNCH_ID, model: 'gpt-nonexistent-9' })).resolves.toEqual({ kind: 'refused', model: 'gpt-nonexistent-9' });
   });
 
-  it('reads no refusal from its screen, only from its session log', async () => {
-    screens.set(shipId, readFileSync(new URL('../../test/screens/codex-refused.txt', import.meta.url), 'utf8'));
-    await hooked({ ...sessionStarted, transcript_path: ANSWERED_LOG });
+  it("sees a refusal of Codex's own default model when it launched with none", async () => {
+    events.set(shipId, eventsOf('codex-events-refused.jsonl'));
 
-    await expect(harness().launchSeen({ shipId, folder, launchId: LAUNCH_ID, model: 'gpt-nonexistent-9' })).resolves.toEqual({ kind: 'none' });
+    await expect(harness().launchSeen({ shipId, folder, launchId: LAUNCH_ID })).resolves.toEqual({ kind: 'refused', model: 'gpt-nonexistent-9' });
   });
 
-  it('sees no refusal when the session log its hooks named is gone', async () => {
-    await hooked({ ...sessionStarted, transcript_path: join(folder, 'gone.jsonl') });
+  it('reads no refusal of another model than the one it launched with, and names its error as the cause', async () => {
+    events.set(shipId, eventsOf('codex-events-refused.jsonl'));
 
-    await expect(harness().launchSeen({ shipId, folder, launchId: LAUNCH_ID, model: 'gpt-nonexistent-9' })).resolves.toEqual({ kind: 'none' });
+    await expect(seen()).resolves.toEqual({ kind: 'none', cause: "The 'gpt-nonexistent-9' model is not supported when using Codex with a ChatGPT account." });
   });
 
-  it('names no screen once its session started', async () => {
-    screens.set(shipId, hooksReview());
+  it("names the cause of a start with no activity from the harness's last error event (headless H13)", async () => {
+    events.set(shipId, [JSON.stringify({ type: 'thread.started', thread_id: 'thread-1' }), JSON.stringify({ type: 'turn.started' }), JSON.stringify({ type: 'error', message: 'Reconnecting... 1/5' }), JSON.stringify({ type: 'turn.failed', error: { message: 'stream disconnected before completion' } })]);
+
+    await expect(seen()).resolves.toEqual({ kind: 'none', cause: 'stream disconnected before completion' });
+  });
+
+  it('names no cause when its turn answered', async () => {
+    events.set(shipId, eventsOf('codex-events-answered.jsonl'));
     await hooked(sessionStarted);
 
     await expect(seen()).resolves.toEqual({ kind: 'none' });
-  });
-
-  it('names the screen its session stopped at when it never started', async () => {
-    screens.set(shipId, hooksReview());
-
-    await expect(seen()).resolves.toEqual({ kind: 'none', screen: 'hooks review' });
   });
 
   it('counts nothing the hooks marked for another launch', async () => {
