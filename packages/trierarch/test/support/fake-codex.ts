@@ -20,7 +20,10 @@
  *
  * Its own flags: `--refuse-model` fails the turn as Codex does for a model it
  * does not support, then exits 1; `--linger-ms <ms>` waits that long after its
- * turn completed before it exits, as Codex finishes its session files.
+ * turn completed before it exits, as Codex finishes its session files;
+ * `--thread-id <id>` names that thread id in `thread.started` instead;
+ * `--stray-thread-id <id>` names that thread id in `turn.started` too, an
+ * event that names no thread.
  */
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 
@@ -32,6 +35,8 @@ const isResuming = words[1] === 'resume';
 const LAST_THREAD = 'fake-last-thread';
 const lingerAt = words.indexOf('--linger-ms');
 const lingerMs = lingerAt === -1 ? 0 : Number(words[lingerAt + 1]);
+const threadIdAt = words.indexOf('--thread-id');
+const strayThreadIdAt = words.indexOf('--stray-thread-id');
 const REFUSED = JSON.stringify({ type: 'error', status: 400, error: { type: 'invalid_request_error', message: "The 'gpt-nonexistent-9' model is not supported when using Codex with a ChatGPT account.", code: 'model_not_found' } });
 
 function threadId(): string {
@@ -68,12 +73,12 @@ process.stdin.on('data', (chunk: Buffer) => {
   stdin += chunk.toString('utf8');
 });
 process.stdin.on('end', () => {
-  const thread = threadId();
+  const thread = threadIdAt === -1 ? threadId() : (words[threadIdAt + 1] ?? '');
   writeFileSync(LAST_THREAD, thread);
   emit({ type: 'thread.started', thread_id: thread });
   hook('SessionStart', { source: isResuming ? 'resume' : 'startup', thread });
   hook('UserPromptSubmit', { prompt: stdin === '' ? prompt : `${prompt}\n<stdin>${stdin}</stdin>`, thread });
-  emit({ type: 'turn.started' });
+  emit({ type: 'turn.started', ...(strayThreadIdAt !== -1 && { thread_id: words[strayThreadIdAt + 1] }) });
   if (words.includes('--refuse-model')) {
     emit({ type: 'error', message: REFUSED });
     emit({ type: 'turn.failed', error: { message: REFUSED } });

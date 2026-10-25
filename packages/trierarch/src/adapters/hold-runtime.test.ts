@@ -404,6 +404,26 @@ describe('a Codex session held by a hold, one codex exec per turn (headless H11,
     expect(codexStarts()).toHaveLength(1);
   });
 
+  it('resumes no thread when thread.started names none: a line is refused until Codex names one', async () => {
+    const runtime = aRuntime();
+    const shipId = await aCodexSession(runtime, { flags: ['--thread-id', ''] });
+    await expect.poll(hooks).toContain('Stop');
+
+    await expect(runtime.send({ shipId, line: 'the hand-over' })).rejects.toThrow('Codex named no thread to resume yet');
+    expect(codexStarts()).toHaveLength(1);
+  });
+
+  it('resumes the thread thread.started names, not one another event names', async () => {
+    const runtime = aRuntime();
+    const shipId = await aCodexSession(runtime, { flags: ['--thread-id', 'thread-1', '--stray-thread-id', 'not-a-thread'] });
+    await expect.poll(hooks).toContain('Stop');
+
+    await runtime.send({ shipId, line: 'the hand-over' });
+
+    await expect.poll(() => codexStarts()).toHaveLength(2);
+    expect(codexStarts()[1]?.args.slice(0, 3)).toEqual(['exec', 'resume', 'thread-1']);
+  });
+
   it("keeps the hold and the failed turn's error event when the turn fails, so the launch window reads why (H13)", async () => {
     const runtime = aRuntime();
     const shipId = await aCodexSession(runtime, { flags: ['--refuse-model'] });
