@@ -61,10 +61,11 @@ export function createRunPass(deps: RunPassDeps): RunPass {
     try {
       const requests = await deps.fleet.assignedRequests();
       const clears = await deps.fleet.pendingClears();
-      const observed = await observe(state, deps);
+      // Before anything reads a session through its plugin: a harness whose plugin is gone is left unread (#1212).
+      const { marksLaunches, missingPlugins } = await launchMarks(deps);
+      const observed = await observe(state, { deps, missingPlugins });
       const trusted = await deps.trust.trusted();
       const versions = Object.fromEntries(Object.entries(deps.setup.detected ?? {}).flatMap(([harness, found]) => (found === undefined ? [] : [[harness, found.version]])));
-      const { marksLaunches, missingPlugins } = await launchMarks(deps);
       const reconciled = reconcile(state, { requests, clears, observed, now: deps.clock.now(), configuration: deps.setup.configuration, trusted, versions, marksLaunches, missingPlugins });
       state = succeeded(reconciled.state, missingPlugins);
       await deps.state.save(state);
@@ -155,7 +156,8 @@ async function crewFailed(state: TrierarchState, at: EntryAt & { reason: string 
  * turn. An inbox is watched only while its session runs, so last seen still
  * means the session is alive; a crewing one from the moment its session runs (#473).
  */
-async function observe(state: TrierarchState, deps: RunPassDeps): Promise<Observed> {
+async function observe(state: TrierarchState, at: { deps: RunPassDeps; missingPlugins: ReadonlySet<string> }): Promise<Observed> {
+  const { deps, missingPlugins } = at;
   const sessions = await deps.processes.list();
   const worktrees = await deps.workspace.worktrees();
   const ships: Record<string, Observed['ships'][string]> = {};
@@ -164,7 +166,7 @@ async function observe(state: TrierarchState, deps: RunPassDeps): Promise<Observ
   for (const entry of Object.values(state.entries)) {
     const session = sessions.find((each) => each.shipId === entry.shipId);
     const { folder } = entry;
-    const harness = harnessOf(entry, deps);
+    const harness = missingPlugins.has(entry.harness) ? undefined : harnessOf(entry, deps);
     // A crewing session's launch window (#382), and a final crew's first minute after a restart (#397).
     const { launchId } = entry;
     if ((entry.state === 'crewing' || entry.state === 'running') && entry.launchedAt !== undefined && launchId !== undefined && folder !== undefined && session !== undefined && harness !== undefined) {

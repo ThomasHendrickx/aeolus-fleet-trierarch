@@ -152,6 +152,16 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
       actions.push({ kind: 'release', shipId: entry.shipId });
       continue;
     }
+    // A harness that lost its aeolus plugin under a running session cannot crew its ship any more (#1212): the request is given back with why, and the other harnesses go on.
+    const refusal = launchMarkerRefusal({ harness: entry.harness, marksLaunches: context.marksLaunches, missingPlugins: context.missingPlugins });
+    if (refusal !== undefined) {
+      const uncrewed = uncrewable({ request, refusal, state: next, entry });
+      actions.push(...uncrewed);
+      if (uncrewed.some((action) => action.kind === 'giveBack')) {
+        next = removeEntry(next, entry.shipId);
+        continue;
+      }
+    }
     const step =
       request.settingsVersion === entry.settingsVersion
         ? trustedStep(entry, { step: stepOf(entry, { ...context, canStart: canStart(), isFinal: request.isFinal }), request, state: next, context })

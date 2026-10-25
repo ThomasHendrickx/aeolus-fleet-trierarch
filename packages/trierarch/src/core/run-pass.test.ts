@@ -1545,7 +1545,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.logger.warnings.some((warning) => warning.startsWith('The pass failed'))).toBe(false);
   });
 
-  it('a harness that loses its aeolus plugin under a running session is not offered, its request is given back, and the pass goes on for the others (#1212)', async () => {
+  it('a harness that loses its aeolus plugin under a running session is not offered, the owner is told once, and the pass goes on for the others (#1212)', async () => {
     const trierarch = aTrierarch(WITH_CODEX);
     const codexShip = trierarch.fleet.commission('lookout');
     trierarch.fleet.request(codexShip, crewSettings({ harness: 'codex' }));
@@ -1559,7 +1559,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
 
     expect(trierarch.state.current().missingPlugins).toEqual(['codex']);
     expect(trierarch.state.current().passFailure).toBeUndefined();
-    expect(trierarch.fleet.givenBack.map((each) => each.shipId)).toEqual([codexShip]);
+    expect(trierarch.fleet.toArgo.map((report) => report.text.split('\n')[0])).toEqual(['Cannot crew lookout with its settings']);
     expect(trierarch.harness.launches.map((launch) => launch.shipId)).toEqual([claudeShip]);
   });
 
