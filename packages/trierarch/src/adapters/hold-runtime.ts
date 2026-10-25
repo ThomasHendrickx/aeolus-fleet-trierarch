@@ -150,8 +150,9 @@ export function createHoldRuntime(options: {
       }
       throw new Error(`the hold of ${shipId} did not answer within ${String(START_WAIT_MS)} ms of its start`);
     },
+    // A Codex hold starts the line's turn once the last turn's process has ended, which it waits for as long as for an interrupted turn.
     send: async ({ shipId, line }) => {
-      await must(shipId, { request: { call: 'send', line }, timeoutMs: CALL_TIMEOUT_MS });
+      await must(shipId, { request: { call: 'send', line }, timeoutMs: INTERRUPT_WAIT_MS + CALL_TIMEOUT_MS });
     },
     interrupt: async (shipId) => {
       await must(shipId, { request: { call: 'interrupt' }, timeoutMs: INTERRUPT_WAIT_MS + CALL_TIMEOUT_MS });
