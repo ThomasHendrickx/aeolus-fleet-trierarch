@@ -382,13 +382,16 @@ function launchStep(entry: Entry, context: ReconcileContext & { isFinal: boolean
       if (!isWindowOver(launchedAt, now)) {
         return wakeStep(entry, observed.ships[entry.shipId]);
       }
-      return failedStart(noActivityReason(entry, seen.screen));
+      return failedStart(noActivityReason(entry, seen));
   }
 }
 
-/** Why a start failed for no activity, naming the harness's screen the session stopped at when it knows it (#403). */
-function noActivityReason(entry: Entry, screen: string | undefined): string {
-  return screen === undefined ? NO_ACTIVITY_REASON : `${NO_ACTIVITY_REASON}, stopped at ${entry.harness}'s ${screen}`;
+/** Why a start failed for no activity, naming the harness's screen the session stopped at when it knows it (#403), or the cause the harness gave (headless H13). */
+function noActivityReason(entry: Entry, seen: { screen?: string; cause?: string }): string {
+  if (seen.cause !== undefined) {
+    return `${NO_ACTIVITY_REASON}, ${entry.harness} said: ${seen.cause}`;
+  }
+  return seen.screen === undefined ? NO_ACTIVITY_REASON : `${NO_ACTIVITY_REASON}, stopped at ${entry.harness}'s ${seen.screen}`;
 }
 
 /** The entry with no launch window open. */
@@ -427,7 +430,20 @@ function runningStep(entry: Entry, context: ReconcileContext & { canStart: boole
   if (session.status === 'exited') {
     return exitStep(entry, { now });
   }
+  if (session.isOtherVersion === true) {
+    return otherVersionStep(entry, observed.ships[entry.shipId]);
+  }
   return restartWindowStep(entry, context);
+}
+
+/**
+ * A session another version of the trierarch started, as before an upgrade
+ * (headless H19): this one does not speak to it, so it is handed nothing,
+ * forced or not. Once its turn is idle it is started again, continuing its
+ * conversation, with no restart counted.
+ */
+function otherVersionStep(entry: Entry, seen: Observed['ships'][string] | undefined): Step {
+  return seen?.turn === 'idle' ? { entry: withoutLaunch(entry), actions: [{ kind: 'launch', shipId: entry.shipId }], starts: 0 } : NOTHING;
 }
 
 /**
@@ -461,7 +477,7 @@ function restartWindowStep(entry: Entry, context: ReconcileContext): Step {
       if (!isWindowOver(launchedAt, now)) {
         return wakeStep(entry, seen);
       }
-      return exitStep(entry, { now, failedStart: noActivityReason(entry, launch.screen) });
+      return exitStep(entry, { now, failedStart: noActivityReason(entry, launch) });
     }
   }
 }

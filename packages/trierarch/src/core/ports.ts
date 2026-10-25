@@ -212,14 +212,16 @@ export interface HarnessPort {
  * What a session did in its launch window (#382): activity once its first
  * prompt made a tool call, the model refused (by its id when that is known),
  * or neither yet, with the harness's own screen it stopped at when it knows
- * that screen (#403), such as `bypass permissions warning`.
+ * that screen (#403), such as `bypass permissions warning`, or the cause its
+ * harness's last error event gave (headless H13), such as a refused login.
  */
-export type LaunchSeen = { readonly kind: 'active' } | { readonly kind: 'refused'; readonly model?: string } | { readonly kind: 'none'; readonly screen?: string };
+export type LaunchSeen = { readonly kind: 'active' } | { readonly kind: 'refused'; readonly model?: string } | { readonly kind: 'none'; readonly screen?: string; readonly cause?: string };
 
-/** A session the session runtime runs, by ship id: running, or exited and kept so the exit is seen. */
+/** A session the session runtime runs, by ship id: running, or exited and kept so the exit is seen; and whether another version of the trierarch started it, which this one does not speak to (headless H19). */
 export interface ObservedSession {
   readonly shipId: ShipId;
   readonly status: 'running' | 'exited';
+  readonly isOtherVersion?: boolean;
 }
 
 /**
