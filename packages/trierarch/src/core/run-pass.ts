@@ -103,8 +103,8 @@ async function launchMarks(deps: RunPassDeps): Promise<{ marksLaunches: Record<s
 
 /** The state of a pass that succeeded: no failing pass is kept, and the harnesses whose plugin it could not find (#1212). */
 function succeeded(state: TrierarchState, missingPlugins: ReadonlySet<string>): TrierarchState {
-  const { entries, kept, orphans, refused } = state;
-  return { entries, kept, orphans, refused, ...(missingPlugins.size > 0 && { missingPlugins: [...missingPlugins].sort() }) };
+  // Every other field of the state (what the machine is low on, #400) stays as the pass found it.
+  return { ...state, passFailure: undefined, missingPlugins: missingPlugins.size > 0 ? [...missingPlugins].sort() : undefined };
 }
 
 /**
