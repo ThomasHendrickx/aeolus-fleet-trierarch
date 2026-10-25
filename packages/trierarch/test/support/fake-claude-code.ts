@@ -100,7 +100,7 @@ lines.on('line', (line) => {
   if (typeof event !== 'object' || event === null) {
     return;
   }
-  const type = Reflect.get(event, 'type');
+  const type: unknown = Reflect.get(event, 'type');
   if (type === 'user') {
     const message: unknown = Reflect.get(event, 'message');
     const content: unknown = typeof message === 'object' && message !== null ? Reflect.get(message, 'content') : undefined;

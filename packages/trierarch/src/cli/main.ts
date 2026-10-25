@@ -20,7 +20,7 @@ import { createPluginUpdate } from '../adapters/plugin-update.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
 import { runCommand, streamCommand } from '../adapters/run-command.js';
 import { createService, serviceEnvironment } from '../adapters/service.js';
-import { createTmux } from '../adapters/tmux.js';
+import { hostSessions } from '../adapters/runtime-adapters.js';
 import { runningVersion } from '../adapters/version.js';
 import { createDetectHarnesses } from '../core/detect-harnesses.js';
 import { createUninstall } from '../core/uninstall.js';
@@ -182,7 +182,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       crew,
       service: serviceAt(),
       lease: leaseFrom(() => fleet.whoami()),
-      processes: createTmux(),
+      processes: hostSessions({ paths, version: runningVersion() }),
       state: createJsonState(paths.state),
     });
     return { data: report, text: describeStatus(report, style) };
@@ -328,7 +328,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       return { data: status, text };
     },
     uninstall: async () => {
-      const report = await uninstallTrierarch({ service: serviceAt(), uninstall: createUninstall({ processes: createTmux(), state: createJsonState(paths.state) }), home: paths.home });
+      const report = await uninstallTrierarch({ service: serviceAt(), uninstall: createUninstall({ processes: hostSessions({ paths, version: runningVersion() }), state: createJsonState(paths.state) }), home: paths.home });
       return { data: report, text: report.said.join('\n') };
     },
     run: async () => {

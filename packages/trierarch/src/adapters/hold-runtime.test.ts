@@ -4,20 +4,23 @@ import { join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import { FAKE_CLAUDE_CODE, TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
 import { newId } from '../../test/support/in-memory.js';
 import { sessionRuntimeContract } from '../../test/support/session-runtime-contract.js';
 import type { ObservedSession, SessionRuntime } from '../core/ports.js';
 import { createCallerCheck } from './caller-check.js';
-import { createHoldRuntime } from './hold-runtime.js';
+import { createHoldRuntime, sessionsLaunch } from './hold-runtime.js';
+import { runningVersion } from './version.js';
 
 // Against real holds, each the trierarch program from source started as the
 // trierarch starts it, running the stand-in for Claude Code in print mode
 // with streamed JSON, or a shell command. The folders sit under /tmp: a Unix
 // socket path is at most 104 bytes on macOS.
 
-const VERSION = '0.33.0';
+/** The version a hold states: the trierarch's own, which runs it. */
+const VERSION = runningVersion();
 /** A user line as Claude Code takes it on stdin. */
 const userLine = (text: string) => JSON.stringify({ type: 'user', message: { role: 'user', content: text } });
 
@@ -59,13 +62,19 @@ function written(file: string): unknown[] {
     : [];
 }
 
+const eventSchema = z.looseObject({ type: z.string() });
+const startSchema = z.object({ args: z.array(z.string()), env: z.record(z.string(), z.string()) });
+
 /** The events of the session that are of the type given, parsed. */
-async function eventsOfType(runtime: SessionRuntime, shipId: ShipId, type: string): Promise<Record<string, unknown>[]> {
-  return (await runtime.events(shipId)).flatMap((line) => {
-    const event: unknown = JSON.parse(line);
-    return typeof event === 'object' && event !== null && Reflect.get(event, 'type') === type ? [event as Record<string, unknown>] : [];
+async function eventsOfType(session: { runtime: SessionRuntime; shipId: ShipId }, type: string): Promise<z.infer<typeof eventSchema>[]> {
+  return (await session.runtime.events(session.shipId)).flatMap((line) => {
+    const event = eventSchema.safeParse(JSON.parse(line));
+    return event.success && event.data.type === type ? [event.data] : [];
   });
 }
+
+/** Each start of the stand-in, as it wrote it down. */
+const starts = () => written('fake-starts.jsonl').map((start) => startSchema.parse(start));
 
 async function aClaudeCodeSession(runtime: SessionRuntime, flags: readonly string[] = []): Promise<ShipId> {
   const shipId = newId('ship');
@@ -84,7 +93,7 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
 
     await runtime.send({ shipId, line: userLine('Review PR 12') });
 
-    await expect.poll(async () => eventsOfType(runtime, shipId, 'result')).toEqual([expect.objectContaining({ subtype: 'success', result: 'got Review PR 12' })]);
+    await expect.poll(async () => eventsOfType({ runtime: runtime, shipId: shipId }, 'result')).toEqual([expect.objectContaining({ subtype: 'success', result: 'got Review PR 12' })]);
     expect(written('fake-received.jsonl')).toEqual([JSON.parse(userLine('Review PR 12'))]);
   });
 
@@ -95,8 +104,8 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
 
     await runtime.send({ shipId: scout, line: userLine('for scout') });
 
-    await expect.poll(async () => eventsOfType(runtime, scout, 'result')).toHaveLength(1);
-    await expect(eventsOfType(runtime, lookout, 'result')).resolves.toEqual([]);
+    await expect.poll(async () => eventsOfType({ runtime: runtime, shipId: scout }, 'result')).toHaveLength(1);
+    await expect(eventsOfType({ runtime: runtime, shipId: lookout }, 'result')).resolves.toEqual([]);
   });
 
   it("starts the harness with none of the trierarch's environment: only HOME, PATH and what the start gives (H10)", async () => {
@@ -108,9 +117,9 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
       await runtime.start({ shipId, folder, command: [...FAKE_CLAUDE_CODE], env: { AEOLUS_LAUNCH: 'launch-1' }, harness: 'claude-code' });
 
       await expect.poll(() => written('fake-starts.jsonl')).toHaveLength(1);
-      const [start] = written('fake-starts.jsonl');
-      expect(Object.keys(Reflect.get(start as object, 'env') as object).sort()).toEqual(['AEOLUS_LAUNCH', 'HOME', 'PATH']);
-      expect(Reflect.get(Reflect.get(start as object, 'env') as object, 'AEOLUS_LAUNCH')).toBe('launch-1');
+      const [start] = starts();
+      expect(Object.keys(start?.env ?? {}).sort()).toEqual(['AEOLUS_LAUNCH', 'HOME', 'PATH']);
+      expect(start?.env.AEOLUS_LAUNCH).toBe('launch-1');
     } finally {
       delete process.env.AEOLUS_TEST_TRIERARCH_SECRET;
     }
@@ -123,20 +132,20 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
     await again.send({ shipId, line: userLine('after the restart') });
 
     await expect(again.list()).resolves.toEqual([{ shipId, status: 'running' }]);
-    await expect.poll(async () => eventsOfType(again, shipId, 'result')).toEqual([expect.objectContaining({ result: 'got after the restart' })]);
+    await expect.poll(async () => eventsOfType({ runtime: again, shipId: shipId }, 'result')).toEqual([expect.objectContaining({ result: 'got after the restart' })]);
   });
 
   it('stops a running turn with the interrupt control request and waits for its end; the harness goes on and takes the next line (H12)', async () => {
     const runtime = aRuntime();
     const shipId = await aClaudeCodeSession(runtime);
     await runtime.send({ shipId, line: userLine('work slowly') });
-    await expect.poll(async () => eventsOfType(runtime, shipId, 'assistant')).toHaveLength(1);
+    await expect.poll(async () => eventsOfType({ runtime: runtime, shipId: shipId }, 'assistant')).toHaveLength(1);
 
     await runtime.interrupt(shipId);
 
-    await expect(eventsOfType(runtime, shipId, 'result')).resolves.toEqual([expect.objectContaining({ subtype: 'error_during_execution' })]);
+    await expect(eventsOfType({ runtime: runtime, shipId: shipId }, 'result')).resolves.toEqual([expect.objectContaining({ subtype: 'error_during_execution' })]);
     await runtime.send({ shipId, line: userLine('the forced one') });
-    await expect.poll(async () => eventsOfType(runtime, shipId, 'result')).toHaveLength(2);
+    await expect.poll(async () => eventsOfType({ runtime: runtime, shipId: shipId }, 'result')).toHaveLength(2);
     expect(written('fake-starts.jsonl')).toHaveLength(1);
   });
 
@@ -144,16 +153,16 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
     const runtime = aRuntime();
     const shipId = await aClaudeCodeSession(runtime, ['--refuse-interrupt']);
     await runtime.send({ shipId, line: userLine('work slowly') });
-    await expect.poll(async () => eventsOfType(runtime, shipId, 'assistant')).toHaveLength(1);
-    const [init] = await eventsOfType(runtime, shipId, 'system');
+    await expect.poll(async () => eventsOfType({ runtime: runtime, shipId: shipId }, 'assistant')).toHaveLength(1);
+    const [init] = await eventsOfType({ runtime: runtime, shipId: shipId }, 'system');
 
     await runtime.interrupt(shipId);
     await runtime.send({ shipId, line: userLine('the forced one') });
 
-    await expect.poll(async () => eventsOfType(runtime, shipId, 'result')).toEqual([expect.objectContaining({ subtype: 'error_during_execution' }), expect.objectContaining({ result: 'got the forced one' })]);
-    const starts = written('fake-starts.jsonl').map((start) => Reflect.get(start as object, 'args') as string[]);
-    expect(starts).toHaveLength(2);
-    expect(starts[1]?.slice(-2)).toEqual(['--resume', init?.session_id]);
+    await expect.poll(async () => eventsOfType({ runtime: runtime, shipId: shipId }, 'result')).toEqual([expect.objectContaining({ subtype: 'error_during_execution' }), expect.objectContaining({ result: 'got the forced one' })]);
+    const args = starts().map((start) => start.args);
+    expect(args).toHaveLength(2);
+    expect(args[1]?.slice(-2)).toEqual(['--resume', init?.session_id]);
     await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running' }]);
   });
 
@@ -164,7 +173,7 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
     await runtime.send({ shipId, line: userLine('/aeolus:wake') });
 
     await expect.poll(async () => runtime.list()).toEqual([{ shipId, status: 'exited' }]);
-    await expect(eventsOfType(runtime, shipId, 'result')).resolves.toEqual([expect.objectContaining({ is_error: true, result: 'Not logged in · Please run /login' })]);
+    await expect(eventsOfType({ runtime: runtime, shipId: shipId }, 'result')).resolves.toEqual([expect.objectContaining({ is_error: true, result: 'Not logged in · Please run /login' })]);
   });
 
   it('sees the session exited when its hold dies, and the harness ends with it', async () => {
@@ -177,10 +186,10 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
     await expect.poll(async () => runtime.list()).toEqual([{ shipId, status: 'exited' }]);
   });
 
-  it('lists a session whose hold another version of the trierarch started as of another version (H19)', async () => {
-    const shipId = await aClaudeCodeSession(aRuntime({ version: '0.32.0' }));
+  it('lists a session whose hold another version of the trierarch started as of another version, as after an upgrade (H19)', async () => {
+    const shipId = await aClaudeCodeSession(aRuntime());
 
-    await expect(aRuntime().list()).resolves.toEqual([{ shipId, status: 'running', isOtherVersion: true }]);
+    await expect(aRuntime({ version: '99.0.0' }).list()).resolves.toEqual([{ shipId, status: 'running', isOtherVersion: true }]);
   });
 
   it('lists no session whose hold started before the machine did, as after a restart of the machine', async () => {
@@ -235,8 +244,12 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
       await expect.poll(() => connections.length).toBe(1);
       const mayCall = createCallerCheck({ platform: process.platform, sessionRootOf: (id) => runtime.sessionRootOf(id) });
 
-      await expect(mayCall(shipId, connections[0] as Socket)).resolves.toBe(true);
-      await expect(mayCall(newId('ship'), connections[0] as Socket)).resolves.toBe(false);
+      const [connection] = connections;
+      if (connection === undefined) {
+        throw new Error('the harness never connected');
+      }
+      await expect(mayCall(shipId, connection)).resolves.toBe(true);
+      await expect(mayCall(newId('ship'), connection)).resolves.toBe(false);
     } finally {
       connections.forEach((connection) => connection.destroy());
       await new Promise((resolve) => server.close(resolve));
@@ -252,5 +265,19 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
 
     await expect(runtime.list()).resolves.toEqual([]);
     expect(() => process.kill(hold ?? 0, 0)).toThrow();
+  });
+});
+
+describe('where a hold starts (#537)', () => {
+  it("starts through a systemd scope of its own under a systemd unit, so the service's restart ends no session", () => {
+    expect(sessionsLaunch({ platform: 'linux', env: { INVOCATION_ID: 'c0ffee' } })).toEqual(['systemd-run', '--user', '--scope', '--quiet', '--collect', '--']);
+  });
+
+  it('starts itself on Linux outside a systemd unit', () => {
+    expect(sessionsLaunch({ platform: 'linux', env: {} })).toEqual([]);
+  });
+
+  it('starts itself on macOS, where launchd leaves the sessions running', () => {
+    expect(sessionsLaunch({ platform: 'darwin', env: { INVOCATION_ID: 'c0ffee' } })).toEqual([]);
   });
 });

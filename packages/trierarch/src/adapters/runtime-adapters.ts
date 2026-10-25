@@ -1,4 +1,5 @@
 import { realpath } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
@@ -9,10 +10,23 @@ import { createContainerRuntime } from './container.js';
 import { createGitWorkspace } from './git-workspace.js';
 import type { TrustedClones } from './trusted-clones.js';
 import type { TrierarchPaths } from './paths.js';
+import { createHoldRuntime } from './hold-runtime.js';
 import { createTmux } from './tmux.js';
 
 /** The session image `release.yml` publishes with each version (decision 0011, 0039). */
 const SESSION_IMAGE = 'ghcr.io/thomashendrickx/aeolus-session';
+
+/** The trierarch program as it runs now, which starts each hold: `hold` and its words follow. */
+const TRIERARCH_PROGRAM: readonly string[] = [process.execPath, fileURLToPath(new URL('../bin/aeolus-trierarch.js', import.meta.url))];
+
+/**
+ * The sessions on the host (headless H4, H8): one hold per ship, with the
+ * sessions an older trierarch started in tmux listed beside them until each
+ * is replaced (H19).
+ */
+export function hostSessions(at: { paths: TrierarchPaths; version: string; launch?: readonly string[]; program?: readonly string[] }): SessionRuntime & SessionRoots {
+  return createHoldRuntime({ sessions: at.paths.sessions, program: at.program ?? TRIERARCH_PROGRAM, version: at.version, platform: process.platform, launch: at.launch ?? [], legacy: createTmux() });
+}
 
 /** What runs the sessions, where their workspaces go, and, in containers, where each ship's home is kept. */
 export interface RuntimeAdapters {
@@ -24,7 +38,7 @@ export interface RuntimeAdapters {
 
 /**
  * The adapters the configuration's session runtime picks (decision 0039): on
- * the host, tmux and a worktree per ship; in containers, a container per ship
+ * the host, a hold per ship and a worktree per ship (headless H4); in containers, a container per ship
  * from the image of the trierarch's own version, with the configured binary
  * and caps and the machine's model token, a clone per ship in place of the
  * worktree, by its real path, and a home of each ship's own.
@@ -37,12 +51,14 @@ export function runtimeAdaptersOf(at: {
   managedSettings: string;
   /** The trusted repositories a workspace clones first when the machine does not have them (aeolus-fleet#384). */
   clones?: TrustedClones;
+  /** The trierarch program that starts each hold; the one running now unless a test runs another. */
+  program?: readonly string[];
 }): RuntimeAdapters {
   const { configuration, paths, version, launch, managedSettings, clones: trusted } = at;
   const root = configuration.worktreeRoot ?? paths.worktrees;
   const { runtime } = configuration;
   if (runtime?.kind !== 'container') {
-    return { sessions: createTmux({ launch }), workspace: createGitWorkspace({ configuration, root, ...(trusted !== undefined && { clones: trusted }) }) };
+    return { sessions: hostSessions({ paths, version, launch, ...(at.program !== undefined && { program: at.program }) }), workspace: createGitWorkspace({ configuration, root, ...(trusted !== undefined && { clones: trusted }) }) };
   }
   const clones = createCloneWorkspace({ configuration, root, ...(trusted !== undefined && { clones: trusted }) });
   return {

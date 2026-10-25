@@ -12,13 +12,12 @@ import { effectiveFlags } from '../core/effective-flags.js';
 import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
 import { createLaunchMarks } from './launch-marker.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
-import { stopTurn } from './stop-turn.js';
 
 /**
  * Codex as a harness (docs/architecture.md, "First adapters"): `codex` in the
  * folder, `codex resume --last` on a restart (the folder's last conversation;
  * one ship per folder), always with `--no-daemon` and without the question
- * tool, and `$aeolus-wake` typed
+ * tool, and `$aeolus-wake` sent
  * to wake an idle session, each prompt with the line that no human reads its
  * terminal (#585). The identity and the turn marker go through the
  * aeolus plugin for Codex, in Codex's own plugin data folder. The plugin's new
@@ -27,12 +26,6 @@ import { stopTurn } from './stop-turn.js';
  */
 
 export const WAKE_PROMPT = '$aeolus-wake';
-
-/**
- * How long a typed wake waits before Enter. Codex takes an Enter that comes
- * right after fast typing as part of a paste, a newline, and submits nothing.
- */
-export const CODEX_TYPING_SETTLE_MS = 1000;
 
 /**
  * Added to every launch, as mechanism: without it Codex runs the session's
@@ -80,7 +73,7 @@ async function sessionLog(path: string): Promise<string | undefined> {
 export function createCodexHarness(options: {
   configuration: TrierarchConfiguration;
   plugin: AeolusPlugin;
-  sessions: Pick<SessionRuntime, 'start' | 'type' | 'interrupt' | 'screen'>;
+  sessions: Pick<SessionRuntime, 'start' | 'send' | 'interrupt' | 'events'>;
   /** Codex's own answers, where the aeolus plugin's hooks are trusted before each launch (#581). */
   setup: Pick<CodexSetup, 'trustAeolusHooks'>;
   /** The program to run; `codex` unless a test runs another. */
@@ -102,14 +95,14 @@ export function createCodexHarness(options: {
       await options.setup.trustAeolusHooks(folder);
       await marks.clear(folder);
       // Codex reads outside its folder as it is: its read-only checkouts need no flag (#1182).
-      await sessions.start({ shipId, folder, command: wordsOf(command), env: { [LAUNCH_VARIABLE]: launchId }, ...(checkouts.length > 0 && { readOnly: checkouts.map((checkout) => checkout.path) }) });
+      await sessions.start({ shipId, folder, command: wordsOf(command), harness, env: { [LAUNCH_VARIABLE]: launchId }, ...(checkouts.length > 0 && { readOnly: checkouts.map((checkout) => checkout.path) }) });
     },
     handOver: async (session) => {
       const line = await handOverLine(session);
       if (line === undefined) {
         return 'nothing';
       }
-      await sessions.type({ shipId: session.shipId, text: wakePromptOf(line), settleMs: CODEX_TYPING_SETTLE_MS });
+      await sessions.send({ shipId: session.shipId, line: wakePromptOf(line) });
       return 'handed';
     },
     forceOver: async ({ shipId, folder, isTurnBusy }) => {
@@ -118,9 +111,9 @@ export function createCodexHarness(options: {
         return 'nothing';
       }
       if (isTurnBusy) {
-        await stopTurn(sessions, { shipId });
+        await sessions.interrupt(shipId);
       }
-      await sessions.type({ shipId, text: wakePromptOf(line), settleMs: CODEX_TYPING_SETTLE_MS });
+      await sessions.send({ shipId, line: wakePromptOf(line) });
       return 'handed';
     },
     marksLaunches: () => marks.isMarking(),
@@ -135,7 +128,7 @@ export function createCodexHarness(options: {
       if (marker?.isActive === true) {
         return { kind: 'active' };
       }
-      const stoppedAt = marker?.isStarted === true ? undefined : codexScreenStoppedAt(await sessions.screen(shipId));
+      const stoppedAt = marker?.isStarted === true ? undefined : codexScreenStoppedAt((await sessions.events(shipId)).join('\n'));
       return { kind: 'none', ...(stoppedAt !== undefined && { screen: stoppedAt }) };
     },
   };

@@ -23,6 +23,8 @@ export interface TrierarchPaths {
   readonly worktrees: string;
   /** The homes of the ships whose sessions run in containers, one folder per ship (decision 0039). */
   readonly homes: string;
+  /** Each session's hold files, in a folder of its own (headless H8). */
+  readonly sessions: string;
   /** Each crewed ship's socket, in a folder of its own: its session's fleet calls come over it (decision 0026). */
   readonly sockets: string;
   /** Each crewed ship's read-only checkouts, in a folder of its own (#1182). */
@@ -47,6 +49,7 @@ export function trierarchPaths(at: { homeDirectory: string; config?: string }): 
     logs: join(home, 'logs'),
     worktrees: join(home, 'worktrees'),
     homes: join(home, 'homes'),
+    sessions: join(home, 'sessions'),
     sockets: join(home, 'sockets'),
     checkouts: join(home, 'checkouts'),
     trustedRepositories: join(home, 'trusted-repositories.json'),

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
 import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
-import { CODEX_ADAPTER_FLAGS, CODEX_TYPING_SETTLE_MS, codexCommandLine, createCodexHarness } from './codex.js';
+import { CODEX_ADAPTER_FLAGS, codexCommandLine, createCodexHarness } from './codex.js';
 import { runCommand } from './run-command.js';
 
 // With the aeolus plugin's own scripts from this repository, in a temporary data folder standing for Codex's.
@@ -32,8 +32,8 @@ let folder: string;
 let started: { shipId: ShipId; folder: string; command: readonly string[]; env?: Readonly<Record<string, string>>; readOnly?: readonly string[] }[];
 /** What each ship's session shows, by ship id. */
 let screens: Map<ShipId, string>;
-let typed: { shipId: ShipId; text: string; settleMs?: number }[];
-/** What was done to each session, in order: a turn stopped, or a line typed. */
+let sent: { shipId: ShipId; line: string }[];
+/** What was done to each session, in order: a turn stopped, or a line sent. */
 let steps: string[];
 /** The aeolus plugin's hooks Codex does not trust yet, as a plugin update leaves them (#581). */
 let untrustedHooks: Set<string>;
@@ -45,7 +45,7 @@ beforeEach(() => {
   crews = join(mkdtempSync(join(tmpdir(), 'trierarch-codex-home-')), '.aeolus', 'crews', 'codex');
   folder = realpathSync(mkdtempSync(join(tmpdir(), 'trierarch-codex-session-')));
   started = [];
-  typed = [];
+  sent = [];
   steps = [];
   screens = new Map();
   untrustedHooks = new Set(['aeolus@aeolus-fleet:hooks/hooks.json:stop:0:0']);
@@ -75,16 +75,16 @@ function harness(at: { pluginRoot?: string } = {}) {
         untrustedAtStart.push([...untrustedHooks]);
         return Promise.resolve();
       },
-      type: (at) => {
-        typed.push(at);
-        steps.push(`type ${at.shipId}`);
+      send: (at) => {
+        sent.push(at);
+        steps.push(`send ${at.shipId}`);
         return Promise.resolve();
       },
       interrupt: (shipId) => {
         steps.push(`interrupt ${shipId}`);
         return Promise.resolve();
       },
-      screen: (shipId) => Promise.resolve(screens.get(shipId) ?? ''),
+      events: (shipId) => Promise.resolve((screens.get(shipId) ?? '').split('\n')),
     },
   });
 }
@@ -114,7 +114,7 @@ describe('Codex as a harness', () => {
   it('starts codex with the first prompt on the first start, last and after -- behind the configured flags and the picked option, ending in the line that no human reads its terminal (#585)', async () => {
     await harness().launch({ ...launchOf(shipId), options: { model: 'terra' }, isFirstStart: true, firstPrompt: 'Review the open pull requests.' });
 
-    expect(started).toEqual([{ shipId, folder, command: ['codex', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-terra', '--no-daemon', '--config=tools.experimental_request_user_input.enabled=false', '--', `Review the open pull requests.\n\n${NO_TERMINAL_QUESTIONS}`], env: { AEOLUS_LAUNCH: LAUNCH_ID } }]);
+    expect(started).toEqual([{ shipId, folder, command: ['codex', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-terra', '--no-daemon', '--config=tools.experimental_request_user_input.enabled=false', '--', `Review the open pull requests.\n\n${NO_TERMINAL_QUESTIONS}`], harness: 'codex', env: { AEOLUS_LAUNCH: LAUNCH_ID } }]);
   });
 
   it('passes a first prompt that starts with - after --, so it never reads as a flag', async () => {
@@ -161,9 +161,9 @@ describe('Codex as a harness', () => {
           started.push(session);
           return Promise.resolve();
         },
-        type: () => Promise.resolve(),
+        send: () => Promise.resolve(),
         interrupt: () => Promise.resolve(),
-        screen: () => Promise.resolve(''),
+        events: () => Promise.resolve([]),
       },
     });
 
@@ -181,9 +181,9 @@ describe('Codex as a harness', () => {
           started.push(session);
           return Promise.resolve();
         },
-        type: () => Promise.resolve(),
+        send: () => Promise.resolve(),
         interrupt: () => Promise.resolve(),
-        screen: () => Promise.resolve(''),
+        events: () => Promise.resolve([]),
       },
     });
 
@@ -227,10 +227,10 @@ describe('Codex as a harness', () => {
 
     await expect(harness({ pluginRoot: root }).handOver({ shipId, folder })).resolves.toBe('handed');
 
-    expect(typed).toEqual([{ shipId, text: `${line} ${NO_TERMINAL_QUESTIONS}`, settleMs: CODEX_TYPING_SETTLE_MS }]);
+    expect(sent).toEqual([{ shipId, line: `${line} ${NO_TERMINAL_QUESTIONS}` }]);
   });
 
-  it("forces a message over to a busy task: the plugin's force hands it, then the turn is stopped and the line typed, settling before Enter (decision 0040)", async () => {
+  it("forces a message over to a busy task: the plugin's force hands it, then the turn is stopped and the line sent (decision 0040)", async () => {
     const line = "Aeolus handed a message for scout to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it.";
     const root = mkdtempSync(join(data, 'plugin-'));
     mkdirSync(join(root, 'scripts'));
@@ -238,8 +238,8 @@ describe('Codex as a harness', () => {
 
     await expect(harness({ pluginRoot: root }).forceOver({ shipId, folder, isTurnBusy: true })).resolves.toBe('handed');
 
-    expect(steps).toEqual([`interrupt ${shipId}`, `type ${shipId}`]);
-    expect(typed).toEqual([{ shipId, text: `${line} ${NO_TERMINAL_QUESTIONS}`, settleMs: CODEX_TYPING_SETTLE_MS }]);
+    expect(steps).toEqual([`interrupt ${shipId}`, `send ${shipId}`]);
+    expect(sent).toEqual([{ shipId, line: `${line} ${NO_TERMINAL_QUESTIONS}` }]);
   });
 
 });

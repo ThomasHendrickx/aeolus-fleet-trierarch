@@ -6,6 +6,7 @@
 import { registerHooks } from 'node:module';
 
 registerHooks({
+  // eslint-disable-next-line @typescript-eslint/max-params -- Node's resolve hook takes these three, in this order.
   resolve: (specifier, context, nextResolve) => {
     try {
       return nextResolve(specifier, context);
