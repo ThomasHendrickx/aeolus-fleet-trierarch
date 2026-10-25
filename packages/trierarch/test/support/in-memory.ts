@@ -583,6 +583,10 @@ export class InMemoryWorkspace implements WorkspacePort {
   /** Folders under the root the trierarch did not make, or that git does not know: git cannot read or remove them. */
   readonly notMade = new Set<string>();
 
+  isMade(folder: string): Promise<boolean> {
+    return Promise.resolve(!this.notMade.has(folder));
+  }
+
   unsaved(folder: string): Promise<readonly string[]> {
     if (this.notMade.has(folder)) {
       return Promise.reject(new Error(`${folder} is no worktree under ${WORKTREE_ROOT}: the trierarch removes only what it made`));
