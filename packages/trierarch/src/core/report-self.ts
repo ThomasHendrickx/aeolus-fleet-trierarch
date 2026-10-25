@@ -2,7 +2,7 @@ import type { TrierarchReportDetails } from '@aeolus-fleet/common';
 
 import { optionsSchemaOf } from './options-schema.js';
 import type { TrierarchState } from './entry.js';
-import { isOffering, notOfferedReason } from './failed-starts.js';
+import { isOffering, isProbing, notOfferedReason, probeShipsCap } from './failed-starts.js';
 import { loadStepsOf } from './machine-load.js';
 import type { FleetPort, SelfReport, SessionRuntime, StatePort, TrierarchSetup, TrustedPlaces, TrustPort } from './ports.js';
 import type { ReadLoad } from './read-load.js';
@@ -52,7 +52,7 @@ function selfReportOf(at: { setup: TrierarchSetup; state: TrierarchState; runnin
   // A harness without its aeolus-fleet plugin cannot crew a ship (#1212): it is left out of the details, so no request is placed for it, and the note says why.
   const notOfferedNote = missing.map((harness) => `, ${harness} not offered: ${PLUGIN_MISSING_REASON}`).join('') + (stopped === undefined ? '' : `, not offered: ${stopped}`);
   const note = `${String(running)} of ${String(setup.configuration.caps.ships)} running${crashed > 0 ? `, ${String(crashed)} crashed` : ''}${notOfferedNote}`;
-  return { state: running > 0 ? 'working' : 'idle', note, details: detailsOf(setup, { state, trusted, stopped }) };
+  return { state: running > 0 ? 'working' : 'idle', note, details: detailsOf(setup, { state, trusted, stopped, isProbe: isProbing(state.failedStarts, now) }) };
 }
 
 /** Why the machine offers itself for no placement now (#853), or none while it offers itself. */
@@ -75,11 +75,12 @@ function offeredOf(names: readonly string[], trustedBy: readonly (readonly strin
  * The trierarch's report details: what it offers from its configuration and
  * what its harnesses trust, the worktrees it kept and found, its version. A
  * machine that stopped offering itself (#853) offers no harness, and so no
- * place, naming each harness with why.
+ * place, naming each harness with why; in its probe it has room for one
+ * start only.
  */
-function detailsOf(setup: TrierarchSetup, at: { state: TrierarchState; trusted: TrustedPlaces; stopped: string | undefined }): TrierarchReportDetails {
+function detailsOf(setup: TrierarchSetup, at: { state: TrierarchState; trusted: TrustedPlaces; stopped: string | undefined; isProbe: boolean }): TrierarchReportDetails {
   const { configuration, version } = setup;
-  const { state, trusted, stopped } = at;
+  const { state, trusted, stopped, isProbe } = at;
   const missing = state.missingPlugins ?? [];
   const reasonOf = (harness: string): string | undefined => (missing.includes(harness) ? PLUGIN_MISSING_REASON : stopped);
   const notOffered = Object.keys(configuration.harnesses).flatMap((harness) => {
@@ -110,7 +111,7 @@ function detailsOf(setup: TrierarchSetup, at: { state: TrierarchState; trusted: 
       ),
     },
     ...(notOffered.length > 0 && { notOffered }),
-    caps: configuration.caps,
+    caps: isProbe ? { ...configuration.caps, ships: probeShipsCap(Object.values(state.entries), configuration.caps.ships) } : configuration.caps,
     // Paths stay on the machine: names only (decision 0032).
     kept: state.kept.map(({ shipId, repository }) => ({ shipId, repository })),
     orphans: state.orphans.map(({ repository, name }) => ({ repository, name })),

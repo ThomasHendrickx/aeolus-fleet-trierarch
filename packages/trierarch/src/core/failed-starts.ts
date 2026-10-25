@@ -1,12 +1,14 @@
 import { NOT_OFFERED_REASON_MAX_LENGTH, type ShipId } from '@aeolus-fleet/common';
 
+import type { Entry } from './entry.js';
+
 /**
  * The machine's failed session starts (docs/trierarch.md, "Crewing a ship",
  * aeolus-fleet#853): once the last start of 3 different ships failed, with no
  * start succeeding since, the cause is the machine's, not one ship's
  * settings, so the trierarch stops offering itself for placement. It offers
- * itself again, as a probe, 10 minutes after its last failed start; a start
- * that succeeds, or another configuration, offers it for good.
+ * itself again, as a probe, 10 minutes after its last failed start, with room
+ * for one start until a start decides; a start that succeeds, or another configuration, offers it for good.
  */
 
 /** How many different ships' last starts must fail in a row before the machine stops offering itself. */
@@ -62,6 +64,17 @@ export function withConfiguration(failedStarts: FailedStarts | undefined, config
 /** Whether the machine offers itself for placement now: always, unless it stopped and its probe is not due yet. */
 export function isOffering(failedStarts: FailedStarts | undefined, now: Date): boolean {
   return failedStarts?.stopped === undefined || now.getTime() - new Date(failedStarts.at).getTime() >= PROBE_AFTER_MS;
+}
+
+/** Whether the machine stopped offering itself and its probe is due: it offers room for one start only, until a start decides. */
+export function isProbing(failedStarts: FailedStarts | undefined, now: Date): boolean {
+  return failedStarts?.stopped !== undefined && isOffering(failedStarts, now);
+}
+
+/** The ships cap a probe reports: the ships it holds, with room for one more only while none of their starts is undecided. */
+export function probeShipsCap(entries: readonly Entry[], ships: number): number {
+  const isStartUndecided = entries.some((entry) => entry.state === 'crewing' || entry.state === 'restarting' || entry.launchedAt !== undefined);
+  return Math.min(ships, entries.length + (isStartUndecided ? 0 : 1));
 }
 
 /** Why the machine does not offer itself, as its report names it for each harness. */
