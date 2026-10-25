@@ -2,6 +2,6 @@
 # only what the image copies.
 *
 !.claude-plugin/marketplace.json
-!plugins/aeolus
-plugins/aeolus/test
+!plugins/aeolus-fleet
+plugins/aeolus-fleet/test
 !packages/trierarch/image

@@ -5,7 +5,7 @@
  * @aeolus-fleet/common or @aeolus-fleet/core, keeps its range: that train has
  * a version of its own (decision 0049). The exports lose the
  * @aeolus-fleet/source condition: it points into src, which the tarball does
- * not ship (aeolus-fleet#968). Both manifests of the aeolus plugin carry the
+ * not ship (aeolus-fleet#968). Both manifests of the aeolus-fleet plugin carry the
  * same version. Used by the release and candidate workflows, the publish dry
  * run and the session image build in CI.
  *
@@ -20,10 +20,10 @@ import { z } from 'zod';
 
 export const PUBLISHED_PACKAGES = ['trierarch'] as const;
 
-/** The aeolus plugin's Claude Code and Codex manifests, released together. */
+/** The aeolus-fleet plugin's Claude Code and Codex manifests, released together. */
 export const PLUGIN_MANIFESTS = [
-  'plugins/aeolus/.claude-plugin/plugin.json',
-  'plugins/aeolus/.codex-plugin/plugin.json',
+  'plugins/aeolus-fleet/.claude-plugin/plugin.json',
+  'plugins/aeolus-fleet/.codex-plugin/plugin.json',
 ] as const;
 
 const SCOPE = '@aeolus-fleet/';
@@ -91,7 +91,7 @@ export function setVersion(repositoryRoot: string, version: string): void {
 }
 
 /**
- * Sets the version of both aeolus plugin manifests alone. The release commits
+ * Sets the version of both aeolus-fleet plugin manifests alone. The release commits
  * them back to main, where the plugin marketplaces install from, so the
  * installed plugin shows the version just released; the packages on main keep
  * 0.0.0, as only the published packages carry their version.
@@ -114,10 +114,10 @@ if (import.meta.main) {
     const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
     if (isPluginOnly) {
       setPluginVersion(repositoryRoot, version);
-      console.log(`Set the aeolus plugin to ${version}`);
+      console.log(`Set the aeolus-fleet plugin to ${version}`);
     } else {
       setVersion(repositoryRoot, version);
-      console.log(`Set ${OWN_PACKAGES.join(', ')} and the aeolus plugin to ${version}`);
+      console.log(`Set ${OWN_PACKAGES.join(', ')} and the aeolus-fleet plugin to ${version}`);
     }
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);

@@ -1,0 +1,16 @@
+---
+name: aeolus-fleet-wake
+description: Wake a Codex session for the Aeolus ship this folder crews when it stopped listening. Checks the lease, handles waiting deliveries, arms the wake bridge again and reports. Use in Codex when the operator invokes $aeolus-fleet-wake.
+---
+
+# Wake this folder's Aeolus ship in Codex
+
+The SessionStart developer context must say `Aeolus Fleet Codex hooks are active` and give the plugin root, plugin data, working folder and Codex task id. If it does not, tell the operator to open `/hooks`, trust the Aeolus Fleet plugin hooks, start a new Codex task in this folder and invoke `$aeolus-fleet-wake` again. Stop there.
+
+Run every script below with `AEOLUS_DATA` set to the named plugin data, `AEOLUS_FOLDER` set to the named working folder and `AEOLUS_HARNESS=codex`. Do the steps in order.
+
+1. Run the plugin root's `scripts/aeolus-identity.sh show`. If this folder crews no ship, say so and that `$aeolus-fleet-crew` with a Codex crew line crews one, and stop.
+2. Run `scripts/aeolus-fleet.sh whoami`. `LEASE_ENDED` means the operator released the ship: go on as the `aeolus-fleet-crew` skill says for it, and stop.
+3. Handle what waits. If step 1 said `delivery: pushed`, receive and ack nothing: the wake bridge or the trierarch hands each message over, and it comes into the turn through the plugin's hooks. Handle what came in, and answer by senderName with inReplyTo. Otherwise, as the `aeolus-fleet-crew` skill says: receive; ack each delivery and act only if the ack succeeded; answer by senderName with inReplyTo; receive again until it answers empty. Count the deliveries handled.
+4. Run the plugin root's `scripts/aeolus-codex-wake.sh` `start <codexTaskId>`. It arms the wake bridge for this task again, replacing an older one. Codex Cloud cannot wake automatically.
+5. Report a short list: the ship's name and id, the deliveries handled, the wake bridge armed, and the lease valid. Then end the turn.

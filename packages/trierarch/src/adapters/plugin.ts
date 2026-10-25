@@ -5,13 +5,13 @@ import { z } from 'zod';
 
 import type { AeolusPlugin } from './plugin-identity.js';
 
-/** The harnesses that install the aeolus plugin, each in its own plugin folders. */
+/** The harnesses that install the aeolus-fleet plugin, each in its own plugin folders. */
 export type PluginHarness = 'claude-code' | 'codex';
 
 export const PLUGIN_HARNESSES: readonly PluginHarness[] = ['claude-code', 'codex'];
 
-/** The aeolus plugin's data folder in a harness's plugin folders, as both harnesses name it. */
-export const PLUGIN_DATA_FOLDER = 'aeolus-aeolus-fleet';
+/** The aeolus-fleet plugin's data folder in a harness's plugin folders, as both harnesses name it. */
+export const PLUGIN_DATA_FOLDER = 'aeolus-fleet-aeolus-fleet';
 
 /** Where each harness keeps its plugins, and the variables that point elsewhere. */
 function placesOf(at: { homeDirectory: string; env: Readonly<Record<string, string | undefined>>; harness: PluginHarness }) {
@@ -23,7 +23,7 @@ function placesOf(at: { homeDirectory: string; env: Readonly<Record<string, stri
 }
 
 /**
- * Where a harness installed the aeolus plugin: the newest version in its
+ * Where a harness installed the aeolus-fleet plugin: the newest version in its
  * plugin cache, looked up again at each use so a plugin upgrade without a
  * service restart moves along (#828), and the plugin's data folder, unless
  * variables name others
@@ -42,12 +42,12 @@ export async function findAeolusPlugin(at: { homeDirectory: string; env: Readonl
   if (root !== undefined) {
     return { root: () => Promise.resolve(root), data, crews };
   }
-  const cache = join(places.plugins, 'cache', 'aeolus-fleet', 'aeolus');
+  const cache = join(places.plugins, 'cache', 'aeolus-fleet', 'aeolus-fleet');
   const newest = async (): Promise<string> => {
     const versions = (await readdir(cache).catch(() => [])).filter((name) => /^\d+\.\d+\.\d+$/.test(name)).sort(byVersion);
     const version = versions.at(-1);
     if (version === undefined) {
-      throw new Error(`The aeolus plugin is not installed for ${places.name} (nothing in ${cache}): install it, or set ${places.rootVariable}`);
+      throw new Error(`The aeolus-fleet plugin is not installed for ${places.name} (nothing in ${cache}): install it, or set ${places.rootVariable}`);
     }
     return join(cache, version);
   };
@@ -60,8 +60,8 @@ export async function findAeolusPlugin(at: { homeDirectory: string; env: Readonl
 const manifestSchema = z.object({ version: z.string() });
 
 /**
- * The version of the aeolus plugin a harness uses, as the manifest that
- * harness reads says it (#480); none when the harness has no aeolus plugin or
+ * The version of the aeolus-fleet plugin a harness uses, as the manifest that
+ * harness reads says it (#480); none when the harness has no aeolus-fleet plugin or
  * its manifest says no version.
  */
 export async function aeolusPluginVersion(at: { homeDirectory: string; env: Readonly<Record<string, string | undefined>>; harness: string }): Promise<string | undefined> {

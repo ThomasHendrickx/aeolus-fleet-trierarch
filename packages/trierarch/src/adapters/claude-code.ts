@@ -17,7 +17,7 @@ import { stopTurn } from './stop-turn.js';
 /**
  * Claude Code as a harness (docs/architecture.md, "First adapters"): `claude`
  * in the folder, `--continue` on a restart when the folder has a conversation
- * to continue, `/aeolus:wake` typed to wake an idle session, each prompt with
+ * to continue, `/aeolus-fleet:wake` typed to wake an idle session, each prompt with
  * the line that no human reads its terminal (#585), and always
  * without AskUserQuestion and plan mode: nobody watches the session's pane, so
  * it asks its questions over the fleet, and a question form or a plan approval
@@ -38,7 +38,7 @@ import { stopTurn } from './stop-turn.js';
  * (decision 0039).
  */
 
-export const WAKE_PROMPT = '/aeolus:wake';
+export const WAKE_PROMPT = '/aeolus-fleet:wake';
 
 /** The variable a session's launch id is passed in, for the plugin's hooks to mark that launch (#490). */
 export const LAUNCH_VARIABLE = 'AEOLUS_LAUNCH';

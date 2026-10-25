@@ -10,7 +10,7 @@ import { runCommand } from './run-command.js';
 import { runningProcesses, type RunningProcess } from './running-processes.js';
 
 /**
- * The aeolus plugin updated through each harness's own command (#581), from
+ * The aeolus-fleet plugin updated through each harness's own command (#581), from
  * the release tag it is given, or main without one (#652): each harness's
  * aeolus-fleet marketplace is pointed at it first. Neither harness adds a
  * second source for a marketplace. Codex's is removed and added again, which
@@ -39,7 +39,7 @@ export interface PluginUpdate {
 
 const MARKETPLACE = 'aeolus-fleet';
 const REPOSITORY = 'ThomasHendrickx/aeolus-fleet-trierarch';
-const PLUGIN = 'aeolus@aeolus-fleet';
+const PLUGIN = 'aeolus-fleet@aeolus-fleet';
 
 async function run(command: string, args: readonly string[]): Promise<void> {
   const result = await runCommand(command, { args });
@@ -160,13 +160,13 @@ export function createPluginUpdate(at: {
   const codex = at.commands?.codex ?? 'codex';
   const claude = at.commands?.['claude-code'] ?? 'claude';
   const claudeSettings = join(at.env.CLAUDE_CONFIG_DIR ?? join(at.homeDirectory, '.claude'), 'settings.json');
-  const codexCache = join(at.env.CODEX_HOME ?? join(at.homeDirectory, '.codex'), 'plugins', 'cache', MARKETPLACE, 'aeolus');
+  const codexCache = join(at.env.CODEX_HOME ?? join(at.homeDirectory, '.codex'), 'plugins', 'cache', MARKETPLACE, 'aeolus-fleet');
 
   return {
     update: async (harness, tag) => {
       if (harness === 'codex') {
         if (!(await codexKeepsPluginData(codex))) {
-          throw new Error(`Codex would delete the aeolus plugin's data on this machine, its log and the crew identities not yet moved to ~/.aeolus/crews, when its ${MARKETPLACE} marketplace is removed: the upgrade leaves the marketplace as it is`);
+          throw new Error(`Codex would delete the aeolus-fleet plugin's data on this machine, its log and the crew identities not yet moved to ~/.aeolus/crews, when its ${MARKETPLACE} marketplace is removed: the upgrade leaves the marketplace as it is`);
         }
         await keepingVersions(codexCache, {
           upgrade: async () => {

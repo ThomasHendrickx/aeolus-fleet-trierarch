@@ -1,7 +1,7 @@
 {
   "name": "aeolus-fleet-trierarch",
   "private": true,
-  "description": "Aeolus trierarch: workspace root for @aeolus-fleet/trierarch, with the aeolus plugin for Claude Code and Codex and the session image.",
+  "description": "Aeolus trierarch: workspace root for @aeolus-fleet/trierarch, with the aeolus-fleet plugin for Claude Code and Codex and the session image.",
   "license": "Apache-2.0",
   "type": "module",
   "packageManager": "npm@11.19.1",

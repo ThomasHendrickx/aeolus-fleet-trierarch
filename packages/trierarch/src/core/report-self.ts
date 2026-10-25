@@ -7,7 +7,7 @@ import type { FleetPort, SelfReport, SessionRuntime, StatePort, TrierarchSetup, 
 import type { ReadLoad } from './read-load.js';
 import type { ReadUsage } from './read-usage.js';
 
-const PLUGIN_MISSING_REASON = 'its aeolus plugin is not installed (run aeolus-trierarch upgrade)';
+const PLUGIN_MISSING_REASON = 'its aeolus-fleet plugin is not installed (run aeolus-trierarch upgrade)';
 
 /** Reports the trierarch's own ship when something changed; the first call, at start, always reports. */
 export type ReportSelf = () => Promise<void>;
@@ -44,7 +44,7 @@ function selfReportOf(at: { setup: TrierarchSetup; state: TrierarchState; runnin
   const { setup, state, running, trusted } = at;
   const crashed = Object.values(state.entries).filter((entry) => entry.state === 'crashed').length;
   const missing = state.missingPlugins ?? [];
-  // A harness without its aeolus plugin cannot crew a ship (#1212): it is left out of the details, so no request is placed for it, and the note says why.
+  // A harness without its aeolus-fleet plugin cannot crew a ship (#1212): it is left out of the details, so no request is placed for it, and the note says why.
   const notOfferedNote = missing.map((harness) => `, ${harness} not offered: ${PLUGIN_MISSING_REASON}`).join('');
   const note = `${String(running)} of ${String(setup.configuration.caps.ships)} running${crashed > 0 ? `, ${String(crashed)} crashed` : ''}${notOfferedNote}`;
   return { state: running > 0 ? 'working' : 'idle', note, details: detailsOf(setup, { state, trusted }) };

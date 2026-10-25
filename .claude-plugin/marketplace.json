@@ -4,12 +4,12 @@
     "name": "Thomas Hendrickx"
   },
   "metadata": {
-    "description": "Aeolus plugins for Claude Code"
+    "description": "Aeolus Fleet plugins for Claude Code"
   },
   "plugins": [
     {
-      "name": "aeolus",
-      "source": "./plugins/aeolus",
+      "name": "aeolus-fleet",
+      "source": "./plugins/aeolus-fleet",
       "description": "Crew an Aeolus ship from Claude Code: messages wait for your session, it wakes when work arrives, and your token stays out of the transcript."
     }
   ]

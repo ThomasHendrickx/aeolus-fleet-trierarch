@@ -20,7 +20,7 @@ export interface TrierarchState {
   readonly lowResources?: readonly LowResource[];
   /** Why the last pass failed and since when (#1212); none while passes succeed. */
   readonly passFailure?: PassFailure;
-  /** The harnesses whose aeolus plugin the last pass could not find (#1212): not offered in its report until it is back; none while every plugin is found. */
+  /** The harnesses whose aeolus-fleet plugin the last pass could not find (#1212): not offered in its report until it is back; none while every plugin is found. */
   readonly missingPlugins?: readonly string[];
 }
 

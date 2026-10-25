@@ -134,7 +134,7 @@ export interface SelfReport {
   readonly details: TrierarchReportDetails;
 }
 
-/** What a session's folder identity holds for the trierarch: written through the aeolus plugin, never a copy of it. No crew token: the session calls over its ship's socket (decision 0026). */
+/** What a session's folder identity holds for the trierarch: written through the aeolus-fleet plugin, never a copy of it. No crew token: the session calls over its ship's socket (decision 0026). */
 export interface Identity {
   readonly fleetUrl: string;
   readonly shipId: ShipId;
@@ -164,7 +164,7 @@ export type HandOver = 'handed' | 'nothing';
 
 export interface HarnessPort {
   /**
-   * Writes the folder's identity with wakeBy=trierarch, as the aeolus plugin does. The
+   * Writes the folder's identity with wakeBy=trierarch, as the aeolus-fleet plugin does. The
    * crew token goes to the plugin only for the lease it stands for, never into the folder.
    */
   prepareIdentity(at: { folder: string; identity: Identity; crewToken: string }): Promise<void>;
@@ -188,10 +188,10 @@ export interface HarnessPort {
     firstPrompt?: string;
   }): Promise<void>;
   turnOf(session: { shipId: ShipId; folder: string }): Promise<Turn>;
-  /** Hands one message over through the aeolus plugin, which keeps the store, and types the line it gives into the session (#756, 2a). */
+  /** Hands one message over through the aeolus-fleet plugin, which keeps the store, and types the line it gives into the session (#756, 2a). */
   handOver(session: { shipId: ShipId; folder: string }): Promise<HandOver>;
   /**
-   * Hands a forced message over first through the aeolus plugin (decision
+   * Hands a forced message over first through the aeolus-fleet plugin (decision
    * 0040), and types the line it gives into the session as a new prompt. A
    * busy turn is stopped for it first: force means act now.
    */
@@ -202,9 +202,9 @@ export interface HarnessPort {
   sessionDied(session: { shipId: ShipId; folder: string }): Promise<void>;
   /** What the session did in its launch window (#382), as its hooks marked the launch it was started for (#490), for the model it launched with; any model refused when it launched with none. */
   launchSeen(session: { shipId: ShipId; folder: string; launchId: string; model?: string }): Promise<LaunchSeen>;
-  /** Whether the harness's aeolus plugin marks launches (#490); one older than the launch marker does not, and its sessions are not crewed. */
+  /** Whether the harness's aeolus-fleet plugin marks launches (#490); one older than the launch marker does not, and its sessions are not crewed. */
   marksLaunches(): Promise<boolean>;
-  /** Why no session of the harness can start now, as when its aeolus plugin's scripts are gone (#827); none when one can. */
+  /** Why no session of the harness can start now, as when its aeolus-fleet plugin's scripts are gone (#827); none when one can. */
   startProblem(): Promise<string | undefined>;
 }
 

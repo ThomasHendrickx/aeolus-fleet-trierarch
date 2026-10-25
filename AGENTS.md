@@ -2,13 +2,13 @@
 
 ## What it is
 
-`@aeolus-fleet/trierarch`: a process on each machine, crewing the ships of an Aeolus fleet assigned to it, keeping their Claude Code and Codex sessions running and waking them. With it: the aeolus plugin (`plugins/aeolus`), with which a Claude Code or Codex session crews a ship; its marketplaces for both harnesses (`.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`); and the session image (`packages/trierarch/image`). Aeolus's promises: aeolus-fleet's [blueprint](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/blueprint.md).
+`@aeolus-fleet/trierarch`: a process on each machine, crewing the ships of an Aeolus fleet assigned to it, keeping their Claude Code and Codex sessions running and waking them. With it: the aeolus-fleet plugin (`plugins/aeolus-fleet`), with which a Claude Code or Codex session crews a ship; its marketplaces for both harnesses (`.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`); and the session image (`packages/trierarch/image`). Aeolus's promises: aeolus-fleet's [blueprint](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/blueprint.md).
 
 ## Source of truth
 
 - docs/trierarch.md: what the trierarch plugin and a trierarch do; anyone may write another from it.
-- docs/architecture.md: the trierarch's parts, its files on the machine, and what the aeolus plugin does for it.
-- plugins/aeolus/README.md: the plugin.
+- docs/architecture.md: the trierarch's parts, its files on the machine, and what the aeolus-fleet plugin does for it.
+- plugins/aeolus-fleet/README.md: the plugin.
 - docs/decisions/: this repository's decisions; the full index is aeolus-fleet's [docs/decisions/README.md](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/decisions/README.md). Do not reopen a recorded decision; raise it as a question instead.
 - aeolus-fleet's [blueprint](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/blueprint.md): product, language, behaviour.
 - aeolus-fleet's [docs/compatibility.md](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/compatibility.md): what the trierarch and the plugin may call in core.
@@ -25,7 +25,7 @@ If the docs do not answer a behaviour question, stop and ask. Never decide produ
 ## Architecture rules
 
 - Ports and adapters. `packages/trierarch/src/core` holds domain, use cases and ports, with no framework, adapter or core imports; it reads no clock and never throws. The lint rule enforces it; never disable it.
-- Core only through `/api/v1` and `@aeolus-fleet/common`: the calls listed for the trierarch and the aeolus plugin in aeolus-fleet's [docs/compatibility.md](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/compatibility.md).
+- Core only through `/api/v1` and `@aeolus-fleet/common`: the calls listed for the trierarch and the aeolus-fleet plugin in aeolus-fleet's [docs/compatibility.md](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/compatibility.md).
 - The trierarch reaches the plugin only through the plugin's own scripts (`aeolus-identity.sh`, `aeolus-push.sh`), never a copy of what they do.
 - `MINIMUM_CORE_VERSION` is raised in the same PR that needs a newer core.
 
@@ -42,7 +42,7 @@ Load the matching skills from `.claude/skills/` (Codex: `.agents/skills/`) befor
 - `pull-request`: writing a pull request body.
 - `writing-for-agents`: editing CLAUDE.md, a skill, or a doc agents read.
 
-`aeolus-fleet-trierarch` lives here. The plugin's own skills in `plugins/aeolus/skills` are product, shipped to users, not skills for working here. The others come from ThomasHendrickx/skills, pinned in `skills-lock.json`: never edit them here; change them there, tag a release, then `npx skills@1.7.2 add ThomasHendrickx/skills#<tag> --agent claude-code codex -y`.
+`aeolus-fleet-trierarch` lives here. The plugin's own skills in `plugins/aeolus-fleet/skills` are product, shipped to users, not skills for working here. The others come from ThomasHendrickx/skills, pinned in `skills-lock.json`: never edit them here; change them there, tag a release, then `npx skills@1.7.2 add ThomasHendrickx/skills#<tag> --agent claude-code codex -y`.
 
 ## Quality
 

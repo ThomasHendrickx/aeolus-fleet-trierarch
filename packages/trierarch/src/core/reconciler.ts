@@ -80,9 +80,9 @@ export interface ReconcileContext {
   readonly trusted: TrustedPlaces;
   /** Each harness's version as detection found it, for the reason a refused model is given back with (#382). */
   readonly versions: Readonly<Record<string, string>>;
-  /** Whether each harness's aeolus plugin marks launches (#490): checked before every launch. */
+  /** Whether each harness's aeolus-fleet plugin marks launches (#490): checked before every launch. */
   readonly marksLaunches: Readonly<Record<string, boolean>>;
-  /** The harnesses whose aeolus plugin could not be found (#1212): none of their requests is crewed or given a session. */
+  /** The harnesses whose aeolus-fleet plugin could not be found (#1212): none of their requests is crewed or given a session. */
   readonly missingPlugins: ReadonlySet<string>;
 }
 
@@ -152,7 +152,7 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
       actions.push({ kind: 'release', shipId: entry.shipId });
       continue;
     }
-    // A harness that lost its aeolus plugin under a running session cannot crew its ship any more (#1212): the request is given back with why, and the other harnesses go on.
+    // A harness that lost its aeolus-fleet plugin under a running session cannot crew its ship any more (#1212): the request is given back with why, and the other harnesses go on.
     const refusal = launchMarkerRefusal({ harness: entry.harness, marksLaunches: context.marksLaunches, missingPlugins: context.missingPlugins });
     if (refusal !== undefined) {
       const uncrewed = uncrewable({ request, refusal, state: next, entry });
