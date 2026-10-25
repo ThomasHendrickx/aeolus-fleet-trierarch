@@ -31,7 +31,7 @@ That gives the command `aeolus-trierarch`.
 
    Without a terminal, pass everything as flags and take every default with `--yes`: `aeolus-trierarch init --fleet-url https://fleet.example.com --ship-id shp_... --secret aeolus_sk_v1_... --yes`. Prefer the prompt: a secret in a flag lands in your shell history.
 
-   Run `aeolus-trierarch init` again on a machine set up already to change the configuration. It says so and never registers again; to register another ship, remove `~/.aeolus/trierarch/crew-token` first.
+   Run `aeolus-trierarch init` again on a machine set up already to change the configuration. It says so and never registers again; to register another ship, remove `~/.aeolus/trierarch/crew-token` first. A setup that stopped partway goes on when you run its setup line again; once its ship was released, the setup line with the new secret registers it again.
 
 ## Use
 
