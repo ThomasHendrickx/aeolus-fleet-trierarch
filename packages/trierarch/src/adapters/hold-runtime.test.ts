@@ -6,7 +6,7 @@ import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { FAKE_CLAUDE_CODE, TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
+import { FAKE_CLAUDE_CODE, FAKE_CODEX, TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
 import { newId } from '../../test/support/in-memory.js';
 import { sessionRuntimeContract } from '../../test/support/session-runtime-contract.js';
 import type { ObservedSession, SessionRuntime } from '../core/ports.js';
@@ -304,6 +304,133 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
 
     await expect(runtime.list()).resolves.toEqual([]);
     expect(() => process.kill(hold ?? 0, 0)).toThrow();
+  });
+});
+
+describe('a Codex session held by a hold, one codex exec per turn (headless H11, H12)', () => {
+  const startOf = z.object({ args: z.array(z.string()), pid: z.number() });
+  const hookOf = z.looseObject({ event: z.string() });
+  const lifeOf = z.object({ pid: z.number(), at: z.enum(['start', 'exit']) });
+  const codexStarts = () => written('fake-starts.jsonl').map((start) => startOf.parse(start));
+  const hooks = () => written('fake-hooks.jsonl').map((hook) => hookOf.parse(hook).event);
+  const lives = () => written('fake-lives.jsonl').map((life) => lifeOf.parse(life));
+  const isRunning = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  /** A Codex session whose first turn ran the prompt given, ended. */
+  async function aCodexSession(runtime: SessionRuntime, at: { flags?: readonly string[]; prompt?: string } = {}): Promise<ShipId> {
+    const shipId = newId('ship');
+    await runtime.start({ shipId, folder, command: [...FAKE_CODEX, 'exec', ...(at.flags ?? []), '--json', '--', at.prompt ?? '$aeolus-wake'], harness: 'codex' });
+    return shipId;
+  }
+
+  it("starts one codex exec resume of the session's thread for a line it is sent, which ends with Stop (H11)", async () => {
+    const runtime = aRuntime();
+    const shipId = await aCodexSession(runtime);
+    await expect.poll(hooks).toEqual(['SessionStart', 'UserPromptSubmit', 'Stop']);
+    const [thread] = await eventsOfType({ runtime, shipId }, 'thread.started');
+
+    await runtime.send({ shipId, line: 'the hand-over' });
+
+    await expect.poll(hooks).toEqual(['SessionStart', 'UserPromptSubmit', 'Stop', 'SessionStart', 'UserPromptSubmit', 'Stop']);
+    const args = codexStarts().map((start) => start.args);
+    expect(args).toHaveLength(2);
+    expect(args[1]).toEqual(['exec', 'resume', thread?.thread_id, '--json', '--', 'the hand-over']);
+    await expect.poll(async () => eventsOfType({ runtime, shipId }, 'turn.completed')).toHaveLength(2);
+  });
+
+  it('runs no Codex process between turns, and the hold stays: the session is listed running (H11)', async () => {
+    const runtime = aRuntime();
+    const shipId = await aCodexSession(runtime);
+    await expect.poll(async () => eventsOfType({ runtime, shipId }, 'turn.completed')).toHaveLength(1);
+
+    await expect.poll(() => codexStarts().filter((start) => isRunning(start.pid))).toEqual([]);
+    await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running' }]);
+    expect(isRunning((await runtime.sessionRootOf(shipId)) ?? 0)).toBe(true);
+  });
+
+  it("gives codex exec no stdin to wait on, so a turn never waits for input that does not come", async () => {
+    const runtime = aRuntime();
+    const shipId = await aCodexSession(runtime);
+
+    await expect.poll(async () => eventsOfType({ runtime, shipId }, 'turn.completed')).toHaveLength(1);
+  });
+
+  it("starts a line's turn only once the last turn's process has ended, never two at once on one thread", async () => {
+    const runtime = aRuntime();
+    const shipId = await aCodexSession(runtime, { flags: ['--linger-ms', '500'] });
+    await expect.poll(hooks).toContain('Stop');
+
+    await runtime.send({ shipId, line: 'the next one' });
+
+    await expect.poll(lives).toHaveLength(4);
+    expect(lives().map((life) => life.at)).toEqual(['start', 'exit', 'start', 'exit']);
+  });
+
+  it('stops a running turn with SIGINT and waits for its process to end; the forced line runs next, resuming the thread (H12)', async () => {
+    const runtime = aRuntime();
+    const shipId = await aCodexSession(runtime);
+    await expect.poll(hooks).toContain('Stop');
+    await runtime.send({ shipId, line: 'work slowly' });
+    await expect.poll(async () => eventsOfType({ runtime, shipId }, 'item.completed')).toHaveLength(2);
+
+    await runtime.interrupt(shipId);
+
+    expect(hooks().slice(-1)).toEqual(['Interrupt']);
+    expect(codexStarts().filter((start) => isRunning(start.pid))).toEqual([]);
+    await runtime.send({ shipId, line: 'the forced one' });
+    await expect.poll(hooks).toEqual(['SessionStart', 'UserPromptSubmit', 'Stop', 'SessionStart', 'UserPromptSubmit', 'Interrupt', 'SessionStart', 'UserPromptSubmit', 'Stop']);
+    expect(codexStarts().at(-1)?.args.slice(-2)).toEqual(['--', 'the forced one']);
+    await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running' }]);
+  });
+
+  it('interrupts nothing between turns: no process runs to stop', async () => {
+    const runtime = aRuntime();
+    const shipId = await aCodexSession(runtime);
+    await expect.poll(hooks).toContain('Stop');
+
+    await runtime.interrupt(shipId);
+
+    expect(hooks()).not.toContain('Interrupt');
+    expect(codexStarts()).toHaveLength(1);
+  });
+
+  it("keeps the hold and the failed turn's error event when the turn fails, so the launch window reads why (H13)", async () => {
+    const runtime = aRuntime();
+    const shipId = await aCodexSession(runtime, { flags: ['--refuse-model'] });
+
+    await expect.poll(async () => eventsOfType({ runtime, shipId }, 'turn.failed')).toHaveLength(1);
+    await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running' }]);
+  });
+
+  it('stops a session mid-turn: its hold and the running codex exec end', async () => {
+    const runtime = aRuntime();
+    const shipId = await aCodexSession(runtime, { prompt: 'work slowly' });
+    await expect.poll(async () => eventsOfType({ runtime, shipId }, 'item.completed')).toHaveLength(1);
+    const [turn] = codexStarts();
+
+    await runtime.stop(shipId);
+
+    await expect(runtime.list()).resolves.toEqual([]);
+    await expect.poll(() => isRunning(turn?.pid ?? 0)).toBe(false);
+  });
+
+  it('stops a session between turns: its hold ends', async () => {
+    const runtime = aRuntime();
+    const shipId = await aCodexSession(runtime);
+    await expect.poll(hooks).toContain('Stop');
+    const hold = await runtime.sessionRootOf(shipId);
+
+    await runtime.stop(shipId);
+
+    await expect(runtime.list()).resolves.toEqual([]);
+    expect(isRunning(hold ?? 0)).toBe(false);
   });
 });
 
