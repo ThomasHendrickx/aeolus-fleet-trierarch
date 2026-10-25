@@ -325,7 +325,7 @@ export async function initTrierarch(input: {
   let fleetUrl: string;
   let shipId: ShipId | undefined;
   let isPluginShipNew = false;
-  // Registered again after a release, so the crew file keeps the new crew token.
+  // Registered again after a release: a trierarch that runs holds the ended crew token until it restarts.
   let isRegisteredAgain = false;
   if (crew === undefined) {
     prompter.step('The fleet');
@@ -420,7 +420,7 @@ export async function initTrierarch(input: {
     }
   } else {
     await service.rewrite();
-    if ((configured !== 'kept' || isPluginShipNew) && (await prompter.confirm('Restart the trierarch so it reads the new configuration?', { isDefault: true }))) {
+    if ((configured !== 'kept' || isPluginShipNew || isRegisteredAgain) && (await prompter.confirm('Restart the trierarch so it reads the new configuration?', { isDefault: true }))) {
       await startNew(() => service.restart(), 'The trierarch restarted with the new configuration.');
       serviced = 'restarted';
     }
