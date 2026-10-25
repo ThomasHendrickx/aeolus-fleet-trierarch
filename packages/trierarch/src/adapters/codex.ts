@@ -1,15 +1,13 @@
-import { readFile } from 'node:fs/promises';
-
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
+import { z } from 'zod';
 
 import type { AdapterFlag, HarnessPort, SessionRuntime } from '../core/ports.js';
 import { LAUNCH_VARIABLE } from './claude-code.js';
-import { codexScreenStoppedAt } from './codex-screen.js';
-import { codexModelRefusedIn } from './codex-session-log.js';
 import type { CodexSetup } from './codex-setup.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
 import { effectiveFlags } from '../core/effective-flags.js';
 import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
+import { parsedLine } from './hold-protocol.js';
 import { createLaunchMarks } from './launch-marker.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
 
@@ -64,13 +62,41 @@ export function codexCommandLine(at: { flags: readonly string[]; prompt: string;
   ]);
 }
 
-/** The session log at the path given; none before Codex wrote it, or once it is gone. */
-async function sessionLog(path: string): Promise<string | undefined> {
-  try {
-    return await readFile(path, 'utf8');
-  } catch {
+/** Codex's error events in `codex exec --json`: a failed turn, or an error the turn met. */
+const errorEventSchema = z.union([z.object({ type: z.literal('turn.failed'), error: z.object({ message: z.string() }) }), z.object({ type: z.literal('error'), message: z.string() })]);
+
+/** The API error an error event carries as JSON text in its message, as Codex passes a refusal on. */
+const apiErrorSchema = z.object({ error: z.object({ message: z.string(), code: z.string().optional() }) });
+
+const NOT_SUPPORTED = /^The '([^']+)' model is not supported/u;
+
+/** The harness's last error event in its events, as its message says it: an API error by its own message; none without one. */
+function lastErrorIn(events: readonly string[]): { message: string; code?: string } | undefined {
+  for (const line of [...events].reverse()) {
+    const event = errorEventSchema.safeParse(parsedLine(line));
+    if (event.success) {
+      const message = event.data.type === 'turn.failed' ? event.data.error.message : event.data.message;
+      const api = apiErrorSchema.safeParse(parsedLine(message));
+      return api.success ? { message: api.data.error.message, ...(api.data.error.code !== undefined && { code: api.data.error.code }) } : { message };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Why Codex's start failed, from its last error event (headless H13): the
+ * model it refused when that is the model it launched with (or any, when it
+ * launched with none, so Codex's own default), or else the error's message.
+ * Codex has no hook for a failed turn (#490). Its event shapes are tested on
+ * events captured from `codex exec --json` (test/logs).
+ */
+export function codexErrorIn(at: { events: readonly string[]; model?: string }): { kind: 'refused'; model: string } | { kind: 'cause'; cause: string } | undefined {
+  const error = lastErrorIn(at.events);
+  if (error === undefined) {
     return undefined;
   }
+  const refused = error.code === 'model_not_found' ? NOT_SUPPORTED.exec(error.message)?.[1] : undefined;
+  return refused !== undefined && (at.model === undefined || refused === at.model) ? { kind: 'refused', model: refused } : { kind: 'cause', cause: error.message };
 }
 
 export function createCodexHarness(options: {
@@ -122,19 +148,16 @@ export function createCodexHarness(options: {
       return 'handed';
     },
     marksLaunches: () => marks.isMarking(),
-    // The marker says what the session did (#490); Codex has no hook for a failed turn, so a refusal is read from the session log its session start named.
+    // The marker says what the session did (#490); Codex has no hook for a failed turn, so a refusal, or why a start shows none, is read from its last error event (headless H13).
     launchSeen: async ({ shipId, folder, launchId, model }) => {
-      const marker = await marks.read({ folder, launchId });
-      const log = marker?.transcript === undefined ? undefined : await sessionLog(marker.transcript);
-      const refused = log === undefined ? undefined : codexModelRefusedIn({ log, ...(model !== undefined && { model }) });
-      if (refused !== undefined) {
-        return { kind: 'refused', model: refused };
+      const error = codexErrorIn({ events: await sessions.events(shipId), ...(model !== undefined && { model }) });
+      if (error?.kind === 'refused') {
+        return { kind: 'refused', model: error.model };
       }
-      if (marker?.isActive === true) {
+      if ((await marks.read({ folder, launchId }))?.isActive === true) {
         return { kind: 'active' };
       }
-      const stoppedAt = marker?.isStarted === true ? undefined : codexScreenStoppedAt((await sessions.events(shipId)).join('\n'));
-      return { kind: 'none', ...(stoppedAt !== undefined && { screen: stoppedAt }) };
+      return { kind: 'none', ...(error !== undefined && { cause: error.cause }) };
     },
   };
 }
