@@ -1,13 +1,23 @@
+import type { ShipId } from '@aeolus-fleet/common';
 import { expect, it } from 'vitest';
 
 import type { SessionRuntime } from '../../src/core/ports.js';
 import { newId } from './in-memory.js';
 
+/** The harness every contract session is started for: a shell command stands in for it. */
+const HARNESS = 'claude-code';
+
+/** What the session's harness wrote, as one text. */
+async function shown(runtime: SessionRuntime, shipId: ShipId): Promise<string> {
+  return (await runtime.events(shipId)).join('\n');
+}
+
 /**
  * What every session runtime does (decision 0039), so the reconciler, the
  * launch window and wakes behave the same whichever runs the sessions. Each
  * adapter's test calls it inside its own describe, with a fresh runtime and an
- * empty folder per test.
+ * empty folder per test. How a turn is stopped depends on the harness, so each
+ * adapter's own test proves its interrupt.
  */
 export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; folder: () => string }): void {
   const POLL = { timeout: 5000 };
@@ -20,105 +30,71 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
     const runtime = at.runtime();
     const shipId = newId('ship');
 
-    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'echo "in $(pwd)"; sleep 30'] });
+    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'echo "in $(pwd)"; sleep 30'], harness: HARNESS });
 
     await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running' }]);
-    await expect.poll(async () => runtime.screen(shipId), POLL).toContain(`in ${at.folder()}`);
+    await expect.poll(async () => shown(runtime, shipId), POLL).toContain(`in ${at.folder()}`);
   });
 
   it('starts the command with the environment given, such as its launch id (#490)', async () => {
     const runtime = at.runtime();
     const shipId = newId('ship');
 
-    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'echo "launch $AEOLUS_LAUNCH"; sleep 30'], env: { AEOLUS_LAUNCH: 'launch-1' } });
+    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'echo "launch $AEOLUS_LAUNCH"; sleep 30'], env: { AEOLUS_LAUNCH: 'launch-1' }, harness: HARNESS });
 
-    await expect.poll(async () => runtime.screen(shipId), POLL).toContain('launch launch-1');
+    await expect.poll(async () => shown(runtime, shipId), POLL).toContain('launch launch-1');
   });
 
   it('keeps a session whose command ended, so the exit is seen', async () => {
     const runtime = at.runtime();
     const shipId = newId('ship');
 
-    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'exit 3'] });
+    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'exit 3'], harness: HARNESS });
 
     await expect.poll(async () => runtime.list(), POLL).toEqual([{ shipId, status: 'exited' }]);
   });
 
-  it('reads the screen of a session whose command ended, so the launch window names what stopped it', async () => {
+  it('reads the events of a session whose command ended, so the launch window names what stopped it', async () => {
     const runtime = at.runtime();
     const shipId = newId('ship');
-    // The command ends only once its text is on the screen: a command that exits at once can end before tmux has drawn its output (#859).
-    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'echo "Invalid API key"; read line; exit 1'] });
-    await expect.poll(async () => runtime.screen(shipId), POLL).toContain('Invalid API key');
-    await runtime.type({ shipId, text: 'end' });
+    // The command ends only once its text is shown: a command that exits at once can end before a terminal has drawn its output (#859).
+    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'echo "Invalid API key"; read line; exit 1'], harness: HARNESS });
+    await expect.poll(async () => shown(runtime, shipId), POLL).toContain('Invalid API key');
+    await runtime.send({ shipId, line: 'end' });
     await expect.poll(async () => runtime.list(), POLL).toEqual([{ shipId, status: 'exited' }]);
 
-    await expect(runtime.screen(shipId)).resolves.toContain('Invalid API key');
+    await expect(shown(runtime, shipId)).resolves.toContain('Invalid API key');
   });
 
   it('replaces an exited session when the ship starts again', async () => {
     const runtime = at.runtime();
     const shipId = newId('ship');
-    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'exit 3'] });
+    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'exit 3'], harness: HARNESS });
     await expect.poll(async () => runtime.list(), POLL).toEqual([{ shipId, status: 'exited' }]);
 
-    await runtime.start({ shipId, folder: at.folder(), command: ['sleep', '30'] });
+    await runtime.start({ shipId, folder: at.folder(), command: ['sleep', '30'], harness: HARNESS });
 
     await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running' }]);
   });
 
-  it('types text into the session and presses Enter', async () => {
+  it("sends a line to the session's harness, as its next input", async () => {
     const runtime = at.runtime();
     const shipId = newId('ship');
-    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'read line; echo "got $line"; sleep 30'] });
+    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'read line; echo "got $line"; sleep 30'], harness: HARNESS });
 
-    await runtime.type({ shipId, text: '/aeolus:wake' });
+    await runtime.send({ shipId, line: '/aeolus:wake' });
 
-    await expect.poll(async () => runtime.screen(shipId), POLL).toContain('got /aeolus:wake');
+    await expect.poll(async () => shown(runtime, shipId), POLL).toContain('got /aeolus:wake');
   });
 
-  it('waits the settle time between the text and Enter when asked', async () => {
-    const runtime = at.runtime();
-    const shipId = newId('ship');
-    const settleMs = 300;
-    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'read line; echo "got $line"; sleep 30'] });
-    const before = Date.now();
-
-    await runtime.type({ shipId, text: '$aeolus-wake ', settleMs });
-
-    expect(Date.now() - before).toBeGreaterThanOrEqual(settleMs);
-    await expect.poll(async () => runtime.screen(shipId), POLL).toContain('got $aeolus-wake');
-  });
-
-  it("stops the session's running turn as Escape does, keeping the session (decision 0040)", async () => {
-    const runtime = at.runtime();
-    const shipId = newId('ship');
-    // Shell builtins only, as a test image holds no more: the line read starts with Escape when it came first.
-    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'read line; case "$line" in "$(printf "\\033")"*) echo "got Escape" ;; *) echo "got no Escape" ;; esac; sleep 30'] });
-
-    await runtime.interrupt(shipId);
-    await runtime.type({ shipId, text: 'end' });
-
-    await expect.poll(async () => runtime.screen(shipId), POLL).toContain('got Escape');
-    await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running' }]);
-  });
-
-  it("reads what the session's screen shows", async () => {
-    const runtime = at.runtime();
-    const shipId = newId('ship');
-    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'echo "Ran 1 shell command"; sleep 30'] });
-
-    await expect.poll(async () => runtime.screen(shipId), POLL).toContain('Ran 1 shell command');
-  });
-
-  it('reads an empty screen for a ship with no session', async () => {
-    await expect(at.runtime().screen(newId('ship'))).resolves.toBe('');
+  it('reads no events for a ship with no session', async () => {
+    await expect(at.runtime().events(newId('ship'))).resolves.toEqual([]);
   });
 
   it('stops a session', async () => {
     const runtime = at.runtime();
     const shipId = newId('ship');
-    await runtime.start({ shipId, folder: at.folder(), command: ['sleep', '30'] });
+    await runtime.start({ shipId, folder: at.folder(), command: ['sleep', '30'], harness: HARNESS });
 
     await runtime.stop(shipId);
 
