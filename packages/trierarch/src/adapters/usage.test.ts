@@ -25,14 +25,14 @@ describe("the harnesses' usage, each from its own reader (#353)", () => {
   });
 
   it('dates a folder from when it was made', async () => {
-    const before = Date.now();
     const folder = await mkdtemp(join(tmpdir(), 'aeolus-made-'));
     try {
       const madeAt = (await folderMadeAt(folder)).getTime();
+      const after = Date.now();
 
       // Some filesystems keep whole seconds or less.
-      expect(madeAt).toBeGreaterThanOrEqual(before - 1000);
-      expect(madeAt).toBeLessThanOrEqual(Date.now());
+      expect(madeAt).toBeGreaterThanOrEqual(after - 1000);
+      expect(madeAt).toBeLessThanOrEqual(after);
     } finally {
       await rm(folder, { recursive: true, force: true });
     }
