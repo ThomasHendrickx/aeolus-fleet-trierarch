@@ -544,10 +544,44 @@ aeolus_physical_folder() {
 # <deliveryId>.ponged; a long payload is in <deliveryId>.payload. Handled, an
 # entry is removed.
 aeolus_store_dir() {
-  local folder dir
+  local folder dir store
   folder="$(aeolus_folder)" || return 1
   dir="$(aeolus_ships_dir)" || return 1
-  printf '%s/%s.store' "$dir" "$(aeolus_key "$folder")"
+  store="$dir/$(aeolus_key "$folder").store"
+  aeolus_store_version_guard "$store" || return 1
+  printf '%s' "$store"
+}
+
+# This plugin's version, from its manifest; empty when unreadable.
+aeolus_plugin_version() {
+  local root manifest
+  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || return 0
+  for manifest in "$root/.claude-plugin/plugin.json" "$root/.codex-plugin/plugin.json"; do
+    [ -f "$manifest" ] || continue
+    sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$manifest" | head -n 1
+    return 0
+  done
+}
+
+# A store belongs to the newest plugin that wrote it (aeolus-fleet#1318): two
+# plugins load in one session and share it, and an older one cannot confirm
+# what a newer one handed. Fails, touching nothing and logging once, when the
+# store was last written by a newer plugin; otherwise records this plugin's
+# version in an existing store. <store folder>
+aeolus_store_version_guard() {
+  local store="$1" mine owner identity
+  mine="$(aeolus_plugin_version)"
+  [ -n "$mine" ] && [ -d "$store" ] || return 0
+  owner="$(cat "$store/.version" 2>/dev/null)"
+  if [ -n "$owner" ] && [ "$owner" != "$mine" ] && [ "$(printf '%s\n%s\n' "$owner" "$mine" | sort -V | head -n 1)" = "$mine" ]; then
+    if [ "$(cat "$store/.older-logged" 2>/dev/null)" != "$mine" ]; then
+      printf '%s' "$mine" > "$store/.older-logged" 2>/dev/null
+      identity="$(aeolus_identity_file 2>/dev/null)" && aeolus_log "$identity" handover "left the store alone: a newer plugin owns it (${owner}, this one is ${mine})"
+    fi
+    return 1
+  fi
+  [ "$owner" = "$mine" ] || printf '%s' "$mine" > "$store/.version" 2>/dev/null
+  return 0
 }
 
 # Whether a text is a delivery id, so it can name a file of the store.
@@ -716,6 +750,7 @@ aeolus_store_put() {
   aeolus_is_delivery_id "$id" || return 1
   dir="$(aeolus_store_dir)" || return 1
   (umask 077 && mkdir -p "$dir") || return 1
+  aeolus_store_version_guard "$dir" || return 1
   if [ ! -f "$dir/$id.state" ]; then
     printf '%s' "$delivery" > "$dir/$id.json" || return 1
     aeolus_current_lease_key > "$dir/$id.lease" || return 1
