@@ -18,15 +18,15 @@ import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
  * last conversation; one ship per folder), and every later turn `codex exec
  * resume <thread id>`, which the hold starts for each line it is sent; between
  * turns no Codex process runs. Always without the question tool, and
- * `$aeolus-wake` sent to wake an idle session, each prompt with the line that
+ * `$aeolus-fleet-wake` sent to wake an idle session, each prompt with the line that
  * no human reads its terminal (#585). The identity and the turn marker go
- * through the aeolus plugin for Codex, in Codex's own plugin data folder,
+ * through the aeolus-fleet plugin for Codex, in Codex's own plugin data folder,
  * whose hooks run in `codex exec` as in a terminal. The plugin's new or
  * changed hooks are trusted before every launch: a plugin update changes them,
  * and Codex runs none it does not trust (#581).
  */
 
-export const WAKE_PROMPT = '$aeolus-wake';
+export const WAKE_PROMPT = '$aeolus-fleet-wake';
 
 /** Added to every launch, as mechanism: the turn's events as JSON lines, which the hold keeps (headless H13, H14). */
 const JSON_EVENTS = '--json';
@@ -126,7 +126,7 @@ export function createCodexHarness(options: {
   configuration: TrierarchConfiguration;
   plugin: AeolusPlugin;
   sessions: Pick<SessionRuntime, 'start' | 'send' | 'interrupt' | 'events'>;
-  /** Codex's own answers, where the aeolus plugin's hooks are trusted before each launch (#581). */
+  /** Codex's own answers, where the aeolus-fleet plugin's hooks are trusted before each launch (#581). */
   setup: Pick<CodexSetup, 'trustAeolusHooks'>;
   /** The program to run; `codex` unless a test runs another. */
   command?: string;

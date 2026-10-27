@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { freePort } from './support/free-port.js';
 
-// The aeolus plugin in a real interactive Claude Code session, driven in tmux
+// The aeolus-fleet plugin in a real interactive Claude Code session, driven in tmux
 // against a fleet on this machine and with no fleet MCP server: the session
 // crews a ship with the crew line, answers a message sent while it is idle
 // without anyone touching it, and does again after /clear. The watcher hands
@@ -21,7 +21,7 @@ import { freePort } from './support/free-port.js';
 // it runs only when AEOLUS_PLUGIN_E2E=1, never in CI.
 
 const isEnabled = process.env.AEOLUS_PLUGIN_E2E === '1';
-const PLUGIN_DIR = fileURLToPath(new URL('../plugins/aeolus', import.meta.url));
+const PLUGIN_DIR = fileURLToPath(new URL('../plugins/aeolus-fleet', import.meta.url));
 const TMUX_SESSION = 'aeolus-plugin-e2e';
 /** A session takes a while to start, think and call the fleet. */
 const SESSION_TIMEOUT_MS = 240_000;
@@ -140,7 +140,7 @@ async function waitForReply(messageId: MessageId) {
   return database.message.findFirstOrThrow({ where: { inReplyToMessageId: messageId, senderShipId: shipId } });
 }
 
-describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Claude Code session', () => {
+describe.skipIf(!isEnabled)('the aeolus-fleet plugin in an interactive Claude Code session', () => {
   beforeAll(async () => {
     const databaseUrl = await createMigratedDatabase();
     database = createPrismaClient(databaseUrl);
@@ -152,7 +152,7 @@ describe.skipIf(!isEnabled)('the aeolus plugin in an interactive Claude Code ses
     await server.listen({ host: '127.0.0.1', port });
     const commissioned = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'scout', type: 'reviewer' }));
     shipId = commissioned.shipId;
-    crewLine = `/aeolus:crew ${fleetUrl} ${shipId} ${commissioned.secret ?? ''}`;
+    crewLine = `/aeolus-fleet:crew ${fleetUrl} ${shipId} ${commissioned.secret ?? ''}`;
 
     folder = mkdtempSync(join(tmpdir(), 'aeolus-plugin-e2e-'));
     crews = mkdtempSync(join(tmpdir(), 'aeolus-plugin-e2e-crews-'));

@@ -82,9 +82,9 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
     const shipId = newId('ship');
     await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'read line; echo "got $line"; sleep 30'], harness: HARNESS });
 
-    await runtime.send({ shipId, line: '/aeolus:wake' });
+    await runtime.send({ shipId, line: '/aeolus-fleet:wake' });
 
-    await expect.poll(async () => shown(runtime, shipId), POLL).toContain('got /aeolus:wake');
+    await expect.poll(async () => shown(runtime, shipId), POLL).toContain('got /aeolus-fleet:wake');
   });
 
   it('reads no events for a ship with no session', async () => {

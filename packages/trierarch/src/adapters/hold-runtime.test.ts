@@ -196,7 +196,7 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
     const runtime = aRuntime();
     const shipId = await aClaudeCodeSession(runtime, ['--fail-login']);
 
-    await runtime.send({ shipId, line: userLine('/aeolus:wake') });
+    await runtime.send({ shipId, line: userLine('/aeolus-fleet:wake') });
 
     await expect.poll(async () => runtime.list()).toEqual([{ shipId, status: 'exited' }]);
     await expect(eventsOfType({ runtime: runtime, shipId: shipId }, 'result')).resolves.toEqual([expect.objectContaining({ is_error: true, result: 'Not logged in · Please run /login' })]);
@@ -326,7 +326,7 @@ describe('a Codex session held by a hold, one codex exec per turn (headless H11,
   /** A Codex session whose first turn ran the prompt given, ended. */
   async function aCodexSession(runtime: SessionRuntime, at: { flags?: readonly string[]; prompt?: string } = {}): Promise<ShipId> {
     const shipId = newId('ship');
-    await runtime.start({ shipId, folder, command: [...FAKE_CODEX, 'exec', ...(at.flags ?? []), '--json', '--', at.prompt ?? '$aeolus-wake'], harness: 'codex' });
+    await runtime.start({ shipId, folder, command: [...FAKE_CODEX, 'exec', ...(at.flags ?? []), '--json', '--', at.prompt ?? '$aeolus-fleet-wake'], harness: 'codex' });
     return shipId;
   }
 

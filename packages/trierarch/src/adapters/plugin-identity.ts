@@ -6,7 +6,7 @@ import type { ShipId } from '@aeolus-fleet/common';
 import type { HarnessPort, Turn } from '../core/ports.js';
 import { runCommand } from './run-command.js';
 
-/** The aeolus plugin as a harness installed it: its scripts, its data folder, and where its sessions' identities live. */
+/** The aeolus-fleet plugin as a harness installed it: its scripts, its data folder, and where its sessions' identities live. */
 export interface AeolusPlugin {
   /** Where the plugin's scripts are, resolved at each use: a plugin upgrade moves them to its new version's folder (#828). */
   readonly root: () => Promise<string>;
@@ -42,7 +42,7 @@ export interface PluginHandOver {
 }
 
 /**
- * A session's identity and turn, through the aeolus plugin's own
+ * A session's identity and turn, through the aeolus-fleet plugin's own
  * `aeolus-identity.sh`, never a copy of how the plugin names its files. The
  * same for every harness; each keeps them in a crews folder of its own. The
  * data folder goes along, so the script moves an identity an older plugin
@@ -96,7 +96,7 @@ export function createPluginIdentity(plugin: AeolusPlugin): Pick<HarnessPort, 'p
       const scripts = join(await plugin.root(), 'scripts');
       return access(join(scripts, 'aeolus-identity.sh')).then(
         () => undefined,
-        () => `the aeolus plugin's scripts are not at ${scripts}`,
+        () => `the aeolus-fleet plugin's scripts are not at ${scripts}`,
       );
     },
     sessionDied: async ({ folder }) => {

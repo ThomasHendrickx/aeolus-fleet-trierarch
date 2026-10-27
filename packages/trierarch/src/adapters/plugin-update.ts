@@ -10,7 +10,7 @@ import { runCommand } from './run-command.js';
 import { runningProcesses, type RunningProcess } from './running-processes.js';
 
 /**
- * The aeolus plugin updated through each harness's own command (#581), from
+ * The aeolus-fleet plugin updated through each harness's own command (#581), from
  * the release tag it is given, or main without one (#652): each harness's
  * aeolus-fleet marketplace is pointed at it first. Neither harness adds a
  * second source for a marketplace. Codex's is removed and added again, which
@@ -39,12 +39,34 @@ export interface PluginUpdate {
 
 const MARKETPLACE = 'aeolus-fleet';
 const REPOSITORY = 'ThomasHendrickx/aeolus-fleet-trierarch';
-const PLUGIN = 'aeolus@aeolus-fleet';
+const PLUGIN = 'aeolus-fleet@aeolus-fleet';
+const RENAMED_PLUGIN = 'aeolus@aeolus-fleet';
 
 async function run(command: string, args: readonly string[]): Promise<void> {
   const result = await runCommand(command, { args });
   if (result.status !== 0) {
     throw new Error(`${[command, ...args].join(' ')} failed: ${`${result.stdout}${result.stderr}`.trim()}`);
+  }
+}
+
+const installedPluginsSchema = z.array(z.object({ id: z.string() }));
+
+/** The ids of the plugins Claude Code has installed: `uninstall` of one it lacks exits 1, and `install` of one it has does not move it to the new version. */
+async function installedClaudePlugins(claude: string): Promise<ReadonlySet<string>> {
+  const args = ['plugin', 'list', '--json'];
+  const result = await runCommand(claude, { args });
+  const listed = result.status === 0 ? installedPluginsSchema.safeParse(parseJson(result.stdout)) : undefined;
+  if (listed?.success !== true) {
+    throw new Error(`${[claude, ...args].join(' ')} failed: ${`${result.stdout}${result.stderr}`.trim()}`);
+  }
+  return new Set(listed.data.map((plugin) => plugin.id));
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
   }
 }
 
@@ -160,13 +182,13 @@ export function createPluginUpdate(at: {
   const codex = at.commands?.codex ?? 'codex';
   const claude = at.commands?.['claude-code'] ?? 'claude';
   const claudeSettings = join(at.env.CLAUDE_CONFIG_DIR ?? join(at.homeDirectory, '.claude'), 'settings.json');
-  const codexCache = join(at.env.CODEX_HOME ?? join(at.homeDirectory, '.codex'), 'plugins', 'cache', MARKETPLACE, 'aeolus');
+  const codexCache = join(at.env.CODEX_HOME ?? join(at.homeDirectory, '.codex'), 'plugins', 'cache', MARKETPLACE, 'aeolus-fleet');
 
   return {
     update: async (harness, tag) => {
       if (harness === 'codex') {
         if (!(await codexKeepsPluginData(codex))) {
-          throw new Error(`Codex would delete the aeolus plugin's data on this machine, its log and the crew identities not yet moved to ~/.aeolus/crews, when its ${MARKETPLACE} marketplace is removed: the upgrade leaves the marketplace as it is`);
+          throw new Error(`Codex would delete the aeolus-fleet plugin's data on this machine, its log and the crew identities not yet moved to ~/.aeolus/crews, when its ${MARKETPLACE} marketplace is removed: the upgrade leaves the marketplace as it is`);
         }
         await keepingVersions(codexCache, {
           upgrade: async () => {
@@ -178,6 +200,8 @@ export function createPluginUpdate(at: {
             if ((await versionFolders(codexCache)).filter((name) => VERSION.test(name)).length === 0) {
               await run(codex, ['plugin', 'add', PLUGIN]);
             }
+            // Codex enables the renamed plugin until told otherwise, also once its marketplace entry is gone; removing one it lacks succeeds.
+            await run(codex, ['plugin', 'remove', RENAMED_PLUGIN]);
           },
           afterUpgrade: async (before) => {
             const upgradedAt = now();
@@ -190,7 +214,11 @@ export function createPluginUpdate(at: {
       await dropDeclaredMarketplace(claudeSettings);
       await run(claude, ['plugin', 'marketplace', 'add', tag === undefined ? REPOSITORY : `${REPOSITORY}#${tag}`]);
       await run(claude, ['plugin', 'marketplace', 'update', MARKETPLACE]);
-      await run(claude, ['plugin', 'update', PLUGIN]);
+      const installed = await installedClaudePlugins(claude);
+      await run(claude, ['plugin', installed.has(PLUGIN) ? 'update' : 'install', PLUGIN]);
+      if (installed.has(RENAMED_PLUGIN)) {
+        await run(claude, ['plugin', 'uninstall', RENAMED_PLUGIN]);
+      }
     },
   };
 }

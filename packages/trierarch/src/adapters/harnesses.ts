@@ -66,7 +66,7 @@ export async function commandLinesOf(at: { harness: string; flags: readonly stri
 
 /**
  * The adapters of the harnesses the configuration offers, by name, each with
- * the aeolus plugin its harness installed. A plugin is looked for only for a
+ * the aeolus-fleet plugin its harness installed. A plugin is looked for only for a
  * harness on offer, so a machine without Codex needs no Codex plugin. A
  * configured harness this trierarch has no adapter for is refused at start,
  * so no request for it is ever crewed.

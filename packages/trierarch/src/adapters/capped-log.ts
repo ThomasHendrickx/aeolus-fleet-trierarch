@@ -3,8 +3,8 @@ import { copyFileSync, fstatSync, mkdirSync, rmdirSync, statSync, truncateSync }
 import type { LogStream } from './log.js';
 
 /**
- * The trierarch's log file capped, by the rule the aeolus plugin's log follows
- * (plugins/aeolus/README.md, "The log"): before a record, a log that reached
+ * The trierarch's log file capped, by the rule the aeolus-fleet plugin's log follows
+ * (plugins/aeolus-fleet/README.md, "The log"): before a record, a log that reached
  * 1 MiB moves aside as `trierarch.log.1`, replacing an older one, and the
  * record starts a new log. On macOS launchd writes the log: it opened the file
  * for appending as the trierarch's stdout and stderr and keeps it open, so a

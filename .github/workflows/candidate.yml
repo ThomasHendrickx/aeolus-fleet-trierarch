@@ -69,7 +69,7 @@ jobs:
           gh run list --workflow ci.yml --commit "$GITHUB_SHA" --branch "$GITHUB_REF_NAME" --event push --json status,conclusion,url \
             | node scripts/release-gate.ts "$GITHUB_REF" "$GITHUB_SHA"
 
-      - name: Set the version on the trierarch and the aeolus plugin
+      - name: Set the version on the trierarch and the aeolus-fleet plugin
         env:
           VERSION: ${{ inputs.version }}
         run: npm run set-version -- "$VERSION"

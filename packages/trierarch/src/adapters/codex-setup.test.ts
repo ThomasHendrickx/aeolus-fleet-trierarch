@@ -16,9 +16,9 @@ let program: string;
 const requestSchema = z.object({ method: z.string(), params: z.unknown().optional() });
 
 const HOOKS = [
-  { key: 'aeolus@aeolus-fleet:hooks/hooks.json:stop:0:0', pluginId: 'aeolus@aeolus-fleet', currentHash: 'sha256:changed', trustStatus: 'modified' },
-  { key: 'aeolus@aeolus-fleet:hooks/hooks.json:user_prompt_submit:0:0', pluginId: 'aeolus@aeolus-fleet', currentHash: 'sha256:new', trustStatus: 'untrusted' },
-  { key: 'aeolus@aeolus-fleet:hooks/hooks.json:session_start:0:0', pluginId: 'aeolus@aeolus-fleet', currentHash: 'sha256:same', trustStatus: 'trusted' },
+  { key: 'aeolus-fleet@aeolus-fleet:hooks/hooks.json:stop:0:0', pluginId: 'aeolus-fleet@aeolus-fleet', currentHash: 'sha256:changed', trustStatus: 'modified' },
+  { key: 'aeolus-fleet@aeolus-fleet:hooks/hooks.json:user_prompt_submit:0:0', pluginId: 'aeolus-fleet@aeolus-fleet', currentHash: 'sha256:new', trustStatus: 'untrusted' },
+  { key: 'aeolus-fleet@aeolus-fleet:hooks/hooks.json:session_start:0:0', pluginId: 'aeolus-fleet@aeolus-fleet', currentHash: 'sha256:same', trustStatus: 'trusted' },
   { key: 'other@elsewhere:hooks/hooks.json:stop:0:0', pluginId: 'other@elsewhere', currentHash: 'sha256:other', trustStatus: 'untrusted' },
 ];
 
@@ -98,17 +98,17 @@ describe("Codex's one-time questions, answered ahead through its app server", ()
     ]);
   });
 
-  it("trusts the aeolus plugin's hooks that are new or changed, with the hash Codex gives them, and no other plugin's", async () => {
+  it("trusts the aeolus-fleet plugin's hooks that are new or changed, with the hash Codex gives them, and no other plugin's", async () => {
     const trusted = await anAppServer().trustAeolusHooks('/home/thomas/.aeolus/trierarch/worktrees');
 
-    expect(trusted).toEqual(['aeolus@aeolus-fleet:hooks/hooks.json:stop:0:0', 'aeolus@aeolus-fleet:hooks/hooks.json:user_prompt_submit:0:0']);
+    expect(trusted).toEqual(['aeolus-fleet@aeolus-fleet:hooks/hooks.json:stop:0:0', 'aeolus-fleet@aeolus-fleet:hooks/hooks.json:user_prompt_submit:0:0']);
     expect(requests('hooks/list')).toEqual([{ cwds: ['/home/thomas/.aeolus/trierarch/worktrees'] }]);
     expect(requests('config/batchWrite')).toEqual([
       {
         edits: [
           {
             keyPath: 'hooks.state',
-            value: { 'aeolus@aeolus-fleet:hooks/hooks.json:stop:0:0': { trusted_hash: 'sha256:changed' }, 'aeolus@aeolus-fleet:hooks/hooks.json:user_prompt_submit:0:0': { trusted_hash: 'sha256:new' } },
+            value: { 'aeolus-fleet@aeolus-fleet:hooks/hooks.json:stop:0:0': { trusted_hash: 'sha256:changed' }, 'aeolus-fleet@aeolus-fleet:hooks/hooks.json:user_prompt_submit:0:0': { trusted_hash: 'sha256:new' } },
             mergeStrategy: 'upsert',
           },
         ],

@@ -52,6 +52,14 @@ const stateSchema = z.object({
   lowResources: z.array(z.enum(LOW_RESOURCES)).optional(),
   missingPlugins: z.array(z.string()).optional(),
   passFailure: z.object({ reason: z.string(), since: z.string() }).optional(),
+  failedStarts: z
+    .object({
+      shipIds: z.array(idSchema('ship')),
+      reason: z.string(),
+      at: z.string(),
+      stopped: z.object({ since: z.string(), configuration: z.string() }).optional(),
+    })
+    .optional(),
 });
 
 /** The 0.17 state file: it alone kept the messages it applied. */

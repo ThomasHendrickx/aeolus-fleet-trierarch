@@ -47,7 +47,7 @@ export interface InitReport {
   readonly isSkipPermissionsAccepted: boolean;
   /** The repositories and folders Codex now trusts, when the configuration offers Codex. */
   readonly codexTrusted: readonly string[];
-  /** The aeolus plugin's hooks Codex trusts since this run, by key. */
+  /** The aeolus-fleet plugin's hooks Codex trusts since this run, by key. */
   readonly codexHooksTrusted: readonly string[];
   readonly service: 'installed' | 'restarted' | 'unchanged' | 'notInstalled';
   readonly said: readonly string[];
@@ -486,7 +486,7 @@ async function setUpClaudeCode(at: {
 /**
  * Codex's one-time questions, answered ahead on every run where the
  * configuration offers Codex: each repository and folder trusted (a folder
- * added since among them), and the aeolus plugin's hooks, which a plugin
+ * added since among them), and the aeolus-fleet plugin's hooks, which a plugin
  * update changes. When Codex cannot be set up, init says so and goes on.
  */
 async function setUpCodex(at: { configuration: TrierarchConfiguration; codex: CodexSetup; root: string }): Promise<{ trusted: readonly string[]; hooksTrusted: readonly string[]; said: readonly string[] }> {
@@ -503,7 +503,7 @@ async function setUpCodex(at: { configuration: TrierarchConfiguration; codex: Co
       hooksTrusted,
       said: [
         ...(folders.length > 0 ? [`Codex trusts each configured repository and folder, so a session there, or in a worktree of one, starts with no trust question: ${folders.join(', ')}.`] : []),
-        hooksTrusted.length > 0 ? `Codex trusts the aeolus plugin's ${String(hooksTrusted.length)} new or changed hooks.` : "Codex trusts the aeolus plugin's hooks already.",
+        hooksTrusted.length > 0 ? `Codex trusts the aeolus-fleet plugin's ${String(hooksTrusted.length)} new or changed hooks.` : "Codex trusts the aeolus-fleet plugin's hooks already.",
       ],
     };
   } catch (error) {

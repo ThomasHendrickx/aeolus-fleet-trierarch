@@ -106,8 +106,8 @@ class FakeService implements Pick<Service, 'install' | 'rewrite' | 'restart' | '
 class FakeCodexSetup implements CodexSetup {
   readonly trusted: string[] = [];
   readonly hooks = new Map<string, 'trusted' | 'untrusted'>([
-    ['aeolus@aeolus-fleet:hooks/hooks.json:stop:0:0', 'untrusted'],
-    ['aeolus@aeolus-fleet:hooks/hooks.json:user_prompt_submit:0:0', 'untrusted'],
+    ['aeolus-fleet@aeolus-fleet:hooks/hooks.json:stop:0:0', 'untrusted'],
+    ['aeolus-fleet@aeolus-fleet:hooks/hooks.json:user_prompt_submit:0:0', 'untrusted'],
   ]);
   isMissing = false;
 
@@ -736,7 +736,7 @@ describe('aeolus-trierarch init, for Codex', () => {
     expect(report.codexTrusted).toEqual([repository, join(home, 'notes')]);
   });
 
-  it("trusts the aeolus plugin's hooks for Codex, so its sessions mark their turns and the trierarch can wake them", async () => {
+  it("trusts the aeolus-fleet plugin's hooks for Codex, so its sessions mark their turns and the trierarch can wake them", async () => {
     withCodex();
 
     const report = await init({ isYes: true });

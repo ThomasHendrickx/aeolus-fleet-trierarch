@@ -74,7 +74,7 @@ export default defineConfig({
         test: {
           // The aeolus Claude Code plugin's bash scripts, run against a stub fleet.
           name: 'plugin:unit',
-          root: 'plugins/aeolus',
+          root: 'plugins/aeolus-fleet',
           include: ['test/**/*.test.ts'],
           exclude: [...configDefaults.exclude, '**/*.integration.test.ts'],
           setupFiles: ['test/foreign-harness.setup.ts'],
@@ -96,9 +96,9 @@ export default defineConfig({
       {
         extends: true,
         test: {
-          // The aeolus plugin's bash scripts against a real fleet server, in the shared container.
+          // The aeolus-fleet plugin's bash scripts against a real fleet server, in the shared container.
           name: 'plugin:integration',
-          root: 'plugins/aeolus',
+          root: 'plugins/aeolus-fleet',
           include: ['test/**/*.integration.test.ts'],
           setupFiles: ['test/foreign-harness.setup.ts'],
           globalSetup: [postgresGlobalSetup],
@@ -109,7 +109,7 @@ export default defineConfig({
       {
         extends: true,
         test: {
-          // The aeolus plugin in a real Claude Code or Codex session, against a
+          // The aeolus-fleet plugin in a real Claude Code or Codex session, against a
           // fleet on this machine. Each file runs only when its variable is set
           // (AEOLUS_PLUGIN_E2E, AEOLUS_PLUGIN_CODEX_E2E), never in CI.
           name: 'plugin:e2e',

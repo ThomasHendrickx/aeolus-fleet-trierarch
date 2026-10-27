@@ -17,7 +17,7 @@ import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
 /**
  * Claude Code as a harness (docs/architecture.md, "First adapters"): `claude`
  * in the folder, `--continue` on a restart when the folder has a conversation
- * to continue, `/aeolus:wake` sent to wake an idle session, each prompt with
+ * to continue, `/aeolus-fleet:wake` sent to wake an idle session, each prompt with
  * the line that no human reads its terminal (#585). On the host it runs
  * headless (headless H11): one long-lived `claude -p` taking user messages as
  * stream-json lines on stdin, each prompt one line, a busy turn stopped by its
@@ -43,7 +43,7 @@ import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
  * (decision 0039).
  */
 
-export const WAKE_PROMPT = '/aeolus:wake';
+export const WAKE_PROMPT = '/aeolus-fleet:wake';
 
 /** The variable a session's launch id is passed in, for the plugin's hooks to mark that launch (#490). */
 export const LAUNCH_VARIABLE = 'AEOLUS_LAUNCH';

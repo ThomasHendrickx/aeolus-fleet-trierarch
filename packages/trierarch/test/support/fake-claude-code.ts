@@ -14,7 +14,7 @@
  *
  * Its flags: `--refuse-interrupt` answers the control request with an error;
  * `--fail-login` answers its first turn as Claude Code does without a login,
- * then exits 1; `--plugin <root> <data>` runs the aeolus plugin's hooks from
+ * then exits 1; `--plugin <root> <data>` runs the aeolus-fleet plugin's hooks from
  * that root as Claude Code runs them: SessionStart, UserPromptSubmit (its
  * output added to the turn), a first tool call, Stop.
  */

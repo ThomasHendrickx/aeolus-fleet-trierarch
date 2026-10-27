@@ -1,8 +1,9 @@
 import { CREW_REQUEST_REASON_MAX_LENGTH, type ShipId } from '@aeolus-fleet/common';
 
 import { putEntry, removeEntry, withState, type Entry, type Orphan, type TrierarchState } from './entry.js';
-import { crashText, discardedText, identityGoneText, modelRefusedText, ownerUnreachableText, settingsRefusedText } from './argo-reports.js';
+import { crashText, discardedText, identityGoneText, modelRefusedText, ownerUnreachableText, settingsRefusedText, stoppedOfferingText } from './argo-reports.js';
 import { MODEL_OPTION } from './detected-options.js';
+import { countStart, PROBE_AFTER_MINUTES, withConfiguration, type StartOutcome } from './failed-starts.js';
 import type { Checkout, CheckoutsPort, FleetPort, FolderProcessesPort, HarnessPort, LaunchSeen, LoggedAction, Logger, SessionRuntime, ShipSocketsPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { HOLDS_IDENTITY, reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
 import type { RefuseModel } from './refuse-model.js';
@@ -67,8 +68,10 @@ export function createRunPass(deps: RunPassDeps): RunPass {
       const trusted = await deps.trust.trusted();
       const versions = Object.fromEntries(Object.entries(deps.setup.detected ?? {}).flatMap(([harness, found]) => (found === undefined ? [] : [[harness, found.version]])));
       const reconciled = reconcile(state, { requests, clears, observed, now: deps.clock.now(), configuration: deps.setup.configuration, trusted, versions, marksLaunches, missingPlugins });
-      state = succeeded(reconciled.state, missingPlugins);
+      const counted = countStarts(succeeded(reconciled.state, missingPlugins), { outcomes: reconciled.outcomes, deps });
+      state = counted.state;
       await deps.state.save(state);
+      await tellStopped(state, { isNewlyStopped: counted.isNewlyStopped, deps });
       actions = reconciled.actions;
     } catch (error) {
       deps.logger.warn(`The pass failed: ${reasonOf(error)}; ${NEXT_AFTER_FAILURE}`);
@@ -85,7 +88,7 @@ export function createRunPass(deps: RunPassDeps): RunPass {
   };
 }
 
-/** Whether each harness's aeolus plugin marks launches, and which harnesses have no plugin to ask (#1212): one missing never fails the pass for the others. */
+/** Whether each harness's aeolus-fleet plugin marks launches, and which harnesses have no plugin to ask (#1212): one missing never fails the pass for the others. */
 async function launchMarks(deps: RunPassDeps): Promise<{ marksLaunches: Record<string, boolean>; missingPlugins: Set<string> }> {
   const marksLaunches: Record<string, boolean> = {};
   const missingPlugins = new Set<string>();
@@ -95,7 +98,7 @@ async function launchMarks(deps: RunPassDeps): Promise<{ marksLaunches: Record<s
         marksLaunches[harness] = await port.marksLaunches();
       } catch (error) {
         missingPlugins.add(harness);
-        deps.logger.warn(`The aeolus plugin for ${harness} cannot be used: ${reasonOf(error)}; its requests are given back until it is installed (aeolus-trierarch upgrade)`);
+        deps.logger.warn(`The aeolus-fleet plugin for ${harness} cannot be used: ${reasonOf(error)}; its requests are given back until it is installed (aeolus-trierarch upgrade)`);
       }
     }),
   );
@@ -106,6 +109,45 @@ async function launchMarks(deps: RunPassDeps): Promise<{ marksLaunches: Record<s
 function succeeded(state: TrierarchState, missingPlugins: ReadonlySet<string>): TrierarchState {
   // Every other field of the state (what the machine is low on, #400) stays as the pass found it.
   return { ...state, passFailure: undefined, missingPlugins: missingPlugins.size > 0 ? [...missingPlugins].sort() : undefined };
+}
+
+/**
+ * The machine's failed starts after this pass's (#853): a trierarch started
+ * with another configuration than it stopped with counts afresh, then each
+ * launch window that closed is counted in turn. Answers whether they stopped
+ * the machine offering itself now, so argo is told once.
+ */
+function countStarts(state: TrierarchState, at: { outcomes: readonly StartOutcome[]; deps: RunPassDeps }): { state: TrierarchState; isNewlyStopped: boolean } {
+  const { outcomes, deps } = at;
+  const configuration = configurationOf(deps);
+  let failedStarts = withConfiguration(state.failedStarts, configuration);
+  let isNewlyStopped = false;
+  for (const outcome of outcomes) {
+    const counted = countStart(failedStarts, { outcome, now: deps.clock.now(), configuration });
+    failedStarts = counted.failedStarts;
+    isNewlyStopped ||= counted.isNewlyStopped;
+  }
+  return { state: { ...state, failedStarts }, isNewlyStopped };
+}
+
+/** The configuration as its file gives it, as a failed start keeps it: another one offers the machine again (#853). */
+function configurationOf(deps: RunPassDeps): string {
+  return JSON.stringify(deps.setup.configured);
+}
+
+/** Tells argo, once per stop, that the machine stopped offering itself, with the last reason (#853); a failure to tell is logged, and the pass goes on. */
+async function tellStopped(state: TrierarchState, at: { isNewlyStopped: boolean; deps: RunPassDeps }): Promise<void> {
+  const { isNewlyStopped, deps } = at;
+  const { failedStarts } = state;
+  if (!isNewlyStopped || failedStarts?.stopped === undefined) {
+    return;
+  }
+  deps.logger.warn(`The machine stops offering itself: the starts of ${String(failedStarts.shipIds.length)} ships failed in a row, last: ${failedStarts.reason}; it offers itself again ${String(PROBE_AFTER_MINUTES)} minutes after its last failed start`);
+  try {
+    await deps.fleet.reportToArgo({ text: stoppedOfferingText(failedStarts), idempotencyKey: `trierarch:stopped-offering:${failedStarts.stopped.since}` });
+  } catch (error) {
+    deps.logger.warn(`Could not tell argo the machine stopped offering itself: ${reasonOf(error)}`);
+  }
 }
 
 /**
@@ -137,15 +179,21 @@ async function failed(at: { action: Action; deps: RunPassDeps; reason: string })
 /** A failed crew, counted against its settings version: the last one of the budget gives the request back (#827). */
 async function crewFailed(state: TrierarchState, at: EntryAt & { reason: string }): Promise<TrierarchState> {
   const { entry, deps, reason } = at;
+  // Every failed crew is a failed start of the machine's too (#853).
+  const counted = countStarts(state, { outcomes: [{ kind: 'failed', shipId: entry.shipId, reason }], deps });
+  state = counted.state;
   const crewFailures = (entry.crewFailures ?? 0) + 1;
   const logged = { ...about(state, { shipId: entry.shipId, action: 'crew' }), outcome: `failed: ${reason}` };
   if (crewFailures < CREW_FAILURE_BUDGET) {
     const next = putEntry(state, { ...entry, crewFailures });
     await deps.state.save(next);
     log(deps, { ...logged, next: NEXT_AFTER_FAILURE });
+    await tellStopped(next, { isNewlyStopped: counted.isNewlyStopped, deps });
     return next;
   }
   log(deps, { ...logged, next: `failed ${String(CREW_FAILURE_BUDGET)} times in a row, so the trierarch gives it back` });
+  await deps.state.save(state);
+  await tellStopped(state, { isNewlyStopped: counted.isNewlyStopped, deps });
   const given = `crew failed ${String(CREW_FAILURE_BUDGET)} times: ${reason}`;
   return giveBack(state, { action: { kind: 'giveBack', shipId: entry.shipId, settingsVersion: entry.settingsVersion, reason: given, entry }, deps });
 }

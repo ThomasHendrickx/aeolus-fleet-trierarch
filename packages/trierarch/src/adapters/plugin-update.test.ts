@@ -29,10 +29,10 @@ function hoursAgo(hours: number): Date {
 }
 
 function codexCache(codexHome = join(home, '.codex')): string {
-  return join(codexHome, 'plugins', 'cache', 'aeolus-fleet', 'aeolus');
+  return join(codexHome, 'plugins', 'cache', 'aeolus-fleet', 'aeolus-fleet');
 }
 
-/** A version of the aeolus plugin for Codex, as Codex installs it, with a script a running session uses. */
+/** A version of the aeolus-fleet plugin for Codex, as Codex installs it, with a script a running session uses. */
 function aCodexVersion(version: string, at: { cache?: string; installedAt?: Date } = {}): void {
   const { cache = codexCache(), installedAt = hoursAgo(24) } = at;
   mkdirSync(join(cache, version, 'scripts'), { recursive: true });
@@ -76,6 +76,16 @@ mkdirSync(join(cache, ${JSON.stringify(to)}, 'scripts'), { recursive: true });
 writeFileSync(join(cache, ${JSON.stringify(to)}, 'scripts', 'aeolus-fleet.sh'), '# ${to}\\n');`);
 }
 
+/** `code` that makes the stand-in answer `claude plugin list --json` with the plugins `ids`. */
+function claudeListing(ids: readonly string[]): string {
+  return `if (process.argv[2] === 'plugin' && process.argv[3] === 'list') process.stdout.write(${JSON.stringify(JSON.stringify(ids.map((id) => ({ id, scope: 'user' }))))});`;
+}
+
+/** A Claude Code that has the plugins `ids` installed. */
+function claudeHas(...ids: string[]): void {
+  aProgram(claude, { then: claudeListing(ids) });
+}
+
 /** Claude Code's user settings in `configDirectory`. */
 function aSettingsFile(configDirectory: string, settings: Record<string, unknown>): void {
   mkdirSync(configDirectory, { recursive: true });
@@ -115,7 +125,7 @@ beforeEach(() => {
   log = join(home, 'ran.log');
   codex = join(home, 'codex');
   claude = join(home, 'claude');
-  aProgram(claude);
+  aProgram(claude, { then: claudeListing([]) });
   processes = [];
   trierarchPid = undefined;
 });
@@ -124,14 +134,14 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-describe('the aeolus plugin update for Codex', () => {
+describe('the aeolus-fleet plugin update for Codex', () => {
   it("runs Codex's own plugin upgrade for the aeolus-fleet marketplace", async () => {
     aCodexVersion('0.21.0');
     aProgram(codex, { then: codexUpgrading('0.22.0') });
 
     await update().update('codex', 'v0.23.0');
 
-    expect(ran().at(-1)).toBe('codex plugin marketplace upgrade aeolus-fleet');
+    expect(ran().at(-2)).toBe('codex plugin marketplace upgrade aeolus-fleet');
   });
 
   it("points Codex's aeolus-fleet marketplace at the release tag it is given before the upgrade, adding it again since Codex adds no second source (#652)", async () => {
@@ -139,7 +149,7 @@ describe('the aeolus plugin update for Codex', () => {
 
     await update().update('codex', 'v0.23.0');
 
-    expect(ran()).toEqual(['codex plugin marketplace remove aeolus-fleet', 'codex plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch --ref v0.23.0', 'codex plugin marketplace upgrade aeolus-fleet']);
+    expect(ran()).toEqual(['codex plugin marketplace remove aeolus-fleet', 'codex plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch --ref v0.23.0', 'codex plugin marketplace upgrade aeolus-fleet', 'codex plugin remove aeolus@aeolus-fleet']);
   });
 
   it('installs the plugin when the upgrade left Codex with none, as when its cache folder was emptied (#1212)', async () => {
@@ -147,7 +157,7 @@ describe('the aeolus plugin update for Codex', () => {
 
     await update().update('codex', 'v0.23.0');
 
-    expect(ran().slice(-2)).toEqual(['codex plugin marketplace upgrade aeolus-fleet', 'codex plugin add aeolus@aeolus-fleet']);
+    expect(ran().slice(-3)).toEqual(['codex plugin marketplace upgrade aeolus-fleet', 'codex plugin add aeolus-fleet@aeolus-fleet', 'codex plugin remove aeolus@aeolus-fleet']);
   });
 
   it('installs nothing beyond the upgrade when Codex has the plugin after it (#1212)', async () => {
@@ -156,13 +166,13 @@ describe('the aeolus plugin update for Codex', () => {
 
     await update().update('codex', 'v0.23.0');
 
-    expect(ran()).not.toContain('codex plugin add aeolus@aeolus-fleet');
+    expect(ran()).not.toContain('codex plugin add aeolus-fleet@aeolus-fleet');
   });
 
   it('says what Codex said when it cannot install the plugin (#1212)', async () => {
     aProgram(codex, { then: "if (probe === '' && process.argv[3] === 'add' && process.argv[2] === 'plugin') { process.stderr.write('Error: plugin not found in aeolus-fleet'); process.exit(1); }" });
 
-    await expect(update().update('codex', 'v0.23.0')).rejects.toThrow('codex plugin add aeolus@aeolus-fleet failed: Error: plugin not found in aeolus-fleet');
+    await expect(update().update('codex', 'v0.23.0')).rejects.toThrow('codex plugin add aeolus-fleet@aeolus-fleet failed: Error: plugin not found in aeolus-fleet');
   });
 
   it("points Codex's aeolus-fleet marketplace at main when it is given no tag (#652)", async () => {
@@ -178,7 +188,7 @@ describe('the aeolus plugin update for Codex', () => {
 
     await update().update('codex', 'v0.23.0');
 
-    expect(ran().at(-1)).toBe('codex plugin marketplace upgrade aeolus-fleet');
+    expect(ran().at(-2)).toBe('codex plugin marketplace upgrade aeolus-fleet');
   });
 
   it("says what Codex said when it cannot add the marketplace, and upgrades nothing (#652)", async () => {
@@ -333,7 +343,7 @@ describe('the aeolus plugin update for Codex', () => {
     expect(readdirSync(codexCache()).sort()).toEqual(['0.20.5', '0.21.0']);
   });
 
-  it("proves Codex keeps the aeolus plugin's data before it removes the aeolus-fleet marketplace (#660)", async () => {
+  it("proves Codex keeps the aeolus-fleet plugin's data before it removes the aeolus-fleet marketplace (#660)", async () => {
     aProgram(codex);
 
     await update().update('codex', 'v0.23.0');
@@ -342,36 +352,117 @@ describe('the aeolus plugin update for Codex', () => {
     expect(beforeRemove).toContain('probe: codex plugin marketplace remove aeolus-fleet');
   });
 
-  it("refuses to remove the aeolus-fleet marketplace when Codex would delete the aeolus plugin's data with it, its log and the crew identities not yet moved to ~/.aeolus/crews, and changes nothing (#660, #679)", async () => {
+  it("refuses to remove the aeolus-fleet marketplace when Codex would delete the aeolus-fleet plugin's data with it, its log and the crew identities not yet moved to ~/.aeolus/crews, and changes nothing (#660, #679)", async () => {
     aCodexVersion('0.21.0');
     aProgram(codex, { then: DELETES_DATA_ON_REMOVE });
 
-    await expect(update().update('codex', 'v0.23.0')).rejects.toThrow("Codex would delete the aeolus plugin's data on this machine, its log and the crew identities not yet moved to ~/.aeolus/crews, when its aeolus-fleet marketplace is removed: the upgrade leaves the marketplace as it is");
+    await expect(update().update('codex', 'v0.23.0')).rejects.toThrow("Codex would delete the aeolus-fleet plugin's data on this machine, its log and the crew identities not yet moved to ~/.aeolus/crews, when its aeolus-fleet marketplace is removed: the upgrade leaves the marketplace as it is");
     expect(ran()).toEqual([]);
     expect(readdirSync(codexCache())).toEqual(['0.21.0']);
   });
 
   it('changes nothing when Codex cannot run the proof, saying what Codex said (#660)', async () => {
-    aProgram(codex, { then: "if (process.argv.slice(2).join(' ') === 'plugin add aeolus@aeolus-fleet') { process.stderr.write('Error: plugin aeolus not found'); process.exit(1); }" });
+    aProgram(codex, { then: "if (process.argv.slice(2).join(' ') === 'plugin add aeolus-fleet@aeolus-fleet') { process.stderr.write('Error: plugin aeolus not found'); process.exit(1); }" });
 
-    await expect(update().update('codex', 'v0.23.0')).rejects.toThrow('codex plugin add aeolus@aeolus-fleet failed: Error: plugin aeolus not found');
+    await expect(update().update('codex', 'v0.23.0')).rejects.toThrow('codex plugin add aeolus-fleet@aeolus-fleet failed: Error: plugin aeolus not found');
     expect(ran()).toEqual([]);
   });
 
-  it('runs the upgrade where Codex has no aeolus plugin version yet', async () => {
+  it('runs the upgrade where Codex has no aeolus-fleet plugin version yet', async () => {
     aProgram(codex, { then: codexUpgrading('0.22.0') });
 
     await update().update('codex', 'v0.23.0');
 
-    expect(ran().at(-1)).toBe('codex plugin marketplace upgrade aeolus-fleet');
+    expect(ran().at(-2)).toBe('codex plugin marketplace upgrade aeolus-fleet');
   });
 });
 
-describe('the aeolus plugin update for Claude Code', () => {
-  it("points Claude Code's aeolus-fleet marketplace at the release tag it is given, updates it, then the aeolus plugin from it (#652)", async () => {
-    await update().update('claude-code', 'v0.23.0');
+/** `code` that makes the stand-in keep the plugins Codex has enabled in `enabled`, one id a line, as `plugin add` and `plugin remove` change them; it starts with `ids`. */
+function codexEnabling(ids: readonly string[], enabled: string): string {
+  writeFileSync(enabled, ids.map((id) => `${id}\n`).join(''));
+  return `if (probe === '' && process.argv[2] === 'plugin' && (process.argv[3] === 'add' || process.argv[3] === 'remove')) {
+  const { readFileSync } = require('node:fs');
+  const others = readFileSync(${JSON.stringify(enabled)}, 'utf8').split('\\n').filter((id) => id !== '' && id !== process.argv[4]);
+  writeFileSync(${JSON.stringify(enabled)}, (process.argv[3] === 'add' ? [...others, process.argv[4]] : others).map((id) => id + '\\n').join(''));
+}`;
+}
 
-    expect(ran()).toEqual(['claude plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch#v0.23.0', 'claude plugin marketplace update aeolus-fleet', 'claude plugin update aeolus@aeolus-fleet']);
+function enabledIn(enabled: string): string[] {
+  return readFileSync(enabled, 'utf8').split('\n').filter((id) => id !== '');
+}
+
+describe('the aeolus-fleet plugin update for Codex across the plugin rename (#1320)', () => {
+  it('leaves only the aeolus-fleet plugin enabled where Codex has the renamed aeolus plugin beside it', async () => {
+    const enabled = join(home, 'enabled.txt');
+    aCodexVersion('0.31.0');
+    aProgram(codex, { then: `${codexEnabling(['aeolus@aeolus-fleet', 'aeolus-fleet@aeolus-fleet'], enabled)}\n${codexUpgrading('0.32.2')}` });
+
+    await update().update('codex', 'v0.32.2');
+
+    expect(enabledIn(enabled)).toEqual(['aeolus-fleet@aeolus-fleet']);
+    expect(readdirSync(codexCache())).toContain('0.32.2');
+  });
+
+  it('succeeds where Codex never had the renamed aeolus plugin', async () => {
+    const enabled = join(home, 'enabled.txt');
+    aCodexVersion('0.31.0');
+    aProgram(codex, { then: `${codexEnabling(['aeolus-fleet@aeolus-fleet'], enabled)}\n${codexUpgrading('0.32.2')}` });
+
+    await update().update('codex', 'v0.32.2');
+
+    expect(enabledIn(enabled)).toEqual(['aeolus-fleet@aeolus-fleet']);
+  });
+
+  it('succeeds again on a second upgrade', async () => {
+    const enabled = join(home, 'enabled.txt');
+    aCodexVersion('0.31.0');
+    aProgram(codex, { then: `${codexEnabling(['aeolus@aeolus-fleet', 'aeolus-fleet@aeolus-fleet'], enabled)}\n${codexUpgrading('0.32.2')}` });
+
+    await update().update('codex', 'v0.32.2');
+    await update().update('codex', 'v0.32.2');
+
+    expect(enabledIn(enabled)).toEqual(['aeolus-fleet@aeolus-fleet']);
+  });
+
+  it('says what Codex said when it cannot remove the renamed aeolus plugin', async () => {
+    aProgram(codex, { then: "if (probe === '' && process.argv[3] === 'remove' && process.argv[2] === 'plugin') { process.stderr.write('Error: could not write config.toml'); process.exit(1); }" });
+
+    await expect(update().update('codex', 'v0.32.2')).rejects.toThrow('codex plugin remove aeolus@aeolus-fleet failed: Error: could not write config.toml');
+  });
+});
+
+describe('the aeolus-fleet plugin update for Claude Code', () => {
+  it('installs the aeolus-fleet plugin where it is absent, and removes the renamed aeolus plugin where it is installed (#1312)', async () => {
+    claudeHas('aeolus@aeolus-fleet');
+
+    await update().update('claude-code', 'v0.32.0');
+
+    expect(ran()).toEqual([
+      'claude plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch#v0.32.0',
+      'claude plugin marketplace update aeolus-fleet',
+      'claude plugin list --json',
+      'claude plugin install aeolus-fleet@aeolus-fleet',
+      'claude plugin uninstall aeolus@aeolus-fleet',
+    ]);
+  });
+
+  it('updates the aeolus-fleet plugin where it is installed, as an ordinary upgrade does, and uninstalls nothing where the renamed aeolus plugin is absent (#1312)', async () => {
+    claudeHas('aeolus-fleet@aeolus-fleet');
+
+    await update().update('claude-code', 'v0.32.1');
+
+    expect(ran()).toEqual([
+      'claude plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch#v0.32.1',
+      'claude plugin marketplace update aeolus-fleet',
+      'claude plugin list --json',
+      'claude plugin update aeolus-fleet@aeolus-fleet',
+    ]);
+  });
+
+  it('installs the aeolus-fleet plugin on a machine that never had the renamed aeolus plugin, uninstalling nothing (#1312)', async () => {
+    await update().update('claude-code', 'v0.32.0');
+
+    expect(ran().slice(3)).toEqual(['claude plugin install aeolus-fleet@aeolus-fleet']);
   });
 
   it("points Claude Code's aeolus-fleet marketplace at main when it is given no tag (#652)", async () => {
@@ -409,8 +500,8 @@ describe('the aeolus plugin update for Claude Code', () => {
   });
 
   it('says what Claude Code said when its update fails', async () => {
-    aProgram(claude, { status: 1, stderr: 'Plugin "aeolus@aeolus-fleet" is not installed\n' });
+    aProgram(claude, { status: 1, stderr: 'Plugin "aeolus-fleet@aeolus-fleet" is not installed\n' });
 
-    await expect(update().update('claude-code', 'v0.23.0')).rejects.toThrow('claude plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch#v0.23.0 failed: Plugin "aeolus@aeolus-fleet" is not installed');
+    await expect(update().update('claude-code', 'v0.23.0')).rejects.toThrow('claude plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch#v0.23.0 failed: Plugin "aeolus-fleet@aeolus-fleet" is not installed');
   });
 });
