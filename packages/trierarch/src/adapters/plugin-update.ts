@@ -200,6 +200,8 @@ export function createPluginUpdate(at: {
             if ((await versionFolders(codexCache)).filter((name) => VERSION.test(name)).length === 0) {
               await run(codex, ['plugin', 'add', PLUGIN]);
             }
+            // Codex enables the renamed plugin until told otherwise, also once its marketplace entry is gone; removing one it lacks succeeds.
+            await run(codex, ['plugin', 'remove', RENAMED_PLUGIN]);
           },
           afterUpgrade: async (before) => {
             const upgradedAt = now();
