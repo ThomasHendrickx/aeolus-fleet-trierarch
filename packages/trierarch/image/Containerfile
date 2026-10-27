@@ -22,7 +22,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
  && apt-get install --yes --no-install-recommends \
-      ca-certificates curl git gnupg jq less openssh-client tmux tini \
+      ca-certificates curl gh git gnupg jq less openssh-client tmux tini \
       podman uidmap fuse-overlayfs slirp4netns passt \
  && curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
  && apt-get install --yes --no-install-recommends nodejs \
