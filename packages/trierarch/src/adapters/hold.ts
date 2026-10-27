@@ -230,7 +230,7 @@ export async function runHold(options: HoldOptions): Promise<number> {
   };
 
   /** Codex's next turn, once the last turn's process has ended: a codex exec resume of the session's thread (H11). */
-  const sendCodex = async (line: string): Promise<HoldAnswer> => {
+  const startCodexTurn = async (line: string): Promise<HoldAnswer> => {
     if (sessionId === undefined) {
       return { isOk: false, error: 'Codex named no thread to resume yet' };
     }
@@ -243,6 +243,15 @@ export async function runHold(options: HoldOptions): Promise<number> {
     isBusy = true;
     child = startHarness(codexTurnCommand({ start: options.command, threadId: sessionId, line }));
     return { isOk: true };
+  };
+
+  /** The lines in the order they came: one waits for the one before, so two never start a codex exec resume on one thread. */
+  let lastCodexSend: Promise<unknown> = Promise.resolve();
+  const sendCodex = (line: string): Promise<HoldAnswer> => {
+    const sent = lastCodexSend.then(() => startCodexTurn(line));
+    // A failed send must not hold back the lines after it.
+    lastCodexSend = sent.catch(() => undefined);
+    return sent;
   };
 
   const interrupt = async (): Promise<void> => {
