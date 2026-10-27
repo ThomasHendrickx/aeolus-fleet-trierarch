@@ -379,10 +379,15 @@ describe('the aeolus-fleet plugin update for Claude Code', () => {
     ]);
   });
 
-  it("points Claude Code's aeolus-fleet marketplace at the release tag it is given, updates it, then the aeolus-fleet plugin from it (#652)", async () => {
-    await update().update('claude-code', 'v0.23.0');
+  it("points Claude Code's aeolus-fleet marketplace at the release tag it is given, then installs the aeolus-fleet plugin from it (#652)", async () => {
+    await update().update('claude-code', 'v0.32.0');
 
-    expect(ran()).toEqual(['claude plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch#v0.23.0', 'claude plugin marketplace update aeolus-fleet', 'claude plugin update aeolus-fleet@aeolus-fleet']);
+    expect(ran()).toEqual([
+      'claude plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch#v0.32.0',
+      'claude plugin marketplace update aeolus-fleet',
+      'claude plugin install aeolus-fleet@aeolus-fleet',
+      'claude plugin uninstall aeolus@aeolus-fleet',
+    ]);
   });
 
   it("points Claude Code's aeolus-fleet marketplace at main when it is given no tag (#652)", async () => {

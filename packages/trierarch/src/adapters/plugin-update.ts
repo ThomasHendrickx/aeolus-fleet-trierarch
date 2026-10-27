@@ -40,6 +40,7 @@ export interface PluginUpdate {
 const MARKETPLACE = 'aeolus-fleet';
 const REPOSITORY = 'ThomasHendrickx/aeolus-fleet-trierarch';
 const PLUGIN = 'aeolus-fleet@aeolus-fleet';
+const RENAMED_PLUGIN = 'aeolus@aeolus-fleet';
 
 async function run(command: string, args: readonly string[]): Promise<void> {
   const result = await runCommand(command, { args });
@@ -190,7 +191,8 @@ export function createPluginUpdate(at: {
       await dropDeclaredMarketplace(claudeSettings);
       await run(claude, ['plugin', 'marketplace', 'add', tag === undefined ? REPOSITORY : `${REPOSITORY}#${tag}`]);
       await run(claude, ['plugin', 'marketplace', 'update', MARKETPLACE]);
-      await run(claude, ['plugin', 'update', PLUGIN]);
+      await run(claude, ['plugin', 'install', PLUGIN]);
+      await run(claude, ['plugin', 'uninstall', RENAMED_PLUGIN]);
     },
   };
 }
