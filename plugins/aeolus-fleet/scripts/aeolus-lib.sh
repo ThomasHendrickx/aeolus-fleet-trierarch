@@ -565,17 +565,19 @@ aeolus_plugin_version() {
 
 # A store belongs to the newest plugin that wrote it (aeolus-fleet#1318): two
 # plugins load in one session and share it, and an older one cannot confirm
-# what a newer one handed. Fails, touching nothing and logging once, when the
-# store was last written by a newer plugin; otherwise records this plugin's
-# version in an existing store. <store folder>
+# what a newer one handed. Fails, touching nothing in the store and logging
+# once (kept in this plugin's own data folder), when the store was last written
+# by a newer plugin; otherwise records this plugin's version in an existing
+# store. <store folder>
 aeolus_store_version_guard() {
-  local store="$1" mine owner identity
+  local store="$1" mine owner identity logged data
   mine="$(aeolus_plugin_version)"
   [ -n "$mine" ] && [ -d "$store" ] || return 0
   owner="$(cat "$store/.version" 2>/dev/null)"
   if [ -n "$owner" ] && [ "$owner" != "$mine" ] && [ "$(printf '%s\n%s\n' "$owner" "$mine" | sort -V | head -n 1)" = "$mine" ]; then
-    if [ "$(cat "$store/.older-logged" 2>/dev/null)" != "$mine" ]; then
-      printf '%s' "$mine" > "$store/.older-logged" 2>/dev/null
+    data="$(aeolus_data 2>/dev/null)" && logged="$data/older-logged-$(basename "$store")"
+    if [ -z "$logged" ] || [ "$(cat "$logged" 2>/dev/null)" != "$owner" ]; then
+      [ -z "$logged" ] || printf '%s' "$owner" > "$logged" 2>/dev/null
       identity="$(aeolus_identity_file 2>/dev/null)" && aeolus_log "$identity" handover "left the store alone: a newer plugin owns it (${owner}, this one is ${mine})"
     fi
     return 1

@@ -4303,16 +4303,31 @@ describe('the version guard: an older plugin never touches the delivery store a 
   }
 
   const store = () => run('aeolus-identity.sh', { args: ['store'] }).stdout.trim();
+  /** Every file under the store folders, by path and bytes. */
+  const storeBytes = () => {
+    const crews = join(home, '.aeolus', 'crews');
+    const files: Record<string, string> = {};
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) walk(path);
+        else if (path.includes('.store')) files[path] = readFileSync(path, 'utf8');
+      }
+    };
+    walk(crews);
+    return files;
+  };
   const newerPluginOwns = () => actions().filter((record) => 'outcome' in record && record.outcome.includes('a newer plugin owns'));
 
   it('changes nothing in the store and acknowledges nothing, when its version is lower than the one that last wrote it', async () => {
     const stub = await aHandedMessage();
-    const before = store();
+    const before = storeBytes();
 
     const prompted = await hookOf(aPlugin('0.24.0'))('aeolus-turn.sh', PROMPT);
     const toolCall = await hookOf(aPlugin('0.24.0'))('aeolus-handover.sh', TOOL_CALL);
 
-    expect({ stdout: [prompted.stdout, toolCall.stdout], acks: ackBodies(stub), store: store() }).toEqual({ stdout: ['', ''], acks: [], store: before });
+    expect(Object.keys(before).length).toBeGreaterThan(0);
+    expect({ stdout: [prompted.stdout, toolCall.stdout], acks: ackBodies(stub), store: storeBytes() }).toEqual({ stdout: ['', ''], acks: [], store: before });
   });
 
   it('logs once that a newer plugin owns the store', async () => {
