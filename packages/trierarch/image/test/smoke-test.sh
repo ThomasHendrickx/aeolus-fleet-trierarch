@@ -39,6 +39,8 @@ check() {
 
 check 'claude runs' in_session claude --version
 
+check 'GitHub CLI runs' in_session gh --version
+
 check 'tmux starts a session and reads its screen' in_session bash -c '
   tmux new-session -d -s smoke "echo smoke-screen; sleep 30"
   sleep 1
