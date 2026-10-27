@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -4233,5 +4233,137 @@ describe("a ship's read-only checkouts, which its trierarch keeps (#1182)", () =
     const refreshed = run('aeolus-checkouts.sh', { args: ['refresh'] });
 
     expect({ status: refreshed.status, stdout: refreshed.stdout }).toEqual({ status: 2, stdout: 'aeolus: no trierarch crews this folder, so none keeps checkouts for it\n' });
+  });
+});
+
+describe('the version guard: an older plugin never touches the delivery store a newer one owns (aeolus-fleet#1318)', () => {
+  const PLUGIN = fileURLToPath(new URL('..', import.meta.url));
+  const PROMPT = { hook_event_name: 'UserPromptSubmit', prompt: 'go on' };
+  const TOOL_CALL = { hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: { file_path: '/tmp/x' } };
+  const ackBodies = (stub: StubFleet) => stub.calls.filter((call) => call.path === '/api/v1/ship/ack').map((call) => call.body);
+
+  /** A copy of this plugin that says it is another version, as a second plugin of a session is. */
+  function aPluginOfVersion(version: string): string {
+    const root = mkdtempSync(join(tmpdir(), 'aeolus-plugin-'));
+    for (const part of ['scripts', '.claude-plugin', '.codex-plugin']) cpSync(join(PLUGIN, part), join(root, part), { recursive: true });
+    for (const manifest of ['.claude-plugin/plugin.json', '.codex-plugin/plugin.json']) {
+      const file = join(root, manifest);
+      writeFileSync(file, readFileSync(file, 'utf8').replace(/"version": "[^"]*"/, `"version": "${version}"`));
+    }
+    return root;
+  }
+
+  /** Runs a hook of the plugin in a root, as Claude Code does. */
+  function hookOf(root: string, script: string, payload: Record<string, unknown>): Promise<Run> {
+    const child = spawn('bash', [join(root, 'scripts', script)], {
+      env: scriptEnvironment({
+        HOME: home, AEOLUS_FOLDER: '', AEOLUS_DATA: '', CLAUDE_PROJECT_DIR: folder, CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: root,
+        AEOLUS_RETRY_SECONDS: '0', AEOLUS_POLL_SECONDS: '0.05', ...NO_WAITS,
+      }),
+    });
+    child.stdin.end(JSON.stringify({ session_id: 'c5858406-be86-46cd-8591-f4fb39b1fa61', cwd: folder, ...payload }));
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString('utf8')));
+    child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString('utf8')));
+    return new Promise((resolve) => child.on('close', (status) => resolve({ status, stdout, stderr })));
+  }
+
+  const plugins: string[] = [];
+  const aPlugin = (version: string) => {
+    const root = aPluginOfVersion(version);
+    plugins.push(root);
+    return root;
+  };
+  afterEach(() => {
+    for (const root of plugins.splice(0)) rmSync(root, { recursive: true, force: true });
+  });
+
+  /** The plugin hands one message over: the watcher receives it while the session is idle. */
+  async function aHandedMessage(routes: Record<string, readonly StubAnswer[]> = {}): Promise<StubFleet> {
+    fleet = await startRoutedStubFleet({
+      '/api/v1/ship/inbox': [inbox(1)],
+      '/api/v1/ship/pushReceive': [receiving(aDelivery())],
+      '/api/v1/ship/handed': [handedOk],
+      '/api/v1/ship/ack': [acknowledged],
+      ...routes,
+    });
+    crew(fleet.url);
+    aTurnEnded();
+    await start('aeolus-wait.sh').exited;
+    return fleet;
+  }
+
+  const store = () => run('aeolus-identity.sh', { args: ['store'] }).stdout.trim();
+  const newerPluginOwns = () => actions().filter((record) => 'outcome' in record && record.outcome.includes('a newer plugin owns'));
+
+  it('changes nothing in the store and acknowledges nothing, when its version is lower than the one that last wrote it', async () => {
+    const stub = await aHandedMessage();
+    const before = store();
+
+    const prompted = await hookOf(aPlugin('0.24.0'), 'aeolus-turn.sh', PROMPT);
+    const toolCall = await hookOf(aPlugin('0.24.0'), 'aeolus-handover.sh', TOOL_CALL);
+
+    expect({ stdout: [prompted.stdout, toolCall.stdout], acks: ackBodies(stub), store: store() }).toEqual({ stdout: ['', ''], acks: [], store: before });
+  });
+
+  it('logs once that a newer plugin owns the store', async () => {
+    await aHandedMessage();
+    const older = aPlugin('0.24.0');
+
+    await hookOf(older, 'aeolus-turn.sh', PROMPT);
+    await hookOf(older, 'aeolus-handover.sh', TOOL_CALL);
+    await hookOf(older, 'aeolus-stop.sh', { hook_event_name: 'Stop', stop_hook_active: true });
+
+    expect(newerPluginOwns()).toHaveLength(1);
+  });
+
+  it('lets the newer plugin acknowledge the message and put it into the turn, when the older plugin hooks the prompt first', async () => {
+    const stub = await aHandedMessage();
+
+    await hookOf(aPlugin('0.24.0'), 'aeolus-turn.sh', PROMPT);
+    const prompted = await hookOf(PLUGIN, 'aeolus-turn.sh', PROMPT);
+
+    expect({ acks: ackBodies(stub).length, context: prompted.stdout.includes('Review \\"PR 12\\"'), store: store() }).toEqual({
+      acks: 1,
+      context: true,
+      store: expect.stringContaining(`${DELIVERY_ID} confirmed`),
+    });
+  });
+
+  it('lets the newer plugin acknowledge the message and put it into the turn, when it hooks the prompt first', async () => {
+    const stub = await aHandedMessage();
+
+    const prompted = await hookOf(PLUGIN, 'aeolus-turn.sh', PROMPT);
+    await hookOf(aPlugin('0.24.0'), 'aeolus-turn.sh', PROMPT);
+
+    expect({ acks: ackBodies(stub).length, context: prompted.stdout.includes('Review \\"PR 12\\"'), store: store() }).toEqual({
+      acks: 1,
+      context: true,
+      store: expect.stringContaining(`${DELIVERY_ID} confirmed`),
+    });
+  });
+
+  it('works on the store as today, when its version is newer than the one that last wrote it, and records its version', async () => {
+    const stub = await aHandedMessage();
+    const newer = aPlugin('99.0.0');
+
+    const prompted = await hookOf(newer, 'aeolus-turn.sh', PROMPT);
+    const older = await hookOf(PLUGIN, 'aeolus-handover.sh', TOOL_CALL);
+
+    expect({ acks: ackBodies(stub).length, context: prompted.stdout.includes('Review'), olderStdout: older.stdout, owned: newerPluginOwns().length }).toEqual({
+      acks: 1,
+      context: true,
+      olderStdout: '',
+      owned: 1,
+    });
+  });
+
+  it('works on the store as today, when its version is the one that last wrote it', async () => {
+    const stub = await aHandedMessage();
+
+    const prompted = await hookOf(PLUGIN, 'aeolus-turn.sh', PROMPT);
+
+    expect({ acks: ackBodies(stub).length, context: prompted.stdout.includes('Review'), owned: newerPluginOwns().length }).toEqual({ acks: 1, context: true, owned: 0 });
   });
 });
