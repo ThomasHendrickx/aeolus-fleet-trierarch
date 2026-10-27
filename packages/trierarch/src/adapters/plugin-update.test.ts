@@ -377,6 +377,60 @@ describe('the aeolus-fleet plugin update for Codex', () => {
   });
 });
 
+/** `code` that makes the stand-in keep the plugins Codex has enabled in `enabled`, one id a line, as `plugin add` and `plugin remove` change them; it starts with `ids`. */
+function codexEnabling(ids: readonly string[], enabled: string): string {
+  writeFileSync(enabled, ids.map((id) => `${id}\n`).join(''));
+  return `if (probe === '' && process.argv[2] === 'plugin' && (process.argv[3] === 'add' || process.argv[3] === 'remove')) {
+  const { readFileSync } = require('node:fs');
+  const others = readFileSync(${JSON.stringify(enabled)}, 'utf8').split('\\n').filter((id) => id !== '' && id !== process.argv[4]);
+  writeFileSync(${JSON.stringify(enabled)}, (process.argv[3] === 'add' ? [...others, process.argv[4]] : others).map((id) => id + '\\n').join(''));
+}`;
+}
+
+function enabledIn(enabled: string): string[] {
+  return readFileSync(enabled, 'utf8').split('\n').filter((id) => id !== '');
+}
+
+describe('the aeolus-fleet plugin update for Codex across the plugin rename (#1320)', () => {
+  it('leaves only the aeolus-fleet plugin enabled where Codex has the renamed aeolus plugin beside it', async () => {
+    const enabled = join(home, 'enabled.txt');
+    aCodexVersion('0.31.0');
+    aProgram(codex, { then: `${codexEnabling(['aeolus@aeolus-fleet', 'aeolus-fleet@aeolus-fleet'], enabled)}\n${codexUpgrading('0.32.2')}` });
+
+    await update().update('codex', 'v0.32.2');
+
+    expect(enabledIn(enabled)).toEqual(['aeolus-fleet@aeolus-fleet']);
+    expect(readdirSync(codexCache())).toContain('0.32.2');
+  });
+
+  it('succeeds where Codex never had the renamed aeolus plugin', async () => {
+    const enabled = join(home, 'enabled.txt');
+    aCodexVersion('0.31.0');
+    aProgram(codex, { then: `${codexEnabling(['aeolus-fleet@aeolus-fleet'], enabled)}\n${codexUpgrading('0.32.2')}` });
+
+    await update().update('codex', 'v0.32.2');
+
+    expect(enabledIn(enabled)).toEqual(['aeolus-fleet@aeolus-fleet']);
+  });
+
+  it('succeeds again on a second upgrade', async () => {
+    const enabled = join(home, 'enabled.txt');
+    aCodexVersion('0.31.0');
+    aProgram(codex, { then: `${codexEnabling(['aeolus@aeolus-fleet', 'aeolus-fleet@aeolus-fleet'], enabled)}\n${codexUpgrading('0.32.2')}` });
+
+    await update().update('codex', 'v0.32.2');
+    await update().update('codex', 'v0.32.2');
+
+    expect(enabledIn(enabled)).toEqual(['aeolus-fleet@aeolus-fleet']);
+  });
+
+  it('says what Codex said when it cannot remove the renamed aeolus plugin', async () => {
+    aProgram(codex, { then: "if (probe === '' && process.argv[3] === 'remove' && process.argv[2] === 'plugin') { process.stderr.write('Error: could not write config.toml'); process.exit(1); }" });
+
+    await expect(update().update('codex', 'v0.32.2')).rejects.toThrow('codex plugin remove aeolus@aeolus-fleet failed: Error: could not write config.toml');
+  });
+});
+
 describe('the aeolus-fleet plugin update for Claude Code', () => {
   it('installs the aeolus-fleet plugin where it is absent, and removes the renamed aeolus plugin where it is installed (#1312)', async () => {
     claudeHas('aeolus@aeolus-fleet');
