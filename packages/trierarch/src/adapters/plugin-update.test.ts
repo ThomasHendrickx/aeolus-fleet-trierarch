@@ -141,7 +141,7 @@ describe('the aeolus-fleet plugin update for Codex', () => {
 
     await update().update('codex', 'v0.23.0');
 
-    expect(ran().at(-1)).toBe('codex plugin marketplace upgrade aeolus-fleet');
+    expect(ran().at(-2)).toBe('codex plugin marketplace upgrade aeolus-fleet');
   });
 
   it("points Codex's aeolus-fleet marketplace at the release tag it is given before the upgrade, adding it again since Codex adds no second source (#652)", async () => {
@@ -149,7 +149,7 @@ describe('the aeolus-fleet plugin update for Codex', () => {
 
     await update().update('codex', 'v0.23.0');
 
-    expect(ran()).toEqual(['codex plugin marketplace remove aeolus-fleet', 'codex plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch --ref v0.23.0', 'codex plugin marketplace upgrade aeolus-fleet']);
+    expect(ran()).toEqual(['codex plugin marketplace remove aeolus-fleet', 'codex plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch --ref v0.23.0', 'codex plugin marketplace upgrade aeolus-fleet', 'codex plugin remove aeolus@aeolus-fleet']);
   });
 
   it('installs the plugin when the upgrade left Codex with none, as when its cache folder was emptied (#1212)', async () => {
@@ -157,7 +157,7 @@ describe('the aeolus-fleet plugin update for Codex', () => {
 
     await update().update('codex', 'v0.23.0');
 
-    expect(ran().slice(-2)).toEqual(['codex plugin marketplace upgrade aeolus-fleet', 'codex plugin add aeolus-fleet@aeolus-fleet']);
+    expect(ran().slice(-3)).toEqual(['codex plugin marketplace upgrade aeolus-fleet', 'codex plugin add aeolus-fleet@aeolus-fleet', 'codex plugin remove aeolus@aeolus-fleet']);
   });
 
   it('installs nothing beyond the upgrade when Codex has the plugin after it (#1212)', async () => {
@@ -188,7 +188,7 @@ describe('the aeolus-fleet plugin update for Codex', () => {
 
     await update().update('codex', 'v0.23.0');
 
-    expect(ran().at(-1)).toBe('codex plugin marketplace upgrade aeolus-fleet');
+    expect(ran().at(-2)).toBe('codex plugin marketplace upgrade aeolus-fleet');
   });
 
   it("says what Codex said when it cannot add the marketplace, and upgrades nothing (#652)", async () => {
@@ -373,7 +373,7 @@ describe('the aeolus-fleet plugin update for Codex', () => {
 
     await update().update('codex', 'v0.23.0');
 
-    expect(ran().at(-1)).toBe('codex plugin marketplace upgrade aeolus-fleet');
+    expect(ran().at(-2)).toBe('codex plugin marketplace upgrade aeolus-fleet');
   });
 });
 
