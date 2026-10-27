@@ -32,6 +32,8 @@ let service: FakeService;
 let repository: string;
 let codex: FakeCodexSetup;
 let isCodexInstalled: boolean;
+let isClaudeCodeInstalled: boolean;
+let nodeVersion: string;
 /** What running.json says on each read after the service starts, the last one from then on. */
 let saying: (RunningFile | undefined)[];
 let reads: number;
@@ -137,6 +139,8 @@ beforeEach(() => {
   detections = [];
   codex = new FakeCodexSetup();
   isCodexInstalled = false;
+  isClaudeCodeInstalled = true;
+  nodeVersion = '26.0.0';
   home = mkdtempSync(join(tmpdir(), 'trierarch-init-'));
   paths = trierarchPaths({ homeDirectory: home });
   registered = [];
@@ -157,6 +161,8 @@ afterEach(() => {
 function init(flags: Partial<InitFlags>, prompter: Prompter = new ScriptedPrompter([])) {
   return initTrierarch({
     isCodexInstalled,
+    isClaudeCodeInstalled,
+    nodeVersion,
     codex,
     homeDirectory: home,
     paths,
@@ -699,6 +705,31 @@ describe('aeolus-trierarch init, for Codex', () => {
     writeFileSync(paths.config, JSON.stringify(offered));
     writeFileSync(paths.crewToken, `fleetUrl=${FLEET_URL}\nshipId=${newId('ship')}\ncrewToken=aeolus_ct_v1_trierarch\n`, { mode: 0o600 });
   }
+
+  it('stops before registering when Node is older than 26, saying which to install', async () => {
+    nodeVersion = '22.11.0';
+
+    await expect(init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET })).rejects.toThrow(/Node 26/);
+
+    expect(registered).toEqual([]);
+    expect(existsSync(paths.crewToken)).toBe(false);
+  });
+
+  it('stops before registering when neither Claude Code nor Codex is installed, saying to install one and sign in', async () => {
+    isClaudeCodeInstalled = false;
+
+    await expect(init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET })).rejects.toThrow(/Claude Code or Codex.*signed in/s);
+
+    expect(registered).toEqual([]);
+    expect(existsSync(paths.crewToken)).toBe(false);
+  });
+
+  it('goes on with only Codex installed', async () => {
+    isClaudeCodeInstalled = false;
+    isCodexInstalled = true;
+
+    await expect(init({ isYes: true, fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET })).resolves.toBeDefined();
+  });
 
   it('asks nothing about Codex where it is neither installed nor configured', async () => {
     const prompter = new ScriptedPrompter(defaults());
