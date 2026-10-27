@@ -376,6 +376,17 @@ describe('a Codex session held by a hold, one codex exec per turn (headless H11,
     expect(lives().map((life) => life.at)).toEqual(['start', 'exit', 'start', 'exit']);
   }, LINGER_MS * 4);
 
+  it('starts one turn at a time when two lines arrive together while a turn runs, never two at once on one thread', async () => {
+    const runtime = aRuntime();
+    const shipId = await aCodexSession(runtime, { flags: ['--linger-ms', String(LINGER_MS)] });
+    await expect.poll(hooks).toContain('Stop');
+
+    await Promise.all([runtime.send({ shipId, line: 'the first one' }), runtime.send({ shipId, line: 'the second one' })]);
+
+    await expect.poll(lives, { timeout: LINGER_MS * 4 }).toHaveLength(6);
+    expect(lives().map((life) => life.at)).toEqual(['start', 'exit', 'start', 'exit', 'start', 'exit']);
+  }, LINGER_MS * 6);
+
   it('stops a running turn with SIGINT and waits for its process to end; the forced line runs next, resuming the thread (H12)', async () => {
     const runtime = aRuntime();
     const shipId = await aCodexSession(runtime);
