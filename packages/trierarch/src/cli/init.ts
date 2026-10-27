@@ -116,6 +116,20 @@ function pluginShipOf(flags: InitFlags): ShipId | undefined {
   return accepted.value;
 }
 
+const MINIMUM_NODE_MAJOR = 26;
+
+/** Refuses, before anything is registered, a machine that cannot run the trierarch or crew anything: Node older than 26, or neither Claude Code nor Codex installed. */
+function checkMachine(at: { nodeVersion: string; isClaudeCodeInstalled: boolean; isCodexInstalled: boolean }): void {
+  if (Number.parseInt(at.nodeVersion, 10) < MINIMUM_NODE_MAJOR) {
+    throw new TrierarchFileError(`The trierarch needs Node ${String(MINIMUM_NODE_MAJOR)} or newer and this is Node ${at.nodeVersion}. Install Node ${String(MINIMUM_NODE_MAJOR)} (https://nodejs.org), then run the setup line again.`);
+  }
+  if (!at.isClaudeCodeInstalled && !at.isCodexInstalled) {
+    throw new TrierarchFileError(
+      'Neither Claude Code nor Codex runs on this machine, so it could crew nothing. Install Claude Code (https://code.claude.com/docs/en/setup) or Codex (npm install -g @openai/codex) and be signed in to it, then run the setup line again.',
+    );
+  }
+}
+
 type FleetAt = (fleetUrl: string, crewToken?: string) => Pick<RestFleet, 'registerSelf' | 'whoami'>;
 
 /**
@@ -303,6 +317,10 @@ export async function initTrierarch(input: {
   codex: CodexSetup;
   /** Whether `codex` runs on this machine: only then, or when Codex is configured, does init ask about it. */
   isCodexInstalled: boolean;
+  /** Whether `claude` runs on this machine: with Codex, one of the two must, before init registers anything. */
+  isClaudeCodeInstalled: boolean;
+  /** The Node this runs on, as `process.versions.node` gives it. */
+  nodeVersion: string;
   /** Detects the configured harnesses' options (#365), once per harness version. */
   detect: DetectHarnesses;
   service: Pick<Service, 'install' | 'rewrite' | 'restart' | 'status'>;
@@ -319,6 +337,7 @@ export async function initTrierarch(input: {
     said.push(line, ...(hasSaidVersion ? [] : [NOT_SAID_YET]));
   };
 
+  checkMachine({ nodeVersion: input.nodeVersion, isClaudeCodeInstalled: input.isClaudeCodeInstalled, isCodexInstalled });
   const pluginShipId = pluginShipOf(flags);
   // The ship: registered once per machine, never again.
   const crew = await readCrewFile(paths.crewToken).catch(() => undefined);

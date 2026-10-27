@@ -718,7 +718,7 @@ describe('aeolus-trierarch init, for Codex', () => {
   it('stops before registering when neither Claude Code nor Codex is installed, saying to install one and sign in', async () => {
     isClaudeCodeInstalled = false;
 
-    await expect(init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET })).rejects.toThrow(/Claude Code or Codex.*signed in/s);
+    await expect(init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET })).rejects.toThrow(/Install Claude Code.*Codex.*signed in/s);
 
     expect(registered).toEqual([]);
     expect(existsSync(paths.crewToken)).toBe(false);
