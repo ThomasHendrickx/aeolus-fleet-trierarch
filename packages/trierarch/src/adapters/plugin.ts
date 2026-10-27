@@ -43,10 +43,15 @@ export async function findAeolusPlugin(at: { homeDirectory: string; env: Readonl
     return { root: () => Promise.resolve(root), data, crews };
   }
   const cache = join(places.plugins, 'cache', 'aeolus-fleet', 'aeolus-fleet');
+  const renamedCache = join(places.plugins, 'cache', 'aeolus-fleet', 'aeolus');
   const newest = async (): Promise<string> => {
     const versions = (await readdir(cache).catch(() => [])).filter((name) => /^\d+\.\d+\.\d+$/.test(name)).sort(byVersion);
     const version = versions.at(-1);
     if (version === undefined) {
+      const renamedVersions = (await readdir(renamedCache).catch(() => [])).filter((name) => /^\d+\.\d+\.\d+$/.test(name));
+      if (renamedVersions.length > 0) {
+        throw new Error(`The aeolus-fleet plugin is not installed for ${places.name} (found aeolus in ${renamedCache}): install it, or set ${places.rootVariable}`);
+      }
       throw new Error(`The aeolus-fleet plugin is not installed for ${places.name} (nothing in ${cache}): install it, or set ${places.rootVariable}`);
     }
     return join(cache, version);

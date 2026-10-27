@@ -76,6 +76,16 @@ mkdirSync(join(cache, ${JSON.stringify(to)}, 'scripts'), { recursive: true });
 writeFileSync(join(cache, ${JSON.stringify(to)}, 'scripts', 'aeolus-fleet.sh'), '# ${to}\\n');`);
 }
 
+/** `code` that makes the stand-in answer `claude plugin list --json` with the plugins `ids`. */
+function claudeListing(ids: readonly string[]): string {
+  return `if (process.argv[2] === 'plugin' && process.argv[3] === 'list') process.stdout.write(${JSON.stringify(JSON.stringify(ids.map((id) => ({ id, scope: 'user' }))))});`;
+}
+
+/** A Claude Code that has the plugins `ids` installed. */
+function claudeHas(...ids: string[]): void {
+  aProgram(claude, { then: claudeListing(ids) });
+}
+
 /** Claude Code's user settings in `configDirectory`. */
 function aSettingsFile(configDirectory: string, settings: Record<string, unknown>): void {
   mkdirSync(configDirectory, { recursive: true });
@@ -115,7 +125,7 @@ beforeEach(() => {
   log = join(home, 'ran.log');
   codex = join(home, 'codex');
   claude = join(home, 'claude');
-  aProgram(claude);
+  aProgram(claude, { then: claudeListing([]) });
   processes = [];
   trierarchPid = undefined;
 });
@@ -368,10 +378,37 @@ describe('the aeolus-fleet plugin update for Codex', () => {
 });
 
 describe('the aeolus-fleet plugin update for Claude Code', () => {
-  it("points Claude Code's aeolus-fleet marketplace at the release tag it is given, updates it, then the aeolus-fleet plugin from it (#652)", async () => {
-    await update().update('claude-code', 'v0.23.0');
+  it('installs the aeolus-fleet plugin where it is absent, and removes the renamed aeolus plugin where it is installed (#1312)', async () => {
+    claudeHas('aeolus@aeolus-fleet');
 
-    expect(ran()).toEqual(['claude plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch#v0.23.0', 'claude plugin marketplace update aeolus-fleet', 'claude plugin update aeolus-fleet@aeolus-fleet']);
+    await update().update('claude-code', 'v0.32.0');
+
+    expect(ran()).toEqual([
+      'claude plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch#v0.32.0',
+      'claude plugin marketplace update aeolus-fleet',
+      'claude plugin list --json',
+      'claude plugin install aeolus-fleet@aeolus-fleet',
+      'claude plugin uninstall aeolus@aeolus-fleet',
+    ]);
+  });
+
+  it('updates the aeolus-fleet plugin where it is installed, as an ordinary upgrade does, and uninstalls nothing where the renamed aeolus plugin is absent (#1312)', async () => {
+    claudeHas('aeolus-fleet@aeolus-fleet');
+
+    await update().update('claude-code', 'v0.32.1');
+
+    expect(ran()).toEqual([
+      'claude plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch#v0.32.1',
+      'claude plugin marketplace update aeolus-fleet',
+      'claude plugin list --json',
+      'claude plugin update aeolus-fleet@aeolus-fleet',
+    ]);
+  });
+
+  it('installs the aeolus-fleet plugin on a machine that never had the renamed aeolus plugin, uninstalling nothing (#1312)', async () => {
+    await update().update('claude-code', 'v0.32.0');
+
+    expect(ran().slice(3)).toEqual(['claude plugin install aeolus-fleet@aeolus-fleet']);
   });
 
   it("points Claude Code's aeolus-fleet marketplace at main when it is given no tag (#652)", async () => {
