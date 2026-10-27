@@ -42,6 +42,12 @@ describe('finding the aeolus-fleet plugin', () => {
   it('says the plugin is not installed when the cache has none', async () => {
     await expect(findAeolusPlugin({ homeDirectory: home, env: {} })).rejects.toThrow('The aeolus-fleet plugin is not installed');
   });
+
+  it('says it found the renamed aeolus plugin when aeolus-fleet is not installed (#1312)', async () => {
+    mkdirSync(join(home, '.claude', 'plugins', 'cache', 'aeolus-fleet', 'aeolus', '0.31.1'), { recursive: true });
+
+    await expect(findAeolusPlugin({ homeDirectory: home, env: {} })).rejects.toThrow('The aeolus-fleet plugin is not installed for Claude Code (found aeolus in');
+  });
 });
 
 describe('finding the aeolus-fleet plugin for Codex', () => {
