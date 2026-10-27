@@ -40,14 +40,14 @@ import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
 
 // The trierarch against a real fleet server on Postgres, over REST: a crew
 // request assigned to it is crewed in a worktree of a real git repository,
-// with the folder's identity written through the aeolus plugin's own script,
+// with the folder's identity written through the aeolus-fleet plugin's own script,
 // and removing the request ends the lease. Only the sessions are stand-ins:
 // no Claude Code runs here, but its stand-in shows its first-run screens, as
 // captured from Claude Code itself, until its own files say they are answered,
-// and past them runs the aeolus plugin's own launch hook as its first prompt
+// and past them runs the aeolus-fleet plugin's own launch hook as its first prompt
 // would: the session starts and makes a tool call (#490).
 
-const PLUGIN_ROOT = fileURLToPath(new URL('../../../plugins/aeolus', import.meta.url));
+const PLUGIN_ROOT = fileURLToPath(new URL('../../../plugins/aeolus-fleet', import.meta.url));
 const GIT_ENV = { GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 't@example.com' };
 
 let database: PrismaClient;
@@ -89,10 +89,10 @@ function claudeCodeStopsAt(command: readonly string[]): string | undefined {
 }
 
 function claudeCodeShows(command: readonly string[]): string {
-  return claudeCodeStopsAt(command) ?? '❯ /aeolus:wake\n\n  Ran 1 shell command\n';
+  return claudeCodeStopsAt(command) ?? '❯ /aeolus-fleet:wake\n\n  Ran 1 shell command\n';
 }
 
-/** Runs the aeolus plugin's launch hook for each event, as Claude Code does in the session started in the folder with the launch id given. */
+/** Runs the aeolus-fleet plugin's launch hook for each event, as Claude Code does in the session started in the folder with the launch id given. */
 async function launchHooks(at: { folder: string; env: Readonly<Record<string, string>> }, events: readonly Record<string, unknown>[]): Promise<void> {
   for (const event of events) {
     const hooked = await runCommand('bash', {
@@ -208,7 +208,7 @@ async function aTrierarchOnTheFleet(
   const state = createJsonState(paths.state);
   const clock = at.clock ?? { now: () => new Date() };
   const logger = { warn: () => undefined, action: () => undefined };
-  const setup = { configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
+  const setup = { configuration, configured: configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
   // The real caller check: the plugin's scripts run as children of this process, as aeolus-push.sh does of the trierarch, or of a session's hold.
   const mayCall = createCallerCheck({ platform: process.platform, sessionRootOf: (shipId) => sessions.sessionRootOf?.(shipId) ?? Promise.resolve(undefined) });
   const checkouts = createGitCheckouts({ configuration, root: paths.checkouts });
@@ -310,7 +310,7 @@ describe('the trierarch on a real fleet', () => {
 describe("contained access on a real fleet (decision 0026): the session calls over its ship's socket, and only the trierarch holds the crew token", () => {
   const SETTINGS = { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } as const;
 
-  /** A fleet call of the session in the worktree, through the aeolus plugin's own script, as Claude Code's Bash tool makes it. */
+  /** A fleet call of the session in the worktree, through the aeolus-fleet plugin's own script, as Claude Code's Bash tool makes it. */
   const fleetCall = (worktree: string, call: { args: readonly string[]; input?: string }) =>
     runCommand('bash', {
       args: [`${PLUGIN_ROOT}/scripts/aeolus-fleet.sh`, ...call.args],
@@ -397,7 +397,7 @@ describe("contained access on a real fleet (decision 0026): the session calls ov
 });
 
 /**
- * Sessions as a map, as standInSessions, whose turns run the aeolus plugin's
+ * Sessions as a map, as standInSessions, whose turns run the aeolus-fleet plugin's
  * own hooks as headless Claude Code runs them in the session's folder: each
  * user line sent to an idle session, its first prompt among them, starts a
  * turn (UserPromptSubmit), and the test ends the turn (Stop), makes a tool
@@ -700,7 +700,7 @@ describe('every session restarted at once, each on a hold of its own (#881, head
   /** How long a session that died first waits before it starts again. */
   const RESTART_WAIT_MS = RESTART_DELAYS_MS[0];
 
-  /** The stand-in for headless Claude Code, running the aeolus plugin's own hooks in this test's home, as a program the adapter runs. */
+  /** The stand-in for headless Claude Code, running the aeolus-fleet plugin's own hooks in this test's home, as a program the adapter runs. */
   function aClaudeCodeProgram(): string {
     const program = join(home, 'claude');
     const crews = join(home, '.aeolus', 'crews', 'claude-code');
@@ -873,13 +873,13 @@ describe('the trusted repositories on a real fleet (aeolus-fleet#384)', () => {
     const workspace = createGitWorkspace({ configuration: offered, root: paths.worktrees, clones: trustedClonesOf({ configured: configuration, held: trustedRepositories, root: paths.repositories, protocols: 'file' }) });
     const state = createJsonState(paths.state);
     const trust = createTrust({ configuration: offered, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') });
-    const setup = { configuration: offered, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
+    const setup = { configuration: offered, configured: configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
     const checkouts = createGitCheckouts({ configuration, root: paths.checkouts });
     const mayCall = createCallerCheck({ platform: process.platform, sessionRootOf: () => Promise.resolve(undefined) });
     const sockets = createShipSockets({ root: paths.sockets, fleetUrl: address, crewTokenOf: async (shipId) => (await state.load()).entries[shipId]?.crewToken, mayCall, log: () => undefined, refreshCheckouts: (shipId) => checkouts.refresh(shipId) });
     openSockets = sockets;
     const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, folderProcesses: { stopIn: () => Promise.resolve(0) }, workspace, trust, state, setup, clock: { now: () => new Date() }, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID, sockets, checkouts });
-    const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup, readLoad: () => Promise.resolve(undefined), readUsage: () => Promise.resolve({ subscriptions: [], ships: [] }) });
+    const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup, readLoad: () => Promise.resolve(undefined), readUsage: () => Promise.resolve({ subscriptions: [], ships: [] }), clock: { now: () => new Date() } });
 
     await sendTrusted([{ name: 'hemma', url }]);
     for (const delivery of await fleet.receive()) {

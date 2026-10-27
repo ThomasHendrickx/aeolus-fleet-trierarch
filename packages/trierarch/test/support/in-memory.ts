@@ -55,7 +55,7 @@ import type { TrustedRepository } from '../../src/core/trusted-repositories.js';
 
 /**
  * Hand-written in-memory ports for the trierarch's core, behaving as the
- * fleet, tmux, git and the aeolus plugin do, so tests assert outcomes and
+ * fleet, tmux, git and the aeolus-fleet plugin do, so tests assert outcomes and
  * stored state, never calls.
  */
 
@@ -471,13 +471,13 @@ export class InMemoryHarness implements HarnessPort {
   readonly seen = new Map<ShipId, LaunchSeen>();
   /** Each launch it was asked about, by its folder and launch id, with the model the session launched with. */
   readonly asked: { shipId: ShipId; folder: string; launchId: string; model?: string }[] = [];
-  /** Whether its aeolus plugin marks launches (#490): set to false for one older than the launch marker. */
+  /** Whether its aeolus-fleet plugin marks launches (#490): set to false for one older than the launch marker. */
   isMarkingLaunches = true;
   /** Set to make every launch fail, as when the harness's CLI cannot start: the entry stays crewing. */
   isFailingLaunch = false;
-  /** Set to say why its aeolus plugin cannot be found, as when its cache folder is empty (#1212): nothing of it can be read. */
+  /** Set to say why its aeolus-fleet plugin cannot be found, as when its cache folder is empty (#1212): nothing of it can be read. */
   pluginProblem: string | undefined = undefined;
-  /** Set to say why no session of the harness can start, as when its aeolus plugin's scripts are gone (#827). */
+  /** Set to say why no session of the harness can start, as when its aeolus-fleet plugin's scripts are gone (#827). */
   problem: string | undefined = undefined;
 
   constructor(private readonly processes: InMemoryProcesses) {}
@@ -875,7 +875,7 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
   const fleet = new InMemoryFleet();
   const processes = new InMemoryProcesses();
   const harness = new InMemoryHarness(processes);
-  // Each harness keeps its own identities, as the aeolus plugin does per harness.
+  // Each harness keeps its own identities, as the aeolus-fleet plugin does per harness.
   const codex = new InMemoryHarness(processes);
   const workspace = new InMemoryWorkspace();
   const trust = new InMemoryTrust(configuration);
@@ -883,6 +883,7 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
   const logger = new CollectingLogger();
   const setup = {
     configuration,
+    configured: configuration,
     version: '0.1.0',
     adapterFlags: { 'claude-code': [
       { flag: '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', when: 'always' as const },
@@ -918,7 +919,7 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
   const usage = new InMemoryUsage();
   const readLoad = createReadLoad({ machine, fleet, state, clock, logger });
   const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configuration.harnesses), prices: priceTableOf(undefined) });
-  const reportSelf = createReportSelf({ fleet, processes, trust, state, setup, readLoad, readUsage });
+  const reportSelf = createReportSelf({ fleet, processes, trust, state, setup, readLoad, readUsage, clock });
 
   /** A message arrives at the trierarch's own ship: its delivery, handled. */
   async function deliver(message: { contentType: string; payload: string; senderShipId?: ShipId }): Promise<Delivery> {

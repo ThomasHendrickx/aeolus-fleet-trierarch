@@ -8,7 +8,7 @@ import { shipHome } from './paths.js';
 import type { AeolusPlugin } from './plugin-identity.js';
 import { PLUGIN_DATA_FOLDER } from './plugin.js';
 
-/** Where a ship's Claude Code session keeps its files: its identity through the aeolus plugin, its conversations, and Claude Code's own files. */
+/** Where a ship's Claude Code session keeps its files: its identity through the aeolus-fleet plugin, its conversations, and Claude Code's own files. */
 export interface ClaudeCodeHome {
   readonly plugin: AeolusPlugin;
   /** Claude Code's projects folder, where it keeps each folder's conversations. */
@@ -44,7 +44,7 @@ const PRIVATE_FOLDER_MODE = 0o700;
 /**
  * A home of each ship's own under `homes` (`~/.aeolus/trierarch/homes/<shipId>`),
  * holding its identity and Claude Code's files and nothing of another ship.
- * The identity goes through the host's aeolus plugin scripts into the home's
+ * The identity goes through the host's aeolus-fleet plugin scripts into the home's
  * crews folder, where the image's plugin of the same version finds it. Before
  * each launch, the onboarding is completed and the workspace trusted at its
  * path, which the container mounts at the same path; bypass permissions mode

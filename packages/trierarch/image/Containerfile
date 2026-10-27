@@ -1,5 +1,5 @@
 # The session image (decision 0039): one trierarch session per container, with
-# the harness, tmux, the aeolus plugin of this image's version, Playwright's
+# the harness, tmux, the aeolus-fleet plugin of this image's version, Playwright's
 # browser dependencies and a nested rootless Podman for a repository's tests.
 #
 # Built from the repository root, with the version set on the packages and the
@@ -13,7 +13,7 @@ ARG CLAUDE_CODE_VERSION=latest
 ARG PLAYWRIGHT_VERSION=1.63.0
 
 LABEL org.opencontainers.image.title="aeolus-session" \
-      org.opencontainers.image.description="An Aeolus trierarch session: Claude Code, tmux, the aeolus plugin and a nested rootless Podman" \
+      org.opencontainers.image.description="An Aeolus trierarch session: Claude Code, tmux, the aeolus-fleet plugin and a nested rootless Podman" \
       org.opencontainers.image.source="https://github.com/ThomasHendrickx/aeolus-fleet-trierarch" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${VERSION}"
@@ -22,7 +22,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
  && apt-get install --yes --no-install-recommends \
-      ca-certificates curl git gnupg jq less openssh-client tmux tini \
+      ca-certificates curl gh git gnupg jq less openssh-client tmux tini \
       podman uidmap fuse-overlayfs slirp4netns passt \
  && curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
  && apt-get install --yes --no-install-recommends nodejs \
@@ -42,14 +42,14 @@ COPY packages/trierarch/image/containers.conf /etc/containers/containers.conf
 COPY packages/trierarch/image/storage.conf /etc/containers/storage.conf
 COPY packages/trierarch/image/session-init.sh /usr/local/bin/aeolus-session-init
 
-# The aeolus plugin of this version, from its marketplace in the image.
+# The aeolus-fleet plugin of this version, from its marketplace in the image.
 COPY .claude-plugin/marketplace.json /opt/aeolus-fleet/.claude-plugin/marketplace.json
-COPY plugins/aeolus /opt/aeolus-fleet/plugins/aeolus
+COPY plugins/aeolus-fleet /opt/aeolus-fleet/plugins/aeolus-fleet
 
 USER ubuntu
 WORKDIR /home/ubuntu
 RUN claude plugin marketplace add /opt/aeolus-fleet \
- && claude plugin install aeolus@aeolus-fleet
+ && claude plugin install aeolus-fleet@aeolus-fleet
 
 # The trierarch mounts a home of the ship's own over /home/ubuntu, so the
 # plugin's install and the settings that enable it live outside the home; the

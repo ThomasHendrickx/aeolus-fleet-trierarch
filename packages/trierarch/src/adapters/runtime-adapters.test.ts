@@ -79,7 +79,7 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
     expect({ folder, isClone: statSync(join(folder, '.git')).isDirectory() }).toEqual({ folder: join(paths.worktrees, 'demo', 'scout'), isClone: true });
   });
 
-  it('gives sessions in containers their folder by its real path, as the aeolus plugin in the container and on the host both key it (pwd -P), through a worktree root that is a link', async () => {
+  it('gives sessions in containers their folder by its real path, as the aeolus-fleet plugin in the container and on the host both key it (pwd -P), through a worktree root that is a link', async () => {
     mkdirSync(join(home, 'real-root'));
     symlinkSync(join(home, 'real-root'), join(home, 'linked-root'));
 

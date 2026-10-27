@@ -1,0 +1,168 @@
+import { readFileSync } from 'node:fs';
+
+import { ANSWER_CONTENT_TYPE, NO_TERMINAL_QUESTIONS, QUESTION_CONTENT_TYPE } from '@aeolus-fleet/common';
+import { SHIP_PROTOCOL } from '@aeolus-fleet/core/testing';
+import { describe, expect, it } from 'vitest';
+
+const claudeSkill = readFileSync(new URL('../skills/crew-a-ship/SKILL.md', import.meta.url), 'utf8');
+const codexSkill = readFileSync(new URL('../skills/aeolus-fleet-crew/SKILL.md', import.meta.url), 'utf8');
+const codexWake = readFileSync(new URL('../skills/aeolus-fleet-wake/SKILL.md', import.meta.url), 'utf8');
+const codexShip = readFileSync(new URL('../skills/aeolus-fleet-ship/SKILL.md', import.meta.url), 'utf8');
+const protocolRules = SHIP_PROTOCOL.split('\n').filter((line) => /^\d+\. /.test(line));
+
+// The ship protocol lives once, in the fleet, which states it in its MCP
+// instructions and its REST description; both skills point to it and hold
+// only what the plugin adds.
+
+describe('the crew-a-ship skill', () => {
+  it('has the session fetch the ship protocol from the fleet through aeolus-fleet.sh, and holds none of its rules', () => {
+    expect(claudeSkill).toContain('"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-fleet.sh" protocol');
+    for (const rule of protocolRules) {
+      expect(claudeSkill).not.toContain(rule);
+    }
+  });
+
+  it('makes every fleet call through aeolus-fleet.sh, and never has the session read or pass the crew token', () => {
+    for (const call of ['receive', 'ack', 'pong', 'send', 'report', 'inbox', 'whoami', 'deregister']) {
+      expect(claudeSkill).toContain(`\`${call}`);
+    }
+    expect(claudeSkill).toContain('aeolus-fleet.sh" send -');
+    expect(claudeSkill).toContain('Never read the identity file, and never pass a crew token');
+    expect(claudeSkill).not.toMatch(/crewToken line|pass it to every fleet call/);
+  });
+
+  it("lists a meeting's calls through aeolus-fleet.sh, open and add stating the model, and says how a session takes part (decision 0061)", () => {
+    for (const call of [
+      'openMeeting', 'meeting', 'requestMic', 'withdrawMicRequest', 'releaseMic', 'giveMic', 'takeMic', 'setMicPattern',
+      'addToMeeting', 'leaveMeeting', 'rejoinMeeting', 'revokeFromMeeting', 'transferMeeting', 'nameModerator', 'endMeeting',
+    ]) {
+      expect(claudeSkill).toContain(`\`${call}\``);
+    }
+    expect(claudeSkill).toContain('`openMeeting` and `addToMeeting` state the model as a send does');
+    expect(claudeSkill).toContain('contribute with `send -` to `{"kind":"meeting","meetingId":"<its id>"}`, never with inReplyTo');
+    expect(claudeSkill).toContain('Not holding the mic and with nothing to request, end your turn.');
+  });
+
+  it('has a Codex session fetch the same protocol from the fleet, holding none of the rules, with its Codex crew line and harness', () => {
+    expect(codexSkill).toContain('`scripts/aeolus-fleet.sh protocol`');
+    for (const rule of protocolRules) {
+      expect(codexSkill).not.toContain(rule);
+    }
+    expect(codexSkill).toContain('$aeolus-fleet-crew');
+    expect(codexSkill).toContain('harness `codex`');
+    expect(codexSkill).not.toContain('Receive, pong each operator ping');
+  });
+
+  it('has a crewed session send every other question to the sender of its task, never through an interactive question form, in both harnesses (#457)', () => {
+    expect(claudeSkill).toContain('Every other question goes to the sender of your task with `send -`, never through AskUserQuestion or another interactive question form.');
+    expect(codexSkill).toContain('Every other question goes to the sender of your task with `send -`, never through request_user_input or another interactive question form.');
+  });
+
+  it('tells a crewed session, in both harnesses, that a question for the operator goes to argo as a question, sent with aeolus-ask.sh, withdrawn or replaced by its uuid, and answered by a reply (#684)', () => {
+    for (const skill of [claudeSkill, codexSkill]) {
+      expect(skill).toContain(QUESTION_CONTENT_TYPE);
+      expect(skill).toContain(ANSWER_CONTENT_TYPE);
+      expect(skill).toMatch(/aeolus-ask\.sh"? ask /);
+      expect(skill).toMatch(/aeolus-ask\.sh"? withdraw <questionId>/);
+      expect(skill).toMatch(/aeolus-ask\.sh"? replace <questionId>/);
+      expect(skill).toContain('a reply to the question');
+    }
+    expect(claudeSkill).toContain('"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-ask.sh" ask');
+    expect(codexSkill).toContain('`scripts/aeolus-ask.sh ask');
+  });
+
+  it('says ask over the fleet once, in the trierarch line, not again after it, in both harnesses (#598)', () => {
+    expect(claudeSkill.match(/over the fleet/g)).toHaveLength(1);
+    expect(codexSkill.match(/over the fleet/g)).toHaveLength(1);
+  });
+
+  it("tells every crewed session, in both harnesses, the line the trierarch gives its sessions: no human reads its terminal, ask over the fleet, and its ship's owner for what only a human can answer (#585)", () => {
+    expect(claudeSkill).toContain(NO_TERMINAL_QUESTIONS);
+    expect(codexSkill).toContain(NO_TERMINAL_QUESTIONS);
+  });
+
+  it("sends a question for its ship's owner to the owner's ship, never to argo alone, in both harnesses (decision 0045)", () => {
+    for (const skill of [claudeSkill, codexSkill]) {
+      expect(skill).toContain("A question for your ship's owner goes to the owner's ship as a question");
+      expect(skill).not.toContain('goes to argo as a question');
+    }
+  });
+
+  it('tells a squadron member how to check in, take up its role, report and stand down', () => {
+    const skill = claudeSkill;
+
+    expect(skill).toContain('## A squadron member');
+    expect(skill).toContain('application/vnd.aeolus.squadron.check-in+json');
+    expect(skill).toContain('application/vnd.aeolus.squadron.role+json');
+    expect(skill).toContain('application/vnd.aeolus.squadron.on-station+json');
+    expect(skill).toContain('application/vnd.aeolus.squadron.stand-down+json');
+    expect(skill).toContain('report at least once per check-in interval');
+  });
+
+  it('tells a squadron member to keep the check-in interval its role message gives, in both harnesses', () => {
+    expect(claudeSkill).toContain('aeolus-identity.sh" check-in <interval>');
+    expect(codexSkill).toContain('`scripts/aeolus-identity.sh check-in <interval>`');
+  });
+
+  it('tells a standing-down member to ack the stand-down on receipt, finish its work, then send stood-down to its flagship', () => {
+    const skill = claudeSkill;
+
+    expect(skill).toContain('ack it on receipt');
+    expect(skill).toContain(
+      'send the flagship a message with contentType `application/vnd.aeolus.squadron.stood-down+json`, payload `{"squadron":"<squadron>"}` and inReplyTo the stand-down',
+    );
+  });
+
+  it('tells a member whose role message says standingDown to stand down too, inReplyTo the role message', () => {
+    expect(claudeSkill).toContain('If the role message says `"standingDown": true`, the squadron already stands down');
+  });
+
+  it('tells a squadron member to state the exact model it runs at check-in', () => {
+    expect(claudeSkill).toContain('payload `{"squadron":"<squadron>","model":"<model>"}`, where <model> is the exact model id this session runs');
+  });
+
+  it('tells the session that a message the watcher handed over comes into its turn acknowledged, never by its own receive (#756)', () => {
+    expect(claudeSkill).toContain(
+      '"is handed to this session" (exit 0): the watcher received a message for this ship. Do not receive or ack it: the plugin acknowledges it and puts it into your turn at your next tool call, or when you end your turn.',
+    );
+  });
+
+  it("tells a session on a pushed lease to receive and ack nothing, in both harnesses: the message comes into the turn through the plugin's hooks (#756)", () => {
+    expect(claudeSkill).toContain(
+      'When "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-identity.sh" show says `delivery: pushed`, receive and ack nothing: the watcher or the trierarch hands each message over, and it comes into your turn through the plugin\'s hooks. Otherwise handle what waits:',
+    );
+    expect(codexSkill).toContain(
+      'When `scripts/aeolus-identity.sh show` says `delivery: pushed`, receive and ack nothing: the wake bridge or the trierarch hands each message over, and it comes into the turn through the plugin\'s hooks with the prompt the bridge queues or the line the trierarch types.',
+    );
+  });
+
+  it('tells the session to start the watcher again when it exits 6 at its 2-hour limit', () => {
+    expect(claudeSkill).toContain('"for almost 2 hours" (exit 6): start the watcher again, as in step 3. That is all.');
+  });
+
+  it('tells a session the trierarch wakes to start no watcher, in both harnesses', () => {
+    expect(claudeSkill).toContain('When "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-identity.sh" show says `wakes: the trierarch`, start no watcher and end your turn: the trierarch wakes this session.');
+    expect(codexSkill).toContain('When `scripts/aeolus-identity.sh show` says `wakes: the trierarch`, start no wake: the trierarch wakes this session.');
+  });
+});
+
+// LEASE_ENDED for a crew token the identity file no longer holds says nothing
+// about the folder's new crew: only the scripts, which know the token they
+// used, may forget the ship. A session never deletes the identity file on it.
+describe('LEASE_ENDED in the skills', () => {
+  const leaseEndedLines = (skill: string) => skill.split('\n').filter((line) => line.includes('LEASE_ENDED'));
+
+  it('has a Claude Code session stop calling the fleet, the plugin having forgotten the ship, and delete no identity file', () => {
+    expect(leaseEndedLines(claudeSkill).join('\n')).toContain('the plugin already forgot the ship');
+    for (const line of leaseEndedLines(claudeSkill)) {
+      expect(line).not.toContain('delete');
+    }
+  });
+
+  it('has a Codex session do the same in $aeolus-fleet-crew, $aeolus-fleet-wake and $aeolus-fleet-ship', () => {
+    expect(leaseEndedLines(codexSkill).join('\n')).toContain('the plugin already forgot the ship');
+    for (const line of [codexSkill, codexWake, codexShip].flatMap(leaseEndedLines)) {
+      expect(line).not.toContain('delete');
+    }
+  });
+});

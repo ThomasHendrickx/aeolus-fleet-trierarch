@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 const run = { node: '/opt/homebrew/bin/node', script: '/opt/homebrew/lib/node_modules/@aeolus-fleet/trierarch/dist/bin/aeolus-trierarch.js' };
-const environment = { PATH: '/opt/homebrew/bin:/usr/bin:/bin', AEOLUS_PLUGIN_ROOT: '/Users/thomas/aeolus-fleet/plugins/aeolus' };
+const environment = { PATH: '/opt/homebrew/bin:/usr/bin:/bin', AEOLUS_PLUGIN_ROOT: '/Users/thomas/aeolus-fleet/plugins/aeolus-fleet' };
 const NOW = new Date('2026-10-06T10:00:00.000Z');
 const ok = (stdout = ''): CommandResult => ({ status: 0, stdout, stderr: '' });
 
@@ -60,7 +60,7 @@ describe('the service on macOS (launchd)', () => {
     expect(text).toContain('<key>KeepAlive</key>\n  <true/>');
     expect(text).toContain(`<string>${join(home, '.aeolus', 'trierarch', 'logs', 'trierarch.log')}</string>`);
     expect(text).toContain('<key>PATH</key>\n    <string>/opt/homebrew/bin:/usr/bin:/bin</string>');
-    expect(text).toContain('<key>AEOLUS_PLUGIN_ROOT</key>\n    <string>/Users/thomas/aeolus-fleet/plugins/aeolus</string>');
+    expect(text).toContain('<key>AEOLUS_PLUGIN_ROOT</key>\n    <string>/Users/thomas/aeolus-fleet/plugins/aeolus-fleet</string>');
     expect(calls).toEqual([`launchctl bootout ${target}`, `launchctl print ${target}`, `launchctl bootstrap gui/501 ${plist()}`]);
   });
 
@@ -252,7 +252,7 @@ describe('the service on Linux (systemd)', () => {
     expect(text).toContain(`ExecStart="${run.node}" "${run.script}" run`);
     expect(text).toContain('Restart=always');
     expect(text).toContain('Environment="PATH=/opt/homebrew/bin:/usr/bin:/bin"');
-    expect(text).toContain('Environment="AEOLUS_PLUGIN_ROOT=/Users/thomas/aeolus-fleet/plugins/aeolus"');
+    expect(text).toContain('Environment="AEOLUS_PLUGIN_ROOT=/Users/thomas/aeolus-fleet/plugins/aeolus-fleet"');
     expect(calls).toEqual(['systemctl --user daemon-reload', `systemctl --user enable ${SYSTEMD_UNIT}`, `systemctl --user restart ${SYSTEMD_UNIT}`]);
   });
 

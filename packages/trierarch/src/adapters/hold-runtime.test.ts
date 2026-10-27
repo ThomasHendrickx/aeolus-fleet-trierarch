@@ -196,7 +196,7 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
     const runtime = aRuntime();
     const shipId = await aClaudeCodeSession(runtime, ['--fail-login']);
 
-    await runtime.send({ shipId, line: userLine('/aeolus:wake') });
+    await runtime.send({ shipId, line: userLine('/aeolus-fleet:wake') });
 
     await expect.poll(async () => runtime.list()).toEqual([{ shipId, status: 'exited' }]);
     await expect(eventsOfType({ runtime: runtime, shipId: shipId }, 'result')).resolves.toEqual([expect.objectContaining({ is_error: true, result: 'Not logged in · Please run /login' })]);

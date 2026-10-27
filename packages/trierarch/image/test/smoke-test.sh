@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Smoke test of the session image (decision 0039): the harness, tmux, the
-# aeolus plugin of the image's version and a nested rootless Podman all work
+# aeolus-fleet plugin of the image's version and a nested rootless Podman all work
 # in a container started as the trierarch starts one.
 #
 # Usage: smoke-test.sh <runtime binary> <image> <version>
@@ -39,6 +39,8 @@ check() {
 
 check 'claude runs' in_session claude --version
 
+check 'GitHub CLI runs' in_session gh --version
+
 check 'tmux starts a session and reads its screen' in_session bash -c '
   tmux new-session -d -s smoke "echo smoke-screen; sleep 30"
   sleep 1
@@ -48,15 +50,15 @@ check 'tmux starts a session and reads its screen' in_session bash -c '
 PLUGIN_AT_VERSION="
   claude plugin list --json | node -e '
     const plugins = JSON.parse(require(\"node:fs\").readFileSync(0, \"utf8\"));
-    const aeolus = plugins.find((plugin) => plugin.id === \"aeolus@aeolus-fleet\");
+    const aeolus = plugins.find((plugin) => plugin.id === \"aeolus-fleet@aeolus-fleet\");
     if (aeolus?.version !== process.argv[1] || aeolus?.enabled !== true) {
-      console.error(\"aeolus plugin:\", JSON.stringify(aeolus));
+      console.error(\"aeolus-fleet plugin:\", JSON.stringify(aeolus));
       process.exit(1);
     }
   ' '$VERSION'
 "
 
-check "the aeolus plugin is installed at $VERSION" in_session bash -c "$PLUGIN_AT_VERSION"
+check "the aeolus-fleet plugin is installed at $VERSION" in_session bash -c "$PLUGIN_AT_VERSION"
 
 # The trierarch mounts a home of the ship's own over the image's: the image's
 # plugin still reaches it, and what the plugin writes stays in that home.
@@ -69,7 +71,7 @@ in_ship_home() {
     "$IMAGE" "$@"
 }
 
-check "the aeolus plugin is installed at $VERSION in a home of the ship's own" in_ship_home bash -c "$PLUGIN_AT_VERSION"
+check "the aeolus-fleet plugin is installed at $VERSION in a home of the ship's own" in_ship_home bash -c "$PLUGIN_AT_VERSION"
 
 # Nested containers from an image built in place, so the test pulls nothing:
 # a shell, /usr/bin/true, /usr/bin/sleep and the libraries they load.

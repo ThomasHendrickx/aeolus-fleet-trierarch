@@ -3,6 +3,7 @@ import type { CrewStatus, ShipId, TrierarchConfiguration } from '@aeolus-fleet/c
 import { checkSettings, launchMarkerRefusal, trustRefusal, unacceptedRefusal, type CheckedSettings, type Refusal } from './check-settings.js';
 import { MODEL_OPTION } from './detected-options.js';
 import { putEntry, removeEntry, withState, type Entry, type KeptWorktree, type Orphan, type TrierarchState } from './entry.js';
+import type { StartOutcome } from './failed-starts.js';
 import type { AssignedRequest, ClearRequestToMe, InboxAnswer, LaunchSeen, ObservedSession, ObservedWorktree, TrustedPlaces, Turn, WrittenStatus } from './ports.js';
 import { decideRestart, exitsInWindow } from './restart-policy.js';
 
@@ -66,6 +67,8 @@ export type Action =
 export interface Reconciled {
   readonly state: TrierarchState;
   readonly actions: readonly Action[];
+  /** How the launch windows that closed this pass ended, for the machine's failed starts (#853). */
+  readonly outcomes: readonly StartOutcome[];
 }
 
 /** What reconciling needs beside the state and what was seen. */
@@ -80,9 +83,9 @@ export interface ReconcileContext {
   readonly trusted: TrustedPlaces;
   /** Each harness's version as detection found it, for the reason a refused model is given back with (#382). */
   readonly versions: Readonly<Record<string, string>>;
-  /** Whether each harness's aeolus plugin marks launches (#490): checked before every launch. */
+  /** Whether each harness's aeolus-fleet plugin marks launches (#490): checked before every launch. */
   readonly marksLaunches: Readonly<Record<string, boolean>>;
-  /** The harnesses whose aeolus plugin could not be found (#1212): none of their requests is crewed or given a session. */
+  /** The harnesses whose aeolus-fleet plugin could not be found (#1212): none of their requests is crewed or given a session. */
   readonly missingPlugins: ReadonlySet<string>;
 }
 
@@ -109,6 +112,8 @@ interface Step {
   readonly actions: readonly Action[];
   /** Sessions this step starts, counted against the running cap. */
   readonly starts: number;
+  /** How its launch window ended, when it closed in this step (#853). */
+  readonly outcome?: StartOutcome;
 }
 
 const NOTHING: Step = { actions: [], starts: 0 };
@@ -138,6 +143,7 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
   const assigned = new Set<string>(requested.keys());
   let next: TrierarchState = { ...state, refused: Object.fromEntries(Object.entries(state.refused).filter(([shipId]) => assigned.has(shipId))) };
   const actions: Action[] = [];
+  const outcomes: StartOutcome[] = [];
   let running = observed.sessions.filter((session) => session.status === 'running' && session.shipId in state.entries).length;
   const canStart = (): boolean => running < configuration.caps.running;
 
@@ -152,7 +158,7 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
       actions.push({ kind: 'release', shipId: entry.shipId });
       continue;
     }
-    // A harness that lost its aeolus plugin under a running session cannot crew its ship any more (#1212): the request is given back with why, and the other harnesses go on.
+    // A harness that lost its aeolus-fleet plugin under a running session cannot crew its ship any more (#1212): the request is given back with why, and the other harnesses go on.
     const refusal = launchMarkerRefusal({ harness: entry.harness, marksLaunches: context.marksLaunches, missingPlugins: context.missingPlugins });
     if (refusal !== undefined) {
       const uncrewed = uncrewable({ request, refusal, state: next, entry });
@@ -166,6 +172,9 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
       request.settingsVersion === entry.settingsVersion
         ? trustedStep(entry, { step: stepOf(entry, { ...context, canStart: canStart(), isFinal: request.isFinal }), request, state: next, context })
         : newVersionStep(entry, { request, state: next, context });
+    if (step.outcome !== undefined) {
+      outcomes.push(step.outcome);
+    }
     if (step.isGivenBack === true) {
       next = removeEntry(next, entry.shipId);
       actions.push(...step.actions);
@@ -226,7 +235,7 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
   for (const orphan of orphans) {
     actions.push({ kind: 'clearOrphan', orphan, isNew: !reported.has(orphan.path) });
   }
-  return { state: { ...next, kept, orphans }, actions };
+  return { state: { ...next, kept, orphans }, actions, outcomes };
 }
 
 /**
@@ -360,23 +369,25 @@ function launchStep(entry: Entry, context: ReconcileContext & { isFinal: boolean
   if (launchedAt === undefined || seen === undefined) {
     return { actions: [{ kind: 'crew', shipId: entry.shipId, isResumed: true }], starts: 1 };
   }
-  const failedStart = (reason: string, first: readonly Action[] = []): Step => {
+  const failedStart = (reason: string, at: { first?: readonly Action[]; isRefusal?: boolean } = {}): Step => {
+    const { first = [], isRefusal = false } = at;
+    const outcome = machineFailedStart(entry, { reason, isRefusal });
     if (isFinal) {
       const step = exitStep(running, { now, failedStart: reason });
-      return { ...step, actions: [...first, ...step.actions] };
+      return { ...step, actions: [...first, ...step.actions], ...(outcome !== undefined && { outcome }) };
     }
-    return { isGivenBack: true, actions: [...first, { kind: 'giveBack', shipId: entry.shipId, settingsVersion: entry.settingsVersion, reason, entry }], starts: 0 };
+    return { isGivenBack: true, actions: [...first, { kind: 'giveBack', shipId: entry.shipId, settingsVersion: entry.settingsVersion, reason, entry }], starts: 0, ...(outcome !== undefined && { outcome }) };
   };
   switch (seen.kind) {
     case 'active': {
       // Running since its session started, so the session start it writes is that start; the window is closed.
       const final: Entry = { ...running, state: 'running', since: launchedAt };
       const step = wakeStep(final, observed.ships[entry.shipId]);
-      return { ...step, entry: step.entry ?? final };
+      return { ...step, entry: step.entry ?? final, outcome: { kind: 'succeeded', shipId: entry.shipId } };
     }
     case 'refused': {
       const refused = modelRefusal(entry, { model: seen.model, versions: context.versions });
-      return failedStart(refused.reason, refused.actions);
+      return failedStart(refused.reason, { first: refused.actions, isRefusal: true });
     }
     case 'none':
       if (!isWindowOver(launchedAt, now)) {
@@ -384,6 +395,15 @@ function launchStep(entry: Entry, context: ReconcileContext & { isFinal: boolean
       }
       return failedStart(noActivityReason(entry, seen));
   }
+}
+
+/**
+ * A failed start counted against the machine (#853): any but a refusal of
+ * a model the settings picked, which is the settings' cause, kept refused
+ * on its own (#382).
+ */
+function machineFailedStart(entry: Entry, at: { reason: string; isRefusal: boolean }): StartOutcome | undefined {
+  return at.isRefusal && entry.options[MODEL_OPTION] !== undefined ? undefined : { kind: 'failed', shipId: entry.shipId, reason: at.reason };
 }
 
 /** Why a start failed for no activity, naming the harness's screen the session stopped at when it knows it (#403), or the cause the harness gave (headless H13). */
@@ -466,18 +486,20 @@ function restartWindowStep(entry: Entry, context: ReconcileContext): Step {
     case 'active': {
       const closed = withoutLaunch(entry);
       const step = wakeStep(closed, seen);
-      return { ...step, entry: step.entry ?? closed };
+      return { ...step, entry: step.entry ?? closed, outcome: { kind: 'succeeded', shipId: entry.shipId } };
     }
     case 'refused': {
       const refused = modelRefusal(entry, { model: launch.model, versions: context.versions });
       const step = exitStep(entry, { now, failedStart: refused.reason });
-      return { ...step, actions: [...refused.actions, ...step.actions] };
+      const outcome = machineFailedStart(entry, { reason: refused.reason, isRefusal: true });
+      return { ...step, actions: [...refused.actions, ...step.actions], ...(outcome !== undefined && { outcome }) };
     }
     case 'none': {
       if (!isWindowOver(launchedAt, now)) {
         return wakeStep(entry, seen);
       }
-      return exitStep(entry, { now, failedStart: noActivityReason(entry, launch) });
+      const reason = noActivityReason(entry, launch);
+      return { ...exitStep(entry, { now, failedStart: reason }), outcome: { kind: 'failed', shipId: entry.shipId, reason } };
     }
   }
 }

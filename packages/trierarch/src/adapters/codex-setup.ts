@@ -13,17 +13,17 @@ import { runningVersion } from './version.js';
  * trusting a repository covers its worktrees, but trusting a parent folder
  * covers no repository under it, so each configured repository and folder is
  * trusted. It asks to review hooks that are new or changed, and runs none it
- * does not trust, so the aeolus plugin's hooks (the turn marker among them)
+ * does not trust, so the aeolus-fleet plugin's hooks (the turn marker among them)
  * are trusted too. Both answers go through Codex's own app server, as its
  * dialogs give them: the hash a hook is trusted by is Codex's to compute.
  */
 export interface CodexSetup {
   trust(folders: readonly string[]): Promise<void>;
-  /** Trusts the aeolus plugin's hooks that are new or changed, as Codex sees them from the folder: their keys. */
+  /** Trusts the aeolus-fleet plugin's hooks that are new or changed, as Codex sees them from the folder: their keys. */
   trustAeolusHooks(folder: string): Promise<readonly string[]>;
 }
 
-const AEOLUS_PLUGIN_PREFIX = 'aeolus@';
+const AEOLUS_PLUGIN_PREFIX = 'aeolus-fleet@';
 
 /** How long the app server may take to answer before the setup gives up. */
 const ANSWER_TIMEOUT_MS = 30_000;

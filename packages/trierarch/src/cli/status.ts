@@ -12,7 +12,7 @@ import { PLAIN, stateTone, type Style } from '../adapters/style.js';
 
 /**
  * `aeolus-trierarch status`: how the trierarch stands on this machine, from
- * what is on it. The aeolus plugin version per configured harness, the
+ * what is on it. The aeolus-fleet plugin version per configured harness, the
  * configured repositories by name, the service and its process, the fleet and the trierarch's
  * own lease (one whoami, no message), the caps in use, the entries by state,
  * and the worktrees kept or orphaned.
@@ -26,7 +26,7 @@ export interface StatusReport {
   readonly version: string;
   /** The version the running service runs, as it said when it started; none when it does not run or did not say. */
   readonly runningVersion?: string;
-  /** The aeolus plugin version per configured harness; null where the harness has none (#480). */
+  /** The aeolus-fleet plugin version per configured harness; null where the harness has none (#480). */
   readonly plugins: Readonly<Record<string, string | null>>;
   /** The repositories the configuration offers, by name (#579). */
   readonly repositories: readonly string[];
@@ -57,7 +57,7 @@ export function leaseFrom(whoami: () => Promise<unknown>): () => Promise<Lease> 
 export async function inspectStatus(at: {
   configuration: TrierarchConfiguration;
   version: string;
-  /** The aeolus plugin version the harness uses; none when it has no aeolus plugin. */
+  /** The aeolus-fleet plugin version the harness uses; none when it has no aeolus-fleet plugin. */
   pluginVersion: (harness: string) => Promise<string | undefined>;
   running: () => Promise<RunningFile | undefined>;
   crew: CrewFile;
@@ -135,13 +135,13 @@ function describeVersion(report: StatusReport, style: Style): string {
   return style.tone('busy', `${report.version} installed, ${report.runningVersion} running: restart the service to run the installed one (${RESTART})`);
 }
 
-/** Each configured harness with the aeolus plugin version it uses, or that it has none. */
+/** Each configured harness with the aeolus-fleet plugin version it uses, or that it has none. */
 function describePlugins(plugins: StatusReport['plugins'], style: Style): string {
   const harnesses = Object.entries(plugins);
   if (harnesses.length === 0) {
     return 'no harness configured';
   }
-  return harnesses.map(([harness, version]) => (version === null ? style.tone('bad', `${harness} not found (install the aeolus plugin for it)`) : `${harness} ${version}`)).join(', ');
+  return harnesses.map(([harness, version]) => (version === null ? style.tone('bad', `${harness} not found (install the aeolus-fleet plugin for it)`) : `${harness} ${version}`)).join(', ');
 }
 
 /** Each line its label and how it stands; where the style colours, the label strong and each state in its tone. */
@@ -150,7 +150,7 @@ export function describeStatus(report: StatusReport, style: Style = PLAIN): stri
   const line = (label: string, text: string): string => `${style.tone('strong', `${label}:`)} ${text}`;
   return [
     line('Version', describeVersion(report, style)),
-    line('Aeolus plugin', describePlugins(report.plugins, style)),
+    line('Aeolus Fleet plugin', describePlugins(report.plugins, style)),
     line('Repositories', report.repositories.length === 0 ? 'none' : report.repositories.join(', ')),
     line('Service', describeService(report.service, style)),
     line('Fleet', describeFleet(report.fleet, style)),

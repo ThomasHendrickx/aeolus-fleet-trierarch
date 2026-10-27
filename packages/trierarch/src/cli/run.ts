@@ -112,6 +112,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     get configuration() {
       return offered.configuration;
     },
+    configured,
     version,
     adapterFlags: adapterFlagsOf(configuration),
     riskyFlags: riskyFlagsOf(configuration),
@@ -156,7 +157,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     codex: createCodexUsage({ sessions: join(env.CODEX_HOME ?? join(homeDirectory, '.codex'), 'sessions'), madeAt: folderMadeAt }),
   });
   const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configured.harnesses), prices: priceTableOf(configured.prices) });
-  const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup, readLoad, readUsage });
+  const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup, readLoad, readUsage, clock });
   const askForTrustedRepositories = createAskForTrustedRepositories({ fleet, logger, ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
   // Each pass ends with the trierarch's own report: the first at start, then only when it changed.
   const pass = async (): Promise<void> => {
@@ -167,7 +168,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
 
   await writeRunningFile(paths.running, { pid: process.pid, version: setup.version });
   const found = await Promise.all(Object.entries(plugins).map(async ([harness, plugin]) => `${harness} at ${await plugin.root()}`));
-  logger.info(`aeolus-trierarch ${setup.version} runs for ${crew.fleetUrl}, with the aeolus plugin for ${found.join(' and ') || 'no harness'}`);
+  logger.info(`aeolus-trierarch ${setup.version} runs for ${crew.fleetUrl}, with the aeolus-fleet plugin for ${found.join(' and ') || 'no harness'}`);
   try {
     await loop({ receive: (stop) => fleet.receive(stop), handle, pass, signal, logger, intervalMs: PASS_INTERVAL_MS });
   } finally {

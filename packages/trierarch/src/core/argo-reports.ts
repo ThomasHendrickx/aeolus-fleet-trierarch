@@ -1,5 +1,6 @@
 import { argoMessage } from '@aeolus-fleet/common';
 
+import { PROBE_AFTER_MINUTES, type FailedStarts } from './failed-starts.js';
 import type { LowResource, MachineLoad } from './machine-load.js';
 
 /**
@@ -138,4 +139,15 @@ function countsOf(lines: readonly { kind: DiscardedKind }[]): string {
     .filter(({ count }) => count > 0)
     .map(({ kind, count }) => (kind === 'commit' ? `${String(count)} ${count === 1 ? 'commit' : 'commits'}` : `${String(count)} ${kind}`))
     .join(', ');
+}
+
+/** The machine stopped offering itself after failed starts (#853): told once, with the last reason and how it offers itself again. */
+export function stoppedOfferingText(failedStarts: FailedStarts): string {
+  return argoMessage({
+    headline: 'Session starts fail here: this machine takes no new ships',
+    body: paragraphs(
+      [`- Failed in a row: the starts of ${String(failedStarts.shipIds.length)} ships`, `- Last: ${failedStarts.reason}`].join('\n'),
+      `It offers itself again for one start ${String(PROBE_AFTER_MINUTES)} minutes after its last failed start, and for good once a start succeeds or the trierarch starts with a changed configuration.`,
+    ),
+  });
 }

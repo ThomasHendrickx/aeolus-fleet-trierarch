@@ -9,8 +9,8 @@ import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
 import { createHarnesses, riskyFlagsOf } from './harnesses.js';
 
 const sessions = { start: () => Promise.resolve(), send: () => Promise.resolve(), interrupt: () => Promise.resolve(), events: () => Promise.resolve([]) };
-/** The aeolus plugin's own scripts from this repository, as a harness installs them in its plugin cache. */
-const PLUGIN_ROOT = fileURLToPath(new URL('../../../../plugins/aeolus', import.meta.url));
+/** The aeolus-fleet plugin's own scripts from this repository, as a harness installs them in its plugin cache. */
+const PLUGIN_ROOT = fileURLToPath(new URL('../../../../plugins/aeolus-fleet', import.meta.url));
 const env = { AEOLUS_PLUGIN_ROOT: '/claude-plugin', AEOLUS_CODEX_PLUGIN_ROOT: '/codex-plugin' };
 
 describe('the harnesses a trierarch offers', () => {
@@ -22,7 +22,7 @@ describe('the harnesses a trierarch offers', () => {
     expect(Object.keys(harnesses).sort()).toEqual(['claude-code', 'codex']);
   });
 
-  it('looks for the aeolus plugin of Codex only when the configuration offers Codex', async () => {
+  it('looks for the aeolus-fleet plugin of Codex only when the configuration offers Codex', async () => {
     const { plugins } = await createHarnesses({ configuration: CONFIGURATION, homeDirectory: '/home/thomas', env: { AEOLUS_PLUGIN_ROOT: '/claude-plugin' }, managedSettings: '/home/thomas/managed', detected: () => ({}), sessions });
 
     expect(Object.keys(plugins)).toEqual(['claude-code']);
@@ -44,7 +44,7 @@ describe('the harnesses a trierarch offers', () => {
     const home = realpathSync(mkdtempSync(join(tmpdir(), 'trierarch-upgraded-home-')));
     const folder = realpathSync(mkdtempSync(join(tmpdir(), 'trierarch-upgraded-session-')));
     try {
-      const cache = join(home, harness === 'codex' ? '.codex' : '.claude', 'plugins', 'cache', 'aeolus-fleet', 'aeolus');
+      const cache = join(home, harness === 'codex' ? '.codex' : '.claude', 'plugins', 'cache', 'aeolus-fleet', 'aeolus-fleet');
       cpSync(PLUGIN_ROOT, join(cache, '0.25.0'), { recursive: true });
       const configuration = { ...CONFIGURATION, harnesses: { [harness]: { flags: [], options: {} } } };
       const { harnesses } = await createHarnesses({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed'), detected: () => ({}), sessions });

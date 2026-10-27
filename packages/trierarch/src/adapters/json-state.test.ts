@@ -82,6 +82,12 @@ const aPopulatedState = (): Populated<TrierarchState> => {
     lowResources: ['memory', 'disk'],
     missingPlugins: ['codex'],
     passFailure: { reason: 'the fleet cannot be reached', since: '2026-10-06T08:00:00.000Z' },
+    failedStarts: {
+      shipIds: [newId('ship'), newId('ship'), newId('ship')],
+      reason: 'no activity within a minute of its start',
+      at: '2026-10-06T08:00:00.000Z',
+      stopped: { since: '2026-10-06T07:58:00.000Z', configuration: '{"caps":{"ships":8,"running":4}}' },
+    },
   };
 };
 

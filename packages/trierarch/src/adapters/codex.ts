@@ -17,15 +17,15 @@ import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
  * Codex as a harness (docs/architecture.md, "First adapters"): `codex` in the
  * folder, `codex resume --last` on a restart (the folder's last conversation;
  * one ship per folder), always with `--no-daemon` and without the question
- * tool, and `$aeolus-wake` sent
+ * tool, and `$aeolus-fleet-wake` sent
  * to wake an idle session, each prompt with the line that no human reads its
  * terminal (#585). The identity and the turn marker go through the
- * aeolus plugin for Codex, in Codex's own plugin data folder. The plugin's new
+ * aeolus-fleet plugin for Codex, in Codex's own plugin data folder. The plugin's new
  * or changed hooks are trusted before every launch: a plugin update changes
  * them, and Codex would stop the session at its hooks review (#581).
  */
 
-export const WAKE_PROMPT = '$aeolus-wake';
+export const WAKE_PROMPT = '$aeolus-fleet-wake';
 
 /**
  * Added to every launch, as mechanism: without it Codex runs the session's
@@ -77,7 +77,7 @@ export function createCodexHarness(options: {
   configuration: TrierarchConfiguration;
   plugin: AeolusPlugin;
   sessions: Pick<SessionRuntime, 'start' | 'send' | 'interrupt' | 'events'>;
-  /** Codex's own answers, where the aeolus plugin's hooks are trusted before each launch (#581). */
+  /** Codex's own answers, where the aeolus-fleet plugin's hooks are trusted before each launch (#581). */
   setup: Pick<CodexSetup, 'trustAeolusHooks'>;
   /** The program to run; `codex` unless a test runs another. */
   command?: string;
