@@ -49,6 +49,27 @@ async function run(command: string, args: readonly string[]): Promise<void> {
   }
 }
 
+const installedPluginsSchema = z.array(z.object({ id: z.string() }));
+
+/** The ids of the plugins Claude Code has installed: `uninstall` of one it lacks exits 1, and `install` of one it has does not move it to the new version. */
+async function installedClaudePlugins(claude: string): Promise<ReadonlySet<string>> {
+  const args = ['plugin', 'list', '--json'];
+  const result = await runCommand(claude, { args });
+  const listed = result.status === 0 ? installedPluginsSchema.safeParse(parseJson(result.stdout)) : undefined;
+  if (listed?.success !== true) {
+    throw new Error(`${[claude, ...args].join(' ')} failed: ${`${result.stdout}${result.stderr}`.trim()}`);
+  }
+  return new Set(listed.data.map((plugin) => plugin.id));
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
 const settingsSchema = z.record(z.string(), z.unknown());
 const marketplacesSchema = z.record(z.string(), z.unknown());
 
@@ -191,8 +212,11 @@ export function createPluginUpdate(at: {
       await dropDeclaredMarketplace(claudeSettings);
       await run(claude, ['plugin', 'marketplace', 'add', tag === undefined ? REPOSITORY : `${REPOSITORY}#${tag}`]);
       await run(claude, ['plugin', 'marketplace', 'update', MARKETPLACE]);
-      await run(claude, ['plugin', 'install', PLUGIN]);
-      await run(claude, ['plugin', 'uninstall', RENAMED_PLUGIN]);
+      const installed = await installedClaudePlugins(claude);
+      await run(claude, ['plugin', installed.has(PLUGIN) ? 'update' : 'install', PLUGIN]);
+      if (installed.has(RENAMED_PLUGIN)) {
+        await run(claude, ['plugin', 'uninstall', RENAMED_PLUGIN]);
+      }
     },
   };
 }
