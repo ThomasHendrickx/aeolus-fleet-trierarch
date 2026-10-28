@@ -111,9 +111,13 @@ export function claudeCodeSettingsDefaultMode(setup: Pick<ClaudeCodeSetup, 'defa
 }
 
 /** What in the settings Claude Code reads with these flags would give a session a key instead of its subscription (api keys K6). */
-export function claudeCodeKeyInReach(setup: Pick<ClaudeCodeSetup, 'keyInReach'>, at: { flags: readonly string[]; folder?: string }): Promise<string | undefined> {
-  const settings = valueOf(at.flags, SETTINGS);
-  return setup.keyInReach({ sources: settingSourcesOf(at.flags), ...(at.folder !== undefined && { folder: at.folder }), ...(settings !== undefined && { settings }) });
+type HarnessConfiguration = TrierarchConfiguration['harnesses'][string];
+
+export function claudeCodeKeyInReach(setup: Pick<ClaudeCodeSetup, 'keyInReach'>, at: { harness: HarnessConfiguration; options: Readonly<Record<string, string>>; folder?: string }): Promise<string | undefined> {
+  // The flags the session would start with, the picked options' own among them, as launch takes them.
+  const flags = effectiveFlags(at.harness, at.options);
+  const settings = valueOf(flags, SETTINGS);
+  return setup.keyInReach({ sources: settingSourcesOf(flags), ...(at.folder !== undefined && { folder: at.folder }), ...(settings !== undefined && { settings }) });
 }
 
 /** `--permission-mode manual` (or `default` where the installed Claude Code lists no manual) where the settings' default mode is plan and the flags name none, and with when it applies where that depends on the folder. */

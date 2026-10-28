@@ -13,14 +13,14 @@ import { PLUGIN_HARNESSES, type PluginHarness } from './plugin.js';
 export function createModelLogins(at: {
   keys: Pick<KeyFiles, 'has'>;
   runtime: 'host' | 'container';
-  /** What in Claude Code's settings would give a session in the folder a key, named; see ClaudeCodeSetup.keyInReach. */
-  claudeCode: { keyInReach(at: { folder?: string }): Promise<string | undefined> };
+  /** What in Claude Code's settings would give a session with the options in the folder a key, named; see ClaudeCodeSetup.keyInReach. */
+  claudeCode: { keyInReach(at: { options: Readonly<Record<string, string>>; folder?: string }): Promise<string | undefined> };
   codex: Pick<CodexSetup, 'loginKind'>;
 }): ModelLoginsPort {
   return {
-    startProblem: async ({ harness, login, folder }) => {
+    startProblem: async ({ harness, login, options, folder }) => {
       if (login === 'subscription') {
-        return subscriptionProblem(at, { harness, ...(folder !== undefined && { folder }) });
+        return subscriptionProblem(at, { harness, options, ...(folder !== undefined && { folder }) });
       }
       if (at.runtime === 'container') {
         return 'a session on an API key runs on the host runtime only, until containers reach the model proxy';
@@ -32,9 +32,9 @@ export function createModelLogins(at: {
 }
 
 /** Why a session of the harness would not run on its subscription alone; none when it would. */
-async function subscriptionProblem(at: Parameters<typeof createModelLogins>[0], session: { harness: string; folder?: string }): Promise<string | undefined> {
+async function subscriptionProblem(at: Parameters<typeof createModelLogins>[0], session: { harness: string; options: Readonly<Record<string, string>>; folder?: string }): Promise<string | undefined> {
   if (session.harness === 'claude-code') {
-    const found = await at.claudeCode.keyInReach(session.folder === undefined ? {} : { folder: session.folder });
+    const found = await at.claudeCode.keyInReach({ options: session.options, ...(session.folder !== undefined && { folder: session.folder }) });
     return found === undefined ? undefined : `claude-code would reach an API key on its subscription (${found}): remove it, or run the ship on its API key`;
   }
   if (session.harness === 'codex' && (await at.codex.loginKind()) === 'apiKey') {

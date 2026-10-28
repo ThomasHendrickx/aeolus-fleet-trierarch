@@ -150,12 +150,12 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     },
     refreshCheckouts: (shipId) => checkouts.refresh(shipId),
   });
-  const claudeCodeFlags = configured.harnesses['claude-code']?.flags ?? [];
   const claudeCodeSetup = createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) });
   const modelLogins = createModelLogins({
     keys,
     runtime: configured.runtime?.kind === 'container' ? 'container' : 'host',
-    claudeCode: { keyInReach: ({ folder }) => claudeCodeKeyInReach(claudeCodeSetup, { flags: claudeCodeFlags, ...(folder !== undefined && { folder }) }) },
+    // The harness as launch reads it, so the guard sees the flags the session would start with (K6).
+    claudeCode: { keyInReach: ({ options, folder }) => claudeCodeKeyInReach(claudeCodeSetup, { harness: configuration.harnesses['claude-code'] ?? { flags: [], options: {} }, options, ...(folder !== undefined && { folder }) }) },
     codex: createCodexSetup(),
   });
   const runPass = createRunPass({ fleet, harnesses, processes: sessions, folderProcesses: createFolderProcesses(), workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets, modelLogins, ...(configured.logins !== undefined && { logins: configured.logins }) });

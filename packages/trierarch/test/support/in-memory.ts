@@ -868,9 +868,9 @@ export class InMemoryUsage implements UsagePort {
 export class InMemoryModelLogins implements ModelLoginsPort {
   readonly problems = new Map<string, string>();
   /** Each question it was asked, in order. */
-  readonly asked: { harness: string; login: Login; folder?: string }[] = [];
+  readonly asked: { harness: string; login: Login; options: Readonly<Record<string, string>>; folder?: string }[] = [];
 
-  startProblem(at: { harness: string; login: Login; folder?: string }): Promise<string | undefined> {
+  startProblem(at: { harness: string; login: Login; options: Readonly<Record<string, string>>; folder?: string }): Promise<string | undefined> {
     this.asked.push(at);
     return Promise.resolve(this.problems.get(`${at.harness}:${at.login}`));
   }
