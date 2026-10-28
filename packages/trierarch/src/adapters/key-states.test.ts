@@ -61,6 +61,15 @@ describe("a harness's key state (api keys K8)", () => {
     await expect(states().stateOf('claude-code')).resolves.toEqual({ state: 'ready' });
   });
 
+  it('stays refused whatever its vendor answers later, until login writes a new key (api keys K10)', async () => {
+    await keys.write('codex', 'test-key-not-real');
+    await states().record('codex', { state: 'refused', at: AT });
+
+    await states().record('codex', { state: 'ready', at: new Date(AT.getTime() + 60_000) });
+
+    await expect(states().stateOf('codex')).resolves.toEqual({ state: 'refused', at: AT.toISOString() });
+  });
+
   it('is ready once the key works again', async () => {
     await keys.write('claude-code', 'test-key-not-real');
     await states().record('claude-code', { state: 'outOfCredit', at: AT });
