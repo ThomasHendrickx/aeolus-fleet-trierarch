@@ -15,6 +15,8 @@ export interface TrierarchPaths {
   readonly crewToken: string;
   /** The machine's long-lived model token, handed to each container session (decision 0039); never in the configuration. */
   readonly modelToken: string;
+  /** Each harness's API key, one file per harness (api keys K5); only login writes it, never the configuration. */
+  readonly keys: string;
   readonly state: string;
   /** What detection found per harness (#365), apart from the configuration. */
   readonly detected: string;
@@ -43,6 +45,7 @@ export function trierarchPaths(at: { homeDirectory: string; config?: string }): 
     configSchema: join(home, 'config.schema.json'),
     crewToken: join(home, 'crew-token'),
     modelToken: join(home, 'model-token'),
+    keys: join(home, 'keys'),
     state: join(home, 'state.json'),
     detected: join(home, 'detected.json'),
     running: join(home, 'running.json'),

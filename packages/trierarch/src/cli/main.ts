@@ -12,15 +12,17 @@ import { createDetectedFile } from '../adapters/detected-file.js';
 import { createDetectors } from '../adapters/detectors.js';
 import { loadConfiguration, readCrewFile, readRunningFile, removeRemoteControl, TrierarchFileError } from '../adapters/files.js';
 import { createJsonState } from '../adapters/json-state.js';
+import { createKeyFiles } from '../adapters/key-files.js';
 import { createLogger, readLogLine, renderLogLine, type LogStream } from '../adapters/log.js';
 import { createStyle, isColourTerminal, type Style } from '../adapters/style.js';
 import { trierarchPaths } from '../adapters/paths.js';
-import { aeolusPluginVersion, PLUGIN_HARNESSES } from '../adapters/plugin.js';
+import { aeolusPluginVersion, PLUGIN_HARNESSES, type PluginHarness } from '../adapters/plugin.js';
 import { createPluginUpdate } from '../adapters/plugin-update.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
 import { runCommand, streamCommand } from '../adapters/run-command.js';
 import { createService, serviceEnvironment } from '../adapters/service.js';
 import { hostSessions } from '../adapters/runtime-adapters.js';
+import { checkKey } from '../adapters/vendor-key-check.js';
 import { runningVersion } from '../adapters/version.js';
 import { createDetectHarnesses } from '../core/detect-harnesses.js';
 import { createUninstall } from '../core/uninstall.js';
@@ -29,6 +31,7 @@ import { detectOptions } from './detect.js';
 import { addPlace } from './add.js';
 import { initTrierarch } from './init.js';
 import { describeList, inspectList } from './list.js';
+import { login, readKeyFrom, type LoginRequest } from './login.js';
 import { createServiceLog } from './logs.js';
 import { createTerminalPrompter } from './prompter.js';
 import { runTrierarch } from './run.js';
@@ -47,6 +50,9 @@ export const USAGE = [
   '  add folder <name> <path>       add a folder to crew a ship in as it is, the same way',
   '  config check          check the configuration and give the effective flags per harness',
   '  detect                detect again what each configured harness offers (models, effort) and keep it beside the configuration',
+  '  login                 each harness\'s login and whether it holds an API key',
+  '  login <harness> --api-key      read an API key for claude-code or codex from stdin (not shown as typed), check it with the vendor and keep it on this computer only, then restart the service; sessions keep running',
+  '  login <harness> --remove-key   remove the API key for that harness, then restart the service',
   '',
   'Look:',
   '  status                the version, the aeolus-fleet plugin per harness, the repositories, the service, the fleet and its own lease, caps in use, entries by state, kept worktrees and orphans',
@@ -83,7 +89,7 @@ const VALUE_FLAGS = new Set(['--config', '--fleet-url', '--ship-id', '--plugin-s
 /** Set for the installed version's upgrade that runs the plugin step of an upgrade (#725), which restarts the service itself (#829); older versions ignore it. */
 const PLUGIN_STEP_VARIABLE = 'AEOLUS_TRIERARCH_PLUGIN_STEP';
 
-const SWITCHES = new Set(['--json', '--yes', '--follow', '--no-load', '--version']);
+const SWITCHES = new Set(['--json', '--yes', '--follow', '--no-load', '--version', '--api-key', '--remove-key']);
 const DEFAULT_LINES = 50;
 const FOLLOW_INTERVAL_MS = 500;
 
@@ -124,6 +130,20 @@ export interface Machine {
   env: Readonly<Record<string, string | undefined>>;
   managedSettings: string;
   platform: string;
+}
+
+/** What a login command line asks: show with no harness, else a key to read or remove for the harness it names. */
+function loginRequest(harness: string | undefined, switches: ReadonlySet<string>): LoginRequest {
+  const isApiKey = switches.has('--api-key');
+  const isRemoveKey = switches.has('--remove-key');
+  if (harness === undefined && !isApiKey && !isRemoveKey) {
+    return { kind: 'show' };
+  }
+  const known = PLUGIN_HARNESSES.find((name): name is PluginHarness => name === harness);
+  if (known === undefined || isApiKey === isRemoveKey) {
+    throw new TrierarchFileError(`login takes ${PLUGIN_HARNESSES.join(' or ')}: aeolus-trierarch login claude-code --api-key`);
+  }
+  return { kind: isApiKey ? 'apiKey' : 'removeKey', harness: known };
 }
 
 /** Runs one command line of `aeolus-trierarch`. */
@@ -238,6 +258,28 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       const { text, ...data } = await configCheck(paths, { files: { claudeCode: claudeCodeSetup() }, host: createContainerHost({ modelTokenFile: paths.modelToken }) });
       return { data, text };
     },
+    login: async () => {
+      const report = await login({
+        request: loginRequest(words[1], switches),
+        keys: createKeyFiles(paths.keys),
+        readKey: async () => {
+          if (!process.stdin.isTTY) {
+            return readKeyFrom(process.stdin);
+          }
+          // Asked on stderr, so stdout holds the answer alone.
+          const prompter = createTerminalPrompter({ input: process.stdin, output: process.stderr, style: createStyle({ isColour: isColourTerminal(env, process.stderr.isTTY) }) });
+          try {
+            return await prompter.secret('API key (not shown):');
+          } finally {
+            prompter.close();
+          }
+        },
+        check: (harness, key) => checkKey({ harness, key }),
+        service: serviceAt(),
+        running: () => readRunningFile(paths.running),
+      });
+      return { data: report, text: report.said.join('\n') };
+    },
     detect: async () => {
       const { text, ...data } = await detectOptions({ configuration: await loadConfiguration(paths.config), detect: detectAt() });
       return { data, text };
@@ -349,8 +391,8 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
     },
   };
 
-  // upgrade takes a word after it, the version; add takes three, the kind, the name and the path.
-  const command = words[0] === 'upgrade' && words.length <= 2 ? commands.upgrade : words[0] === 'add' && words.length === 4 ? commands.add : commands[words.join(' ')];
+  // upgrade takes a word after it, the version; add takes three, the kind, the name and the path; login one, the harness.
+  const command = (words[0] === 'upgrade' || words[0] === 'login') && words.length <= 2 ? commands[words[0]] : words[0] === 'add' && words.length === 4 ? commands.add : commands[words.join(' ')];
   if (command === undefined) {
     return { output: USAGE, code: 2 };
   }
