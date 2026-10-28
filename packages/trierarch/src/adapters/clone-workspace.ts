@@ -1,4 +1,4 @@
-import { mkdir, rm, stat } from 'node:fs/promises';
+import { mkdir, readdir, rm, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
@@ -86,6 +86,15 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
         throw new Error(`${folder} is no clone under ${root}: the trierarch removes only what it made`);
       }
       await rm(folder, { recursive: true, force: true });
+    },
+    worktrees: async () => {
+      const found = [];
+      for (const repository of Object.keys(configuration.repositories)) {
+        for (const name of await readdir(join(root, repository)).catch(() => [])) {
+          found.push({ path: join(root, repository, name), repository, name });
+        }
+      }
+      return found;
     },
   };
 }
