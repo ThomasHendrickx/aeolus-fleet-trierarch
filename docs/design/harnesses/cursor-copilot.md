@@ -75,7 +75,7 @@ The fleet's rules (decisions index):
 - **0039.** Container mode offers Claude Code only until another harness is proven in a container (CC10).
 - **0048, 0056.** Outside agents and clients reach the fleet through the gateway, not as crewed sessions (CC8).
 - **0016.** No policy: `--force`, `--allow-all-tools` and `--yolo` are the operator's risk, as `--dangerously-skip-permissions` is.
-- **0063.** Model governance compares the ids a session states and a trierarch reports; `auto` is one more id there (CC9, open point O2).
+- **0063.** Model governance compares the ids a session states and a trierarch reports; `auto` is one more id there (CC9).
 
 The trierarch's own:
 - **H5.** A harness whose hooks do not run headless is not offered until they do. Cursor's CLI hooks are in doubt (CC1).
@@ -101,7 +101,7 @@ Thomas decided these on 28 Oct.
 | CC6 | **Sign-in is the machine's own login.** The person who runs the trierarch signs the harness in (`copilot login --device-code`, `agent login`); the trierarch keeps nothing. The hold's clean environment (H10) passes none of `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` or `CURSOR_API_KEY`. A missing or expired login fails the launch window with the harness's error event as its cause. `aeolus-trierarch login copilot` and `login cursor` with `--api-key` are refused, naming why. A kept login is later ([#1361](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1361)) |
 | CC7 | **Trierarch crew first, no core change; a hand crew line per harness in core once that harness is proven,** with `copilot` and `cursor` added to 0018's known harness values and 0019's crew lines in the same core PR. The console's starting prompt shows the new crew line beside Claude Code's and Codex's |
 | CC8 | **Vendor cloud agents are out of this design;** a later gateway design hands them deliveries ([#1360](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1360)) |
-| CC9 | **Cursor's auto mode is allowed; a session on it states `auto` as its model** (Thomas, 28 Oct). This changes 0018: every send states the model, its exact id, or `auto` when the harness chooses the model per request and names none. The trierarch offers `auto` among Cursor's models in its detected options, and a crew request may name it. Core already takes `auto` (common's `modelSchema` takes any id without spaces), so core changes its decision, its blueprint and its schema's documentation, not its checks; open points O1 to O3 settle what the console and model governance do with it |
+| CC9 | **Cursor's auto mode is allowed; a session on it states `auto` as its model** (Thomas, 28 Oct). This changes 0018: every send states the model, its exact id, or `auto` when the harness chooses the model per request and names none. The trierarch offers `auto` among Cursor's models in its detected options, and a crew request may name it. Core already takes `auto` (common's `modelSchema` takes any id without spaces), so core changes its decision, its blueprint and its schema's documentation, not its checks. Any harness that chooses its model per request may state `auto`; core does not check it against the ship's harness, which is self-reported (0016). The console shows `auto` as any model name, exactly as stated, with no screen change. Model governance treats `auto` as a model id like any other: in a fleet with enabled models, a session or crew request on `auto` is allowed only where the fleet enables `auto` |
 | CC10 | **Host only.** Copilot and Cursor are offered on the host runtime; in container mode they are in `notOffered` until proven in a container (0039, [#1362](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1362)) |
 | CC11 | **The model a session states** comes from its harness, as the Codex model does today: the hook input where it carries the model, otherwise the model the trierarch started the session with. A Copilot session states the id Copilot names; a Cursor session on auto states `auto` |
 | CC12 | **A hand-crewed session wakes** through what its harness documents for starting a turn in a running session, as Codex's wake bridge uses `codex queue`. A harness with no such way gets no hand crew line (CC7) and its slice stops to ask Thomas |
@@ -204,7 +204,7 @@ Trierarch crew:
 The model:
 - **Given** a crewed Copilot session, **when** it sends, **then** the send states the model id Copilot names.
 - **Given** a Cursor crew request on `auto`, **when** the session sends, **then** the send states `auto` and the fleet takes it.
-- **Given** decision 0018 as changed, **when** a send states `auto`, **then** core stores it and the console shows it as O1 settles.
+- **Given** decision 0018 as changed, **when** a send states `auto`, **then** core stores it and the console shows it as any model name, exactly as stated.
 
 Hand crew:
 - **Given** the console's starting prompt for a ship awaiting crew, **when** Copilot is proven, **then** it shows a Copilot crew line beside Claude Code's and Codex's.
@@ -220,7 +220,7 @@ Each one PR. S1 and S2 may go first in any order. The Cursor slices (S7 to S11) 
 | # | Repository | Slice |
 | --- | --- | --- |
 | S1 | aeolus-fleet | **The MCP guides (CC2).** `docs/guides/cursor.md` and `docs/guides/copilot.md`, their lines in `docs/guides/README.md`: the starting prompt for a chat in each CLI's MCP configuration, and the limits (no wake, token in the transcript) |
-| S2 | aeolus-fleet | **Decision 0018 takes `auto` (CC9).** The decision's text (an exact id, or `auto` when the harness chooses the model per request), its line in `docs/decisions/README.md`, the blueprint's "Model", common's `modelSchema` documentation and a test that it takes `auto`. Core and the console accept `auto` as they accept any id today; the console's part follows O1, and the trierarch plugin's model governance follows O2. No `MINIMUM_CORE_VERSION` change, since no check changes |
+| S2 | aeolus-fleet | **Decision 0018 takes `auto` (CC9).** The decision's text (an exact id, or `auto` when the harness chooses the model per request), its line in `docs/decisions/README.md`, the blueprint's "Model", common's `modelSchema` documentation and a test that it takes `auto`. Core, the console and model governance accept `auto` as they accept any id today: the console shows it as stated, and governance allows it only where the fleet enables it. No `MINIMUM_CORE_VERSION` change, since no check changes |
 | S3 | aeolus-fleet-trierarch | **Copilot in the plugin (CC5, CC11).** First prove on a captured Copilot CLI build that each role in the hook table runs in `copilot -p` and with `--resume`, and that a `preToolUse` deny reason reaches the model; if one does not, stop and ask Thomas. Then Copilot's manifest and hooks file mapping onto the existing scripts, its marketplace entry, `~/.aeolus/crews/copilot/`, the crew skill wording for Copilot, the plugin README |
 | S4 | aeolus-fleet-trierarch | **The Copilot adapter (CC3, CC4, CC6, CC10).** A `copilot` adapter in `harnesses.ts`: detector, models, setup (answers first-run questions), command lines, a turn per process with `--resume` in the hold, the launch window from hook markers and captured error events, SIGINT for force, `notOffered` for no plugin, an unproven build or the container runtime, and `login copilot --api-key` refused. Docs: `trierarch.md`, `architecture.md` |
 | S5 | aeolus-fleet-trierarch | **A hand-crewed Copilot session wakes (CC12).** First prove how Copilot starts a turn in a running interactive session; if it has no documented way, stop and ask Thomas. Then the plugin's wake for Copilot |
@@ -234,10 +234,4 @@ Each one PR. S1 and S2 may go first in any order. The Cursor slices (S7 to S11) 
 Screens that need a before and after mockup for Thomas:
 - **StartingPromptBlock** (S6, S11): a CrewLineBlock for Copilot, then for Cursor, after Claude Code's and Codex's.
 - **LocationTag** (S6, S11): Copilot and Cursor by name and icon, where today any other harness shows as plain text.
-- **ModelTag for `auto`** (S2), only if O1 is answered with a look of its own.
 
-## 8. Open points for Thomas
-
-- **O1. How the console shows `auto`.** Options: 1. As any model, exactly as stated (ModelTag with the sparkles mark, "auto"), no screen change. 2. A look of its own saying the harness chooses the model, with a mockup. Pick: 1. The conventions say ModelTag shows the value exactly as stated, and the harness beside it already says it is Cursor.
-- **O2. Model governance and `auto`.** Options: 1. `auto` is an id like any: in a fleet with enabled models, a Cursor request on auto is placed only when `auto` is enabled. 2. `auto` is always allowed. 3. `auto` is never placed in a fleet with enabled models. Pick: 1. It needs no change to the trierarch plugin and lets a fleet that governs models decide about auto as about any model.
-- **O3. Which harnesses may state `auto`.** Options: 1. Any session whose harness chooses the model per request, since the harness is self-reported and core cannot tell. 2. Cursor only, checked by core against the ship's harness. Pick: 1. 0018's harness is free text and never verified (0016); a check would be a first.
