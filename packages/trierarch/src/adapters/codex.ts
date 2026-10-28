@@ -1,7 +1,8 @@
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
-import type { AdapterFlag, HarnessPort, SessionRuntime } from '../core/ports.js';
+import type { Login } from '../core/login.js';
+import type { AdapterFlag, HarnessPort, ProxyToken, SessionRuntime } from '../core/ports.js';
 import { LAUNCH_VARIABLE } from './claude-code.js';
 import type { CodexSetup } from './codex-setup.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
@@ -10,6 +11,7 @@ import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
 import { parsedLine } from './hold-protocol.js';
 import { createLaunchMarks } from './launch-marker.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
+import { newProxyToken } from './proxy-tokens.js';
 
 /**
  * Codex as a harness (docs/architecture.md, "First adapters"), headless
@@ -43,6 +45,10 @@ const NO_DAEMON = '--no-daemon';
  */
 const NO_QUESTION_TOOL = '--config=tools.experimental_request_user_input.enabled=false';
 const END_OF_FLAGS = '--';
+/** The model provider a session on an API key uses: the model proxy (api keys K6). */
+const PROVIDER = 'aeolus';
+/** The variable the provider reads its token from, which the hold sets from the session's own file. */
+const PROXY_TOKEN_VARIABLE = 'AEOLUS_MODEL_TOKEN';
 const EXEC = 'exec';
 const RESUME = 'resume';
 const LAST = '--last';
@@ -130,8 +136,30 @@ export function createCodexHarness(options: {
   setup: Pick<CodexSetup, 'trustAeolusHooks'>;
   /** The program to run; `codex` unless a test runs another. */
   command?: string;
+  /** Where sessions on an API key reach the model proxy (headless H16); none before it first listened, or on a machine with no proxy. */
+  proxyUrl?: () => Promise<string | undefined>;
 }): HarnessPort {
   const { configuration, plugin, sessions } = options;
+  /**
+   * The session's way to its model (api keys K6): on an API key, the model
+   * proxy as a provider of its own, set on the command line (a project's
+   * config cannot set one), its token in the variable the provider names and
+   * fresh for each start; on the subscription, nothing, so it signs in as
+   * Codex does. Every later turn's exec keeps the flags and the hold keeps the
+   * variable.
+   */
+  const routeOf = async (login: Login): Promise<{ flags: readonly string[]; proxyToken?: ProxyToken }> => {
+    if (login === 'subscription') {
+      return { flags: [] };
+    }
+    const url = await options.proxyUrl?.();
+    if (url === undefined) {
+      throw new Error('the model proxy is not running yet');
+    }
+    const provider = { name: '"Aeolus model proxy"', base_url: `"${url}/openai/v1"`, env_key: `"${PROXY_TOKEN_VARIABLE}"`, wire_api: '"responses"' };
+    const flags = [...Object.entries(provider).flatMap(([key, value]) => ['-c', `model_providers.${PROVIDER}.${key}=${value}`]), '-c', `model_provider="${PROVIDER}"`];
+    return { flags, proxyToken: { harness: 'codex', variable: PROXY_TOKEN_VARIABLE, token: newProxyToken() } };
+  };
   const marks = createLaunchMarks(plugin);
   const { handOverLine, forceOverLine, ...identity } = createPluginIdentity(plugin);
 
@@ -142,16 +170,13 @@ export function createCodexHarness(options: {
       if (settings === undefined) {
         throw new Error(`The configuration has no harness ${harness}`);
       }
-      // Never on its subscription instead (api keys K2): a Codex session on an API key is not offered yet.
-      if (login === 'apiKey') {
-        throw new Error('codex does not run on an API key yet');
-      }
+      const route = await routeOf(login);
       const prompt = isFirstStart && firstPrompt !== undefined ? firstPromptOf(firstPrompt) : wakePromptOf(WAKE_PROMPT);
-      const command = codexCommandLine({ flags: effectiveFlags(settings, picked), prompt, isFirstStart, ...(options.command !== undefined && { program: options.command }) });
+      const command = codexCommandLine({ flags: [...effectiveFlags(settings, picked), ...route.flags], prompt, isFirstStart, ...(options.command !== undefined && { program: options.command }) });
       await options.setup.trustAeolusHooks(folder);
       await marks.clear(folder);
       // Codex reads outside its folder as it is: its read-only checkouts need no flag (#1182).
-      await sessions.start({ shipId, folder, command: wordsOf(command), harness, env: { [LAUNCH_VARIABLE]: launchId }, ...(checkouts.length > 0 && { readOnly: checkouts.map((checkout) => checkout.path) }) });
+      await sessions.start({ shipId, folder, command: wordsOf(command), harness, env: { [LAUNCH_VARIABLE]: launchId }, ...(route.proxyToken !== undefined && { proxyToken: route.proxyToken }), ...(checkouts.length > 0 && { readOnly: checkouts.map((checkout) => checkout.path) }) });
     },
     handOver: async (session) => {
       const line = await handOverLine(session);

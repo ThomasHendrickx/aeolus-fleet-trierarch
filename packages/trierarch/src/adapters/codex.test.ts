@@ -29,7 +29,7 @@ let data: string;
 /** Where the identities of Codex sessions live, in a home of the test's own (#658). */
 let crews: string;
 let folder: string;
-let started: { shipId: ShipId; folder: string; command: readonly string[]; env?: Readonly<Record<string, string>>; readOnly?: readonly string[] }[];
+let started: { shipId: ShipId; folder: string; command: readonly string[]; env?: Readonly<Record<string, string>>; readOnly?: readonly string[]; proxyToken?: { harness: string; variable: string; token: string } }[];
 /** The event lines each ship's session wrote, by ship id. */
 let events: Map<ShipId, readonly string[]>;
 let sent: { shipId: ShipId; line: string }[];
@@ -103,7 +103,7 @@ const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harne
 describe('Codex on its login (api keys K6, K7)', () => {
   const PROXY = 'http://127.0.0.1:41234';
   const PROVIDER_FLAGS = ['-c', 'model_providers.aeolus.name="Aeolus model proxy"', '-c', `model_providers.aeolus.base_url="${PROXY}/openai/v1"`, '-c', 'model_providers.aeolus.env_key="AEOLUS_MODEL_TOKEN"', '-c', 'model_providers.aeolus.wire_api="responses"', '-c', 'model_provider="aeolus"'];
-  const hasRun = (command: readonly string[] | undefined, flags: readonly string[]): boolean => command !== undefined && command.some((_, at) => flags.every((flag, offset) => command[at + offset] === flag));
+  const hasRun = (command: readonly string[] | undefined, flags: readonly string[]): boolean => (command ?? []).some((_, at) => flags.every((flag, offset) => command?.[at + offset] === flag));
 
   it("starts a session on an API key through the model proxy as a provider of its own, with a token of its own and never the key", async () => {
     await harness({ proxyUrl: PROXY }).launch({ ...launchOf(shipId), login: 'apiKey', options: {}, isFirstStart: true });

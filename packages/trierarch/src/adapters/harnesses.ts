@@ -93,7 +93,7 @@ export async function createHarnesses(at: {
     }
     const plugin = await findAeolusPlugin({ homeDirectory, env, harness: name });
     plugins[name] = plugin;
-    harnesses[name] = name === 'codex' ? createCodexHarness({ configuration, plugin, sessions, setup: createCodexSetup() }) : createClaudeCodeHarness({ configuration, plugin, sessions, ...(proxyUrl !== undefined && { proxyUrl }), isHeadless: shipHomes === undefined, permissionModes: () => detected()['claude-code']?.permissionModes, projects: join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects'), setup: createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) }), ...(shipHomes !== undefined && { shipHomes }) });
+    harnesses[name] = name === 'codex' ? createCodexHarness({ configuration, plugin, sessions, setup: createCodexSetup(), ...(proxyUrl !== undefined && { proxyUrl }) }) : createClaudeCodeHarness({ configuration, plugin, sessions, ...(proxyUrl !== undefined && { proxyUrl }), isHeadless: shipHomes === undefined, permissionModes: () => detected()['claude-code']?.permissionModes, projects: join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects'), setup: createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) }), ...(shipHomes !== undefined && { shipHomes }) });
   }
   return { harnesses, plugins };
 }

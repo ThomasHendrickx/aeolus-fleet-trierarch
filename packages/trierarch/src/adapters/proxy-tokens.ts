@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { chmod, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -20,6 +20,14 @@ const FILE = 'proxy-token';
 const proxyTokenSchema = z.object({ harness: z.enum(PLUGIN_HARNESSES), token: z.string().min(1) });
 
 export type ProxyToken = z.infer<typeof proxyTokenSchema>;
+
+/** How many random bytes a session's proxy token holds. */
+const TOKEN_BYTES = 32;
+
+/** A fresh token for one start of a session. */
+export function newProxyToken(): string {
+  return randomBytes(TOKEN_BYTES).toString('base64url');
+}
 
 export async function writeProxyToken(folder: string, proxyToken: { readonly harness: string; readonly token: string }): Promise<void> {
   const file = join(folder, FILE);

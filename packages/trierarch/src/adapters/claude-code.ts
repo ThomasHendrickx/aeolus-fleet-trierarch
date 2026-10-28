@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -15,6 +14,7 @@ import { effectiveFlags } from '../core/effective-flags.js';
 import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
 import { createLaunchMarks } from './launch-marker.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
+import { newProxyToken } from './proxy-tokens.js';
 
 /**
  * Claude Code as a harness (docs/architecture.md, "First adapters"): `claude`
@@ -49,8 +49,6 @@ export const WAKE_PROMPT = '/aeolus-fleet:wake';
 
 /** The variable a session's launch id is passed in, for the plugin's hooks to mark that launch (#490). */
 export const LAUNCH_VARIABLE = 'AEOLUS_LAUNCH';
-/** How many random bytes a session's proxy token holds. */
-const PROXY_TOKEN_BYTES = 32;
 
 /** Print mode, taking and giving stream-json: one long-lived process, one user message per stdin line (headless H11). */
 const HEADLESS = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'];
@@ -221,7 +219,7 @@ export function createClaudeCodeHarness(options: {
     if (url === undefined) {
       throw new Error('the model proxy is not running yet');
     }
-    return { env: { ANTHROPIC_BASE_URL: `${url}/anthropic` }, proxyToken: { harness: 'claude-code', variable: 'ANTHROPIC_AUTH_TOKEN', token: randomBytes(PROXY_TOKEN_BYTES).toString('base64url') } };
+    return { env: { ANTHROPIC_BASE_URL: `${url}/anthropic` }, proxyToken: { harness: 'claude-code', variable: 'ANTHROPIC_AUTH_TOKEN', token: newProxyToken() } };
   };
   /** A prompt as the session takes it: a stream-json line headless, the text typed in a terminal. */
   const lineOf = (prompt: string): string => (isHeadless ? userLine(prompt) : prompt);
