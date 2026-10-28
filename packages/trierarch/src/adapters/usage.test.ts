@@ -30,9 +30,9 @@ describe("the harnesses' usage, each from its own reader (#353)", () => {
       const madeAt = (await folderMadeAt(folder)).getTime();
       const after = Date.now();
 
-      // Some filesystems keep whole seconds or less.
+      // Some filesystems keep whole seconds or less; on macOS the filesystem's clock can run a millisecond ahead of the process's.
       expect(madeAt).toBeGreaterThanOrEqual(after - 1000);
-      expect(madeAt).toBeLessThanOrEqual(after);
+      expect(madeAt).toBeLessThanOrEqual(after + 1);
     } finally {
       await rm(folder, { recursive: true, force: true });
     }
