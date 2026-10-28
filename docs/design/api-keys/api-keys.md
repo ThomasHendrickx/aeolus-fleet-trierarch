@@ -1,6 +1,6 @@
 # Sessions on an API key
 
-Design for [#1085](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1085), for Aeolus 0.33.0. Stage 2: the purpose and Thomas's answers as current state, the detailed decisions, the flow, and the questions they leave.
+Design for [#1085](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1085), for Aeolus 0.33.0. The purpose and Thomas's answers as current state, the detailed decisions and the flow.
 
 It builds on the headless design (aeolus-fleet `docs/design/headless/headless.md`, approved 25 Oct): its hold (H8), clean environment (H10), launch window from events (H13), key file (H15), model proxy (H16) and usage with a key (H17). Its H6 and H15 now say what K2 says; this design is the detail behind them, and its slice S5 builds both.
 
@@ -23,6 +23,8 @@ Not the purpose:
 | K2 | **Key and subscription on one computer at once.** Each session uses exactly one login and never falls back to the other. This replaces the headless design's "one login per harness per computer" (H6, H15) |
 | K3 | **A change takes effect at the ship's next session start.** A running session keeps the login it started with |
 | K4 | **The console's computer card and ship page show "API key" and the ship's cost,** a slice in aeolus-fleet, its mockup to Thomas first |
+| A5 | **A ship whose key is not ready before its crew is final gives its crew request back with the cause,** so it can be crewed on another computer. Once the crew is final, it waits here (K9) |
+| A6 | **What wakes a session whose turn failed on the key is #1286's design,** the same for keys and subscriptions; until then the next delivery wakes it |
 
 ## 3. Lessons checked against
 
@@ -62,7 +64,7 @@ flowchart TD
   keystate -->|none, refused, outOfCredit| notStarted2["Not started: cause names the key's state (K9)"]
   notStarted --> final{Crew final?}
   notStarted2 --> final
-  final -->|no| giveback["Give back with the cause (Q1)"]
+  final -->|no| giveback["Give back with the cause (A5)"]
   final -->|yes| wait["Ship waits, restarting, no attempt counted; argo told once (K9)"]
   wait -->|key ready again (K10) or settings fixed| resolve
   startS --> window
@@ -86,7 +88,7 @@ Unhappy paths the diagram does not show:
 - **The key is removed while sessions run** (`login --remove-key`). The state is `none`; the proxy refuses their tokens; they get no hand-over and stay on the key until a new key is written. They never move to the subscription. To move one now: change its login (K11) and release it; it is crewed again on the new login.
 - **The configuration moves a ship while its key is not ready.** Its running session keeps the key and waits (K3, K9); its report shows `next`. Released or restarted, it starts on the new login.
 - **The proxy is down.** Model requests fail and the harness retries; the trierarch starts the proxy again within a pass, as the headless design says. The key's state does not change: a missing proxy is not the vendor's answer.
-- **The turn that met the failure.** Its delivery was confirmed by the hook before the vendor refused (0040), and its text is in the session's conversation. What wakes the session once the key is ready again is Q2.
+- **The turn that met the failure.** Its delivery was confirmed by the hook before the vendor refused (0040), and its text is in the session's conversation. Once the key is ready again, the next delivery wakes the session (A6).
 - **A checked key is refused on the check.** `login --api-key` writes nothing and says the vendor's cause; the state stays as it was.
 - **Two harnesses, one bad key.** States are per harness: an Anthropic key out of credit holds back Claude Code ships on the key only; Codex ships and every subscription ship go on.
 - **Probes.** The model probes and the subscription window probe (trierarch.md, Detected options, usage) run on the harness's default login; the window probe runs only when some ship of that harness runs on the subscription. On a key each probe costs a turn (H17).
@@ -96,20 +98,3 @@ Unhappy paths the diagram does not show:
 - **S5 (trierarch, the headless design's slice, now with this design):** K5 to K11. The proxy, the key file, `login`, the per-session login, the key states and their waits, the report fields. Tests: a computer with one ship on the key and one on the subscription runs both, each session's environment holds only its own login; a subscription start with an `apiKeyHelper` in Claude Code's settings is not started, with its cause; a key session's environment and container hold no key; a token of a stopped session is refused; a 401 makes the state `refused` and hands nothing; a 402 makes it `outOfCredit`, the check every 15 minutes brings it back and the ships start without a restart counted; removing a key moves no session to the subscription; a change of login reaches only the next start; the report states the login per ship, `next`, and the cost per login, never the key.
 - **`common` (aeolus-fleet):** the optional report fields of K8.
 - **Console (aeolus-fleet):** K12, after Thomas approves the mockup.
-
-## 7. Questions
-
-**Q1. A ship whose key is not ready before its crew is final: give back or wait here.**
-Context: the trierarch gives back settings it cannot crew, with the reason (trierarch.md, the crew request), and placement then leaves this computer out. A missing, refused or out-of-credit key is the computer's state, not the settings'. Given back, another computer may crew the ship on its own default, which may be the subscription; that is a new session on another computer, not a session falling back (K2), but the ship would no longer spend the key the operator chose for it here.
-Options:
-1. Give back with the cause, as #852 asks for a refused login: the ship gets crewed where it can be, and the needs-crew to-do shows why it left.
-2. Keep it here, not started, until the key is ready (K10), as after the crew is final.
-Pick: 1. A ship that has never run should not wait for an operator who may not look at this computer; the reason names the key, and the operator who wants the key here fixes it and saves the settings again, which clears the give-backs.
-
-**Q2. What wakes a session whose turn failed on the key, once the key is ready again.**
-Context: the hook confirmed that turn's delivery before the vendor refused, so the fleet holds nothing for it (0040), and K9 hands nothing while the key is not ready. #1286 saw the same with a subscription limit: sessions that stayed idle after it cleared.
-Options:
-1. Nothing: the next delivery wakes it, and its conversation still holds the failed one.
-2. The trierarch sends the session one fixed line through the hold once the key is ready: "The model login works again: go on with what your last turn was doing." No delivery, nothing confirmed.
-3. Leave it to #1286's design, the same for keys and subscriptions.
-Pick: 3, with 1 until then. The same gap exists for subscription limits; one answer for both, decided once, beats a key-only line now.
