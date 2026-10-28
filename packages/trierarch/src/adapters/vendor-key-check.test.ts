@@ -80,7 +80,8 @@ describe('the vendor key check', () => {
   it('says the vendor could not be reached, without the key', async () => {
     const checked = await checkKey({ harness: 'claude-code', key: KEY, vendorUrl: 'http://127.0.0.1:9' });
 
-    expect(checked).toEqual({ kind: 'unreachable', cause: expect.stringMatching(/^Anthropic could not be reached at http:\/\/127\.0\.0\.1:9/u) });
+    expect(checked.kind).toBe('unreachable');
+    expect('cause' in checked ? checked.cause : '').toMatch(/^Anthropic could not be reached at http:\/\/127\.0\.0\.1:9: /u);
     expect(JSON.stringify(checked)).not.toContain(KEY);
   });
 });
