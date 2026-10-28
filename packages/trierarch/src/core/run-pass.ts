@@ -1,10 +1,10 @@
 import { CREW_REQUEST_REASON_MAX_LENGTH, type ShipId } from '@aeolus-fleet/common';
 
 import { putEntry, removeEntry, withState, type Entry, type Orphan, type TrierarchState } from './entry.js';
-import { crashText, discardedText, identityGoneText, modelRefusedText, ownerUnreachableText, settingsRefusedText, stoppedOfferingText } from './argo-reports.js';
+import { crashText, discardedText, identityGoneText, keyNotReadyText, modelRefusedText, ownerUnreachableText, settingsRefusedText, stoppedOfferingText } from './argo-reports.js';
 import { MODEL_OPTION } from './detected-options.js';
 import { countStart, PROBE_AFTER_MINUTES, withConfiguration, type StartOutcome } from './failed-starts.js';
-import { loginOf, type Login, type Logins } from './login.js';
+import { loginOf, type KeyState, type Login, type Logins } from './login.js';
 import type { Checkout, CheckoutsPort, FleetPort, FolderProcessesPort, HarnessPort, LaunchSeen, LoggedAction, Logger, ModelLoginsPort, SessionRuntime, ShipSocketsPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { HOLDS_IDENTITY, reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
 import type { RefuseModel } from './refuse-model.js';
@@ -77,6 +77,7 @@ export function createRunPass(deps: RunPassDeps): RunPass {
       state = counted.state;
       await deps.state.save(state);
       await tellStopped(state, { isNewlyStopped: counted.isNewlyStopped, deps });
+      state = await tellKeysNotReady(state, deps);
       actions = reconciled.actions;
     } catch (error) {
       deps.logger.warn(`The pass failed: ${reasonOf(error)}; ${NEXT_AFTER_FAILURE}`);
@@ -153,6 +154,41 @@ async function tellStopped(state: TrierarchState, at: { isNewlyStopped: boolean;
   } catch (error) {
     deps.logger.warn(`Could not tell argo the machine stopped offering itself: ${reasonOf(error)}`);
   }
+}
+
+/**
+ * Tells argo once per harness and state of its API key while ships on it wait
+ * (api keys K9): the harness, the state since when and those ships. A key
+ * ready again is forgotten, so a later state is told again; a key no ship
+ * here is on is nobody's concern. A failure to tell is logged and tried again
+ * on the next pass.
+ */
+async function tellKeysNotReady(state: TrierarchState, deps: RunPassDeps): Promise<TrierarchState> {
+  const onKey = Object.values(state.entries).filter((entry) => (entry.login ?? sessionLogin(entry, deps)) === 'apiKey');
+  const harnesses = [...new Set(onKey.map((entry) => entry.harness))].sort();
+  const told: Record<string, KeyState> = {};
+  for (const harness of harnesses) {
+    const key = await deps.modelLogins.keyState(harness);
+    if (key.state === 'ready') {
+      continue;
+    }
+    if (state.keysTold?.[harness] === key.state) {
+      told[harness] = key.state;
+      continue;
+    }
+    const ships = onKey.filter((entry) => entry.harness === harness);
+    try {
+      await deps.fleet.reportToArgo({ text: keyNotReadyText({ harness, key, ships }), idempotencyKey: `trierarch:key:${harness}:${key.state}:${key.at ?? ''}` });
+      told[harness] = key.state;
+    } catch (error) {
+      deps.logger.warn(`Could not tell argo that ${harness}'s API key is not ready: ${reasonOf(error)}`);
+    }
+  }
+  const next: TrierarchState = { ...state, keysTold: Object.keys(told).length > 0 ? told : undefined };
+  if (JSON.stringify(next.keysTold ?? {}) !== JSON.stringify(state.keysTold ?? {})) {
+    await deps.state.save(next);
+  }
+  return next;
 }
 
 /**
@@ -254,7 +290,8 @@ async function observe(state: TrierarchState, at: { deps: RunPassDeps; missingPl
       const turn = await harness.turnOf({ shipId: entry.shipId, folder });
       // The store is asked only when a hand-over could follow.
       const isHolding = turn === 'idle' && (await harness.isHolding({ shipId: entry.shipId, folder }));
-      ships[entry.shipId] = { inbox: await deps.fleet.inbox(crewToken), turn, isHolding };
+      const isKeyNotReady = entry.login === 'apiKey' && (await deps.modelLogins.keyState(entry.harness)).state !== 'ready';
+      ships[entry.shipId] = { inbox: await deps.fleet.inbox(crewToken), turn, isHolding, ...(isKeyNotReady && { isKeyNotReady }) };
     }
   }
   return { sessions, worktrees, ships, launches, withoutIdentity, startProblems };

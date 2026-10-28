@@ -1,7 +1,7 @@
 import type { ShipId, TrierarchWorkspace } from '@aeolus-fleet/common';
 
 import type { FailedStarts } from './failed-starts.js';
-import type { Login } from './login.js';
+import type { KeyState, Login } from './login.js';
 import type { LowResource } from './machine-load.js';
 
 /**
@@ -26,6 +26,8 @@ export interface TrierarchState {
   readonly missingPlugins?: readonly string[];
   /** The machine's failed session starts since one last succeeded (#853), and whether they stopped it offering itself; none while starts succeed. */
   readonly failedStarts?: FailedStarts;
+  /** By harness, the state of its API key argo was told holds ships back (api keys K9), so it is told once per state; none while ready. */
+  readonly keysTold?: Readonly<Record<string, KeyState>>;
 }
 
 /** A failing pass: the reason of the latest failure, and when the passes began to fail. */

@@ -4,7 +4,7 @@ import type { TrierarchConfiguration } from '../../src/adapters/files.js';
 
 import { EMPTY_STATE, type TrierarchState } from '../../src/core/entry.js';
 import { createHandleDelivery } from '../../src/core/handle-delivery.js';
-import type { Login, Logins } from '../../src/core/login.js';
+import type { KeyStateAt, Login, Logins } from '../../src/core/login.js';
 import type {
   ArgoReport,
   AssignedRequest,
@@ -869,6 +869,12 @@ export class InMemoryModelLogins implements ModelLoginsPort {
   readonly problems = new Map<string, string>();
   /** Each question it was asked, in order. */
   readonly asked: { harness: string; login: Login; options: Readonly<Record<string, string>>; folder?: string }[] = [];
+  /** Each harness's key state: ready unless a test sets otherwise. */
+  readonly states = new Map<string, KeyStateAt>();
+
+  keyState(harness: string): Promise<KeyStateAt> {
+    return Promise.resolve(this.states.get(harness) ?? { state: 'ready' });
+  }
 
   startProblem(at: { harness: string; login: Login; options: Readonly<Record<string, string>>; folder?: string }): Promise<string | undefined> {
     this.asked.push(at);

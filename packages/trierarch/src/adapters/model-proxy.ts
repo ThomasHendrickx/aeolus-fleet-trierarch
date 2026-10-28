@@ -2,8 +2,10 @@ import { request as httpRequest, type IncomingMessage, type OutgoingHttpHeaders,
 import { request as httpsRequest } from 'node:https';
 
 import { readKey } from './key-files.js';
+import { createKeyStates } from './key-states.js';
 import type { PluginHarness } from './plugin.js';
 import { sessionOfToken } from './proxy-tokens.js';
+import { keyStateOfAnswer } from './vendor-answers.js';
 
 /**
  * The model proxy (headless H16, api keys K7): the one process that reads a
@@ -11,7 +13,10 @@ import { sessionOfToken } from './proxy-tokens.js';
  * its own; the proxy takes the token only from a running session of that
  * harness, swaps it for the key, and forwards the request to that harness's
  * vendor alone: `/anthropic/...` to Anthropic for Claude Code, `/openai/...`
- * to OpenAI for Codex. Its refusals name neither a key nor a token.
+ * to OpenAI for Codex. Its refusals name neither a key nor a token. It reads
+ * every vendor answer to the key and records what it says of the key (api
+ * keys K9): a success as it streams, an error once whole, before it is sent
+ * on unchanged.
  */
 
 export interface ModelProxy {
@@ -36,6 +41,10 @@ const BEARER = /^Bearer (?<token>\S+)$/u;
 const HTTP_UNAUTHORIZED = 401;
 const HTTP_NOT_FOUND = 404;
 const HTTP_BAD_GATEWAY = 502;
+/** An answer from this status on is an error, read whole before it is sent on. */
+const HTTP_ERRORS_FROM = 300;
+/** How much of an error's body is read for what it says of the key: a vendor's error is a short JSON object. */
+const ERROR_BODY_READ_BYTES = 64 * 1024;
 
 function refuse(response: ServerResponse, refusal: { status: number; message: string }): void {
   const { status, message } = refusal;
@@ -43,7 +52,16 @@ function refuse(response: ServerResponse, refusal: { status: number; message: st
   response.end(JSON.stringify({ type: 'error', error: { type: status === HTTP_UNAUTHORIZED ? 'authentication_error' : 'not_found_error', message: `aeolus model proxy: ${message}` } }));
 }
 
-export function createModelProxy(at: { sessions: string; keys: string; version: string; vendors?: Partial<Record<PluginHarness, string>> }): ModelProxy {
+export function createModelProxy(at: { sessions: string; keys: string; keyStates: string; version: string; vendors?: Partial<Record<PluginHarness, string>>; now?: () => Date }): ModelProxy {
+  const keyStates = createKeyStates({ keys: at.keys, file: at.keyStates });
+  const now = at.now ?? (() => new Date());
+  /** Kept before the answer goes on, so the trierarch knows the key's state by the time the session does; a failed write is tried again on the next answer. */
+  const recordAnswer = async (harness: PluginHarness, answer: { status: number; body: string }): Promise<void> => {
+    const state = keyStateOfAnswer({ harness, ...answer });
+    if (state !== undefined) {
+      await keyStates.record(harness, { state, at: now() }).catch(() => undefined);
+    }
+  };
   const routeOf = (path: string): { route: Route; rest: string } | undefined => {
     const [, prefix = '', ...rest] = path.split('/');
     const harness = PREFIXES[prefix];
@@ -92,9 +110,25 @@ export function createModelProxy(at: { sessions: string; keys: string; version: 
     const headers: OutgoingHttpHeaders = { ...Object.fromEntries(Object.entries(request.headers).filter(([name]) => !DROPPED_HEADERS.has(name))), ...route.keyHeaders(key) };
     const send = target.protocol === 'https:' ? httpsRequest : httpRequest;
     const outgoing = send(target, { method: request.method, headers }, (answer) => {
+      const status = answer.statusCode ?? HTTP_BAD_GATEWAY;
       const answerHeaders = Object.fromEntries(Object.entries(answer.headers).filter(([name]) => name !== 'connection' && name !== 'transfer-encoding'));
-      response.writeHead(answer.statusCode ?? HTTP_BAD_GATEWAY, answerHeaders);
-      answer.pipe(response);
+      if (status < HTTP_ERRORS_FROM) {
+        answer.pause();
+        void recordAnswer(route.harness, { status, body: '' }).then(() => {
+          response.writeHead(status, answerHeaders);
+          answer.pipe(response);
+        });
+        return;
+      }
+      const chunks: Buffer[] = [];
+      answer.on('data', (chunk: Buffer) => chunks.push(chunk));
+      answer.on('end', () => {
+        const body = Buffer.concat(chunks);
+        void recordAnswer(route.harness, { status, body: body.subarray(0, ERROR_BODY_READ_BYTES).toString('utf8') }).then(() => {
+          response.writeHead(status, answerHeaders);
+          response.end(body);
+        });
+      });
     });
     outgoing.on('error', () => {
       if (!response.headersSent) {

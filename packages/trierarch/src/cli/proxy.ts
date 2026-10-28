@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 
 import { createModelProxy } from '../adapters/model-proxy.js';
-import { proxyFilesOf } from '../adapters/proxy-runtime.js';
+import { keyStatesFileOf, proxyFilesOf } from '../adapters/proxy-runtime.js';
 import { runningVersion } from '../adapters/version.js';
 
 /**
@@ -38,7 +38,7 @@ export async function proxyCommand(words: readonly string[]): Promise<number> {
   }
   const files = proxyFilesOf(folder);
   await mkdir(folder, { recursive: true, mode: 0o700 });
-  const proxy = createModelProxy({ sessions, keys, version: runningVersion() });
+  const proxy = createModelProxy({ sessions, keys, keyStates: keyStatesFileOf(folder), version: runningVersion() });
   const server = createServer(proxy.handle);
   const before = Number(await readFile(files.port, 'utf8').catch(() => '0'));
   // The port it had may be taken by now: then any free one, and sessions started from now reach it there.

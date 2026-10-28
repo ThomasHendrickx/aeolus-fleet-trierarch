@@ -26,6 +26,11 @@ export interface ProxyFiles {
   readonly port: string;
 }
 
+/** Where the proxy records each harness's key state (api keys K8), which the trierarch reads. */
+export function keyStatesFileOf(folder: string): string {
+  return join(folder, 'key-states.json');
+}
+
 export function proxyFilesOf(folder: string): ProxyFiles {
   return { pid: join(folder, 'proxy.pid'), port: join(folder, 'port') };
 }

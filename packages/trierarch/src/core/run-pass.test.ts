@@ -2638,7 +2638,7 @@ describe("each session's login (api keys K5, K6, K9)", () => {
     expect(trierarch.harness.handOvers).toEqual([shipId]);
   });
 
-  it('tells argo once per harness and state, naming the computer, the harness, the state and the ships that wait (K9)', async () => {
+  it('tells argo once per harness and state, from the computer\'s own ship, naming the harness, the state and the ships that wait (K9)', async () => {
     const trierarch = aTrierarchOnLogins(ON_KEY);
     const shipId = await aCrewedShip(trierarch);
     trierarch.modelLogins.states.set('claude-code', { state: 'outOfCredit', at: '2026-10-06T08:00:00.000Z' });
@@ -2647,7 +2647,7 @@ describe("each session's login (api keys K5, K6, K9)", () => {
     await trierarch.pass();
 
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
-      `mac-studio: Claude Code's API key is out of credit\n\n- Computer: mac-studio\n- Harness: claude-code\n- State: out of credit since 2026-10-06T08:00:00.000Z\n- Ships that wait: scout (\`${shipId}\`)\n\nIt is checked every 15 minutes; aeolus-trierarch login claude-code --check checks it at once.`,
+      `Claude Code's API key is out of credit\n\n- Harness: claude-code\n- State: out of credit since 2026-10-06T08:00:00.000Z\n- Ships that wait: scout (\`${shipId}\`)\n\nIt is checked every 15 minutes; aeolus-trierarch login claude-code --check checks it at once.`,
     ]);
   });
 
@@ -2662,7 +2662,7 @@ describe("each session's login (api keys K5, K6, K9)", () => {
     trierarch.modelLogins.states.set('claude-code', { state: 'refused', at: '2026-10-06T09:00:00.000Z' });
     await trierarch.pass();
 
-    expect(trierarch.fleet.toArgo.map((report) => report.text.split('\n')[0])).toEqual(["mac-studio: Claude Code's API key is out of credit", "mac-studio: Claude Code's API key was refused"]);
+    expect(trierarch.fleet.toArgo.map((report) => report.text.split('\n')[0])).toEqual(["Claude Code's API key is out of credit", "Claude Code's API key was refused"]);
   });
 
   it('tells argo nothing of a key no ship of this computer is on', async () => {
