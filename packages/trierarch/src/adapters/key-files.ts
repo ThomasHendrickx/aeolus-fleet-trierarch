@@ -1,4 +1,4 @@
-import { chmod, mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { PluginHarness } from './plugin.js';
@@ -6,8 +6,8 @@ import type { PluginHarness } from './plugin.js';
 /**
  * Each harness's API key, one file per harness in `~/.aeolus/trierarch/keys/`
  * (api keys K5): mode 600 in a folder of mode 700. Only `aeolus-trierarch
- * login` writes it and only the model proxy reads it (K7), so this holds no
- * read: the key never comes back out of here into the trierarch.
+ * login` writes it and only the model proxy reads it (K7), with readKey
+ * below: the key never comes back out of here into the trierarch.
  */
 export interface KeyFiles {
   has(harness: PluginHarness): Promise<boolean>;
@@ -42,4 +42,10 @@ export function createKeyFiles(folder: string): KeyFiles {
       return wasThere;
     },
   };
+}
+
+/** The harness's key, for the model proxy alone; none when it holds no key. */
+export async function readKey(folder: string, harness: PluginHarness): Promise<string | undefined> {
+  const key = (await readFile(join(folder, harness), 'utf8').catch(() => '')).trim();
+  return key === '' ? undefined : key;
 }
