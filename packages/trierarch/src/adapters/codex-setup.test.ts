@@ -136,3 +136,25 @@ describe("Codex's one-time questions, answered ahead through its app server", ()
     await expect(anAppServerThatEndsEarly().trust(['/home/thomas/notes'])).rejects.toThrow('codex app-server');
   });
 });
+
+describe("Codex's login, as `codex login status` says it (api keys K6)", () => {
+  /** A stand-in for `codex` that answers `login status` with the line given, on stderr as Codex writes it. */
+  function aCodexSaying(line: string): string {
+    writeFileSync(program, `#!/bin/sh\n[ "$1 $2" = "login status" ] && echo '${line}' >&2\n`);
+    chmodSync(program, 0o755);
+    return program;
+  }
+
+  it('is a ChatGPT login', async () => {
+    await expect(createCodexSetup({ command: aCodexSaying('Logged in using ChatGPT') }).loginKind()).resolves.toBe('chatgpt');
+  });
+
+  it('is an API key, from a line that shows part of it', async () => {
+    await expect(createCodexSetup({ command: aCodexSaying('Logged in using an API key - sk-proj-***abcd') }).loginKind()).resolves.toBe('apiKey');
+  });
+
+  it('is none when Codex is not logged in', async () => {
+    await expect(createCodexSetup({ command: aCodexSaying('Not logged in') }).loginKind()).resolves.toBe('none');
+  });
+});
+

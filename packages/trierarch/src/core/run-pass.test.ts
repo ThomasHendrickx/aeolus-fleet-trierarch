@@ -2580,4 +2580,13 @@ describe("each session's login (api keys K5, K6, K9)", () => {
     expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 1, reason: `mac-studio: ${NO_KEY}` }]);
     expect(trierarch.state.current().entries[shipId]).toBeUndefined();
   });
+
+  it('asks whether a session can start on its login in the folder it starts in, so its folder\'s own settings count (K6)', async () => {
+    const trierarch = aTrierarch();
+
+    await aCrewedShip(trierarch);
+
+    expect(trierarch.modelLogins.asked).toContainEqual({ harness: 'claude-code', login: 'subscription', folder: SCOUT_FOLDER });
+  });
 });
+

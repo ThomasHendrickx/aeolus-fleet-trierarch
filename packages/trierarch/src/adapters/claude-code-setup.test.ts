@@ -141,3 +141,55 @@ describe("Claude Code's files under CLAUDE_CONFIG_DIR, where Claude Code keeps t
     await expect(setup.isSkipPermissionsAccepted()).resolves.toBe(true);
   });
 });
+
+describe('a key in reach of a subscription session (api keys K6)', () => {
+  const setup = () => createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') });
+  const ALL = { sources: ['local', 'project', 'user'] as const };
+
+  it("finds none where Claude Code's settings name no key", async () => {
+    mkdirSync(join(home, '.claude'), { recursive: true });
+    writeFileSync(settingsJson(), JSON.stringify({ env: { DISABLE_TELEMETRY: '1' }, permissions: { defaultMode: 'acceptEdits' } }));
+
+    await expect(setup().keyInReach({ ...ALL })).resolves.toBeUndefined();
+  });
+
+  it("names an apiKeyHelper in the user's settings, never what it runs", async () => {
+    mkdirSync(join(home, '.claude'), { recursive: true });
+    writeFileSync(settingsJson(), JSON.stringify({ apiKeyHelper: '/usr/local/bin/print-secret-key' }));
+
+    const found = await setup().keyInReach({ ...ALL });
+
+    expect(found).toBe(`apiKeyHelper in ${settingsJson()}`);
+    expect(found).not.toContain('print-secret-key');
+  });
+
+  it("names a key variable in a folder's project settings, never its value", async () => {
+    const folder = join(home, 'work');
+    mkdirSync(join(folder, '.claude'), { recursive: true });
+    writeFileSync(join(folder, '.claude', 'settings.json'), JSON.stringify({ env: { ANTHROPIC_API_KEY: 'test-key-not-real' } }));
+
+    const found = await setup().keyInReach({ ...ALL, folder });
+
+    expect(found).toBe(`ANTHROPIC_API_KEY in ${join(folder, '.claude', 'settings.json')}`);
+    expect(found).not.toContain('test-key-not-real');
+  });
+
+  it('names a cloud provider variable in a managed settings drop-in', async () => {
+    mkdirSync(join(home, 'managed', 'managed-settings.d'), { recursive: true });
+    writeFileSync(join(home, 'managed', 'managed-settings.d', '10-cloud.json'), JSON.stringify({ env: { CLAUDE_CODE_USE_BEDROCK: '1' } }));
+
+    await expect(setup().keyInReach({ ...ALL })).resolves.toBe(`CLAUDE_CODE_USE_BEDROCK in ${join(home, 'managed', 'managed-settings.d', '10-cloud.json')}`);
+  });
+
+  it('names an ANTHROPIC_AUTH_TOKEN in the --settings JSON on the command line', async () => {
+    await expect(setup().keyInReach({ ...ALL, settings: JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: 'x' } }) })).resolves.toBe('ANTHROPIC_AUTH_TOKEN in --settings');
+  });
+
+  it('reads only the sources Claude Code loads', async () => {
+    const folder = join(home, 'work');
+    mkdirSync(join(folder, '.claude'), { recursive: true });
+    writeFileSync(join(folder, '.claude', 'settings.local.json'), JSON.stringify({ apiKeyHelper: 'helper' }));
+
+    await expect(setup().keyInReach({ sources: ['user'], folder })).resolves.toBeUndefined();
+  });
+});
