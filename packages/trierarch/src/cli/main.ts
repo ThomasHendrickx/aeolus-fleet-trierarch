@@ -215,6 +215,8 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
           claudeCode: claudeCodeSetup(),
           codex: createCodexSetup(),
           isCodexInstalled: (await runCommand('sh', { args: ['-c', 'command -v codex'] })).status === 0,
+          isClaudeCodeInstalled: (await runCommand('sh', { args: ['-c', 'command -v claude'] })).status === 0,
+          nodeVersion: process.versions.node,
           service: serviceAt(),
           running: () => readRunningFile(paths.running),
           detect: detectAt(),
