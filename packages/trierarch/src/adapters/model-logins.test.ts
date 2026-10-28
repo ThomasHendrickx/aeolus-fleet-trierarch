@@ -34,10 +34,11 @@ describe('whether a session can start on its login (api keys K9)', () => {
     await expect(createModelLogins({ keys, runtime: 'host' }).startProblem({ harness: 'claude-code', login: 'apiKey' })).resolves.toBe('claude-code has no API key on this computer: aeolus-trierarch login claude-code --api-key');
   });
 
-  it('not for Codex on an API key yet', async () => {
+  it('for Codex on an API key once it holds one, as for Claude Code', async () => {
     await keys.write('codex', 'test-key-not-real');
 
-    await expect(createModelLogins({ keys, runtime: 'host' }).startProblem({ harness: 'codex', login: 'apiKey' })).resolves.toBe('codex does not run on an API key yet');
+    await expect(createModelLogins({ keys, runtime: 'host' }).startProblem({ harness: 'codex', login: 'apiKey' })).resolves.toBeUndefined();
+    await expect(createModelLogins({ keys, runtime: 'host' }).startProblem({ harness: 'claude-code', login: 'apiKey' })).resolves.toBe('claude-code has no API key on this computer: aeolus-trierarch login claude-code --api-key');
   });
 
   it('not on an API key with the container runtime yet', async () => {

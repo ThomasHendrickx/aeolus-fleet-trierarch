@@ -58,8 +58,9 @@ afterEach(() => {
   rmSync(folder, { recursive: true, force: true });
 });
 
-function harness(at: { pluginRoot?: string } = {}) {
+function harness(at: { pluginRoot?: string; proxyUrl?: string } = {}) {
   return createCodexHarness({
+    proxyUrl: () => Promise.resolve(at.proxyUrl),
     configuration: WITH_CODEX,
     plugin: { root: () => Promise.resolve(at.pluginRoot ?? PLUGIN_ROOT), data, crews },
     setup: {
@@ -98,6 +99,35 @@ const identity = { fleetUrl: 'https://fleet.example.com', shipId, shipName: 'sco
 const LAUNCH_ID = 'launch-1';
 /** The launch of the ship scout in a worktree of aeolus-fleet. */
 const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'codex', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, checkouts: [], launchId: LAUNCH_ID, login: 'subscription' }) as const;
+
+describe('Codex on its login (api keys K6, K7)', () => {
+  const PROXY = 'http://127.0.0.1:41234';
+  const PROVIDER_FLAGS = ['-c', 'model_providers.aeolus.name="Aeolus model proxy"', '-c', `model_providers.aeolus.base_url="${PROXY}/openai/v1"`, '-c', 'model_providers.aeolus.env_key="AEOLUS_MODEL_TOKEN"', '-c', 'model_providers.aeolus.wire_api="responses"', '-c', 'model_provider="aeolus"'];
+  const hasRun = (command: readonly string[] | undefined, flags: readonly string[]): boolean => command !== undefined && command.some((_, at) => flags.every((flag, offset) => command[at + offset] === flag));
+
+  it("starts a session on an API key through the model proxy as a provider of its own, with a token of its own and never the key", async () => {
+    await harness({ proxyUrl: PROXY }).launch({ ...launchOf(shipId), login: 'apiKey', options: {}, isFirstStart: true });
+
+    expect(hasRun(started[0]?.command, PROVIDER_FLAGS)).toBe(true);
+    expect(started[0]?.proxyToken).toMatchObject({ harness: 'codex', variable: 'AEOLUS_MODEL_TOKEN' });
+    expect(started[0]?.proxyToken?.token).toMatch(/^[\w-]{32,}$/u);
+    expect(Object.values(started[0]?.env ?? {})).not.toContain(started[0]?.proxyToken?.token);
+    expect(started[0]?.command.join(' ')).not.toContain(started[0]?.proxyToken?.token);
+  });
+
+  it('starts a session on its subscription with no provider of its own and no token', async () => {
+    await harness({ proxyUrl: PROXY }).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+
+    expect(started[0]?.command.join(' ')).not.toContain('model_provider');
+    expect(started[0]?.proxyToken).toBeUndefined();
+  });
+
+  it('starts nothing on an API key while the model proxy has no address', async () => {
+    await expect(harness().launch({ ...launchOf(shipId), login: 'apiKey', options: {}, isFirstStart: true })).rejects.toThrow('the model proxy is not running yet');
+
+    expect(started).toEqual([]);
+  });
+});
 
 describe('Codex as a harness', () => {
   it("writes the folder's identity through the plugin in ~/.aeolus/crews/codex, saying the trierarch wakes it (#658)", async () => {
