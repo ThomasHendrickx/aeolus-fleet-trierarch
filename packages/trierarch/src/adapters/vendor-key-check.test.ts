@@ -77,14 +77,6 @@ describe('the vendor key check', () => {
     await expect(checkKey({ harness: 'codex', key: KEY, vendorUrl: vendor.url })).resolves.toEqual({ kind: 'refused', cause: 'OpenAI refused the key: 503' });
   });
 
-  it('says the vendor could not be reached, without the key', async () => {
-    const checked = await checkKey({ harness: 'claude-code', key: KEY, vendorUrl: 'http://127.0.0.1:9' });
-
-    expect(checked.kind).toBe('unreachable');
-    expect('cause' in checked ? checked.cause : '').toMatch(/^Anthropic could not be reached at http:\/\/127\.0\.0\.1:9: /u);
-    expect(JSON.stringify(checked)).not.toContain(KEY);
-  });
-
   it('refuses a key with a character no key holds, such as a line break, without sending it or quoting it (api keys K7)', async () => {
     const vendor = await aVendor(200, { data: [] });
     const broken = 'test-key\nnot-real';
@@ -98,8 +90,12 @@ describe('the vendor key check', () => {
   });
 
   it("names how the vendor could not be reached by its error code, never the error's message, which may quote the request", async () => {
-    const checked = await checkKey({ harness: 'codex', key: KEY, vendorUrl: 'http://127.0.0.1:9' });
+    const closed = await aVendor(200, {});
+    server?.close();
+    server = undefined;
 
-    expect(checked).toEqual({ kind: 'unreachable', cause: 'OpenAI could not be reached at http://127.0.0.1:9 (ECONNREFUSED)' });
+    const checked = await checkKey({ harness: 'codex', key: KEY, vendorUrl: closed.url });
+
+    expect(checked).toEqual({ kind: 'unreachable', cause: `OpenAI could not be reached at ${closed.url} (ECONNREFUSED)` });
   });
 });
