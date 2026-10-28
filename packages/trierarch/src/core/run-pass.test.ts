@@ -2567,7 +2567,7 @@ describe("each session's login (api keys K5, K6, K9)", () => {
     expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'restarting', exits: [] });
   });
 
-  it('a first crew whose key is not ready starts nothing and fails as a crew that cannot start does (#827)', async () => {
+  it('a crew not yet final whose key is not ready gives the request back with the cause, so it can be placed on another computer (api keys A5)', async () => {
     const trierarch = aTrierarchOnLogins(ON_KEY);
     trierarch.modelLogins.problems.set('claude-code:apiKey', NO_KEY);
     const shipId = trierarch.fleet.commission('scout');
@@ -2577,6 +2577,7 @@ describe("each session's login (api keys K5, K6, K9)", () => {
 
     expect(trierarch.harness.launchedLogins).toEqual([]);
     expect(trierarch.fleet.shipOf(shipId).status).not.toBe('crewed');
-    expect(trierarch.state.current().entries[shipId]?.crewFailures).toBe(1);
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 1, reason: `mac-studio: ${NO_KEY}` }]);
+    expect(trierarch.state.current().entries[shipId]).toBeUndefined();
   });
 });
