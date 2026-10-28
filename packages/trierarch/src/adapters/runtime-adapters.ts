@@ -11,6 +11,7 @@ import { createGitWorkspace } from './git-workspace.js';
 import type { TrustedClones } from './trusted-clones.js';
 import type { TrierarchPaths } from './paths.js';
 import { createHoldRuntime } from './hold-runtime.js';
+import { createProxyRuntime, type ProxyRuntime } from './proxy-runtime.js';
 import { createTmux } from './tmux.js';
 
 /** The session image `release.yml` publishes with each version (decision 0011, 0039). */
@@ -18,6 +19,11 @@ const SESSION_IMAGE = 'ghcr.io/thomashendrickx/aeolus-session';
 
 /** The trierarch program as it runs now, which starts each hold: `hold` and its words follow. */
 const TRIERARCH_PROGRAM: readonly string[] = [process.execPath, fileURLToPath(new URL('../bin/aeolus-trierarch.js', import.meta.url))];
+
+/** The model proxy on this machine (headless H16), started as a hold is. */
+export function modelProxy(at: { paths: TrierarchPaths; version: string; launch?: readonly string[] }): ProxyRuntime {
+  return createProxyRuntime({ folder: at.paths.proxy, sessions: at.paths.sessions, keys: at.paths.keys, program: TRIERARCH_PROGRAM, version: at.version, launch: at.launch ?? [] });
+}
 
 /**
  * The sessions on the host (headless H4, H8): one hold per ship, with the

@@ -17,6 +17,8 @@ export interface TrierarchPaths {
   readonly modelToken: string;
   /** Each harness's API key, one file per harness (api keys K5); only login writes it, never the configuration. */
   readonly keys: string;
+  /** The model proxy's files, its pid and its port (headless H16). */
+  readonly proxy: string;
   readonly state: string;
   /** What detection found per harness (#365), apart from the configuration. */
   readonly detected: string;
@@ -46,6 +48,7 @@ export function trierarchPaths(at: { homeDirectory: string; config?: string }): 
     crewToken: join(home, 'crew-token'),
     modelToken: join(home, 'model-token'),
     keys: join(home, 'keys'),
+    proxy: join(home, 'proxy'),
     state: join(home, 'state.json'),
     detected: join(home, 'detected.json'),
     running: join(home, 'running.json'),
