@@ -97,6 +97,8 @@ export function createGitWorkspace(options: { configuration: TrierarchConfigurat
     },
     worktrees: async () => {
       const found: ObservedWorktree[] = [];
+      // git lists each worktree by its real path, so a root reached through a symbolic link (macOS's /var) is matched by its own.
+      const realRoot = await realpath(root).catch(() => root);
       for (const repository of Object.keys(configuration.repositories)) {
         const source = await repositoryOf(join(root, repository, 'worktree'));
         if (source === undefined) {
@@ -110,11 +112,10 @@ export function createGitWorkspace(options: { configuration: TrierarchConfigurat
           if (!line.startsWith('worktree ')) {
             continue;
           }
-          const path = line.slice('worktree '.length);
-          const parts = relative(root, path).split(sep);
+          const parts = relative(realRoot, line.slice('worktree '.length)).split(sep);
           const [listedRepository, name] = parts;
           if (listedRepository === repository && name !== undefined && parts.length === 2) {
-            found.push({ path, repository, name });
+            found.push({ path: join(root, repository, name), repository, name });
           }
         }
       }

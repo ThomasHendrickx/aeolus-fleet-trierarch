@@ -21,6 +21,8 @@ import { runningVersion } from './version.js';
 
 /** The version a hold states: the trierarch's own, which runs it. */
 const VERSION = runningVersion();
+/** macOS gives every process this variable itself, even one started with an empty environment: not the trierarch's. */
+const MACOS_PROCESS_VARIABLE = '__CF_USER_TEXT_ENCODING';
 /** A user line as Claude Code takes it on stdin. */
 const userLine = (text: string) => JSON.stringify({ type: 'user', message: { role: 'user', content: text } });
 
@@ -131,7 +133,7 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
 
       await expect.poll(() => written('fake-starts.jsonl')).toHaveLength(1);
       const [start] = starts();
-      expect(Object.keys(start?.env ?? {}).sort()).toEqual(['AEOLUS_LAUNCH', 'HOME', 'PATH']);
+      expect(Object.keys(start?.env ?? {}).filter((variable) => variable !== MACOS_PROCESS_VARIABLE).sort()).toEqual(['AEOLUS_LAUNCH', 'HOME', 'PATH']);
       expect(start?.env.AEOLUS_LAUNCH).toBe('launch-1');
     } finally {
       delete process.env.AEOLUS_TEST_TRIERARCH_SECRET;
