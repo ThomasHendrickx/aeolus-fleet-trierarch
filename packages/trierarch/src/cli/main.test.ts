@@ -236,6 +236,7 @@ describe('aeolus-trierarch', () => {
     expect(JSON.parse(readFileSync(config, 'utf8'))).toMatchObject({ logins: { default: { codex: 'apiKey' }, ships: { 'build-docs': 'subscription' } } });
     expect(USAGE).toContain('  login <harness> --default api-key|subscription');
     expect(USAGE).toContain('  login --ship <name> api-key|subscription|default');
+    expect(USAGE).toContain('  login <harness> --check');
   });
 
   it('login refuses a login it does not know', async () => {

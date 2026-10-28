@@ -22,10 +22,13 @@ let answer: KeyCheck;
 let restarts: number;
 let isServiceInstalled: boolean;
 let config: string;
+/** What the model proxy answers a check with, by harness; none when it does not run. */
+let checkedStates: Map<string, { state: string; at?: string }> | undefined;
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'trierarch-login-'));
   config = join(home, 'config.json');
+  checkedStates = new Map();
   writeFileSync(config, JSON.stringify({ ...initialConfiguration(), worktreeRoot: '/kept/as/written' }));
   keys = createKeyFiles(join(home, 'keys'));
   checked = [];
@@ -56,6 +59,7 @@ function run(request: LoginRequest, key = KEY) {
       },
     },
     running: () => Promise.resolve({ pid: 2, version: '0.34.0' }),
+    checkNow: (harness) => (checkedStates === undefined ? Promise.resolve(undefined) : Promise.resolve(checkedStates.get(harness) ?? { state: 'ready' })),
     sleep: () => Promise.resolve(),
   });
 }
@@ -214,6 +218,30 @@ describe('aeolus-trierarch login, choosing the login (api keys K5, K11)', () => 
       { shipName: 'build-docs', login: 'subscription' },
     ]);
     expect(report.said).toEqual(['Claude Code  default API key       no API key', 'Codex        default Subscription  API key ready', 'build-api    API key', 'build-docs   Subscription']);
+  });
+});
+
+describe('aeolus-trierarch login --check (api keys K10)', () => {
+  it('says the key is ready once the proxy found the vendor takes it', async () => {
+    checkedStates?.set('claude-code', { state: 'ready' });
+
+    const report = await run({ kind: 'check', harness: 'claude-code' });
+
+    expect(report.said).toEqual(["Claude Code's API key is ready: its waiting ships start within a pass."]);
+  });
+
+  it('says the key is still out of credit, since when', async () => {
+    checkedStates?.set('codex', { state: 'outOfCredit', at: '2026-10-28T14:02:00.000Z' });
+
+    const report = await run({ kind: 'check', harness: 'codex' });
+
+    expect(report.said).toEqual(["Codex's API key is still out of credit since 2026-10-28T14:02:00.000Z. The proxy checks it again every 15 minutes."]);
+  });
+
+  it('says to start the service when the proxy does not run', async () => {
+    checkedStates = undefined;
+
+    await expect(run({ kind: 'check', harness: 'codex' })).rejects.toThrow('The model proxy does not run: it runs while the service does and a harness holds a key (aeolus-trierarch start).');
   });
 });
 

@@ -16,6 +16,7 @@ const ANTHROPIC_KEY = 'test-anthropic-key-not-real';
 const OPENAI_KEY = 'test-openai-key-not-real';
 const TOKEN = 'test-session-token-one';
 const AT = new Date('2026-10-28T14:02:00.000Z');
+const keys = () => createKeyFiles(join(home, 'keys'));
 const keyStatesFile = () => join(home, 'proxy', 'key-states.json');
 const keyStateOf = (harness: 'claude-code' | 'codex') => createKeyStates({ keys: join(home, 'keys'), file: keyStatesFile() }).stateOf(harness);
 /** A pid no process has: the hold of a stopped session. */
@@ -33,6 +34,7 @@ let sessions: string;
 let servers: Server[];
 let vendor: { url: string; asked: Asked[] };
 let proxyUrl: string;
+let proxy: ReturnType<typeof createModelProxy>;
 /** What the vendor answers: a success naming the path it was asked, unless a test sets otherwise. */
 let vendorAnswer: { status: number; body: string } | undefined;
 
@@ -55,6 +57,11 @@ async function aVendor(): Promise<{ url: string; asked: Asked[] }> {
       });
       request.on('end', () => {
         asked.push({ method: request.method, path: request.url, headers: request.headers, body });
+        if (request.url === '/v1/models') {
+          response.writeHead(200, { 'content-type': 'application/json' });
+          response.end(JSON.stringify({ data: [{ id: 'claude-opus-5-5' }, { id: 'claude-haiku-5-5' }, { id: 'gpt-5.5' }, { id: 'gpt-5.5-mini' }, { id: 'gpt-5.5-nano' }] }));
+          return;
+        }
         response.writeHead(vendorAnswer?.status ?? 200, { 'content-type': 'application/json' });
         response.end(vendorAnswer?.body ?? JSON.stringify({ answered: request.url }));
       });
@@ -82,7 +89,7 @@ beforeEach(async () => {
   const keys = createKeyFiles(join(home, 'keys'));
   await keys.write('claude-code', ANTHROPIC_KEY);
   await keys.write('codex', OPENAI_KEY);
-  const proxy = createModelProxy({ sessions, keys: join(home, 'keys'), keyStates: keyStatesFile(), version: '0.34.0', vendors: { 'claude-code': vendor.url, codex: vendor.url }, now: () => AT });
+  proxy = createModelProxy({ sessions, keys: join(home, 'keys'), keyStates: keyStatesFile(), version: '0.34.0', vendors: { 'claude-code': vendor.url, codex: vendor.url }, now: () => AT });
   proxyUrl = await listen(createServer(proxy.handle));
 });
 
@@ -243,6 +250,45 @@ describe('the model proxy', () => {
     await ask('/anthropic/v1/messages', { token: TOKEN });
 
     await expect(keyStateOf('claude-code')).resolves.toEqual({ state: 'ready' });
+  });
+
+  it("checks a key out of credit with the smallest request its vendor bills, one output token on its cheapest model, and keeps it out of credit while the vendor says so (api keys K10)", async () => {
+    await keys().write('claude-code', ANTHROPIC_KEY);
+    await createKeyStates({ keys: join(home, 'keys'), file: keyStatesFile() }).record('claude-code', { state: 'outOfCredit', at: AT });
+    vendorAnswer = { status: 402, body: JSON.stringify({ type: 'error', error: { type: 'billing_error', message: 'no credit' } }) };
+
+    await proxy.checkOutOfCredit();
+
+    const check = vendor.asked.find((asked) => asked.path === '/v1/messages');
+    expect(JSON.parse(check?.body ?? '{}')).toEqual({ model: 'claude-haiku-5-5', max_tokens: 1, messages: [{ role: 'user', content: 'Hi' }] });
+    expect(check?.headers['x-api-key']).toBe(ANTHROPIC_KEY);
+    await expect(keyStateOf('claude-code')).resolves.toEqual({ state: 'outOfCredit', at: AT.toISOString() });
+  });
+
+  it('brings a key out of credit back to ready once the vendor takes the check', async () => {
+    await createKeyStates({ keys: join(home, 'keys'), file: keyStatesFile() }).record('codex', { state: 'outOfCredit', at: AT });
+
+    await proxy.checkOutOfCredit();
+
+    const check = vendor.asked.find((asked) => asked.path === '/v1/responses');
+    expect(JSON.parse(check?.body ?? '{}')).toEqual({ model: 'gpt-5.5-nano', input: 'Hi', max_output_tokens: 16 });
+    expect(check?.headers.authorization).toBe(`Bearer ${OPENAI_KEY}`);
+    await expect(keyStateOf('codex')).resolves.toEqual({ state: 'ready' });
+  });
+
+  it('checks no key that is ready', async () => {
+    await proxy.checkOutOfCredit();
+
+    expect(vendor.asked).toEqual([]);
+  });
+
+  it('checks a harness\'s key at once when asked on its own path, and answers its state (login --check)', async () => {
+    await createKeyStates({ keys: join(home, 'keys'), file: keyStatesFile() }).record('codex', { state: 'outOfCredit', at: AT });
+
+    const answer = await fetch(`${proxyUrl}/aeolus/check/codex`, { method: 'POST' });
+
+    await expect(answer.json()).resolves.toEqual({ state: 'ready' });
+    await expect(keyStateOf('codex')).resolves.toEqual({ state: 'ready' });
   });
 
   it('answers its version to whoever asks its state, so the trierarch knows it runs', async () => {
