@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -176,6 +176,14 @@ describe('workspaces in git', () => {
   it('lists each known worktree once and ignores a plain clone in the workspace folder (#1295)', async () => {
     await workspace().prepare(scout);
     await git(['clone', '-q', repository, join(root, 'aeolus-fleet-designer-release')]);
+
+    expect(await workspace().worktrees()).toEqual([{ path: join(root, 'aeolus-fleet', 'scout'), repository: 'aeolus-fleet', name: 'scout' }]);
+  });
+
+  it('lists the worktrees under a root reached through a symbolic link, as macOS reaches /var through /private/var (aeolus-fleet#1340)', async () => {
+    mkdirSync(join(folder, 'real-worktrees'));
+    symlinkSync(join(folder, 'real-worktrees'), root);
+    await workspace().prepare(scout);
 
     expect(await workspace().worktrees()).toEqual([{ path: join(root, 'aeolus-fleet', 'scout'), repository: 'aeolus-fleet', name: 'scout' }]);
   });
