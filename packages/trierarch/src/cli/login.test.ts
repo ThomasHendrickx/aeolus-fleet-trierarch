@@ -1,10 +1,11 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { initialConfiguration, trierarchConfigurationSchema } from '../adapters/files.js';
 import { createKeyFiles, type KeyFiles } from '../adapters/key-files.js';
 import type { PluginHarness } from '../adapters/plugin.js';
 import type { ServiceStatus } from '../adapters/service.js';
@@ -20,9 +21,12 @@ let checked: { harness: PluginHarness; key: string }[];
 let answer: KeyCheck;
 let restarts: number;
 let isServiceInstalled: boolean;
+let config: string;
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'trierarch-login-'));
+  config = join(home, 'config.json');
+  writeFileSync(config, JSON.stringify({ ...initialConfiguration(), worktreeRoot: '/kept/as/written' }));
   keys = createKeyFiles(join(home, 'keys'));
   checked = [];
   answer = { kind: 'taken' };
@@ -37,6 +41,7 @@ afterEach(() => {
 function run(request: LoginRequest, key = KEY) {
   return login({
     request,
+    config,
     keys,
     readKey: () => Promise.resolve(key),
     check: (harness, given) => {
@@ -138,9 +143,77 @@ describe('aeolus-trierarch login', () => {
       { harness: 'claude-code', default: 'subscription', key: 'ready' },
       { harness: 'codex', default: 'subscription', key: 'none' },
     ]);
+    expect(report.ships).toEqual([]);
     expect(report.said).toEqual(['Claude Code  default Subscription  API key ready', 'Codex        default Subscription  no API key']);
     expect(restarts).toBe(0);
     expect(checked).toEqual([]);
+  });
+});
+
+function logins() {
+  return trierarchConfigurationSchema.parse(JSON.parse(readFileSync(config, 'utf8'))).logins;
+}
+
+describe('aeolus-trierarch login, choosing the login (api keys K5, K11)', () => {
+  it("sets a harness's default login in the configuration, keeping the rest of it, then restarts the service", async () => {
+    const report = await run({ kind: 'setDefault', harness: 'claude-code', login: 'apiKey' });
+
+    expect(logins()).toEqual({ default: { 'claude-code': 'apiKey' } });
+    expect(JSON.parse(readFileSync(config, 'utf8'))).toMatchObject({ worktreeRoot: '/kept/as/written', $schema: './config.schema.json' });
+    expect(restarts).toBe(1);
+    expect(report.said).toEqual(['Claude Code runs on API key by default, from each session\'s next start.', 'The trierarch restarted; its sessions kept running.']);
+  });
+
+  it("sets a ship's exception, and another harness's default beside it", async () => {
+    await run({ kind: 'setShip', shipName: 'build-docs', login: 'subscription' });
+    const report = await run({ kind: 'setDefault', harness: 'codex', login: 'apiKey' });
+
+    expect(logins()).toEqual({ default: { codex: 'apiKey' }, ships: { 'build-docs': 'subscription' } });
+    expect(report.said[0]).toBe('Codex runs on API key by default, from each session\'s next start.');
+  });
+
+  it("says a ship's exception from its next start", async () => {
+    const report = await run({ kind: 'setShip', shipName: 'build-docs', login: 'apiKey' });
+
+    expect(report.said[0]).toBe("build-docs runs on API key from its next start.");
+  });
+
+  it("clears a ship's exception, so it runs on its harness's default", async () => {
+    await run({ kind: 'setShip', shipName: 'build-docs', login: 'apiKey' });
+
+    const report = await run({ kind: 'setShip', shipName: 'build-docs', login: 'default' });
+
+    expect(logins()).toEqual({ ships: {} });
+    expect(report.said[0]).toBe("build-docs runs on its harness's default from its next start.");
+  });
+
+  it('changes nothing and restarts nothing when the login is already so', async () => {
+    await run({ kind: 'setDefault', harness: 'codex', login: 'apiKey' });
+    restarts = 0;
+
+    const report = await run({ kind: 'setDefault', harness: 'codex', login: 'apiKey' });
+
+    expect(restarts).toBe(0);
+    expect(report.said).toEqual(['Codex runs on API key by default already.']);
+  });
+
+  it('gives the defaults and each exception it set', async () => {
+    await keys.write('codex', KEY);
+    await run({ kind: 'setDefault', harness: 'claude-code', login: 'apiKey' });
+    await run({ kind: 'setShip', shipName: 'build-docs', login: 'subscription' });
+    await run({ kind: 'setShip', shipName: 'build-api', login: 'apiKey' });
+
+    const report = await run({ kind: 'show' });
+
+    expect(report.harnesses).toEqual([
+      { harness: 'claude-code', default: 'apiKey', key: 'none' },
+      { harness: 'codex', default: 'subscription', key: 'ready' },
+    ]);
+    expect(report.ships).toEqual([
+      { shipName: 'build-api', login: 'apiKey' },
+      { shipName: 'build-docs', login: 'subscription' },
+    ]);
+    expect(report.said).toEqual(['Claude Code  default API key       no API key', 'Codex        default Subscription  API key ready', 'build-api    API key', 'build-docs   Subscription']);
   });
 });
 

@@ -6,7 +6,7 @@ import { trierarchConfigurationSchema } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { newId } from '../../test/support/in-memory.js';
-import { configurationJsonSchema, initialConfiguration, loadConfiguration, readCrewFile, readRunningFile, removeRemoteControl, writeCrewFile, writeRunningFile } from './files.js';
+import { configurationJsonSchema, initialConfiguration, trierarchConfigurationSchema as configurationSchema, loadConfiguration, readCrewFile, readRunningFile, removeRemoteControl, writeCrewFile, writeRunningFile } from './files.js';
 
 let folder: string;
 
@@ -175,3 +175,15 @@ describe('the configuration file', () => {
     expect(readFileSync(path, 'utf8')).toContain('crewToken=');
   });
 });
+
+describe('the logins in the configuration (api keys K5)', () => {
+  it('take a default login per harness and a login per ship name, and nothing else', () => {
+    const logins = { default: { 'claude-code': 'apiKey', codex: 'subscription' }, ships: { 'build-docs': 'subscription' } };
+
+    expect(configurationSchema.parse({ ...initialConfiguration(), logins }).logins).toEqual(logins);
+    expect(configurationSchema.safeParse({ ...initialConfiguration(), logins: { default: { 'claude-code': 'key' } } }).success).toBe(false);
+    expect(configurationSchema.safeParse({ ...initialConfiguration(), logins: { default: { gemini: 'apiKey' } } }).success).toBe(false);
+    expect(configurationSchema.safeParse({ ...initialConfiguration(), logins: { keyFile: '/tmp/key' } }).success).toBe(false);
+  });
+});
+

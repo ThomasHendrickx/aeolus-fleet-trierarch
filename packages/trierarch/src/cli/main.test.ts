@@ -226,6 +226,25 @@ describe('aeolus-trierarch', () => {
     expect(USAGE).toContain('  login <harness> --remove-key');
   });
 
+  it("login takes a harness's default and a ship's exception, and names both forms in its usage (api keys K11)", async () => {
+    const config = join(home, 'env.json');
+    writeFileSync(config, JSON.stringify(CONFIGURATION));
+
+    await expect(main(['login', 'codex', '--default', 'api-key'], machine({ HOME: home, AEOLUS_TRIERARCH_CONFIG: config }))).resolves.toMatchObject({ code: 0 });
+    await expect(main(['login', '--ship', 'build-docs', 'subscription'], machine({ HOME: home, AEOLUS_TRIERARCH_CONFIG: config }))).resolves.toMatchObject({ code: 0 });
+
+    expect(JSON.parse(readFileSync(config, 'utf8'))).toMatchObject({ logins: { default: { codex: 'apiKey' }, ships: { 'build-docs': 'subscription' } } });
+    expect(USAGE).toContain('  login <harness> --default api-key|subscription');
+    expect(USAGE).toContain('  login --ship <name> api-key|subscription|default');
+  });
+
+  it('login refuses a login it does not know', async () => {
+    const { output, code } = await main(['login', 'codex', '--default', 'key'], machine({ HOME: home }));
+
+    expect(code).toBe(1);
+    expect(output).toBe('A login is api-key or subscription: aeolus-trierarch login codex --default api-key');
+  });
+
   it('login refuses a harness it does not know, naming the ones it does', async () => {
     const { output, code } = await main(['login', 'gemini', '--remove-key'], machine({ HOME: home }));
 
