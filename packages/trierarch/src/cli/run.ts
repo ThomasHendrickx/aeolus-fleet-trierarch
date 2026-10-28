@@ -17,11 +17,13 @@ import { adapterFlagsOf, createHarnesses, riskyFlagsOf } from '../adapters/harne
 import { createFolderProcesses } from '../adapters/folder-processes.js';
 import { createGitCheckouts } from '../adapters/git-checkouts.js';
 import { createJsonState } from '../adapters/json-state.js';
+import { createKeyFiles } from '../adapters/key-files.js';
 import { createMachine } from '../adapters/machine.js';
 import { shipHome, type TrierarchPaths } from '../adapters/paths.js';
 import { runCommand } from '../adapters/run-command.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
-import { runtimeAdaptersOf } from '../adapters/runtime-adapters.js';
+import { modelProxy, runtimeAdaptersOf } from '../adapters/runtime-adapters.js';
+import { PLUGIN_HARNESSES } from '../adapters/plugin.js';
 import { createCallerCheck } from '../adapters/caller-check.js';
 import { createShipSockets } from '../adapters/ship-sockets.js';
 import { sessionsLaunch } from '../adapters/hold-runtime.js';
@@ -159,8 +161,18 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configured.harnesses), prices: priceTableOf(configured.prices) });
   const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup, readLoad, readUsage, clock });
   const askForTrustedRepositories = createAskForTrustedRepositories({ fleet, logger, ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
+  // The model proxy runs while any harness holds an API key (headless H16); a pass starts it again when it is gone.
+  const keys = createKeyFiles(paths.keys);
+  const proxy = modelProxy({ paths, version, launch: sessionsLaunch({ platform: process.platform, env }) });
+  const keepProxy = async (): Promise<void> => {
+    const held = await Promise.all(PLUGIN_HARNESSES.map((harness) => keys.has(harness)));
+    await proxy.keep({ isNeeded: held.includes(true) }).catch((error: unknown) => {
+      logger.warn(`the model proxy: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  };
   // Each pass ends with the trierarch's own report: the first at start, then only when it changed.
   const pass = async (): Promise<void> => {
+    await keepProxy();
     await askForTrustedRepositories();
     await runPass();
     await reportSelf();
