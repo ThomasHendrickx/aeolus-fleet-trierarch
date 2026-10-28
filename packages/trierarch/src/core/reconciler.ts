@@ -20,7 +20,7 @@ export interface Observed {
   readonly sessions: readonly ObservedSession[];
   readonly worktrees: readonly ObservedWorktree[];
   /** For each entry whose session it watches: its inbox, its turn, and whether its store holds a message to hand (#756). */
-  readonly ships: Readonly<Record<string, { readonly inbox: InboxAnswer; readonly turn: Turn; readonly isHolding: boolean }>>;
+  readonly ships: Readonly<Record<string, { readonly inbox: InboxAnswer; readonly turn: Turn; readonly isHolding: boolean; readonly isKeyNotReady?: boolean }>>;
   /** For each entry crewing whose session started: what its screen shows in its launch window (#382). */
   readonly launches: Readonly<Record<string, LaunchSeen>>;
   /** The entries it would watch or report on whose folder holds no identity, so it cannot see their inbox or report for them (#659, #664). */
@@ -578,7 +578,8 @@ function identityStep(entry: Entry, observed: Observed): Step {
  * stopped once per forced message.
  */
 function wakeStep(entry: Entry, seen: Observed['ships'][string] | undefined): Step {
-  if (seen?.inbox.kind !== 'waiting' || seen.turn === 'unknown') {
+  // A session on a key that is not ready is handed nothing, forced or not: its deliveries wait in the inbox (api keys K9).
+  if (seen?.inbox.kind !== 'waiting' || seen.turn === 'unknown' || seen.isKeyNotReady === true) {
     return NOTHING;
   }
   if (seen.inbox.forced > 0) {

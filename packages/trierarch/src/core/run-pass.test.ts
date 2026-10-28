@@ -2598,5 +2598,81 @@ describe("each session's login (api keys K5, K6, K9)", () => {
 
     expect(trierarch.modelLogins.asked).toContainEqual({ harness: 'claude-code', login: 'subscription', options: { model: 'sonnet' }, folder: SCOUT_FOLDER });
   });
+
+  it('hands nothing to a running session on a key that is not ready: its deliveries wait in the inbox (K9)', async () => {
+    const trierarch = aTrierarchOnLogins(ON_KEY);
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.modelLogins.states.set('claude-code', { state: 'outOfCredit', at: '2026-10-06T08:00:00.000Z' });
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.fleet.deliver(shipId, 1);
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.handOvers).toEqual([]);
+    expect(trierarch.processes.sessions.get(shipId)).toBe('running');
+  });
+
+  it('hands over again once the key is ready', async () => {
+    const trierarch = aTrierarchOnLogins(ON_KEY);
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.modelLogins.states.set('claude-code', { state: 'outOfCredit', at: '2026-10-06T08:00:00.000Z' });
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.fleet.deliver(shipId, 1);
+    await trierarch.pass();
+
+    trierarch.modelLogins.states.set('claude-code', { state: 'ready' });
+    await trierarch.pass();
+
+    expect(trierarch.harness.handOvers).toEqual([shipId]);
+  });
+
+  it('hands over to a session on its subscription whatever the key', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.modelLogins.states.set('claude-code', { state: 'refused', at: '2026-10-06T08:00:00.000Z' });
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.fleet.deliver(shipId, 1);
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.handOvers).toEqual([shipId]);
+  });
+
+  it('tells argo once per harness and state, from the computer\'s own ship, naming the harness, the state and the ships that wait (K9)', async () => {
+    const trierarch = aTrierarchOnLogins(ON_KEY);
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.modelLogins.states.set('claude-code', { state: 'outOfCredit', at: '2026-10-06T08:00:00.000Z' });
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
+      `Claude Code's API key is out of credit\n\n- Harness: claude-code\n- State: out of credit since 2026-10-06T08:00:00.000Z\n- Ships that wait: scout (\`${shipId}\`)\n\nIt is checked every 15 minutes; aeolus-trierarch login claude-code --check checks it at once.`,
+    ]);
+  });
+
+  it('tells argo again when the state changes, and nothing while the key is ready', async () => {
+    const trierarch = aTrierarchOnLogins(ON_KEY);
+    await aCrewedShip(trierarch);
+    trierarch.modelLogins.states.set('claude-code', { state: 'outOfCredit', at: '2026-10-06T08:00:00.000Z' });
+    await trierarch.pass();
+    trierarch.modelLogins.states.set('claude-code', { state: 'ready' });
+    await trierarch.pass();
+
+    trierarch.modelLogins.states.set('claude-code', { state: 'refused', at: '2026-10-06T09:00:00.000Z' });
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo.map((report) => report.text.split('\n')[0])).toEqual(["Claude Code's API key is out of credit", "Claude Code's API key was refused"]);
+  });
+
+  it('tells argo nothing of a key no ship of this computer is on', async () => {
+    const trierarch = aTrierarch();
+    await aCrewedShip(trierarch);
+    trierarch.modelLogins.states.set('claude-code', { state: 'refused', at: '2026-10-06T08:00:00.000Z' });
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo).toEqual([]);
+  });
 });
 

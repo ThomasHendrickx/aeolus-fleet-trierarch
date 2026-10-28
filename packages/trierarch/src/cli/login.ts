@@ -8,7 +8,7 @@ import type { KeyFiles } from '../adapters/key-files.js';
 import { PLUGIN_HARNESSES, type PluginHarness } from '../adapters/plugin.js';
 import type { Service } from '../adapters/service.js';
 import type { KeyCheck } from '../adapters/vendor-key-check.js';
-import type { Login as SessionLogin, Logins } from '../core/login.js';
+import type { KeyStateAt, Login as SessionLogin, Logins } from '../core/login.js';
 import { NOT_SAID_YET, startNewProcess } from './new-process.js';
 
 /**
@@ -25,6 +25,7 @@ export type LoginRequest =
   | { readonly kind: 'show' }
   | { readonly kind: 'apiKey'; readonly harness: PluginHarness }
   | { readonly kind: 'removeKey'; readonly harness: PluginHarness }
+  | { readonly kind: 'check'; readonly harness: PluginHarness }
   | { readonly kind: 'setDefault'; readonly harness: PluginHarness; readonly login: SessionLogin }
   | { readonly kind: 'setShip'; readonly shipName: string; readonly login: SessionLogin | 'default' };
 
@@ -62,6 +63,8 @@ export interface Login {
   readonly running: () => Promise<RunningFile | undefined>;
   /** Waits between reads of running.json; a test passes one that does not wait. */
   readonly sleep?: (ms: number) => Promise<void>;
+  /** Has the model proxy check the harness's key at once (K10): its state after; none when the proxy does not run. */
+  readonly checkNow: (harness: PluginHarness) => Promise<KeyStateAt | undefined>;
 }
 
 const HARNESS_NAMES: Readonly<Record<PluginHarness, string>> = { 'claude-code': 'Claude Code', codex: 'Codex' };
@@ -126,6 +129,24 @@ async function change(at: Login): Promise<string[]> {
         return [`${HARNESS_NAMES[request.harness]} holds no API key: nothing to remove.`];
       }
       return [`Removed the API key for ${HARNESS_NAMES[request.harness]}.`, ...(await restart(at))];
+    case 'check': {
+      const name = HARNESS_NAMES[request.harness];
+      const key = await at.checkNow(request.harness);
+      if (key === undefined) {
+        throw new TrierarchFileError('The model proxy does not run: it runs while the service does and a harness holds a key (aeolus-trierarch start).');
+      }
+      switch (key.state) {
+        case 'ready':
+          return [`${name}'s API key is ready: its waiting ships start within a pass.`];
+        case 'outOfCredit':
+          return [`${name}'s API key is still out of credit since ${key.at ?? ''}. The proxy checks it again every 15 minutes.`];
+        case 'refused':
+          return [`${name}'s API key was refused by its vendor: give it a new one with aeolus-trierarch login ${request.harness} --api-key.`];
+        case 'none':
+          return [`${name} holds no API key: aeolus-trierarch login ${request.harness} --api-key.`];
+      }
+      break;
+    }
     case 'setDefault': {
       const name = HARNESS_NAMES[request.harness];
       const label = LOGIN_NAMES[request.login];

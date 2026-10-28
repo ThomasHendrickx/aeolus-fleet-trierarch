@@ -1,6 +1,7 @@
 import { argoMessage } from '@aeolus-fleet/common';
 
 import { PROBE_AFTER_MINUTES, type FailedStarts } from './failed-starts.js';
+import type { KeyStateAt } from './login.js';
 import type { LowResource, MachineLoad } from './machine-load.js';
 
 /**
@@ -150,4 +151,24 @@ export function stoppedOfferingText(failedStarts: FailedStarts): string {
       `It offers itself again for one start ${String(PROBE_AFTER_MINUTES)} minutes after its last failed start, and for good once a start succeeds or the trierarch starts with a changed configuration.`,
     ),
   });
+}
+
+const HARNESS_NAMES: Readonly<Record<string, string>> = { 'claude-code': 'Claude Code', codex: 'Codex' };
+
+/**
+ * A harness's API key that holds its ships back (api keys K9): which harness,
+ * the state since when, the ships that wait, and how the key gets ready again.
+ */
+export function keyNotReadyText(at: { harness: string; key: KeyStateAt; ships: readonly ShipNamed[] }): string {
+  const { harness, key, ships } = at;
+  const name = HARNESS_NAMES[harness] ?? harness;
+  const since = key.at === undefined ? '' : ` since ${key.at}`;
+  const told =
+    key.state === 'outOfCredit'
+      ? { headline: `${name}'s API key is out of credit`, state: `out of credit${since}`, next: `It is checked every 15 minutes; aeolus-trierarch login ${harness} --check checks it at once.` }
+      : key.state === 'refused'
+        ? { headline: `${name}'s API key was refused`, state: `refused by its vendor${since}`, next: `Give it a new key with aeolus-trierarch login ${harness} --api-key.` }
+        : { headline: `${name} has no API key`, state: 'no key', next: `Give it one with aeolus-trierarch login ${harness} --api-key.` };
+  const waiting = ships.map((ship) => (ship.shipName === undefined ? `\`${ship.shipId}\`` : `${ship.shipName} (\`${ship.shipId}\`)`)).join(', ');
+  return argoMessage({ headline: told.headline, body: paragraphs([`- Harness: ${harness}`, `- State: ${told.state}`, `- Ships that wait: ${waiting}`].join('\n'), told.next) });
 }

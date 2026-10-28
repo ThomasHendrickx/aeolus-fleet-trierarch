@@ -4,6 +4,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { z } from 'zod';
+
 import { cappedLogStream, isWritingTo } from '../adapters/capped-log.js';
 import { createClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import { createCodexSetup } from '../adapters/codex-setup.js';
@@ -21,10 +23,11 @@ import { createPluginUpdate } from '../adapters/plugin-update.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
 import { runCommand, streamCommand } from '../adapters/run-command.js';
 import { createService, serviceEnvironment } from '../adapters/service.js';
-import { hostSessions } from '../adapters/runtime-adapters.js';
+import { hostSessions, modelProxy } from '../adapters/runtime-adapters.js';
 import { checkKey } from '../adapters/vendor-key-check.js';
+import { CHECK_PATH } from '../adapters/model-proxy.js';
 import { runningVersion } from '../adapters/version.js';
-import type { Login } from '../core/login.js';
+import { KEY_STATES, type Login } from '../core/login.js';
 import { createDetectHarnesses } from '../core/detect-harnesses.js';
 import { createUninstall } from '../core/uninstall.js';
 import { configCheck } from './config-check.js';
@@ -54,6 +57,7 @@ export const USAGE = [
   '  login                 each harness\'s login and whether it holds an API key',
   '  login <harness> --api-key      read an API key for claude-code or codex from stdin (not shown as typed), check it with the vendor and keep it on this computer only, then restart the service; sessions keep running',
   '  login <harness> --remove-key   remove the API key for that harness, then restart the service',
+  '  login <harness> --check        check an API key out of credit at once, as the model proxy does every 15 minutes',
   '  login <harness> --default api-key|subscription   the login that harness\'s sessions run on, from each one\'s next start, then restart the service',
   '  login --ship <name> api-key|subscription|default  the login that ship runs on, or its harness\'s default again, from its next start, then restart the service',
   '',
@@ -92,7 +96,7 @@ const VALUE_FLAGS = new Set(['--config', '--fleet-url', '--ship-id', '--plugin-s
 /** Set for the installed version's upgrade that runs the plugin step of an upgrade (#725), which restarts the service itself (#829); older versions ignore it. */
 const PLUGIN_STEP_VARIABLE = 'AEOLUS_TRIERARCH_PLUGIN_STEP';
 
-const SWITCHES = new Set(['--json', '--yes', '--follow', '--no-load', '--version', '--api-key', '--remove-key']);
+const SWITCHES = new Set(['--json', '--yes', '--follow', '--no-load', '--version', '--api-key', '--remove-key', '--check']);
 const DEFAULT_LINES = 50;
 const FOLLOW_INTERVAL_MS = 500;
 
@@ -135,6 +139,9 @@ export interface Machine {
   platform: string;
 }
 
+/** A key's state as the model proxy answers a check. */
+const keyStateAtSchema = z.object({ state: z.enum(KEY_STATES), at: z.string().optional() });
+
 /** The login a command line names: api-key or subscription, and default where it may clear one. */
 const LOGIN_WORDS: Readonly<Record<string, Login | 'default' | undefined>> = { 'api-key': 'apiKey', subscription: 'subscription', default: 'default' };
 
@@ -142,6 +149,7 @@ const LOGIN_WORDS: Readonly<Record<string, Login | 'default' | undefined>> = { '
 function loginRequest(word: string | undefined, at: { switches: ReadonlySet<string>; values: ReadonlyMap<string, string> }): LoginRequest {
   const isApiKey = at.switches.has('--api-key');
   const isRemoveKey = at.switches.has('--remove-key');
+  const isCheck = at.switches.has('--check');
   const shipName = at.values.get('--ship');
   const defaultWord = at.values.get('--default');
   if (shipName !== undefined) {
@@ -151,11 +159,11 @@ function loginRequest(word: string | undefined, at: { switches: ReadonlySet<stri
     }
     return { kind: 'setShip', shipName, login };
   }
-  if (word === undefined && !isApiKey && !isRemoveKey && defaultWord === undefined) {
+  if (word === undefined && !isApiKey && !isRemoveKey && !isCheck && defaultWord === undefined) {
     return { kind: 'show' };
   }
   const harness = PLUGIN_HARNESSES.find((name): name is PluginHarness => name === word);
-  if (harness === undefined || [isApiKey, isRemoveKey, defaultWord !== undefined].filter(Boolean).length !== 1) {
+  if (harness === undefined || [isApiKey, isRemoveKey, isCheck, defaultWord !== undefined].filter(Boolean).length !== 1) {
     throw new TrierarchFileError(`login takes ${PLUGIN_HARNESSES.join(' or ')}: aeolus-trierarch login claude-code --api-key`);
   }
   if (defaultWord !== undefined) {
@@ -165,7 +173,7 @@ function loginRequest(word: string | undefined, at: { switches: ReadonlySet<stri
     }
     return { kind: 'setDefault', harness, login };
   }
-  return { kind: isApiKey ? 'apiKey' : 'removeKey', harness };
+  return { kind: isApiKey ? 'apiKey' : isCheck ? 'check' : 'removeKey', harness };
 }
 
 /** Runs one command line of `aeolus-trierarch`. */
@@ -298,6 +306,12 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
           }
         },
         check: (harness, key) => checkKey({ harness, key }),
+        checkNow: async (harness) => {
+          const url = await modelProxy({ paths, version: runningVersion() }).url();
+          const answer = url === undefined ? undefined : await fetch(`${url}${CHECK_PATH}${harness}`, { method: 'POST' }).catch(() => undefined);
+          const key = keyStateAtSchema.safeParse(answer?.ok === true ? await answer.json().catch(() => undefined) : undefined);
+          return key.success ? key.data : undefined;
+        },
         service: serviceAt(),
         running: () => readRunningFile(paths.running),
       });
