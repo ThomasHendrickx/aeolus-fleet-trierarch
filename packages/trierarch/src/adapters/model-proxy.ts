@@ -79,7 +79,16 @@ export function createModelProxy(at: { sessions: string; keys: string; version: 
       refuse(response, { status: HTTP_UNAUTHORIZED, message: `this computer holds no API key for ${route.harness}` });
       return;
     }
-    const target = new URL(rest, route.vendor);
+    // The vendor's origin is fixed, and the path only ever set on it: a path is never resolved as a URL, which could name another host.
+    const vendorOrigin = new URL(route.vendor).origin;
+    const target = new URL(vendorOrigin);
+    const queryAt = rest.indexOf('?');
+    target.pathname = queryAt === -1 ? rest : rest.slice(0, queryAt);
+    target.search = queryAt === -1 ? '' : rest.slice(queryAt);
+    if (target.origin !== vendorOrigin) {
+      refuse(response, { status: HTTP_NOT_FOUND, message: 'it forwards only to the harnesses\' vendors' });
+      return;
+    }
     const headers: OutgoingHttpHeaders = { ...Object.fromEntries(Object.entries(request.headers).filter(([name]) => !DROPPED_HEADERS.has(name))), ...route.keyHeaders(key) };
     const send = target.protocol === 'https:' ? httpsRequest : httpRequest;
     const outgoing = send(target, { method: request.method, headers }, (answer) => {
