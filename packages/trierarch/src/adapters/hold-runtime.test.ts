@@ -25,6 +25,11 @@ const VERSION = runningVersion();
 const MACOS_PROCESS_VARIABLE = '__CF_USER_TEXT_ENCODING';
 /** A user line as Claude Code takes it on stdin. */
 const userLine = (text: string) => JSON.stringify({ type: 'user', message: { role: 'user', content: text } });
+/** Puts a variable of this process's environment back as it was before a test set it. */
+const restore = (variable: string, value: string | undefined): void => {
+  if (value === undefined) Reflect.deleteProperty(process.env, variable);
+  else process.env[variable] = value;
+};
 
 let sessions: string;
 let folder: string;
@@ -123,8 +128,11 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
     await expect(eventsOfType({ runtime: runtime, shipId: lookout }, 'result')).resolves.toEqual([]);
   });
 
-  it("starts the harness with none of the trierarch's environment: only HOME, PATH and what the start gives (H10)", async () => {
+  it("starts the harness with none of the trierarch's environment: only HOME, PATH, USER, LOGNAME and what the start gives (H10)", async () => {
     process.env.AEOLUS_TEST_TRIERARCH_SECRET = 'held by the trierarch';
+    const { USER: user, LOGNAME: logname } = process.env;
+    process.env.USER = 'held-user';
+    process.env.LOGNAME = 'held-user';
     try {
       const runtime = aRuntime();
       const shipId = newId('ship');
@@ -133,10 +141,12 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
 
       await expect.poll(() => written('fake-starts.jsonl')).toHaveLength(1);
       const [start] = starts();
-      expect(Object.keys(start?.env ?? {}).filter((variable) => variable !== MACOS_PROCESS_VARIABLE).sort()).toEqual(['AEOLUS_LAUNCH', 'HOME', 'PATH']);
+      expect(Object.keys(start?.env ?? {}).filter((variable) => variable !== MACOS_PROCESS_VARIABLE).sort()).toEqual(['AEOLUS_LAUNCH', 'HOME', 'LOGNAME', 'PATH', 'USER']);
       expect(start?.env.AEOLUS_LAUNCH).toBe('launch-1');
     } finally {
       delete process.env.AEOLUS_TEST_TRIERARCH_SECRET;
+      restore('USER', user);
+      restore('LOGNAME', logname);
     }
   });
 
