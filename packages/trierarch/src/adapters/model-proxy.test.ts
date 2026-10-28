@@ -160,6 +160,29 @@ describe('the model proxy', () => {
     expect(vendor.asked).toEqual([]);
   });
 
+  it("never sends the key to another host, whatever the path after the vendor's prefix (api keys K7)", async () => {
+    await aSession({ harness: 'claude-code', token: TOKEN });
+    const attacker = await aVendor();
+    const host = attacker.url.replace('http://', '');
+    const paths = [
+      `/anthropic//${host}/steal`,
+      `/anthropic/%2F%2F${host}/steal`,
+      `/anthropic/%2f%2f${host}/steal`,
+      `/anthropic/@${host}/steal`,
+      `/anthropic/v1/..//${host}/steal`,
+      `/anthropic/${attacker.url}/steal`,
+      `/anthropic/https://${host}/steal`,
+      `/anthropic/\\${host}/steal`,
+    ];
+
+    for (const path of paths) {
+      await ask(path, { token: TOKEN });
+    }
+
+    expect(attacker.asked).toEqual([]);
+    expect(vendor.asked.every((asked) => asked.headers.host === vendor.url.replace('http://', ''))).toBe(true);
+  });
+
   it('refuses a running session when its harness holds no key, and never moves it elsewhere (api keys, a key removed)', async () => {
     await aSession({ harness: 'codex', token: TOKEN });
     await createKeyFiles(join(home, 'keys')).remove('codex');
