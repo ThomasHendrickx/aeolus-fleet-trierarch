@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
 import { effectiveFlags } from '../core/effective-flags.js';
 import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
-import { CLAUDE_CODE_ADAPTER_FLAGS, claudeCodeCommandLine, createClaudeCodeHarness } from './claude-code.js';
+import { CLAUDE_CODE_ADAPTER_FLAGS, claudeCodeCommandLine, claudeCodeKeyInReach, createClaudeCodeHarness } from './claude-code.js';
 import { createClaudeCodeSetup } from './claude-code-setup.js';
 import { wordsOf } from './command-line.js';
 import { runCommand } from './run-command.js';
@@ -146,6 +146,40 @@ describe('Claude Code on its login (api keys K6, K7)', () => {
     await expect(harness({ isHeadless: true }).launch({ ...launchOf(shipId), login: 'apiKey', options: {}, isFirstStart: true })).rejects.toThrow('the model proxy is not running yet');
 
     expect(started).toEqual([]);
+  });
+
+  describe('a key in reach on the subscription, read from the flags the session would start with (K6)', () => {
+    /** Settings a picked option points Claude Code at, holding an apiKeyHelper. */
+    let keyed: string;
+    const setup = () => createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') });
+    const claudeCodeWith = (options: Record<string, { values: Record<string, string[]>; default?: string }>) => ({ flags: ['--remote-control'], options });
+
+    beforeEach(() => {
+      keyed = join(home, 'keyed-settings.json');
+      writeFileSync(keyed, JSON.stringify({ apiKeyHelper: '/usr/local/bin/print-secret-key' }));
+    });
+
+    it("names an apiKeyHelper in settings a picked option adds with --settings", async () => {
+      const claudeCode = claudeCodeWith({ profile: { values: { keyed: ['--settings', keyed], plain: [] } } });
+
+      await expect(claudeCodeKeyInReach(setup(), { harness: claudeCode, options: { profile: 'keyed' }, folder })).resolves.toBe(`apiKeyHelper in ${keyed}`);
+      await expect(claudeCodeKeyInReach(setup(), { harness: claudeCode, options: { profile: 'plain' }, folder })).resolves.toBeUndefined();
+    });
+
+    it("names it from an option's default when the request picks none", async () => {
+      const claudeCode = claudeCodeWith({ profile: { values: { keyed: ['--settings', keyed] }, default: 'keyed' } });
+
+      await expect(claudeCodeKeyInReach(setup(), { harness: claudeCode, options: {}, folder })).resolves.toBe(`apiKeyHelper in ${keyed}`);
+    });
+
+    it('reads the sources a picked option names with --setting-sources', async () => {
+      mkdirSync(join(folder, '.claude'), { recursive: true });
+      writeFileSync(join(folder, '.claude', 'settings.json'), JSON.stringify({ apiKeyHelper: '/usr/local/bin/print-secret-key' }));
+      const claudeCode = { flags: ['--setting-sources', 'user'], options: { sources: { values: { all: ['--setting-sources', 'user,project,local'] } } } };
+
+      await expect(claudeCodeKeyInReach(setup(), { harness: claudeCode, options: {}, folder })).resolves.toBeUndefined();
+      await expect(claudeCodeKeyInReach(setup(), { harness: claudeCode, options: { sources: 'all' }, folder })).resolves.toBe(`apiKeyHelper in ${join(folder, '.claude', 'settings.json')}`);
+    });
   });
 });
 

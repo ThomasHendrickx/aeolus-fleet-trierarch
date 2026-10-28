@@ -2586,7 +2586,17 @@ describe("each session's login (api keys K5, K6, K9)", () => {
 
     await aCrewedShip(trierarch);
 
-    expect(trierarch.modelLogins.asked).toContainEqual({ harness: 'claude-code', login: 'subscription', folder: SCOUT_FOLDER });
+    expect(trierarch.modelLogins.asked).toContainEqual({ harness: 'claude-code', login: 'subscription', options: {}, folder: SCOUT_FOLDER });
+  });
+
+  it("asks with the options the request picked, whose flags may name settings of their own (K6)", async () => {
+    const trierarch = aTrierarch();
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, crewSettings({ options: { model: 'sonnet' } }));
+
+    await trierarch.pass();
+
+    expect(trierarch.modelLogins.asked).toContainEqual({ harness: 'claude-code', login: 'subscription', options: { model: 'sonnet' }, folder: SCOUT_FOLDER });
   });
 });
 
