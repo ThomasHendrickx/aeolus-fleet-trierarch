@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import { idSchema, trierarchConfigurationSchema as commonConfigurationSchema, trierarchNameSchema, type ShipId } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
+import { LOGINS } from '../core/login.js';
 import { withoutRemoteControl } from '../core/remote-control.js';
 
 /**
@@ -21,13 +22,17 @@ import { withoutRemoteControl } from '../core/remote-control.js';
  * a crew request never names them. With them, the price table the cost of a
  * ship's tokens is estimated by (#353): per model, in US dollars per million
  * tokens of each kind, in place of its list price or for a model with none.
+ * And which login each session runs on (api keys K5): a default per harness
+ * and a login per ship name, never a key or a path.
  */
 const priceSchema = z.number().nonnegative();
+const loginSchema = z.enum(LOGINS);
 
 export const trierarchConfigurationSchema = commonConfigurationSchema
   .extend({
     repositories: z.record(trierarchNameSchema, z.strictObject({ path: z.string().min(1), checkouts: z.array(trierarchNameSchema).optional() })),
     prices: z.record(z.string().min(1), z.strictObject({ input: priceSchema, output: priceSchema, cacheRead: priceSchema, cacheWrite: priceSchema })).optional(),
+    logins: z.strictObject({ default: z.strictObject({ 'claude-code': loginSchema.optional(), codex: loginSchema.optional() }).optional(), ships: z.record(z.string().min(1), loginSchema).optional() }).optional(),
   })
   .superRefine((configuration, context) => {
     for (const [repository, { checkouts = [] }] of Object.entries(configuration.repositories)) {

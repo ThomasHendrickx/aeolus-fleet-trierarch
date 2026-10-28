@@ -24,6 +24,7 @@ import { createService, serviceEnvironment } from '../adapters/service.js';
 import { hostSessions } from '../adapters/runtime-adapters.js';
 import { checkKey } from '../adapters/vendor-key-check.js';
 import { runningVersion } from '../adapters/version.js';
+import type { Login } from '../core/login.js';
 import { createDetectHarnesses } from '../core/detect-harnesses.js';
 import { createUninstall } from '../core/uninstall.js';
 import { configCheck } from './config-check.js';
@@ -53,6 +54,8 @@ export const USAGE = [
   '  login                 each harness\'s login and whether it holds an API key',
   '  login <harness> --api-key      read an API key for claude-code or codex from stdin (not shown as typed), check it with the vendor and keep it on this computer only, then restart the service; sessions keep running',
   '  login <harness> --remove-key   remove the API key for that harness, then restart the service',
+  '  login <harness> --default api-key|subscription   the login that harness\'s sessions run on, from each one\'s next start, then restart the service',
+  '  login --ship <name> api-key|subscription|default  the login that ship runs on, or its harness\'s default again, from its next start, then restart the service',
   '',
   'Look:',
   '  status                the version, the aeolus-fleet plugin per harness, the repositories, the service, the fleet and its own lease, caps in use, entries by state, kept worktrees and orphans',
@@ -85,7 +88,7 @@ interface Answer {
   readonly code?: number;
 }
 
-const VALUE_FLAGS = new Set(['--config', '--fleet-url', '--ship-id', '--plugin-ship-id', '--secret', '--lines']);
+const VALUE_FLAGS = new Set(['--config', '--fleet-url', '--ship-id', '--plugin-ship-id', '--secret', '--lines', '--default', '--ship']);
 /** Set for the installed version's upgrade that runs the plugin step of an upgrade (#725), which restarts the service itself (#829); older versions ignore it. */
 const PLUGIN_STEP_VARIABLE = 'AEOLUS_TRIERARCH_PLUGIN_STEP';
 
@@ -132,18 +135,37 @@ export interface Machine {
   platform: string;
 }
 
-/** What a login command line asks: show with no harness, else a key to read or remove for the harness it names. */
-function loginRequest(harness: string | undefined, switches: ReadonlySet<string>): LoginRequest {
-  const isApiKey = switches.has('--api-key');
-  const isRemoveKey = switches.has('--remove-key');
-  if (harness === undefined && !isApiKey && !isRemoveKey) {
+/** The login a command line names: api-key or subscription, and default where it may clear one. */
+const LOGIN_WORDS: Readonly<Record<string, Login | 'default' | undefined>> = { 'api-key': 'apiKey', subscription: 'subscription', default: 'default' };
+
+/** What a login command line asks: show with nothing more, a ship's login with --ship, else a key to read or remove or a default for the harness it names. */
+function loginRequest(word: string | undefined, at: { switches: ReadonlySet<string>; values: ReadonlyMap<string, string> }): LoginRequest {
+  const isApiKey = at.switches.has('--api-key');
+  const isRemoveKey = at.switches.has('--remove-key');
+  const shipName = at.values.get('--ship');
+  const defaultWord = at.values.get('--default');
+  if (shipName !== undefined) {
+    const login = LOGIN_WORDS[word ?? ''];
+    if (login === undefined) {
+      throw new TrierarchFileError('A ship\'s login is api-key, subscription or default: aeolus-trierarch login --ship build-docs api-key');
+    }
+    return { kind: 'setShip', shipName, login };
+  }
+  if (word === undefined && !isApiKey && !isRemoveKey && defaultWord === undefined) {
     return { kind: 'show' };
   }
-  const known = PLUGIN_HARNESSES.find((name): name is PluginHarness => name === harness);
-  if (known === undefined || isApiKey === isRemoveKey) {
+  const harness = PLUGIN_HARNESSES.find((name): name is PluginHarness => name === word);
+  if (harness === undefined || [isApiKey, isRemoveKey, defaultWord !== undefined].filter(Boolean).length !== 1) {
     throw new TrierarchFileError(`login takes ${PLUGIN_HARNESSES.join(' or ')}: aeolus-trierarch login claude-code --api-key`);
   }
-  return { kind: isApiKey ? 'apiKey' : 'removeKey', harness: known };
+  if (defaultWord !== undefined) {
+    const login = LOGIN_WORDS[defaultWord];
+    if (login === undefined || login === 'default') {
+      throw new TrierarchFileError(`A login is api-key or subscription: aeolus-trierarch login ${harness} --default api-key`);
+    }
+    return { kind: 'setDefault', harness, login };
+  }
+  return { kind: isApiKey ? 'apiKey' : 'removeKey', harness };
 }
 
 /** Runs one command line of `aeolus-trierarch`. */
@@ -260,7 +282,8 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
     },
     login: async () => {
       const report = await login({
-        request: loginRequest(words[1], switches),
+        request: loginRequest(words[1], { switches, values }),
+        config: paths.config,
         keys: createKeyFiles(paths.keys),
         readKey: async () => {
           if (!process.stdin.isTTY) {
