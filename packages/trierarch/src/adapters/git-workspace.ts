@@ -1,4 +1,4 @@
-import { mkdir, realpath, stat } from 'node:fs/promises';
+import { mkdir, readdir, realpath, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
@@ -97,25 +97,19 @@ export function createGitWorkspace(options: { configuration: TrierarchConfigurat
     },
     worktrees: async () => {
       const found: ObservedWorktree[] = [];
-      for (const repository of Object.keys(configuration.repositories)) {
-        const source = await repositoryOf(join(root, repository, 'worktree'));
-        if (source === undefined) {
+      for (const repositoryEntry of await readdir(root, { withFileTypes: true }).catch(() => [])) {
+        if (!repositoryEntry.isDirectory()) {
           continue;
         }
-        const listed = await runCommand('git', { args: ['-C', source, 'worktree', 'list', '--porcelain'] });
-        if (listed.status !== 0) {
+        const repository = repositoryEntry.name;
+        if ((await repositoryOf(join(root, repository))) === undefined) {
           continue;
         }
-        for (const line of listed.stdout.split('\n')) {
-          if (!line.startsWith('worktree ')) {
+        for (const shipEntry of await readdir(join(root, repository), { withFileTypes: true }).catch(() => [])) {
+          if (!shipEntry.isDirectory()) {
             continue;
           }
-          const path = line.slice('worktree '.length);
-          const parts = relative(root, path).split(sep);
-          const [listedRepository, name] = parts;
-          if (listedRepository === repository && name !== undefined && parts.length === 2) {
-            found.push({ path, repository, name });
-          }
+          found.push({ path: join(root, repository, shipEntry.name), repository, name: shipEntry.name });
         }
       }
       return found;
