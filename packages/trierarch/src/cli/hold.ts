@@ -13,14 +13,18 @@ import { runningVersion } from '../adapters/version.js';
  * `aeolus-trierarch hold <ship id> --sessions <folder> --folder <folder>
  * --harness <name> [--env NAME=value]... -- <command>...`: the hold of one
  * session (headless H8), as the trierarch starts it, never a person. The
- * harness's environment is built from nothing (H10): HOME and PATH from the
- * hold's own, then each `--env` given, and with `--proxy-token-variable` the
- * session's proxy token from its folder in that variable (api keys K7);
- * nothing else of the trierarch's.
+ * harness's environment is built from nothing (H10): HOME, PATH, USER and
+ * LOGNAME from the hold's own, then each `--env` given, and with
+ * `--proxy-token-variable` the session's proxy token from its folder in that
+ * variable (api keys K7); nothing else of the trierarch's.
  */
 
-/** What the harness takes of the hold's own environment; everything else it is given. */
-const KEPT_VARIABLES = ['HOME', 'PATH'] as const;
+/**
+ * What the harness takes of the hold's own environment; everything else it is
+ * given. USER and LOGNAME name the user: on macOS Claude Code finds its login
+ * in the Keychain by them, and without them it is not logged in.
+ */
+const KEPT_VARIABLES = ['HOME', 'PATH', 'USER', 'LOGNAME'] as const;
 
 /** The harness's environment, from the hold's own and the variables given. */
 export function harnessEnvironment(own: Readonly<Record<string, string | undefined>>, given: Readonly<Record<string, string>>): Record<string, string> {
