@@ -1,9 +1,11 @@
 import { request as httpRequest, type IncomingMessage, type OutgoingHttpHeaders, type ServerResponse } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 
+import { z } from 'zod';
+
 import { readKey } from './key-files.js';
 import { createKeyStates } from './key-states.js';
-import type { PluginHarness } from './plugin.js';
+import { PLUGIN_HARNESSES, type PluginHarness } from './plugin.js';
 import { sessionOfToken } from './proxy-tokens.js';
 import { keyStateOfAnswer } from './vendor-answers.js';
 
@@ -21,6 +23,8 @@ import { keyStateOfAnswer } from './vendor-answers.js';
 
 export interface ModelProxy {
   readonly handle: (request: IncomingMessage, response: ServerResponse) => void;
+  /** Checks each key out of credit once (api keys K10), as the proxy does every 15 minutes. */
+  readonly checkOutOfCredit: () => Promise<void>;
 }
 
 interface Route {
@@ -34,6 +38,16 @@ const VENDOR_URLS: Readonly<Record<PluginHarness, string>> = { 'claude-code': 'h
 const PREFIXES: Readonly<Record<string, PluginHarness>> = { anthropic: 'claude-code', openai: 'codex' };
 /** The proxy's own path, which answers its version. */
 export const STATE_PATH = '/aeolus/state';
+/** The proxy's own path that checks a harness's key at once, `<path>/<harness>` (login --check, K10). */
+export const CHECK_PATH = '/aeolus/check/';
+/** How often a key out of credit is checked (K10). */
+export const CHECK_INTERVAL_MS = 15 * 60 * 1000;
+/** Each vendor's cheapest models, by a word in their ids, cheapest first: the check spends as little as the vendor bills. */
+const CHEAPEST: Readonly<Record<PluginHarness, readonly string[]>> = { 'claude-code': ['haiku'], codex: ['nano', 'mini'] };
+const ANTHROPIC_VERSION = '2023-06-01';
+/** The fewest output tokens the Responses API takes. */
+const OPENAI_FEWEST_OUTPUT_TOKENS = 16;
+const modelListSchema = z.object({ data: z.array(z.object({ id: z.string() })) });
 /** What the session sent that never goes on: its own credentials, and what belongs to its connection to the proxy. */
 const DROPPED_HEADERS = new Set(['authorization', 'x-api-key', 'host', 'connection', 'keep-alive', 'proxy-authorization', 'proxy-connection', 'transfer-encoding', 'upgrade']);
 const BEARER = /^Bearer (?<token>\S+)$/u;
@@ -62,6 +76,29 @@ export function createModelProxy(at: { sessions: string; keys: string; keyStates
       await keyStates.record(harness, { state, at: now() }).catch(() => undefined);
     }
   };
+  const vendorOf = (harness: PluginHarness): string => at.vendors?.[harness] ?? VENDOR_URLS[harness];
+  const headersOf = (harness: PluginHarness, key: string): Record<string, string> => (harness === 'claude-code' ? { 'x-api-key': key, 'anthropic-version': ANTHROPIC_VERSION } : { authorization: `Bearer ${key}` });
+
+  /** One request the vendor bills, on its cheapest model it lists for the key, and what its answer says of the key recorded. */
+  const checkKey = async (harness: PluginHarness): Promise<void> => {
+    const key = await readKey(at.keys, harness);
+    if (key === undefined) {
+      return;
+    }
+    const vendor = vendorOf(harness);
+    const listed = modelListSchema.safeParse(await (await fetch(`${vendor}/v1/models`, { headers: headersOf(harness, key) }).catch(() => undefined))?.json().catch(() => undefined));
+    const ids = listed.success ? listed.data.data.map((model) => model.id) : [];
+    const model = CHEAPEST[harness].flatMap((word) => ids.filter((id) => id.includes(word))).at(0);
+    if (model === undefined) {
+      return;
+    }
+    const [path, body] = harness === 'claude-code' ? ['/v1/messages', { model, max_tokens: 1, messages: [{ role: 'user', content: 'Hi' }] }] : ['/v1/responses', { model, input: 'Hi', max_output_tokens: OPENAI_FEWEST_OUTPUT_TOKENS }];
+    const answer = await fetch(`${vendor}${path}`, { method: 'POST', headers: { ...headersOf(harness, key), 'content-type': 'application/json' }, body: JSON.stringify(body) }).catch(() => undefined);
+    if (answer !== undefined) {
+      await recordAnswer(harness, { status: answer.status, body: await answer.text().catch(() => '') });
+    }
+  };
+
   const routeOf = (path: string): { route: Route; rest: string } | undefined => {
     const [, prefix = '', ...rest] = path.split('/');
     const harness = PREFIXES[prefix];
@@ -75,6 +112,15 @@ export function createModelProxy(at: { sessions: string; keys: string; keyStates
 
   const forward = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const path = request.url ?? '/';
+    const checked = PLUGIN_HARNESSES.find((harness) => path === `${CHECK_PATH}${harness}`);
+    if (checked !== undefined && request.method === 'POST') {
+      if ((await keyStates.stateOf(checked)).state === 'outOfCredit') {
+        await checkKey(checked);
+      }
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(await keyStates.stateOf(checked)));
+      return;
+    }
     if (path === STATE_PATH) {
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ version: at.version }));
@@ -145,6 +191,13 @@ export function createModelProxy(at: { sessions: string; keys: string; keyStates
       forward(request, response).catch(() => {
         response.destroy();
       });
+    },
+    checkOutOfCredit: async () => {
+      for (const harness of PLUGIN_HARNESSES) {
+        if ((await keyStates.stateOf(harness)).state === 'outOfCredit') {
+          await checkKey(harness);
+        }
+      }
     },
   };
 }

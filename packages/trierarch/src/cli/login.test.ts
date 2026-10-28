@@ -10,6 +10,7 @@ import { createKeyFiles, type KeyFiles } from '../adapters/key-files.js';
 import type { PluginHarness } from '../adapters/plugin.js';
 import type { ServiceStatus } from '../adapters/service.js';
 import type { KeyCheck } from '../adapters/vendor-key-check.js';
+import type { KeyStateAt } from '../core/login.js';
 import { login, readKeyFrom, type LoginRequest } from './login.js';
 
 /** A made-up key: no test holds a real one. */
@@ -23,7 +24,7 @@ let restarts: number;
 let isServiceInstalled: boolean;
 let config: string;
 /** What the model proxy answers a check with, by harness; none when it does not run. */
-let checkedStates: Map<string, { state: string; at?: string }> | undefined;
+let checkedStates: Map<string, KeyStateAt> | undefined;
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'trierarch-login-'));
