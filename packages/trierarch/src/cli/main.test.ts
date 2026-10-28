@@ -213,6 +213,26 @@ describe('aeolus-trierarch', () => {
     expect(USAGE).toContain('  add folder <name> <path>');
   });
 
+  it("login gives each harness's login and key state, keeping keys in the trierarch's keys folder, and names its forms in its usage (api keys K11)", async () => {
+    mkdirSync(join(home, '.aeolus', 'trierarch', 'keys'), { recursive: true });
+    writeFileSync(join(home, '.aeolus', 'trierarch', 'keys', 'codex'), 'test-key-not-real', { mode: 0o600 });
+
+    const { output, code } = await main(['login', '--json'], machine({ HOME: home }));
+
+    expect(code).toBe(0);
+    expect(JSON.parse(output)).toMatchObject({ harnesses: [{ harness: 'claude-code', key: 'none' }, { harness: 'codex', key: 'ready' }] });
+    expect(output).not.toContain('test-key-not-real');
+    expect(USAGE).toContain('  login <harness> --api-key');
+    expect(USAGE).toContain('  login <harness> --remove-key');
+  });
+
+  it('login refuses a harness it does not know, naming the ones it does', async () => {
+    const { output, code } = await main(['login', 'gemini', '--remove-key'], machine({ HOME: home }));
+
+    expect(code).toBe(1);
+    expect(output).toBe('login takes claude-code or codex: aeolus-trierarch login claude-code --api-key');
+  });
+
   it('says to run init, exiting 1, when there is no configuration yet', async () => {
     const { output, code } = await main(['config', 'check'], machine({ HOME: home }));
 
@@ -221,7 +241,7 @@ describe('aeolus-trierarch', () => {
   });
 
   it('names every command in its usage', () => {
-    for (const command of ['init', 'status', 'list', 'logs', 'start', 'stop', 'restart', 'upgrade', 'install', 'uninstall', 'config check', 'detect', 'run']) {
+    for (const command of ['init', 'status', 'list', 'logs', 'start', 'stop', 'restart', 'upgrade', 'install', 'uninstall', 'config check', 'detect', 'login', 'run']) {
       expect(USAGE).toContain(`  ${command}`);
     }
     expect(USAGE).toContain('--json');
