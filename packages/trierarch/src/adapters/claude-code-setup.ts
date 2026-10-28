@@ -39,6 +39,13 @@ export interface ClaudeCodeSetup {
    * folder settings come before the one that names it.
    */
   defaultPermissionMode(at: { folder?: string; settings?: string; sources: readonly SettingSource[] }): Promise<SettingsDefaultMode>;
+  /**
+   * What in the settings Claude Code reads would give a session a key instead
+   * of its subscription (api keys K6): an `apiKeyHelper`, or a key or cloud
+   * provider variable in `env`, named with where it is, never its value; none
+   * when nothing does. The same files as the default mode, every one of them.
+   */
+  keyInReach(at: { folder?: string; settings?: string; sources: readonly SettingSource[] }): Promise<string | undefined>;
 }
 
 /** The settings files `--setting-sources` picks from. */
@@ -111,6 +118,37 @@ async function commandLineDefaultMode(settings: string, folder: string | undefin
   return folder === undefined ? undefined : defaultModeIn(join(folder, settings));
 }
 
+/** The variables in a settings file's `env` that sign Claude Code in with something other than its subscription. */
+const KEY_VARIABLES = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY'] as const;
+
+/** What in settings text gives a key, named, never its value; none for text that is no JSON object. */
+function keyIn(text: string): string | undefined {
+  const settings = jsonObjectSchema.safeParse(parsedJson(text)).data;
+  if (settings === undefined) {
+    return undefined;
+  }
+  if (typeof settings.apiKeyHelper === 'string' && settings.apiKeyHelper !== '') {
+    return 'apiKeyHelper';
+  }
+  const env = jsonObjectSchema.safeParse(settings.env).data ?? {};
+  return KEY_VARIABLES.find((variable) => typeof env[variable] === 'string' && env[variable] !== '');
+}
+
+function parsedJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/** What in a settings file gives a key, with the file's path; none for a missing file. */
+async function keyInFile(path: string): Promise<string | undefined> {
+  const text = await readFile(path, 'utf8').catch(() => undefined);
+  const found = text === undefined ? undefined : keyIn(text);
+  return found === undefined ? undefined : `${found} in ${path}`;
+}
+
 async function writeJsonObject(path: string, value: JsonObject): Promise<void> {
   const mode = (await stat(path).catch(() => undefined))?.mode ?? PRIVATE_MODE;
   await mkdir(dirname(path), { recursive: true });
@@ -159,6 +197,37 @@ export function createClaudeCodeSetup(at: {
     isOnboardingComplete: async () => {
       const claude = await readJsonObject(state);
       return claude.hasCompletedOnboarding === true && fullscreenOfferSeen(claude) >= FULLSCREEN_OFFER_SHOWN_MAX;
+    },
+    keyInReach: async ({ folder, settings: commandLine, sources }) => {
+      const dropIns = join(at.managedSettings, 'managed-settings.d');
+      const managed = [join(at.managedSettings, 'managed-settings.json'), ...(await readdir(dropIns).catch(() => [])).filter((file) => file.endsWith('.json') && !file.startsWith('.')).sort().map((file) => join(dropIns, file))];
+      for (const file of managed) {
+        const found = await keyInFile(file);
+        if (found !== undefined) {
+          return found;
+        }
+      }
+      if (commandLine !== undefined) {
+        if (commandLine.trimStart().startsWith('{')) {
+          const found = keyIn(commandLine);
+          if (found !== undefined) {
+            return `${found} in --settings`;
+          }
+        } else if (isAbsolute(commandLine) || folder !== undefined) {
+          const found = await keyInFile(isAbsolute(commandLine) ? commandLine : join(folder ?? '', commandLine));
+          if (found !== undefined) {
+            return found;
+          }
+        }
+      }
+      for (const source of SETTING_SOURCES.filter((source) => sources.includes(source))) {
+        const file = source === 'user' ? settings : folder === undefined ? undefined : join(folder, '.claude', source === 'local' ? 'settings.local.json' : 'settings.json');
+        const found = file === undefined ? undefined : await keyInFile(file);
+        if (found !== undefined) {
+          return found;
+        }
+      }
+      return undefined;
     },
     defaultPermissionMode: async ({ folder, settings: commandLine, sources }) => {
       const above = (await managedDefaultMode(at.managedSettings)) ?? (commandLine === undefined ? undefined : await commandLineDefaultMode(commandLine, folder));

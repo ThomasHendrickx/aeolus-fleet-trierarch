@@ -5,6 +5,7 @@ import { createInterface } from 'node:readline';
 
 import { z } from 'zod';
 
+import { runCommand } from './run-command.js';
 import { runningVersion } from './version.js';
 
 /**
@@ -21,6 +22,8 @@ export interface CodexSetup {
   trust(folders: readonly string[]): Promise<void>;
   /** Trusts the aeolus-fleet plugin's hooks that are new or changed, as Codex sees them from the folder: their keys. */
   trustAeolusHooks(folder: string): Promise<readonly string[]>;
+  /** How Codex is logged in, as `codex login status` says (api keys K6): its line may show part of a key, so only the kind is kept. */
+  loginKind(): Promise<'chatgpt' | 'apiKey' | 'none'>;
 }
 
 const AEOLUS_PLUGIN_PREFIX = 'aeolus-fleet@';
@@ -123,6 +126,11 @@ export function createCodexSetup(options: { command?: string } = {}): CodexSetup
   const command = options.command ?? 'codex';
 
   return {
+    loginKind: async () => {
+      const said = await runCommand(command, { args: ['login', 'status'] });
+      const text = `${said.stdout}\n${said.stderr}`;
+      return /using ChatGPT/iu.test(text) ? 'chatgpt' : /API key/iu.test(text) ? 'apiKey' : 'none';
+    },
     trust: async (folders) => {
       await withAppServer(command, (request) => request('config/batchWrite', upsert('projects', Object.fromEntries(folders.map((folder) => [folder, { trust_level: 'trusted' }])))));
     },

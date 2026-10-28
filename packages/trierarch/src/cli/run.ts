@@ -19,6 +19,7 @@ import { createGitCheckouts } from '../adapters/git-checkouts.js';
 import { createJsonState } from '../adapters/json-state.js';
 import { createKeyFiles } from '../adapters/key-files.js';
 import { createModelLogins } from '../adapters/model-logins.js';
+import { claudeCodeKeyInReach } from '../adapters/claude-code.js';
 import { createMachine } from '../adapters/machine.js';
 import { shipHome, type TrierarchPaths } from '../adapters/paths.js';
 import { runCommand } from '../adapters/run-command.js';
@@ -149,7 +150,14 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     },
     refreshCheckouts: (shipId) => checkouts.refresh(shipId),
   });
-  const modelLogins = createModelLogins({ keys, runtime: configured.runtime?.kind === 'container' ? 'container' : 'host' });
+  const claudeCodeFlags = configured.harnesses['claude-code']?.flags ?? [];
+  const claudeCodeSetup = createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) });
+  const modelLogins = createModelLogins({
+    keys,
+    runtime: configured.runtime?.kind === 'container' ? 'container' : 'host',
+    claudeCode: { keyInReach: ({ folder }) => claudeCodeKeyInReach(claudeCodeSetup, { flags: claudeCodeFlags, ...(folder !== undefined && { folder }) }) },
+    codex: createCodexSetup(),
+  });
   const runPass = createRunPass({ fleet, harnesses, processes: sessions, folderProcesses: createFolderProcesses(), workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets, modelLogins, ...(configured.logins !== undefined && { logins: configured.logins }) });
   // The machine's load (#400) and the harnesses' usage (#353), each read on its own interval for the report.
   const readLoad = createReadLoad({ machine: createMachine({ worktreeRoot: configuration.worktreeRoot ?? paths.worktrees }), fleet, state, clock, logger });

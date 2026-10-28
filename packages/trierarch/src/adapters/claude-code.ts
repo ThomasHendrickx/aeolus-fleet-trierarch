@@ -110,6 +110,12 @@ export function claudeCodeSettingsDefaultMode(setup: Pick<ClaudeCodeSetup, 'defa
   return setup.defaultPermissionMode({ sources: settingSourcesOf(at.flags), ...(at.folder !== undefined && { folder: at.folder }), ...(settings !== undefined && { settings }) });
 }
 
+/** What in the settings Claude Code reads with these flags would give a session a key instead of its subscription (api keys K6). */
+export function claudeCodeKeyInReach(setup: Pick<ClaudeCodeSetup, 'keyInReach'>, at: { flags: readonly string[]; folder?: string }): Promise<string | undefined> {
+  const settings = valueOf(at.flags, SETTINGS);
+  return setup.keyInReach({ sources: settingSourcesOf(at.flags), ...(at.folder !== undefined && { folder: at.folder }), ...(settings !== undefined && { settings }) });
+}
+
 /** `--permission-mode manual` (or `default` where the installed Claude Code lists no manual) where the settings' default mode is plan and the flags name none, and with when it applies where that depends on the folder. */
 function planOverride(flags: readonly string[], installed: { defaultMode: SettingsDefaultMode | undefined; permissionModes: readonly string[] | undefined }): CommandPart {
   const { defaultMode, permissionModes } = installed;

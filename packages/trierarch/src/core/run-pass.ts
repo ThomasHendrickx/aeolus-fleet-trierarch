@@ -221,7 +221,7 @@ async function observe(state: TrierarchState, at: { deps: RunPassDeps; missingPl
     const session = sessions.find((each) => each.shipId === entry.shipId);
     // Asked only of an entry whose session would start: a running session keeps the login it started with (K3).
     if (entry.state === 'restarting' || (entry.state === 'running' && session === undefined)) {
-      const problem = await deps.modelLogins.startProblem({ harness: entry.harness, login: sessionLogin(entry, deps) });
+      const problem = await deps.modelLogins.startProblem({ harness: entry.harness, login: sessionLogin(entry, deps), ...(entry.folder !== undefined && { folder: entry.folder }) });
       if (problem !== undefined) {
         startProblems[entry.shipId] = problem;
       }
@@ -431,16 +431,16 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   if (problem !== undefined) {
     return crewFailed(state, { entry: crewing, deps, reason: problem });
   }
-  // A login that cannot start it is this computer's state (api keys A5): given back at once, it may be crewed on another.
-  const login = sessionLogin({ ...crewing, shipName: ship.name }, deps);
-  const loginProblem = await deps.modelLogins.startProblem({ harness: crewing.harness, login });
-  if (loginProblem !== undefined) {
-    return giveBack(state, { action: { kind: 'giveBack', shipId: crewing.shipId, settingsVersion: crewing.settingsVersion, reason: loginProblem, entry: crewing }, deps });
-  }
   const { folder } = await deps.workspace.prepare({ shipId: crewing.shipId, shipName: ship.name, workspace: crewing.workspace });
   // Kept at once, so an crewing still crewing knows the workspace and identity to remove if it ends (#382).
   state = putEntry(state, { ...crewing, shipName: ship.name, folder });
   await deps.state.save(state);
+  // A login that cannot start it is this computer's state (api keys A5): given back at once, it may be crewed on another. Asked in its folder, whose own settings count (K6).
+  const login = sessionLogin({ ...crewing, shipName: ship.name }, deps);
+  const loginProblem = await deps.modelLogins.startProblem({ harness: crewing.harness, login, folder });
+  if (loginProblem !== undefined) {
+    return giveBack(state, { action: { kind: 'giveBack', shipId: crewing.shipId, settingsVersion: crewing.settingsVersion, reason: loginProblem, entry: { ...crewing, shipName: ship.name, folder } }, deps });
+  }
   const { secret } = await deps.fleet.getStartingPrompt(crewing.shipId);
   const { crewToken } = await deps.fleet.register({ shipId: crewing.shipId, secret });
   // The crew token stays in the state; the session calls over its ship's socket, opened before it starts (decision 0026).

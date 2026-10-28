@@ -867,8 +867,11 @@ export class InMemoryUsage implements UsagePort {
 /** Whether a session can start on a login: every login can, until a test gives one a problem by `<harness>:<login>`. */
 export class InMemoryModelLogins implements ModelLoginsPort {
   readonly problems = new Map<string, string>();
+  /** Each question it was asked, in order. */
+  readonly asked: { harness: string; login: Login; folder?: string }[] = [];
 
-  startProblem(at: { harness: string; login: Login }): Promise<string | undefined> {
+  startProblem(at: { harness: string; login: Login; folder?: string }): Promise<string | undefined> {
+    this.asked.push(at);
     return Promise.resolve(this.problems.get(`${at.harness}:${at.login}`));
   }
 }
