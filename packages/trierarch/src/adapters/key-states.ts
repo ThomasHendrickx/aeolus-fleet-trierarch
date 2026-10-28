@@ -17,7 +17,7 @@ import type { PluginHarness } from './plugin.js';
 
 export interface KeyStates {
   stateOf(harness: PluginHarness): Promise<KeyStateAt>;
-  /** Keeps what the vendor's answer said of the harness's key now; a state it already has keeps its time. */
+  /** Keeps what the vendor's answer said of the harness's key now; a state it already has keeps its time, and a refused key stays refused until a new key. */
   record(harness: PluginHarness, said: { state: 'ready' | 'refused' | 'outOfCredit'; at: Date }): Promise<void>;
 }
 
@@ -47,7 +47,9 @@ export function createKeyStates(at: { keys: string; file: string }): KeyStates {
       const keyFile = await keyFileOf(harness);
       const all = await recorded();
       const before = all[harness];
-      const isUnchanged = said.state === 'ready' ? before === undefined : keyFile === undefined || (before?.state === said.state && isSameFile(before.keyFile, keyFile));
+      // A refused key leaves refused only as a new key login writes (K10), never by a later answer for the same key.
+      const isStillRefused = keyFile !== undefined && before?.state === 'refused' && isSameFile(before.keyFile, keyFile);
+      const isUnchanged = isStillRefused || (said.state === 'ready' ? before === undefined : keyFile === undefined || (before?.state === said.state && isSameFile(before.keyFile, keyFile)));
       if (isUnchanged) {
         return;
       }
