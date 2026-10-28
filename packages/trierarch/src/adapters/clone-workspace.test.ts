@@ -202,6 +202,13 @@ describe('workspaces as per-ship clones', () => {
       { path: join(root, 'aeolus-fleet', 'scout'), repository: 'aeolus-fleet', name: 'scout' },
     ]);
   });
+
+  it('lists each per-ship clone once and ignores a plain clone in the workspace folder (#1295)', async () => {
+    await workspace().prepare(scout);
+    await git(['clone', '-q', repository, join(root, 'aeolus-fleet-designer-release')]);
+
+    expect(await workspace().worktrees()).toEqual([{ path: join(root, 'aeolus-fleet', 'scout'), repository: 'aeolus-fleet', name: 'scout' }]);
+  });
 });
 
 describe('per-ship clones of a trusted repository the machine does not have (aeolus-fleet#384)', () => {
