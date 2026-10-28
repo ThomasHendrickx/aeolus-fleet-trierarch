@@ -97,7 +97,7 @@ const identity = { fleetUrl: 'https://fleet.example.com', shipId, shipName: 'sco
 /** The launch id the trierarch started the session with. */
 const LAUNCH_ID = 'launch-1';
 /** The launch of the ship scout in a worktree of aeolus-fleet. */
-const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'codex', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, checkouts: [], launchId: LAUNCH_ID }) as const;
+const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'codex', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, checkouts: [], launchId: LAUNCH_ID, login: 'subscription' }) as const;
 
 describe('Codex as a harness', () => {
   it("writes the folder's identity through the plugin in ~/.aeolus/crews/codex, saying the trierarch wakes it (#658)", async () => {

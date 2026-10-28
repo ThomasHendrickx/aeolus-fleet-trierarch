@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 
@@ -12,6 +12,7 @@ import { sessionRuntimeContract } from '../../test/support/session-runtime-contr
 import type { ObservedSession, SessionRuntime } from '../core/ports.js';
 import { createCallerCheck } from './caller-check.js';
 import { createHoldRuntime, sessionsLaunch } from './hold-runtime.js';
+import { runCommand } from './run-command.js';
 import { runningVersion } from './version.js';
 
 // Against real holds, each the trierarch program from source started as the
@@ -121,6 +122,25 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
 
     await expect.poll(async () => eventsOfType({ runtime: runtime, shipId: scout }, 'result')).toHaveLength(1);
     await expect(eventsOfType({ runtime: runtime, shipId: lookout }, 'result')).resolves.toEqual([]);
+  });
+
+  it("hands the session its proxy token in the variable named, from a file of the session's own, never on a command line (api keys K7)", async () => {
+    const runtime = aRuntime();
+    const shipId = newId('ship');
+    const token = 'test-proxy-token-not-real';
+
+    await runtime.start({ shipId, folder, command: [...FAKE_CLAUDE_CODE], env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:41234/anthropic' }, harness: 'claude-code', proxyToken: { harness: 'claude-code', variable: 'ANTHROPIC_AUTH_TOKEN', token } });
+
+    await expect.poll(() => written('fake-starts.jsonl')).toHaveLength(1);
+    const [start] = starts();
+    expect(start?.env.ANTHROPIC_AUTH_TOKEN).toBe(token);
+    expect(start?.args.join(' ')).not.toContain(token);
+    const tokenFile = join(sessions, shipId, 'proxy-token');
+    expect(statSync(tokenFile).mode & 0o777).toBe(0o600);
+    const holdPid = Number(readFileSync(join(sessions, shipId, 'hold.pid'), 'utf8'));
+    const commandLine = (await runCommand('ps', { args: ['-o', 'args=', '-p', String(holdPid)] })).stdout;
+    expect(commandLine).toContain(' hold ');
+    expect(commandLine).not.toContain(token);
   });
 
   it("starts the harness with none of the trierarch's environment: only HOME, PATH and what the start gives (H10)", async () => {

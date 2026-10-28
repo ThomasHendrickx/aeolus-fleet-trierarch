@@ -25,7 +25,7 @@ let crews: string;
 let folder: string;
 /** Claude Code's projects folder, where it keeps each folder's conversations. */
 let projects: string;
-let started: { shipId: ShipId; folder: string; command: readonly string[]; harness: string; env?: Readonly<Record<string, string>>; readOnly?: readonly string[] }[];
+let started: { shipId: ShipId; folder: string; command: readonly string[]; harness: string; env?: Readonly<Record<string, string>>; readOnly?: readonly string[]; proxyToken?: { harness: string; variable: string; token: string } }[];
 /** What each ship's session shows, by ship id: a terminal's screen, or a headless session's events, one line each. */
 let screens: Map<ShipId, string>;
 let sent: { shipId: ShipId; line: string }[];
@@ -64,8 +64,9 @@ function aConversationIn(folder: string): void {
 }
 
 /** Claude Code as the adapter runs it: in a terminal, as in a container, unless the test runs it headless, as on the host. */
-function harness(at: { pluginRoot?: string; isHeadless?: boolean } = {}) {
+function harness(at: { pluginRoot?: string; isHeadless?: boolean; proxyUrl?: string } = {}) {
   return createClaudeCodeHarness({
+    proxyUrl: () => Promise.resolve(at.proxyUrl),
     configuration: CONFIGURATION,
     isHeadless: at.isHeadless ?? false,
     plugin: { root: () => Promise.resolve(at.pluginRoot ?? PLUGIN_ROOT), data, crews },
@@ -111,7 +112,41 @@ const parsed = (text: string | undefined): unknown => (text === undefined ? unde
 /** The launch id the trierarch started the session with. */
 const LAUNCH_ID = 'launch-1';
 /** The launch of the ship scout in a worktree of aeolus-fleet. */
-const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, checkouts: [], launchId: LAUNCH_ID }) as const;
+const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, checkouts: [], launchId: LAUNCH_ID, login: 'subscription' }) as const;
+
+describe('Claude Code on its login (api keys K6, K7)', () => {
+  const PROXY = 'http://127.0.0.1:41234';
+
+  it('starts a session on an API key through the model proxy, with a token of its own and never the key', async () => {
+    await harness({ isHeadless: true, proxyUrl: PROXY }).launch({ ...launchOf(shipId), login: 'apiKey', options: {}, isFirstStart: true });
+
+    expect(started[0]?.env).toMatchObject({ ANTHROPIC_BASE_URL: `${PROXY}/anthropic` });
+    expect(started[0]?.proxyToken).toEqual({ harness: 'claude-code', variable: 'ANTHROPIC_AUTH_TOKEN', token: expect.stringMatching(/^[\w-]{32,}$/u) });
+    expect(Object.values(started[0]?.env ?? {})).not.toContain(started[0]?.proxyToken?.token);
+  });
+
+  it('gives each start a token of its own', async () => {
+    const claudeCode = harness({ isHeadless: true, proxyUrl: PROXY });
+
+    await claudeCode.launch({ ...launchOf(shipId), login: 'apiKey', options: {}, isFirstStart: true });
+    await claudeCode.launch({ ...launchOf(shipId), login: 'apiKey', options: {}, isFirstStart: false });
+
+    expect(started[0]?.proxyToken?.token).not.toBe(started[1]?.proxyToken?.token);
+  });
+
+  it('starts a session on its subscription with no route to the proxy and no token', async () => {
+    await harness({ isHeadless: true, proxyUrl: PROXY }).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+
+    expect(started[0]?.env).not.toHaveProperty('ANTHROPIC_BASE_URL');
+    expect(started[0]?.proxyToken).toBeUndefined();
+  });
+
+  it('starts nothing on an API key while the model proxy has no address', async () => {
+    await expect(harness({ isHeadless: true }).launch({ ...launchOf(shipId), login: 'apiKey', options: {}, isFirstStart: true })).rejects.toThrow('the model proxy is not running yet');
+
+    expect(started).toEqual([]);
+  });
+});
 
 describe('Claude Code as a harness', () => {
   it("completes Claude Code's onboarding before it starts a session, so a fresh machine shows no first-run screen (#403)", async () => {
