@@ -427,10 +427,15 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   }
   await deps.fleet.writeStatus(crewing.shipId, writtenStatusOf(withState(crewing, { state: 'crewing', now: deps.clock.now() })));
   // Registered only once the crew can start, so a crew that cannot never takes the ship's lease (#827).
-  const login = sessionLogin({ ...crewing, shipName: ship.name }, deps);
-  const problem = (await harness.startProblem()) ?? (await deps.modelLogins.startProblem({ harness: crewing.harness, login }));
+  const problem = await harness.startProblem();
   if (problem !== undefined) {
     return crewFailed(state, { entry: crewing, deps, reason: problem });
+  }
+  // A login that cannot start it is this computer's state (api keys A5): given back at once, it may be crewed on another.
+  const login = sessionLogin({ ...crewing, shipName: ship.name }, deps);
+  const loginProblem = await deps.modelLogins.startProblem({ harness: crewing.harness, login });
+  if (loginProblem !== undefined) {
+    return giveBack(state, { action: { kind: 'giveBack', shipId: crewing.shipId, settingsVersion: crewing.settingsVersion, reason: loginProblem, entry: crewing }, deps });
   }
   const { folder } = await deps.workspace.prepare({ shipId: crewing.shipId, shipName: ship.name, workspace: crewing.workspace });
   // Kept at once, so an crewing still crewing knows the workspace and identity to remove if it ends (#382).
