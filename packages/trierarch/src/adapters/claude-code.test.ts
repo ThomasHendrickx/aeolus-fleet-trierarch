@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
 import { effectiveFlags } from '../core/effective-flags.js';
 import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
-import { CLAUDE_CODE_ADAPTER_FLAGS, claudeCodeCommandLine, createClaudeCodeHarness } from './claude-code.js';
+import { CLAUDE_CODE_ADAPTER_FLAGS, claudeCodeCommandLine, claudeCodeKeyInReach, createClaudeCodeHarness } from './claude-code.js';
 import { createClaudeCodeSetup } from './claude-code-setup.js';
 import { wordsOf } from './command-line.js';
 import { runCommand } from './run-command.js';
@@ -25,7 +25,7 @@ let crews: string;
 let folder: string;
 /** Claude Code's projects folder, where it keeps each folder's conversations. */
 let projects: string;
-let started: { shipId: ShipId; folder: string; command: readonly string[]; harness: string; env?: Readonly<Record<string, string>>; readOnly?: readonly string[] }[];
+let started: { shipId: ShipId; folder: string; command: readonly string[]; harness: string; env?: Readonly<Record<string, string>>; readOnly?: readonly string[]; proxyToken?: { harness: string; variable: string; token: string } }[];
 /** What each ship's session shows, by ship id: a terminal's screen, or a headless session's events, one line each. */
 let screens: Map<ShipId, string>;
 let sent: { shipId: ShipId; line: string }[];
@@ -64,8 +64,9 @@ function aConversationIn(folder: string): void {
 }
 
 /** Claude Code as the adapter runs it: in a terminal, as in a container, unless the test runs it headless, as on the host. */
-function harness(at: { pluginRoot?: string; isHeadless?: boolean } = {}) {
+function harness(at: { pluginRoot?: string; isHeadless?: boolean; proxyUrl?: string } = {}) {
   return createClaudeCodeHarness({
+    proxyUrl: () => Promise.resolve(at.proxyUrl),
     configuration: CONFIGURATION,
     isHeadless: at.isHeadless ?? false,
     plugin: { root: () => Promise.resolve(at.pluginRoot ?? PLUGIN_ROOT), data, crews },
@@ -111,7 +112,76 @@ const parsed = (text: string | undefined): unknown => (text === undefined ? unde
 /** The launch id the trierarch started the session with. */
 const LAUNCH_ID = 'launch-1';
 /** The launch of the ship scout in a worktree of aeolus-fleet. */
-const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, checkouts: [], launchId: LAUNCH_ID }) as const;
+const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, checkouts: [], launchId: LAUNCH_ID, login: 'subscription' }) as const;
+
+describe('Claude Code on its login (api keys K6, K7)', () => {
+  const PROXY = 'http://127.0.0.1:41234';
+
+  it('starts a session on an API key through the model proxy, with a token of its own and never the key', async () => {
+    await harness({ isHeadless: true, proxyUrl: PROXY }).launch({ ...launchOf(shipId), login: 'apiKey', options: {}, isFirstStart: true });
+
+    expect(started[0]?.env).toMatchObject({ ANTHROPIC_BASE_URL: `${PROXY}/anthropic` });
+    expect(started[0]?.proxyToken).toMatchObject({ harness: 'claude-code', variable: 'ANTHROPIC_AUTH_TOKEN' });
+    expect(started[0]?.proxyToken?.token).toMatch(/^[\w-]{32,}$/u);
+    expect(Object.values(started[0]?.env ?? {})).not.toContain(started[0]?.proxyToken?.token);
+  });
+
+  it('gives each start a token of its own', async () => {
+    const claudeCode = harness({ isHeadless: true, proxyUrl: PROXY });
+
+    await claudeCode.launch({ ...launchOf(shipId), login: 'apiKey', options: {}, isFirstStart: true });
+    await claudeCode.launch({ ...launchOf(shipId), login: 'apiKey', options: {}, isFirstStart: false });
+
+    expect(started[0]?.proxyToken?.token).not.toBe(started[1]?.proxyToken?.token);
+  });
+
+  it('starts a session on its subscription with no route to the proxy and no token', async () => {
+    await harness({ isHeadless: true, proxyUrl: PROXY }).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+
+    expect(started[0]?.env).not.toHaveProperty('ANTHROPIC_BASE_URL');
+    expect(started[0]?.proxyToken).toBeUndefined();
+  });
+
+  it('starts nothing on an API key while the model proxy has no address', async () => {
+    await expect(harness({ isHeadless: true }).launch({ ...launchOf(shipId), login: 'apiKey', options: {}, isFirstStart: true })).rejects.toThrow('the model proxy is not running yet');
+
+    expect(started).toEqual([]);
+  });
+
+  describe('a key in reach on the subscription, read from the flags the session would start with (K6)', () => {
+    /** Settings a picked option points Claude Code at, holding an apiKeyHelper. */
+    let keyed: string;
+    const setup = () => createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') });
+    const claudeCodeWith = (options: Record<string, { values: Record<string, string[]>; default?: string }>) => ({ flags: ['--remote-control'], options });
+
+    beforeEach(() => {
+      keyed = join(home, 'keyed-settings.json');
+      writeFileSync(keyed, JSON.stringify({ apiKeyHelper: '/usr/local/bin/print-secret-key' }));
+    });
+
+    it("names an apiKeyHelper in settings a picked option adds with --settings", async () => {
+      const claudeCode = claudeCodeWith({ profile: { values: { keyed: ['--settings', keyed], plain: [] } } });
+
+      await expect(claudeCodeKeyInReach(setup(), { harness: claudeCode, options: { profile: 'keyed' }, folder })).resolves.toBe(`apiKeyHelper in ${keyed}`);
+      await expect(claudeCodeKeyInReach(setup(), { harness: claudeCode, options: { profile: 'plain' }, folder })).resolves.toBeUndefined();
+    });
+
+    it("names it from an option's default when the request picks none", async () => {
+      const claudeCode = claudeCodeWith({ profile: { values: { keyed: ['--settings', keyed] }, default: 'keyed' } });
+
+      await expect(claudeCodeKeyInReach(setup(), { harness: claudeCode, options: {}, folder })).resolves.toBe(`apiKeyHelper in ${keyed}`);
+    });
+
+    it('reads the sources a picked option names with --setting-sources', async () => {
+      mkdirSync(join(folder, '.claude'), { recursive: true });
+      writeFileSync(join(folder, '.claude', 'settings.json'), JSON.stringify({ apiKeyHelper: '/usr/local/bin/print-secret-key' }));
+      const claudeCode = { flags: ['--setting-sources', 'user'], options: { sources: { values: { all: ['--setting-sources', 'user,project,local'] } } } };
+
+      await expect(claudeCodeKeyInReach(setup(), { harness: claudeCode, options: {}, folder })).resolves.toBeUndefined();
+      await expect(claudeCodeKeyInReach(setup(), { harness: claudeCode, options: { sources: 'all' }, folder })).resolves.toBe(`apiKeyHelper in ${join(folder, '.claude', 'settings.json')}`);
+    });
+  });
+});
 
 describe('Claude Code as a harness', () => {
   it("completes Claude Code's onboarding before it starts a session, so a fresh machine shows no first-run screen (#403)", async () => {

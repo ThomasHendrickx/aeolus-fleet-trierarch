@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { chmod, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -21,9 +21,17 @@ const proxyTokenSchema = z.object({ harness: z.enum(PLUGIN_HARNESSES), token: z.
 
 export type ProxyToken = z.infer<typeof proxyTokenSchema>;
 
-export async function writeProxyToken(folder: string, proxyToken: ProxyToken): Promise<void> {
+/** How many random bytes a session's proxy token holds. */
+const TOKEN_BYTES = 32;
+
+/** A fresh token for one start of a session. */
+export function newProxyToken(): string {
+  return randomBytes(TOKEN_BYTES).toString('base64url');
+}
+
+export async function writeProxyToken(folder: string, proxyToken: { readonly harness: string; readonly token: string }): Promise<void> {
   const file = join(folder, FILE);
-  await writeFile(file, JSON.stringify(proxyToken), { mode: 0o600 });
+  await writeFile(file, JSON.stringify({ harness: proxyToken.harness, token: proxyToken.token }), { mode: 0o600 });
   await chmod(file, 0o600);
 }
 
@@ -62,4 +70,10 @@ export async function sessionOfToken(sessions: string, at: { harness: PluginHarn
     }
   }
   return undefined;
+}
+
+/** The token kept in the session's folder; none without one. */
+export async function readProxyToken(folder: string): Promise<ProxyToken | undefined> {
+  const held = proxyTokenSchema.safeParse(parsedLine(await readFile(join(folder, FILE), 'utf8').catch(() => '')));
+  return held.success ? held.data : undefined;
 }

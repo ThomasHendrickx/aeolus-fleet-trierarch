@@ -140,7 +140,10 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
       });
     },
     stop,
-    start: async ({ shipId, folder, command, env = {}, readOnly = [] }) => {
+    start: async ({ shipId, folder, command, env = {}, readOnly = [], proxyToken }) => {
+      if (proxyToken !== undefined) {
+        throw new Error('a container session reaches no model proxy yet');
+      }
       const token = (await readFile(options.tokenFile, 'utf8')).trim();
       const content = envFileOf({ ...env, [MODEL_TOKEN_VARIABLE]: token });
       await stop(shipId);

@@ -5,6 +5,7 @@ import { idSchema, trierarchWorkspaceSchema } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
 import { EMPTY_STATE, ENTRY_STATES, type TrierarchState } from '../core/entry.js';
+import { LOGINS } from '../core/login.js';
 import { LOW_RESOURCES } from '../core/machine-load.js';
 import type { StatePort } from '../core/ports.js';
 
@@ -41,6 +42,7 @@ const stateSchema = z.object({
       hasStarted: z.boolean(),
       launchedAt: z.string().optional(),
       launchId: z.string().optional(),
+      login: z.enum(LOGINS).optional(),
       isReleasedElsewhere: z.literal(true).optional(),
       crewFailures: z.int().min(1).optional(),
       isIdentityGone: z.literal(true).optional(),

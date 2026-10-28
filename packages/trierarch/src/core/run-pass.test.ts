@@ -1,7 +1,7 @@
 import type { ShipId } from '@aeolus-fleet/common';
 import { describe, expect, it } from 'vitest';
 
-import { aTrierarch, CONFIGURATION, crewSettings, InMemoryCheckouts, InMemoryShipSockets, newId, NOTES_FOLDER, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
+import { aTrierarch, aTrierarchOnLogins, CONFIGURATION, crewSettings, InMemoryCheckouts, InMemoryShipSockets, newId, NOTES_FOLDER, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
 import type { LaunchSeen } from './ports.js';
 import { RESTART_BUDGET } from './restart-policy.js';
 
@@ -2493,3 +2493,110 @@ describe('read-only checkouts (#1182)', () => {
     expect(trierarch.checkouts.removed).toEqual([shipId]);
   });
 });
+
+describe("each session's login (api keys K5, K6, K9)", () => {
+  const ON_KEY = { default: { 'claude-code': 'apiKey' as const } };
+  const NO_KEY = 'claude-code has no API key on this computer';
+
+  it('starts a session on its harness\'s default login and keeps it with the session', async () => {
+    const trierarch = aTrierarchOnLogins(ON_KEY);
+
+    const shipId = await aCrewedShip(trierarch);
+
+    expect(trierarch.harness.launchedLogins).toEqual([{ shipId, login: 'apiKey' }]);
+    expect(trierarch.state.current().entries[shipId]?.login).toBe('apiKey');
+  });
+
+  it("starts a session on its ship's own login before its harness's default", async () => {
+    const trierarch = aTrierarchOnLogins({ ...ON_KEY, ships: { scout: 'subscription' } });
+
+    const shipId = await aCrewedShip(trierarch);
+
+    expect(trierarch.harness.launchedLogins).toEqual([{ shipId, login: 'subscription' }]);
+  });
+
+  it('starts a session on its subscription with no logins configured', async () => {
+    const trierarch = aTrierarch();
+
+    const shipId = await aCrewedShip(trierarch);
+
+    expect(trierarch.harness.launchedLogins).toEqual([{ shipId, login: 'subscription' }]);
+  });
+
+  it('a restart whose key is not ready starts nothing: the ship waits restarting, with no restart counted, and never moves to the subscription', async () => {
+    const trierarch = aTrierarchOnLogins(ON_KEY);
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.processes.exit(shipId);
+    await trierarch.pass();
+    trierarch.modelLogins.problems.set('claude-code:apiKey', NO_KEY);
+
+    for (let pass = 0; pass < 3; pass += 1) {
+      trierarch.clock.advance(10 * MINUTE_MS);
+      await trierarch.pass();
+    }
+
+    expect(trierarch.harness.launchedLogins).toEqual([{ shipId, login: 'apiKey' }]);
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'restarting', exits: [expect.any(String)] });
+  });
+
+  it('a waiting ship starts once its key is ready again, with no restart counted (K10)', async () => {
+    const trierarch = aTrierarchOnLogins(ON_KEY);
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.processes.exit(shipId);
+    await trierarch.pass();
+    trierarch.modelLogins.problems.set('claude-code:apiKey', NO_KEY);
+    trierarch.clock.advance(10 * MINUTE_MS);
+    await trierarch.pass();
+
+    trierarch.modelLogins.problems.clear();
+    await trierarch.pass();
+
+    expect(trierarch.harness.launchedLogins).toEqual([{ shipId, login: 'apiKey' }, { shipId, login: 'apiKey' }]);
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'running', exits: [expect.any(String)] });
+  });
+
+  it('after the machine restarts, a ship whose key is not ready waits restarting instead of starting', async () => {
+    const trierarch = aTrierarchOnLogins(ON_KEY);
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.processes.restartMachine();
+    trierarch.modelLogins.problems.set('claude-code:apiKey', NO_KEY);
+
+    await trierarch.pass();
+
+    expect(trierarch.processes.sessions.has(shipId)).toBe(false);
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'restarting', exits: [] });
+  });
+
+  it('a crew not yet final whose key is not ready gives the request back with the cause, so it can be placed on another computer (api keys A5)', async () => {
+    const trierarch = aTrierarchOnLogins(ON_KEY);
+    trierarch.modelLogins.problems.set('claude-code:apiKey', NO_KEY);
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, crewSettings());
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.launchedLogins).toEqual([]);
+    expect(trierarch.fleet.shipOf(shipId).status).not.toBe('crewed');
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 1, reason: `mac-studio: ${NO_KEY}` }]);
+    expect(trierarch.state.current().entries[shipId]).toBeUndefined();
+  });
+
+  it('asks whether a session can start on its login in the folder it starts in, so its folder\'s own settings count (K6)', async () => {
+    const trierarch = aTrierarch();
+
+    await aCrewedShip(trierarch);
+
+    expect(trierarch.modelLogins.asked).toContainEqual({ harness: 'claude-code', login: 'subscription', options: {}, folder: SCOUT_FOLDER });
+  });
+
+  it("asks with the options the request picked, whose flags may name settings of their own (K6)", async () => {
+    const trierarch = aTrierarch();
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, crewSettings({ options: { model: 'sonnet' } }));
+
+    await trierarch.pass();
+
+    expect(trierarch.modelLogins.asked).toContainEqual({ harness: 'claude-code', login: 'subscription', options: { model: 'sonnet' }, folder: SCOUT_FOLDER });
+  });
+});
+

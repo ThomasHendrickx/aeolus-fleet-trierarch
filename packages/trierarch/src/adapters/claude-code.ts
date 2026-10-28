@@ -3,7 +3,8 @@ import { join } from 'node:path';
 
 import type { ShipId, TrierarchConfiguration } from '@aeolus-fleet/common';
 
-import type { AdapterFlag, HarnessPort, SessionRuntime } from '../core/ports.js';
+import type { Login } from '../core/login.js';
+import type { AdapterFlag, HarnessPort, ProxyToken, SessionRuntime } from '../core/ports.js';
 import { createHostClaudeCodeHomes, createShipClaudeCodeHomes } from './claude-code-home.js';
 import { claudeCodeScreenStoppedAt } from './claude-code-screen.js';
 import { parsedLine } from './hold-protocol.js';
@@ -13,6 +14,7 @@ import { effectiveFlags } from '../core/effective-flags.js';
 import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
 import { createLaunchMarks } from './launch-marker.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
+import { newProxyToken } from './proxy-tokens.js';
 
 /**
  * Claude Code as a harness (docs/architecture.md, "First adapters"): `claude`
@@ -108,6 +110,16 @@ export function claudeCodeSettingsDefaultMode(setup: Pick<ClaudeCodeSetup, 'defa
   return setup.defaultPermissionMode({ sources: settingSourcesOf(at.flags), ...(at.folder !== undefined && { folder: at.folder }), ...(settings !== undefined && { settings }) });
 }
 
+/** What in the settings Claude Code reads with these flags would give a session a key instead of its subscription (api keys K6). */
+type HarnessConfiguration = TrierarchConfiguration['harnesses'][string];
+
+export function claudeCodeKeyInReach(setup: Pick<ClaudeCodeSetup, 'keyInReach'>, at: { harness: HarnessConfiguration; options: Readonly<Record<string, string>>; folder?: string }): Promise<string | undefined> {
+  // The flags the session would start with, the picked options' own among them, as launch takes them.
+  const flags = effectiveFlags(at.harness, at.options);
+  const settings = valueOf(flags, SETTINGS);
+  return setup.keyInReach({ sources: settingSourcesOf(flags), ...(at.folder !== undefined && { folder: at.folder }), ...(settings !== undefined && { settings }) });
+}
+
 /** `--permission-mode manual` (or `default` where the installed Claude Code lists no manual) where the settings' default mode is plan and the flags name none, and with when it applies where that depends on the folder. */
 function planOverride(flags: readonly string[], installed: { defaultMode: SettingsDefaultMode | undefined; permissionModes: readonly string[] | undefined }): CommandPart {
   const { defaultMode, permissionModes } = installed;
@@ -200,8 +212,25 @@ export function createClaudeCodeHarness(options: {
   permissionModes: () => readonly string[] | undefined;
   /** The program to run; `claude` unless a test runs another. */
   command?: string;
+  /** Where sessions on an API key reach the model proxy (headless H16); none before it first listened, or on a machine with no proxy. */
+  proxyUrl?: () => Promise<string | undefined>;
 }): HarnessPort {
   const { configuration, plugin, sessions, isHeadless } = options;
+  /**
+   * The session's way to its model (api keys K6): on an API key, the model
+   * proxy's address and a token of the session's own, fresh for each start;
+   * on the subscription, nothing, so it signs in as Claude Code does.
+   */
+  const routeOf = async (login: Login): Promise<{ env: Record<string, string>; proxyToken?: ProxyToken }> => {
+    if (login === 'subscription') {
+      return { env: {} };
+    }
+    const url = await options.proxyUrl?.();
+    if (url === undefined) {
+      throw new Error('the model proxy is not running yet');
+    }
+    return { env: { ANTHROPIC_BASE_URL: `${url}/anthropic` }, proxyToken: { harness: 'claude-code', variable: 'ANTHROPIC_AUTH_TOKEN', token: newProxyToken() } };
+  };
   /** A prompt as the session takes it: a stream-json line headless, the text typed in a terminal. */
   const lineOf = (prompt: string): string => (isHeadless ? userLine(prompt) : prompt);
   const homes =
@@ -220,11 +249,12 @@ export function createClaudeCodeHarness(options: {
     },
     turnOf: (session) => identityOf(session.shipId).turnOf(session),
     startProblem: () => createPluginIdentity(plugin).startProblem(),
-    launch: async ({ shipId, folder, checkouts, harness, options: picked, isFirstStart, launchId, firstPrompt }) => {
+    launch: async ({ shipId, folder, checkouts, harness, options: picked, isFirstStart, launchId, login, firstPrompt }) => {
       const settings = configuration.harnesses[harness];
       if (settings === undefined) {
         throw new Error(`The configuration has no harness ${harness}`);
       }
+      const route = await routeOf(login);
       const home = homes.of(shipId);
       await homes.prepare({ shipId, folder });
       const prompt = isFirstStart && firstPrompt !== undefined ? firstPromptOf(firstPrompt) : wakePromptOf(WAKE_PROMPT);
@@ -241,7 +271,7 @@ export function createClaudeCodeHarness(options: {
       });
       const marks = marksOf(shipId);
       await marks.clear(folder);
-      await sessions.start({ shipId, folder, command: wordsOf(command), harness, env: { [LAUNCH_VARIABLE]: launchId }, ...(checkouts.length > 0 && { readOnly: checkouts.map((checkout) => checkout.path) }) });
+      await sessions.start({ shipId, folder, command: wordsOf(command), harness, env: { [LAUNCH_VARIABLE]: launchId, ...route.env }, ...(route.proxyToken !== undefined && { proxyToken: route.proxyToken }), ...(checkouts.length > 0 && { readOnly: checkouts.map((checkout) => checkout.path) }) });
       if (isHeadless) {
         await sessions.send({ shipId, line: userLine(prompt) });
       }

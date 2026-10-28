@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { readdir, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { uptime } from 'node:os';
 import { setTimeout as wait } from 'node:timers/promises';
 
@@ -9,6 +9,7 @@ import type { ObservedSession, SessionRuntime } from '../core/ports.js';
 import type { SessionRoots } from './caller-check.js';
 import { INTERRUPT_WAIT_MS } from './hold.js';
 import { callHold, holdFilesOf, type HoldRequest } from './hold-protocol.js';
+import { writeProxyToken } from './proxy-tokens.js';
 
 /** How long a hold has to answer a call other than interrupt. */
 const CALL_TIMEOUT_MS = 2000;
@@ -125,10 +126,16 @@ export function createHoldRuntime(options: {
       return [...held, ...legacy];
     },
     stop,
-    start: async ({ shipId, folder, command, harness, env = {} }) => {
+    start: async ({ shipId, folder, command, harness, env = {}, proxyToken }) => {
       await stop(shipId);
       const files = filesOf(shipId);
-      const hold = [...options.program, 'hold', shipId, '--sessions', sessions, '--folder', folder, '--harness', harness, ...Object.entries(env).flatMap(([variable, value]) => ['--env', `${variable}=${value}`]), '--', ...command];
+      // The token goes in the session's folder, which only its user reads, and the hold reads it there: a command line is anyone's to see.
+      if (proxyToken !== undefined) {
+        await mkdir(files.folder, { recursive: true, mode: 0o700 });
+        await writeProxyToken(files.folder, proxyToken);
+      }
+      const tokenVariable = proxyToken === undefined ? [] : ['--proxy-token-variable', proxyToken.variable];
+      const hold = [...options.program, 'hold', shipId, '--sessions', sessions, '--folder', folder, '--harness', harness, ...tokenVariable, ...Object.entries(env).flatMap(([variable, value]) => ['--env', `${variable}=${value}`]), '--', ...command];
       const [program = 'sh', ...args] = [...(options.launch ?? []), 'sh', '-c', DETACHED, 'sh', ...hold];
       const starter = spawn(program, args, { stdio: 'ignore', detached: true });
       await new Promise<void>((resolve, reject) => {

@@ -113,6 +113,10 @@ class FakeCodexSetup implements CodexSetup {
   ]);
   isMissing = false;
 
+  loginKind(): Promise<'chatgpt'> {
+    return Promise.resolve('chatgpt');
+  }
+
   trust(folders: readonly string[]): Promise<void> {
     if (this.isMissing) {
       return Promise.reject(new Error('Codex is not installed: codex was not found'));

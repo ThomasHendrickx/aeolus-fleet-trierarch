@@ -18,6 +18,8 @@ import { createFolderProcesses } from '../adapters/folder-processes.js';
 import { createGitCheckouts } from '../adapters/git-checkouts.js';
 import { createJsonState } from '../adapters/json-state.js';
 import { createKeyFiles } from '../adapters/key-files.js';
+import { createModelLogins } from '../adapters/model-logins.js';
+import { claudeCodeKeyInReach } from '../adapters/claude-code.js';
 import { createMachine } from '../adapters/machine.js';
 import { shipHome, type TrierarchPaths } from '../adapters/paths.js';
 import { runCommand } from '../adapters/run-command.js';
@@ -106,7 +108,10 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const version = runningVersion();
   const clones = trustedClonesOf({ configured, held: trustedRepositories, root: paths.repositories });
   const { sessions, workspace, shipHomes } = runtimeAdaptersOf({ configuration, paths, version, launch: sessionsLaunch({ platform: process.platform, env }), managedSettings, clones });
-  const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, managedSettings, detected: () => offered.detected, sessions, ...(shipHomes !== undefined && { shipHomes }) });
+  // The model proxy runs while any harness holds an API key (headless H16); a pass starts it again when it is gone.
+  const keys = createKeyFiles(paths.keys);
+  const proxy = modelProxy({ paths, version, launch: sessionsLaunch({ platform: process.platform, env }) });
+  const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, managedSettings, detected: () => offered.detected, sessions, proxyUrl: () => proxy.url(), ...(shipHomes !== undefined && { shipHomes }) });
   const state = createJsonState(paths.state);
   const trust = createTrust({ configuration, homeDirectory, env, managedSettings });
   const clock = { now: () => new Date() };
@@ -145,7 +150,15 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     },
     refreshCheckouts: (shipId) => checkouts.refresh(shipId),
   });
-  const runPass = createRunPass({ fleet, harnesses, processes: sessions, folderProcesses: createFolderProcesses(), workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets });
+  const claudeCodeSetup = createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) });
+  const modelLogins = createModelLogins({
+    keys,
+    runtime: configured.runtime?.kind === 'container' ? 'container' : 'host',
+    // The harness as launch reads it, so the guard sees the flags the session would start with (K6).
+    claudeCode: { keyInReach: ({ options, folder }) => claudeCodeKeyInReach(claudeCodeSetup, { harness: configuration.harnesses['claude-code'] ?? { flags: [], options: {} }, options, ...(folder !== undefined && { folder }) }) },
+    codex: createCodexSetup(),
+  });
+  const runPass = createRunPass({ fleet, harnesses, processes: sessions, folderProcesses: createFolderProcesses(), workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets, modelLogins, ...(configured.logins !== undefined && { logins: configured.logins }) });
   // The machine's load (#400) and the harnesses' usage (#353), each read on its own interval for the report.
   const readLoad = createReadLoad({ machine: createMachine({ worktreeRoot: configuration.worktreeRoot ?? paths.worktrees }), fleet, state, clock, logger });
   const usage = createUsage({
@@ -161,9 +174,6 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configured.harnesses), prices: priceTableOf(configured.prices) });
   const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup, readLoad, readUsage, clock });
   const askForTrustedRepositories = createAskForTrustedRepositories({ fleet, logger, ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
-  // The model proxy runs while any harness holds an API key (headless H16); a pass starts it again when it is gone.
-  const keys = createKeyFiles(paths.keys);
-  const proxy = modelProxy({ paths, version, launch: sessionsLaunch({ platform: process.platform, env }) });
   const keepProxy = async (): Promise<void> => {
     const held = await Promise.all(PLUGIN_HARNESSES.map((harness) => keys.has(harness)));
     await proxy.keep({ isNeeded: held.includes(true) }).catch((error: unknown) => {
