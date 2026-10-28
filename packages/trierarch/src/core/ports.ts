@@ -212,33 +212,38 @@ export interface HarnessPort {
  * What a session did in its launch window (#382): activity once its first
  * prompt made a tool call, the model refused (by its id when that is known),
  * or neither yet, with the harness's own screen it stopped at when it knows
- * that screen (#403), such as `bypass permissions warning`.
+ * that screen (#403), such as `bypass permissions warning`, or the cause its
+ * harness's last error event gave (headless H13), such as a refused login.
  */
-export type LaunchSeen = { readonly kind: 'active' } | { readonly kind: 'refused'; readonly model?: string } | { readonly kind: 'none'; readonly screen?: string };
+export type LaunchSeen = { readonly kind: 'active' } | { readonly kind: 'refused'; readonly model?: string } | { readonly kind: 'none'; readonly screen?: string; readonly cause?: string };
 
-/** A session the session runtime runs, by ship id: running, or exited and kept so the exit is seen. */
+/** A session the session runtime runs, by ship id: running, or exited and kept so the exit is seen; and whether another version of the trierarch started it, which this one does not speak to (headless H19). */
 export interface ObservedSession {
   readonly shipId: ShipId;
   readonly status: 'running' | 'exited';
+  readonly isOtherVersion?: boolean;
 }
 
 /**
  * Where the sessions run (decision 0039): one session per ship, by ship id,
  * kept on exit so an exit is seen. The reconciler lists and stops them; the
- * harness adapters start, type into and read them.
+ * harness adapters start them, send them lines, stop their turns and read
+ * what their harness wrote (headless H9).
  */
 export interface SessionRuntime {
   list(): Promise<readonly ObservedSession[]>;
   stop(shipId: ShipId): Promise<void>;
-  /** Starts the command in the folder, with the environment given, in a new session for the ship; an exited one is replaced. */
-  /** Starts the session in its folder; `readOnly` names its read-only checkouts (#1182), which a container mounts read-only and the host leaves as they are. */
-  start(session: { shipId: ShipId; folder: string; command: readonly string[]; env?: Readonly<Record<string, string>>; readOnly?: readonly string[] }): Promise<void>;
-  /** Types the text into the ship's session and presses Enter, after `settleMs` when given. */
-  type(at: { shipId: ShipId; text: string; settleMs?: number }): Promise<void>;
-  /** Stops the session's running turn as a person does, with Escape; the session goes on (decision 0040). */
+  /**
+   * Starts the command in the folder, with the environment given, in a new session for the ship; an exited one is replaced. `harness` names the harness the command runs, for how its turn is stopped;
+   * `readOnly` names its read-only checkouts (#1182), which a container mounts read-only and the host leaves as they are.
+   */
+  start(session: { shipId: ShipId; folder: string; command: readonly string[]; harness: string; env?: Readonly<Record<string, string>>; readOnly?: readonly string[] }): Promise<void>;
+  /** Sends one line to the session's harness as its next input. */
+  send(at: { shipId: ShipId; line: string }): Promise<void>;
+  /** Stops the session's running turn and waits for its end, within a bound; the session goes on (decision 0040, headless H12). */
   interrupt(shipId: ShipId): Promise<void>;
-  /** What the ship's session shows: its last lines, wrapped ones joined; empty with no session. */
-  screen(shipId: ShipId): Promise<string>;
+  /** What the session's harness wrote last, one line each, oldest first: its events, or its screen in a terminal; none with no session. */
+  events(shipId: ShipId): Promise<readonly string[]>;
 }
 
 /** The processes running in a folder, whatever started them: a dev server a session left behind. */

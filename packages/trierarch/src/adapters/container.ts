@@ -1,7 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { setTimeout as wait } from 'node:timers/promises';
 
 import { idSchema, type ShipId } from '@aeolus-fleet/common';
 
@@ -10,6 +9,7 @@ import type { SessionRoots } from './caller-check.js';
 import { heldCommand } from './held-command.js';
 import { shipHome } from './paths.js';
 import { runCommand, type CommandResult } from './run-command.js';
+import { stopTurn } from './stop-turn.js';
 
 const PREFIX = 'trierarch-';
 const OWNER_LABEL = 'aeolus.trierarch';
@@ -86,8 +86,10 @@ function envFileOf(env: Readonly<Record<string, string>>): string {
 
 /**
  * The container session runtime (decision 0039): one container per ship,
- * named after its ship id, with tmux inside, so typing and screen reads are an
- * exec into it. Rootless only, with hard memory and cpu caps and no restart
+ * named after its ship id, with tmux inside, so a line sent is typed and the
+ * events read are its screen, each an exec into it; a turn is stopped with
+ * Escape, as a person does. Its sessions move to holds in S3 of the headless
+ * design. Rootless only, with hard memory and cpu caps and no restart
  * policy: the trierarch starts a dead container again itself. The container
  * sees its folder, its ship's own home, as its home, and its ship's socket
  * folder, at its own path, and nothing else of the host, never the runtime's
@@ -118,6 +120,15 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
     await runtime(['rm', '--force', containerName(shipId)]);
   };
   const tmux = (shipId: ShipId, args: readonly string[]): readonly string[] => ['exec', containerName(shipId), 'tmux', ...args];
+  const screen = async (shipId: ShipId): Promise<string> => {
+    const shown = await runtime(tmux(shipId, ['capture-pane', '-p', '-J', '-S', `-${String(SCREEN_LINES)}`, '-t', TMUX_TARGET]));
+    if (shown.status === 0) {
+      return shown.stdout;
+    }
+    // An exited container printed its last screen as it ended.
+    const logged = await runtime(['logs', containerName(shipId)]);
+    return logged.status === 0 ? logged.stdout : '';
+  };
 
   return {
     list: async () => {
@@ -199,24 +210,20 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
         await rm(secrets, { recursive: true, force: true });
       }
     },
-    type: async ({ shipId, text, settleMs }) => {
-      await must(tmux(shipId, ['send-keys', '-t', TMUX_TARGET, '-l', text]));
-      if (settleMs !== undefined) {
-        await wait(settleMs);
-      }
+    // The line typed, then Enter, as a person types it in the session's terminal.
+    send: async ({ shipId, line }) => {
+      await must(tmux(shipId, ['send-keys', '-t', TMUX_TARGET, '-l', line]));
       await must(tmux(shipId, ['send-keys', '-t', TMUX_TARGET, 'Enter']));
     },
     interrupt: async (shipId) => {
-      await must(tmux(shipId, ['send-keys', '-t', TMUX_TARGET, 'Escape']));
+      await stopTurn({ escape: async () => {
+          await must(tmux(shipId, ['send-keys', '-t', TMUX_TARGET, 'Escape']));
+        }, screen: () => screen(shipId) });
     },
-    screen: async (shipId) => {
-      const shown = await runtime(tmux(shipId, ['capture-pane', '-p', '-J', '-S', `-${String(SCREEN_LINES)}`, '-t', TMUX_TARGET]));
-      if (shown.status === 0) {
-        return shown.stdout;
-      }
-      // An exited container printed its last screen as it ended.
-      const logged = await runtime(['logs', containerName(shipId)]);
-      return logged.status === 0 ? logged.stdout : '';
+    // The terminal's screen, one line each: it is all a session in a terminal shows of its events.
+    events: async (shipId) => {
+      const shown = await screen(shipId);
+      return shown === '' ? [] : shown.replace(/\n$/u, '').split('\n');
     },
     // The container's first process as the host sees it: every process of the session runs under it; 0 once it runs no more.
     sessionRootOf: async (shipId) => {

@@ -12,9 +12,8 @@ import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
 import type { AeolusPlugin } from './plugin-identity.js';
 import { findAeolusPlugin } from './plugin.js';
 
-/** What the settings' first prompt and a ship's session name stand for where config check shows a command line. */
+/** What the settings' first prompt stands for where config check shows a command line. */
 const FIRST_PROMPT = '<first prompt>';
-const SESSION_NAME = '[<repository or folder>] <ship>';
 
 /** What config check reads of the harnesses' own files to show their command lines. */
 export interface HarnessFiles {
@@ -28,15 +27,15 @@ interface CommandLines {
 
 /** Per harness this trierarch has an adapter for: the flags it adds itself, its risky flags, and its command lines for given flags. */
 const ADAPTERS: Readonly<
-  Record<string, { adapterFlags: readonly AdapterFlag[]; riskyFlags: readonly string[]; commandLines: (flags: readonly string[], at: { files: HarnessFiles; permissionModes: readonly string[] | undefined }) => Promise<CommandLines> } | undefined>
+  Record<string, { adapterFlags: readonly AdapterFlag[]; riskyFlags: readonly string[]; commandLines: (flags: readonly string[], at: { files: HarnessFiles; permissionModes: readonly string[] | undefined; isHeadless: boolean }) => Promise<CommandLines> } | undefined>
 > = {
   'claude-code': {
     adapterFlags: CLAUDE_CODE_ADAPTER_FLAGS,
     riskyFlags: CLAUDE_CODE_RISKY_FLAGS,
-    commandLines: async (flags, { files, permissionModes }) => {
+    commandLines: async (flags, { files, permissionModes, isHeadless }) => {
       const defaultPermissionMode = await claudeCodeSettingsDefaultMode(files.claudeCode, { flags });
       const commandLine = (isFirstStart: boolean) =>
-        claudeCodeCommandLine({ flags, sessionName: SESSION_NAME, prompt: isFirstStart ? firstPromptOf(FIRST_PROMPT) : wakePromptOf(CLAUDE_CODE_WAKE_PROMPT), isFirstStart, defaultPermissionMode, permissionModes });
+        claudeCodeCommandLine({ flags, isHeadless, prompt: isFirstStart ? firstPromptOf(FIRST_PROMPT) : wakePromptOf(CLAUDE_CODE_WAKE_PROMPT), isFirstStart, defaultPermissionMode, permissionModes });
       return { firstStart: commandLine(true), restart: commandLine(false) };
     },
   },
@@ -60,9 +59,9 @@ export function riskyFlagsOf(configuration: TrierarchConfiguration): Record<stri
   return Object.fromEntries(Object.keys(configuration.harnesses).map((name) => [name, ADAPTERS[name]?.riskyFlags ?? []]));
 }
 
-/** What a harness launches with the given flags, on a first start and a restart, for config check; undefined without an adapter. */
-export async function commandLinesOf(at: { harness: string; flags: readonly string[]; files: HarnessFiles; permissionModes: readonly string[] | undefined }): Promise<CommandLines | undefined> {
-  return ADAPTERS[at.harness]?.commandLines(at.flags, { files: at.files, permissionModes: at.permissionModes });
+/** What a harness launches with the given flags, on a first start and a restart, headless or in a terminal, for config check; undefined without an adapter. */
+export async function commandLinesOf(at: { harness: string; flags: readonly string[]; files: HarnessFiles; permissionModes: readonly string[] | undefined; isHeadless: boolean }): Promise<CommandLines | undefined> {
+  return ADAPTERS[at.harness]?.commandLines(at.flags, { files: at.files, permissionModes: at.permissionModes, isHeadless: at.isHeadless });
 }
 
 /**
@@ -79,8 +78,8 @@ export async function createHarnesses(at: {
   managedSettings: string;
   /** What detection last found, read at each launch (#517). */
   detected: () => Detected;
-  sessions: Pick<SessionRuntime, 'start' | 'type' | 'interrupt' | 'screen'>;
-  /** For sessions in containers: a home of each ship's own (decision 0039). */
+  sessions: Pick<SessionRuntime, 'start' | 'send' | 'interrupt' | 'events'>;
+  /** For sessions in containers: a home of each ship's own (decision 0039); without, sessions run headless on the host (headless H4). */
   shipHomes?: { homes: string; managedSettings: string };
 }): Promise<{ harnesses: Record<string, HarnessPort>; plugins: Record<string, AeolusPlugin> }> {
   const { configuration, homeDirectory, env, managedSettings, detected, sessions, shipHomes } = at;
@@ -92,7 +91,7 @@ export async function createHarnesses(at: {
     }
     const plugin = await findAeolusPlugin({ homeDirectory, env, harness: name });
     plugins[name] = plugin;
-    harnesses[name] = name === 'codex' ? createCodexHarness({ configuration, plugin, sessions, setup: createCodexSetup() }) : createClaudeCodeHarness({ configuration, plugin, sessions, permissionModes: () => detected()['claude-code']?.permissionModes, projects: join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects'), setup: createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) }), ...(shipHomes !== undefined && { shipHomes }) });
+    harnesses[name] = name === 'codex' ? createCodexHarness({ configuration, plugin, sessions, setup: createCodexSetup() }) : createClaudeCodeHarness({ configuration, plugin, sessions, isHeadless: shipHomes === undefined, permissionModes: () => detected()['claude-code']?.permissionModes, projects: join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects'), setup: createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) }), ...(shipHomes !== undefined && { shipHomes }) });
   }
   return { harnesses, plugins };
 }

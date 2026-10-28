@@ -24,7 +24,7 @@ import { createRestFleet } from '../adapters/rest-fleet.js';
 import { runtimeAdaptersOf } from '../adapters/runtime-adapters.js';
 import { createCallerCheck } from '../adapters/caller-check.js';
 import { createShipSockets } from '../adapters/ship-sockets.js';
-import { sessionsLaunch } from '../adapters/tmux.js';
+import { sessionsLaunch } from '../adapters/hold-runtime.js';
 import { createTrust } from '../adapters/trust.js';
 import { createTrustedRepositoriesFile, trustedClonesOf, withTrustedRepositories } from '../adapters/trusted-repositories-file.js';
 import { createUsage, folderMadeAt } from '../adapters/usage.js';

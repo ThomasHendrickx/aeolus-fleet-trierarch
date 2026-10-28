@@ -205,3 +205,39 @@ export function createCallerCheck(options: {
     }
   };
 }
+
+/**
+ * Who may call a hold's socket (headless H9): only the trierarch, never a
+ * session. A caller is refused when any process holding the connection's other
+ * end runs under a session's root (a hold), whichever ship's, and when it does
+ * not resolve. The trierarch starts each hold outside its own process tree, so
+ * the trierarch is under none of them.
+ */
+export function createTrierarchCallerCheck(options: {
+  platform: string;
+  /** The process each session runs under on this machine: every hold's. */
+  sessionRoots: () => Promise<readonly number[]>;
+  ownPid?: number;
+  run?: typeof runCommand;
+}): (connection: Socket) => Promise<boolean> {
+  const run = options.run ?? runCommand;
+  const peers = options.platform === 'linux' ? linuxPeers(run) : options.platform === 'darwin' ? darwinPeers(run, options.ownPid ?? process.pid) : undefined;
+  if (peers === undefined) {
+    return () => Promise.resolve(false);
+  }
+  return async (connection) => {
+    const fd = descriptorOf(connection);
+    if (fd === undefined) {
+      return false;
+    }
+    try {
+      const roots = new Set(await options.sessionRoots());
+      const holders = await peers.holdersOf({ fd, root: undefined });
+      const under = await Promise.all(holders.map((holder) => isUnder(holder, { roots, peers })));
+      return under.length > 0 && under.every((isUnderASession) => !isUnderASession);
+    } catch {
+      // A caller that does not resolve is refused, never allowed.
+      return false;
+    }
+  };
+}

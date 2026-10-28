@@ -10,7 +10,7 @@ import { createCodexSetup } from '../adapters/codex-setup.js';
 import { createContainerHost } from '../adapters/container-host.js';
 import { createDetectedFile } from '../adapters/detected-file.js';
 import { createDetectors } from '../adapters/detectors.js';
-import { loadConfiguration, readCrewFile, readRunningFile, TrierarchFileError } from '../adapters/files.js';
+import { loadConfiguration, readCrewFile, readRunningFile, removeRemoteControl, TrierarchFileError } from '../adapters/files.js';
 import { createJsonState } from '../adapters/json-state.js';
 import { createLogger, readLogLine, renderLogLine, type LogStream } from '../adapters/log.js';
 import { createStyle, isColourTerminal, type Style } from '../adapters/style.js';
@@ -20,7 +20,7 @@ import { createPluginUpdate } from '../adapters/plugin-update.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
 import { runCommand, streamCommand } from '../adapters/run-command.js';
 import { createService, serviceEnvironment } from '../adapters/service.js';
-import { createTmux } from '../adapters/tmux.js';
+import { hostSessions } from '../adapters/runtime-adapters.js';
 import { runningVersion } from '../adapters/version.js';
 import { createDetectHarnesses } from '../core/detect-harnesses.js';
 import { createUninstall } from '../core/uninstall.js';
@@ -182,7 +182,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       crew,
       service: serviceAt(),
       lease: leaseFrom(() => fleet.whoami()),
-      processes: createTmux(),
+      processes: hostSessions({ paths, version: runningVersion() }),
       state: createJsonState(paths.state),
     });
     return { data: report, text: describeStatus(report, style) };
@@ -249,6 +249,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       const report = await upgradeTrierarch({
         ...(version !== undefined && { version }),
         isPluginStepOfAnUpgrade: env[PLUGIN_STEP_VARIABLE] === '1',
+        removeRemoteControl: () => removeRemoteControl(paths.config),
         installedVersion: runningVersion,
         npm: {
           globalFolder: async () => {
@@ -328,7 +329,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       return { data: status, text };
     },
     uninstall: async () => {
-      const report = await uninstallTrierarch({ service: serviceAt(), uninstall: createUninstall({ processes: createTmux(), state: createJsonState(paths.state) }), home: paths.home });
+      const report = await uninstallTrierarch({ service: serviceAt(), uninstall: createUninstall({ processes: hostSessions({ paths, version: runningVersion() }), state: createJsonState(paths.state) }), home: paths.home });
       return { data: report, text: report.said.join('\n') };
     },
     run: async () => {

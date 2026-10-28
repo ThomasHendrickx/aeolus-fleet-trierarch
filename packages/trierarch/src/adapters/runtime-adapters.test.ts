@@ -100,7 +100,7 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
     mkdirSync(paths.home, { recursive: true });
     writeFileSync(paths.modelToken, `${MODEL_TOKEN}\n`, { mode: 0o600 });
 
-    await adaptersOf({ ...CONTAINER, binary }).sessions.start({ shipId, folder: repository, command: ['claude'] });
+    await adaptersOf({ ...CONTAINER, binary }).sessions.start({ shipId, folder: repository, command: ['claude'], harness: 'claude-code' });
 
     const run = readFileSync(join(home, 'calls'), 'utf8').split('\n').find((call) => call.startsWith('run '));
     expect({

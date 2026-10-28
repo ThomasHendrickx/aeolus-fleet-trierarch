@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
 import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
-import { CODEX_ADAPTER_FLAGS, CODEX_TYPING_SETTLE_MS, codexCommandLine, createCodexHarness } from './codex.js';
+import { CODEX_ADAPTER_FLAGS, codexCommandLine, codexTurnCommand, createCodexHarness } from './codex.js';
 import { runCommand } from './run-command.js';
 
 // With the aeolus-fleet plugin's own scripts from this repository, in a temporary data folder standing for Codex's.
@@ -30,10 +30,10 @@ let data: string;
 let crews: string;
 let folder: string;
 let started: { shipId: ShipId; folder: string; command: readonly string[]; env?: Readonly<Record<string, string>>; readOnly?: readonly string[] }[];
-/** What each ship's session shows, by ship id. */
-let screens: Map<ShipId, string>;
-let typed: { shipId: ShipId; text: string; settleMs?: number }[];
-/** What was done to each session, in order: a turn stopped, or a line typed. */
+/** The event lines each ship's session wrote, by ship id. */
+let events: Map<ShipId, readonly string[]>;
+let sent: { shipId: ShipId; line: string }[];
+/** What was done to each session, in order: a turn stopped, or a line sent. */
 let steps: string[];
 /** The aeolus-fleet plugin's hooks Codex does not trust yet, as a plugin update leaves them (#581). */
 let untrustedHooks: Set<string>;
@@ -45,9 +45,9 @@ beforeEach(() => {
   crews = join(mkdtempSync(join(tmpdir(), 'trierarch-codex-home-')), '.aeolus', 'crews', 'codex');
   folder = realpathSync(mkdtempSync(join(tmpdir(), 'trierarch-codex-session-')));
   started = [];
-  typed = [];
+  sent = [];
   steps = [];
-  screens = new Map();
+  events = new Map();
   untrustedHooks = new Set(['aeolus-fleet@aeolus-fleet:hooks/hooks.json:stop:0:0']);
   untrustedAtStart = [];
 });
@@ -75,16 +75,16 @@ function harness(at: { pluginRoot?: string } = {}) {
         untrustedAtStart.push([...untrustedHooks]);
         return Promise.resolve();
       },
-      type: (at) => {
-        typed.push(at);
-        steps.push(`type ${at.shipId}`);
+      send: (at) => {
+        sent.push(at);
+        steps.push(`send ${at.shipId}`);
         return Promise.resolve();
       },
       interrupt: (shipId) => {
         steps.push(`interrupt ${shipId}`);
         return Promise.resolve();
       },
-      screen: (shipId) => Promise.resolve(screens.get(shipId) ?? ''),
+      events: (shipId) => Promise.resolve(events.get(shipId) ?? []),
     },
   });
 }
@@ -111,10 +111,10 @@ describe('Codex as a harness', () => {
     await expect(harness().hasIdentity({ shipId, folder })).resolves.toBe(true);
   });
 
-  it('starts codex with the first prompt on the first start, last and after -- behind the configured flags and the picked option, ending in the line that no human reads its terminal (#585)', async () => {
+  it('starts codex exec with its events as JSON and the first prompt on the first start, last and after -- behind the configured flags and the picked option, ending in the line that no human reads its terminal (headless H11, #585)', async () => {
     await harness().launch({ ...launchOf(shipId), options: { model: 'terra' }, isFirstStart: true, firstPrompt: 'Review the open pull requests.' });
 
-    expect(started).toEqual([{ shipId, folder, command: ['codex', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-terra', '--no-daemon', '--config=tools.experimental_request_user_input.enabled=false', '--', `Review the open pull requests.\n\n${NO_TERMINAL_QUESTIONS}`], env: { AEOLUS_LAUNCH: LAUNCH_ID } }]);
+    expect(started).toEqual([{ shipId, folder, command: ['codex', 'exec', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-terra', '--json', '--config=tools.experimental_request_user_input.enabled=false', '--', `Review the open pull requests.\n\n${NO_TERMINAL_QUESTIONS}`], harness: 'codex', env: { AEOLUS_LAUNCH: LAUNCH_ID } }]);
   });
 
   it('passes a first prompt that starts with - after --, so it never reads as a flag', async () => {
@@ -137,10 +137,10 @@ describe('Codex as a harness', () => {
     expect(started[0]?.command.slice(-2)).toEqual(['--', `$aeolus-fleet-wake ${NO_TERMINAL_QUESTIONS}`]);
   });
 
-  it("resumes the folder's last conversation on a restart, with $aeolus-fleet-wake and the line that no human reads its terminal, never the first prompt again (#585)", async () => {
+  it("resumes the folder's last conversation on a restart with codex exec resume --last, with $aeolus-fleet-wake and the line that no human reads its terminal, never the first prompt again (headless H11, #585)", async () => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false, firstPrompt: 'Review the open pull requests.' });
 
-    expect(started[0]?.command).toEqual(['codex', 'resume', '--last', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-sol', '--no-daemon', '--config=tools.experimental_request_user_input.enabled=false', '--', `$aeolus-fleet-wake ${NO_TERMINAL_QUESTIONS}`]);
+    expect(started[0]?.command).toEqual(['codex', 'exec', 'resume', '--last', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-sol', '--json', '--config=tools.experimental_request_user_input.enabled=false', '--', `$aeolus-fleet-wake ${NO_TERMINAL_QUESTIONS}`]);
   });
 
   it("trusts the aeolus-fleet plugin's new or changed hooks before every start, a restart too, so a session after a plugin update never stops at Codex's hooks review (#581)", async () => {
@@ -161,9 +161,9 @@ describe('Codex as a harness', () => {
           started.push(session);
           return Promise.resolve();
         },
-        type: () => Promise.resolve(),
+        send: () => Promise.resolve(),
         interrupt: () => Promise.resolve(),
-        screen: () => Promise.resolve(''),
+        events: () => Promise.resolve([]),
       },
     });
 
@@ -171,7 +171,7 @@ describe('Codex as a harness', () => {
     expect(started).toEqual([]);
   });
 
-  it('adds --no-daemon once even when the operator configured it too, so the session owns its work and a stop stops it', async () => {
+  it('leaves out --no-daemon when the operator configured it, which codex exec does not take: it runs its turn in its own process', async () => {
     const withNoDaemon = createCodexHarness({
       configuration: { ...WITH_CODEX, harnesses: { codex: { flags: ['--no-daemon'], options: {} } } },
       plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data, crews },
@@ -181,15 +181,15 @@ describe('Codex as a harness', () => {
           started.push(session);
           return Promise.resolve();
         },
-        type: () => Promise.resolve(),
+        send: () => Promise.resolve(),
         interrupt: () => Promise.resolve(),
-        screen: () => Promise.resolve(''),
+        events: () => Promise.resolve([]),
       },
     });
 
     await withNoDaemon.launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
 
-    expect(started[0]?.command.filter((part) => part === '--no-daemon')).toHaveLength(1);
+    expect(started[0]?.command).not.toContain('--no-daemon');
   });
 
   it('starts codex without its question tool on every start, so the crewed session asks over the fleet and never waits on a question in a pane nobody watches (#460)', async () => {
@@ -199,21 +199,21 @@ describe('Codex as a harness', () => {
     expect(started.map((session) => session.command.filter((word) => word.includes('request_user_input')))).toEqual([['--config=tools.experimental_request_user_input.enabled=false'], ['--config=tools.experimental_request_user_input.enabled=false']]);
   });
 
-  it('tells the configured flags from --no-daemon and the question tool switched off, which the adapter adds to every launch', () => {
+  it('tells the configured flags from --json and the question tool switched off, which the adapter adds to every launch', () => {
     expect(CODEX_ADAPTER_FLAGS).toEqual([
-      { flag: '--no-daemon', when: 'always' },
+      { flag: '--json', when: 'always' },
       { flag: '--config=tools.experimental_request_user_input.enabled=false', when: 'always' },
     ]);
     expect(codexCommandLine({ flags: ['--dangerously-bypass-approvals-and-sandbox', '--no-daemon'], prompt: '<first prompt>', isFirstStart: true })).toEqual([
-      { words: ['codex'] },
+      { words: ['codex', 'exec'] },
       { words: ['--dangerously-bypass-approvals-and-sandbox'], source: 'configuration' },
-      { words: ['--no-daemon'], source: 'adapter' },
+      { words: ['--json'], source: 'adapter' },
       { words: ['--config=tools.experimental_request_user_input.enabled=false'], source: 'adapter' },
       { words: ['--', '<first prompt>'] },
     ]);
     expect(codexCommandLine({ flags: [], prompt: '$aeolus-fleet-wake', isFirstStart: false })).toEqual([
-      { words: ['codex', 'resume', '--last'] },
-      { words: ['--no-daemon'], source: 'adapter' },
+      { words: ['codex', 'exec', 'resume', '--last'] },
+      { words: ['--json'], source: 'adapter' },
       { words: ['--config=tools.experimental_request_user_input.enabled=false'], source: 'adapter' },
       { words: ['--', '$aeolus-fleet-wake'] },
     ]);
@@ -227,10 +227,22 @@ describe('Codex as a harness', () => {
 
     await expect(harness({ pluginRoot: root }).handOver({ shipId, folder })).resolves.toBe('handed');
 
-    expect(typed).toEqual([{ shipId, text: `${line} ${NO_TERMINAL_QUESTIONS}`, settleMs: CODEX_TYPING_SETTLE_MS }]);
+    expect(sent).toEqual([{ shipId, line: `${line} ${NO_TERMINAL_QUESTIONS}` }]);
   });
 
-  it("forces a message over to a busy task: the plugin's force hands it, then the turn is stopped and the line typed, settling before Enter (decision 0040)", async () => {
+  it("resumes the session's thread for a later turn with codex exec resume <thread id>, the start's flags kept and the line last after -- (headless H11)", () => {
+    const start = ['codex', 'exec', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-sol', '--json', '--config=tools.experimental_request_user_input.enabled=false', '--', 'Review the open pull requests.'];
+
+    expect(codexTurnCommand({ start, threadId: 'thread-1', line: '--the hand-over' })).toEqual(['codex', 'exec', 'resume', 'thread-1', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-sol', '--json', '--config=tools.experimental_request_user_input.enabled=false', '--', '--the hand-over']);
+  });
+
+  it("resumes the session's thread for a later turn after a restart, not the folder's last conversation", () => {
+    const start = ['/usr/bin/codex', 'exec', 'resume', '--last', '--json', '--', '$aeolus-fleet-wake'];
+
+    expect(codexTurnCommand({ start, threadId: 'thread-2', line: 'next' })).toEqual(['/usr/bin/codex', 'exec', 'resume', 'thread-2', '--json', '--', 'next']);
+  });
+
+  it("forces a message over to a busy task: the plugin's force hands it, then the turn is stopped and the line sent (decision 0040)", async () => {
     const line = "Aeolus handed a message for scout to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it.";
     const root = mkdtempSync(join(data, 'plugin-'));
     mkdirSync(join(root, 'scripts'));
@@ -238,8 +250,8 @@ describe('Codex as a harness', () => {
 
     await expect(harness({ pluginRoot: root }).forceOver({ shipId, folder, isTurnBusy: true })).resolves.toBe('handed');
 
-    expect(steps).toEqual([`interrupt ${shipId}`, `type ${shipId}`]);
-    expect(typed).toEqual([{ shipId, text: `${line} ${NO_TERMINAL_QUESTIONS}`, settleMs: CODEX_TYPING_SETTLE_MS }]);
+    expect(steps).toEqual([`interrupt ${shipId}`, `send ${shipId}`]);
+    expect(sent).toEqual([{ shipId, line: `${line} ${NO_TERMINAL_QUESTIONS}` }]);
   });
 
 });
@@ -258,10 +270,11 @@ describe("Codex's launch window, from the launch marker its session's hooks keep
   const sessionStarted = { hook_event_name: 'SessionStart', source: 'startup' };
   const aToolCall = { hook_event_name: 'PreToolUse', tool_name: 'shell' };
   const seen = () => harness().launchSeen({ shipId, folder, launchId: LAUNCH_ID, model: 'gpt-5.6-sol' });
-  /** Codex's real session logs (test/logs), as its hooks name them in transcript_path. */
-  const REFUSED_LOG = fileURLToPath(new URL('../../test/logs/codex-refused.jsonl', import.meta.url));
-  const ANSWERED_LOG = fileURLToPath(new URL('../../test/logs/codex-answered.jsonl', import.meta.url));
-  const hooksReview = () => readFileSync(new URL('../../test/screens/codex-hooks.txt', import.meta.url), 'utf8');
+  /** Codex's real events from `codex exec --json` (test/logs), captured from codex-cli 0.163.0 on 25 Oct. */
+  const eventsOf = (file: string) =>
+    readFileSync(new URL(`../../test/logs/${file}`, import.meta.url), 'utf8')
+      .split('\n')
+      .filter((line) => line !== '');
 
   beforeEach(async () => {
     await harness().prepareIdentity({ folder, identity, crewToken: CREW_TOKEN });
@@ -284,36 +297,36 @@ describe("Codex's launch window, from the launch marker its session's hooks keep
     await expect(seen()).resolves.toEqual({ kind: 'active' });
   });
 
-  it('sees the model it launched with refused in the session log its hooks named, as Codex has no hook for a failed turn', async () => {
-    await hooked({ ...sessionStarted, transcript_path: REFUSED_LOG });
+  it('sees the model it launched with refused in its failed turn event, as Codex has no hook for a failed turn (headless H13)', async () => {
+    events.set(shipId, eventsOf('codex-events-refused.jsonl'));
+    await hooked(sessionStarted);
 
     await expect(harness().launchSeen({ shipId, folder, launchId: LAUNCH_ID, model: 'gpt-nonexistent-9' })).resolves.toEqual({ kind: 'refused', model: 'gpt-nonexistent-9' });
   });
 
-  it('reads no refusal from its screen, only from its session log', async () => {
-    screens.set(shipId, readFileSync(new URL('../../test/screens/codex-refused.txt', import.meta.url), 'utf8'));
-    await hooked({ ...sessionStarted, transcript_path: ANSWERED_LOG });
+  it("sees a refusal of Codex's own default model when it launched with none", async () => {
+    events.set(shipId, eventsOf('codex-events-refused.jsonl'));
 
-    await expect(harness().launchSeen({ shipId, folder, launchId: LAUNCH_ID, model: 'gpt-nonexistent-9' })).resolves.toEqual({ kind: 'none' });
+    await expect(harness().launchSeen({ shipId, folder, launchId: LAUNCH_ID })).resolves.toEqual({ kind: 'refused', model: 'gpt-nonexistent-9' });
   });
 
-  it('sees no refusal when the session log its hooks named is gone', async () => {
-    await hooked({ ...sessionStarted, transcript_path: join(folder, 'gone.jsonl') });
+  it('reads no refusal of another model than the one it launched with, and names its error as the cause', async () => {
+    events.set(shipId, eventsOf('codex-events-refused.jsonl'));
 
-    await expect(harness().launchSeen({ shipId, folder, launchId: LAUNCH_ID, model: 'gpt-nonexistent-9' })).resolves.toEqual({ kind: 'none' });
+    await expect(seen()).resolves.toEqual({ kind: 'none', cause: "The 'gpt-nonexistent-9' model is not supported when using Codex with a ChatGPT account." });
   });
 
-  it('names no screen once its session started', async () => {
-    screens.set(shipId, hooksReview());
+  it("names the cause of a start with no activity from the harness's last error event (headless H13)", async () => {
+    events.set(shipId, [JSON.stringify({ type: 'thread.started', thread_id: 'thread-1' }), JSON.stringify({ type: 'turn.started' }), JSON.stringify({ type: 'error', message: 'Reconnecting... 1/5' }), JSON.stringify({ type: 'turn.failed', error: { message: 'stream disconnected before completion' } })]);
+
+    await expect(seen()).resolves.toEqual({ kind: 'none', cause: 'stream disconnected before completion' });
+  });
+
+  it('names no cause when its turn answered', async () => {
+    events.set(shipId, eventsOf('codex-events-answered.jsonl'));
     await hooked(sessionStarted);
 
     await expect(seen()).resolves.toEqual({ kind: 'none' });
-  });
-
-  it('names the screen its session stopped at when it never started', async () => {
-    screens.set(shipId, hooksReview());
-
-    await expect(seen()).resolves.toEqual({ kind: 'none', screen: 'hooks review' });
   });
 
   it('counts nothing the hooks marked for another launch', async () => {
@@ -327,7 +340,7 @@ describe("Codex's launch window, from the launch marker its session's hooks keep
     await expect(harness({ pluginRoot: join(data, 'gone') }).startProblem()).resolves.toBe(`the aeolus-fleet plugin's scripts are not at ${join(data, 'gone', 'scripts')}`);
   });
 
-  it("says nothing stops a session from starting while the aeolus-fleet plugin's scripts are there (#827)", async () => {
+  it("says nothing stops a session from starting while the aeolus-fleet plugin's scripts are there: Codex runs headless on the host (headless S2)", async () => {
     await expect(harness().startProblem()).resolves.toBeUndefined();
   });
 

@@ -1,86 +1,131 @@
-import { readFile } from 'node:fs/promises';
-
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
+import { z } from 'zod';
 
 import type { AdapterFlag, HarnessPort, SessionRuntime } from '../core/ports.js';
 import { LAUNCH_VARIABLE } from './claude-code.js';
-import { codexScreenStoppedAt } from './codex-screen.js';
-import { codexModelRefusedIn } from './codex-session-log.js';
 import type { CodexSetup } from './codex-setup.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
 import { effectiveFlags } from '../core/effective-flags.js';
 import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
+import { parsedLine } from './hold-protocol.js';
 import { createLaunchMarks } from './launch-marker.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
-import { stopTurn } from './stop-turn.js';
 
 /**
- * Codex as a harness (docs/architecture.md, "First adapters"): `codex` in the
- * folder, `codex resume --last` on a restart (the folder's last conversation;
- * one ship per folder), always with `--no-daemon` and without the question
- * tool, and `$aeolus-fleet-wake` typed
- * to wake an idle session, each prompt with the line that no human reads its
- * terminal (#585). The identity and the turn marker go through the
- * aeolus-fleet plugin for Codex, in Codex's own plugin data folder. The plugin's new
- * or changed hooks are trusted before every launch: a plugin update changes
- * them, and Codex would stop the session at its hooks review (#581).
+ * Codex as a harness (docs/architecture.md, "First adapters"), headless
+ * (headless H11): one `codex exec --json` per turn in the folder, the first
+ * with the first prompt, a restart `codex exec resume --last` (the folder's
+ * last conversation; one ship per folder), and every later turn `codex exec
+ * resume <thread id>`, which the hold starts for each line it is sent; between
+ * turns no Codex process runs. Always without the question tool, and
+ * `$aeolus-fleet-wake` sent to wake an idle session, each prompt with the line that
+ * no human reads its terminal (#585). The identity and the turn marker go
+ * through the aeolus-fleet plugin for Codex, in Codex's own plugin data folder,
+ * whose hooks run in `codex exec` as in a terminal. The plugin's new or
+ * changed hooks are trusted before every launch: a plugin update changes them,
+ * and Codex runs none it does not trust (#581).
  */
 
 export const WAKE_PROMPT = '$aeolus-fleet-wake';
 
+/** Added to every launch, as mechanism: the turn's events as JSON lines, which the hold keeps (headless H13, H14). */
+const JSON_EVENTS = '--json';
 /**
- * How long a typed wake waits before Enter. Codex takes an Enter that comes
- * right after fast typing as part of a paste, a newline, and submits nothing.
- */
-export const CODEX_TYPING_SETTLE_MS = 1000;
-
-/**
- * Added to every launch, as mechanism: without it Codex runs the session's
- * work in its shared app-server daemon, which keeps a turn running after the
- * pane is gone, so a release or a crash would stop the pane but not the work.
+ * Left out of the configured flags: `codex exec` does not take it, and runs
+ * its turn in its own process, so a stop stops its work. Configurations
+ * written for Codex in a terminal may still carry it.
  */
 const NO_DAEMON = '--no-daemon';
 /**
  * Added to every launch: Codex's question tool (request_user_input) waits for
- * an answer in the pane, which nobody watches, and would take the keys of a
- * wake. The session asks its questions over the fleet instead (#460).
+ * an answer nobody gives, and would hold the turn. The session asks its
+ * questions over the fleet instead (#460).
  */
 const NO_QUESTION_TOOL = '--config=tools.experimental_request_user_input.enabled=false';
 const END_OF_FLAGS = '--';
+const EXEC = 'exec';
+const RESUME = 'resume';
+const LAST = '--last';
 
 export const CODEX_ADAPTER_FLAGS: readonly AdapterFlag[] = [
-  { flag: NO_DAEMON, when: 'always' },
+  { flag: JSON_EVENTS, when: 'always' },
   { flag: NO_QUESTION_TOOL, when: 'always' },
 ];
 
 /** The flags of Codex that are risky: it then runs every command without approval and outside its sandbox (#326). */
 export const CODEX_RISKY_FLAGS: readonly string[] = ['--dangerously-bypass-approvals-and-sandbox'];
 
-/** `codex`, or `codex resume --last` on a restart, then the configured flags, --no-daemon once, the question tool off, and the prompt last after `--`, so it never reads as a flag. */
+/** `codex exec`, or `codex exec resume --last` on a restart, then the configured flags, --json, the question tool off, and the prompt last after `--`, so it never reads as a flag. */
 export function codexCommandLine(at: { flags: readonly string[]; prompt: string; isFirstStart: boolean; program?: string }): CommandPart[] {
   const program = at.program ?? 'codex';
   return partsWithWords([
-    { words: at.isFirstStart ? [program] : [program, 'resume', '--last'] },
+    { words: at.isFirstStart ? [program, EXEC] : [program, EXEC, RESUME, LAST] },
     { words: at.flags.filter((flag) => flag !== NO_DAEMON), source: 'configuration' },
-    { words: [NO_DAEMON], source: 'adapter' },
+    { words: [JSON_EVENTS], source: 'adapter' },
     { words: [NO_QUESTION_TOOL], source: 'adapter' },
     { words: [END_OF_FLAGS, at.prompt] },
   ]);
 }
 
-/** The session log at the path given; none before Codex wrote it, or once it is gone. */
-async function sessionLog(path: string): Promise<string | undefined> {
-  try {
-    return await readFile(path, 'utf8');
-  } catch {
+/**
+ * The command of a later turn (headless H11): the session's start command,
+ * resuming its thread by id instead of the folder's last conversation, with
+ * the line as its prompt after `--`.
+ */
+export function codexTurnCommand(at: { start: readonly string[]; threadId: string; line: string }): string[] {
+  const end = at.start.lastIndexOf(END_OF_FLAGS);
+  const words = end === -1 ? at.start : at.start.slice(0, end);
+  // The program is every word before exec: a test runs Codex's stand-in as Node and its script.
+  const exec = words.indexOf(EXEC);
+  const rest = words.slice(exec + 1);
+  const flags = rest[0] === RESUME && rest[1] === LAST ? rest.slice(2) : rest;
+  return [...words.slice(0, exec), EXEC, RESUME, at.threadId, ...flags, END_OF_FLAGS, at.line];
+}
+
+/** The event of `codex exec --json` that names the session's thread, which a later turn resumes (H11). */
+export const codexThreadStartedSchema = z.object({ type: z.literal('thread.started'), thread_id: z.string().min(1) });
+
+/** Codex's error events in `codex exec --json`: a failed turn, or an error the turn met. */
+const errorEventSchema = z.union([z.object({ type: z.literal('turn.failed'), error: z.object({ message: z.string() }) }), z.object({ type: z.literal('error'), message: z.string() })]);
+
+/** The API error an error event carries as JSON text in its message, as Codex passes a refusal on. */
+const apiErrorSchema = z.object({ error: z.object({ message: z.string(), code: z.string().optional() }) });
+
+const NOT_SUPPORTED = /^The '([^']+)' model is not supported/u;
+
+/** The harness's last error event in its events, as its message says it: an API error by its own message; none without one. */
+function lastErrorIn(events: readonly string[]): { message: string; code?: string } | undefined {
+  for (const line of [...events].reverse()) {
+    const event = errorEventSchema.safeParse(parsedLine(line));
+    if (event.success) {
+      const message = event.data.type === 'turn.failed' ? event.data.error.message : event.data.message;
+      const api = apiErrorSchema.safeParse(parsedLine(message));
+      return api.success ? { message: api.data.error.message, ...(api.data.error.code !== undefined && { code: api.data.error.code }) } : { message };
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Why Codex's start failed, from its last error event (headless H13): the
+ * model it refused when that is the model it launched with (or any, when it
+ * launched with none, so Codex's own default), or else the error's message.
+ * Codex has no hook for a failed turn (#490). Its event shapes are tested on
+ * events captured from `codex exec --json` (test/logs).
+ */
+export function codexErrorIn(at: { events: readonly string[]; model?: string }): { kind: 'refused'; model: string } | { kind: 'cause'; cause: string } | undefined {
+  const error = lastErrorIn(at.events);
+  if (error === undefined) {
     return undefined;
   }
+  const refused = error.code === 'model_not_found' ? NOT_SUPPORTED.exec(error.message)?.[1] : undefined;
+  return refused !== undefined && (at.model === undefined || refused === at.model) ? { kind: 'refused', model: refused } : { kind: 'cause', cause: error.message };
 }
 
 export function createCodexHarness(options: {
   configuration: TrierarchConfiguration;
   plugin: AeolusPlugin;
-  sessions: Pick<SessionRuntime, 'start' | 'type' | 'interrupt' | 'screen'>;
+  sessions: Pick<SessionRuntime, 'start' | 'send' | 'interrupt' | 'events'>;
   /** Codex's own answers, where the aeolus-fleet plugin's hooks are trusted before each launch (#581). */
   setup: Pick<CodexSetup, 'trustAeolusHooks'>;
   /** The program to run; `codex` unless a test runs another. */
@@ -102,14 +147,14 @@ export function createCodexHarness(options: {
       await options.setup.trustAeolusHooks(folder);
       await marks.clear(folder);
       // Codex reads outside its folder as it is: its read-only checkouts need no flag (#1182).
-      await sessions.start({ shipId, folder, command: wordsOf(command), env: { [LAUNCH_VARIABLE]: launchId }, ...(checkouts.length > 0 && { readOnly: checkouts.map((checkout) => checkout.path) }) });
+      await sessions.start({ shipId, folder, command: wordsOf(command), harness, env: { [LAUNCH_VARIABLE]: launchId }, ...(checkouts.length > 0 && { readOnly: checkouts.map((checkout) => checkout.path) }) });
     },
     handOver: async (session) => {
       const line = await handOverLine(session);
       if (line === undefined) {
         return 'nothing';
       }
-      await sessions.type({ shipId: session.shipId, text: wakePromptOf(line), settleMs: CODEX_TYPING_SETTLE_MS });
+      await sessions.send({ shipId: session.shipId, line: wakePromptOf(line) });
       return 'handed';
     },
     forceOver: async ({ shipId, folder, isTurnBusy }) => {
@@ -118,25 +163,22 @@ export function createCodexHarness(options: {
         return 'nothing';
       }
       if (isTurnBusy) {
-        await stopTurn(sessions, { shipId });
+        await sessions.interrupt(shipId);
       }
-      await sessions.type({ shipId, text: wakePromptOf(line), settleMs: CODEX_TYPING_SETTLE_MS });
+      await sessions.send({ shipId, line: wakePromptOf(line) });
       return 'handed';
     },
     marksLaunches: () => marks.isMarking(),
-    // The marker says what the session did (#490); Codex has no hook for a failed turn, so a refusal is read from the session log its session start named.
+    // The marker says what the session did (#490); Codex has no hook for a failed turn, so a refusal, or why a start shows none, is read from its last error event (headless H13).
     launchSeen: async ({ shipId, folder, launchId, model }) => {
-      const marker = await marks.read({ folder, launchId });
-      const log = marker?.transcript === undefined ? undefined : await sessionLog(marker.transcript);
-      const refused = log === undefined ? undefined : codexModelRefusedIn({ log, ...(model !== undefined && { model }) });
-      if (refused !== undefined) {
-        return { kind: 'refused', model: refused };
+      const error = codexErrorIn({ events: await sessions.events(shipId), ...(model !== undefined && { model }) });
+      if (error?.kind === 'refused') {
+        return { kind: 'refused', model: error.model };
       }
-      if (marker?.isActive === true) {
+      if ((await marks.read({ folder, launchId }))?.isActive === true) {
         return { kind: 'active' };
       }
-      const stoppedAt = marker?.isStarted === true ? undefined : codexScreenStoppedAt(await sessions.screen(shipId));
-      return { kind: 'none', ...(stoppedAt !== undefined && { screen: stoppedAt }) };
+      return { kind: 'none', ...(error !== undefined && { cause: error.cause }) };
     },
   };
 }

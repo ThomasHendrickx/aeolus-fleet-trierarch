@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { createServer as createNetServer, type Server as NetServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 
+import type { ShipId } from '@aeolus-fleet/common';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { newId } from '../../test/support/in-memory.js';
@@ -79,12 +80,27 @@ describe('the session runtime contract, on rootless Podman', () => {
 
   sessionRuntimeContract({ runtime: () => runtime, folder: () => folder });
 
+  /** What the session's terminal shows, as one text. */
+  const shown = async (shipId: ShipId): Promise<string> => (await runtime.events(shipId)).join('\n');
+
+  it("stops the session's running turn as Escape does, keeping the session (decision 0040)", async () => {
+    const shipId = newId('ship');
+    // Shell builtins only, as a test image holds no more: the line read starts with Escape when it came first.
+    await runtime.start({ shipId, folder, command: ['sh', '-c', 'read line; case "$line" in "$(printf "\\033")"*) echo "got Escape" ;; *) echo "got no Escape" ;; esac; sleep 30'], harness: 'claude-code' });
+
+    await runtime.interrupt(shipId);
+    await runtime.send({ shipId, line: 'end' });
+
+    await expect.poll(async () => shown(shipId), { timeout: 5000 }).toContain('got Escape');
+    await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running' }]);
+  });
+
   it('hands the session the model token', async () => {
     const shipId = newId('ship');
 
-    await runtime.start({ shipId, folder, command: ['sh', '-c', `[ "$${MODEL_TOKEN_VARIABLE}" = "${MODEL_TOKEN}" ] && echo "token handed"; sleep 30`] });
+    await runtime.start({ shipId, folder, command: ['sh', '-c', `[ "$${MODEL_TOKEN_VARIABLE}" = "${MODEL_TOKEN}" ] && echo "token handed"; sleep 30`], harness: 'claude-code' });
 
-    await expect.poll(async () => runtime.screen(shipId), { timeout: 5000 }).toContain('token handed');
+    await expect.poll(async () => shown(shipId), { timeout: 5000 }).toContain('token handed');
   });
 
   it("gives the session its own ship's home as its home, and nothing of another ship's", async () => {
@@ -102,10 +118,11 @@ describe('the session runtime contract, on rootless Podman', () => {
       shipId: scout,
       folder,
       command: ['sh', '-c', `cd; echo "home $(pwd)"; for file in * .*; do echo "holds $file"; done; read line < ${join(homes, other, 'other.identity')} && echo "read $line"; sleep 30`],
+      harness: 'claude-code',
     });
 
-    await expect.poll(async () => runtime.screen(scout), { timeout: 5000 }).toContain('holds scout.identity');
-    const screen = await runtime.screen(scout);
+    await expect.poll(async () => shown(scout), { timeout: 5000 }).toContain('holds scout.identity');
+    const screen = await shown(scout);
     expect({ home: screen.includes('home /home/ubuntu'), other: screen.includes('holds other.identity'), read: screen.includes('read shipName') }).toEqual({ home: true, other: false, read: false });
   });
 
@@ -123,10 +140,11 @@ describe('the session runtime contract, on rootless Podman', () => {
       shipId: scout,
       folder,
       command: ['sh', '-c', `[ -S ${join(sockets, scout, 'fleet.sock')} ] && echo "own socket"; [ -e ${join(sockets, other, 'fleet.sock')} ] && echo "other socket"; sleep 30`],
+      harness: 'claude-code',
     });
 
-    await expect.poll(async () => runtime.screen(scout), { timeout: 5000 }).toContain('own socket');
-    expect(await runtime.screen(scout)).not.toContain('other socket');
+    await expect.poll(async () => shown(scout), { timeout: 5000 }).toContain('own socket');
+    expect(await shown(scout)).not.toContain('other socket');
   });
 
   it.runIf(process.platform === 'linux')("lets the socket's caller check find a process of the ship's own container, in the container's own namespaces, and only for that ship (decision 0026)", async () => {
@@ -138,7 +156,7 @@ describe('the session runtime contract, on rootless Podman', () => {
     listening.push(server);
 
     // The test image holds no fleet client: its tmux, pointed at the socket, connects as one would.
-    await runtime.start({ shipId: scout, folder, command: ['sh', '-c', `tmux -S ${join(sockets, scout, 'fleet.sock')} list-sessions; sleep 30`] });
+    await runtime.start({ shipId: scout, folder, command: ['sh', '-c', `tmux -S ${join(sockets, scout, 'fleet.sock')} list-sessions; sleep 30`], harness: 'claude-code' });
 
     await expect.poll(() => connections.length, { timeout: 10_000 }).toBeGreaterThan(0);
     const [connection] = connections;
@@ -152,7 +170,7 @@ describe('the session runtime contract, on rootless Podman', () => {
   it("makes the ship's home when it has none yet, for its owner alone", async () => {
     const shipId = newId('ship');
 
-    await runtime.start({ shipId, folder, command: ['sleep', '30'] });
+    await runtime.start({ shipId, folder, command: ['sleep', '30'], harness: 'claude-code' });
 
     expect(statSync(join(homes, shipId)).mode & 0o777).toBe(0o700);
   });
@@ -160,7 +178,7 @@ describe('the session runtime contract, on rootless Podman', () => {
   it('caps the memory and the cpus of the container', async () => {
     const shipId = newId('ship');
 
-    await runtime.start({ shipId, folder, command: ['sleep', '30'] });
+    await runtime.start({ shipId, folder, command: ['sleep', '30'], harness: 'claude-code' });
 
     const limits = await runCommand('podman', { args: ['inspect', '--format', '{{.HostConfig.Memory}} {{.HostConfig.NanoCpus}}', `trierarch-${shipId}`] });
     expect(limits.stdout.trim()).toBe(`${String(512 * 1024 * 1024)} ${String(1_000_000_000)}`);
@@ -206,7 +224,7 @@ describe('the container a session runs in', () => {
 
   async function started(options: { launch?: readonly string[]; binary?: string; env?: Record<string, string> } = {}) {
     const runner = recordingRunner();
-    await runtimeWith(runner, options).start({ shipId, folder, command: ['claude', '--name', 'implementer-b'], ...(options.env !== undefined && { env: options.env }) });
+    await runtimeWith(runner, options).start({ shipId, folder, command: ['claude', '--name', 'implementer-b'], harness: 'claude-code', ...(options.env !== undefined && { env: options.env }) });
     const [run] = runner.runs();
     if (run === undefined) {
       throw new Error('no container was run');
@@ -284,7 +302,7 @@ describe('the container a session runs in', () => {
     const governance = `/home/thomas/.aeolus/trierarch/checkouts/${shipId}/governance`;
     const runner = recordingRunner();
 
-    await runtimeWith(runner).start({ shipId, folder, command: ['claude'], readOnly: [governance] });
+    await runtimeWith(runner).start({ shipId, folder, command: ['claude'], readOnly: [governance], harness: 'claude-code' });
 
     const [run] = runner.runs();
     expect(valuesOf(run?.args ?? [], '--volume')).toContain(`${governance}:${governance}:ro`);
@@ -328,7 +346,7 @@ describe('the container a session runs in', () => {
       return {};
     });
 
-    await runtimeWith(runner).start({ shipId, folder, command: ['claude'], env: { AEOLUS_LAUNCH: 'launch-1' } });
+    await runtimeWith(runner).start({ shipId, folder, command: ['claude'], env: { AEOLUS_LAUNCH: 'launch-1' }, harness: 'claude-code' });
 
     const [run] = runner.runs();
     expect({ seen, isRemoved: !existsSync(run?.envFile ?? '') }).toEqual({ seen: { content: `AEOLUS_LAUNCH=launch-1\n${MODEL_TOKEN_VARIABLE}=${MODEL_TOKEN}\n`, mode: 0o600 }, isRemoved: true });
@@ -343,7 +361,7 @@ describe('the container a session runs in', () => {
   it('refuses an environment value of more than one line, which an env file cannot hold', async () => {
     const runner = recordingRunner();
 
-    await expect(runtimeWith(runner).start({ shipId, folder, command: ['claude'], env: { AEOLUS_LAUNCH: 'one\ntwo' } })).rejects.toThrow('AEOLUS_LAUNCH');
+    await expect(runtimeWith(runner).start({ shipId, folder, command: ['claude'], env: { AEOLUS_LAUNCH: 'one\ntwo' }, harness: 'claude-code' })).rejects.toThrow('AEOLUS_LAUNCH');
   });
 
   it("runs the container through the launch command, so under a systemd unit it lives outside the service's control group (#479, #537)", async () => {

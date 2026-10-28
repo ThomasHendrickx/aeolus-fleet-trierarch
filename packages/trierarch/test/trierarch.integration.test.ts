@@ -25,7 +25,10 @@ import { createTrust } from '../src/adapters/trust.js';
 import { initTrierarch } from '../src/cli/init.js';
 import type { ObservedSession, SessionRuntime } from '../src/core/ports.js';
 import { RESTART_DELAYS_MS } from '../src/core/restart-policy.js';
-import { createCallerCheck } from '../src/adapters/caller-check.js';
+import { createCallerCheck, type SessionRoots } from '../src/adapters/caller-check.js';
+import { createHoldRuntime } from '../src/adapters/hold-runtime.js';
+import { runningVersion } from '../src/adapters/version.js';
+import { FAKE_CLAUDE_CODE, TRIERARCH_PROGRAM } from './support/hold-program.js';
 import { createShipSockets, type ShipSockets } from '../src/adapters/ship-sockets.js';
 import { createRunPass } from '../src/core/run-pass.js';
 import { createHandleDelivery } from '../src/core/handle-delivery.js';
@@ -56,6 +59,8 @@ let paths: TrierarchPaths;
 let openSockets: ShipSockets | undefined;
 let repository: string;
 let pluginData: string;
+/** Stops the holds a test started, before its home is removed. */
+let stopHolds: () => Promise<void> = () => Promise.resolve();
 
 const SKIP = '--dangerously-skip-permissions';
 
@@ -116,9 +121,9 @@ function standInSessions(): SessionRuntime {
         await launchHooks({ folder, env }, [{ hook_event_name: 'SessionStart', source: 'startup' }, { hook_event_name: 'PreToolUse', tool_name: 'Bash' }]);
       }
     },
-    type: () => Promise.resolve(),
+    send: () => Promise.resolve(),
     interrupt: () => Promise.resolve(),
-    screen: (shipId) => Promise.resolve(sessions.has(shipId) ? claudeCodeShows(commands.get(shipId) ?? []) : ''),
+    events: (shipId) => Promise.resolve(sessions.has(shipId) ? claudeCodeShows(commands.get(shipId) ?? []).split('\n') : []),
   };
 }
 
@@ -144,6 +149,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  await stopHolds();
+  stopHolds = () => Promise.resolve();
   await openSockets?.closeAll();
   openSockets = undefined;
   await server.close();
@@ -152,7 +159,10 @@ afterEach(async () => {
 });
 
 /** A trierarch set up with init on a real fleet, with a ship scout of the fleet to crew, and one pass of its loop; Claude Code with the flags given. */
-async function aTrierarchOnTheFleet(claudeCodeFlags: readonly string[] = CONFIGURATION.harnesses['claude-code']?.flags ?? [], at: { sessions?: SessionRuntime; clock?: { now: () => Date } } = {}) {
+async function aTrierarchOnTheFleet(
+  claudeCodeFlags: readonly string[] = CONFIGURATION.harnesses['claude-code']?.flags ?? [],
+  at: { sessions?: SessionRuntime & Partial<SessionRoots>; clock?: { now: () => Date }; claudeCodeProgram?: string } = {},
+) {
   const useCases = createUseCases({ prisma: database });
   const argo = operatorCaller(unwrap(await useCases.initialiseFleet({ name: 'home fleet', ...OPERATOR })));
   const trierarchShip = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'mac-mini', type: 'trierarch', scopes: ['crew:run'] }));
@@ -183,15 +193,24 @@ async function aTrierarchOnTheFleet(claudeCodeFlags: readonly string[] = CONFIGU
     detect: () => Promise.resolve({}),
   });
   const fleet = createRestFleet(await readCrewFile(paths.crewToken));
-  const sessions = at.sessions ?? standInSessions();
-  const harness = createClaudeCodeHarness({ configuration, plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data: pluginData, crews: join(home, '.aeolus', 'crews', 'claude-code') }, projects: join(home, '.claude', 'projects'), sessions, setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }), permissionModes: () => undefined });
+  const sessions: SessionRuntime & Partial<SessionRoots> = at.sessions ?? standInSessions();
+  const harness = createClaudeCodeHarness({
+    configuration,
+    isHeadless: true,
+    plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data: pluginData, crews: join(home, '.aeolus', 'crews', 'claude-code') },
+    projects: join(home, '.claude', 'projects'),
+    sessions,
+    setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
+    permissionModes: () => undefined,
+    ...(at.claudeCodeProgram !== undefined && { command: at.claudeCodeProgram }),
+  });
   const workspace = createGitWorkspace({ configuration, root: paths.worktrees });
   const state = createJsonState(paths.state);
   const clock = at.clock ?? { now: () => new Date() };
   const logger = { warn: () => undefined, action: () => undefined };
   const setup = { configuration, configured: configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
-  // The real caller check: the plugin's scripts run as children of this process, as aeolus-push.sh does of the trierarch.
-  const mayCall = createCallerCheck({ platform: process.platform, sessionRootOf: () => Promise.resolve(undefined) });
+  // The real caller check: the plugin's scripts run as children of this process, as aeolus-push.sh does of the trierarch, or of a session's hold.
+  const mayCall = createCallerCheck({ platform: process.platform, sessionRootOf: (shipId) => sessions.sessionRootOf?.(shipId) ?? Promise.resolve(undefined) });
   const checkouts = createGitCheckouts({ configuration, root: paths.checkouts });
   const sockets = createShipSockets({ root: paths.sockets, fleetUrl: address, crewTokenOf: async (shipId) => (await state.load()).entries[shipId]?.crewToken, mayCall, log: () => undefined, refreshCheckouts: (shipId) => checkouts.refresh(shipId) });
   openSockets = sockets;
@@ -379,19 +398,21 @@ describe("contained access on a real fleet (decision 0026): the session calls ov
 
 /**
  * Sessions as a map, as standInSessions, whose turns run the aeolus-fleet plugin's
- * own hooks as Claude Code runs them in the session's folder: its first
- * prompt and each line typed into an idle session start a turn
- * (UserPromptSubmit), and the test ends the turn (Stop), makes a tool call
- * (PreToolUse) or lets the session die. A line typed while the turn is busy
- * lands mid-turn, where no prompt hook runs (2a). Escape stops a busy turn
- * and runs no hook, as in Claude Code (decision 0040).
+ * own hooks as headless Claude Code runs them in the session's folder: each
+ * user line sent to an idle session, its first prompt among them, starts a
+ * turn (UserPromptSubmit), and the test ends the turn (Stop), makes a tool
+ * call (PreToolUse) or lets the session die. A line sent while the turn is
+ * busy lands mid-turn, where no prompt hook runs (2a). An interrupt stops a
+ * busy turn and runs no hook, as in Claude Code (decision 0040).
  */
 function hookedSessions() {
   const sessions = new Map<ShipId, { status: ObservedSession['status']; folder: string; isBusy: boolean }>();
-  /** Each line typed into a session, and what the hooks put into the turn it started, if any. */
+  /** Each prompt sent to a session, and what the hooks put into the turn it started, if any. */
   const turns: { typed: string; context: string }[] = [];
   /** Each session whose turn was stopped, in order. */
   const interrupts: ShipId[] = [];
+  /** The launch environment of each session whose first prompt has not come yet. */
+  const launched = new Map<ShipId, Readonly<Record<string, string>>>();
 
   async function hook(folder: string, run: { script: string; payload: Record<string, unknown> }): Promise<string> {
     const { script, payload } = run;
@@ -420,14 +441,19 @@ function hookedSessions() {
       sessions.delete(shipId);
       return Promise.resolve();
     },
-    start: async ({ shipId, folder, command, env = {} }) => {
+    start: async ({ shipId, folder, env = {} }) => {
       sessions.set(shipId, { status: 'running', folder, isBusy: false });
+      launched.set(shipId, env);
       await launchHooks({ folder, env }, [{ hook_event_name: 'SessionStart', source: 'startup' }]);
-      await prompt(shipId, command.at(-1) ?? '');
-      await launchHooks({ folder, env }, [{ hook_event_name: 'PreToolUse', tool_name: 'Bash' }]);
     },
-    type: async ({ shipId, text }) => {
-      await prompt(shipId, text);
+    // A user message as headless Claude Code takes it on stdin; the first one's turn makes the launch's first tool call.
+    send: async ({ shipId, line }) => {
+      await prompt(shipId, z.object({ message: z.object({ content: z.string() }) }).parse(JSON.parse(line)).message.content);
+      const env = launched.get(shipId);
+      launched.delete(shipId);
+      if (env !== undefined) {
+        await launchHooks({ folder: folderOf(shipId), env }, [{ hook_event_name: 'PreToolUse', tool_name: 'Bash' }]);
+      }
     },
     interrupt: (shipId) => {
       interrupts.push(shipId);
@@ -437,7 +463,7 @@ function hookedSessions() {
       }
       return Promise.resolve();
     },
-    screen: () => Promise.resolve('❯ \n'),
+    events: () => Promise.resolve([]),
   };
 
   return {
@@ -669,6 +695,90 @@ describe('the trierarch hands messages over on a real fleet (#756): the plugin k
   });
 });
 
+describe('every session restarted at once, each on a hold of its own (#881, headless H8 to H10)', () => {
+  const SHIPS = ['scout', 'lookout', 'helmsman'] as const;
+  /** How long a session that died first waits before it starts again. */
+  const RESTART_WAIT_MS = RESTART_DELAYS_MS[0];
+
+  /** The stand-in for headless Claude Code, running the aeolus-fleet plugin's own hooks in this test's home, as a program the adapter runs. */
+  function aClaudeCodeProgram(): string {
+    const program = join(home, 'claude');
+    const crews = join(home, '.aeolus', 'crews', 'claude-code');
+    writeFileSync(
+      program,
+      `#!/bin/sh\nexport HOME='${home}' AEOLUS_DATA='${pluginData}' AEOLUS_CREWS='${crews}'\nexec ${FAKE_CLAUDE_CODE.join(' ')} --plugin '${PLUGIN_ROOT}' '${pluginData}' "$@"\n`,
+      { mode: 0o755 },
+    );
+    return program;
+  }
+
+  /** Each prompt the session of the ship took, and what the plugin's hooks added to its turn. */
+  function turnsOf(ship: string): { prompt: string; context: string }[] {
+    const turns = join(paths.worktrees, 'aeolus-fleet', ship, 'fake-turns.jsonl');
+    return existsSync(turns)
+      ? readFileSync(turns, 'utf8')
+          .split('\n')
+          .filter((line) => line !== '')
+          .map((line) => z.object({ prompt: z.string(), context: z.string() }).parse(JSON.parse(line)))
+      : [];
+  }
+
+  it('hands each session only its own ship\'s deliveries after the trierarch and every session it runs were started again', async () => {
+    let offsetMs = 0;
+    const clock = { now: () => new Date(Date.now() + offsetMs) };
+    const sessions = createHoldRuntime({ sessions: paths.sessions, program: TRIERARCH_PROGRAM, version: runningVersion(), platform: process.platform });
+    // Stopped before the test's home goes, which afterEach removes: a session would write into it.
+    stopHolds = async () => {
+      for (const session of await sessions.list()) {
+        await sessions.stop(session.shipId);
+      }
+    };
+    const { useCases, argo, trierarchShip, scout, pass, aRunPass } = await aTrierarchOnTheFleet(undefined, { sessions, clock, claudeCodeProgram: aClaudeCodeProgram() });
+    const shipIds = [scout.shipId];
+    for (const name of SHIPS.slice(1)) {
+      shipIds.push(unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name, type: 'reviewer' })).shipId);
+    }
+    for (const shipId of shipIds) {
+      unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } }));
+      unwrap(await useCases.assignCrew(argo, { shipId, trierarchShipId: trierarchShip.shipId }));
+    }
+    await pass();
+    await pass();
+    await expect(sessions.list()).resolves.toHaveLength(SHIPS.length);
+
+    // Every session killed at once, and the trierarch started again (#880, #881).
+    for (const shipId of shipIds) {
+      process.kill((await sessions.sessionRootOf(shipId)) ?? 0, 'SIGKILL');
+    }
+    await expect.poll(async () => (await sessions.list()).map((session) => session.status)).toEqual(SHIPS.map(() => 'exited'));
+    const restarted = aRunPass();
+    await restarted();
+    offsetMs += RESTART_WAIT_MS;
+    await restarted();
+    await expect(sessions.list()).resolves.toEqual(expect.arrayContaining(shipIds.map((shipId) => ({ shipId, status: 'running' }))));
+
+    for (const name of SHIPS) {
+      unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', name }, payload: `Only for ${name}`, idempotencyKey: newKey() }));
+    }
+    // A pass hands each idle session one message: passes run until every message is handled, as the loop runs them.
+    const states = async () => (await database.delivery.findMany({ where: { message: { payload: { startsWith: 'Only for' } } }, select: { state: true } })).map((delivery) => delivery.state);
+    await expect
+      .poll(async () => {
+        await restarted();
+        return states();
+      }, { timeout: 60_000 })
+      .toEqual(SHIPS.map(() => 'handled'));
+
+    for (const name of SHIPS) {
+      const contexts = turnsOf(name).map((turn) => turn.context).join('\n');
+      expect(contexts, name).toContain(`Only for ${name}`);
+      for (const other of SHIPS.filter((each) => each !== name)) {
+        expect(contexts, `${name} took ${other}'s`).not.toContain(`Only for ${other}`);
+      }
+    }
+  }, 120_000);
+});
+
 describe('the trusted repositories on a real fleet (aeolus-fleet#384)', () => {
   /** A ship call over REST with the crew token given, answering the fleet's JSON. */
   async function shipCall(path: string, call: { body: unknown; crewToken?: string }): Promise<unknown> {
@@ -759,7 +869,7 @@ describe('the trusted repositories on a real fleet (aeolus-fleet#384)', () => {
     const offered = withTrustedRepositories(configuration, trustedRepositories);
     const handle = createHandleDelivery({ fleet, logger, trustedRepositories, ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
     const sessions = standInSessions();
-    const harness = createClaudeCodeHarness({ configuration: offered, plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data: pluginData, crews: join(home, '.aeolus', 'crews', 'claude-code') }, projects: join(home, '.claude', 'projects'), sessions, setup: claudeCode, permissionModes: () => undefined });
+    const harness = createClaudeCodeHarness({ configuration: offered, isHeadless: true, plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data: pluginData, crews: join(home, '.aeolus', 'crews', 'claude-code') }, projects: join(home, '.claude', 'projects'), sessions, setup: claudeCode, permissionModes: () => undefined });
     const workspace = createGitWorkspace({ configuration: offered, root: paths.worktrees, clones: trustedClonesOf({ configured: configuration, held: trustedRepositories, root: paths.repositories, protocols: 'file' }) });
     const state = createJsonState(paths.state);
     const trust = createTrust({ configuration: offered, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') });

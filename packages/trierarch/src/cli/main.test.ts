@@ -16,7 +16,7 @@ import { main, USAGE } from './main.js';
 /** The configuration as an operator writes it now (#382): no model, which comes from detection only, and an effort with its default. */
 const CONFIGURED = {
   ...CONFIGURATION,
-  harnesses: { 'claude-code': { flags: ['--remote-control'], options: { effort: { values: { high: ['--effort', 'high'], low: ['--effort', 'low'] }, default: 'high' } } } },
+  harnesses: { 'claude-code': { flags: ['--verbose'], options: { effort: { values: { high: ['--effort', 'high'], low: ['--effort', 'low'] }, default: 'high' } } } },
 };
 
 let home: string;
@@ -60,7 +60,7 @@ describe('aeolus-trierarch', () => {
 
     expect(code).toBe(0);
     expect(output).toContain(`The configuration at ${config} fits.`);
-    expect(output).toContain('claude-code: --remote-control --effort high');
+    expect(output).toContain('claude-code: --verbose --effort high');
   });
 
   it('config check gives the detected options too, an option the operator wrote winning by its name, and the detected model always (#365, #382)', async () => {
@@ -86,7 +86,7 @@ describe('aeolus-trierarch', () => {
     expect(output).toContain('claude-haiku-4-5-20251001');
   });
 
-  it('config check prints the command each harness launches, on a first start and a restart, its prompt with the line no human reads the terminal (#588), with each flag marked as configured or added by the adapter', async () => {
+  it('config check prints the command each harness launches, on a first start and a restart, with each flag marked as configured or added by the adapter: Claude Code headless, its prompt its first line (headless H11), Codex with its prompt and the line no human reads the terminal (#588)', async () => {
     const config = join(home, 'both.json');
     writeFileSync(config, JSON.stringify({ ...CONFIGURED, harnesses: { ...CONFIGURED.harnesses, codex: { flags: ['--dangerously-bypass-approvals-and-sandbox'], options: {} } } }));
 
@@ -94,14 +94,14 @@ describe('aeolus-trierarch', () => {
 
     expect(output).toContain(
       [
-        `  first start: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --permission-mode default (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter) -- "<first prompt>\\n\\n${NO_TERMINAL_QUESTIONS}"`,
-        `  restart: claude --remote-control (configuration) "[<repository or folder>] <ship>" (adapter) --effort high (configuration) --permission-mode default (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter) --continue (adapter) -- "/aeolus-fleet:wake ${NO_TERMINAL_QUESTIONS}"`,
+        `  first start: claude -p --input-format stream-json --output-format stream-json --verbose (adapter) --verbose --effort high (configuration) --permission-mode default (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter)`,
+        `  restart: claude -p --input-format stream-json --output-format stream-json --verbose (adapter) --verbose --effort high (configuration) --permission-mode default (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter) --continue (adapter)`,
       ].join('\n'),
     );
     expect(output).toContain(
       [
-        `  first start: codex --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- "<first prompt>\\n\\n${NO_TERMINAL_QUESTIONS}"`,
-        `  restart: codex resume --last --dangerously-bypass-approvals-and-sandbox (configuration) --no-daemon (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- "$aeolus-fleet-wake ${NO_TERMINAL_QUESTIONS}"`,
+        `  first start: codex exec --dangerously-bypass-approvals-and-sandbox (configuration) --json (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- "<first prompt>\\n\\n${NO_TERMINAL_QUESTIONS}"`,
+        `  restart: codex exec resume --last --dangerously-bypass-approvals-and-sandbox (configuration) --json (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- "$aeolus-fleet-wake ${NO_TERMINAL_QUESTIONS}"`,
       ].join('\n'),
     );
   });
@@ -126,7 +126,7 @@ describe('aeolus-trierarch', () => {
 
     const { output } = await main(['config', 'check', '--config', config], { env: { HOME: home }, managedSettings, platform: 'linux' });
 
-    expect(output).toContain('  first start: claude --permission-mode default (adapter) --disallowedTools');
+    expect(output).toContain('  first start: claude -p --input-format stream-json --output-format stream-json --verbose (adapter) --permission-mode default (adapter) --disallowedTools');
   });
 
   it('config check shows the override with the mode the detected Claude Code lists: manual where it lists manual (#517)', async () => {
@@ -143,7 +143,7 @@ describe('aeolus-trierarch', () => {
 
     const { output } = await main(['config', 'check', '--config', config], machine({ HOME: home }));
 
-    expect(output).toContain('  first start: claude --permission-mode manual (adapter) --disallowedTools');
+    expect(output).toContain('  first start: claude -p --input-format stream-json --output-format stream-json --verbose (adapter) --permission-mode manual (adapter) --disallowedTools');
   });
 
   it('config check shows no --permission-mode default when the flags name a permission mode of their own (#507)', async () => {
@@ -152,7 +152,7 @@ describe('aeolus-trierarch', () => {
 
     const { output } = await main(['config', 'check', '--config', config], machine({ HOME: home }));
 
-    expect(output).toContain('  first start: claude --permission-mode acceptEdits (configuration) --disallowedTools');
+    expect(output).toContain('  first start: claude -p --input-format stream-json --output-format stream-json --verbose (adapter) --permission-mode acceptEdits (configuration) --disallowedTools');
   });
 
   it('config check gives the flags each adapter adds, beside the configured ones, as JSON with --json', async () => {
@@ -164,20 +164,18 @@ describe('aeolus-trierarch', () => {
     expect(JSON.parse(output)).toMatchObject({
       harnesses: {
         'claude-code': {
-          flags: ['--remote-control', '--effort', 'high'],
+          flags: ['--verbose', '--effort', 'high'],
           adapterFlags: [
             { flag: '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', when: 'always' },
             { flag: '--continue', when: 'restart' },
           ],
           restart: [
             { words: ['claude'] },
-            { words: ['--remote-control'], source: 'configuration' },
-            { words: ['[<repository or folder>] <ship>'], source: 'adapter' },
-            { words: ['--effort', 'high'], source: 'configuration' },
+            { words: ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'], source: 'adapter' },
+            { words: ['--verbose', '--effort', 'high'], source: 'configuration' },
             { words: ['--permission-mode', 'default'], source: 'adapter', when: 'the Claude Code settings for the folder make plan the default mode' },
             { words: ['--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode'], source: 'adapter' },
             { words: ['--continue'], source: 'adapter' },
-            { words: ['--', `/aeolus-fleet:wake ${NO_TERMINAL_QUESTIONS}`] },
           ],
         },
       },
@@ -273,7 +271,7 @@ describe('aeolus-trierarch', () => {
 
     expect(JSON.parse(output)).toMatchObject({
       path: config,
-      harnesses: { 'claude-code': { flags: ['--remote-control', '--effort', 'high'], options: { effort: { high: ['--effort', 'high'], low: ['--effort', 'low'] } } } },
+      harnesses: { 'claude-code': { flags: ['--verbose', '--effort', 'high'], options: { effort: { high: ['--effort', 'high'], low: ['--effort', 'low'] } } } },
     });
   });
 

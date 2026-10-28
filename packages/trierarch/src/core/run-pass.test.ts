@@ -739,6 +739,16 @@ describe('the launch window: a crew is final once its session shows activity (#3
     ]);
   });
 
+  it('names the cause its harness gave, as a refused login, when it gives the request back (H13)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none', cause: 'Not logged in · Please run /login' } });
+    trierarch.clock.advance(MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 1, reason: 'mac-studio: no activity within a minute of its start, claude-code said: Not logged in · Please run /login' }]);
+  });
+
   it('waits out the minute before it gives the request back', async () => {
     const trierarch = aTrierarch();
     const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' } });
@@ -1087,6 +1097,51 @@ describe('a session is watched and woken from the moment it runs, whatever the c
     await trierarch.pass();
 
     expect(trierarch.harness.handOvers).toEqual([]);
+  });
+});
+
+describe('a session an older trierarch started, after an upgrade (H19)', () => {
+  it('is started again, continuing its conversation, once its turn is idle, with no restart counted', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.processes.upgrade(shipId);
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.launches.filter((launch) => launch.shipId === shipId).map((launch) => launch.isFirstStart)).toEqual([true, false]);
+    expect(trierarch.processes.otherVersion.has(shipId)).toBe(false);
+    expect(trierarch.state.current().entries[shipId]?.exits).toEqual([]);
+    expect(trierarch.state.current().entries[shipId]?.state).toBe('running');
+  });
+
+  it('is left running and handed nothing, not even a forced message, while its turn is busy', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.processes.upgrade(shipId);
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'busy');
+    trierarch.fleet.deliver(shipId, 1);
+    trierarch.fleet.force(shipId, 1);
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.launches.filter((launch) => launch.shipId === shipId)).toHaveLength(1);
+    expect(trierarch.harness.forcedOver).toEqual([]);
+    expect(trierarch.harness.handOvers).toEqual([]);
+    expect(trierarch.processes.sessions.get(shipId)).toBe('running');
+  });
+
+  it('is handed nothing once started again until it shows its turn idle, as any session', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.processes.upgrade(shipId);
+    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.fleet.deliver(shipId, 1);
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.handOvers).toEqual([]);
+    expect(trierarch.harness.launches.filter((launch) => launch.shipId === shipId)).toHaveLength(2);
   });
 });
 

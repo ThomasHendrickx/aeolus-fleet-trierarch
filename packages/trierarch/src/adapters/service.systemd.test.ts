@@ -11,11 +11,14 @@ import { createContainerRuntime } from './container.js';
 import { trierarchPaths } from './paths.js';
 import { runCommand } from './run-command.js';
 import { createService, serviceEnvironment, SYSTEMD_UNIT } from './service.js';
-import { createTmux, sessionsLaunch } from './tmux.js';
+import { TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
+import { createHoldRuntime, sessionsLaunch } from './hold-runtime.js';
+import { runningVersion } from './version.js';
 
 // The unit the trierarch writes, run by the real systemd user manager under a
-// name of the test's own. Its command starts a tmux server the way the
-// trierarch starts its sessions, in a scope of its own. The user manager is the
+// name of the test's own. Its command starts a tmux server, standing in for
+// any process the trierarch starts outside its service, the way the trierarch
+// starts its sessions' holds: in a scope of its own. The user manager is the
 // machine's own, the one a live trierarch runs under, so the tests run only
 // where AEOLUS_TEST_USER_SYSTEMD=1 asks for them, as CI does on a runner that
 // hosts no trierarch (#886), and there wherever the user manager starts units,
@@ -27,7 +30,7 @@ const systemd = await userSystemd({ isAskedFor: process.env[USER_SYSTEMD_TESTS_V
 const SESSION_TIMEOUT_MS = 10_000;
 const TEST_TIMEOUT_MS = 60_000;
 
-/** How the trierarch launches its tmux server under a systemd unit. */
+/** How the trierarch starts a session's hold under a systemd unit. */
 const UNDER_SYSTEMD = sessionsLaunch({ platform: 'linux', env: { INVOCATION_ID: 'test' } });
 
 let folder: string;
@@ -90,7 +93,6 @@ describe('the systemd user unit on this machine', () => {
     await systemctl('daemon-reload');
     await systemctl('reset-failed', name);
     await runCommand('tmux', { args: ['-S', socket, 'kill-server'] });
-    await runCommand('tmux', { args: ['-L', 'sessions', 'kill-server'] });
     rmSync(folder, { recursive: true, force: true });
     vi.unstubAllEnvs();
 
@@ -125,14 +127,15 @@ describe('the systemd user unit on this machine', () => {
     TEST_TIMEOUT_MS,
   );
 
-  it('starts the trierarch tmux server in a scope of its own under a systemd unit', async () => {
-    const tmux = createTmux({ server: 'sessions', launch: UNDER_SYSTEMD });
+  it("starts each session's hold in a scope of its own under a systemd unit (headless H8)", async () => {
+    const runtime = createHoldRuntime({ sessions: join(folder, 'sessions'), program: TRIERARCH_PROGRAM, version: runningVersion(), platform: 'linux', launch: UNDER_SYSTEMD });
+    const shipId = newId('ship');
 
-    await tmux.start({ shipId: newId('ship'), folder, command: ['sleep', '30'] });
+    await runtime.start({ shipId, folder, command: ['sleep', '30'], harness: 'claude-code' });
 
-    const pid = (await runCommand('tmux', { args: ['-L', 'sessions', 'display-message', '-p', '#{pid}'] })).stdout.trim();
-    const scope = unitOf(pid);
+    const scope = unitOf(String(await runtime.sessionRootOf(shipId)));
     scopes.push(scope);
+    await runtime.stop(shipId);
     expect({ isScope: scope.endsWith('.scope'), isThisProcess: scope === unitOf(String(process.pid)) }).toEqual({ isScope: true, isThisProcess: false });
   });
 });
@@ -187,7 +190,7 @@ describe('container sessions under the systemd user unit on this machine', () =>
     const shipId = newId('ship');
     const runtime = createContainerRuntime({ binary: 'podman', image, tokenFile, homes: join(containerFolder, 'homes'), sockets: join(containerFolder, 'sockets'), memory: '512m', cpus: 1, owner: `trierarch-test-${shipId.slice(-8)}`, launch: UNDER_SYSTEMD });
 
-    await runtime.start({ shipId, folder: containerFolder, command: ['sleep', '30'] });
+    await runtime.start({ shipId, folder: containerFolder, command: ['sleep', '30'], harness: 'claude-code' });
 
     container = `trierarch-${shipId}`;
     const monitor = (await runCommand('podman', { args: ['inspect', '--format', '{{.State.ConmonPid}}', container] })).stdout.trim();

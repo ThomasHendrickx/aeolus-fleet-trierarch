@@ -4,6 +4,8 @@ import { dirname } from 'node:path';
 import { idSchema, trierarchConfigurationSchema as commonConfigurationSchema, trierarchNameSchema, type ShipId } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
+import { withoutRemoteControl } from '../core/remote-control.js';
+
 /**
  * The trierarch's own files: its configuration, written by the operator, and
  * its crew file, written by `init`: the fleet's URL and the trierarch's own
@@ -80,6 +82,22 @@ export async function loadConfiguration(path: string): Promise<TrierarchConfigur
     throw new TrierarchFileError(`The configuration at ${path} does not fit:\n${z.prettifyError(parsed.error)}`);
   }
   return parsed.data;
+}
+
+/**
+ * Takes Remote Control out of the configuration at the path, keeping all else
+ * it holds (headless H20): answers the harnesses whose flags carried it; none
+ * without a configuration that fits.
+ */
+export async function removeRemoteControl(path: string): Promise<readonly string[]> {
+  const configuration = await loadConfiguration(path).catch(() => undefined);
+  const without = configuration === undefined ? undefined : withoutRemoteControl(configuration);
+  if (without === undefined || without.harnesses.length === 0) {
+    return [];
+  }
+  const raw = z.record(z.string(), z.unknown()).parse(JSON.parse(await readFile(path, 'utf8')));
+  await writeFile(path, `${JSON.stringify({ ...raw, harnesses: without.configuration.harnesses }, null, 2)}\n`);
+  return without.harnesses;
 }
 
 /** The fleet, the trierarch's own ship and its crew token. A crew file written before the ship id was kept lacks it. */
