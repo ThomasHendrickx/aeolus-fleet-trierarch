@@ -179,6 +179,16 @@ describe('workspaces in git', () => {
 
     expect(await workspace().worktrees()).toEqual([{ path: join(root, 'aeolus-fleet', 'scout'), repository: 'aeolus-fleet', name: 'scout' }]);
   });
+
+  it('lists a folder git no longer knows in a configured repository as an orphan (#1295)', async () => {
+    await workspace().prepare(scout);
+    mkdirSync(join(root, 'aeolus-fleet', 'gone'));
+
+    expect([...(await workspace().worktrees())].sort((first, second) => first.path.localeCompare(second.path))).toEqual([
+      { path: join(root, 'aeolus-fleet', 'gone'), repository: 'aeolus-fleet', name: 'gone' },
+      { path: join(root, 'aeolus-fleet', 'scout'), repository: 'aeolus-fleet', name: 'scout' },
+    ]);
+  });
 });
 
 describe('workspaces of a trusted repository the machine does not have (aeolus-fleet#384)', () => {
@@ -251,5 +261,11 @@ describe('workspaces of a trusted repository the machine does not have (aeolus-f
     await trustedWorkspace({ url: undefined, isListed: false }).remove(made);
 
     expect(existsSync(made)).toBe(false);
+  });
+
+  it('lists a worktree of a clone whose repository left the trusted repositories as an orphan (#1295)', async () => {
+    const { folder: made } = await trustedWorkspace({ url: remote(), protocols: 'file' }).prepare(crew);
+
+    expect(await trustedWorkspace({ url: undefined, isListed: false }).worktrees()).toEqual([{ path: made, repository: 'hemma', name: 'scout' }]);
   });
 });
