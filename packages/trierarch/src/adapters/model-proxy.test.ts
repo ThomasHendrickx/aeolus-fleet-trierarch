@@ -8,12 +8,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { newId } from '../../test/support/in-memory.js';
 import { createKeyFiles } from './key-files.js';
 import { createModelProxy } from './model-proxy.js';
+import { createKeyStates } from './key-states.js';
 import { writeProxyToken } from './proxy-tokens.js';
 
 /** Made-up secrets: no test holds a real one. */
 const ANTHROPIC_KEY = 'test-anthropic-key-not-real';
 const OPENAI_KEY = 'test-openai-key-not-real';
 const TOKEN = 'test-session-token-one';
+const AT = new Date('2026-10-28T14:02:00.000Z');
+const keyStatesFile = () => join(home, 'proxy', 'key-states.json');
+const keyStateOf = (harness: 'claude-code' | 'codex') => createKeyStates({ keys: join(home, 'keys'), file: keyStatesFile() }).stateOf(harness);
 /** A pid no process has: the hold of a stopped session. */
 const GONE_PID = 2_147_483_000;
 
@@ -29,6 +33,8 @@ let sessions: string;
 let servers: Server[];
 let vendor: { url: string; asked: Asked[] };
 let proxyUrl: string;
+/** What the vendor answers: a success naming the path it was asked, unless a test sets otherwise. */
+let vendorAnswer: { status: number; body: string } | undefined;
 
 async function listen(server: Server): Promise<string> {
   servers.push(server);
@@ -49,8 +55,8 @@ async function aVendor(): Promise<{ url: string; asked: Asked[] }> {
       });
       request.on('end', () => {
         asked.push({ method: request.method, path: request.url, headers: request.headers, body });
-        response.writeHead(200, { 'content-type': 'application/json' });
-        response.end(JSON.stringify({ answered: request.url }));
+        response.writeHead(vendorAnswer?.status ?? 200, { 'content-type': 'application/json' });
+        response.end(vendorAnswer?.body ?? JSON.stringify({ answered: request.url }));
       });
     }),
   );
@@ -71,11 +77,12 @@ beforeEach(async () => {
   sessions = join(home, 'sessions');
   mkdirSync(sessions);
   servers = [];
+  vendorAnswer = undefined;
   vendor = await aVendor();
   const keys = createKeyFiles(join(home, 'keys'));
   await keys.write('claude-code', ANTHROPIC_KEY);
   await keys.write('codex', OPENAI_KEY);
-  const proxy = createModelProxy({ sessions, keys: join(home, 'keys'), version: '0.34.0', vendors: { 'claude-code': vendor.url, codex: vendor.url } });
+  const proxy = createModelProxy({ sessions, keys: join(home, 'keys'), keyStates: keyStatesFile(), version: '0.34.0', vendors: { 'claude-code': vendor.url, codex: vendor.url }, now: () => AT });
   proxyUrl = await listen(createServer(proxy.handle));
 });
 
@@ -204,6 +211,38 @@ describe('the model proxy', () => {
       expect(text).not.toContain(OPENAI_KEY);
       expect(text).not.toContain(ANTHROPIC_KEY);
     }
+  });
+
+  it("records the key out of credit from the vendor's answer, and passes the answer on as it came (api keys K9)", async () => {
+    await aSession({ harness: 'claude-code', token: TOKEN });
+    vendorAnswer = { status: 402, body: JSON.stringify({ type: 'error', error: { type: 'billing_error', message: 'no credit' } }) };
+
+    const answer = await ask('/anthropic/v1/messages', { token: TOKEN });
+
+    expect(answer.status).toBe(402);
+    await expect(answer.json()).resolves.toEqual({ type: 'error', error: { type: 'billing_error', message: 'no credit' } });
+    await expect(keyStateOf('claude-code')).resolves.toEqual({ state: 'outOfCredit', at: AT.toISOString() });
+    await expect(keyStateOf('codex')).resolves.toEqual({ state: 'ready' });
+  });
+
+  it("records the key refused from the vendor's 401", async () => {
+    await aSession({ harness: 'codex', token: TOKEN });
+    vendorAnswer = { status: 401, body: JSON.stringify({ error: { message: 'Incorrect API key provided', type: 'invalid_request_error', code: 'invalid_api_key' } }) };
+
+    await ask('/openai/v1/responses', { token: TOKEN });
+
+    await expect(keyStateOf('codex')).resolves.toEqual({ state: 'refused', at: AT.toISOString() });
+  });
+
+  it('records the key ready again once the vendor answers it', async () => {
+    await aSession({ harness: 'claude-code', token: TOKEN });
+    vendorAnswer = { status: 402, body: JSON.stringify({ type: 'error', error: { type: 'billing_error', message: 'no credit' } }) };
+    await ask('/anthropic/v1/messages', { token: TOKEN });
+
+    vendorAnswer = undefined;
+    await ask('/anthropic/v1/messages', { token: TOKEN });
+
+    await expect(keyStateOf('claude-code')).resolves.toEqual({ state: 'ready' });
   });
 
   it('answers its version to whoever asks its state, so the trierarch knows it runs', async () => {

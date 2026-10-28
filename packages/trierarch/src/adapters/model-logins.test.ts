@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createKeyFiles, type KeyFiles } from './key-files.js';
+import { createKeyStates } from './key-states.js';
 import { createModelLogins } from './model-logins.js';
 
 /** Claude Code's settings and Codex's login as a test gives them: no key in reach unless it says so. */
@@ -13,6 +14,7 @@ let codexLogin: 'chatgpt' | 'apiKey' | 'none';
 let askedFolders: (string | undefined)[];
 let askedOptions: Readonly<Record<string, string>>[];
 const harnesses = () => ({
+  keyStates: createKeyStates({ keys: join(home, 'keys'), file: join(home, 'proxy', 'key-states.json') }),
   claudeCode: {
     keyInReach: (at: { options: Readonly<Record<string, string>>; folder?: string }) => {
       askedFolders.push(at.folder);
@@ -91,6 +93,31 @@ describe('whether a session can start on its login (api keys K9)', () => {
     await keys.write('claude-code', 'test-key-not-real');
 
     await expect(createModelLogins({ keys, runtime: 'host', ...harnesses() }).startProblem({ harness: 'claude-code', login: 'apiKey', options: {} })).resolves.toBeUndefined();
+  });
+
+  it('not on an API key out of credit, naming since when and that it is checked', async () => {
+    await keys.write('claude-code', 'test-key-not-real');
+    await createKeyStates({ keys: join(home, 'keys'), file: join(home, 'proxy', 'key-states.json') }).record('claude-code', { state: 'outOfCredit', at: new Date('2026-10-28T14:02:00.000Z') });
+
+    await expect(createModelLogins({ keys, runtime: 'host', ...harnesses() }).startProblem({ harness: 'claude-code', login: 'apiKey' })).resolves.toBe(
+      "claude-code's API key is out of credit since 2026-10-28T14:02:00.000Z: it is checked every 15 minutes, or at once with aeolus-trierarch login claude-code --check",
+    );
+  });
+
+  it('not on an API key its vendor refused, saying to give it a new one', async () => {
+    await keys.write('codex', 'test-key-not-real');
+    await createKeyStates({ keys: join(home, 'keys'), file: join(home, 'proxy', 'key-states.json') }).record('codex', { state: 'refused', at: new Date('2026-10-28T14:02:00.000Z') });
+
+    await expect(createModelLogins({ keys, runtime: 'host', ...harnesses() }).startProblem({ harness: 'codex', login: 'apiKey' })).resolves.toBe(
+      "codex's API key was refused by its vendor since 2026-10-28T14:02:00.000Z: give it a new one with aeolus-trierarch login codex --api-key",
+    );
+  });
+
+  it("says each harness's key state", async () => {
+    await keys.write('codex', 'test-key-not-real');
+
+    await expect(createModelLogins({ keys, runtime: 'host', ...harnesses() }).keyState('codex')).resolves.toEqual({ state: 'ready' });
+    await expect(createModelLogins({ keys, runtime: 'host', ...harnesses() }).keyState('claude-code')).resolves.toEqual({ state: 'none' });
   });
 });
 
