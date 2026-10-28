@@ -6,6 +6,7 @@ import { idSchema } from '@aeolus-fleet/common';
 import { createTrierarchCallerCheck } from '../adapters/caller-check.js';
 import { runHold } from '../adapters/hold.js';
 import { holdFilesOf } from '../adapters/hold-protocol.js';
+import { readProxyToken } from '../adapters/proxy-tokens.js';
 import { runningVersion } from '../adapters/version.js';
 
 /**
@@ -13,7 +14,9 @@ import { runningVersion } from '../adapters/version.js';
  * --harness <name> [--env NAME=value]... -- <command>...`: the hold of one
  * session (headless H8), as the trierarch starts it, never a person. The
  * harness's environment is built from nothing (H10): HOME and PATH from the
- * hold's own, then each `--env` given; nothing else of the trierarch's.
+ * hold's own, then each `--env` given, and with `--proxy-token-variable` the
+ * session's proxy token from its folder in that variable (api keys K7);
+ * nothing else of the trierarch's.
  */
 
 /** What the harness takes of the hold's own environment; everything else it is given. */
@@ -56,12 +59,19 @@ export async function holdCommand(words: readonly string[], at: { env: Readonly<
       return pair === undefined || separator < 1 ? [] : [[pair.slice(0, separator), pair.slice(separator + 1)]];
     }),
   );
+  const files = holdFilesOf(sessions, shipId.data);
+  const tokenVariable = options.includes('--proxy-token-variable') ? valueOf('--proxy-token-variable') : undefined;
+  const proxyToken = tokenVariable === undefined ? undefined : await readProxyToken(files.folder);
+  if (tokenVariable !== undefined && proxyToken === undefined) {
+    process.stderr.write(`No proxy token in ${files.folder}\n`);
+    return 2;
+  }
   return runHold({
-    files: holdFilesOf(sessions, shipId.data),
+    files,
     folder,
     harness,
     command,
-    environment: harnessEnvironment(at.env, given),
+    environment: harnessEnvironment(at.env, { ...given, ...(tokenVariable !== undefined && proxyToken !== undefined && { [tokenVariable]: proxyToken.token }) }),
     version: runningVersion(),
     mayCall: createTrierarchCallerCheck({ platform: at.platform, sessionRoots: () => holdPids(sessions) }),
   });

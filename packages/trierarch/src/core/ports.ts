@@ -1,6 +1,7 @@
 import type { ClearOutcome, CrewStatus, ShipId, TrierarchConfiguration, TrierarchReportDetails, TrierarchWorkspace } from '@aeolus-fleet/common';
 
 import type { TrierarchState } from './entry.js';
+import type { Login } from './login.js';
 import type { Machine } from './machine.js';
 import type { MachineLoad } from './machine-load.js';
 import type { TokenCounts } from './token-cost.js';
@@ -185,6 +186,8 @@ export interface HarnessPort {
     isFirstStart: boolean;
     /** Fresh for each start (#490): the session's hooks mark this launch, and nothing of another counts. */
     launchId: string;
+    /** The one login the session runs on (api keys K6): the model proxy with a token of its own, or the subscription alone. */
+    login: Login;
     firstPrompt?: string;
   }): Promise<void>;
   turnOf(session: { shipId: ShipId; folder: string }): Promise<Turn>;
@@ -237,13 +240,34 @@ export interface SessionRuntime {
    * Starts the command in the folder, with the environment given, in a new session for the ship; an exited one is replaced. `harness` names the harness the command runs, for how its turn is stopped;
    * `readOnly` names its read-only checkouts (#1182), which a container mounts read-only and the host leaves as they are.
    */
-  start(session: { shipId: ShipId; folder: string; command: readonly string[]; harness: string; env?: Readonly<Record<string, string>>; readOnly?: readonly string[] }): Promise<void>;
+  start(session: { shipId: ShipId; folder: string; command: readonly string[]; harness: string; env?: Readonly<Record<string, string>>; readOnly?: readonly string[]; proxyToken?: ProxyToken }): Promise<void>;
   /** Sends one line to the session's harness as its next input. */
   send(at: { shipId: ShipId; line: string }): Promise<void>;
   /** Stops the session's running turn and waits for its end, within a bound; the session goes on (decision 0040, headless H12). */
   interrupt(shipId: ShipId): Promise<void>;
   /** What the session's harness wrote last, one line each, oldest first: its events, or its screen in a terminal; none with no session. */
   events(shipId: ShipId): Promise<readonly string[]>;
+}
+
+/**
+ * Whether a session of a harness can start on a login now (api keys K9): an
+ * API key that is not ready holds back every session on it, and it never
+ * starts on the subscription instead (K2).
+ */
+export interface ModelLoginsPort {
+  /** Why no session of the harness can start on the login now, such as a key not ready; none when one can. */
+  startProblem(at: { harness: string; login: Login }): Promise<string | undefined>;
+}
+
+/**
+ * A session's own token for the model proxy (headless H16, api keys K7): kept
+ * in a file of the session's own and handed to its harness in the variable
+ * named, never on a command line or in the environment it is started with.
+ */
+export interface ProxyToken {
+  readonly harness: string;
+  readonly variable: string;
+  readonly token: string;
 }
 
 /** The processes running in a folder, whatever started them: a dev server a session left behind. */

@@ -1,9 +1,11 @@
+import { randomBytes } from 'node:crypto';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { ShipId, TrierarchConfiguration } from '@aeolus-fleet/common';
 
-import type { AdapterFlag, HarnessPort, SessionRuntime } from '../core/ports.js';
+import type { Login } from '../core/login.js';
+import type { AdapterFlag, HarnessPort, ProxyToken, SessionRuntime } from '../core/ports.js';
 import { createHostClaudeCodeHomes, createShipClaudeCodeHomes } from './claude-code-home.js';
 import { claudeCodeScreenStoppedAt } from './claude-code-screen.js';
 import { parsedLine } from './hold-protocol.js';
@@ -47,6 +49,8 @@ export const WAKE_PROMPT = '/aeolus-fleet:wake';
 
 /** The variable a session's launch id is passed in, for the plugin's hooks to mark that launch (#490). */
 export const LAUNCH_VARIABLE = 'AEOLUS_LAUNCH';
+/** How many random bytes a session's proxy token holds. */
+const PROXY_TOKEN_BYTES = 32;
 
 /** Print mode, taking and giving stream-json: one long-lived process, one user message per stdin line (headless H11). */
 const HEADLESS = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'];
@@ -200,8 +204,25 @@ export function createClaudeCodeHarness(options: {
   permissionModes: () => readonly string[] | undefined;
   /** The program to run; `claude` unless a test runs another. */
   command?: string;
+  /** Where sessions on an API key reach the model proxy (headless H16); none before it first listened, or on a machine with no proxy. */
+  proxyUrl?: () => Promise<string | undefined>;
 }): HarnessPort {
   const { configuration, plugin, sessions, isHeadless } = options;
+  /**
+   * The session's way to its model (api keys K6): on an API key, the model
+   * proxy's address and a token of the session's own, fresh for each start;
+   * on the subscription, nothing, so it signs in as Claude Code does.
+   */
+  const routeOf = async (login: Login): Promise<{ env: Record<string, string>; proxyToken?: ProxyToken }> => {
+    if (login === 'subscription') {
+      return { env: {} };
+    }
+    const url = await options.proxyUrl?.();
+    if (url === undefined) {
+      throw new Error('the model proxy is not running yet');
+    }
+    return { env: { ANTHROPIC_BASE_URL: `${url}/anthropic` }, proxyToken: { harness: 'claude-code', variable: 'ANTHROPIC_AUTH_TOKEN', token: randomBytes(PROXY_TOKEN_BYTES).toString('base64url') } };
+  };
   /** A prompt as the session takes it: a stream-json line headless, the text typed in a terminal. */
   const lineOf = (prompt: string): string => (isHeadless ? userLine(prompt) : prompt);
   const homes =
@@ -220,11 +241,12 @@ export function createClaudeCodeHarness(options: {
     },
     turnOf: (session) => identityOf(session.shipId).turnOf(session),
     startProblem: () => createPluginIdentity(plugin).startProblem(),
-    launch: async ({ shipId, folder, checkouts, harness, options: picked, isFirstStart, launchId, firstPrompt }) => {
+    launch: async ({ shipId, folder, checkouts, harness, options: picked, isFirstStart, launchId, login, firstPrompt }) => {
       const settings = configuration.harnesses[harness];
       if (settings === undefined) {
         throw new Error(`The configuration has no harness ${harness}`);
       }
+      const route = await routeOf(login);
       const home = homes.of(shipId);
       await homes.prepare({ shipId, folder });
       const prompt = isFirstStart && firstPrompt !== undefined ? firstPromptOf(firstPrompt) : wakePromptOf(WAKE_PROMPT);
@@ -241,7 +263,7 @@ export function createClaudeCodeHarness(options: {
       });
       const marks = marksOf(shipId);
       await marks.clear(folder);
-      await sessions.start({ shipId, folder, command: wordsOf(command), harness, env: { [LAUNCH_VARIABLE]: launchId }, ...(checkouts.length > 0 && { readOnly: checkouts.map((checkout) => checkout.path) }) });
+      await sessions.start({ shipId, folder, command: wordsOf(command), harness, env: { [LAUNCH_VARIABLE]: launchId, ...route.env }, ...(route.proxyToken !== undefined && { proxyToken: route.proxyToken }), ...(checkouts.length > 0 && { readOnly: checkouts.map((checkout) => checkout.path) }) });
       if (isHeadless) {
         await sessions.send({ shipId, line: userLine(prompt) });
       }

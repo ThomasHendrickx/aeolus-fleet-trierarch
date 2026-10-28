@@ -1,7 +1,7 @@
 import type { ShipId } from '@aeolus-fleet/common';
 import { describe, expect, it } from 'vitest';
 
-import { aTrierarch, CONFIGURATION, crewSettings, InMemoryCheckouts, InMemoryShipSockets, newId, NOTES_FOLDER, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
+import { aTrierarch, aTrierarchOnLogins, CONFIGURATION, crewSettings, InMemoryCheckouts, InMemoryShipSockets, newId, NOTES_FOLDER, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
 import type { LaunchSeen } from './ports.js';
 import { RESTART_BUDGET } from './restart-policy.js';
 
@@ -2499,7 +2499,7 @@ describe("each session's login (api keys K5, K6, K9)", () => {
   const NO_KEY = 'claude-code has no API key on this computer';
 
   it('starts a session on its harness\'s default login and keeps it with the session', async () => {
-    const trierarch = aTrierarch(CONFIGURATION, {}, ON_KEY);
+    const trierarch = aTrierarchOnLogins(ON_KEY);
 
     const shipId = await aCrewedShip(trierarch);
 
@@ -2508,7 +2508,7 @@ describe("each session's login (api keys K5, K6, K9)", () => {
   });
 
   it("starts a session on its ship's own login before its harness's default", async () => {
-    const trierarch = aTrierarch(CONFIGURATION, {}, { ...ON_KEY, ships: { scout: 'subscription' } });
+    const trierarch = aTrierarchOnLogins({ ...ON_KEY, ships: { scout: 'subscription' } });
 
     const shipId = await aCrewedShip(trierarch);
 
@@ -2524,7 +2524,7 @@ describe("each session's login (api keys K5, K6, K9)", () => {
   });
 
   it('a restart whose key is not ready starts nothing: the ship waits restarting, with no restart counted, and never moves to the subscription', async () => {
-    const trierarch = aTrierarch(CONFIGURATION, {}, ON_KEY);
+    const trierarch = aTrierarchOnLogins(ON_KEY);
     const shipId = await aCrewedShip(trierarch);
     trierarch.processes.exit(shipId);
     await trierarch.pass();
@@ -2540,7 +2540,7 @@ describe("each session's login (api keys K5, K6, K9)", () => {
   });
 
   it('a waiting ship starts once its key is ready again, with no restart counted (K10)', async () => {
-    const trierarch = aTrierarch(CONFIGURATION, {}, ON_KEY);
+    const trierarch = aTrierarchOnLogins(ON_KEY);
     const shipId = await aCrewedShip(trierarch);
     trierarch.processes.exit(shipId);
     await trierarch.pass();
@@ -2556,7 +2556,7 @@ describe("each session's login (api keys K5, K6, K9)", () => {
   });
 
   it('after the machine restarts, a ship whose key is not ready waits restarting instead of starting', async () => {
-    const trierarch = aTrierarch(CONFIGURATION, {}, ON_KEY);
+    const trierarch = aTrierarchOnLogins(ON_KEY);
     const shipId = await aCrewedShip(trierarch);
     trierarch.processes.restartMachine();
     trierarch.modelLogins.problems.set('claude-code:apiKey', NO_KEY);
@@ -2568,7 +2568,7 @@ describe("each session's login (api keys K5, K6, K9)", () => {
   });
 
   it('a first crew whose key is not ready starts nothing and fails as a crew that cannot start does (#827)', async () => {
-    const trierarch = aTrierarch(CONFIGURATION, {}, ON_KEY);
+    const trierarch = aTrierarchOnLogins(ON_KEY);
     trierarch.modelLogins.problems.set('claude-code:apiKey', NO_KEY);
     const shipId = trierarch.fleet.commission('scout');
     trierarch.fleet.request(shipId, crewSettings());

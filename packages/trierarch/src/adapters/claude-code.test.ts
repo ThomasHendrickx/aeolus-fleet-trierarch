@@ -121,7 +121,8 @@ describe('Claude Code on its login (api keys K6, K7)', () => {
     await harness({ isHeadless: true, proxyUrl: PROXY }).launch({ ...launchOf(shipId), login: 'apiKey', options: {}, isFirstStart: true });
 
     expect(started[0]?.env).toMatchObject({ ANTHROPIC_BASE_URL: `${PROXY}/anthropic` });
-    expect(started[0]?.proxyToken).toEqual({ harness: 'claude-code', variable: 'ANTHROPIC_AUTH_TOKEN', token: expect.stringMatching(/^[\w-]{32,}$/u) });
+    expect(started[0]?.proxyToken).toMatchObject({ harness: 'claude-code', variable: 'ANTHROPIC_AUTH_TOKEN' });
+    expect(started[0]?.proxyToken?.token).toMatch(/^[\w-]{32,}$/u);
     expect(Object.values(started[0]?.env ?? {})).not.toContain(started[0]?.proxyToken?.token);
   });
 

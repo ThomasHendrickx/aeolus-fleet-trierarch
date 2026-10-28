@@ -4,7 +4,8 @@ import { putEntry, removeEntry, withState, type Entry, type Orphan, type Trierar
 import { crashText, discardedText, identityGoneText, modelRefusedText, ownerUnreachableText, settingsRefusedText, stoppedOfferingText } from './argo-reports.js';
 import { MODEL_OPTION } from './detected-options.js';
 import { countStart, PROBE_AFTER_MINUTES, withConfiguration, type StartOutcome } from './failed-starts.js';
-import type { Checkout, CheckoutsPort, FleetPort, FolderProcessesPort, HarnessPort, LaunchSeen, LoggedAction, Logger, SessionRuntime, ShipSocketsPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
+import { loginOf, type Login, type Logins } from './login.js';
+import type { Checkout, CheckoutsPort, FleetPort, FolderProcessesPort, HarnessPort, LaunchSeen, LoggedAction, Logger, ModelLoginsPort, SessionRuntime, ShipSocketsPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { HOLDS_IDENTITY, reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
 import type { RefuseModel } from './refuse-model.js';
 import type { Clock } from './shared/clock.js';
@@ -44,6 +45,10 @@ export interface RunPassDeps {
   newLaunchId: () => string;
   /** The ships' sockets its sessions call the fleet over (decision 0026). */
   sockets: ShipSocketsPort;
+  /** Which login each session runs on, as the configuration gives it (api keys K5); every session on its subscription without. */
+  logins?: Logins;
+  /** Whether a session can start on its login now (api keys K9). */
+  modelLogins: ModelLoginsPort;
 }
 
 const NEXT_AFTER_FAILURE = 'the next pass tries again; aeolus-trierarch status and list show where it stands';
@@ -211,8 +216,16 @@ async function observe(state: TrierarchState, at: { deps: RunPassDeps; missingPl
   const ships: Record<string, Observed['ships'][string]> = {};
   const launches: Record<string, LaunchSeen> = {};
   const withoutIdentity: ShipId[] = [];
+  const startProblems: Record<string, string> = {};
   for (const entry of Object.values(state.entries)) {
     const session = sessions.find((each) => each.shipId === entry.shipId);
+    // Asked only of an entry whose session would start: a running session keeps the login it started with (K3).
+    if (entry.state === 'restarting' || (entry.state === 'running' && session === undefined)) {
+      const problem = await deps.modelLogins.startProblem({ harness: entry.harness, login: sessionLogin(entry, deps) });
+      if (problem !== undefined) {
+        startProblems[entry.shipId] = problem;
+      }
+    }
     const { folder } = entry;
     const harness = missingPlugins.has(entry.harness) ? undefined : harnessOf(entry, deps);
     // A crewing session's launch window (#382), and a final crew's first minute after a restart (#397).
@@ -244,7 +257,7 @@ async function observe(state: TrierarchState, at: { deps: RunPassDeps; missingPl
       ships[entry.shipId] = { inbox: await deps.fleet.inbox(crewToken), turn, isHolding };
     }
   }
-  return { sessions, worktrees, ships, launches, withoutIdentity };
+  return { sessions, worktrees, ships, launches, withoutIdentity, startProblems };
 }
 
 function log(deps: RunPassDeps, logged: Omit<LoggedAction, 'time'>): void {
@@ -321,6 +334,7 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
         // The session that held its messages is gone: its store marks them for the session started now (#756).
         await harness?.sessionDied({ shipId: entry.shipId, folder: entry.folder });
         const launchId = deps.newLaunchId();
+        const login = sessionLogin(entry, deps);
         await harness?.launch({
           shipId: entry.shipId,
           // An entry saved before the ship's name was kept goes by its id.
@@ -332,10 +346,11 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
           options: entry.options,
           isFirstStart: false,
           launchId,
+          login,
         });
         log(deps, { ...about(state, { shipId: entry.shipId, action: 'launch' }), outcome: `started again in ${entry.folder}` });
         // Its first minute is checked from now, while it runs (#397).
-        const next = putEntry(state, { ...entry, launchedAt: deps.clock.now().toISOString(), launchId });
+        const next = putEntry(state, { ...entry, launchedAt: deps.clock.now().toISOString(), launchId, login });
         await deps.state.save(next);
         return next;
       }
@@ -362,6 +377,11 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
       return state;
     }
   }
+}
+
+/** The login the entry's next session starts on (api keys K5): an entry saved before its ship's name was kept goes by its id. */
+function sessionLogin(entry: Entry, deps: RunPassDeps): Login {
+  return loginOf({ ...(deps.logins !== undefined && { logins: deps.logins }), harness: entry.harness, shipName: entry.shipName ?? entry.shipId });
 }
 
 interface EntryAt {
@@ -407,7 +427,8 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   }
   await deps.fleet.writeStatus(crewing.shipId, writtenStatusOf(withState(crewing, { state: 'crewing', now: deps.clock.now() })));
   // Registered only once the crew can start, so a crew that cannot never takes the ship's lease (#827).
-  const problem = await harness.startProblem();
+  const login = sessionLogin({ ...crewing, shipName: ship.name }, deps);
+  const problem = (await harness.startProblem()) ?? (await deps.modelLogins.startProblem({ harness: crewing.harness, login }));
   if (problem !== undefined) {
     return crewFailed(state, { entry: crewing, deps, reason: problem });
   }
@@ -446,11 +467,12 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
     options: crewing.options,
     isFirstStart: !crewing.hasStarted,
     launchId,
+    login,
     ...(!crewing.hasStarted && crewing.firstPrompt !== undefined && { firstPrompt: crewing.firstPrompt }),
   });
   // Crewing still: its launch window is open, and only activity in it makes the crew final (#382).
   const { crewFailures, ...started } = crewing;
-  const next = putEntry(state, { ...(crewFailures === undefined ? crewing : started), shipName: ship.name, folder, hasStarted: true, launchedAt: deps.clock.now().toISOString(), launchId });
+  const next = putEntry(state, { ...(crewFailures === undefined ? crewing : started), shipName: ship.name, folder, hasStarted: true, launchedAt: deps.clock.now().toISOString(), launchId, login });
   await deps.state.save(next);
   log(deps, { shipId: crewing.shipId, shipName: ship.name, action: 'crew', outcome: `crewed, ${crewing.harness} started in ${folder}` });
   return next;

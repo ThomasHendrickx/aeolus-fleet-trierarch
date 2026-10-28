@@ -4,6 +4,7 @@ import type { TrierarchConfiguration } from '../../src/adapters/files.js';
 
 import { EMPTY_STATE, type TrierarchState } from '../../src/core/entry.js';
 import { createHandleDelivery } from '../../src/core/handle-delivery.js';
+import type { Login, Logins } from '../../src/core/login.js';
 import type {
   ArgoReport,
   AssignedRequest,
@@ -43,6 +44,7 @@ import type {
   ModelTokens,
   SubscriptionWindow,
   UsagePort,
+  ModelLoginsPort,
 } from '../../src/core/ports.js';
 import type { MachineLoad } from '../../src/core/machine-load.js';
 import { createReadLoad } from '../../src/core/read-load.js';
@@ -454,6 +456,8 @@ export class InMemoryHarness implements HarnessPort {
   readonly launches: { shipId: ShipId; shipName: string; folder: string; workspace: TrierarchWorkspace; isFirstStart: boolean; firstPrompt?: string }[] = [];
   /** The launch id of each launch, in order (#490). */
   readonly launchIds: string[] = [];
+  /** The login each launch started its session on, in order (api keys K6). */
+  readonly launchedLogins: { shipId: ShipId; login: Login }[] = [];
   /** The read-only checkouts each launch gave its session, in order (#1182). */
   readonly launchedCheckouts: { shipId: ShipId; checkouts: readonly Checkout[] }[] = [];
   /** Each hand-over the trierarch made, by ship (#756). */
@@ -499,13 +503,14 @@ export class InMemoryHarness implements HarnessPort {
     return Promise.resolve();
   }
 
-  launch(session: { shipId: ShipId; shipName: string; folder: string; workspace: TrierarchWorkspace; checkouts: readonly Checkout[]; isFirstStart: boolean; launchId: string; firstPrompt?: string }): Promise<void> {
+  launch(session: { shipId: ShipId; shipName: string; folder: string; workspace: TrierarchWorkspace; checkouts: readonly Checkout[]; isFirstStart: boolean; launchId: string; login: Login; firstPrompt?: string }): Promise<void> {
     if (this.isFailingLaunch) {
       return Promise.reject(new Error(`the harness could not start ${session.shipId}`));
     }
     const { shipId, shipName, folder, workspace, checkouts, isFirstStart, launchId, firstPrompt } = session;
     this.launches.push({ shipId, shipName, folder, workspace, isFirstStart, ...(firstPrompt !== undefined && { firstPrompt }) });
     this.launchIds.push(launchId);
+    this.launchedLogins.push({ shipId, login: session.login });
     this.launchedCheckouts.push({ shipId, checkouts });
     this.processes.sessions.set(shipId, 'running');
     this.processes.otherVersion.delete(shipId);
@@ -859,9 +864,23 @@ export class InMemoryUsage implements UsagePort {
   }
 }
 
+/** Whether a session can start on a login: every login can, until a test gives one a problem by `<harness>:<login>`. */
+export class InMemoryModelLogins implements ModelLoginsPort {
+  readonly problems = new Map<string, string>();
+
+  startProblem(at: { harness: string; login: Login }): Promise<string | undefined> {
+    return Promise.resolve(this.problems.get(`${at.harness}:${at.login}`));
+  }
+}
+
 /** A trierarch on in-memory ports. */
 export function aTrierarch(configuration: TrierarchConfiguration = CONFIGURATION, detected: Detected = {}) {
   return trierarchOn({ configuration, detected, pluginShipId: PLUGIN_SHIP_ID });
+}
+
+/** A trierarch on in-memory ports, its sessions on the logins given (api keys K5). */
+export function aTrierarchOnLogins(logins: Logins) {
+  return trierarchOn({ configuration: CONFIGURATION, detected: {}, pluginShipId: PLUGIN_SHIP_ID, logins });
 }
 
 /** A trierarch on in-memory ports on a machine set up before init kept the trierarch plugin's ship (aeolus-fleet#384). */
@@ -869,8 +888,9 @@ export function aTrierarchSetUpBefore() {
   return trierarchOn({ configuration: CONFIGURATION, detected: {}, pluginShipId: undefined });
 }
 
-function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Detected; pluginShipId: ShipId | undefined }) {
-  const { configuration, detected, pluginShipId } = at;
+function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Detected; pluginShipId: ShipId | undefined; logins?: Logins }) {
+  const { configuration, detected, pluginShipId, logins } = at;
+  const modelLogins = new InMemoryModelLogins();
   const state = new InMemoryState();
   const fleet = new InMemoryFleet();
   const processes = new InMemoryProcesses();
@@ -913,7 +933,7 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
   const sockets = new InMemoryShipSockets([harness, codex]);
   const checkouts = new InMemoryCheckouts(configuration);
   const folderProcesses = new InMemoryFolderProcesses();
-  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, folderProcesses, workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId, sockets });
+  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, folderProcesses, workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId, sockets, modelLogins, ...(logins !== undefined && { logins }) });
   const uninstall = createUninstall({ processes, state });
   const machine = new InMemoryMachine();
   const usage = new InMemoryUsage();
@@ -928,7 +948,7 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
     return delivery;
   }
 
-  return { fleet, processes, folderProcesses, harness, codex, workspace, checkouts, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver, refusals, sockets, trustedRepositories, machine, usage, readLoad, readUsage };
+  return { fleet, processes, folderProcesses, harness, codex, modelLogins, workspace, checkouts, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver, refusals, sockets, trustedRepositories, machine, usage, readLoad, readUsage };
 }
 
 export type Trierarch = ReturnType<typeof aTrierarch>;

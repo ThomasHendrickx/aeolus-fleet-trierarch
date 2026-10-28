@@ -25,6 +25,8 @@ export interface Observed {
   readonly launches: Readonly<Record<string, LaunchSeen>>;
   /** The entries it would watch or report on whose folder holds no identity, so it cannot see their inbox or report for them (#659, #664). */
   readonly withoutIdentity: readonly ShipId[];
+  /** By ship id, why its session cannot start on its login now, as a key not ready (api keys K9): it waits, restarting, with no restart counted. */
+  readonly startProblems?: Readonly<Record<string, string>>;
 }
 
 export type Action =
@@ -341,7 +343,7 @@ function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean; i
     case 'running':
       return runningStep(entry, context);
     case 'restarting':
-      return entry.restartAt !== undefined && now >= new Date(entry.restartAt) && canStart
+      return entry.restartAt !== undefined && now >= new Date(entry.restartAt) && canStart && observed.startProblems?.[entry.shipId] === undefined
         ? { entry: withState(withoutLaunch(entry), { state: 'running', now }), actions: [{ kind: 'launch', shipId: entry.shipId }], starts: 1 }
         : NOTHING;
     case 'crashed':
@@ -443,6 +445,10 @@ function modelRefusal(entry: Entry, at: { model: string | undefined; versions: R
 function runningStep(entry: Entry, context: ReconcileContext & { canStart: boolean }): Step {
   const { observed, now, canStart } = context;
   const session = observed.sessions.find((each) => each.shipId === entry.shipId);
+  if (session === undefined && observed.startProblems?.[entry.shipId] !== undefined) {
+    // Its login cannot start it now (api keys K9): it waits, restarting, until it can, with no restart counted.
+    return { entry: withState(withoutLaunch(entry), { state: 'restarting', now }), actions: [], starts: 0 };
+  }
   if (session === undefined) {
     // No session at all, as after the machine restarts: start it again, with no restart counted.
     return canStart ? { entry: withoutLaunch(entry), actions: [{ kind: 'launch', shipId: entry.shipId }], starts: 1 } : NOTHING;

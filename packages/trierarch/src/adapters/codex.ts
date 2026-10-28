@@ -137,10 +137,14 @@ export function createCodexHarness(options: {
 
   return {
     ...identity,
-    launch: async ({ shipId, folder, checkouts, harness, options: picked, isFirstStart, launchId, firstPrompt }) => {
+    launch: async ({ shipId, folder, checkouts, harness, options: picked, isFirstStart, launchId, login, firstPrompt }) => {
       const settings = configuration.harnesses[harness];
       if (settings === undefined) {
         throw new Error(`The configuration has no harness ${harness}`);
+      }
+      // Never on its subscription instead (api keys K2): a Codex session on an API key is not offered yet.
+      if (login === 'apiKey') {
+        throw new Error('codex does not run on an API key yet');
       }
       const prompt = isFirstStart && firstPrompt !== undefined ? firstPromptOf(firstPrompt) : wakePromptOf(WAKE_PROMPT);
       const command = codexCommandLine({ flags: effectiveFlags(settings, picked), prompt, isFirstStart, ...(options.command !== undefined && { program: options.command }) });
