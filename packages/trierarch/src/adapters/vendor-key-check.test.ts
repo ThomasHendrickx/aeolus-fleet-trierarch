@@ -84,4 +84,22 @@ describe('the vendor key check', () => {
     expect('cause' in checked ? checked.cause : '').toMatch(/^Anthropic could not be reached at http:\/\/127\.0\.0\.1:9: /u);
     expect(JSON.stringify(checked)).not.toContain(KEY);
   });
+
+  it('refuses a key with a character no key holds, such as a line break, without sending it or quoting it (api keys K7)', async () => {
+    const vendor = await aVendor(200, { data: [] });
+    const broken = 'test-key\nnot-real';
+
+    const checked = await checkKey({ harness: 'claude-code', key: broken, vendorUrl: vendor.url });
+
+    expect(checked).toEqual({ kind: 'refused', cause: 'The key holds a character no API key holds, such as a line break or a space' });
+    expect(vendor.asked).toEqual([]);
+    expect(JSON.stringify(checked)).not.toContain('test-key');
+    expect(JSON.stringify(checked)).not.toContain('not-real');
+  });
+
+  it("names how the vendor could not be reached by its error code, never the error's message, which may quote the request", async () => {
+    const checked = await checkKey({ harness: 'codex', key: KEY, vendorUrl: 'http://127.0.0.1:9' });
+
+    expect(checked).toEqual({ kind: 'unreachable', cause: 'OpenAI could not be reached at http://127.0.0.1:9 (ECONNREFUSED)' });
+  });
 });
