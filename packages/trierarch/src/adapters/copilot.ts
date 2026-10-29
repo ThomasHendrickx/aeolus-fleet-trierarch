@@ -192,15 +192,19 @@ export function createCopilotHarness(options: {
       return 'handed';
     },
     marksLaunches: () => marks.isMarking(),
-    notOfferedReason: () => {
+    notOfferedReason: async () => {
+      // The trierarch's upgrade installs no Copilot plugin: the reason says Copilot's own command.
+      if ((await plugin.root().catch(() => undefined)) === undefined) {
+        return 'its aeolus-fleet plugin is not installed for Copilot: copilot plugin install aeolus-fleet@aeolus-fleet';
+      }
       if (options.isInContainer) {
-        return Promise.resolve('Copilot is not proven in a container: the container runtime runs claude-code only');
+        return 'Copilot is not proven in a container: the container runtime runs claude-code only';
       }
       const version = options.detectedVersion();
       if (version === undefined) {
-        return Promise.resolve(`its Copilot CLI version is not detected yet: the hooks of its aeolus-fleet plugin are proven on ${proven}`);
+        return `its Copilot CLI version is not detected yet: the hooks of its aeolus-fleet plugin are proven on ${proven}`;
       }
-      return Promise.resolve(COPILOT_PROVEN_VERSIONS.includes(version) ? undefined : `Copilot CLI ${version} is not proven: the hooks of its aeolus-fleet plugin are proven on ${proven}`);
+      return COPILOT_PROVEN_VERSIONS.includes(version) ? undefined : `Copilot CLI ${version} is not proven: the hooks of its aeolus-fleet plugin are proven on ${proven}`;
     },
     // The marker says what the session did (#490); what Copilot says before any hook runs, a refused model or login, is read from its output (headless H13).
     launchSeen: async ({ shipId, folder, launchId, model }) => {

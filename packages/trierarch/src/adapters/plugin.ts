@@ -34,17 +34,26 @@ function placesOf(at: { homeDirectory: string; env: Readonly<Record<string, stri
  * Copilot gives its hooks (`COPILOT_PLUGIN_DATA`, as Copilot CLI 1.0.105 sets
  * it), both in COPILOT_HOME when it is set, unless AEOLUS_COPILOT_PLUGIN_ROOT
  * and AEOLUS_COPILOT_PLUGIN_DATA name others, as for a plugin Copilot loads
- * live from a local marketplace.
+ * live from a local marketplace. Unlike Claude Code's and Codex's, a missing
+ * one does not stop the trierarch at start: the machine does not offer
+ * Copilot until it is installed.
  */
-async function findCopilotPlugin(at: { homeDirectory: string; env: Readonly<Record<string, string | undefined>>; crews: string }): Promise<AeolusPlugin> {
+function findCopilotPlugin(at: { homeDirectory: string; env: Readonly<Record<string, string | undefined>>; crews: string }): Promise<AeolusPlugin> {
   const { env } = at;
   const copilotHome = env.COPILOT_HOME ?? join(at.homeDirectory, '.copilot');
   const data = env.AEOLUS_COPILOT_PLUGIN_DATA ?? join(copilotHome, 'plugin-data', 'aeolus-fleet', 'aeolus-fleet');
   const root = env.AEOLUS_COPILOT_PLUGIN_ROOT ?? join(copilotHome, 'installed-plugins', 'aeolus-fleet', 'aeolus-fleet');
-  if (env.AEOLUS_COPILOT_PLUGIN_ROOT === undefined && (await stat(root).catch(() => undefined)) === undefined) {
-    throw new Error(`The aeolus-fleet plugin is not installed for Copilot (nothing in ${root}): install it, or set AEOLUS_COPILOT_PLUGIN_ROOT`);
+  if (env.AEOLUS_COPILOT_PLUGIN_ROOT !== undefined) {
+    return Promise.resolve({ root: () => Promise.resolve(root), data, crews: at.crews });
   }
-  return { root: () => Promise.resolve(root), data, crews: at.crews };
+  // Looked for at each use, never at start: the trierarch starts without it, names Copilot as not offered, and finds it once installed (#1212).
+  const installed = async (): Promise<string> => {
+    if ((await stat(root).catch(() => undefined)) === undefined) {
+      throw new Error(`The aeolus-fleet plugin is not installed for Copilot (nothing in ${root}): install it, or set AEOLUS_COPILOT_PLUGIN_ROOT`);
+    }
+    return root;
+  };
+  return Promise.resolve({ root: installed, data, crews: at.crews });
 }
 
 /**
