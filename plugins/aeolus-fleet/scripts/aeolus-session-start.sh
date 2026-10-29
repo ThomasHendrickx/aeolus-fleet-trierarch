@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# SessionStart hook (startup, resume, clear, compact). Exports the session's
-# folder and the plugin's paths for the session's commands, then, when the
-# folder crews a ship, tells the fresh context which one and how to go on.
+# SessionStart hook (startup, resume, clear, compact; Copilot: new, resume).
+# Exports the session's folder and the plugin's paths for the session's
+# commands, then, when the folder crews a ship, tells the fresh context which
+# one and how to go on.
 # Silent otherwise. Never blocks the session: a refused folder is a non-blocking error.
 set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
@@ -27,7 +28,7 @@ if ships="$(aeolus_ships_dir 2>/dev/null)"; then
   done
 fi
 
-if [ -n "${PLUGIN_ROOT:-}" ]; then
+if aeolus_codex_hook; then
   [ "$refused" -eq 0 ] || exit 1
   model="$(aeolus_json_string "$payload" model)"
   session_id="$(aeolus_json_string "$payload" session_id)"
@@ -93,6 +94,43 @@ if [ -n "${PLUGIN_ROOT:-}" ]; then
   [ -n "$checkouts" ] && context="${context} ${checkouts}"
   aeolus_log "$identity" sessionStart "told the session after ${source_event:-start} which ship it crews, ${told}"
   printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(aeolus_json_escape "$context")"
+  exit 0
+fi
+
+# Copilot exports nothing to the session's commands, so the context names what
+# each command sets for the scripts to find the folder's ship.
+if [ "${AEOLUS_HARNESS:-}" = copilot ]; then
+  [ "$refused" -eq 0 ] || exit 1
+  identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
+  identity_text="$(aeolus_identity_read "$identity")" || exit 0
+  ship_name="$(aeolus_identity_field "$identity_text" shipName)"
+  ship_id="$(aeolus_identity_field "$identity_text" shipId)"
+  fleet_url="$(aeolus_identity_field "$identity_text" fleetUrl)"
+  squadron="$(aeolus_identity_field "$identity_text" squadron)"
+  run="AEOLUS_HARNESS=copilot AEOLUS_DATA='${AEOLUS_DATA}' AEOLUS_FOLDER='${AEOLUS_FOLDER}'"
+  context="This folder crews the Aeolus ship ${ship_name} (${ship_id}) in the fleet at ${fleet_url}. Run every Aeolus Fleet script with ${run} before it: every fleet call goes through ${run} \"${root}/scripts/aeolus-fleet.sh\", which adds the crew token: never read the identity file or pass a crew token. Do not register again. It states the model this session runs on every send: state none yourself."
+  if [ -n "$squadron" ]; then
+    context="${context} This ship is a member of the squadron ${squadron}. Before anything else, check in at its flagship ${squadron}, as the Aeolus Fleet crew-a-ship skill says for a squadron member."
+    check_in="$(aeolus_identity_field "$identity_text" checkIn)"
+    [ -n "$check_in" ] && context="${context} Its check-in interval is ${check_in}: report at least once per interval; the plugin reminds you when one passes without a report."
+  fi
+  checkouts="$(aeolus_checkouts_context "$identity_text" "${run} \"${root}/scripts/aeolus-checkouts.sh\" refresh")"
+  [ -n "$checkouts" ] && context="${context} ${checkouts}"
+  if aeolus_woken_by_trierarch "$identity_text"; then
+    # A pushed lease (#756): the trierarch hands each message over, so the session receives nothing itself.
+    if aeolus_reports_here "$identity_text"; then
+      handle="fetch the protocol. Receive and ack nothing: this ship is pushed, so the trierarch hands each message over and it comes into the turn through the plugin's hooks. Then"
+    else
+      handle='fetch the protocol, receive and handle what waits; then'
+    fi
+    context="${context} Go on as the Aeolus Fleet crew-a-ship skill says: ${handle} end your turn. The trierarch wakes this session when work arrives: start no watcher."
+    told='and that the trierarch wakes it'
+  else
+    context="${context} Go on as the Aeolus Fleet crew-a-ship skill says: fetch the protocol, receive and handle what waits; then end your turn."
+    told='and to handle what waits'
+  fi
+  aeolus_log "$identity" sessionStart "told the session after ${source_event:-start} which ship it crews, ${told}"
+  aeolus_hook_context SessionStart "$context"
   exit 0
 fi
 

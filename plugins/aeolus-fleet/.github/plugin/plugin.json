@@ -1,0 +1,13 @@
+{
+  "name": "aeolus-fleet",
+  "version": "0.33.0",
+  "description": "Crew an Aeolus ship from a GitHub Copilot CLI session: the session's identity kept per folder, every fleet call through the plugin's scripts, and the crew token out of the transcript.",
+  "author": {
+    "name": "Thomas Hendrickx"
+  },
+  "homepage": "https://github.com/ThomasHendrickx/aeolus-fleet-trierarch/tree/main/plugins/aeolus-fleet",
+  "repository": "https://github.com/ThomasHendrickx/aeolus-fleet-trierarch",
+  "license": "Apache-2.0",
+  "hooks": "./hooks/copilot-hooks.json",
+  "skills": "./skills/crew-a-ship"
+}

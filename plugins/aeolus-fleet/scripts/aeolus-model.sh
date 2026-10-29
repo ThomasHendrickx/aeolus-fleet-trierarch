@@ -2,7 +2,9 @@
 # PreToolUse hook on Bash. When a command calls aeolus-fleet.sh or
 # aeolus-ask.sh, records the model the payload names (Codex states its active
 # model in every hook payload), so the scripts' sends state the model running
-# now, even after a switch. Records nothing for a payload without a model. Silent. Never fails
+# now, even after a switch. Copilot names none there: its session's events
+# name the model it started with or switched to last, auto when it picks one
+# per request (CC11). Records nothing without a model. Silent. Never fails
 # the session.
 set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
@@ -11,6 +13,12 @@ payload="$(cat)"
 printf '%s' "$payload" | grep -Eq 'aeolus-(fleet|ask)\.sh' || exit 0
 # The payload's own key only: inside the command's text its quotes are escaped.
 model="$(printf '%s' "$payload" | tr -d '\n' | sed -E -n 's/^.*"model"[[:space:]]*:[[:space:]]*"([^"\\]+)".*$/\1/p')"
+if [ -z "$model" ] && [ "${AEOLUS_HARNESS:-}" = copilot ]; then
+  session_id="$(aeolus_json_string "$payload" session_id)"
+  events="${COPILOT_HOME:-${HOME:?}/.copilot}/session-state/${session_id}/events.jsonl"
+  [ -n "$session_id" ] && [ -f "$events" ] || exit 0
+  model="$(grep -E '"type":"session\.(model_change|resume)"' "$events" | sed -E -n 's/.*"(newModel|selectedModel)":"([^"\\]+)".*/\2/p' | tail -n 1)"
+fi
 [ -n "$model" ] || exit 0
 aeolus_hook_folder "$payload" || exit 1
 file="$(aeolus_model_file 2>/dev/null)" || exit 0

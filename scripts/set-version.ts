@@ -5,7 +5,7 @@
  * @aeolus-fleet/common or @aeolus-fleet/core, keeps its range: that train has
  * a version of its own (decision 0049). The exports lose the
  * @aeolus-fleet/source condition: it points into src, which the tarball does
- * not ship (aeolus-fleet#968). Both manifests of the aeolus-fleet plugin carry the
+ * not ship (aeolus-fleet#968). Every manifest of the aeolus-fleet plugin carries the
  * same version. Used by the release and candidate workflows, the publish dry
  * run and the session image build in CI.
  *
@@ -20,10 +20,11 @@ import { z } from 'zod';
 
 export const PUBLISHED_PACKAGES = ['trierarch'] as const;
 
-/** The aeolus-fleet plugin's Claude Code and Codex manifests, released together. */
+/** The aeolus-fleet plugin's Claude Code, Codex and Copilot manifests, released together. */
 export const PLUGIN_MANIFESTS = [
   'plugins/aeolus-fleet/.claude-plugin/plugin.json',
   'plugins/aeolus-fleet/.codex-plugin/plugin.json',
+  'plugins/aeolus-fleet/.github/plugin/plugin.json',
 ] as const;
 
 const SCOPE = '@aeolus-fleet/';

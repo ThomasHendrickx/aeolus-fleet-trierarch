@@ -93,6 +93,23 @@ aeolus_crews_known() {
   [ -n "${AEOLUS_CREWS:-}" ] || [ -n "${AEOLUS_HARNESS:-}" ] || [ -n "${PLUGIN_ROOT:-}" ] || [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]
 }
 
+# Whether a Codex hook runs: Codex sets PLUGIN_ROOT in its hooks. Copilot sets
+# it too, and its hooks file names its harness (AEOLUS_HARNESS=copilot).
+aeolus_codex_hook() {
+  [ -n "${PLUGIN_ROOT:-}" ] && [ "${AEOLUS_HARNESS:-codex}" = codex ]
+}
+
+# What a hook adds to the session's context, as its harness reads it: Copilot
+# reads additionalContext at the top level, Claude Code and Codex inside
+# hookSpecificOutput. <hook event> <text>
+aeolus_hook_context() {
+  if [ "${AEOLUS_HARNESS:-}" = copilot ]; then
+    printf '{"additionalContext":"%s"}\n' "$(aeolus_json_escape "$2")"
+  else
+    printf '{"hookSpecificOutput":{"hookEventName":"%s","additionalContext":"%s"}}\n' "$1" "$(aeolus_json_escape "$2")"
+  fi
+}
+
 # Where the identities of the harness's sessions live (decision 0015):
 # ~/.aeolus/crews/<harness>, outside the plugin's data folder, so uninstalling
 # the plugin cannot delete them (#658). AEOLUS_CREWS names another folder, as
