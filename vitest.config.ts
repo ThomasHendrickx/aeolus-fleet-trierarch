@@ -109,9 +109,9 @@ export default defineConfig({
       {
         extends: true,
         test: {
-          // The aeolus-fleet plugin in a real Claude Code or Codex session, against a
+          // The aeolus-fleet plugin in a real Claude Code, Codex or Copilot session, against a
           // fleet on this machine. Each file runs only when its variable is set
-          // (AEOLUS_PLUGIN_E2E, AEOLUS_PLUGIN_CODEX_E2E), never in CI.
+          // (AEOLUS_PLUGIN_E2E, AEOLUS_PLUGIN_CODEX_E2E, AEOLUS_PLUGIN_COPILOT_E2E), never in CI.
           name: 'plugin:e2e',
           include: ['e2e/**/*.e2e.test.ts'],
           fileParallelism: false,
