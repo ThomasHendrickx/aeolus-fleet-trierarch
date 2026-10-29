@@ -8,7 +8,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -79,6 +79,35 @@ function inSession(script: string, options: { args?: string[]; stdin?: string; e
     env: scriptEnvironment({ HOME: home, AEOLUS_HARNESS: 'copilot', AEOLUS_DATA: data, AEOLUS_FOLDER: folder, AEOLUS_RETRY_SECONDS: '0', ...options.env }),
   });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+}
+
+/** Runs a script as a Copilot session's command does, beside the stub fleet it may call. */
+function inSessionInBackground(script: string): Promise<Run> {
+  const child = spawn('bash', [join(SCRIPTS, script)], {
+    cwd: folder,
+    env: scriptEnvironment({ HOME: home, AEOLUS_HARNESS: 'copilot', AEOLUS_DATA: data, AEOLUS_FOLDER: folder, AEOLUS_RETRY_SECONDS: '0', AEOLUS_POLL_SECONDS: '0' }),
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
+  child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
+  return new Promise((resolve) => {
+    child.on('close', (status) => {
+      resolve({ status, stdout, stderr });
+    });
+  });
+}
+
+/** A process named as the watcher, its pid where the plugin looks for the folder's watcher. */
+function aRunningWatcher() {
+  const bin = join(data, 'bin');
+  mkdirSync(bin, { recursive: true });
+  const watcher = join(bin, 'aeolus-wait.sh');
+  writeFileSync(watcher, '#!/usr/bin/env bash\nsleep 30\n');
+  chmodSync(watcher, 0o700);
+  const process = spawn('bash', [watcher]);
+  writeFileSync(inSession('aeolus-identity.sh', { args: ['path'] }).stdout.trim().replace(/\.identity$/, '.watch.pid'), `${String(process.pid)}\n`);
+  return process;
 }
 
 /** Runs a hook as Copilot does: the payload on stdin, Copilot's variables and the hooks file's set, beside the stub fleet it may call. */
@@ -194,11 +223,12 @@ describe("the Copilot hooks file: each role of the delivery protocol on the hook
     expect(copilotHooks().SessionStart?.map((entry) => entry.bash)).toEqual([running('aeolus-session-start.sh'), running('aeolus-launch.sh')]);
   });
 
-  it('confirms a hand-over at the first tool call and marks the launch active at PreToolUse, and records the model at a Bash call', () => {
+  it('confirms a hand-over at the first tool call, guards the watcher and marks the launch active at PreToolUse, and records the model at a Bash call', () => {
     const preToolUse = copilotHooks().PreToolUse ?? [];
 
     expect(preToolUse.map((entry) => [entry.matcher, entry.bash])).toEqual([
       [undefined, running('aeolus-handover.sh')],
+      ['^Bash$', running('aeolus-watch-guard.sh')],
       [undefined, running('aeolus-launch.sh')],
       ['^Bash$', running('aeolus-model.sh')],
     ]);
@@ -276,13 +306,93 @@ describe('a hand-over in Copilot (CC3)', () => {
     expect(kept.reason).not.toContain('aeolus-wait.sh');
   });
 
-  it('lets a turn with nothing unconfirmed end, idle, without asking for a watcher or arming a Codex wake bridge', async () => {
+  it('lets a turn with nothing unconfirmed end, idle, without arming a Codex wake bridge, while a watcher runs', async () => {
     crew();
+    const watcher = aRunningWatcher();
 
     const stopped = await copilotHook('aeolus-stop.sh', { payload: { hook_event_name: 'Stop', stop_hook_active: false, stop_reason: 'end_turn' } });
 
+    watcher.kill();
     expect(stopped).toMatchObject({ status: 0, stdout: '' });
     expect(inSession('aeolus-identity.sh', { args: ['turn'] }).stdout).toMatch(/^idle /);
+  });
+});
+
+describe('a Copilot session crewed by hand wakes through the watcher, a detached background shell whose completion starts a turn (CC12)', () => {
+  const START_THE_WATCHER = () =>
+    `start AEOLUS_HARNESS=copilot AEOLUS_DATA='${data}' AEOLUS_FOLDER='${realpathSync(folder)}' "${PLUGIN}/scripts/aeolus-wait.sh" as a detached background shell (the shell tool with mode async and detach true), then end your turn`;
+  const theTurnEnding = (stopHookActive = false) =>
+    copilotHook('aeolus-stop.sh', { payload: { hook_event_name: 'Stop', stop_hook_active: stopHookActive, stop_reason: 'end_turn' } });
+  const kept = (hookRun: Run) => z.object({ decision: z.literal('block'), reason: z.string() }).parse(JSON.parse(hookRun.stdout)).reason;
+  /** The shell tool call that starts the watcher, as Copilot CLI 1.0.105 makes it. */
+  const startingTheWatcher = {
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Bash',
+    tool_input: { command: `AEOLUS_HARNESS=copilot "${SCRIPTS}/aeolus-wait.sh"`, description: 'Start the Aeolus watcher', mode: 'async', detach: true },
+  };
+  const deniedWith = (hookRun: Run) =>
+    z.object({ hookSpecificOutput: z.object({ permissionDecision: z.literal('deny'), permissionDecisionReason: z.string() }) }).parse(JSON.parse(hookRun.stdout))
+      .hookSpecificOutput.permissionDecisionReason;
+
+  it('keeps the turn open once when no watcher runs, asking for the watcher as a detached background shell with the variables its scripts run with', async () => {
+    crew();
+
+    const stopped = await theTurnEnding();
+
+    expect(kept(stopped)).toBe(`aeolus: no watcher runs for scout, so nothing wakes this session when work arrives: ${START_THE_WATCHER()}`);
+  });
+
+  it('lets the turn end, idle, when it already kept it open once', async () => {
+    crew();
+
+    const stopped = await theTurnEnding(true);
+
+    expect(stopped).toMatchObject({ status: 0, stdout: '' });
+    expect(inSession('aeolus-identity.sh', { args: ['turn'] }).stdout).toMatch(/^idle /);
+  });
+
+  it('confirms a message the watcher handed over at Stop when the turn called no tool, asking for the watcher again with it', async () => {
+    const stub = await startRoutedStubFleet({
+      '/api/v1/ship/inbox': [{ status: 200, body: { waiting: 1, forced: 0 } }],
+      '/api/v1/ship/pushReceive': [{ status: 200, body: { deliveries: [aDelivery()] } }],
+      '/api/v1/ship/handed': [{ status: 200, body: { state: 'handed' } }],
+      '/api/v1/ship/ack': [taken],
+      '/api/v1/ship/turn': [taken],
+    });
+    fleet = stub;
+    crew(stub.url);
+    await theTurnEnding(true);
+    await expect(inSessionInBackground('aeolus-wait.sh')).resolves.toMatchObject({ status: 0 });
+
+    const stopped = await theTurnEnding();
+
+    expect(callsTo(stub, '/api/v1/ship/ack').map((call) => call.body)).toEqual([`{"deliveryId":"${DELIVERY_ID}"}`]);
+    expect(kept(stopped)).toContain('Review PR 12');
+    expect(kept(stopped)).toContain(`aeolus: no watcher runs for scout: when you are done, ${START_THE_WATCHER()}`);
+  });
+
+  it('refuses to start a second watcher while one runs, so the session is not woken with nothing to read', async () => {
+    crew();
+    const watcher = aRunningWatcher();
+
+    const guarded = await copilotHook('aeolus-watch-guard.sh', { payload: startingTheWatcher });
+
+    watcher.kill();
+    expect(deniedWith(guarded)).toBe('aeolus: already running: a watcher runs for scout; do nothing else');
+  });
+
+  it('lets the watcher start when none runs', async () => {
+    crew();
+
+    await expect(copilotHook('aeolus-watch-guard.sh', { payload: startingTheWatcher })).resolves.toMatchObject({ status: 0, stdout: '' });
+  });
+
+  it('refuses any watcher in a folder the trierarch crews, which wakes the session itself', async () => {
+    crew('https://fleet.example.com', ['--wake-by', 'trierarch']);
+
+    const guarded = await copilotHook('aeolus-watch-guard.sh', { payload: startingTheWatcher });
+
+    expect(deniedWith(guarded)).toBe('aeolus: the trierarch wakes scout; start no watcher and do nothing else');
   });
 });
 
