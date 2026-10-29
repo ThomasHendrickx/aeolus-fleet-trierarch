@@ -14,7 +14,7 @@ set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
 payload="$(cat)"
-[ -z "${PLUGIN_ROOT:-}" ] || exit 0
+! aeolus_codex_hook || exit 0
 aeolus_hook_folder "$payload" || exit 1
 [ -z "$(aeolus_json_string "$payload" agent_id)" ] || exit 0
 identity="$(aeolus_identity_file 2>/dev/null)" || exit 0

@@ -6,6 +6,7 @@
 #   Claude Code: a session wakes only through its own background task, which a
 #   hook cannot start, so when no watcher runs the hook keeps the turn open once
 #   and asks the session to start it.
+#   Copilot: runs no watcher, so the hook asks for none.
 # A message the watcher handed over and no tool call confirmed yet is
 # confirmed here (#756): acknowledged first, then the turn is kept open with it,
 # asking for the watcher too when none runs. Under a trierarch too, for a line
@@ -37,9 +38,9 @@ let_end() {
 root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 ship_name="$(aeolus_identity_field "$identity_text" shipName)"
 
-if [ -z "${PLUGIN_ROOT:-}" ] && text="$(aeolus_put_into_turn "$identity" "$ship_name" "$root" '')"; then
+if ! aeolus_codex_hook && text="$(aeolus_put_into_turn "$identity" "$ship_name" "$root" '')"; then
   reason="${text%x}"
-  if ! aeolus_woken_by_trierarch "$identity_text" && ! aeolus_is_watching && [ ! -f "$(aeolus_refused_file)" ]; then
+  if [ "${AEOLUS_HARNESS:-}" != copilot ] && ! aeolus_woken_by_trierarch "$identity_text" && ! aeolus_is_watching && [ ! -f "$(aeolus_refused_file)" ]; then
     reason="${reason}"$'\n\n'"aeolus: no watcher runs for ${ship_name}: when you are done, start \"${root}/scripts/aeolus-wait.sh\" as a background task (run_in_background), then end your turn"
   fi
   printf '{"decision":"block","reason":"%s"}\n' "$(aeolus_json_escape "$reason")"
@@ -51,11 +52,17 @@ if aeolus_woken_by_trierarch "$identity_text"; then
   exit 0
 fi
 
-if [ -n "${PLUGIN_ROOT:-}" ]; then
+if aeolus_codex_hook; then
   let_end
   session_id="$(aeolus_json_string "$payload" session_id)"
   [ -n "$session_id" ] && [ "${AEOLUS_CODEX_WAKE_DISABLED:-}" != 1 ] || exit 0
   "$(dirname "$0")/aeolus-codex-wake.sh" start "$session_id" >/dev/null 2>&1 || true
+  exit 0
+fi
+
+# Copilot runs no watcher, so there is none to ask for.
+if [ "${AEOLUS_HARNESS:-}" = copilot ]; then
+  let_end
   exit 0
 fi
 

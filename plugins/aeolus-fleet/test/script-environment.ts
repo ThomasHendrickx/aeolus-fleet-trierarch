@@ -5,7 +5,7 @@
  * (#717, #726).
  */
 
-/** Every variable the plugin scripts read from Claude Code, Codex, the trierarch's launch or the crew's session. */
+/** Every variable the plugin scripts read from Claude Code, Codex, Copilot, the trierarch's launch or the crew's session. */
 export const HARNESS_VARIABLES = [
   'CLAUDECODE',
   'CLAUDE_PLUGIN_ROOT',
@@ -18,6 +18,7 @@ export const HARNESS_VARIABLES = [
   'AEOLUS_FOLDER',
   'AEOLUS_DATA',
   'AEOLUS_LAUNCH',
+  'COPILOT_HOME',
 ] as const;
 
 /** The caller's environment without its harness and crew variables, with the test's own variables set over it. */

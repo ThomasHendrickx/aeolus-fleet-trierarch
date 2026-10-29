@@ -162,7 +162,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit --quiet --message "chore(release): the aeolus-fleet plugin is $VERSION" -- plugins/aeolus-fleet/.claude-plugin/plugin.json plugins/aeolus-fleet/.codex-plugin/plugin.json
+          git commit --quiet --message "chore(release): the aeolus-fleet plugin is $VERSION" -- plugins/aeolus-fleet/.claude-plugin/plugin.json plugins/aeolus-fleet/.codex-plugin/plugin.json plugins/aeolus-fleet/.github/plugin/plugin.json
           git tag "v$VERSION" HEAD
           git push origin "refs/tags/v$VERSION"
 

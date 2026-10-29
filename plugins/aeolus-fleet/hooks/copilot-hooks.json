@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "bash": "bash \"${PLUGIN_ROOT}/scripts/aeolus-session-start.sh\"",
+        "env": {
+          "AEOLUS_HARNESS": "copilot"
+        }
+      },
+      {
+        "type": "command",
+        "bash": "bash \"${PLUGIN_ROOT}/scripts/aeolus-launch.sh\"",
+        "env": {
+          "AEOLUS_HARNESS": "copilot"
+        }
+      }
+    ],
+    "PreToolUse": [
+      {
+        "type": "command",
+        "bash": "bash \"${PLUGIN_ROOT}/scripts/aeolus-handover.sh\"",
+        "env": {
+          "AEOLUS_HARNESS": "copilot"
+        }
+      },
+      {
+        "type": "command",
+        "bash": "bash \"${PLUGIN_ROOT}/scripts/aeolus-launch.sh\"",
+        "env": {
+          "AEOLUS_HARNESS": "copilot"
+        }
+      },
+      {
+        "matcher": "^Bash$",
+        "type": "command",
+        "bash": "bash \"${PLUGIN_ROOT}/scripts/aeolus-model.sh\"",
+        "env": {
+          "AEOLUS_HARNESS": "copilot"
+        }
+      }
+    ],
+    "PostToolUse": [
+      {
+        "type": "command",
+        "bash": "bash \"${PLUGIN_ROOT}/scripts/aeolus-report-due.sh\"",
+        "env": {
+          "AEOLUS_HARNESS": "copilot"
+        }
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "bash": "bash \"${PLUGIN_ROOT}/scripts/aeolus-stop.sh\"",
+        "env": {
+          "AEOLUS_HARNESS": "copilot"
+        }
+      }
+    ],
+    "SessionEnd": [
+      {
+        "type": "command",
+        "bash": "bash \"${PLUGIN_ROOT}/scripts/aeolus-turn-died.sh\"",
+        "env": {
+          "AEOLUS_HARNESS": "copilot"
+        }
+      }
+    ]
+  }
+}

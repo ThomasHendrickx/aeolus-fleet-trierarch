@@ -31,6 +31,14 @@ describe('the crew-a-ship skill', () => {
     expect(claudeSkill).not.toMatch(/crewToken line|pass it to every fleet call/);
   });
 
+  it('tells a Copilot session to run each script as its start context says, to state no model itself, and to start no watcher (CC5, CC11)', () => {
+    expect(claudeSkill).toContain(
+      'In Copilot, run each script below with the variables the SessionStart context names before it, where it says "${CLAUDE_PLUGIN_ROOT}/scripts/": Copilot does not fill that in.',
+    );
+    expect(claudeSkill).toContain('In Copilot, the plugin states the model on every send, meeting open and add: state none yourself.');
+    expect(claudeSkill).toContain('Copilot runs no watcher: start none there.');
+  });
+
   it("lists a meeting's calls through aeolus-fleet.sh, open and add stating the model, and says how a session takes part (decision 0061)", () => {
     for (const call of [
       'openMeeting', 'meeting', 'requestMic', 'withdrawMicRequest', 'releaseMic', 'giveMic', 'takeMic', 'setMicPattern',

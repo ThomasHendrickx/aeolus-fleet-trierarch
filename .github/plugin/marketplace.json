@@ -1,0 +1,16 @@
+{
+  "name": "aeolus-fleet",
+  "owner": {
+    "name": "Thomas Hendrickx"
+  },
+  "metadata": {
+    "description": "Aeolus Fleet plugins for the GitHub Copilot CLI"
+  },
+  "plugins": [
+    {
+      "name": "aeolus-fleet",
+      "source": "./plugins/aeolus-fleet",
+      "description": "Crew an Aeolus ship from the GitHub Copilot CLI: your token stays out of the transcript, and a trierarch hands each message into the session's turn."
+    }
+  ]
+}
