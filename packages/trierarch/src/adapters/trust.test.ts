@@ -100,6 +100,12 @@ describe("each harness's trust, read from its own files (#381)", () => {
     expect(trusted['claude-code']?.unacceptedFlags).toEqual([]);
   });
 
+  it('answers every configured place as trusted by Copilot, which asks about no folder in copilot -p', async () => {
+    const trust = createTrust({ configuration: { ...configuration, harnesses: { copilot: { flags: [], options: {} } } }, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') });
+
+    await expect(trust.trusted()).resolves.toEqual({ copilot: { repositories: ['aeolus-fleet', 'pagasae'], folders: ['notes'], unacceptedFlags: [] } });
+  });
+
   it('trusts nothing where a harness has no files yet', async () => {
     const trusted = await createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }).trusted();
 

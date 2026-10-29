@@ -8,6 +8,8 @@ export type CheckSessionRuntime = (configuration: TrierarchConfiguration) => Pro
 
 /** Container mode offers these harnesses only, until another is proven in a container (decision 0039). */
 const CONTAINER_HARNESSES: readonly string[] = ['claude-code'];
+/** Harnesses the configuration may hold in container mode, which the trierarch then names as not offered rather than refusing it (CC10). */
+const NOT_OFFERED_IN_CONTAINERS: readonly string[] = ['copilot'];
 /** The group whose members drive a rootful docker daemon: root on the machine. */
 const DOCKER_GROUP = 'docker';
 
@@ -41,7 +43,7 @@ export function createCheckSessionRuntime(deps: { host: ContainerHostPort; model
       refusals.push('the user that runs the trierarch is in the docker group, which is root on the machine: take the user out of it');
     }
     for (const harness of Object.keys(configuration.harnesses)) {
-      if (!CONTAINER_HARNESSES.includes(harness)) {
+      if (!CONTAINER_HARNESSES.includes(harness) && !NOT_OFFERED_IN_CONTAINERS.includes(harness)) {
         refusals.push(`${harness} does not run in a container yet: the container runtime offers ${CONTAINER_HARNESSES.join(', ')} only, so remove ${harness}`);
       }
     }

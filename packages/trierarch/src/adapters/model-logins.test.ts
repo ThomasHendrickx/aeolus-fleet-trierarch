@@ -63,6 +63,10 @@ describe('whether a session can start on its login (api keys K9)', () => {
     await expect(createModelLogins({ runtime: 'host', ...harnesses() }).startProblem({ harness: 'claude-code', login: 'apiKey', options: {} })).resolves.toBe('claude-code has no API key on this computer: aeolus-trierarch login claude-code --api-key');
   });
 
+  it("not Copilot on an API key: it signs in with the computer's own login (CC6)", async () => {
+    await expect(createModelLogins({ runtime: 'host', ...harnesses() }).startProblem({ harness: 'copilot', login: 'apiKey', options: {} })).resolves.toBe("copilot signs in with this computer's own login and runs on no API key: run the ship on its subscription");
+  });
+
   it('not on an API key with the container runtime yet', async () => {
     await keys.write('claude-code', 'test-key-not-real');
 

@@ -51,7 +51,7 @@ Cursor CLI (`agent`, formerly `cursor-agent`):
 
 GitHub Copilot CLI (`copilot`):
 - **Headless:** `copilot -p` with `--allow-all-tools` (required) and `--no-ask-user`; `--output-format json` gives JSONL. (docs.github.com, copilot-cli-reference/cli-programmatic-reference)
-- **Resume:** `--continue` (the folder's latest session), `--resume`; sessions in `~/.copilot/session-state/<id>`; `COPILOT_HOME` moves the config folder. (cli-command-reference, cli-config-dir-reference)
+- **Resume:** `--continue` (the latest session of the machine, whatever its folder, as Copilot CLI 1.0.105 does it), `--resume`; sessions in `~/.copilot/session-state/<id>`; `COPILOT_HOME` moves the config folder. (cli-command-reference, cli-config-dir-reference)
 - **A long-lived channel:** ACP, and the Copilot SDK, which drives a CLI server over JSON-RPC and can `send` into the current turn. (about-copilot-cli, copilot-sdk)
 - **Hooks:** events `sessionStart`, `userPromptSubmitted`, `preToolUse`, `permissionRequest`, `postToolUse`, `postToolUseFailure`, `agentStop`, `errorOccurred`, `sessionEnd` and more. `sessionStart` and `postToolUse` add context; `agentStop` with `decision: "block"` and a reason runs another turn with the reason as its prompt (at most 8 in a row); `preToolUse` denies with exit 2; `userPromptSubmitted` from a config file can neither block nor add context. (hooks-reference)
 - **Where hooks load:** `.github/hooks/*.json`, `~/.copilot/hooks/`, `settings.json`, a plugin's `hooks.json`, and Claude Code's `.claude/settings.json`. (hooks-configuration)

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { HarnessDetector } from '../core/ports.js';
 import { createClaudeCodeDetector } from './claude-code-detector.js';
 import { createCodexDetector } from './codex-detector.js';
+import { createCopilotDetector } from './copilot-detector.js';
 import { runCommand } from './run-command.js';
 
 /** The detector of each harness this trierarch has an adapter for (#365), running the real CLIs. */
@@ -21,6 +22,11 @@ export function createDetectors(at: { homeDirectory: string; env: Readonly<Recor
       readConfig: () => readFile(join(at.env.CODEX_HOME ?? join(at.homeDirectory, '.codex'), 'config.toml'), 'utf8').catch(() => undefined),
       // As for Claude Code: a new empty folder per detection, so a probe is never a ship.
       neutralFolder: () => mkdtemp(join(tmpdir(), 'aeolus-trierarch-probe-')),
+    }),
+    copilot: createCopilotDetector({
+      run: runCommand,
+      // Copilot's settings where Copilot keeps them: in COPILOT_HOME when it is set.
+      readSettings: () => readFile(join(at.env.COPILOT_HOME ?? join(at.homeDirectory, '.copilot'), 'settings.json'), 'utf8').catch(() => undefined),
     }),
   };
 }

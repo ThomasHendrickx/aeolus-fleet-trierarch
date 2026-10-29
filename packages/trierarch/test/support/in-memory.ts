@@ -483,6 +483,8 @@ export class InMemoryHarness implements HarnessPort {
   pluginProblem: string | undefined = undefined;
   /** Set to say why no session of the harness can start, as when its aeolus-fleet plugin's scripts are gone (#827). */
   problem: string | undefined = undefined;
+  /** Set to say why the machine does not offer the harness, as for a build its plugin is not proven on (CC3). */
+  notOffered: string | undefined = undefined;
 
   constructor(private readonly processes: InMemoryProcesses) {}
 
@@ -559,6 +561,10 @@ export class InMemoryHarness implements HarnessPort {
 
   startProblem(): Promise<string | undefined> {
     return Promise.resolve(this.problem);
+  }
+
+  notOfferedReason(): Promise<string | undefined> {
+    return Promise.resolve(this.notOffered);
   }
 
   marksLaunches(): Promise<boolean> {

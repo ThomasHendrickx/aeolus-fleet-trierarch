@@ -1653,6 +1653,33 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.state.current().missingPlugins).toBeUndefined();
   });
 
+  it('a harness its adapter does not offer, as a Copilot build its plugin is not proven on, gives back only its own requests, with why, and the pass goes on for the others (CC3)', async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    trierarch.codex.notOffered = 'Copilot CLI 1.0.106 is not proven: the hooks of its aeolus-fleet plugin are proven on 1.0.105';
+    const codexShip = trierarch.fleet.commission('lookout');
+    trierarch.fleet.request(codexShip, crewSettings({ harness: 'codex' }));
+    const claudeShip = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(claudeShip, crewSettings());
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([{ shipId: codexShip, settingsVersion: 1, reason: 'mac-studio: harness: codex is not offered: Copilot CLI 1.0.106 is not proven: the hooks of its aeolus-fleet plugin are proven on 1.0.105' }]);
+    expect(trierarch.harness.launches.map((launch) => launch.shipId)).toEqual([claudeShip]);
+  });
+
+  it('keeps the harnesses its adapters do not offer in the state, with why, and drops them once offered (CC3)', async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    trierarch.codex.notOffered = 'not proven in a container';
+    await trierarch.pass();
+
+    expect(trierarch.state.current().notOffered).toEqual([{ harness: 'codex', reason: 'not proven in a container' }]);
+
+    trierarch.codex.notOffered = undefined;
+    await trierarch.pass();
+
+    expect(trierarch.state.current().notOffered).toBeUndefined();
+  });
+
   it('a pass that fails is kept in the state with why and since when, and cleared once a pass succeeds (#1212)', async () => {
     const trierarch = aTrierarch();
     trierarch.fleet.isUnreachable = true;

@@ -1,0 +1,4 @@
+{"type":"session.mcp_server_status_changed","data":{"serverName":"github-mcp-server","status":"pending"},"ephemeral":true,"id":"d7c11559-727d-41bf-946c-feebe8144d6c","timestamp":"2026-10-29T18:49:43.382Z","parentId":"b3895d50-415f-4f08-8adf-1526f8cc3ebe"}
+{"type":"session.mcp_server_status_changed","data":{"serverName":"github-mcp-server","status":"connected","configSource":"builtin"},"ephemeral":true,"id":"c44f804e-6a8c-48cc-b1e9-dda593863bbb","timestamp":"2026-10-29T18:49:43.797Z","parentId":"b3895d50-415f-4f08-8adf-1526f8cc3ebe"}
+{"type":"session.mcp_server_tools_loaded","data":{"serverName":"github-mcp-server","toolCount":5},"ephemeral":true,"id":"4322a31f-22fa-484f-832b-dc7c2d2f90bb","timestamp":"2026-10-29T18:49:44.072Z","parentId":"b3895d50-415f-4f08-8adf-1526f8cc3ebe"}
+{"type":"aeolus.stderr","line":"Error: Model \"no-such-model\" from --model flag is not available."}

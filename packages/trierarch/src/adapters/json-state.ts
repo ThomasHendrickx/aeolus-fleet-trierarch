@@ -53,6 +53,7 @@ const stateSchema = z.object({
   refused: z.record(z.string(), z.int().positive()),
   lowResources: z.array(z.enum(LOW_RESOURCES)).optional(),
   missingPlugins: z.array(z.string()).optional(),
+  notOffered: z.array(z.object({ harness: z.string(), reason: z.string() })).optional(),
   passFailure: z.object({ reason: z.string(), since: z.string() }).optional(),
   keysTold: z.record(z.string(), z.enum(KEY_STATES)).optional(),
   failedStarts: z

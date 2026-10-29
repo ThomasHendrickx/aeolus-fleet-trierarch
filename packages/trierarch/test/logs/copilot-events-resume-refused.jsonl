@@ -1,0 +1,6 @@
+{"type":"aeolus.stderr","line":"Error: No session, task, or name matched '00000000-0000-4000-8000-000000000000'."}
+{"type":"aeolus.stderr","line":"To resume by session or task ID:  copilot --resume=<id>"}
+{"type":"aeolus.stderr","line":"To resume by name:                copilot --resume=<name>"}
+{"type":"aeolus.stderr","line":"To name a new session:            copilot --name=<name>"}
+{"type":"aeolus.stderr","line":"To pick from existing sessions:   copilot --resume"}
+{"type":"aeolus.stderr","line":"To start a new session with ID:   copilot --session-id=<valid-uuid>"}

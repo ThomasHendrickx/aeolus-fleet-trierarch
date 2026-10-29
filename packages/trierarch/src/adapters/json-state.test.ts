@@ -82,6 +82,7 @@ const aPopulatedState = (): Populated<TrierarchState> => {
     refused: { [newId('ship')]: 3 },
     lowResources: ['memory', 'disk'],
     missingPlugins: ['codex'],
+    notOffered: [{ harness: 'copilot', reason: 'not proven in a container' }],
     passFailure: { reason: 'the fleet cannot be reached', since: '2026-10-06T08:00:00.000Z' },
     keysTold: { 'claude-code': 'outOfCredit' },
     failedStarts: {
