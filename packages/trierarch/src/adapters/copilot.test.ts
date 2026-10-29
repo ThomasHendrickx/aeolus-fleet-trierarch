@@ -108,7 +108,7 @@ describe('Copilot as a harness: a turn per process (CC4)', () => {
 
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false });
 
-    expect(started[0]?.command).toEqual(['copilot', '--disable-builtin-mcps', ...ADAPTER_WORDS, `--resume=${INTERRUPTED_SESSION}`, expect.stringMatching(/^--prompt=.+/su)]);
+    expect(started[0]?.command).toEqual(['copilot', '--disable-builtin-mcps', '--model', 'auto', ...ADAPTER_WORDS, `--resume=${INTERRUPTED_SESSION}`, expect.stringMatching(/^--prompt=.+/su)]);
   });
 
   it('starts a new session on a restart when no turn named one, as when Copilot refused to resume the last', async () => {
