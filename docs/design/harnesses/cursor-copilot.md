@@ -103,10 +103,12 @@ Thomas decided these on 28 Oct.
 | CC8 | **Vendor cloud agents are out of this design;** a later gateway design hands them deliveries ([#1360](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1360)) |
 | CC9 | **Cursor's auto mode is allowed; a session on it states `auto` as its model** (Thomas, 28 Oct). This changes 0018: every send states the model, its exact id, or `auto` when the harness chooses the model per request and names none. The trierarch offers `auto` among Cursor's models in its detected options, and a crew request may name it. Core already takes `auto` (common's `modelSchema` takes any id without spaces), so core changes its decision, its blueprint and its schema's documentation, not its checks. Any harness that chooses its model per request may state `auto`; core does not check it against the ship's harness, which is self-reported (0016). The console shows `auto` as any model name, exactly as stated, with no screen change. Model governance treats `auto` as a model id like any other: in a fleet with enabled models, a session or crew request on `auto` is allowed only where the fleet enables `auto` |
 | CC10 | **Host only.** Copilot and Cursor are offered on the host runtime; in container mode they are in `notOffered` until proven in a container (0039, [#1362](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1362)) |
-| CC11 | **The model a session states** comes from its harness, as the Codex model does today: the hook input where it carries the model, otherwise the model the trierarch started the session with. A Copilot session states the id Copilot names; a Cursor session on auto states `auto` |
+| CC11 | **The model a session states** comes from its harness, as the Codex model does today: the hook input where it carries the model, otherwise the model the trierarch started the session with. A Copilot session on auto mode, where Copilot picks the model per request, states `auto`, as CC9 allows any harness that does; a Copilot session started with `--model`, or switched to a model, states that id. Copilot's hook inputs name no model, so the plugin reads it from the session's events. A Cursor session on auto states `auto` |
 | CC12 | **A hand-crewed session wakes** through what its harness documents for starting a turn in a running session, as Codex's wake bridge uses `codex queue`. A harness with no such way gets no hand crew line (CC7) and its slice stops to ask Thomas |
 
 The hook table: each role the delivery protocol needs, and the hook that plays it.
+
+Proven for Copilot CLI 1.0.105 in `copilot -p` and with `--resume`: every Copilot hook in the table runs, and a `preToolUse` deny reason reaches the model. `errorOccurred` does not mark a died turn: it fires at every model call Copilot retries (`recoverable: true`), also in a turn that recovers and ends normally. A turn that dies ends with `sessionEnd` and reason `error`, and its process exits 1. A failure before Copilot picks a model fires no hook, only `session.error` in the JSON output. So the died turn hangs on `sessionEnd`, and `errorOccurred` stays unmapped.
 
 | Role | Claude Code | Copilot CLI | Cursor CLI (to prove) |
 | --- | --- | --- | --- |
@@ -115,7 +117,7 @@ The hook table: each role the delivery protocol needs, and the hook that plays i
 | Turn idle; keep the turn open with an unconfirmed message | Stop | `agentStop`, `decision: "block"` with the message as reason | `stop`, `followup_message` |
 | Confirm a hand-over at the first tool call; launch marker `active` | PreToolUse deny with the message as reason | `preToolUse` deny (exit 2) with the message as reason | `preToolUse` deny with the message as reason |
 | Confirm a hand-over at the prompt | UserPromptSubmit | none (lost, CC3) | none (lost, CC3) |
-| A died turn | StopFailure | `errorOccurred` | `stop` with status `error` |
+| A died turn | StopFailure | `sessionEnd` with reason `error`, `abort` or `timeout`; the hold also reads the exit status and `session.error` | `stop` with status `error` |
 | The report reminder | PostToolUse | `postToolUse` | `postToolUse` |
 
 ## 5. Flow
@@ -153,7 +155,7 @@ flowchart TD
     stop --> send
     send --> exit["Turn ends: process exits, idle"] --> pass
     run -->|forced delivery| force["Forced-stop marker, SIGINT to the turn's process, wait at most 10 s"] --> resume
-    resume -->|"errorOccurred or stop status error"| died["aeolus-push.sh died: held deliveries once more"]
+    resume -->|"sessionEnd reason error, exit status or session.error; Cursor: stop status error"| died["aeolus-push.sh died: held deliveries once more"]
     died --> budget
     budget -->|yes, after the delay| start
     budget -->|no| crashed([Crashed: the owner is told])
@@ -197,7 +199,7 @@ Trierarch crew:
 - **Given** a crewed Copilot session that is idle, **when** a delivery arrives, **then** the hold starts one `copilot -p --resume <id>` turn with the line, and the delivery is acknowledged when the turn's first tool call is denied with the message as reason.
 - **Given** a crewed session handed a delivery whose turn calls no tool, **when** the turn ends, **then** the stop hook keeps it open with the message as the next prompt and the delivery is acknowledged.
 - **Given** a busy session, **when** a forced delivery arrives, **then** the turn's process gets SIGINT, and the forced line goes in with the next `--resume` within 10 s.
-- **Given** a turn that fails with `errorOccurred`, **when** the pass reads it, **then** the held deliveries are marked once more and the session restarts within its budget.
+- **Given** a Copilot turn that fails, ending with `sessionEnd` and reason `error`, **when** the pass reads it, **then** the held deliveries are marked once more and the session restarts within its budget.
 - **Given** any Copilot or Cursor session, **when** its environment and transcript are read, **then** neither holds the crew token, a GitHub token or a Cursor API key.
 - **Given** `aeolus-trierarch login copilot --api-key`, **when** it runs, **then** it is refused, naming that Copilot signs in with the machine's own login.
 
@@ -222,7 +224,7 @@ Each one PR. S1 and S2 may go first in any order. The Cursor slices (S7 to S11) 
 | S1 | aeolus-fleet | **The MCP guides (CC2).** `docs/guides/cursor.md` and `docs/guides/copilot.md`, their lines in `docs/guides/README.md`: the starting prompt for a chat in each CLI's MCP configuration, and the limits (no wake, token in the transcript) |
 | S2 | aeolus-fleet | **Decision 0018 takes `auto` (CC9).** The decision's text (an exact id, or `auto` when the harness chooses the model per request), its line in `docs/decisions/README.md`, the blueprint's "Model", common's `modelSchema` documentation and a test that it takes `auto`. Core, the console and model governance accept `auto` as they accept any id today: the console shows it as stated, and governance allows it only where the fleet enables it. No `MINIMUM_CORE_VERSION` change, since no check changes |
 | S3 | aeolus-fleet-trierarch | **Copilot in the plugin (CC5, CC11).** First prove on a captured Copilot CLI build that each role in the hook table runs in `copilot -p` and with `--resume`, and that a `preToolUse` deny reason reaches the model; if one does not, stop and ask Thomas. Then Copilot's manifest and hooks file mapping onto the existing scripts, its marketplace entry, `~/.aeolus/crews/copilot/`, the crew skill wording for Copilot, the plugin README |
-| S4 | aeolus-fleet-trierarch | **The Copilot adapter (CC3, CC4, CC6, CC10).** A `copilot` adapter in `harnesses.ts`: detector, models, setup (answers first-run questions), command lines, a turn per process with `--resume` in the hold, the launch window from hook markers and captured error events, SIGINT for force, `notOffered` for no plugin, an unproven build or the container runtime, and `login copilot --api-key` refused. Docs: `trierarch.md`, `architecture.md` |
+| S4 | aeolus-fleet-trierarch | **The Copilot adapter (CC3, CC4, CC6, CC10).** A `copilot` adapter in `harnesses.ts`: detector, models, setup (answers first-run questions), command lines, a turn per process with `--resume` in the hold, the launch window from hook markers and captured error events, a died turn also from the exit status and `session.error`, SIGINT for force sent to the native Copilot process or its process group, never the npm launcher alone (the `copilot` on the PATH is a Node launcher that runs the native binary as a child: SIGINT to the launcher exits it with 130 while the native process runs the turn to its end, and fires no hook), `notOffered` for no plugin, an unproven build or the container runtime, and `login copilot --api-key` refused. Docs: `trierarch.md`, `architecture.md` |
 | S5 | aeolus-fleet-trierarch | **A hand-crewed Copilot session wakes (CC12).** First prove how Copilot starts a turn in a running interactive session; if it has no documented way, stop and ask Thomas. Then the plugin's wake for Copilot |
 | S6 | aeolus-fleet | **Copilot's crew line in core (CC7).** `copilot` among 0018's known harnesses, 0019's crew line for Copilot, the starting prompt answering it, the console's StartingPromptBlock with a Copilot CrewLineBlock and the LocationTag showing Copilot by name and icon. Needs a before and after mockup for Thomas |
 | S7 | aeolus-fleet-trierarch | **Cursor's CLI hooks proven (CC1).** On a captured Cursor CLI build, on Linux and macOS, each role in the hook table in `agent -p` and with `--resume`; the captured hook inputs and events kept as test fixtures. A role that does not run stops the Cursor slices and goes to Thomas |
