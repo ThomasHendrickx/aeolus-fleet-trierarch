@@ -24,10 +24,18 @@ export interface TrierarchState {
   readonly passFailure?: PassFailure;
   /** The harnesses whose aeolus-fleet plugin the last pass could not find (#1212): not offered in its report until it is back; none while every plugin is found. */
   readonly missingPlugins?: readonly string[];
+  /** The harnesses the last pass found their adapters do not offer, with why (CC3, CC10): not offered in its report until they are; none while every one is. */
+  readonly notOffered?: readonly NotOfferedHarness[];
   /** The machine's failed session starts since one last succeeded (#853), and whether they stopped it offering itself; none while starts succeed. */
   readonly failedStarts?: FailedStarts;
   /** By harness, the state of its API key argo was told holds ships back (api keys K9), so it is told once per state; none while ready. */
   readonly keysTold?: Readonly<Record<string, KeyState>>;
+}
+
+/** A harness the machine does not offer, and why. */
+export interface NotOfferedHarness {
+  readonly harness: string;
+  readonly reason: string;
 }
 
 /** A failing pass: the reason of the latest failure, and when the passes began to fail. */

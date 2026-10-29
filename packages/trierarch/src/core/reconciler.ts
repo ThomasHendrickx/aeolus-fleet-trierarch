@@ -89,6 +89,8 @@ export interface ReconcileContext {
   readonly marksLaunches: Readonly<Record<string, boolean>>;
   /** The harnesses whose aeolus-fleet plugin could not be found (#1212): none of their requests is crewed or given a session. */
   readonly missingPlugins: ReadonlySet<string>;
+  /** Why the machine does not offer a harness, by harness (CC3, CC10): none of its requests is crewed or given a session. */
+  readonly notOffered: Readonly<Record<string, string>>;
 }
 
 /** How long after its start a crewing session has to show activity (#382): its first prompt made a tool call. */
@@ -161,7 +163,7 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
       continue;
     }
     // A harness that lost its aeolus-fleet plugin under a running session cannot crew its ship any more (#1212): the request is given back with why, and the other harnesses go on.
-    const refusal = launchMarkerRefusal({ harness: entry.harness, marksLaunches: context.marksLaunches, missingPlugins: context.missingPlugins });
+    const refusal = launchMarkerRefusal({ harness: entry.harness, marksLaunches: context.marksLaunches, missingPlugins: context.missingPlugins, notOffered: context.notOffered });
     if (refusal !== undefined) {
       const uncrewed = uncrewable({ request, refusal, state: next, entry });
       actions.push(...uncrewed);
@@ -201,7 +203,7 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
       actions.push({ kind: 'confirm', shipId: request.shipId });
       continue;
     }
-    const checked = checkSettings(request.settings, { shipId: request.shipId, configuration, state: next, trusted: context.trusted, marksLaunches: context.marksLaunches, missingPlugins: context.missingPlugins });
+    const checked = checkSettings(request.settings, { shipId: request.shipId, configuration, state: next, trusted: context.trusted, marksLaunches: context.marksLaunches, missingPlugins: context.missingPlugins, notOffered: context.notOffered });
     if (!checked.isOk) {
       actions.push(...uncrewable({ request, refusal: checked.error, state: next }));
       continue;
@@ -282,7 +284,7 @@ function entryOf(checked: CheckedSettings, at: { shipId: ShipId; settingsVersion
  */
 function newVersionStep(entry: Entry, at: { request: AssignedRequest; state: TrierarchState; context: ReconcileContext }): Step {
   const { request, state, context } = at;
-  const checked = checkSettings(request.settings, { shipId: entry.shipId, configuration: context.configuration, state, trusted: context.trusted, marksLaunches: context.marksLaunches, missingPlugins: context.missingPlugins });
+  const checked = checkSettings(request.settings, { shipId: entry.shipId, configuration: context.configuration, state, trusted: context.trusted, marksLaunches: context.marksLaunches, missingPlugins: context.missingPlugins, notOffered: context.notOffered });
   if (!checked.isOk) {
     const uncrewed = uncrewable({ request, refusal: checked.error, state, entry });
     if (uncrewed.some((action) => action.kind === 'giveBack')) {
@@ -313,9 +315,9 @@ function trustedStep(entry: Entry, at: { step: Step; request: AssignedRequest; s
   const { step, request, state, context } = at;
   const isLaunching = step.actions.some((action) => action.kind === 'crew' || action.kind === 'launch');
   const { harness, workspace, options } = entry;
-  const { trusted, configuration, marksLaunches, missingPlugins } = context;
+  const { trusted, configuration, marksLaunches, missingPlugins, notOffered } = context;
   const refusal = isLaunching
-    ? (trustRefusal({ harness, workspace, trusted }) ?? unacceptedRefusal({ harness, configuration, options, trusted }) ?? launchMarkerRefusal({ harness, marksLaunches, missingPlugins }))
+    ? (trustRefusal({ harness, workspace, trusted }) ?? unacceptedRefusal({ harness, configuration, options, trusted }) ?? launchMarkerRefusal({ harness, marksLaunches, missingPlugins, notOffered }))
     : undefined;
   if (refusal === undefined) {
     return step;

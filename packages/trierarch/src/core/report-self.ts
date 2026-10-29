@@ -49,8 +49,11 @@ function selfReportOf(at: { setup: TrierarchSetup; state: TrierarchState; runnin
   const crashed = Object.values(state.entries).filter((entry) => entry.state === 'crashed').length;
   const missing = state.missingPlugins ?? [];
   const stopped = stoppedReasonOf(state, now);
-  // A harness without its aeolus-fleet plugin cannot crew a ship (#1212): it is left out of the details, so no request is placed for it, and the note says why.
-  const notOfferedNote = missing.map((harness) => `, ${harness} not offered: ${PLUGIN_MISSING_REASON}`).join('') + (stopped === undefined ? '' : `, not offered: ${stopped}`);
+  // A harness without its aeolus-fleet plugin cannot crew a ship (#1212), nor one its adapter does not offer (CC3): it is left out of the details, so no request is placed for it, and the note says why.
+  const notOfferedNote =
+    missing.map((harness) => `, ${harness} not offered: ${PLUGIN_MISSING_REASON}`).join('') +
+    (state.notOffered ?? []).map(({ harness, reason }) => `, ${harness} not offered: ${reason}`).join('') +
+    (stopped === undefined ? '' : `, not offered: ${stopped}`);
   const note = `${String(running)} of ${String(setup.configuration.caps.ships)} running${crashed > 0 ? `, ${String(crashed)} crashed` : ''}${notOfferedNote}`;
   return { state: running > 0 ? 'working' : 'idle', note, details: detailsOf(setup, { state, trusted, stopped, isProbe: isProbing(state.failedStarts, now) }) };
 }
@@ -82,7 +85,7 @@ function detailsOf(setup: TrierarchSetup, at: { state: TrierarchState; trusted: 
   const { configuration, version } = setup;
   const { state, trusted, stopped, isProbe } = at;
   const missing = state.missingPlugins ?? [];
-  const reasonOf = (harness: string): string | undefined => (missing.includes(harness) ? PLUGIN_MISSING_REASON : stopped);
+  const reasonOf = (harness: string): string | undefined => (missing.includes(harness) ? PLUGIN_MISSING_REASON : (state.notOffered?.find((each) => each.harness === harness)?.reason ?? stopped));
   const notOffered = Object.keys(configuration.harnesses).flatMap((harness) => {
     const reason = reasonOf(harness);
     return reason === undefined ? [] : [{ harness, reason }];

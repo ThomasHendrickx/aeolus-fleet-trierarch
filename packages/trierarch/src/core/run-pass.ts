@@ -68,12 +68,12 @@ export function createRunPass(deps: RunPassDeps): RunPass {
       const requests = await deps.fleet.assignedRequests();
       const clears = await deps.fleet.pendingClears();
       // Before anything reads a session through its plugin: a harness whose plugin is gone is left unread (#1212).
-      const { marksLaunches, missingPlugins } = await launchMarks(deps);
+      const { marksLaunches, missingPlugins, notOffered } = await launchMarks(deps);
       const observed = await observe(state, { deps, missingPlugins });
       const trusted = await deps.trust.trusted();
       const versions = Object.fromEntries(Object.entries(deps.setup.detected ?? {}).flatMap(([harness, found]) => (found === undefined ? [] : [[harness, found.version]])));
-      const reconciled = reconcile(state, { requests, clears, observed, now: deps.clock.now(), configuration: deps.setup.configuration, trusted, versions, marksLaunches, missingPlugins });
-      const counted = countStarts(succeeded(reconciled.state, missingPlugins), { outcomes: reconciled.outcomes, deps });
+      const reconciled = reconcile(state, { requests, clears, observed, now: deps.clock.now(), configuration: deps.setup.configuration, trusted, versions, marksLaunches, missingPlugins, notOffered });
+      const counted = countStarts(succeeded(reconciled.state, { missingPlugins, notOffered }), { outcomes: reconciled.outcomes, deps });
       state = counted.state;
       await deps.state.save(state);
       await tellStopped(state, { isNewlyStopped: counted.isNewlyStopped, deps });
@@ -94,12 +94,17 @@ export function createRunPass(deps: RunPassDeps): RunPass {
   };
 }
 
-/** Whether each harness's aeolus-fleet plugin marks launches, and which harnesses have no plugin to ask (#1212): one missing never fails the pass for the others. */
-async function launchMarks(deps: RunPassDeps): Promise<{ marksLaunches: Record<string, boolean>; missingPlugins: Set<string> }> {
+/** Whether each harness's aeolus-fleet plugin marks launches, which harnesses have no plugin to ask (#1212), one missing never failing the pass for the others, and why the machine does not offer a harness (CC3, CC10). */
+async function launchMarks(deps: RunPassDeps): Promise<{ marksLaunches: Record<string, boolean>; missingPlugins: Set<string>; notOffered: Record<string, string> }> {
   const marksLaunches: Record<string, boolean> = {};
   const missingPlugins = new Set<string>();
+  const notOffered: Record<string, string> = {};
   await Promise.all(
     Object.entries(deps.harnesses).map(async ([harness, port]) => {
+      const reason = await port.notOfferedReason();
+      if (reason !== undefined) {
+        notOffered[harness] = reason;
+      }
       try {
         marksLaunches[harness] = await port.marksLaunches();
       } catch (error) {
@@ -108,13 +113,17 @@ async function launchMarks(deps: RunPassDeps): Promise<{ marksLaunches: Record<s
       }
     }),
   );
-  return { marksLaunches, missingPlugins };
+  return { marksLaunches, missingPlugins, notOffered };
 }
 
-/** The state of a pass that succeeded: no failing pass is kept, and the harnesses whose plugin it could not find (#1212). */
-function succeeded(state: TrierarchState, missingPlugins: ReadonlySet<string>): TrierarchState {
+/** The state of a pass that succeeded: no failing pass is kept, the harnesses whose plugin it could not find (#1212), and those not offered, with why (CC3). */
+function succeeded(state: TrierarchState, at: { missingPlugins: ReadonlySet<string>; notOffered: Readonly<Record<string, string>> }): TrierarchState {
+  const { missingPlugins } = at;
+  const notOffered = Object.entries(at.notOffered)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([harness, reason]) => ({ harness, reason }));
   // Every other field of the state (what the machine is low on, #400) stays as the pass found it.
-  return { ...state, passFailure: undefined, missingPlugins: missingPlugins.size > 0 ? [...missingPlugins].sort() : undefined };
+  return { ...state, passFailure: undefined, missingPlugins: missingPlugins.size > 0 ? [...missingPlugins].sort() : undefined, notOffered: notOffered.length > 0 ? notOffered : undefined };
 }
 
 /**

@@ -298,6 +298,8 @@ export function createClaudeCodeHarness(options: {
     isHolding: (session) => identityOf(session.shipId).isHolding(session),
     sessionDied: (session) => identityOf(session.shipId).sessionDied(session),
     marksLaunches: () => createLaunchMarks(plugin).isMarking(),
+    // Claude Code is offered wherever its plugin is: no build or runtime of it is held back.
+    notOfferedReason: () => Promise.resolve(undefined),
     // The marker says what the session did; headless, the last error event names why a start shows none (H13); in a terminal, the screen names one that stopped it before its hooks ran (#490).
     launchSeen: async ({ shipId, folder, launchId, model }) => {
       const marker = await marksOf(shipId).read({ folder, launchId });

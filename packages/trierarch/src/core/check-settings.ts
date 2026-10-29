@@ -51,7 +51,12 @@ export function unacceptedRefusal(at: { harness: string; configuration: Trierarc
  * launch marker (#490), so the launch window could see nothing of the
  * session. Upgrade updates the plugin, so the reason says to run it.
  */
-export function launchMarkerRefusal(at: { harness: string; marksLaunches: Readonly<Record<string, boolean>>; missingPlugins: ReadonlySet<string> }): Refusal | undefined {
+export function launchMarkerRefusal(at: { harness: string; marksLaunches: Readonly<Record<string, boolean>>; missingPlugins: ReadonlySet<string>; notOffered: Readonly<Record<string, string>> }): Refusal | undefined {
+  const notOffered = at.notOffered[at.harness];
+  if (notOffered !== undefined) {
+    // Its adapter says the machine does not offer it (CC3, CC10), as for a build its plugin is not proven on.
+    return { field: 'harness', reason: `${at.harness} is not offered: ${notOffered}` };
+  }
   if (at.missingPlugins.has(at.harness)) {
     // Its plugin could not be found at all (#1212), so it is not known what it marks: only that it must be installed.
     return { field: 'harness', reason: `${at.harness}'s aeolus-fleet plugin is not installed: run aeolus-trierarch upgrade` };
@@ -74,7 +79,7 @@ function fieldOf(path: readonly PropertyKey[]): { field?: string } {
  */
 export function checkSettings(
   raw: unknown,
-  context: { shipId: ShipId; configuration: TrierarchConfiguration; state: TrierarchState; trusted: TrustedPlaces; marksLaunches: Readonly<Record<string, boolean>>; missingPlugins: ReadonlySet<string> },
+  context: { shipId: ShipId; configuration: TrierarchConfiguration; state: TrierarchState; trusted: TrustedPlaces; marksLaunches: Readonly<Record<string, boolean>>; missingPlugins: ReadonlySet<string>; notOffered: Readonly<Record<string, string>> },
 ): Result<CheckedSettings, Refusal> {
   const parsed = crewSettingsSchema.safeParse(raw);
   if (!parsed.success) {
@@ -117,7 +122,7 @@ export function checkSettings(
     }
     options[name] = value;
   }
-  const unaccepted = unacceptedRefusal({ harness: harnessName, configuration, options, trusted }) ?? launchMarkerRefusal({ harness: harnessName, marksLaunches: context.marksLaunches, missingPlugins: context.missingPlugins });
+  const unaccepted = unacceptedRefusal({ harness: harnessName, configuration, options, trusted }) ?? launchMarkerRefusal({ harness: harnessName, marksLaunches: context.marksLaunches, missingPlugins: context.missingPlugins, notOffered: context.notOffered });
   if (unaccepted !== undefined) {
     return err(unaccepted);
   }

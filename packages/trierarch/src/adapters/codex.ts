@@ -198,6 +198,8 @@ export function createCodexHarness(options: {
       return 'handed';
     },
     marksLaunches: () => marks.isMarking(),
+    // Codex is offered wherever its plugin is: no build or runtime of it is held back.
+    notOfferedReason: () => Promise.resolve(undefined),
     // The marker says what the session did (#490); Codex has no hook for a failed turn, so a refusal, or why a start shows none, is read from its last error event (headless H13).
     launchSeen: async ({ shipId, folder, launchId, model }) => {
       const error = codexErrorIn({ events: await sessions.events(shipId), ...(model !== undefined && { model }) });
