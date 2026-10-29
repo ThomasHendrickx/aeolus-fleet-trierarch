@@ -24,6 +24,9 @@ export function createModelLogins(at: {
       if (login === 'subscription') {
         return subscriptionProblem(at, { harness, options, ...(folder !== undefined && { folder }) });
       }
+      if (harness === 'copilot') {
+        return "copilot signs in with this computer's own login and runs on no API key: run the ship on its subscription";
+      }
       if (at.runtime === 'container') {
         return 'a session on an API key runs on the host runtime only, until containers reach the model proxy';
       }

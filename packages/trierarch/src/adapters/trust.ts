@@ -12,14 +12,17 @@ import { codexTrustedFolders } from './codex-setup.js';
  * repository; a folder when its path is. A harness with no reader trusts
  * nothing. Claude Code's skip-permissions flag is unaccepted until bypass
  * permissions mode is accepted in its settings (#403); Codex asks about no
- * flag.
+ * flag. Copilot asks about no folder in `copilot -p`, so it trusts every
+ * configured place (Copilot CLI 1.0.105, in a new folder it never saw).
  */
 export function createTrust(at: { configuration: TrierarchConfiguration; homeDirectory: string; env: Readonly<Record<string, string | undefined>>; managedSettings: string }): TrustPort {
   const { configuration, homeDirectory, env, managedSettings } = at;
   const claudeCode = createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) });
+  const configured = new Set([...Object.values(configuration.repositories), ...Object.values(configuration.folders)].map((place) => place.path));
   const readers: Readonly<Record<string, (() => Promise<ReadonlySet<string>>) | undefined>> = {
     'claude-code': () => claudeCode.trustedFolders(),
     codex: () => codexTrustedFolders({ homeDirectory, env }),
+    copilot: () => Promise.resolve(configured),
   };
   const unaccepted: Readonly<Record<string, (() => Promise<readonly string[]>) | undefined>> = {
     'claude-code': async () => ((await claudeCode.isSkipPermissionsAccepted()) ? [] : [SKIP_PERMISSIONS]),

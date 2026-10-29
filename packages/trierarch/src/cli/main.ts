@@ -162,6 +162,10 @@ function loginRequest(word: string | undefined, at: { switches: ReadonlySet<stri
   if (word === undefined && !isApiKey && !isRemoveKey && !isCheck && defaultWord === undefined) {
     return { kind: 'show' };
   }
+  if (word === 'copilot') {
+    // Copilot signs in with the machine's own login (CC6): it has no API key, default or check to set.
+    throw new TrierarchFileError("Copilot signs in with this computer's own login (copilot login), never an API key: the trierarch keeps no Copilot key and runs every Copilot session on that login");
+  }
   const harness = PLUGIN_HARNESSES.find((name): name is PluginHarness => name === word);
   if (harness === undefined || [isApiKey, isRemoveKey, isCheck, defaultWord !== undefined].filter(Boolean).length !== 1) {
     throw new TrierarchFileError(`login takes ${PLUGIN_HARNESSES.join(' or ')}: aeolus-trierarch login claude-code --api-key`);

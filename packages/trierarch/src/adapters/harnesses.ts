@@ -7,6 +7,7 @@ import { CLAUDE_CODE_ADAPTER_FLAGS, CLAUDE_CODE_RISKY_FLAGS, claudeCodeCommandLi
 import { createClaudeCodeSetup, type ClaudeCodeSetup } from './claude-code-setup.js';
 import { createCodexSetup } from './codex-setup.js';
 import { CODEX_ADAPTER_FLAGS, CODEX_RISKY_FLAGS, codexCommandLine, createCodexHarness, WAKE_PROMPT as CODEX_WAKE_PROMPT } from './codex.js';
+import { COPILOT_ADAPTER_FLAGS, COPILOT_RISKY_FLAGS, copilotCommandLine, createCopilotHarness, WAKE_PROMPT as COPILOT_WAKE_PROMPT } from './copilot.js';
 import type { CommandPart } from './command-line.js';
 import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
 import type { AeolusPlugin } from './plugin-identity.js';
@@ -47,6 +48,12 @@ const ADAPTERS: Readonly<
       return Promise.resolve({ firstStart: commandLine(true), restart: commandLine(false) });
     },
   },
+  copilot: {
+    adapterFlags: COPILOT_ADAPTER_FLAGS,
+    riskyFlags: COPILOT_RISKY_FLAGS,
+    // A restart resumes the session its last turn named, which config check cannot know: it shows the restart without it.
+    commandLines: (flags) => Promise.resolve({ firstStart: copilotCommandLine({ flags, prompt: firstPromptOf(FIRST_PROMPT) }), restart: copilotCommandLine({ flags, prompt: wakePromptOf(COPILOT_WAKE_PROMPT) }) }),
+  },
 };
 
 /** The flags each configured harness's adapter adds itself, for describe. */
@@ -67,7 +74,7 @@ export async function commandLinesOf(at: { harness: string; flags: readonly stri
 /**
  * The adapters of the harnesses the configuration offers, by name, each with
  * the aeolus-fleet plugin its harness installed. A plugin is looked for only for a
- * harness on offer, so a machine without Codex needs no Codex plugin. A
+ * harness on offer, so a machine without Codex or Copilot needs no plugin for it. A
  * configured harness this trierarch has no adapter for is refused at start,
  * so no request for it is ever crewed.
  */
@@ -88,11 +95,16 @@ export async function createHarnesses(at: {
   const harnesses: Record<string, HarnessPort> = {};
   const plugins: Record<string, AeolusPlugin> = {};
   for (const name of Object.keys(configuration.harnesses)) {
-    if (name !== 'claude-code' && name !== 'codex') {
-      throw new Error(`This trierarch has no adapter for the harness ${name}: it offers claude-code and codex`);
+    if (name !== 'claude-code' && name !== 'codex' && name !== 'copilot') {
+      throw new Error(`This trierarch has no adapter for the harness ${name}: it offers claude-code, codex and copilot`);
     }
     const plugin = await findAeolusPlugin({ homeDirectory, env, harness: name });
     plugins[name] = plugin;
+    if (name === 'copilot') {
+      // Copilot runs on the host only (CC10): with homes for containers, the machine does not offer it.
+      harnesses[name] = createCopilotHarness({ configuration, plugin, sessions, detectedVersion: () => detected().copilot?.version, isInContainer: shipHomes !== undefined, ...(env.COPILOT_HOME !== undefined && { copilotHome: env.COPILOT_HOME }) });
+      continue;
+    }
     harnesses[name] = name === 'codex' ? createCodexHarness({ configuration, plugin, sessions, setup: createCodexSetup(), ...(proxyUrl !== undefined && { proxyUrl }) }) : createClaudeCodeHarness({ configuration, plugin, sessions, ...(proxyUrl !== undefined && { proxyUrl }), isHeadless: shipHomes === undefined, permissionModes: () => detected()['claude-code']?.permissionModes, projects: join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects'), setup: createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) }), ...(shipHomes !== undefined && { shipHomes }) });
   }
   return { harnesses, plugins };
