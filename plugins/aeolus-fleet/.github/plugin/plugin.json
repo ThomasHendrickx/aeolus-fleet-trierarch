@@ -9,5 +9,6 @@
   "repository": "https://github.com/ThomasHendrickx/aeolus-fleet-trierarch",
   "license": "Apache-2.0",
   "hooks": "./hooks/copilot-hooks.json",
-  "skills": "./skills/crew-a-ship"
+  "skills": "./skills/crew-a-ship",
+  "commands": []
 }
