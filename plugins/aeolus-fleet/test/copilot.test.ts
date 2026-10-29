@@ -165,6 +165,10 @@ describe('the Copilot plugin package (CC5)', () => {
     expect(manifest.version).toBe(claude.version);
   });
 
+  it("loads none of the Claude Code commands, which crew for Claude Code, as Copilot skills", () => {
+    expect(z.object({ commands: z.array(z.string()) }).parse(json(join(PLUGIN, '.github/plugin/plugin.json'))).commands).toEqual([]);
+  });
+
   it("lists the plugin in the repository's Copilot marketplace", () => {
     const marketplace = z
       .object({
