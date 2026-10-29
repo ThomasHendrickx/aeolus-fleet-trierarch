@@ -111,8 +111,17 @@ describe('finding the aeolus-fleet plugin for Copilot', () => {
     await expect(found({ homeDirectory: home, env: { AEOLUS_COPILOT_PLUGIN_ROOT: '/plugin', AEOLUS_COPILOT_PLUGIN_DATA: '/data', AEOLUS_PLUGIN_ROOT: '/claude' }, harness: 'copilot' })).resolves.toEqual({ root: '/plugin', data: '/data', crews: join(home, '.aeolus', 'crews', 'copilot') });
   });
 
-  it('says the plugin is not installed for Copilot when Copilot installed none', async () => {
-    await expect(findAeolusPlugin({ homeDirectory: home, env: {}, harness: 'copilot' })).rejects.toThrow('The aeolus-fleet plugin is not installed for Copilot');
+  it('says the plugin is not installed for Copilot at each use while Copilot installed none, so the trierarch starts and names Copilot as not offered', async () => {
+    const plugin = await findAeolusPlugin({ homeDirectory: home, env: {}, harness: 'copilot' });
+
+    await expect(plugin.root()).rejects.toThrow('The aeolus-fleet plugin is not installed for Copilot');
+  });
+
+  it('finds the plugin Copilot installed after the trierarch started', async () => {
+    const plugin = await findAeolusPlugin({ homeDirectory: home, env: {}, harness: 'copilot' });
+    mkdirSync(join(home, '.copilot', 'installed-plugins', 'aeolus-fleet', 'aeolus-fleet'), { recursive: true });
+
+    await expect(plugin.root()).resolves.toBe(join(home, '.copilot', 'installed-plugins', 'aeolus-fleet', 'aeolus-fleet'));
   });
 });
 

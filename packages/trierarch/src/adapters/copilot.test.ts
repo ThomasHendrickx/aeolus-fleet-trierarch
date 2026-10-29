@@ -57,10 +57,11 @@ afterEach(() => {
   rmSync(folder, { recursive: true, force: true });
 });
 
-function harness(at: { pluginRoot?: string; version?: string; isInContainer?: boolean; copilotHome?: string } = {}) {
+function harness(at: { pluginRoot?: string | (() => Promise<string>); version?: string; isInContainer?: boolean; copilotHome?: string } = {}) {
+  const { pluginRoot } = at;
   return createCopilotHarness({
     configuration: WITH_COPILOT,
-    plugin: { root: () => Promise.resolve(at.pluginRoot ?? PLUGIN_ROOT), data, crews },
+    plugin: { root: typeof pluginRoot === 'function' ? pluginRoot : () => Promise.resolve(pluginRoot ?? PLUGIN_ROOT), data, crews },
     detectedVersion: () => ('version' in at ? at.version : '1.0.105'),
     isInContainer: at.isInContainer ?? false,
     ...(at.copilotHome !== undefined && { copilotHome: at.copilotHome }),
@@ -190,6 +191,11 @@ describe('where the machine offers Copilot (CC3, CC10)', () => {
 
   it('does not offer it before detection named its version', async () => {
     await expect(harness({ version: undefined }).notOfferedReason()).resolves.toBe('its Copilot CLI version is not detected yet: the hooks of its aeolus-fleet plugin are proven on Copilot CLI 1.0.105');
+  });
+
+  it('does not offer it while Copilot has no aeolus-fleet plugin, saying how to install it (#1212)', async () => {
+
+    await expect(harness({ pluginRoot: () => Promise.reject(new Error('The aeolus-fleet plugin is not installed for Copilot')) }).notOfferedReason()).resolves.toBe('its aeolus-fleet plugin is not installed for Copilot: copilot plugin install aeolus-fleet@aeolus-fleet');
   });
 
   it('does not offer it on the container runtime', async () => {

@@ -180,6 +180,16 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
     });
   });
 
+  it("names a harness its adapter does not offer by its adapter's reason alone, when its plugin is missing too, as Copilot's adapter says how to install its plugin", async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    await trierarch.state.save({ ...EMPTY_STATE, missingPlugins: ['codex'], notOffered: [{ harness: 'codex', reason: 'install it with its own command' }] });
+
+    await trierarch.reportSelf();
+
+    const [report] = trierarch.fleet.selfReports;
+    expect({ notOffered: report?.details.notOffered, note: report?.note }).toEqual({ notOffered: [{ harness: 'codex', reason: 'install it with its own command' }], note: '0 of 8 running, codex not offered: install it with its own command' });
+  });
+
   it('offers a place the missing harness alone does not trust (#1212)', async () => {
     const trierarch = aTrierarch(WITH_CODEX);
     trierarch.trust.untrust('codex', { kind: 'repository', name: 'aeolus-fleet' });
