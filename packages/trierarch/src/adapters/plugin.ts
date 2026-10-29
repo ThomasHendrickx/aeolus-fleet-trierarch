@@ -1,4 +1,4 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { z } from 'zod';
@@ -10,10 +10,16 @@ export type PluginHarness = 'claude-code' | 'codex';
 
 export const PLUGIN_HARNESSES: readonly PluginHarness[] = ['claude-code', 'codex'];
 
+/** Every harness the aeolus-fleet plugin crews a ship from: Claude Code and Codex, and Copilot, whose plugin the trierarch neither upgrades nor gives an API key. */
+export type CrewHarness = PluginHarness | 'copilot';
+
+/** The manifest each harness reads the plugin's version from. */
+const MANIFESTS: Readonly<Record<CrewHarness, string>> = { 'claude-code': '.claude-plugin', codex: '.codex-plugin', copilot: join('.github', 'plugin') };
+
 /** The aeolus-fleet plugin's data folder in a harness's plugin folders, as both harnesses name it. */
 export const PLUGIN_DATA_FOLDER = 'aeolus-fleet-aeolus-fleet';
 
-/** Where each harness keeps its plugins, and the variables that point elsewhere. */
+/** Where Claude Code and Codex keep their plugins, and the variables that point elsewhere. */
 function placesOf(at: { homeDirectory: string; env: Readonly<Record<string, string | undefined>>; harness: PluginHarness }) {
   const { homeDirectory, env } = at;
   if (at.harness === 'codex') {
@@ -23,21 +29,44 @@ function placesOf(at: { homeDirectory: string; env: Readonly<Record<string, stri
 }
 
 /**
- * Where a harness installed the aeolus-fleet plugin: the newest version in its
- * plugin cache, looked up again at each use so a plugin upgrade without a
- * service restart moves along (#828), and the plugin's data folder, unless
- * variables name others
+ * Where Copilot installed the aeolus-fleet plugin: one folder per plugin in its
+ * installed-plugins folder, with no version in the path, and the data folder
+ * Copilot gives its hooks (`COPILOT_PLUGIN_DATA`, as Copilot CLI 1.0.105 sets
+ * it), both in COPILOT_HOME when it is set, unless AEOLUS_COPILOT_PLUGIN_ROOT
+ * and AEOLUS_COPILOT_PLUGIN_DATA name others, as for a plugin Copilot loads
+ * live from a local marketplace.
+ */
+async function findCopilotPlugin(at: { homeDirectory: string; env: Readonly<Record<string, string | undefined>>; crews: string }): Promise<AeolusPlugin> {
+  const { env } = at;
+  const copilotHome = env.COPILOT_HOME ?? join(at.homeDirectory, '.copilot');
+  const data = env.AEOLUS_COPILOT_PLUGIN_DATA ?? join(copilotHome, 'plugin-data', 'aeolus-fleet', 'aeolus-fleet');
+  const root = env.AEOLUS_COPILOT_PLUGIN_ROOT ?? join(copilotHome, 'installed-plugins', 'aeolus-fleet', 'aeolus-fleet');
+  if (env.AEOLUS_COPILOT_PLUGIN_ROOT === undefined && (await stat(root).catch(() => undefined)) === undefined) {
+    throw new Error(`The aeolus-fleet plugin is not installed for Copilot (nothing in ${root}): install it, or set AEOLUS_COPILOT_PLUGIN_ROOT`);
+  }
+  return { root: () => Promise.resolve(root), data, crews: at.crews };
+}
+
+/**
+ * Where a harness installed the aeolus-fleet plugin: for Claude Code and
+ * Codex the newest version in its plugin cache, looked up again at each use
+ * so a plugin upgrade without a service restart moves along (#828), and the
+ * plugin's data folder, unless variables name others
  * (AEOLUS_PLUGIN_ROOT and AEOLUS_PLUGIN_DATA for Claude Code,
  * AEOLUS_CODEX_PLUGIN_ROOT and AEOLUS_CODEX_PLUGIN_DATA for Codex). The
- * folders follow CLAUDE_CONFIG_DIR and CODEX_HOME as the harnesses do. The
- * identities of the harness's sessions live in ~/.aeolus/crews/<harness>, as
- * the plugin keeps them (decision 0015).
+ * folders follow CLAUDE_CONFIG_DIR and CODEX_HOME as the harnesses do. For
+ * Copilot, as findCopilotPlugin says. The identities of the harness's
+ * sessions live in ~/.aeolus/crews/<harness>, as the plugin keeps them
+ * (decision 0015).
  */
-export async function findAeolusPlugin(at: { homeDirectory: string; env: Readonly<Record<string, string | undefined>>; harness?: PluginHarness }): Promise<AeolusPlugin> {
+export async function findAeolusPlugin(at: { homeDirectory: string; env: Readonly<Record<string, string | undefined>>; harness?: CrewHarness }): Promise<AeolusPlugin> {
   const harness = at.harness ?? 'claude-code';
+  const crews = join(at.homeDirectory, '.aeolus', 'crews', harness);
+  if (harness === 'copilot') {
+    return findCopilotPlugin({ ...at, crews });
+  }
   const places = placesOf({ ...at, harness });
   const data = places.data ?? join(places.plugins, 'data', PLUGIN_DATA_FOLDER);
-  const crews = join(at.homeDirectory, '.aeolus', 'crews', harness);
   const { root } = places;
   if (root !== undefined) {
     return { root: () => Promise.resolve(root), data, crews };
@@ -70,16 +99,17 @@ const manifestSchema = z.object({ version: z.string() });
  * its manifest says no version.
  */
 export async function aeolusPluginVersion(at: { homeDirectory: string; env: Readonly<Record<string, string | undefined>>; harness: string }): Promise<string | undefined> {
-  if (at.harness !== 'claude-code' && at.harness !== 'codex') {
+  const harness = [...PLUGIN_HARNESSES, 'copilot' as const].find((name) => name === at.harness);
+  if (harness === undefined) {
     return undefined;
   }
-  const root = await findAeolusPlugin({ ...at, harness: at.harness })
+  const root = await findAeolusPlugin({ ...at, harness })
     .then((plugin) => plugin.root())
     .catch(() => undefined);
   if (root === undefined) {
     return undefined;
   }
-  const manifest = join(root, at.harness === 'codex' ? '.codex-plugin' : '.claude-plugin', 'plugin.json');
+  const manifest = join(root, MANIFESTS[harness], 'plugin.json');
   const text = await readFile(manifest, 'utf8').catch(() => undefined);
   if (text === undefined) {
     return undefined;
