@@ -85,8 +85,39 @@ describe('finding the aeolus-fleet plugin for Codex', () => {
   });
 });
 
+describe('finding the aeolus-fleet plugin for Copilot', () => {
+  it("takes the plugin Copilot installed in its installed-plugins folder, its plugin data folder, and ~/.aeolus/crews/copilot for the identities", async () => {
+    mkdirSync(join(home, '.copilot', 'installed-plugins', 'aeolus-fleet', 'aeolus-fleet', 'scripts'), { recursive: true });
+
+    await expect(found({ homeDirectory: home, env: {}, harness: 'copilot' })).resolves.toEqual({
+      root: join(home, '.copilot', 'installed-plugins', 'aeolus-fleet', 'aeolus-fleet'),
+      data: join(home, '.copilot', 'plugin-data', 'aeolus-fleet', 'aeolus-fleet'),
+      crews: join(home, '.aeolus', 'crews', 'copilot'),
+    });
+  });
+
+  it('looks in COPILOT_HOME when it is set, as Copilot does', async () => {
+    const copilotHome = join(home, 'copilot-home');
+    mkdirSync(join(copilotHome, 'installed-plugins', 'aeolus-fleet', 'aeolus-fleet'), { recursive: true });
+
+    await expect(found({ homeDirectory: home, env: { COPILOT_HOME: copilotHome }, harness: 'copilot' })).resolves.toEqual({
+      root: join(copilotHome, 'installed-plugins', 'aeolus-fleet', 'aeolus-fleet'),
+      data: join(copilotHome, 'plugin-data', 'aeolus-fleet', 'aeolus-fleet'),
+      crews: join(home, '.aeolus', 'crews', 'copilot'),
+    });
+  });
+
+  it('takes AEOLUS_COPILOT_PLUGIN_ROOT and AEOLUS_COPILOT_PLUGIN_DATA when set, as for a plugin Copilot loads live from a local marketplace', async () => {
+    await expect(found({ homeDirectory: home, env: { AEOLUS_COPILOT_PLUGIN_ROOT: '/plugin', AEOLUS_COPILOT_PLUGIN_DATA: '/data', AEOLUS_PLUGIN_ROOT: '/claude' }, harness: 'copilot' })).resolves.toEqual({ root: '/plugin', data: '/data', crews: join(home, '.aeolus', 'crews', 'copilot') });
+  });
+
+  it('says the plugin is not installed for Copilot when Copilot installed none', async () => {
+    await expect(findAeolusPlugin({ homeDirectory: home, env: {}, harness: 'copilot' })).rejects.toThrow('The aeolus-fleet plugin is not installed for Copilot');
+  });
+});
+
 /** A plugin folder with the manifest the harness reads, saying the version. */
-function aPlugin({ root, manifest, version }: { root: string; manifest: '.claude-plugin' | '.codex-plugin'; version: string }): void {
+function aPlugin({ root, manifest, version }: { root: string; manifest: '.claude-plugin' | '.codex-plugin' | '.github/plugin'; version: string }): void {
   mkdirSync(join(root, manifest), { recursive: true });
   writeFileSync(join(root, manifest, 'plugin.json'), JSON.stringify({ name: 'aeolus-fleet', version }));
 }
@@ -104,6 +135,12 @@ describe('the version of the aeolus-fleet plugin a harness installed (#480)', ()
     aPlugin({ root: join(home, '.codex', 'plugins', 'cache', 'aeolus-fleet', 'aeolus-fleet', '0.20.4'), manifest: '.codex-plugin', version: '0.20.4' });
 
     await expect(aeolusPluginVersion({ homeDirectory: home, env: {}, harness: 'codex' })).resolves.toBe('0.20.4');
+  });
+
+  it("is what Copilot's manifest of the plugin it uses says", async () => {
+    aPlugin({ root: join(home, '.copilot', 'installed-plugins', 'aeolus-fleet', 'aeolus-fleet'), manifest: '.github/plugin', version: '0.34.0' });
+
+    await expect(aeolusPluginVersion({ homeDirectory: home, env: {}, harness: 'copilot' })).resolves.toBe('0.34.0');
   });
 
   it("is what Claude Code's manifest says of the plugin in its cache under CLAUDE_CONFIG_DIR when it is set (#474)", async () => {
