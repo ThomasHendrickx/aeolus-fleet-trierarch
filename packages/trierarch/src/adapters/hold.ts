@@ -6,6 +6,7 @@ import type { Readable, Writable } from 'node:stream';
 import { createInterface } from 'node:readline';
 
 import { codexThreadStartedSchema, codexTurnCommand } from './codex.js';
+import { copilotSessionIdOf, copilotStderrEvent, copilotTurnCommand } from './copilot.js';
 import type { HoldAnswer, HoldFiles, HoldRequest } from './hold-protocol.js';
 import { holdRequestSchema, parsedLine, REFUSED } from './hold-protocol.js';
 
@@ -31,6 +32,18 @@ import { holdRequestSchema, parsedLine, REFUSED } from './hold-protocol.js';
  * thread the first named, started once the last turn's process has ended.
  * Between turns no Codex process runs and the hold stays; its turn is stopped
  * with SIGINT, which ends the process (H12).
+ *
+ * Copilot runs one `copilot -p` per turn in the same way (CC4), each line the
+ * prompt of one resuming the session the last turn's result named. The
+ * `copilot` on the PATH is a launcher that runs the native Copilot as its
+ * child: a turn ends when the native process closed its output, not when the
+ * launcher exits, and its turn is stopped with SIGINT to its whole process
+ * group, since a SIGINT to the launcher alone ends the launcher and leaves
+ * the native process running the turn to its end. What Copilot writes on
+ * stderr is kept among the events, as it says a refused model or login
+ * there before any event. A turn that ends with a failing exit status ends
+ * the hold with it: the turn died, and the trierarch starts the session
+ * again (design harnesses/cursor-copilot, the died turn).
  */
 
 /** The longest the hold waits for an interrupted turn to end before the forced line goes in anyway (timings-and-limits.md). */
@@ -82,6 +95,9 @@ function sessionIdOf(event: object): string | undefined {
   return typeof id === 'string' ? id : undefined;
 }
 
+/** The harness's process, with a stderr only where the hold keeps what it writes there. */
+type Harness = ChildProcessByStdio<Writable, Readable, Readable | null>;
+
 /** A waiter for the end of the running turn, or for an answer to a control request. */
 type Waiter = (event: { type: 'result' } | { type: 'control'; requestId: string; isRefused: boolean } | { type: 'exit' }) => void;
 
@@ -97,6 +113,9 @@ export async function runHold(options: HoldOptions): Promise<number> {
   let isRestarting = false;
   let isStopping = false;
   const isCodex = harness === 'codex';
+  const isCopilot = harness === 'copilot';
+  /** Codex and Copilot run one process per turn, with no process between turns (H11, CC4). */
+  const isTurnPerProcess = isCodex || isCopilot;
   let controls = 0;
   const waiters = new Set<Waiter>();
   const tell = (event: Parameters<Waiter>[0]): void => {
@@ -123,7 +142,7 @@ export async function runHold(options: HoldOptions): Promise<number> {
       return;
     }
     const type: unknown = Reflect.get(event, 'type');
-    const id = isCodex ? codexThreadStartedSchema.safeParse(event).data?.thread_id : sessionIdOf(event);
+    const id = isCodex ? codexThreadStartedSchema.safeParse(event).data?.thread_id : isCopilot ? copilotSessionIdOf(line) : sessionIdOf(event);
     if (id !== undefined && id !== sessionId) {
       sessionId = id;
       void writeFile(files.sessionId, id);
@@ -144,45 +163,61 @@ export async function runHold(options: HoldOptions): Promise<number> {
   guard.stdin.on('error', () => undefined);
   guard.unref();
 
-  /** Kills the harness's process group: the harness and every process it started. */
-  const killGroup = (running: ChildProcessByStdio<Writable, Readable, null>): void => {
+  /** Sends the signal to the harness's process group: the harness and every process it started. */
+  const signalGroup = (running: Harness, signal: 'SIGINT' | 'SIGKILL'): void => {
     try {
-      process.kill(-(running.pid ?? 0), 'SIGKILL');
+      process.kill(-(running.pid ?? 0), signal);
     } catch {
       // Its group is gone already.
     }
   };
+  const killGroup = (running: Harness): void => {
+    signalGroup(running, 'SIGKILL');
+  };
 
-  const startHarness = (command: readonly string[]): ChildProcessByStdio<Writable, Readable, null> => {
-    const [program = '', ...args] = command;
+  const spawnHarness = (program: string, args: readonly string[]): Harness => {
     // A process group of its own: a stop ends the harness and every process it started.
-    const started = spawn(program, args, { cwd: folder, env: { ...environment }, stdio: ['pipe', 'pipe', 'ignore'], detached: true });
+    const at = { cwd: folder, env: { ...environment }, detached: true };
+    return isCopilot ? spawn(program, args, { ...at, stdio: ['pipe', 'pipe', 'pipe'] }) : spawn(program, args, { ...at, stdio: ['pipe', 'pipe', 'ignore'] });
+  };
+
+  const startHarness = (command: readonly string[]): Harness => {
+    const [program = '', ...args] = command;
+    const started = spawnHarness(program, args);
     if (started.pid !== undefined) {
       guard.stdin.write(`${String(started.pid)}\n`);
     }
     started.stdin.on('error', () => undefined);
-    // codex exec reads a stdin that is no terminal to its end before its turn: it gets none.
-    if (isCodex) {
+    // codex exec reads a stdin that is no terminal to its end before its turn, and copilot -p may take it as its prompt: neither gets one.
+    if (isTurnPerProcess) {
       started.stdin.end();
     }
     createInterface({ input: started.stdout }).on('line', onLine);
+    if (started.stderr !== null) {
+      createInterface({ input: started.stderr }).on('line', (line) => {
+        onLine(copilotStderrEvent(line));
+      });
+    }
     started.on('error', () => {
       resolveEnd(1);
     });
-    started.on('exit', (code) => {
-      if (isCodex && child === started) {
+    // Copilot's turn ends once its native process closed the output it inherited from the launcher, which may exit first.
+    started.on(isCopilot ? 'close' : 'exit', (code: number | null) => {
+      if (isTurnPerProcess && child === started) {
         isBusy = false;
         child = undefined;
       }
       tell({ type: 'exit' });
-      if (isStopping || (!isRestarting && !isCodex)) {
+      // A Copilot turn that failed died: its exit status ends the hold. One the hold stopped ends by its signal, with no status.
+      const isDiedTurn = isCopilot && code !== null && code !== 0;
+      if (isStopping || isDiedTurn || (!isRestarting && !isTurnPerProcess)) {
         resolveEnd(code ?? 1);
       }
     });
     return started;
   };
-  let child: ChildProcessByStdio<Writable, Readable, null> | undefined = startHarness(options.command);
-  if (isCodex) {
+  let child: Harness | undefined = startHarness(options.command);
+  if (isTurnPerProcess) {
     isBusy = true;
   }
 
@@ -211,14 +246,17 @@ export async function runHold(options: HoldOptions): Promise<number> {
     return sessionId === undefined ? [program, ...flags, CONTINUE] : [program, ...flags, RESUME, sessionId];
   };
 
-  /** Ends Codex's running turn: SIGINT, then its process group killed when it has not ended within the wait (H12). */
-  const endCodexTurn = async (signal: 'SIGINT' | 'SIGKILL'): Promise<void> => {
+  /** Ends the running turn of a harness with a process per turn: SIGINT, then its process group killed when it has not ended within the wait (H12). */
+  const endTurn = async (signal: 'SIGINT' | 'SIGKILL'): Promise<void> => {
     const running = child;
     if (running === undefined) {
       return;
     }
     const exited = waitFor((event) => event.type === 'exit', INTERRUPT_WAIT_MS);
-    if (signal === 'SIGINT') {
+    if (signal === 'SIGINT' && isCopilot) {
+      // To the native process too: the launcher alone would end and leave the turn running.
+      signalGroup(running, 'SIGINT');
+    } else if (signal === 'SIGINT') {
       running.kill('SIGINT');
     } else {
       killGroup(running);
@@ -229,28 +267,28 @@ export async function runHold(options: HoldOptions): Promise<number> {
     }
   };
 
-  /** Codex's next turn, once the last turn's process has ended: a codex exec resume of the session's thread (H11). */
-  const startCodexTurn = async (line: string): Promise<HoldAnswer> => {
-    if (sessionId === undefined) {
-      return { isOk: false, error: 'Codex named no thread to resume yet' };
-    }
+  /** The next turn, once the last turn's process has ended: a codex exec resume of the session's thread (H11), or a copilot -p resuming its session (CC4). */
+  const startTurn = async (line: string): Promise<HoldAnswer> => {
     if (child !== undefined) {
       const running = child;
       if ((await waitFor((event) => event.type === 'exit', INTERRUPT_WAIT_MS)) === undefined && child === running) {
-        await endCodexTurn('SIGKILL');
+        await endTurn('SIGKILL');
       }
     }
+    if (sessionId === undefined) {
+      return { isOk: false, error: isCopilot ? 'Copilot named no session to resume yet' : 'Codex named no thread to resume yet' };
+    }
     isBusy = true;
-    child = startHarness(codexTurnCommand({ start: options.command, threadId: sessionId, line }));
+    child = startHarness(isCopilot ? copilotTurnCommand({ start: options.command, sessionId, line }) : codexTurnCommand({ start: options.command, threadId: sessionId, line }));
     return { isOk: true };
   };
 
-  /** The lines in the order they came: one waits for the one before, so two never start a codex exec resume on one thread. */
-  let lastCodexSend: Promise<unknown> = Promise.resolve();
-  const sendCodex = (line: string): Promise<HoldAnswer> => {
-    const sent = lastCodexSend.then(() => startCodexTurn(line));
+  /** The lines in the order they came: one waits for the one before, so two never start a turn on one session. */
+  let lastTurnSend: Promise<unknown> = Promise.resolve();
+  const sendTurn = (line: string): Promise<HoldAnswer> => {
+    const sent = lastTurnSend.then(() => startTurn(line));
     // A failed send must not hold back the lines after it.
-    lastCodexSend = sent.catch(() => undefined);
+    lastTurnSend = sent.catch(() => undefined);
     return sent;
   };
 
@@ -258,8 +296,8 @@ export async function runHold(options: HoldOptions): Promise<number> {
     if (!isBusy) {
       return;
     }
-    if (isCodex) {
-      await endCodexTurn('SIGINT');
+    if (isTurnPerProcess) {
+      await endTurn('SIGINT');
       return;
     }
     const current = child;
@@ -294,8 +332,8 @@ export async function runHold(options: HoldOptions): Promise<number> {
   const answer = async (request: HoldRequest): Promise<HoldAnswer> => {
     switch (request.call) {
       case 'send':
-        if (isCodex) {
-          return sendCodex(request.line);
+        if (isTurnPerProcess) {
+          return sendTurn(request.line);
         }
         isBusy = true;
         child?.stdin.write(`${request.line}\n`);
