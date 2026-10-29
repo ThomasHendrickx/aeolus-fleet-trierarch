@@ -8,3 +8,6 @@ export const FAKE_CLAUDE_CODE: readonly string[] = [process.execPath, fileURLToP
 
 /** The stand-in for `codex exec --json`, as a command: `exec`, its flags, then `--` and the prompt after. */
 export const FAKE_CODEX: readonly string[] = [process.execPath, fileURLToPath(new URL('./fake-codex.ts', import.meta.url))];
+
+/** The stand-in for `copilot -p --output-format=json`, a launcher running its native process, as a command: its flags, then `--prompt=` and the prompt. */
+export const FAKE_COPILOT: readonly string[] = [process.execPath, fileURLToPath(new URL('./fake-copilot.ts', import.meta.url))];

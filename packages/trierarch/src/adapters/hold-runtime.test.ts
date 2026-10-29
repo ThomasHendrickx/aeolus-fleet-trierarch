@@ -6,7 +6,7 @@ import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { FAKE_CLAUDE_CODE, FAKE_CODEX, TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
+import { FAKE_CLAUDE_CODE, FAKE_CODEX, FAKE_COPILOT, TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
 import { newId } from '../../test/support/in-memory.js';
 import { sessionRuntimeContract } from '../../test/support/session-runtime-contract.js';
 import type { ObservedSession, SessionRuntime } from '../core/ports.js';
@@ -497,6 +497,99 @@ describe('a Codex session held by a hold, one codex exec per turn (headless H11,
 
     await expect(runtime.list()).resolves.toEqual([]);
     expect(isRunning(hold ?? 0)).toBe(false);
+  });
+});
+
+describe('a Copilot session held by a hold, one copilot -p per turn (CC4)', () => {
+  const startOf = z.object({ args: z.array(z.string()), pid: z.number() });
+  const hookOf = z.looseObject({ event: z.string() });
+  const lifeOf = z.object({ pid: z.number(), at: z.enum(['start', 'exit']) });
+  const copilotStarts = () => written('fake-starts.jsonl').map((start) => startOf.parse(start));
+  const hooks = () => written('fake-hooks.jsonl').map((hook) => hookOf.parse(hook).event);
+  const lives = () => written('fake-lives.jsonl').map((life) => lifeOf.parse(life));
+  const resultOf = z.looseObject({ sessionId: z.string() });
+
+  /** A Copilot session whose first turn ran the prompt given. */
+  async function aCopilotSession(runtime: SessionRuntime, at: { flags?: readonly string[]; prompt?: string } = {}): Promise<ShipId> {
+    const shipId = newId('ship');
+    await runtime.start({ shipId, folder, command: [...FAKE_COPILOT, ...(at.flags ?? []), '--output-format=json', '--allow-all-tools', '--no-ask-user', `--prompt=${at.prompt ?? 'wake'}`], harness: 'copilot' });
+    return shipId;
+  }
+
+  it("starts one copilot -p resuming the session the last turn's result named for a line it is sent, the line its prompt", async () => {
+    const runtime = aRuntime();
+    const shipId = await aCopilotSession(runtime);
+    await expect.poll(async () => eventsOfType({ runtime, shipId }, 'result')).toHaveLength(1);
+    const [result] = await eventsOfType({ runtime, shipId }, 'result');
+
+    await runtime.send({ shipId, line: 'the hand-over' });
+
+    await expect.poll(async () => eventsOfType({ runtime, shipId }, 'result')).toHaveLength(2);
+    expect(copilotStarts()[1]?.args).toEqual(['--output-format=json', '--allow-all-tools', '--no-ask-user', `--resume=${resultOf.parse(result).sessionId}`, '--prompt=the hand-over']);
+  });
+
+  it('runs no Copilot process between turns, and the hold stays: the session is listed running', async () => {
+    const runtime = aRuntime();
+    const shipId = await aCopilotSession(runtime);
+    await expect.poll(async () => eventsOfType({ runtime, shipId }, 'result')).toHaveLength(1);
+
+    await expect.poll(() => lives().map((life) => life.at)).toEqual(['start', 'exit']);
+    await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running' }]);
+  });
+
+  it("stops a running turn with SIGINT to Copilot's native process too, never its launcher alone, and starts the forced line's turn only once the native process ended", async () => {
+    const runtime = aRuntime();
+    const shipId = await aCopilotSession(runtime);
+    await expect.poll(async () => eventsOfType({ runtime, shipId }, 'result')).toHaveLength(1);
+    await runtime.send({ shipId, line: 'work slowly' });
+    await expect.poll(async () => eventsOfType({ runtime, shipId }, 'assistant.message')).toHaveLength(2);
+
+    await runtime.interrupt(shipId);
+    await runtime.send({ shipId, line: 'the forced one' });
+
+    await expect.poll(async () => eventsOfType({ runtime, shipId }, 'result')).toHaveLength(3);
+    expect(lives().map((life) => life.at)).toEqual(['start', 'exit', 'start', 'exit', 'start', 'exit']);
+    expect(hooks()).toEqual(['SessionStart', 'Stop', 'SessionEnd', 'SessionStart', 'SessionEnd', 'SessionStart', 'Stop', 'SessionEnd']);
+    await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running' }]);
+  });
+
+  it('interrupts nothing between turns: no process runs to stop', async () => {
+    const runtime = aRuntime();
+    const shipId = await aCopilotSession(runtime);
+    await expect.poll(async () => eventsOfType({ runtime, shipId }, 'result')).toHaveLength(1);
+
+    await runtime.interrupt(shipId);
+
+    expect(copilotStarts()).toHaveLength(1);
+    await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running' }]);
+  });
+
+  it("ends its hold when a turn fails, keeping the turn's session error, so the session restarts and its launch window reads why", async () => {
+    const runtime = aRuntime();
+    const shipId = await aCopilotSession(runtime, { flags: ['--fail-model-call'] });
+
+    await expect.poll(async () => runtime.list()).toEqual([{ shipId, status: 'exited' }]);
+    await expect(eventsOfType({ runtime, shipId }, 'session.error')).resolves.toHaveLength(1);
+  });
+
+  it('keeps what Copilot writes on stderr among the events, as it says a refused model before any event, and ends its hold', async () => {
+    const runtime = aRuntime();
+    const shipId = await aCopilotSession(runtime, { flags: ['--refuse-model'] });
+
+    await expect.poll(async () => runtime.list()).toEqual([{ shipId, status: 'exited' }]);
+    await expect(eventsOfType({ runtime, shipId }, 'aeolus.stderr')).resolves.toEqual([{ type: 'aeolus.stderr', line: 'Error: Model "no-such-model" from --model flag is not available.' }]);
+  });
+
+  it('stops a session mid-turn: its hold and the running native process end', async () => {
+    const runtime = aRuntime();
+    const shipId = await aCopilotSession(runtime, { prompt: 'work slowly' });
+    await expect.poll(async () => eventsOfType({ runtime, shipId }, 'assistant.message')).toHaveLength(1);
+    const [turn] = copilotStarts();
+
+    await runtime.stop(shipId);
+
+    await expect(runtime.list()).resolves.toEqual([]);
+    await expect.poll(() => isAlive(turn?.pid ?? 0)).toBe(false);
   });
 });
 
