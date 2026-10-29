@@ -246,6 +246,13 @@ describe('aeolus-trierarch', () => {
     expect(output).toBe('A login is api-key or subscription: aeolus-trierarch login codex --default api-key');
   });
 
+  it.each([['--api-key'], ['--remove-key'], ['--check'], ['--default', 'api-key']])("login refuses Copilot with %s, naming that it signs in with the computer's own login (CC6)", async (...words) => {
+    const { output, code } = await main(['login', 'copilot', ...words], machine({ HOME: home }));
+
+    expect(code).toBe(1);
+    expect(output).toBe("Copilot signs in with this computer's own login (copilot login), never an API key: the trierarch keeps no Copilot key and runs every Copilot session on that login");
+  });
+
   it('login refuses a harness it does not know, naming the ones it does', async () => {
     const { output, code } = await main(['login', 'gemini', '--remove-key'], machine({ HOME: home }));
 

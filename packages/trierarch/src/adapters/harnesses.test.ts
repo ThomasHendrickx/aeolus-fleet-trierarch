@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
-import { createHarnesses, riskyFlagsOf } from './harnesses.js';
+import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
+
+import { commandLinesOf, createHarnesses, riskyFlagsOf } from './harnesses.js';
 
 const sessions = { start: () => Promise.resolve(), send: () => Promise.resolve(), interrupt: () => Promise.resolve(), events: () => Promise.resolve([]) };
 /** The aeolus-fleet plugin's own scripts from this repository, as a harness installs them in its plugin cache. */
@@ -32,6 +34,35 @@ describe('the harnesses a trierarch offers', () => {
     const both = { ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: { flags: [], options: {} } } };
 
     expect(riskyFlagsOf(both)).toEqual({ 'claude-code': ['--dangerously-skip-permissions'], codex: ['--dangerously-bypass-approvals-and-sandbox'] });
+  });
+
+  it('has an adapter for Copilot, with its plugin where AEOLUS_COPILOT_PLUGIN_ROOT says', async () => {
+    const withCopilot = { ...CONFIGURATION, harnesses: { copilot: { flags: [], options: {} } } };
+
+    const { harnesses, plugins } = await createHarnesses({ configuration: withCopilot, homeDirectory: '/home/thomas', env: { AEOLUS_COPILOT_PLUGIN_ROOT: '/copilot-plugin' }, managedSettings: '/home/thomas/managed', detected: () => ({}), sessions });
+
+    expect({ harnesses: Object.keys(harnesses), root: await plugins.copilot?.root() }).toEqual({ harnesses: ['copilot'], root: '/copilot-plugin' });
+  });
+
+  it('offers Copilot on the version detection found when its plugin is proven on it, and not on the container runtime (CC3, CC10)', async () => {
+    const withCopilot = { ...CONFIGURATION, harnesses: { copilot: { flags: [], options: {} } } };
+    const detected = () => ({ copilot: { version: '1.0.105', detectedAt: new Date(), confirmedAt: null, options: {} } });
+    const at = { configuration: withCopilot, homeDirectory: '/home/thomas', env: { AEOLUS_COPILOT_PLUGIN_ROOT: '/copilot-plugin' }, managedSettings: '/home/thomas/managed', detected, sessions };
+
+    const onHost = (await createHarnesses(at)).harnesses.copilot;
+    const inContainers = (await createHarnesses({ ...at, shipHomes: { homes: '/home/thomas/.aeolus/trierarch/homes', managedSettings: '/home/thomas/managed' } })).harnesses.copilot;
+
+    expect({ onHost: await onHost?.notOfferedReason(), inContainers: await inContainers?.notOfferedReason() }).toEqual({ onHost: undefined, inContainers: 'Copilot is not proven in a container: the container runtime runs claude-code only' });
+  });
+
+  it("names Copilot's risky flags: every path and every URL, beyond the tools every launch allows (#326)", () => {
+    expect(riskyFlagsOf({ ...CONFIGURATION, harnesses: { copilot: { flags: [], options: {} } } })).toEqual({ copilot: ['--allow-all', '--yolo', '--allow-all-paths', '--allow-all-urls'] });
+  });
+
+  it('shows the command lines Copilot starts with, for config check', async () => {
+    const lines = await commandLinesOf({ harness: 'copilot', flags: ['--model', 'auto'], files: { claudeCode: { defaultPermissionMode: () => Promise.reject(new Error('Copilot reads no Claude Code settings')) } }, permissionModes: undefined, isHeadless: true });
+
+    expect(lines?.firstStart.flatMap((part) => part.words)).toEqual(['copilot', '--model', 'auto', '--output-format=json', '--allow-all-tools', '--no-ask-user', `--prompt=<first prompt>\n\n${NO_TERMINAL_QUESTIONS}`]);
   });
 
   it('refuses a configured harness it has no adapter for, naming it', async () => {

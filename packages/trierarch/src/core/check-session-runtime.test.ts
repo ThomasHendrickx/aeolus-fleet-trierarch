@@ -83,6 +83,12 @@ describe('checking the session runtime (decision 0039)', () => {
     await expect(check(inContainers({ harnesses }))).resolves.toEqual(['codex does not run in a container yet: the container runtime offers claude-code only, so remove codex']);
   });
 
+  it('takes Copilot in containers, which the trierarch then does not offer, naming why, rather than refusing its configuration (CC10)', async () => {
+    const harnesses = { 'claude-code': { flags: [], options: {} }, copilot: { flags: [], options: {} } };
+
+    await expect(check(inContainers({ harnesses }))).resolves.toEqual([]);
+  });
+
   it('refuses a machine whose model token file is missing or empty', async () => {
     host.hasModelToken = false;
 
