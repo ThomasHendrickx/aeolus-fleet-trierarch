@@ -166,6 +166,20 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
     expect(back?.details.notOffered ?? []).toEqual([]);
   });
 
+  it('names a harness its adapter does not offer, with why, in its details and its note, and offers it no place (CC3, CC10)', async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    await trierarch.state.save({ ...EMPTY_STATE, notOffered: [{ harness: 'codex', reason: 'not proven in a container' }] });
+
+    await trierarch.reportSelf();
+
+    const [report] = trierarch.fleet.selfReports;
+    expect({ harnesses: report?.details.harnesses.map((each) => each.harness), notOffered: report?.details.notOffered, note: report?.note }).toEqual({
+      harnesses: ['claude-code'],
+      notOffered: [{ harness: 'codex', reason: 'not proven in a container' }],
+      note: '0 of 8 running, codex not offered: not proven in a container',
+    });
+  });
+
   it('offers a place the missing harness alone does not trust (#1212)', async () => {
     const trierarch = aTrierarch(WITH_CODEX);
     trierarch.trust.untrust('codex', { kind: 'repository', name: 'aeolus-fleet' });
