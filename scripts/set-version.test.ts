@@ -158,8 +158,13 @@ describe('setPluginVersion', () => {
     expect(PLUGIN_MANIFESTS.map(pluginManifest)).toEqual([
       expect.objectContaining({ name: 'aeolus-fleet', version: '0.28.0' }),
       expect.objectContaining({ name: 'aeolus-fleet', version: '0.28.0' }),
+      expect.objectContaining({ name: 'aeolus-fleet', version: '0.28.0' }),
     ]);
     expect(PUBLISHED_PACKAGES.map((name) => rawManifest(name))).toEqual(packagesBefore);
+  });
+
+  it("carries the plugin's Copilot manifest with its Claude Code and Codex ones", () => {
+    expect(PLUGIN_MANIFESTS).toContain('plugins/aeolus-fleet/.github/plugin/plugin.json');
   });
 
   it('refuses a version that is not semantic', () => {
