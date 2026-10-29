@@ -3,10 +3,10 @@
 # when work arrives for the folder's ship, so no session has to remember.
 #   Codex: re-arms the wake bridge for the task; a bridge already armed for it
 #   stays as it is.
-#   Claude Code: a session wakes only through its own background task, which a
-#   hook cannot start, so when no watcher runs the hook keeps the turn open once
-#   and asks the session to start it.
-#   Copilot: runs no watcher, so the hook asks for none.
+#   Claude Code and Copilot: a session wakes only through its own background
+#   task (in Copilot a detached background shell), which a hook cannot start,
+#   so when no watcher runs the hook keeps the turn open once and asks the
+#   session to start it.
 # A message the watcher handed over and no tool call confirmed yet is
 # confirmed here (#756): acknowledged first, then the turn is kept open with it,
 # asking for the watcher too when none runs. Under a trierarch too, for a line
@@ -40,8 +40,8 @@ ship_name="$(aeolus_identity_field "$identity_text" shipName)"
 
 if ! aeolus_codex_hook && text="$(aeolus_put_into_turn "$identity" "$ship_name" "$root" '')"; then
   reason="${text%x}"
-  if [ "${AEOLUS_HARNESS:-}" != copilot ] && ! aeolus_woken_by_trierarch "$identity_text" && ! aeolus_is_watching && [ ! -f "$(aeolus_refused_file)" ]; then
-    reason="${reason}"$'\n\n'"aeolus: no watcher runs for ${ship_name}: when you are done, start \"${root}/scripts/aeolus-wait.sh\" as a background task (run_in_background), then end your turn"
+  if ! aeolus_woken_by_trierarch "$identity_text" && ! aeolus_is_watching && [ ! -f "$(aeolus_refused_file)" ]; then
+    reason="${reason}"$'\n\n'"aeolus: no watcher runs for ${ship_name}: when you are done, $(aeolus_start_the_watcher "$root")"
   fi
   printf '{"decision":"block","reason":"%s"}\n' "$(aeolus_json_escape "$reason")"
   exit 0
@@ -60,12 +60,6 @@ if aeolus_codex_hook; then
   exit 0
 fi
 
-# Copilot runs no watcher, so there is none to ask for.
-if [ "${AEOLUS_HARNESS:-}" = copilot ]; then
-  let_end
-  exit 0
-fi
-
 if printf '%s' "$payload" | grep -Eq '"stop_hook_active"[[:space:]]*:[[:space:]]*true' \
   || aeolus_is_watching || [ -f "$(aeolus_refused_file)" ]; then
   let_end
@@ -73,5 +67,5 @@ if printf '%s' "$payload" | grep -Eq '"stop_hook_active"[[:space:]]*:[[:space:]]
 fi
 
 aeolus_log "$identity" askWatcher 'kept the turn open: no watcher runs'
-reason="aeolus: no watcher runs for ${ship_name}, so nothing wakes this session when work arrives: start \"${root}/scripts/aeolus-wait.sh\" as a background task (run_in_background), then end your turn"
+reason="aeolus: no watcher runs for ${ship_name}, so nothing wakes this session when work arrives: $(aeolus_start_the_watcher "$root")"
 printf '{"decision":"block","reason":"%s"}\n' "$(aeolus_json_escape "$reason")"

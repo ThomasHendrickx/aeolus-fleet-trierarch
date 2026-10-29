@@ -99,6 +99,25 @@ aeolus_codex_hook() {
   [ -n "${PLUGIN_ROOT:-}" ] && [ "${AEOLUS_HARNESS:-codex}" = codex ]
 }
 
+# What a Copilot session's command sets before an Aeolus Fleet script, since
+# Copilot exports nothing to it: the harness, the plugin's data folder and the
+# session's folder. Run in a hook, after aeolus_hook_folder.
+aeolus_copilot_run() {
+  printf "AEOLUS_HARNESS=copilot AEOLUS_DATA='%s' AEOLUS_FOLDER='%s'" "$(aeolus_data)" "$AEOLUS_FOLDER"
+}
+
+# How the session starts the watcher, as its harness runs a command in the
+# background: Claude Code as a background task, Copilot as a detached
+# background shell, whose completion starts a turn (Copilot CLI 1.0.105).
+# <plugin root>
+aeolus_start_the_watcher() {
+  if [ "${AEOLUS_HARNESS:-}" = copilot ]; then
+    printf 'start %s "%s/scripts/aeolus-wait.sh" as a detached background shell (the shell tool with mode async and detach true), then end your turn' "$(aeolus_copilot_run)" "$1"
+  else
+    printf 'start "%s/scripts/aeolus-wait.sh" as a background task (run_in_background), then end your turn' "$1"
+  fi
+}
+
 # What a hook adds to the session's context, as its harness reads it: Copilot
 # reads additionalContext at the top level, Claude Code and Codex inside
 # hookSpecificOutput. <hook event> <text>

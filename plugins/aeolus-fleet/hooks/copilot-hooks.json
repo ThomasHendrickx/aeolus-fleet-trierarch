@@ -26,6 +26,14 @@
         }
       },
       {
+        "matcher": "^Bash$",
+        "type": "command",
+        "bash": "bash \"${PLUGIN_ROOT}/scripts/aeolus-watch-guard.sh\"",
+        "env": {
+          "AEOLUS_HARNESS": "copilot"
+        }
+      },
+      {
         "type": "command",
         "bash": "bash \"${PLUGIN_ROOT}/scripts/aeolus-launch.sh\"",
         "env": {

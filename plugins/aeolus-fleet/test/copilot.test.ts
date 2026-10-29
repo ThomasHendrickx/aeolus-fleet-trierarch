@@ -321,8 +321,8 @@ describe('a hand-over in Copilot (CC3)', () => {
 describe('a Copilot session crewed by hand wakes through the watcher, a detached background shell whose completion starts a turn (CC12)', () => {
   const START_THE_WATCHER = () =>
     `start AEOLUS_HARNESS=copilot AEOLUS_DATA='${data}' AEOLUS_FOLDER='${realpathSync(folder)}' "${PLUGIN}/scripts/aeolus-wait.sh" as a detached background shell (the shell tool with mode async and detach true), then end your turn`;
-  const theTurnEnding = (stopHookActive = false) =>
-    copilotHook('aeolus-stop.sh', { payload: { hook_event_name: 'Stop', stop_hook_active: stopHookActive, stop_reason: 'end_turn' } });
+  const theTurnEnding = (wasKeptOpen = false) =>
+    copilotHook('aeolus-stop.sh', { payload: { hook_event_name: 'Stop', stop_hook_active: wasKeptOpen, stop_reason: 'end_turn' } });
   const kept = (hookRun: Run) => z.object({ decision: z.literal('block'), reason: z.string() }).parse(JSON.parse(hookRun.stdout)).reason;
   /** The shell tool call that starts the watcher, as Copilot CLI 1.0.105 makes it. */
   const startingTheWatcher = {

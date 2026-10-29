@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# PreToolUse hook on Bash. Refuses to start the watcher in the background while
-# one already runs for the folder's ship: the second would only exit 4 at once
-# and wake the session with nothing to read. In a folder a trierarch crews
+# PreToolUse hook on Bash. Refuses to start the watcher in the background (in
+# Copilot, as a detached shell) while one already runs for the folder's ship:
+# the second would only exit 4 at once and wake the session with nothing to
+# read. In a folder a trierarch crews
 # (wakeBy=trierarch), refuses any watcher: the trierarch wakes the session.
 # Silent otherwise. Never fails the session.
 set -uo pipefail
@@ -9,7 +10,7 @@ set -uo pipefail
 
 payload="$(cat)"
 printf '%s' "$payload" | grep -q 'aeolus-wait\.sh' || exit 0
-printf '%s' "$payload" | grep -Eq '"run_in_background"[[:space:]]*:[[:space:]]*true' || exit 0
+printf '%s' "$payload" | grep -Eq '"(run_in_background|detach)"[[:space:]]*:[[:space:]]*true' || exit 0
 aeolus_hook_folder "$payload" || exit 1
 identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
 identity_text="$(aeolus_identity_read "$identity")"

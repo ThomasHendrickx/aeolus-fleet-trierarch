@@ -107,7 +107,7 @@ if [ "${AEOLUS_HARNESS:-}" = copilot ]; then
   ship_id="$(aeolus_identity_field "$identity_text" shipId)"
   fleet_url="$(aeolus_identity_field "$identity_text" fleetUrl)"
   squadron="$(aeolus_identity_field "$identity_text" squadron)"
-  run="AEOLUS_HARNESS=copilot AEOLUS_DATA='${AEOLUS_DATA}' AEOLUS_FOLDER='${AEOLUS_FOLDER}'"
+  run="$(aeolus_copilot_run)"
   context="This folder crews the Aeolus ship ${ship_name} (${ship_id}) in the fleet at ${fleet_url}. Run every Aeolus Fleet script with ${run} before it: every fleet call goes through ${run} \"${root}/scripts/aeolus-fleet.sh\", which adds the crew token: never read the identity file or pass a crew token. Do not register again. It states the model this session runs on every send: state none yourself."
   if [ -n "$squadron" ]; then
     context="${context} This ship is a member of the squadron ${squadron}. Before anything else, check in at its flagship ${squadron}, as the Aeolus Fleet crew-a-ship skill says for a squadron member."
