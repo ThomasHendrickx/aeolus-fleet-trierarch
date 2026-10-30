@@ -7,7 +7,7 @@
 #
 #   aeolus-fleet.sh register <fleetUrl> <shipId> <secret> <location> [<squadronId>]
 #       location: DEVICE, CLOUD, SERVER or OTHER:<a few words>; the harness is
-#       the one aeolus_register_harness works out
+#       the one aeolus_stated_harness tells, none when it cannot (aeolus-fleet#1408)
 #   aeolus-fleet.sh receive|send|report|inbox|setStatement [<json input>|-]   - reads the input from stdin
 #   aeolus-fleet.sh ack|pong <deliveryId>
 #   aeolus-fleet.sh openMeeting|meeting|requestMic|withdrawMicRequest|releaseMic|giveMic|takeMic|setMicPattern
@@ -140,13 +140,16 @@ json_unescape() {
 
 register() {
   [ "$#" -eq 4 ] || [ "$#" -eq 5 ] || usage
-  local ship_id="$2" secret="$3" location squadron="${5:-}" token name crewed
+  local ship_id="$2" secret="$3" location squadron="${5:-}" token name crewed stated harness=
   fleet_url="${1%/}"
   case "$4" in
     DEVICE|CLOUD|SERVER) location="{\"kind\":\"$4\"}" ;;
     OTHER:?*) location="{\"kind\":\"OTHER\",\"description\":\"$(aeolus_json_escape "${4#OTHER:}")\"}" ;;
     *) echo "aeolus: the location is DEVICE, CLOUD, SERVER or OTHER:<a few words>" >&2; exit 2 ;;
   esac
+  # The fleet is told the harness only when the plugin can tell it: an unknown one stays unknown (aeolus-fleet#1408).
+  stated="$(aeolus_stated_harness)"
+  [ -z "$stated" ] || harness=",\"harness\":\"$(aeolus_json_escape "$stated")\""
   # Every later call of the session finds the identity in this harness's crews folder.
   AEOLUS_HARNESS="$(aeolus_register_harness)"
   export AEOLUS_HARNESS
@@ -155,7 +158,7 @@ register() {
     echo "aeolus: this folder already crews $(aeolus_identity_field "$crewed" shipName) ($(aeolus_identity_field "$crewed" shipId)); one folder crews one ship, and deregistering frees it"
     exit 4
   fi
-  call_fleet POST /api/v1/ship/register "" "{\"shipId\":\"$(aeolus_json_escape "$ship_id")\",\"secret\":\"$(aeolus_json_escape "$secret")\",\"location\":${location},\"harness\":\"$(aeolus_json_escape "$AEOLUS_HARNESS")\"}"
+  call_fleet POST /api/v1/ship/register "" "{\"shipId\":\"$(aeolus_json_escape "$ship_id")\",\"secret\":\"$(aeolus_json_escape "$secret")\",\"location\":${location}${harness}}"
   [ "$status" = 200 ] || refused register
   token="$(aeolus_json_string "$body" crewToken)"
   [ -n "$token" ] || { echo "aeolus: the fleet answered register without a crew token"; exit 1; }

@@ -83,9 +83,10 @@ aeolus_stated_harness() {
   fi
 }
 
-# The harness a register states and crews for: the stated one, else codex: the
-# plugin runs in Claude Code and Codex only, and a Codex skill's command that
-# left out AEOLUS_HARNESS sets none of their variables (#711).
+# The harness whose crews folder a register keeps the identity in: the stated
+# one, else codex: the plugin runs in Claude Code and Codex only, and a Codex
+# skill's command that left out AEOLUS_HARNESS sets none of their variables
+# (#711). Only the folder: the fleet is told no harness then (aeolus-fleet#1408).
 aeolus_register_harness() {
   local harness
   harness="$(aeolus_stated_harness)"
