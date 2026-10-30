@@ -216,9 +216,21 @@ describe('aeolus-fleet-issue file', () => {
     expect(calls).toContain(`issue create --repo ${REPOSITORY} --title The watcher woke [ship] four times with nothing to read --body-file`);
     const body = readFileSync(`${ghCalls}.body`, 'utf8');
     expect(body.match(/Filed by an Aeolus ship/g)).toHaveLength(1);
-    expect(body).toMatch(/aeolus-fleet plugin \d+\.\d+\.\d+, harness claude-code, OS \w+/);
+    expect(body).toMatch(/aeolus-fleet plugin \d+\.\d+\.\d+, harness unknown, OS \w+/);
     expect(body).not.toContain(CREW_TOKEN);
     expect(body).not.toContain('l3lo');
+  });
+
+  it.each([
+    { label: 'Claude Code runs it', env: { CLAUDECODE: '1' }, harness: 'claude-code' },
+    { label: 'a Codex hook runs it', env: { PLUGIN_ROOT: '/plugins/aeolus-fleet' }, harness: 'codex' },
+    { label: 'AEOLUS_HARNESS names it', env: { AEOLUS_HARNESS: 'copilot' }, harness: 'copilot' },
+  ])('states the harness the issue was filed from when $label, and never guesses claude-code (aeolus-fleet#1408)', ({ env, harness }) => {
+    aGh({ isSignedIn: true });
+
+    run('aeolus-issue.sh', { args: ['file', aDraft()], env });
+
+    expect(readFileSync(`${ghCalls}.body`, 'utf8')).toContain(`, harness ${harness}, OS `);
   });
 
   it('keeps the draft and prints a prefilled new-issue link when gh is not signed in', () => {
