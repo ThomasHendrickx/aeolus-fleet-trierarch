@@ -72,10 +72,7 @@ async function startTheUnit(): Promise<void> {
   await systemctl('start', name);
   await expect.poll(sessionPid, { timeout: SESSION_TIMEOUT_MS }).not.toBe('').catch(async (error: unknown) => {
     const dump = async (c: string, a: string[]) => { const r = await runCommand(c, { args: a }); console.log('DIAG', c, a.join(' '), JSON.stringify(r)); };
-    await dump('sh', ['-c', 'cat ' + folder + '/trierarch.sh; ls -la /bin/sh; ls -la $(command -v echo)']);
-    await dump('systemd-run', ['--user', '--scope', '--quiet', '--collect', '--', 'sh', '-c', 'echo $$']);
-    await dump('systemd-run', ['--user', '--scope', '--quiet', '--collect', '--', 'sh', '-c', 'echo [$$] > ' + folder + '/probe; cat ' + folder + '/probe']);
-    await dump('sh', ['-c', 'systemd-run --user --scope --quiet --collect -- sh -c \'echo $$ > ' + folder + '/probe2; exec sleep 1\' < /dev/null > /dev/null 2>&1 & sleep 3; cat ' + folder + '/probe2']);
+    await dump('sh', ['-c', 'systemd-run --help | grep -i -B1 -A3 expand; systemd-run --user --scope --quiet --collect --expand-environment=no -- sh -c "echo [\\$\\$]"']);
     throw error;
   });
 }
