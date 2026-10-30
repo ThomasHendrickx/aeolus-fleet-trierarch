@@ -218,7 +218,7 @@ case "${1:-}" in
     {
       redact < "$draft"
       printf '\n---\n_Filed by an Aeolus ship (aeolus-fleet plugin %s, harness %s, OS %s)._\n' \
-        "$(plugin_version)" "${AEOLUS_HARNESS:-claude-code}" "$(uname -s)"
+        "$(plugin_version)" "$(harness="$(aeolus_stated_harness)"; printf '%s' "${harness:-unknown}")" "$(uname -s)"
     } > "$public"
     check "$public" || exit 3
     title="$(head -n 1 "$public" | sed 's/^#[[:space:]]*//')"

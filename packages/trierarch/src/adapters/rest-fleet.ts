@@ -25,9 +25,6 @@ export const TRIERARCH_SELF = { model: `@aeolus-fleet/trierarch@${runningVersion
 /** Where the trierarch says its sessions and itself run: on the operator's machine. */
 const LOCATION = { kind: 'DEVICE' } as const;
 
-/** The harness a session the trierarch crews states when the trierarch registers it. */
-const SESSION_HARNESS = 'claude-code';
-
 const refusalSchema = z.object({ code: z.string(), message: z.string() });
 
 /** The fleet's code for a call it could not start: nothing was stored, so the same call may be made again. */
@@ -117,8 +114,8 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string; 
     }
     return request.answers.parse(body);
   }
-  const register = (crew: { shipId: ShipId; secret: string }, harness: string) =>
-    call({ path: '/ship/register', crewToken: '', body: { ...crew, location: LOCATION, harness }, answers: z.object({ crewToken: z.string() }) });
+  const register = (crew: { shipId: ShipId; secret: string; harness: string }) =>
+    call({ path: '/ship/register', crewToken: '', body: { ...crew, location: LOCATION }, answers: z.object({ crewToken: z.string() }) });
 
   return {
     url: fleetUrl,
@@ -141,8 +138,8 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string; 
       }
     },
     getStartingPrompt: async (shipId) => call({ path: '/fleet/getStartingPrompt', body: { shipId }, answers: z.object({ secret: z.string() }) }),
-    register: async (crew) => register(crew, SESSION_HARNESS),
-    registerSelf: async (crew) => register(crew, TRIERARCH_SELF.harness),
+    register: async (crew) => register(crew),
+    registerSelf: async (crew) => register({ ...crew, harness: TRIERARCH_SELF.harness }),
     whoami: async () => call({ path: '/ship/whoami', answers: z.object({ shipId: idSchema('ship'), name: z.string() }) }),
     release: async (shipId) => {
       await call({ path: '/fleet/release', body: { shipId }, answers: z.unknown() });

@@ -103,8 +103,8 @@ export interface FleetPort {
   ship(shipId: ShipId): Promise<FleetShipStatus>;
   /** A new starting prompt's secret; the trierarch keeps it only until it registers. */
   getStartingPrompt(shipId: ShipId): Promise<{ secret: string }>;
-  /** Registers the ship with its secret, as the session's crew: its crew token. */
-  register(crew: { shipId: ShipId; secret: string }): Promise<{ crewToken: string }>;
+  /** Registers the ship with its secret, as the session's crew in its harness: its crew token. */
+  register(crew: { shipId: ShipId; secret: string; harness: string }): Promise<{ crewToken: string }>;
   release(shipId: ShipId): Promise<void>;
   /** Acknowledges a delivery to the trierarch's own ship. */
   ack(deliveryId: string): Promise<void>;

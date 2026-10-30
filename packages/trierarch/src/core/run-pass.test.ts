@@ -1415,6 +1415,19 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(given?.reason.startsWith('mac-studio: options.model: model must be one of a-value-name-of-some-length-0')).toBe(true);
   });
 
+  it('registers each session with the harness its crew request asks for, so the fleet lists a Codex crew as codex (aeolus-fleet#1408)', async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    const codexShip = trierarch.fleet.commission('lookout');
+    trierarch.fleet.request(codexShip, crewSettings({ harness: 'codex' }));
+    const claudeShip = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(claudeShip, crewSettings());
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.shipOf(codexShip).harness).toBe('codex');
+    expect(trierarch.fleet.shipOf(claudeShip).harness).toBe('claude-code');
+  });
+
   it('tells argo once per version, as before, when the fleet holds its crew final already, as after its state was lost (#382)', async () => {
     const trierarch = aTrierarch();
     const shipId = trierarch.fleet.commission('scout');

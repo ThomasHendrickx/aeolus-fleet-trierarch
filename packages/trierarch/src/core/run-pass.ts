@@ -489,7 +489,7 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
     return giveBack(state, { action: { kind: 'giveBack', shipId: crewing.shipId, settingsVersion: crewing.settingsVersion, reason: loginProblem, entry: { ...crewing, shipName: ship.name, folder } }, deps });
   }
   const { secret } = await deps.fleet.getStartingPrompt(crewing.shipId);
-  const { crewToken } = await deps.fleet.register({ shipId: crewing.shipId, secret });
+  const { crewToken } = await deps.fleet.register({ shipId: crewing.shipId, secret, harness: crewing.harness });
   // The crew token stays in the state; the session calls over its ship's socket, opened before it starts (decision 0026).
   crewing = { ...crewing, crewToken };
   state = putEntry(state, { ...crewing, shipName: ship.name, folder });

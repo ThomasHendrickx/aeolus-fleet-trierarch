@@ -149,6 +149,16 @@ describe('the fleet over REST', () => {
     );
   });
 
+  it('registers a session with its own harness, as the fleet then lists its ship (aeolus-fleet#1408)', async () => {
+    await aFleetAnswering([{ status: 200, body: { crewToken: 'aeolus_ct_v1_session' } }], async (fleetUrl, asked) => {
+      const shipId = newId('ship');
+
+      await expect(createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_x' }).register({ shipId, secret: 'aeolus_sk_v1_x', harness: 'codex' })).resolves.toEqual({ crewToken: 'aeolus_ct_v1_session' });
+
+      expect(asked.map(({ url, body }) => ({ url, body }))).toEqual([{ url: '/api/v1/ship/register', body: JSON.stringify({ shipId, secret: 'aeolus_sk_v1_x', harness: 'codex', location: { kind: 'DEVICE' } }) }]);
+    });
+  });
+
   it('gives a crew request back with the settings version it tried and the reason, and answers given back once the fleet takes it (#382)', async () => {
     const shipId = newId('ship');
     const asked: { method?: string; url?: string; body: string }[] = [];
