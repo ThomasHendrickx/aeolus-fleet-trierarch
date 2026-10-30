@@ -554,7 +554,7 @@ aeolus_hook_folder() {
   local own inherited="${AEOLUS_FOLDER:-}"
   own="${CLAUDE_PROJECT_DIR:-}"
   [ -n "$own" ] || own="$(aeolus_json_string "$1" cwd)"
-  AEOLUS_FOLDER="${own:-$inherited}"
+  AEOLUS_FOLDER="$(aeolus_physical_folder "${own:-$inherited}")"
   export AEOLUS_FOLDER
   if [ -n "$own" ] && [ -n "$inherited" ] && [ "$(aeolus_physical_folder "$own")" != "$(aeolus_physical_folder "$inherited")" ]; then
     echo "aeolus: refused AEOLUS_FOLDER ${inherited}: this session's folder is ${own}" >&2

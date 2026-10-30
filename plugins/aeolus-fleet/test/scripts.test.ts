@@ -2279,7 +2279,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       await aHookWithScoutsFolder('aeolus-session-start.sh', { hook_event_name: 'SessionStart', source: 'startup' });
 
       const exported = spawnSync('bash', ['-c', '. "$1"; printf %s "$AEOLUS_FOLDER"', 'bash', join(data, 'session.env')], { env: { AEOLUS_FOLDER: folder } });
-      expect(exported.stdout.toString()).toBe(ownFolder);
+      expect(exported.stdout.toString()).toBe(realpathSync(ownFolder));
     });
   });
 
@@ -2528,7 +2528,7 @@ describe('the SessionStart hook', () => {
     const { env } = hook(payloadFor(folder));
 
     const exported = spawnSync('bash', ['-c', `. "$1"; printf '%s\\n' "$AEOLUS_FOLDER" "$AEOLUS_DATA" "$AEOLUS_ROOT"`, 'bash', join(data, 'session.env')]);
-    expect(exported.stdout.toString()).toBe(`${folder}\n${data}\n/plugin\n`);
+    expect(exported.stdout.toString()).toBe(`${realpathSync(folder)}\n${data}\n/plugin\n`);
     expect(env).toContain('export AEOLUS_FOLDER=');
   });
 
@@ -2654,7 +2654,7 @@ describe('the SessionStart hook', () => {
     const { stdout, env } = hook(payloadFor(subfolder, 'compact'), folder);
 
     const exported = spawnSync('bash', ['-c', `. "$1"; printf '%s' "$AEOLUS_FOLDER"`, 'bash', join(data, 'session.env')]);
-    expect(exported.stdout.toString()).toBe(folder);
+    expect(exported.stdout.toString()).toBe(realpathSync(folder));
     expect(env).toContain('export AEOLUS_FOLDER=');
     expect(hookOutputSchema.parse(JSON.parse(stdout)).hookSpecificOutput.additionalContext).toContain(`This folder crews the Aeolus ship scout (${SHIP_ID})`);
   });
