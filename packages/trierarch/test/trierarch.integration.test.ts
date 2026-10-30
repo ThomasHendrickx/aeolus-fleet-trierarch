@@ -235,7 +235,6 @@ describe('the trierarch on a real fleet', () => {
     writeFileSync(join(paths.keys, 'claude-code'), KEY, { mode: 0o600 });
     const modelLogins = createModelLogins({
       keyStates: createKeyStates({ keys: paths.keys, file: keyStatesFileOf(paths.proxy) }),
-      runtime: 'host',
       claudeCode: { keyInReach: () => Promise.resolve(undefined) },
       codex: { loginKind: () => Promise.reject(new Error('no Codex here')) },
     });
