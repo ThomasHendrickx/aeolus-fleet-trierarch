@@ -61,6 +61,17 @@ describe('config check, with the session runtime (decision 0039)', () => {
     expect({ headless: words.slice(1, 6), hasPrompt: words.includes('--') }).toEqual({ headless: ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json'], hasPrompt: false });
   });
 
+  it.each([
+    { label: 'on the host', runtime: undefined },
+    { label: 'in containers', runtime: CONTAINER },
+  ])('asks for no tmux with the sessions $label: no session runs in a terminal (headless H4)', async ({ runtime }) => {
+    configured({ ...SESSIONS, ...(runtime !== undefined && { runtime }) });
+
+    const report = await configCheck(paths, { files: FILES, host });
+
+    expect(report.text).not.toMatch(/tmux/iu);
+  });
+
   it('refuses a configuration the container runtime cannot run, giving every reason', async () => {
     configured({ ...SESSIONS, runtime: CONTAINER });
     host.groups = ['docker'];
