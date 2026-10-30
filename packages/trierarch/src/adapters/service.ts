@@ -54,6 +54,11 @@ export type Exec = (command: string, args: readonly string[]) => Promise<Command
 /** The variables the trierarch itself reads, carried into the service when set where install ran. */
 const TRIERARCH_VARIABLES = ['AEOLUS_PLUGIN_ROOT', 'AEOLUS_PLUGIN_DATA', 'AEOLUS_CODEX_PLUGIN_ROOT', 'AEOLUS_CODEX_PLUGIN_DATA', 'CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'AEOLUS_TRIERARCH_CONFIG'] as const;
 
+/** What systemctl --user needs to reach the user's bus: the shell's XDG_RUNTIME_DIR, or /run/user/<uid> where it has none, as in a session the trierarch runs. */
+export function systemctlEnvironment(env: Readonly<Record<string, string | undefined>>, uid: number): Record<string, string> {
+  return { XDG_RUNTIME_DIR: env.XDG_RUNTIME_DIR ?? `/run/user/${String(uid)}` };
+}
+
 const DEFAULT_PATH = '/usr/bin:/bin';
 
 /** The service's environment: PATH, so it finds git, claude, codex and the container runtime, and the trierarch's own variables. */
