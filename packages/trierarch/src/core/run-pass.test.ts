@@ -2,6 +2,7 @@ import type { ShipId } from '@aeolus-fleet/common';
 import { describe, expect, it } from 'vitest';
 
 import { aTrierarch, aTrierarchOnLogins, CONFIGURATION, crewSettings, InMemoryCheckouts, InMemoryShipSockets, newId, NOTES_FOLDER, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
+import { putEntry } from './entry.js';
 import type { LaunchSeen } from './ports.js';
 import { RESTART_BUDGET } from './restart-policy.js';
 
@@ -2548,6 +2549,37 @@ describe("each session's login (api keys K5, K6, K9)", () => {
     const shipId = await aCrewedShip(trierarch);
 
     expect(trierarch.harness.launchedLogins).toEqual([{ shipId, login: 'subscription' }]);
+  });
+
+  it('keeps the login of its earlier sessions, until the start that changed it, so what each session used counts to its own login (K8)', async () => {
+    const trierarch = aTrierarchOnLogins(ON_KEY);
+    const shipId = await aCrewedShip(trierarch);
+    const crewed = trierarch.state.current();
+    const entry = crewed.entries[shipId];
+    if (entry !== undefined) {
+      await trierarch.state.save(putEntry(crewed, { ...entry, login: 'subscription' }));
+    }
+    trierarch.processes.exit(shipId);
+    await trierarch.pass();
+    trierarch.clock.advance(10 * MINUTE_MS);
+    const restartedAt = trierarch.clock.now().toISOString();
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ login: 'apiKey', earlierLogins: [{ login: 'subscription', until: restartedAt }] });
+  });
+
+  it('keeps no earlier login for a start on the login it ran on', async () => {
+    const trierarch = aTrierarchOnLogins(ON_KEY);
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.processes.exit(shipId);
+    await trierarch.pass();
+    trierarch.clock.advance(10 * MINUTE_MS);
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.launchedLogins).toHaveLength(2);
+    expect(trierarch.state.current().entries[shipId]?.earlierLogins).toBeUndefined();
   });
 
   it('a restart whose key is not ready starts nothing: the ship waits restarting, with no restart counted, and never moves to the subscription', async () => {
