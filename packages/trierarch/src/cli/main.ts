@@ -22,7 +22,7 @@ import { aeolusPluginVersion, PLUGIN_HARNESSES, type PluginHarness } from '../ad
 import { createPluginUpdate } from '../adapters/plugin-update.js';
 import { createRestFleet } from '../adapters/rest-fleet.js';
 import { runCommand, streamCommand } from '../adapters/run-command.js';
-import { createService, serviceEnvironment } from '../adapters/service.js';
+import { createService, serviceEnvironment, systemctlEnvironment } from '../adapters/service.js';
 import { hostSessions, modelProxy } from '../adapters/runtime-adapters.js';
 import { checkKey } from '../adapters/vendor-key-check.js';
 import { CHECK_PATH } from '../adapters/model-proxy.js';
@@ -200,6 +200,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
   const paths = trierarchPaths({ homeDirectory, ...(config !== undefined && { config }) });
   // The installed package's own command: an upgrade puts the new version's code here.
   const script = fileURLToPath(new URL('../bin/aeolus-trierarch.js', import.meta.url));
+  const uid = process.getuid?.() ?? 0;
   const serviceAt = () =>
     createService({
       platform,
@@ -207,8 +208,8 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       paths,
       run: { node: process.execPath, script },
       environment: serviceEnvironment(env),
-      uid: process.getuid?.() ?? 0,
-      exec: (program, args) => runCommand(program, { args }),
+      uid,
+      exec: (program, args) => runCommand(program, { args, ...(program === 'systemctl' && { env: systemctlEnvironment(env, uid) }) }),
       now: () => new Date(),
     });
   // Claude Code's files where Claude Code keeps them: under CLAUDE_CONFIG_DIR when it is set (#474).
