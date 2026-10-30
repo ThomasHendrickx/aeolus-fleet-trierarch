@@ -773,7 +773,10 @@ describe('Claude Code in containers, each ship with a home of its own (decision 
           started.push(session);
           return Promise.resolve();
         },
-        send: () => Promise.resolve(),
+        send: (at) => {
+          sent.push(at);
+          return Promise.resolve();
+        },
         interrupt: () => Promise.resolve(),
         events: () => Promise.resolve([]),
       },
@@ -812,6 +815,13 @@ describe('Claude Code in containers, each ship with a home of its own (decision 
 
     const shipSetup = createClaudeCodeSetup({ homeDirectory: join(homes, shipId), managedSettings: join(home, 'managed') });
     expect({ isOnboarded: await shipSetup.isOnboardingComplete(), isTrusted: await shipSetup.isTrusted(folder), host: existsSync(join(home, '.claude.json')) }).toEqual({ isOnboarded: true, isTrusted: true, host: false });
+  });
+
+  it('runs headless in a container too, as on the host: Claude Code in print mode with streamed JSON, its first prompt sent as its first line (headless H18)', async () => {
+    await inContainers().launch({ ...launchOf(shipId), options: {}, isFirstStart: true, firstPrompt: 'Review the open pull requests.' });
+
+    const command = started[0]?.command ?? [];
+    expect({ headless: command.slice(1, 6), hasPrompt: command.includes('--'), sent: sent.map((line) => line.shipId) }).toEqual({ headless: ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json'], hasPrompt: false, sent: [shipId] });
   });
 
   it("makes the ship's home for its owner alone", async () => {
