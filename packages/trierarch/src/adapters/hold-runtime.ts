@@ -33,9 +33,9 @@ export interface HeldCommand {
   readonly env: Readonly<Record<string, string>>;
 }
 
-/** What a session's start goes through: a systemd scope of its own under a systemd unit, which sets INVOCATION_ID, so a restart or upgrade of the service ends no session (#479, #537). */
+/** What a session's start goes through: a systemd scope of its own under a systemd unit, which sets INVOCATION_ID, so a restart or upgrade of the service ends no session (#479, #537). It expands no variable in the command: systemd 259 would turn a $$ of it into $. */
 export function sessionsLaunch(at: { platform: string; env: Readonly<Record<string, string | undefined>> }): readonly string[] {
-  return at.platform === 'linux' && at.env.INVOCATION_ID !== undefined ? ['systemd-run', '--user', '--scope', '--quiet', '--collect', '--'] : [];
+  return at.platform === 'linux' && at.env.INVOCATION_ID !== undefined ? ['systemd-run', '--user', '--scope', '--quiet', '--collect', '--expand-environment=no', '--'] : [];
 }
 
 /**
