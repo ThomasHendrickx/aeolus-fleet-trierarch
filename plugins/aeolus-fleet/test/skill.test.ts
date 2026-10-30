@@ -8,6 +8,7 @@ const claudeSkill = readFileSync(new URL('../skills/crew-a-ship/SKILL.md', impor
 const codexSkill = readFileSync(new URL('../skills/aeolus-fleet-crew/SKILL.md', import.meta.url), 'utf8');
 const codexWake = readFileSync(new URL('../skills/aeolus-fleet-wake/SKILL.md', import.meta.url), 'utf8');
 const codexShip = readFileSync(new URL('../skills/aeolus-fleet-ship/SKILL.md', import.meta.url), 'utf8');
+const copilotCrew = readFileSync(new URL('../copilot-skills/aeolus-fleet-crew/SKILL.md', import.meta.url), 'utf8');
 const protocolRules = SHIP_PROTOCOL.split('\n').filter((line) => /^\d+\. /.test(line));
 
 // The ship protocol lives once, in the fleet, which states it in its MCP
@@ -176,6 +177,36 @@ describe('LEASE_ENDED in the skills', () => {
     expect(leaseEndedLines(codexSkill).join('\n')).toContain('the plugin already forgot the ship');
     for (const line of [codexSkill, codexWake, codexShip].flatMap(leaseEndedLines)) {
       expect(line).not.toContain('delete');
+    }
+  });
+});
+
+// A Copilot session pastes the Copilot crew line the console shows (design
+// harnesses/cursor-copilot, S6): its skill registers with harness copilot and
+// hands over to crew-a-ship, which holds the rest.
+describe('the Copilot crew skill', () => {
+  it('takes the Copilot crew line, /aeolus-fleet-crew with the fleet URL, ship id, secret and a squadron id for a member', () => {
+    expect(copilotCrew).toContain('name: aeolus-fleet-crew');
+    expect(copilotCrew).toContain('A Copilot crew line is `/aeolus-fleet-crew <fleetUrl> <shipId> <secret> [<squadronId>]`.');
+  });
+
+  it("runs register with the variables the SessionStart context names, so the ship is crewed with harness copilot, and stops when the plugin's hooks are not active", () => {
+    expect(copilotCrew).toContain('The SessionStart context must say `Aeolus Fleet Copilot hooks are active`');
+    expect(copilotCrew).toContain('Run every script below with the variables the SessionStart context names before it');
+    expect(copilotCrew).toContain("aeolus-fleet.sh register '<fleetUrl>' '<shipId>' '<secret>' '<location>'");
+    expect(copilotCrew).toContain('It registers with harness `copilot`');
+  });
+
+  it('never registers a folder that already crews a ship, and never repeats the secret', () => {
+    expect(copilotCrew).toContain('If it shows a ship, this folder already crews it');
+    expect(copilotCrew).toContain('Never write the secret into a file and never repeat it in your answer.');
+  });
+
+  it('goes on as crew-a-ship says, holding none of the protocol, and starts the watcher as a detached background shell (CC12)', () => {
+    expect(copilotCrew).toContain('go on as the Aeolus Fleet crew-a-ship skill says');
+    expect(copilotCrew).toContain('start the watcher as a detached background shell');
+    for (const rule of protocolRules) {
+      expect(copilotCrew).not.toContain(rule);
     }
   });
 });

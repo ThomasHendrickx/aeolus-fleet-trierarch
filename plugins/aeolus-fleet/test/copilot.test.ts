@@ -185,10 +185,15 @@ const copilotHooks = () =>
 const running = (script: string) => `bash "\${PLUGIN_ROOT}/scripts/${script}"`;
 
 describe('the Copilot plugin package (CC5)', () => {
-  it('publishes the aeolus-fleet plugin through a Copilot manifest with its own hooks file and the crew skill, at the version of the other manifests', () => {
+  it('publishes the aeolus-fleet plugin through a Copilot manifest with its own hooks file, the crew-a-ship skill and the Copilot crew skill, at the version of the other manifests', () => {
     const claude = z.object({ version: z.string() }).parse(json(join(PLUGIN, '.claude-plugin/plugin.json')));
     const manifest = z
-      .object({ name: z.literal('aeolus-fleet'), version: z.string(), hooks: z.literal('./hooks/copilot-hooks.json'), skills: z.literal('./skills/crew-a-ship') })
+      .object({
+        name: z.literal('aeolus-fleet'),
+        version: z.string(),
+        hooks: z.literal('./hooks/copilot-hooks.json'),
+        skills: z.tuple([z.literal('./skills/crew-a-ship'), z.literal('./copilot-skills/aeolus-fleet-crew')]),
+      })
       .parse(json(join(PLUGIN, '.github/plugin/plugin.json')));
 
     expect(manifest.version).toBe(claude.version);
@@ -278,8 +283,20 @@ describe('the SessionStart hook in Copilot', () => {
     expect(told).toContain('The trierarch wakes this session when work arrives: start no watcher.');
   });
 
-  it('says nothing in a folder that crews no ship', async () => {
-    await expect(copilotHook('aeolus-session-start.sh', { payload: { hook_event_name: 'SessionStart', source: 'new' } })).resolves.toMatchObject({ status: 0, stdout: '' });
+  it("tells a session in a folder that crews no ship that the hooks are active, and how to run the plugin's scripts, for the Copilot crew line (S6)", async () => {
+    const told = context(await copilotHook('aeolus-session-start.sh', { payload: { hook_event_name: 'SessionStart', source: 'new' } }));
+
+    expect(told).toBe(
+      `Aeolus Fleet Copilot hooks are active. This folder crews no Aeolus ship. Run every Aeolus Fleet script with AEOLUS_HARNESS=copilot AEOLUS_DATA='${data}' AEOLUS_FOLDER='${realpathSync(folder)}' before it; the scripts are in ${PLUGIN}/scripts.`,
+    );
+  });
+
+  it('tells a crewed session that the hooks are active too, so the Copilot crew skill finds its folder crewed (S6)', async () => {
+    crew();
+
+    const told = context(await copilotHook('aeolus-session-start.sh', { payload: { hook_event_name: 'SessionStart', source: 'new' } }));
+
+    expect(told).toMatch(/^Aeolus Fleet Copilot hooks are active\. This folder crews the Aeolus ship scout/);
   });
 });
 
