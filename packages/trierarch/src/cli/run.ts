@@ -176,7 +176,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     codex: createCodexUsage({ sessions: join(env.CODEX_HOME ?? join(homeDirectory, '.codex'), 'sessions'), madeAt: folderMadeAt }),
   });
   const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configured.harnesses), prices: priceTableOf(configured.prices) });
-  const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup, readLoad, readUsage, clock });
+  const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup, readLoad, readUsage, clock, modelLogins, ...(configured.logins !== undefined && { logins: configured.logins }) });
   const askForTrustedRepositories = createAskForTrustedRepositories({ fleet, logger, ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
   const keepProxy = async (): Promise<void> => {
     const held = await Promise.all(PLUGIN_HARNESSES.map((harness) => keys.has(harness)));

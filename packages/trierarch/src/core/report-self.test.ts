@@ -1,7 +1,7 @@
 import { trierarchReportDetailsSchema } from '@aeolus-fleet/common';
 import { describe, expect, it } from 'vitest';
 
-import { aMachineLoad, aTrierarch, CONFIGURATION, newId, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
+import { aMachineLoad, aTrierarch, aTrierarchOnLogins, CONFIGURATION, newId, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
 import { EMPTY_STATE, putEntry, type Entry } from './entry.js';
 
 const WITH_CODEX = { ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: { flags: [], options: {} } } };
@@ -45,6 +45,7 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
           options: { type: 'object', properties: { model: { enum: ['opus', 'sonnet'], default: 'opus' } }, additionalProperties: false },
           flags: ['--remote-control'],
           riskyFlags: [],
+          login: { default: 'subscription', key: 'ready' },
         },
       ],
       workspaces: { repositories: ['aeolus-fleet'], folders: ['notes'] },
@@ -52,6 +53,7 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
       // Paths stay on the machine: a kept worktree goes by its ship and repository, an orphan by its repository and name (#325).
       kept: [{ shipId: kept.shipId, repository: 'aeolus-fleet' }],
       orphans: [{ repository: 'aeolus-fleet', name: 'stray' }],
+      logins: [],
       machine: { os: 'macos', arch: 'arm64' },
       runtime: 'host',
       load: aMachineLoad(),
@@ -246,5 +248,68 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
     await trierarch.reportSelf();
 
     expect(trierarch.fleet.selfReports.map((report) => report.details.workspaces.repositories)).toEqual([['aeolus-fleet'], []]);
+  });
+
+  describe('the logins its sessions run on (api keys K8)', () => {
+    const OUT_OF_CREDIT_SINCE = '2026-10-28T14:02:00.000Z';
+
+    it("reports each harness's default login and its key's state, with since when its vendor's answer set it", async () => {
+      const trierarch = aTrierarchOnLogins({ default: { 'claude-code': 'apiKey' } });
+      trierarch.modelLogins.states.set('claude-code', { state: 'outOfCredit', at: OUT_OF_CREDIT_SINCE });
+
+      await trierarch.reportSelf();
+
+      expect(trierarch.fleet.selfReports.at(-1)?.details.harnesses.map(({ harness, login }) => ({ harness, login }))).toEqual([{ harness: 'claude-code', login: { default: 'apiKey', key: 'outOfCredit', keyStateAt: OUT_OF_CREDIT_SINCE } }]);
+    });
+
+    it('reports a harness with no default on its subscription', async () => {
+      const trierarch = aTrierarchOnLogins({});
+      trierarch.modelLogins.states.set('claude-code', { state: 'none' });
+
+      await trierarch.reportSelf();
+
+      expect(trierarch.fleet.selfReports.at(-1)?.details.harnesses[0]?.login).toEqual({ default: 'subscription', key: 'none' });
+    });
+
+    it('reports the login of each ship it crews, by its running session', async () => {
+      const trierarch = aTrierarchOnLogins({ default: { 'claude-code': 'apiKey' } });
+      const shipId = await aRunningShip(trierarch);
+
+      await trierarch.reportSelf();
+
+      expect(trierarch.fleet.selfReports.at(-1)?.details.logins).toEqual([{ shipId, login: 'apiKey' }]);
+    });
+
+    it('reports next for a ship whose next start would use the other login, as its running session keeps its own (K3)', async () => {
+      const trierarch = aTrierarchOnLogins({ ships: { lookout: 'apiKey' } });
+      const entry: Entry = { ...aCrashedEntry(), state: 'running', shipName: 'lookout', login: 'subscription' };
+      await trierarch.state.save(putEntry(EMPTY_STATE, entry));
+
+      await trierarch.reportSelf();
+
+      expect(trierarch.fleet.selfReports.at(-1)?.details.logins).toEqual([{ shipId: entry.shipId, login: 'subscription', next: 'apiKey' }]);
+    });
+
+    it('reports no login for a ship whose session never started', async () => {
+      const trierarch = aTrierarchOnLogins({ default: { 'claude-code': 'apiKey' } });
+      await trierarch.state.save(putEntry(EMPTY_STATE, { ...aCrashedEntry(), state: 'crewing', hasStarted: false }));
+
+      await trierarch.reportSelf();
+
+      expect(trierarch.fleet.selfReports.at(-1)?.details.logins).toEqual([]);
+    });
+
+    it("never carries the key, whatever its key's state holds besides (K7)", async () => {
+      const trierarch = aTrierarchOnLogins({ default: { 'claude-code': 'apiKey' } });
+      const said = { state: 'ready' as const, at: OUT_OF_CREDIT_SINCE, apiKey: 'sk-ant-api03-test-key-not-real' };
+      trierarch.modelLogins.states.set('claude-code', said);
+      await aRunningShip(trierarch);
+
+      await trierarch.reportSelf();
+
+      const report = trierarch.fleet.selfReports.at(-1);
+      expect(JSON.stringify(report)).not.toContain('sk-ant-api03-test-key-not-real');
+      expect(trierarchReportDetailsSchema.safeParse(report?.details).success).toBe(true);
+    });
   });
 });

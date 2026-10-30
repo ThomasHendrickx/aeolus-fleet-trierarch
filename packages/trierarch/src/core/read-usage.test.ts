@@ -137,4 +137,28 @@ describe("the harnesses' usage, as the trierarch reads it (#353)", () => {
 
     expect((await trierarch.readUsage()).subscriptions[0]?.windows[0]?.usedPercent).toBe(3);
   });
+
+  it('splits each model\'s tokens per login, each counted to the login of the session that used them, with its own cost (api keys K8)', async () => {
+    const trierarch = aTrierarch();
+    const entry: Entry = { ...aCrewedEntry(), login: 'apiKey', earlierLogins: [{ login: 'subscription', until: '2026-10-06T07:30:00.000Z' }] };
+    await withEntries(trierarch, entry);
+    trierarch.usage.written.set(entry.shipId, [
+      { ...OPUS_TOKENS, at: new Date('2026-10-06T07:10:00.000Z') },
+      { ...OPUS_TOKENS, at: new Date('2026-10-06T07:40:00.000Z') },
+      { ...OPUS_TOKENS, at: new Date('2026-10-06T07:50:00.000Z') },
+    ]);
+
+    const usage = await trierarch.readUsage();
+
+    expect(usage.ships).toEqual([
+      {
+        shipId: entry.shipId,
+        models: [
+          { ...OPUS_TOKENS, login: 'subscription', estimatedCostUsd: 6.14 },
+          // Twice the tokens of 6.1448 dollars at list prices, rounded to the cent.
+          { model: 'claude-opus-5-5', login: 'apiKey', tokens: { input: 2400, output: 90_000, cacheRead: 19_600_000, cacheWrite: 820_000 }, estimatedCostUsd: 12.29 },
+        ],
+      },
+    ]);
+  });
 });

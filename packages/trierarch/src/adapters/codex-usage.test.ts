@@ -68,6 +68,22 @@ describe("a Codex ship's tokens, from its session logs (#353)", () => {
   });
 });
 
+describe("a Codex ship's tokens per login (api keys K8)", () => {
+  it('counts each token count to the login of the session that wrote it, when it is told the logins its sessions ran on', async () => {
+    const meta = JSON.stringify({ timestamp: '2026-10-15T17:09:00.000Z', type: 'session_meta', payload: { timestamp: '2026-10-15T17:09:00.000Z', cwd: FOLDER } });
+    const turn = JSON.stringify({ timestamp: '2026-10-15T17:10:00.000Z', type: 'turn_context', payload: { model: 'gpt-6.1-sol' } });
+    const counted = (total: number, at: string) =>
+      JSON.stringify({ timestamp: at, type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: total, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: 0 } } } });
+    await writeFile(join(sessions, DAY, 'rollout-resumed.jsonl'), [meta, turn, counted(100, '2026-10-15T17:10:01.000Z'), counted(130, '2026-10-15T17:20:01.000Z'), ''].join('\n'));
+    const logins = { login: 'apiKey' as const, earlierLogins: [{ login: 'subscription' as const, until: '2026-10-15T17:15:00.000Z' }] };
+
+    expect(await aUsage().tokensOf({ shipId: newId('ship'), folder: FOLDER, logins })).toEqual([
+      { model: 'gpt-6.1-sol', login: 'apiKey', tokens: { input: 30, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { model: 'gpt-6.1-sol', login: 'subscription', tokens: { input: 100, output: 0, cacheRead: 0, cacheWrite: 0 } },
+    ]);
+  });
+});
+
 describe("Codex's subscription, from its newest session log (#353)", () => {
   it('reads how much of its windows the last token count says is used, and when each starts again', async () => {
     await withRollout('rollout-2026-10-14T08-00-00-old.jsonl', (log) => log.replaceAll('"used_percent":2.0', '"used_percent":99.0'));

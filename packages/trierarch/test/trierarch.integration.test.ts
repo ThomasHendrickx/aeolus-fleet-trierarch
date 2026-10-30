@@ -20,6 +20,9 @@ import { createGitCheckouts } from '../src/adapters/git-checkouts.js';
 import { createGitWorkspace } from '../src/adapters/git-workspace.js';
 import { createJsonState } from '../src/adapters/json-state.js';
 import { trierarchPaths, type TrierarchPaths } from '../src/adapters/paths.js';
+import { createKeyStates } from '../src/adapters/key-states.js';
+import { createModelLogins } from '../src/adapters/model-logins.js';
+import { keyStatesFileOf } from '../src/adapters/proxy-runtime.js';
 import { createRestFleet } from '../src/adapters/rest-fleet.js';
 import { createTrust } from '../src/adapters/trust.js';
 import { initTrierarch } from '../src/cli/init.js';
@@ -221,10 +224,35 @@ async function aTrierarchOnTheFleet(
   const leasesOf = (shipId: ShipId) => database.lease.count({ where: { shipId, endedAt: null } });
   const worktree = join(paths.worktrees, 'aeolus-fleet', 'scout');
 
-  return { useCases, argo, trierarchShip, scout, pass, aRunPass, leasesOf, worktree, sockets };
+  return { useCases, argo, trierarchShip, scout, pass, aRunPass, leasesOf, worktree, sockets, fleet, sessions, state, setup, clock };
 }
 
 describe('the trierarch on a real fleet', () => {
+  it("reports each harness's login and each ship's, as core keeps the report, and never the key on the computer (api keys K7, K8)", async () => {
+    const KEY = 'sk-ant-api03-integration-key-not-real';
+    const { useCases, argo, trierarchShip, scout, pass, fleet, sessions, state, setup, clock } = await aTrierarchOnTheFleet();
+    mkdirSync(paths.keys, { recursive: true, mode: 0o700 });
+    writeFileSync(join(paths.keys, 'claude-code'), KEY, { mode: 0o600 });
+    const modelLogins = createModelLogins({
+      keyStates: createKeyStates({ keys: paths.keys, file: keyStatesFileOf(paths.proxy) }),
+      claudeCode: { keyInReach: () => Promise.resolve(undefined) },
+      codex: { loginKind: () => Promise.reject(new Error('no Codex here')) },
+    });
+    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } }));
+    unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
+    await pass();
+    await pass();
+    // The configuration moved the harness to its key after scout started: its running session keeps its subscription (K3).
+    const reportSelf = createReportSelf({ fleet, processes: sessions, trust: createTrust({ configuration: setup.configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }), state, setup, readLoad: () => Promise.resolve(undefined), readUsage: () => Promise.resolve({ subscriptions: [], ships: [] }), clock, modelLogins, logins: { default: { 'claude-code': 'apiKey' } } });
+
+    await reportSelf();
+
+    const reported = unwrap(await useCases.getShip(argo, { shipId: trierarchShip.shipId }));
+    expect(reported).toMatchObject({ report: { details: { harnesses: [{ harness: 'claude-code', login: { default: 'apiKey', key: 'ready' } }], logins: [{ shipId: scout.shipId, login: 'subscription', next: 'apiKey' }] } } });
+    expect(JSON.stringify(reported)).not.toContain(KEY);
+    expect(JSON.stringify(await database.event.findMany({ select: { details: true } }))).not.toContain(KEY);
+  });
+
   it('crews an assigned request, its status reads running once its session shows activity, and removing it ends the lease, removes the clean worktree and the request', async () => {
     const { useCases, argo, trierarchShip, scout, pass, leasesOf, worktree } = await aTrierarchOnTheFleet();
     unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } }));
@@ -891,7 +919,7 @@ describe('the trusted repositories on a real fleet (aeolus-fleet#384)', () => {
     const sockets = createShipSockets({ root: paths.sockets, fleetUrl: address, crewTokenOf: async (shipId) => (await state.load()).entries[shipId]?.crewToken, mayCall, log: () => undefined, refreshCheckouts: (shipId) => checkouts.refresh(shipId) });
     openSockets = sockets;
     const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, folderProcesses: { stopIn: () => Promise.resolve(0) }, workspace, trust, state, setup, clock: { now: () => new Date() }, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID, sockets, checkouts, modelLogins: { startProblem: () => Promise.resolve(undefined), keyState: () => Promise.resolve({ state: 'ready' }) } });
-    const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup, readLoad: () => Promise.resolve(undefined), readUsage: () => Promise.resolve({ subscriptions: [], ships: [] }), clock: { now: () => new Date() } });
+    const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup, readLoad: () => Promise.resolve(undefined), readUsage: () => Promise.resolve({ subscriptions: [], ships: [] }), clock: { now: () => new Date() }, modelLogins: { keyState: () => Promise.resolve({ state: 'ready' }) } });
 
     await sendTrusted([{ name: 'hemma', url }]);
     for (const delivery of await fleet.receive()) {

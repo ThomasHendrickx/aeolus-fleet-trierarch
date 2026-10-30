@@ -1,7 +1,7 @@
 import type { ClearOutcome, CrewStatus, ShipId, TrierarchConfiguration, TrierarchReportDetails, TrierarchWorkspace } from '@aeolus-fleet/common';
 
 import type { TrierarchState } from './entry.js';
-import type { KeyStateAt, Login } from './login.js';
+import type { KeyStateAt, Login, SessionLogins } from './login.js';
 import type { Machine } from './machine.js';
 import type { MachineLoad } from './machine-load.js';
 import type { TokenCounts } from './token-cost.js';
@@ -460,9 +460,10 @@ export interface MachinePort {
   load(): Promise<MachineLoad>;
 }
 
-/** The tokens of one model a ship's sessions used (#353). */
+/** The tokens of one model a ship's sessions used (#353), on one login when the ship's logins were given (api keys K8). */
 export interface ModelTokens {
   readonly model: string;
+  readonly login?: Login;
   readonly tokens: TokenCounts;
 }
 
@@ -475,8 +476,8 @@ export interface SubscriptionWindow {
 
 /** What the harnesses say of their usage (#353), from their own files and CLIs. */
 export interface UsagePort {
-  /** The tokens the ship's sessions used since its folder was made, per model, from its harness's transcripts. */
-  tokensOf(ship: { shipId: ShipId; harness: string; folder: string }): Promise<readonly ModelTokens[]>;
+  /** The tokens the ship's sessions used since its folder was made, per model, from its harness's transcripts; given its logins, per model and login, each counted to the login of the session that wrote it (api keys K8). */
+  tokensOf(ship: { shipId: ShipId; harness: string; folder: string; logins?: SessionLogins }): Promise<readonly ModelTokens[]>;
   /** How much of the harness's subscription is used now, per window; none when the harness cannot say. */
   subscriptionOf(harness: string): Promise<readonly SubscriptionWindow[] | undefined>;
 }

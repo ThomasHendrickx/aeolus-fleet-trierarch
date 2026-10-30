@@ -31,7 +31,8 @@ const totalOf = (models: readonly ModelTokens[]): number => models.reduce((sum, 
 
 /**
  * Use case: the trierarch reads its harnesses' usage (#353). Every 5 minutes
- * it reads the tokens each ship it crews used per model, since its folder was
+ * it reads the tokens each ship it crews used per model and login (api keys
+ * K8), since its folder was
  * made, and estimates their cost from the price table. A harness's
  * subscription is read at start, then again only once 30 minutes passed and
  * the harness's ships did work since: Claude Code's read is a turn of its own.
@@ -52,14 +53,16 @@ export function createReadUsage(deps: { usage: UsagePort; state: StatePort; cloc
       if (entry.folder === undefined) {
         continue;
       }
-      const models = await deps.usage.tokensOf({ shipId: entry.shipId, harness: entry.harness, folder: entry.folder }).catch((error: unknown) => {
+      // An entry saved before its login was kept says no login, and its tokens none (K8).
+      const logins = entry.login === undefined ? undefined : { login: entry.login, ...(entry.earlierLogins !== undefined && { earlierLogins: entry.earlierLogins }) };
+      const models = await deps.usage.tokensOf({ shipId: entry.shipId, harness: entry.harness, folder: entry.folder, ...(logins !== undefined && { logins }) }).catch((error: unknown) => {
         deps.logger.warn(`Could not read the usage of ${entry.shipId}: ${messageOf(error)}`);
         return undefined;
       });
       const usage =
         models === undefined
           ? ships.find((ship) => ship.shipId === entry.shipId)
-          : { shipId: entry.shipId, models: models.map(({ model, tokens }) => ({ model, tokens, estimatedCostUsd: estimatedCostUsd(tokens, deps.prices[model]) })) };
+          : { shipId: entry.shipId, models: models.map(({ model, login, tokens }) => ({ model, ...(login !== undefined && { login }), tokens, estimatedCostUsd: estimatedCostUsd(tokens, deps.prices[model]) })) };
       if (usage !== undefined && usage.models.length > 0) {
         read.push(usage);
         totals.set(entry.harness, (totals.get(entry.harness) ?? 0) + totalOf(usage.models));

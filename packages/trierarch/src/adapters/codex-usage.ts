@@ -4,16 +4,20 @@ import { join } from 'node:path';
 import type { ShipId } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
+import { loginAt, type SessionLogins } from '../core/login.js';
 import type { ModelTokens, SubscriptionWindow } from '../core/ports.js';
 import type { TokenCounts } from '../core/token-cost.js';
 import { createAppendedLines } from './appended-lines.js';
+import { createTokensPerLogin } from './tokens-per-login.js';
 
 /**
  * What Codex says of its usage (#353), from its session logs (rollout files
  * under `sessions/<year>/<month>/<day>/`). A session log starts with the
  * folder it ran in; each turn names its model, and each token count the
  * session's total so far, so a turn's tokens are what the total grew by since
- * the count before. Codex's input counts what it read from the cache: the
+ * the count before, counted to the login of the session that ran when it was
+ * written, when the ship's logins are given (api keys K8). Codex's input
+ * counts what it read from the cache: the
  * input here is without it. Each token count also says how much of the
  * subscription's windows is used: the newest log's last one is read. Codex
  * documents no format for them: the reader is tested on a captured one (test/logs).
@@ -26,6 +30,7 @@ const turnSchema = z.object({ type: z.literal('turn_context'), payload: z.object
 const totalSchema = z.object({ input_tokens: z.number(), cached_input_tokens: z.number().optional(), cache_write_input_tokens: z.number().optional(), output_tokens: z.number() });
 
 const tokenCountSchema = z.object({
+  timestamp: z.iso.datetime().optional(),
   type: z.literal('event_msg'),
   payload: z.object({ type: z.literal('token_count'), info: z.object({ total_token_usage: totalSchema }).nullable().optional() }),
 });
@@ -46,13 +51,24 @@ type Total = z.infer<typeof totalSchema>;
 
 const NONE: Total = { input_tokens: 0, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: 0 };
 
-/** One session log as read so far: the folder it ran in and since when, the model of its turn now, its last total, and its tokens per model. */
+/** What one token count grew by, of the model of its turn, and when it was written. */
+interface Grown {
+  readonly model: string;
+  readonly at: Date;
+  readonly tokens: TokenCounts;
+}
+
+/**
+ * One session log as read so far: the folder it ran in and since when, the
+ * model of its turn now, its last total, and what each token count grew by,
+ * kept with when so that the ship's logins split them when it is asked (K8).
+ */
 interface SessionLog {
   folder?: string;
   startedAt?: number;
   model?: string;
   total: Total;
-  readonly byModel: Map<string, TokenCounts>;
+  readonly grown: Grown[];
 }
 
 function jsonOf(line: string): unknown {
@@ -61,10 +77,6 @@ function jsonOf(line: string): unknown {
   } catch {
     return undefined;
   }
-}
-
-function plus(a: TokenCounts | undefined, b: TokenCounts): TokenCounts {
-  return a === undefined ? b : { input: a.input + b.input, output: a.output + b.output, cacheRead: a.cacheRead + b.cacheRead, cacheWrite: a.cacheWrite + b.cacheWrite };
 }
 
 /** What the session's total grew by, input without what was read from or written to the cache. */
@@ -87,9 +99,12 @@ function read(log: SessionLog, line: string): void {
     log.model = turn.data.payload.model;
     return;
   }
-  const total = tokenCountSchema.safeParse(json).data?.payload.info?.total_token_usage;
+  const count = tokenCountSchema.safeParse(json).data;
+  const total = count?.payload.info?.total_token_usage;
   if (total !== undefined && log.model !== undefined) {
-    log.byModel.set(log.model, plus(log.byModel.get(log.model), grownBy(total, log.total)));
+    // A count with no time of its own was written in the session it belongs to: since its start.
+    const at = count?.timestamp === undefined ? new Date(log.startedAt ?? 0) : new Date(count.timestamp);
+    log.grown.push({ model: log.model, at, tokens: grownBy(total, log.total) });
     log.total = total;
   }
 }
@@ -113,27 +128,27 @@ export function createCodexUsage(deps: {
   };
 
   return {
-    tokensOf: async (ship: { shipId: ShipId; folder: string }): Promise<ModelTokens[]> => {
+    tokensOf: async (ship: { shipId: ShipId; folder: string; logins?: SessionLogins }): Promise<ModelTokens[]> => {
       const since = (await deps.madeAt(ship.folder)).getTime();
-      const byModel = new Map<string, TokenCounts>();
+      const counted = createTokensPerLogin();
       for (const path of await sessionLogs()) {
         // A log not written since the folder was made is another crew's: never read.
         if ((await stat(path)).mtimeMs < since) {
           continue;
         }
         const { lines, isFromStart } = await appended.read(path);
-        const log = (isFromStart ? undefined : logs.get(path)) ?? { total: NONE, byModel: new Map<string, TokenCounts>() };
+        const log = (isFromStart ? undefined : logs.get(path)) ?? { total: NONE, grown: [] };
         lines.forEach((line) => {
           read(log, line);
         });
         logs.set(path, log);
         if (log.folder === ship.folder && (log.startedAt ?? 0) >= since) {
-          for (const [model, tokens] of log.byModel) {
-            byModel.set(model, plus(byModel.get(model), tokens));
+          for (const { model, at, tokens } of log.grown) {
+            counted.add({ model, ...(ship.logins !== undefined && { login: loginAt(ship.logins, at) }), tokens });
           }
         }
       }
-      return [...byModel].sort(([a], [b]) => a.localeCompare(b)).map(([model, tokens]) => ({ model, tokens }));
+      return counted.list();
     },
     subscription: async (): Promise<SubscriptionWindow[] | undefined> => {
       for (const path of (await sessionLogs()).slice(-NEWEST_LOGS_SEARCHED).reverse()) {

@@ -61,6 +61,18 @@ describe("a Claude Code ship's tokens, from its transcripts (#353)", () => {
     expect(await usage.tokensOf({ shipId: newId('ship'), folder: FOLDER })).toEqual([{ model: 'claude-opus-5-5', tokens: { input: 4, output: 400, cacheRead: 25_945, cacheWrite: 34_622 } }, SONNET]);
   });
 
+  it('counts each message to the login of the session that wrote it, when it is told the logins its sessions ran on (api keys K8)', async () => {
+    await withConversations();
+
+    const logins = { login: 'apiKey' as const, earlierLogins: [{ login: 'subscription' as const, until: '2026-10-09T16:00:00.000Z' }] };
+
+    expect(await aUsage().tokensOf({ shipId: newId('ship'), folder: FOLDER, logins })).toEqual([
+      { model: 'claude-opus-5-5', login: 'apiKey', tokens: { input: 4, output: 400, cacheRead: 25_945, cacheWrite: 34_622 } },
+      { model: 'claude-opus-5-5', login: 'subscription', tokens: { input: 12, output: 1287, cacheRead: 300_106, cacheWrite: 33_893 } },
+      { ...SONNET, login: 'apiKey' },
+    ]);
+  });
+
   it('adds what a conversation wrote since the last read, and a line only once it is written whole', async () => {
     await withConversations();
     const usage = aUsage();
