@@ -221,7 +221,7 @@ describe('aeolus-fleet-issue file', () => {
     expect(body).not.toContain('l3lo');
   });
 
-  it.each([
+  it.each<{ label: string; env: Record<string, string>; harness: string }>([
     { label: 'Claude Code runs it', env: { CLAUDECODE: '1' }, harness: 'claude-code' },
     { label: 'a Codex hook runs it', env: { PLUGIN_ROOT: '/plugins/aeolus-fleet' }, harness: 'codex' },
     { label: 'AEOLUS_HARNESS names it', env: { AEOLUS_HARNESS: 'copilot' }, harness: 'copilot' },
