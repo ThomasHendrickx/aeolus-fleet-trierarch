@@ -19,7 +19,8 @@ concurrency:
 jobs:
   checks:
     name: Typecheck, lint and unit tests
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: on ubuntu-26.04 the user-systemd session tests (#479, #537) fail.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

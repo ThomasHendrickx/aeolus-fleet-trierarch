@@ -295,8 +295,9 @@ describe('the session runtime contract, on rootless Podman under holds', { timeo
 
     await runtime.start({ shipId, folder, command: ['sleep', '30'], harness: 'claude-code' });
 
-    const limits = await runCommand('podman', { args: ['inspect', '--format', '{{.HostConfig.Memory}} {{.HostConfig.NanoCpus}}', `trierarch-${shipId}`] });
-    expect(limits.stdout.trim()).toBe(`${String(512 * 1024 * 1024)} ${String(1_000_000_000)}`);
+    // The start returns once the hold answers, which can be before the hold has created the container.
+    const limitsOf = async () => (await runCommand('podman', { args: ['inspect', '--format', '{{.HostConfig.Memory}} {{.HostConfig.NanoCpus}}', `trierarch-${shipId}`] })).stdout.trim();
+    await expect.poll(limitsOf, { timeout: 10_000 }).toBe(`${String(512 * 1024 * 1024)} ${String(1_000_000_000)}`);
   });
 });
 
