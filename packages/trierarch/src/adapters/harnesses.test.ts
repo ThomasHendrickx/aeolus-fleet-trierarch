@@ -60,7 +60,7 @@ describe('the harnesses a trierarch offers', () => {
   });
 
   it('shows the command lines Copilot starts with, for config check', async () => {
-    const lines = await commandLinesOf({ harness: 'copilot', flags: ['--model', 'auto'], files: { claudeCode: { defaultPermissionMode: () => Promise.reject(new Error('Copilot reads no Claude Code settings')) } }, permissionModes: undefined, isHeadless: true });
+    const lines = await commandLinesOf({ harness: 'copilot', flags: ['--model', 'auto'], files: { claudeCode: { defaultPermissionMode: () => Promise.reject(new Error('Copilot reads no Claude Code settings')) } }, permissionModes: undefined });
 
     expect(lines?.firstStart.flatMap((part) => part.words)).toEqual(['copilot', '--model', 'auto', '--output-format=json', '--allow-all-tools', '--no-ask-user', `--prompt=<first prompt>\n\n${NO_TERMINAL_QUESTIONS}`]);
   });

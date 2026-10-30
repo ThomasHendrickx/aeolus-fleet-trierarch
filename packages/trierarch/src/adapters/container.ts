@@ -1,15 +1,13 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { idSchema, type ShipId } from '@aeolus-fleet/common';
 
 import type { ObservedSession, SessionRuntime } from '../core/ports.js';
 import type { SessionRoots } from './caller-check.js';
-import { heldCommand } from './held-command.js';
+import { createHoldRuntime } from './hold-runtime.js';
 import { shipHome } from './paths.js';
 import { runCommand, type CommandResult } from './run-command.js';
-import { stopTurn } from './stop-turn.js';
 
 const PREFIX = 'trierarch-';
 const OWNER_LABEL = 'aeolus.trierarch';
@@ -20,31 +18,14 @@ export const MODEL_TOKEN_VARIABLE = 'CLAUDE_CODE_OAUTH_TOKEN';
 export const SESSION_HOME = '/home/ubuntu';
 /** The image's session user (ubuntu), whose subordinate ids the nested Podman maps. */
 const SESSION_USER = 'uid=1000,gid=1000';
-/** The tmux session inside each container: one per container, so one name serves. */
-const TMUX_TARGET = '=session:';
 /**
  * The most processes and threads a container may hold, a hard cap beside
  * memory and cpus (decision 0039): room for Claude Code, a test run with its
  * workers, a browser and a nested Postgres, and none for a runaway fork.
  */
 const PIDS_LIMIT = 4096;
-/** How many lines back a screen is read, as on the host. */
-const SCREEN_LINES = 200;
-
-/**
- * The container's command: tmux runs the session's command, keeping its pane
- * on exit, as on the host. Once the command ends, it prints the pane and ends,
- * so the container exits and the runtime's log keeps the last screen. The pane
- * starts with the shell and is respawned with the command once remain-on-exit
- * is set, so even a command that ends at once leaves its exit to see.
- */
-const SESSION_SCRIPT = `
-tmux new-session -d -s session -x 200 -y 50 || exit 1
-tmux set-option -w -t '${TMUX_TARGET}' remain-on-exit on
-tmux respawn-pane -k -t '${TMUX_TARGET}' -- "$@"
-while [ "$(tmux display-message -p -t '${TMUX_TARGET}' '#{pane_dead}' 2> /dev/null)" = 0 ]; do sleep 1; done
-tmux capture-pane -p -J -S -${String(SCREEN_LINES)} -t '${TMUX_TARGET}'
-`;
+/** The env file in the session's own folder, beside its hold's files. */
+const ENV_FILE = 'session.env';
 
 type Run = (command: string, options: { args: readonly string[] }) => Promise<CommandResult>;
 
@@ -61,9 +42,15 @@ export interface ContainerRuntimeOptions {
   /** The memory cap of each container, as the runtime takes it (`4g`). */
   readonly memory: string;
   readonly cpus: number;
+  /** The sessions folder: a folder per ship, with its hold's files and its env file. */
+  readonly sessions: string;
+  /** The trierarch program, which `hold` and its words follow. */
+  readonly program: readonly string[];
+  readonly version: string;
+  readonly platform: string;
   /** Tells this trierarch's containers apart from any other on the machine. */
   readonly owner?: string;
-  /** What the runtime's run goes through: a systemd scope of its own under a systemd unit (see sessionsLaunch). */
+  /** What a hold's start goes through: a systemd scope of its own under a systemd unit (see sessionsLaunch). */
   readonly launch?: readonly string[];
   readonly run?: Run;
 }
@@ -85,26 +72,28 @@ function envFileOf(env: Readonly<Record<string, string>>): string {
 }
 
 /**
- * The container session runtime (decision 0039): one container per ship,
- * named after its ship id, with tmux inside, so a line sent is typed and the
- * events read are its screen, each an exec into it; a turn is stopped with
- * Escape, as a person does. Its sessions move to holds in S3 of the headless
- * design. Rootless only, with hard memory and cpu caps and no restart
- * policy: the trierarch starts a dead container again itself. The container
- * sees its folder, its ship's own home, as its home, and its ship's socket
- * folder, at its own path, and nothing else of the host, never the runtime's
- * socket. The home is made, for its owner
- * alone, when the ship has none yet.
+ * The container session runtime (decision 0039, headless H18): one container
+ * per ship, named after its ship id, run by the ship's hold on the host as
+ * `run --rm -i`, attached: the hold holds the harness's input and output
+ * through the runtime, so a line sent, an interrupt and the events are the
+ * hold's, as on the host, and the container lives as long as the hold, a
+ * signal to it reaching the harness through the image's tini. A container an
+ * older trierarch started detached is listed as of another version until its
+ * ship starts again (H19). Rootless only, with hard memory and cpu caps and no
+ * restart policy: the trierarch starts a dead session again itself. The
+ * container sees its folder, its ship's own home, as its home, and its ship's
+ * socket folder, at its own path, and nothing else of the host, never the
+ * runtime's socket. The home is made, for its owner alone, when the ship has
+ * none yet.
  *
  * The model token and the session's environment reach the container through
- * an env file only its owner reads, removed once the container runs, never a
- * command line (#445). Under a systemd unit the run goes through a scope of its
- * own, so the container's monitor is not in the service's control group and a
- * restart or upgrade ends no session (#479, #537).
+ * an env file in the session's own folder, for its owner alone, never a
+ * command line (#445). It is kept while the session runs, since the hold runs
+ * the container again when it starts Claude Code again (H12), and goes with
+ * the session's folder when it stops.
  */
 export function createContainerRuntime(options: ContainerRuntimeOptions): SessionRuntime & SessionRoots {
   const owner = options.owner ?? CONTAINER_OWNER;
-  const launch = options.launch ?? [];
   const run = options.run ?? runCommand;
   const runtime = async (args: readonly string[]): Promise<CommandResult> => run(options.binary, { args });
   const must = async (args: readonly string[]): Promise<string> => {
@@ -114,23 +103,8 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
     }
     return result.stdout;
   };
-  const stop = async (shipId: ShipId): Promise<void> => {
-    // Kill, then remove: a remove alone waits out the stop timeout on podman.
-    await runtime(['kill', containerName(shipId)]);
-    await runtime(['rm', '--force', containerName(shipId)]);
-  };
-  const tmux = (shipId: ShipId, args: readonly string[]): readonly string[] => ['exec', containerName(shipId), 'tmux', ...args];
-  const screen = async (shipId: ShipId): Promise<string> => {
-    const shown = await runtime(tmux(shipId, ['capture-pane', '-p', '-J', '-S', `-${String(SCREEN_LINES)}`, '-t', TMUX_TARGET]));
-    if (shown.status === 0) {
-      return shown.stdout;
-    }
-    // An exited container printed its last screen as it ended.
-    const logged = await runtime(['logs', containerName(shipId)]);
-    return logged.status === 0 ? logged.stdout : '';
-  };
-
-  return {
+  /** The ship's container: stopped before its hold, so the hold ends with it, and listed where no hold holds the ship. */
+  const containers: Pick<SessionRuntime, 'list' | 'stop'> = {
     list: async () => {
       const listed = await must(['ps', '--all', '--filter', `label=${OWNER_LABEL}=${owner}`, '--format', '{{.Names}} {{.State}}']);
       return listed.split('\n').flatMap((line): ObservedSession[] => {
@@ -139,28 +113,40 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
         return name.startsWith(PREFIX) && shipId.success ? [{ shipId: shipId.data, status: state === 'running' ? 'running' : 'exited' }] : [];
       });
     },
-    stop,
-    start: async ({ shipId, folder, command, env = {}, readOnly = [], proxyToken }) => {
+    stop: async (shipId) => {
+      // Kill, then remove: a remove alone waits out the stop timeout on podman.
+      await runtime(['kill', containerName(shipId)]);
+      await runtime(['rm', '--force', containerName(shipId)]);
+    },
+  };
+
+  const holds = createHoldRuntime({
+    sessions: options.sessions,
+    program: options.program,
+    version: options.version,
+    platform: options.platform,
+    launch: options.launch ?? [],
+    beside: containers,
+    heldAs: async ({ shipId, folder, command, env = {}, readOnly = [], proxyToken }, files) => {
       if (proxyToken !== undefined) {
         throw new Error('a container session reaches no model proxy yet');
       }
       const token = (await readFile(options.tokenFile, 'utf8')).trim();
       const content = envFileOf({ ...env, [MODEL_TOKEN_VARIABLE]: token });
-      await stop(shipId);
       const home = shipHome(options.homes, shipId);
       const shipSockets = join(options.sockets, shipId);
       // The runtime mounts only a folder that exists, and the ship's socket may not have made it yet.
       await mkdir(shipSockets, { recursive: true, mode: 0o700 });
       await mkdir(home, { recursive: true, mode: 0o700 });
-      const secrets = await mkdtemp(join(tmpdir(), 'aeolus-trierarch-env-'));
-      try {
-        const envFile = join(secrets, 'session.env');
-        await writeFile(envFile, content, { mode: 0o600 });
-        const [program = options.binary, ...args] = [
-          ...launch,
+      await mkdir(files.folder, { recursive: true, mode: 0o700 });
+      const envFile = join(files.folder, ENV_FILE);
+      await writeFile(envFile, content, { mode: 0o600 });
+      return {
+        command: [
           options.binary,
           'run',
-          '--detach',
+          '--rm',
+          '-i',
           '--name',
           containerName(shipId),
           '--label',
@@ -199,36 +185,17 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
           '--env-file',
           envFile,
           options.image,
-          'sh',
-          '-c',
-          SESSION_SCRIPT,
-          'sh',
-          ...heldCommand(command),
-        ];
-        const started = await run(program, { args });
-        if (started.status !== 0) {
-          throw new Error(`${options.binary} run failed: ${started.stderr.trim()}`);
-        }
-      } finally {
-        await rm(secrets, { recursive: true, force: true });
-      }
+          ...command,
+        ],
+        // The session's environment reaches the container through the env file alone.
+        env: {},
+      };
     },
-    // The line typed, then Enter, as a person types it in the session's terminal.
-    send: async ({ shipId, line }) => {
-      await must(tmux(shipId, ['send-keys', '-t', TMUX_TARGET, '-l', line]));
-      await must(tmux(shipId, ['send-keys', '-t', TMUX_TARGET, 'Enter']));
-    },
-    interrupt: async (shipId) => {
-      await stopTurn({ escape: async () => {
-          await must(tmux(shipId, ['send-keys', '-t', TMUX_TARGET, 'Escape']));
-        }, screen: () => screen(shipId) });
-    },
-    // The terminal's screen, one line each: it is all a session in a terminal shows of its events.
-    events: async (shipId) => {
-      const shown = await screen(shipId);
-      return shown === '' ? [] : shown.replace(/\n$/u, '').split('\n');
-    },
-    // The container's first process as the host sees it: every process of the session runs under it; 0 once it runs no more.
+  });
+
+  return {
+    ...holds,
+    // The container's first process as the host sees it: every process of the session runs under it; none once it runs no more.
     sessionRootOf: async (shipId) => {
       const inspected = await runtime(['inspect', '--format', '{{.State.Pid}}', containerName(shipId)]);
       const pid = Number(inspected.stdout.trim());

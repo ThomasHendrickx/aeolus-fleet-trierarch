@@ -10,7 +10,7 @@ import type { TrustedRepository } from './trusted-repositories.js';
 
 /**
  * The trierarch's ports (docs/architecture.md, "The trierarch"). Adapters
- * implement them in D2b: REST for the fleet, tmux for the sessions, git worktree
+ * implement them in D2b: REST for the fleet, holds for the sessions, git worktree
  * and folders for workspaces, Claude Code for the harness, a JSON file for
  * state. Each throws only for a system failure.
  */

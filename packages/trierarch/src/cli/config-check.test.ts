@@ -52,6 +52,26 @@ describe('config check, with the session runtime (decision 0039)', () => {
     expect(report.text).toContain(`Sessions run in containers of podman, each capped at 4g of memory and 2 cpus, with the model token in ${join(home, '.aeolus', 'trierarch', 'model-token')}.`);
   });
 
+  it('gives the command line of a session in a container headless, as on the host: Claude Code in print mode with streamed JSON, the prompt sent on its stdin (headless H18)', async () => {
+    configured({ ...SESSIONS, runtime: CONTAINER });
+
+    const report = await configCheck(paths, { files: FILES, host });
+
+    const words = (report.harnesses['claude-code']?.firstStart ?? []).flatMap((part) => part.words);
+    expect({ headless: words.slice(1, 6), hasPrompt: words.includes('--') }).toEqual({ headless: ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json'], hasPrompt: false });
+  });
+
+  it.each([
+    { label: 'on the host', runtime: undefined },
+    { label: 'in containers', runtime: CONTAINER },
+  ])('asks for no tmux with the sessions $label: no session runs in a terminal (headless H4)', async ({ runtime }) => {
+    configured({ ...SESSIONS, ...(runtime !== undefined && { runtime }) });
+
+    const report = await configCheck(paths, { files: FILES, host });
+
+    expect(report.text).not.toMatch(/tmux/iu);
+  });
+
   it('refuses a configuration the container runtime cannot run, giving every reason', async () => {
     configured({ ...SESSIONS, runtime: CONTAINER });
     host.groups = ['docker'];

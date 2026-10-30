@@ -1,5 +1,5 @@
 # The session image (decision 0039): one trierarch session per container, with
-# the harness, tmux, the aeolus-fleet plugin of this image's version, Playwright's
+# the harness, the aeolus-fleet plugin of this image's version, Playwright's
 # browser dependencies and a nested rootless Podman for a repository's tests.
 #
 # Built from the repository root, with the version set on the packages and the
@@ -13,7 +13,7 @@ ARG CLAUDE_CODE_VERSION=latest
 ARG PLAYWRIGHT_VERSION=1.63.0
 
 LABEL org.opencontainers.image.title="aeolus-session" \
-      org.opencontainers.image.description="An Aeolus trierarch session: Claude Code, tmux, the aeolus-fleet plugin and a nested rootless Podman" \
+      org.opencontainers.image.description="An Aeolus trierarch session: Claude Code, the aeolus-fleet plugin and a nested rootless Podman" \
       org.opencontainers.image.source="https://github.com/ThomasHendrickx/aeolus-fleet-trierarch" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${VERSION}"
@@ -22,7 +22,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
  && apt-get install --yes --no-install-recommends \
-      ca-certificates curl gh git gnupg jq less openssh-client tmux tini \
+      ca-certificates curl gh git gnupg jq less openssh-client tini \
       podman uidmap fuse-overlayfs slirp4netns passt \
  && curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
  && apt-get install --yes --no-install-recommends nodejs \

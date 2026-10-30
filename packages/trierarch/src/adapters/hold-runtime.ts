@@ -8,7 +8,7 @@ import { idSchema, type ShipId } from '@aeolus-fleet/common';
 import type { ObservedSession, SessionRuntime } from '../core/ports.js';
 import type { SessionRoots } from './caller-check.js';
 import { INTERRUPT_WAIT_MS } from './hold.js';
-import { callHold, holdFilesOf, type HoldRequest } from './hold-protocol.js';
+import { callHold, holdFilesOf, type HoldFiles, type HoldRequest } from './hold-protocol.js';
 import { writeProxyToken } from './proxy-tokens.js';
 
 /** How long a hold has to answer a call other than interrupt. */
@@ -23,6 +23,15 @@ const STOP_WAIT_MS = 5000;
 const EVENT_LINES = 200;
 /** Runs the command in the background and returns at once: its process is then nobody's child, so no session runs under the trierarch's own process. */
 const DETACHED = '"$@" < /dev/null > /dev/null 2>&1 &';
+
+/** What a session runtime's start is given. */
+export type SessionStart = Parameters<SessionRuntime['start']>[0];
+
+/** What a hold runs for a session: the command, and the environment it is given on top of the hold's own few (H10). */
+export interface HeldCommand {
+  readonly command: readonly string[];
+  readonly env: Readonly<Record<string, string>>;
+}
 
 /** What a session's start goes through: a systemd scope of its own under a systemd unit, which sets INVOCATION_ID, so a restart or upgrade of the service ends no session (#479, #537). */
 export function sessionsLaunch(at: { platform: string; env: Readonly<Record<string, string | undefined>> }): readonly string[] {
@@ -41,8 +50,12 @@ export function sessionsLaunch(at: { platform: string; env: Readonly<Record<stri
  * A hold that answers runs; one that started since the machine did and no
  * longer answers has exited, kept so the exit is seen with its events; one
  * from before the machine started is gone. A hold another version started is
- * listed as such (H19), as is a session an older trierarch started in tmux,
- * which a start stops before the ship's hold starts.
+ * listed as such (H19). What runs beside the holds, as a container runtime's
+ * containers, is stopped with its ship's hold, and listed as of another
+ * version for a ship no hold holds: an older trierarch started it.
+ *
+ * A hold runs the session's command itself, unless the runtime holds it
+ * otherwise: a container runtime's hold runs the runtime's run of it (H18).
  */
 export function createHoldRuntime(options: {
   /** The sessions folder: a folder per ship, with its hold's files. */
@@ -53,8 +66,10 @@ export function createHoldRuntime(options: {
   platform: string;
   /** What a hold's start goes through: a systemd scope of its own under a systemd unit (see sessionsLaunch). */
   launch?: readonly string[];
-  /** The sessions an older trierarch started in tmux: listed and stopped, never started. */
-  legacy?: Pick<SessionRuntime, 'list' | 'stop'>;
+  /** What runs beside the holds, one per ship: stopped first when its ship's hold stops, and listed as of another version for a ship no hold holds. */
+  beside?: Pick<SessionRuntime, 'list' | 'stop'>;
+  /** What the hold runs for a session, once the ship's last session is stopped and its folder is new; the session's command and environment unless given. */
+  heldAs?: (session: SessionStart, files: HoldFiles) => Promise<HeldCommand>;
   /** When the machine started. */
   bootedAt?: () => Date;
 }): SessionRuntime & SessionRoots {
@@ -90,7 +105,7 @@ export function createHoldRuntime(options: {
   };
 
   const stop = async (shipId: ShipId): Promise<void> => {
-    await options.legacy?.stop(shipId);
+    await options.beside?.stop(shipId);
     const pid = await runningPid(shipId);
     if (pid !== undefined) {
       process.kill(pid, 'SIGTERM');
@@ -122,11 +137,12 @@ export function createHoldRuntime(options: {
       });
       const held = (await Promise.all(shipIds.map(observed))).flatMap((session) => (session === undefined ? [] : [session]));
       const heldIds = new Set(held.map((session) => session.shipId));
-      const legacy = ((await options.legacy?.list()) ?? []).filter((session) => !heldIds.has(session.shipId)).map((session) => ({ ...session, isOtherVersion: true }));
-      return [...held, ...legacy];
+      const beside = ((await options.beside?.list()) ?? []).filter((session) => !heldIds.has(session.shipId)).map((session) => ({ ...session, isOtherVersion: true }));
+      return [...held, ...beside];
     },
     stop,
-    start: async ({ shipId, folder, command, harness, env = {}, proxyToken }) => {
+    start: async (session) => {
+      const { shipId, folder, harness, proxyToken } = session;
       await stop(shipId);
       const files = filesOf(shipId);
       // The token goes in the session's folder, which only its user reads, and the hold reads it there: a command line is anyone's to see.
@@ -135,6 +151,7 @@ export function createHoldRuntime(options: {
         await writeProxyToken(files.folder, proxyToken);
       }
       const tokenVariable = proxyToken === undefined ? [] : ['--proxy-token-variable', proxyToken.variable];
+      const { command, env } = options.heldAs === undefined ? { command: session.command, env: session.env ?? {} } : await options.heldAs(session, files);
       const hold = [...options.program, 'hold', shipId, '--sessions', sessions, '--folder', folder, '--harness', harness, ...tokenVariable, ...Object.entries(env).flatMap(([variable, value]) => ['--env', `${variable}=${value}`]), '--', ...command];
       const [program = 'sh', ...args] = [...(options.launch ?? []), 'sh', '-c', DETACHED, 'sh', ...hold];
       const starter = spawn(program, args, { stdio: 'ignore', detached: true });

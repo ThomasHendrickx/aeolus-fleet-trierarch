@@ -256,7 +256,7 @@ describe('the service on Linux (systemd)', () => {
     expect(calls).toEqual(['systemctl --user daemon-reload', `systemctl --user enable ${SYSTEMD_UNIT}`, `systemctl --user restart ${SYSTEMD_UNIT}`]);
   });
 
-  it('writes a unit whose stop ends only the trierarch, so the sessions in its tmux server keep running across upgrade and restart (#479)', async () => {
+  it('writes a unit whose stop ends only the trierarch, so the sessions under its holds keep running across upgrade and restart (#479)', async () => {
     await serviceOn('linux').write();
 
     expect(readFileSync(unit(), 'utf8')).toContain('\nKillMode=process\n');

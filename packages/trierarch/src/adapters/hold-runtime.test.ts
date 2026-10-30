@@ -56,8 +56,8 @@ afterEach(async () => {
 /** Twenty turns started and interrupted, each a stdin line and a poll of the events. */
 const TWENTY_TURNS_MS = 30_000;
 
-function aRuntime(at: { version?: string; legacy?: Pick<SessionRuntime, 'list' | 'stop'>; bootedAt?: () => Date } = {}) {
-  const runtime = createHoldRuntime({ sessions, program: TRIERARCH_PROGRAM, version: at.version ?? VERSION, platform: process.platform, ...(at.legacy !== undefined && { legacy: at.legacy }), ...(at.bootedAt !== undefined && { bootedAt: at.bootedAt }) });
+function aRuntime(at: { version?: string; beside?: Pick<SessionRuntime, 'list' | 'stop'>; bootedAt?: () => Date } = {}) {
+  const runtime = createHoldRuntime({ sessions, program: TRIERARCH_PROGRAM, version: at.version ?? VERSION, platform: process.platform, ...(at.beside !== undefined && { beside: at.beside }), ...(at.bootedAt !== undefined && { bootedAt: at.bootedAt }) });
   runtimes.push(runtime);
   return runtime;
 }
@@ -270,23 +270,23 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
     await expect(aRuntime({ bootedAt: () => new Date(Date.now() + 60_000) }).list()).resolves.toEqual([]);
   });
 
-  it('lists a session an older trierarch started in tmux as of another version, and stops it before the ship starts under a hold', async () => {
+  it('lists what runs beside the holds for a ship no hold holds as of another version, as an older trierarch left it, and stops it before the ship starts under a hold', async () => {
     const shipId = newId('ship');
-    const tmux = new Map<ShipId, ObservedSession['status']>([[shipId, 'running']]);
-    const legacy = {
-      list: () => Promise.resolve([...tmux].map(([id, status]) => ({ shipId: id, status }))),
+    const older = new Map<ShipId, ObservedSession['status']>([[shipId, 'running']]);
+    const beside = {
+      list: () => Promise.resolve([...older].map(([id, status]) => ({ shipId: id, status }))),
       stop: (id: ShipId) => {
-        tmux.delete(id);
+        older.delete(id);
         return Promise.resolve();
       },
     };
-    const runtime = aRuntime({ legacy });
+    const runtime = aRuntime({ beside });
 
     await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running', isOtherVersion: true }]);
 
     await runtime.start({ shipId, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
 
-    expect(tmux.size).toBe(0);
+    expect(older.size).toBe(0);
     await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running' }]);
   });
 
