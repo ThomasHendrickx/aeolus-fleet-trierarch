@@ -83,7 +83,7 @@ export async function configCheck(paths: TrierarchPaths, machine: CheckedMachine
             flags,
             options: Object.fromEntries(Object.entries(harness.options).map(([option, settings]) => [option, settings.values])),
             adapterFlags: adapterFlags[name] ?? [],
-            ...(await commandLinesOf({ harness: name, flags, files, permissionModes: detected[name]?.permissionModes, isHeadless: runtime.kind !== 'container' })),
+            ...(await commandLinesOf({ harness: name, flags, files, permissionModes: detected[name]?.permissionModes })),
           },
         ] as const;
       }),

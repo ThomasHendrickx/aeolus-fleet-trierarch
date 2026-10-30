@@ -198,7 +198,6 @@ async function aTrierarchOnTheFleet(
   const sessions: SessionRuntime & Partial<SessionRoots> = at.sessions ?? standInSessions();
   const harness = createClaudeCodeHarness({
     configuration,
-    isHeadless: true,
     plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data: pluginData, crews: join(home, '.aeolus', 'crews', 'claude-code') },
     projects: join(home, '.claude', 'projects'),
     sessions,
@@ -873,7 +872,7 @@ describe('the trusted repositories on a real fleet (aeolus-fleet#384)', () => {
     const offered = withTrustedRepositories(configuration, trustedRepositories);
     const handle = createHandleDelivery({ fleet, logger, trustedRepositories, ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
     const sessions = standInSessions();
-    const harness = createClaudeCodeHarness({ configuration: offered, isHeadless: true, plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data: pluginData, crews: join(home, '.aeolus', 'crews', 'claude-code') }, projects: join(home, '.claude', 'projects'), sessions, setup: claudeCode, permissionModes: () => undefined });
+    const harness = createClaudeCodeHarness({ configuration: offered, plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data: pluginData, crews: join(home, '.aeolus', 'crews', 'claude-code') }, projects: join(home, '.claude', 'projects'), sessions, setup: claudeCode, permissionModes: () => undefined });
     const workspace = createGitWorkspace({ configuration: offered, root: paths.worktrees, clones: trustedClonesOf({ configured: configuration, held: trustedRepositories, root: paths.repositories, protocols: 'file' }) });
     const state = createJsonState(paths.state);
     const trust = createTrust({ configuration: offered, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') });
