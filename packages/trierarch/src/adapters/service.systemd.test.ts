@@ -188,7 +188,7 @@ describe('container sessions under the systemd user unit on this machine', () =>
     const tokenFile = join(containerFolder, 'model-token');
     writeFileSync(tokenFile, 'sk-ant-oat01-test-token\n', { mode: 0o600 });
     const shipId = newId('ship');
-    const runtime = createContainerRuntime({ binary: 'podman', image, tokenFile, homes: join(containerFolder, 'homes'), sockets: join(containerFolder, 'sockets'), memory: '512m', cpus: 1, owner: `trierarch-test-${shipId.slice(-8)}`, launch: UNDER_SYSTEMD });
+    const runtime = createContainerRuntime({ binary: 'podman', image, tokenFile, homes: join(containerFolder, 'homes'), sockets: join(containerFolder, 'sockets'), sessions: join(containerFolder, 'sessions'), program: TRIERARCH_PROGRAM, version: runningVersion(), platform: 'linux', memory: '512m', cpus: 1, owner: `trierarch-test-${shipId.slice(-8)}`, launch: UNDER_SYSTEMD });
 
     await runtime.start({ shipId, folder: containerFolder, command: ['sleep', '30'], harness: 'claude-code' });
 

@@ -50,7 +50,10 @@ done
 // machine's own sh, sleep and nc, so nothing is pulled (#464), and a label of
 // the test's own, so the machine's own trierarch containers are left alone.
 // Each session runs under a real hold, the trierarch program from source.
-describe('the session runtime contract, on rootless Podman under holds', () => {
+/** A container's start and stop take seconds on a loaded machine: each test of the real Podman gets room for both. */
+const PODMAN_TEST_TIMEOUT_MS = 30_000;
+
+describe('the session runtime contract, on rootless Podman under holds', { timeout: PODMAN_TEST_TIMEOUT_MS }, () => {
   let image = '';
   let owner: string;
   let folder: string;
@@ -145,7 +148,8 @@ describe('the session runtime contract, on rootless Podman under holds', () => {
   it('lives as long as its hold: once the hold ends, its container is gone (H18)', async () => {
     const shipId = newId('ship');
     // The harness ends on SIGTERM, as Claude Code does: a shell that is the container's first process ignores it otherwise.
-    await runtime.start({ shipId, folder, command: ['sh', '-c', 'trap "exit 0" TERM; sleep 30 & wait'], harness: 'claude-code' });
+    await runtime.start({ shipId, folder, command: ['sh', '-c', 'trap "exit 0" TERM; echo ready; sleep 30 & wait'], harness: 'claude-code' });
+    await expect.poll(async () => shown(shipId), { timeout: 10_000 }).toContain('ready');
 
     process.kill(holdPidOf(sessions, shipId), 'SIGTERM');
 
