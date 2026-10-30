@@ -25,25 +25,24 @@ export async function rootlessPodman(machine: { platform: NodeJS.Platform; info:
 }
 
 /**
- * Builds a session image in place from this machine's own sh, tmux and sleep,
- * the libraries they load, the terminal descriptions and the C.UTF-8 locale
- * tmux needs, so a test pulls nothing from a registry (#464). Answers its
- * name; the caller removes it.
+ * Builds a session image in place from this machine's own sh, sleep and nc,
+ * and the libraries they load, so a test pulls nothing from a registry (#464):
+ * the shell and sleep stand in for a harness, and nc, which connects to a Unix
+ * socket, for the fleet client a session calls its ship's socket with.
+ * Answers its name; the caller removes it.
  */
 export async function buildTestSessionImage(name: string): Promise<string> {
   const script = `
     set -eu
     root=$(mktemp -d)
     trap 'rm -rf "$root"' EXIT
-    programs="/bin/sh $(command -v tmux) $(command -v sleep)"
+    programs="/bin/sh $(command -v sleep) $(command -v nc)"
     for file in $programs $(ldd $programs | grep -o '/[^ :]*' | sort -u); do
       mkdir -p "$root$(dirname "$file")"
       cp -L "$file" "$root$file"
     done
-    mkdir -p "$root/usr/share" "$root/usr/lib/locale" "$root/tmp"
+    mkdir -p "$root/tmp"
     chmod 1777 "$root/tmp"
-    cp -rL /usr/share/terminfo "$root/usr/share/terminfo"
-    cp -rL /usr/lib/locale/C.utf8 "$root/usr/lib/locale/C.utf8"
     tar -C "$root" -c . | podman import --quiet - "$1" > /dev/null
   `;
   const built = await runCommand('sh', { args: ['-c', script, 'sh', name] });
