@@ -306,6 +306,15 @@ describe('the trierarch on a real fleet', () => {
       { details: { worktreeShipId: scout.shipId, repository: 'aeolus-fleet', outcome: 'removed' } },
     ]);
   });
+
+  it('registers a Codex session as codex, so the fleet keeps codex as its lease harness (aeolus-fleet#1408)', async () => {
+    const { useCases, argo } = await aTrierarchOnTheFleet();
+    const lookout = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'lookout', type: 'reviewer' }));
+
+    await createRestFleet({ fleetUrl: address, crewToken: '' }).register({ shipId: lookout.shipId, secret: secretOf(lookout.secret), harness: 'codex' });
+
+    await expect(database.lease.findMany({ where: { shipId: lookout.shipId, endedAt: null }, select: { harness: true } })).resolves.toEqual([{ harness: 'codex' }]);
+  });
 });
 
 describe("contained access on a real fleet (decision 0026): the session calls over its ship's socket, and only the trierarch holds the crew token", () => {
