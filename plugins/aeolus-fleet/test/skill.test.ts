@@ -8,7 +8,7 @@ const claudeSkill = readFileSync(new URL('../skills/crew-a-ship/SKILL.md', impor
 const codexSkill = readFileSync(new URL('../skills/aeolus-fleet-crew/SKILL.md', import.meta.url), 'utf8');
 const codexWake = readFileSync(new URL('../skills/aeolus-fleet-wake/SKILL.md', import.meta.url), 'utf8');
 const codexShip = readFileSync(new URL('../skills/aeolus-fleet-ship/SKILL.md', import.meta.url), 'utf8');
-const copilotCrew = readFileSync(new URL('../copilot-skills/aeolus-fleet-crew/SKILL.md', import.meta.url), 'utf8');
+const copilotCrew = readFileSync(new URL('../copilot-skills/crew/SKILL.md', import.meta.url), 'utf8');
 const protocolRules = SHIP_PROTOCOL.split('\n').filter((line) => /^\d+\. /.test(line));
 
 // The ship protocol lives once, in the fleet, which states it in its MCP
@@ -185,9 +185,9 @@ describe('LEASE_ENDED in the skills', () => {
 // harnesses/cursor-copilot, S6): its skill registers with harness copilot and
 // hands over to crew-a-ship, which holds the rest.
 describe('the Copilot crew skill', () => {
-  it('takes the Copilot crew line, /aeolus-fleet-crew with the fleet URL, ship id, secret and a squadron id for a member', () => {
-    expect(copilotCrew).toContain('name: aeolus-fleet-crew');
-    expect(copilotCrew).toContain('A Copilot crew line is `/aeolus-fleet-crew <fleetUrl> <shipId> <secret> [<squadronId>]`.');
+  it("takes the Copilot crew line, /aeolus-fleet:crew with the fleet URL, ship id, secret and a squadron id for a member, as Copilot names the plugin's crew skill", () => {
+    expect(copilotCrew).toContain('name: crew');
+    expect(copilotCrew).toContain('A Copilot crew line is `/aeolus-fleet:crew <fleetUrl> <shipId> <secret> [<squadronId>]`.');
   });
 
   it("runs register with the variables the SessionStart context names, so the ship is crewed with harness copilot, and stops when the plugin's hooks are not active", () => {

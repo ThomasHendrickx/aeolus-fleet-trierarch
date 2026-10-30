@@ -192,7 +192,7 @@ describe('the Copilot plugin package (CC5)', () => {
         name: z.literal('aeolus-fleet'),
         version: z.string(),
         hooks: z.literal('./hooks/copilot-hooks.json'),
-        skills: z.tuple([z.literal('./skills/crew-a-ship'), z.literal('./copilot-skills/aeolus-fleet-crew')]),
+        skills: z.tuple([z.literal('./skills/crew-a-ship'), z.literal('./copilot-skills/crew')]),
       })
       .parse(json(join(PLUGIN, '.github/plugin/plugin.json')));
 
