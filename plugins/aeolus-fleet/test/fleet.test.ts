@@ -150,14 +150,14 @@ describe('aeolus-fleet register', () => {
     expect(JSON.parse(fleet.calls[0]?.body ?? '')).toMatchObject({ harness: 'codex' });
   });
 
-  it("states the harness codex from a Codex skill's command run without AEOLUS_HARNESS, and keeps the identity in the codex crews folder (#711)", async () => {
+  it("states no harness from a command that cannot tell it, never a guess, and keeps the identity in the codex crews folder (#711, aeolus-fleet#1408)", async () => {
     fleet = await startStubFleet([registered, whoami]);
     const key = createHash('sha256').update(realpathSync(folder)).digest('hex').slice(0, 32);
 
     const result = await run('aeolus-fleet.sh', { args: ['register', fleet.url, SHIP_ID, SECRET, 'DEVICE'], env: AS_CODEX_COMMAND });
 
     expect(result.status).toBe(0);
-    expect(JSON.parse(fleet.calls[0]?.body ?? '')).toMatchObject({ harness: 'codex' });
+    expect(JSON.parse(fleet.calls[0]?.body ?? '')).toEqual({ shipId: SHIP_ID, secret: SECRET, location: { kind: 'DEVICE' } });
     expect(readFileSync(join(home, '.aeolus', 'crews', 'codex', `${key}.identity`), 'utf8')).toContain(`crewToken=${CREW_TOKEN}\n`);
   });
 
