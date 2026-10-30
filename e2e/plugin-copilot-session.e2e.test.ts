@@ -1,9 +1,8 @@
-import { execFile, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
 
 import type { MessageId, ShipId } from '@aeolus-fleet/common';
 import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, newKey, OPERATOR, operatorCaller, unwrap, type PrismaClient, type ShipCaller, type UseCases } from '@aeolus-fleet/core/testing';
@@ -14,8 +13,8 @@ import { freePort } from './support/free-port.js';
 
 // The aeolus-fleet plugin in a real interactive GitHub Copilot CLI session
 // (1.0.105), driven in tmux against a fleet on this machine: a folder crewed by
-// hand, as a person registers it with the plugin's script, and a session that
-// answers a message sent while it is idle, without anyone touching it. The
+// hand, as a person pastes the Copilot crew line the console shows (S6), and a
+// session that answers a message sent while it is idle, without anyone touching it. The
 // session starts the watcher as a detached background shell; the watcher
 // hands the message over and exits, its completion starts a turn, and the
 // hooks acknowledge the message before they put it into that turn (design
@@ -27,7 +26,6 @@ import { freePort } from './support/free-port.js';
 
 const isEnabled = process.env.AEOLUS_PLUGIN_COPILOT_E2E === '1';
 const REPOSITORY = fileURLToPath(new URL('..', import.meta.url));
-const SCRIPTS = join(REPOSITORY, 'plugins', 'aeolus-fleet', 'scripts');
 const SIGNED_IN_COPILOT_HOME = process.env.COPILOT_HOME ?? join(homedir(), '.copilot');
 const TMUX_SESSION = 'aeolus-plugin-copilot-e2e';
 /** A session takes a while to start, think and call the fleet. */
@@ -44,6 +42,8 @@ let copilotHome: string;
 /** Where the session keeps its identity (AEOLUS_CREWS), apart from the crews on this machine. */
 let crews: string;
 let shipId: ShipId;
+/** The Copilot crew line, as the console shows it for the ship (aeolus-fleet decision 0019). */
+let crewLine: string;
 
 function tmux(...args: string[]): string {
   return execFileSync('tmux', args, { encoding: 'utf8' });
@@ -124,6 +124,7 @@ describe.skipIf(!isEnabled)('the aeolus-fleet plugin in an interactive Copilot s
     await server.listen({ host: '127.0.0.1', port });
     const commissioned = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'scout', type: 'reviewer' }));
     shipId = commissioned.shipId;
+    crewLine = `/aeolus-fleet:crew ${fleetUrl} ${shipId} ${commissioned.secret ?? ''}`;
 
     folder = realpathSync(mkdtempSync(join(tmpdir(), 'aeolus-plugin-copilot-e2e-')));
     execFileSync('git', ['init', '-q'], { cwd: folder });
@@ -132,19 +133,6 @@ describe.skipIf(!isEnabled)('the aeolus-fleet plugin in an interactive Copilot s
     crews = join(copilotHome, 'aeolus-crews');
     copilot('plugin', 'marketplace', 'add', REPOSITORY);
     copilot('plugin', 'install', 'aeolus-fleet@aeolus-fleet');
-    // Crewed by hand, as a person registers the folder with the plugin's script; run
-    // without blocking, so the fleet in this process answers it.
-    const registered = await promisify(execFile)('bash', [join(SCRIPTS, 'aeolus-fleet.sh'), 'register', fleetUrl, shipId, commissioned.secret ?? '', 'DEVICE'], {
-      cwd: folder,
-      env: {
-        ...process.env,
-        AEOLUS_HARNESS: 'copilot',
-        AEOLUS_CREWS: crews,
-        AEOLUS_FOLDER: folder,
-        AEOLUS_DATA: join(copilotHome, 'plugin-data', 'aeolus-fleet', 'aeolus-fleet'),
-      },
-    });
-    expect(registered.stdout).toContain('aeolus: this folder now crews scout');
     try {
       tmux('kill-session', '-t', TMUX_SESSION);
     } catch {
@@ -164,7 +152,7 @@ describe.skipIf(!isEnabled)('the aeolus-fleet plugin in an interactive Copilot s
     await database.$disconnect();
   });
 
-  it('starts the watcher as a detached background shell, and answers a message sent while it is idle, without anyone touching it', async () => {
+  it('crews the ship from the Copilot crew line, starts the watcher as a detached background shell, and answers a message sent while it is idle, without anyone touching it', async () => {
     tmux(
       'new-session', '-d', '-s', TMUX_SESSION, '-x', '200', '-y', '50', '-c', folder, '-e', `COPILOT_HOME=${copilotHome}`, '-e', `AEOLUS_CREWS=${crews}`,
       // A session of the machine's own harness exports its folder's variables (AEOLUS_FOLDER and the like): the
@@ -175,8 +163,10 @@ describe.skipIf(!isEnabled)('the aeolus-fleet plugin in an interactive Copilot s
     tmux('send-keys', '-t', TMUX_SESSION, 'Enter');
     await until(() => pane().includes('? help'), 'the session to start');
 
-    await type('Go on as the Aeolus Fleet start context says.');
+    await type(crewLine);
     await until(() => sibling('.watch.pid') !== undefined && sibling('.turn')?.startsWith('idle ') === true, 'the turn to end, with the watcher running');
+    const crewed = await database.lease.findFirstOrThrow({ where: { shipId, endedAt: null } });
+    expect(crewed.harness).toBe('copilot');
 
     const { messageId } = unwrap(
       await useCases.sendMessage(argo, {
