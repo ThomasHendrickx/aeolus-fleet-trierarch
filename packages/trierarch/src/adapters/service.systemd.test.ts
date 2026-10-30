@@ -198,8 +198,14 @@ describe('container sessions under the systemd user unit on this machine', () =>
     await runtime.start({ shipId, folder: containerFolder, command: ['sleep', '30'], harness: 'claude-code' });
 
     container = `trierarch-${shipId}`;
-    const monitor = (await runCommand('podman', { args: ['inspect', '--format', '{{.State.ConmonPid}}', container] })).stdout.trim();
-    scope = unitOf(monitor);
+    // The start returns once the hold answers, which is before its `podman run` has created the container and started its monitor: the monitor's pid is read once the container runs.
+    const monitorPid = async () => {
+      const inspected = await runCommand('podman', { args: ['inspect', '--format', '{{.State.Running}} {{.State.ConmonPid}}', container] });
+      const [isRunning, pid = ''] = inspected.stdout.trim().split(' ');
+      return inspected.status === 0 && isRunning === 'true' && pid !== '0' ? pid : '';
+    };
+    await expect.poll(monitorPid, { timeout: SESSION_TIMEOUT_MS }).not.toBe('');
+    scope = unitOf(await monitorPid());
     expect({ isScope: scope.endsWith('.scope'), isThisProcess: scope === unitOf(String(process.pid)) }).toEqual({ isScope: true, isThisProcess: false });
   });
 });
