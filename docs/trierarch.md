@@ -94,13 +94,18 @@ Its report, sent on start and again whenever it changes: its state (`working` wh
       "flags": ["--dangerously-skip-permissions"],
       "riskyFlags": ["--dangerously-skip-permissions"],
       "version": "2.1.293",
-      "modelsConfirmedAt": "2026-10-08T15:00:00.000Z"
+      "modelsConfirmedAt": "2026-10-08T15:00:00.000Z",
+      "login": { "default": "apiKey", "key": "outOfCredit", "keyStateAt": "2026-10-28T14:02:00.000Z" }
     }
   ],
   "workspaces": { "repositories": ["aeolus-fleet"], "folders": ["notes"] },
   "caps": { "ships": 8, "running": 4 },
   "kept": [{ "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88", "repository": "aeolus-fleet" }],
   "orphans": [{ "repository": "aeolus-fleet", "name": "lookout" }],
+  "logins": [
+    { "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88", "login": "apiKey" },
+    { "shipId": "shp_01m473j7hp3x6gha0gzs1mnf89", "login": "subscription", "next": "apiKey" }
+  ],
   "machine": { "os": "macos", "arch": "arm64" },
   "runtime": "host",
   "load": {
@@ -124,21 +129,24 @@ Its report, sent on start and again whenever it changes: its state (`working` wh
       {
         "shipId": "shp_01m473j7hp3x6gha0gzs1mnf88",
         "models": [
-          { "model": "claude-opus-5-5", "tokens": { "input": 1200, "output": 45000, "cacheRead": 9800000, "cacheWrite": 410000 }, "estimatedCostUsd": 12.5 },
-          { "model": "claude-haiku-5-5", "tokens": { "input": 300, "output": 2000, "cacheRead": 50000, "cacheWrite": 20000 }, "estimatedCostUsd": null }
+          { "model": "claude-opus-5-5", "login": "apiKey", "tokens": { "input": 1200, "output": 45000, "cacheRead": 9800000, "cacheWrite": 410000 }, "estimatedCostUsd": 6.14 },
+          { "model": "claude-opus-5-5", "login": "subscription", "tokens": { "input": 300, "output": 2000, "cacheRead": 50000, "cacheWrite": 20000 }, "estimatedCostUsd": 0.21 },
+          { "model": "claude-haiku-5-5", "login": "apiKey", "tokens": { "input": 300, "output": 2000, "cacheRead": 50000, "cacheWrite": 20000 }, "estimatedCostUsd": null }
         ]
       }
     ]
   },
-  "version": "0.31.0"
+  "version": "0.34.0"
 }
 ```
 
 `workspaces` offers only the repositories and folders every configured harness trusts (see Trust below), the trusted repositories among them, so the trierarch plugin never assigns a request to a place a harness would stop at. Each harness gives the `version` the trierarch detected and when it last confirmed its models (`modelsConfirmedAt`, null while none is; see Detected options); the console's machine card shows both. Its shape lives in `common`, as the type `trierarch`'s report details. Paths stay on the machine (decision 0032): a kept worktree is named by the ship it belonged to and its repository, an orphan by its repository and its folder's name under the worktree root (`<root>/<repository>/<name>`). It holds no entry per ship: each request carries its own status. `machine` is read from the trierarch's process: `os` is `macos`, `linux` or `windows`, and `arch` is `arm64` or `amd64`; a platform outside these is left out. `runtime` is where the machine runs its sessions, `host` or `container`, as its configuration picks it (see Session runtime below): a fact, never a label, and placement never reads it.
 
+Each harness's `login` (api keys K8) is the login its sessions run on by default, `apiKey` or `subscription` as `logins.default` gives it (subscription when it gives none), and `key`, where its API key stands: `none` with no key on the computer, `ready`, `refused` by its vendor or `outOfCredit`, with since when (`keyStateAt`) for a state its vendor's answer set. `logins` holds, for each ship it crews whose session started, the login of its running or last session, and `next` when its next start would use the other one, as a running session keeps the login it started with (K3). The report carries the key's state, never the key (K7).
+
 `load` is the machine's load (#400), machine totals only: memory (on a Mac, as available its free, inactive, speculative and purgeable pages, as Activity Monitor counts what is not used), swap where the platform says it, the 1-minute load average over its cores, and the disk its worktree root is on. It is read at most once a minute, and the report goes again for it only once memory, swap or disk moves 5 points of use, or the load per core half a load, so a load that always moves does not flood the fleet. When the machine drops below 10 % of its memory available or 5 % of its disk free, the trierarch tells argo once, in the shape of a message to argo: a headline naming what is low, then the memory and disk left. It tells again only after the machine recovered and dropped again; the state keeps what argo was told, so a restart while it stays low tells nothing. It stops no session for it.
 
-`usage` is what the machine's harnesses used (#353). `ships` holds, for each ship it crews whose sessions used any, the tokens per model since its folder was made, so a ship of the same name before counts nothing: input not read from the cache, output, and the input read from and written to the prompt cache. They come from the harness's own transcripts: Claude Code's conversations of the folder and their sub-agents', each message once; Codex's session logs of the folder, each turn's tokens to the model of that turn. They are read every 5 minutes. `estimatedCostUsd` is their cost at the price table: the list prices the trierarch carries (its `token-cost.ts` names their source and date), with the configuration's `prices` in place of a model's or for a model it does not carry (US dollars per million tokens of each kind: `{ "prices": { "claude-opus-5-5": { "input": 4, "output": 20, "cacheRead": 0.2, "cacheWrite": 8 } } }`); null for a model neither prices. On a subscription it is what the tokens would cost at list prices, not what is paid. `subscriptions` holds how much of each harness's subscription is used per window, and when each window starts again: Codex's from the last token count of its newest session log; Claude Code's from a short print-mode turn on its cheapest model, from an empty folder, which costs a turn of its own. Each is read when the trierarch starts, and again only once 30 minutes passed and the harness's sessions on this machine did work since. A harness that cannot say (not logged in, no session yet) is left out. Placement by load or remaining credits is the trierarch plugin's.
+`usage` is what the machine's harnesses used (#353). `ships` holds, for each ship it crews whose sessions used any, the tokens per model since its folder was made, so a ship of the same name before counts nothing: input not read from the cache, output, and the input read from and written to the prompt cache. They come from the harness's own transcripts: Claude Code's conversations of the folder and their sub-agents', each message once; Codex's session logs of the folder, each turn's tokens to the model of that turn. Each model's tokens are split per `login` (K8): each message counts to the login of the session that wrote it, by when it was written, as the trierarch keeps each ship's earlier logins until the start that changed it. A ship's cost on the key is the sum of its `apiKey` entries. A ship whose session started before the trierarch kept its login has no `login` on its tokens. They are read every 5 minutes. `estimatedCostUsd` is their cost at the price table: the list prices the trierarch carries (its `token-cost.ts` names their source and date), with the configuration's `prices` in place of a model's or for a model it does not carry (US dollars per million tokens of each kind: `{ "prices": { "claude-opus-5-5": { "input": 4, "output": 20, "cacheRead": 0.2, "cacheWrite": 8 } } }`); null for a model neither prices. On a subscription it is what the tokens would cost at list prices, not what is paid. `subscriptions` holds how much of each harness's subscription is used per window, and when each window starts again: Codex's from the last token count of its newest session log; Claude Code's from a short print-mode turn on its cheapest model, from an empty folder, which costs a turn of its own. Each is read when the trierarch starts, and again only once 30 minutes passed and the harness's sessions on this machine did work since. A harness that cannot say (not logged in, no session yet) is left out. Placement by load or remaining credits is the trierarch plugin's.
 
 ### Machine labels
 
