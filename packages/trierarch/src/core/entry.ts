@@ -1,7 +1,7 @@
 import type { ShipId, TrierarchWorkspace } from '@aeolus-fleet/common';
 
 import type { FailedStarts } from './failed-starts.js';
-import type { KeyState, Login } from './login.js';
+import type { EarlierLogin, KeyState, Login } from './login.js';
 import type { LowResource } from './machine-load.js';
 
 /**
@@ -81,6 +81,8 @@ export interface Entry {
   readonly launchId?: string;
   /** The login of its running or last session (api keys K6), set at each start: a change of configuration reaches only the next one (K3). */
   readonly login?: Login;
+  /** The logins of its earlier sessions, each until the start that changed it (api keys K8), so what each session used counts to its own login. */
+  readonly earlierLogins?: readonly EarlierLogin[];
   /** Set as it goes back to crewing after a release elsewhere (row 11): its worktree goes before it is crewed again (#475). */
   readonly isReleasedElsewhere?: true;
   /** How many crews of its settings version failed in a row (#827); none once one starts. */

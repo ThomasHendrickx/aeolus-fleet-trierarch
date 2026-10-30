@@ -4,7 +4,7 @@ import { putEntry, removeEntry, withState, type Entry, type Orphan, type Trierar
 import { crashText, discardedText, identityGoneText, keyNotReadyText, modelRefusedText, ownerUnreachableText, settingsRefusedText, stoppedOfferingText } from './argo-reports.js';
 import { MODEL_OPTION } from './detected-options.js';
 import { countStart, PROBE_AFTER_MINUTES, withConfiguration, type StartOutcome } from './failed-starts.js';
-import { loginOf, type KeyState, type Login, type Logins } from './login.js';
+import { loginOf, startedOn, type KeyState, type Login, type Logins } from './login.js';
 import type { Checkout, CheckoutsPort, FleetPort, FolderProcessesPort, HarnessPort, LaunchSeen, LoggedAction, Logger, ModelLoginsPort, SessionRuntime, ShipSocketsPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { HOLDS_IDENTITY, reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
 import type { RefuseModel } from './refuse-model.js';
@@ -396,7 +396,8 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
         });
         log(deps, { ...about(state, { shipId: entry.shipId, action: 'launch' }), outcome: `started again in ${entry.folder}` });
         // Its first minute is checked from now, while it runs (#397).
-        const next = putEntry(state, { ...entry, launchedAt: deps.clock.now().toISOString(), launchId, login });
+        const launchedAt = deps.clock.now().toISOString();
+        const next = putEntry(state, { ...entry, launchedAt, launchId, ...startedOn(entry, { login, at: launchedAt }) });
         await deps.state.save(next);
         return next;
       }
@@ -523,7 +524,8 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   });
   // Crewing still: its launch window is open, and only activity in it makes the crew final (#382).
   const { crewFailures, ...started } = crewing;
-  const next = putEntry(state, { ...(crewFailures === undefined ? crewing : started), shipName: ship.name, folder, hasStarted: true, launchedAt: deps.clock.now().toISOString(), launchId, login });
+  const launchedAt = deps.clock.now().toISOString();
+  const next = putEntry(state, { ...(crewFailures === undefined ? crewing : started), shipName: ship.name, folder, hasStarted: true, launchedAt, launchId, ...startedOn(crewing, { login, at: launchedAt }) });
   await deps.state.save(next);
   log(deps, { shipId: crewing.shipId, shipName: ship.name, action: 'crew', outcome: `crewed, ${crewing.harness} started in ${folder}` });
   return next;
