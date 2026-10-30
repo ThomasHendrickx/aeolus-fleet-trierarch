@@ -954,7 +954,7 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
   const usage = new InMemoryUsage();
   const readLoad = createReadLoad({ machine, fleet, state, clock, logger });
   const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configuration.harnesses), prices: priceTableOf(undefined) });
-  const reportSelf = createReportSelf({ fleet, processes, trust, state, setup, readLoad, readUsage, clock });
+  const reportSelf = createReportSelf({ fleet, processes, trust, state, setup, readLoad, readUsage, clock, modelLogins, ...(logins !== undefined && { logins }) });
 
   /** A message arrives at the trierarch's own ship: its delivery, handled. */
   async function deliver(message: { contentType: string; payload: string; senderShipId?: ShipId }): Promise<Delivery> {
