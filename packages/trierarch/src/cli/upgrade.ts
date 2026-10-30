@@ -9,8 +9,8 @@ import { NOT_SAID_YET_REASON, startNewProcess } from './new-process.js';
 /**
  * `aeolus-trierarch upgrade [version]` (#255): installs the given version, or
  * the latest on npm, globally and pinned to it, then stops the old process and
- * starts the new one. Sessions are not touched: they run on the trierarch's
- * own tmux server, and the new process takes them over from its saved state.
+ * starts the new one. Sessions are not touched: they run under holds of their
+ * own, and the new process takes them over from its saved state.
  * It reports once the new process has said its version in running.json, so
  * the status that follows shows it running (#376), waiting at most 30 seconds,
  * as every start waits (#466). Before the stop, the installed version writes

@@ -56,7 +56,7 @@ const TRIERARCH_VARIABLES = ['AEOLUS_PLUGIN_ROOT', 'AEOLUS_PLUGIN_DATA', 'AEOLUS
 
 const DEFAULT_PATH = '/usr/bin:/bin';
 
-/** The service's environment: PATH, so it finds tmux, git, claude and codex, and the trierarch's own variables. */
+/** The service's environment: PATH, so it finds git, claude, codex and the container runtime, and the trierarch's own variables. */
 export function serviceEnvironment(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
   const environment: Record<string, string> = { PATH: env.PATH ?? DEFAULT_PATH };
   for (const name of TRIERARCH_VARIABLES) {
@@ -116,7 +116,7 @@ ExecStart="${at.run.node}" "${at.run.script}" run
 ${variables}
 Restart=always
 RestartSec=5
-# The sessions run in the tmux server the trierarch starts, in this unit's control group: a stop ends the trierarch only (#479).
+# The sessions run under holds the trierarch starts, each in a scope of its own: a stop ends the trierarch only (#479).
 KillMode=process
 
 [Install]
