@@ -594,8 +594,8 @@ describe('a Copilot session held by a hold, one copilot -p per turn (CC4)', () =
 });
 
 describe('where a hold starts (#537)', () => {
-  it("starts through a systemd scope of its own under a systemd unit, so the service's restart ends no session", () => {
-    expect(sessionsLaunch({ platform: 'linux', env: { INVOCATION_ID: 'c0ffee' } })).toEqual(['systemd-run', '--user', '--scope', '--quiet', '--collect', '--']);
+  it("starts through a systemd scope of its own under a systemd unit, so the service's restart ends no session, and leaves every $ in the command as it is (systemd 259 turns $$ into $)", () => {
+    expect(sessionsLaunch({ platform: 'linux', env: { INVOCATION_ID: 'c0ffee' } })).toEqual(['systemd-run', '--user', '--scope', '--quiet', '--collect', '--expand-environment=no', '--']);
   });
 
   it('starts itself on Linux outside a systemd unit', () => {
