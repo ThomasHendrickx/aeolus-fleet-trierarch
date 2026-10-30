@@ -86,6 +86,8 @@ interface FleetShip {
   status: 'awaitingCrew' | 'crewed' | 'retired';
   secret?: string;
   crewToken?: string;
+  /** The harness its crew registered with, as the fleet lists it (aeolus-fleet#1408). */
+  harness?: string;
   waiting: number;
   /** Of those waiting, the forced ones not handed over yet (decision 0040). */
   forced: number;
@@ -344,13 +346,14 @@ export class InMemoryFleet implements FleetPort {
     return Promise.resolve({ secret: ship.secret });
   }
 
-  register(crew: { shipId: ShipId; secret: string }): Promise<{ crewToken: string }> {
+  register(crew: { shipId: ShipId; secret: string; harness: string }): Promise<{ crewToken: string }> {
     const ship = this.shipOf(crew.shipId);
     if (ship.status !== 'awaitingCrew' || ship.secret !== crew.secret) {
       return Promise.reject(new Error('CONFLICT'));
     }
     this.count += 1;
     ship.status = 'crewed';
+    ship.harness = crew.harness;
     ship.crewToken = `aeolus_ct_v1_${String(this.count)}`;
     if (this.isLosingRegisterReply) {
       this.isLosingRegisterReply = false;
