@@ -67,10 +67,10 @@ describe('whether a session can start on its login (api keys K9)', () => {
     await expect(createModelLogins({ runtime: 'host', ...harnesses() }).startProblem({ harness: 'copilot', login: 'apiKey', options: {} })).resolves.toBe("copilot signs in with this computer's own login and runs on no API key: run the ship on its subscription");
   });
 
-  it('not on an API key with the container runtime yet', async () => {
+  it('on an API key with the container runtime too, once its harness holds a key: containers reach the model proxy (headless H16)', async () => {
     await keys.write('claude-code', 'test-key-not-real');
 
-    await expect(createModelLogins({ runtime: 'container', ...harnesses() }).startProblem({ harness: 'claude-code', login: 'apiKey', options: {} })).resolves.toBe('a session on an API key runs on the host runtime only, until containers reach the model proxy');
+    await expect(createModelLogins({ runtime: 'container', ...harnesses() }).startProblem({ harness: 'claude-code', login: 'apiKey', options: {} })).resolves.toBeUndefined();
   });
 
   it("not on Claude Code's subscription with a key in reach of it, naming where, in the folder it starts in", async () => {

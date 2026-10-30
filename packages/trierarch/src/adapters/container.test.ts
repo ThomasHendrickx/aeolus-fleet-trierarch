@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer as createNetServer, type Server as NetServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 
@@ -11,7 +12,7 @@ import { newId } from '../../test/support/in-memory.js';
 import { buildTestSessionImage, rootlessPodman } from '../../test/support/podman.js';
 import { sessionRuntimeContract } from '../../test/support/session-runtime-contract.js';
 import { createCallerCheck } from './caller-check.js';
-import { createContainerRuntime, MODEL_TOKEN_VARIABLE } from './container.js';
+import { createContainerRuntime, MODEL_PROXY_HOST, MODEL_TOKEN_VARIABLE } from './container.js';
 import { runCommand, type CommandResult } from './run-command.js';
 import { runningVersion } from './version.js';
 
@@ -50,6 +51,9 @@ done
 // machine's own sh, sleep and nc, so nothing is pulled (#464), and a label of
 // the test's own, so the machine's own trierarch containers are left alone.
 // Each session runs under a real hold, the trierarch program from source.
+/** A session's own token for the model proxy, as the Claude Code adapter makes one. */
+const PROXY_TOKEN = { harness: 'claude-code', variable: 'ANTHROPIC_AUTH_TOKEN', token: 'aeolus-proxy-test-token' };
+
 /** A container's start and stop take seconds on a loaded machine: each test of the real Podman gets room for both. */
 const PODMAN_TEST_TIMEOUT_MS = 30_000;
 
@@ -180,6 +184,32 @@ describe('the session runtime contract, on rootless Podman under holds', { timeo
     await expect(containerNames()).resolves.toEqual([`trierarch-${shipId}`]);
   });
 
+  it("reaches the model proxy at Podman's host address on an API key, with its own proxy token, and holds no key and no model token (headless H16, api keys K7)", async () => {
+    const shipId = newId('ship');
+    const proxy = createHttpServer((_request, response) => response.end('the proxy answered'));
+    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+    const address = proxy.address();
+    const port = typeof address === 'object' && address !== null ? address.port : 0;
+    const key = 'sk-ant-api03-test-key-not-real';
+    mkdirSync(join(folder, 'keys'));
+    writeFileSync(join(folder, 'keys', 'claude-code'), `${key}\n`, { mode: 0o600 });
+    try {
+      await runtime.start({
+        shipId,
+        folder,
+        command: ['sh', '-c', `export -p; printf 'GET / HTTP/1.0\\r\\n\\r\\n' | nc -w 5 ${MODEL_PROXY_HOST} ${String(port)}; sleep 30`],
+        harness: 'claude-code',
+        proxyToken: PROXY_TOKEN,
+      });
+
+      await expect.poll(async () => shown(shipId), { timeout: 10_000 }).toContain('the proxy answered');
+      const screen = await shown(shipId);
+      expect({ token: screen.includes(`${PROXY_TOKEN.variable}='${PROXY_TOKEN.token}'`) || screen.includes(`${PROXY_TOKEN.variable}="${PROXY_TOKEN.token}"`), key: screen.includes(key), modelToken: screen.includes(MODEL_TOKEN) }).toEqual({ token: true, key: false, modelToken: false });
+    } finally {
+      await new Promise((resolve) => proxy.close(resolve));
+    }
+  });
+
   it('hands the session the model token', async () => {
     const shipId = newId('ship');
 
@@ -304,7 +334,7 @@ describe('the container a session runs in', () => {
     sockets = join(folder, 'sockets');
     sessions = realpathSync(mkdtempSync('/tmp/aeolus-holds-'));
     binary = join(folder, 'runtime');
-    writeFileSync(binary, `#!/bin/sh\nfor word in "$@"; do printf '%s\\n' "$word"; done > "$0.words"\nexec sleep 30\n`);
+    writeFileSync(binary, `#!/bin/sh\nenv > "$0.env"\nfor word in "$@"; do printf '%s\\n' "$word"; done > "$0.words"\nexec sleep 30\n`);
     chmodSync(binary, 0o755);
     runtimes = [];
   });
@@ -331,10 +361,18 @@ describe('the container a session runs in', () => {
     return readFileSync(`${binary}.words`, 'utf8').replace(/\n$/u, '').split('\n');
   }
 
-  async function started(options: { env?: Record<string, string>; readOnly?: readonly string[]; launch?: readonly string[] } = {}) {
+  async function started(options: { env?: Record<string, string>; readOnly?: readonly string[]; launch?: readonly string[]; proxyToken?: typeof PROXY_TOKEN } = {}) {
     const runner = recordingRunner();
     const runtime = runtimeWith(runner, options.launch === undefined ? {} : { launch: options.launch });
-    await runtime.start({ shipId, folder, command: ['claude', '--name', 'implementer-b'], harness: 'claude-code', ...(options.env !== undefined && { env: options.env }), ...(options.readOnly !== undefined && { readOnly: options.readOnly }) });
+    await runtime.start({
+      shipId,
+      folder,
+      command: ['claude', '--name', 'implementer-b'],
+      harness: 'claude-code',
+      ...(options.env !== undefined && { env: options.env }),
+      ...(options.readOnly !== undefined && { readOnly: options.readOnly }),
+      ...(options.proxyToken !== undefined && { proxyToken: options.proxyToken }),
+    });
     return { runner, runtime, words: await wordsRun() };
   }
 
@@ -422,6 +460,35 @@ describe('the container a session runs in', () => {
     await runtime.stop(shipId);
 
     expect(existsSync(envFile)).toBe(false);
+  });
+
+  it("hands a session on an API key its proxy token by its variable's name alone, the value in the environment its hold runs the container with, never on a command line or in the env file (api keys K7)", async () => {
+    const { words } = await started({ proxyToken: PROXY_TOKEN });
+
+    expect({
+      named: valuesOf(words, '--env'),
+      inHoldEnvironment: readFileSync(`${binary}.env`, 'utf8').includes(`${PROXY_TOKEN.variable}=${PROXY_TOKEN.token}\n`),
+      onCommandLine: words.some((word) => word.includes(PROXY_TOKEN.token)),
+      inEnvFile: readFileSync(envFileOf(words), 'utf8').includes(PROXY_TOKEN.token),
+    }).toEqual({ named: ['HOME=/home/ubuntu', PROXY_TOKEN.variable], inHoldEnvironment: true, onCommandLine: false, inEnvFile: false });
+  });
+
+  it("gives a session on an API key no model token: the model token is the subscription's login (headless H15)", async () => {
+    const { words } = await started({ proxyToken: PROXY_TOKEN, env: { AEOLUS_LAUNCH: 'launch-1' } });
+
+    expect(readFileSync(envFileOf(words), 'utf8')).toBe('AEOLUS_LAUNCH=launch-1\n');
+  });
+
+  it("lets a session on an API key reach the host's loopback, where the model proxy listens, at Podman's host address (headless H16)", async () => {
+    const { words } = await started({ proxyToken: PROXY_TOKEN });
+
+    expect(valuesOf(words, '--network')).toEqual(['slirp4netns:allow_host_loopback=true']);
+  });
+
+  it("keeps a session on its subscription off the host's loopback", async () => {
+    const { words } = await started();
+
+    expect(valuesOf(words, '--network')).toEqual([]);
   });
 
   it('refuses an environment value of more than one line, which an env file cannot hold', async () => {
