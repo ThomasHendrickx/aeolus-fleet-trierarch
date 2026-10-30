@@ -9,12 +9,10 @@ import { PLUGIN_HARNESSES, type PluginHarness } from './plugin.js';
  * only once its harness holds one, so a session never starts to be refused by
  * the proxy, nor on its subscription instead (K2). On the subscription,
  * only when nothing the harness reads itself would put a key in reach (K6).
- * For now only sessions on the host reach the model proxy: containers follow.
  */
 export function createModelLogins(at: {
   /** What the model proxy recorded of each key (api keys K8). */
   keyStates: Pick<KeyStates, 'stateOf'>;
-  runtime: 'host' | 'container';
   /** What in Claude Code's settings would give a session with the options in the folder a key, named; see ClaudeCodeSetup.keyInReach. */
   claudeCode: { keyInReach(at: { options: Readonly<Record<string, string>>; folder?: string }): Promise<string | undefined> };
   codex: Pick<CodexSetup, 'loginKind'>;
@@ -26,9 +24,6 @@ export function createModelLogins(at: {
       }
       if (harness === 'copilot') {
         return "copilot signs in with this computer's own login and runs on no API key: run the ship on its subscription";
-      }
-      if (at.runtime === 'container') {
-        return 'a session on an API key runs on the host runtime only, until containers reach the model proxy';
       }
       const { state, at: since = '' } = await keyStateOf(at, harness);
       switch (state) {

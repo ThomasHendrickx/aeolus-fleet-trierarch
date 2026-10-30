@@ -186,7 +186,7 @@ describe('the session runtime contract, on rootless Podman under holds', { timeo
 
   it("reaches the model proxy at Podman's host address on an API key, with its own proxy token, and holds no key and no model token (headless H16, api keys K7)", async () => {
     const shipId = newId('ship');
-    const proxy = createHttpServer((_request, response) => response.end('the proxy answered'));
+    const proxy = createHttpServer((_request, response) => response.end('the proxy answered\n'));
     await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
     const address = proxy.address();
     const port = typeof address === 'object' && address !== null ? address.port : 0;
