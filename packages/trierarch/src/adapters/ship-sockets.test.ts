@@ -209,6 +209,13 @@ describe('a call the socket refuses, never forwarded', () => {
     expect(calls).toEqual([]);
   });
 
+  it('forwards a send of a 256 KB payload, the most the fleet takes, with the JSON around it', async () => {
+    const socket = await sockets.open(shipId);
+    const body = JSON.stringify({ selector: { kind: 'ship', name: 'argo' }, payload: 'a'.repeat(262_144), idempotencyKey: 'k'.repeat(256), model: 'claude-opus-5-5', inReplyTo: 'msg_01m679bfr46y1vgk4cxx918e2d' });
+
+    await expect(callOver(socket, { method: 'POST', path: '/api/v1/ship/send', body })).resolves.toMatchObject({ status: 200 });
+  });
+
   it(`forwards a body of ${String(SHIP_CALL_MAX_BYTES)} bytes, the most it takes`, async () => {
     const socket = await sockets.open(shipId);
 

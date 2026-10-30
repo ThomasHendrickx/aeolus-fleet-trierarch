@@ -23,8 +23,8 @@ import type { RefreshedCheckout } from '../core/ports.js';
  * revision each now holds, or why it could not.
  */
 
-/** The most a call's body may hold: a 64 KB payload with the JSON around it. */
-export const SHIP_CALL_MAX_BYTES = 128 * 1024;
+/** The most a call's body may hold: a 256 KB payload with the JSON around it (aeolus-fleet decision 0006). */
+export const SHIP_CALL_MAX_BYTES = 320 * 1024;
 
 const SOCKET_FILE = 'fleet.sock';
 /** A ship call is one word under the ship API: `/api/v1/ship/send`. */
