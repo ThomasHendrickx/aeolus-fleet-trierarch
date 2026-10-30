@@ -32,7 +32,8 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
 
     await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'echo "in $(pwd)"; sleep 30'], harness: HARNESS });
 
-    await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running' }]);
+    // A start returns once the hold answers, which a container runtime does before its container exists: the list shows it running once it does.
+    await expect.poll(async () => runtime.list(), POLL).toEqual([{ shipId, status: 'running' }]);
     await expect.poll(async () => shown(runtime, shipId), POLL).toContain(`in ${at.folder()}`);
   });
 
@@ -74,7 +75,7 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
 
     await runtime.start({ shipId, folder: at.folder(), command: ['sleep', '30'], harness: HARNESS });
 
-    await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running' }]);
+    await expect.poll(async () => runtime.list(), POLL).toEqual([{ shipId, status: 'running' }]);
   });
 
   it("sends a line to the session's harness, as its next input", async () => {
