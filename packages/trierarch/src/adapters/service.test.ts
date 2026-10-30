@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { trierarchPaths } from './paths.js';
 import type { CommandResult } from './run-command.js';
-import { createService, LAUNCHD_LABEL, serviceEnvironment, SYSTEMD_UNIT, type Service } from './service.js';
+import { createService, LAUNCHD_LABEL, serviceEnvironment, SYSTEMD_UNIT, systemctlEnvironment, type Service } from './service.js';
 
 let home: string;
 let calls: string[];
@@ -372,5 +372,15 @@ describe("the service's environment", () => {
 
   it('gives the service a plain PATH where install ran without one', () => {
     expect(serviceEnvironment({})).toEqual({ PATH: '/usr/bin:/bin' });
+  });
+});
+
+describe('the environment systemctl --user runs in', () => {
+  it('finds the user bus at /run/user/<uid> when the shell has no XDG_RUNTIME_DIR, as a session the trierarch runs does (aeolus-fleet#1416)', () => {
+    expect(systemctlEnvironment({}, 1000)).toEqual({ XDG_RUNTIME_DIR: '/run/user/1000' });
+  });
+
+  it('keeps the XDG_RUNTIME_DIR the shell has', () => {
+    expect(systemctlEnvironment({ XDG_RUNTIME_DIR: '/run/elsewhere' }, 1000)).toEqual({ XDG_RUNTIME_DIR: '/run/elsewhere' });
   });
 });
