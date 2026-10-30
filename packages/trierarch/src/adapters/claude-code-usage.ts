@@ -4,17 +4,20 @@ import { join } from 'node:path';
 import type { ShipId } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
+import { loginAt, type SessionLogins } from '../core/login.js';
 import type { ModelTokens, SubscriptionWindow } from '../core/ports.js';
-import type { TokenCounts } from '../core/token-cost.js';
 import { createAppendedLines } from './appended-lines.js';
 import { CLAUDE_CODE_PROBE_TIMEOUT_MS } from './claude-code-detector.js';
 import type { CommandResult } from './run-command.js';
+import { createTokensPerLogin, type TokensPerLogin } from './tokens-per-login.js';
 
 /**
  * What Claude Code says of its usage (#353). A ship's tokens come from the
  * transcripts in its projects folder: its folder's conversations and their
  * sub-agents', one line per content block, each line of a message carrying
- * the message's whole usage, so each message counts once by its id. Its
+ * the message's whole usage, so each message counts once by its id, to the
+ * login of the session that wrote it when the ship's logins are given (api
+ * keys K8). Its
  * subscription comes from the rate limit event a print-mode turn streams,
  * a short turn on the cheapest model, from an empty folder. Claude Code
  * documents neither: the readers are tested on captured ones (test/logs).
@@ -55,14 +58,10 @@ function jsonOf(line: string): unknown {
   }
 }
 
-/** One transcript as read so far: the messages it counted, and their tokens per model. */
+/** One transcript as read so far: the messages it counted, and their tokens per model and login. */
 interface TranscriptTotals {
   readonly seen: Set<string>;
-  readonly byModel: Map<string, TokenCounts>;
-}
-
-function plus(a: TokenCounts | undefined, b: TokenCounts): TokenCounts {
-  return a === undefined ? b : { input: a.input + b.input, output: a.output + b.output, cacheRead: a.cacheRead + b.cacheRead, cacheWrite: a.cacheWrite + b.cacheWrite };
+  readonly counted: TokensPerLogin;
 }
 
 /** The conversations Claude Code keeps of the folder: each `.jsonl` in its projects folder, and the sub-agents' of each. */
@@ -111,9 +110,11 @@ export function createClaudeCodeUsage(deps: {
   const appended = createAppendedLines();
   const transcripts = new Map<string, TranscriptTotals>();
 
-  const readTranscript = async (path: string, since: Date): Promise<TranscriptTotals> => {
+  // A transcript is read on, never again from its start: a message counted to a login stays counted to it, as a later change of login is kept from its start on.
+  const readTranscript = async (path: string, at: { since: Date; logins: SessionLogins | undefined }): Promise<TranscriptTotals> => {
+    const { since, logins } = at;
     const { lines, isFromStart } = await appended.read(path);
-    const totals = isFromStart ? { seen: new Set<string>(), byModel: new Map<string, TokenCounts>() } : (transcripts.get(path) ?? { seen: new Set<string>(), byModel: new Map<string, TokenCounts>() });
+    const totals = (isFromStart ? undefined : transcripts.get(path)) ?? { seen: new Set<string>(), counted: createTokensPerLogin() };
     for (const line of lines) {
       const parsed = assistantLineSchema.safeParse(jsonOf(line));
       if (!parsed.success || parsed.data.message.model === SYNTHETIC_MODEL || totals.seen.has(parsed.data.message.id) || Date.parse(parsed.data.timestamp) < since.getTime()) {
@@ -121,23 +122,24 @@ export function createClaudeCodeUsage(deps: {
       }
       const { id, model, usage } = parsed.data.message;
       totals.seen.add(id);
-      totals.byModel.set(model, plus(totals.byModel.get(model), { input: usage.input_tokens, output: usage.output_tokens, cacheRead: usage.cache_read_input_tokens ?? 0, cacheWrite: usage.cache_creation_input_tokens ?? 0 }));
+      const login = logins === undefined ? undefined : loginAt(logins, new Date(parsed.data.timestamp));
+      totals.counted.add({ model, ...(login !== undefined && { login }), tokens: { input: usage.input_tokens, output: usage.output_tokens, cacheRead: usage.cache_read_input_tokens ?? 0, cacheWrite: usage.cache_creation_input_tokens ?? 0 } });
     }
     transcripts.set(path, totals);
     return totals;
   };
 
   return {
-    tokensOf: async (ship: { shipId: ShipId; folder: string }): Promise<ModelTokens[]> => {
+    tokensOf: async (ship: { shipId: ShipId; folder: string; logins?: SessionLogins }): Promise<ModelTokens[]> => {
       const since = await deps.madeAt(ship.folder);
       const project = join(deps.projectsOf(ship.shipId), ship.folder.replace(/[^a-zA-Z0-9]/gu, '-'));
-      const byModel = new Map<string, TokenCounts>();
+      const counted = createTokensPerLogin();
       for (const path of await transcriptsIn(project)) {
-        for (const [model, tokens] of (await readTranscript(path, since)).byModel) {
-          byModel.set(model, plus(byModel.get(model), tokens));
-        }
+        (await readTranscript(path, { since, logins: ship.logins })).counted.list().forEach((used) => {
+          counted.add(used);
+        });
       }
-      return [...byModel].sort(([a], [b]) => a.localeCompare(b)).map(([model, tokens]) => ({ model, tokens }));
+      return counted.list();
     },
     subscription: async (): Promise<SubscriptionWindow[] | undefined> => {
       const folder = await deps.neutralFolder();

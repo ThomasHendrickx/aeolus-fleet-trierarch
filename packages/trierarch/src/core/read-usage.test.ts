@@ -154,8 +154,9 @@ describe("the harnesses' usage, as the trierarch reads it (#353)", () => {
       {
         shipId: entry.shipId,
         models: [
-          { model: 'claude-opus-5-5', login: 'apiKey', tokens: { input: 2400, output: 90_000, cacheRead: 19_600_000, cacheWrite: 820_000 }, estimatedCostUsd: 12.28 },
           { ...OPUS_TOKENS, login: 'subscription', estimatedCostUsd: 6.14 },
+          // Twice the tokens of 6.1448 dollars at list prices, rounded to the cent.
+          { model: 'claude-opus-5-5', login: 'apiKey', tokens: { input: 2400, output: 90_000, cacheRead: 19_600_000, cacheWrite: 820_000 }, estimatedCostUsd: 12.29 },
         ],
       },
     ]);
