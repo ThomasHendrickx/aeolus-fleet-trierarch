@@ -8,7 +8,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -264,6 +264,21 @@ describe('a Copilot crew in ~/.aeolus/crews/copilot (CC5)', () => {
 
 describe('the SessionStart hook in Copilot', () => {
   const context = (hookRun: Run) => z.object({ additionalContext: z.string() }).parse(JSON.parse(hookRun.stdout)).additionalContext;
+
+  it('uses the physical folder in Copilot instructions when the session starts through a link', async () => {
+    const linkedFolder = join(home, 'copilot-session-folder');
+    symlinkSync(folder, linkedFolder, 'dir');
+    crew();
+
+    const told = context(
+      await copilotHook('aeolus-session-start.sh', {
+        payload: { hook_event_name: 'SessionStart', source: 'new' },
+        env: { CLAUDE_PROJECT_DIR: linkedFolder },
+      }),
+    );
+
+    expect(told).toContain(`AEOLUS_FOLDER='${realpathSync(folder)}'`);
+  });
 
   it("tells the session its ship and how to run the plugin's scripts, as top-level additionalContext, the form Copilot reads", async () => {
     crew();
