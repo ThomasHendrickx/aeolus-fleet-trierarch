@@ -109,11 +109,14 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   let offered = { configuration, detected };
   const version = runningVersion();
   const clones = trustedClonesOf({ configured, held: trustedRepositories, root: paths.repositories });
-  const { sessions, workspace, shipHomes } = runtimeAdaptersOf({ configuration, paths, version, launch: sessionsLaunch({ platform: process.platform, env }), managedSettings, clones });
+  const { sessions, workspace, shipHomes, modelProxyUrlOf } = runtimeAdaptersOf({ configuration, paths, version, launch: sessionsLaunch({ platform: process.platform, env }), managedSettings, clones });
   // The model proxy runs while any harness holds an API key (headless H16); a pass starts it again when it is gone.
   const keys = createKeyFiles(paths.keys);
   const proxy = modelProxy({ paths, version, launch: sessionsLaunch({ platform: process.platform, env }) });
-  const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, managedSettings, detected: () => offered.detected, sessions, proxyUrl: () => proxy.url(), ...(shipHomes !== undefined && { shipHomes }) });
+  const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, managedSettings, detected: () => offered.detected, sessions, proxyUrl: async () => {
+      const url = await proxy.url();
+      return url === undefined ? undefined : modelProxyUrlOf(url);
+    }, ...(shipHomes !== undefined && { shipHomes }) });
   const state = createJsonState(paths.state);
   const trust = createTrust({ configuration, homeDirectory, env, managedSettings });
   const clock = { now: () => new Date() };
@@ -155,7 +158,6 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const claudeCodeSetup = createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) });
   const modelLogins = createModelLogins({
     keyStates: createKeyStates({ keys: paths.keys, file: keyStatesFileOf(paths.proxy) }),
-    runtime: configured.runtime?.kind === 'container' ? 'container' : 'host',
     // The harness as launch reads it, so the guard sees the flags the session would start with (K6).
     claudeCode: { keyInReach: ({ options, folder }) => claudeCodeKeyInReach(claudeCodeSetup, { harness: configuration.harnesses['claude-code'] ?? { flags: [], options: {} }, options, ...(folder !== undefined && { folder }) }) },
     codex: createCodexSetup(),

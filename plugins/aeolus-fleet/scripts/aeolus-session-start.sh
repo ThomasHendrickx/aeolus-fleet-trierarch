@@ -98,17 +98,21 @@ if aeolus_codex_hook; then
 fi
 
 # Copilot exports nothing to the session's commands, so the context names what
-# each command sets for the scripts to find the folder's ship.
+# each command sets for the scripts to find the folder's ship. In a folder that
+# crews no ship it says so too: the Copilot crew skill registers from it.
 if [ "${AEOLUS_HARNESS:-}" = copilot ]; then
   [ "$refused" -eq 0 ] || exit 1
   identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
-  identity_text="$(aeolus_identity_read "$identity")" || exit 0
+  run="$(aeolus_copilot_run)"
+  if ! identity_text="$(aeolus_identity_read "$identity")"; then
+    aeolus_hook_context SessionStart "Aeolus Fleet Copilot hooks are active. This folder crews no Aeolus ship. Run every Aeolus Fleet script with ${run} before it; the scripts are in ${root}/scripts."
+    exit 0
+  fi
   ship_name="$(aeolus_identity_field "$identity_text" shipName)"
   ship_id="$(aeolus_identity_field "$identity_text" shipId)"
   fleet_url="$(aeolus_identity_field "$identity_text" fleetUrl)"
   squadron="$(aeolus_identity_field "$identity_text" squadron)"
-  run="$(aeolus_copilot_run)"
-  context="This folder crews the Aeolus ship ${ship_name} (${ship_id}) in the fleet at ${fleet_url}. Run every Aeolus Fleet script with ${run} before it: every fleet call goes through ${run} \"${root}/scripts/aeolus-fleet.sh\", which adds the crew token: never read the identity file or pass a crew token. Do not register again. It states the model this session runs on every send: state none yourself."
+  context="Aeolus Fleet Copilot hooks are active. This folder crews the Aeolus ship ${ship_name} (${ship_id}) in the fleet at ${fleet_url}. Run every Aeolus Fleet script with ${run} before it: every fleet call goes through ${run} \"${root}/scripts/aeolus-fleet.sh\", which adds the crew token: never read the identity file or pass a crew token. Do not register again. It states the model this session runs on every send: state none yourself."
   if [ -n "$squadron" ]; then
     context="${context} This ship is a member of the squadron ${squadron}. Before anything else, check in at its flagship ${squadron}, as the Aeolus Fleet crew-a-ship skill says for a squadron member."
     check_in="$(aeolus_identity_field "$identity_text" checkIn)"

@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { newId } from '../../test/support/in-memory.js';
 import { buildTestSessionImage, rootlessPodman } from '../../test/support/podman.js';
@@ -16,14 +17,14 @@ import { createHoldRuntime, sessionsLaunch } from './hold-runtime.js';
 import { runningVersion } from './version.js';
 
 // The unit the trierarch writes, run by the real systemd user manager under a
-// name of the test's own. Its command starts a tmux server, standing in for
-// any process the trierarch starts outside its service, the way the trierarch
+// name of the test's own. Its command starts a sleep, standing in for any
+// process the trierarch starts outside its service, the way the trierarch
 // starts its sessions' holds: in a scope of its own. The user manager is the
 // machine's own, the one a live trierarch runs under, so the tests run only
 // where AEOLUS_TEST_USER_SYSTEMD=1 asks for them, as CI does on a runner that
 // hosts no trierarch (#886), and there wherever the user manager starts units,
 // degraded included; elsewhere each test skips, saying why (#552). Each test proves it leaves nothing on the machine (#537):
-// no unit, no scope, no tmux server, no socket.
+// no unit, no scope, no process.
 
 const systemd = await userSystemd({ isAskedFor: process.env[USER_SYSTEMD_TESTS_VARIABLE] === '1', platform: process.platform, isSystemRunning: () => runCommand('systemctl', { args: ['--user', 'is-system-running'] }) });
 
@@ -35,22 +36,26 @@ const UNDER_SYSTEMD = sessionsLaunch({ platform: 'linux', env: { INVOCATION_ID: 
 
 let folder: string;
 let name: string;
-let socket: string;
+/** Where the stand-in session writes its pid as it starts. */
+let pidFile: string;
 let unitFile: string;
-/** The scopes the test's tmux servers ran in, each to be gone when the test ends. */
+/** The scopes the test's stand-in sessions ran in, each to be gone when the test ends. */
 let scopes: string[];
 
 const systemctl = (...args: string[]) => runCommand('systemctl', { args: ['--user', ...args] });
 const loadState = async (unit: string) => (await systemctl('show', unit, '-p', 'LoadState', '--value')).stdout.trim();
-/** The tmux server's pid, so a server the restarted command starts anew is told apart from the one kept. */
-const serverPid = async () => (await runCommand('tmux', { args: ['-S', socket, 'display-message', '-p', '#{pid}'] })).stdout.trim();
+/** The stand-in session's pid while it runs, so one the restarted command starts anew is told apart from the one kept; empty once it runs no more. */
+const sessionPid = async () => {
+  const pid = (await readFile(pidFile, 'utf8').catch(() => '')).trim();
+  return pid !== '' && existsSync(`/proc/${pid}`) ? pid : '';
+};
 /** The unit a process runs in: the last part of its control group, as `run-r1.scope`. */
 const unitOf = (pid: string) => readFileSync(`/proc/${pid}/cgroup`, 'utf8').trim().split('/').at(-1) ?? '';
 
-/** Writes the trierarch's unit under the test's name, its command starting a tmux server as the trierarch does, and starts it until the server runs. */
+/** Writes the trierarch's unit under the test's name, its command starting a stand-in session detached as the trierarch starts a hold, and starts it until the session runs. */
 async function startTheUnit(): Promise<void> {
   const script = join(folder, 'trierarch.sh');
-  writeFileSync(script, `${[...UNDER_SYSTEMD, 'tmux', '-S', socket].join(' ')} new-session -d -s session sleep 300\nexec sleep 300\n`);
+  writeFileSync(script, `[ -s ${pidFile} ] || ${UNDER_SYSTEMD.join(' ')} sh -c 'echo $$ > ${pidFile}; exec sleep 300' < /dev/null > /dev/null 2>&1 &\nexec sleep 300\n`);
   await createService({
     platform: 'linux',
     homeDirectory: folder,
@@ -65,7 +70,7 @@ async function startTheUnit(): Promise<void> {
   writeFileSync(unitFile, readFileSync(join(folder, '.config', 'systemd', 'user', SYSTEMD_UNIT), 'utf8'));
   await systemctl('daemon-reload');
   await systemctl('start', name);
-  await expect.poll(serverPid, { timeout: SESSION_TIMEOUT_MS }).not.toBe('');
+  await expect.poll(sessionPid, { timeout: SESSION_TIMEOUT_MS }).not.toBe('');
 }
 
 describe('the systemd user unit on this machine', () => {
@@ -80,11 +85,9 @@ describe('the systemd user unit on this machine', () => {
     folder = mkdtempSync(join(tmpdir(), 'trierarch-systemd-'));
     const suffix = folder.slice(-6).toLowerCase().replaceAll(/[^a-z0-9]/g, 'x');
     name = `aeolus-trierarch-test-${suffix}.service`;
-    socket = join(folder, 'tmux.socket');
+    pidFile = join(folder, 'session.pid');
     unitFile = join(homedir(), '.config', 'systemd', 'user', name);
     scopes = [];
-    // The tmux the test runs itself keeps its socket in the test's folder too.
-    vi.stubEnv('TMUX_TMPDIR', folder);
   });
 
   afterEach(async () => {
@@ -92,34 +95,36 @@ describe('the systemd user unit on this machine', () => {
     rmSync(unitFile, { force: true });
     await systemctl('daemon-reload');
     await systemctl('reset-failed', name);
-    await runCommand('tmux', { args: ['-S', socket, 'kill-server'] });
+    const pid = await sessionPid();
+    if (pid !== '') {
+      process.kill(Number(pid), 'SIGTERM');
+    }
     rmSync(folder, { recursive: true, force: true });
-    vi.unstubAllEnvs();
 
     await expect.poll(async () => Promise.all([name, ...scopes].map(loadState))).toEqual([name, ...scopes].map(() => 'not-found'));
   });
 
   it(
-    'keeps the sessions in the tmux server the trierarch started running across a stop and a restart of the service (#479)',
+    'keeps the sessions the trierarch started running across a stop and a restart of the service (#479)',
     async () => {
       await startTheUnit();
-      const started = await serverPid();
+      const started = await sessionPid();
       scopes.push(unitOf(started));
 
       await systemctl('restart', name);
-      const afterRestart = await serverPid();
+      const afterRestart = await sessionPid();
       await systemctl('stop', name);
 
-      expect({ afterRestart, afterStop: await serverPid() }).toEqual({ afterRestart: started, afterStop: started });
+      expect({ afterRestart, afterStop: await sessionPid() }).toEqual({ afterRestart: started, afterStop: started });
     },
     TEST_TIMEOUT_MS,
   );
 
   it(
-    "runs the tmux server outside the service's control group, so a restart finds no tmux server of its run before (#537)",
+    "runs a session outside the service's control group, so a restart finds no session of its run before in it (#537)",
     async () => {
       await startTheUnit();
-      const scope = unitOf(await serverPid());
+      const scope = unitOf(await sessionPid());
       scopes.push(scope);
 
       expect(scope).toMatch(/\.scope$/);
@@ -188,7 +193,7 @@ describe('container sessions under the systemd user unit on this machine', () =>
     const tokenFile = join(containerFolder, 'model-token');
     writeFileSync(tokenFile, 'sk-ant-oat01-test-token\n', { mode: 0o600 });
     const shipId = newId('ship');
-    const runtime = createContainerRuntime({ binary: 'podman', image, tokenFile, homes: join(containerFolder, 'homes'), sockets: join(containerFolder, 'sockets'), memory: '512m', cpus: 1, owner: `trierarch-test-${shipId.slice(-8)}`, launch: UNDER_SYSTEMD });
+    const runtime = createContainerRuntime({ binary: 'podman', image, tokenFile, homes: join(containerFolder, 'homes'), sockets: join(containerFolder, 'sockets'), sessions: join(containerFolder, 'sessions'), program: TRIERARCH_PROGRAM, version: runningVersion(), platform: 'linux', memory: '512m', cpus: 1, owner: `trierarch-test-${shipId.slice(-8)}`, launch: UNDER_SYSTEMD });
 
     await runtime.start({ shipId, folder: containerFolder, command: ['sleep', '30'], harness: 'claude-code' });
 

@@ -6,7 +6,6 @@ import type { ShipId, TrierarchConfiguration } from '@aeolus-fleet/common';
 import type { Login } from '../core/login.js';
 import type { AdapterFlag, HarnessPort, ProxyToken, SessionRuntime } from '../core/ports.js';
 import { createHostClaudeCodeHomes, createShipClaudeCodeHomes } from './claude-code-home.js';
-import { claudeCodeScreenStoppedAt } from './claude-code-screen.js';
 import { parsedLine } from './hold-protocol.js';
 import { SETTING_SOURCES, type ClaudeCodeSetup, type SettingsDefaultMode, type SettingSource } from './claude-code-setup.js';
 import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
@@ -20,12 +19,11 @@ import { newProxyToken } from './proxy-tokens.js';
  * Claude Code as a harness (docs/architecture.md, "First adapters"): `claude`
  * in the folder, `--continue` on a restart when the folder has a conversation
  * to continue, `/aeolus-fleet:wake` sent to wake an idle session, each prompt with
- * the line that no human reads its terminal (#585). On the host it runs
- * headless (headless H11): one long-lived `claude -p` taking user messages as
- * stream-json lines on stdin, each prompt one line, a busy turn stopped by its
- * hold, and a start that shows no activity explained by its last error event
- * (H13). In a container it still runs in a terminal, each prompt typed, until
- * S3 of the headless design. Always
+ * the line that no human reads its terminal (#585). It runs headless on every
+ * runtime (headless H11, H18): one long-lived `claude -p` taking user messages
+ * as stream-json lines on stdin, each prompt one line, a busy turn stopped by
+ * its hold, and a start that shows no activity explained by its last error
+ * event (H13). Always
  * without AskUserQuestion and plan mode: nobody watches the session's pane, so
  * it asks its questions over the fleet, and a question form or a plan approval
  * waiting there would take the keys of a wake (#457, #460). Plan mode goes as a
@@ -55,7 +53,6 @@ const HEADLESS = ['-p', '--input-format', 'stream-json', '--output-format', 'str
 const CONTINUE = '--continue';
 /** Lets the session read a folder beside its own without asking: each of its read-only checkouts (#1182). */
 const ADD_DIR = '--add-dir';
-const END_OF_FLAGS = '--';
 const NO_PANE_PROMPTS = '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode';
 const PERMISSION_MODE = '--permission-mode';
 const PLAN_MODE = 'plan';
@@ -131,19 +128,15 @@ function planOverride(flags: readonly string[], installed: { defaultMode: Settin
 }
 
 /**
- * `claude`, headless in print mode with streamed JSON on the host, the flags
- * without plan mode, `--permission-mode manual` (or `default`, as the
- * installed Claude Code lists) when the settings' default mode is plan and the
- * flags name none (or where it depends on the folder, with when it applies),
- * AskUserQuestion and plan mode disallowed, `--continue` on a restart. In a
- * terminal, the prompt last after `--`, so it never reads as a flag; headless,
- * the prompt is the first line on stdin instead.
+ * `claude`, headless in print mode with streamed JSON, the flags without plan
+ * mode, `--permission-mode manual` (or `default`, as the installed Claude Code
+ * lists) when the settings' default mode is plan and the flags name none (or
+ * where it depends on the folder, with when it applies), AskUserQuestion and
+ * plan mode disallowed, `--continue` on a restart. The prompt is no word of
+ * it: it is the first line on stdin.
  */
 export function claudeCodeCommandLine(at: {
   flags: readonly string[];
-  /** The first prompt in a terminal; none headless, where it is sent as the first line. */
-  prompt?: string;
-  isHeadless: boolean;
   isFirstStart: boolean;
   defaultPermissionMode?: SettingsDefaultMode;
   permissionModes?: readonly string[] | undefined;
@@ -154,13 +147,12 @@ export function claudeCodeCommandLine(at: {
   const flags = withoutPlanMode(at.flags);
   return partsWithWords([
     { words: [at.program ?? 'claude'] },
-    { words: at.isHeadless ? HEADLESS : [], source: 'adapter' },
+    { words: HEADLESS, source: 'adapter' },
     { words: flags, source: 'configuration' },
     planOverride(flags, { defaultMode: at.defaultPermissionMode, permissionModes: at.permissionModes }),
     { words: [NO_PANE_PROMPTS], source: 'adapter' },
     { words: at.isFirstStart ? [] : [CONTINUE], source: 'adapter' },
     { words: (at.readOnly ?? []).flatMap((path) => [ADD_DIR, path]), source: 'adapter' },
-    { words: at.isHeadless || at.prompt === undefined ? [] : [END_OF_FLAGS, at.prompt] },
   ]);
 }
 
@@ -200,8 +192,6 @@ export function createClaudeCodeHarness(options: {
   configuration: TrierarchConfiguration;
   plugin: AeolusPlugin;
   sessions: Pick<SessionRuntime, 'start' | 'send' | 'interrupt' | 'events'>;
-  /** Whether its sessions run headless, as on the host (headless H11), or in a terminal, as in a container until S3. */
-  isHeadless: boolean;
   /** Claude Code's projects folder, where it keeps each folder's conversations. */
   projects: string;
   /** Claude Code's own files, where its onboarding is completed before each launch (#403) and its settings' default mode is read (#505, #507). */
@@ -215,7 +205,7 @@ export function createClaudeCodeHarness(options: {
   /** Where sessions on an API key reach the model proxy (headless H16); none before it first listened, or on a machine with no proxy. */
   proxyUrl?: () => Promise<string | undefined>;
 }): HarnessPort {
-  const { configuration, plugin, sessions, isHeadless } = options;
+  const { configuration, plugin, sessions } = options;
   /**
    * The session's way to its model (api keys K6): on an API key, the model
    * proxy's address and a token of the session's own, fresh for each start;
@@ -231,8 +221,6 @@ export function createClaudeCodeHarness(options: {
     }
     return { env: { ANTHROPIC_BASE_URL: `${url}/anthropic` }, proxyToken: { harness: 'claude-code', variable: 'ANTHROPIC_AUTH_TOKEN', token: newProxyToken() } };
   };
-  /** A prompt as the session takes it: a stream-json line headless, the text typed in a terminal. */
-  const lineOf = (prompt: string): string => (isHeadless ? userLine(prompt) : prompt);
   const homes =
     options.shipHomes === undefined
       ? createHostClaudeCodeHomes({ plugin, projects: options.projects, setup: options.setup })
@@ -261,8 +249,6 @@ export function createClaudeCodeHarness(options: {
       const flags = effectiveFlags(settings, picked);
       const command = claudeCodeCommandLine({
         flags,
-        isHeadless,
-        prompt,
         isFirstStart: isFirstStart || !(await hasConversation(home.projects, folder)),
         defaultPermissionMode: await claudeCodeSettingsDefaultMode(home.setup, { flags, folder }),
         permissionModes: options.permissionModes(),
@@ -272,16 +258,14 @@ export function createClaudeCodeHarness(options: {
       const marks = marksOf(shipId);
       await marks.clear(folder);
       await sessions.start({ shipId, folder, command: wordsOf(command), harness, env: { [LAUNCH_VARIABLE]: launchId, ...route.env }, ...(route.proxyToken !== undefined && { proxyToken: route.proxyToken }), ...(checkouts.length > 0 && { readOnly: checkouts.map((checkout) => checkout.path) }) });
-      if (isHeadless) {
-        await sessions.send({ shipId, line: userLine(prompt) });
-      }
+      await sessions.send({ shipId, line: userLine(prompt) });
     },
     handOver: async (session) => {
       const line = await identityOf(session.shipId).handOverLine(session);
       if (line === undefined) {
         return 'nothing';
       }
-      await sessions.send({ shipId: session.shipId, line: lineOf(wakePromptOf(line)) });
+      await sessions.send({ shipId: session.shipId, line: userLine(wakePromptOf(line)) });
       return 'handed';
     },
     forceOver: async ({ shipId, folder, isTurnBusy }) => {
@@ -292,7 +276,7 @@ export function createClaudeCodeHarness(options: {
       if (isTurnBusy) {
         await sessions.interrupt(shipId);
       }
-      await sessions.send({ shipId, line: lineOf(wakePromptOf(line)) });
+      await sessions.send({ shipId, line: userLine(wakePromptOf(line)) });
       return 'handed';
     },
     isHolding: (session) => identityOf(session.shipId).isHolding(session),
@@ -300,7 +284,7 @@ export function createClaudeCodeHarness(options: {
     marksLaunches: () => createLaunchMarks(plugin).isMarking(),
     // Claude Code is offered wherever its plugin is: no build or runtime of it is held back.
     notOfferedReason: () => Promise.resolve(undefined),
-    // The marker says what the session did; headless, the last error event names why a start shows none (H13); in a terminal, the screen names one that stopped it before its hooks ran (#490).
+    // The marker says what the session did; the last error event names why a start shows none (H13).
     launchSeen: async ({ shipId, folder, launchId, model }) => {
       const marker = await marksOf(shipId).read({ folder, launchId });
       if (marker?.refused !== undefined) {
@@ -310,12 +294,8 @@ export function createClaudeCodeHarness(options: {
       if (marker?.isActive === true) {
         return { kind: 'active' };
       }
-      if (isHeadless) {
-        const cause = claudeCodeErrorIn(await sessions.events(shipId));
-        return { kind: 'none', ...(cause !== undefined && { cause }) };
-      }
-      const screen = marker?.isStarted === true ? undefined : claudeCodeScreenStoppedAt((await sessions.events(shipId)).join('\n'));
-      return { kind: 'none', ...(screen !== undefined && { screen }) };
+      const cause = claudeCodeErrorIn(await sessions.events(shipId));
+      return { kind: 'none', ...(cause !== undefined && { cause }) };
     },
   };
 }

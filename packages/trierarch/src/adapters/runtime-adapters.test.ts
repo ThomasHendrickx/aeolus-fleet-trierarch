@@ -1,10 +1,10 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
 import { newId } from '../../test/support/in-memory.js';
 import { trierarchPaths, type TrierarchPaths } from './paths.js';
 import { runCommand } from './run-command.js';
@@ -16,7 +16,7 @@ const CONTAINER = { kind: 'container', binary: '', memory: '4g', cpus: 2 } as co
 let home: string;
 let paths: TrierarchPaths;
 let repository: string;
-/** A docker-style binary that logs each call's arguments, and the env file a run passes, and lists one running container. */
+/** A docker-style binary that logs each call's arguments, and the env file a run passes, and lists one running container, as an older trierarch left it. */
 let binary: string;
 let shipId: ReturnType<typeof newId<'ship'>>;
 
@@ -28,7 +28,8 @@ async function git(args: readonly string[]): Promise<void> {
 }
 
 beforeEach(async () => {
-  home = realpathSync(mkdtempSync(join(tmpdir(), 'trierarch-runtime-adapters-')));
+  // Short, under /tmp: a hold's socket sits in the trierarch's files under it, and a Unix socket path is at most 104 bytes on macOS.
+  home = realpathSync(mkdtempSync('/tmp/aeolus-adapters-'));
   paths = trierarchPaths({ homeDirectory: home });
   repository = join(home, 'demo');
   await git(['init', '-q', '-b', 'main', repository]);
@@ -61,7 +62,7 @@ function configuration(runtime?: TrierarchConfiguration['runtime']): TrierarchCo
 }
 
 function adaptersOf(runtime?: TrierarchConfiguration['runtime'], worktreeRoot?: string) {
-  return runtimeAdaptersOf({ configuration: { ...configuration(runtime), ...(worktreeRoot !== undefined && { worktreeRoot }) }, paths, version: '0.25.0', launch: [], managedSettings: join(home, 'managed') });
+  return runtimeAdaptersOf({ configuration: { ...configuration(runtime), ...(worktreeRoot !== undefined && { worktreeRoot }) }, paths, version: '0.25.0', launch: [], managedSettings: join(home, 'managed'), program: TRIERARCH_PROGRAM });
 }
 
 describe('the adapters the session runtime picks (decision 0039)', () => {
@@ -92,8 +93,12 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
     expect(adaptersOf({ ...CONTAINER, binary }).shipHomes).toEqual({ homes: paths.homes, managedSettings: join(home, 'managed') });
   });
 
+  it("has sessions on the host reach the model proxy where the trierarch does, and sessions in containers at Podman's host address (headless H16)", () => {
+    expect({ host: adaptersOf().modelProxyUrlOf('http://127.0.0.1:4100'), container: adaptersOf({ ...CONTAINER, binary }).modelProxyUrlOf('http://127.0.0.1:4100') }).toEqual({ host: 'http://127.0.0.1:4100', container: 'http://10.0.2.2:4100' });
+  });
+
   it('lists the sessions through the binary the configuration names', async () => {
-    await expect(adaptersOf({ ...CONTAINER, binary }).sessions.list()).resolves.toEqual([{ shipId, status: 'running' }]);
+    await expect(adaptersOf({ ...CONTAINER, binary }).sessions.list()).resolves.toEqual([{ shipId, status: 'running', isOtherVersion: true }]);
   });
 
   it("starts a session from the image of the trierarch's own version, with the configured caps and the machine's model token", async () => {
@@ -102,6 +107,7 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
 
     await adaptersOf({ ...CONTAINER, binary }).sessions.start({ shipId, folder: repository, command: ['claude'], harness: 'claude-code' });
 
+    await expect.poll(() => readFileSync(join(home, 'calls'), 'utf8')).toContain('run ');
     const run = readFileSync(join(home, 'calls'), 'utf8').split('\n').find((call) => call.startsWith('run '));
     expect({
       image: run?.includes(' ghcr.io/thomashendrickx/aeolus-session:0.25.0 '),

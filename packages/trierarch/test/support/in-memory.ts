@@ -57,7 +57,7 @@ import type { TrustedRepository } from '../../src/core/trusted-repositories.js';
 
 /**
  * Hand-written in-memory ports for the trierarch's core, behaving as the
- * fleet, tmux, git and the aeolus-fleet plugin do, so tests assert outcomes and
+ * fleet, the holds, git and the aeolus-fleet plugin do, so tests assert outcomes and
  * stored state, never calls.
  */
 
@@ -440,7 +440,7 @@ export class InMemoryProcesses implements Pick<SessionRuntime, 'list' | 'stop'> 
     this.otherVersion.add(shipId);
   }
 
-  /** The session's process dies; tmux keeps the pane, so the exit is seen. */
+  /** The session's process dies; its hold's files stay, so the exit is seen. */
   exit(shipId: ShipId): void {
     this.sessions.set(shipId, 'exited');
   }

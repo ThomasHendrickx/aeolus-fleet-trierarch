@@ -15,8 +15,8 @@ import { absolutePath, nameRefusal, placeRefusal, type PlaceKind } from './place
  * the trierarch may crew ships in, and trusts it, in one step. Adding a place
  * is what trusts it: it is checked as init checks it, written to the
  * configuration, and trusted for every configured harness that asks. Then the
- * service restarts so the trierarch reads it; its sessions run on their own
- * tmux server and keep running. It reports once the new process has said its
+ * service restarts so the trierarch reads it; its sessions run under holds of
+ * their own and keep running. It reports once the new process has said its
  * version (#402). A place it holds under the same name and path
  * is trusted again.
  */

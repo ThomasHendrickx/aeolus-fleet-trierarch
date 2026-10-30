@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Smoke test of the session image (decision 0039): the harness, tmux, the
-# aeolus-fleet plugin of the image's version and a nested rootless Podman all work
-# in a container started as the trierarch starts one.
+# Smoke test of the session image (decision 0039): the harness, the aeolus-fleet
+# plugin of the image's version and a nested rootless Podman all work in a
+# container started as the trierarch starts one, its input held on the host.
 #
 # Usage: smoke-test.sh <runtime binary> <image> <version>
 set -euo pipefail
@@ -41,11 +41,15 @@ check 'claude runs' in_session claude --version
 
 check 'GitHub CLI runs' in_session gh --version
 
-check 'tmux starts a session and reads its screen' in_session bash -c '
-  tmux new-session -d -s smoke "echo smoke-screen; sleep 30"
-  sleep 1
-  tmux capture-pane -p -t smoke | grep -q smoke-screen
-'
+# The hold runs the container attached, holding its stdin (headless H18): a
+# line written there reaches the session through tini and the init.
+takes_a_line() {
+  echo smoke-line | "$RUNTIME" run --rm -i --pull=never \
+    --userns=keep-id:uid=1000,gid=1000 \
+    "$IMAGE" bash -c 'read -r line && [[ $line == smoke-line ]]'
+}
+
+check 'the session takes a line on its stdin' takes_a_line
 
 PLUGIN_AT_VERSION="
   claude plugin list --json | node -e '

@@ -26,7 +26,11 @@ let folder: string;
 /** Claude Code's projects folder, where it keeps each folder's conversations. */
 let projects: string;
 let started: { shipId: ShipId; folder: string; command: readonly string[]; harness: string; env?: Readonly<Record<string, string>>; readOnly?: readonly string[]; proxyToken?: { harness: string; variable: string; token: string } }[];
-/** What each ship's session shows, by ship id: a terminal's screen, or a headless session's events, one line each. */
+/** A prompt as headless Claude Code takes it on stdin: one stream-json user message on one line. */
+const userLineOf = (prompt: string) => JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } });
+/** How many words print mode with streamed JSON takes, after `claude` (headless H11). */
+const HEADLESS_WORDS = 6;
+/** What each ship's session's harness wrote, by ship id, its events one line each. */
 let screens: Map<ShipId, string>;
 let sent: { shipId: ShipId; line: string }[];
 /** What was done to each session, in order: a turn stopped, or a line sent. */
@@ -64,11 +68,10 @@ function aConversationIn(folder: string): void {
 }
 
 /** Claude Code as the adapter runs it: in a terminal, as in a container, unless the test runs it headless, as on the host. */
-function harness(at: { pluginRoot?: string; isHeadless?: boolean; proxyUrl?: string } = {}) {
+function harness(at: { pluginRoot?: string; proxyUrl?: string } = {}) {
   return createClaudeCodeHarness({
     proxyUrl: () => Promise.resolve(at.proxyUrl),
     configuration: CONFIGURATION,
-    isHeadless: at.isHeadless ?? false,
     plugin: { root: () => Promise.resolve(at.pluginRoot ?? PLUGIN_ROOT), data, crews },
     projects,
     setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
@@ -118,7 +121,7 @@ describe('Claude Code on its login (api keys K6, K7)', () => {
   const PROXY = 'http://127.0.0.1:41234';
 
   it('starts a session on an API key through the model proxy, with a token of its own and never the key', async () => {
-    await harness({ isHeadless: true, proxyUrl: PROXY }).launch({ ...launchOf(shipId), login: 'apiKey', options: {}, isFirstStart: true });
+    await harness({ proxyUrl: PROXY }).launch({ ...launchOf(shipId), login: 'apiKey', options: {}, isFirstStart: true });
 
     expect(started[0]?.env).toMatchObject({ ANTHROPIC_BASE_URL: `${PROXY}/anthropic` });
     expect(started[0]?.proxyToken).toMatchObject({ harness: 'claude-code', variable: 'ANTHROPIC_AUTH_TOKEN' });
@@ -127,7 +130,7 @@ describe('Claude Code on its login (api keys K6, K7)', () => {
   });
 
   it('gives each start a token of its own', async () => {
-    const claudeCode = harness({ isHeadless: true, proxyUrl: PROXY });
+    const claudeCode = harness({ proxyUrl: PROXY });
 
     await claudeCode.launch({ ...launchOf(shipId), login: 'apiKey', options: {}, isFirstStart: true });
     await claudeCode.launch({ ...launchOf(shipId), login: 'apiKey', options: {}, isFirstStart: false });
@@ -136,14 +139,14 @@ describe('Claude Code on its login (api keys K6, K7)', () => {
   });
 
   it('starts a session on its subscription with no route to the proxy and no token', async () => {
-    await harness({ isHeadless: true, proxyUrl: PROXY }).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+    await harness({ proxyUrl: PROXY }).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
 
     expect(started[0]?.env).not.toHaveProperty('ANTHROPIC_BASE_URL');
     expect(started[0]?.proxyToken).toBeUndefined();
   });
 
   it('starts nothing on an API key while the model proxy has no address', async () => {
-    await expect(harness({ isHeadless: true }).launch({ ...launchOf(shipId), login: 'apiKey', options: {}, isFirstStart: true })).rejects.toThrow('the model proxy is not running yet');
+    await expect(harness().launch({ ...launchOf(shipId), login: 'apiKey', options: {}, isFirstStart: true })).rejects.toThrow('the model proxy is not running yet');
 
     expect(started).toEqual([]);
   });
@@ -209,12 +212,12 @@ describe('Claude Code as a harness', () => {
     expect(readFileSync(path, 'utf8')).toContain(`checkout=governance=${GOVERNANCE}\ncheckout=skills=${SKILLS}\n`);
   });
 
-  it('lets the session read its read-only checkouts with --add-dir, before the prompt, and starts it with them read-only (#1182)', async () => {
+  it('lets the session read its read-only checkouts with --add-dir, and starts it with them read-only (#1182)', async () => {
     await harness().launch({ ...launchOf(shipId), checkouts: CHECKOUTS, options: {}, isFirstStart: true });
 
     const [session] = started;
     const command = session?.command ?? [];
-    expect(command.slice(0, command.indexOf('--'))).toEqual(expect.arrayContaining(['--add-dir', GOVERNANCE, '--add-dir', SKILLS]));
+    expect(command).toEqual(expect.arrayContaining(['--add-dir', GOVERNANCE, '--add-dir', SKILLS]));
     expect(command.indexOf(SKILLS)).toBe(command.indexOf(GOVERNANCE) + 2);
     expect(session?.readOnly).toEqual([GOVERNANCE, SKILLS]);
   });
@@ -241,12 +244,6 @@ describe('Claude Code as a harness', () => {
     await expect(harness().hasIdentity({ shipId, folder })).resolves.toBe(false);
   });
 
-  it('starts claude with the first prompt on the first start, last and after -- so no flag takes it, ending in the line that no human reads its terminal (#585)', async () => {
-    await harness().launch({ ...launchOf(shipId), options: { model: 'sonnet' }, isFirstStart: true, firstPrompt: 'Review the open pull requests.' });
-
-    expect(started).toEqual([{ shipId, folder, command: ['claude', '--remote-control', '--model', 'claude-sonnet-5-5', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', `Review the open pull requests.\n\n${NO_TERMINAL_QUESTIONS}`], harness: 'claude-code', env: { AEOLUS_LAUNCH: LAUNCH_ID } }]);
-  });
-
   it('starts claude without AskUserQuestion and without plan mode on every start, so the crewed session asks over the fleet and never waits on a question form or a plan approval in a pane nobody watches (#457, #460)', async () => {
     aConversationIn(folder);
 
@@ -257,13 +254,13 @@ describe('Claude Code as a harness', () => {
   });
 
   it('never starts a crewed session in plan mode, which it could not leave without plan mode: --permission-mode plan from the flags or an option is ignored, another permission mode kept (#465)', () => {
-    const wordsFor = (flags: string[]) => wordsOf(claudeCodeCommandLine({ flags, isHeadless: false, prompt: '/aeolus-fleet:wake', isFirstStart: true }));
+    const wordsFor = (flags: string[]) => wordsOf(claudeCodeCommandLine({ flags, isFirstStart: true })).slice(HEADLESS_WORDS + 1);
     const mode = (flags: string[]) => effectiveFlags({ flags, options: { mode: { values: { plan: ['--permission-mode', 'plan'], edits: ['--permission-mode', 'acceptEdits'] } } } }, { mode: 'plan' });
 
-    expect(wordsFor(['--permission-mode', 'plan', '--verbose'])).toEqual(['claude', '--verbose', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', '/aeolus-fleet:wake']);
-    expect(wordsFor(['--permission-mode=plan'])).toEqual(['claude', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', '/aeolus-fleet:wake']);
-    expect(wordsFor(mode(['--remote-control']))).toEqual(['claude', '--remote-control', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', '/aeolus-fleet:wake']);
-    expect(wordsFor(['--permission-mode', 'acceptEdits'])).toEqual(['claude', '--permission-mode', 'acceptEdits', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', '/aeolus-fleet:wake']);
+    expect(wordsFor(['--permission-mode', 'plan', '--verbose'])).toEqual(['--verbose', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode']);
+    expect(wordsFor(['--permission-mode=plan'])).toEqual(['--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode']);
+    expect(wordsFor(mode(['--remote-control']))).toEqual(['--remote-control', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode']);
+    expect(wordsFor(['--permission-mode', 'acceptEdits'])).toEqual(['--permission-mode', 'acceptEdits', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode']);
   });
 
   it("never starts a crewed session in plan mode when Claude Code's settings make plan its default mode: the user's, the project's or the project's local settings, the nearest one winning; a permission mode in the flags is kept (#505)", async () => {
@@ -278,7 +275,6 @@ describe('Claude Code as a harness', () => {
       started = [];
       await createClaudeCodeHarness({
         configuration: { ...CONFIGURATION, harnesses: { 'claude-code': { flags, options: {} } } },
-        isHeadless: false,
         plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data, crews },
         projects,
         setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
@@ -293,7 +289,7 @@ describe('Claude Code as a harness', () => {
           events: () => Promise.resolve([]),
         },
       }).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
-      return started[0]?.command.slice(1, -3);
+      return started[0]?.command.slice(HEADLESS_WORDS + 1, -1);
     };
 
     expect(await modeOf([])).toEqual([]);
@@ -333,7 +329,6 @@ describe('Claude Code as a harness', () => {
       started = [];
       await createClaudeCodeHarness({
         configuration: { ...CONFIGURATION, harnesses: { 'claude-code': { flags, options: {} } } },
-        isHeadless: false,
         plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data, crews },
         projects,
         setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: managed, ...(at.configDirectory !== undefined && { configDirectory: at.configDirectory }) }),
@@ -348,7 +343,7 @@ describe('Claude Code as a harness', () => {
           events: () => Promise.resolve([]),
         },
       }).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
-      return started[0]?.command.slice(1, -3);
+      return started[0]?.command.slice(HEADLESS_WORDS + 1, -1);
     };
 
     it("overrides a plan default mode in the managed settings, which win over the folder's", async () => {
@@ -412,30 +407,10 @@ describe('Claude Code as a harness', () => {
     });
   });
 
-  it('passes a first prompt that starts with - after --, so it never reads as a flag', async () => {
-    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true, firstPrompt: '--dangerously-skip-permissions' });
-
-    expect(started[0]?.command.slice(-2)).toEqual(['--', `--dangerously-skip-permissions\n\n${NO_TERMINAL_QUESTIONS}`]);
-  });
-
-  it('starts claude with /aeolus-fleet:wake on a first start without a first prompt, the line that no human reads its terminal as its argument (#585)', async () => {
-    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
-
-    expect(started[0]?.command.slice(-2)).toEqual(['--', `/aeolus-fleet:wake ${NO_TERMINAL_QUESTIONS}`]);
-  });
-
-  it('continues the conversation on a restart, with /aeolus-fleet:wake and the line that no human reads its terminal, never the first prompt again (#585)', async () => {
-    aConversationIn(folder);
-
-    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false, firstPrompt: 'Review the open pull requests.' });
-
-    expect(started[0]?.command).toEqual(['claude', '--remote-control', '--model', 'claude-opus-5-5', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--continue', '--', `/aeolus-fleet:wake ${NO_TERMINAL_QUESTIONS}`]);
-  });
-
   it('starts fresh on a restart when the folder has no conversation to continue, as claude --continue would exit at once (#381)', async () => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false });
 
-    expect(started[0]?.command).toEqual(['claude', '--remote-control', '--model', 'claude-opus-5-5', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', '--', `/aeolus-fleet:wake ${NO_TERMINAL_QUESTIONS}`]);
+    expect(started[0]?.command).toEqual(['claude', '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--remote-control', '--model', 'claude-opus-5-5', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode']);
   });
 
   it('continues on a restart only a conversation of its own folder, not one of another folder (#381)', async () => {
@@ -451,18 +426,18 @@ describe('Claude Code as a harness', () => {
       { flag: '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', when: 'always' },
       { flag: '--continue', when: 'restart' },
     ]);
-    expect(claudeCodeCommandLine({ flags: ['--remote-control', '--model', 'claude-opus-5-5'], isHeadless: false, prompt: '/aeolus-fleet:wake', isFirstStart: false })).toEqual([
+    expect(claudeCodeCommandLine({ flags: ['--remote-control', '--model', 'claude-opus-5-5'], isFirstStart: false })).toEqual([
       { words: ['claude'] },
+      { words: ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'], source: 'adapter' },
       { words: ['--remote-control', '--model', 'claude-opus-5-5'], source: 'configuration' },
       { words: ['--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode'], source: 'adapter' },
       { words: ['--continue'], source: 'adapter' },
-      { words: ['--', '/aeolus-fleet:wake'] },
     ]);
-    expect(claudeCodeCommandLine({ flags: ['--verbose'], isHeadless: false, prompt: '<first prompt>', isFirstStart: true })).toEqual([
+    expect(claudeCodeCommandLine({ flags: ['--verbose'], isFirstStart: true })).toEqual([
       { words: ['claude'] },
+      { words: ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'], source: 'adapter' },
       { words: ['--verbose'], source: 'configuration' },
       { words: ['--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode'], source: 'adapter' },
-      { words: ['--', '<first prompt>'] },
     ]);
   });
 
@@ -471,13 +446,11 @@ describe('Claude Code as a harness', () => {
       wordsOf(
         claudeCodeCommandLine({
           flags: [],
-          isHeadless: false,
-          prompt: '/aeolus-fleet:wake',
           isFirstStart: true,
           defaultPermissionMode: { kind: 'decided', mode: 'plan' },
           ...(permissionModes !== undefined && { permissionModes }),
         }),
-      ).slice(1, 3);
+      ).slice(HEADLESS_WORDS + 1, HEADLESS_WORDS + 3);
 
     expect(overrideWith(['acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan'])).toEqual(['--permission-mode', 'manual']);
     expect(overrideWith(['acceptEdits', 'bypassPermissions', 'default', 'plan'])).toEqual(['--permission-mode', 'default']);
@@ -500,23 +473,23 @@ describe('Claude Code as a harness', () => {
       return { root, calls: () => (existsSync(calls) ? readFileSync(calls, 'utf8').split('\n').filter((line) => line !== '') : []) };
     }
 
-    it('hands a message over through the plugin, and types the line it prints with the line that no human reads its terminal (#585)', async () => {
+    it('hands a message over through the plugin, and sends the line it prints with the line that no human reads its terminal as one user message on stdin (#585, headless H12)', async () => {
       const plugin = aPlugin();
 
       await expect(harness({ pluginRoot: plugin.root }).handOver({ shipId, folder })).resolves.toBe('handed');
 
       expect(plugin.calls()).toEqual([`hand ${folder}`]);
-      expect(sent).toEqual([{ shipId, line: `${LINE} ${NO_TERMINAL_QUESTIONS}` }]);
+      expect(sent).toEqual([{ shipId, line: userLineOf(`${LINE} ${NO_TERMINAL_QUESTIONS}`) }]);
     });
 
-    it("forces a message over to a busy session: the plugin's force hands it, then the turn is stopped and the line typed as a new prompt (decision 0040)", async () => {
+    it("forces a message over to a busy session: the plugin's force hands it, then the turn is stopped through the session's hold and the line sent as a new prompt (decision 0040, headless H12)", async () => {
       const plugin = aPlugin();
 
       await expect(harness({ pluginRoot: plugin.root }).forceOver({ shipId, folder, isTurnBusy: true })).resolves.toBe('handed');
 
       expect(plugin.calls()).toEqual([`force ${folder}`]);
       expect(steps).toEqual([`interrupt ${shipId}`, `send ${shipId}`]);
-      expect(sent).toEqual([{ shipId, line: `${LINE} ${NO_TERMINAL_QUESTIONS}` }]);
+      expect(sent).toEqual([{ shipId, line: userLineOf(`${LINE} ${NO_TERMINAL_QUESTIONS}`) }]);
     });
 
     it('forces a message over to an idle session without stopping a turn', async () => {
@@ -527,7 +500,7 @@ describe('Claude Code as a harness', () => {
       expect(steps).toEqual([`send ${shipId}`]);
     });
 
-    it('stops no turn and types nothing when the plugin hands no forced message over', async () => {
+    it('stops no turn and sends nothing when the plugin hands no forced message over', async () => {
       const plugin = aPlugin({ hasNothing: true });
 
       await expect(harness({ pluginRoot: plugin.root }).forceOver({ shipId, folder, isTurnBusy: true })).resolves.toBe('nothing');
@@ -535,7 +508,7 @@ describe('Claude Code as a harness', () => {
       expect(steps).toEqual([]);
     });
 
-    it('types nothing when the plugin hands nothing over', async () => {
+    it('sends nothing when the plugin hands nothing over', async () => {
       const plugin = aPlugin({ hasNothing: true });
 
       await expect(harness({ pluginRoot: plugin.root }).handOver({ shipId, folder })).resolves.toBe('nothing');
@@ -578,69 +551,30 @@ describe('Claude Code as a harness', () => {
 
 });
 
-describe('Claude Code headless on the host, in print mode with streamed JSON (headless H11 to H13)', () => {
+describe('Claude Code headless, in print mode with streamed JSON (headless H11 to H13)', () => {
   const HEADLESS = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'];
-  /** A prompt as headless Claude Code takes it on stdin. */
-  const lineOf = (prompt: string) => JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } });
+  const lineOf = userLineOf;
 
   it('starts one long-lived claude -p with the configured flags and no prompt among its words, then sends the first prompt as its first line', async () => {
-    await harness({ isHeadless: true }).launch({ ...launchOf(shipId), options: {}, isFirstStart: true, firstPrompt: 'Review the open pull requests.' });
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true, firstPrompt: 'Review the open pull requests.' });
 
     expect(started).toEqual([{ shipId, folder, command: ['claude', ...HEADLESS, '--remote-control', '--model', 'claude-opus-5-5', '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode'], harness: 'claude-code', env: { AEOLUS_LAUNCH: LAUNCH_ID } }]);
     expect(sent).toEqual([{ shipId, line: lineOf(`Review the open pull requests.\n\n${NO_TERMINAL_QUESTIONS}`) }]);
   });
 
-  it('continues the conversation on a restart, with /aeolus-fleet:wake as its first line', async () => {
+  it('continues the conversation on a restart, with /aeolus-fleet:wake as its first line, never the first prompt again (#585)', async () => {
     aConversationIn(folder);
 
-    await harness({ isHeadless: true }).launch({ ...launchOf(shipId), options: {}, isFirstStart: false });
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false, firstPrompt: 'Review the open pull requests.' });
 
     expect(started[0]?.command.slice(-1)).toEqual(['--continue']);
     expect(sent).toEqual([{ shipId, line: lineOf(`/aeolus-fleet:wake ${NO_TERMINAL_QUESTIONS}`) }]);
   });
 
-  describe('the hand-over', () => {
-    const LINE = "Aeolus handed a message for scout to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it.";
-
-    /** A plugin whose aeolus-push.sh hands a message over. */
-    function aPlugin(): string {
-      const root = mkdtempSync(join(data, 'plugin-'));
-      mkdirSync(join(root, 'scripts'));
-      writeFileSync(join(root, 'scripts', 'aeolus-push.sh'), `case "$1" in hand|force) ;; *) exit 0 ;; esac\necho "${LINE.replace(/"/g, '\\"')}"\n`);
-      return root;
-    }
-
-    it('sends the line the plugin hands over as one user message on stdin (H12)', async () => {
-      await expect(harness({ isHeadless: true, pluginRoot: aPlugin() }).handOver({ shipId, folder })).resolves.toBe('handed');
-
-      expect(sent).toEqual([{ shipId, line: lineOf(`${LINE} ${NO_TERMINAL_QUESTIONS}`) }]);
-    });
-
-    it("stops a busy turn through the session's hold before the forced line goes in (H12)", async () => {
-      await expect(harness({ isHeadless: true, pluginRoot: aPlugin() }).forceOver({ shipId, folder, isTurnBusy: true })).resolves.toBe('handed');
-
-      expect(steps).toEqual([`interrupt ${shipId}`, `send ${shipId}`]);
-      expect(sent).toEqual([{ shipId, line: lineOf(`${LINE} ${NO_TERMINAL_QUESTIONS}`) }]);
-    });
-  });
-
-  it('names the cause its last error event gives when a start shows no activity, as a refused login (H13)', async () => {
-    screens.set(
-      shipId,
-      [
-        JSON.stringify({ type: 'system', subtype: 'init', session_id: 'c5858406' }),
-        JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Not logged in · Please run /login' }] }, error: 'authentication_failed' }),
-        JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: 'Not logged in · Please run /login' }),
-      ].join('\n'),
-    );
-
-    await expect(harness({ isHeadless: true }).launchSeen({ shipId, folder, launchId: LAUNCH_ID })).resolves.toEqual({ kind: 'none', cause: 'Not logged in · Please run /login' });
-  });
-
   it('names no cause while no event is an error', async () => {
     screens.set(shipId, [JSON.stringify({ type: 'system', subtype: 'init', session_id: 'c5858406' }), JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' })].join('\n'));
 
-    await expect(harness({ isHeadless: true }).launchSeen({ shipId, folder, launchId: LAUNCH_ID })).resolves.toEqual({ kind: 'none' });
+    await expect(harness().launchSeen({ shipId, folder, launchId: LAUNCH_ID })).resolves.toEqual({ kind: 'none' });
   });
 });
 
@@ -702,25 +636,11 @@ describe("Claude Code's launch window, from the launch marker its session's hook
     await expect(seen()).resolves.toEqual({ kind: 'refused' });
   });
 
-  it('reads no screen once its session started: none, whatever the screen shows', async () => {
-    screens.set(shipId, readFileSync(new URL('../../test/screens/claude-code-bypass.txt', import.meta.url), 'utf8'));
-    await hooked(sessionStarted);
-
-    await expect(seen()).resolves.toEqual({ kind: 'none' });
-  });
-
-  it('names the screen its session stopped at when it never started', async () => {
-    screens.set(shipId, readFileSync(new URL('../../test/screens/claude-code-bypass.txt', import.meta.url), 'utf8'));
-
-    await expect(seen()).resolves.toEqual({ kind: 'none', screen: 'bypass permissions warning' });
-  });
-
   it('counts nothing the hooks marked for another launch', async () => {
-    screens.set(shipId, readFileSync(new URL('../../test/screens/claude-code-bypass.txt', import.meta.url), 'utf8'));
     await hooked(sessionStarted, 'launch-0');
     await hooked(aToolCall, 'launch-0');
 
-    await expect(seen()).resolves.toEqual({ kind: 'none', screen: 'bypass permissions warning' });
+    await expect(seen()).resolves.toEqual({ kind: 'none' });
   });
 
   it("says no session can start while the aeolus-fleet plugin's scripts are gone, as after a plugin upgrade moved them (#827)", async () => {
@@ -762,7 +682,6 @@ describe('Claude Code in containers, each ship with a home of its own (decision 
   function inContainers() {
     return createClaudeCodeHarness({
       configuration: CONFIGURATION,
-      isHeadless: false,
       plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data, crews },
       projects,
       setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
@@ -773,7 +692,10 @@ describe('Claude Code in containers, each ship with a home of its own (decision 
           started.push(session);
           return Promise.resolve();
         },
-        send: () => Promise.resolve(),
+        send: (at) => {
+          sent.push(at);
+          return Promise.resolve();
+        },
         interrupt: () => Promise.resolve(),
         events: () => Promise.resolve([]),
       },
@@ -812,6 +734,13 @@ describe('Claude Code in containers, each ship with a home of its own (decision 
 
     const shipSetup = createClaudeCodeSetup({ homeDirectory: join(homes, shipId), managedSettings: join(home, 'managed') });
     expect({ isOnboarded: await shipSetup.isOnboardingComplete(), isTrusted: await shipSetup.isTrusted(folder), host: existsSync(join(home, '.claude.json')) }).toEqual({ isOnboarded: true, isTrusted: true, host: false });
+  });
+
+  it('runs headless in a container too, as on the host: Claude Code in print mode with streamed JSON, its first prompt sent as its first line (headless H18)', async () => {
+    await inContainers().launch({ ...launchOf(shipId), options: {}, isFirstStart: true, firstPrompt: 'Review the open pull requests.' });
+
+    const command = started[0]?.command ?? [];
+    expect({ headless: command.slice(1, 6), hasPrompt: command.includes('--'), sent: sent.map((line) => line.shipId) }).toEqual({ headless: ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json'], hasPrompt: false, sent: [shipId] });
   });
 
   it("makes the ship's home for its owner alone", async () => {

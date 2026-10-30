@@ -4,7 +4,7 @@ Keeps the ships whose crew requests are assigned to it crewed on the machine it 
 
 ## Install
 
-On the machine that will run the sessions (macOS or Linux), with Node 26, `git`, `tmux`, and Claude Code with the aeolus-fleet plugin for Claude Code, Codex with the aeolus-fleet plugin for Codex, or both, installed. Codex must be on the `PATH` as `codex`:
+On the machine that will run the sessions (macOS or Linux), with Node 26, `git`, and Claude Code with the aeolus-fleet plugin for Claude Code, Codex with the aeolus-fleet plugin for Codex, or both, installed. Codex must be on the `PATH` as `codex`:
 
 ```sh
 npm install --global @aeolus-fleet/trierarch
@@ -53,7 +53,7 @@ That gives the command `aeolus-trierarch`.
 
 Every command takes `--json`, so a ship can read what it says, and `--config <path>`. `status`, `list` and `logs` read what is on the machine and send no message; `status` asks the fleet `whoami` once, for the lease.
 
-To stop the trierarch: `aeolus-trierarch stop`, or `aeolus-trierarch uninstall` to keep it from starting at login. On the host, each session runs under a hold of its own and has no terminal to attach to: what it writes is in `~/.aeolus/trierarch/sessions/<ship id>/events.jsonl`. A container session runs tmux inside its container.
+To stop the trierarch: `aeolus-trierarch stop`, or `aeolus-trierarch uninstall` to keep it from starting at login. Each session runs under a hold of its own, in a container of its own with the container runtime, and has no terminal to attach to: what it writes is in `~/.aeolus/trierarch/sessions/<ship id>/events.jsonl`.
 
 ## Configure
 
@@ -103,7 +103,7 @@ The trierarch finds the aeolus-fleet plugin in each offered harness's plugin cac
   - the ports.
 - **Adapters** (`src/adapters`):
   - the fleet over REST;
-  - the hold (`aeolus-trierarch hold <ship id>`), one per host session, which runs the harness, keeps its input and output and writes its events to `~/.aeolus/trierarch/sessions/<ship id>/events.jsonl`; tmux, which a container session runs inside and which lists and stops the sessions an older trierarch left in tmux;
+  - the hold (`aeolus-trierarch hold <ship id>`), one per session, which runs the harness, or with the container runtime the container it runs in, keeps its input and output and writes its events to `~/.aeolus/trierarch/sessions/<ship id>/events.jsonl`;
   - git worktrees and folders;
   - Claude Code and Codex, through the aeolus-fleet plugin's `aeolus-identity.sh`. Each passes its prompt last, after `--`, so a prompt never reads as a flag. A Claude Code session on the host is `claude -p` with streamed JSON, handed each line on its stdin. A Codex session on the host is one `codex exec --json ... -- <prompt>` per turn: it starts with the first prompt, comes back with `codex exec resume --last`, and takes each later line as `codex exec resume <thread id>`;
   - Copilot, through the same scripts of the aeolus-fleet plugin Copilot installed: one `copilot` per turn with JSON output, every tool allowed and no question tool, its prompt the value of `--prompt=`, each later turn and a restart resuming the session by the id its last result named. `init` does not ask about Copilot: to offer it, sign Copilot in (`copilot login`), install the plugin for it (its README), and add `"copilot": { "flags": [], "options": {} }` to the configuration's `harnesses`. The trierarch starts without that plugin, and names Copilot as not offered until it is installed. The machine offers it on Copilot CLI 1.0.105 on the host only;
