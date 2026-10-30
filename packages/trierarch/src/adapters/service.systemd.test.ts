@@ -70,7 +70,14 @@ async function startTheUnit(): Promise<void> {
   writeFileSync(unitFile, readFileSync(join(folder, '.config', 'systemd', 'user', SYSTEMD_UNIT), 'utf8'));
   await systemctl('daemon-reload');
   await systemctl('start', name);
-  await expect.poll(sessionPid, { timeout: SESSION_TIMEOUT_MS }).not.toBe('');
+  await expect.poll(sessionPid, { timeout: SESSION_TIMEOUT_MS }).not.toBe('').catch(async (error: unknown) => {
+    const dump = async (c: string, a: string[]) => { const r = await runCommand(c, { args: a }); console.log('DIAG', c, a.join(' '), JSON.stringify(r)); };
+    await dump('systemctl', ['--user', 'status', name, '--no-pager', '-l']);
+    await dump('journalctl', ['--user', '-n', '60', '--no-pager']);
+    await dump('systemd-run', ['--user', '--scope', '--quiet', '--collect', '--', 'sh', '-c', 'echo ok']);
+    await dump('sh', ['-c', 'cat /etc/os-release | head -3; systemctl --version | head -1; cat ' + pidFile + '; ls -la ' + folder]);
+    throw error;
+  });
 }
 
 describe('the systemd user unit on this machine', () => {
