@@ -53,6 +53,7 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
       // Paths stay on the machine: a kept worktree goes by its ship and repository, an orphan by its repository and name (#325).
       kept: [{ shipId: kept.shipId, repository: 'aeolus-fleet' }],
       orphans: [{ repository: 'aeolus-fleet', name: 'stray' }],
+      logins: [],
       machine: { os: 'macos', arch: 'arm64' },
       runtime: 'host',
       load: aMachineLoad(),
