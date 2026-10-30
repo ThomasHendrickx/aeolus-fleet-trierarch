@@ -24,6 +24,22 @@ const SESSION_USER = 'uid=1000,gid=1000';
  * workers, a browser and a nested Postgres, and none for a runaway fork.
  */
 const PIDS_LIMIT = 4096;
+/**
+ * Where a container reaches the host's loopback, and so the model proxy
+ * (headless H16): the host's address in Podman's slirp4netns network, which
+ * maps it to the host's loopback when the network allows that.
+ */
+export const MODEL_PROXY_HOST = '10.0.2.2';
+/** The network that lets a session on an API key reach the host's loopback, and nothing more of the host than the network gives any container. */
+const HOST_LOOPBACK_NETWORK = 'slirp4netns:allow_host_loopback=true';
+
+/** Where a session in a container reaches the model proxy the trierarch reaches at the url, on the host's loopback. */
+export function containerProxyUrl(url: string): string {
+  const at = new URL(url);
+  at.hostname = MODEL_PROXY_HOST;
+  return at.origin;
+}
+
 /** The env file in the session's own folder, beside its hold's files. */
 const ENV_FILE = 'session.env';
 
@@ -88,7 +104,11 @@ function envFileOf(env: Readonly<Record<string, string>>): string {
  *
  * The model token and the session's environment reach the container through
  * an env file in the session's own folder, for its owner alone, never a
- * command line (#445). It is kept while the session runs, since the hold runs
+ * command line (#445). A session on an API key gets no model token, the
+ * subscription's login: its proxy token, which its hold holds in the
+ * environment it runs the container with, is passed on by its variable's name
+ * alone, and the container reaches the host's loopback, where the model proxy
+ * listens (headless H16, api keys K7). It is kept while the session runs, since the hold runs
  * the container again when it starts Claude Code again (H12), and goes with
  * the session's folder when it stops.
  */
@@ -128,11 +148,8 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
     launch: options.launch ?? [],
     beside: containers,
     heldAs: async ({ shipId, folder, command, env = {}, readOnly = [], proxyToken }, files) => {
-      if (proxyToken !== undefined) {
-        throw new Error('a container session reaches no model proxy yet');
-      }
-      const token = (await readFile(options.tokenFile, 'utf8')).trim();
-      const content = envFileOf({ ...env, [MODEL_TOKEN_VARIABLE]: token });
+      const login: Record<string, string> = proxyToken === undefined ? { [MODEL_TOKEN_VARIABLE]: (await readFile(options.tokenFile, 'utf8')).trim() } : {};
+      const content = envFileOf({ ...env, ...login });
       const home = shipHome(options.homes, shipId);
       const shipSockets = join(options.sockets, shipId);
       // The runtime mounts only a folder that exists, and the ship's socket may not have made it yet.
@@ -180,6 +197,7 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
           ...readOnly.flatMap((path) => ['--volume', `${path}:${path}:ro`]),
           '--env',
           `HOME=${SESSION_HOME}`,
+          ...(proxyToken === undefined ? [] : ['--env', proxyToken.variable, '--network', HOST_LOOPBACK_NETWORK]),
           '--workdir',
           folder,
           '--env-file',

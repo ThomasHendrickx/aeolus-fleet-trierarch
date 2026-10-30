@@ -93,6 +93,10 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
     expect(adaptersOf({ ...CONTAINER, binary }).shipHomes).toEqual({ homes: paths.homes, managedSettings: join(home, 'managed') });
   });
 
+  it("has sessions on the host reach the model proxy where the trierarch does, and sessions in containers at Podman's host address (headless H16)", () => {
+    expect({ host: adaptersOf().modelProxyUrlOf('http://127.0.0.1:4100'), container: adaptersOf({ ...CONTAINER, binary }).modelProxyUrlOf('http://127.0.0.1:4100') }).toEqual({ host: 'http://127.0.0.1:4100', container: 'http://10.0.2.2:4100' });
+  });
+
   it('lists the sessions through the binary the configuration names', async () => {
     await expect(adaptersOf({ ...CONTAINER, binary }).sessions.list()).resolves.toEqual([{ shipId, status: 'running', isOtherVersion: true }]);
   });
