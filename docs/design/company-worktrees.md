@@ -1,6 +1,6 @@
 # Design: the company worktree and the skills worktree (aeolus-fleet#1449)
 
-Status: structure, for Thomas to approve. No detailed decisions before the purpose and the picks below are agreed.
+Status: approved by Thomas on 31 Oct (WT1 to WT8, each the first option).
 
 ## Purpose
 
@@ -28,14 +28,16 @@ A company session (a ship of ThomasHendrickx/aeolus-company) gets, from the trie
 | A refresh that "cannot be done" is reported | A fetch that fails quietly leaves the old main, answered as a revision | The session verifies against a stale `origin/main` |
 | Only a machine that can supply both crews a company ship | Placement never reads checkouts | A machine without them still crews it |
 
-## Questions, each with my pick
+## Decisions
 
-1. **Where the second worktree is named.** (a) In the machine's configuration, as #1182 records: `aeolus-company` names `checkouts: ["skills"]` and becomes read-only there; no core change. (b) In the crew request settings, a field on the workspace (the issue's title): core's crew settings schema in `common` changes, a core release, `MINIMUM_CORE_VERSION` raised, and placement learns to match it. **Pick (a)**: it is the recorded design and ships tonight on one train. Cost: placement stays blind to it (last row above); every session in `aeolus-company` on that machine is read-only.
-2. **How the company worktree becomes read-only.** (a) A repository in the configuration can be `"readOnly": true`: its workspace is made as a read-only checkout is (a clone with no remote, no write bits; read-only mount in a container) instead of a git worktree. (b) Keep the writable worktree and trust the session. **Pick (a)**: it is what "read-only" says and reuses the checkout code. Temporary working files then go to the session's temp folder, not the working directory.
-3. **"On `main`".** (a) The trierarch makes each read-only clone on a local branch `main` at the fetched revision, with `origin/main` the same revision, so `git branch --show-current` says `main` and `HEAD` equals `origin/main`. (b) The company changes its bootstrap to accept a detached `HEAD` at `origin/main`. **Pick (a)**: a trierarch change; the company's wording stays. A git worktree cannot do this (two worktrees cannot both hold `main`), which is one more reason for 2(a).
-4. **Refresh.** `aeolus-checkouts.sh refresh` (and `POST /trierarch/checkouts/refresh`) brings the read-only workspace too, in the same answer as `{ repository, revision }`, and a fetch that fails is answered as `{ repository, problem }`, never as a stale revision. **Pick: yes, both.**
-5. **The start context.** The SessionStart hook already names each checkout; it adds that the working directory is read-only and that the refresh covers it. **Pick: yes.** It names the skills worktree by its repository (`skills`) and path, as today.
-6. **Container runtime.** **Pick:** the read-only workspace is mounted read-only in a container as checkouts are, in the same slice if it is small; if not, tonight's slice refuses `readOnly` in a container with a reason (`config check` and at start), and the container follows.
+1. **The second worktree is named in the machine's configuration**, as #1182 records: `aeolus-company` names `checkouts: ["skills"]`. The crew request settings and core's crew settings schema do not change. Placement stays blind to it: a machine that names no skills checkout still crews a company ship, which then fails at step 5.
+2. **A configured repository can be `"readOnly": true`**: its workspace is made as a read-only checkout is (a clone with no remote and no write bits; read-only mount in a container) instead of a git worktree. Temporary working files go to the session's temp folder.
+3. **Every read-only clone is on a local branch `main`** at the fetched revision, with `origin/main` the same revision, so `git branch --show-current` says `main` and `HEAD` equals `origin/main`. The company's bootstrap wording stays.
+4. **The refresh covers the read-only workspace too**, in the same answer as each checkout, and a fetch that fails is answered as `{ repository, problem }`, never as a stale revision.
+5. **The start context says the working directory is read-only** and that the refresh covers it; it names the skills worktree by its repository and path, as today.
+6. **A container mounts the read-only workspace read-only**, as it mounts checkouts, when that is small; otherwise `readOnly` is refused in a container (`config check` and at start) and the container follows.
+7. **0.35.1 includes the #1445 fix** (trierarch #75, on main), with slices 1 and 2.
+8. **0.35.1 is checked** by the upgrade on agent-host-1 and the commercial ship passing its startup.
 
 ## Flow
 
@@ -62,18 +64,18 @@ flowchart TD
   RA -- yes --> V[Session verifies again, records revisions, takes the assignment]
 ```
 
-Unhappy paths, as today unless named: a repository not trusted is never crewed and is given back while the crew is not final (Trust); a checkout or clone that fails fails the crew and counts toward the give-back, as a trusted repository's clone does; a machine that names no skills checkout crews the ship and the session fails at step 5 (question 1's cost); a refresh with a failed fetch answers a problem and the session rejects the assignment (question 4); a release, a give-back or an unassigned request removes the read-only workspace and checkouts with the identity, as checkouts are removed now.
+Unhappy paths, as today unless named: a repository not trusted is never crewed and is given back while the crew is not final (Trust); a checkout or clone that fails fails the crew and counts toward the give-back, as a trusted repository's clone does; a machine that names no skills checkout crews the ship and the session fails at step 5 (decision 1's cost); a refresh with a failed fetch answers a problem and the session rejects the assignment (decision 4); a release, a give-back or an unassigned request removes the read-only workspace and checkouts with the identity, as checkouts are removed now.
 
 ## Trains
 
-- **Core (aeolus-fleet)**: no change with question 1(a). With 1(b): `common`'s crew settings schema, a core release, then the trierarch.
-- **Trierarch train (this repository)**: the trierarch (2, 3, 4, 6) and the aeolus-fleet plugin's SessionStart wording (5). One release.
+- **Core (aeolus-fleet)**: no change.
+- **Trierarch train (this repository)**: the trierarch (decisions 2, 3, 4, 6) and the aeolus-fleet plugin's SessionStart wording (5). One release.
 - **Trierarch plugin**: no change.
 - **aeolus-company**: none needed; its "not yet implemented" note is the founder's to drop.
 
 ## Smallest slice set for tonight
 
 0. **Operator, no release, now**: on agent-host-1, add `"checkouts": ["skills"]` to `aeolus-company` in `~/.aeolus/trierarch/config.json`, `aeolus-trierarch config check`, restart the trierarch. Company ships get the skills worktree with the released 0.35 code; they still fail a literal "on `main`".
-1. **Read-only clones on `main`** (trierarch): checkouts on a local branch `main` with `origin/main`; a failed fetch is a problem in a refresh (questions 3, 4).
-2. **The read-only workspace** (trierarch and plugin): `"readOnly": true` on a configured repository makes its workspace a read-only clone on `main`, refreshed with the checkouts, named in the start context (questions 2, 4, 5, 6).
-3. **Release** per decision 0011: both slices onto `hotfix/0.35.x`, a candidate, the staging walk or Thomas's override, then `aeolus-trierarch upgrade` on agent-host-1 and `"readOnly": true` on `aeolus-company`.
+1. **Read-only clones on `main`** (trierarch): checkouts on a local branch `main` with `origin/main`; a failed fetch is a problem in a refresh (decisions 3, 4).
+2. **The read-only workspace** (trierarch and plugin): `"readOnly": true` on a configured repository makes its workspace a read-only clone on `main`, refreshed with the checkouts, named in the start context (decisions 2, 4, 5, 6).
+3. **Release** 0.35.1 per decision 0011: both slices and #75 onto `hotfix/0.35.x`, a candidate, the staging walk or Thomas's override, then `aeolus-trierarch upgrade` on agent-host-1 and `"readOnly": true` on `aeolus-company`.
