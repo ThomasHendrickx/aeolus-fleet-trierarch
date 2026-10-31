@@ -1780,7 +1780,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       const pushReceives = (stub: StubFleet) => callsTo(stub, '/api/v1/ship/pushReceive').length;
 
       async function aCutOffFleet(...receives: StubAnswer[]): Promise<StubFleet> {
-        fleet = await startRoutedStubFleet({ '/api/v1/ship/pushReceive': receives, '/api/v1/ship/handed': [handedOk], '/api/v1/ship/handled': [taken], '/api/v1/ship/turn': [taken] });
+        fleet = await startRoutedStubFleet({ '/api/v1/ship/pushReceive': receives, '/api/v1/ship/report': [taken], '/api/v1/ship/handed': [handedOk], '/api/v1/ship/handled': [taken], '/api/v1/ship/turn': [taken] });
         crewedByATrierarch(fleet.url);
         aTurnEnded();
         return fleet;
@@ -1813,6 +1813,22 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
         expect(await handWithKey()).toMatchObject({ status: 0, stdout: HAND_OVER_LINE });
 
         expect(pushReceives(stub)).toBe(2);
+      });
+
+      it("reports the ship blocked, waiting for the key, once, and idle again with the key back, as the turn marker says", async () => {
+        const stub = await aCutOffFleet(keyUnavailable, keyUnavailable, receiving(aDelivery()));
+        const handCapped = () => start('aeolus-push.sh', { args: ['hand'], env: { ...KEY_WAIT, AEOLUS_KEY_WAIT_MAX_SECONDS: '2' } }).done;
+        await handCapped();
+        await new Promise((resolve) => setTimeout(resolve, 2100));
+        await handCapped();
+        await new Promise((resolve) => setTimeout(resolve, 2100));
+
+        expect(await handCapped()).toMatchObject({ status: 0 });
+
+        expect(callsTo(stub, '/api/v1/ship/report').map((call) => call.body)).toEqual([
+          '{"state":"blocked","note":"waiting for the fleet\'s key (KEY_UNAVAILABLE)"}',
+          '{"state":"idle","note":"the fleet\'s key is back"}',
+        ]);
       });
 
       it('waits twice as long after a second refusal', async () => {
@@ -3434,8 +3450,21 @@ describe("the plugin's log: what the watcher and hooks do, one record per line i
       }
     });
 
+    it("reports the ship blocked, waiting for the key, once, and idle again with the key back, as the turn marker says", async () => {
+      fleet = await startRoutedStubFleet({ '/api/v1/ship/inbox': [inbox(1)], '/api/v1/ship/pushReceive': [keyUnavailable, keyUnavailable, receiving(aDelivery())], '/api/v1/ship/handed': [handedOk], '/api/v1/ship/report': [taken] });
+      crew(fleet.url);
+      aTurnEnded();
+
+      await start('aeolus-wait.sh', { env: KEY_WAIT }).done;
+
+      expect(fleet.calls.filter((call) => call.path === '/api/v1/ship/report').map((call) => call.body)).toEqual([
+        '{"state":"blocked","note":"waiting for the fleet\'s key (KEY_UNAVAILABLE)"}',
+        '{"state":"idle","note":"the fleet\'s key is back"}',
+      ]);
+    });
+
     it('says once that the key is not reachable, and when it answers again', async () => {
-      fleet = await startRoutedStubFleet({ '/api/v1/ship/inbox': [inbox(1)], '/api/v1/ship/pushReceive': [keyUnavailable, keyUnavailable, receiving(aDelivery())], '/api/v1/ship/handed': [handedOk] });
+      fleet = await startRoutedStubFleet({ '/api/v1/ship/inbox': [inbox(1)], '/api/v1/ship/pushReceive': [keyUnavailable, keyUnavailable, receiving(aDelivery())], '/api/v1/ship/handed': [handedOk], '/api/v1/ship/report': [taken] });
       crew(fleet.url);
       aTurnEnded();
 
