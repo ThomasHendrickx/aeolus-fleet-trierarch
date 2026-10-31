@@ -160,6 +160,14 @@ describe('aeolus-trierarch add (#381)', () => {
     expect(configuration().repositories).toEqual({ pagasae: { path: pagasae } });
   });
 
+  it('keeps the read-only checkouts of a repository it holds already (aeolus-fleet#1185)', async () => {
+    writeConfiguration({ ...initialConfiguration(), repositories: { pagasae: { path: pagasae, checkouts: ['skills'] }, skills: { path: join(home, 'skills') } } });
+
+    await add({ kind: 'repository', name: 'pagasae', path: pagasae });
+
+    expect(configuration().repositories).toMatchObject({ pagasae: { path: pagasae, checkouts: ['skills'] } });
+  });
+
   it('only writes and trusts while the service is not installed, and says how to start it', async () => {
     isServiceInstalled = false;
 
