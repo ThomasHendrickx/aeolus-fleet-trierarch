@@ -5,11 +5,11 @@ import type { ShipId } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
 import { loginAt, type SessionLogins } from '../core/login.js';
-import type { ModelTokens, SubscriptionWindow } from '../core/ports.js';
+import type { HourTokens, SubscriptionWindow } from '../core/ports.js';
 import { createAppendedLines } from './appended-lines.js';
 import { CLAUDE_CODE_PROBE_TIMEOUT_MS } from './claude-code-detector.js';
 import type { CommandResult } from './run-command.js';
-import { createTokensPerLogin, type TokensPerLogin } from './tokens-per-login.js';
+import { createTokensPerLogin, hourOf, type TokensPerLogin } from './tokens-per-login.js';
 
 /**
  * What Claude Code says of its usage (#353). A ship's tokens come from the
@@ -122,15 +122,16 @@ export function createClaudeCodeUsage(deps: {
       }
       const { id, model, usage } = parsed.data.message;
       totals.seen.add(id);
-      const login = logins === undefined ? undefined : loginAt(logins, new Date(parsed.data.timestamp));
-      totals.counted.add({ model, ...(login !== undefined && { login }), tokens: { input: usage.input_tokens, output: usage.output_tokens, cacheRead: usage.cache_read_input_tokens ?? 0, cacheWrite: usage.cache_creation_input_tokens ?? 0 } });
+      const at = new Date(parsed.data.timestamp);
+      const login = logins === undefined ? undefined : loginAt(logins, at);
+      totals.counted.add({ model, ...(login !== undefined && { login }), hour: hourOf(at), tokens: { input: usage.input_tokens, output: usage.output_tokens, cacheRead: usage.cache_read_input_tokens ?? 0, cacheWrite: usage.cache_creation_input_tokens ?? 0 } });
     }
     transcripts.set(path, totals);
     return totals;
   };
 
   return {
-    tokensOf: async (ship: { shipId: ShipId; folder: string; logins?: SessionLogins }): Promise<ModelTokens[]> => {
+    tokensOf: async (ship: { shipId: ShipId; folder: string; logins?: SessionLogins }): Promise<HourTokens[]> => {
       const since = await deps.madeAt(ship.folder);
       const project = join(deps.projectsOf(ship.shipId), ship.folder.replace(/[^a-zA-Z0-9]/gu, '-'));
       const counted = createTokensPerLogin();

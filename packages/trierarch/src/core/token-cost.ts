@@ -52,3 +52,8 @@ export function estimatedCostUsd(tokens: TokenCounts, price: ModelPrice | undefi
   const dollars = (tokens.input * price.input + tokens.output * price.output + tokens.cacheRead * price.cacheRead + tokens.cacheWrite * price.cacheWrite) / TOKENS_PER_PRICE;
   return Math.round(dollars * CENTS_PER_DOLLAR) / CENTS_PER_DOLLAR;
 }
+
+/** The tokens of two counts added up, kind by kind. */
+export function plusTokens(a: TokenCounts, b: TokenCounts): TokenCounts {
+  return { input: a.input + b.input, output: a.output + b.output, cacheRead: a.cacheRead + b.cacheRead, cacheWrite: a.cacheWrite + b.cacheWrite };
+}

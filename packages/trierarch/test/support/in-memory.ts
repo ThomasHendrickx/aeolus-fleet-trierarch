@@ -42,6 +42,7 @@ import type {
   ShipSocketsPort,
   TrustedRepositoriesPort,
   MachinePort,
+  HourTokens,
   ModelTokens,
   SubscriptionWindow,
   UsagePort,
@@ -878,29 +879,36 @@ export class InMemoryMachine implements MachinePort {
   }
 }
 
-/** What the harnesses' own files and CLIs say of their usage: each ship's tokens per model, and each harness's subscription windows, as a test sets them. */
+/** The UTC hour a test's tokens were used in when it gives no time: the hour its crewed entries start. */
+export const USAGE_HOUR = new Date('2026-10-06T07:00:00.000Z');
+
+const HOUR_MS = 60 * 60_000;
+
+/** What the harnesses' own files and CLIs say of their usage: each ship's tokens per model and UTC hour, and each harness's subscription windows, as a test sets them. */
 export class InMemoryUsage implements UsagePort {
-  readonly tokens = new Map<ShipId, readonly ModelTokens[]>();
-  /** Each ship's tokens as its sessions wrote them, with when: counted per model and login of the session that wrote them, when the ship's logins are given. */
+  /** Each ship's tokens, in the hour given, or in USAGE_HOUR. */
+  readonly tokens = new Map<ShipId, readonly (ModelTokens & { hour?: Date })[]>();
+  /** Each ship's tokens as its sessions wrote them, with when: counted per model, hour and login of the session that wrote them, when the ship's logins are given. */
   readonly written = new Map<ShipId, readonly (ModelTokens & { at: Date })[]>();
   readonly subscriptions = new Map<string, readonly SubscriptionWindow[]>();
   /** Ships whose transcripts cannot be read. */
   readonly unreadable = new Set<ShipId>();
 
-  tokensOf(ship: { shipId: ShipId; harness: string; folder: string; logins?: SessionLogins }): Promise<readonly ModelTokens[]> {
+  tokensOf(ship: { shipId: ShipId; harness: string; folder: string; logins?: SessionLogins }): Promise<readonly HourTokens[]> {
     if (this.unreadable.has(ship.shipId)) {
       return Promise.reject(new Error('EACCES'));
     }
     const written = this.written.get(ship.shipId);
     if (written === undefined) {
-      return Promise.resolve(this.tokens.get(ship.shipId) ?? []);
+      return Promise.resolve((this.tokens.get(ship.shipId) ?? []).map((used) => ({ ...used, hour: used.hour ?? USAGE_HOUR })));
     }
-    const counted = new Map<string, ModelTokens>();
+    const counted = new Map<string, HourTokens>();
     for (const { model, tokens, at } of written) {
       const login = ship.logins === undefined ? undefined : loginAt(ship.logins, at);
-      const key = `${model} ${login ?? ''}`;
+      const hour = new Date(Math.floor(at.getTime() / HOUR_MS) * HOUR_MS);
+      const key = `${model} ${login ?? ''} ${String(hour.getTime())}`;
       const before = counted.get(key)?.tokens ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-      counted.set(key, { model, ...(login !== undefined && { login }), tokens: { input: before.input + tokens.input, output: before.output + tokens.output, cacheRead: before.cacheRead + tokens.cacheRead, cacheWrite: before.cacheWrite + tokens.cacheWrite } });
+      counted.set(key, { model, ...(login !== undefined && { login }), hour, tokens: { input: before.input + tokens.input, output: before.output + tokens.output, cacheRead: before.cacheRead + tokens.cacheRead, cacheWrite: before.cacheWrite + tokens.cacheWrite } });
     }
     return Promise.resolve([...counted.values()]);
   }

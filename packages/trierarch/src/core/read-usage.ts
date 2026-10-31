@@ -1,8 +1,8 @@
 import type { TrierarchReportDetails } from '@aeolus-fleet/common';
 
-import type { Logger, ModelTokens, StatePort, SubscriptionWindow, UsagePort } from './ports.js';
+import type { HourTokens, Logger, ModelTokens, StatePort, SubscriptionWindow, UsagePort } from './ports.js';
 import type { Clock } from './shared/clock.js';
-import { estimatedCostUsd, type PriceTable } from './token-cost.js';
+import { estimatedCostUsd, plusTokens, type PriceTable } from './token-cost.js';
 
 /** The harnesses' usage as a trierarch reports it (#353): each harness's subscription windows, and each crewed ship's tokens per model with their estimated cost. */
 export type HarnessUsage = NonNullable<TrierarchReportDetails['usage']>;
@@ -26,6 +26,17 @@ interface SubscriptionRead {
 }
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/** A ship's tokens added up per model and login over the hours, in the order they came: the report says no hours. */
+function perModelOf(hours: readonly HourTokens[]): ModelTokens[] {
+  const summed = new Map<string, ModelTokens>();
+  for (const { model, login, tokens } of hours) {
+    const key = `${model}\u0000${login ?? ''}`;
+    const before = summed.get(key)?.tokens;
+    summed.set(key, { model, ...(login !== undefined && { login }), tokens: before === undefined ? tokens : plusTokens(before, tokens) });
+  }
+  return [...summed.values()];
+}
 
 const totalOf = (models: readonly ModelTokens[]): number => models.reduce((sum, { tokens }) => sum + tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite, 0);
 
@@ -62,7 +73,7 @@ export function createReadUsage(deps: { usage: UsagePort; state: StatePort; cloc
       const usage =
         models === undefined
           ? ships.find((ship) => ship.shipId === entry.shipId)
-          : { shipId: entry.shipId, models: models.map(({ model, login, tokens }) => ({ model, ...(login !== undefined && { login }), tokens, estimatedCostUsd: estimatedCostUsd(tokens, deps.prices[model]) })) };
+          : { shipId: entry.shipId, models: perModelOf(models).map(({ model, login, tokens }) => ({ model, ...(login !== undefined && { login }), tokens, estimatedCostUsd: estimatedCostUsd(tokens, deps.prices[model]) })) };
       if (usage !== undefined && usage.models.length > 0) {
         read.push(usage);
         totals.set(entry.harness, (totals.get(entry.harness) ?? 0) + totalOf(usage.models));
