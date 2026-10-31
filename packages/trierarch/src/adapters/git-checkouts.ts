@@ -11,11 +11,14 @@ import { runCommand } from './run-command.js';
  * Read-only checkouts in git (#1182; docs/trierarch.md, "Read-only
  * checkouts"): per ship, `<root>/<ship id>/<repository>`, a clone of the
  * configured repository (`--reference` with `--dissociate`, so it holds its
- * own objects, as a container's workspace does) detached at the latest main.
- * The configured repository is fetched first, so main is its remote's when it
- * has one, else its own. The clone keeps no remote, so the session has none to
- * push to, and no write bit, so it changes and commits nothing; a refresh
- * gives the write bits back only while it moves the checkout on.
+ * own objects, as a container's workspace does) on a local branch main at the
+ * latest main, which it also keeps as `origin/main`, so a session sees it on
+ * main with `HEAD` at `origin/main` (aeolus-fleet#1449). The configured
+ * repository is fetched first, so main is its remote's when it has one, else
+ * its own; a refresh whose fetch fails answers a problem rather than the main
+ * it held. The clone keeps no remote, so the session has none to push to, and
+ * no write bit, so it changes and commits nothing; a refresh gives the write
+ * bits back only while it moves the checkout on.
  */
 
 const REMOTE = 'origin';
@@ -46,21 +49,27 @@ export function createGitCheckouts(options: { configuration: TrierarchConfigurat
     }
     return path;
   };
-  /** The latest main of the repository: its remote's once fetched, when it has one, else its own. */
-  const latestMain = async (repository: string): Promise<string> => {
-    // A fetch that fails (offline, no remote) leaves what the repository has.
-    await runCommand('git', { args: ['-C', repository, 'fetch', '--quiet', REMOTE] });
+  /**
+   * The latest main of the repository: its remote's once fetched, when it has one, else its own.
+   * A fetch that fails leaves what the repository has, unless the caller must have the remote's latest.
+   */
+  const latestMain = async (repository: string, { isFetchRequired }: { isFetchRequired: boolean }): Promise<string> => {
+    const hasRemote = (await runCommand('git', { args: ['-C', repository, 'remote', 'get-url', REMOTE] })).status === 0;
+    const fetched = await runCommand('git', { args: ['-C', repository, 'fetch', '--quiet', REMOTE] });
+    if (hasRemote && fetched.status !== 0 && isFetchRequired) {
+      throw new Error(`git fetch ${REMOTE} in ${repository} failed: ${fetched.stderr.trim()}`);
+    }
     const remote = await runCommand('git', { args: ['-C', repository, 'rev-parse', '--verify', '--quiet', `refs/remotes/${REMOTE}/${MAIN}`] });
     return remote.status === 0 ? `refs/remotes/${REMOTE}/${MAIN}` : `refs/heads/${MAIN}`;
   };
   /** Moves the checkout to the latest main of its repository, writable only meanwhile: answers the revision it holds. */
-  const bringToMain = async (checkout: Checkout): Promise<string> => {
+  const bringToMain = async (checkout: Checkout, fetch: { isFetchRequired: boolean }): Promise<string> => {
     const repository = pathOf(checkout.repository);
-    const main = await latestMain(repository);
+    const main = await latestMain(repository, fetch);
     await chmod('u+w', checkout.path);
     try {
       await git(['-C', checkout.path, 'fetch', '--quiet', '--no-tags', repository, `+${main}:${FETCHED}`]);
-      await git(['-C', checkout.path, 'checkout', '--quiet', '--force', '--detach', FETCHED]);
+      await git(['-C', checkout.path, 'checkout', '--quiet', '--force', '-B', MAIN, FETCHED]);
       return await git(['-C', checkout.path, 'rev-parse', 'HEAD']);
     } finally {
       await chmod('a-w', checkout.path);
@@ -78,7 +87,7 @@ export function createGitCheckouts(options: { configuration: TrierarchConfigurat
           const source = pathOf(checkout);
           await git(['clone', '--quiet', '--no-checkout', '--reference', source, '--dissociate', source, path]);
           await git(['-C', path, 'remote', 'remove', REMOTE]);
-          await bringToMain({ repository: checkout, path });
+          await bringToMain({ repository: checkout, path }, { isFetchRequired: false });
         }
         made.push({ repository: checkout, path });
       }
@@ -88,7 +97,7 @@ export function createGitCheckouts(options: { configuration: TrierarchConfigurat
       const refreshed: RefreshedCheckout[] = [];
       for (const repository of (await readdir(join(root, shipId)).catch(() => [])).toSorted()) {
         try {
-          refreshed.push({ repository, revision: await bringToMain({ repository, path: join(root, shipId, repository) }) });
+          refreshed.push({ repository, revision: await bringToMain({ repository, path: join(root, shipId, repository) }, { isFetchRequired: true }) });
         } catch (error) {
           refreshed.push({ repository, problem: (error instanceof Error ? error.message : String(error)).split('\n')[0] ?? '' });
         }
