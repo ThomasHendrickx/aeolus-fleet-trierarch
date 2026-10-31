@@ -146,6 +146,28 @@ describe('the configuration file', () => {
     });
   });
 
+  describe('a read-only repository (aeolus-fleet#1449)', () => {
+    const withReadOnly = (readOnly: unknown) => ({ ...initialConfiguration(), repositories: { 'aeolus-company': { path: '/code/aeolus-company', readOnly } } });
+
+    it('loads a repository whose sessions may only read their workspace', async () => {
+      const path = join(folder, 'config.json');
+      writeFileSync(path, JSON.stringify(withReadOnly(true)));
+
+      await expect(loadConfiguration(path)).resolves.toMatchObject({ repositories: { 'aeolus-company': { readOnly: true } } });
+    });
+
+    it('refuses a read-only that is no yes or no', async () => {
+      const path = join(folder, 'config.json');
+      writeFileSync(path, JSON.stringify(withReadOnly('yes')));
+
+      await expect(loadConfiguration(path)).rejects.toThrow('readOnly');
+    });
+
+    it('states read-only in the schema an editor checks it with', () => {
+      expect(JSON.stringify(configurationJsonSchema())).toContain('"readOnly"');
+    });
+  });
+
   describe('the price table the cost of tokens is estimated by (#353)', () => {
     const withPrices = (prices: unknown) => ({ ...initialConfiguration(), prices });
 
