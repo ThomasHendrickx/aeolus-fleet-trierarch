@@ -68,7 +68,7 @@ export async function addPlace(at: AddPlace): Promise<AddReport> {
   if (held !== undefined && (held.path !== path || !(name in configuration[key]))) {
     throw new TrierarchFileError(`${name} names ${held.path} already: pick another name`);
   }
-  await writeFile(paths.config, `${JSON.stringify({ ...raw, [key]: { ...raw[key], [name]: { path } } }, null, 2)}\n`);
+  await writeFile(paths.config, `${JSON.stringify({ ...raw, [key]: { ...raw[key], [name]: { ...raw[key][name], path } } }, null, 2)}\n`);
   const said = [`Added the ${kind} ${name} (${path}) to ${paths.config}.`];
 
   const trustedBy: string[] = [];
