@@ -146,6 +146,8 @@ const busy: StubAnswer = { status: 503, body: { code: 'SERVICE_UNAVAILABLE', mes
 const notInFlight: StubAnswer = { status: 409, body: { code: 'DELIVERY_NOT_IN_FLIGHT', message: 'Delivery is undeliverable, not in flight' } };
 /** A refusal about the delivery whose code the plugin names nowhere: it drops the delivery as it does every delivery refusal. */
 const deliveryNotFound: StubAnswer = { status: 404, body: { code: 'DELIVERY_NOT_FOUND', message: 'No delivery with this id' } };
+/** Core's answer while the fleet's company key cannot be had: nothing was claimed, so a later call may pass (decision 0068). */
+const keyUnavailable: StubAnswer = { status: 503, body: { code: 'KEY_UNAVAILABLE', message: 'The fleet key is not reachable: access denied' } };
 const leaseEnded: StubAnswer = { status: 401, body: { code: 'LEASE_ENDED', message: 'The lease ended' } };
 /** The fleet's answer to handed: where the delivery stands now. */
 const handedAs = (state: 'handed' | 'acknowledged' | 'undeliverable'): StubAnswer => ({ status: 200, body: { state } });
@@ -1772,6 +1774,60 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       return fleet;
     }
 
+    describe('with the fleet key cut off (decision 0068)', () => {
+      const KEY_WAIT = { ...NO_WAITS, AEOLUS_KEY_WAIT_SECONDS: '1' };
+      const handWithKey = () => start('aeolus-push.sh', { args: ['hand'], env: KEY_WAIT }).done;
+      const pushReceives = (stub: StubFleet) => callsTo(stub, '/api/v1/ship/pushReceive').length;
+
+      async function aCutOffFleet(...receives: StubAnswer[]): Promise<StubFleet> {
+        fleet = await startRoutedStubFleet({ '/api/v1/ship/pushReceive': receives, '/api/v1/ship/handed': [handedOk], '/api/v1/ship/handled': [taken], '/api/v1/ship/turn': [taken] });
+        crewedByATrierarch(fleet.url);
+        aTurnEnded();
+        return fleet;
+      }
+
+      it('hands nothing over on KEY_UNAVAILABLE, without ending the crew, and logs the wait', async () => {
+        await aCutOffFleet(keyUnavailable);
+
+        expect(await handWithKey()).toMatchObject({ status: 1, stdout: '' });
+
+        expect(store()).toEqual([]);
+        expect(run('aeolus-identity.sh', { args: ['show'] }).stdout).toContain('ship: scout');
+        expect(actions().at(-1)).toEqual({ ...scout, action: 'wake', outcome: "waiting: the fleet's key is not reachable (KEY_UNAVAILABLE)", next: 'asks again after 1 seconds, longer each time' });
+      });
+
+      it('does not ask the fleet again within the wait, so a cut-off key is not asked for at every pass', async () => {
+        const stub = await aCutOffFleet(keyUnavailable);
+        await handWithKey();
+
+        expect(await handWithKey()).toMatchObject({ status: 1 });
+
+        expect(pushReceives(stub)).toBe(1);
+      });
+
+      it('asks again once the wait has passed, and hands the message over when the key is back', async () => {
+        const stub = await aCutOffFleet(keyUnavailable, receiving(aDelivery()));
+        await handWithKey();
+        await new Promise((resolve) => setTimeout(resolve, 1100));
+
+        expect(await handWithKey()).toMatchObject({ status: 0, stdout: HAND_OVER_LINE });
+
+        expect(pushReceives(stub)).toBe(2);
+      });
+
+      it('waits twice as long after a second refusal', async () => {
+        const stub = await aCutOffFleet(keyUnavailable);
+        await handWithKey();
+        await new Promise((resolve) => setTimeout(resolve, 1100));
+        await handWithKey();
+        await new Promise((resolve) => setTimeout(resolve, 1100));
+
+        expect(await handWithKey()).toMatchObject({ status: 1 });
+
+        expect(pushReceives(stub)).toBe(2);
+      });
+    });
+
     describe('hand', () => {
       it('push-receives one delivery, keeps it in the store as handed, reports it handed with number 1, and prints the line to type', async () => {
         const stub = await aTrierarchHandOver({});
@@ -3356,6 +3412,41 @@ describe("the plugin's log: what the watcher and hooks do, one record per line i
       { ...scout, action: 'watch', outcome: 'failed: the fleet answered HTTP 500', next: 'retries, a little later each time' },
       { ...scout, action: 'watch', outcome: 'the fleet answers again' },
     ]);
+  });
+
+  describe('with the fleet key cut off (decision 0068)', () => {
+    const KEY_WAIT = { AEOLUS_KEY_WAIT_SECONDS: '1', AEOLUS_KEY_WAIT_MAX_SECONDS: '2' };
+    const keyActions = () => actions().filter((record) => 'outcome' in record && /key/.test(record.outcome));
+
+    it('waits longer after each KEY_UNAVAILABLE on the push receive, up to a most, and keeps watching', async () => {
+      fleet = await startRoutedStubFleet({ '/api/v1/ship/inbox': [inbox(1)], '/api/v1/ship/pushReceive': [keyUnavailable] });
+      crew(fleet.url);
+      aTurnEnded();
+      const watcher = start('aeolus-wait.sh', { env: KEY_WAIT });
+
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 4500));
+
+        expect(fleet.calls.filter((call) => call.path === '/api/v1/ship/pushReceive')).toHaveLength(3);
+        expect(watcher.child.exitCode).toBeNull();
+      } finally {
+        watcher.child.kill();
+      }
+    });
+
+    it('says once that the key is not reachable, and when it answers again', async () => {
+      fleet = await startRoutedStubFleet({ '/api/v1/ship/inbox': [inbox(1)], '/api/v1/ship/pushReceive': [keyUnavailable, keyUnavailable, receiving(aDelivery())], '/api/v1/ship/handed': [handedOk] });
+      crew(fleet.url);
+      aTurnEnded();
+
+      const finished = await start('aeolus-wait.sh', { env: KEY_WAIT }).done;
+
+      expect(finished).toMatchObject({ status: 0, stdout: HANDED_OVER });
+      expect(keyActions()).toEqual([
+        { ...scout, action: 'watch', outcome: "waiting: the fleet's key is not reachable (KEY_UNAVAILABLE)", next: 'retries, longer each time' },
+        { ...scout, action: 'watch', outcome: "the fleet's key is reachable again" },
+      ]);
+    });
   });
 
   it('logs a fleet that does not answer at all', async () => {
