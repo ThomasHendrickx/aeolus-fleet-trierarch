@@ -53,7 +53,9 @@ beforeEach(async () => {
   chmodSync(binary, 0o755);
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Read-only workspaces a test left are made writable again so they can go.
+  await runCommand('chmod', { args: ['-R', 'u+w', home] });
   rmSync(home, { recursive: true, force: true });
 });
 

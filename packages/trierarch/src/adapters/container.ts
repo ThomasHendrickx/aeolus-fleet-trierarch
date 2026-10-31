@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { idSchema, type ShipId } from '@aeolus-fleet/common';
@@ -187,7 +187,8 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
           '--security-opt',
           'unmask=ALL',
           '--volume',
-          `${folder}:${folder}`,
+          // A read-only workspace (aeolus-fleet#1449), whose files have no write bit, is mounted read-only, which the session cannot undo.
+          (await isWritable(folder)) ? `${folder}:${folder}` : `${folder}:${folder}:ro`,
           '--volume',
           `${home}:${SESSION_HOME}`,
           // The session calls the fleet over its ship's socket, at the path its identity names.
@@ -220,4 +221,12 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
       return inspected.status === 0 && Number.isInteger(pid) && pid > 1 ? pid : undefined;
     },
   };
+}
+
+/** The write bit its owner has on a folder, the session's user in the container; one that cannot be read is taken as writable, as before. */
+const OWNER_WRITE = 0o200;
+
+async function isWritable(folder: string): Promise<boolean> {
+  const found = await stat(folder).catch(() => undefined);
+  return found === undefined || (found.mode & OWNER_WRITE) !== 0;
 }

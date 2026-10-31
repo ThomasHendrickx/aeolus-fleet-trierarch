@@ -30,6 +30,7 @@ import { modelProxy, runtimeAdaptersOf } from '../adapters/runtime-adapters.js';
 import { PLUGIN_HARNESSES } from '../adapters/plugin.js';
 import { createCallerCheck } from '../adapters/caller-check.js';
 import { createShipSockets } from '../adapters/ship-sockets.js';
+import { createShipRefresh } from '../adapters/ship-refresh.js';
 import { sessionsLaunch } from '../adapters/hold-runtime.js';
 import { createTrust } from '../adapters/trust.js';
 import { createTrustedRepositoriesFile, trustedClonesOf, withTrustedRepositories } from '../adapters/trusted-repositories-file.js';
@@ -109,7 +110,9 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   let offered = { configuration, detected };
   const version = runningVersion();
   const clones = trustedClonesOf({ configured, held: trustedRepositories, root: paths.repositories });
-  const { sessions, workspace, shipHomes, modelProxyUrlOf } = runtimeAdaptersOf({ configuration, paths, version, launch: sessionsLaunch({ platform: process.platform, env }), managedSettings, clones });
+  // The repositories whose sessions may only read their workspace (aeolus-fleet#1449).
+  const readOnly = Object.entries(configured.repositories).flatMap(([name, repository]) => (repository.readOnly === true ? [name] : []));
+  const { sessions, workspace, shipHomes, modelProxyUrlOf } = runtimeAdaptersOf({ configuration, paths, version, launch: sessionsLaunch({ platform: process.platform, env }), managedSettings, clones, readOnly });
   // The model proxy runs while any harness holds an API key (headless H16); a pass starts it again when it is gone.
   const keys = createKeyFiles(paths.keys);
   const proxy = modelProxy({ paths, version, launch: sessionsLaunch({ platform: process.platform, env }) });
@@ -153,7 +156,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     log: (line) => {
       logger.info(`fleet call ${line}`);
     },
-    refreshCheckouts: (shipId) => checkouts.refresh(shipId),
+    refreshCheckouts: createShipRefresh({ state, workspace, checkouts }),
   });
   const claudeCodeSetup = createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) });
   const modelLogins = createModelLogins({
