@@ -92,6 +92,19 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
     await expect(at.runtime().events(newId('ship'))).resolves.toEqual([]);
   });
 
+  it('says when the session last wrote an event, and none for a ship with no session', async () => {
+    const runtime = at.runtime();
+    const shipId = newId('ship');
+    await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'echo "an event"; sleep 30'], harness: HARNESS });
+    await expect.poll(async () => shown(runtime, shipId), POLL).toContain('an event');
+
+    const lastEventAt = await runtime.lastEventAt(shipId);
+
+    expect(lastEventAt).toBeInstanceOf(Date);
+    expect(Math.abs((lastEventAt?.getTime() ?? 0) - Date.now())).toBeLessThan(60_000);
+    await expect(runtime.lastEventAt(newId('ship'))).resolves.toBeUndefined();
+  });
+
   it('stops a session', async () => {
     const runtime = at.runtime();
     const shipId = newId('ship');

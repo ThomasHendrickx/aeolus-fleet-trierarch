@@ -30,6 +30,7 @@ import type {
   OwnerReportAnswer,
   RuntimeMode,
   SelfReport,
+  SessionActivity,
   SessionRuntime,
   StatePort,
   TrustedPlaces,
@@ -237,6 +238,19 @@ export class InMemoryFleet implements FleetPort {
       return Promise.reject(new Error('the fleet cannot be reached'));
     }
     return Promise.resolve([...this.requests].map(([shipId, { settings, settingsVersion, status, isFinal, owner }]) => ({ shipId, settings, settingsVersion, status, isFinal, owner })));
+  }
+
+  /** Each write of the sessions' activity, with the interval it stated, in order. */
+  readonly activityWrites: { intervalSeconds: number; activities: readonly ({ shipId: ShipId } & SessionActivity)[] }[] = [];
+  /** Set to make the fleet refuse the write of activity, as when it is busy. */
+  isRefusingActivity = false;
+
+  reportActivity(report: { intervalSeconds: number; activities: readonly ({ shipId: ShipId } & SessionActivity)[] }): Promise<void> {
+    if (this.isRefusingActivity) {
+      return Promise.reject(new Error('SERVICE_UNAVAILABLE'));
+    }
+    this.activityWrites.push(report);
+    return Promise.resolve();
   }
 
   writeStatus(shipId: ShipId, written: WrittenStatus): Promise<void> {
@@ -575,6 +589,13 @@ export class InMemoryHarness implements HarnessPort {
       return Promise.reject(new Error(this.pluginProblem));
     }
     return Promise.resolve(this.isMarkingLaunches);
+  }
+
+  /** What each ship's session did last, as its events say; a ship with none shows no activity yet. */
+  readonly activities = new Map<ShipId, SessionActivity>();
+
+  activityOf(session: { shipId: ShipId; folder: string }): Promise<SessionActivity | undefined> {
+    return Promise.resolve(this.activities.get(session.shipId));
   }
 
   launchSeen(session: { shipId: ShipId; folder: string; launchId: string; model?: string }): Promise<LaunchSeen> {
