@@ -17,6 +17,7 @@ import { NOT_SAID_YET_REASON, startNewProcess } from './new-process.js';
  * the service's file, as its own init does, and the supervisor reads it again,
  * so the stop already follows it (#485) and a change to the file arrives with
  * the version that makes it, not one upgrade later (#492).
+ * The configuration's schema, config.schema.json, is rewritten for the installed version: by its `install` after an install, by upgrade on the version already.
  * It never upgrades on its own, and never moves to npm's latest when that is older
  * than the version installed, as on a release candidate: it changes nothing and
  * says which version runs and which npm has (#1219). A failed install leaves the old version
@@ -222,6 +223,8 @@ export async function upgradeTrierarch(at: Restart & {
   plugin?: PluginUpgrade;
   /** Takes Remote Control out of the configuration (headless H20): the harnesses whose flags carried it. */
   removeRemoteControl: () => Promise<readonly string[]>;
+  /** Writes config.schema.json of the installed version; the installed version's `install` does it after an install. */
+  writeConfigurationSchema: () => Promise<void>;
 }): Promise<UpgradeReport> {
   const from = at.installedVersion();
   if (at.version !== undefined && !VERSION.test(at.version)) {
@@ -234,6 +237,7 @@ export async function upgradeTrierarch(at: Restart & {
   }
   if (target === from) {
     const removed = await at.removeRemoteControl();
+    await at.writeConfigurationSchema();
     const plugin = await upgradePlugin(at.plugin, target);
     const said = [alreadyOn(from), ...(removed.length === 0 ? [] : [remoteControlRemoved(removed)]), ...plugin.said];
     const running = at.isPluginStepOfAnUpgrade === true ? undefined : await otherRunningVersion(at, from);

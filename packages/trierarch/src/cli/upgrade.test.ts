@@ -158,11 +158,31 @@ const removeRemoteControl = () => {
   return Promise.resolve(removed);
 };
 
+/** How many times the upgrade rewrote config.schema.json for the installed version. */
+let schemaWrites: number;
+
+beforeEach(() => {
+  schemaWrites = 0;
+});
+
+const writeConfigurationSchema = () => {
+  schemaWrites += 1;
+  return Promise.resolve();
+};
+
 function upgrade(version?: string, at: { isPluginStepOfAnUpgrade?: boolean } = {}) {
-  return upgradeTrierarch({ ...(version !== undefined && { version }), ...at, installedVersion: () => installed, npm, writeInstalledServiceFile, upgradeInstalledPlugin: (to) => upgradeInstalledPlugin(to), service, running, sleep, plugin, removeRemoteControl });
+  return upgradeTrierarch({ ...(version !== undefined && { version }), ...at, installedVersion: () => installed, npm, writeInstalledServiceFile, upgradeInstalledPlugin: (to) => upgradeInstalledPlugin(to), service, running, sleep, plugin, removeRemoteControl, writeConfigurationSchema });
 }
 
 describe('aeolus-trierarch upgrade', () => {
+  it('rewrites config.schema.json for the installed version when it is on that version already', async () => {
+    installed = '0.17.2';
+
+    await upgrade();
+
+    expect(schemaWrites).toBe(1);
+  });
+
   it("takes --remote-control out of the configuration as the version it installs, and says so, before the service starts on it (headless H20)", async () => {
     offered = ['claude-code'];
     remoteControlIn = ['claude-code'];

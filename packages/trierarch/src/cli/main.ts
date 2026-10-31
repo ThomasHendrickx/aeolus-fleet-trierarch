@@ -12,7 +12,7 @@ import { createCodexSetup } from '../adapters/codex-setup.js';
 import { createContainerHost } from '../adapters/container-host.js';
 import { createDetectedFile } from '../adapters/detected-file.js';
 import { createDetectors } from '../adapters/detectors.js';
-import { loadConfiguration, readCrewFile, readRunningFile, removeRemoteControl, TrierarchFileError } from '../adapters/files.js';
+import { loadConfiguration, readCrewFile, readRunningFile, removeRemoteControl, TrierarchFileError, writeConfigurationJsonSchema } from '../adapters/files.js';
 import { createJsonState } from '../adapters/json-state.js';
 import { createKeyFiles } from '../adapters/key-files.js';
 import { createLogger, readLogLine, renderLogLine, type LogStream } from '../adapters/log.js';
@@ -336,6 +336,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
         ...(version !== undefined && { version }),
         isPluginStepOfAnUpgrade: env[PLUGIN_STEP_VARIABLE] === '1',
         removeRemoteControl: () => removeRemoteControl(paths.config),
+        writeConfigurationSchema: () => writeConfigurationJsonSchema(paths.configSchema),
         installedVersion: runningVersion,
         npm: {
           globalFolder: async () => {
@@ -405,6 +406,8 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       return { data: status, text };
     },
     install: async () => {
+      // The configuration's schema is of the version that runs this, as the one an editor checks against.
+      await writeConfigurationJsonSchema(paths.configSchema);
       if (switches.has('--no-load')) {
         const service = serviceAt();
         await service.write();

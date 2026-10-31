@@ -69,6 +69,12 @@ export function configurationJsonSchema(): Record<string, unknown> {
   return z.toJSONSchema(trierarchConfigurationSchema, { io: 'input' });
 }
 
+/** Writes the configuration's JSON Schema of this version to the path, so an editor checks against the schema the version accepts. */
+export async function writeConfigurationJsonSchema(path: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  await writeFile(path, `${JSON.stringify(configurationJsonSchema(), null, 2)}\n`);
+}
+
 export async function loadConfiguration(path: string): Promise<TrierarchConfiguration> {
   let text: string;
   try {
