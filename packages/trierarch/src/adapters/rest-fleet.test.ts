@@ -1,6 +1,7 @@
 import { createServer, type ServerResponse } from 'node:http';
 
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import { newId } from '../../test/support/in-memory.js';
 import { createRestFleet, FleetRefusal } from './rest-fleet.js';
@@ -349,7 +350,7 @@ describe('the fleet over REST while it is busy (#546)', () => {
 
       await fleet.reportActivity({ intervalSeconds: 30, activities });
 
-      expect(asked.map(({ body }) => (JSON.parse(body) as { activities: unknown[] }).activities.length)).toEqual([100, 1]);
+      expect(asked.map(({ body }) => z.object({ activities: z.array(z.unknown()) }).parse(JSON.parse(body)).activities.length)).toEqual([100, 1]);
     });
   });
 });

@@ -5,7 +5,7 @@ import { crashText, discardedText, identityGoneText, keyNotReadyText, modelRefus
 import { MODEL_OPTION } from './detected-options.js';
 import { countStart, PROBE_AFTER_MINUTES, withConfiguration, type StartOutcome } from './failed-starts.js';
 import { loginOf, startedOn, type KeyState, type Login, type Logins } from './login.js';
-import type { Checkout, CheckoutsPort, FleetPort, FolderProcessesPort, HarnessPort, LaunchSeen, LoggedAction, Logger, ModelLoginsPort, SessionRuntime, ShipSocketsPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
+import type { Checkout, CheckoutsPort, FleetPort, FolderProcessesPort, HarnessPort, LaunchSeen, LoggedAction, Logger, ModelLoginsPort, SessionActivity, SessionRuntime, ShipSocketsPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { HOLDS_IDENTITY, reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
 import type { RefuseModel } from './refuse-model.js';
 import type { Clock } from './shared/clock.js';
@@ -53,6 +53,9 @@ export interface RunPassDeps {
 
 const NEXT_AFTER_FAILURE = 'the next pass tries again; aeolus-trierarch status and list show where it stands';
 
+/** The interval the trierarch states with the activity it writes each pass: the fleet reads it as unknown past twice this, a pass being 5 seconds and a slow one a few more. */
+export const ACTIVITY_INTERVAL_SECONDS = 30;
+
 /** How many crews of a settings version may fail in a row before the request is given back (#827): the restart budget's count. */
 export const CREW_FAILURE_BUDGET = 3;
 
@@ -91,7 +94,37 @@ export function createRunPass(deps: RunPassDeps): RunPass {
         state = await failed({ action, deps, reason: reasonOf(error) });
       }
     }
+    await writeActivities(state, deps);
   };
+}
+
+/**
+ * Writes the activity of every running session, each pass (monitoring W3b):
+ * the fleet reads it as unknown once a write is older than twice the interval
+ * stated with it, so a trierarch that is down reads as unknown, not as stopped
+ * work. A failure here is told and left: it never fails the pass.
+ */
+async function writeActivities(state: TrierarchState, deps: RunPassDeps): Promise<void> {
+  try {
+    const sessions = await deps.processes.list();
+    const activities: ({ shipId: ShipId } & SessionActivity)[] = [];
+    for (const entry of Object.values(state.entries)) {
+      const { folder } = entry;
+      const harness = harnessOf(entry, deps);
+      if (entry.state !== 'running' || folder === undefined || harness === undefined || sessions.find((each) => each.shipId === entry.shipId)?.status !== 'running') {
+        continue;
+      }
+      const activity = await harness.activityOf({ shipId: entry.shipId, folder });
+      if (activity !== undefined) {
+        activities.push({ shipId: entry.shipId, ...activity });
+      }
+    }
+    if (activities.length > 0) {
+      await deps.fleet.reportActivity({ intervalSeconds: ACTIVITY_INTERVAL_SECONDS, activities });
+    }
+  } catch (error) {
+    deps.logger.warn(`The activity of the sessions was not written: ${reasonOf(error)}; the next pass tries again`);
+  }
 }
 
 /** Whether each harness's aeolus-fleet plugin marks launches, which harnesses have no plugin to ask (#1212), one missing never failing the pass for the others, and why the machine does not offer a harness (CC3, CC10). */

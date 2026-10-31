@@ -83,6 +83,15 @@ export interface WrittenStatus {
 /** How the fleet answered a give-back (#382): it took the request back, or refused with its code and message. */
 export type GiveBackAnswer = { readonly kind: 'givenBack' } | { readonly kind: 'refused'; readonly code: string; readonly message: string };
 
+/** What a session did last (monitoring 4.3): when, its kind and the tool of a tool call; never any content of it. */
+export type ActivityKind = 'text' | 'tool' | 'result' | 'error';
+
+export interface SessionActivity {
+  readonly at: Date;
+  readonly kind: ActivityKind;
+  readonly tool?: string;
+}
+
 export interface FleetPort {
   /** The fleet's URL, written into each session's identity. */
   readonly url: string;
@@ -124,6 +133,13 @@ export interface FleetPort {
   inbox(crewToken: string): Promise<InboxAnswer>;
   /** Reports on a ship's behalf, with its session's crew token. */
   report(crew: { crewToken: string; state: 'blocked' | 'working'; note: string }): Promise<void>;
+  /**
+   * Writes the activity of the sessions it runs (monitoring W3b), with the
+   * interval it writes at: the fleet reads it as unknown once a write is
+   * older than twice that. An entry the fleet refuses, as for a ship whose
+   * lease just ended, is left; the rest are taken.
+   */
+  reportActivity(report: { intervalSeconds: number; activities: readonly ({ shipId: ShipId } & SessionActivity)[] }): Promise<void>;
   /** Reports as the trierarch's own ship: what it does, and its details. */
   reportSelf(report: SelfReport): Promise<void>;
 }
@@ -205,6 +221,8 @@ export interface HarnessPort {
   sessionDied(session: { shipId: ShipId; folder: string }): Promise<void>;
   /** What the session did in its launch window (#382), as its hooks marked the launch it was started for (#490), for the model it launched with; any model refused when it launched with none. */
   launchSeen(session: { shipId: ShipId; folder: string; launchId: string; model?: string }): Promise<LaunchSeen>;
+  /** What the session did last, from its events and when it last wrote one; none while it wrote none that shows activity (monitoring W3b). */
+  activityOf(session: { shipId: ShipId; folder: string }): Promise<SessionActivity | undefined>;
   /** Whether the harness's aeolus-fleet plugin marks launches (#490); one older than the launch marker does not, and its sessions are not crewed. */
   marksLaunches(): Promise<boolean>;
   /** Why the machine does not offer the harness now, as for a build its plugin's hooks are not proven on or a runtime it is not proven in (CC3, CC10); none while it offers it. */
@@ -249,6 +267,8 @@ export interface SessionRuntime {
   interrupt(shipId: ShipId): Promise<void>;
   /** What the session's harness wrote last, one line each, oldest first: its events, or its screen in a terminal; none with no session. */
   events(shipId: ShipId): Promise<readonly string[]>;
+  /** When the session's harness last wrote an event; none with no session or no event. */
+  lastEventAt(shipId: ShipId): Promise<Date | undefined>;
 }
 
 /**
