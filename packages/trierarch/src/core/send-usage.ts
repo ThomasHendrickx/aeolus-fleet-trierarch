@@ -31,7 +31,8 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
 const bytesOf = (message: TrierarchUsageMessage): number => new TextEncoder().encode(JSON.stringify(message)).length;
 
 /** Whole hours packed into messages under the most a message holds, oldest hour first; the subscription readings go with the first. */
-function messagesOf(hours: readonly MessageHour[], subscriptions: readonly SubscriptionReading[], readAt: string): TrierarchUsageMessage[] {
+function messagesOf(hours: readonly MessageHour[], first: { subscriptions: readonly SubscriptionReading[]; readAt: string }): TrierarchUsageMessage[] {
+  const { subscriptions, readAt } = first;
   const messages: TrierarchUsageMessage[] = [{ hours: [], subscriptions: [...subscriptions], readAt }];
   for (const hour of hours) {
     const last = messages.at(-1) ?? { hours: [], subscriptions: [], readAt };
@@ -51,7 +52,7 @@ function messagesOf(hours: readonly MessageHour[], subscriptions: readonly Subsc
  * after the hour turns, and at the first after it starts, it reads each
  * crewed ship's tokens per UTC hour and sends every hour whose totals changed
  * since its last send that returned OK, each hour whole across its ships,
- * and the subscription readings since. An hour's tokens are its total so
+ * and every subscription reading since, gathered each pass. An hour's tokens are its total so
  * far: sending it again changes nothing. Over 64 KB it goes as several
  * messages of whole hours. Only a send that returned OK marks its hours sent,
  * in the ship's entry, so a refused one (fleet unreachable, the daily message
@@ -71,6 +72,8 @@ export function createSendUsage(deps: {
   pluginShipId?: ShipId;
 }): SendUsage {
   let triedHour: number | undefined;
+  /** The subscription readings not sent yet, by harness and when, gathered each pass: a harness is read again within an hour. */
+  const pendingReadings = new Map<string, SubscriptionReading>();
   const sentReadings = new Set<string>();
 
   const shipHoursOf = async (entry: Entry): Promise<ShipHour[]> => {
@@ -124,23 +127,39 @@ export function createSendUsage(deps: {
 
   return async () => {
     const { pluginShipId, trierarchShipId } = deps;
+    if (pluginShipId === undefined || trierarchShipId === undefined) {
+      return;
+    }
+    const { subscriptions } = await deps.readUsage();
+    const current = new Set(subscriptions.map(({ harness, readAt }) => `${harness} ${readAt}`));
+    // Only the readings the read still answers can come again: the others need not be remembered as sent.
+    for (const key of sentReadings) {
+      if (!current.has(key)) {
+        sentReadings.delete(key);
+      }
+    }
+    for (const reading of subscriptions) {
+      const key = `${reading.harness} ${reading.readAt}`;
+      if (!sentReadings.has(key)) {
+        pendingReadings.set(key, reading);
+      }
+    }
     const now = deps.clock.now();
     const hourNow = Math.floor(now.getTime() / HOUR_MS);
-    if (pluginShipId === undefined || trierarchShipId === undefined || triedHour === hourNow) {
+    if (triedHour === hourNow) {
       return;
     }
     triedHour = hourNow;
-    const { subscriptions } = await deps.readUsage();
     const { entries } = await deps.state.load();
     const shipHours = (await Promise.all(Object.values(entries).map(shipHoursOf))).flat();
     const changedHours = new Set(shipHours.filter(({ shipId, key, ships }) => entries[shipId]?.sentUsage?.[key] !== JSON.stringify(ships)).map(({ hour }) => hour));
-    const newReadings = subscriptions.filter(({ harness, readAt }) => !sentReadings.has(`${harness} ${readAt}`));
+    const newReadings = [...pendingReadings.values()].sort((a, b) => a.readAt.localeCompare(b.readAt) || a.harness.localeCompare(b.harness));
     if (changedHours.size === 0 && newReadings.length === 0) {
       return;
     }
     const hours = [...changedHours].sort().map((hour) => ({ hour, ships: shipHours.filter((shipHour) => shipHour.hour === hour).flatMap(({ ships }) => ships) }));
     const readAt = now.toISOString();
-    const messages = messagesOf(hours, newReadings, readAt);
+    const messages = messagesOf(hours, { subscriptions: newReadings, readAt });
     for (const [index, message] of messages.entries()) {
       const idempotencyKey = `usage:${trierarchShipId}:${readAt}${index === 0 ? '' : `:${String(index + 1)}`}`;
       try {
@@ -152,7 +171,9 @@ export function createSendUsage(deps: {
       const sentHours = new Set(message.hours.map(({ hour }) => hour));
       await markSent(shipHours.filter(({ hour }) => sentHours.has(hour)));
       for (const { harness, readAt: readingAt } of message.subscriptions) {
-        sentReadings.add(`${harness} ${readingAt}`);
+        const key = `${harness} ${readingAt}`;
+        sentReadings.add(key);
+        pendingReadings.delete(key);
       }
     }
   };
