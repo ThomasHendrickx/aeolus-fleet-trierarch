@@ -1,4 +1,4 @@
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { idSchema, type ShipId, type TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { ClaudeCodeSetup } from '../adapters/claude-code-setup.js';
@@ -9,6 +9,7 @@ import { FleetRefusal, type RestFleet } from '../adapters/rest-fleet.js';
 import type { Service } from '../adapters/service.js';
 import type { DetectHarnesses } from '../core/detect-harnesses.js';
 import { withoutRemoteControl } from '../core/remote-control.js';
+import { readTrustedRepositories, type TrustedRepository } from '../core/trusted-repositories.js';
 import { describeDetected } from './detect.js';
 import { NOT_SAID_YET, startNewProcess } from './new-process.js';
 import { absolutePath, nameRefusal, placeRefusal } from './places.js';
@@ -114,6 +115,13 @@ function pluginShipOf(flags: InitFlags): ShipId | undefined {
     throw new TrierarchFileError(accepted.why);
   }
   return accepted.value;
+}
+
+/** The trusted repositories the trierarch holds from the trierarch plugin's ship; none when the file is missing or does not fit. */
+async function heldTrustedRepositories(file: string): Promise<readonly TrustedRepository[]> {
+  const text = await readFile(file, 'utf8').catch(() => undefined);
+  const read = text === undefined ? undefined : readTrustedRepositories(text);
+  return read?.isOk === true ? read.value : [];
 }
 
 const MINIMUM_NODE_MAJOR = 26;
@@ -404,7 +412,15 @@ export async function initTrierarch(input: {
     said.push(`Configuration ${configured} at ${paths.config}.`);
   }
   if (Object.keys(configuration.repositories).length === 0 && Object.keys(configuration.folders).length === 0) {
-    said.push('It has no repository or folder yet, so it can crew no request: run aeolus-trierarch init again to add one.');
+    const trusted = await heldTrustedRepositories(paths.trustedRepositories);
+    const keptPluginShipId = pluginShipId ?? crew?.pluginShipId;
+    if (trusted.length > 0) {
+      said.push(`It has no configured repository or folder, and holds ${String(trusted.length)} trusted ${trusted.length === 1 ? 'repository' : 'repositories'}: ${trusted.map(({ name }) => name).join(', ')}.`);
+    } else if (keptPluginShipId !== undefined) {
+      said.push(`It has no configured repository or folder, and takes its trusted repositories from the trierarch plugin's ship ${keptPluginShipId} once the restarted trierarch has them.`);
+    } else {
+      said.push('It has no repository or folder yet, so it can crew no request: run aeolus-trierarch init again to add one.');
+    }
   }
 
   const root = configuration.worktreeRoot ?? paths.worktrees;
