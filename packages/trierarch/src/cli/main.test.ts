@@ -415,6 +415,18 @@ describe('aeolus-trierarch with CLAUDE_CONFIG_DIR and CODEX_HOME set (#521)', ()
     expect(output).toContain('codex 0.160.1: model gpt-6.1-sol, gpt-6-luna (default);');
   }, INIT_TIMEOUT_MS);
 
+  it('install --no-load, as the installed version runs it in an upgrade, rewrites config.schema.json for its version', async () => {
+    await aSetUpMachine({ isServiceInstalled: true });
+    const { configSchema } = trierarchPaths({ homeDirectory: home });
+    writeFileSync(configSchema, '{"stale":true}\n');
+
+    const { output, code } = await main(['install', '--no-load'], machine(both()));
+
+    expect(code, output).toBe(0);
+    expect(json(configSchema)).toMatchObject({ type: 'object', properties: { $schema: expect.anything() } });
+    expect(json(configSchema)).not.toHaveProperty('stale');
+  }, INIT_TIMEOUT_MS);
+
   it('add trusts a place in .claude.json under CLAUDE_CONFIG_DIR, leaving ~/.claude.json alone', async () => {
     await aSetUpMachine({ isServiceInstalled: false });
     const drafts = join(home, 'drafts');
