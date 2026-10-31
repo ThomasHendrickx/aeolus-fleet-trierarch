@@ -142,7 +142,8 @@ describe('the session runtime contract, on rootless Podman under holds', { timeo
   it('runs the container under the hold, not detached: stopping the session removes its container (H18)', async () => {
     const shipId = newId('ship');
     await runtime.start({ shipId, folder, command: ['sleep', '30'], harness: 'claude-code' });
-    await expect(containerNames()).resolves.toEqual([`trierarch-${shipId}`]);
+    // The hold answers once it runs the container's start, which Podman makes a moment later.
+    await expect.poll(containerNames, { timeout: 10_000 }).toEqual([`trierarch-${shipId}`]);
 
     await runtime.stop(shipId);
 
@@ -181,7 +182,8 @@ describe('the session runtime contract, on rootless Podman under holds', { timeo
     await runtime.start({ shipId, folder, command: ['sleep', '30'], harness: 'claude-code' });
 
     await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running' }]);
-    await expect(containerNames()).resolves.toEqual([`trierarch-${shipId}`]);
+    // The hold answers once it runs the container's start, which Podman makes a moment later.
+    await expect.poll(containerNames, { timeout: 10_000 }).toEqual([`trierarch-${shipId}`]);
   });
 
   it("reaches the model proxy at Podman's host address on an API key, with its own proxy token, and holds no key and no model token (headless H16, api keys K7)", async () => {
