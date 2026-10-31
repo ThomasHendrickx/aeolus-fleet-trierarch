@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as wait } from 'node:timers/promises';
 
-import { assignedCrewRequestsOutputSchema, busyWaitMs, clearRequestsOutputSchema, FLEET_BUSY_WAITS_MS, giveBackCrewRequestOutputSchema, idSchema, inboxOutputSchema, MARKDOWN_CONTENT_TYPE, receivedDeliverySchema, shipDetailOutputSchema, type ShipId } from '@aeolus-fleet/common';
+import { assignedCrewRequestsOutputSchema, busyWaitMs, clearRequestsOutputSchema, FLEET_BUSY_WAITS_MS, giveBackCrewRequestOutputSchema, idSchema, inboxOutputSchema, MARKDOWN_CONTENT_TYPE, receivedDeliverySchema, shipDetailOutputSchema, TRIERARCH_USAGE_CONTENT_TYPE, type ShipId } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
 import type { Delivery, FleetPort } from '../core/ports.js';
@@ -156,6 +156,13 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string; 
     },
     pong: async (deliveryId) => {
       await call({ path: '/ship/pong', body: { deliveryId }, answers: z.unknown() });
+    },
+    sendUsage: async ({ pluginShipId, payload, idempotencyKey }) => {
+      await call({
+        path: '/ship/send',
+        body: { selector: { kind: 'ship', shipId: pluginShipId }, payload, contentType: TRIERARCH_USAGE_CONTENT_TYPE, model: TRIERARCH_SELF.model, idempotencyKey },
+        answers: z.object({ messageId: idSchema('message') }),
+      });
     },
     askForTrustedRepositories: async (pluginShipId) => {
       await call({

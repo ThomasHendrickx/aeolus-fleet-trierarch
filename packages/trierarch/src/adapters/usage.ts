@@ -12,8 +12,9 @@ export interface HarnessUsageReader {
 }
 
 /** The harnesses' usage (#353), each from the reader of its harness; a harness with none says nothing. */
-export function createUsage(readers: Readonly<Record<string, HarnessUsageReader>>): UsagePort {
+export function createUsage(readers: Readonly<Record<string, HarnessUsageReader>>, madeAt: (folder: string) => Promise<Date> = folderMadeAt): UsagePort {
   return {
+    madeAt,
     tokensOf: ({ harness, ...ship }) => readers[harness]?.tokensOf(ship) ?? Promise.resolve([]),
     subscriptionOf: (harness) => readers[harness]?.subscription() ?? Promise.resolve(undefined),
   };
