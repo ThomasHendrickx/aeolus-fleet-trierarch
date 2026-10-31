@@ -8,6 +8,7 @@ import { loginOf, startedOn, type KeyState, type Login, type Logins } from './lo
 import type { Checkout, CheckoutsPort, FleetPort, FolderProcessesPort, HarnessPort, LaunchSeen, LoggedAction, Logger, ModelLoginsPort, SessionActivity, SessionRuntime, ShipSocketsPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { HOLDS_IDENTITY, reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
 import type { RefuseModel } from './refuse-model.js';
+import type { SendReleasedUsage } from './send-usage.js';
 import type { Clock } from './shared/clock.js';
 
 /**
@@ -49,6 +50,8 @@ export interface RunPassDeps {
   logins?: Logins;
   /** Whether a session can start on its login now (api keys K9). */
   modelLogins: ModelLoginsPort;
+  /** Sends a released ship's last usage before its folder goes (the usage design, U9); rejects while the fleet does not take it. */
+  sendReleasedUsage: SendReleasedUsage;
 }
 
 const NEXT_AFTER_FAILURE = 'the next pass tries again; aeolus-trierarch status and list show where it stands';
@@ -615,6 +618,8 @@ async function releaseWorkspace(at: EntryAt & { cause: ReleaseCause }): Promise<
   if (folder === undefined) {
     return 'its worktree removed';
   }
+  // Its usage goes first: what it used since the last send would be lost with the folder.
+  await deps.sendReleasedUsage(entry);
   await removeIdentity({ entry, deps, folder });
   if (entry.workspace.kind === 'folder') {
     return `its folder kept: ${folder}`;

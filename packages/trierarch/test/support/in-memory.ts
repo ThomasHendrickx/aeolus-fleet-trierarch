@@ -51,7 +51,7 @@ import type {
 import type { MachineLoad } from '../../src/core/machine-load.js';
 import { createReadLoad } from '../../src/core/read-load.js';
 import { createReadUsage } from '../../src/core/read-usage.js';
-import { createSendUsage } from '../../src/core/send-usage.js';
+import { createSendReleasedUsage, createSendUsage } from '../../src/core/send-usage.js';
 import { createReportSelf } from '../../src/core/report-self.js';
 import { priceTableOf } from '../../src/core/token-cost.js';
 import { createRunPass } from '../../src/core/run-pass.js';
@@ -1029,10 +1029,11 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
   const sockets = new InMemoryShipSockets([harness, codex]);
   const checkouts = new InMemoryCheckouts(configuration);
   const folderProcesses = new InMemoryFolderProcesses();
-  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, folderProcesses, workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId, sockets, modelLogins, ...(logins !== undefined && { logins }) });
+  const usage = new InMemoryUsage();
+  const sendReleasedUsage = createSendReleasedUsage({ fleet, usage, clock, prices: priceTableOf(undefined), trierarchShipId: TRIERARCH_SHIP_ID, ...(pluginShipId !== undefined && { pluginShipId }) });
+  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, folderProcesses, workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId, sockets, modelLogins, sendReleasedUsage, ...(logins !== undefined && { logins }) });
   const uninstall = createUninstall({ processes, state });
   const machine = new InMemoryMachine();
-  const usage = new InMemoryUsage();
   const readLoad = createReadLoad({ machine, fleet, state, clock, logger });
   const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configuration.harnesses), prices: priceTableOf(undefined) });
   const sendUsage = createSendUsage({ fleet, usage, state, readUsage, clock, logger, prices: priceTableOf(undefined), trierarchShipId: TRIERARCH_SHIP_ID, ...(pluginShipId !== undefined && { pluginShipId }) });
