@@ -131,7 +131,7 @@ describe('a read-only workspace (aeolus-fleet#1449)', () => {
 
     const refreshed = await workspaces().refresh({ repository: 'aeolus-company', folder: workspace });
 
-    expect('problem' in refreshed ? refreshed.problem : undefined).toContain('fetch');
+    expect(refreshed !== undefined && 'problem' in refreshed ? refreshed.problem : undefined).toContain('fetch');
     expect(await git(['-C', workspace, 'rev-parse', 'HEAD'])).toBe(held);
   });
 

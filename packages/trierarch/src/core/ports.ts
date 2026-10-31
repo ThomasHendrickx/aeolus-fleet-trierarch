@@ -317,8 +317,8 @@ export interface ContainerHostPort {
 }
 
 export interface WorkspacePort {
-  /** Makes the workspace, or finds the one a stop mid-crew left half made: its folder. */
-  prepare(workspace: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace }): Promise<{ folder: string }>;
+  /** Makes the workspace, or finds the one a stop mid-crew left half made: its folder, and whether the session may only read it (aeolus-fleet#1449). */
+  prepare(workspace: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace }): Promise<{ folder: string; isReadOnly?: boolean }>;
   isClean(folder: string): Promise<boolean>;
   /**
    * What removing the worktree would discard, one line each (#450): each change
