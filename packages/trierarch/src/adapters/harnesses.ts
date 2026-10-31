@@ -84,7 +84,7 @@ export async function createHarnesses(at: {
   managedSettings: string;
   /** What detection last found, read at each launch (#517). */
   detected: () => Detected;
-  sessions: Pick<SessionRuntime, 'start' | 'send' | 'interrupt' | 'events'>;
+  sessions: Pick<SessionRuntime, 'start' | 'send' | 'interrupt' | 'events' | 'lastEventAt'>;
   /** For sessions in containers: a home of each ship's own (decision 0039); without, sessions run headless on the host (headless H4). */
   shipHomes?: { homes: string; managedSettings: string };
   /** Where sessions on an API key reach the model proxy (headless H16); none on a machine with no proxy. */

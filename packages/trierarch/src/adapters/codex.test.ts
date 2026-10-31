@@ -86,6 +86,7 @@ function harness(at: { pluginRoot?: string; proxyUrl?: string } = {}) {
         return Promise.resolve();
       },
       events: (shipId) => Promise.resolve(events.get(shipId) ?? []),
+      lastEventAt: () => Promise.resolve(undefined),
     },
   });
 }
@@ -194,6 +195,7 @@ describe('Codex as a harness', () => {
         send: () => Promise.resolve(),
         interrupt: () => Promise.resolve(),
         events: () => Promise.resolve([]),
+        lastEventAt: () => Promise.resolve(undefined),
       },
     });
 
@@ -214,6 +216,7 @@ describe('Codex as a harness', () => {
         send: () => Promise.resolve(),
         interrupt: () => Promise.resolve(),
         events: () => Promise.resolve([]),
+        lastEventAt: () => Promise.resolve(undefined),
       },
     });
 

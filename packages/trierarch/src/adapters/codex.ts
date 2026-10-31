@@ -12,6 +12,7 @@ import { parsedLine } from './hold-protocol.js';
 import { createLaunchMarks } from './launch-marker.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
 import { newProxyToken } from './proxy-tokens.js';
+import { codexActivityIn, sessionActivityOf } from './session-activity.js';
 
 /**
  * Codex as a harness (docs/architecture.md, "First adapters"), headless
@@ -131,7 +132,7 @@ export function codexErrorIn(at: { events: readonly string[]; model?: string }):
 export function createCodexHarness(options: {
   configuration: TrierarchConfiguration;
   plugin: AeolusPlugin;
-  sessions: Pick<SessionRuntime, 'start' | 'send' | 'interrupt' | 'events'>;
+  sessions: Pick<SessionRuntime, 'start' | 'send' | 'interrupt' | 'events' | 'lastEventAt'>;
   /** Codex's own answers, where the aeolus-fleet plugin's hooks are trusted before each launch (#581). */
   setup: Pick<CodexSetup, 'trustAeolusHooks'>;
   /** The program to run; `codex` unless a test runs another. */
@@ -201,6 +202,7 @@ export function createCodexHarness(options: {
     // Codex is offered wherever its plugin is: no build or runtime of it is held back.
     notOfferedReason: () => Promise.resolve(undefined),
     // The marker says what the session did (#490); Codex has no hook for a failed turn, so a refusal, or why a start shows none, is read from its last error event (headless H13).
+    activityOf: async ({ shipId }) => sessionActivityOf({ sessions, shipId, read: codexActivityIn }),
     launchSeen: async ({ shipId, folder, launchId, model }) => {
       const error = codexErrorIn({ events: await sessions.events(shipId), ...(model !== undefined && { model }) });
       if (error?.kind === 'refused') {

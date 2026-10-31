@@ -14,6 +14,7 @@ import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
 import { createLaunchMarks } from './launch-marker.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
 import { newProxyToken } from './proxy-tokens.js';
+import { claudeCodeActivityIn, sessionActivityOf } from './session-activity.js';
 
 /**
  * Claude Code as a harness (docs/architecture.md, "First adapters"): `claude`
@@ -191,7 +192,7 @@ export function claudeCodeErrorIn(events: readonly string[]): string | undefined
 export function createClaudeCodeHarness(options: {
   configuration: TrierarchConfiguration;
   plugin: AeolusPlugin;
-  sessions: Pick<SessionRuntime, 'start' | 'send' | 'interrupt' | 'events'>;
+  sessions: Pick<SessionRuntime, 'start' | 'send' | 'interrupt' | 'events' | 'lastEventAt'>;
   /** Claude Code's projects folder, where it keeps each folder's conversations. */
   projects: string;
   /** Claude Code's own files, where its onboarding is completed before each launch (#403) and its settings' default mode is read (#505, #507). */
@@ -285,6 +286,7 @@ export function createClaudeCodeHarness(options: {
     // Claude Code is offered wherever its plugin is: no build or runtime of it is held back.
     notOfferedReason: () => Promise.resolve(undefined),
     // The marker says what the session did; the last error event names why a start shows none (H13).
+    activityOf: async ({ shipId }) => sessionActivityOf({ sessions, shipId, read: claudeCodeActivityIn }),
     launchSeen: async ({ shipId, folder, launchId, model }) => {
       const marker = await marksOf(shipId).read({ folder, launchId });
       if (marker?.refused !== undefined) {

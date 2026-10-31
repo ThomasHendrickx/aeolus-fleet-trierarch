@@ -107,6 +107,9 @@ async function launchHooks(at: { folder: string; env: Readonly<Record<string, st
   }
 }
 
+/** The stream-json event of a tool call, as Claude Code writes it: the activity the trierarch reads. */
+const A_TOOL_CALL = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash' }] } });
+
 /** Sessions as a map, standing in for the session runtime: started ones run until stopped, each showing what Claude Code would show in this home. */
 function standInSessions(): SessionRuntime {
   const sessions = new Map<ShipId, ObservedSession['status']>();
@@ -126,7 +129,8 @@ function standInSessions(): SessionRuntime {
     },
     send: () => Promise.resolve(),
     interrupt: () => Promise.resolve(),
-    events: (shipId) => Promise.resolve(sessions.has(shipId) ? claudeCodeShows(commands.get(shipId) ?? []).split('\n') : []),
+    lastEventAt: (shipId) => Promise.resolve(sessions.has(shipId) ? new Date() : undefined),
+    events: (shipId) => Promise.resolve(sessions.has(shipId) ? [...claudeCodeShows(commands.get(shipId) ?? []).split('\n'), A_TOOL_CALL] : []),
   };
 }
 
@@ -268,6 +272,7 @@ describe('the trierarch on a real fleet', () => {
     const identity = readFileSync(identityPath.stdout.trim(), 'utf8');
     expect(identity).toContain(`shipId=${scout.shipId}\n`);
     expect(identity).toContain('wakeBy=trierarch\n');
+    await expect(database.lease.findFirstOrThrow({ where: { shipId: scout.shipId } })).resolves.toMatchObject({ activityIntervalSeconds: 30, activityKind: 'tool', activityTool: 'Bash' });
 
     unwrap(await useCases.removeCrewRequest(argo, { shipId: scout.shipId }));
     await pass();
@@ -502,6 +507,7 @@ function hookedSessions() {
       return Promise.resolve();
     },
     events: () => Promise.resolve([]),
+    lastEventAt: () => Promise.resolve(undefined),
   };
 
   return {
