@@ -53,7 +53,9 @@ beforeEach(async () => {
   chmodSync(binary, 0o755);
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Read-only workspaces a test left are made writable again so they can go.
+  await runCommand('chmod', { args: ['-R', 'u+w', home] });
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -63,6 +65,11 @@ function configuration(runtime?: TrierarchConfiguration['runtime']): TrierarchCo
 
 function adaptersOf(runtime?: TrierarchConfiguration['runtime'], worktreeRoot?: string) {
   return runtimeAdaptersOf({ configuration: { ...configuration(runtime), ...(worktreeRoot !== undefined && { worktreeRoot }) }, paths, version: '0.25.0', launch: [], managedSettings: join(home, 'managed'), program: TRIERARCH_PROGRAM });
+}
+
+/** The adapters for a machine whose demo repository is read-only (aeolus-fleet#1449). */
+function readOnlyAdaptersOf(runtime?: TrierarchConfiguration['runtime']) {
+  return runtimeAdaptersOf({ configuration: configuration(runtime), readOnly: ['demo'], paths, version: '0.25.0', launch: [], managedSettings: join(home, 'managed'), program: TRIERARCH_PROGRAM });
 }
 
 describe('the adapters the session runtime picks (decision 0039)', () => {
@@ -87,6 +94,25 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
     const { folder } = await adaptersOf({ ...CONTAINER, binary }, join(home, 'linked-root')).workspace.prepare({ shipId, shipName: 'scout', workspace: { kind: 'worktree', repository: 'demo' } });
 
     expect(folder).toBe(join(home, 'real-root', 'demo', 'scout'));
+  });
+
+  it("gives sessions on the host a read-only repository's workspace as a read-only clone (aeolus-fleet#1449)", async () => {
+    const made = await readOnlyAdaptersOf().workspace.prepare({ shipId, shipName: 'scout', workspace: { kind: 'worktree', repository: 'demo' } });
+
+    expect({ ...made, isClone: statSync(join(made.folder, '.git')).isDirectory() }).toEqual({ folder: join(paths.worktrees, 'demo', 'scout'), isReadOnly: true, isClone: true });
+  });
+
+  it("gives sessions in containers a read-only repository's workspace as a read-only clone, mounted read-only (aeolus-fleet#1449)", async () => {
+    mkdirSync(paths.home, { recursive: true });
+    writeFileSync(paths.modelToken, `${MODEL_TOKEN}\n`, { mode: 0o600 });
+    const adapters = readOnlyAdaptersOf({ ...CONTAINER, binary });
+    const { folder, isReadOnly } = await adapters.workspace.prepare({ shipId, shipName: 'scout', workspace: { kind: 'worktree', repository: 'demo' } });
+
+    await adapters.sessions.start({ shipId, folder, command: ['claude'], harness: 'claude-code' });
+
+    await expect.poll(() => readFileSync(join(home, 'calls'), 'utf8')).toContain('run ');
+    const run = readFileSync(join(home, 'calls'), 'utf8').split('\n').find((call) => call.startsWith('run '));
+    expect({ isReadOnly, isMountedReadOnly: run?.includes(` ${folder}:${folder}:ro `) }).toEqual({ isReadOnly: true, isMountedReadOnly: true });
   });
 
   it("gives sessions in containers a home of each ship's own under the trierarch's homes", () => {

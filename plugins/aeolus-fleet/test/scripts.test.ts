@@ -4143,9 +4143,9 @@ describe("a ship's read-only checkouts, which its trierarch keeps (#1182)", () =
   });
 
   /** The trierarch writes the folder's identity with its socket and the checkouts given. */
-  function crewedWithCheckouts(checkouts: readonly string[], env: Record<string, string> = {}): string {
+  function crewedWithCheckouts(checkouts: readonly string[], { env = {}, isFolderReadOnly = false }: { env?: Record<string, string>; isFolderReadOnly?: boolean } = {}): string {
     const socket = join(sockets, 'fleet.sock');
-    const args = ['write', '--wake-by', 'trierarch', '--socket', socket, ...checkouts.flatMap((checkout) => ['--checkout', checkout]), 'https://fleet.example.com', SHIP_ID, 'scout'];
+    const args = ['write', '--wake-by', 'trierarch', '--socket', socket, ...checkouts.flatMap((checkout) => ['--checkout', checkout]), ...(isFolderReadOnly ? ['--read-only-folder'] : []), 'https://fleet.example.com', SHIP_ID, 'scout'];
     expect(run('aeolus-identity.sh', { args, stdin: CREW_TOKEN, env }).status).toBe(0);
     return socket;
   }
@@ -4175,7 +4175,7 @@ describe("a ship's read-only checkouts, which its trierarch keeps (#1182)", () =
   });
 
   it("names each checkout and where it is in a Codex session's start context", () => {
-    crewedWithCheckouts([`governance=${GOVERNANCE}`, `skills=${SKILLS}`], AS_CODEX);
+    crewedWithCheckouts([`governance=${GOVERNANCE}`, `skills=${SKILLS}`], { env: AS_CODEX });
 
     const context = sessionStart({ PLUGIN_DATA: data, PLUGIN_ROOT: SCRIPTS.replace(/\/scripts\/$/, '') });
 
@@ -4189,6 +4189,32 @@ describe("a ship's read-only checkouts, which its trierarch keeps (#1182)", () =
     const context = sessionStart({ CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin' });
 
     expect(context).not.toContain('checkouts');
+  });
+
+  it('says in the start context that a read-only folder is read-only and on main, and that the refresh brings it too (aeolus-fleet#1449)', () => {
+    crewedWithCheckouts([`skills=${SKILLS}`], { isFolderReadOnly: true });
+
+    const context = sessionStart({ CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin' });
+
+    expect(context).toContain(`Read-only checkouts beside this folder: skills at ${SKILLS}. Read them; never change, commit or push in them.`);
+    expect(context).toContain('This folder is read-only too, on main: never change, commit or push in it, and keep working files in your temporary folder.');
+    expect(context).toContain('To bring them and this folder to the latest main, run "/plugin/scripts/aeolus-checkouts.sh" refresh: it answers the revision each now holds, or why it could not.');
+  });
+
+  it('says a read-only folder with no checkouts beside it is read-only, and how to refresh it (aeolus-fleet#1449)', () => {
+    crewedWithCheckouts([], { isFolderReadOnly: true });
+
+    const context = sessionStart({ CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin' });
+
+    expect(context).toContain('This folder is read-only, on main: never change, commit or push in it, and keep working files in your temporary folder.');
+    expect(context).toContain('To bring this folder to the latest main, run "/plugin/scripts/aeolus-checkouts.sh" refresh: it answers the revision it now holds, or why it could not.');
+  });
+
+  it('refuses a read-only folder in a folder no trierarch crews (aeolus-fleet#1449)', () => {
+    const written = run('aeolus-identity.sh', { args: ['write', '--read-only-folder', 'https://fleet.example.com', SHIP_ID, 'scout'], stdin: CREW_TOKEN });
+
+    expect(written.status).toBe(2);
+    expect(statSync(identityFile(), { throwIfNoEntry: false })).toBeUndefined();
   });
 
   it('refuses a checkout that names no repository and path', () => {

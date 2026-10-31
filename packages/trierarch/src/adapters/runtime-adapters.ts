@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
-import type { SessionRuntime, WorkspacePort } from '../core/ports.js';
+import type { RefreshedCheckout, SessionRuntime, WorkspacePort } from '../core/ports.js';
 import type { SessionRoots } from './caller-check.js';
 import { createCloneWorkspace } from './clone-workspace.js';
 import { containerProxyUrl, createContainerRuntime } from './container.js';
@@ -12,6 +12,7 @@ import type { TrustedClones } from './trusted-clones.js';
 import type { TrierarchPaths } from './paths.js';
 import { createHoldRuntime } from './hold-runtime.js';
 import { createProxyRuntime, type ProxyRuntime } from './proxy-runtime.js';
+import { createReadOnlyWorkspace } from './read-only-workspace.js';
 
 /** The session image `release.yml` publishes with each version (decision 0011, 0039). */
 const SESSION_IMAGE = 'ghcr.io/thomashendrickx/aeolus-session';
@@ -32,7 +33,8 @@ export function hostSessions(at: { paths: TrierarchPaths; version: string; launc
 /** What runs the sessions, where their workspaces go, and, in containers, where each ship's home is kept. */
 export interface RuntimeAdapters {
   readonly sessions: SessionRuntime & SessionRoots;
-  readonly workspace: WorkspacePort;
+  /** Each ship's workspace, with the refresh of a read-only one (aeolus-fleet#1449). */
+  readonly workspace: WorkspacePort & { refresh(at: { repository: string; folder: string }): Promise<RefreshedCheckout | undefined> };
   /** The homes of the ships, one each, for sessions in containers; none on the host, where every session shares the user's. */
   readonly shipHomes?: { homes: string; managedSettings: string };
   /** Where a session reaches the model proxy the trierarch reaches at the url (headless H16): there on the host, at Podman's host address in a container. */
@@ -56,14 +58,17 @@ export function runtimeAdaptersOf(at: {
   clones?: TrustedClones;
   /** The trierarch program that starts each hold; the one running now unless a test runs another. */
   program?: readonly string[];
+  /** The configured repositories whose sessions may only read their workspace (aeolus-fleet#1449); none unless the configuration names them. */
+  readOnly?: readonly string[];
 }): RuntimeAdapters {
-  const { configuration, paths, version, launch, managedSettings, clones: trusted } = at;
+  const { configuration, paths, version, launch, managedSettings, clones: trusted, readOnly = [] } = at;
   const root = configuration.worktreeRoot ?? paths.worktrees;
   const { runtime } = configuration;
   if (runtime?.kind !== 'container') {
-    return { modelProxyUrlOf: (url) => url, sessions: hostSessions({ paths, version, launch, ...(at.program !== undefined && { program: at.program }) }), workspace: createGitWorkspace({ configuration, root, ...(trusted !== undefined && { clones: trusted }) }) };
+    const worktrees = createGitWorkspace({ configuration, root, ...(trusted !== undefined && { clones: trusted }) });
+    return { modelProxyUrlOf: (url) => url, sessions: hostSessions({ paths, version, launch, ...(at.program !== undefined && { program: at.program }) }), workspace: createReadOnlyWorkspace({ configuration, root, readOnly, workspaces: worktrees }) };
   }
-  const clones = createCloneWorkspace({ configuration, root, ...(trusted !== undefined && { clones: trusted }) });
+  const clones = createReadOnlyWorkspace({ configuration, root, readOnly, workspaces: createCloneWorkspace({ configuration, root, ...(trusted !== undefined && { clones: trusted }) }) });
   return {
     sessions: createContainerRuntime({
       binary: runtime.binary,
@@ -80,7 +85,13 @@ export function runtimeAdaptersOf(at: {
       launch,
     }),
     // The container mounts the folder at the path it is given, where the plugin inside keys it by `pwd -P` as the host's does: one path for both, the real one.
-    workspace: { ...clones, prepare: async (at) => ({ folder: await realpath((await clones.prepare(at)).folder) }) },
+    workspace: {
+      ...clones,
+      prepare: async (request) => {
+        const made = await clones.prepare(request);
+        return { ...made, folder: await realpath(made.folder) };
+      },
+    },
     shipHomes: { homes: paths.homes, managedSettings },
     modelProxyUrlOf: containerProxyUrl,
   };

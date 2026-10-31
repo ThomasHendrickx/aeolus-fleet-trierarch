@@ -212,6 +212,13 @@ describe('Claude Code as a harness', () => {
     expect(readFileSync(path, 'utf8')).toContain(`checkout=governance=${GOVERNANCE}\ncheckout=skills=${SKILLS}\n`);
   });
 
+  it("says in the folder's identity, through the plugin, that the session may only read its folder (aeolus-fleet#1449)", async () => {
+    await harness().prepareIdentity({ folder, identity: { ...identity, isFolderReadOnly: true }, crewToken: CREW_TOKEN });
+
+    const path = (await runCommand('bash', { args: [`${PLUGIN_ROOT}/scripts/aeolus-identity.sh`, 'path'], env: { AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_CREWS: crews } })).stdout.trim();
+    expect(readFileSync(path, 'utf8')).toContain('readOnlyFolder=yes\n');
+  });
+
   it('lets the session read its read-only checkouts with --add-dir, and starts it with them read-only (#1182)', async () => {
     await harness().launch({ ...launchOf(shipId), checkouts: CHECKOUTS, options: {}, isFirstStart: true });
 

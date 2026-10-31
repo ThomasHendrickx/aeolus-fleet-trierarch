@@ -65,6 +65,8 @@ export function createPluginIdentity(plugin: AeolusPlugin): Pick<HarnessPort, 'p
           crew.socket,
           // Each read-only checkout, which the session's start context names (#1182).
           ...(crew.checkouts ?? []).flatMap((checkout) => ['--checkout', `${checkout.repository}=${checkout.path}`]),
+          // A read-only workspace, which the start context says the session may only read (aeolus-fleet#1449).
+          ...(crew.isFolderReadOnly === true ? ['--read-only-folder'] : []),
           crew.fleetUrl,
           crew.shipId,
           crew.shipName,

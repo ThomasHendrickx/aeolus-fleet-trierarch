@@ -376,14 +376,29 @@ aeolus_identity_field() {
   printf '%s\n' "$text" | sed -n "s/^${field}=//p" | head -n 1
 }
 
-# The sentence a start context gives a folder's read-only checkouts (#1182):
-# each by its repository and where it is, and how to refresh them. Nothing
-# when the identity names none. <identity text> <the refresh as the session runs it>
+# The sentences a start context gives a folder's read-only checkouts (#1182),
+# each by its repository and where it is, and a read-only folder (aeolus-fleet#1449),
+# and how to refresh them. Nothing when the identity names neither.
+# <identity text> <the refresh as the session runs it>
 aeolus_checkouts_context() {
-  local text="$1" refresh="$2" named
+  local text="$1" refresh="$2" named is_read_only too="" refreshed
   named="$(printf '%s\n' "$text" | sed -n 's/^checkout=\([^=]*\)=\(.*\)$/\1 at \2/p' | awk 'NR > 1 { printf ", " } { printf "%s", $0 }')"
-  [ -n "$named" ] || return 0
-  printf 'Read-only checkouts beside this folder: %s. Read them; never change, commit or push in them. To bring them to the latest main, run %s: it answers the revision each now holds, or why it could not.' "$named" "$refresh"
+  is_read_only="$(aeolus_identity_field "$text" readOnlyFolder)"
+  [ -n "$named" ] || [ "$is_read_only" = yes ] || return 0
+  if [ -n "$named" ]; then
+    printf 'Read-only checkouts beside this folder: %s. Read them; never change, commit or push in them. ' "$named"
+    too=" too"
+  fi
+  if [ "$is_read_only" = yes ]; then
+    printf 'This folder is read-only%s, on main: never change, commit or push in it, and keep working files in your temporary folder. ' "$too"
+  fi
+  case "${named:+checkouts}${is_read_only}" in
+    checkoutsyes) refreshed='them and this folder to the latest main, run %s: it answers the revision each now holds, or why it could not.' ;;
+    yes) refreshed='this folder to the latest main, run %s: it answers the revision it now holds, or why it could not.' ;;
+    *) refreshed='them to the latest main, run %s: it answers the revision each now holds, or why it could not.' ;;
+  esac
+  # shellcheck disable=SC2059 # the format is one of the three above, the refresh its argument
+  printf "To bring ${refreshed}" "$refresh"
 }
 
 # One field of an identity file as it is now, or nothing once it is gone.

@@ -478,7 +478,7 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   if (problem !== undefined) {
     return crewFailed(state, { entry: crewing, deps, reason: problem });
   }
-  const { folder } = await deps.workspace.prepare({ shipId: crewing.shipId, shipName: ship.name, workspace: crewing.workspace });
+  const { folder, isReadOnly } = await deps.workspace.prepare({ shipId: crewing.shipId, shipName: ship.name, workspace: crewing.workspace });
   // Kept at once, so an crewing still crewing knows the workspace and identity to remove if it ends (#382).
   state = putEntry(state, { ...crewing, shipName: ship.name, folder });
   await deps.state.save(state);
@@ -505,6 +505,7 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
       socket,
       ...(crewing.squadron !== undefined && { squadron: crewing.squadron }),
       ...(checkouts.length > 0 && { checkouts }),
+      ...(isReadOnly === true && { isFolderReadOnly: true }),
     },
     crewToken,
   });
