@@ -275,6 +275,48 @@ aeolus_reported_file() {
   printf '%s/%s.reported' "$dir" "$(aeolus_key "$folder")"
 }
 
+# The wait after the fleet refused a receive with KEY_UNAVAILABLE (decision
+# 0068): the epoch second the next push receive may be asked at, and the wait
+# after that one. The trierarch's passes read it, so a cut-off key is not asked
+# for at every pass.
+aeolus_key_wait_file() {
+  local folder dir
+  folder="$(aeolus_folder)" || return 1
+  dir="$(aeolus_ships_dir)" || return 1
+  printf '%s/%s.keywait' "$dir" "$(aeolus_key "$folder")"
+}
+
+# Whether the folder waits for the fleet's key now.
+aeolus_key_wait_active() {
+  local file until
+  file="$(aeolus_key_wait_file)" || return 1
+  { read -r until _ < "$file"; } 2>/dev/null || return 1
+  [ "$(date +%s)" -lt "${until:-0}" ]
+}
+
+# Starts the next wait and prints its length in seconds: AEOLUS_KEY_WAIT_SECONDS
+# (5) at first, then twice the last, up to AEOLUS_KEY_WAIT_MAX_SECONDS (300,
+# the fleet's key cache).
+aeolus_key_wait_start() {
+  local file last wait max
+  file="$(aeolus_key_wait_file)" || return 1
+  max="${AEOLUS_KEY_WAIT_MAX_SECONDS:-300}"
+  last=0
+  { read -r _ last < "$file"; } 2>/dev/null
+  if [ "${last:-0}" -gt 0 ] 2>/dev/null; then wait=$((last * 2)); else wait="${AEOLUS_KEY_WAIT_SECONDS:-5}"; fi
+  [ "$wait" -le "$max" ] || wait="$max"
+  mkdir -p "$(dirname "$file")" 2>/dev/null
+  printf '%s %s\n' "$(($(date +%s) + wait))" "$wait" > "$file"
+  printf '%s' "$wait"
+}
+
+# The key answers again: the next push receive is asked at once.
+aeolus_key_wait_clear() {
+  local file
+  file="$(aeolus_key_wait_file)" || return 0
+  rm -f "$file"
+}
+
 # The questions the folder's ship asked: each question's uuid and the selector
 # of the ship it asked, one per line, so a withdrawal or replacement goes to the
 # ship that was asked (decision 0038), whoever owns the ship by then.

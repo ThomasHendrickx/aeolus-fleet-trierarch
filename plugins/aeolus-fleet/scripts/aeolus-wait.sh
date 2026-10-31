@@ -29,6 +29,11 @@ WAIT_SECONDS="${AEOLUS_WAIT_SECONDS:-25}"
 # The pause between inbox checks while deliveries wait, since the check then
 # answers at once: the trierarch's pass interval.
 POLL_SECONDS="${AEOLUS_POLL_SECONDS:-5}"
+# The first pause after the fleet refused a push receive with KEY_UNAVAILABLE
+# (its key cut off, decision 0068); it doubles up to the most, the fleet's key
+# cache. The watcher keeps watching: the delivery waits pending.
+KEY_WAIT_SECONDS="${AEOLUS_KEY_WAIT_SECONDS:-5}"
+KEY_WAIT_MAX_SECONDS="${AEOLUS_KEY_WAIT_MAX_SECONDS:-300}"
 # The first pause after a failed call; it doubles up to the most.
 RETRY_SECONDS="${AEOLUS_RETRY_SECONDS:-2}"
 RETRY_MAX_SECONDS="${AEOLUS_RETRY_MAX_SECONDS:-60}"
@@ -100,6 +105,8 @@ call() {
 }
 
 delay="$RETRY_SECONDS"
+# The pause after the last KEY_UNAVAILABLE; 0 while the key answers.
+key_delay=0
 # Whether the last call failed: a failing fleet is logged once, not every retry.
 is_failing=0
 RETRY_NEXT='retries, a little later each time'
@@ -144,6 +151,21 @@ on_refusal() {
   sleep "$delay"
   delay=$((delay * 2))
   [ "$delay" -le "$RETRY_MAX_SECONDS" ] || delay="$RETRY_MAX_SECONDS"
+}
+
+# The push receive was refused KEY_UNAVAILABLE: nothing was claimed. The
+# watcher says so once, waits longer each time and asks again; the inbox
+# answering in between does not shorten the wait.
+on_key_unavailable() {
+  answered
+  if [ "$key_delay" = 0 ]; then
+    aeolus_log "$identity" watch "waiting: the fleet's key is not reachable (KEY_UNAVAILABLE)" 'retries, longer each time'
+    key_delay="$KEY_WAIT_SECONDS"
+  else
+    key_delay=$((key_delay * 2))
+    [ "$key_delay" -le "$KEY_WAIT_MAX_SECONDS" ] || key_delay="$KEY_WAIT_MAX_SECONDS"
+  fi
+  sleep "$key_delay"
 }
 
 refused_token() {
@@ -207,11 +229,19 @@ while :; do
     printf '%s 0\n' "$waiting" > "$waiting_file"
     # Deliveries wait, so the push receive answers at once.
     call /api/v1/ship/pushReceive '{"max":1}' $((WAIT_SECONDS + 15))
+    if [ "$status" = 503 ] && [ "$(aeolus_json_string "$body" code)" = KEY_UNAVAILABLE ]; then
+      on_key_unavailable
+      continue
+    fi
     if [ "$status" != 200 ]; then
       on_refusal
       continue
     fi
     answered
+    if [ "$key_delay" != 0 ]; then
+      aeolus_log "$identity" watch "the fleet's key is reachable again"
+      key_delay=0
+    fi
     aeolus_lease_key "$crew_token" > "$(aeolus_pushed_file)"
     if id="$(aeolus_store_put "$(printf '%s' "$body" | tr -d '\n')")"; then
       if aeolus_is_idle || aeolus_store_is_forced "$id"; then
