@@ -2850,6 +2850,18 @@ describe("a released ship's last usage, sent before its worktree goes (the usage
     expect(trierarch.fleet.confirmed).toEqual([shipId]);
   });
 
+  it("row 7: releases a ship whose transcripts cannot be read, saying so: there is nothing it could send", async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.usage.unreadable.add(shipId);
+    trierarch.fleet.removeRequest(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.confirmed).toEqual([shipId]);
+    expect(trierarch.logger.warnings.some((line) => line.includes(`Could not read the last usage of ${shipId}`))).toBe(true);
+  });
+
   it("row 11: sends the usage of a ship released elsewhere before its fresh worktree", async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
