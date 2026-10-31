@@ -44,7 +44,7 @@ import { createHandleDelivery } from '../core/handle-delivery.js';
 import { machineOf } from '../core/machine.js';
 import { createReadLoad } from '../core/read-load.js';
 import { createReadUsage } from '../core/read-usage.js';
-import { createSendUsage } from '../core/send-usage.js';
+import { createSendReleasedUsage, createSendUsage } from '../core/send-usage.js';
 import { priceTableOf } from '../core/token-cost.js';
 import type { Delivery, Logger, TrierarchSetup } from '../core/ports.js';
 import { createReportSelf } from '../core/report-self.js';
@@ -163,7 +163,6 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     claudeCode: { keyInReach: ({ options, folder }) => claudeCodeKeyInReach(claudeCodeSetup, { harness: configuration.harnesses['claude-code'] ?? { flags: [], options: {} }, options, ...(folder !== undefined && { folder }) }) },
     codex: createCodexSetup(),
   });
-  const runPass = createRunPass({ fleet, harnesses, processes: sessions, folderProcesses: createFolderProcesses(), workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets, modelLogins, ...(configured.logins !== undefined && { logins: configured.logins }) });
   // The machine's load (#400) and the harnesses' usage (#353), each read on its own interval for the report.
   const readLoad = createReadLoad({ machine: createMachine({ worktreeRoot: configuration.worktreeRoot ?? paths.worktrees }), fleet, state, clock, logger });
   const usage = createUsage({
@@ -177,6 +176,8 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     codex: createCodexUsage({ sessions: join(env.CODEX_HOME ?? join(homeDirectory, '.codex'), 'sessions'), madeAt: folderMadeAt }),
   });
   const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configured.harnesses), prices: priceTableOf(configured.prices) });
+  const sendReleasedUsage = createSendReleasedUsage({ fleet, usage, clock, logger, prices: priceTableOf(configured.prices), ...(crew.shipId !== undefined && { trierarchShipId: crew.shipId }), ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
+  const runPass = createRunPass({ fleet, harnesses, processes: sessions, folderProcesses: createFolderProcesses(), workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets, modelLogins, sendReleasedUsage, ...(configured.logins !== undefined && { logins: configured.logins }) });
   // Set by the receive loop, read by each report of the trierarch's own ship.
   let isFleetKeyCutOff = false;
   const reportSelf = createReportSelf({ fleetKey: { isCutOff: () => isFleetKeyCutOff }, fleet, processes: sessions, trust, state, setup, readLoad, readUsage, clock, modelLogins, ...(configured.logins !== undefined && { logins: configured.logins }) });

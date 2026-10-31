@@ -1,5 +1,6 @@
 import type { ShipId } from '@aeolus-fleet/common';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import { aTrierarch, aTrierarchOnLogins, CONFIGURATION, crewSettings, InMemoryCheckouts, InMemoryShipSockets, newId, NOTES_FOLDER, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
 import { putEntry } from './entry.js';
@@ -2798,3 +2799,77 @@ describe("each session's login (api keys K5, K6, K9)", () => {
   });
 });
 
+describe("a released ship's last usage, sent before its worktree goes (the usage design, U9)", () => {
+  const TOKENS = { model: 'claude-opus-5-5', tokens: { input: 10, output: 20, cacheRead: 30, cacheWrite: 40 } };
+
+  /** The hours each usage message the plugin's ship was sent holds, with the ships of each. */
+  const sentHours = (trierarch: Trierarch) =>
+    trierarch.fleet.sentUsage.map(({ payload }) => z.object({ hours: z.array(z.object({ hour: z.string(), ships: z.array(z.object({ shipId: z.string() })) })) }).parse(JSON.parse(payload)).hours);
+
+  it("row 7: sends the ship's usage read once more, then removes its worktree and confirms", async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.usage.tokens.set(shipId, [TOKENS]);
+    trierarch.fleet.removeRequest(shipId);
+
+    await trierarch.pass();
+
+    expect(sentHours(trierarch)).toEqual([[{ hour: '2026-10-06T07:00:00.000Z', ships: [{ shipId }] }]]);
+    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.fleet.confirmed).toEqual([shipId]);
+  });
+
+  it('row 7: keeps the worktree and the request while the fleet refuses the send; the next pass sends, then removes', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.usage.tokens.set(shipId, [TOKENS]);
+    trierarch.fleet.removeRequest(shipId);
+    trierarch.fleet.isRefusingUsage = true;
+    await trierarch.pass();
+    const kept = { hasFolder: trierarch.workspace.folders.has(SCOUT_FOLDER), confirmed: [...trierarch.fleet.confirmed] };
+    trierarch.fleet.isRefusingUsage = false;
+
+    await trierarch.pass();
+
+    expect(kept).toEqual({ hasFolder: true, confirmed: [] });
+    expect(sentHours(trierarch)).toHaveLength(1);
+    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.fleet.confirmed).toEqual([shipId]);
+  });
+
+  it('row 7: sends nothing of hours it already sent, and releases as before', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.usage.tokens.set(shipId, [TOKENS]);
+    await trierarch.sendUsage();
+    trierarch.fleet.removeRequest(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.sentUsage).toHaveLength(1);
+    expect(trierarch.fleet.confirmed).toEqual([shipId]);
+  });
+
+  it("row 7: releases a ship whose transcripts cannot be read, saying so: there is nothing it could send", async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.usage.unreadable.add(shipId);
+    trierarch.fleet.removeRequest(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.confirmed).toEqual([shipId]);
+    expect(trierarch.logger.warnings.some((line) => line.includes(`Could not read the last usage of ${shipId}`))).toBe(true);
+  });
+
+  it("row 11: sends the usage of a ship released elsewhere before its fresh worktree", async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.usage.tokens.set(shipId, [TOKENS]);
+    trierarch.fleet.releaseElsewhere(shipId);
+
+    await trierarch.pass();
+
+    expect(sentHours(trierarch)).toEqual([[{ hour: '2026-10-06T07:00:00.000Z', ships: [{ shipId }] }]]);
+  });
+});

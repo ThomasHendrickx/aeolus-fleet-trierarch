@@ -46,6 +46,48 @@ function messagesOf(hours: readonly MessageHour[], first: { subscriptions: reado
   return messages;
 }
 
+/** What reading a ship's usage takes: the harnesses' usage, and the prices it estimates the cost by. */
+interface ReadShipHoursDeps {
+  readonly usage: UsagePort;
+  readonly prices: PriceTable;
+}
+
+/** A crewed ship's usage per UTC hour, as it goes into the message; none before its folder is made. A read that fails rejects. */
+async function readShipHours(entry: Entry, deps: ReadShipHoursDeps): Promise<ShipHour[]> {
+  if (entry.folder === undefined) {
+    return [];
+  }
+  const { folder } = entry;
+  const logins = entry.login === undefined ? undefined : { login: entry.login, ...(entry.earlierLogins !== undefined && { earlierLogins: entry.earlierLogins }) };
+  const [madeAt, tokens] = await Promise.all([deps.usage.madeAt(folder), deps.usage.tokensOf({ shipId: entry.shipId, harness: entry.harness, folder, ...(logins !== undefined && { logins }) })]);
+  const byHour = new Map<string, HourTokens[]>();
+  for (const used of tokens) {
+    const hour = used.hour.toISOString();
+    byHour.set(hour, [...(byHour.get(hour) ?? []), used]);
+  }
+  const folderMadeAt = madeAt.toISOString();
+  return [...byHour].map(([hour, used]) => {
+    const byLogin = new Map<string | null, HourTokens[]>();
+    for (const each of used) {
+      const login = each.login ?? null;
+      byLogin.set(login, [...(byLogin.get(login) ?? []), each]);
+    }
+    const ships = [...byLogin].map(([login, models]) => ({
+      shipId: entry.shipId,
+      harness: entry.harness,
+      folderMadeAt,
+      login,
+      models: models.map(({ model, tokens: counts }) => ({ model, tokens: counts, estimatedCostUsd: estimatedCostPerKindUsd(counts, deps.prices[model]) })),
+    }));
+    return { shipId: entry.shipId, hour, key: `${folderMadeAt} ${hour}`, ships };
+  });
+}
+
+/** The ship hours whose totals differ from what the entry says was sent of them. */
+function changedOf(entry: Entry | undefined, shipHours: readonly ShipHour[]): ShipHour[] {
+  return shipHours.filter(({ key, ships }) => entry?.sentUsage?.[key] !== JSON.stringify(ships));
+}
+
 /**
  * Use case: the trierarch sends its usage to the trierarch plugin's ship
  * (the usage design, "What the trierarch sends, and when"). At the first pass
@@ -76,42 +118,11 @@ export function createSendUsage(deps: {
   const pendingReadings = new Map<string, SubscriptionReading>();
   const sentReadings = new Set<string>();
 
-  const shipHoursOf = async (entry: Entry): Promise<ShipHour[]> => {
-    if (entry.folder === undefined) {
-      return [];
-    }
-    const { folder } = entry;
-    const logins = entry.login === undefined ? undefined : { login: entry.login, ...(entry.earlierLogins !== undefined && { earlierLogins: entry.earlierLogins }) };
-    const read = await Promise.all([deps.usage.madeAt(folder), deps.usage.tokensOf({ shipId: entry.shipId, harness: entry.harness, folder, ...(logins !== undefined && { logins }) })]).catch((error: unknown) => {
+  const shipHoursOf = (entry: Entry): Promise<ShipHour[]> =>
+    readShipHours(entry, deps).catch((error: unknown) => {
       deps.logger.warn(`Could not read the usage of ${entry.shipId} to send: ${messageOf(error)}`);
-      return undefined;
-    });
-    if (read === undefined) {
       return [];
-    }
-    const [madeAt, tokens] = read;
-    const byHour = new Map<string, HourTokens[]>();
-    for (const used of tokens) {
-      const hour = used.hour.toISOString();
-      byHour.set(hour, [...(byHour.get(hour) ?? []), used]);
-    }
-    const folderMadeAt = madeAt.toISOString();
-    return [...byHour].map(([hour, used]) => {
-      const byLogin = new Map<string | null, HourTokens[]>();
-      for (const each of used) {
-        const login = each.login ?? null;
-        byLogin.set(login, [...(byLogin.get(login) ?? []), each]);
-      }
-      const ships = [...byLogin].map(([login, models]) => ({
-        shipId: entry.shipId,
-        harness: entry.harness,
-        folderMadeAt,
-        login,
-        models: models.map(({ model, tokens: counts }) => ({ model, tokens: counts, estimatedCostUsd: estimatedCostPerKindUsd(counts, deps.prices[model]) })),
-      }));
-      return { shipId: entry.shipId, hour, key: `${folderMadeAt} ${hour}`, ships };
     });
-  };
 
   /** Marks the ship hours sent in their entries, as the state holds them now. */
   const markSent = async (sent: readonly ShipHour[]): Promise<void> => {
@@ -152,7 +163,7 @@ export function createSendUsage(deps: {
     triedHour = hourNow;
     const { entries } = await deps.state.load();
     const shipHours = (await Promise.all(Object.values(entries).map(shipHoursOf))).flat();
-    const changedHours = new Set(shipHours.filter(({ shipId, key, ships }) => entries[shipId]?.sentUsage?.[key] !== JSON.stringify(ships)).map(({ hour }) => hour));
+    const changedHours = new Set(Object.values(entries).flatMap((entry) => changedOf(entry, shipHours.filter(({ shipId }) => shipId === entry.shipId))).map(({ hour }) => hour));
     const newReadings = [...pendingReadings.values()].sort((a, b) => a.readAt.localeCompare(b.readAt) || a.harness.localeCompare(b.harness));
     if (changedHours.size === 0 && newReadings.length === 0) {
       return;
@@ -175,6 +186,51 @@ export function createSendUsage(deps: {
         sentReadings.add(key);
         pendingReadings.delete(key);
       }
+    }
+  };
+}
+
+/** Sends a released ship's last usage, read once more, before its folder goes; rejects when the fleet does not take it, so the folder stays. */
+export type SendReleasedUsage = (entry: Entry) => Promise<void>;
+
+/**
+ * Use case: as a ship is released, here or elsewhere, the trierarch reads its
+ * transcripts once more and sends the plugin's ship every hour of it whose
+ * totals changed since its last send that returned OK (the usage design, U9).
+ * Its folder is removed only after that: a send that fails rejects, and the
+ * release tries again on the next pass. Transcripts that cannot be read hold
+ * nothing it could send: logged, and the release goes on. Nothing to send, or a machine
+ * that does not know the plugin's ship or its own, sends nothing. The key
+ * names the ship, as an hourly send may share the moment.
+ */
+export function createSendReleasedUsage(deps: {
+  fleet: Pick<FleetPort, 'sendUsage'>;
+  usage: UsagePort;
+  clock: Clock;
+  logger: Pick<Logger, 'warn'>;
+  prices: PriceTable;
+  trierarchShipId?: ShipId;
+  pluginShipId?: ShipId;
+}): SendReleasedUsage {
+  return async (entry) => {
+    const { pluginShipId, trierarchShipId } = deps;
+    if (pluginShipId === undefined || trierarchShipId === undefined) {
+      return;
+    }
+    // Transcripts that cannot be read hold nothing it could send: the release goes on, said in the log.
+    const read = await readShipHours(entry, deps).catch((error: unknown) => {
+      deps.logger.warn(`Could not read the last usage of ${entry.shipId}: ${messageOf(error)}; it is released without it`);
+      return [];
+    });
+    const changed = changedOf(entry, read);
+    if (changed.length === 0) {
+      return;
+    }
+    const hours = [...new Set(changed.map(({ hour }) => hour))].sort().map((hour) => ({ hour, ships: changed.filter((shipHour) => shipHour.hour === hour).flatMap(({ ships }) => ships) }));
+    const readAt = deps.clock.now().toISOString();
+    for (const [index, message] of messagesOf(hours, { subscriptions: [], readAt }).entries()) {
+      const idempotencyKey = `usage:${trierarchShipId}:${readAt}:${entry.shipId}${index === 0 ? '' : `:${String(index + 1)}`}`;
+      await deps.fleet.sendUsage({ pluginShipId, payload: JSON.stringify(message), idempotencyKey });
     }
   };
 }
