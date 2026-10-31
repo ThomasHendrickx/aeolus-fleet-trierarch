@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { trierarchPaths } from '../adapters/paths.js';
+import { FleetRefusal } from '../adapters/rest-fleet.js';
 import type { Delivery } from '../core/ports.js';
 import { loop, runTrierarch } from './run.js';
 
@@ -17,7 +18,7 @@ function longPoll(signal: AbortSignal): Promise<Delivery[]> {
   });
 }
 
-const quiet = { warn: () => undefined };
+const quiet = { warn: () => undefined, info: () => undefined };
 const STOP_WITHIN_MS = 200;
 
 describe('the run loop', () => {
@@ -44,7 +45,7 @@ describe('the run loop', () => {
       handle: () => Promise.resolve(),
       pass: () => Promise.resolve(),
       signal: stopping.signal,
-      logger: { warn: (message) => warned.push(message) },
+      logger: { warn: (message) => warned.push(message), info: () => undefined },
       intervalMs: 60_000,
     });
     setTimeout(() => {
@@ -78,7 +79,7 @@ describe('the run loop', () => {
       },
       pass: () => Promise.resolve(),
       signal: stopping.signal,
-      logger: { warn: (message) => warned.push(message) },
+      logger: { warn: (message) => warned.push(message), info: () => undefined },
       intervalMs: 1,
     });
 
@@ -145,6 +146,72 @@ describe('the run loop', () => {
 
     expect(handled).toEqual(['dlv_1']);
     expect(passes).toBe(1);
+  });
+});
+
+describe('the run loop, with the fleet key cut off (decision 0068)', () => {
+  const delivery = { deliveryId: 'dlv_1', messageId: 'msg_1', senderShipId: 'shp_01m487vd5pdz6zh6s0jdnkg9p6', contentType: 'text/plain', payload: '' } as const;
+  const keyUnavailable = () => Promise.reject(new FleetRefusal('KEY_UNAVAILABLE', 'The company key is not reachable: access denied'));
+
+  it('waits longer after each KEY_UNAVAILABLE, up to a most, and says so once', async () => {
+    const stopping = new AbortController();
+    const warned: string[] = [];
+    const waits: number[] = [];
+    let receives = 0;
+
+    await loop({
+      receive: (signal) => {
+        receives += 1;
+        if (receives <= 5) {
+          return keyUnavailable();
+        }
+        stopping.abort();
+        return longPoll(signal);
+      },
+      handle: () => Promise.resolve(),
+      pass: () => longPoll(stopping.signal).then(() => undefined),
+      signal: stopping.signal,
+      logger: { warn: (message) => warned.push(message), info: () => undefined },
+      intervalMs: 10,
+      keyWaitMaxMs: 40,
+      pause: (ms) => {
+        waits.push(ms);
+        return Promise.resolve();
+      },
+    });
+
+    expect(waits).toEqual([10, 20, 40, 40, 40]);
+    expect(warned).toEqual(["The fleet's key is not reachable, so the trierarch's own ship receives nothing and waits, longer each time, up to 40 ms: KEY_UNAVAILABLE: The company key is not reachable: access denied"]);
+  });
+
+  it('says when the key answers again, and goes on at the plain pace', async () => {
+    const stopping = new AbortController();
+    const told: string[] = [];
+    const handled: string[] = [];
+    let receives = 0;
+
+    await loop({
+      receive: (signal) => {
+        receives += 1;
+        if (receives === 1) {
+          return keyUnavailable();
+        }
+        return receives === 2 ? Promise.resolve([delivery]) : longPoll(signal);
+      },
+      handle: (received) => {
+        handled.push(received.deliveryId);
+        stopping.abort();
+        return Promise.resolve();
+      },
+      pass: () => longPoll(stopping.signal).then(() => undefined),
+      signal: stopping.signal,
+      logger: { warn: () => undefined, info: (message) => told.push(message) },
+      intervalMs: 1,
+      pause: () => Promise.resolve(),
+    });
+
+    expect(handled).toEqual(['dlv_1']);
+    expect(told).toEqual(["The fleet's key is reachable again: the trierarch's own ship receives again"]);
   });
 });
 
