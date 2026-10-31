@@ -18,7 +18,7 @@ function longPoll(signal: AbortSignal): Promise<Delivery[]> {
   });
 }
 
-const quiet = { warn: () => undefined, info: () => undefined };
+const quiet = { warn: () => undefined };
 const STOP_WITHIN_MS = 200;
 
 describe('the run loop', () => {
@@ -45,7 +45,7 @@ describe('the run loop', () => {
       handle: () => Promise.resolve(),
       pass: () => Promise.resolve(),
       signal: stopping.signal,
-      logger: { warn: (message) => warned.push(message), info: () => undefined },
+      logger: { warn: (message) => warned.push(message) },
       intervalMs: 60_000,
     });
     setTimeout(() => {
@@ -79,7 +79,7 @@ describe('the run loop', () => {
       },
       pass: () => Promise.resolve(),
       signal: stopping.signal,
-      logger: { warn: (message) => warned.push(message), info: () => undefined },
+      logger: { warn: (message) => warned.push(message) },
       intervalMs: 1,
     });
 
@@ -160,18 +160,18 @@ describe('the run loop, with the fleet key cut off (decision 0068)', () => {
     let receives = 0;
 
     await loop({
-      receive: (signal) => {
+      receive: () => {
         receives += 1;
         if (receives <= 5) {
           return keyUnavailable();
         }
         stopping.abort();
-        return longPoll(signal);
+        return Promise.reject(new Error('stopped'));
       },
       handle: () => Promise.resolve(),
       pass: () => longPoll(stopping.signal).then(() => undefined),
       signal: stopping.signal,
-      logger: { warn: (message) => warned.push(message), info: () => undefined },
+      logger: { warn: (message) => warned.push(message) },
       intervalMs: 10,
       keyWaitMaxMs: 40,
       pause: (ms) => {
@@ -205,13 +205,13 @@ describe('the run loop, with the fleet key cut off (decision 0068)', () => {
       },
       pass: () => longPoll(stopping.signal).then(() => undefined),
       signal: stopping.signal,
-      logger: { warn: () => undefined, info: (message) => told.push(message) },
+      logger: { warn: (message) => told.push(message) },
       intervalMs: 1,
       pause: () => Promise.resolve(),
     });
 
     expect(handled).toEqual(['dlv_1']);
-    expect(told).toEqual(["The fleet's key is reachable again: the trierarch's own ship receives again"]);
+    expect(told.at(-1)).toBe("The fleet's key is reachable again: the trierarch's own ship receives again");
   });
 });
 
