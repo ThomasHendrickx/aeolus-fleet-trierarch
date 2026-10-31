@@ -17,7 +17,9 @@ import { withoutRemoteControl } from '../core/remote-control.js';
  * The configuration as common states it, with each repository's read-only
  * checkouts (#1182): the configured repositories a session in that repository
  * gets beside its working folder, at the latest main. They are named, never a
- * path, so only a repository the machine already trusts is checked out. Kept
+ * path, so only a repository the machine already trusts is checked out. And
+ * whether a repository is read-only (aeolus-fleet#1449): its sessions' working
+ * folder is a read-only clone on main in place of a worktree. Kept
  * here rather than in common: only the trierarch reads its configuration, and
  * a crew request never names them. With them, the price table the cost of a
  * ship's tokens is estimated by (#353): per model, in US dollars per million
@@ -30,7 +32,7 @@ const loginSchema = z.enum(LOGINS);
 
 export const trierarchConfigurationSchema = commonConfigurationSchema
   .extend({
-    repositories: z.record(trierarchNameSchema, z.strictObject({ path: z.string().min(1), checkouts: z.array(trierarchNameSchema).optional() })),
+    repositories: z.record(trierarchNameSchema, z.strictObject({ path: z.string().min(1), checkouts: z.array(trierarchNameSchema).optional(), readOnly: z.boolean().optional() })),
     prices: z.record(z.string().min(1), z.strictObject({ input: priceSchema, output: priceSchema, cacheRead: priceSchema, cacheWrite: priceSchema })).optional(),
     logins: z.strictObject({ default: z.strictObject({ 'claude-code': loginSchema.optional(), codex: loginSchema.optional() }).optional(), ships: z.record(z.string().min(1), loginSchema).optional() }).optional(),
   })
