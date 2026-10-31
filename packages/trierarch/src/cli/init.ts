@@ -3,7 +3,7 @@ import { idSchema, type ShipId, type TrierarchConfiguration } from '@aeolus-flee
 
 import type { ClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import type { CodexSetup } from '../adapters/codex-setup.js';
-import { configurationJsonSchema, initialConfiguration, loadConfiguration, readCrewFile, TrierarchFileError, writeCrewFile, type RunningFile } from '../adapters/files.js';
+import { initialConfiguration, loadConfiguration, readCrewFile, TrierarchFileError, writeConfigurationJsonSchema, writeCrewFile, type RunningFile } from '../adapters/files.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
 import { FleetRefusal, type RestFleet } from '../adapters/rest-fleet.js';
 import type { Service } from '../adapters/service.js';
@@ -392,7 +392,7 @@ export async function initTrierarch(input: {
     said.push(`It takes the trusted repositories from the trierarch plugin's ship ${pluginShipId}.`);
   }
   await mkdir(paths.home, { recursive: true, mode: 0o700 });
-  await writeFile(paths.configSchema, `${JSON.stringify(configurationJsonSchema(), null, 2)}\n`);
+  await writeConfigurationJsonSchema(paths.configSchema);
 
   // The configuration: written from the answers, or changed only when the operator says so.
   let configuration: TrierarchConfiguration;

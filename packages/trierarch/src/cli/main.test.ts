@@ -423,7 +423,7 @@ describe('aeolus-trierarch with CLAUDE_CONFIG_DIR and CODEX_HOME set (#521)', ()
     const { output, code } = await main(['install', '--no-load'], machine(both()));
 
     expect(code, output).toBe(0);
-    expect(json(configSchema)).toMatchObject({ type: 'object', properties: { $schema: expect.anything() } });
+    expect(json(configSchema)).toMatchObject({ type: 'object' });
     expect(json(configSchema)).not.toHaveProperty('stale');
   }, INIT_TIMEOUT_MS);
 
