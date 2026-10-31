@@ -590,13 +590,16 @@ export class InMemoryWorkspace implements WorkspacePort {
   /** Folders on disk, with whether they hold changes, and what removing one would discard, as git says it. */
   readonly folders = new Map<string, { shipId?: ShipId; hasChanges: boolean; unsaved: string[] }>([[NOTES_FOLDER, { hasChanges: false, unsaved: [] }]]);
 
-  prepare(at: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace }): Promise<{ folder: string }> {
+  /** The repositories whose workspaces a session may only read (aeolus-fleet#1449). */
+  readonly readOnly = new Set<string>();
+
+  prepare(at: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace }): Promise<{ folder: string; isReadOnly?: boolean }> {
     const { shipId, shipName, workspace } = at;
     const folder = workspace.kind === 'folder' ? NOTES_FOLDER : `${WORKTREE_ROOT}/${workspace.repository}/${shipName}`;
     if (!this.folders.has(folder)) {
       this.folders.set(folder, { shipId, hasChanges: false, unsaved: [] });
     }
-    return Promise.resolve({ folder });
+    return Promise.resolve(workspace.kind === 'worktree' && this.readOnly.has(workspace.repository) ? { folder, isReadOnly: true } : { folder });
   }
 
   isClean(folder: string): Promise<boolean> {

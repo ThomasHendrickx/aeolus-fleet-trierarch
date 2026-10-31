@@ -2476,6 +2476,22 @@ describe('read-only checkouts (#1182)', () => {
     });
   });
 
+  it("says in the folder's identity that the session may only read its workspace, for its start context (aeolus-fleet#1449)", async () => {
+    const trierarch = aTrierarch(WITH_CHECKOUTS);
+    trierarch.workspace.readOnly.add('aeolus-fleet');
+
+    const shipId = await aCrewedShip(trierarch);
+
+    expect(trierarch.harness.identities.get(SCOUT_FOLDER)).toEqual({
+      fleetUrl: 'https://fleet.example.com',
+      shipId,
+      shipName: 'scout',
+      socket: InMemoryShipSockets.pathOf(shipId),
+      checkouts: checkoutsOf(shipId),
+      isFolderReadOnly: true,
+    });
+  });
+
   it('starts the session with its checkouts', async () => {
     const trierarch = aTrierarch(WITH_CHECKOUTS);
 
