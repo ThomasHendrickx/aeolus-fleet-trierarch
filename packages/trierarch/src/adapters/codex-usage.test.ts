@@ -36,13 +36,24 @@ async function withRollout(name: string, edit: (log: string) => string): Promise
   await writeFile(join(sessions, DAY, name), edit(await captured()));
 }
 
+/** What the reader counted, added up per model and login over the hours, as the report gives it. */
+function perModel(counted: readonly { model: string; login?: string; tokens: { input: number; output: number; cacheRead: number; cacheWrite: number } }[]) {
+  const summed = new Map<string, { model: string; login?: string; tokens: { input: number; output: number; cacheRead: number; cacheWrite: number } }>();
+  for (const { model, login, tokens } of counted) {
+    const key = `${model} ${login ?? ''}`;
+    const before = summed.get(key)?.tokens ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    summed.set(key, { model, ...(login !== undefined && { login }), tokens: { input: before.input + tokens.input, output: before.output + tokens.output, cacheRead: before.cacheRead + tokens.cacheRead, cacheWrite: before.cacheWrite + tokens.cacheWrite } });
+  }
+  return [...summed.values()];
+}
+
 const SOL = { model: 'gpt-6.1-sol', tokens: { input: 43_216, output: 1428, cacheRead: 250_240, cacheWrite: 0 } };
 
 describe("a Codex ship's tokens, from its session logs (#353)", () => {
   it("sums the tokens of each model its folder's sessions used, input without what was read from the cache", async () => {
     await copyFile(new URL('../../test/logs/codex-tokens.jsonl', import.meta.url), join(sessions, DAY, ROLLOUT));
 
-    expect(await aUsage().tokensOf({ shipId: newId('ship'), folder: FOLDER })).toEqual([SOL]);
+    expect(perModel(await aUsage().tokensOf({ shipId: newId('ship'), folder: FOLDER }))).toEqual([SOL]);
   });
 
   it("leaves out the sessions of another folder, and those started before the ship's folder was made", async () => {
@@ -51,7 +62,7 @@ describe("a Codex ship's tokens, from its session logs (#353)", () => {
     const before = aUsage('2026-10-15T18:00:00.000Z');
     await copyFile(new URL('../../test/logs/codex-tokens.jsonl', import.meta.url), join(sessions, DAY, ROLLOUT));
 
-    expect(await before.tokensOf({ shipId: newId('ship'), folder: FOLDER })).toEqual([]);
+    expect(perModel(await before.tokensOf({ shipId: newId('ship'), folder: FOLDER }))).toEqual([]);
   });
 
   it('gives each turn its tokens to the model of that turn', async () => {
@@ -61,9 +72,24 @@ describe("a Codex ship's tokens, from its session logs (#353)", () => {
     const meta = JSON.stringify({ timestamp: '2026-10-15T17:09:00.000Z', type: 'session_meta', payload: { timestamp: '2026-10-15T17:09:00.000Z', cwd: FOLDER } });
     await writeFile(join(sessions, DAY, 'rollout-switch.jsonl'), [meta, turn('gpt-6.1-sol'), counted(100), turn('gpt-6-luna'), counted(130), counted(130), ''].join('\n'));
 
-    expect(await aUsage().tokensOf({ shipId: newId('ship'), folder: FOLDER })).toEqual([
+    expect(perModel(await aUsage().tokensOf({ shipId: newId('ship'), folder: FOLDER }))).toEqual([
       { model: 'gpt-6-luna', tokens: { input: 30, output: 0, cacheRead: 0, cacheWrite: 0 } },
       { model: 'gpt-6.1-sol', tokens: { input: 100, output: 0, cacheRead: 0, cacheWrite: 0 } },
+    ]);
+  });
+});
+
+describe("a Codex ship's tokens per UTC hour (the usage design)", () => {
+  it('counts each turn in the UTC hour its token count was written', async () => {
+    const meta = JSON.stringify({ timestamp: '2026-10-15T17:09:00.000Z', type: 'session_meta', payload: { timestamp: '2026-10-15T17:09:00.000Z', cwd: FOLDER } });
+    const turn = JSON.stringify({ timestamp: '2026-10-15T17:10:00.000Z', type: 'turn_context', payload: { model: 'gpt-6.1-sol' } });
+    const counted = (total: number, at: string) =>
+      JSON.stringify({ timestamp: at, type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: total, cached_input_tokens: 0, cache_write_input_tokens: 0, output_tokens: 0 } } } });
+    await writeFile(join(sessions, DAY, 'rollout-hours.jsonl'), [meta, turn, counted(100, '2026-10-15T17:59:59.000Z'), counted(130, '2026-10-15T18:00:00.000Z'), ''].join('\n'));
+
+    expect(await aUsage().tokensOf({ shipId: newId('ship'), folder: FOLDER })).toEqual([
+      { model: 'gpt-6.1-sol', hour: new Date('2026-10-15T17:00:00.000Z'), tokens: { input: 100, output: 0, cacheRead: 0, cacheWrite: 0 } },
+      { model: 'gpt-6.1-sol', hour: new Date('2026-10-15T18:00:00.000Z'), tokens: { input: 30, output: 0, cacheRead: 0, cacheWrite: 0 } },
     ]);
   });
 });
@@ -77,7 +103,7 @@ describe("a Codex ship's tokens per login (api keys K8)", () => {
     await writeFile(join(sessions, DAY, 'rollout-resumed.jsonl'), [meta, turn, counted(100, '2026-10-15T17:10:01.000Z'), counted(130, '2026-10-15T17:20:01.000Z'), ''].join('\n'));
     const logins = { login: 'apiKey' as const, earlierLogins: [{ login: 'subscription' as const, until: '2026-10-15T17:15:00.000Z' }] };
 
-    expect(await aUsage().tokensOf({ shipId: newId('ship'), folder: FOLDER, logins })).toEqual([
+    expect(perModel(await aUsage().tokensOf({ shipId: newId('ship'), folder: FOLDER, logins }))).toEqual([
       { model: 'gpt-6.1-sol', login: 'apiKey', tokens: { input: 30, output: 0, cacheRead: 0, cacheWrite: 0 } },
       { model: 'gpt-6.1-sol', login: 'subscription', tokens: { input: 100, output: 0, cacheRead: 0, cacheWrite: 0 } },
     ]);

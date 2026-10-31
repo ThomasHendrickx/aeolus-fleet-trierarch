@@ -43,6 +43,17 @@ function aUsage(at: { madeAt?: string; probe?: CommandResult } = {}) {
   });
 }
 
+/** What the reader counted, added up per model and login over the hours, as the report gives it. */
+function perModel(counted: readonly { model: string; login?: string; tokens: { input: number; output: number; cacheRead: number; cacheWrite: number } }[]) {
+  const summed = new Map<string, { model: string; login?: string; tokens: { input: number; output: number; cacheRead: number; cacheWrite: number } }>();
+  for (const { model, login, tokens } of counted) {
+    const key = `${model} ${login ?? ''}`;
+    const before = summed.get(key)?.tokens ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    summed.set(key, { model, ...(login !== undefined && { login }), tokens: { input: before.input + tokens.input, output: before.output + tokens.output, cacheRead: before.cacheRead + tokens.cacheRead, cacheWrite: before.cacheWrite + tokens.cacheWrite } });
+  }
+  return [...summed.values()];
+}
+
 const OPUS = { model: 'claude-opus-5-5', tokens: { input: 16, output: 1687, cacheRead: 326_051, cacheWrite: 68_515 } };
 const SONNET = { model: 'claude-sonnet-5-5', tokens: { input: 8, output: 988, cacheRead: 143_335, cacheWrite: 52_804 } };
 
@@ -50,7 +61,7 @@ describe("a Claude Code ship's tokens, from its transcripts (#353)", () => {
   it('sums each model its conversations and their sub-agents used, each message once however many lines it spans', async () => {
     await withConversations();
 
-    expect(await aUsage().tokensOf({ shipId: newId('ship'), folder: FOLDER })).toEqual([OPUS, SONNET]);
+    expect(perModel(await aUsage().tokensOf({ shipId: newId('ship'), folder: FOLDER }))).toEqual([OPUS, SONNET]);
   });
 
   it('counts only what was used since the folder was made, so a ship of the same name before counts nothing', async () => {
@@ -58,7 +69,7 @@ describe("a Claude Code ship's tokens, from its transcripts (#353)", () => {
 
     const usage = aUsage({ madeAt: '2026-10-09T16:00:00.000Z' });
 
-    expect(await usage.tokensOf({ shipId: newId('ship'), folder: FOLDER })).toEqual([{ model: 'claude-opus-5-5', tokens: { input: 4, output: 400, cacheRead: 25_945, cacheWrite: 34_622 } }, SONNET]);
+    expect(perModel(await usage.tokensOf({ shipId: newId('ship'), folder: FOLDER }))).toEqual([{ model: 'claude-opus-5-5', tokens: { input: 4, output: 400, cacheRead: 25_945, cacheWrite: 34_622 } }, SONNET]);
   });
 
   it('counts each message to the login of the session that wrote it, when it is told the logins its sessions ran on (api keys K8)', async () => {
@@ -66,7 +77,7 @@ describe("a Claude Code ship's tokens, from its transcripts (#353)", () => {
 
     const logins = { login: 'apiKey' as const, earlierLogins: [{ login: 'subscription' as const, until: '2026-10-09T16:00:00.000Z' }] };
 
-    expect(await aUsage().tokensOf({ shipId: newId('ship'), folder: FOLDER, logins })).toEqual([
+    expect(perModel(await aUsage().tokensOf({ shipId: newId('ship'), folder: FOLDER, logins }))).toEqual([
       { model: 'claude-opus-5-5', login: 'apiKey', tokens: { input: 4, output: 400, cacheRead: 25_945, cacheWrite: 34_622 } },
       { model: 'claude-opus-5-5', login: 'subscription', tokens: { input: 12, output: 1287, cacheRead: 300_106, cacheWrite: 33_893 } },
       { ...SONNET, login: 'apiKey' },
@@ -86,11 +97,21 @@ describe("a Claude Code ship's tokens, from its transcripts (#353)", () => {
     await appendFile(transcript, `${line.slice(40)}\n`);
     const whole = await usage.tokensOf({ shipId, folder: FOLDER });
 
-    expect([half[0], whole[0]]).toEqual([OPUS, { model: 'claude-opus-5-5', tokens: { input: 17, output: 1689, cacheRead: 326_054, cacheWrite: 68_519 } }]);
+    expect([perModel(half)[0], perModel(whole)[0]]).toEqual([OPUS, { model: 'claude-opus-5-5', tokens: { input: 17, output: 1689, cacheRead: 326_054, cacheWrite: 68_519 } }]);
+  });
+
+  it('counts each message in the UTC hour its transcript says it was written', async () => {
+    await withConversations();
+
+    expect(await aUsage().tokensOf({ shipId: newId('ship'), folder: FOLDER })).toEqual([
+      { model: 'claude-opus-5-5', hour: new Date('2026-10-09T15:00:00.000Z'), tokens: { input: 12, output: 1287, cacheRead: 300_106, cacheWrite: 33_893 } },
+      { model: 'claude-opus-5-5', hour: new Date('2026-10-09T17:00:00.000Z'), tokens: { input: 4, output: 400, cacheRead: 25_945, cacheWrite: 34_622 } },
+      { ...SONNET, hour: new Date('2026-10-22T12:00:00.000Z') },
+    ]);
   });
 
   it('answers no tokens for a folder Claude Code has no conversation of', async () => {
-    expect(await aUsage().tokensOf({ shipId: newId('ship'), folder: FOLDER })).toEqual([]);
+    expect(perModel(await aUsage().tokensOf({ shipId: newId('ship'), folder: FOLDER }))).toEqual([]);
   });
 });
 
