@@ -188,6 +188,7 @@ export function createHoldRuntime(options: {
         .filter((line) => line !== '')
         .slice(-EVENT_LINES);
     },
+    lastEventAt: async (shipId) => (await stat(filesOf(shipId).events).catch(() => undefined))?.mtime,
     sessionRootOf: runningPid,
   };
 }

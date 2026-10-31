@@ -126,6 +126,7 @@ function standInSessions(): SessionRuntime {
     },
     send: () => Promise.resolve(),
     interrupt: () => Promise.resolve(),
+    lastEventAt: () => Promise.resolve(undefined),
     events: (shipId) => Promise.resolve(sessions.has(shipId) ? claudeCodeShows(commands.get(shipId) ?? []).split('\n') : []),
   };
 }
@@ -502,6 +503,7 @@ function hookedSessions() {
       return Promise.resolve();
     },
     events: () => Promise.resolve([]),
+    lastEventAt: () => Promise.resolve(undefined),
   };
 
   return {
