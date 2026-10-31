@@ -101,6 +101,16 @@ describe('read-only checkouts in git (#1182)', () => {
     expect(await git(['-C', join(root, scout, 'skills'), 'rev-parse', 'HEAD'])).toBe(latest);
   });
 
+  it('puts a checkout on a local branch main whose HEAD is origin/main, so a session sees it on main (aeolus-fleet#1449)', async () => {
+    const latest = await commit(upstream, 'rule.md');
+
+    await checkouts().prepare({ shipId: scout, repository: 'aeolus-company' });
+
+    const checkout = join(root, scout, 'governance');
+    expect(await git(['-C', checkout, 'branch', '--show-current'])).toBe('main');
+    expect(await git(['-C', checkout, 'rev-parse', 'origin/main'])).toBe(latest);
+  });
+
   it('keeps a checkout the ship has already', async () => {
     await checkouts().prepare({ shipId: scout, repository: 'aeolus-company' });
     const before = await git(['-C', join(root, scout, 'governance'), 'rev-parse', 'HEAD']);
@@ -159,6 +169,29 @@ describe('read-only checkouts in git (#1182)', () => {
     expect(() => {
       writeFileSync(join(root, scout, 'governance', 'rule.md'), 'changed\n');
     }).toThrow(/EACCES/);
+  });
+
+  it('keeps a refreshed checkout on main, its HEAD the new origin/main (aeolus-fleet#1449)', async () => {
+    await checkouts().prepare({ shipId: scout, repository: 'aeolus-company' });
+    const latest = await commit(upstream, 'rule.md');
+
+    await checkouts().refresh(scout);
+
+    const checkout = join(root, scout, 'governance');
+    expect(await git(['-C', checkout, 'branch', '--show-current'])).toBe('main');
+    expect(await git(['-C', checkout, 'rev-parse', 'HEAD'])).toBe(latest);
+    expect(await git(['-C', checkout, 'rev-parse', 'origin/main'])).toBe(latest);
+  });
+
+  it('answers a problem, never the main it held, when the remote cannot be fetched (aeolus-fleet#1449)', async () => {
+    await checkouts().prepare({ shipId: scout, repository: 'aeolus-company' });
+    const held = await git(['-C', join(root, scout, 'governance'), 'rev-parse', 'HEAD']);
+    rmSync(upstream, { recursive: true, force: true });
+
+    const [governanceRefreshed] = await checkouts().refresh(scout);
+
+    expect(governanceRefreshed !== undefined && 'problem' in governanceRefreshed ? governanceRefreshed.problem : undefined).toContain('fetch');
+    expect(await git(['-C', join(root, scout, 'governance'), 'rev-parse', 'HEAD'])).toBe(held);
   });
 
   it('answers why a checkout could not be refreshed, and refreshes the others', async () => {
