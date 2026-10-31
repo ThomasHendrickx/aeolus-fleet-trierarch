@@ -1,6 +1,7 @@
 import { createServer, type ServerResponse } from 'node:http';
 
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import { newId } from '../../test/support/in-memory.js';
 import { createRestFleet, FleetRefusal } from './rest-fleet.js';
@@ -314,6 +315,42 @@ describe('the fleet over REST while it is busy (#546)', () => {
 
       await expect(ended).resolves.toMatchObject({ name: 'AbortError' });
       expect(asked).toHaveLength(1);
+    });
+  });
+
+  it('writes the activity of the sessions in one call, with the interval, as ISO times, leaving out a tool a kind has none of', async () => {
+    const scout = newId('ship');
+    const hand = newId('ship');
+    await aFleetAnswering([{ status: 200, body: { refused: [] } }], async (fleetUrl, asked) => {
+      const fleet = createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_x' });
+
+      await fleet.reportActivity({
+        intervalSeconds: 30,
+        activities: [
+          { shipId: scout, at: new Date('2026-10-09T08:00:00Z'), kind: 'tool', tool: 'Bash' },
+          { shipId: hand, at: new Date('2026-10-09T08:00:05Z'), kind: 'text' },
+        ],
+      });
+
+      expect(asked.map(({ url }) => url)).toEqual(['/api/v1/fleet/reportActivity']);
+      expect(JSON.parse(asked[0]?.body ?? '')).toEqual({
+        intervalSeconds: 30,
+        activities: [
+          { shipId: scout, at: '2026-10-09T08:00:00.000Z', kind: 'tool', tool: 'Bash' },
+          { shipId: hand, at: '2026-10-09T08:00:05.000Z', kind: 'text' },
+        ],
+      });
+    });
+  });
+
+  it('writes the activity of 101 sessions in two calls, the fleet taking at most 100', async () => {
+    await aFleetAnswering([{ status: 200, body: { refused: [] } }], async (fleetUrl, asked) => {
+      const fleet = createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_x' });
+      const activities = Array.from({ length: 101 }, () => ({ shipId: newId('ship'), at: new Date('2026-10-09T08:00:00Z'), kind: 'text' as const }));
+
+      await fleet.reportActivity({ intervalSeconds: 30, activities });
+
+      expect(asked.map(({ body }) => z.object({ activities: z.array(z.unknown()) }).parse(JSON.parse(body)).activities.length)).toEqual([100, 1]);
     });
   });
 });

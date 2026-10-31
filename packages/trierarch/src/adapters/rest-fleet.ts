@@ -22,6 +22,9 @@ import { runningVersion } from './version.js';
 /** What the trierarch states as model and harness: it is software, not a model, as squadrons is (#157). */
 export const TRIERARCH_SELF = { model: `@aeolus-fleet/trierarch@${runningVersion()}`, harness: 'aeolus-trierarch' } as const;
 
+/** The most activities the fleet takes in one `fleet.reportActivity` call. */
+const ACTIVITIES_PER_CALL = 100;
+
 /** Where the trierarch says its sessions and itself run: on the operator's machine. */
 const LOCATION = { kind: 'DEVICE' } as const;
 
@@ -227,6 +230,12 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string; 
     },
     report: async ({ crewToken, state, note }) => {
       await call({ path: '/ship/report', crewToken, body: { state, note }, answers: z.unknown() });
+    },
+    reportActivity: async ({ intervalSeconds, activities }) => {
+      for (let from = 0; from < activities.length; from += ACTIVITIES_PER_CALL) {
+        const chunk = activities.slice(from, from + ACTIVITIES_PER_CALL).map(({ shipId, at, kind, tool }) => ({ shipId, at: at.toISOString(), kind, ...(tool !== undefined && { tool }) }));
+        await call({ path: '/fleet/reportActivity', body: { intervalSeconds, activities: chunk }, answers: z.unknown() });
+      }
     },
     reportSelf: async ({ state, note, details }) => {
       await call({ path: '/ship/report', body: { state, note, details }, answers: z.unknown() });

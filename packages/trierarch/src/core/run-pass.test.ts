@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { aTrierarch, aTrierarchOnLogins, CONFIGURATION, crewSettings, InMemoryCheckouts, InMemoryShipSockets, newId, NOTES_FOLDER, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
 import { putEntry } from './entry.js';
 import type { LaunchSeen } from './ports.js';
+import { ACTIVITY_INTERVAL_SECONDS } from './run-pass.js';
 import { RESTART_BUDGET } from './restart-policy.js';
 
 const SECOND_MS = 1000;
@@ -64,6 +65,55 @@ async function aKeptWorktree(trierarch: Trierarch) {
 }
 
 const statusesOf = (trierarch: Trierarch, shipId: ShipId) => trierarch.fleet.statuses.filter((each) => each.shipId === shipId).map((each) => each.status);
+
+describe('the activity of the sessions it runs (monitoring W3b)', () => {
+  const AT = new Date('2026-10-09T08:00:00Z');
+
+  it('writes each running session\'s activity every pass, with the interval it states', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.activities.set(shipId, { at: AT, kind: 'tool', tool: 'Bash' });
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.fleet.activityWrites).toEqual([
+      { intervalSeconds: ACTIVITY_INTERVAL_SECONDS, activities: [{ shipId, at: AT, kind: 'tool', tool: 'Bash' }] },
+      { intervalSeconds: ACTIVITY_INTERVAL_SECONDS, activities: [{ shipId, at: AT, kind: 'tool', tool: 'Bash' }] },
+    ]);
+  });
+
+  it('writes nothing for a session that shows no activity yet', async () => {
+    const trierarch = aTrierarch();
+    await aCrewedShip(trierarch);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.activityWrites).toEqual([]);
+  });
+
+  it('writes nothing for a session that exited', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.activities.set(shipId, { at: AT, kind: 'text' });
+    trierarch.processes.exit(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.activityWrites).toEqual([]);
+  });
+
+  it('goes on with the pass when the fleet refuses the write', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.activities.set(shipId, { at: AT, kind: 'text' });
+    trierarch.fleet.isRefusingActivity = true;
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().passFailure).toBeUndefined();
+  });
+});
 
 describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => {
   it('row 3: the first crew registers, makes the worktree, writes the identity and starts the session with the first prompt', async () => {

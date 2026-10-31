@@ -9,6 +9,7 @@ import { partsWithWords, wordsOf, type CommandPart } from './command-line.js';
 import { parsedLine } from './hold-protocol.js';
 import { createLaunchMarks } from './launch-marker.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
+import { copilotActivityIn, sessionActivityOf } from './session-activity.js';
 
 /**
  * The GitHub Copilot CLI as a harness (docs/architecture.md, "First
@@ -139,7 +140,7 @@ function lastSessionIn(events: readonly string[]): string | undefined {
 export function createCopilotHarness(options: {
   configuration: TrierarchConfiguration;
   plugin: AeolusPlugin;
-  sessions: Pick<SessionRuntime, 'start' | 'send' | 'interrupt' | 'events'>;
+  sessions: Pick<SessionRuntime, 'start' | 'send' | 'interrupt' | 'events' | 'lastEventAt'>;
   /** Copilot's version as detection last found it, read each time: a build its plugin is not proven on is not offered (CC3). */
   detectedVersion: () => string | undefined;
   /** Whether sessions run in containers, where Copilot is not proven (CC10). */
@@ -207,6 +208,7 @@ export function createCopilotHarness(options: {
       return COPILOT_PROVEN_VERSIONS.includes(version) ? undefined : `Copilot CLI ${version} is not proven: the hooks of its aeolus-fleet plugin are proven on ${proven}`;
     },
     // The marker says what the session did (#490); what Copilot says before any hook runs, a refused model or login, is read from its output (headless H13).
+    activityOf: async ({ shipId }) => sessionActivityOf({ sessions, shipId, read: copilotActivityIn }),
     launchSeen: async ({ shipId, folder, launchId, model }) => {
       const error = copilotErrorIn({ events: await sessions.events(shipId), ...(model !== undefined && { model }) });
       if (error?.kind === 'refused') {
