@@ -4143,7 +4143,7 @@ describe("a ship's read-only checkouts, which its trierarch keeps (#1182)", () =
   });
 
   /** The trierarch writes the folder's identity with its socket and the checkouts given. */
-  function crewedWithCheckouts(checkouts: readonly string[], env: Record<string, string> = {}, { isFolderReadOnly = false }: { isFolderReadOnly?: boolean } = {}): string {
+  function crewedWithCheckouts(checkouts: readonly string[], { env = {}, isFolderReadOnly = false }: { env?: Record<string, string>; isFolderReadOnly?: boolean } = {}): string {
     const socket = join(sockets, 'fleet.sock');
     const args = ['write', '--wake-by', 'trierarch', '--socket', socket, ...checkouts.flatMap((checkout) => ['--checkout', checkout]), ...(isFolderReadOnly ? ['--read-only-folder'] : []), 'https://fleet.example.com', SHIP_ID, 'scout'];
     expect(run('aeolus-identity.sh', { args, stdin: CREW_TOKEN, env }).status).toBe(0);
@@ -4175,7 +4175,7 @@ describe("a ship's read-only checkouts, which its trierarch keeps (#1182)", () =
   });
 
   it("names each checkout and where it is in a Codex session's start context", () => {
-    crewedWithCheckouts([`governance=${GOVERNANCE}`, `skills=${SKILLS}`], AS_CODEX);
+    crewedWithCheckouts([`governance=${GOVERNANCE}`, `skills=${SKILLS}`], { env: AS_CODEX });
 
     const context = sessionStart({ PLUGIN_DATA: data, PLUGIN_ROOT: SCRIPTS.replace(/\/scripts\/$/, '') });
 
@@ -4192,7 +4192,7 @@ describe("a ship's read-only checkouts, which its trierarch keeps (#1182)", () =
   });
 
   it('says in the start context that a read-only folder is read-only and on main, and that the refresh brings it too (aeolus-fleet#1449)', () => {
-    crewedWithCheckouts([`skills=${SKILLS}`], {}, { isFolderReadOnly: true });
+    crewedWithCheckouts([`skills=${SKILLS}`], { isFolderReadOnly: true });
 
     const context = sessionStart({ CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin' });
 
@@ -4202,7 +4202,7 @@ describe("a ship's read-only checkouts, which its trierarch keeps (#1182)", () =
   });
 
   it('says a read-only folder with no checkouts beside it is read-only, and how to refresh it (aeolus-fleet#1449)', () => {
-    crewedWithCheckouts([], {}, { isFolderReadOnly: true });
+    crewedWithCheckouts([], { isFolderReadOnly: true });
 
     const context = sessionStart({ CLAUDE_PLUGIN_DATA: data, CLAUDE_PLUGIN_ROOT: '/plugin' });
 
