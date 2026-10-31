@@ -468,6 +468,24 @@ describe('aeolus-trierarch init on a machine set up already', () => {
     expect(service.done).toEqual(['rewrite', 'restart']);
   });
 
+  it("does not say it can crew no request when the trierarch plugin's ship is named and no repository is configured, as the trusted repositories come from that ship once the trierarch restarts (aeolus-fleet#1218)", async () => {
+    const pluginShipId = newId('ship');
+
+    const report = await init({ pluginShipId, isYes: true });
+
+    expect(report.said.join('\n')).not.toContain('can crew no request');
+    expect(report.said).toContain(`It has no configured repository or folder, and takes its trusted repositories from the trierarch plugin's ship ${pluginShipId} once the restarted trierarch has them.`);
+  });
+
+  it('counts the trusted repositories it holds in its summary instead of saying it can crew no request (aeolus-fleet#1218)', async () => {
+    writeFileSync(paths.trustedRepositories, JSON.stringify({ repositories: [{ name: 'aeolus-fleet', url: 'https://github.com/ThomasHendrickx/aeolus-fleet.git' }] }));
+
+    const report = await init({}, new ScriptedPrompter([['Change the configuration', false]]));
+
+    expect(report.said.join('\n')).not.toContain('can crew no request');
+    expect(report.said).toContain('It has no configured repository or folder, and holds 1 trusted repository: aeolus-fleet.');
+  });
+
   it("rewrites the installed service's file, so a unit an earlier trierarch wrote runs as this one writes it from its next start (#479)", async () => {
     await init({}, new ScriptedPrompter([['Change the configuration', false]]));
 
