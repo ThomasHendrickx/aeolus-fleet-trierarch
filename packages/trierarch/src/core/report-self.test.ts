@@ -126,10 +126,10 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
     const trierarch = aTrierarch();
     await trierarch.reportSelf();
 
-    trierarch.fleetKey.cutOff = true;
+    trierarch.fleetKey.isCutOffNow = true;
     await trierarch.reportSelf();
     await trierarch.reportSelf();
-    trierarch.fleetKey.cutOff = false;
+    trierarch.fleetKey.isCutOffNow = false;
     await trierarch.reportSelf();
 
     expect(trierarch.fleet.selfReports.map(({ state, note }) => ({ state, note }))).toEqual([

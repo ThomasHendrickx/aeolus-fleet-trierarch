@@ -176,7 +176,9 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     codex: createCodexUsage({ sessions: join(env.CODEX_HOME ?? join(homeDirectory, '.codex'), 'sessions'), madeAt: folderMadeAt }),
   });
   const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configured.harnesses), prices: priceTableOf(configured.prices) });
-  const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup, readLoad, readUsage, clock, modelLogins, ...(configured.logins !== undefined && { logins: configured.logins }) });
+  // Set by the receive loop, read by each report of the trierarch's own ship.
+  let isFleetKeyCutOff = false;
+  const reportSelf = createReportSelf({ fleetKey: { isCutOff: () => isFleetKeyCutOff }, fleet, processes: sessions, trust, state, setup, readLoad, readUsage, clock, modelLogins, ...(configured.logins !== undefined && { logins: configured.logins }) });
   const askForTrustedRepositories = createAskForTrustedRepositories({ fleet, logger, ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
   const keepProxy = async (): Promise<void> => {
     const held = await Promise.all(PLUGIN_HARNESSES.map((harness) => keys.has(harness)));
@@ -196,7 +198,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const found = await Promise.all(Object.entries(plugins).map(async ([harness, plugin]) => `${harness} at ${await plugin.root()}`));
   logger.info(`aeolus-trierarch ${setup.version} runs for ${crew.fleetUrl}, with the aeolus-fleet plugin for ${found.join(' and ') || 'no harness'}`);
   try {
-    await loop({ receive: (stop) => fleet.receive(stop), handle, pass, signal, logger, intervalMs: PASS_INTERVAL_MS });
+    await loop({ receive: (stop) => fleet.receive(stop), handle, pass, signal, logger, intervalMs: PASS_INTERVAL_MS, onKeyCutOff: (isCutOff) => { isFleetKeyCutOff = isCutOff; } });
   } finally {
     // While the trierarch is down a session's call gets no answer, as when the fleet is down (decision 0026).
     await sockets.closeAll();
@@ -232,6 +234,8 @@ export async function loop(at: {
   keyWaitMaxMs?: number;
   /** Waits `ms`, ending at once on the stop. */
   pause?: (ms: number) => Promise<void>;
+  /** Told at the first KEY_UNAVAILABLE (true) and when a receive passes again (false). */
+  onKeyCutOff?: (isCutOff: boolean) => void;
 }): Promise<void> {
   const { signal, logger, intervalMs } = at;
   const keyWaitMaxMs = at.keyWaitMaxMs ?? KEY_WAIT_MAX_MS;
@@ -243,6 +247,7 @@ export async function loop(at: {
   let keyWaitMs: number | undefined;
   const keyUnavailable = async (error: FleetRefusal): Promise<void> => {
     if (keyWaitMs === undefined) {
+      at.onKeyCutOff?.(true);
       logger.warn(`The fleet's key is not reachable, so the trierarch's own ship receives nothing and waits, longer each time, up to ${String(keyWaitMaxMs)} ms: ${error.message}`);
     }
     const waitMs = keyWaitMs === undefined ? intervalMs : Math.min(keyWaitMs * 2, keyWaitMaxMs);
@@ -252,6 +257,7 @@ export async function loop(at: {
   const keyAnswered = (): void => {
     if (keyWaitMs !== undefined) {
       keyWaitMs = undefined;
+      at.onKeyCutOff?.(false);
       logger.warn("The fleet's key is reachable again: the trierarch's own ship receives again");
     }
   };

@@ -922,11 +922,11 @@ export function aTrierarchSetUpBefore() {
   return trierarchOn({ configuration: CONFIGURATION, detected: {}, pluginShipId: undefined });
 }
 
-/** Whether the fleet's key is cut off (decision 0068): a test sets `cutOff`. */
+/** Whether the fleet's key is cut off (decision 0068): a test sets `isCutOffNow`. */
 export class InMemoryFleetKey {
-  cutOff = false;
+  isCutOffNow = false;
   isCutOff(): boolean {
-    return this.cutOff;
+    return this.isCutOffNow;
   }
 }
 
