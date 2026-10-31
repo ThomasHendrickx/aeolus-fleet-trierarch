@@ -213,6 +213,34 @@ describe('the run loop, with the fleet key cut off (decision 0068)', () => {
     expect(handled).toEqual(['dlv_1']);
     expect(told.at(-1)).toBe("The fleet's key is reachable again: the trierarch's own ship receives again");
   });
+
+  it('tells whether the key is cut off: at the first refusal, and again once a receive passes', async () => {
+    const stopping = new AbortController();
+    const told: boolean[] = [];
+    let receives = 0;
+
+    await loop({
+      receive: (signal) => {
+        receives += 1;
+        if (receives <= 2) {
+          return keyUnavailable();
+        }
+        return receives === 3 ? Promise.resolve([delivery]) : longPoll(signal);
+      },
+      handle: () => {
+        stopping.abort();
+        return Promise.resolve();
+      },
+      pass: () => longPoll(stopping.signal).then(() => undefined),
+      signal: stopping.signal,
+      logger: { warn: () => undefined },
+      intervalMs: 1,
+      pause: () => Promise.resolve(),
+      onKeyCutOff: (isCutOff) => told.push(isCutOff),
+    });
+
+    expect(told).toEqual([true, false]);
+  });
 });
 
 describe('the run, with the container runtime (decision 0039)', () => {
