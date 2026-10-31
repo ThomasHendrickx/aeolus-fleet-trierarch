@@ -54,9 +54,9 @@ describe("a ship's refresh (aeolus-fleet#1449)", () => {
 
   it('brings only its checkouts for a ship it holds no folder for', async () => {
     const shipId = newId('ship');
-    const { folder: _made, ...notMade } = aCompanyEntry(shipId);
+    const entry: Entry = { ...aCompanyEntry(shipId), folder: undefined };
 
-    const refreshed = await createShipRefresh({ state: await aStateWith(notMade), workspace, checkouts })(shipId);
+    const refreshed = await createShipRefresh({ state: await aStateWith(entry), workspace, checkouts })(shipId);
 
     expect(refreshed).toEqual([SKILLS]);
   });
