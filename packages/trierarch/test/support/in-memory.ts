@@ -922,6 +922,14 @@ export function aTrierarchSetUpBefore() {
   return trierarchOn({ configuration: CONFIGURATION, detected: {}, pluginShipId: undefined });
 }
 
+/** Whether the fleet's key is cut off (decision 0068): a test sets `cutOff`. */
+export class InMemoryFleetKey {
+  cutOff = false;
+  isCutOff(): boolean {
+    return this.cutOff;
+  }
+}
+
 function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Detected; pluginShipId: ShipId | undefined; logins?: Logins }) {
   const { configuration, detected, pluginShipId, logins } = at;
   const modelLogins = new InMemoryModelLogins();
@@ -973,7 +981,8 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
   const usage = new InMemoryUsage();
   const readLoad = createReadLoad({ machine, fleet, state, clock, logger });
   const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configuration.harnesses), prices: priceTableOf(undefined) });
-  const reportSelf = createReportSelf({ fleet, processes, trust, state, setup, readLoad, readUsage, clock, modelLogins, ...(logins !== undefined && { logins }) });
+  const fleetKey = new InMemoryFleetKey();
+  const reportSelf = createReportSelf({ fleetKey, fleet, processes, trust, state, setup, readLoad, readUsage, clock, modelLogins, ...(logins !== undefined && { logins }) });
 
   /** A message arrives at the trierarch's own ship: its delivery, handled. */
   async function deliver(message: { contentType: string; payload: string; senderShipId?: ShipId }): Promise<Delivery> {
@@ -982,7 +991,7 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
     return delivery;
   }
 
-  return { fleet, processes, folderProcesses, harness, codex, modelLogins, workspace, checkouts, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver, refusals, sockets, trustedRepositories, machine, usage, readLoad, readUsage };
+  return { fleetKey, fleet, processes, folderProcesses, harness, codex, modelLogins, workspace, checkouts, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver, refusals, sockets, trustedRepositories, machine, usage, readLoad, readUsage };
 }
 
 export type Trierarch = ReturnType<typeof aTrierarch>;

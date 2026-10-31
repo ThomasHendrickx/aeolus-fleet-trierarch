@@ -122,6 +122,23 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
     ]);
   });
 
+  it('is blocked, saying it waits for the fleet key, while the key is cut off, and reports as before once it is back (decision 0068)', async () => {
+    const trierarch = aTrierarch();
+    await trierarch.reportSelf();
+
+    trierarch.fleetKey.cutOff = true;
+    await trierarch.reportSelf();
+    await trierarch.reportSelf();
+    trierarch.fleetKey.cutOff = false;
+    await trierarch.reportSelf();
+
+    expect(trierarch.fleet.selfReports.map(({ state, note }) => ({ state, note }))).toEqual([
+      { state: 'idle', note: '0 of 8 running' },
+      { state: 'blocked', note: "0 of 8 running, waiting for the fleet's key (KEY_UNAVAILABLE)" },
+      { state: 'idle', note: '0 of 8 running' },
+    ]);
+  });
+
   it('is idle while no session runs, and says how many run of its cap', async () => {
     const trierarch = aTrierarch();
 
