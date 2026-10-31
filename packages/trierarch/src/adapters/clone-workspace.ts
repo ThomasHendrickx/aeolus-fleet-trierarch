@@ -91,6 +91,10 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
       const found = [];
       for (const repository of Object.keys(configuration.repositories)) {
         for (const name of await readdir(join(root, repository)).catch(() => [])) {
+          // A clone has a .git of its own; a file or folder without one is part of something else, such as a plain clone.
+          if (!(await exists(join(root, repository, name, '.git')))) {
+            continue;
+          }
           found.push({ path: join(root, repository, name), repository, name });
         }
       }
