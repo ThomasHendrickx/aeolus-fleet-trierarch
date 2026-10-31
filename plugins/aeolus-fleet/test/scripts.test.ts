@@ -4509,4 +4509,46 @@ describe('the version guard: an older plugin never touches the delivery store a 
 
     expect({ acks: ackBodies(stub).length, context: prompted.stdout.includes('Review'), owned: newerPluginOwns().length }).toEqual({ acks: 1, context: true, owned: 0 });
   });
+
+  describe('a plugin upgraded under a running session the trierarch crews (aeolus-fleet#1445)', () => {
+    const STOP = { hook_event_name: 'Stop', stop_hook_active: true };
+
+    /** The trierarch hands one message over with the plugin in a root, as it runs the newest plugin in the cache. */
+    const trierarchHands = (root: string): Promise<Run> => {
+      const child = spawn('bash', [join(root, 'scripts', 'aeolus-push.sh'), 'hand'], {
+        env: scriptEnvironment({ HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_CREWS: join(home, '.aeolus', 'crews', 'claude-code'), AEOLUS_RETRY_SECONDS: '0', ...NO_WAITS }),
+      });
+      child.stdin.end('');
+      let stdout = '';
+      child.stdout.on('data', (chunk: Buffer) => {
+        stdout += chunk.toString('utf8');
+      });
+      return new Promise((resolve) => {
+        child.on('close', (status) => {
+          resolve({ status, stdout, stderr: '' });
+        });
+      });
+    };
+
+    it('puts a message the trierarch hands over after the upgrade into the turn of the session still on the older plugin', async () => {
+      fleet = await startRoutedStubFleet({
+        '/api/v1/ship/pushReceive': [receiving(aDelivery()), receiving(aDelivery({ deliveryId: 'dlv_01m4rb7cq8m6d0x3ycsn1f4c2t', messageId: 'msg_01m4rb7cq8m6d0x3ycsn1f4c2s', payload: 'Merge "PR 12"' }))],
+        '/api/v1/ship/handed': [handedOk],
+        '/api/v1/ship/ack': [acknowledged],
+        '/api/v1/ship/handled': [taken],
+        '/api/v1/ship/turn': [taken],
+      });
+      expect(run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', fleet.url, SHIP_ID, 'scout'], stdin: CREW_TOKEN }).status).toBe(0);
+      const session = hookOf(aPlugin('0.34.0'));
+      await session('aeolus-stop.sh', STOP);
+      expect((await trierarchHands(aPlugin('0.34.0'))).status).toBe(0);
+      await session('aeolus-turn.sh', PROMPT);
+      await session('aeolus-stop.sh', STOP);
+
+      expect((await trierarchHands(aPlugin('0.35.0'))).status).toBe(0);
+      const prompted = await session('aeolus-turn.sh', PROMPT);
+
+      expect({ acks: ackBodies(fleet).length, context: prompted.stdout.includes('Merge \\"PR 12\\"') }).toEqual({ acks: 2, context: true });
+    });
+  });
 });
