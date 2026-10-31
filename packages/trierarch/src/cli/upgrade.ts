@@ -17,7 +17,9 @@ import { NOT_SAID_YET_REASON, startNewProcess } from './new-process.js';
  * the service's file, as its own init does, and the supervisor reads it again,
  * so the stop already follows it (#485) and a change to the file arrives with
  * the version that makes it, not one upgrade later (#492).
- * It never upgrades on its own. A failed install leaves the old version
+ * It never upgrades on its own, and never moves to npm's latest when that is older
+ * than the version installed, as on a release candidate: it changes nothing and
+ * says which version runs and which npm has (#1219). A failed install leaves the old version
  * running. Where npm's global folder is not the user's to write, as under a
  * system Node install, it installs nothing and says what to run instead
  * (#480): it never runs sudo itself. What it says to run then includes
@@ -226,6 +228,10 @@ export async function upgradeTrierarch(at: Restart & {
     throw new TrierarchFileError(`${at.version} is no version: give one such as 0.17.2`);
   }
   const target = at.version ?? (await at.npm.latest()).trim();
+  // Only npm's latest is refused when older: a version the user names is their choice, as a downgrade (#652).
+  if (at.version === undefined && byVersion(target, from) < 0) {
+    return { from, to: from, isUpgraded: false, isPluginUpdated: true, said: [`The trierarch runs ${from} and npm's latest is ${target}, an older version: upgrade never moves to an older one, so it stays on ${from}.`] };
+  }
   if (target === from) {
     const removed = await at.removeRemoteControl();
     const plugin = await upgradePlugin(at.plugin, target);
