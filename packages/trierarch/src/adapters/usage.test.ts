@@ -11,7 +11,7 @@ const NONE = { tokensOf: () => Promise.resolve([]), subscription: () => Promise.
 
 describe("the harnesses' usage, each from its own reader (#353)", () => {
   it("reads a ship's tokens and a subscription from the reader of its harness", async () => {
-    const tokens = [{ model: 'gpt-6.1-sol', tokens: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } }];
+    const tokens = [{ model: 'gpt-6.1-sol', hour: new Date('2026-10-12T07:00:00.000Z'), tokens: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } }];
     const windows = [{ windowMinutes: 300, usedPercent: 17, resetsAt: new Date('2026-10-12T08:00:00.000Z') }];
     const usage = createUsage({ 'claude-code': NONE, codex: { tokensOf: () => Promise.resolve(tokens), subscription: () => Promise.resolve(windows) } });
 

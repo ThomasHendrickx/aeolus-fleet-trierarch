@@ -38,6 +38,7 @@ const stateSchema = z.object({
       exits: z.array(z.string()),
       restartAt: z.string().optional(),
       folder: z.string().optional(),
+      sentUsage: z.record(z.string(), z.string()).optional(),
       crewToken: z.string().optional(),
       hasStarted: z.boolean(),
       launchedAt: z.string().optional(),

@@ -44,6 +44,7 @@ import { createHandleDelivery } from '../core/handle-delivery.js';
 import { machineOf } from '../core/machine.js';
 import { createReadLoad } from '../core/read-load.js';
 import { createReadUsage } from '../core/read-usage.js';
+import { createSendUsage } from '../core/send-usage.js';
 import { priceTableOf } from '../core/token-cost.js';
 import type { Delivery, Logger, TrierarchSetup } from '../core/ports.js';
 import { createReportSelf } from '../core/report-self.js';
@@ -179,6 +180,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   // Set by the receive loop, read by each report of the trierarch's own ship.
   let isFleetKeyCutOff = false;
   const reportSelf = createReportSelf({ fleetKey: { isCutOff: () => isFleetKeyCutOff }, fleet, processes: sessions, trust, state, setup, readLoad, readUsage, clock, modelLogins, ...(configured.logins !== undefined && { logins: configured.logins }) });
+  const sendUsage = createSendUsage({ fleet, usage, state, readUsage, clock, logger, prices: priceTableOf(configured.prices), ...(crew.shipId !== undefined && { trierarchShipId: crew.shipId }), ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
   const askForTrustedRepositories = createAskForTrustedRepositories({ fleet, logger, ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
   const keepProxy = async (): Promise<void> => {
     const held = await Promise.all(PLUGIN_HARNESSES.map((harness) => keys.has(harness)));
@@ -192,6 +194,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     await askForTrustedRepositories();
     await runPass();
     await reportSelf();
+    await sendUsage();
   };
 
   await writeRunningFile(paths.running, { pid: process.pid, version: setup.version });

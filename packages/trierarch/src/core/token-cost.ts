@@ -52,3 +52,20 @@ export function estimatedCostUsd(tokens: TokenCounts, price: ModelPrice | undefi
   const dollars = (tokens.input * price.input + tokens.output * price.output + tokens.cacheRead * price.cacheRead + tokens.cacheWrite * price.cacheWrite) / TOKENS_PER_PRICE;
   return Math.round(dollars * CENTS_PER_DOLLAR) / CENTS_PER_DOLLAR;
 }
+
+/** What a cost per kind is kept to: a millionth of a dollar, as an hour's tokens of one kind often cost under a cent. */
+const MICRO_DOLLARS = 1_000_000;
+
+/** Policy: what each kind of the tokens costs at the model's price, to the millionth of a dollar; none for a model the table does not price (the usage design). */
+export function estimatedCostPerKindUsd(tokens: TokenCounts, price: ModelPrice | undefined): TokenCounts | null {
+  if (price === undefined) {
+    return null;
+  }
+  const cost = (count: number, perMillion: number): number => Math.round((count * perMillion * MICRO_DOLLARS) / TOKENS_PER_PRICE) / MICRO_DOLLARS;
+  return { input: cost(tokens.input, price.input), output: cost(tokens.output, price.output), cacheRead: cost(tokens.cacheRead, price.cacheRead), cacheWrite: cost(tokens.cacheWrite, price.cacheWrite) };
+}
+
+/** The tokens of two counts added up, kind by kind. */
+export function plusTokens(a: TokenCounts, b: TokenCounts): TokenCounts {
+  return { input: a.input + b.input, output: a.output + b.output, cacheRead: a.cacheRead + b.cacheRead, cacheWrite: a.cacheWrite + b.cacheWrite };
+}

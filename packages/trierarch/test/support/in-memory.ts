@@ -42,6 +42,7 @@ import type {
   ShipSocketsPort,
   TrustedRepositoriesPort,
   MachinePort,
+  HourTokens,
   ModelTokens,
   SubscriptionWindow,
   UsagePort,
@@ -50,6 +51,7 @@ import type {
 import type { MachineLoad } from '../../src/core/machine-load.js';
 import { createReadLoad } from '../../src/core/read-load.js';
 import { createReadUsage } from '../../src/core/read-usage.js';
+import { createSendUsage } from '../../src/core/send-usage.js';
 import { createReportSelf } from '../../src/core/report-self.js';
 import { priceTableOf } from '../../src/core/token-cost.js';
 import { createRunPass } from '../../src/core/run-pass.js';
@@ -134,6 +136,10 @@ export class InMemoryFleet implements FleetPort {
   readonly askedForTrustedRepositories: ShipId[] = [];
   /** Set to refuse each ask for the trusted repositories, as a fleet that does not answer. */
   isRefusingAsks = false;
+  /** The usage the trierarch sent the trierarch plugin's ship, in order (the usage design). */
+  readonly sentUsage: { pluginShipId: ShipId; payload: string; idempotencyKey: string }[] = [];
+  /** Set to refuse every usage send, as when the fleet is unreachable or the daily message limit is reached. */
+  isRefusingUsage = false;
   /** Set to make the fleet refuse every send to an owner, as when no rule lets the trierarch reach it. */
   isRefusingOwnerReports = false;
   readonly acked: string[] = [];
@@ -296,6 +302,14 @@ export class InMemoryFleet implements FleetPort {
     }
     this.clearRequests.splice(index, 1);
     this.cleared.push({ ...cleared });
+    return Promise.resolve();
+  }
+
+  sendUsage(sent: { pluginShipId: ShipId; payload: string; idempotencyKey: string }): Promise<void> {
+    if (this.isRefusingUsage) {
+      return Promise.reject(new Error('DAILY_MESSAGE_LIMIT'));
+    }
+    this.sentUsage.push({ ...sent });
     return Promise.resolve();
   }
 
@@ -878,29 +892,48 @@ export class InMemoryMachine implements MachinePort {
   }
 }
 
-/** What the harnesses' own files and CLIs say of their usage: each ship's tokens per model, and each harness's subscription windows, as a test sets them. */
+/** The UTC hour a test's tokens were used in when it gives no time: the hour its crewed entries start. */
+export const USAGE_HOUR = new Date('2026-10-06T07:00:00.000Z');
+
+/** When a ship's folder was made, unless a test says otherwise. */
+export const FOLDER_MADE_AT = new Date('2026-10-06T06:30:00.000Z');
+
+/** The trierarch's own ship: the machine. */
+export const TRIERARCH_SHIP_ID: ShipId = 'shp_01m3tbfspe96yf1rnr4ank9t1a';
+
+const HOUR_MS = 60 * 60_000;
+
+/** What the harnesses' own files and CLIs say of their usage: each ship's tokens per model and UTC hour, and each harness's subscription windows, as a test sets them. */
 export class InMemoryUsage implements UsagePort {
-  readonly tokens = new Map<ShipId, readonly ModelTokens[]>();
-  /** Each ship's tokens as its sessions wrote them, with when: counted per model and login of the session that wrote them, when the ship's logins are given. */
+  /** Each ship's tokens, in the hour given, or in USAGE_HOUR. */
+  readonly tokens = new Map<ShipId, readonly (ModelTokens & { hour?: Date })[]>();
+  /** Each ship's tokens as its sessions wrote them, with when: counted per model, hour and login of the session that wrote them, when the ship's logins are given. */
   readonly written = new Map<ShipId, readonly (ModelTokens & { at: Date })[]>();
   readonly subscriptions = new Map<string, readonly SubscriptionWindow[]>();
   /** Ships whose transcripts cannot be read. */
   readonly unreadable = new Set<ShipId>();
+  /** When each folder was made, by folder; FOLDER_MADE_AT for any other. */
+  readonly madeAtOf = new Map<string, Date>();
 
-  tokensOf(ship: { shipId: ShipId; harness: string; folder: string; logins?: SessionLogins }): Promise<readonly ModelTokens[]> {
+  madeAt(folder: string): Promise<Date> {
+    return Promise.resolve(this.madeAtOf.get(folder) ?? FOLDER_MADE_AT);
+  }
+
+  tokensOf(ship: { shipId: ShipId; harness: string; folder: string; logins?: SessionLogins }): Promise<readonly HourTokens[]> {
     if (this.unreadable.has(ship.shipId)) {
       return Promise.reject(new Error('EACCES'));
     }
     const written = this.written.get(ship.shipId);
     if (written === undefined) {
-      return Promise.resolve(this.tokens.get(ship.shipId) ?? []);
+      return Promise.resolve((this.tokens.get(ship.shipId) ?? []).map((used) => ({ ...used, hour: used.hour ?? USAGE_HOUR })));
     }
-    const counted = new Map<string, ModelTokens>();
+    const counted = new Map<string, HourTokens>();
     for (const { model, tokens, at } of written) {
       const login = ship.logins === undefined ? undefined : loginAt(ship.logins, at);
-      const key = `${model} ${login ?? ''}`;
+      const hour = new Date(Math.floor(at.getTime() / HOUR_MS) * HOUR_MS);
+      const key = `${model} ${login ?? ''} ${String(hour.getTime())}`;
       const before = counted.get(key)?.tokens ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-      counted.set(key, { model, ...(login !== undefined && { login }), tokens: { input: before.input + tokens.input, output: before.output + tokens.output, cacheRead: before.cacheRead + tokens.cacheRead, cacheWrite: before.cacheWrite + tokens.cacheWrite } });
+      counted.set(key, { model, ...(login !== undefined && { login }), hour, tokens: { input: before.input + tokens.input, output: before.output + tokens.output, cacheRead: before.cacheRead + tokens.cacheRead, cacheWrite: before.cacheWrite + tokens.cacheWrite } });
     }
     return Promise.resolve([...counted.values()]);
   }
@@ -1002,6 +1035,7 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
   const usage = new InMemoryUsage();
   const readLoad = createReadLoad({ machine, fleet, state, clock, logger });
   const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configuration.harnesses), prices: priceTableOf(undefined) });
+  const sendUsage = createSendUsage({ fleet, usage, state, readUsage, clock, logger, prices: priceTableOf(undefined), trierarchShipId: TRIERARCH_SHIP_ID, ...(pluginShipId !== undefined && { pluginShipId }) });
   const fleetKey = new InMemoryFleetKey();
   const reportSelf = createReportSelf({ fleetKey, fleet, processes, trust, state, setup, readLoad, readUsage, clock, modelLogins, ...(logins !== undefined && { logins }) });
 
@@ -1012,7 +1046,7 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
     return delivery;
   }
 
-  return { fleetKey, fleet, processes, folderProcesses, harness, codex, modelLogins, workspace, checkouts, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver, refusals, sockets, trustedRepositories, machine, usage, readLoad, readUsage };
+  return { fleetKey, fleet, processes, folderProcesses, harness, codex, modelLogins, workspace, checkouts, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver, refusals, sockets, trustedRepositories, machine, usage, readLoad, readUsage, sendUsage };
 }
 
 export type Trierarch = ReturnType<typeof aTrierarch>;

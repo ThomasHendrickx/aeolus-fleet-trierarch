@@ -67,6 +67,7 @@ const aPopulatedState = (): Populated<TrierarchState> => {
         exits: ['2026-10-06T07:59:00.000Z'],
         restartAt: '2026-10-06T08:01:00.000Z',
         folder: '/home/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/scout',
+        sentUsage: { '2026-10-06T06:30:00.000Z 2026-10-06T07:00:00.000Z': '[]' },
         hasStarted: true,
         launchedAt: '2026-10-06T07:58:30.000Z',
         launchId: '6f1c2b9e-3d4a-4e5f-8a7b-9c0d1e2f3a4b',

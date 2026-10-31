@@ -125,6 +125,8 @@ export interface FleetPort {
   confirmCleared(cleared: ClearRequestToMe & { outcome: ClearOutcome }): Promise<void>;
   /** Asks the trierarch plugin's ship for the trusted repositories again, as the trierarch's own ship (aeolus-fleet#384). */
   askForTrustedRepositories(pluginShipId: ShipId): Promise<void>;
+  /** Sends the trierarch plugin's ship a usage message (the usage design), stored by the fleet before it answers; a refusal throws. */
+  sendUsage(sent: { pluginShipId: ShipId; payload: string; idempotencyKey: string }): Promise<void>;
   /** Sends argo a report, as the trierarch's own ship. */
   reportToArgo(report: ArgoReport): Promise<void>;
   /** Sends a ship's owner a report, as the trierarch's own ship. A refusal is answered, not thrown. */
@@ -492,6 +494,12 @@ export interface ModelTokens {
   readonly tokens: TokenCounts;
 }
 
+/** The tokens of one model and login in one UTC hour, by the time the transcript gives each message or turn (the usage design). */
+export interface HourTokens extends ModelTokens {
+  /** The start of the UTC hour. */
+  readonly hour: Date;
+}
+
 /** One window of a harness's subscription (#353): how long it is, how much of it is used, and when it starts again. */
 export interface SubscriptionWindow {
   readonly windowMinutes: number;
@@ -501,8 +509,10 @@ export interface SubscriptionWindow {
 
 /** What the harnesses say of their usage (#353), from their own files and CLIs. */
 export interface UsagePort {
-  /** The tokens the ship's sessions used since its folder was made, per model, from its harness's transcripts; given its logins, per model and login, each counted to the login of the session that wrote it (api keys K8). */
-  tokensOf(ship: { shipId: ShipId; harness: string; folder: string; logins?: SessionLogins }): Promise<readonly ModelTokens[]>;
+  /** The tokens the ship's sessions used since its folder was made, per model and UTC hour, from its harness's transcripts; given its logins, per login too, each counted to the login of the session that wrote it (api keys K8). */
+  tokensOf(ship: { shipId: ShipId; harness: string; folder: string; logins?: SessionLogins }): Promise<readonly HourTokens[]>;
+  /** When the folder was made: its usage counts from then, and it tells two folders of one ship apart. */
+  madeAt(folder: string): Promise<Date>;
   /** How much of the harness's subscription is used now, per window; none when the harness cannot say. */
   subscriptionOf(harness: string): Promise<readonly SubscriptionWindow[] | undefined>;
 }

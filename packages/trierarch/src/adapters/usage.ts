@@ -3,17 +3,18 @@ import { stat } from 'node:fs/promises';
 import type { ShipId } from '@aeolus-fleet/common';
 
 import type { SessionLogins } from '../core/login.js';
-import type { ModelTokens, SubscriptionWindow, UsagePort } from '../core/ports.js';
+import type { HourTokens, SubscriptionWindow, UsagePort } from '../core/ports.js';
 
 /** What one harness says of its usage (#353): a ship's tokens from its transcripts, and its subscription's windows. */
 export interface HarnessUsageReader {
-  tokensOf(ship: { shipId: ShipId; folder: string; logins?: SessionLogins }): Promise<readonly ModelTokens[]>;
+  tokensOf(ship: { shipId: ShipId; folder: string; logins?: SessionLogins }): Promise<readonly HourTokens[]>;
   subscription(): Promise<readonly SubscriptionWindow[] | undefined>;
 }
 
 /** The harnesses' usage (#353), each from the reader of its harness; a harness with none says nothing. */
-export function createUsage(readers: Readonly<Record<string, HarnessUsageReader>>): UsagePort {
+export function createUsage(readers: Readonly<Record<string, HarnessUsageReader>>, madeAt: (folder: string) => Promise<Date> = folderMadeAt): UsagePort {
   return {
+    madeAt,
     tokensOf: ({ harness, ...ship }) => readers[harness]?.tokensOf(ship) ?? Promise.resolve([]),
     subscriptionOf: (harness) => readers[harness]?.subscription() ?? Promise.resolve(undefined),
   };

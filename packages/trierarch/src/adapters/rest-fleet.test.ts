@@ -230,6 +230,27 @@ describe("the fleet over REST: trouble to a ship's owner (decision 0045)", () =>
     });
   });
 
+  it("sends the trierarch plugin's ship a usage message, by its id, under the idempotency key given (the usage design)", async () => {
+    const pluginShipId = newId('ship');
+    await aFleetAnswering([{ status: 200, body: { messageId: newId('message') } }], async (fleetUrl, asked) => {
+      await createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_x' }).sendUsage({ pluginShipId, payload: '{"hours":[]}', idempotencyKey: 'usage:shp_x:2026-10-06T08:00:00.000Z' });
+
+      expect(asked.map(({ url }) => url)).toEqual(['/api/v1/ship/send']);
+      expect(JSON.parse(asked[0]?.body ?? '')).toMatchObject({
+        selector: { kind: 'ship', shipId: pluginShipId },
+        contentType: 'application/vnd.aeolus.trierarch.usage+json',
+        payload: '{"hours":[]}',
+        idempotencyKey: 'usage:shp_x:2026-10-06T08:00:00.000Z',
+      });
+    });
+  });
+
+  it('throws when the fleet refuses a usage message, as at the daily message limit', async () => {
+    await aFleetAnswering([{ status: 429, body: { code: 'DAILY_MESSAGE_LIMIT', message: 'The fleet reached its daily message limit' } }], async (fleetUrl) => {
+      await expect(createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_x' }).sendUsage({ pluginShipId: newId('ship'), payload: '{}', idempotencyKey: 'usage:1' })).rejects.toThrow();
+    });
+  });
+
   it("sends the owner's ship the report in markdown, by its id, and answers sent", async () => {
     const ownerShipId = newId('ship');
     await aFleetAnswering([{ status: 200, body: { messageId: newId('message') } }], async (fleetUrl, asked) => {

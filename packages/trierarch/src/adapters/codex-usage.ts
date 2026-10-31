@@ -5,10 +5,10 @@ import type { ShipId } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
 import { loginAt, type SessionLogins } from '../core/login.js';
-import type { ModelTokens, SubscriptionWindow } from '../core/ports.js';
+import type { HourTokens, SubscriptionWindow } from '../core/ports.js';
 import type { TokenCounts } from '../core/token-cost.js';
 import { createAppendedLines } from './appended-lines.js';
-import { createTokensPerLogin } from './tokens-per-login.js';
+import { createTokensPerLogin, hourOf } from './tokens-per-login.js';
 
 /**
  * What Codex says of its usage (#353), from its session logs (rollout files
@@ -128,7 +128,7 @@ export function createCodexUsage(deps: {
   };
 
   return {
-    tokensOf: async (ship: { shipId: ShipId; folder: string; logins?: SessionLogins }): Promise<ModelTokens[]> => {
+    tokensOf: async (ship: { shipId: ShipId; folder: string; logins?: SessionLogins }): Promise<HourTokens[]> => {
       const since = (await deps.madeAt(ship.folder)).getTime();
       const counted = createTokensPerLogin();
       for (const path of await sessionLogs()) {
@@ -144,7 +144,7 @@ export function createCodexUsage(deps: {
         logs.set(path, log);
         if (log.folder === ship.folder && (log.startedAt ?? 0) >= since) {
           for (const { model, at, tokens } of log.grown) {
-            counted.add({ model, ...(ship.logins !== undefined && { login: loginAt(ship.logins, at) }), tokens });
+            counted.add({ model, ...(ship.logins !== undefined && { login: loginAt(ship.logins, at) }), hour: hourOf(at), tokens });
           }
         }
       }

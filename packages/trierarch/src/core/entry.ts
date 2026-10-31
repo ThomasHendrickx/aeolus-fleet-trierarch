@@ -72,6 +72,13 @@ export interface Entry {
   readonly restartAt?: string;
   /** Where its workspace is, once made. */
   readonly folder?: string;
+  /**
+   * What it last sent the trierarch plugin's ship of each UTC hour of its
+   * folder's usage (the usage design), by the folder's made time and the
+   * hour: each hour's totals as sent, so an hour is sent again only once they
+   * change. Lost, every hour is sent again, which changes nothing.
+   */
+  readonly sentUsage?: Readonly<Record<string, string>>;
   /** The crew token its register gave, kept here only: its session calls the fleet over its ship's socket (decision 0026). */
   readonly crewToken?: string;
   readonly hasStarted: boolean;
