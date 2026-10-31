@@ -145,6 +145,34 @@ describe("the trierarch sends its usage to the trierarch plugin's ship (the usag
     expect(trierarch.logger.warnings.some((line) => line.includes('Could not send the usage'))).toBe(true);
   });
 
+  it('sends every subscription reading since its last send that returned OK, each once', async () => {
+    const trierarch = aTrierarch();
+    const entry = aCrewedEntry();
+    await withEntries(trierarch, entry);
+    trierarch.usage.tokens.set(entry.shipId, [OPUS_TOKENS]);
+    trierarch.usage.subscriptions.set('claude-code', [FIVE_HOURS]);
+    trierarch.fleet.isRefusingUsage = true;
+    await trierarch.sendUsage();
+    trierarch.fleet.isRefusingUsage = false;
+    // 31 minutes on, with work since: the subscription is read again, within the hour.
+    trierarch.clock.advance(31 * 60_000);
+    trierarch.usage.tokens.set(entry.shipId, [{ ...OPUS_TOKENS, tokens: { ...OPUS_TOKENS.tokens, output: 46_000 } }]);
+    trierarch.usage.subscriptions.set('claude-code', [{ ...FIVE_HOURS, usedPercent: 9 }]);
+    await trierarch.sendUsage();
+
+    trierarch.clock.advance(29 * 60_000);
+    await trierarch.sendUsage();
+    trierarch.clock.advance(HOUR_MS);
+    await trierarch.sendUsage();
+
+    expect(sentMessages(trierarch).map(({ subscriptions }) => subscriptions.map(({ readAt, windows }) => ({ readAt, usedPercent: windows[0]?.usedPercent })))).toEqual([
+      [
+        { readAt: '2026-10-06T08:00:00.000Z', usedPercent: 3 },
+        { readAt: '2026-10-06T08:31:00.000Z', usedPercent: 9 },
+      ],
+    ]);
+  });
+
   it("keeps a ship's fresh folder apart: its hours are sent though the old folder's same hours were", async () => {
     const trierarch = aTrierarch();
     const entry = aCrewedEntry();
