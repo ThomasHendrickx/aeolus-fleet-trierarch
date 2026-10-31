@@ -130,9 +130,14 @@ export interface FleetPort {
 
 /** The trierarch's own report: idle or working, how many sessions run, and its details (docs/trierarch.md). */
 export interface SelfReport {
-  readonly state: 'idle' | 'working';
+  readonly state: 'idle' | 'working' | 'blocked';
   readonly note: string;
   readonly details: TrierarchReportDetails;
+}
+
+/** Whether the fleet's key is cut off (decision 0068): the fleet refuses to receive `KEY_UNAVAILABLE`. */
+export interface FleetKeyPort {
+  isCutOff(): boolean;
 }
 
 /** What a session's folder identity holds for the trierarch: written through the aeolus-fleet plugin, never a copy of it. No crew token: the session calls over its ship's socket (decision 0026). */

@@ -25,7 +25,7 @@ import { claudeCodeKeyInReach } from '../adapters/claude-code.js';
 import { createMachine } from '../adapters/machine.js';
 import { shipHome, type TrierarchPaths } from '../adapters/paths.js';
 import { runCommand } from '../adapters/run-command.js';
-import { createRestFleet } from '../adapters/rest-fleet.js';
+import { createRestFleet, FleetRefusal } from '../adapters/rest-fleet.js';
 import { modelProxy, runtimeAdaptersOf } from '../adapters/runtime-adapters.js';
 import { PLUGIN_HARNESSES } from '../adapters/plugin.js';
 import { createCallerCheck } from '../adapters/caller-check.js';
@@ -176,7 +176,9 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     codex: createCodexUsage({ sessions: join(env.CODEX_HOME ?? join(homeDirectory, '.codex'), 'sessions'), madeAt: folderMadeAt }),
   });
   const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configured.harnesses), prices: priceTableOf(configured.prices) });
-  const reportSelf = createReportSelf({ fleet, processes: sessions, trust, state, setup, readLoad, readUsage, clock, modelLogins, ...(configured.logins !== undefined && { logins: configured.logins }) });
+  // Set by the receive loop, read by each report of the trierarch's own ship.
+  let isFleetKeyCutOff = false;
+  const reportSelf = createReportSelf({ fleetKey: { isCutOff: () => isFleetKeyCutOff }, fleet, processes: sessions, trust, state, setup, readLoad, readUsage, clock, modelLogins, ...(configured.logins !== undefined && { logins: configured.logins }) });
   const askForTrustedRepositories = createAskForTrustedRepositories({ fleet, logger, ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
   const keepProxy = async (): Promise<void> => {
     const held = await Promise.all(PLUGIN_HARNESSES.map((harness) => keys.has(harness)));
@@ -196,12 +198,18 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const found = await Promise.all(Object.entries(plugins).map(async ([harness, plugin]) => `${harness} at ${await plugin.root()}`));
   logger.info(`aeolus-trierarch ${setup.version} runs for ${crew.fleetUrl}, with the aeolus-fleet plugin for ${found.join(' and ') || 'no harness'}`);
   try {
-    await loop({ receive: (stop) => fleet.receive(stop), handle, pass, signal, logger, intervalMs: PASS_INTERVAL_MS });
+    await loop({ receive: (stop) => fleet.receive(stop), handle, pass, signal, logger, intervalMs: PASS_INTERVAL_MS, onKeyCutOff: (isCutOff) => { isFleetKeyCutOff = isCutOff; } });
   } finally {
     // While the trierarch is down a session's call gets no answer, as when the fleet is down (decision 0026).
     await sockets.closeAll();
   }
 }
+
+/** The most the loop waits between receives while the fleet's key is cut off: core's key cache lasts 5 minutes (decision 0068). */
+const KEY_WAIT_MAX_MS = 300_000;
+
+/** The refusal core answers while the company's key cannot be had: nothing was claimed, and a later call may pass (decision 0068). */
+const KEY_UNAVAILABLE = 'KEY_UNAVAILABLE';
 
 /**
  * Receives and handles what came, and runs a pass every `intervalMs`, until
@@ -212,7 +220,9 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
  * logged and its side waits an interval before it goes on. The stop ends a
  * receive the fleet still holds, and every wait, at once: a service manager
  * that stops the trierarch sees it gone in a moment, not after the next long
- * poll.
+ * poll. While the fleet's key is cut off (KEY_UNAVAILABLE) a receive waits
+ * longer after each refusal, up to `keyWaitMaxMs`, says so once and says when
+ * the key is back: the trierarch's own ship is never taken as dead for it.
  */
 export async function loop(at: {
   receive: (signal: AbortSignal) => Promise<readonly Delivery[]>;
@@ -221,22 +231,52 @@ export async function loop(at: {
   signal: AbortSignal;
   logger: Pick<Logger, 'warn'>;
   intervalMs: number;
+  keyWaitMaxMs?: number;
+  /** Waits `ms`, ending at once on the stop. */
+  pause?: (ms: number) => Promise<void>;
+  /** Told at the first KEY_UNAVAILABLE (true) and when a receive passes again (false). */
+  onKeyCutOff?: (isCutOff: boolean) => void;
 }): Promise<void> {
   const { signal, logger, intervalMs } = at;
+  const keyWaitMaxMs = at.keyWaitMaxMs ?? KEY_WAIT_MAX_MS;
   // Asked afresh each time: a stop comes from outside while the loop waits.
   const isStopped = (): boolean => signal.aborted;
-  const pause = () => wait(intervalMs, undefined, { signal }).catch(() => undefined);
+  const pauseFor = at.pause ?? ((ms: number) => wait(ms, undefined, { signal }).catch(() => undefined));
+  const pause = () => pauseFor(intervalMs);
+  /** How long the next wait is while the key is cut off; undefined while it is not. */
+  let keyWaitMs: number | undefined;
+  const keyUnavailable = async (error: FleetRefusal): Promise<void> => {
+    if (keyWaitMs === undefined) {
+      at.onKeyCutOff?.(true);
+      logger.warn(`The fleet's key is not reachable, so the trierarch's own ship receives nothing and waits, longer each time, up to ${String(keyWaitMaxMs)} ms: ${error.message}`);
+    }
+    const waitMs = keyWaitMs === undefined ? intervalMs : Math.min(keyWaitMs * 2, keyWaitMaxMs);
+    keyWaitMs = waitMs;
+    await pauseFor(waitMs);
+  };
+  const keyAnswered = (): void => {
+    if (keyWaitMs !== undefined) {
+      keyWaitMs = undefined;
+      at.onKeyCutOff?.(false);
+      logger.warn("The fleet's key is reachable again: the trierarch's own ship receives again");
+    }
+  };
   /** Runs one step after another until the stop, logging a failure and pausing after it; a paced one waits an interval after each. */
   const repeat = async (step: () => Promise<void>, pacing: { isPaced: boolean }): Promise<void> => {
     while (!isStopped()) {
       try {
         await step();
+        keyAnswered();
         if (pacing.isPaced) {
           await pause();
         }
       } catch (error) {
         if (isStopped()) {
           return;
+        }
+        if (error instanceof FleetRefusal && error.code === KEY_UNAVAILABLE) {
+          await keyUnavailable(error);
+          continue;
         }
         logger.warn(`The loop failed and goes on: ${error instanceof Error ? error.message : String(error)}`);
         await pause();

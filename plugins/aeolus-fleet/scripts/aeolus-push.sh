@@ -96,7 +96,11 @@ hand() {
 # One push receive: sets id to the entry of what the fleet answers first, a
 # forced delivery before any other. Exits 1 when it answers nothing.
 push_receive() {
-  local output
+  local output wait
+  # The fleet's key is cut off (decision 0068): not asked again within the wait.
+  if aeolus_key_wait_active; then
+    exit 1
+  fi
   output="$(AEOLUS_CALL_MAX_SECONDS="$PUSH_RECEIVE_SECONDS" "$(dirname "$0")/aeolus-fleet.sh" pushReceive '{"max":1}' 2>/dev/null)"
   case $? in
     0) ;;
@@ -105,10 +109,20 @@ push_receive() {
       exit 3
       ;;
     *)
+      if printf '%s' "$output" | grep -q ': KEY_UNAVAILABLE:'; then
+        [ -f "$(aeolus_key_wait_file)" ] || aeolus_report_key blocked
+        wait="$(aeolus_key_wait_start)"
+        aeolus_log "$identity" wake "waiting: the fleet's key is not reachable (KEY_UNAVAILABLE)" "asks again after ${wait} seconds, longer each time"
+        exit 1
+      fi
       aeolus_log "$identity" wake "failed: no push receive: ${output:-no answer}" 'the next pass tries again'
       exit 1
       ;;
   esac
+  if [ -f "$(aeolus_key_wait_file)" ]; then
+    aeolus_key_wait_clear
+    aeolus_report_key back
+  fi
   aeolus_identity_lease_key "$identity_text" > "$(aeolus_pushed_file)"
   if ! id="$(aeolus_store_put "$(printf '%s' "$output" | tr -d '\n')")"; then
     # Nothing handed, as when another ship of its type took the delivery first.

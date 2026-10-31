@@ -5,10 +5,13 @@ import type { TrierarchState } from './entry.js';
 import { loginOf, type KeyStateAt, type Logins } from './login.js';
 import { isOffering, isProbing, notOfferedReason, probeShipsCap } from './failed-starts.js';
 import { loadStepsOf } from './machine-load.js';
-import type { FleetPort, ModelLoginsPort, SelfReport, SessionRuntime, StatePort, TrierarchSetup, TrustedPlaces, TrustPort } from './ports.js';
+import type { FleetKeyPort, FleetPort, ModelLoginsPort, SelfReport, SessionRuntime, StatePort, TrierarchSetup, TrustedPlaces, TrustPort } from './ports.js';
 import type { ReadLoad } from './read-load.js';
 import type { ReadUsage } from './read-usage.js';
 import type { Clock } from './shared/clock.js';
+
+/** What the trierarch's report says while the fleet refuses to receive for lack of its key (decision 0068). */
+const KEY_CUT_OFF_NOTE = "waiting for the fleet's key (KEY_UNAVAILABLE)";
 
 const PLUGIN_MISSING_REASON = 'its aeolus-fleet plugin is not installed (run aeolus-trierarch upgrade)';
 
@@ -25,9 +28,11 @@ export type ReportSelf = () => Promise<void>;
  * counts as changed only once it takes another step, as it always moves.
  * A machine whose session starts keep failing offers nothing (#853) until
  * its probe is due. Each harness's login says its default and its key's
- * state, never the key (api keys K7, K8).
+ * state, never the key (api keys K7, K8). While the fleet's key is cut off it
+ * is blocked and says it waits for the key (decision 0068).
  */
 export function createReportSelf(deps: {
+  fleetKey: FleetKeyPort;
   fleet: FleetPort;
   processes: Pick<SessionRuntime, 'list' | 'stop'>;
   trust: TrustPort;
@@ -47,7 +52,8 @@ export function createReportSelf(deps: {
     const running = (await deps.processes.list()).filter((session) => session.status === 'running').length;
     const keys = new Map(await Promise.all(Object.keys(deps.setup.configuration.harnesses).map(async (harness) => [harness, await deps.modelLogins.keyState(harness)] as const)));
     const report = selfReportOf({ setup: deps.setup, state, running, trusted: await deps.trust.trusted(), now: deps.clock.now(), logins: { ...(deps.logins !== undefined && { configured: deps.logins }), keys } });
-    const withUsage: SelfReport = { ...report, details: { ...report.details, ...(load !== undefined && { load }), usage } };
+    const blocked: SelfReport = deps.fleetKey.isCutOff() ? { ...report, state: 'blocked', note: `${report.note}, ${KEY_CUT_OFF_NOTE}` } : report;
+    const withUsage: SelfReport = { ...blocked, details: { ...report.details, ...(load !== undefined && { load }), usage } };
     // What makes it another report: the load by its steps only.
     const sent = JSON.stringify({ ...withUsage, details: { ...withUsage.details, load: load === undefined ? undefined : loadStepsOf(load) } });
     if (sent === lastSent) {

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { trierarchPaths } from '../adapters/paths.js';
+import { FleetRefusal } from '../adapters/rest-fleet.js';
 import type { Delivery } from '../core/ports.js';
 import { loop, runTrierarch } from './run.js';
 
@@ -145,6 +146,100 @@ describe('the run loop', () => {
 
     expect(handled).toEqual(['dlv_1']);
     expect(passes).toBe(1);
+  });
+});
+
+describe('the run loop, with the fleet key cut off (decision 0068)', () => {
+  const delivery = { deliveryId: 'dlv_1', messageId: 'msg_1', senderShipId: 'shp_01m487vd5pdz6zh6s0jdnkg9p6', contentType: 'text/plain', payload: '' } as const;
+  const keyUnavailable = () => Promise.reject(new FleetRefusal('KEY_UNAVAILABLE', 'The company key is not reachable: access denied'));
+
+  it('waits longer after each KEY_UNAVAILABLE, up to a most, and says so once', async () => {
+    const stopping = new AbortController();
+    const warned: string[] = [];
+    const waits: number[] = [];
+    let receives = 0;
+
+    await loop({
+      receive: () => {
+        receives += 1;
+        if (receives <= 5) {
+          return keyUnavailable();
+        }
+        stopping.abort();
+        return Promise.reject(new Error('stopped'));
+      },
+      handle: () => Promise.resolve(),
+      pass: () => longPoll(stopping.signal).then(() => undefined),
+      signal: stopping.signal,
+      logger: { warn: (message) => warned.push(message) },
+      intervalMs: 10,
+      keyWaitMaxMs: 40,
+      pause: (ms) => {
+        waits.push(ms);
+        return Promise.resolve();
+      },
+    });
+
+    expect(waits).toEqual([10, 20, 40, 40, 40]);
+    expect(warned).toEqual(["The fleet's key is not reachable, so the trierarch's own ship receives nothing and waits, longer each time, up to 40 ms: KEY_UNAVAILABLE: The company key is not reachable: access denied"]);
+  });
+
+  it('says when the key answers again, and goes on at the plain pace', async () => {
+    const stopping = new AbortController();
+    const told: string[] = [];
+    const handled: string[] = [];
+    let receives = 0;
+
+    await loop({
+      receive: (signal) => {
+        receives += 1;
+        if (receives === 1) {
+          return keyUnavailable();
+        }
+        return receives === 2 ? Promise.resolve([delivery]) : longPoll(signal);
+      },
+      handle: (received) => {
+        handled.push(received.deliveryId);
+        stopping.abort();
+        return Promise.resolve();
+      },
+      pass: () => longPoll(stopping.signal).then(() => undefined),
+      signal: stopping.signal,
+      logger: { warn: (message) => told.push(message) },
+      intervalMs: 1,
+      pause: () => Promise.resolve(),
+    });
+
+    expect(handled).toEqual(['dlv_1']);
+    expect(told.at(-1)).toBe("The fleet's key is reachable again: the trierarch's own ship receives again");
+  });
+
+  it('tells whether the key is cut off: at the first refusal, and again once a receive passes', async () => {
+    const stopping = new AbortController();
+    const told: boolean[] = [];
+    let receives = 0;
+
+    await loop({
+      receive: (signal) => {
+        receives += 1;
+        if (receives <= 2) {
+          return keyUnavailable();
+        }
+        return receives === 3 ? Promise.resolve([delivery]) : longPoll(signal);
+      },
+      handle: () => {
+        stopping.abort();
+        return Promise.resolve();
+      },
+      pass: () => longPoll(stopping.signal).then(() => undefined),
+      signal: stopping.signal,
+      logger: { warn: () => undefined },
+      intervalMs: 1,
+      pause: () => Promise.resolve(),
+      onKeyCutOff: (isCutOff) => told.push(isCutOff),
+    });
+
+    expect(told).toEqual([true, false]);
   });
 });
 
