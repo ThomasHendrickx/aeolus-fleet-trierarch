@@ -232,6 +232,29 @@ describe('aeolus-trierarch upgrade', () => {
     expect(report).toMatchObject({ from: '0.17.1', to: '0.17.1', isUpgraded: false, said: ['The trierarch is already on 0.17.1.'] });
   });
 
+  it("changes nothing when npm's latest is older than the version installed, saying which version runs and which npm has", async () => {
+    installed = '0.31.0';
+    latest = '0.29.0';
+    saying = [{ pid: 2, version: '0.31.0' }];
+    offered = ['codex'];
+
+    const report = await upgrade();
+
+    expect(installs).toEqual([]);
+    expect(steps).toEqual([]);
+    expect(report).toMatchObject({ from: '0.31.0', to: '0.31.0', isUpgraded: false, isPluginUpdated: true });
+    expect(report.said).toEqual(["The trierarch runs 0.31.0 and npm's latest is 0.29.0, an older version: upgrade never moves to an older one, so it stays on 0.31.0."]);
+  });
+
+  it("compares versions by number, so npm's latest 0.9.0 is older than 0.10.0", async () => {
+    installed = '0.10.0';
+    latest = '0.9.0';
+
+    await upgrade();
+
+    expect(installs).toEqual([]);
+  });
+
   it('keeps the old version running when the install fails, saying what failed and what to do', async () => {
     failing = { status: 1, stdout: '', stderr: 'npm error code EACCES\nnpm error permission denied\n' };
 
