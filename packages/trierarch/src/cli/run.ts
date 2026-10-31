@@ -176,7 +176,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     codex: createCodexUsage({ sessions: join(env.CODEX_HOME ?? join(homeDirectory, '.codex'), 'sessions'), madeAt: folderMadeAt }),
   });
   const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configured.harnesses), prices: priceTableOf(configured.prices) });
-  const sendReleasedUsage = createSendReleasedUsage({ fleet, usage, clock, prices: priceTableOf(configured.prices), ...(crew.shipId !== undefined && { trierarchShipId: crew.shipId }), ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
+  const sendReleasedUsage = createSendReleasedUsage({ fleet, usage, clock, logger, prices: priceTableOf(configured.prices), ...(crew.shipId !== undefined && { trierarchShipId: crew.shipId }), ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
   const runPass = createRunPass({ fleet, harnesses, processes: sessions, folderProcesses: createFolderProcesses(), workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets, modelLogins, sendReleasedUsage, ...(configured.logins !== undefined && { logins: configured.logins }) });
   // Set by the receive loop, read by each report of the trierarch's own ship.
   let isFleetKeyCutOff = false;

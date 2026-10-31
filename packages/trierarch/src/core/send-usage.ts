@@ -197,8 +197,9 @@ export type SendReleasedUsage = (entry: Entry) => Promise<void>;
  * Use case: as a ship is released, here or elsewhere, the trierarch reads its
  * transcripts once more and sends the plugin's ship every hour of it whose
  * totals changed since its last send that returned OK (the usage design, U9).
- * Its folder is removed only after that: a read or a send that fails rejects,
- * and the release tries again on the next pass. Nothing to send, or a machine
+ * Its folder is removed only after that: a send that fails rejects, and the
+ * release tries again on the next pass. Transcripts that cannot be read hold
+ * nothing it could send: logged, and the release goes on. Nothing to send, or a machine
  * that does not know the plugin's ship or its own, sends nothing. The key
  * names the ship, as an hourly send may share the moment.
  */
@@ -206,6 +207,7 @@ export function createSendReleasedUsage(deps: {
   fleet: Pick<FleetPort, 'sendUsage'>;
   usage: UsagePort;
   clock: Clock;
+  logger: Pick<Logger, 'warn'>;
   prices: PriceTable;
   trierarchShipId?: ShipId;
   pluginShipId?: ShipId;
@@ -215,7 +217,12 @@ export function createSendReleasedUsage(deps: {
     if (pluginShipId === undefined || trierarchShipId === undefined) {
       return;
     }
-    const changed = changedOf(entry, await readShipHours(entry, deps));
+    // Transcripts that cannot be read hold nothing it could send: the release goes on, said in the log.
+    const read = await readShipHours(entry, deps).catch((error: unknown) => {
+      deps.logger.warn(`Could not read the last usage of ${entry.shipId}: ${messageOf(error)}; it is released without it`);
+      return [];
+    });
+    const changed = changedOf(entry, read);
     if (changed.length === 0) {
       return;
     }

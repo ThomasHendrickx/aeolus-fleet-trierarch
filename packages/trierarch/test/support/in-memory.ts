@@ -1030,7 +1030,7 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
   const checkouts = new InMemoryCheckouts(configuration);
   const folderProcesses = new InMemoryFolderProcesses();
   const usage = new InMemoryUsage();
-  const sendReleasedUsage = createSendReleasedUsage({ fleet, usage, clock, prices: priceTableOf(undefined), trierarchShipId: TRIERARCH_SHIP_ID, ...(pluginShipId !== undefined && { pluginShipId }) });
+  const sendReleasedUsage = createSendReleasedUsage({ fleet, usage, clock, logger, prices: priceTableOf(undefined), trierarchShipId: TRIERARCH_SHIP_ID, ...(pluginShipId !== undefined && { pluginShipId }) });
   const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, folderProcesses, workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId, sockets, modelLogins, sendReleasedUsage, ...(logins !== undefined && { logins }) });
   const uninstall = createUninstall({ processes, state });
   const machine = new InMemoryMachine();
