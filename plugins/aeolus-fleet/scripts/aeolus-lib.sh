@@ -310,6 +310,25 @@ aeolus_key_wait_start() {
   printf '%s' "$wait"
 }
 
+# Reports the ship's state while the fleet's key is cut off (decision 0068):
+# blocked, saying it waits for the key, or, with the key back, working or idle
+# as the turn marker says. One call, bounded as an acknowledgement is, so
+# nothing waits long. <blocked|back>
+aeolus_report_key() {
+  local state note
+  if [ "$1" = blocked ]; then
+    state=blocked
+    note="waiting for the fleet's key (KEY_UNAVAILABLE)"
+  else
+    state=idle
+    [ "$(head -n 1 "$(aeolus_turn_file)" 2>/dev/null | cut -d ' ' -f 1)" != busy ] || state=working
+    note="the fleet's key is back"
+  fi
+  AEOLUS_CALL_MAX_SECONDS="${AEOLUS_CONFIRM_SECONDS:-3}" AEOLUS_BUSY_WAITS='' \
+    "$(dirname "${BASH_SOURCE[0]}")/aeolus-fleet.sh" report "{\"state\":\"${state}\",\"note\":\"${note}\"}" >/dev/null 2>&1
+  return 0
+}
+
 # The key answers again: the next push receive is asked at once.
 aeolus_key_wait_clear() {
   local file

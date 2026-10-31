@@ -110,6 +110,7 @@ push_receive() {
       ;;
     *)
       if printf '%s' "$output" | grep -q ': KEY_UNAVAILABLE:'; then
+        [ -f "$(aeolus_key_wait_file)" ] || aeolus_report_key blocked
         wait="$(aeolus_key_wait_start)"
         aeolus_log "$identity" wake "waiting: the fleet's key is not reachable (KEY_UNAVAILABLE)" "asks again after ${wait} seconds, longer each time"
         exit 1
@@ -118,7 +119,10 @@ push_receive() {
       exit 1
       ;;
   esac
-  aeolus_key_wait_clear
+  if [ -f "$(aeolus_key_wait_file)" ]; then
+    aeolus_key_wait_clear
+    aeolus_report_key back
+  fi
   aeolus_identity_lease_key "$identity_text" > "$(aeolus_pushed_file)"
   if ! id="$(aeolus_store_put "$(printf '%s' "$output" | tr -d '\n')")"; then
     # Nothing handed, as when another ship of its type took the delivery first.

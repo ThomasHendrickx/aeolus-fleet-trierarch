@@ -160,6 +160,7 @@ on_key_unavailable() {
   answered
   if [ "$key_delay" = 0 ]; then
     aeolus_log "$identity" watch "waiting: the fleet's key is not reachable (KEY_UNAVAILABLE)" 'retries, longer each time'
+    aeolus_report_key blocked
     key_delay="$KEY_WAIT_SECONDS"
   else
     key_delay=$((key_delay * 2))
@@ -240,6 +241,7 @@ while :; do
     answered
     if [ "$key_delay" != 0 ]; then
       aeolus_log "$identity" watch "the fleet's key is reachable again"
+      aeolus_report_key back
       key_delay=0
     fi
     aeolus_lease_key "$crew_token" > "$(aeolus_pushed_file)"
