@@ -80,6 +80,7 @@ function harness(at: { pluginRoot?: string | (() => Promise<string>); version?: 
         return Promise.resolve();
       },
       events: (shipId) => Promise.resolve(events.get(shipId) ?? []),
+      lastEventAt: () => Promise.resolve(undefined),
     },
   });
 }

@@ -32,6 +32,8 @@ const userLineOf = (prompt: string) => JSON.stringify({ type: 'user', message: {
 const HEADLESS_WORDS = 6;
 /** What each ship's session's harness wrote, by ship id, its events one line each. */
 let screens: Map<ShipId, string>;
+/** When each ship's session last wrote an event. */
+let eventTimes: Map<ShipId, Date>;
 let sent: { shipId: ShipId; line: string }[];
 /** What was done to each session, in order: a turn stopped, or a line sent. */
 let steps: string[];
@@ -48,6 +50,7 @@ beforeEach(() => {
   sent = [];
   steps = [];
   screens = new Map();
+  eventTimes = new Map();
   home = mkdtempSync(join(tmpdir(), 'trierarch-home-'));
   crews = join(home, '.aeolus', 'crews', 'claude-code');
   claudeJsonAtStart = [];
@@ -93,6 +96,7 @@ function harness(at: { pluginRoot?: string; proxyUrl?: string } = {}) {
         return Promise.resolve();
       },
       events: (shipId) => Promise.resolve((screens.get(shipId) ?? '').split('\n').filter((line) => line !== '')),
+      lastEventAt: (shipId) => Promise.resolve(eventTimes.get(shipId)),
     },
   });
 }
@@ -183,6 +187,20 @@ describe('Claude Code on its login (api keys K6, K7)', () => {
       await expect(claudeCodeKeyInReach(setup(), { harness: claudeCode, options: {}, folder })).resolves.toBeUndefined();
       await expect(claudeCodeKeyInReach(setup(), { harness: claudeCode, options: { sources: 'all' }, folder })).resolves.toBe(`apiKeyHelper in ${join(folder, '.claude', 'settings.json')}`);
     });
+  });
+});
+
+describe('Claude Code activity (monitoring W3b)', () => {
+  it('is its latest event\'s kind, at when its session last wrote an event', async () => {
+    const wroteAt = new Date('2026-10-09T08:00:00Z');
+    screens.set(shipId, JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: {} }] } }));
+    eventTimes.set(shipId, wroteAt);
+
+    await expect(harness().activityOf({ shipId, folder: '/work/scout' })).resolves.toEqual({ at: wroteAt, kind: 'tool', tool: 'Bash' });
+  });
+
+  it('is none while its session wrote no event', async () => {
+    await expect(harness().activityOf({ shipId, folder: '/work/scout' })).resolves.toBeUndefined();
   });
 });
 
@@ -287,6 +305,7 @@ describe('Claude Code as a harness', () => {
           send: () => Promise.resolve(),
           interrupt: () => Promise.resolve(),
           events: () => Promise.resolve([]),
+          lastEventAt: () => Promise.resolve(undefined),
         },
       }).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
       return started[0]?.command.slice(HEADLESS_WORDS + 1, -1);
@@ -341,6 +360,7 @@ describe('Claude Code as a harness', () => {
           send: () => Promise.resolve(),
           interrupt: () => Promise.resolve(),
           events: () => Promise.resolve([]),
+          lastEventAt: () => Promise.resolve(undefined),
         },
       }).launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
       return started[0]?.command.slice(HEADLESS_WORDS + 1, -1);
@@ -698,6 +718,7 @@ describe('Claude Code in containers, each ship with a home of its own (decision 
         },
         interrupt: () => Promise.resolve(),
         events: () => Promise.resolve([]),
+        lastEventAt: () => Promise.resolve(undefined),
       },
     });
   }

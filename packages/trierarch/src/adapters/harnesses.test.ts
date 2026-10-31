@@ -10,7 +10,7 @@ import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
 
 import { commandLinesOf, createHarnesses, riskyFlagsOf } from './harnesses.js';
 
-const sessions = { start: () => Promise.resolve(), send: () => Promise.resolve(), interrupt: () => Promise.resolve(), events: () => Promise.resolve([]) };
+const sessions = { start: () => Promise.resolve(), send: () => Promise.resolve(), interrupt: () => Promise.resolve(), events: () => Promise.resolve([]), lastEventAt: () => Promise.resolve(undefined) };
 /** The aeolus-fleet plugin's own scripts from this repository, as a harness installs them in its plugin cache. */
 const PLUGIN_ROOT = fileURLToPath(new URL('../../../../plugins/aeolus-fleet', import.meta.url));
 const env = { AEOLUS_PLUGIN_ROOT: '/claude-plugin', AEOLUS_CODEX_PLUGIN_ROOT: '/codex-plugin' };
