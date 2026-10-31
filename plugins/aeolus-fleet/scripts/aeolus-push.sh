@@ -42,6 +42,8 @@
 #   3  LEASE_ENDED: the store is forgotten
 set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
+# The store stays the session's plugins' (aeolus_store_version_guard).
+aeolus_is_store_claimed=0
 
 # How long the push receive may wait: it waits about 25 seconds when nothing
 # is there, and the trierarch's pass waits for it. A delivery taken after the

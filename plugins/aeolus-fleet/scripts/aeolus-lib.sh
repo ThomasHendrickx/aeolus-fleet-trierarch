@@ -666,12 +666,15 @@ aeolus_plugin_version() {
   done
 }
 
-# A store belongs to the newest plugin that wrote it (aeolus-fleet#1318): two
-# plugins load in one session and share it, and an older one cannot confirm
-# what a newer one handed. Fails, touching nothing in the store and logging
-# once (kept in this plugin's own data folder), when the store was last written
-# by a newer plugin; otherwise records this plugin's version in an existing
-# store. <store folder>
+# A store belongs to the newest plugin of the session that wrote it
+# (aeolus-fleet#1318): two plugins load in one session and share it, and an
+# older one cannot confirm what a newer one handed. Fails, touching nothing in
+# the store and logging once (kept in this plugin's own data folder), when the
+# store was last written by a newer plugin; otherwise records this plugin's
+# version in an existing store, unless the trierarch runs it (aeolus-push.sh):
+# the trierarch hands over with the newest plugin in the cache, which a session
+# started before an upgrade does not run (aeolus-fleet#1445). <store folder>
+aeolus_is_store_claimed=1
 aeolus_store_version_guard() {
   local store="$1" mine owner identity logged data
   mine="$(aeolus_plugin_version)"
@@ -685,7 +688,7 @@ aeolus_store_version_guard() {
     fi
     return 1
   fi
-  [ "$owner" = "$mine" ] || printf '%s' "$mine" > "$store/.version" 2>/dev/null
+  [ "$owner" = "$mine" ] || [ "$aeolus_is_store_claimed" != 1 ] || printf '%s' "$mine" > "$store/.version" 2>/dev/null
   return 0
 }
 
