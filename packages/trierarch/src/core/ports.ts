@@ -144,6 +144,8 @@ export interface Identity {
   readonly squadron?: string;
   /** The session's read-only checkouts (#1182), which its start context names; none when it has none. */
   readonly checkouts?: readonly Checkout[];
+  /** Whether the session may only read its folder, a read-only workspace (aeolus-fleet#1449), which its start context says. */
+  readonly isFolderReadOnly?: boolean;
 }
 
 /**

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # The ship this folder crews, kept in the plugin's data folder.
 #
-#   aeolus-identity.sh write [--wake-by trierarch [--socket <path>] [--checkout <repository>=<path>]...] <fleetUrl> <shipId> <shipName> [<squadronId>]
+#   aeolus-identity.sh write [--wake-by trierarch [--socket <path>] [--checkout <repository>=<path>]... [--read-only-folder]] <fleetUrl> <shipId> <shipName> [<squadronId>]
 #                       the crew token on stdin, never on the command line, which any local user reads (#822);
 #                       with --wake-by trierarch, the trierarch wakes the folder's sessions, not a watcher;
 #                       with --socket, the folder calls the fleet over the trierarch's socket and keeps only the token's lease;
 #                       each --checkout, a read-only checkout the trierarch keeps beside the folder, which the start context names (#1182)
+#                       --read-only-folder, the folder is a read-only workspace the trierarch keeps on main, which the start context says (aeolus-fleet#1449)
 #   aeolus-identity.sh check-in <interval>   a squadron member keeps its check-in interval: <n>m or <n>h
 #   aeolus-identity.sh show     the ship and its fleet (never the token), and whether its lease is pushed; exit 1 when none
 #   aeolus-identity.sh turn     the turn marker of a folder a trierarch crews: busy or idle, with when; exit 1 when none
@@ -22,10 +23,11 @@ command="${1:-}"
 
 case "$command" in
   write)
-    usage="usage: aeolus-identity.sh write [--wake-by trierarch [--socket <path>] [--checkout <repository>=<path>]...] <fleetUrl> <shipId> <shipName> [<squadronId>], the crew token on stdin"
+    usage="usage: aeolus-identity.sh write [--wake-by trierarch [--socket <path>] [--checkout <repository>=<path>]... [--read-only-folder]] <fleetUrl> <shipId> <shipName> [<squadronId>], the crew token on stdin"
     wake_by=""
     socket=""
     checkouts=()
+    read_only_folder=""
     shift
     while [ "$#" -gt 0 ]; do
       case "$1" in
@@ -37,6 +39,7 @@ case "$command" in
             *) echo "$usage" >&2; exit 2 ;;
           esac
           ;;
+        --read-only-folder) read_only_folder=yes; shift ;;
         *) break ;;
       esac
     done
@@ -44,6 +47,7 @@ case "$command" in
     [ -z "$socket" ] || [ "$wake_by" = trierarch ] || { echo "$usage" >&2; exit 2; }
     # Only a trierarch keeps checkouts beside a folder (#1182).
     [ "${#checkouts[@]}" -eq 0 ] || [ "$wake_by" = trierarch ] || { echo "$usage" >&2; exit 2; }
+    [ -z "$read_only_folder" ] || [ "$wake_by" = trierarch ] || { echo "$usage" >&2; exit 2; }
     { [ "$#" -eq 3 ] || [ "$#" -eq 4 ]; } || { echo "$usage" >&2; exit 2; }
     IFS= read -r token || true
     [ -n "$token" ] || { echo "$usage" >&2; exit 2; }
@@ -66,6 +70,7 @@ case "$command" in
     for checkout in ${checkouts[@]+"${checkouts[@]}"}; do
       printf 'checkout=%s\n' "$checkout" >> "$file.tmp"
     done
+    [ -n "$read_only_folder" ] && printf 'readOnlyFolder=yes\n' >> "$file.tmp"
     # A trierarch's session: the trierarch wakes it, so the plugin asks for no watcher.
     [ -n "$wake_by" ] && printf 'wakeBy=%s\n' "$wake_by" >> "$file.tmp"
     mv "$file.tmp" "$file"
