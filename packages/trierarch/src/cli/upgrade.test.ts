@@ -172,13 +172,16 @@ const writeConfigurationSchema = () => {
 
 /** What the installed version's `config check` answers; none is a configuration that fits. */
 let configurationRefusal: CommandResult | undefined;
+/** The version that ran `config check`, per check, and the steps taken by then. */
+let checks: string[];
 
 beforeEach(() => {
   configurationRefusal = undefined;
+  checks = [];
 });
 
 const checkInstalledConfiguration = () => {
-  steps.push(`check ${installed}`);
+  checks.push(`${installed} after ${steps.join(', ')}`);
   return Promise.resolve(configurationRefusal ?? { status: 0, stdout: '', stderr: '' });
 };
 
@@ -258,7 +261,8 @@ describe('aeolus-trierarch upgrade', () => {
 
     await upgrade();
 
-    expect(steps.slice(0, 3)).toEqual(['check 0.17.2', 'update claude-code', 'write 0.17.2']);
+    expect(checks).toEqual(['0.17.2 after ']);
+    expect(steps.slice(0, 2)).toEqual(['update claude-code', 'write 0.17.2']);
   });
 
   it('refuses when the version it installed does not accept the configuration: it reinstalls the old version, leaves the service and the plugin as they are, and says why', async () => {
@@ -270,7 +274,8 @@ describe('aeolus-trierarch upgrade', () => {
     );
     expect(installs).toEqual([`${PACKAGE}@0.17.2`, `${PACKAGE}@0.17.1`]);
     expect(installed).toBe('0.17.1');
-    expect(steps).toEqual(['check 0.17.2']);
+    expect(checks).toEqual(['0.17.2 after ']);
+    expect(steps).toEqual([]);
   });
 
   it('does not check the configuration when the service is not installed', async () => {
@@ -278,7 +283,7 @@ describe('aeolus-trierarch upgrade', () => {
 
     await upgrade();
 
-    expect(steps).not.toContain('check 0.17.2');
+    expect(checks).toEqual([]);
   });
 
   it('says it is already on a version and does nothing more', async () => {
