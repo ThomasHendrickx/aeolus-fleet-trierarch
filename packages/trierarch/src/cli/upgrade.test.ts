@@ -170,8 +170,20 @@ const writeConfigurationSchema = () => {
   return Promise.resolve();
 };
 
+/** What the installed version's `config check` answers; none is a configuration that fits. */
+let configurationRefusal: CommandResult | undefined;
+
+beforeEach(() => {
+  configurationRefusal = undefined;
+});
+
+const checkInstalledConfiguration = () => {
+  steps.push(`check ${installed}`);
+  return Promise.resolve(configurationRefusal ?? { status: 0, stdout: '', stderr: '' });
+};
+
 function upgrade(version?: string, at: { isPluginStepOfAnUpgrade?: boolean } = {}) {
-  return upgradeTrierarch({ ...(version !== undefined && { version }), ...at, installedVersion: () => installed, npm, writeInstalledServiceFile, upgradeInstalledPlugin: (to) => upgradeInstalledPlugin(to), service, running, sleep, plugin, removeRemoteControl, writeConfigurationSchema });
+  return upgradeTrierarch({ ...(version !== undefined && { version }), ...at, installedVersion: () => installed, npm, writeInstalledServiceFile, upgradeInstalledPlugin: (to) => upgradeInstalledPlugin(to), checkInstalledConfiguration, service, running, sleep, plugin, removeRemoteControl, writeConfigurationSchema });
 }
 
 describe('aeolus-trierarch upgrade', () => {
@@ -239,6 +251,34 @@ describe('aeolus-trierarch upgrade', () => {
       'The trierarch 0.17.2 could not write the service\'s file: EACCES: permission denied\nThe service keeps running 0.17.1. Fix what it says, then run aeolus-trierarch install to write the file and restart the service.',
     );
     expect(steps).toEqual([]);
+  });
+
+  it('checks the configuration with the version it installed before the plugin step and the stop', async () => {
+    offered = ['claude-code'];
+
+    await upgrade();
+
+    expect(steps.slice(0, 3)).toEqual(['check 0.17.2', 'update claude-code', 'write 0.17.2']);
+  });
+
+  it('refuses when the version it installed does not accept the configuration: it reinstalls the old version, leaves the service and the plugin as they are, and says why', async () => {
+    offered = ['claude-code'];
+    configurationRefusal = { status: 1, stdout: '', stderr: 'The configuration does not fit:\n  Unrecognized key: "readOnly"\n' };
+
+    await expect(upgrade()).rejects.toThrow(
+      'The trierarch 0.17.2 does not accept the configuration: The configuration does not fit:\n  Unrecognized key: "readOnly"\nIt stays on 0.17.1, running; the plugin and the service are untouched. Fix the configuration, then run aeolus-trierarch upgrade again.',
+    );
+    expect(installs).toEqual([`${PACKAGE}@0.17.2`, `${PACKAGE}@0.17.1`]);
+    expect(installed).toBe('0.17.1');
+    expect(steps).toEqual(['check 0.17.2']);
+  });
+
+  it('does not check the configuration when the service is not installed', async () => {
+    isServiceInstalled = false;
+
+    await upgrade();
+
+    expect(steps).not.toContain('check 0.17.2');
   });
 
   it('says it is already on a version and does nothing more', async () => {
