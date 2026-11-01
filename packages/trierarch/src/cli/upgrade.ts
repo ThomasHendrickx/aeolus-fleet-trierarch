@@ -25,6 +25,11 @@ import { NOT_SAID_YET_REASON, startNewProcess } from './new-process.js';
  * system Node install, it installs nothing and says what to run instead
  * (#480): it never runs sudo itself. What it says to run then includes
  * upgrade again at the new version, which updates the plugin (#718).
+ * After an install, and before the plugin step and the stop, the installed
+ * version checks the configuration (`config check`) when the service is
+ * installed. One it does not accept, as a key it dropped, is not run: the old
+ * version is installed again and the upgrade refuses with the reason, the
+ * service and the plugin untouched (aeolus-fleet#1534).
  * It updates the aeolus-fleet plugin too, for each harness the configuration
  * offers, also when the trierarch is on the version already: on a trierarch
  * machine the plugin is updated this way only (#581). Codex's version folders
@@ -223,6 +228,8 @@ export async function upgradeTrierarch(at: Restart & {
   plugin?: PluginUpgrade;
   /** Takes Remote Control out of the configuration (headless H20): the harnesses whose flags carried it. */
   removeRemoteControl: () => Promise<readonly string[]>;
+  /** The installed version's `config check`: what it says of the configuration it would start on. */
+  checkInstalledConfiguration: () => Promise<CommandResult>;
   /** Writes config.schema.json of the installed version; the installed version's `install` does it after an install. */
   writeConfigurationSchema: () => Promise<void>;
 }): Promise<UpgradeReport> {
@@ -270,11 +277,22 @@ export async function upgradeTrierarch(at: Restart & {
     );
   }
   const to = at.installedVersion();
+  // The service restarts on the installed version only when the version accepts the configuration: one that does not would crash-loop and the fleet lose the trierarch with its sessions. The old version goes back, the plugin and the service untouched.
+  const isServiceInstalled = (await at.service.status()).isInstalled;
+  if (isServiceInstalled) {
+    const checked = await at.checkInstalledConfiguration();
+    if (checked.status !== 0) {
+      await at.npm.install(`${PACKAGE}@${from}`);
+      throw new TrierarchFileError(
+        `The trierarch ${to} does not accept the configuration: ${`${checked.stdout}${checked.stderr}`.trim()}\nIt stays on ${from}, running; the plugin and the service are untouched. Fix the configuration, then run aeolus-trierarch upgrade again.`,
+      );
+    }
+  }
   // This process runs the code of the version it replaces: the installed version runs its own plugin step (#725).
   const plugin = at.plugin === undefined || at.plugin.harnesses.length === 0 ? { isPluginUpdated: true, said: [] } : pluginStepOf(await at.upgradeInstalledPlugin(to), to);
   const said = [`Upgraded the trierarch from ${from} to ${to}.`, ...plugin.said];
 
-  if ((await at.service.status()).isInstalled) {
+  if (isServiceInstalled) {
     said.push(await restartOn(at, { from, to }));
   } else {
     said.push('The service is not installed: run aeolus-trierarch install to run it.');
