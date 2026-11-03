@@ -16,6 +16,15 @@ const protocolRules = SHIP_PROTOCOL.split('\n').filter((line) => /^\d+\. /.test(
 // only what the plugin adds.
 
 describe('the crew-a-ship skill', () => {
+  it('says in one line that "isForced": true on a send changes or stops what a busy ship does now, and points to the protocol for the rule', () => {
+    const line = claudeSkill.split('\n').find((l) => l.includes('"isForced":true'));
+    expect(line).toContain('busy ship');
+    expect(line).toContain('messages:force');
+    expect(line).toContain('the protocol');
+    expect(codexSkill).toContain('"isForced":true');
+    expect(codexSkill).toContain('messages:force');
+  });
+
   it('has the session fetch the ship protocol from the fleet through aeolus-fleet.sh, and holds none of its rules', () => {
     expect(claudeSkill).toContain('"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-fleet.sh" protocol');
     for (const rule of protocolRules) {
