@@ -22,7 +22,7 @@ export const PROBE_AFTER_MS = PROBE_AFTER_MINUTES * 60_000;
 export interface FailedStarts {
   /** The ships whose last start failed, each once, in the order they first failed. */
   readonly shipIds: readonly ShipId[];
-  /** Why the last start failed. */
+  /** Why the first start of this run failed: the cause, where later failures are often its consequence. */
   readonly reason: string;
   /** When the last start failed, ISO 8601. */
   readonly at: string;
@@ -46,7 +46,7 @@ export function countStart(failedStarts: FailedStarts | undefined, at: { outcome
     return { failedStarts: undefined, isNewlyStopped: false };
   }
   const shipIds = failedStarts?.shipIds.includes(outcome.shipId) === true ? failedStarts.shipIds : [...(failedStarts?.shipIds ?? []), outcome.shipId];
-  const counted = { shipIds, reason: outcome.reason, at: now.toISOString() };
+  const counted = { shipIds, reason: failedStarts?.reason ?? outcome.reason, at: now.toISOString() };
   if (failedStarts?.stopped !== undefined) {
     return { failedStarts: { ...counted, stopped: failedStarts.stopped }, isNewlyStopped: false };
   }
@@ -79,5 +79,12 @@ export function probeShipsCap(entries: readonly Entry[], ships: number): number 
 
 /** Why the machine does not offer itself, as its report names it for each harness. */
 export function notOfferedReason(failedStarts: FailedStarts): string {
-  return `the starts of ${String(failedStarts.shipIds.length)} ships failed in a row; last: ${failedStarts.reason}`.slice(0, NOT_OFFERED_REASON_MAX_LENGTH);
+  const offersAgain = `; it offers itself again at ${offersAgainAt(failedStarts)}`;
+  const failed = `the starts of ${String(failedStarts.shipIds.length)} ships failed in a row; first: ${failedStarts.reason}`;
+  return `${failed.slice(0, NOT_OFFERED_REASON_MAX_LENGTH - offersAgain.length)}${offersAgain}`;
+}
+
+/** When a machine that stopped offering itself offers itself again for a probe, ISO 8601. */
+function offersAgainAt(failedStarts: FailedStarts): string {
+  return new Date(new Date(failedStarts.at).getTime() + PROBE_AFTER_MS).toISOString();
 }
