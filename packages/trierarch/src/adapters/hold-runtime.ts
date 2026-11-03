@@ -8,8 +8,9 @@ import { idSchema, type ShipId } from '@aeolus-fleet/common';
 import type { ObservedSession, SessionRuntime } from '../core/ports.js';
 import type { SessionRoots } from './caller-check.js';
 import { INTERRUPT_WAIT_MS } from './hold.js';
-import { callHold, holdFilesOf, type HoldFiles, type HoldRequest } from './hold-protocol.js';
+import { callHold, holdFilesOf, REFUSED, type HoldAnswer, type HoldFiles, type HoldRequest } from './hold-protocol.js';
 import { writeProxyToken } from './proxy-tokens.js';
+import type { runCommand } from './run-command.js';
 
 /** How long a hold has to answer a call other than interrupt. */
 const CALL_TIMEOUT_MS = 2000;
@@ -33,9 +34,23 @@ export interface HeldCommand {
   readonly env: Readonly<Record<string, string>>;
 }
 
-/** What a session's start goes through: a systemd scope of its own under a systemd unit, which sets INVOCATION_ID, so a restart or upgrade of the service ends no session (#479, #537). It expands no variable in the command: systemd 259 would turn a $$ of it into $. */
-export function sessionsLaunch(at: { platform: string; env: Readonly<Record<string, string | undefined>> }): readonly string[] {
-  return at.platform === 'linux' && at.env.INVOCATION_ID !== undefined ? ['systemd-run', '--user', '--scope', '--quiet', '--collect', '--expand-environment=no', '--'] : [];
+/** The first systemd that has `systemd-run --expand-environment`. */
+const EXPAND_ENVIRONMENT_FROM = 254;
+
+/** The systemd version `systemd-run --version` states, such as 252 for `systemd 252 (252.31-1~deb12u1)`; none when it states none or cannot run. */
+export async function systemdVersionOf(run: typeof runCommand): Promise<number | undefined> {
+  const stated = await run('systemd-run', { args: ['--version'] }).catch(() => undefined);
+  const version = Number(/^systemd (\d+)/.exec(stated?.stdout ?? '')?.[1]);
+  return Number.isInteger(version) ? version : undefined;
+}
+
+/** What a session's start goes through: a systemd scope of its own under a systemd unit, which sets INVOCATION_ID, so a restart or upgrade of the service ends no session (#479, #537). It expands no variable in the command where systemd-run can be told so (from systemd 254): systemd 259 would turn a $$ of it into $; before 254 it expands none, and has no such option. */
+export function sessionsLaunch(at: { platform: string; env: Readonly<Record<string, string | undefined>>; systemdVersion?: number }): readonly string[] {
+  if (at.platform !== 'linux' || at.env.INVOCATION_ID === undefined) {
+    return [];
+  }
+  const expansion = at.systemdVersion !== undefined && at.systemdVersion >= EXPAND_ENVIRONMENT_FROM ? ['--expand-environment=no'] : [];
+  return ['systemd-run', '--user', '--scope', '--quiet', '--collect', ...expansion, '--'];
 }
 
 /**
@@ -154,16 +169,27 @@ export function createHoldRuntime(options: {
       const { command, env } = options.heldAs === undefined ? { command: session.command, env: session.env ?? {} } : await options.heldAs(session, files);
       const hold = [...options.program, 'hold', shipId, '--sessions', sessions, '--folder', folder, '--harness', harness, ...tokenVariable, ...Object.entries(env).flatMap(([variable, value]) => ['--env', `${variable}=${value}`]), '--', ...command];
       const [program = 'sh', ...args] = [...(options.launch ?? []), 'sh', '-c', DETACHED, 'sh', ...hold];
-      const starter = spawn(program, args, { stdio: 'ignore', detached: true });
+      const starter = spawn(program, args, { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
+      let wrote = '';
+      starter.stderr.on('data', (chunk: Buffer) => {
+        wrote += chunk.toString('utf8');
+      });
       await new Promise<void>((resolve, reject) => {
         starter.on('error', reject);
-        starter.on('exit', () => {
-          resolve();
+        // The hold's own output goes to /dev/null: what the starter wrote is the launch's, such as systemd-run's refusal of an option.
+        starter.on('exit', (code) => {
+          if (code === 0 || code === null) {
+            resolve();
+          } else {
+            reject(new Error(`the hold of ${shipId} did not start: ${program} ended with ${String(code)}: ${wrote.trim()}`));
+          }
         });
       });
       const until = Date.now() + START_WAIT_MS;
+      let lastAnswer: HoldAnswer | undefined;
       while (Date.now() < until) {
-        if ((await callHold({ socket: files.socket, request: { call: 'state' }, timeoutMs: CALL_TIMEOUT_MS }).catch(() => undefined))?.isOk === true) {
+        lastAnswer = await callHold({ socket: files.socket, request: { call: 'state' }, timeoutMs: CALL_TIMEOUT_MS }).catch(() => undefined);
+        if (lastAnswer?.isOk === true) {
           return;
         }
         // A hold whose harness ended at once has ended too: its exit is seen in the next list.
@@ -172,7 +198,9 @@ export function createHoldRuntime(options: {
         }
         await wait(START_POLL_MS);
       }
-      throw new Error(`the hold of ${shipId} did not answer within ${String(START_WAIT_MS)} ms of its start`);
+      // Where no `ss` lists the sockets, the hold cannot tell the trierarch from another caller and refuses it.
+      const refusal = lastAnswer?.isOk === false && lastAnswer.error === REFUSED ? `: it refused the trierarch's call (${REFUSED}); on Linux it tells its caller with ss, so install iproute2 if ss is missing` : '';
+      throw new Error(`the hold of ${shipId} did not answer within ${String(START_WAIT_MS)} ms of its start${refusal}`);
     },
     // A Codex hold starts the line's turn once the last turn's process has ended, which it waits for as long as for an interrupted turn.
     send: async ({ shipId, line }) => {

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { PLUGIN_MANIFESTS, PUBLISHED_PACKAGES, setPluginVersion, setVersion } from './set-version.ts';
+import { PLUGIN_MANIFESTS, PUBLISHED_PACKAGES, setPluginVersion, setPluginVersionUnlessNewer, setVersion } from './set-version.ts';
 
 const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
 
@@ -170,6 +170,38 @@ describe('setPluginVersion', () => {
   it('refuses a version that is not semantic', () => {
     expect(() => {
       setPluginVersion(copy, 'latest');
+    }).toThrow('Not a semantic version: "latest"');
+  });
+});
+
+describe('setPluginVersionUnlessNewer', () => {
+  it("sets the plugin to the release's version from any release, a hotfix branch's included, when the plugin is older", () => {
+    setPluginVersion(copy, '0.36.0');
+
+    setPluginVersionUnlessNewer(copy, '0.36.1');
+
+    expect(PLUGIN_MANIFESTS.map((path) => pluginManifest(path).version)).toEqual(['0.36.1', '0.36.1', '0.36.1']);
+  });
+
+  it('compares versions by number, not by text: 0.36.10 is newer than 0.36.9', () => {
+    setPluginVersion(copy, '0.36.9');
+
+    setPluginVersionUnlessNewer(copy, '0.36.10');
+
+    expect(PLUGIN_MANIFESTS.map((path) => pluginManifest(path).version)).toEqual(['0.36.10', '0.36.10', '0.36.10']);
+  });
+
+  it("leaves a plugin that is newer alone: a hotfix of an older line never takes main's plugin back", () => {
+    setPluginVersion(copy, '0.37.0');
+
+    setPluginVersionUnlessNewer(copy, '0.36.2');
+
+    expect(PLUGIN_MANIFESTS.map((path) => pluginManifest(path).version)).toEqual(['0.37.0', '0.37.0', '0.37.0']);
+  });
+
+  it('refuses a version that is not semantic', () => {
+    expect(() => {
+      setPluginVersionUnlessNewer(copy, 'latest');
     }).toThrow('Not a semantic version: "latest"');
   });
 });

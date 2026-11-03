@@ -30,7 +30,7 @@ import { modelProxy, runtimeAdaptersOf } from '../adapters/runtime-adapters.js';
 import { PLUGIN_HARNESSES } from '../adapters/plugin.js';
 import { createCallerCheck } from '../adapters/caller-check.js';
 import { createShipSockets } from '../adapters/ship-sockets.js';
-import { sessionsLaunch } from '../adapters/hold-runtime.js';
+import { sessionsLaunch, systemdVersionOf } from '../adapters/hold-runtime.js';
 import { createTrust } from '../adapters/trust.js';
 import { createTrustedRepositoriesFile, trustedClonesOf, withTrustedRepositories } from '../adapters/trusted-repositories-file.js';
 import { createUsage, folderMadeAt } from '../adapters/usage.js';
@@ -110,10 +110,12 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   let offered = { configuration, detected };
   const version = runningVersion();
   const clones = trustedClonesOf({ configured, held: trustedRepositories, root: paths.repositories });
-  const { sessions, workspace, shipHomes, modelProxyUrlOf } = runtimeAdaptersOf({ configuration, paths, version, launch: sessionsLaunch({ platform: process.platform, env }), managedSettings, clones });
+  const systemdVersion = await systemdVersionOf(runCommand);
+  const launch = sessionsLaunch({ platform: process.platform, env, ...(systemdVersion !== undefined && { systemdVersion }) });
+  const { sessions, workspace, shipHomes, modelProxyUrlOf } = runtimeAdaptersOf({ configuration, paths, version, launch, managedSettings, clones });
   // The model proxy runs while any harness holds an API key (headless H16); a pass starts it again when it is gone.
   const keys = createKeyFiles(paths.keys);
-  const proxy = modelProxy({ paths, version, launch: sessionsLaunch({ platform: process.platform, env }) });
+  const proxy = modelProxy({ paths, version, launch });
   const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, managedSettings, detected: () => offered.detected, sessions, proxyUrl: async () => {
       const url = await proxy.url();
       return url === undefined ? undefined : modelProxyUrlOf(url);

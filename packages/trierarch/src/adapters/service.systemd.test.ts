@@ -13,7 +13,7 @@ import { trierarchPaths } from './paths.js';
 import { runCommand } from './run-command.js';
 import { createService, serviceEnvironment, SYSTEMD_UNIT } from './service.js';
 import { TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
-import { createHoldRuntime, sessionsLaunch } from './hold-runtime.js';
+import { createHoldRuntime, sessionsLaunch, systemdVersionOf } from './hold-runtime.js';
 import { runningVersion } from './version.js';
 
 // The unit the trierarch writes, run by the real systemd user manager under a
@@ -32,7 +32,8 @@ const SESSION_TIMEOUT_MS = 10_000;
 const TEST_TIMEOUT_MS = 60_000;
 
 /** How the trierarch starts a session's hold under a systemd unit. */
-const UNDER_SYSTEMD = sessionsLaunch({ platform: 'linux', env: { INVOCATION_ID: 'test' } });
+const systemdVersion = await systemdVersionOf(runCommand);
+const UNDER_SYSTEMD = sessionsLaunch({ platform: 'linux', env: { INVOCATION_ID: 'test' }, ...(systemdVersion !== undefined && { systemdVersion }) });
 
 let folder: string;
 let name: string;

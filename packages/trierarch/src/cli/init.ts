@@ -126,10 +126,13 @@ async function heldTrustedRepositories(file: string): Promise<readonly TrustedRe
 
 const MINIMUM_NODE_MAJOR = 26;
 
-/** Refuses, before anything is registered, a machine that cannot run the trierarch or crew anything: Node older than 26, or neither Claude Code nor Codex installed. */
-function checkMachine(at: { nodeVersion: string; isClaudeCodeInstalled: boolean; isCodexInstalled: boolean }): void {
+/** Refuses, before anything is registered, a machine that cannot run the trierarch or crew anything: Node older than 26, no `ss` where the ship sockets need it, or neither Claude Code nor Codex installed. */
+function checkMachine(at: { nodeVersion: string; isSsMissing: boolean; isClaudeCodeInstalled: boolean; isCodexInstalled: boolean }): void {
   if (Number.parseInt(at.nodeVersion, 10) < MINIMUM_NODE_MAJOR) {
     throw new TrierarchFileError(`The trierarch needs Node ${String(MINIMUM_NODE_MAJOR)} or newer and this is Node ${at.nodeVersion}. Install Node ${String(MINIMUM_NODE_MAJOR)} (https://nodejs.org), then run the setup line again.`);
+  }
+  if (at.isSsMissing) {
+    throw new TrierarchFileError('`ss` is not installed, and the trierarch needs it to tell which process calls a ship socket: without it no session starts. Install iproute2 (Debian and Ubuntu: sudo apt-get install iproute2), then run the setup line again.');
   }
   if (!at.isClaudeCodeInstalled && !at.isCodexInstalled) {
     throw new TrierarchFileError(
@@ -324,6 +327,8 @@ export async function initTrierarch(input: {
   isClaudeCodeInstalled: boolean;
   /** The Node this runs on, as `process.versions.node` gives it. */
   nodeVersion: string;
+  /** Whether this machine needs `ss` (Linux) and has none on the PATH. */
+  isSsMissing: boolean;
   /** Detects the configured harnesses' options (#365), once per harness version. */
   detect: DetectHarnesses;
   service: Pick<Service, 'install' | 'rewrite' | 'restart' | 'status'>;
@@ -340,7 +345,7 @@ export async function initTrierarch(input: {
     said.push(line, ...(hasSaidVersion ? [] : [NOT_SAID_YET]));
   };
 
-  checkMachine({ nodeVersion: input.nodeVersion, isClaudeCodeInstalled: input.isClaudeCodeInstalled, isCodexInstalled });
+  checkMachine({ nodeVersion: input.nodeVersion, isSsMissing: input.isSsMissing, isClaudeCodeInstalled: input.isClaudeCodeInstalled, isCodexInstalled });
   const pluginShipId = pluginShipOf(flags);
   // The ship: registered once per machine, never again.
   const crew = await readCrewFile(paths.crewToken).catch(() => undefined);
