@@ -180,7 +180,7 @@ describe('setPluginVersionUnlessNewer', () => {
 
     setPluginVersionUnlessNewer(copy, '0.36.1');
 
-    expect(PLUGIN_MANIFESTS.map(pluginManifest)).toEqual(PLUGIN_MANIFESTS.map(() => expect.objectContaining({ version: '0.36.1' })));
+    expect(PLUGIN_MANIFESTS.map((path) => pluginManifest(path).version)).toEqual(['0.36.1', '0.36.1', '0.36.1']);
   });
 
   it('compares versions by number, not by text: 0.36.10 is newer than 0.36.9', () => {
@@ -188,7 +188,7 @@ describe('setPluginVersionUnlessNewer', () => {
 
     setPluginVersionUnlessNewer(copy, '0.36.10');
 
-    expect(PLUGIN_MANIFESTS.map(pluginManifest)).toEqual(PLUGIN_MANIFESTS.map(() => expect.objectContaining({ version: '0.36.10' })));
+    expect(PLUGIN_MANIFESTS.map((path) => pluginManifest(path).version)).toEqual(['0.36.10', '0.36.10', '0.36.10']);
   });
 
   it("leaves a plugin that is newer alone: a hotfix of an older line never takes main's plugin back", () => {
@@ -196,7 +196,7 @@ describe('setPluginVersionUnlessNewer', () => {
 
     setPluginVersionUnlessNewer(copy, '0.36.2');
 
-    expect(PLUGIN_MANIFESTS.map(pluginManifest)).toEqual(PLUGIN_MANIFESTS.map(() => expect.objectContaining({ version: '0.37.0' })));
+    expect(PLUGIN_MANIFESTS.map((path) => pluginManifest(path).version)).toEqual(['0.37.0', '0.37.0', '0.37.0']);
   });
 
   it('refuses a version that is not semantic', () => {
