@@ -364,8 +364,9 @@ function standInPrograms(): void {
   };
   // Reuse system executables: first executions of fresh shell scripts are slow on macOS.
   symlinkSync('/bin/sh', join(bin, 'sh'));
-  symlinkSync('/usr/bin/false', join(bin, 'claude'));
-  program('codex', `case "$1" in\n  --version) echo "codex-cli 0.160.1" ;;\n  debug) echo '${CODEX_CATALOG}' ;;\n  exec) echo OK ;;\n  app-server) read -r line; exit 1 ;;\n  *) exit 1 ;;\nesac`);
+  // init needs `claude auth status` to say a login, so claude is signed in for it only.
+  program('claude', 'case "$1" in\n  auth) exit 0 ;;\n  *) exit 1 ;;\nesac');
+  program('codex', `case "$1" in\n  --version) echo "codex-cli 0.160.1" ;;\n  debug) echo '${CODEX_CATALOG}' ;;\n  exec) echo OK ;;\n  app-server) read -r line; exit 1 ;;\n  login) exit 0 ;;\n  *) exit 1 ;;\nesac`);
   symlinkSync('/usr/bin/true', join(bin, 'systemctl'));
   // init refuses a Linux machine without ss: this one has it.
   symlinkSync('/usr/bin/true', join(bin, 'ss'));
