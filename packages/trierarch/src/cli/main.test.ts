@@ -353,7 +353,7 @@ const CODEX_CATALOG = JSON.stringify({ models: [{ slug: 'gpt-6.1-sol', visibilit
 /**
  * The programs main runs, as stand-ins first on PATH, so no test runs the
  * machine's own: a Claude Code that is not installed, a Codex that lists and
- * confirms its models but whose app server ends on its first request, and a systemctl that does
+ * confirms its models but whose app server ends on its first request, and a systemctl and an ss that do
  * nothing. `sh` is the system's, for `command -v`.
  */
 function standInPrograms(): void {
@@ -367,6 +367,8 @@ function standInPrograms(): void {
   symlinkSync('/usr/bin/false', join(bin, 'claude'));
   program('codex', `case "$1" in\n  --version) echo "codex-cli 0.160.1" ;;\n  debug) echo '${CODEX_CATALOG}' ;;\n  exec) echo OK ;;\n  app-server) read -r line; exit 1 ;;\n  *) exit 1 ;;\nesac`);
   symlinkSync('/usr/bin/true', join(bin, 'systemctl'));
+  // init refuses a Linux machine without ss: this one has it.
+  symlinkSync('/usr/bin/true', join(bin, 'ss'));
   vi.stubEnv('PATH', bin);
 }
 
