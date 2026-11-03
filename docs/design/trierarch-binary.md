@@ -1,6 +1,6 @@
 # Design: a trierarch with no Node, one binary for VPSes (trierarch#95)
 
-Status: purpose, lessons and questions, for Thomas. No decision is taken and nothing is built.
+Status: approved by Thomas. Nothing is built.
 
 ## Purpose
 
@@ -50,54 +50,35 @@ docs/design/worktrees-end-with-their-session.md is approved and its slices #89 t
 
 It does not remove the harnesses (and Copilot's Node), git, bash, curl, the container runtime or the trierarch's own code.
 
-## Questions
+## Decisions
 
-### Q1. The language
+### The language is Go
 
-1. **Go.** Static binaries with no C library, cross-built for each operating system and chip from one machine; the standard library covers HTTP over Unix sockets, child processes with process groups, signals and JSON. Few or no outside modules. A rewrite of about 14,000 lines and its tests; `common`'s schemas written again in Go or generated from their JSON Schema.
-2. **Rust.** The smallest and fastest binary, memory safety without a collector. Slower to write; its HTTP and async crates bring a crate tree back (crates.io is a registry too); building for macOS from Linux needs extra tools. Same rewrite and schema work as Go.
-3. **A compiled single file of today's code** (Node's single executable application, or Bun or Deno compile). Today's code and tests stay; the move is weeks, not months. The Node or Bun runtime is inside the binary (about 100 MB), so its security releases still matter, patched by our release. Self-starting changes (`node -e` for the guard, the bin script path, `package.json` for the version). Bun or Deno would run the code on a runtime it is not tested on.
+Static binaries with no C library, cross-built for each operating system and chip; the standard library covers HTTP over Unix sockets, child processes with process groups, signals and JSON. Few or no outside modules. `common`'s schemas are written again in Go or generated from their JSON Schema. The fallback if the rewrite proves too large is a compiled single file of today's code.
 
-Pick: 1, Go. It removes the runtime, not only npm, which is what Thomas's example asks for; it fits a process that runs programs and sockets; it cross-builds simply. Option 3 is the fallback if the rewrite is too large for now.
+### The install routes
 
-### Q2. Install routes
+- An install script (`curl -fsSL <url> | sh`) downloads the binary for the machine's system and chip from the GitHub Release, checks its checksum, puts it in `~/.local/bin` and runs `init`. The trierarch plugin's setup line is that script.
+- The bare binary from the GitHub Release, by hand, with its checksum.
+- `upgrade` fetches the release itself, checks its checksum and attestation, and replaces the file. It does not use npm.
+- The npm package stays during the move, so today's machines upgrade as they do now.
 
-1. **An install script** (`curl -fsSL <url> | sh`) that downloads the binary for the machine's system and chip from the GitHub Release, checks its checksum, puts it in `~/.local/bin` and runs `init`. The trierarch plugin's setup line becomes that (a change in aeolus-fleet-trierarch-plugin).
-2. **The npm package carrying the binary**, one optional package per system and chip, as esbuild does. The setup line stays `npx`; npm stays on the machine, so the purpose is met only by the other routes.
-3. **Homebrew** (a tap): natural on macOS, available on Linux; one more repository to keep.
-4. **The binary itself** from the GitHub Release, by hand, with its checksum.
+### Signing on macOS
 
-Pick: 1 and 4 first, the setup line moving to the install script; 2 kept during the move so today's machines upgrade the way they do now; 3 once macOS machines want it. `upgrade` then fetches the release itself, checks it and replaces the file, instead of npm.
+An ad hoc signature, which the Go linker writes. The install script and `curl` set no quarantine flag, so the binary runs; a binary downloaded with a browser is stopped by Gatekeeper until the user allows it.
 
-### Q3. Signing on macOS
+### The CI
 
-1. **Ad hoc signature only** (what the Go and Rust linkers write on Apple silicon). Runs when installed by the script or `curl`, which set no quarantine flag; a binary downloaded with a browser is stopped by Gatekeeper until the user allows it.
-2. **Developer ID signing and notarization** in CI: opens anywhere, as a signed app does. Needs the Apple Developer Program (99 USD a year), a certificate and an App Store Connect key as CI secrets, and a macOS runner for each release.
-3. **Homebrew only for macOS**, which clears the quarantine flag itself.
+Each release is built and tested where it runs: `ubuntu-latest`, `ubuntu-24.04-arm`, `macos-latest` (arm64), and macOS amd64 cross-built or on an Intel runner while GitHub offers one. The launchd and systemd parts run where they live, as `trierarch-macos` does today. A release carries `SHA256SUMS` and a GitHub artifact attestation per binary, which the install script and `upgrade` check. There is no Windows build: the trierarch has no Windows service.
 
-Pick: 1 now: VPSes are Linux, and the install script sets no quarantine. 2 once a macOS route is downloaded by hand. Thomas holds the Apple account, so 2 is his call.
+### The order of the move
 
-### Q4. The CI that builds each system and chip
-
-1. **Cross-built on one Ubuntu runner** for linux amd64 and arm64 and macOS arm64 and amd64, tests on Linux amd64 only. Cheapest; a macOS-only or arm-only defect is found on a machine.
-2. **Built and tested where it runs**: `ubuntu-latest`, `ubuntu-24.04-arm`, `macos-latest` (arm64), and macOS amd64 cross-built or on an Intel runner while GitHub offers one. The launchd and systemd parts run where they live, as `trierarch-macos` does today.
-3. As 2, plus provenance: `SHA256SUMS` and a GitHub artifact attestation per binary in the release, which the install script and `upgrade` check.
-
-Pick: 3. Each binary is tested on its own system and chip, and the checksum and attestation are what replaces trusting the npm registry. Windows is out: the trierarch has no Windows service today.
-
-### Q5. The order of the move
-
-Thomas's frame: one part at a time, today's trierarch kept until the new one passes a walk.
-
-1. **A contract suite first, then the new trierarch beside the old.** The suite drives a trierarch as a program from outside (its CLI, its sockets, its files, an in-process core, the fake harnesses) and runs green against today's trierarch. The new trierarch is built one part at a time against it, in an order to agree (for example: config and `init`, `run` and the reconciler with one harness, the hold, the model proxy, the other harnesses, `upgrade`). Today's trierarch keeps its releases until the new one passes a walk on a VPS; then the setup line moves and a machine moves by one upgrade, its holds taken over as another version's.
-2. **The compiled single file first** (Q1 option 3) as a release now, the rewrite later behind it. Removes npm from the VPS soon; Node stays inside the binary until the rewrite.
-3. **Part by part inside today's trierarch**: a Go hold started by the Node trierarch, then the proxy, then the rest. Each part ships early, but Node stays until the last part, and two languages run together on every machine.
-
-Pick: 1. It keeps today's trierarch whole until the walk and gives both a test that proves them the same. #89 to #92 land first in today's trierarch, so the suite holds them before the new one starts.
+1. A contract suite drives a trierarch as a program from outside (its CLI, its sockets, its files, an in-process core, the fake harnesses) and runs green against today's trierarch. The worktree slices (#89 to #92) land in today's trierarch first, so the suite holds them.
+2. The Go trierarch is built beside the old one, part by part, against the suite: config and `init`, `run` and the reconciler with one harness, the hold, the model proxy, the other harnesses, `upgrade`.
+3. Today's trierarch keeps its releases until the Go trierarch passes a walk on a VPS. Then the setup line moves to the install script and a machine moves by one upgrade, its holds taken over as another version's.
 
 ## Trains
 
-- **Trierarch (this repository)**: the contract suite, the new trierarch, its release and `upgrade`.
-- **Trierarch plugin**: the setup line for the new install route.
-- **Core (aeolus-fleet)**: nothing, unless `common`'s JSON Schemas are to be published for a trierarch in another language (Q1).
-- **Thomas**: the Apple account for Q3 option 2.
+- **Trierarch (this repository)**: the contract suite, the Go trierarch, its release and `upgrade`.
+- **Trierarch plugin**: the setup line for the install script.
+- **Core (aeolus-fleet)**: nothing, unless `common`'s JSON Schemas are to be published for a trierarch in another language.
