@@ -5,7 +5,8 @@
 # version (aeolus-trierarch upgrade installs it from there). Then creates the
 # GitHub Release for the tag, with notes from the merged pull requests carrying
 # the label <version>, and sets the aeolus-fleet plugin to that version on main for
-# main releases, where the plugin marketplaces install from by default.
+# every release, a hotfix branch's included, unless main's plugin is newer already:
+# the plugin marketplaces install from main by default.
 #
 # The only way the package can be published: npm trusted publishing (OIDC) is
 # configured for exactly this file name, and tokens are disallowed (decision
@@ -183,11 +184,11 @@ jobs:
           gh release create "v$VERSION" --verify-tag --title "v$VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"
 
       # The plugin marketplace installs from main, so main carries the plugin's
-      # released version (the package on main keeps 0.0.0). After the tag: if
+      # latest released version, whichever branch released it (the package on
+      # main keeps 0.0.0). After the tag: if
       # this step fails, the release is whole; set it by hand with
       # npm run set-version -- --plugin-only <version>, commit and push.
       - name: Set the aeolus-fleet plugin to ${{ inputs.version }} on main
-        if: github.ref == 'refs/heads/main'
         env:
           VERSION: ${{ inputs.version }}
         run: |
