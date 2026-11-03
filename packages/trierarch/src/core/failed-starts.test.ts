@@ -7,12 +7,13 @@ import type { LaunchSeen } from './ports.js';
 const SECOND_MS = 1000;
 const MINUTE_MS = 60 * SECOND_MS;
 const NO_ACTIVITY = 'no activity within a minute of its start';
-const STOPPED_REASON = `the starts of 3 ships failed in a row; last: ${NO_ACTIVITY}`;
+const OFFERS_AGAIN_AT = '2026-10-06T08:13:00.000Z';
+const STOPPED_REASON = `the starts of 3 ships failed in a row; first: ${NO_ACTIVITY}; it offers itself again at ${OFFERS_AGAIN_AT}`;
 const STOPPED_TEXT = [
   'Session starts fail here: this machine takes no new ships',
   '',
   '- Failed in a row: the starts of 3 ships',
-  `- Last: ${NO_ACTIVITY}`,
+  `- First: ${NO_ACTIVITY}`,
   '',
   'It offers itself again for one start 10 minutes after its last failed start, and for good once a start succeeds or the trierarch starts with a changed configuration.',
 ].join('\n');
@@ -46,7 +47,7 @@ async function offeredHarnesses(trierarch: Trierarch) {
 const toldArgo = (trierarch: Trierarch) => trierarch.fleet.toArgo.map((report) => report.text);
 
 describe('a machine whose session starts keep failing stops offering itself (aeolus-fleet#853)', () => {
-  it('offers no harness and no place once the starts of 3 ships failed in a row, naming each harness with the last reason, and says so in its note', async () => {
+  it('offers no harness and no place once the starts of 3 ships failed in a row, naming each harness with the first reason and when it offers itself again, and says so in its note', async () => {
     const trierarch = aTrierarch();
 
     await failedStarts(trierarch, ['scout', 'lookout', 'helm']);
@@ -59,6 +60,19 @@ describe('a machine whose session starts keep failing stops offering itself (aeo
     expect(report?.note).toBe(`0 of 8 running, not offered: ${STOPPED_REASON}`);
   });
 
+  it('names the failure that began the run, not the one that came last', async () => {
+    const trierarch = aTrierarch(CONFIGURATION, DETECTED);
+
+    await aStart(trierarch, { name: 'scout', seen: { kind: 'none' } });
+    await aStart(trierarch, { name: 'lookout', seen: { kind: 'refused', model: 'claude-opus-5-5' } });
+    await aStart(trierarch, { name: 'helm', seen: { kind: 'refused', model: 'claude-opus-5-5' } });
+    await trierarch.reportSelf();
+
+    const reason = trierarch.fleet.selfReports.at(-1)?.details.notOffered?.[0]?.reason;
+    expect(reason).toContain(`first: ${NO_ACTIVITY}`);
+    expect(reason).not.toContain('refused');
+  });
+
   it('still offers itself after the starts of 2 ships failed', async () => {
     const trierarch = aTrierarch();
 
@@ -67,7 +81,7 @@ describe('a machine whose session starts keep failing stops offering itself (aeo
     expect(await offeredHarnesses(trierarch)).toEqual(['claude-code']);
   });
 
-  it('tells argo once, with the last reason', async () => {
+  it('tells argo once, with the first reason', async () => {
     const trierarch = aTrierarch();
 
     await failedStarts(trierarch, ['scout', 'lookout', 'helm', 'bosun']);
