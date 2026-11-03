@@ -126,8 +126,8 @@ async function heldTrustedRepositories(file: string): Promise<readonly TrustedRe
 
 const MINIMUM_NODE_MAJOR = 26;
 
-/** Refuses, before anything is registered, a machine that cannot run the trierarch or crew anything: Node older than 26, no `ss` where the ship sockets need it, or neither Claude Code nor Codex installed. */
-function checkMachine(at: { nodeVersion: string; isSsMissing: boolean; isClaudeCodeInstalled: boolean; isCodexInstalled: boolean }): void {
+/** Refuses, before anything is registered, a machine that cannot run the trierarch or crew anything: Node older than 26, no `ss` where the ship sockets need it, or neither Claude Code nor Codex installed and signed in. */
+function checkMachine(at: { nodeVersion: string; isSsMissing: boolean; isClaudeCodeInstalled: boolean; isClaudeCodeSignedIn: boolean; isCodexInstalled: boolean; isCodexSignedIn: boolean }): void {
   if (Number.parseInt(at.nodeVersion, 10) < MINIMUM_NODE_MAJOR) {
     throw new TrierarchFileError(`The trierarch needs Node ${String(MINIMUM_NODE_MAJOR)} or newer and this is Node ${at.nodeVersion}. Install Node ${String(MINIMUM_NODE_MAJOR)} (https://nodejs.org), then run the setup line again.`);
   }
@@ -138,6 +138,10 @@ function checkMachine(at: { nodeVersion: string; isSsMissing: boolean; isClaudeC
     throw new TrierarchFileError(
       'Neither Claude Code nor Codex runs on this machine, so it could crew nothing. Install Claude Code (https://code.claude.com/docs/en/setup) or Codex (npm install -g @openai/codex) and be signed in to it, then run the setup line again.',
     );
+  }
+  if (!((at.isClaudeCodeInstalled && at.isClaudeCodeSignedIn) || (at.isCodexInstalled && at.isCodexSignedIn))) {
+    const steps = [...(at.isClaudeCodeInstalled ? ['Claude Code (run `claude` and sign in)'] : []), ...(at.isCodexInstalled ? ['Codex (run `codex login`)'] : [])];
+    throw new TrierarchFileError(`${steps.join(' and ')} ${steps.length === 1 ? 'is' : 'are'} installed but not signed in, so no session could answer. Sign in: ${steps.join('; ')}, then run the setup line again.`);
   }
 }
 
@@ -325,6 +329,10 @@ export async function initTrierarch(input: {
   isCodexInstalled: boolean;
   /** Whether `claude` runs on this machine: with Codex, one of the two must, before init registers anything. */
   isClaudeCodeInstalled: boolean;
+  /** Whether `claude auth status` reports a login: only an installed harness that is signed in can crew. */
+  isClaudeCodeSignedIn: boolean;
+  /** Whether `codex login status` reports a login. */
+  isCodexSignedIn: boolean;
   /** The Node this runs on, as `process.versions.node` gives it. */
   nodeVersion: string;
   /** Whether this machine needs `ss` (Linux) and has none on the PATH. */
@@ -345,7 +353,7 @@ export async function initTrierarch(input: {
     said.push(line, ...(hasSaidVersion ? [] : [NOT_SAID_YET]));
   };
 
-  checkMachine({ nodeVersion: input.nodeVersion, isSsMissing: input.isSsMissing, isClaudeCodeInstalled: input.isClaudeCodeInstalled, isCodexInstalled });
+  checkMachine({ nodeVersion: input.nodeVersion, isSsMissing: input.isSsMissing, isClaudeCodeInstalled: input.isClaudeCodeInstalled, isClaudeCodeSignedIn: input.isClaudeCodeSignedIn, isCodexInstalled, isCodexSignedIn: input.isCodexSignedIn });
   const pluginShipId = pluginShipOf(flags);
   // The ship: registered once per machine, never again.
   const crew = await readCrewFile(paths.crewToken).catch(() => undefined);

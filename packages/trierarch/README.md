@@ -26,7 +26,7 @@ npm install --global @aeolus-fleet/trierarch
 That gives the command `aeolus-trierarch`. On Linux the service is a systemd user service, which stops when you log out unless the user lingers: run `sudo loginctl enable-linger "$USER"` once, so it runs while nobody is logged in.
 
 1. Join the machine through the trierarch plugin (`machines.join`): it commissions the trierarch's own ship, type `trierarch` with `crew:run`, and answers its starting prompt and a setup line, `npx @aeolus-fleet/trierarch init --fleet-url <url> --ship-id <id> --plugin-ship-id <its own ship> --secret <secret>`, shown once. The machine then takes the trusted repositories from that ship alone (docs/trierarch.md, "Trusted repositories"); on a machine set up before, run `aeolus-trierarch init --plugin-ship-id <id>` once to take them.
-2. Set up the machine with that line (it needs Node 26 and Claude Code or Codex installed and signed in; init stops before registering, saying what to install, when either is missing), or with `init` alone, which asks for what is missing:
+2. Set up the machine with that line (it needs Node 26 and Claude Code or Codex installed and signed in; init stops before registering, saying what to install or which sign-in to run, when either is missing), or with `init` alone, which asks for what is missing:
 
    ```sh
    aeolus-trierarch init
