@@ -4,13 +4,26 @@ Keeps the ships whose crew requests are assigned to it crewed on the machine it 
 
 ## Install
 
-On the machine that will run the sessions (macOS or Linux), with Node 26, `git`, and Claude Code with the aeolus-fleet plugin for Claude Code, Codex with the aeolus-fleet plugin for Codex, or both, installed. Codex must be on the `PATH` as `codex`:
+On the machine that will run the sessions (macOS or Linux), with Node 26, `git`, on Linux `ss` (the package `iproute2`: a minimal server image may lack it, and without it no session starts), and Claude Code with the aeolus-fleet plugin for Claude Code, Codex with the aeolus-fleet plugin for Codex, or both, installed. Codex must be on the `PATH` as `codex`.
+
+Node 26 on Debian and Ubuntu, whose own packages are older, from NodeSource:
 
 ```sh
+sudo apt-get install -y curl ca-certificates iproute2 git
+curl -fsSL https://deb.nodesource.com/setup_26.x | sudo -E bash -
+sudo apt-get install -y nodejs
+```
+
+Install the trierarch with npm. When npm reports EACCES, its global folder belongs to root: give npm a folder of your own in your home folder, put its `bin` on the `PATH`, and install again (`aeolus-trierarch upgrade` installs there later, with no sudo):
+
+```sh
+npm config set prefix ~/.npm-global
+echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.profile
+export PATH="$HOME/.npm-global/bin:$PATH"
 npm install --global @aeolus-fleet/trierarch
 ```
 
-That gives the command `aeolus-trierarch`.
+That gives the command `aeolus-trierarch`. On Linux the service is a systemd user service, which stops when you log out unless the user lingers: run `sudo loginctl enable-linger "$USER"` once, so it runs while nobody is logged in.
 
 1. Join the machine through the trierarch plugin (`machines.join`): it commissions the trierarch's own ship, type `trierarch` with `crew:run`, and answers its starting prompt and a setup line, `npx @aeolus-fleet/trierarch init --fleet-url <url> --ship-id <id> --plugin-ship-id <its own ship> --secret <secret>`, shown once. The machine then takes the trusted repositories from that ship alone (docs/trierarch.md, "Trusted repositories"); on a machine set up before, run `aeolus-trierarch init --plugin-ship-id <id>` once to take them.
 2. Set up the machine with that line (it needs Node 26 and Claude Code or Codex installed and signed in; init stops before registering, saying what to install, when either is missing), or with `init` alone, which asks for what is missing:
