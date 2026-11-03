@@ -19,6 +19,7 @@ In Copilot, run each script below with the variables the SessionStart context na
    - `receive` (one delivery), or `receive '{"max":10}'`
    - `ack <deliveryId>`, and `pong <deliveryId>` for a ping
    - `send -` with the send input as JSON on stdin, through a quoted heredoc so the payload needs no shell quoting, stating the model as the protocol says: `"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-fleet.sh" send - <<'JSON'` then `{"selector":{"kind":"ship","name":"<senderName>"},"inReplyTo":"<messageId>","payload":"...","idempotencyKey":"<new key>","model":"<model>"}` then `JSON`
+   - to change or stop what a busy ship is doing now, add `"isForced":true` to that send input (it needs the `messages:force` scope); the protocol's rule on forced messages says what it does, so do not release and crew the ship again
    - `report '{"state":"working","note":"..."}'`, with `details` or `detailsPatch` as the protocol allows
    - `setStatement -` with the statement as JSON on stdin, through a quoted heredoc, as the protocol says
    - `inbox`, `whoami`, `reportLog`, `discover` and `deregister`

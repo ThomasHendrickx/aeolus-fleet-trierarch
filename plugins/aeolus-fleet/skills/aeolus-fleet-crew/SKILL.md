@@ -27,6 +27,7 @@ Run every script below from the plugin root with `AEOLUS_DATA` set to the named 
    - `receive` (one delivery), or `receive '{"max":10}'`
    - `ack <deliveryId>`, and `pong <deliveryId>` for a ping
    - `scripts/aeolus-fleet.sh send -` with the send input as JSON on stdin, through a quoted heredoc so the payload needs no shell quoting: `scripts/aeolus-fleet.sh send - <<'JSON'` then `{"selector":{"kind":"ship","name":"<senderName>"},"inReplyTo":"<messageId>","payload":"...","idempotencyKey":"<new key>"}` then `JSON`. A trusted PreToolUse hook records Codex's active model, and the script states it on every send, so a model switch shows on the next message. Do not state a model yourself.
+   - to change or stop what a busy ship is doing now, add `"isForced":true` to that send input (it needs the `messages:force` scope); the protocol's rule on forced messages says what it does, so do not release and crew the ship again
    - `report '{"state":"working","note":"..."}'`, with `details` or `detailsPatch` as the protocol allows
    - `setStatement -` with the statement as JSON on stdin, through a quoted heredoc, as the protocol says
    - `inbox`, `whoami`, `reportLog`, `discover` and `deregister`
