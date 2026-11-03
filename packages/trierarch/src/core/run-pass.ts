@@ -186,14 +186,14 @@ function configurationOf(deps: RunPassDeps): string {
   return JSON.stringify(deps.setup.configured);
 }
 
-/** Tells argo, once per stop, that the machine stopped offering itself, with the last reason (#853); a failure to tell is logged, and the pass goes on. */
+/** Tells argo, once per stop, that the machine stopped offering itself, with the first reason (#853); a failure to tell is logged, and the pass goes on. */
 async function tellStopped(state: TrierarchState, at: { isNewlyStopped: boolean; deps: RunPassDeps }): Promise<void> {
   const { isNewlyStopped, deps } = at;
   const { failedStarts } = state;
   if (!isNewlyStopped || failedStarts?.stopped === undefined) {
     return;
   }
-  deps.logger.warn(`The machine stops offering itself: the starts of ${String(failedStarts.shipIds.length)} ships failed in a row, last: ${failedStarts.reason}; it offers itself again ${String(PROBE_AFTER_MINUTES)} minutes after its last failed start`);
+  deps.logger.warn(`The machine stops offering itself: the starts of ${String(failedStarts.shipIds.length)} ships failed in a row, first: ${failedStarts.reason}; it offers itself again ${String(PROBE_AFTER_MINUTES)} minutes after its last failed start`);
   try {
     await deps.fleet.reportToArgo({ text: stoppedOfferingText(failedStarts), idempotencyKey: `trierarch:stopped-offering:${failedStarts.stopped.since}` });
   } catch (error) {

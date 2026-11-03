@@ -142,12 +142,12 @@ function countsOf(lines: readonly { kind: DiscardedKind }[]): string {
     .join(', ');
 }
 
-/** The machine stopped offering itself after failed starts (#853): told once, with the last reason and how it offers itself again. */
+/** The machine stopped offering itself after failed starts (#853): told once, with the first reason and how it offers itself again. */
 export function stoppedOfferingText(failedStarts: FailedStarts): string {
   return argoMessage({
     headline: 'Session starts fail here: this machine takes no new ships',
     body: paragraphs(
-      [`- Failed in a row: the starts of ${String(failedStarts.shipIds.length)} ships`, `- Last: ${failedStarts.reason}`].join('\n'),
+      [`- Failed in a row: the starts of ${String(failedStarts.shipIds.length)} ships`, `- First: ${failedStarts.reason}`].join('\n'),
       `It offers itself again for one start ${String(PROBE_AFTER_MINUTES)} minutes after its last failed start, and for good once a start succeeds or the trierarch starts with a changed configuration.`,
     ),
   });
