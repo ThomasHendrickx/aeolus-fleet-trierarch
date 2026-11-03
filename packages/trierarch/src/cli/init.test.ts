@@ -33,6 +33,8 @@ let repository: string;
 let codex: FakeCodexSetup;
 let isCodexInstalled: boolean;
 let isClaudeCodeInstalled: boolean;
+let isClaudeCodeSignedIn: boolean;
+let isCodexSignedIn: boolean;
 let nodeVersion: string;
 let isSsMissing: boolean;
 /** What running.json says on each read after the service starts, the last one from then on. */
@@ -145,6 +147,8 @@ beforeEach(() => {
   codex = new FakeCodexSetup();
   isCodexInstalled = false;
   isClaudeCodeInstalled = true;
+  isClaudeCodeSignedIn = true;
+  isCodexSignedIn = true;
   nodeVersion = '26.0.0';
   isSsMissing = false;
   home = mkdtempSync(join(tmpdir(), 'trierarch-init-'));
@@ -168,6 +172,8 @@ function init(flags: Partial<InitFlags>, prompter: Prompter = new ScriptedPrompt
   return initTrierarch({
     isCodexInstalled,
     isClaudeCodeInstalled,
+    isClaudeCodeSignedIn,
+    isCodexSignedIn,
     nodeVersion,
     isSsMissing,
     codex,
@@ -761,6 +767,32 @@ describe('aeolus-trierarch init, for Codex', () => {
 
     expect(registered).toEqual([]);
     expect(existsSync(paths.crewToken)).toBe(false);
+  });
+
+  it('stops before registering when Claude Code is installed but not signed in, saying to run claude and sign in', async () => {
+    isClaudeCodeSignedIn = false;
+
+    await expect(init({ isYes: true, fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET })).rejects.toThrow(/Claude Code.*not signed in.*`claude`/s);
+
+    expect(registered).toEqual([]);
+    expect(existsSync(paths.crewToken)).toBe(false);
+  });
+
+  it('stops before registering when Claude Code and Codex are installed and neither is signed in', async () => {
+    isCodexInstalled = true;
+    isClaudeCodeSignedIn = false;
+    isCodexSignedIn = false;
+
+    await expect(init({ isYes: true, fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET })).rejects.toThrow(/Claude Code.*Codex.*not signed in.*`codex login`/s);
+
+    expect(registered).toEqual([]);
+  });
+
+  it('goes on when Claude Code is not signed in but the installed Codex is', async () => {
+    isCodexInstalled = true;
+    isClaudeCodeSignedIn = false;
+
+    await expect(init({ isYes: true, fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET })).resolves.toBeDefined();
   });
 
   it('goes on with only Codex installed', async () => {
