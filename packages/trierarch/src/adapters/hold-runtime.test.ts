@@ -56,8 +56,8 @@ afterEach(async () => {
 /** Twenty turns started and interrupted, each a stdin line and a poll of the events. */
 const TWENTY_TURNS_MS = 30_000;
 
-function aRuntime(at: { version?: string; beside?: Pick<SessionRuntime, 'list' | 'stop'>; bootedAt?: () => Date } = {}) {
-  const runtime = createHoldRuntime({ sessions, program: TRIERARCH_PROGRAM, version: at.version ?? VERSION, platform: process.platform, ...(at.beside !== undefined && { beside: at.beside }), ...(at.bootedAt !== undefined && { bootedAt: at.bootedAt }) });
+function aRuntime(at: { version?: string; beside?: Pick<SessionRuntime, 'list' | 'stop'>; bootedAt?: () => Date; launch?: readonly string[]; program?: readonly string[] } = {}) {
+  const runtime = createHoldRuntime({ sessions, program: at.program ?? TRIERARCH_PROGRAM, version: at.version ?? VERSION, platform: process.platform, ...(at.launch !== undefined && { launch: at.launch }), ...(at.beside !== undefined && { beside: at.beside }), ...(at.bootedAt !== undefined && { bootedAt: at.bootedAt }) });
   runtimes.push(runtime);
   return runtime;
 }
@@ -593,9 +593,34 @@ describe('a Copilot session held by a hold, one copilot -p per turn (CC4)', () =
   });
 });
 
+describe('why a hold does not start', () => {
+  it("says what the starter wrote when it fails, such as systemd-run's own refusal of an option", async () => {
+    const runtime = aRuntime({ launch: ['sh', '-c', 'echo "systemd-run: unrecognized option --expand-environment=no" >&2; exit 1', 'sh'] });
+
+    await expect(runtime.start({ shipId: newId('ship'), folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' })).rejects.toThrow(/unrecognized option --expand-environment=no/);
+  });
+
+  it('names ss and iproute2 when the hold answers every call of the trierarch with a refusal, as it does where ss is missing', { timeout: 20_000 }, async () => {
+    const refusing = "const net = require('node:net'); const a = process.argv; const socket = a[a.indexOf('--sessions') + 1] + '/' + a[3] + '/hold.sock'; require('node:fs').mkdirSync(require('node:path').dirname(socket), { recursive: true }); net.createServer((c) => { c.on('error', () => undefined); c.end(JSON.stringify({ isOk: false, error: 'refused: only the trierarch talks to a hold' }) + '\\n'); }).listen(socket);";
+    const runtime = aRuntime({ program: [process.execPath, '-e', refusing] });
+
+    await expect(runtime.start({ shipId: newId('ship'), folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' })).rejects.toThrow(/refused.*iproute2/s);
+  });
+});
+
 describe('where a hold starts (#537)', () => {
   it("starts through a systemd scope of its own under a systemd unit, so the service's restart ends no session, and leaves every $ in the command as it is (systemd 259 turns $$ into $)", () => {
     expect(sessionsLaunch({ platform: 'linux', env: { INVOCATION_ID: 'c0ffee' } })).toEqual(['systemd-run', '--user', '--scope', '--quiet', '--collect', '--expand-environment=no', '--']);
+  });
+
+  it('leaves --expand-environment out where systemd-run has none: before systemd 254, which Debian 12 (252) and Ubuntu 22.04 (249) run', () => {
+    expect(sessionsLaunch({ platform: 'linux', env: { INVOCATION_ID: 'c0ffee' }, systemdVersion: 252 })).toEqual(['systemd-run', '--user', '--scope', '--quiet', '--collect', '--']);
+    expect(sessionsLaunch({ platform: 'linux', env: { INVOCATION_ID: 'c0ffee' }, systemdVersion: 249 })).toEqual(['systemd-run', '--user', '--scope', '--quiet', '--collect', '--']);
+  });
+
+  it('passes --expand-environment=no from systemd 254, where systemd-run has it', () => {
+    expect(sessionsLaunch({ platform: 'linux', env: { INVOCATION_ID: 'c0ffee' }, systemdVersion: 254 })).toContain('--expand-environment=no');
+    expect(sessionsLaunch({ platform: 'linux', env: { INVOCATION_ID: 'c0ffee' }, systemdVersion: 259 })).toContain('--expand-environment=no');
   });
 
   it('starts itself on Linux outside a systemd unit', () => {
