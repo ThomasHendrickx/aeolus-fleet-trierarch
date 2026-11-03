@@ -34,6 +34,7 @@ let codex: FakeCodexSetup;
 let isCodexInstalled: boolean;
 let isClaudeCodeInstalled: boolean;
 let nodeVersion: string;
+let isSsMissing: boolean;
 /** What running.json says on each read after the service starts, the last one from then on. */
 let saying: (RunningFile | undefined)[];
 let reads: number;
@@ -145,6 +146,7 @@ beforeEach(() => {
   isCodexInstalled = false;
   isClaudeCodeInstalled = true;
   nodeVersion = '26.0.0';
+  isSsMissing = false;
   home = mkdtempSync(join(tmpdir(), 'trierarch-init-'));
   paths = trierarchPaths({ homeDirectory: home });
   registered = [];
@@ -167,6 +169,7 @@ function init(flags: Partial<InitFlags>, prompter: Prompter = new ScriptedPrompt
     isCodexInstalled,
     isClaudeCodeInstalled,
     nodeVersion,
+    isSsMissing,
     codex,
     homeDirectory: home,
     paths,
@@ -737,6 +740,15 @@ describe('aeolus-trierarch init, for Codex', () => {
     nodeVersion = '22.11.0';
 
     await expect(init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET })).rejects.toThrow(/Node 26/);
+
+    expect(registered).toEqual([]);
+    expect(existsSync(paths.crewToken)).toBe(false);
+  });
+
+  it('stops before registering when ss is missing, saying to install iproute2, as the caller check of the ship sockets runs it', async () => {
+    isSsMissing = true;
+
+    await expect(init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET })).rejects.toThrow(/ss.*iproute2/s);
 
     expect(registered).toEqual([]);
     expect(existsSync(paths.crewToken)).toBe(false);

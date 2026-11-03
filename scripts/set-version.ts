@@ -92,7 +92,7 @@ export function setVersion(repositoryRoot: string, version: string): void {
 }
 
 /**
- * Sets the version of both aeolus-fleet plugin manifests alone. The release commits
+ * Sets the version of every aeolus-fleet plugin manifest alone. The release commits
  * them back to main, where the plugin marketplaces install from, so the
  * installed plugin shows the version just released; the packages on main keep
  * 0.0.0, as only the published packages carry their version.
@@ -108,14 +108,40 @@ export function setPluginVersion(repositoryRoot: string, version: string): void 
   }
 }
 
+/** The numbers of a version's core, such as [0, 36, 1]; a prerelease is read as its core. */
+const coreOf = (version: string): number[] => version.split(/[-+]/)[0]?.split('.').map(Number) ?? [];
+
+/** Whether the first version's core is newer than the second's, compared by number. */
+function isNewer(version: string, than: string): boolean {
+  const [a, b] = [coreOf(version), coreOf(than)];
+  const differing = a.findIndex((part, index) => part !== b[index]);
+  return differing !== -1 && (a[differing] ?? 0) > (b[differing] ?? 0);
+}
+
+/**
+ * Sets the plugin's version as the release does on main, from any branch it
+ * releases: a hotfix of an older line, released after a newer version, leaves
+ * the newer one in place. The plugin is whatever its first manifest says.
+ */
+export function setPluginVersionUnlessNewer(repositoryRoot: string, version: string): void {
+  if (!SEMVER.test(version)) {
+    throw new Error(`Not a semantic version: "${version}"`);
+  }
+  const [first] = PLUGIN_MANIFESTS;
+  const current = z.object({ version: z.string() }).parse(JSON.parse(readFileSync(join(repositoryRoot, first), 'utf8'))).version;
+  if (!isNewer(current, version)) {
+    setPluginVersion(repositoryRoot, version);
+  }
+}
+
 if (import.meta.main) {
   const isPluginOnly = process.argv[2] === '--plugin-only';
   const version = (isPluginOnly ? process.argv[3] : process.argv[2]) ?? '';
   try {
     const repositoryRoot = fileURLToPath(new URL('..', import.meta.url));
     if (isPluginOnly) {
-      setPluginVersion(repositoryRoot, version);
-      console.log(`Set the aeolus-fleet plugin to ${version}`);
+      setPluginVersionUnlessNewer(repositoryRoot, version);
+      console.log(`Set the aeolus-fleet plugin to ${version}, unless it is newer already`);
     } else {
       setVersion(repositoryRoot, version);
       console.log(`Set ${OWN_PACKAGES.join(', ')} and the aeolus-fleet plugin to ${version}`);
