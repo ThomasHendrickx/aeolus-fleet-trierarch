@@ -11,7 +11,7 @@ import { newId } from '../../test/support/in-memory.js';
 import { sessionRuntimeContract } from '../../test/support/session-runtime-contract.js';
 import type { ObservedSession, SessionRuntime } from '../core/ports.js';
 import { createCallerCheck } from './caller-check.js';
-import { createHoldRuntime, sessionsLaunch } from './hold-runtime.js';
+import { createHoldRuntime, sessionsLaunch, systemdVersionOf } from './hold-runtime.js';
 import { runCommand } from './run-command.js';
 import { runningVersion } from './version.js';
 
@@ -601,7 +601,7 @@ describe('why a hold does not start', () => {
   });
 
   it('names ss and iproute2 when the hold answers every call of the trierarch with a refusal, as it does where ss is missing', { timeout: 20_000 }, async () => {
-    const refusing = "const net = require('node:net'); const a = process.argv; const socket = a[a.indexOf('--sessions') + 1] + '/' + a[3] + '/hold.sock'; require('node:fs').mkdirSync(require('node:path').dirname(socket), { recursive: true }); net.createServer((c) => { c.on('error', () => undefined); c.end(JSON.stringify({ isOk: false, error: 'refused: only the trierarch talks to a hold' }) + '\\n'); }).listen(socket);";
+    const refusing = "const net = require('node:net'); const a = process.argv; const socket = a[a.indexOf('--sessions') + 1] + '/' + a[2] + '/hold.sock'; require('node:fs').mkdirSync(require('node:path').dirname(socket), { recursive: true }); net.createServer((c) => { c.on('error', () => undefined); c.end(JSON.stringify({ isOk: false, error: 'refused: only the trierarch talks to a hold' }) + '\\n'); }).listen(socket);";
     const runtime = aRuntime({ program: [process.execPath, '-e', refusing] });
 
     await expect(runtime.start({ shipId: newId('ship'), folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' })).rejects.toThrow(/refused.*iproute2/s);
@@ -610,7 +610,7 @@ describe('why a hold does not start', () => {
 
 describe('where a hold starts (#537)', () => {
   it("starts through a systemd scope of its own under a systemd unit, so the service's restart ends no session, and leaves every $ in the command as it is (systemd 259 turns $$ into $)", () => {
-    expect(sessionsLaunch({ platform: 'linux', env: { INVOCATION_ID: 'c0ffee' } })).toEqual(['systemd-run', '--user', '--scope', '--quiet', '--collect', '--expand-environment=no', '--']);
+    expect(sessionsLaunch({ platform: 'linux', env: { INVOCATION_ID: 'c0ffee' }, systemdVersion: 255 })).toEqual(['systemd-run', '--user', '--scope', '--quiet', '--collect', '--expand-environment=no', '--']);
   });
 
   it('leaves --expand-environment out where systemd-run has none: before systemd 254, which Debian 12 (252) and Ubuntu 22.04 (249) run', () => {
@@ -629,5 +629,18 @@ describe('where a hold starts (#537)', () => {
 
   it('starts itself on macOS, where launchd leaves the sessions running', () => {
     expect(sessionsLaunch({ platform: 'darwin', env: { INVOCATION_ID: 'c0ffee' } })).toEqual([]);
+  });
+});
+
+describe('the systemd version systemd-run states', () => {
+  const stating = (stdout: string): typeof runCommand => () => Promise.resolve({ status: 0, stdout, stderr: '' });
+
+  it('is the number after systemd', async () => {
+    await expect(systemdVersionOf(stating('systemd 252 (252.31-1~deb12u1)\n+PAM +AUDIT\n'))).resolves.toBe(252);
+  });
+
+  it('is none when systemd-run states nothing a version is read from', async () => {
+    await expect(systemdVersionOf(stating(''))).resolves.toBeUndefined();
+    await expect(systemdVersionOf(() => Promise.reject(new Error('spawn systemd-run ENOENT')))).resolves.toBeUndefined();
   });
 });
