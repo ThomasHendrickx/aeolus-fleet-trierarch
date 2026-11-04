@@ -78,9 +78,12 @@ func (h Harness) EffectiveFlags(picked map[string]string) []string {
 	return flags
 }
 
+// Option is a setting a crew request may pick: each value's name and the flags it adds, and the value used when none is picked.
 type Option struct {
 	Values  map[string][]string `json:"values"`
 	Default string              `json:"default,omitempty"`
+	// Order is the values' names in the order they were written or detected in, as a refusal and detect name them.
+	Order []string `json:"-"`
 }
 
 // Price is a model's price in US dollars per million tokens of each kind.
