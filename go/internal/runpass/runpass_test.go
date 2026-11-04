@@ -217,7 +217,9 @@ type aPass struct {
 	workspace *aWorkspace
 	store     *aStore
 	logged    []string
-	pass      Pass
+	// refusedModels are the models kept refused, each as its harness and id.
+	refusedModels []string
+	pass          Pass
 }
 
 func aRunPass(t *testing.T) *aPass {
@@ -247,6 +249,13 @@ func aRunPass(t *testing.T) *aPass {
 		Offered:      []string{"claude-code"},
 		Repositories: []string{"aeolus-fleet"},
 		RunningCap:   2,
+		Offers: func() map[string]map[string][]string {
+			return map[string]map[string][]string{"claude-code": {"model": {"opus", "claude-sonnet-5", "claude-opus-4"}}}
+		},
+		RefuseModel: func(harness string, model string) error {
+			at.refusedModels = append(at.refusedModels, harness+" "+model)
+			return nil
+		},
 	}
 	return at
 }
@@ -1111,6 +1120,32 @@ func TestAModelRefusedTellsArgoWhichModelTheSettingsPickedAtWhichVersionThenGive
 	}
 	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 claude-code 2.1.306 refused claude-sonnet-5") {
 		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+}
+
+func TestAModelTheSettingsPickedThatASessionRefusedIsKeptRefusedForItsHarness(t *testing.T) {
+	pass := aRunPass(t)
+
+	pass.refusedModel(t, "2.1.306")
+
+	if want := []string{"claude-code claude-sonnet-5"}; !slices.Equal(pass.refusedModels, want) {
+		t.Fatalf("refused %v, want %v", pass.refusedModels, want)
+	}
+}
+
+func TestARequestPickingAModelItsHarnessOffersNoMoreIsGivenBack(t *testing.T) {
+	pass := aRunPass(t)
+	pass.pass.Offers = func() map[string]map[string][]string {
+		return map[string]map[string][]string{"claude-code": {"model": {"opus"}}}
+	}
+	request := aRequest("")
+	request.Settings.Options = map[string]string{"model": "claude-sonnet-5"}
+	pass.fleet.requests = []reconciler.Request{request}
+
+	pass.run(t)
+
+	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 options.model: model must be one of opus") {
+		t.Fatalf("calls %q, want it given back", pass.fleet.calls)
 	}
 }
 
