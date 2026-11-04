@@ -92,7 +92,7 @@ const nameMaxLength = 100
 func add(at paths.Paths, machine Machine, words []string) (answer, error) {
 	kind, name, written := words[0], words[1], words[2]
 	if !namePattern.MatchString(name) || len(name) > nameMaxLength {
-		return answer{}, fmt.Errorf("%s is no name: lowercase letters, digits and hyphens.", name)
+		return answer{}, fmt.Errorf("%s is no name: lowercase letters, digits and hyphens", name)
 	}
 	path := written
 	if path == "~" || strings.HasPrefix(path, "~/") {
@@ -104,10 +104,10 @@ func add(at paths.Paths, machine Machine, words []string) (answer, error) {
 	}
 	if kind == "repository" {
 		if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {
-			return answer{}, fmt.Errorf("%s is no git checkout.", path)
+			return answer{}, fmt.Errorf("%s is no git checkout", path)
 		}
 	} else if info, err := os.Stat(path); err != nil || !info.IsDir() {
-		return answer{}, fmt.Errorf("%s is no folder.", path)
+		return answer{}, fmt.Errorf("%s is no folder", path)
 	}
 	configuration, err := config.Load(at.Config)
 	if err != nil {
