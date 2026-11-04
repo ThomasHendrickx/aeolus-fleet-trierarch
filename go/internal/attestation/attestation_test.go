@@ -1,7 +1,9 @@
 package attestation
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -159,7 +161,11 @@ func TestATamperedBundleIsRefused(t *testing.T) {
 	}
 	for name, change := range map[string]func(map[string]any){
 		"the payload": func(b map[string]any) {
-			object(b, "dsseEnvelope")["payload"] = object(otherBundle, "dsseEnvelope")["payload"]
+			payload, err := base64.StdEncoding.DecodeString(object(b, "dsseEnvelope")["payload"].(string))
+			if err != nil {
+				t.Fatal(err)
+			}
+			object(b, "dsseEnvelope")["payload"] = bytes.Replace(payload, []byte("linux-amd64"), []byte("linux-arm64"), 1)
 		},
 		"the signature": func(b map[string]any) {
 			object(b, "dsseEnvelope", "signatures", 0)["sig"] = object(otherBundle, "dsseEnvelope", "signatures", 0)["sig"]
