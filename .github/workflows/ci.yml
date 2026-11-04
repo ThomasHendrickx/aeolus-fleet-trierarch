@@ -49,6 +49,22 @@ jobs:
         env:
           AEOLUS_TEST_USER_SYSTEMD: '1'
 
+  go:
+    # The Go trierarch (docs/design/trierarch-binary.md), built beside today's.
+    name: Go vet and tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.mod
+      - run: go vet ./...
+      - run: go test ./...
+
   trierarch-macos:
     # The trierarch and the aeolus-fleet plugin's scripts run on macOS too, where
     # Linux CI misses their regressions: BSD awk and sed for the scripts. On
