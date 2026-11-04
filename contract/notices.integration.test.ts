@@ -14,7 +14,7 @@ import { aMachine, CLAUDE_CODE_VERSION, type Machine } from './support/machine.j
 /** Time enough for passes after the one that told, to show a notice told twice. */
 const ANOTHER_PASSES_MS = 12_000;
 
-// What the trierarch tells argo and a ship's owner (docs/trierarch.md, "Telling"), each in the ship protocol's shape for argo: a headline, a blank line, the facts.
+// What the trierarch tells argo and a ship's owner (docs/trierarch.md, "Crashed and Restart", "Crewing a ship", "API keys", "Release"), each in the ship protocol's shape for argo: a headline, a blank line, the facts.
 
 const CREWED_WITHIN_MS = 30_000;
 const TOLD_WITHIN_MS = 30_000;
