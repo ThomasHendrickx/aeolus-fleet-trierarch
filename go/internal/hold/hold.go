@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/peer"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
 )
 
 // Files are a session's hold files, in its folder under the sessions folder.
@@ -580,9 +581,9 @@ func Call(socket string, request Request, timeout time.Duration) (Answer, error)
 // keptVariables are what the harness takes of the hold's own environment; everything else it is given. USER and LOGNAME name the user, by which Claude Code finds its login on macOS.
 var keptVariables = []string{"HOME", "PATH", "USER", "LOGNAME"}
 
-const usage = "Usage: aeolus-trierarch hold <ship id> --sessions <folder> --folder <folder> --harness <name> [--env NAME=value]... -- <command>..."
+const usage = "Usage: aeolus-trierarch hold <ship id> --sessions <folder> --folder <folder> --harness <name> [--proxy-token-variable NAME] [--env NAME=value]... -- <command>..."
 
-// Main runs `aeolus-trierarch hold` with the words after `hold`, as the trierarch starts it, never a person: the harness's environment is built from nothing (H10), the kept variables of the hold's own, then each --env given; its guard is this program run as `hold --guard`. Answers its exit code, or 2 for words it cannot take.
+// Main runs `aeolus-trierarch hold` with the words after `hold`, as the trierarch starts it, never a person: the harness's environment is built from nothing (H10), the kept variables of the hold's own, then each --env given, and with --proxy-token-variable the session's model proxy token from its folder in that variable (H16); its guard is this program run as `hold --guard`. Answers its exit code, or 2 for words it cannot take.
 func Main(words []string, version string, environ []string) int {
 	if len(words) == 1 && words[0] == "--guard" {
 		return Guard(os.Stdin)
@@ -624,8 +625,17 @@ func Main(words []string, version string, environ []string) int {
 		close(stop)
 	}()
 	sessions := values["--sessions"]
+	files := FilesOf(sessions, shipID)
+	if variable := values["--proxy-token-variable"]; variable != "" {
+		token, ok := proxytoken.Read(files.Folder)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "No proxy token in %s\n", files.Folder)
+			return 1
+		}
+		given = append(given, variable+"="+token.Token)
+	}
 	return Run(Options{
-		Files:       FilesOf(sessions, shipID),
+		Files:       files,
 		Folder:      values["--folder"],
 		Harness:     values["--harness"],
 		Command:     command,
