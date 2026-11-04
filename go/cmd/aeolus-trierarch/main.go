@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -23,7 +24,9 @@ import (
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/claudecode"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/cli"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/codex"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/copilot"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
@@ -76,6 +79,9 @@ func main() {
 		ClaudeCode: func(homeDirectory string, configDirectory string) cli.ClaudeCode {
 			return claudecode.Of(homeDirectory, configDirectory)
 		},
+		IsCodexInstalled: codex.IsInstalled,
+		IsCodexSignedIn:  codex.IsSignedIn,
+		Codex:            func() cli.Codex { return codex.AppServer{Program: "codex", Version: cli.Version} },
 		Service: func(at paths.Paths) cli.ServiceManager {
 			return service.Systemd{HomeDirectory: home, Logs: at.Logs, Program: program, Environment: service.Environment(environ), Exec: systemctl}
 		},
@@ -207,28 +213,14 @@ func environment() map[string]string {
 	return env
 }
 
-// newPass is one pass of the run loop with this machine's adapters: the fleet over /api/v1 with the trierarch's crew token, Claude Code as the one harness, worktrees of the configured repositories, and the state file.
+// newPass is one pass of the run loop with this machine's adapters: the fleet over /api/v1 with the trierarch's crew token, the harnesses the configuration offers, worktrees of the configured repositories, and the state file.
 func newPass(at paths.Paths, kept crew.File, configuration config.Configuration, home string, program string) (func() error, error) {
 	env := environment()
 	running := sessionRuntime(at, program)
 	proxy := modelProxy(at, program)
-	harnesses := map[string]runpass.Harness{}
-	offered := []string{}
-	if settings, ok := configuration.Harnesses["claude-code"]; ok {
-		found, err := plugin.Find(home, env)
-		if err != nil {
-			return nil, err
-		}
-		harnesses["claude-code"] = claudecode.Harness{
-			Plugin:     found,
-			Runtime:    running,
-			Settings:   settings,
-			Projects:   claudecode.Projects(home, env["CLAUDE_CONFIG_DIR"]),
-			Onboarding: claudecode.Of(home, env["CLAUDE_CONFIG_DIR"]),
-			Events:     func(shipID string) string { return hold.FilesOf(at.Sessions, shipID).Events },
-			ProxyURL:   proxy.URL,
-		}
-		offered = append(offered, "claude-code")
+	harnesses, offered, err := harnessesOf(configuration, at, env, home, running, proxy)
+	if err != nil {
+		return nil, err
 	}
 	root := configuration.WorktreeRoot
 	if root == "" {
@@ -266,6 +258,53 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Keys:  keys.Files{Folder: at.Keys},
 	}
 	return pass.Run, nil
+}
+
+// adapters are the harnesses this trierarch has an adapter for, the default first.
+var adapters = []string{"claude-code", "codex", "copilot"}
+
+// harnessesOf are the adapters of the harnesses the configuration offers, each with the aeolus-fleet plugin its harness installed, and their names, the default first. Claude Code's and Codex's plugin is looked for at start, so a trierarch without it does not start; Copilot's at each crew, so the machine offers Copilot once it is installed. A configured harness this trierarch has no adapter for stops it at start, so no request for it is ever crewed.
+func harnessesOf(configuration config.Configuration, at paths.Paths, env map[string]string, home string, running sessions.Runtime, proxy modelproxy.Runtime) (map[string]runpass.Harness, []string, error) {
+	for name := range configuration.Harnesses {
+		if !slices.Contains(adapters, name) {
+			return nil, nil, fmt.Errorf("this trierarch has no adapter for the harness %s: it offers %s", name, strings.Join(adapters, ", "))
+		}
+	}
+	events := func(shipID string) string { return hold.FilesOf(at.Sessions, shipID).Events }
+	harnesses := map[string]runpass.Harness{}
+	offered := []string{}
+	for _, name := range adapters {
+		settings, ok := configuration.Harnesses[name]
+		if !ok {
+			continue
+		}
+		switch name {
+		case "claude-code":
+			found, err := plugin.Find(home, env)
+			if err != nil {
+				return nil, nil, err
+			}
+			harnesses[name] = claudecode.Harness{
+				Plugin:     found,
+				Runtime:    running,
+				Settings:   settings,
+				Projects:   claudecode.Projects(home, env["CLAUDE_CONFIG_DIR"]),
+				Onboarding: claudecode.Of(home, env["CLAUDE_CONFIG_DIR"]),
+				Events:     events,
+				ProxyURL:   proxy.URL,
+			}
+		case "codex":
+			found, err := plugin.FindCodex(home, env)
+			if err != nil {
+				return nil, nil, err
+			}
+			harnesses[name] = codex.Harness{Plugin: found, Runtime: running, Settings: settings, Hooks: codex.AppServer{Program: "codex", Version: cli.Version}, Events: events, ProxyURL: proxy.URL}
+		case "copilot":
+			harnesses[name] = copilot.Harness{Plugin: plugin.FindCopilot(home, env), Runtime: running, Settings: settings, Events: events, Version: func() (string, bool) { return copilot.VersionOf("copilot") }, CopilotHome: env["COPILOT_HOME"]}
+		}
+		offered = append(offered, name)
+	}
+	return harnesses, offered, nil
 }
 
 // newLaunchID is a launch id of its own, a random UUID.
