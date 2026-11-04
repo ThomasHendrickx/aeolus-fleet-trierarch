@@ -36,7 +36,7 @@ func aHoldOf(t *testing.T, options Options) aRunningHold {
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if answer, err := Call(files.Socket, Request{Call: "state"}, time.Second); err == nil && answer.IsOK {
+		if _, err := Call(files.Socket, Request{Call: "state"}, time.Second); err == nil {
 			break
 		}
 		if time.Now().After(deadline) {
