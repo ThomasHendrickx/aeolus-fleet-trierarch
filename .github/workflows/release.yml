@@ -4,7 +4,10 @@
 # on npm always matches a tag in git and the tag holds the plugin of that
 # version (aeolus-trierarch upgrade installs it from there). Then creates the
 # GitHub Release for the tag, with notes from the merged pull requests carrying
-# the label <version>, and sets the aeolus-fleet plugin to that version on main for
+# the label <version>, the Go trierarch's binary for each system and chip
+# (aeolus-trierarch-<goos>-<goarch>, built and tested by go-binaries.yml where
+# it runs), their SHA256SUMS and a GitHub artifact attestation per binary,
+# signed here: upgrade takes only an attestation signed by this file. Then sets the aeolus-fleet plugin to that version on main for
 # every release, a hotfix branch's included, unless main's plugin is newer already:
 # the plugin marketplaces install from main by default.
 #
@@ -31,14 +34,25 @@ permissions:
   actions: read
   # To push the session image to ghcr.io.
   packages: write
+  # To attest each Go binary, with id-token above.
+  attestations: write
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
+  binaries:
+    name: Go binaries ${{ inputs.version }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/go-binaries.yml
+    with:
+      version: ${{ inputs.version }}
+
   release:
     name: Publish ${{ inputs.version }}
+    needs: binaries
     runs-on: ubuntu-latest
     steps:
       - name: Check the version
@@ -127,6 +141,46 @@ jobs:
           podman build --file packages/trierarch/image/Containerfile --build-arg VERSION="$VERSION" --tag "$IMAGE" .
           echo "SESSION_IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
+      # Attested before anything is published, so a binary that cannot be attested
+      # stops the release first. One attestation per binary.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: aeolus-trierarch-*
+          path: ${{ runner.temp }}/binaries
+          merge-multiple: true
+      - name: SHA256SUMS of the Go binaries
+        working-directory: ${{ runner.temp }}/binaries
+        run: |
+          sha256sum aeolus-trierarch-* > SHA256SUMS
+          cat SHA256SUMS
+          for name in aeolus-trierarch-linux-amd64 aeolus-trierarch-linux-arm64 aeolus-trierarch-darwin-arm64 aeolus-trierarch-darwin-amd64; do
+            grep --quiet "  $name\$" SHA256SUMS || { echo "::error::No $name was built"; exit 1; }
+          done
+      - name: Attest aeolus-trierarch-linux-amd64
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ runner.temp }}/binaries/aeolus-trierarch-linux-amd64
+      - name: Attest aeolus-trierarch-linux-arm64
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ runner.temp }}/binaries/aeolus-trierarch-linux-arm64
+      - name: Attest aeolus-trierarch-darwin-arm64
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ runner.temp }}/binaries/aeolus-trierarch-darwin-arm64
+      - name: Attest aeolus-trierarch-darwin-amd64
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ runner.temp }}/binaries/aeolus-trierarch-darwin-amd64
+      - name: Each Go binary's attestation verifies as signed by this file
+        working-directory: ${{ runner.temp }}/binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for binary in aeolus-trierarch-*; do
+            gh attestation verify "$binary" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
+          done
+
       # Skips a version on npm already, so releasing a version again after it
       # failed partway pushes the image again, tags it and sets the plugin.
       # Dispatch it again from main: Re-run jobs replays the failed run's own
@@ -168,20 +222,24 @@ jobs:
           git push origin "refs/tags/v$VERSION"
 
       # Notes from the merged pull requests labelled with the version: git and the
-      # labels are the source, there is no changelog file. Skipped when the
-      # Release exists already, as when a release is dispatched again.
+      # labels are the source, there is no changelog file. With the Go binaries
+      # and their SHA256SUMS. When the Release exists already, as when a release
+      # is dispatched again, only the binaries and SHA256SUMS are put on it
+      # again, those of this run, which this run attested.
       - name: Create the GitHub Release v${{ inputs.version }}
+        working-directory: ${{ runner.temp }}/binaries
         env:
           VERSION: ${{ inputs.version }}
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "v$VERSION" > /dev/null 2>&1; then
-            echo "The GitHub Release v$VERSION exists already"
+            echo "The GitHub Release v$VERSION exists already: its Go binaries and SHA256SUMS are put on it again"
+            gh release upload "v$VERSION" aeolus-trierarch-* SHA256SUMS --clobber
             exit 0
           fi
           gh pr list --state merged --label "$VERSION" --json number,title,url --limit 1000 \
-            | node scripts/release-notes.ts "$VERSION" > "$RUNNER_TEMP/release-notes.md"
-          gh release create "v$VERSION" --verify-tag --title "v$VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"
+            | node "$GITHUB_WORKSPACE/scripts/release-notes.ts" "$VERSION" > "$RUNNER_TEMP/release-notes.md"
+          gh release create "v$VERSION" --verify-tag --title "v$VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" aeolus-trierarch-* SHA256SUMS
 
       # The plugin marketplace installs from main, so main carries the plugin's
       # latest released version, whichever branch released it (the package on
