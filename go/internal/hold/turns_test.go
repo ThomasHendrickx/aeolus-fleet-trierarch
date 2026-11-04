@@ -110,15 +110,15 @@ func TestAnInterruptEndsACodexTurnWithSIGINTAndTheHoldStays(t *testing.T) {
 	}
 }
 
-// aCopilotHold is a hold of a harness that answers as `copilot -p` behind its npm launcher does, one process per turn: each start noted with its words, reading its stdin to its end first, a line on stderr, the native process writing the result naming the session after the launcher exited, a failing turn exiting 1, a slow one running until SIGINT ends its group.
+// aCopilotHold is a hold of a harness that answers as `copilot -p` behind its npm launcher does, one process per turn: each start noted with its words, reading its stdin to its end first, a line on stderr, the native process writing the result naming the session after the launcher exited, a failing turn exiting 1, a slow one running until SIGINT ends its group: a SIGINT to the launcher alone waits for its child.
 func aCopilotHold(t *testing.T, starts string, prompt string) aRunningHold {
 	t.Helper()
 	script := `cat > /dev/null
 echo "$*" >> ` + starts + `
 echo 'warning: something' >&2
 case "$*" in
-  *fail*) echo 'Error: Model "gpt-0" from --model flag is not available.' >&2; exit 1 ;;
-  *slowly*) sleep 30 & wait ;;
+  *fail*) sleep 0.5; echo 'Error: Model "gpt-0" from --model flag is not available.' >&2; exit 1 ;;
+  *slowly*) sleep 30 ;;
 esac
 ( sleep 0.3; echo '{"type":"result","sessionId":"copilot-1","exitCode":0}' ) &
 exit 0`
