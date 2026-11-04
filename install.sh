@@ -4,10 +4,11 @@
 #   curl -fsSL https://raw.githubusercontent.com/ThomasHendrickx/aeolus-fleet-trierarch/main/install.sh | sh -s -- init-flags...
 #
 # It takes the binary for this system and chip from the GitHub Release, checks
-# it against the release's SHA256SUMS and its GitHub artifact attestation,
-# signed by the release workflow, puts it in ~/.local/bin and runs
+# it against the release's SHA256SUMS, and with gh against its GitHub artifact
+# attestation, signed by the release workflow, puts it in ~/.local/bin and runs
 # `aeolus-trierarch init` with the arguments it was given. A binary that fails
-# either check is installed nowhere.
+# a check is installed nowhere. Without gh the checksum alone is checked, the
+# script says so and shows the command that verifies the attestation by hand.
 #
 # AEOLUS_TRIERARCH_VERSION   the version to install, else the latest release
 # AEOLUS_TRIERARCH_BIN_DIR   the folder for the binary, else ~/.local/bin
@@ -17,7 +18,7 @@ repository=ThomasHendrickx/aeolus-fleet-trierarch
 api=${AEOLUS_TRIERARCH_RELEASES_URL:-https://api.github.com}
 downloads=${AEOLUS_TRIERARCH_DOWNLOAD_URL:-https://github.com/$repository/releases/download}
 bin_dir=${AEOLUS_TRIERARCH_BIN_DIR:-$HOME/.local/bin}
-by_hand="Or install the binary by hand: download it and SHA256SUMS from https://github.com/$repository/releases, check its checksum and run gh attestation verify <file> --repo $repository --signer-workflow $repository/.github/workflows/release.yml"
+verify_args="--repo $repository --signer-workflow $repository/.github/workflows/release.yml"
 
 fail() {
   echo "aeolus-trierarch install: $*" >&2
@@ -37,7 +38,6 @@ esac
 asset=aeolus-trierarch-$system-$chip
 
 command -v curl > /dev/null 2>&1 || fail "curl is needed to download the binary"
-command -v gh > /dev/null 2>&1 || fail "gh is needed to check the binary's attestation (https://cli.github.com). $by_hand"
 if command -v sha256sum > /dev/null 2>&1; then
   digest_of() { sha256sum "$1" | cut -d ' ' -f 1; }
 elif command -v shasum > /dev/null 2>&1; then
@@ -65,15 +65,23 @@ expected=$(awk -v name="$asset" '$2 == name { print $1 }' "$work/SHA256SUMS" | h
 [ -n "$expected" ] || fail "SHA256SUMS of v$version does not name $asset"
 [ "$(digest_of "$work/$asset")" = "$expected" ] || fail "the checksum of $asset is not the one SHA256SUMS names: not installed"
 
-gh attestation verify "$work/$asset" --repo "$repository" --signer-workflow "$repository/.github/workflows/release.yml" > /dev/null \
-  || fail "the attestation of $asset does not hold: not installed"
+if command -v gh > /dev/null 2>&1; then
+  gh attestation verify "$work/$asset" $verify_args > /dev/null || fail "the attestation of $asset does not hold: not installed"
+  checked="its checksum and its attestation"
+else
+  checked="its checksum only"
+fi
 
 mkdir -p "$bin_dir"
 chmod +x "$work/$asset"
 # Moved from the same folder, so the file is replaced whole.
 cp "$work/$asset" "$bin_dir/.aeolus-trierarch.$$"
 mv -f "$bin_dir/.aeolus-trierarch.$$" "$bin_dir/aeolus-trierarch"
-echo "Installed $bin_dir/aeolus-trierarch"
+echo "Installed $bin_dir/aeolus-trierarch, having checked $checked"
+if [ "$checked" = "its checksum only" ]; then
+  echo "gh is not installed, so the attestation was not checked. To check it by hand (https://cli.github.com):" >&2
+  echo "  gh attestation verify $bin_dir/aeolus-trierarch $verify_args" >&2
+fi
 
 case ":$PATH:" in
   *":$bin_dir:"*) ;;
