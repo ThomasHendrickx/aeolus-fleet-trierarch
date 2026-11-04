@@ -18,7 +18,8 @@ import { isTodaysTrierarch, TRIERARCH_UNDER_TEST } from './trierarch-under-test.
  * What the stand-ins were asked is kept in `machine` for the test to read:
  * each harness command line (`<harness>-calls.txt`), the service's log
  * (`systemd/trierarch.log`). A file there changes their answers:
- * `claude-signed-out` makes `claude auth status` fail, `claude-plugin-fails`
+ * `claude-signed-out` makes `claude auth status` fail, `claude-help-names-no-alias` makes
+ * `claude --help` name no model alias, `claude-plugin-fails`
  * makes every `claude plugin` command fail. Codex's plugin commands keep
  * its plugin cache as Codex does: `plugin marketplace upgrade` replaces every
  * version folder with the version of the release tag the marketplace was added
@@ -59,7 +60,7 @@ export interface Machine {
   remove(): Promise<void>;
 }
 
-export type StandInSwitch = 'claude-signed-out' | 'claude-plugin-fails' | 'codex-plugin-fails' | 'codex-deletes-plugin-data' | 'codex-untrusted-hook';
+export type StandInSwitch = 'claude-signed-out' | 'claude-help-names-no-alias' | 'claude-plugin-fails' | 'codex-plugin-fails' | 'codex-deletes-plugin-data' | 'codex-untrusted-hook';
 
 export interface CommandOutcome {
   readonly status: number;
@@ -130,8 +131,10 @@ case "$1" in
   --version) echo '${CLAUDE_CODE_VERSION} (Claude Code)'; exit 0 ;;
   --help)
     echo "$*" >> "$machine/claude-calls.txt"
+    model="  --model <model>                 Model for the current session. Provide an alias for the latest model (e.g. 'sonnet' or 'opus')"
+    [ -e "$machine/claude-help-names-no-alias" ] && model='  --model <model>                 Model for the current session'
     printf '%s\\n' 'Usage: claude [options] [command] [prompt]' \\
-      "  --model <model>                 Model for the current session. Provide an alias for the latest model (e.g. 'sonnet' or 'opus')" \\
+      "$model" \\
       '  --effort <level>                Effort level for the current session (low, medium, high)' \\
       '  --permission-mode <mode>        Permission mode to use for the session (choices: "acceptEdits", "bypassPermissions", "default", "plan")'
     exit 0 ;;
