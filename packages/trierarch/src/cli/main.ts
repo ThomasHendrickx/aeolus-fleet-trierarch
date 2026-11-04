@@ -10,11 +10,13 @@ import { cappedLogStream, isWritingTo } from '../adapters/capped-log.js';
 import { createClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import { createCodexSetup } from '../adapters/codex-setup.js';
 import { createContainerHost } from '../adapters/container-host.js';
+import { createBinaryFile } from '../adapters/binary-file.js';
 import { createDetectedFile } from '../adapters/detected-file.js';
 import { createDetectors } from '../adapters/detectors.js';
 import { loadConfiguration, readCrewFile, readRunningFile, removeRemoteControl, TrierarchFileError, writeConfigurationJsonSchema } from '../adapters/files.js';
 import { createJsonState } from '../adapters/json-state.js';
 import { createKeyFiles } from '../adapters/key-files.js';
+import { binaryAssetOf, createGitHubRelease, GITHUB_API, REPOSITORY, sigstoreTrustedRoot } from '../adapters/github-release.js';
 import { createLogger, readLogLine, renderLogLine, type LogStream } from '../adapters/log.js';
 import { createStyle, isColourTerminal, type Style } from '../adapters/style.js';
 import { trierarchPaths } from '../adapters/paths.js';
@@ -43,6 +45,7 @@ import { describeService, runServiceCommand } from './service-command.js';
 import { describeStatus, inspectStatus, leaseFrom } from './status.js';
 import { uninstallTrierarch } from './uninstall.js';
 import { PACKAGE, upgradeTrierarch } from './upgrade.js';
+import type { BinaryRoute } from './upgrade-to-binary.js';
 
 export const USAGE = [
   'Usage: aeolus-trierarch <command> [--config <path>] [--json]',
@@ -335,8 +338,21 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       // No configuration yet: the trierarch offers no harness, and updates no plugin.
       const configuration = await loadConfiguration(paths.config).catch(() => undefined);
       const pluginUpdate = createPluginUpdate({ homeDirectory, env, trierarchPid: async () => (await readRunningFile(paths.running))?.pid });
+      // The GitHub Release's binary for this system and chip (#142); AEOLUS_TRIERARCH_RELEASES_URL and AEOLUS_TRIERARCH_TRUSTED_ROOT name another API and trusted root, as for the Go trierarch.
+      const asset = binaryAssetOf(platform, process.arch);
+      const release = asset === undefined ? undefined : createGitHubRelease({ api: env.AEOLUS_TRIERARCH_RELEASES_URL ?? GITHUB_API, repository: REPOSITORY, asset, trustedRoot: () => sigstoreTrustedRoot(env.AEOLUS_TRIERARCH_TRUSTED_ROOT) });
+      const binaryRoute: BinaryRoute | undefined =
+        release === undefined
+          ? undefined
+          : {
+              release: (to) => release.binaryOf(to),
+              file: (to) => createBinaryFile({ path: join(homeDirectory, '.local', 'bin', 'aeolus-trierarch'), version: to }),
+              // A trierarch's version takes no configuration.
+              run: (program, args) => runCommand(program, { args: [...args, ...(args[0] !== '--version' && config !== undefined ? ['--config', config] : [])] }),
+            };
       const report = await upgradeTrierarch({
         ...(version !== undefined && { version }),
+        ...(binaryRoute !== undefined && { binaryRoute }),
         isPluginStepOfAnUpgrade: env[PLUGIN_STEP_VARIABLE] === '1',
         removeRemoteControl: () => removeRemoteControl(paths.config),
         writeConfigurationSchema: () => writeConfigurationJsonSchema(paths.configSchema),

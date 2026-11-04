@@ -26,7 +26,7 @@ let runningFile: RunningFile;
 /** What the binary's upgrade does to the service: restart it on the binary, or nothing, as one that never restarts. */
 let isRestartedByBinary: boolean;
 /** Whether the service started on the binary says its version, as one that starts. */
-let doesBinaryStart: boolean;
+let isBinaryStarting: boolean;
 
 beforeEach(() => {
   steps = [];
@@ -35,7 +35,7 @@ beforeEach(() => {
   service = { pid: 2, isInstalled: true };
   runningFile = { pid: 2, version: '0.17.1' };
   isRestartedByBinary = true;
-  doesBinaryStart = true;
+  isBinaryStarting = true;
   answers = {
     '--version': { status: 0, stdout: '{"version":"0.18.0"}', stderr: '' },
     config: { status: 0, stdout: '{"path":"config.json"}', stderr: '' },
@@ -66,7 +66,7 @@ const file: BinaryFile = {
 /** The service as the binary's upgrade leaves it: restarted on the binary, which says its version when it starts. */
 function startOnBinary(): void {
   service = { ...service, pid: 3 };
-  if (doesBinaryStart) {
+  if (isBinaryStarting) {
     runningFile = { pid: 3, version: '0.18.0' };
   }
 }
@@ -76,7 +76,7 @@ const route: BinaryRoute = {
     steps.push(`release ${version}`);
     return releaseRefusal !== undefined ? Promise.reject(new TrierarchFileError(releaseRefusal)) : Promise.resolve(released);
   },
-  file,
+  file: () => file,
   run: (program, words) => {
     steps.push(`${program} ${words.join(' ')}`);
     if (words[0] === 'upgrade' && isRestartedByBinary) {
@@ -189,7 +189,7 @@ describe('aeolus-trierarch upgrade to a release that carries a binary for this s
   });
 
   it('puts the old file back and restarts the service on itself when the binary did not start, saying so', async () => {
-    doesBinaryStart = false;
+    isBinaryStarting = false;
 
     await expect(upgrade()).rejects.toThrow('The trierarch 0.18.0 did not start: it did not say its version (aeolus-trierarch logs says why).\nThe trierarch 0.17.1 runs again; the aeolus-fleet plugin stays on 0.18.0\'s: run aeolus-trierarch upgrade 0.17.1 to put it back too.');
     expect(steps.slice(steps.indexOf('put back'))).toEqual(['put back', 'rewrite 0.17.1', 'reload', 'stop', 'start', 'settle']);

@@ -43,11 +43,11 @@ const release = () => createGitHubRelease({ api, repository: REPOSITORY, asset: 
 
 describe("a GitHub Release's binary for this system and chip", () => {
   it.each([
-    ['linux', 'x64', 'aeolus-trierarch-linux-amd64'],
-    ['linux', 'arm64', 'aeolus-trierarch-linux-arm64'],
-    ['darwin', 'arm64', 'aeolus-trierarch-darwin-arm64'],
-    ['darwin', 'x64', 'aeolus-trierarch-darwin-amd64'],
-  ])('is named for %s on %s as Go names them', (platform, arch, name) => {
+    { platform: 'linux', arch: 'x64', name: 'aeolus-trierarch-linux-amd64' },
+    { platform: 'linux', arch: 'arm64', name: 'aeolus-trierarch-linux-arm64' },
+    { platform: 'darwin', arch: 'arm64', name: 'aeolus-trierarch-darwin-arm64' },
+    { platform: 'darwin', arch: 'x64', name: 'aeolus-trierarch-darwin-amd64' },
+  ])('is named for $platform on $arch as Go names them', ({ platform, arch, name }) => {
     expect(binaryAssetOf(platform, arch)).toBe(name);
   });
 
