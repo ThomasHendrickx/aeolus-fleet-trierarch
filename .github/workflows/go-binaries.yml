@@ -68,8 +68,13 @@ jobs:
             exit 1
           fi
 
+      # The tests' folders under the runner's own short temp folder: macOS's is
+      # long enough that a hold's socket in it passes the 104 bytes a Unix
+      # socket path may take there (~/.aeolus/trierarch's is far shorter).
       - name: Go tests
         working-directory: go
+        env:
+          TMPDIR: ${{ runner.temp }}
         run: go test -race ./...
 
       - if: runner.os == 'Linux'
