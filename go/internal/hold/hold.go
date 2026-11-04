@@ -367,11 +367,12 @@ func (h *held) serve(listener net.Listener) {
 func (h *held) answerOn(connection net.Conn) {
 	defer connection.Close()
 	_ = connection.SetDeadline(time.Now().Add(30 * time.Second))
+	// The call is read first, a refused one too: a connection closed with its call unread may answer the caller's write with a broken pipe instead of the refusal.
+	line, err := bufio.NewReader(connection).ReadBytes('\n')
 	if h.options.MayCall != nil && !h.options.MayCall(peer.PID(connection)) {
 		writeAnswer(connection, Answer{Error: Refused})
 		return
 	}
-	line, err := bufio.NewReader(connection).ReadBytes('\n')
 	if err != nil && len(line) == 0 {
 		return
 	}
