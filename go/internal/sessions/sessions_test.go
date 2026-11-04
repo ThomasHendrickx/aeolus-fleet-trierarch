@@ -288,3 +288,17 @@ func TestASessionsProxyTokenIsKeptInItsFolderAndHandedToItsHarnessInItsVariableN
 		}
 	}
 }
+
+func TestALineSentToACodexSessionWaitsForItsLastTurnToEndAsLongAsForAnInterruptedTurn(t *testing.T) {
+	runtime := aRuntime(t)
+	folder := t.TempDir()
+	turn := `cat > /dev/null; echo '{"type":"thread.started","thread_id":"thread-1"}'; case "$*" in *first*) sleep 3 ;; esac; echo "$*" >> turns`
+	if err := runtime.Start(Start{ShipID: scout, Folder: folder, Harness: "codex", Command: []string{"sh", "-c", turn, "sh", "exec", "--json", "--", "first"}}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	if err := runtime.Send(scout, "hello"); err != nil {
+		t.Fatalf("Send = %v, want the line's turn started once the first turn ended", err)
+	}
+	eventually(t, "the line's turn", func() bool { return strings.Contains(read(filepath.Join(folder, "turns")), "-- hello") })
+}
