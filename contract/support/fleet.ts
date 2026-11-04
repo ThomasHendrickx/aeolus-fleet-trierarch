@@ -32,6 +32,8 @@ export interface Fleet {
   toldByTrierarch(): Promise<readonly Told[]>;
   /** The delivery's state, as core keeps it. */
   deliveryStateOf(messageId: string): Promise<string>;
+  /** Why the machine's trierarch gave the ship's crew request back; none while it gave none back. */
+  givenBackReasonOf(shipId: ShipId): Promise<string | undefined>;
   close(): Promise<void>;
 }
 
@@ -88,6 +90,7 @@ export async function aFleet(): Promise<Fleet> {
       return told;
     },
     deliveryStateOf: async (messageId) => (await database.delivery.findFirstOrThrow({ where: { messageId }, select: { state: true } })).state,
+    givenBackReasonOf: async (shipId) => (await database.crewRequestGiveBack.findFirst({ where: { shipId, trierarchShipId: trierarchShip.shipId }, select: { reason: true } }))?.reason,
     close: async () => {
       await server.close();
       await database.$disconnect();
