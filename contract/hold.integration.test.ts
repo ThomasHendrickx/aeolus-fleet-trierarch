@@ -9,7 +9,7 @@ import { aCrewingMachine, sessionOf, isRunning, listedEntryOf, REPOSITORY } from
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
 
-// The hold and the hand-over, as a session sees them: each session runs under a hold of its own that outlives the trierarch, takes its ship's messages through the aeolus-fleet plugin's hooks, and only its own ship's (docs/trierarch.md, "Waking a session").
+// The hold and the hand-over, as a session sees them: each session runs under a hold of its own that outlives the trierarch, takes its ship's messages through the aeolus-fleet plugin's hooks, and only its own ship's (docs/trierarch.md, "Crewing a ship").
 
 const CREWED_WITHIN_MS = 30_000;
 /** A pass hands an idle session one message every 5 seconds. */

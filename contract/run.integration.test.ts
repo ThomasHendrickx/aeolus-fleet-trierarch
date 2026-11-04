@@ -8,7 +8,7 @@ import { aCrewingMachine, sessionOf, isRunning, listedEntryOf, REPOSITORY } from
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
 
-// run with the reconciler, as the service runs it: what is assigned is crewed, what ends is ended, a session that ended is started again (docs/trierarch.md, the lifecycle).
+// run with the reconciler, as the service runs it: what is assigned is crewed, what ends is ended, a session that ended is started again (docs/trierarch.md, "Lifecycles").
 
 /** A pass runs every 5 seconds, and a session that ended first waits 5 seconds before it starts again. */
 const CREWED_WITHIN_MS = 30_000;
