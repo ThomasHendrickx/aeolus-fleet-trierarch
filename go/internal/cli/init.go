@@ -99,8 +99,8 @@ const notSaidYet = "The new process has not said its version after 30 seconds: a
 
 // checkMachine refuses, before anything is registered, a machine the trierarch cannot run on or crew anything from.
 func (i Init) checkMachine() error {
-	if i.Platform != "linux" {
-		return fmt.Errorf("this aeolus-trierarch knows systemd (Linux) only, not %s: set this machine up with the npm package, npx @aeolus-fleet/trierarch init", i.Platform)
+	if i.Platform != "darwin" && i.Platform != "linux" {
+		return fmt.Errorf("aeolus-trierarch knows launchd (macOS) and systemd (Linux), not %s: run aeolus-trierarch run under your own supervisor", i.Platform)
 	}
 	if i.IsSsMissing {
 		return errors.New("`ss` is not installed, and the trierarch needs it to tell which process calls a ship socket: without it no session starts. Install iproute2 (Debian and Ubuntu: sudo apt-get install iproute2), then run the setup line again")

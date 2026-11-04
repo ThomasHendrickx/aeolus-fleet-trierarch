@@ -74,6 +74,23 @@ jobs:
       - run: go run honnef.co/go/tools/cmd/staticcheck@2026.2.2 ./...
       - run: go test -race ./...
 
+  go-macos:
+    # The Go trierarch's service on macOS: the launchd agent and the log it
+    # caps, where launchd lives. On pushes only, as trierarch-macos.
+    name: Go service tests on macOS
+    if: github.event_name == 'push'
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.mod
+      - run: go test -race -v ./internal/service ./internal/logfile
+
   trierarch-macos:
     # The trierarch and the aeolus-fleet plugin's scripts run on macOS too, where
     # Linux CI misses their regressions: BSD awk and sed for the scripts. On

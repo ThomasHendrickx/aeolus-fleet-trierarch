@@ -31,6 +31,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/logfile"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/modelproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/peer"
@@ -65,6 +66,7 @@ func main() {
 		close(stop)
 	}()
 	environ := os.Environ()
+	capLog(paths.Of(home, "").Logs)
 	machine := cli.Machine{
 		Environ:               environ,
 		HomeDirectory:         home,
@@ -83,6 +85,9 @@ func main() {
 		IsCodexSignedIn:  codex.IsSignedIn,
 		Codex:            func() cli.Codex { return codex.AppServer{Program: "codex", Version: cli.Version} },
 		Service: func(at paths.Paths) cli.ServiceManager {
+			if runtime.GOOS == "darwin" {
+				return service.Launchd{HomeDirectory: home, Logs: at.Logs, Program: program, Environment: service.Environment(environ), UID: os.Getuid(), Exec: service.Run, Sleep: func() { time.Sleep(time.Second) }}
+			}
 			return service.Systemd{HomeDirectory: home, Logs: at.Logs, Program: program, Environment: service.Environment(environ), Exec: systemctl}
 		},
 		Register:    fleet.Register,
@@ -110,7 +115,7 @@ func main() {
 		opened.CloseAll()
 	}
 	if output != "" {
-		fmt.Println(output)
+		fmt.Fprintln(stdout, output)
 	}
 	os.Exit(code)
 }
@@ -194,8 +199,24 @@ func checkNow(at paths.Paths, harness string) (keys.StateAt, bool) {
 // passEvery is how often the loop runs a pass: restarts and releases wait at most this long.
 const passEvery = 5 * time.Second
 
+// stdout and stderr are the process's own, capped where launchd writes them to the log file; the journal caps itself.
+var (
+	stdout io.Writer = os.Stdout
+	stderr io.Writer = os.Stderr
+)
+
+func capLog(logs string) {
+	file := filepath.Join(logs, "trierarch.log")
+	if logfile.IsWritingTo(os.Stdout, file) {
+		stdout = logfile.Capped{File: file, Out: os.Stdout, Now: time.Now}
+	}
+	if logfile.IsWritingTo(os.Stderr, file) {
+		stderr = logfile.Capped{File: file, Out: os.Stderr, Now: time.Now}
+	}
+}
+
 func logLine(line string) {
-	fmt.Fprintf(os.Stderr, "%s %s\n", time.Now().UTC().Format(time.RFC3339), line)
+	fmt.Fprintf(stderr, "%s %s\n", time.Now().UTC().Format(time.RFC3339), line)
 }
 
 // sessionRuntime is the host session runtime: each session under a hold, the trierarch program run as `hold`, in a systemd scope of its own under the service.

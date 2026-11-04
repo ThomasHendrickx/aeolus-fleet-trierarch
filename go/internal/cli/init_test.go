@@ -265,11 +265,22 @@ func TestInitRefusesBeforeItRegistersAnythingWhereSsIsMissing(t *testing.T) {
 	}
 }
 
-func TestInitRefusesBeforeItRegistersAnythingOnASystemWithoutSystemd(t *testing.T) {
+func TestInitOnMacOSRegistersTheShipAndInstallsTheService(t *testing.T) {
 	machine := newMachine(t)
 	machine.init.Platform = "darwin"
 
-	if _, err := machine.init.Run(setupLine()); err == nil || len(machine.fleet.registered) != 0 {
+	report, err := machine.init.Run(setupLine())
+
+	if err != nil || len(machine.fleet.registered) != 1 || report.Service != "installed" {
+		t.Errorf("Run() = service %q, err %v, registered %q; want installed and registered once", report.Service, err, machine.fleet.registered)
+	}
+}
+
+func TestInitRefusesBeforeItRegistersAnythingOnASystemWithNeitherLaunchdNorSystemd(t *testing.T) {
+	machine := newMachine(t)
+	machine.init.Platform = "freebsd"
+
+	if _, err := machine.init.Run(setupLine()); err == nil || !strings.Contains(err.Error(), "knows launchd (macOS) and systemd (Linux), not freebsd") || len(machine.fleet.registered) != 0 {
 		t.Errorf("err %v, registered %q", err, machine.fleet.registered)
 	}
 }
