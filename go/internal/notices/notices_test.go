@@ -114,3 +114,12 @@ func TestKeyNotReadyNamesAHarnessItHasNoNameForByItsOwn(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestDetectionProblemSaysTheHarnessItsVersionAndWhatDetectionCouldNotFind(t *testing.T) {
+	got := DetectionProblem("claude-code", "2.1.306", "Claude Code 2.1.306's --help names no model alias, so this machine declares no Claude Code model until an update of Claude Code names one")
+
+	want := "claude-code 2.1.306: detection found a problem\n\nClaude Code 2.1.306's --help names no model alias, so this machine declares no Claude Code model until an update of Claude Code names one"
+	if got != want {
+		t.Errorf("DetectionProblem() = %q, want %q", got, want)
+	}
+}
