@@ -109,7 +109,7 @@ jobs:
       - run: npm ci
       # The trierarch's tmux adapter is tested against the real tmux.
       - run: command -v tmux || brew install tmux
-      - run: npx vitest run --project trierarch:unit --project plugin:unit
+      - run: npx vitest run --project trierarch:unit --project plugin:unit --project scripts:unit
 
   guardrails:
     # The CI checks in scripts/. Every check runs, so one failure does not hide the next.
