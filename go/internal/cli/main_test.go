@@ -12,6 +12,7 @@ import (
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 )
@@ -79,6 +80,9 @@ func aMain(t *testing.T) (Machine, *anInstalledService, *aFleet) {
 		PassEvery: time.Millisecond,
 		Sessions:  func(paths.Paths) Sessions { return &aSessionRuntime{} },
 		Log:       func(string) {},
+		Detect: func(paths.Paths, []string, detection.By) (detection.Detected, error) {
+			return detection.Detected{}, nil
+		},
 	}, installed, fleet
 }
 
