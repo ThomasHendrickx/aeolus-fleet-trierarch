@@ -19,6 +19,9 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 )
 
+// MinimumCoreVersion is the oldest core the trierarch runs against (decision 0049, docs/compatibility.md), today's trierarch's MINIMUM_CORE_VERSION.
+const MinimumCoreVersion = "0.35.0"
+
 // Harness is what the trierarch registers its own ship with.
 const Harness = "aeolus-trierarch"
 

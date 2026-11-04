@@ -13,6 +13,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 )
 
 const remote = "origin"
@@ -86,4 +88,43 @@ func Remove(repository string, folder string) error {
 	}
 	_, err := git("-C", repository, "worktree", "remove", "--force", folder)
 	return err
+}
+
+// Places are the configured repositories and folders by name, and the worktree root, as the run pass makes and removes a ship's workspace.
+type Places struct {
+	Root         string
+	Repositories map[string]string
+	Folders      map[string]string
+}
+
+// Prepare is the ship's folder: its worktree, made when missing, or the configured folder as it is.
+func (p Places) Prepare(entry reconciler.Entry, shipName string) (string, error) {
+	if entry.Workspace.Kind == "folder" {
+		folder, ok := p.Folders[entry.Workspace.Name]
+		if !ok {
+			return "", fmt.Errorf("the configuration has no folder %s", entry.Workspace.Name)
+		}
+		return folder, nil
+	}
+	repository, ok := p.Repositories[entry.Workspace.Repository]
+	if !ok {
+		return "", fmt.Errorf("the configuration has no repository %s", entry.Workspace.Repository)
+	}
+	return Prepare(Worktree{Root: p.Root, Repository: entry.Workspace.Repository, Path: repository, ShipName: shipName, Ref: entry.Workspace.Ref})
+}
+
+func (p Places) Unsaved(folder string) ([]string, error) {
+	return Unsaved(folder)
+}
+
+// Remove removes the ship's worktree; a configured folder is never removed.
+func (p Places) Remove(entry reconciler.Entry) error {
+	if entry.Workspace.Kind != "worktree" || entry.Folder == "" {
+		return nil
+	}
+	repository, ok := p.Repositories[entry.Workspace.Repository]
+	if !ok {
+		return fmt.Errorf("the configuration has no repository %s to remove %s from", entry.Workspace.Repository, entry.Folder)
+	}
+	return Remove(repository, entry.Folder)
 }
