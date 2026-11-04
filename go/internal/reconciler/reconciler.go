@@ -59,6 +59,16 @@ type Entry struct {
 	// LaunchedAt and LaunchID are set while its session's launch window is open (#382, #490).
 	LaunchedAt string `json:"launchedAt,omitempty"`
 	LaunchID   string `json:"launchId,omitempty"`
+	// Login is the login its running or last session started on, apiKey or subscription (api keys K8).
+	Login string `json:"login,omitempty"`
+	// EarlierLogins are its earlier sessions' logins, oldest first, each kept only when a start changed it.
+	EarlierLogins []EarlierLogin `json:"earlierLogins,omitempty"`
+}
+
+// EarlierLogin is the login of a ship's earlier session, until the start that changed it (ISO 8601).
+type EarlierLogin struct {
+	Login string `json:"login"`
+	Until string `json:"until"`
 }
 
 // Settings are a crew request's settings as the trierarch reads them (decision 0027).
@@ -110,6 +120,8 @@ type Seen struct {
 	Inbox     Inbox
 	Turn      string
 	IsHolding bool
+	// IsKeyNotReady is whether its session runs on an API key that is not ready (api keys K9).
+	IsKeyNotReady bool
 }
 
 const (
@@ -130,6 +142,8 @@ type Observed struct {
 	Launches map[string]LaunchSeen
 	// Ships are, by ship id, what was seen of each watched session.
 	Ships map[string]Seen
+	// StartProblems are, by ship id, why its session cannot start on its login now, as a key not ready (api keys K9).
+	StartProblems map[string]string
 }
 
 // Context is what reconciling needs beside the state.
@@ -415,7 +429,7 @@ func stepOf(entry Entry, context Context, canStart bool, isFinal bool) step {
 	case "running":
 		return runningStep(entry, context, canStart)
 	case "restarting":
-		if entry.RestartAt != "" && !context.Now.Before(parsed(entry.RestartAt)) && canStart {
+		if entry.RestartAt != "" && !context.Now.Before(parsed(entry.RestartAt)) && canStart && context.Observed.StartProblems[entry.ShipID] == "" {
 			started := withState(withoutLaunch(entry), "running", context.Now)
 			return step{entry: &started, actions: []Action{{Kind: Launch, ShipID: entry.ShipID}}, starts: 1}
 		}
@@ -460,6 +474,12 @@ func noActivity(entry Entry, launch LaunchSeen) string {
 
 func runningStep(entry Entry, context Context, canStart bool) step {
 	session, ok := sessionOf(context, entry.ShipID)
+	if !ok && context.Observed.StartProblems[entry.ShipID] != "" {
+		// Its login cannot start it now (api keys K9): it waits, restarting, until it can, with no restart counted.
+		waiting := withState(withoutLaunch(entry), "restarting", context.Now)
+		waiting.RestartAt = stamp(context.Now)
+		return step{entry: &waiting}
+	}
 	if !ok {
 		// No session at all, as after the machine restarts: started again, with no restart counted.
 		if !canStart {
@@ -502,7 +522,7 @@ func otherVersionStep(entry Entry, context Context) step {
 // wakeStep is a hand-over (#756): one message to an idle session whenever deliveries wait at the fleet or its store holds one to hand. The hand-over marks the turn busy, so the next one waits until the session is idle again. A forced message goes first, idle or busy: a busy turn is stopped for it (decision 0040).
 func wakeStep(entry Entry, context Context) step {
 	seen, ok := context.Observed.Ships[entry.ShipID]
-	if !ok || seen.Inbox.IsLeaseEnded || seen.Turn == TurnUnknown || seen.Turn == "" {
+	if !ok || seen.Inbox.IsLeaseEnded || seen.Turn == TurnUnknown || seen.Turn == "" || seen.IsKeyNotReady {
 		return step{}
 	}
 	if seen.Inbox.Forced > 0 {
