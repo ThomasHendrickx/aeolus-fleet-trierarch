@@ -24,6 +24,7 @@ jobs:
   binary:
     name: aeolus-trierarch-${{ matrix.goos }}-${{ matrix.goarch }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - { runner: ubuntu-latest, goos: linux, goarch: amd64 }
