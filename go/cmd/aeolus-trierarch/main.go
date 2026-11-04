@@ -5,9 +5,11 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/attestation"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/claudecode"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/cli"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/codex"
@@ -36,6 +39,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/peer"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/release"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/runpass"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/service"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
@@ -108,6 +112,12 @@ func main() {
 			return keys.Check(harness, key, "")
 		},
 		CheckNow: checkNow,
+		Program:  program,
+		Releases: func() cli.Releases { return releases(environ) },
+		Plugins: func() cli.Plugins {
+			return plugins{home: home, env: environment()}
+		},
+		Trierarch: runTrierarch,
 	}
 	output, code := cli.Main(os.Args[1:], machine)
 	// While the trierarch is down a session's call gets no answer, as when the fleet is down (decision 0026).
@@ -118,6 +128,97 @@ func main() {
 		fmt.Fprintln(stdout, output)
 	}
 	os.Exit(code)
+}
+
+// releaseSource is the GitHub Release of this system and chip upgrade takes a version from; AEOLUS_TRIERARCH_RELEASES_URL and AEOLUS_TRIERARCH_TRUSTED_ROOT name another API and trusted root, as the contract suite's.
+type releaseSource struct {
+	source release.Source
+	// refusal is why no release is taken: a trusted root that could not be read.
+	refusal error
+}
+
+func releases(environ []string) releaseSource {
+	env := map[string]string{}
+	for _, entry := range environ {
+		if name, value, ok := strings.Cut(entry, "="); ok {
+			env[name] = value
+		}
+	}
+	source := release.Source{API: release.GitHub, Repository: release.Repository, Trusted: attestation.PublicGood(), Client: &http.Client{Timeout: 5 * time.Minute}}
+	if api := env["AEOLUS_TRIERARCH_RELEASES_URL"]; api != "" {
+		source.API = strings.TrimSuffix(api, "/")
+	}
+	if file := env["AEOLUS_TRIERARCH_TRUSTED_ROOT"]; file != "" {
+		text, err := os.ReadFile(file)
+		if err != nil {
+			return releaseSource{refusal: fmt.Errorf("read the trusted root AEOLUS_TRIERARCH_TRUSTED_ROOT names: %w", err)}
+		}
+		trusted, err := attestation.ParseTrustedRoot(text)
+		if err != nil {
+			return releaseSource{refusal: err}
+		}
+		source.Trusted = trusted
+	}
+	return releaseSource{source: source}
+}
+
+func (r releaseSource) Latest() (string, error) {
+	if r.refusal != nil {
+		return "", r.refusal
+	}
+	return r.source.Latest(context.Background())
+}
+
+func (r releaseSource) Fetch(version string) ([]byte, error) {
+	if r.refusal != nil {
+		return nil, r.refusal
+	}
+	return r.source.Fetch(context.Background(), version, runtime.GOOS, runtime.GOARCH)
+}
+
+// plugins is the aeolus-fleet plugin of Claude Code, as upgrade updates it; Codex's upgrade does not update yet.
+type plugins struct {
+	home string
+	env  map[string]string
+}
+
+func (p plugins) Update(harness string, tag string) error {
+	if harness != "claude-code" {
+		return fmt.Errorf("the plugin for %s is not updated by the Go trierarch", harness)
+	}
+	return claudecode.PluginUpdateOf(p.home, p.env["CLAUDE_CONFIG_DIR"]).Update(tag)
+}
+
+func (p plugins) Version(harness string) string {
+	if harness != "claude-code" {
+		return ""
+	}
+	found, err := plugin.Find(p.home, p.env)
+	if err != nil {
+		return ""
+	}
+	return claudecode.PluginVersion(found.Root)
+}
+
+// runTrierarch runs a trierarch file with the words, as the plugin step of an upgrade when isPluginStep: its stdout and its exit status, 127 when it could not run at all.
+func runTrierarch(program string, isPluginStep bool, words ...string) (string, int) {
+	command := exec.Command(program, words...)
+	command.Env = slices.DeleteFunc(os.Environ(), func(entry string) bool { return strings.HasPrefix(entry, cli.PluginStepVariable+"=") })
+	if isPluginStep {
+		command.Env = append(command.Env, cli.PluginStepVariable+"=1")
+	}
+	var stderr strings.Builder
+	command.Stderr = &stderr
+	output, err := command.Output()
+	var exited *exec.ExitError
+	switch {
+	case err == nil:
+		return string(output), 0
+	case errors.As(err, &exited):
+		return string(output) + stderr.String(), exited.ExitCode()
+	default:
+		return err.Error(), 127
+	}
 }
 
 // opened are the ships' sockets run opened, closed once it ends.
