@@ -78,7 +78,7 @@ jobs:
     # The Go trierarch's service on macOS: the launchd agent and the log it
     # caps, where launchd lives. On pushes only, as trierarch-macos.
     name: Go service tests on macOS
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    if: github.event_name == 'push'
     runs-on: macos-latest
     defaults:
       run:
