@@ -166,13 +166,27 @@ describe('the install script', () => {
     expect(existsSync(join(root, 'ran'))).toBe(false);
   });
 
-  it('refuses without gh, which checks the attestation, and names the route by hand', () => {
+  it('without gh installs after the checksum alone, says so and shows the command to verify the attestation by hand', () => {
     release('1.2.3');
+    const result = install(machine({ system: 'Linux', chip: 'x86_64', attestation: 'absent' }), {
+      args: ['--secret', 's3'],
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(installed(), 'utf8')).toContain('# aeolus-trierarch-linux-amd64');
+    expect(readFileSync(join(root, 'ran'), 'utf8').trim()).toBe(`${BINARY_SAYS}: init --secret s3`);
+    const said = result.stdout + result.stderr;
+    expect(said).toContain('checksum only');
+    expect(said).toContain(`gh attestation verify ${installed()} --repo ${REPOSITORY} --signer-workflow ${REPOSITORY}/.github/workflows/release.yml`);
+  });
+
+  it('without gh still refuses a binary whose checksum fails', () => {
+    release('1.2.3', { sums: ({ name }) => `${sha256('another file')}  ${name}\n` });
     const result = install(machine({ system: 'Linux', chip: 'x86_64', attestation: 'absent' }));
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('gh');
     expect(existsSync(installed())).toBe(false);
+    expect(existsSync(join(root, 'ran'))).toBe(false);
   });
 
   it('refuses a system or chip the release has no binary for', () => {
