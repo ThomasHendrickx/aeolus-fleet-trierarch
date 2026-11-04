@@ -24,7 +24,7 @@ type Plugin struct {
 	Crews string
 }
 
-// dataFolder is the plugin's data folder in Claude Code's plugins folder.
+// dataFolder is the plugin's data folder in Claude Code's and Codex's plugins folders, as both name it.
 const dataFolder = "aeolus-fleet-aeolus-fleet"
 
 var releaseVersion = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
@@ -44,7 +44,41 @@ func Find(homeDirectory string, env map[string]string) (Plugin, error) {
 	if directory := env["CLAUDE_CONFIG_DIR"]; directory != "" {
 		plugins = filepath.Join(directory, "plugins")
 	}
-	plugin := Plugin{Root: env["AEOLUS_PLUGIN_ROOT"], Data: env["AEOLUS_PLUGIN_DATA"], Crews: filepath.Join(homeDirectory, ".aeolus", "crews", "claude-code")}
+	return newestIn(plugins, Plugin{Root: env["AEOLUS_PLUGIN_ROOT"], Data: env["AEOLUS_PLUGIN_DATA"], Crews: crewsOf(homeDirectory, "claude-code")}, "Claude Code", "AEOLUS_PLUGIN_ROOT")
+}
+
+// FindCodex is Codex's aeolus-fleet plugin: where AEOLUS_CODEX_PLUGIN_ROOT and AEOLUS_CODEX_PLUGIN_DATA name it, else the newest version in its plugin cache, following CODEX_HOME as Codex does.
+func FindCodex(homeDirectory string, env map[string]string) (Plugin, error) {
+	codexHome := env["CODEX_HOME"]
+	if codexHome == "" {
+		codexHome = filepath.Join(homeDirectory, ".codex")
+	}
+	return newestIn(filepath.Join(codexHome, "plugins"), Plugin{Root: env["AEOLUS_CODEX_PLUGIN_ROOT"], Data: env["AEOLUS_CODEX_PLUGIN_DATA"], Crews: crewsOf(homeDirectory, "codex")}, "Codex", "AEOLUS_CODEX_PLUGIN_ROOT")
+}
+
+// FindCopilot is Copilot's aeolus-fleet plugin: one folder in its installed-plugins folder, with no version in the path, and the data folder Copilot gives its hooks, both in COPILOT_HOME or ~/.copilot, unless AEOLUS_COPILOT_PLUGIN_ROOT and AEOLUS_COPILOT_PLUGIN_DATA name others. Unlike Claude Code's and Codex's, a missing one does not stop the trierarch at start: IsInstalled says so at each use, and the machine offers Copilot once it is installed (#1212).
+func FindCopilot(homeDirectory string, env map[string]string) Plugin {
+	copilotHome := env["COPILOT_HOME"]
+	if copilotHome == "" {
+		copilotHome = filepath.Join(homeDirectory, ".copilot")
+	}
+	plugin := Plugin{Root: env["AEOLUS_COPILOT_PLUGIN_ROOT"], Data: env["AEOLUS_COPILOT_PLUGIN_DATA"], Crews: crewsOf(homeDirectory, "copilot")}
+	if plugin.Root == "" {
+		plugin.Root = filepath.Join(copilotHome, "installed-plugins", "aeolus-fleet", "aeolus-fleet")
+	}
+	if plugin.Data == "" {
+		plugin.Data = filepath.Join(copilotHome, "plugin-data", "aeolus-fleet", "aeolus-fleet")
+	}
+	return plugin
+}
+
+// crewsOf is where the plugin keeps the identities of the harness's sessions (decision 0015).
+func crewsOf(homeDirectory string, harness string) string {
+	return filepath.Join(homeDirectory, ".aeolus", "crews", harness)
+}
+
+// newestIn is the plugin as given, its data folder in the harness's plugins folder when none is given, and its root the newest version in that folder's cache when none is given.
+func newestIn(plugins string, plugin Plugin, harness string, rootVariable string) (Plugin, error) {
 	if plugin.Data == "" {
 		plugin.Data = filepath.Join(plugins, "data", dataFolder)
 	}
@@ -60,7 +94,7 @@ func Find(homeDirectory string, env map[string]string) (Plugin, error) {
 		}
 	}
 	if len(versions) == 0 {
-		return Plugin{}, fmt.Errorf("the aeolus-fleet plugin is not installed for Claude Code (nothing in %s): install it, or set AEOLUS_PLUGIN_ROOT", cache)
+		return Plugin{}, fmt.Errorf("the aeolus-fleet plugin is not installed for %s (nothing in %s): install it, or set %s", harness, cache, rootVariable)
 	}
 	slices.SortFunc(versions, func(a, b string) int { return slices.Compare(versionParts(a), versionParts(b)) })
 	plugin.Root = filepath.Join(cache, versions[len(versions)-1])
