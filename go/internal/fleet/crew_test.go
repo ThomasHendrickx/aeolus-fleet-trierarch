@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -27,9 +28,8 @@ func aFleetAnswering(t *testing.T, answers map[string]string) (*aRecordingFleet,
 			_, _ = w.Write([]byte(`{"code":"NOT_FOUND","message":"no such ship"}`))
 			return
 		}
-		var body strings.Builder
-		_, _ = body.ReadFrom(r.Body)
-		recorded.asked[r.URL.Path] = r.Method + " " + body.String()
+		body, _ := io.ReadAll(r.Body)
+		recorded.asked[r.URL.Path] = r.Method + " " + string(body)
 		recorded.bearers[r.URL.Path] = r.Header.Get("Authorization")
 		_, _ = w.Write([]byte(answer))
 	}))
