@@ -153,7 +153,7 @@ func TestAKeyTheVendorRefusesIsNotWrittenAndTheCauseNamesNoKey(t *testing.T) {
 
 	output, code := Main([]string{"login", "claude-code", "--api-key"}, machine)
 
-	if code != 1 || output != "Anthropic refused the key: 401 authentication_error. Nothing was written." || len(installed.calls) != 0 {
+	if code != 1 || output != "Anthropic refused the key: 401 authentication_error: nothing was written" || len(installed.calls) != 0 {
 		t.Fatalf("answered %d: %q, service calls %q", code, output, installed.calls)
 	}
 	if (keys.Files{Folder: pathsOf(machine).Keys}).Has("claude-code") {
@@ -167,7 +167,7 @@ func TestNoKeyComingInIsRefused(t *testing.T) {
 
 	output, code := Main([]string{"login", "claude-code", "--api-key"}, machine)
 
-	if code != 1 || output != "No API key came in: pipe it in, or type it when asked." {
+	if code != 1 || output != "no API key came in: pipe it in, or type it when asked" {
 		t.Fatalf("answered %d: %q", code, output)
 	}
 }
@@ -212,7 +212,7 @@ func TestACheckWithNoProxyRunningIsRefused(t *testing.T) {
 
 	output, code := Main([]string{"login", "claude-code", "--check"}, machine)
 
-	if code != 1 || !strings.HasPrefix(output, "The model proxy does not run") {
+	if code != 1 || !strings.HasPrefix(output, "the model proxy does not run") {
 		t.Fatalf("answered %d: %q", code, output)
 	}
 }
@@ -223,12 +223,12 @@ func TestLoginRefusesCopilotAndWhatItCannotTake(t *testing.T) {
 		words []string
 		want  string
 	}{
-		{[]string{"login", "copilot", "--api-key"}, "Copilot signs in with this computer's own login"},
+		{[]string{"login", "copilot", "--api-key"}, "copilot signs in with this computer's own login"},
 		{[]string{"login", "cursor", "--api-key"}, "login takes claude-code or codex"},
 		{[]string{"login", "claude-code"}, "login takes claude-code or codex"},
 		{[]string{"login", "claude-code", "--api-key", "--check"}, "login takes claude-code or codex"},
-		{[]string{"login", "claude-code", "--default", "default"}, "A login is api-key or subscription"},
-		{[]string{"login", "--ship", "scout", "bedrock"}, "A ship's login is api-key, subscription or default"},
+		{[]string{"login", "claude-code", "--default", "default"}, "a login is api-key or subscription"},
+		{[]string{"login", "--ship", "scout", "bedrock"}, "a ship's login is api-key, subscription or default"},
 	}
 	for _, each := range cases {
 		if output, code := Main(each.words, machine); code != 1 || !strings.HasPrefix(output, each.want) {
