@@ -129,8 +129,12 @@ type Pass struct {
 	// Proxy runs while any harness in Keys holds a key; none is kept without.
 	Proxy Proxy
 	Keys  Keys
-	// VersionOf is the version a harness says it is, empty when it says none; asked only for a harness whose session refused its model.
+	// VersionOf is the version detection found of a harness, empty when it found none; asked only for a harness whose session refused its model.
 	VersionOf func(harness string) string
+	// Offers are, by harness, each option it offers now and its value names in order, read each pass: a model a session refused is offered no more (#382).
+	Offers func() map[string]map[string][]string
+	// RefuseModel keeps a model a session refused as refused for its harness's detected version.
+	RefuseModel func(harness string, model string) error
 }
 
 func (p Pass) loginOf(entry reconciler.Entry) string {
@@ -188,7 +192,7 @@ func (p Pass) Run() error {
 		return err
 	}
 	now := p.Now()
-	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions})
+	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers()})
 	if err := p.Store.Save(next); err != nil {
 		return err
 	}
@@ -600,8 +604,11 @@ func (p Pass) endWorkspace(entry reconciler.Entry) error {
 	return p.Workspace.Remove(entry)
 }
 
-// modelRefused tells argo, once per harness, version and model, that a session refused the model it launched with (#382).
+// modelRefused keeps the model a session refused as refused at its harness's version, so this machine offers it no more, and tells argo once per harness, version and model (#382).
 func (p Pass) modelRefused(action reconciler.Action) error {
+	if err := p.RefuseModel(action.Harness, action.Model); err != nil {
+		return err
+	}
 	ship := notices.Ship{ID: action.ShipID, Name: action.ShipName}
 	key := fmt.Sprintf("trierarch:refused-model:%s:%s:%s", action.Harness, action.Version, action.Model)
 	if err := p.Fleet.ReportToArgo(notices.ModelRefused(ship, action.Harness, action.Version, action.Model), key); err != nil {
