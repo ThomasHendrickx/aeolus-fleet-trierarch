@@ -183,47 +183,6 @@ jobs:
         env:
           AEOLUS_TRIERARCH_UNDER_TEST: ${{ runner.temp }}/aeolus-trierarch
 
-  # Temporary, for this pull request only: the release's binaries built and tested on each runner, attested as CI (never what upgrade takes) and verified.
-  go-binaries:
-    uses: ./.github/workflows/go-binaries.yml
-    with:
-      version: 0.0.1
-
-  go-binaries-attest:
-    needs: go-binaries
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: aeolus-trierarch-*
-          path: ${{ runner.temp }}/binaries
-          merge-multiple: true
-      - run: sha256sum aeolus-trierarch-* | tee SHA256SUMS
-        working-directory: ${{ runner.temp }}/binaries
-      - uses: actions/attest@v4
-        with:
-          subject-path: ${{ runner.temp }}/binaries/aeolus-trierarch-linux-amd64
-      - uses: actions/attest@v4
-        with:
-          subject-path: ${{ runner.temp }}/binaries/aeolus-trierarch-linux-arm64
-      - uses: actions/attest@v4
-        with:
-          subject-path: ${{ runner.temp }}/binaries/aeolus-trierarch-darwin-arm64
-      - uses: actions/attest@v4
-        with:
-          subject-path: ${{ runner.temp }}/binaries/aeolus-trierarch-darwin-amd64
-      - working-directory: ${{ runner.temp }}/binaries
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for binary in aeolus-trierarch-*; do
-            gh attestation verify "$binary" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ci.yml"
-          done
-
   session-image:
     # The image a trierarch runs container sessions from (decision 0039), built
     # as release.yml builds it, with a throwaway prerelease version so the
