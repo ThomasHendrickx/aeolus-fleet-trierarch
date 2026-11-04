@@ -203,6 +203,23 @@ func (c Client) GiveBack(shipID string, settingsVersion int, reason string) erro
 	return call(c.URL, request{path: "/fleet/giveBackCrewRequest", crewToken: c.CrewToken, body: body}, &map[string]any{})
 }
 
+// Inbox is a session's inbox, asked with its crew token: what waits, of it what is forced, or its lease ended (released or retired elsewhere).
+func (c Client) Inbox(crewToken string) (reconciler.Inbox, error) {
+	var answer struct {
+		Waiting int `json:"waiting"`
+		Forced  int `json:"forced"`
+	}
+	err := call(c.URL, request{path: "/ship/inbox", crewToken: crewToken, body: map[string]any{}}, &answer)
+	var refusal *Refusal
+	if errors.As(err, &refusal) && (refusal.Code == "LEASE_ENDED" || refusal.Code == "UNAUTHORIZED") {
+		return reconciler.Inbox{IsLeaseEnded: true}, nil
+	}
+	if err != nil {
+		return reconciler.Inbox{}, err
+	}
+	return reconciler.Inbox{Waiting: answer.Waiting, Forced: answer.Forced}, nil
+}
+
 // ReportFor reports on a ship's behalf, with its session's crew token.
 func (c Client) ReportFor(crewToken string, state string, note string) error {
 	return call(c.URL, request{path: "/ship/report", crewToken: crewToken, body: map[string]string{"state": state, "note": note}}, &map[string]any{})

@@ -39,10 +39,11 @@ const detached = `"$@" < /dev/null > /dev/null 2>&1 &`
 
 var shipIDPattern = regexp.MustCompile(`^shp_[0-7][0-9a-hjkmnp-tv-z]{25}$`)
 
-// Observed is a ship's session as its hold says it: running, or exited.
+// Observed is a ship's session as its hold says it: running, or exited; of another version when another version of the trierarch started its hold (H19).
 type Observed struct {
-	ShipID string
-	Status string
+	ShipID         string
+	Status         string
+	IsOtherVersion bool
 }
 
 // Start is what a session's start is given.
@@ -128,7 +129,12 @@ func (r Runtime) observed(shipID string) (Observed, bool) {
 	if err != nil || !answer.IsOK || answer.State == nil {
 		return Observed{ShipID: shipID, Status: "exited"}, true
 	}
-	return Observed{ShipID: shipID, Status: "running"}, true
+	return Observed{ShipID: shipID, Status: "running", IsOtherVersion: answer.State.Version != r.Version}, true
+}
+
+// Root is the process the ship's session runs under, its hold, while it runs; 0 otherwise.
+func (r Runtime) Root(shipID string) int {
+	return r.runningPID(shipID)
 }
 
 // List is every ship's session the holds say.
@@ -201,14 +207,23 @@ func (r Runtime) Start(session Start) error {
 	return fmt.Errorf("the hold of %s did not answer within %s of its start", session.ShipID, startWait)
 }
 
-// Send sends the line to the ship's session.
-func (r Runtime) Send(shipID string, line string) error {
-	answer, err := hold.Call(hold.FilesOf(r.Sessions, shipID).Socket, hold.Request{Call: "send", Line: line}, callTimeout)
+// Interrupt stops the session's busy turn, which the hold may wait for as long as an interrupted turn takes.
+func (r Runtime) Interrupt(shipID string) error {
+	return r.must(shipID, hold.Request{Call: "interrupt"}, hold.InterruptWait+callTimeout)
+}
+
+func (r Runtime) must(shipID string, request hold.Request, timeout time.Duration) error {
+	answer, err := hold.Call(hold.FilesOf(r.Sessions, shipID).Socket, request, timeout)
 	if err != nil {
 		return err
 	}
 	if !answer.IsOK {
-		return fmt.Errorf("the hold of %s refused send: %s", shipID, answer.Error)
+		return fmt.Errorf("the hold of %s refused %s: %s", shipID, request.Call, answer.Error)
 	}
 	return nil
+}
+
+// Send sends the line to the ship's session.
+func (r Runtime) Send(shipID string, line string) error {
+	return r.must(shipID, hold.Request{Call: "send", Line: line}, callTimeout)
 }

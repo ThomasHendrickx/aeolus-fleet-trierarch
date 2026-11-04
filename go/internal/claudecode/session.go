@@ -105,7 +105,12 @@ func UserLine(prompt string) string {
 
 // WakePrompt is the prompt of every start but a first one with its own: the wake command, with the line that no human reads.
 func WakePrompt() string {
-	return wakeCommand + " " + noTerminalQuestions
+	return WakePromptOf(wakeCommand)
+}
+
+// WakePromptOf is a wake with the line that no human reads as its argument: a typed wake is one line, as Enter sends it.
+func WakePromptOf(command string) string {
+	return command + " " + noTerminalQuestions
 }
 
 // FirstPrompt is a crew request's first prompt with the line that no human reads last, on a line of its own.
