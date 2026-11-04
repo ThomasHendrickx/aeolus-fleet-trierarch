@@ -151,7 +151,7 @@ jobs:
       - uses: ./.github/actions/test-images
       - run: go build -o "$RUNNER_TEMP/aeolus-trierarch" ./cmd/aeolus-trierarch
         working-directory: go
-      - run: npx vitest run --project contract:integration init.integration --testNamePattern '^init '
+      - run: npx vitest run --project contract:integration init.integration run.integration
         env:
           AEOLUS_TRIERARCH_UNDER_TEST: ${{ runner.temp }}/aeolus-trierarch
 
