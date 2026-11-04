@@ -442,3 +442,121 @@ func TestACrashedEntryWaitsForAHuman(t *testing.T) {
 
 	assertActions(t, actions)
 }
+
+// aRunningShip is the context of the ship's entry running with its session, its inbox and turn as seen.
+func aRunningShip(seen Seen) Context {
+	context := aContext(aRequest(scout))
+	context.Requests[0].Status = status("running")
+	context.Observed.Sessions = running(scout)
+	context.Observed.Ships = map[string]Seen{scout: seen}
+	return context
+}
+
+func TestAnIdleSessionIsHandedAMessageWhileDeliveriesWait(t *testing.T) {
+	_, actions := Reconcile(withEntries(anEntry(scout, "running")), aRunningShip(Seen{Inbox: Inbox{Waiting: 1}, Turn: TurnIdle}))
+
+	assertActions(t, actions, Action{Kind: Wake, ShipID: scout})
+}
+
+func TestAnIdleSessionIsHandedAMessageItsStoreHolds(t *testing.T) {
+	_, actions := Reconcile(withEntries(anEntry(scout, "running")), aRunningShip(Seen{Inbox: Inbox{}, Turn: TurnIdle, IsHolding: true}))
+
+	assertActions(t, actions, Action{Kind: Wake, ShipID: scout})
+}
+
+func TestAnIdleSessionWithNothingWaitingIsHandedNothing(t *testing.T) {
+	_, actions := Reconcile(withEntries(anEntry(scout, "running")), aRunningShip(Seen{Inbox: Inbox{}, Turn: TurnIdle}))
+
+	assertActions(t, actions)
+}
+
+func TestABusyOrUnknownTurnIsHandedNothingThatIsNotForced(t *testing.T) {
+	for _, turn := range []string{TurnBusy, TurnUnknown} {
+		t.Run(turn, func(t *testing.T) {
+			_, actions := Reconcile(withEntries(anEntry(scout, "running")), aRunningShip(Seen{Inbox: Inbox{Waiting: 2}, Turn: turn, IsHolding: true}))
+
+			assertActions(t, actions)
+		})
+	}
+}
+
+func TestAForcedMessageIsHandedOverIdleOrBusy(t *testing.T) {
+	cases := []struct {
+		turn       string
+		isTurnBusy bool
+	}{{TurnIdle, false}, {TurnBusy, true}}
+	for _, c := range cases {
+		t.Run(c.turn, func(t *testing.T) {
+			_, actions := Reconcile(withEntries(anEntry(scout, "running")), aRunningShip(Seen{Inbox: Inbox{Waiting: 2, Forced: 1}, Turn: c.turn}))
+
+			assertActions(t, actions, Action{Kind: Force, ShipID: scout, IsTurnBusy: c.isTurnBusy})
+		})
+	}
+}
+
+func TestAForcedMessageWaitsWhileTheTurnIsUnknown(t *testing.T) {
+	_, actions := Reconcile(withEntries(anEntry(scout, "running")), aRunningShip(Seen{Inbox: Inbox{Waiting: 1, Forced: 1}, Turn: TurnUnknown}))
+
+	assertActions(t, actions)
+}
+
+func TestASessionWhoseLeaseEndedIsHandedNothing(t *testing.T) {
+	_, actions := Reconcile(withEntries(anEntry(scout, "running")), aRunningShip(Seen{Inbox: Inbox{IsLeaseEnded: true}, Turn: TurnIdle, IsHolding: true}))
+
+	assertActions(t, actions)
+}
+
+func TestAnUnwatchedSessionIsHandedNothing(t *testing.T) {
+	_, actions := Reconcile(withEntries(anEntry(scout, "running")), aRunningShip(Seen{}))
+
+	assertActions(t, actions)
+}
+
+func TestASessionInItsLaunchWindowIsHandedAMessage(t *testing.T) {
+	for _, state := range []string{"crewing", "running"} {
+		t.Run(state, func(t *testing.T) {
+			entry := anEntry(scout, state)
+			entry.LaunchedAt, entry.LaunchID = ago(10*time.Second), "launch-1"
+			context := aRunningShip(Seen{Inbox: Inbox{Waiting: 1}, Turn: TurnIdle})
+			context.Requests[0].Status = status(state)
+			context.Observed.Launches[scout] = LaunchSeen{Kind: LaunchNone}
+
+			_, actions := Reconcile(withEntries(entry), context)
+
+			assertActions(t, actions, Action{Kind: Wake, ShipID: scout})
+		})
+	}
+}
+
+func TestASessionActiveAtTheEndOfItsLaunchIsHandedAMessage(t *testing.T) {
+	entry := anEntry(scout, "crewing")
+	entry.LaunchedAt, entry.LaunchID = ago(10*time.Second), "launch-1"
+	context := aRunningShip(Seen{Inbox: Inbox{Waiting: 1}, Turn: TurnIdle})
+	context.Requests[0].Status = status("crewing")
+	context.Observed.Launches[scout] = LaunchSeen{Kind: LaunchActive}
+
+	_, actions := Reconcile(withEntries(entry), context)
+
+	assertActions(t, actions, Action{Kind: Wake, ShipID: scout}, Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "running", Attempt: 0, StartedAt: ago(10 * time.Second)}})
+}
+
+func TestASessionOfAnotherVersionIsStartedAgainOnceItsTurnIsIdleWithNoRestartCounted(t *testing.T) {
+	context := aRunningShip(Seen{Inbox: Inbox{Waiting: 1, Forced: 1}, Turn: TurnIdle})
+	context.Observed.Sessions[0].IsOtherVersion = true
+
+	next, actions := Reconcile(withEntries(anEntry(scout, "running")), context)
+
+	assertActions(t, actions, Action{Kind: Launch, ShipID: scout})
+	if got := next.Entries[scout]; len(got.Exits) != 0 || got.State != "running" {
+		t.Fatalf("entry = %+v, want running with no exit counted", got)
+	}
+}
+
+func TestASessionOfAnotherVersionIsHandedNothingWhileItsTurnIsBusy(t *testing.T) {
+	context := aRunningShip(Seen{Inbox: Inbox{Waiting: 1, Forced: 1}, Turn: TurnBusy})
+	context.Observed.Sessions[0].IsOtherVersion = true
+
+	_, actions := Reconcile(withEntries(anEntry(scout, "running")), context)
+
+	assertActions(t, actions)
+}
