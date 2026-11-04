@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
@@ -27,6 +28,16 @@ type aFleet struct {
 	refuse   string
 	inboxes  map[string]reconciler.Inbox
 	asked    []string
+	// told is every notice, in order; refuseOwner is the refusal the fleet gives a report to an owner.
+	told        []told
+	refuseOwner *fleet.Refusal
+}
+
+// told is a notice the trierarch sent: to argo, or to a ship by its id.
+type told struct {
+	to   string
+	text string
+	key  string
 }
 
 func (f *aFleet) call(text string) error {
@@ -59,6 +70,17 @@ func (f *aFleet) GiveBack(shipID string, settingsVersion int, reason string) err
 }
 func (f *aFleet) ReportFor(crewToken string, state string, note string) error {
 	return f.call(fmt.Sprintf("report %s %s %s", crewToken, state, note))
+}
+func (f *aFleet) ReportToArgo(text string, idempotencyKey string) error {
+	f.told = append(f.told, told{to: "argo", text: text, key: idempotencyKey})
+	return f.call("tellArgo " + idempotencyKey)
+}
+func (f *aFleet) ReportToOwner(ownerShipID string, text string, idempotencyKey string) (*fleet.Refusal, error) {
+	if f.refuseOwner != nil {
+		return f.refuseOwner, nil
+	}
+	f.told = append(f.told, told{to: ownerShipID, text: text, key: idempotencyKey})
+	return nil, f.call("tellOwner " + idempotencyKey)
 }
 func (f *aFleet) Inbox(crewToken string) (reconciler.Inbox, error) {
 	f.asked = append(f.asked, crewToken)
@@ -617,6 +639,8 @@ type someLogins struct {
 	ships    map[string]string
 	problems map[string]string
 	notReady map[string]bool
+	// keyStates are, by harness, the state of its key and since when.
+	keyStates map[string][2]string
 }
 
 func (l *someLogins) LoginOf(harness string, shipName string) string {
@@ -632,6 +656,12 @@ func (l *someLogins) StartProblem(harness string, login string) string {
 	return l.problems[harness+":"+login]
 }
 func (l *someLogins) IsKeyReady(harness string) bool { return !l.notReady[harness] }
+func (l *someLogins) KeyState(harness string) (string, string) {
+	if key, ok := l.keyStates[harness]; ok {
+		return key[0], key[1]
+	}
+	return "ready", ""
+}
 
 // aProxy keeps whether each pass needed it, and fails a keep when told.
 type aProxy struct {
@@ -810,5 +840,324 @@ func TestASessionOnItsSubscriptionIsHandedMessagesWhateverTheKey(t *testing.T) {
 
 	if !slices.Equal(pass.harness.handed, []string{"wake " + scout}) {
 		t.Fatalf("handed %q, want a wake", pass.harness.handed)
+	}
+}
+
+// aRelease crews scout, then removes its request, with what its worktree held.
+func (p *aPass) released(t *testing.T, unsaved ...string) {
+	t.Helper()
+	p.crewed(t)
+	p.workspace.unsaved["/worktrees/aeolus-fleet/scout"] = unsaved
+	p.fleet.requests = []reconciler.Request{aRequest("releasing")}
+	p.run(t)
+}
+
+func TestAReleaseTellsArgoWhatItsWorktreeHeldOncePerReleaseBeforeTheWorktreeGoes(t *testing.T) {
+	pass := aRunPass(t)
+
+	pass.released(t, "?? notes.md", "commit abc1234 unpushed work")
+
+	want := []told{{to: "argo", key: "trierarch:discarded:" + scout + ":" + now.Format(time.RFC3339Nano), text: notices.Discarded(notices.Ship{ID: scout, Name: "scout"}, "aeolus-fleet", []string{"?? notes.md", "commit abc1234 unpushed work"})}}
+	if !reflect.DeepEqual(pass.fleet.told, want) {
+		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
+	}
+	if told, removed := slices.Index(pass.fleet.calls, "tellArgo "+want[0].key), len(pass.workspace.removed); told < 0 || removed != 1 {
+		t.Fatalf("calls %q, removed %q", pass.fleet.calls, pass.workspace.removed)
+	}
+}
+
+func TestAReleaseOfAWorktreeThatHeldNothingTellsNobody(t *testing.T) {
+	pass := aRunPass(t)
+
+	pass.released(t)
+
+	if len(pass.fleet.told) != 0 {
+		t.Fatalf("told %+v", pass.fleet.told)
+	}
+}
+
+func TestAReleaseThatCannotTellArgoLeavesTheWorktreeAndTellsAgainOnTheNextPass(t *testing.T) {
+	pass := aRunPass(t)
+	pass.fleet.refuse = "tellArgo"
+
+	pass.released(t, "?? notes.md")
+
+	if len(pass.workspace.removed) != 0 || slices.Contains(pass.fleet.calls, "confirm "+scout) {
+		t.Fatalf("removed %q, calls %q", pass.workspace.removed, pass.fleet.calls)
+	}
+	pass.fleet.refuse = ""
+	pass.run(t)
+
+	if len(pass.workspace.removed) != 1 || !slices.Contains(pass.fleet.calls, "confirm "+scout) || len(pass.fleet.told) != 2 || pass.fleet.told[0].key != pass.fleet.told[1].key {
+		t.Fatalf("removed %q, calls %q, told %+v", pass.workspace.removed, pass.fleet.calls, pass.fleet.told)
+	}
+}
+
+func TestAReleaseOfAFolderCrewTellsNobodyAndRemovesNothing(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	entry := pass.store.state.Entries[scout]
+	entry.Workspace = reconciler.Workspace{Kind: "folder", Name: "notes"}
+	pass.store.state.Entries[scout] = entry
+	pass.workspace.unsaved[entry.Folder] = []string{"?? notes.md"}
+	pass.fleet.requests = []reconciler.Request{aRequest("releasing")}
+
+	pass.run(t)
+
+	if len(pass.fleet.told) != 0 || len(pass.workspace.removed) != 0 {
+		t.Fatalf("told %+v, removed %q", pass.fleet.told, pass.workspace.removed)
+	}
+}
+
+// anExitedSixthTime crews scout, whose session has exited five times in the last minutes, and exits it once more.
+func (p *aPass) exitedASixthTime(t *testing.T) {
+	t.Helper()
+	p.crewed(t)
+	entry := p.store.state.Entries[scout]
+	entry.Exits = []string{now.Add(-5 * time.Minute).Format(time.RFC3339Nano), now.Add(-4 * time.Minute).Format(time.RFC3339Nano), now.Add(-3 * time.Minute).Format(time.RFC3339Nano), now.Add(-2 * time.Minute).Format(time.RFC3339Nano), now.Add(-time.Minute).Format(time.RFC3339Nano)}
+	p.store.state.Entries[scout] = entry
+	p.sessions.observed = []sessions.Observed{{ShipID: scout, Status: "exited"}}
+	p.fleet.calls = nil
+}
+
+func ownedBy(pass *aPass, owner string) {
+	id := "shp_owner"
+	request := aRequest("running")
+	request.OwnerShipID, request.OwnerName = &id, &owner
+	pass.fleet.requests = []reconciler.Request{request}
+}
+
+func TestACrashTellsArgoWhenItOwnsTheShip(t *testing.T) {
+	pass := aRunPass(t)
+	pass.exitedASixthTime(t)
+	argo, id := "argo", "shp_argo"
+	request := aRequest("running")
+	request.OwnerShipID, request.OwnerName = &id, &argo
+	pass.fleet.requests = []reconciler.Request{request}
+
+	pass.run(t)
+
+	key := "trierarch:crashed:" + scout + ":2026-11-04T12:00:00.000Z"
+	want := []told{{to: "argo", key: key, text: notices.Crash(notices.Ship{ID: scout, Name: "scout"}, 6, "", true)}}
+	if !reflect.DeepEqual(pass.fleet.told, want) {
+		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
+	}
+	if !slices.Contains(pass.logged, "scout ("+scout+"): crashed, its restart budget spent; argo told") {
+		t.Fatalf("logged %q", pass.logged)
+	}
+}
+
+func TestACrashTellsArgoWhenTheShipHasNoOwner(t *testing.T) {
+	pass := aRunPass(t)
+	pass.exitedASixthTime(t)
+	pass.fleet.requests = []reconciler.Request{aRequest("running")}
+
+	pass.run(t)
+
+	if len(pass.fleet.told) != 1 || pass.fleet.told[0].to != "argo" {
+		t.Fatalf("told %+v", pass.fleet.told)
+	}
+}
+
+func TestACrashTellsAPersonWhoOwnsTheShipThatArgoCanRestartIt(t *testing.T) {
+	pass := aRunPass(t)
+	pass.exitedASixthTime(t)
+	ownedBy(pass, "thomas")
+
+	pass.run(t)
+
+	want := []told{{to: "shp_owner", key: "trierarch:crashed:" + scout + ":2026-11-04T12:00:00.000Z", text: notices.Crash(notices.Ship{ID: scout, Name: "scout"}, 6, "", false)}}
+	if !reflect.DeepEqual(pass.fleet.told, want) {
+		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
+	}
+}
+
+func TestACrashTheFleetRefusesToTheOwnerIsToldToArgoWithWhyAndLogged(t *testing.T) {
+	pass := aRunPass(t)
+	pass.exitedASixthTime(t)
+	ownedBy(pass, "thomas")
+	pass.fleet.refuseOwner = &fleet.Refusal{Code: "FORBIDDEN", Message: "The network rules do not allow this send"}
+
+	pass.run(t)
+
+	report := notices.Crash(notices.Ship{ID: scout, Name: "scout"}, 6, "", true)
+	want := []told{{to: "argo", key: "trierarch:crashed:" + scout + ":2026-11-04T12:00:00.000Z:owner-unreachable", text: notices.OwnerUnreachable(report, "thomas", "FORBIDDEN", "The network rules do not allow this send")}}
+	if !reflect.DeepEqual(pass.fleet.told, want) {
+		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
+	}
+	if !slices.Contains(pass.logged, "Could not reach thomas (shp_owner), the owner of scout ("+scout+"): FORBIDDEN: The network rules do not allow this send; argo is told instead") {
+		t.Fatalf("logged %q", pass.logged)
+	}
+}
+
+func TestACrashThatCannotBeToldDoesNotHoldBackTheStatusItWrites(t *testing.T) {
+	pass := aRunPass(t)
+	pass.exitedASixthTime(t)
+	pass.fleet.requests = []reconciler.Request{aRequest("running")}
+	pass.fleet.refuse = "tellArgo"
+
+	pass.run(t)
+
+	if !slices.Contains(pass.fleet.calls, "status "+scout+" crashed 5 ") {
+		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+	if !slices.ContainsFunc(pass.logged, func(line string) bool { return strings.HasPrefix(line, "crashed of "+scout+" failed") }) {
+		t.Fatalf("logged %q", pass.logged)
+	}
+}
+
+func TestAShipWhoseFolderLostItsIdentityTellsArgoOnce(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	delete(pass.harness.identities, "/worktrees/aeolus-fleet/scout")
+
+	pass.run(t)
+	pass.run(t)
+
+	want := []told{{to: "argo", key: "trierarch:identity-gone:" + scout + ":2026-11-04T12:00:00.000Z", text: notices.IdentityGone(notices.Ship{ID: scout, Name: "scout"})}}
+	if !reflect.DeepEqual(pass.fleet.told, want) {
+		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
+	}
+	if !pass.store.state.Entries[scout].IsIdentityGone {
+		t.Fatalf("entry %+v", pass.store.state.Entries[scout])
+	}
+}
+
+func TestAShipWhoseSessionExitedAndWhoseFolderLostItsIdentityIsToldToo(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	delete(pass.harness.identities, "/worktrees/aeolus-fleet/scout")
+	pass.sessions.observed = []sessions.Observed{{ShipID: scout, Status: "exited"}}
+
+	pass.run(t)
+
+	if len(pass.fleet.told) != 1 || pass.fleet.told[0].text != notices.IdentityGone(notices.Ship{ID: scout, Name: "scout"}) {
+		t.Fatalf("told %+v", pass.fleet.told)
+	}
+}
+
+// refusedModel crews scout with the model picked, whose session refuses it.
+func (p *aPass) refusedModel(t *testing.T, version string) {
+	t.Helper()
+	request := aRequest("")
+	request.Settings.Options = map[string]string{"model": "claude-sonnet-5"}
+	p.fleet.requests = []reconciler.Request{request}
+	p.pass.VersionOf = func(harness string) string { return map[string]string{"claude-code": version}[harness] }
+	p.run(t)
+	p.harness.seen[scout] = reconciler.LaunchSeen{Kind: reconciler.LaunchRefused, Model: "claude-opus-4"}
+	request.Status = status("crewing")
+	p.fleet.requests = []reconciler.Request{request}
+	p.run(t)
+}
+
+func status(text string) *string { return &text }
+
+func TestAModelRefusedTellsArgoWhichModelTheSettingsPickedAtWhichVersionThenGivesTheRequestBack(t *testing.T) {
+	pass := aRunPass(t)
+
+	pass.refusedModel(t, "2.1.306")
+
+	want := []told{{to: "argo", key: "trierarch:refused-model:claude-code:2.1.306:claude-sonnet-5", text: notices.ModelRefused(notices.Ship{ID: scout, Name: "scout"}, "claude-code", "2.1.306", "claude-sonnet-5")}}
+	if !reflect.DeepEqual(pass.fleet.told, want) {
+		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
+	}
+	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 claude-code 2.1.306 refused claude-sonnet-5") {
+		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+}
+
+func TestAModelRefusedAtAVersionTheHarnessDoesNotSayTellsArgoNothing(t *testing.T) {
+	pass := aRunPass(t)
+
+	pass.refusedModel(t, "")
+
+	if len(pass.fleet.told) != 0 || !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 claude-code refused claude-sonnet-5") {
+		t.Fatalf("told %+v, calls %q", pass.fleet.told, pass.fleet.calls)
+	}
+}
+
+func TestAModelRefusedThatCannotBeToldDoesNotHoldBackTheGiveBack(t *testing.T) {
+	pass := aRunPass(t)
+	pass.fleet.refuse = "tellArgo"
+
+	pass.refusedModel(t, "2.1.306")
+
+	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 claude-code 2.1.306 refused claude-sonnet-5") {
+		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+}
+
+func TestAKeyThatIsNotReadyTellsArgoOncePerStateWithTheShipsThatWait(t *testing.T) {
+	pass := aRunPass(t)
+	onKey(pass).keyStates = map[string][2]string{}
+	pass.crewed(t)
+	pass.pass.Logins.(*someLogins).keyStates["claude-code"] = [2]string{"refused", "2026-11-04T10:00:00.000Z"}
+
+	pass.run(t)
+	pass.run(t)
+
+	want := []told{{to: "argo", key: "trierarch:key:claude-code:refused:2026-11-04T10:00:00.000Z", text: notices.KeyNotReady("claude-code", "refused", "2026-11-04T10:00:00.000Z", []notices.Ship{{ID: scout, Name: "scout"}})}}
+	if !reflect.DeepEqual(pass.fleet.told, want) {
+		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
+	}
+	if !reflect.DeepEqual(pass.store.state.KeysTold, map[string]string{"claude-code": "refused"}) {
+		t.Fatalf("keys told %+v", pass.store.state.KeysTold)
+	}
+}
+
+func TestAKeyThatIsReadyAgainIsForgottenSoALaterStateIsToldAgain(t *testing.T) {
+	pass := aRunPass(t)
+	logins := onKey(pass)
+	logins.keyStates = map[string][2]string{}
+	pass.crewed(t)
+	logins.keyStates["claude-code"] = [2]string{"outOfCredit", "2026-11-04T10:00:00.000Z"}
+	pass.run(t)
+	delete(logins.keyStates, "claude-code")
+	pass.run(t)
+	if len(pass.store.state.KeysTold) != 0 {
+		t.Fatalf("keys told %+v", pass.store.state.KeysTold)
+	}
+	logins.keyStates["claude-code"] = [2]string{"outOfCredit", "2026-11-04T11:00:00.000Z"}
+
+	pass.run(t)
+
+	if len(pass.fleet.told) != 2 || !strings.HasPrefix(pass.fleet.told[1].text, "Claude Code's API key is out of credit\n") {
+		t.Fatalf("told %+v", pass.fleet.told)
+	}
+}
+
+func TestAKeyArgoCouldNotBeToldOfIsTriedAgainOnTheNextPass(t *testing.T) {
+	pass := aRunPass(t)
+	logins := onKey(pass)
+	logins.keyStates = map[string][2]string{}
+	pass.crewed(t)
+	logins.keyStates["claude-code"] = [2]string{"none", ""}
+	pass.fleet.refuse = "tellArgo"
+
+	pass.run(t)
+	if len(pass.store.state.KeysTold) != 0 || !slices.ContainsFunc(pass.logged, func(line string) bool {
+		return strings.HasPrefix(line, "Could not tell argo that claude-code's API key is not ready")
+	}) {
+		t.Fatalf("keys told %+v, logged %q", pass.store.state.KeysTold, pass.logged)
+	}
+	pass.fleet.refuse = ""
+	pass.run(t)
+
+	if !reflect.DeepEqual(pass.store.state.KeysTold, map[string]string{"claude-code": "none"}) || len(pass.fleet.told) != 2 {
+		t.Fatalf("keys told %+v, told %+v", pass.store.state.KeysTold, pass.fleet.told)
+	}
+}
+
+func TestAKeyNoShipHereIsOnIsNobodysConcern(t *testing.T) {
+	pass := aRunPass(t)
+	logins := onKey(pass)
+	logins.ships = map[string]string{"scout": "subscription"}
+	pass.crewed(t)
+	logins.keyStates = map[string][2]string{"claude-code": {"refused", "2026-11-04T10:00:00.000Z"}}
+
+	pass.run(t)
+
+	if len(pass.fleet.told) != 0 {
+		t.Fatalf("told %+v", pass.fleet.told)
 	}
 }

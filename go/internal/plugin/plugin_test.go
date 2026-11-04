@@ -73,6 +73,22 @@ func TestALaunchMarkerSaysWhatItsLaunchDid(t *testing.T) {
 	}
 }
 
+func TestALaunchMarkerSaysTheModelARefusalNamed(t *testing.T) {
+	seen := launchOf("launch launch-1\nstarted 2026-11-04T10:00:00Z x\nrefused 2026-11-04T10:00:05Z claude-sonnet-5\n", "launch-1")
+
+	if !seen.IsRefused || seen.RefusedModel != "claude-sonnet-5" || seen.IsActive {
+		t.Fatalf("seen %+v", seen)
+	}
+}
+
+func TestALaunchMarkerSaysARefusalThatNamedNoModel(t *testing.T) {
+	seen := launchOf("launch launch-1\nrefused 2026-11-04T10:00:05Z\n", "launch-1")
+
+	if !seen.IsRefused || seen.RefusedModel != "" {
+		t.Fatalf("seen %+v", seen)
+	}
+}
+
 func TestALaunchMarkerOfAnotherLaunchSaysNothingOfThisOne(t *testing.T) {
 	seen := launchOf("launch launch-0\nstarted 2026-11-04T10:00:00Z x\nactive 2026-11-04T10:00:05Z\n", "launch-1")
 

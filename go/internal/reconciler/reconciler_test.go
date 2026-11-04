@@ -291,10 +291,163 @@ func TestASessionThatExitedASixthTimeWithinTheHourIsCrashed(t *testing.T) {
 	assertActions(t, actions,
 		Action{Kind: Stop, ShipID: scout},
 		Action{Kind: Report, ShipID: scout, Note: "blocked: session crashed, restart budget spent"},
+		Action{Kind: Crashed, ShipID: scout, ShipName: "scout", Exits: 6, Key: "trierarch:crashed:" + scout + ":2026-11-04T12:00:00.000Z"},
 		Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "crashed", Attempt: 5}},
 	)
 	if got := next.Entries[scout]; got.State != "crashed" || len(got.Exits) != 6 {
 		t.Fatalf("entry: %+v", got)
+	}
+}
+
+func TestACrashFromAFailedStartTellsWhyItFailed(t *testing.T) {
+	entry := anEntry(scout, "running")
+	entry.LaunchedAt, entry.LaunchID = ago(time.Minute), "launch-2"
+	entry.Exits = []string{ago(50 * time.Minute), ago(40 * time.Minute), ago(30 * time.Minute), ago(20 * time.Minute), ago(10 * time.Minute)}
+	context := aContext(aRequest(scout))
+	context.Requests[0].Status = status("running")
+	context.Observed.Sessions = running(scout)
+	context.Observed.Launches[scout] = LaunchSeen{Kind: LaunchNone, Cause: "Not logged in"}
+
+	_, actions := Reconcile(withEntries(entry), context)
+
+	assertActions(t, actions,
+		Action{Kind: Stop, ShipID: scout},
+		Action{Kind: Report, ShipID: scout, Note: "blocked: session crashed, restart budget spent"},
+		Action{Kind: Crashed, ShipID: scout, ShipName: "scout", Exits: 6, FailedStart: "no activity within a minute of its start, claude-code said: Not logged in", Key: "trierarch:crashed:" + scout + ":2026-11-04T12:00:00.000Z"},
+		Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "crashed", Attempt: 5}},
+	)
+}
+
+func aRefusedLaunch(options map[string]string, model string) (Entry, Context) {
+	entry := anEntry(scout, "crewing")
+	entry.LaunchedAt, entry.LaunchID, entry.Options = ago(5*time.Second), "launch-1", options
+	context := aContext(aRequest(scout))
+	context.Observed.Sessions = running(scout)
+	context.Observed.Launches[scout] = LaunchSeen{Kind: LaunchRefused, Model: model}
+	context.Versions = map[string]string{"claude-code": "2.1.306"}
+	return entry, context
+}
+
+func TestAModelRefusedTellsArgoThenGivesTheRequestBackAtOnce(t *testing.T) {
+	entry, context := aRefusedLaunch(map[string]string{"model": "claude-sonnet-5"}, "claude-sonnet-5")
+
+	next, actions := Reconcile(withEntries(entry), context)
+
+	given := entry
+	assertActions(t, actions,
+		Action{Kind: ModelRefused, ShipID: scout, ShipName: "scout", Harness: "claude-code", Version: "2.1.306", Model: "claude-sonnet-5"},
+		Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "claude-code 2.1.306 refused claude-sonnet-5", Entry: &given},
+	)
+	if _, ok := next.Entries[scout]; ok {
+		t.Fatalf("the entry stayed: %+v", next.Entries[scout])
+	}
+}
+
+func TestAModelRefusedTellsArgoNothingWhenTheSettingsPickedNoModel(t *testing.T) {
+	entry, context := aRefusedLaunch(map[string]string{}, "claude-sonnet-5")
+
+	_, actions := Reconcile(withEntries(entry), context)
+
+	given := entry
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "claude-code 2.1.306 refused claude-sonnet-5", Entry: &given})
+}
+
+func TestAModelRefusedTellsArgoNothingWhenTheRefusalNamesNoModelOrTheVersionIsUnknown(t *testing.T) {
+	entry, context := aRefusedLaunch(map[string]string{"model": "claude-sonnet-5"}, "")
+	_, actions := Reconcile(withEntries(entry), context)
+	given := entry
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "claude-code 2.1.306 refused its default model", Entry: &given})
+
+	entry, context = aRefusedLaunch(map[string]string{"model": "claude-sonnet-5"}, "claude-sonnet-5")
+	context.Versions = nil
+	_, actions = Reconcile(withEntries(entry), context)
+	given = entry
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "claude-code refused claude-sonnet-5", Entry: &given})
+}
+
+func TestAModelRefusedByAFinalCrewIsAFailedStartAgainstTheRestartBudgetAfterTellingArgo(t *testing.T) {
+	entry, context := aRefusedLaunch(map[string]string{"model": "claude-sonnet-5"}, "claude-sonnet-5")
+	context.Requests[0].IsFinal = true
+	context.Requests[0].Status = status("crewing")
+
+	next, actions := Reconcile(withEntries(entry), context)
+
+	assertActions(t, actions,
+		Action{Kind: ModelRefused, ShipID: scout, ShipName: "scout", Harness: "claude-code", Version: "2.1.306", Model: "claude-sonnet-5"},
+		Action{Kind: Stop, ShipID: scout},
+		Action{Kind: Report, ShipID: scout, Note: "blocked: session crashed, restarting"},
+		Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "restarting", Attempt: 1}},
+	)
+	if got := next.Entries[scout]; got.State != "restarting" {
+		t.Fatalf("entry: %+v", got)
+	}
+}
+
+func TestAModelRefusedInARestartedSessionsLaunchWindowIsAFailedStartAfterTellingArgo(t *testing.T) {
+	entry, context := aRefusedLaunch(map[string]string{"model": "claude-sonnet-5"}, "claude-sonnet-5")
+	entry.State = "running"
+	context.Requests[0].Status = status("running")
+
+	next, actions := Reconcile(withEntries(entry), context)
+
+	assertActions(t, actions,
+		Action{Kind: ModelRefused, ShipID: scout, ShipName: "scout", Harness: "claude-code", Version: "2.1.306", Model: "claude-sonnet-5"},
+		Action{Kind: Stop, ShipID: scout},
+		Action{Kind: Report, ShipID: scout, Note: "blocked: session crashed, restarting"},
+		Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "restarting", Attempt: 1}},
+	)
+	if got := next.Entries[scout]; got.State != "restarting" || got.LaunchedAt != "" {
+		t.Fatalf("entry: %+v", got)
+	}
+}
+
+func TestAShipWhoseFolderHoldsNoIdentityTellsArgoOncePerLoss(t *testing.T) {
+	for _, state := range []string{"running", "restarting", "crashed"} {
+		entry := anEntry(scout, state)
+		context := aContext(aRequest(scout))
+		context.Requests[0].Status = status(state)
+		context.Observed.Sessions = running(scout)
+		context.Observed.WithoutIdentity = []string{scout}
+
+		next, actions := Reconcile(withEntries(entry), context)
+
+		assertActions(t, actions, Action{Kind: IdentityGone, ShipID: scout, ShipName: "scout"})
+		if !next.Entries[scout].IsIdentityGone {
+			t.Fatalf("%s: the loss was not kept: %+v", state, next.Entries[scout])
+		}
+
+		_, again := Reconcile(next, context)
+		assertActions(t, again)
+	}
+}
+
+func TestAShipWhoseIdentityIsBackIsToldAgainOnALaterLoss(t *testing.T) {
+	entry := anEntry(scout, "running")
+	entry.IsIdentityGone = true
+	context := aContext(aRequest(scout))
+	context.Requests[0].Status = status("running")
+	context.Observed.Sessions = running(scout)
+
+	back, actions := Reconcile(withEntries(entry), context)
+
+	assertActions(t, actions)
+	if back.Entries[scout].IsIdentityGone {
+		t.Fatalf("the loss stayed: %+v", back.Entries[scout])
+	}
+	context.Observed.WithoutIdentity = []string{scout}
+	_, actions = Reconcile(back, context)
+	assertActions(t, actions, Action{Kind: IdentityGone, ShipID: scout, ShipName: "scout"})
+}
+
+func TestAShipStillCrewingIsToldNothingOfItsIdentity(t *testing.T) {
+	entry := anEntry(scout, "crewing")
+	context := aContext(aRequest(scout))
+	context.Observed.WithoutIdentity = []string{scout}
+
+	next, _ := Reconcile(withEntries(entry), context)
+
+	if next.Entries[scout].IsIdentityGone {
+		t.Fatalf("told while crewing: %+v", next.Entries[scout])
 	}
 }
 

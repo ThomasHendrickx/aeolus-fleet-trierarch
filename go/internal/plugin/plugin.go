@@ -190,10 +190,12 @@ func (p Plugin) ClearLaunch(folder string) error {
 	return err
 }
 
-// Launch is what a session did in its launch, as its marker says: started, and active at its first tool call.
+// Launch is what a session did in its launch, as its marker says: started, active at its first tool call, or refused because a turn failed for a model not found, with the model the refusal names when it names one.
 type Launch struct {
-	IsStarted bool
-	IsActive  bool
+	IsStarted    bool
+	IsActive     bool
+	IsRefused    bool
+	RefusedModel string
 }
 
 // LaunchSeen is what the folder's marker says of the launch given; nothing before the hooks marked anything of it.
@@ -214,6 +216,12 @@ func launchOf(marker string, launchID string) Launch {
 	for _, line := range lines[1:] {
 		seen.IsStarted = seen.IsStarted || strings.HasPrefix(line, "started ")
 		seen.IsActive = seen.IsActive || strings.HasPrefix(line, "active ")
+		if fields := strings.Fields(line); len(fields) > 0 && fields[0] == "refused" && !seen.IsRefused {
+			seen.IsRefused = true
+			if len(fields) > 2 {
+				seen.RefusedModel = fields[2]
+			}
+		}
 	}
 	return seen
 }

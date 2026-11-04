@@ -50,3 +50,9 @@ func (l Logins) StartProblem(harness string, login string) string {
 func (l Logins) IsKeyReady(harness string) bool {
 	return l.States.StateOf(harness).State == Ready
 }
+
+// KeyState is where the harness's key stands and since when, as the model proxy's vendor answers set it.
+func (l Logins) KeyState(harness string) (string, string) {
+	key := l.States.StateOf(harness)
+	return string(key.State), key.At
+}
