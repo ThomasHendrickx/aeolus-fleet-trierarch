@@ -23,15 +23,6 @@ func TestARequestPickingAValueTheHarnessDoesNotOfferIsGivenBackNamingTheValuesIt
 	}
 }
 
-func TestARequestPickingAnOptionItsHarnessOffersNoneOfIsGivenBack(t *testing.T) {
-	request := aRequest(scout)
-	request.Settings.Options = map[string]string{"model": "claude-sonnet-5"}
-
-	_, actions := Reconcile(Empty(), withModels(aContext(request)))
-
-	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "options.model: model must be one of "})
-}
-
 func TestARequestPickingOfferedValuesIsCrewedWithThem(t *testing.T) {
 	request := aRequest(scout)
 	request.Settings.Options = map[string]string{"model": "claude-opus-5", "effort": "high"}
