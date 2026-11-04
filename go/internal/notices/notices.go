@@ -171,6 +171,11 @@ func IdentityGone(ship Ship) string {
 	return Message(ship.nameOf()+" is no longer woken: its folder holds no identity", paragraphs(ship.fact(), "The trierarch can no longer report on its behalf, watch its inbox or wake it. Restart it in the console to crew it again."))
 }
 
+// DetectionProblem is what argo is told when detection could not find what a harness offers, such as Claude Code naming no model alias (#365).
+func DetectionProblem(harness string, version string, problem string) string {
+	return Message(fmt.Sprintf("%s %s: detection found a problem", harness, version), problem)
+}
+
 var harnessNames = map[string]string{"claude-code": "Claude Code", "codex": "Codex"}
 
 // KeyNotReady is what argo is told of a harness's API key that holds its ships back: which harness, the state since when, the ships that wait, and how the key gets ready again. state is outOfCredit, refused or none; at is when the vendor's answer set it, empty when it has no time.
