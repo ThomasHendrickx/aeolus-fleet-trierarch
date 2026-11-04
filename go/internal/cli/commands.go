@@ -140,6 +140,14 @@ func add(at paths.Paths, machine Machine, words []string) (answer, error) {
 		trustedBy = append(trustedBy, claudeCode)
 		said = append(said, "Claude Code trusts it.")
 	}
+	if _, ok := configuration.Harnesses[codex]; ok {
+		if err := machine.Codex().Trust([]string{path}); err != nil {
+			said = append(said, fmt.Sprintf("Codex does not trust it: %v. The trierarch offers it once every harness trusts it: run this again when Codex runs.", err))
+		} else {
+			trustedBy = append(trustedBy, codex)
+			said = append(said, "Codex trusts it.")
+		}
+	}
 	report := map[string]any{"kind": kind, "name": name, "path": path, "trustedBy": trustedBy}
 	manager := machine.Service(at)
 	status, err := manager.Status()

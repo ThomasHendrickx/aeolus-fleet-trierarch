@@ -33,6 +33,10 @@ type Report struct {
 	// Configuration is written or kept.
 	Configuration string   `json:"configuration"`
 	Trusted       []string `json:"trusted"`
+	// CodexTrusted are the repositories and folders Codex now trusts, when the configuration offers Codex.
+	CodexTrusted []string `json:"codexTrusted"`
+	// CodexHooksTrusted are the aeolus-fleet plugin's hooks Codex trusts since this run, by key.
+	CodexHooksTrusted []string `json:"codexHooksTrusted"`
 	// Service is installed, restarted or unchanged.
 	Service string   `json:"service"`
 	Said    []string `json:"said"`
@@ -42,6 +46,12 @@ type Report struct {
 type ClaudeCode interface {
 	Trust(folder string) error
 	CompleteOnboarding() error
+}
+
+// Codex answers Codex's one-time questions ahead, through its app server.
+type Codex interface {
+	Trust(folders []string) error
+	TrustAeolusHooks(folder string) ([]string, error)
 }
 
 // Service is the trierarch as a service of the operating system, as init uses it.
@@ -55,7 +65,8 @@ type Service interface {
 // Init is `aeolus-trierarch init`, the setup of a machine from the trierarch
 // plugin's setup line (docs/trierarch.md, "A machine joins"): it registers the
 // trierarch's own ship and keeps its crew token, never the secret; writes the
-// configuration; makes Claude Code ready to run unattended; and installs the
+// configuration, offering Codex too where it is installed; makes Claude Code
+// and Codex ready to run unattended; and installs the
 // service. Run again with the same setup line, it registers nothing and goes
 // on with a setup that did not finish, registering its ship again only once it
 // was released. It asks nothing: every default is taken.
@@ -66,6 +77,9 @@ type Init struct {
 	IsClaudeCodeInstalled bool
 	IsClaudeCodeSignedIn  bool
 	ClaudeCode            ClaudeCode
+	IsCodexInstalled      bool
+	IsCodexSignedIn       bool
+	Codex                 Codex
 	Service               Service
 	Register              func(fleetURL string, shipID string, secret string) (string, error)
 	IsLeaseHeld           func(fleetURL string, crewToken string) (bool, error)
@@ -73,7 +87,10 @@ type Init struct {
 	Sleep func()
 }
 
-const claudeCode = "claude-code"
+const (
+	claudeCode = "claude-code"
+	codex      = "codex"
+)
 
 // waitChecks is how often init reads running.json, a second apart, for the started process to say its version.
 const waitChecks = 30
@@ -88,13 +105,24 @@ func (i Init) checkMachine() error {
 	if i.IsSsMissing {
 		return errors.New("`ss` is not installed, and the trierarch needs it to tell which process calls a ship socket: without it no session starts. Install iproute2 (Debian and Ubuntu: sudo apt-get install iproute2), then run the setup line again")
 	}
-	if !i.IsClaudeCodeInstalled {
-		return errors.New("no Claude Code runs on this machine, so it could crew nothing. Install Claude Code (https://code.claude.com/docs/en/setup) and sign in to it, then run the setup line again")
+	if !i.IsClaudeCodeInstalled && !i.IsCodexInstalled {
+		return errors.New("neither Claude Code nor Codex runs on this machine, so it could crew nothing. Install Claude Code (https://code.claude.com/docs/en/setup) or Codex (npm install -g @openai/codex) and be signed in to it, then run the setup line again")
 	}
-	if !i.IsClaudeCodeSignedIn {
-		return errors.New("this machine's Claude Code (run `claude` and sign in) is installed but not signed in, so no session could answer. Sign in: run `claude` and sign in, then run the setup line again")
+	if (i.IsClaudeCodeInstalled && i.IsClaudeCodeSignedIn) || (i.IsCodexInstalled && i.IsCodexSignedIn) {
+		return nil
 	}
-	return nil
+	var steps []string
+	if i.IsClaudeCodeInstalled {
+		steps = append(steps, "Claude Code (run `claude` and sign in)")
+	}
+	if i.IsCodexInstalled {
+		steps = append(steps, "Codex (run `codex login`)")
+	}
+	verb := "is"
+	if len(steps) > 1 {
+		verb = "are"
+	}
+	return fmt.Errorf("%s %s installed but not signed in, so no session could answer. Sign in: %s, then run the setup line again", strings.Join(steps, " and "), verb, strings.Join(steps, "; "))
 }
 
 func asFleetURL(text string) (string, error) {
@@ -160,7 +188,7 @@ func (i Init) Run(flags Flags) (Report, error) {
 			return Report{}, err
 		}
 	}
-	report := Report{Trusted: []string{}, Said: []string{}}
+	report := Report{Trusted: []string{}, CodexTrusted: []string{}, CodexHooksTrusted: []string{}, Said: []string{}}
 	say := func(line string) { report.Said = append(report.Said, line) }
 
 	// The ship: registered once per machine, never again.
@@ -248,6 +276,10 @@ func (i Init) Run(flags Flags) (Report, error) {
 	var configuration config.Configuration
 	if _, err := os.Stat(i.Paths.Config); errors.Is(err, os.ErrNotExist) {
 		configuration = config.Initial()
+		// Offering Codex is the default answer where it is installed; launching it without approvals is not.
+		if i.IsCodexInstalled {
+			configuration.Harnesses[codex] = config.Harness{Flags: []string{}, Options: map[string]config.Option{}}
+		}
 		if err := config.Write(i.Paths.Config, configuration); err != nil {
 			return Report{}, err
 		}
@@ -280,6 +312,7 @@ func (i Init) Run(flags Flags) (Report, error) {
 	if len(trusted) > 0 {
 		say(fmt.Sprintf("Claude Code trusts %s, so a session there starts with no trust question, and its onboarding is complete, so it shows no first-run screen.", strings.Join(trusted, ", ")))
 	}
+	report.CodexTrusted, report.CodexHooksTrusted = i.setUpCodex(configuration, root, say)
 
 	// The service: installed when it is not, rewritten as this trierarch writes it when it is, and restarted when it should read a new crew file.
 	status, err := i.Service.Status()
@@ -333,6 +366,38 @@ func (i Init) setUpClaudeCode(configuration config.Configuration, root string) (
 		return nil, err
 	}
 	return places, nil
+}
+
+// setUpCodex answers Codex's one-time questions ahead on every run where the configuration offers Codex: each repository and folder trusted (a folder added since among them), and the aeolus-fleet plugin's hooks, which a plugin update changes. When Codex cannot be set up, init says so and goes on.
+func (i Init) setUpCodex(configuration config.Configuration, root string, say func(line string)) ([]string, []string) {
+	if _, ok := configuration.Harnesses[codex]; !ok {
+		return []string{}, []string{}
+	}
+	repositories, folders := configuration.Places()
+	places := append(append([]string{}, repositories...), folders...)
+	notSetUp := func(err error) ([]string, []string) {
+		say(fmt.Sprintf("Codex is not set up: %v. A Codex session waits on its trust questions until you run aeolus-trierarch init again.", err))
+		return []string{}, []string{}
+	}
+	if err := i.Codex.Trust(places); err != nil {
+		return notSetUp(err)
+	}
+	hooks, err := i.Codex.TrustAeolusHooks(root)
+	if err != nil {
+		return notSetUp(err)
+	}
+	if len(places) > 0 {
+		say(fmt.Sprintf("Codex trusts each configured repository and folder, so a session there, or in a worktree of one, starts with no trust question: %s.", strings.Join(places, ", ")))
+	}
+	if len(hooks) > 0 {
+		say(fmt.Sprintf("Codex trusts the aeolus-fleet plugin's %d new or changed hooks.", len(hooks)))
+	} else {
+		say("Codex trusts the aeolus-fleet plugin's hooks already.")
+	}
+	if hooks == nil {
+		hooks = []string{}
+	}
+	return places, hooks
 }
 
 // hasSaidItsVersion waits until the process the service runs has said its version in running.json, 30 seconds at most.

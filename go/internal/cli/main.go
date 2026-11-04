@@ -49,7 +49,11 @@ type Machine struct {
 	IsClaudeCodeSignedIn  func() bool
 	IsSsMissing           func() bool
 	// ClaudeCode is Claude Code's setup for the home folder and CLAUDE_CONFIG_DIR.
-	ClaudeCode  func(homeDirectory string, configDirectory string) ClaudeCode
+	ClaudeCode       func(homeDirectory string, configDirectory string) ClaudeCode
+	IsCodexInstalled func() bool
+	IsCodexSignedIn  func() bool
+	// Codex is Codex's setup, through its app server.
+	Codex       func() Codex
 	Service     func(at paths.Paths) ServiceManager
 	Register    func(fleetURL string, shipID string, secret string) (string, error)
 	IsLeaseHeld func(fleetURL string, crewToken string) (bool, error)
@@ -184,6 +188,9 @@ func Main(args []string, machine Machine) (string, int) {
 				IsClaudeCodeInstalled: machine.IsClaudeCodeInstalled(),
 				IsClaudeCodeSignedIn:  machine.IsClaudeCodeSignedIn(),
 				ClaudeCode:            machine.ClaudeCode(machine.HomeDirectory, variable(machine.Environ, "CLAUDE_CONFIG_DIR")),
+				IsCodexInstalled:      machine.IsCodexInstalled(),
+				IsCodexSignedIn:       machine.IsCodexSignedIn(),
+				Codex:                 machine.Codex(),
 				Service:               machine.Service(at),
 				Register:              machine.Register,
 				IsLeaseHeld:           machine.IsLeaseHeld,
