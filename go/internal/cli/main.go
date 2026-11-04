@@ -1,5 +1,5 @@
 // Package cli is the Go trierarch's command line, `aeolus-trierarch`: init,
-// status, list, add, login, start, stop, restart, run, uninstall, upgrade, config check, hold and proxy so far, as docs/trierarch.md says them. Each
+// status, list, add, login, start, stop, restart, run, uninstall, upgrade, config check, detect, hold and proxy so far, as docs/trierarch.md says them. Each
 // command answers what it says and its exit status; a refusal is said on
 // stdout, as JSON under --json.
 package cli
@@ -16,6 +16,7 @@ import (
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/modelproxy"
@@ -83,6 +84,8 @@ type Machine struct {
 	Plugins func() Plugins
 	// Trierarch runs a trierarch file with the words, as the plugin step of an upgrade when isPluginStep: its stdout and its exit status.
 	Trierarch func(program string, isPluginStep bool, words ...string) (string, int)
+	// Detect detects what the harnesses given offer, as by says, and keeps it in detected.json (#365).
+	Detect func(at paths.Paths, harnesses []string, by detection.By) (detection.Detected, error)
 }
 
 const usage = `Usage: aeolus-trierarch <command>
@@ -113,6 +116,7 @@ const usage = `Usage: aeolus-trierarch <command>
                  take that version, or the latest, from its GitHub Release, checked against its
                  checksum and attestation, and restart the service on it; update the aeolus-fleet plugin
   config check   check the configuration this version runs on
+  detect         detect again what each configured harness offers (models, effort) and keep it beside the configuration
   --version, -v  the version this runs
 
   --json         answer as JSON
@@ -209,6 +213,9 @@ func Main(args []string, machine Machine) (string, int) {
 				Register:              machine.Register,
 				IsLeaseHeld:           machine.IsLeaseHeld,
 				Sleep:                 machine.Sleep,
+				Detect: func(harnesses []string, by detection.By) (detection.Detected, error) {
+					return machine.Detect(at, harnesses, by)
+				},
 			}.Run(Flags{
 				FleetURL:     command.values["--fleet-url"],
 				ShipID:       command.values["--ship-id"],
@@ -245,8 +252,24 @@ func Main(args []string, machine Machine) (string, int) {
 			if err != nil {
 				return answer{}, err
 			}
+			if ignored := detection.ModelOptionsIgnored(configuration); len(ignored) > 0 {
+				return answer{}, refused(nil, "The configuration at %s sets a model option for %s: model ids come from detection only (#382), so remove it; aeolus-trierarch detect lists them", at.Config, strings.Join(ignored, ", "))
+			}
 			harnesses := slices.Sorted(maps.Keys(configuration.Harnesses))
 			return answer{data: map[string]any{"path": at.Config, "harnesses": harnesses}, text: fmt.Sprintf("The configuration at %s is one this trierarch runs on, offering %s.", at.Config, strings.Join(harnesses, ", "))}, nil
+		},
+		"detect": func() (answer, error) {
+			configuration, err := config.Load(at.Config)
+			if err != nil {
+				return answer{}, err
+			}
+			// Every configured harness again, though its version is the one detected; a running trierarch reads it at its next start.
+			harnesses := slices.Sorted(maps.Keys(configuration.Harnesses))
+			detected, err := machine.Detect(at, harnesses, detection.ByHand)
+			if err != nil {
+				return answer{}, err
+			}
+			return answer{data: map[string]any{"harnesses": detection.ReportOf(detected)}, text: detection.Describe(harnesses, detected)}, nil
 		},
 		"uninstall": func() (answer, error) {
 			manager := machine.Service(at)

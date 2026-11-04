@@ -4,12 +4,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/service"
@@ -85,6 +88,8 @@ type Init struct {
 	IsLeaseHeld           func(fleetURL string, crewToken string) (bool, error)
 	// Sleep waits between reads of running.json; a test passes one that does not wait.
 	Sleep func()
+	// Detect detects what the harnesses given offer, as by says, and keeps it in detected.json (#365).
+	Detect func(harnesses []string, by detection.By) (detection.Detected, error)
 }
 
 const (
@@ -313,6 +318,16 @@ func (i Init) Run(flags Flags) (Report, error) {
 		say(fmt.Sprintf("Claude Code trusts %s, so a session there starts with no trust question, and its onboarding is complete, so it shows no first-run screen.", strings.Join(trusted, ", ")))
 	}
 	report.CodexTrusted, report.CodexHooksTrusted = i.setUpCodex(configuration, root, say)
+
+	// What each harness offers, detected on this machine and kept apart from the configuration (#365).
+	harnesses := slices.Sorted(maps.Keys(configuration.Harnesses))
+	detected, err := i.Detect(harnesses, detection.ByStart)
+	if err != nil {
+		return Report{}, err
+	}
+	for _, line := range strings.Split(detection.Describe(harnesses, detected), "\n") {
+		say(line)
+	}
 
 	// The service: installed when it is not, rewritten as this trierarch writes it when it is, and restarted when it should read a new crew file.
 	status, err := i.Service.Status()
