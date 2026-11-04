@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { aCrewingMachine, claudeCodeSessionOf, listedEntryOf, REPOSITORY } from './support/crewing.js';
+import { aCrewingMachine, sessionOf, listedEntryOf, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
 
@@ -59,7 +59,7 @@ describe('the model proxy', () => {
     expect(login.status, login.stdout + login.stderr).toBe(0);
     await aRunningScout();
 
-    const env = claudeCodeSessionOf(machine, 'scout').starts()[0]?.env ?? {};
+    const env = sessionOf(machine, 'scout').starts()[0]?.env ?? {};
 
     expect(env.ANTHROPIC_BASE_URL).toBe(`${proxyUrl() ?? ''}/anthropic`);
     expect(env.ANTHROPIC_AUTH_TOKEN).toEqual(expect.any(String));

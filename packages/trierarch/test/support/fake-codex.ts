@@ -9,9 +9,12 @@
  * `slowly` runs until it is stopped: SIGINT ends it with exit 1 and no event
  * more.
  *
- * Its hooks as Codex runs them, written down rather than run:
- * SessionStart (startup or resume), UserPromptSubmit, then Stop when the turn
- * completes or Interrupt on SIGINT.
+ * Its hooks as Codex runs them, written down: SessionStart (startup or
+ * resume), UserPromptSubmit, then Stop when the turn completes or Interrupt
+ * on SIGINT. With `--plugin <root> <data>` it runs the aeolus-fleet plugin's
+ * hooks from that root too, as Codex runs them: SessionStart, UserPromptSubmit
+ * (each turn's prompt and what it added kept in `fake-turns.jsonl`), a first
+ * tool call, Stop.
  *
  * What it was given and did goes into its working folder, for the test to
  * read: each start's arguments, environment and pid (`fake-starts.jsonl`),
@@ -25,6 +28,7 @@
  * `--stray-thread-id <id>` names that thread id in `turn.started` too, an
  * event that names no thread.
  */
+import { spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
@@ -45,6 +49,23 @@ function threadId(): string {
   }
   return words[2] === '--last' ? (existsSync(LAST_THREAD) ? readFileSync(LAST_THREAD, 'utf8') : 'no-last-thread') : (words[2] ?? '');
 }
+
+/** The aeolus-fleet plugin given with `--plugin <root> <data>`, none without the flag. */
+const pluginAt = args.indexOf('--plugin');
+const plugin = pluginAt === -1 ? undefined : { root: args[pluginAt + 1] ?? '', data: args[pluginAt + 2] ?? '' };
+
+/** Runs one of the plugin's hook scripts in this folder as Codex runs a hook, the event on stdin and its variables beside the process's: what it printed; nothing without a plugin. */
+function runPluginHook(script: string, at: { env: Readonly<Record<string, string>>; payload: Record<string, unknown> }): string {
+  if (plugin === undefined) {
+    return '';
+  }
+  const ran = spawnSync('bash', [`${plugin.root}/scripts/${script}`], { input: JSON.stringify({ cwd: process.cwd(), ...at.payload }), env: { ...process.env, ...at.env }, encoding: 'utf8' });
+  return ran.stdout;
+}
+
+/** Runs the plugin's hook script as Codex does: its plugin root and data folder in PLUGIN_ROOT and PLUGIN_DATA. */
+const pluginHook = (script: string, payload: Record<string, unknown>): string =>
+  runPluginHook(script, { env: { PLUGIN_ROOT: plugin?.root ?? '', PLUGIN_DATA: plugin?.data ?? '' }, payload: { session_id: threadId(), ...payload } });
 
 const emit = (event: Record<string, unknown>): void => {
   process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -77,7 +98,13 @@ process.stdin.on('end', () => {
   writeFileSync(LAST_THREAD, thread);
   emit({ type: 'thread.started', thread_id: thread });
   hook('SessionStart', { source: isResuming ? 'resume' : 'startup', thread });
+  pluginHook('aeolus-launch.sh', { hook_event_name: 'SessionStart', source: isResuming ? 'resume' : 'startup' });
   hook('UserPromptSubmit', { prompt: stdin === '' ? prompt : `${prompt}\n<stdin>${stdin}</stdin>`, thread });
+  if (plugin !== undefined) {
+    const context = pluginHook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt });
+    appendFileSync('fake-turns.jsonl', `${JSON.stringify({ prompt, context })}\n`);
+    pluginHook('aeolus-launch.sh', { hook_event_name: 'PreToolUse', tool_name: 'Bash' });
+  }
   emit({ type: 'turn.started', ...(strayThreadIdAt !== -1 && { thread_id: words[strayThreadIdAt + 1] }) });
   if (words.includes('--refuse-model')) {
     emit({ type: 'error', message: REFUSED });
@@ -90,6 +117,7 @@ process.stdin.on('end', () => {
     return;
   }
   hook('Stop', { thread });
+  pluginHook('aeolus-stop.sh', { hook_event_name: 'Stop', stop_hook_active: false });
   emit({ type: 'turn.completed', usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 2 } });
   setTimeout(() => exit(0), lingerMs);
 });

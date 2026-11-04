@@ -13,8 +13,11 @@
  * Copilot does: `abort`, the turn's end, the SessionEnd hook with reason
  * complete, then, a moment later, the result with exit code 0.
  *
- * Its hooks as Copilot runs them, written down rather than run: SessionStart
- * (new or resume), Stop when the turn completes, SessionEnd with its reason.
+ * Its hooks as Copilot runs them, written down: SessionStart (new or
+ * resume), Stop when the turn completes, SessionEnd with its reason. With
+ * `--plugin <root> <data>` the native process runs the aeolus-fleet plugin's
+ * hooks from that root too, as Copilot runs them (AEOLUS_HARNESS=copilot, as
+ * its hooks file sets it): SessionStart, a first tool call, Stop.
  *
  * What it was given and did goes into its working folder, for the test to
  * read: each native start's arguments, environment and pid
@@ -42,6 +45,23 @@ const valueOf = (prefix: string): string | undefined => args.find((arg) => arg.s
 const prompt = valueOf('--prompt=') ?? '';
 const resumed = valueOf('--resume=');
 const ABORT_MS = 300;
+
+/** The aeolus-fleet plugin given with `--plugin <root> <data>`, none without the flag. */
+const pluginAt = args.indexOf('--plugin');
+const plugin = pluginAt === -1 ? undefined : { root: args[pluginAt + 1] ?? '', data: args[pluginAt + 2] ?? '' };
+
+/** Runs one of the plugin's hook scripts in this folder as Copilot runs a hook, the event on stdin and its variables beside the process's: what it printed; nothing without a plugin. */
+function runPluginHook(script: string, at: { env: Readonly<Record<string, string>>; payload: Record<string, unknown> }): string {
+  if (plugin === undefined) {
+    return '';
+  }
+  const ran = spawnSync('bash', [`${plugin.root}/scripts/${script}`], { input: JSON.stringify({ cwd: process.cwd(), ...at.payload }), env: { ...process.env, ...at.env }, encoding: 'utf8' });
+  return ran.stdout;
+}
+
+/** Runs the plugin's hook script as Copilot does, with the variables its hooks file names. */
+const pluginHook = (script: string, payload: Record<string, unknown>): string =>
+  runPluginHook(script, { env: { PLUGIN_ROOT: plugin?.root ?? '', PLUGIN_DATA: plugin?.data ?? '', AEOLUS_HARNESS: 'copilot' }, payload });
 
 const emit = (event: Record<string, unknown>): void => {
   process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -71,6 +91,8 @@ if (resumed === 'gone') {
 
 const sessionId = resumed ?? `fake-session-${String(process.pid)}`;
 hook('SessionStart', { source: resumed === undefined ? 'new' : 'resume', sessionId });
+pluginHook('aeolus-launch.sh', { hook_event_name: 'SessionStart', source: resumed === undefined ? 'new' : 'resume', sessionId });
+pluginHook('aeolus-launch.sh', { hook_event_name: 'PreToolUse', toolName: 'bash', sessionId });
 emit({ type: 'user.message', data: { content: prompt } });
 emit({ type: 'assistant.turn_start', data: { turnId: '0' } });
 
@@ -98,6 +120,7 @@ if (prompt.includes('slowly')) {
 } else {
   emit({ type: 'assistant.turn_end', data: { turnId: '0' } });
   hook('Stop', { sessionId });
+  pluginHook('aeolus-stop.sh', { hook_event_name: 'Stop', sessionId });
   hook('SessionEnd', { reason: 'complete', sessionId });
   emit({ type: 'result', sessionId, exitCode: 0 });
   exit(0);

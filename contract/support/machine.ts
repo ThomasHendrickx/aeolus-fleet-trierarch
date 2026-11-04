@@ -56,6 +56,9 @@ export interface CommandOutcome {
 const REPOSITORY_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 export const PLUGIN_ROOT = join(REPOSITORY_ROOT, 'plugins', 'aeolus-fleet');
 const STAND_INS = join(REPOSITORY_ROOT, 'packages', 'trierarch', 'test', 'support');
+const CONTRACT_SUPPORT = join(REPOSITORY_ROOT, 'contract', 'support');
+/** The Copilot CLI version the stand-in says: one the trierarch proves its plugin's hooks on. */
+const COPILOT_VERSION = '1.0.105';
 const GIT_ENV = { GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 't@example.com' };
 /** The Claude Code version the stand-in says, as the captures of fake-claude-code.ts. */
 export const CLAUDE_CODE_VERSION = '2.1.306';
@@ -183,6 +186,36 @@ esac
 `;
 }
 
+/** `codex`: the commands init, detection and setup run answered as Codex answers them; `codex exec` runs fake-codex.ts in the folder. */
+function codexStandIn(at: { machine: string; pluginData: string }): string {
+  return `#!/bin/sh
+machine='${at.machine}'
+case "$1" in
+  --version) echo 'codex-cli 0.163.0'; exit 0 ;;
+  login) echo "$*" >> "$machine/codex-calls.txt"; echo 'Logged in using ChatGPT'; exit 0 ;;
+  debug) echo "$*" >> "$machine/codex-calls.txt"; echo '{"models":[{"slug":"gpt-5.6-terra","visibility":"list"}]}'; exit 0 ;;
+  app-server) exec '${process.execPath}' '${join(CONTRACT_SUPPORT, 'fake-codex-app-server.ts')}' ;;
+  plugin) echo "$*" >> "$machine/codex-calls.txt"; exit 0 ;;
+esac
+exec '${process.execPath}' '${join(STAND_INS, 'fake-codex.ts')}' "$@" --plugin '${PLUGIN_ROOT}' '${at.pluginData}'
+`;
+}
+
+/** `copilot`: a proven version, its models as its help on config lists them, and a session run by fake-copilot.ts. */
+function copilotStandIn(at: { machine: string; pluginData: string }): string {
+  return `#!/bin/sh
+machine='${at.machine}'
+case "$1" in
+  --version) echo 'GitHub Copilot CLI ${COPILOT_VERSION}.'; exit 0 ;;
+  help)
+    echo "$*" >> "$machine/copilot-calls.txt"
+    printf '%s\\n' 'Configuration settings:' '' '  \`model\`: AI model to use for Copilot CLI.' '    - "claude-sonnet-4.5"' '    - "gpt-5"' ''
+    exit 0 ;;
+esac
+exec '${process.execPath}' '${join(STAND_INS, 'fake-copilot.ts')}' "$@" --plugin '${PLUGIN_ROOT}' '${at.pluginData}'
+`;
+}
+
 async function git(args: readonly string[]): Promise<void> {
   const ran = await runProgram(['git', ...args], { cwd: tmpdir(), env: { ...GIT_ENV, PATH: '/usr/bin:/bin', HOME: tmpdir() } });
   if (ran.status !== 0) {
@@ -190,8 +223,12 @@ async function git(args: readonly string[]): Promise<void> {
   }
 }
 
-/** A machine with Claude Code installed and signed in, a repository checked out, and no trierarch yet. */
-export async function aMachine(): Promise<Machine> {
+/** The harnesses a machine may have installed, besides Claude Code, which every machine has. */
+export type OtherHarness = 'codex' | 'copilot';
+
+/** A machine with Claude Code installed and signed in, and the other harnesses given, a repository checked out, and no trierarch yet. */
+export async function aMachine(at: { others?: readonly OtherHarness[] } = {}): Promise<Machine> {
+  const others = at.others ?? [];
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'trierarch-contract-')));
   const home = join(root, 'home');
   const machine = join(root, 'machine');
@@ -201,8 +238,19 @@ export async function aMachine(): Promise<Machine> {
   const tools = join(machine, 'tools');
   linkSystemPrograms(tools);
   const pluginData = join(home, '.claude', 'plugins', 'data', 'aeolus-fleet-aeolus-fleet');
+  const codexPluginData = join(home, '.codex', 'plugins', 'data', 'aeolus-fleet-aeolus-fleet');
   script(join(bin, 'claude'), claudeStandIn({ machine, pluginData }));
   script(join(bin, 'systemctl'), systemctlStandIn({ machine, home }));
+  if (others.includes('codex')) {
+    script(join(bin, 'codex'), codexStandIn({ machine, pluginData: codexPluginData }));
+  }
+  if (others.includes('copilot')) {
+    script(join(bin, 'copilot'), copilotStandIn({ machine, pluginData: join(home, '.copilot', 'plugin-data', 'aeolus-fleet', 'aeolus-fleet') }));
+    // The aeolus-fleet plugin as Copilot installs it: this repository's own.
+    const installed = join(home, '.copilot', 'installed-plugins', 'aeolus-fleet');
+    mkdirSync(installed, { recursive: true });
+    symlinkSync(PLUGIN_ROOT, join(installed, 'aeolus-fleet'));
+  }
   const repository = join(home, 'aeolus-fleet');
   await git(['init', '-q', '-b', 'main', repository]);
   writeFileSync(join(repository, 'README.md'), 'hello\n');
@@ -216,6 +264,8 @@ export async function aMachine(): Promise<Machine> {
     // The aeolus-fleet plugin as Claude Code would have installed it: this repository's own.
     AEOLUS_PLUGIN_ROOT: PLUGIN_ROOT,
     AEOLUS_PLUGIN_DATA: pluginData,
+    AEOLUS_CODEX_PLUGIN_ROOT: PLUGIN_ROOT,
+    AEOLUS_CODEX_PLUGIN_DATA: codexPluginData,
   };
   const servicePid = (): number | undefined => {
     const file = join(machine, 'systemd', 'pid');

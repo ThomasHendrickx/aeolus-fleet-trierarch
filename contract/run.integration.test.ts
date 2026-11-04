@@ -4,7 +4,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { aCrewingMachine, claudeCodeSessionOf, isRunning, listedEntryOf, REPOSITORY } from './support/crewing.js';
+import { aCrewingMachine, sessionOf, isRunning, listedEntryOf, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
 
@@ -42,7 +42,7 @@ afterEach(async ({ task }) => {
 
 describe('run with the reconciler', () => {
   it("crews an assigned request: the ship's lease is held and its session starts in a worktree of the repository", async () => {
-    const session = claudeCodeSessionOf(machine, 'scout');
+    const session = sessionOf(machine, 'scout');
 
     await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
 
@@ -61,7 +61,7 @@ describe('run with the reconciler', () => {
   });
 
   it('ends what a removed request held: the lease, the session and its clean worktree', async () => {
-    const session = claudeCodeSessionOf(machine, 'scout');
+    const session = sessionOf(machine, 'scout');
     await aRunningScout();
     const pid = session.starts()[0]?.pid ?? 0;
 
@@ -73,7 +73,7 @@ describe('run with the reconciler', () => {
   });
 
   it('starts a running session that ended again, in the same worktree', async () => {
-    const session = claudeCodeSessionOf(machine, 'scout');
+    const session = sessionOf(machine, 'scout');
     await aRunningScout();
 
     // The session the trierarch started for this test ends, by its own pid, as a crash ends it.
@@ -85,7 +85,7 @@ describe('run with the reconciler', () => {
   });
 
   it('keeps a session running while the trierarch restarts, and does not start it again', async () => {
-    const session = claudeCodeSessionOf(machine, 'scout');
+    const session = sessionOf(machine, 'scout');
     await aRunningScout();
     const before = machine.servicePid();
 

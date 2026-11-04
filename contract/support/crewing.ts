@@ -35,8 +35,8 @@ function linesOf<T>(file: string, schema: z.ZodType<T>): T[] {
     : [];
 }
 
-/** A ship's Claude Code session in its worktree, as the stand-in writes it down: each start, and each turn with what the plugin's hooks added to it. */
-export function claudeCodeSessionOf(machine: Machine, shipName: string) {
+/** A ship's session in its worktree, as the harness's stand-in writes it down: each start, and for Claude Code each turn with what the plugin's hooks added to it. */
+export function sessionOf(machine: Machine, shipName: string) {
   const worktree = join(machine.trierarchHome, 'worktrees', REPOSITORY, shipName);
   return {
     worktree,

@@ -5,7 +5,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { aCrewingMachine, claudeCodeSessionOf, isRunning, listedEntryOf, REPOSITORY } from './support/crewing.js';
+import { aCrewingMachine, sessionOf, isRunning, listedEntryOf, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
 
@@ -42,13 +42,13 @@ async function aRunningShip(name: string): Promise<ShipId> {
   const shipId = await fleet.commission(name);
   await fleet.crewInWorktree(shipId, { repository: REPOSITORY, harness: 'claude-code' });
   await expect.poll(async () => (await listedEntryOf(machine, shipId))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
-  await expect.poll(() => claudeCodeSessionOf(machine, name).turns().length, { timeout: CREWED_WITHIN_MS }).toBeGreaterThan(0);
+  await expect.poll(() => sessionOf(machine, name).turns().length, { timeout: CREWED_WITHIN_MS }).toBeGreaterThan(0);
   return shipId;
 }
 
 /** What the plugin's hooks put into the ship's turns. */
 function contextsOf(name: string): string {
-  return claudeCodeSessionOf(machine, name)
+  return sessionOf(machine, name)
     .turns()
     .map((turn) => turn.context)
     .join('\n');
@@ -61,14 +61,14 @@ describe('the hold', () => {
     const holdPid = Number(readFileSync(join(machine.trierarchHome, 'sessions', shipId, 'hold.pid'), 'utf8').trim());
 
     expect(isRunning(holdPid)).toBe(true);
-    const sessionPid = claudeCodeSessionOf(machine, 'scout').starts()[0]?.pid ?? 0;
+    const sessionPid = sessionOf(machine, 'scout').starts()[0]?.pid ?? 0;
     expect(readFileSync(`/proc/${String(sessionPid)}/stat`, 'utf8').split(' ')[3]).toBe(String(holdPid));
   });
 
   it("starts the session in an environment holding no crew token and none of the trierarch's own variables", async () => {
     await aRunningShip('scout');
 
-    const env = claudeCodeSessionOf(machine, 'scout').starts()[0]?.env ?? {};
+    const env = sessionOf(machine, 'scout').starts()[0]?.env ?? {};
 
     expect(Object.values(env).filter((value) => value.includes(CREW_TOKEN_PREFIX))).toEqual([]);
     expect(Object.keys(env).filter((name) => name.startsWith('AEOLUS_') && name !== 'AEOLUS_LAUNCH')).toEqual([]);
@@ -88,7 +88,7 @@ describe('the hand-over', () => {
 
   it('hands a message sent while the trierarch was stopped once it runs again, to the session that kept running', async () => {
     await aRunningShip('scout');
-    const session = claudeCodeSessionOf(machine, 'scout');
+    const session = sessionOf(machine, 'scout');
     const stop = await machine.trierarch(['stop']);
     expect(stop.status, stop.stdout + stop.stderr).toBe(0);
 
