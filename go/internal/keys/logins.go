@@ -10,6 +10,14 @@ import (
 type Logins struct {
 	Configured *config.Logins
 	States     States
+	// Subscriptions are, by harness, what it reads itself that would put a key in reach of a session on its subscription (K6); a harness with none puts none in reach.
+	Subscriptions map[string]Subscription
+}
+
+// Subscription is what a harness reads itself before a session on its subscription starts.
+type Subscription interface {
+	// Problem is why a session with the options, in the folder, would reach a key, naming what and where but never its value; empty when nothing does.
+	Problem(options map[string]string, folder string) string
 }
 
 // LoginOf is the ship's own login, else its harness's default, else its subscription.
@@ -29,9 +37,12 @@ func (l Logins) LoginOf(harness string, shipName string) string {
 	return "subscription"
 }
 
-// StartProblem is why a session of the harness cannot start on the login now, empty when it can.
-func (l Logins) StartProblem(harness string, login string) string {
+// StartProblem is why a session of the harness, with the options, in the folder, cannot start on the login now, empty when it can: on its subscription, a key in reach (K6).
+func (l Logins) StartProblem(harness string, login string, options map[string]string, folder string) string {
 	if login != "apiKey" {
+		if subscription, ok := l.Subscriptions[harness]; ok {
+			return subscription.Problem(options, folder)
+		}
 		return ""
 	}
 	key := l.States.StateOf(harness)

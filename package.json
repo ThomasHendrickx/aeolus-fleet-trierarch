@@ -19,7 +19,7 @@
     "test:unit": "vitest run --project '*:unit'",
     "test:integration": "vitest run --project '*:integration'",
     "test:e2e": "vitest run --project '*:e2e'",
-    "test:contract:go": "vitest run --project contract:integration init.integration run.integration hold.integration takeover.integration model-proxy.integration harnesses.integration upgrade.integration notices.integration",
+    "test:contract:go": "vitest run --project contract:integration init.integration run.integration hold.integration takeover.integration model-proxy.integration harnesses.integration upgrade.integration notices.integration subscription.integration",
     "set-version": "node scripts/set-version.ts",
     "go:schema": "vitest run --project trierarch:unit go-configuration-schema --update"
   },
