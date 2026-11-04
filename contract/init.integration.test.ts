@@ -17,7 +17,10 @@ beforeEach(async () => {
   machine = await aMachine();
 });
 
-afterEach(async () => {
+afterEach(async ({ task }) => {
+  if (task.result?.state === 'fail') {
+    console.log(`The service's log:\n${machine.serviceLog()}`);
+  }
   await machine.remove();
   await fleet.close();
 });

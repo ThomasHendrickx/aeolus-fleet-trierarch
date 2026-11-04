@@ -9,7 +9,7 @@
  * ends the turn, then the process (exit 0).
  *
  * What it was given goes into its working folder, for the test to read: each
- * start's arguments and environment (`fake-starts.jsonl`) and each stdin line
+ * start's arguments, environment and pid (`fake-starts.jsonl`) and each stdin line
  * (`fake-received.jsonl`).
  *
  * Its flags: `--refuse-interrupt` answers the control request with an error;
@@ -31,7 +31,7 @@ const resumeAt = args.indexOf('--resume');
 const sessionId = resumeAt === -1 ? `fake-${String(process.pid)}` : (args[resumeAt + 1] ?? '');
 const NOT_LOGGED_IN = 'Not logged in · Please run /login';
 
-appendFileSync('fake-starts.jsonl', `${JSON.stringify({ args, env: process.env })}\n`);
+appendFileSync('fake-starts.jsonl', `${JSON.stringify({ args, env: process.env, pid: process.pid })}\n`);
 
 const emit = (event: Record<string, unknown>): void => {
   process.stdout.write(`${JSON.stringify({ ...event, session_id: sessionId })}\n`);
