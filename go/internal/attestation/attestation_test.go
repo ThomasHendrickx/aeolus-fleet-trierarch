@@ -85,7 +85,7 @@ func aSignedArtifact(t *testing.T) signed {
 func signedBy(t *testing.T, signer *testsigstore.Sigstore, trusted *testsigstore.Sigstore) signed {
 	t.Helper()
 	digest := sha256.Sum256([]byte("aeolus-trierarch 0.40.0"))
-	bundle, err := signer.Bundle(testsigstore.Signing{Name: "aeolus-trierarch-linux-amd64", Digest: digest[:], Signer: testWorkflow + "@refs/heads/main", Issuer: testIdentity.Issuer, IntegratedTime: time.Now()})
+	bundle, err := signer.Bundle(testsigstore.Signing{Name: "aeolus-trierarch-linux-amd64", Digest: digest[:], Signer: testWorkflow + "@refs/heads/main", Issuer: testIdentity.Issuer, IntegratedTime: time.Now().Add(time.Minute)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,8 +197,8 @@ func TestAProvenanceLoggedOutsideItsCertificatesTimeIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256([]byte("aeolus-trierarch 0.40.0"))
-	// A certificate lives ten minutes: a log entry of an hour before it is not proof it was used in its time.
-	bundle, err := sigstore.Bundle(testsigstore.Signing{Name: "aeolus-trierarch-linux-amd64", Digest: digest[:], Signer: testWorkflow + "@refs/heads/main", Issuer: testIdentity.Issuer, IntegratedTime: time.Now()})
+	// A certificate lives ten minutes from now: a log entry of an hour before is not proof it was used in its time.
+	bundle, err := sigstore.Bundle(testsigstore.Signing{Name: "aeolus-trierarch-linux-amd64", Digest: digest[:], Signer: testWorkflow + "@refs/heads/main", Issuer: testIdentity.Issuer, IntegratedTime: time.Now().Add(-time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,11 +210,7 @@ func TestAProvenanceLoggedOutsideItsCertificatesTimeIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	early, err := sigstore.BundleLoggedAt(bundle, time.Now().Add(-time.Hour))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := Verify(early, digest, root, testIdentity); !errors.Is(err, ErrUnverified) {
+	if err := Verify(bundle, digest, root, testIdentity); !errors.Is(err, ErrUnverified) {
 		t.Fatalf("Verify(logged an hour before its certificate) = %v, want ErrUnverified", err)
 	}
 }
