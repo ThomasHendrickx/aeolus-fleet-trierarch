@@ -7,9 +7,12 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 )
 
 // anInstalledService is a service that runs as pid 41 once installed, and removes itself on uninstall.
@@ -21,6 +24,25 @@ type anInstalledService struct {
 func (s *anInstalledService) Uninstall() error {
 	s.uninstalled = true
 	s.installed, s.running = false, false
+	return nil
+}
+
+// aSessionRuntime holds the sessions that run, and stops them as asked.
+type aSessionRuntime struct {
+	running []string
+	stopped []string
+}
+
+func (r *aSessionRuntime) List() ([]sessions.Observed, error) {
+	observed := []sessions.Observed{}
+	for _, shipID := range r.running {
+		observed = append(observed, sessions.Observed{ShipID: shipID, Status: "running"})
+	}
+	return observed, nil
+}
+
+func (r *aSessionRuntime) Stop(shipID string) error {
+	r.stopped = append(r.stopped, shipID)
 	return nil
 }
 
@@ -46,6 +68,13 @@ func aMain(t *testing.T) (Machine, *anInstalledService, *aFleet) {
 		IsLeaseHeld:           fleet.isLeaseHeld,
 		Sleep:                 func() {},
 		Stop:                  make(chan struct{}),
+		CoreVersionRefusal:    func(string) string { return "" },
+		NewPass: func(paths.Paths, crew.File, config.Configuration) (func() error, error) {
+			return func() error { return nil }, nil
+		},
+		PassEvery: time.Millisecond,
+		Sessions:  func(paths.Paths) Sessions { return &aSessionRuntime{} },
+		Log:       func(string) {},
 	}, installed, fleet
 }
 
@@ -141,6 +170,7 @@ func TestStatusSaysAnEndedLease(t *testing.T) {
 
 func TestRunSaysItsPidAndVersionAndEndsWhenStopped(t *testing.T) {
 	machine, _, _ := aMain(t)
+	Main(setupWords(), machine)
 	stop := make(chan struct{})
 	machine.Stop = stop
 	close(stop)

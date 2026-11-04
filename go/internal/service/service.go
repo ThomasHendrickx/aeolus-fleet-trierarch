@@ -131,6 +131,17 @@ func (s Systemd) Rewrite() error {
 	return err
 }
 
+func (s Systemd) Start() error {
+	_, err := s.systemctl("start", Unit)
+	return err
+}
+
+// Stop stops the trierarch alone: its sessions run on under their holds (KillMode=process).
+func (s Systemd) Stop() error {
+	_, err := s.systemctl("stop", Unit)
+	return err
+}
+
 func (s Systemd) Restart() error {
 	_, err := s.systemctl("restart", Unit)
 	return err

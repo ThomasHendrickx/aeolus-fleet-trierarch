@@ -74,6 +74,19 @@ func (s *aServiceManager) Restart() error {
 	return nil
 }
 
+func (s *aServiceManager) Start() error {
+	s.calls = append(s.calls, "start")
+	s.running = true
+	s.write()
+	return nil
+}
+
+func (s *aServiceManager) Stop() error {
+	s.calls = append(s.calls, "stop")
+	s.running = false
+	return nil
+}
+
 func (s *aServiceManager) Status() (service.Status, error) {
 	if !s.running {
 		return service.Status{File: "/unit", IsInstalled: s.installed}, nil

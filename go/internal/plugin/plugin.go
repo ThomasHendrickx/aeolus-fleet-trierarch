@@ -1,0 +1,158 @@
+// Package plugin is the aeolus-fleet plugin as a harness installed it, reached
+// only through its own scripts (`aeolus-identity.sh`, `aeolus-push.sh`),
+// never a copy of how it names its files: a session's identity, with the
+// ship's socket and no crew token in it (decision 0026), its launch marker
+// (#490), and a session that died.
+package plugin
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+)
+
+// Plugin is where the plugin's scripts are, its data folder, and where its sessions' identities live (~/.aeolus/crews/<harness>).
+type Plugin struct {
+	Root  string
+	Data  string
+	Crews string
+}
+
+// dataFolder is the plugin's data folder in Claude Code's plugins folder.
+const dataFolder = "aeolus-fleet-aeolus-fleet"
+
+var releaseVersion = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
+
+func versionParts(version string) []int {
+	parts := []int{}
+	for _, part := range strings.Split(version, ".") {
+		number, _ := strconv.Atoi(part)
+		parts = append(parts, number)
+	}
+	return parts
+}
+
+// Find is Claude Code's aeolus-fleet plugin: where AEOLUS_PLUGIN_ROOT and AEOLUS_PLUGIN_DATA name it, else the newest version in its plugin cache, following CLAUDE_CONFIG_DIR as Claude Code does.
+func Find(homeDirectory string, env map[string]string) (Plugin, error) {
+	plugins := filepath.Join(homeDirectory, ".claude", "plugins")
+	if directory := env["CLAUDE_CONFIG_DIR"]; directory != "" {
+		plugins = filepath.Join(directory, "plugins")
+	}
+	plugin := Plugin{Root: env["AEOLUS_PLUGIN_ROOT"], Data: env["AEOLUS_PLUGIN_DATA"], Crews: filepath.Join(homeDirectory, ".aeolus", "crews", "claude-code")}
+	if plugin.Data == "" {
+		plugin.Data = filepath.Join(plugins, "data", dataFolder)
+	}
+	if plugin.Root != "" {
+		return plugin, nil
+	}
+	cache := filepath.Join(plugins, "cache", "aeolus-fleet", "aeolus-fleet")
+	folders, _ := os.ReadDir(cache)
+	versions := []string{}
+	for _, folder := range folders {
+		if releaseVersion.MatchString(folder.Name()) {
+			versions = append(versions, folder.Name())
+		}
+	}
+	if len(versions) == 0 {
+		return Plugin{}, fmt.Errorf("the aeolus-fleet plugin is not installed for Claude Code (nothing in %s): install it, or set AEOLUS_PLUGIN_ROOT", cache)
+	}
+	slices.SortFunc(versions, func(a, b string) int { return slices.Compare(versionParts(a), versionParts(b)) })
+	plugin.Root = filepath.Join(cache, versions[len(versions)-1])
+	return plugin, nil
+}
+
+func (p Plugin) run(script string, folder string, input string, args ...string) (string, error) {
+	command := exec.Command("bash", append([]string{filepath.Join(p.Root, "scripts", script)}, args...)...)
+	command.Env = append(os.Environ(), "AEOLUS_FOLDER="+folder, "AEOLUS_DATA="+p.Data, "AEOLUS_CREWS="+p.Crews)
+	command.Stdin = strings.NewReader(input)
+	var stderr strings.Builder
+	command.Stderr = &stderr
+	out, err := command.Output()
+	if err != nil {
+		return string(out), fmt.Errorf("%s %s failed: %w: %s", script, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return string(out), nil
+}
+
+// Identity is what a session's identity names: its fleet, its ship, the ship's socket it calls over, and its squadron.
+type Identity struct {
+	FleetURL string
+	ShipID   string
+	ShipName string
+	Socket   string
+	Squadron string
+}
+
+// WriteIdentity writes the folder's identity, woken by the trierarch; the crew token goes on stdin, never the command line (#822), for the plugin to keep its lease.
+func (p Plugin) WriteIdentity(folder string, identity Identity, crewToken string) error {
+	args := []string{"write", "--wake-by", "trierarch", "--socket", identity.Socket, identity.FleetURL, identity.ShipID, identity.ShipName}
+	if identity.Squadron != "" {
+		args = append(args, identity.Squadron)
+	}
+	_, err := p.run("aeolus-identity.sh", folder, crewToken, args...)
+	return err
+}
+
+func (p Plugin) HasIdentity(folder string) bool {
+	_, err := p.run("aeolus-identity.sh", folder, "", "show")
+	return err == nil
+}
+
+func (p Plugin) DeleteIdentity(folder string) error {
+	_, err := p.run("aeolus-identity.sh", folder, "", "delete")
+	return err
+}
+
+// ClearLaunch forgets the folder's launch marker, before a session is started for a new launch.
+func (p Plugin) ClearLaunch(folder string) error {
+	_, err := p.run("aeolus-identity.sh", folder, "", "launch", "clear")
+	return err
+}
+
+// Launch is what a session did in its launch, as its marker says: started, and active at its first tool call.
+type Launch struct {
+	IsStarted bool
+	IsActive  bool
+}
+
+// LaunchSeen is what the folder's marker says of the launch given; nothing before the hooks marked anything of it.
+func (p Plugin) LaunchSeen(folder string, launchID string) Launch {
+	marker, err := p.run("aeolus-identity.sh", folder, "", "launch")
+	if err != nil {
+		return Launch{}
+	}
+	return launchOf(marker, launchID)
+}
+
+func launchOf(marker string, launchID string) Launch {
+	lines := strings.Split(marker, "\n")
+	if lines[0] != "launch "+launchID {
+		return Launch{}
+	}
+	seen := Launch{}
+	for _, line := range lines[1:] {
+		seen.IsStarted = seen.IsStarted || strings.HasPrefix(line, "started ")
+		seen.IsActive = seen.IsActive || strings.HasPrefix(line, "active ")
+	}
+	return seen
+}
+
+// SessionDied tells the plugin's store the folder's session died, so it marks what that session held for the next one (#756).
+func (p Plugin) SessionDied(folder string) error {
+	_, err := p.run("aeolus-push.sh", folder, "", "died")
+	return err
+}
+
+// IsInstalled says whether the plugin's scripts are where it was found: a session cannot start without them (#827).
+func (p Plugin) IsInstalled() error {
+	if _, err := os.Stat(filepath.Join(p.Root, "scripts", "aeolus-identity.sh")); errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("the aeolus-fleet plugin's scripts are not at %s", filepath.Join(p.Root, "scripts"))
+	}
+	return nil
+}
