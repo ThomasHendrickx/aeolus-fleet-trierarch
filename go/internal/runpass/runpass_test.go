@@ -3,6 +3,7 @@ package runpass
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -378,15 +379,47 @@ func TestAReleaseTheFleetRefusesIsTriedAgainOnTheNextPass(t *testing.T) {
 	}
 }
 
-func TestARequestNoLongerAssignedHereEndsItsSessionIdentityAndWorktree(t *testing.T) {
+func TestARequestNoLongerAssignedHereEndsItsSessionAndIdentityAndLeavesItsWorktree(t *testing.T) {
 	pass := aRunPass(t)
 	pass.crewed(t)
 	pass.fleet.requests = nil
 
 	pass.run(t)
 
-	if !slices.Equal(pass.sessions.stopped, []string{scout}) || !slices.Equal(pass.workspace.removed, []string{"/worktrees/aeolus-fleet/scout"}) || len(pass.harness.identities) != 0 || len(pass.store.state.Entries) != 0 {
+	if !slices.Equal(pass.sessions.stopped, []string{scout}) || len(pass.workspace.removed) != 0 || len(pass.harness.identities) != 0 || len(pass.store.state.Entries) != 0 {
 		t.Fatalf("stopped %q, removed %q, identities %+v, entries %+v", pass.sessions.stopped, pass.workspace.removed, pass.harness.identities, pass.store.state.Entries)
+	}
+}
+
+// givenBack crews scout, then lets its launch window pass with no activity: its request is given back.
+func (p *aPass) givenBack(t *testing.T) {
+	t.Helper()
+	p.fleet.requests = []reconciler.Request{aRequest("")}
+	p.run(t)
+	p.fleet.requests = []reconciler.Request{aRequest("crewing")}
+	p.pass.Now = func() time.Time { return now.Add(time.Minute) }
+	p.run(t)
+}
+
+func TestARequestGivenBackRemovesItsCleanWorktree(t *testing.T) {
+	pass := aRunPass(t)
+
+	pass.givenBack(t)
+
+	if !slices.Equal(pass.workspace.removed, []string{"/worktrees/aeolus-fleet/scout"}) || len(pass.store.state.Kept) != 0 || !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 no activity within a minute of its start") {
+		t.Fatalf("removed %q, kept %+v, calls %q", pass.workspace.removed, pass.store.state.Kept, pass.fleet.calls)
+	}
+}
+
+func TestARequestGivenBackKeepsAWorktreeWithChanges(t *testing.T) {
+	pass := aRunPass(t)
+	pass.workspace.unsaved["/worktrees/aeolus-fleet/scout"] = []string{"?? notes.md"}
+
+	pass.givenBack(t)
+
+	want := []any{map[string]any{"shipId": scout, "repository": "aeolus-fleet", "path": "/worktrees/aeolus-fleet/scout"}}
+	if len(pass.workspace.removed) != 0 || !reflect.DeepEqual(pass.store.state.Kept, want) || len(pass.store.state.Entries) != 0 {
+		t.Fatalf("removed %q, kept %+v, entries %+v", pass.workspace.removed, pass.store.state.Kept, pass.store.state.Entries)
 	}
 }
 
