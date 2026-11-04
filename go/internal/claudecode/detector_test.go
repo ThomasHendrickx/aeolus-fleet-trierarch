@@ -46,8 +46,8 @@ var resolves = map[string]string{"fable": "claude-fable-5-1", "opus": "claude-op
 
 var allIDs = []string{"claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5"}
 
-// aClaude is Claude Code 2.1.293 as the mac mini runs it: an alias it resolves answers its probe with the exact id in modelUsage, beside helper when set; a refused one is unrecognized; any other fails otherwise. Every command it is given is kept.
-type aClaude struct {
+// aProbedClaude is Claude Code 2.1.293 as the mac mini runs it: an alias it resolves answers its probe with the exact id in modelUsage, beside helper when set; a refused one is unrecognized; any other fails otherwise. Every command it is given is kept.
+type aProbedClaude struct {
 	resolves map[string]string
 	refused  []string
 	help     string
@@ -55,7 +55,7 @@ type aClaude struct {
 	calls    []detection.Command
 }
 
-func (c *aClaude) run(_ context.Context, command detection.Command) detection.Ran {
+func (c *aProbedClaude) run(_ context.Context, command detection.Command) detection.Ran {
 	c.calls = append(c.calls, command)
 	switch command.Args[0] {
 	case "--version":
@@ -78,15 +78,15 @@ func (c *aClaude) run(_ context.Context, command detection.Command) detection.Ra
 	return detection.Ran{Status: 1, Stderr: "API Error: Connection error."}
 }
 
-func aClaudeCode() *aClaude {
-	return &aClaude{resolves: resolves, help: help}
+func aClaudeCode() *aProbedClaude {
+	return &aProbedClaude{resolves: resolves, help: help}
 }
 
-func (c *aClaude) detector() Detector {
+func (c *aProbedClaude) detector() Detector {
 	return Detector{Run: c.run, NeutralFolder: func() (string, error) { return neutralFolder, nil }}
 }
 
-func (c *aClaude) detect(t *testing.T, version string, previous *detection.Harness) detection.Harness {
+func (c *aProbedClaude) detect(t *testing.T, version string, previous *detection.Harness) detection.Harness {
 	t.Helper()
 	found, ok := c.detector().Detect(context.Background(), version, previous, detectedNow)
 	if !ok {
