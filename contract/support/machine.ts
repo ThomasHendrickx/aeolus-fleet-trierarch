@@ -104,7 +104,7 @@ function script(path: string, text: string): void {
 }
 
 /** `claude`: the commands init, detection and upgrade run answered as Claude Code answers them, and a session run by fake-claude-code.ts with the plugin's hooks. */
-function claudeStandIn(at: { machine: string; home: string; pluginData: string }): string {
+function claudeStandIn(at: { machine: string; pluginData: string }): string {
   return `#!/bin/sh
 machine='${at.machine}'
 case "$1" in
@@ -130,7 +130,6 @@ if [ "$1" = -p ] && [ "$2" = --model ]; then
   echo "$*" >> "$machine/claude-calls.txt"
   echo "{\\"modelUsage\\":{\\"claude-$3-5\\":{}}}"; exit 0
 fi
-export HOME='${at.home}' AEOLUS_DATA='${at.pluginData}' AEOLUS_CREWS='${join(at.home, '.aeolus', 'crews', 'claude-code')}'
 exec '${process.execPath}' '${join(STAND_INS, 'fake-claude-code.ts')}' --plugin '${PLUGIN_ROOT}' '${at.pluginData}' "$@"
 `;
 }
@@ -202,7 +201,7 @@ export async function aMachine(): Promise<Machine> {
   const tools = join(machine, 'tools');
   linkSystemPrograms(tools);
   const pluginData = join(home, '.claude', 'plugins', 'data', 'aeolus-fleet-aeolus-fleet');
-  script(join(bin, 'claude'), claudeStandIn({ machine, home, pluginData }));
+  script(join(bin, 'claude'), claudeStandIn({ machine, pluginData }));
   script(join(bin, 'systemctl'), systemctlStandIn({ machine, home }));
   const repository = join(home, 'aeolus-fleet');
   await git(['init', '-q', '-b', 'main', repository]);
