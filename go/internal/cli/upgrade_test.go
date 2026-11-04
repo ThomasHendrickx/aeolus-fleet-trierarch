@@ -79,11 +79,12 @@ func (s *aServiceOf) Status() (service.Status, error) {
 	return service.Status{IsInstalled: s.installed, IsRunning: s.installed && s.pid != 0, PID: s.pid, File: "aeolus-trierarch.service"}, nil
 }
 
-// somePlugins update the aeolus-fleet plugin of each harness from the tag, Claude Code's from 0.40.0 to the tag's version.
+// somePlugins update the aeolus-fleet plugin of each harness from the tag, Claude Code's from 0.40.0 to the tag's version, or to the version kept when one is.
 type somePlugins struct {
 	failing  error
 	updates  []string
 	versions map[string]string
+	kept     map[string]string
 }
 
 func (p *somePlugins) Update(harness string, tag string) error {
@@ -92,6 +93,9 @@ func (p *somePlugins) Update(harness string, tag string) error {
 		return p.failing
 	}
 	p.versions[harness] = strings.TrimPrefix(tag, "v")
+	if kept := p.kept[harness]; kept != "" {
+		p.versions[harness] = kept
+	}
 	return nil
 }
 
@@ -102,6 +106,7 @@ type anUpgrade struct {
 	releases *someReleases
 	service  *aServiceOf
 	plugins  *somePlugins
+	codex    *aCodex
 	// ran are the words each run of an installed file was given, with its version.
 	ran []string
 }
@@ -125,19 +130,22 @@ func anUpgradeOn(t *testing.T) *anUpgrade {
 		releases: &someReleases{latest: released},
 		service:  &aServiceOf{program: program, running: at.Running, installed: true},
 		plugins:  &somePlugins{versions: map[string]string{"claude-code": running}},
+		codex:    &aCodex{},
 	}
 	if err := machine.service.Restart(); err != nil {
 		t.Fatal(err)
 	}
 	machine.upgrade = Upgrade{
-		Paths:     at,
-		Version:   running,
-		Program:   program,
-		Harnesses: []string{"claude-code"},
-		Releases:  machine.releases,
-		Service:   machine.service,
-		Plugins:   machine.plugins,
-		Sleep:     func() {},
+		Paths:      at,
+		Version:    running,
+		Program:    program,
+		Harnesses:  []string{"claude-code"},
+		Releases:   machine.releases,
+		Service:    machine.service,
+		Plugins:    machine.plugins,
+		Codex:      machine.codex,
+		HookFolder: at.Worktrees,
+		Sleep:      func() {},
 		Trierarch: func(file string, isPluginStep bool, words ...string) (string, int) {
 			text, err := os.ReadFile(file)
 			if err != nil {
@@ -223,17 +231,79 @@ func TestUpgradeRefusesAWordThatIsNoVersionAndChangesNothing(t *testing.T) {
 	}
 }
 
-func TestUpgradeSaysTheCodexPluginIsNotUpdatedByTheGoTrierarchYet(t *testing.T) {
-	machine := anUpgradeOn(t)
+// withCodexOnOffer offers Codex beside Claude Code, its plugin on 0.39.0.
+func withCodexOnOffer(machine *anUpgrade) {
 	machine.upgrade.Harnesses = []string{"claude-code", "codex"}
+	machine.plugins.versions["codex"] = "0.39.0"
+}
+
+func TestUpgradeUpdatesCodexsPluginFromItsReleaseTagAndTrustsItsNewHooks(t *testing.T) {
+	machine := anUpgradeOn(t)
+	withCodexOnOffer(machine)
 
 	report, err := machine.upgrade.Run(running)
 
-	if err != nil || report.IsPluginUpdated || slices.Contains(machine.plugins.updates, "codex v"+running) {
-		t.Fatalf("Run(Codex on offer) = %+v, %v, updates %v, want Codex's not updated and said", report, err, machine.plugins.updates)
+	if err != nil || !report.IsPluginUpdated || !slices.Contains(machine.plugins.updates, "codex v0.40.0") {
+		t.Fatalf("Run(Codex on offer) = %+v, %v, updates %v, want Codex's plugin updated from v0.40.0", report, err, machine.plugins.updates)
 	}
-	if !strings.Contains(strings.Join(report.Said, "\n"), "The aeolus-fleet plugin for Codex is not updated by the Go trierarch yet") {
-		t.Errorf("said %q, want Codex's plugin said", report.Said)
+	want := []string{
+		"Updated the aeolus-fleet plugin for Codex from 0.39.0 to 0.40.0. Running Codex sessions keep the version they started with.",
+		"Codex trusts the aeolus-fleet plugin's 1 new or changed hooks.",
+	}
+	if !slices.Equal(report.Said[len(report.Said)-2:], want) {
+		t.Errorf("said %q, want it to end %q", report.Said, want)
+	}
+	if !slices.Equal(machine.codex.hooksFrom, []string{machine.upgrade.Paths.Worktrees}) {
+		t.Errorf("trusted hooks from %q, want the worktree root", machine.codex.hooksFrom)
+	}
+}
+
+func TestUpgradeSaysCodexDoesNotTrustThePluginsHooksAndThePluginIsNotUpdated(t *testing.T) {
+	machine := anUpgradeOn(t)
+	withCodexOnOffer(machine)
+	machine.codex.err = errors.New("codex app-server ended before it answered (exit 1)")
+
+	report, err := machine.upgrade.Run(running)
+
+	if err != nil || report.IsPluginUpdated {
+		t.Fatalf("Run(hooks not trusted) = %+v, %v, want the plugin not updated", report, err)
+	}
+	want := "Codex does not trust the aeolus-fleet plugin's hooks yet: codex app-server ended before it answered (exit 1). Each Codex launch trusts them first, and starts no session while they cannot be; fix what it says, then run aeolus-trierarch upgrade again."
+	if !slices.Contains(report.Said, want) {
+		t.Errorf("said %q, want %q", report.Said, want)
+	}
+}
+
+func TestUpgradeTrustsNoHooksOfACodexPluginItCouldNotUpdate(t *testing.T) {
+	machine := anUpgradeOn(t)
+	withCodexOnOffer(machine)
+	machine.upgrade.Harnesses = []string{"codex"}
+	machine.plugins.failing = errors.New("codex plugin marketplace upgrade aeolus-fleet failed: could not reach github.com")
+
+	report, err := machine.upgrade.Run(running)
+
+	if err != nil || report.IsPluginUpdated || len(machine.codex.hooksFrom) != 0 {
+		t.Fatalf("Run(Codex's plugin failing) = %+v, %v, hooks from %q, want it not updated and no hooks trusted", report, err, machine.codex.hooksFrom)
+	}
+	want := "The aeolus-fleet plugin for Codex was not updated: codex plugin marketplace upgrade aeolus-fleet failed: could not reach github.com. It stays on 0.39.0; fix what it says, then run aeolus-trierarch upgrade again."
+	if !slices.Contains(report.Said, want) {
+		t.Errorf("said %q, want %q", report.Said, want)
+	}
+}
+
+func TestUpgradeSaysNewCodexSessionsKeepStartingOnANewerPluginVersion(t *testing.T) {
+	machine := anUpgradeOn(t)
+	withCodexOnOffer(machine)
+	machine.plugins.kept = map[string]string{"codex": "0.41.0"}
+
+	report, err := machine.upgrade.Run(running)
+
+	if err != nil || !report.IsPluginUpdated {
+		t.Fatalf("Run(a Codex downgrade) = %+v, %v, want the plugin updated", report, err)
+	}
+	want := "New Codex sessions keep starting on the aeolus-fleet plugin 0.41.0, not on 0.40.0: Codex starts on the newest version it has, and 0.41.0 stays for the Codex sessions running on it."
+	if !slices.Contains(report.Said, want) {
+		t.Errorf("said %q, want %q", report.Said, want)
 	}
 }
 
