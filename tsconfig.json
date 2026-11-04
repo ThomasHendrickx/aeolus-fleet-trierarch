@@ -4,5 +4,5 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["*.ts", "scripts/**/*.ts", "lint/**/*.ts", "e2e/**/*.ts", "plugins/**/*.ts"]
+  "include": ["*.ts", "scripts/**/*.ts", "lint/**/*.ts", "e2e/**/*.ts", "contract/**/*.ts", "plugins/**/*.ts"]
 }

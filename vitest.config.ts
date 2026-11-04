@@ -109,6 +109,19 @@ export default defineConfig({
       {
         extends: true,
         test: {
+          // A trierarch driven from outside as a program (its CLI, its sockets, its files) against a
+          // fleet in process: today's, built, or the one AEOLUS_TRIERARCH_UNDER_TEST names.
+          name: 'contract:integration',
+          root: 'contract',
+          include: ['**/*.integration.test.ts'],
+          globalSetup: [postgresGlobalSetup, 'support/build-global-setup.ts'],
+          testTimeout: 120_000,
+          hookTimeout: 180_000,
+        },
+      },
+      {
+        extends: true,
+        test: {
           // The aeolus-fleet plugin in a real Claude Code, Codex or Copilot session, against a
           // fleet on this machine. Each file runs only when its variable is set
           // (AEOLUS_PLUGIN_E2E, AEOLUS_PLUGIN_CODEX_E2E, AEOLUS_PLUGIN_COPILOT_E2E), never in CI.
