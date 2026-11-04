@@ -4,9 +4,13 @@
 package main
 
 import (
+	"bufio"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -23,6 +27,8 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/modelproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/peer"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
@@ -86,6 +92,11 @@ func main() {
 		PassEvery: passEvery,
 		Sessions:  func(at paths.Paths) cli.Sessions { return sessionRuntime(at, program) },
 		Log:       logLine,
+		ReadKey:   readKey,
+		CheckKey: func(harness string, key string) keys.Checked {
+			return keys.Check(harness, key, "")
+		},
+		CheckNow: checkNow,
 	}
 	output, code := cli.Main(os.Args[1:], machine)
 	// While the trierarch is down a session's call gets no answer, as when the fleet is down (decision 0026).
@@ -126,6 +137,54 @@ func shipSockets(at paths.Paths, fleetURL string, running sessions.Runtime) *shi
 	})
 }
 
+// modelProxy is the model proxy on this machine (headless H16), started as a hold is.
+func modelProxy(at paths.Paths, program string) modelproxy.Runtime {
+	return modelproxy.Runtime{Folder: at.Proxy, Sessions: at.Sessions, Keys: at.Keys, Program: []string{program}, Version: cli.Version, Launch: sessions.Launch(runtime.GOOS, os.Getenv("INVOCATION_ID"), sessions.SystemdVersion())}
+}
+
+// readKey is the key piped in, or typed at a terminal, asked on stderr so stdout holds the answer alone, and not shown as typed.
+func readKey() (string, error) {
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeCharDevice == 0 {
+		typed, err := io.ReadAll(os.Stdin)
+		return string(typed), err
+	}
+	fmt.Fprint(os.Stderr, "API key (not shown): ")
+	echo := func(flag string) {
+		stty := exec.Command("stty", flag)
+		stty.Stdin = os.Stdin
+		_ = stty.Run()
+	}
+	echo("-echo")
+	defer func() {
+		echo("echo")
+		fmt.Fprintln(os.Stderr)
+	}()
+	return bufio.NewReader(os.Stdin).ReadString('\n')
+}
+
+// checkNow has the model proxy check the harness's key at once (K10): its state after; false when the proxy does not run.
+func checkNow(at paths.Paths, harness string) (keys.StateAt, bool) {
+	address, ok := modelproxy.Runtime{Folder: at.Proxy}.URL()
+	if !ok {
+		return keys.StateAt{}, false
+	}
+	client := http.Client{Timeout: time.Minute}
+	answer, err := client.Post(address+modelproxy.CheckPath+harness, "application/json", nil)
+	if err != nil {
+		return keys.StateAt{}, false
+	}
+	defer answer.Body.Close()
+	var key keys.StateAt
+	if answer.StatusCode != http.StatusOK || json.NewDecoder(answer.Body).Decode(&key) != nil || key.State == "" {
+		return keys.StateAt{}, false
+	}
+	return key, true
+}
+
 // passEvery is how often the loop runs a pass: restarts and releases wait at most this long.
 const passEvery = 5 * time.Second
 
@@ -152,6 +211,7 @@ func environment() map[string]string {
 func newPass(at paths.Paths, kept crew.File, configuration config.Configuration, home string, program string) (func() error, error) {
 	env := environment()
 	running := sessionRuntime(at, program)
+	proxy := modelProxy(at, program)
 	harnesses := map[string]runpass.Harness{}
 	offered := []string{}
 	if settings, ok := configuration.Harnesses["claude-code"]; ok {
@@ -166,6 +226,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 			Projects:   claudecode.Projects(home, env["CLAUDE_CONFIG_DIR"]),
 			Onboarding: claudecode.Of(home, env["CLAUDE_CONFIG_DIR"]),
 			Events:     func(shipID string) string { return hold.FilesOf(at.Sessions, shipID).Events },
+			ProxyURL:   proxy.URL,
 		}
 		offered = append(offered, "claude-code")
 	}
@@ -199,6 +260,10 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Repositories: repositories,
 		Folders:      folders,
 		RunningCap:   configuration.Caps.Running,
+		Logins:       keys.Logins{Configured: configuration.Logins, States: keys.States{Keys: at.Keys, File: modelproxy.FilesOf(at.Proxy).KeyStates}},
+		// The model proxy runs while any harness holds an API key (headless H16); a pass starts it again when it is gone.
+		Proxy: proxy,
+		Keys:  keys.Files{Folder: at.Keys},
 	}
 	return pass.Run, nil
 }
