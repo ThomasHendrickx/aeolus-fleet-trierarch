@@ -1,8 +1,9 @@
 // Package service is the trierarch as a service of the operating system:
 // `aeolus-trierarch run` kept alive, started at login and again whenever it
-// stops. On Linux a systemd user unit, through `systemctl --user`; it stops
-// its main process only (`KillMode=process`), so the sessions the trierarch
-// started outlive a stop.
+// stops. On macOS a launchd agent, through `launchctl`; on Linux a systemd
+// user unit, through `systemctl --user`, which stops its main process only
+// (`KillMode=process`). Either way the sessions the trierarch started outlive
+// a stop.
 package service
 
 import (
