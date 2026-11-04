@@ -1,0 +1,183 @@
+package cli
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
+)
+
+// anInstalledService is a service that runs as pid 41 once installed, and removes itself on uninstall.
+type anInstalledService struct {
+	aServiceManager
+	uninstalled bool
+}
+
+func (s *anInstalledService) Uninstall() error {
+	s.uninstalled = true
+	s.installed, s.running = false, false
+	return nil
+}
+
+func aMain(t *testing.T) (Machine, *anInstalledService, *aFleet) {
+	t.Helper()
+	home := t.TempDir()
+	at := paths.Of(home, "")
+	installed := &anInstalledService{aServiceManager: aServiceManager{write: func() {
+		_ = os.WriteFile(at.Running, []byte(`{"pid":41,"version":"`+Version+`"}`), 0o644)
+	}}}
+	fleet := &aFleet{held: map[string]bool{}}
+	return Machine{
+		Environ:               []string{"HOME=" + home},
+		HomeDirectory:         home,
+		Platform:              "linux",
+		PID:                   41,
+		IsClaudeCodeInstalled: func() bool { return true },
+		IsClaudeCodeSignedIn:  func() bool { return true },
+		IsSsMissing:           func() bool { return false },
+		ClaudeCode:            func(string, string) ClaudeCode { return &aClaudeCode{} },
+		Service:               func(paths.Paths) ServiceManager { return installed },
+		Register:              fleet.register,
+		IsLeaseHeld:           fleet.isLeaseHeld,
+		Sleep:                 func() {},
+		Stop:                  make(chan struct{}),
+	}, installed, fleet
+}
+
+func decoded(t *testing.T, output string) map[string]any {
+	t.Helper()
+	var value map[string]any
+	if err := json.Unmarshal([]byte(output), &value); err != nil {
+		t.Fatalf("%q is no JSON object: %v", output, err)
+	}
+	return value
+}
+
+func setupWords() []string {
+	return []string{"init", "--fleet-url", fleetURL, "--ship-id", shipID, "--secret", secret, "--plugin-ship-id", pluginShipID, "--yes"}
+}
+
+func TestSaysItsVersion(t *testing.T) {
+	machine, _, _ := aMain(t)
+
+	output, code := Main([]string{"--version", "--json"}, machine)
+
+	if code != 0 || !reflect.DeepEqual(decoded(t, output), map[string]any{"version": Version}) {
+		t.Errorf("answered %q, %d", output, code)
+	}
+	if output, _ := Main([]string{"-v"}, machine); output != Version {
+		t.Errorf("-v answered %q", output)
+	}
+}
+
+func TestACommandItDoesNotKnowGetsTheUsage(t *testing.T) {
+	machine, _, _ := aMain(t)
+
+	output, code := Main([]string{"sail"}, machine)
+
+	if code != 2 || !strings.HasPrefix(output, "Usage: aeolus-trierarch") {
+		t.Errorf("answered %q, %d", output, code)
+	}
+}
+
+func TestInitSaysWhatItDidAndWhatItRefuses(t *testing.T) {
+	machine, _, _ := aMain(t)
+
+	output, code := Main(setupWords(), machine)
+
+	if code != 0 || !strings.Contains(output, "Registered "+shipID) {
+		t.Errorf("answered %q, %d", output, code)
+	}
+	machine.IsClaudeCodeSignedIn = func() bool { return false }
+	if output, code := Main(append(setupWords(), "--json"), machine); code != 1 || !strings.Contains(decoded(t, output)["error"].(string), "not signed in") {
+		t.Errorf("answered %q, %d", output, code)
+	}
+}
+
+func TestInitAnswersItsReportAsJSON(t *testing.T) {
+	machine, _, _ := aMain(t)
+
+	output, code := Main(append(setupWords(), "--json"), machine)
+
+	report := decoded(t, output)
+	if code != 0 || report["shipId"] != shipID || report["service"] != "installed" || report["configuration"] != "written" {
+		t.Errorf("answered %q, %d", output, code)
+	}
+}
+
+func TestStatusSaysTheVersionTheServiceAndTheLease(t *testing.T) {
+	machine, _, _ := aMain(t)
+	Main(setupWords(), machine)
+
+	output, code := Main([]string{"status", "--json"}, machine)
+
+	want := map[string]any{
+		"version":        Version,
+		"runningVersion": Version,
+		"service":        map[string]any{"file": "/unit", "isInstalled": true, "isRunning": true, "pid": float64(41)},
+		"fleet":          map[string]any{"url": fleetURL, "shipId": shipID, "lease": "valid"},
+	}
+	if got := decoded(t, output); code != 0 || !reflect.DeepEqual(got, want) {
+		t.Errorf("answered %v, %d, want %v", got, code, want)
+	}
+}
+
+func TestStatusSaysAnEndedLease(t *testing.T) {
+	machine, _, fleet := aMain(t)
+	Main(setupWords(), machine)
+	fleet.held = map[string]bool{}
+
+	output, _ := Main([]string{"status", "--json"}, machine)
+
+	if lease := decoded(t, output)["fleet"].(map[string]any)["lease"]; lease != "ended" {
+		t.Errorf("lease %v", lease)
+	}
+}
+
+func TestRunSaysItsPidAndVersionAndEndsWhenStopped(t *testing.T) {
+	machine, _, _ := aMain(t)
+	stop := make(chan struct{})
+	machine.Stop = stop
+	close(stop)
+
+	output, code := Main([]string{"run"}, machine)
+
+	if code != 0 || output != "aeolus-trierarch stopped." {
+		t.Errorf("answered %q, %d", output, code)
+	}
+	running, isRead := readRunning(filepath.Join(machine.HomeDirectory, ".aeolus", "trierarch", "running.json"))
+	if !isRead || running != (Running{PID: 41, Version: Version}) {
+		t.Errorf("running.json says %+v", running)
+	}
+}
+
+func TestUninstallRemovesTheServiceAndKeepsTheTrierarchsFiles(t *testing.T) {
+	machine, installed, _ := aMain(t)
+	Main(setupWords(), machine)
+
+	output, code := Main([]string{"uninstall"}, machine)
+
+	if code != 0 || !installed.uninstalled || !strings.Contains(output, "Removed the service") {
+		t.Errorf("answered %q, %d", output, code)
+	}
+	if _, err := crew.Read(filepath.Join(machine.HomeDirectory, ".aeolus", "trierarch", "crew-token")); err != nil {
+		t.Errorf("the crew file is gone: %v", err)
+	}
+}
+
+func TestTheConfigurationMovesWithAeolusTrierarchConfig(t *testing.T) {
+	machine, _, _ := aMain(t)
+	moved := filepath.Join(machine.HomeDirectory, "elsewhere.json")
+	machine.Environ = append(machine.Environ, "AEOLUS_TRIERARCH_CONFIG="+moved)
+
+	Main(setupWords(), machine)
+
+	if _, err := os.Stat(moved); err != nil {
+		t.Errorf("no configuration at %s: %v", moved, err)
+	}
+}
