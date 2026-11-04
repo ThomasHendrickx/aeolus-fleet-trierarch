@@ -191,7 +191,6 @@ jobs:
 
   go-binaries-attest:
     needs: go-binaries
-    if: ${{ always() }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -201,27 +200,23 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           pattern: aeolus-trierarch-*
-          path: binaries
+          path: ${{ runner.temp }}/binaries
           merge-multiple: true
       - run: sha256sum aeolus-trierarch-* | tee SHA256SUMS
-        working-directory: binaries
-      - if: hashFiles('binaries/aeolus-trierarch-linux-amd64') != ''
-        uses: actions/attest@v4
+        working-directory: ${{ runner.temp }}/binaries
+      - uses: actions/attest@v4
         with:
-          subject-path: binaries/aeolus-trierarch-linux-amd64
-      - if: hashFiles('binaries/aeolus-trierarch-linux-arm64') != ''
-        uses: actions/attest@v4
+          subject-path: ${{ runner.temp }}/binaries/aeolus-trierarch-linux-amd64
+      - uses: actions/attest@v4
         with:
-          subject-path: binaries/aeolus-trierarch-linux-arm64
-      - if: hashFiles('binaries/aeolus-trierarch-darwin-arm64') != ''
-        uses: actions/attest@v4
+          subject-path: ${{ runner.temp }}/binaries/aeolus-trierarch-linux-arm64
+      - uses: actions/attest@v4
         with:
-          subject-path: binaries/aeolus-trierarch-darwin-arm64
-      - if: hashFiles('binaries/aeolus-trierarch-darwin-amd64') != ''
-        uses: actions/attest@v4
+          subject-path: ${{ runner.temp }}/binaries/aeolus-trierarch-darwin-arm64
+      - uses: actions/attest@v4
         with:
-          subject-path: binaries/aeolus-trierarch-darwin-amd64
-      - working-directory: binaries
+          subject-path: ${{ runner.temp }}/binaries/aeolus-trierarch-darwin-amd64
+      - working-directory: ${{ runner.temp }}/binaries
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
