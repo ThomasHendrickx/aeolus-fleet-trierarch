@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
-
 )
 
 func TestASessionRunsHeadlessWithItsFlagsAndNoQuestionForm(t *testing.T) {
