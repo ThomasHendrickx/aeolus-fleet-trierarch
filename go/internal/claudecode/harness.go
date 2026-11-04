@@ -3,11 +3,13 @@ package claudecode
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 )
@@ -37,10 +39,31 @@ type Harness struct {
 	Onboarding Onboarding
 	// Events is where the ship's hold keeps every line its session wrote.
 	Events func(shipID string) string
+	// ProxyURL is where sessions on an API key reach the model proxy (headless H16); false before it first listened.
+	ProxyURL func() (string, bool)
 }
 
-// Launch starts the entry's session in its folder: its first prompt on a first start, the wake otherwise, continuing the folder's conversation when Claude Code keeps one.
+// routeOf is how a session on the login reaches its model: on an API key, the proxy's address and a token of the session's own, fresh for each start, which its hold hands it; on its subscription, nothing.
+func (h Harness) routeOf(login string) (map[string]string, *sessions.ProxyToken, error) {
+	if login != "apiKey" {
+		return map[string]string{}, nil, nil
+	}
+	address, ok := "", false
+	if h.ProxyURL != nil {
+		address, ok = h.ProxyURL()
+	}
+	if !ok {
+		return nil, nil, errors.New("the model proxy is not running yet")
+	}
+	return map[string]string{"ANTHROPIC_BASE_URL": address + "/anthropic"}, &sessions.ProxyToken{Harness: "claude-code", Variable: "ANTHROPIC_AUTH_TOKEN", Token: proxytoken.New()}, nil
+}
+
+// Launch starts the entry's session in its folder, on the login it is to start on: its first prompt on a first start, the wake otherwise, continuing the folder's conversation when Claude Code keeps one.
 func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID string) error {
+	env, token, err := h.routeOf(entry.Login)
+	if err != nil {
+		return err
+	}
 	if err := h.Onboarding.CompleteOnboarding(); err != nil {
 		return err
 	}
@@ -52,7 +75,8 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if err := h.Plugin.ClearLaunch(entry.Folder); err != nil {
 		return err
 	}
-	if err := h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, Harness: "claude-code", Command: command, Env: map[string]string{launchVariable: launchID}}); err != nil {
+	env[launchVariable] = launchID
+	if err := h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, Harness: "claude-code", Command: command, Env: env, ProxyToken: token}); err != nil {
 		return err
 	}
 	return h.Runtime.Send(entry.ShipID, UserLine(prompt))

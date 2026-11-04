@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
 )
 
 const scout = "shp_01m6jyczpnpp5c0vxh54c966cy"
@@ -261,5 +262,29 @@ func TestTheRootOfASessionIsItsHold(t *testing.T) {
 	}
 	if got := runtime.Root("shp_01m6jyczpnpp5c0vxh54c966cz"); got != 0 {
 		t.Fatalf("Root of a ship with no session = %d, want 0", got)
+	}
+}
+
+func TestASessionsProxyTokenIsKeptInItsFolderAndHandedToItsHarnessInItsVariableNeverOnACommandLine(t *testing.T) {
+	runtime := aRuntime(t)
+	folder := t.TempDir()
+	token := &ProxyToken{Harness: "claude-code", Variable: "ANTHROPIC_AUTH_TOKEN", Token: "scouts-proxy-token"}
+	if err := runtime.Start(Start{ShipID: scout, Folder: folder, Harness: "claude-code", Command: []string{"sh", "-c", aHarness}, Env: map[string]string{"ANTHROPIC_BASE_URL": "http://127.0.0.1:1/anthropic"}, ProxyToken: token}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	eventually(t, "the harness's environment", func() bool { return read(filepath.Join(folder, "harness.env")) != "" })
+
+	env := read(filepath.Join(folder, "harness.env"))
+	if !strings.Contains(env, "ANTHROPIC_AUTH_TOKEN=scouts-proxy-token") || !strings.Contains(env, "ANTHROPIC_BASE_URL=http://127.0.0.1:1/anthropic") {
+		t.Fatalf("environment:\n%s", env)
+	}
+	kept, ok := proxytoken.Read(hold.FilesOf(runtime.Sessions, scout).Folder)
+	if !ok || kept != (proxytoken.Token{Harness: "claude-code", Token: "scouts-proxy-token"}) {
+		t.Fatalf("the session's folder keeps %+v, %v, want its token", kept, ok)
+	}
+	for _, pid := range []string{read(hold.FilesOf(runtime.Sessions, scout).PID), read(filepath.Join(folder, "harness.pid"))} {
+		if line := read("/proc/" + pid + "/cmdline"); strings.Contains(line, "scouts-proxy-token") {
+			t.Fatalf("the command line of %s holds the token: %q", pid, line)
+		}
 	}
 }

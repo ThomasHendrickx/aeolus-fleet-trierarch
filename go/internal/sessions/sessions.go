@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
 )
 
 const (
@@ -54,6 +55,15 @@ type Start struct {
 	Command []string
 	// Env is given to the harness on top of the hold's own few variables.
 	Env map[string]string
+	// ProxyToken is the session's model proxy token, none for a session on its subscription (headless H16).
+	ProxyToken *ProxyToken
+}
+
+// ProxyToken is a session's model proxy token, for the harness whose vendor it reaches, handed to it in Variable.
+type ProxyToken struct {
+	Harness  string
+	Variable string
+	Token    string
 }
 
 type Runtime struct {
@@ -183,6 +193,13 @@ func (r Runtime) Start(session Start) error {
 		return err
 	}
 	words := append(append([]string{}, r.Program...), "hold", session.ShipID, "--sessions", r.Sessions, "--folder", session.Folder, "--harness", session.Harness)
+	// The token goes in the session's folder, which only its user reads, and the hold reads it there: a command line is anyone's to see.
+	if token := session.ProxyToken; token != nil {
+		if err := proxytoken.Write(files.Folder, proxytoken.Token{Harness: token.Harness, Token: token.Token}); err != nil {
+			return err
+		}
+		words = append(words, "--proxy-token-variable", token.Variable)
+	}
 	for name, value := range session.Env {
 		words = append(words, "--env", name+"="+value)
 	}

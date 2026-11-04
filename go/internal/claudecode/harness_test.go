@@ -196,3 +196,55 @@ func TestAForcedMessageStopsABusyTurnBeforeItsLineGoesIn(t *testing.T) {
 		}
 	}
 }
+
+func TestASessionOnAnAPIKeyStartsWithTheProxyAsItsBaseURLAndAFreshTokenOfItsOwn(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	harness.ProxyURL = func() (string, bool) { return "http://127.0.0.1:41000", true }
+	entry := anEntry(t)
+	entry.Login = "apiKey"
+
+	for range 2 {
+		if err := harness.Launch(entry, false, "launch-1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	first, second := running.started[0], running.started[1]
+	if first.Env["ANTHROPIC_BASE_URL"] != "http://127.0.0.1:41000/anthropic" || first.ProxyToken == nil || first.ProxyToken.Variable != "ANTHROPIC_AUTH_TOKEN" || first.ProxyToken.Harness != "claude-code" || first.ProxyToken.Token == "" {
+		t.Fatalf("started %+v with token %+v, want the proxy's address and a token in ANTHROPIC_AUTH_TOKEN", first, first.ProxyToken)
+	}
+	if second.ProxyToken == nil || second.ProxyToken.Token == first.ProxyToken.Token {
+		t.Fatal("the second start has the first one's token, want a fresh one")
+	}
+	if _, ok := first.Env["ANTHROPIC_AUTH_TOKEN"]; ok {
+		t.Fatal("the token is among the variables given on the hold's command line")
+	}
+}
+
+func TestASessionOnItsSubscriptionGetsNoRouteToTheProxyAndNoToken(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	harness.ProxyURL = func() (string, bool) { return "http://127.0.0.1:41000", true }
+	entry := anEntry(t)
+	entry.Login = "subscription"
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := running.started[0].Env["ANTHROPIC_BASE_URL"]; ok || running.started[0].ProxyToken != nil {
+		t.Fatalf("started %+v, want no proxy and no token", running.started[0])
+	}
+}
+
+func TestASessionOnAnAPIKeyDoesNotStartBeforeTheProxyListens(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	harness.ProxyURL = func() (string, bool) { return "", false }
+	entry := anEntry(t)
+	entry.Login = "apiKey"
+
+	err := harness.Launch(entry, true, "launch-1")
+
+	if err == nil || len(running.started) != 0 {
+		t.Fatalf("Launch = %v, started %d, want an error and nothing started", err, len(running.started))
+	}
+}

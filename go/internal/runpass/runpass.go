@@ -72,6 +72,28 @@ type Workspace interface {
 	Remove(entry reconciler.Entry) error
 }
 
+// Logins are which login each session starts on and whether it can start on it now (api keys K5, K9).
+type Logins interface {
+	// LoginOf is the login a ship's next session starts on: its own, else its harness's default, else its subscription.
+	LoginOf(harness string, shipName string) string
+	// StartProblem is why a session of the harness cannot start on the login now, empty when it can.
+	StartProblem(harness string, login string) string
+	IsKeyReady(harness string) bool
+}
+
+// Proxy is the model proxy, kept running while it is needed (headless H16).
+type Proxy interface {
+	Keep(isNeeded bool) error
+}
+
+// Keys are the harnesses' API key files.
+type Keys interface {
+	Has(harness string) bool
+}
+
+// keyHarnesses are the harnesses that may hold an API key.
+var keyHarnesses = []string{"claude-code", "codex"}
+
 type Store interface {
 	Load() (reconciler.State, error)
 	Save(state reconciler.State) error
@@ -94,10 +116,50 @@ type Pass struct {
 	Repositories []string
 	Folders      []string
 	RunningCap   int
+	// Logins are each session's login; every session starts on its subscription without.
+	Logins Logins
+	// Proxy runs while any harness in Keys holds a key; none is kept without.
+	Proxy Proxy
+	Keys  Keys
+}
+
+func (p Pass) loginOf(entry reconciler.Entry) string {
+	if p.Logins == nil {
+		return "subscription"
+	}
+	return p.Logins.LoginOf(entry.Harness, nameOf(entry))
+}
+
+func (p Pass) startProblem(harness string, login string) string {
+	if p.Logins == nil {
+		return ""
+	}
+	return p.Logins.StartProblem(harness, login)
+}
+
+// keepProxy runs the proxy while any harness holds a key; a failure is logged, and the next pass tries again.
+func (p Pass) keepProxy() {
+	if p.Proxy == nil || p.Keys == nil {
+		return
+	}
+	isNeeded := slices.ContainsFunc(keyHarnesses, p.Keys.Has)
+	if err := p.Proxy.Keep(isNeeded); err != nil {
+		p.Log("the model proxy: " + err.Error())
+	}
+}
+
+// startedOn is the entry once a session started on the login at the time: the login before kept while it differs (api keys K8).
+func startedOn(entry reconciler.Entry, login string, at string) reconciler.Entry {
+	if entry.Login != "" && entry.Login != login {
+		entry.EarlierLogins = append(append([]reconciler.EarlierLogin{}, entry.EarlierLogins...), reconciler.EarlierLogin{Login: entry.Login, Until: at})
+	}
+	entry.Login = login
+	return entry
 }
 
 // Run runs one pass; it fails only when it cannot read what it reconciles.
 func (p Pass) Run() error {
+	p.keepProxy()
 	requests, err := p.Fleet.AssignedRequests()
 	if err != nil {
 		return err
@@ -135,7 +197,7 @@ func (p Pass) Run() error {
 
 // observe is what runs: the sessions, what each in its launch window did, and for each entry whose session runs its inbox and turn. An inbox is watched only while its session runs, a crewing one from the moment its session runs (#473); its socket is opened again, as after the trierarch stopped, since its session keeps running and calls over it (decision 0026).
 func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reconciler.Observed, error) {
-	observed := reconciler.Observed{Sessions: []reconciler.Session{}, Launches: map[string]reconciler.LaunchSeen{}, Ships: map[string]reconciler.Seen{}}
+	observed := reconciler.Observed{Sessions: []reconciler.Session{}, Launches: map[string]reconciler.LaunchSeen{}, Ships: map[string]reconciler.Seen{}, StartProblems: map[string]string{}}
 	statusOf := map[string]string{}
 	for _, session := range running {
 		observed.Sessions = append(observed.Sessions, reconciler.Session{ShipID: session.ShipID, Status: session.Status, IsOtherVersion: session.IsOtherVersion})
@@ -145,6 +207,12 @@ func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reco
 		entry := state.Entries[shipID]
 		harness, ok := p.Harnesses[entry.Harness]
 		status, hasSession := statusOf[shipID]
+		// Asked only of an entry whose session would start: a running session keeps the login it started with (K3).
+		if entry.State == "restarting" || (entry.State == "running" && !hasSession) {
+			if problem := p.startProblem(entry.Harness, p.loginOf(entry)); problem != "" {
+				observed.StartProblems[shipID] = problem
+			}
+		}
 		if !ok || entry.Folder == "" {
 			continue
 		}
@@ -165,7 +233,8 @@ func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reco
 		if err != nil {
 			return observed, err
 		}
-		observed.Ships[shipID] = reconciler.Seen{Inbox: inbox, Turn: turn, IsHolding: isHolding}
+		isKeyNotReady := entry.Login == "apiKey" && p.Logins != nil && !p.Logins.IsKeyReady(entry.Harness)
+		observed.Ships[shipID] = reconciler.Seen{Inbox: inbox, Turn: turn, IsHolding: isHolding, IsKeyNotReady: isKeyNotReady}
 	}
 	return observed, nil
 }
@@ -294,6 +363,12 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	if problem := harness.Problem(); problem != nil {
 		return p.giveBack(state, entry.ShipID, entry.SettingsVersion, problem.Error(), &entry)
 	}
+	// A login that cannot start it is this computer's state (api keys A5): given back at once, it may be crewed on another.
+	entry.ShipName = ship.Name
+	login := p.loginOf(entry)
+	if problem := p.startProblem(entry.Harness, login); problem != "" {
+		return p.giveBack(state, entry.ShipID, entry.SettingsVersion, problem, &entry)
+	}
 	folder, err := p.Workspace.Prepare(entry, ship.Name)
 	if err != nil {
 		return state, err
@@ -325,10 +400,13 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 		return state, err
 	}
 	launchID := p.NewLaunchID()
-	if err := harness.Launch(entry, !entry.HasStarted, launchID); err != nil {
+	starting := entry
+	starting.Login = login
+	if err := harness.Launch(starting, !entry.HasStarted, launchID); err != nil {
 		return state, err
 	}
 	entry.HasStarted, entry.LaunchedAt, entry.LaunchID = true, p.Now().Format(time.RFC3339Nano), launchID
+	entry = startedOn(entry, login, entry.LaunchedAt)
 	p.Log(fmt.Sprintf("%s (%s): crewed, %s started in %s", ship.Name, entry.ShipID, entry.Harness, folder))
 	return p.put(state, entry)
 }
@@ -343,10 +421,14 @@ func (p Pass) launch(state reconciler.State, entry reconciler.Entry) (reconciler
 		return state, err
 	}
 	launchID := p.NewLaunchID()
-	if err := harness.Launch(entry, false, launchID); err != nil {
+	login := p.loginOf(entry)
+	starting := entry
+	starting.Login = login
+	if err := harness.Launch(starting, false, launchID); err != nil {
 		return state, err
 	}
 	entry.LaunchedAt, entry.LaunchID = p.Now().Format(time.RFC3339Nano), launchID
+	entry = startedOn(entry, login, entry.LaunchedAt)
 	p.Log(fmt.Sprintf("%s (%s): started again in %s", nameOf(entry), entry.ShipID, entry.Folder))
 	return p.put(state, entry)
 }

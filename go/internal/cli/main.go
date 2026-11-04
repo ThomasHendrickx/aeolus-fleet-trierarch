@@ -1,5 +1,5 @@
 // Package cli is the Go trierarch's command line, `aeolus-trierarch`: init,
-// status, list, add, start, stop, restart, run, uninstall and hold so far, as docs/trierarch.md says them. Each
+// status, list, add, login, start, stop, restart, run, uninstall, hold and proxy so far, as docs/trierarch.md says them. Each
 // command answers what it says and its exit status; a refusal is said on
 // stdout, as JSON under --json.
 package cli
@@ -16,6 +16,8 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/modelproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 )
@@ -62,6 +64,12 @@ type Machine struct {
 	Sessions  func(at paths.Paths) Sessions
 	// Log writes a line to the trierarch's log.
 	Log func(line string)
+	// ReadKey is the API key the operator types, not shown, or pipes in.
+	ReadKey func() (string, error)
+	// CheckKey checks a key with its harness's vendor before login keeps it.
+	CheckKey func(harness string, key string) keys.Checked
+	// CheckNow has the model proxy check the harness's key at once (K10): its state after; false when the proxy does not run.
+	CheckNow func(at paths.Paths, harness string) (keys.StateAt, bool)
 }
 
 const usage = `Usage: aeolus-trierarch <command>
@@ -72,6 +80,18 @@ const usage = `Usage: aeolus-trierarch <command>
   list           the ships it crews
   add repository|folder <name> <path>
                  add a place the trierarch may crew ships in, and trust it
+  login          each harness's login and whether it holds an API key
+  login <harness> --api-key
+                 read an API key for claude-code or codex from stdin (not shown as typed), check it
+                 with the vendor and keep it on this computer only, then restart the service
+  login <harness> --remove-key
+                 remove the API key for that harness, then restart the service
+  login <harness> --check
+                 check an API key out of credit at once, as the model proxy does every 15 minutes
+  login <harness> --default api-key|subscription
+                 the login that harness's sessions run on, from each one's next start
+  login --ship <name> api-key|subscription|default
+                 the login that ship runs on, or its harness's default again, from its next start
   start, stop, restart
                  drive the service; the sessions keep running
   run            what the service runs
@@ -81,8 +101,8 @@ const usage = `Usage: aeolus-trierarch <command>
   --json         answer as JSON
   --config <path> the configuration (AEOLUS_TRIERARCH_CONFIG)`
 
-var valueFlags = []string{"--fleet-url", "--ship-id", "--secret", "--plugin-ship-id", "--config"}
-var switchFlags = []string{"--json", "--yes", "--version"}
+var valueFlags = []string{"--fleet-url", "--ship-id", "--secret", "--plugin-ship-id", "--config", "--default", "--ship"}
+var switchFlags = []string{"--json", "--yes", "--version", "--api-key", "--remove-key", "--check"}
 
 type parsed struct {
 	words    []string
@@ -135,6 +155,9 @@ func Main(args []string, machine Machine) (string, int) {
 	// The hold takes its own words: the trierarch starts it, never a person.
 	if len(args) > 0 && args[0] == "hold" {
 		return "", hold.Main(args[1:], Version, machine.Environ)
+	}
+	if len(args) > 0 && args[0] == "proxy" {
+		return "", modelproxy.Main(args[1:], Version)
 	}
 	command, ok := parse(args)
 	if !ok {
@@ -225,6 +248,11 @@ func Main(args []string, machine Machine) (string, int) {
 	if len(command.words) == 4 && command.words[0] == "add" && (command.words[1] == "repository" || command.words[1] == "folder") {
 		commands[strings.Join(command.words, " ")] = func() (answer, error) {
 			return add(at, machine, command.words[1:])
+		}
+	}
+	if len(command.words) >= 1 && len(command.words) <= 2 && command.words[0] == "login" {
+		commands[strings.Join(command.words, " ")] = func() (answer, error) {
+			return login(at, machine, command)
 		}
 	}
 	do, isKnown := commands[strings.Join(command.words, " ")]

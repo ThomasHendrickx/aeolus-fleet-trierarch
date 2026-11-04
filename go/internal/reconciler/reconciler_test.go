@@ -560,3 +560,58 @@ func TestASessionOfAnotherVersionIsHandedNothingWhileItsTurnIsBusy(t *testing.T)
 
 	assertActions(t, actions)
 }
+
+const noKey = "claude-code has no API key on this computer: aeolus-trierarch login claude-code --api-key"
+
+func TestARestartWhoseLoginCannotStartNowStartsNothing(t *testing.T) {
+	entry := anEntry(scout, "restarting")
+	entry.Exits, entry.RestartAt = []string{ago(10 * time.Minute)}, ago(5*time.Minute)
+	context := aContext(aRequest(scout))
+	context.Requests[0].Status = status("restarting")
+	context.Observed.StartProblems = map[string]string{scout: noKey}
+
+	next, actions := Reconcile(withEntries(entry), context)
+
+	assertActions(t, actions)
+	if got := next.Entries[scout]; got.State != "restarting" || len(got.Exits) != 1 {
+		t.Fatalf("entry: %+v, want restarting with its one exit", got)
+	}
+}
+
+func TestAShipWithNoSessionWhoseLoginCannotStartNowWaitsRestartingWithNoRestartCounted(t *testing.T) {
+	context := aContext(aRequest(scout))
+	context.Requests[0].Status = status("running")
+	context.Observed.StartProblems = map[string]string{scout: noKey}
+
+	next, actions := Reconcile(withEntries(anEntry(scout, "running")), context)
+
+	assertActions(t, actions, Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "restarting", Attempt: 0}})
+	if got := next.Entries[scout]; got.State != "restarting" || len(got.Exits) != 0 {
+		t.Fatalf("entry: %+v, want restarting with no exit counted", got)
+	}
+}
+
+func TestAShipWaitingOnItsLoginStartsOnceItCanWithNoRestartCounted(t *testing.T) {
+	context := aContext(aRequest(scout))
+	context.Requests[0].Status = status("running")
+	context.Observed.StartProblems = map[string]string{scout: noKey}
+	waiting, _ := Reconcile(withEntries(anEntry(scout, "running")), context)
+	later := aContext(aRequest(scout))
+	later.Requests[0].Status = status("restarting")
+	later.Now = now.Add(time.Minute)
+
+	next, actions := Reconcile(waiting, later)
+
+	assertActions(t, actions, Action{Kind: Launch, ShipID: scout}, Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "running", Attempt: 0, StartedAt: now.Add(time.Minute).Format(time.RFC3339Nano)}})
+	if got := next.Entries[scout]; got.State != "running" || len(got.Exits) != 0 {
+		t.Fatalf("entry: %+v, want running with no exit counted", got)
+	}
+}
+
+func TestASessionOnAKeyThatIsNotReadyIsHandedNothingForcedOrNot(t *testing.T) {
+	for _, seen := range []Seen{{Inbox: Inbox{Waiting: 1}, Turn: TurnIdle, IsKeyNotReady: true}, {Inbox: Inbox{Waiting: 1, Forced: 1}, Turn: TurnBusy, IsKeyNotReady: true}} {
+		_, actions := Reconcile(withEntries(anEntry(scout, "running")), aRunningShip(seen))
+
+		assertActions(t, actions)
+	}
+}

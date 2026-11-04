@@ -110,10 +110,13 @@ type aHarness struct {
 	holding    map[string]bool
 	handed     []string
 	sockets    *someSockets
+	// logins are the login each launch started on, in order.
+	logins []string
 }
 
 func (h *aHarness) Launch(entry reconciler.Entry, isFirstStart bool, launchID string) error {
 	h.launches = append(h.launches, launched{shipID: entry.ShipID, folder: entry.Folder, isFirstStart: isFirstStart, launchID: launchID, firstPrompt: entry.FirstPrompt})
+	h.logins = append(h.logins, entry.Login)
 	h.sessions.observed = append(h.sessions.observed, sessions.Observed{ShipID: entry.ShipID, Status: "running"})
 	return nil
 }
@@ -605,5 +608,207 @@ func TestASocketClosesWhenItsRequestIsGivenBack(t *testing.T) {
 
 	if !slices.Contains(pass.sockets.events, "close "+scout) {
 		t.Fatalf("sockets %q, want it closed", pass.sockets.events)
+	}
+}
+
+// someLogins give each ship its own login, else its harness's default, else its subscription; a start on a login with a problem cannot start, and a key not ready is said by harness.
+type someLogins struct {
+	defaults map[string]string
+	ships    map[string]string
+	problems map[string]string
+	notReady map[string]bool
+}
+
+func (l *someLogins) LoginOf(harness string, shipName string) string {
+	if login, ok := l.ships[shipName]; ok {
+		return login
+	}
+	if login, ok := l.defaults[harness]; ok {
+		return login
+	}
+	return "subscription"
+}
+func (l *someLogins) StartProblem(harness string, login string) string {
+	return l.problems[harness+":"+login]
+}
+func (l *someLogins) IsKeyReady(harness string) bool { return !l.notReady[harness] }
+
+// aProxy keeps whether each pass needed it, and fails a keep when told.
+type aProxy struct {
+	kept []bool
+	fail error
+}
+
+func (p *aProxy) Keep(isNeeded bool) error {
+	p.kept = append(p.kept, isNeeded)
+	return p.fail
+}
+
+type someKeys map[string]bool
+
+func (k someKeys) Has(harness string) bool { return k[harness] }
+
+const noKey = "claude-code has no API key on this computer: aeolus-trierarch login claude-code --api-key"
+
+func onKey(pass *aPass) *someLogins {
+	logins := &someLogins{defaults: map[string]string{"claude-code": "apiKey"}, problems: map[string]string{}, notReady: map[string]bool{}}
+	pass.pass.Logins = logins
+	return logins
+}
+
+func TestEachPassKeepsTheProxyRunningWhileAHarnessHoldsAKey(t *testing.T) {
+	pass := aRunPass(t)
+	proxy := &aProxy{}
+	keys := someKeys{}
+	pass.pass.Proxy, pass.pass.Keys = proxy, keys
+
+	pass.run(t)
+	keys["codex"] = true
+	pass.run(t)
+
+	if !slices.Equal(proxy.kept, []bool{false, true}) {
+		t.Fatalf("kept %v, want not needed, then needed once codex holds a key", proxy.kept)
+	}
+}
+
+func TestAProxyThatCannotBeKeptIsLoggedAndThePassGoesOn(t *testing.T) {
+	pass := aRunPass(t)
+	pass.pass.Proxy, pass.pass.Keys = &aProxy{fail: errors.New("the model proxy did not answer within 10s of its start")}, someKeys{"claude-code": true}
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+
+	pass.run(t)
+
+	if len(pass.harness.launches) != 1 || !slices.Contains(pass.logged, "the model proxy: the model proxy did not answer within 10s of its start") {
+		t.Fatalf("launches %d, logged %q", len(pass.harness.launches), pass.logged)
+	}
+}
+
+func TestASessionStartsOnItsLoginAndKeepsItInTheState(t *testing.T) {
+	pass := aRunPass(t)
+	onKey(pass)
+
+	pass.crewed(t)
+
+	if !slices.Equal(pass.harness.logins, []string{"apiKey"}) || pass.store.state.Entries[scout].Login != "apiKey" {
+		t.Fatalf("launched on %q, entry %+v, want apiKey", pass.harness.logins, pass.store.state.Entries[scout])
+	}
+}
+
+func TestAShipsOwnLoginComesBeforeItsHarnesssDefault(t *testing.T) {
+	pass := aRunPass(t)
+	onKey(pass).ships = map[string]string{"scout": "subscription"}
+
+	pass.crewed(t)
+
+	if !slices.Equal(pass.harness.logins, []string{"subscription"}) {
+		t.Fatalf("launched on %q, want subscription", pass.harness.logins)
+	}
+}
+
+func TestWithNoLoginsEverySessionStartsOnItsSubscription(t *testing.T) {
+	pass := aRunPass(t)
+
+	pass.crewed(t)
+
+	if !slices.Equal(pass.harness.logins, []string{"subscription"}) {
+		t.Fatalf("launched on %q, want subscription", pass.harness.logins)
+	}
+}
+
+func TestAStartOnAnotherLoginKeepsTheEarlierOneUntilThatStart(t *testing.T) {
+	pass := aRunPass(t)
+	logins := onKey(pass)
+	pass.crewed(t)
+	logins.defaults["claude-code"] = "subscription"
+	pass.sessions.observed = nil
+	pass.run(t)
+
+	entry := pass.store.state.Entries[scout]
+	want := []reconciler.EarlierLogin{{Login: "apiKey", Until: now.Format(time.RFC3339Nano)}}
+	if entry.Login != "subscription" || !reflect.DeepEqual(entry.EarlierLogins, want) {
+		t.Fatalf("entry login %q, earlier %+v, want subscription after %+v", entry.Login, entry.EarlierLogins, want)
+	}
+}
+
+func TestAStartOnTheSameLoginKeepsNoEarlierLogin(t *testing.T) {
+	pass := aRunPass(t)
+	onKey(pass)
+	pass.crewed(t)
+	pass.sessions.observed = nil
+	pass.run(t)
+
+	if entry := pass.store.state.Entries[scout]; len(pass.harness.logins) != 2 || len(entry.EarlierLogins) != 0 {
+		t.Fatalf("launched on %q, earlier %+v, want two starts and no earlier login", pass.harness.logins, entry.EarlierLogins)
+	}
+}
+
+func TestACrewWhoseLoginCannotStartIsGivenBackWithTheCauseBeforeItRegisters(t *testing.T) {
+	pass := aRunPass(t)
+	onKey(pass).problems["claude-code:apiKey"] = noKey
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+
+	pass.run(t)
+
+	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 "+noKey) || slices.ContainsFunc(pass.fleet.calls, func(call string) bool { return strings.HasPrefix(call, "register") }) || len(pass.harness.launches) != 0 {
+		t.Fatalf("calls %q, launches %d", pass.fleet.calls, len(pass.harness.launches))
+	}
+	if len(pass.store.state.Entries) != 0 {
+		t.Fatalf("entries %+v", pass.store.state.Entries)
+	}
+}
+
+func TestAShipWhoseSessionIsGoneWaitsWhileItsKeyIsNotThereAndStartsOnceItIs(t *testing.T) {
+	pass := aRunPass(t)
+	logins := onKey(pass)
+	pass.crewed(t)
+	logins.problems["claude-code:apiKey"] = noKey
+	pass.sessions.observed = nil
+
+	pass.run(t)
+	pass.fleet.requests = []reconciler.Request{aRequest("restarting")}
+	pass.run(t)
+
+	if len(pass.harness.launches) != 1 || pass.store.state.Entries[scout].State != "restarting" || len(pass.store.state.Entries[scout].Exits) != 0 {
+		t.Fatalf("launches %d, entry %+v, want waiting restarting with no restart counted", len(pass.harness.launches), pass.store.state.Entries[scout])
+	}
+	delete(logins.problems, "claude-code:apiKey")
+	pass.run(t)
+	if len(pass.harness.launches) != 2 || pass.store.state.Entries[scout].State != "running" {
+		t.Fatalf("launches %d, entry %+v, want started again once the key is there", len(pass.harness.launches), pass.store.state.Entries[scout])
+	}
+}
+
+func TestARunningSessionOnAKeyNotReadyIsHandedNothing(t *testing.T) {
+	pass := aRunPass(t)
+	logins := onKey(pass)
+	pass.crewed(t)
+	logins.notReady["claude-code"] = true
+	pass.harness.turns["/worktrees/aeolus-fleet/scout"] = reconciler.TurnIdle
+	pass.fleet.inboxes["aeolus_ct_v1_scout"] = reconciler.Inbox{Waiting: 1}
+
+	pass.run(t)
+	if len(pass.harness.handed) != 0 {
+		t.Fatalf("handed %q, want nothing while the key is not ready", pass.harness.handed)
+	}
+	logins.notReady["claude-code"] = false
+	pass.run(t)
+	if !slices.Equal(pass.harness.handed, []string{"wake " + scout}) {
+		t.Fatalf("handed %q, want a wake once the key is ready", pass.harness.handed)
+	}
+}
+
+func TestASessionOnItsSubscriptionIsHandedMessagesWhateverTheKey(t *testing.T) {
+	pass := aRunPass(t)
+	logins := onKey(pass)
+	logins.ships = map[string]string{"scout": "subscription"}
+	pass.crewed(t)
+	logins.notReady["claude-code"] = true
+	pass.harness.turns["/worktrees/aeolus-fleet/scout"] = reconciler.TurnIdle
+	pass.fleet.inboxes["aeolus_ct_v1_scout"] = reconciler.Inbox{Waiting: 1}
+
+	pass.run(t)
+
+	if !slices.Equal(pass.harness.handed, []string{"wake " + scout}) {
+		t.Fatalf("handed %q, want a wake", pass.harness.handed)
 	}
 }

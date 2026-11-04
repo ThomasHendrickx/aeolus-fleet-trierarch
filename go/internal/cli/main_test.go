@@ -211,3 +211,11 @@ func TestTheConfigurationMovesWithAeolusTrierarchConfig(t *testing.T) {
 		t.Errorf("no configuration at %s: %v", moved, err)
 	}
 }
+
+func TestTheProxyTakesItsOwnWords(t *testing.T) {
+	machine, _, _ := aMain(t)
+
+	if _, code := Main([]string{"proxy", "--folder", t.TempDir()}, machine); code != 2 {
+		t.Errorf("proxy without its folders answered %d, want 2", code)
+	}
+}
