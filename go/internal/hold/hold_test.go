@@ -21,7 +21,7 @@ type aRunningHold struct {
 
 func aHold(t *testing.T, script string) aRunningHold {
 	t.Helper()
-	files := FilesOf(t.TempDir(), ship)
+	files := FilesOf(shortFolder(t), ship)
 	folder := t.TempDir()
 	stop := make(chan struct{})
 	ended := make(chan int, 1)
@@ -47,6 +47,17 @@ func aHold(t *testing.T, script string) aRunningHold {
 		<-ended
 	})
 	return aRunningHold{files: files, stop: stop, ended: ended}
+}
+
+// shortFolder is a temporary folder with a path short enough for a socket in it: a test's own is too long.
+func shortFolder(t *testing.T) string {
+	t.Helper()
+	folder, err := os.MkdirTemp("", "hold")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(folder) })
+	return folder
 }
 
 func eventually(t *testing.T, what string, isIt func() bool) {
