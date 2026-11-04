@@ -24,10 +24,12 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/peer"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/runpass"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/service"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/shipsocket"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/workspace"
 )
@@ -86,10 +88,42 @@ func main() {
 		Log:       logLine,
 	}
 	output, code := cli.Main(os.Args[1:], machine)
+	// While the trierarch is down a session's call gets no answer, as when the fleet is down (decision 0026).
+	if opened != nil {
+		opened.CloseAll()
+	}
 	if output != "" {
 		fmt.Println(output)
 	}
 	os.Exit(code)
+}
+
+// opened are the ships' sockets run opened, closed once it ends.
+var opened *shipsocket.Sockets
+
+// shipSockets are each ship's socket for its session's fleet calls, with its crew token from the state at each call (decision 0026). A caller is allowed only under the ship's own hold, or under the trierarch itself, as its aeolus-push.sh.
+func shipSockets(at paths.Paths, fleetURL string, running sessions.Runtime) *shipsocket.Sockets {
+	store := state.File{Path: at.State}
+	trierarch := os.Getpid()
+	return shipsocket.New(shipsocket.Options{
+		Root:     at.Sockets,
+		FleetURL: fleetURL,
+		CrewTokenOf: func(shipID string) string {
+			saved, err := store.Load()
+			if err != nil {
+				return ""
+			}
+			return saved.Entries[shipID].CrewToken
+		},
+		MayCall: func(shipID string, pid int) bool {
+			roots := []int{trierarch}
+			if root := running.Root(shipID); root != 0 {
+				roots = append(roots, root)
+			}
+			return pid > 0 && peer.IsUnder(pid, roots)
+		},
+		Log: logLine,
+	})
 }
 
 // passEvery is how often the loop runs a pass: restarts and releases wait at most this long.
@@ -149,6 +183,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		places.Folders[name] = folder.Path
 		folders = append(folders, name)
 	}
+	opened = shipSockets(at, kept.FleetURL, running)
 	pass := runpass.Pass{
 		Fleet:        fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken},
 		Sessions:     running,
@@ -159,7 +194,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Now:          time.Now,
 		NewLaunchID:  newLaunchID,
 		FleetURL:     kept.FleetURL,
-		Sockets:      at.Sockets,
+		Sockets:      opened,
 		Offered:      offered,
 		Repositories: repositories,
 		Folders:      folders,
