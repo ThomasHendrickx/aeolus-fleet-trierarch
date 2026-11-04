@@ -174,10 +174,14 @@ func (p Pass) carryOut(state reconciler.State, action reconciler.Action) (reconc
 	case reconciler.Confirm:
 		return state, p.Fleet.ConfirmRelease(action.ShipID)
 	case reconciler.Forget:
-		if err := p.end(*action.Entry); err != nil {
+		// Its worktree stays, as today's trierarch leaves it (an orphan).
+		if err := p.Sessions.Stop(action.ShipID); err != nil {
 			return state, err
 		}
-		p.Log(fmt.Sprintf("%s (%s): its request is no longer assigned here, so its session, identity and worktree ended", nameOf(*action.Entry), action.ShipID))
+		if err := p.deleteIdentity(*action.Entry); err != nil {
+			return state, err
+		}
+		p.Log(fmt.Sprintf("%s (%s): its request is no longer assigned here, so its session and identity ended; its worktree stays", nameOf(*action.Entry), action.ShipID))
 		return state, nil
 	case reconciler.WriteStatus:
 		return state, p.Fleet.WriteStatus(action.ShipID, action.Status.Status, action.Status.Attempt, action.Status.StartedAt)
@@ -216,7 +220,11 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	}
 	switch {
 	case ship.Status == "notFound" || ship.Status == "retired":
-		if err := p.end(entry); err != nil {
+		// Forgotten as a request no longer assigned here is.
+		if err := p.Sessions.Stop(entry.ShipID); err != nil {
+			return state, err
+		}
+		if err := p.deleteIdentity(entry); err != nil {
 			return state, err
 		}
 		return p.remove(state, entry.ShipID)
@@ -318,8 +326,26 @@ func (p Pass) release(state reconciler.State, entry reconciler.Entry) (reconcile
 // giveBack gives back a request it cannot crew, with why; the entry it crewed with ends first.
 func (p Pass) giveBack(state reconciler.State, shipID string, settingsVersion int, reason string, entry *reconciler.Entry) (reconciler.State, error) {
 	if entry != nil {
-		if err := p.end(*entry); err != nil {
+		if err := p.Sessions.Stop(shipID); err != nil {
 			return state, err
+		}
+		if err := p.deleteIdentity(*entry); err != nil {
+			return state, err
+		}
+		// A worktree with changes is kept, reported by the state's kept worktrees, as today's trierarch keeps it.
+		if entry.Folder != "" && entry.Workspace.Kind == "worktree" {
+			unsaved, err := p.Workspace.Unsaved(entry.Folder)
+			if err != nil {
+				return state, err
+			}
+			if len(unsaved) == 0 {
+				if err := p.Workspace.Remove(*entry); err != nil {
+					return state, err
+				}
+			} else {
+				p.Log(fmt.Sprintf("Kept the worktree of %s, which has changes: %s", shipID, entry.Folder))
+				state.Kept = append(state.Kept, map[string]any{"shipId": shipID, "repository": entry.Workspace.Repository, "path": entry.Folder})
+			}
 		}
 		var err error
 		if state, err = p.remove(state, shipID); err != nil {
@@ -333,25 +359,22 @@ func (p Pass) giveBack(state reconciler.State, shipID string, settingsVersion in
 	return state, nil
 }
 
-// end ends what an entry held on this machine: its session, then its workspace.
-func (p Pass) end(entry reconciler.Entry) error {
-	if err := p.Sessions.Stop(entry.ShipID); err != nil {
-		return err
-	}
-	return p.endWorkspace(entry)
-}
-
-// endWorkspace removes the entry's identity, and a worktree it made, whatever that holds, logged first (worktrees design, items 1 to 3). A configured folder is never removed.
-func (p Pass) endWorkspace(entry reconciler.Entry) error {
+func (p Pass) deleteIdentity(entry reconciler.Entry) error {
 	if entry.Folder == "" {
 		return nil
 	}
 	if harness, err := p.harnessOf(entry); err == nil && harness.HasIdentity(entry.Folder) {
-		if err := harness.DeleteIdentity(entry.Folder); err != nil {
-			return err
-		}
+		return harness.DeleteIdentity(entry.Folder)
 	}
-	if entry.Workspace.Kind != "worktree" {
+	return nil
+}
+
+// endWorkspace removes the entry's identity, and a worktree it made, whatever that holds, logged first, as a release does (#450). A configured folder is never removed.
+func (p Pass) endWorkspace(entry reconciler.Entry) error {
+	if err := p.deleteIdentity(entry); err != nil {
+		return err
+	}
+	if entry.Folder == "" || entry.Workspace.Kind != "worktree" {
 		return nil
 	}
 	if unsaved, err := p.Workspace.Unsaved(entry.Folder); err == nil && len(unsaved) > 0 {
