@@ -3,6 +3,7 @@ package sessions
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -203,5 +204,62 @@ func TestUnderASystemdUnitAHoldStartsInAScopeOfItsOwnExpandingNothingFrom254(t *
 		if got := strings.Join(Launch(each.platform, each.invocation, each.version), " "); got != each.want {
 			t.Errorf("%+v: %q", each, got)
 		}
+	}
+}
+
+// aClaudeCodeHarness answers a turn per line but one saying slowly, which runs until the interrupt control request ends it.
+const aClaudeCodeHarness = `while read -r line; do case "$line" in *control_request*) echo '{"type":"control_response","response":{"subtype":"success","request_id":"aeolus-interrupt-1"}}'; echo '{"type":"result","subtype":"error_during_execution"}' ;; *slowly*) : ;; *) echo '{"type":"result","subtype":"success"}' ;; esac; done`
+
+func TestAnInterruptStopsTheSessionsBusyTurn(t *testing.T) {
+	runtime := aRuntime(t)
+	started(t, runtime, aClaudeCodeHarness)
+	if err := runtime.Send(scout, `{"type":"user","text":"slowly"}`); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runtime.Interrupt(scout); err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+
+	events, _ := os.ReadFile(hold.FilesOf(runtime.Sessions, scout).Events)
+	if !strings.Contains(string(events), "error_during_execution") {
+		t.Fatalf("events = %s, want the turn ended by the interrupt", events)
+	}
+}
+
+func TestASessionAnotherVersionHoldsIsListedAsOfAnotherVersion(t *testing.T) {
+	runtime := aRuntime(t)
+	started(t, runtime, aHarness)
+	runtime.Version = "9.9.9"
+
+	listed, err := runtime.List()
+
+	if err != nil || len(listed) != 1 || !listed[0].IsOtherVersion || listed[0].Status != "running" {
+		t.Fatalf("List = %+v %v, want the session running, of another version", listed, err)
+	}
+}
+
+func TestASessionOfThisVersionIsNotOfAnotherVersion(t *testing.T) {
+	runtime := aRuntime(t)
+	started(t, runtime, aHarness)
+
+	listed, err := runtime.List()
+
+	if err != nil || len(listed) != 1 || listed[0].IsOtherVersion {
+		t.Fatalf("List = %+v %v, want the session of this version", listed, err)
+	}
+}
+
+func TestTheRootOfASessionIsItsHold(t *testing.T) {
+	runtime := aRuntime(t)
+	folder := started(t, runtime, aHarness)
+	eventually(t, "the harness's pid", func() bool { _, err := os.Stat(filepath.Join(folder, "harness.pid")); return err == nil })
+	pid, _ := os.ReadFile(hold.FilesOf(runtime.Sessions, scout).PID)
+
+	if got := runtime.Root(scout); strconv.Itoa(got) != strings.TrimSpace(string(pid)) {
+		t.Fatalf("Root = %d, want the hold's pid %s", got, pid)
+	}
+	if got := runtime.Root("shp_01m6jyczpnpp5c0vxh54c966cz"); got != 0 {
+		t.Fatalf("Root of a ship with no session = %d, want 0", got)
 	}
 }

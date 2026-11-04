@@ -7,7 +7,7 @@ package runpass
 
 import (
 	"fmt"
-	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -28,6 +28,14 @@ type Fleet interface {
 	WriteStatus(shipID string, status string, attempt int, startedAt string) error
 	GiveBack(shipID string, settingsVersion int, reason string) error
 	ReportFor(crewToken string, state string, note string) error
+	Inbox(crewToken string) (reconciler.Inbox, error)
+}
+
+// Sockets are the ships' sockets, each session's fleet calls (decision 0026).
+type Sockets interface {
+	// Open opens the ship's socket, or keeps the one open, and answers its path.
+	Open(shipID string) (string, error)
+	Close(shipID string)
 }
 
 // Sessions are the sessions that run, as the passes list and stop them.
@@ -45,6 +53,14 @@ type Harness interface {
 	HasIdentity(folder string) bool
 	DeleteIdentity(folder string) error
 	SessionDied(folder string) error
+	// Turn is the session's turn as its plugin marks it: busy, idle or unknown.
+	Turn(folder string) string
+	// IsHolding is whether the session's store holds a message to hand.
+	IsHolding(folder string) bool
+	// HandOver hands one message over to the idle session (#756); false when nothing is handed.
+	HandOver(entry reconciler.Entry) (bool, error)
+	// ForceOver hands a forced message over, its busy turn stopped first (decision 0040); false when nothing is handed.
+	ForceOver(entry reconciler.Entry, isTurnBusy bool) (bool, error)
 	// Problem is why no session of it can start on this machine now, nil when one can (#827).
 	Problem() error
 }
@@ -72,8 +88,8 @@ type Pass struct {
 	// NewLaunchID is a launch id of its own for each start (#490).
 	NewLaunchID func() string
 	FleetURL    string
-	// Sockets is the folder of each ship's socket, which its identity names (decision 0026).
-	Sockets      string
+	// Sockets are the ships' sockets, which their identities name (decision 0026).
+	Sockets      Sockets
 	Offered      []string
 	Repositories []string
 	Folders      []string
@@ -94,16 +110,9 @@ func (p Pass) Run() error {
 	if err != nil {
 		return err
 	}
-	observed := reconciler.Observed{Sessions: []reconciler.Session{}, Launches: map[string]reconciler.LaunchSeen{}}
-	for _, session := range running {
-		observed.Sessions = append(observed.Sessions, reconciler.Session{ShipID: session.ShipID, Status: session.Status})
-	}
-	for shipID, entry := range state.Entries {
-		harness, ok := p.Harnesses[entry.Harness]
-		if !ok || entry.LaunchedAt == "" || entry.Folder == "" || !isRunning(running, shipID) {
-			continue
-		}
-		observed.Launches[shipID] = harness.LaunchSeen(entry)
+	observed, err := p.observe(state, running)
+	if err != nil {
+		return err
 	}
 	now := p.Now()
 	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap})
@@ -124,13 +133,50 @@ func (p Pass) Run() error {
 	return nil
 }
 
-func isRunning(observed []sessions.Observed, shipID string) bool {
-	for _, session := range observed {
-		if session.ShipID == shipID && session.Status == reconciler.SessionRunning {
-			return true
-		}
+// observe is what runs: the sessions, what each in its launch window did, and for each entry whose session runs its inbox and turn. An inbox is watched only while its session runs, a crewing one from the moment its session runs (#473); its socket is opened again, as after the trierarch stopped, since its session keeps running and calls over it (decision 0026).
+func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reconciler.Observed, error) {
+	observed := reconciler.Observed{Sessions: []reconciler.Session{}, Launches: map[string]reconciler.LaunchSeen{}, Ships: map[string]reconciler.Seen{}}
+	statusOf := map[string]string{}
+	for _, session := range running {
+		observed.Sessions = append(observed.Sessions, reconciler.Session{ShipID: session.ShipID, Status: session.Status, IsOtherVersion: session.IsOtherVersion})
+		statusOf[session.ShipID] = session.Status
 	}
-	return false
+	for _, shipID := range sortedIDs(state.Entries) {
+		entry := state.Entries[shipID]
+		harness, ok := p.Harnesses[entry.Harness]
+		status, hasSession := statusOf[shipID]
+		if !ok || entry.Folder == "" {
+			continue
+		}
+		if entry.LaunchedAt != "" && status == reconciler.SessionRunning {
+			observed.Launches[shipID] = harness.LaunchSeen(entry)
+		}
+		isWatched := (entry.State == "running" || (entry.State == "crewing" && hasSession)) && status != reconciler.SessionExited
+		if !isWatched || entry.CrewToken == "" || !harness.HasIdentity(entry.Folder) {
+			continue
+		}
+		if _, err := p.Sockets.Open(shipID); err != nil {
+			return observed, err
+		}
+		turn := harness.Turn(entry.Folder)
+		// The store is asked only when a hand-over could follow.
+		isHolding := turn == reconciler.TurnIdle && harness.IsHolding(entry.Folder)
+		inbox, err := p.Fleet.Inbox(entry.CrewToken)
+		if err != nil {
+			return observed, err
+		}
+		observed.Ships[shipID] = reconciler.Seen{Inbox: inbox, Turn: turn, IsHolding: isHolding}
+	}
+	return observed, nil
+}
+
+func sortedIDs(entries map[string]reconciler.Entry) []string {
+	ids := make([]string, 0, len(entries))
+	for id := range entries {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids
 }
 
 func (p Pass) put(state reconciler.State, entry reconciler.Entry) (reconciler.State, error) {
@@ -197,6 +243,11 @@ func (p Pass) carryOut(state reconciler.State, action reconciler.Action) (reconc
 		return state, p.Fleet.ReportFor(entry.CrewToken, "blocked", action.Note)
 	case reconciler.GiveBack:
 		return p.giveBack(state, action.ShipID, action.SettingsVersion, action.Reason, action.Entry)
+	case reconciler.Wake, reconciler.Force:
+		if !isEntry || entry.Folder == "" {
+			return state, nil
+		}
+		return state, p.handOver(entry, action)
 	}
 	return state, fmt.Errorf("no such action %s", action.Kind)
 }
@@ -265,7 +316,11 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	if state, err = p.put(state, entry); err != nil {
 		return state, err
 	}
-	identity := plugin.Identity{FleetURL: p.FleetURL, ShipID: entry.ShipID, ShipName: ship.Name, Socket: filepath.Join(p.Sockets, entry.ShipID, "fleet.sock"), Squadron: entry.Squadron}
+	socket, err := p.Sockets.Open(entry.ShipID)
+	if err != nil {
+		return state, err
+	}
+	identity := plugin.Identity{FleetURL: p.FleetURL, ShipID: entry.ShipID, ShipName: ship.Name, Socket: socket, Squadron: entry.Squadron}
 	if err := harness.WriteIdentity(folder, identity, crewToken); err != nil {
 		return state, err
 	}
@@ -359,7 +414,35 @@ func (p Pass) giveBack(state reconciler.State, shipID string, settingsVersion in
 	return state, nil
 }
 
+// handOver hands a message over to the entry's session, forced or not.
+func (p Pass) handOver(entry reconciler.Entry, action reconciler.Action) error {
+	harness, err := p.harnessOf(entry)
+	if err != nil {
+		return err
+	}
+	var isHanded bool
+	if action.Kind == reconciler.Force {
+		isHanded, err = harness.ForceOver(entry, action.IsTurnBusy)
+	} else {
+		isHanded, err = harness.HandOver(entry)
+	}
+	if err != nil || !isHanded {
+		return err
+	}
+	switch {
+	case action.Kind == reconciler.Wake:
+		p.Log(fmt.Sprintf("%s (%s): handed a message over", nameOf(entry), entry.ShipID))
+	case action.IsTurnBusy:
+		p.Log(fmt.Sprintf("%s (%s): stopped its turn and handed a forced message over", nameOf(entry), entry.ShipID))
+	default:
+		p.Log(fmt.Sprintf("%s (%s): handed a forced message over", nameOf(entry), entry.ShipID))
+	}
+	return nil
+}
+
+// deleteIdentity removes the entry's identity, and with it its ship's socket, as nothing calls over it any more (decision 0026).
 func (p Pass) deleteIdentity(entry reconciler.Entry) error {
+	p.Sockets.Close(entry.ShipID)
 	if entry.Folder == "" {
 		return nil
 	}

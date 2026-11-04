@@ -110,3 +110,45 @@ func TestNoPluginInstalledIsSaid(t *testing.T) {
 		t.Fatalf("found a plugin where none is")
 	}
 }
+
+func TestATurnNotMarkedYetIsUnknown(t *testing.T) {
+	plugin := thePlugin(t)
+	folder := anIdentity(t, plugin)
+
+	if got := plugin.Turn(folder); got != "unknown" {
+		t.Fatalf("Turn = %q, want unknown", got)
+	}
+}
+
+func TestASessionThatDiedIsMarkedBusyForTheSessionStartedAgain(t *testing.T) {
+	plugin := thePlugin(t)
+	folder := anIdentity(t, plugin)
+
+	if err := plugin.SessionDied(folder); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := plugin.Turn(folder); got != "busy" {
+		t.Fatalf("Turn = %q, want busy", got)
+	}
+}
+
+func TestAnEmptyStoreHoldsNothingToHand(t *testing.T) {
+	plugin := thePlugin(t)
+	folder := anIdentity(t, plugin)
+
+	if plugin.IsHolding(folder) {
+		t.Fatalf("IsHolding = true, want false")
+	}
+}
+
+func TestNothingIsHandedOverWhenTheFleetGivesNothing(t *testing.T) {
+	plugin := thePlugin(t)
+	folder := anIdentity(t, plugin)
+
+	for _, hand := range []func(string) (string, bool){plugin.HandOverLine, plugin.ForceOverLine} {
+		if line, ok := hand(folder); ok {
+			t.Fatalf("handed %q, want nothing", line)
+		}
+	}
+}

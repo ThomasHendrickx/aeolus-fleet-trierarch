@@ -85,10 +85,31 @@ const (
 	SessionExited  = "exited"
 )
 
-// Session is a ship's session as the trierarch sees it: running, or exited and not yet started again.
+// Session is a ship's session as the trierarch sees it: running, or exited and not yet started again; of another version when another version of the trierarch started its hold (H19).
 type Session struct {
-	ShipID string
-	Status string
+	ShipID         string
+	Status         string
+	IsOtherVersion bool
+}
+
+const (
+	TurnIdle    = "idle"
+	TurnBusy    = "busy"
+	TurnUnknown = "unknown"
+)
+
+// Inbox is what a session's inbox says: deliveries waiting, of them those forced and not handed over yet (decision 0040), or the lease ended.
+type Inbox struct {
+	IsLeaseEnded bool
+	Waiting      int
+	Forced       int
+}
+
+// Seen is what the trierarch saw of a watched session: its inbox, its turn as the plugin marks it, and whether its store holds a message to hand.
+type Seen struct {
+	Inbox     Inbox
+	Turn      string
+	IsHolding bool
 }
 
 const (
@@ -107,6 +128,8 @@ type Observed struct {
 	Sessions []Session
 	// Launches are, by ship id, what each session in its launch window did.
 	Launches map[string]LaunchSeen
+	// Ships are, by ship id, what was seen of each watched session.
+	Ships map[string]Seen
 }
 
 // Context is what reconciling needs beside the state.
@@ -140,6 +163,10 @@ const (
 	Report ActionKind = "report"
 	// GiveBack gives back a request it cannot crew while its crew is not final, with why; its entry ends first.
 	GiveBack ActionKind = "giveBack"
+	// Wake hands one message over to an idle session (#756).
+	Wake ActionKind = "wake"
+	// Force hands a forced message over, its busy turn stopped first (decision 0040).
+	Force ActionKind = "force"
 )
 
 // Status is a crew status as the trierarch writes it (#332).
@@ -154,6 +181,7 @@ type Action struct {
 	Kind            ActionKind
 	ShipID          string
 	IsResumed       bool
+	IsTurnBusy      bool
 	Status          Status
 	Note            string
 	SettingsVersion int
@@ -404,10 +432,12 @@ func launchStep(entry Entry, context Context, isFinal bool) step {
 	if launch.Kind == LaunchActive {
 		final := withoutLaunch(entry)
 		final.State, final.Since = "running", entry.LaunchedAt
-		return step{entry: &final}
+		woken := wakeStep(final, context)
+		woken.entry = &final
+		return woken
 	}
 	if !isWindowOver(entry, context.Now) {
-		return step{}
+		return wakeStep(entry, context)
 	}
 	reason := noActivity(entry, launch)
 	if isFinal {
@@ -441,18 +471,47 @@ func runningStep(entry Entry, context Context, canStart bool) step {
 	if session.Status == SessionExited {
 		return exitStep(entry, context.Now, false)
 	}
+	if session.IsOtherVersion {
+		return otherVersionStep(entry, context)
+	}
 	launch, isSeen := context.Observed.Launches[entry.ShipID]
 	if entry.LaunchedAt == "" || !isSeen {
-		return step{}
+		return wakeStep(entry, context)
 	}
 	if launch.Kind == LaunchActive {
 		closed := withoutLaunch(entry)
-		return step{entry: &closed}
+		woken := wakeStep(closed, context)
+		woken.entry = &closed
+		return woken
 	}
 	if !isWindowOver(entry, context.Now) {
-		return step{}
+		return wakeStep(entry, context)
 	}
 	return exitStep(entry, context.Now, true)
+}
+
+// otherVersionStep is a session another version of the trierarch started, as before an upgrade (H19): this one does not speak to it, so it is handed nothing, forced or not. Once its turn is idle it is started again, continuing its conversation, with no restart counted.
+func otherVersionStep(entry Entry, context Context) step {
+	if context.Observed.Ships[entry.ShipID].Turn != TurnIdle {
+		return step{}
+	}
+	started := withoutLaunch(entry)
+	return step{entry: &started, actions: []Action{{Kind: Launch, ShipID: entry.ShipID}}}
+}
+
+// wakeStep is a hand-over (#756): one message to an idle session whenever deliveries wait at the fleet or its store holds one to hand. The hand-over marks the turn busy, so the next one waits until the session is idle again. A forced message goes first, idle or busy: a busy turn is stopped for it (decision 0040).
+func wakeStep(entry Entry, context Context) step {
+	seen, ok := context.Observed.Ships[entry.ShipID]
+	if !ok || seen.Inbox.IsLeaseEnded || seen.Turn == TurnUnknown || seen.Turn == "" {
+		return step{}
+	}
+	if seen.Inbox.Forced > 0 {
+		return step{actions: []Action{{Kind: Force, ShipID: entry.ShipID, IsTurnBusy: seen.Turn == TurnBusy}}}
+	}
+	if seen.Turn == TurnIdle && (seen.Inbox.Waiting > 0 || seen.IsHolding) {
+		return step{actions: []Action{{Kind: Wake, ShipID: entry.ShipID}}}
+	}
+	return step{}
 }
 
 // exitStep is a session that exited, or failed its start: it starts again after its wait, or, with the restart budget spent, the entry is crashed. A session that failed its start still runs, so it stops first.

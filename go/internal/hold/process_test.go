@@ -1,0 +1,163 @@
+package hold
+
+import (
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+)
+
+// TestMain lets this test binary be the trierarch program a hold is started as, `<binary> hold ...`, and a caller of a hold's socket, `<binary> call <socket> <answer file>`.
+func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == "hold" {
+		os.Exit(Main(os.Args[2:], "1.2.3", os.Environ()))
+	}
+	if len(os.Args) > 3 && os.Args[1] == "call" {
+		answer, err := Call(os.Args[2], Request{Call: "state"}, 2*time.Second)
+		text, _ := json.Marshal(answer)
+		if err != nil {
+			text = []byte(err.Error())
+		}
+		_ = os.WriteFile(os.Args[3], text, 0o600)
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+// aHoldProcess starts a hold as the trierarch does, a process of its own running this test binary as `hold`, and waits until it answers.
+func aHoldProcess(t *testing.T, script string) (Files, *exec.Cmd) {
+	t.Helper()
+	return aHoldProcessOf(t, shortFolder(t), ship, script)
+}
+
+// aHoldProcessOf starts the ship's hold in the sessions folder; its harness finds the hold's socket in SOCKET and this test binary in CALLER.
+func aHoldProcessOf(t *testing.T, sessions string, shipID string, script string) (Files, *exec.Cmd) {
+	t.Helper()
+	files := FilesOf(sessions, shipID)
+	program, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder := t.TempDir()
+	command := exec.Command(program, "hold", shipID, "--sessions", sessions, "--folder", folder, "--harness", "claude-code", "--env", "CALLER="+program, "--env", "SOCKET="+files.Socket, "--", "sh", "-c", script)
+	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan struct{})
+	go func() {
+		_ = command.Wait()
+		close(exited)
+	}()
+	t.Cleanup(func() {
+		_ = command.Process.Signal(syscall.SIGTERM)
+		select {
+		case <-exited:
+		case <-time.After(10 * time.Second):
+			_ = command.Process.Kill()
+		}
+	})
+	eventually(t, "the hold answering", func() bool {
+		answer, err := Call(files.Socket, Request{Call: "state"}, time.Second)
+		return err == nil && answer.IsOK
+	})
+	return files, command
+}
+
+func isGone(pid string) bool {
+	stat, err := os.ReadFile("/proc/" + pid + "/stat")
+	return err != nil || strings.Contains(string(stat), ") Z ")
+}
+
+func TestAHoldKilledWithNoChanceToStopStillEndsItsHarnessAndWhatItStarted(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "pids")
+	_, hold := aHoldProcess(t, `sleep 300 & echo "$$ $!" > `+marker+`; wait`)
+	eventually(t, "the harness's pids", func() bool { return len(strings.Fields(read(marker))) == 2 })
+
+	if err := hold.Process.Signal(syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, pid := range strings.Fields(read(marker)) {
+		eventually(t, "process "+pid+" ended", func() bool { return isGone(pid) })
+	}
+}
+
+func TestTheGuardIsAProcessOfItsOwnAndNoNodeScript(t *testing.T) {
+	files, hold := aHoldProcess(t, `while read -r line; do :; done`)
+
+	guards := childrenOf(t, hold.Process.Pid)
+	program, _ := os.Executable()
+
+	found := false
+	for _, pid := range guards {
+		line := strings.ReplaceAll(read("/proc/"+strconv.Itoa(pid)+"/cmdline"), "\x00", " ")
+		if strings.HasPrefix(line, program+" hold --guard") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no `%s hold --guard` among the children of the hold %d (%s)", program, hold.Process.Pid, files.Folder)
+	}
+}
+
+// childrenOf is every process whose parent is the pid.
+func childrenOf(t *testing.T, pid int) []int {
+	t.Helper()
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		t.Skip("no /proc on this system")
+	}
+	children := []int{}
+	for _, entry := range entries {
+		child, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+		stat := read("/proc/" + entry.Name() + "/stat")
+		fields := strings.Fields(stat[strings.LastIndex(stat, ")")+1:])
+		if len(fields) > 1 && fields[1] == strconv.Itoa(pid) {
+			children = append(children, child)
+		}
+	}
+	return children
+}
+
+func TestTheHoldAnswersTheTrierarch(t *testing.T) {
+	files, _ := aHoldProcess(t, `while read -r line; do :; done`)
+
+	answer, err := Call(files.Socket, Request{Call: "state"}, time.Second)
+
+	if err != nil || !answer.IsOK {
+		t.Fatalf("state from the trierarch = %+v %v, want ok", answer, err)
+	}
+}
+
+func TestTheHoldRefusesItsOwnSession(t *testing.T) {
+	answered := filepath.Join(t.TempDir(), "answer")
+	aHoldProcess(t, `"$CALLER" call "$SOCKET" `+answered+`; while read -r line; do :; done`)
+
+	eventually(t, "the session's call answered", func() bool { return read(answered) != "" })
+
+	if got := read(answered); !strings.Contains(got, Refused) {
+		t.Fatalf("the session's own call = %s, want %q", got, Refused)
+	}
+}
+
+func TestTheHoldRefusesAnotherShipsSession(t *testing.T) {
+	sessions := shortFolder(t)
+	scout, _ := aHoldProcessOf(t, sessions, ship, `while read -r line; do :; done`)
+	answered := filepath.Join(t.TempDir(), "answer")
+
+	aHoldProcessOf(t, sessions, "shp_01m6jyczpnpp5c0vxh54c966cz", `"$CALLER" call `+scout.Socket+` `+answered+`; while read -r line; do :; done`)
+
+	eventually(t, "the other session's call answered", func() bool { return read(answered) != "" })
+	if got := read(answered); !strings.Contains(got, Refused) {
+		t.Fatalf("another ship's session's call = %s, want %q", got, Refused)
+	}
+}

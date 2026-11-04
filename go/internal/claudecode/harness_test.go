@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
@@ -127,5 +128,71 @@ func TestAPluginWhoseScriptsAreGoneIsWhyNoSessionCanStart(t *testing.T) {
 
 	if harness.Problem() == nil {
 		t.Fatalf("no problem with a plugin with no scripts")
+	}
+}
+
+func (r *aRuntime) Interrupt(shipID string) error {
+	r.sent = append(r.sent, "interrupt")
+	return nil
+}
+
+// withPushAnswering makes the harness's plugin a stand-in whose aeolus-push.sh prints the line and exits with the code given.
+func withPushAnswering(t *testing.T, harness Harness, line string, code int) Harness {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\necho '" + line + "'\nexit " + strconv.Itoa(code) + "\n"
+	if err := os.WriteFile(filepath.Join(root, "scripts", "aeolus-push.sh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	harness.Plugin.Root = root
+	return harness
+}
+
+func TestAHandOverTypesThePluginsLineIntoTheSessionAsAWake(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	harness = withPushAnswering(t, harness, "Aeolus handed a message", 0)
+
+	isHanded, err := harness.HandOver(anEntry(t))
+
+	if err != nil || !isHanded {
+		t.Fatalf("HandOver = %v %v, want handed", isHanded, err)
+	}
+	want := UserLine("Aeolus handed a message " + noTerminalQuestions)
+	if !slices.Equal(running.sent, []string{want}) {
+		t.Fatalf("sent %q, want %q", running.sent, want)
+	}
+}
+
+func TestNothingHandedOverTypesNothing(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	harness = withPushAnswering(t, harness, "", 1)
+
+	isHanded, err := harness.HandOver(anEntry(t))
+
+	if err != nil || isHanded || len(running.sent) != 0 {
+		t.Fatalf("HandOver = %v %v, sent %q, want nothing", isHanded, err, running.sent)
+	}
+}
+
+func TestAForcedMessageStopsABusyTurnBeforeItsLineGoesIn(t *testing.T) {
+	cases := []struct {
+		isTurnBusy bool
+		want       []string
+	}{
+		{true, []string{"interrupt", UserLine("Aeolus forced " + noTerminalQuestions)}},
+		{false, []string{UserLine("Aeolus forced " + noTerminalQuestions)}},
+	}
+	for _, c := range cases {
+		harness, running, _ := aHarness(t)
+		harness = withPushAnswering(t, harness, "Aeolus forced", 0)
+
+		isHanded, err := harness.ForceOver(anEntry(t), c.isTurnBusy)
+
+		if err != nil || !isHanded || !slices.Equal(running.sent, c.want) {
+			t.Fatalf("ForceOver(busy %v) = %v %v, sent %q, want %q", c.isTurnBusy, isHanded, err, running.sent, c.want)
+		}
 	}
 }

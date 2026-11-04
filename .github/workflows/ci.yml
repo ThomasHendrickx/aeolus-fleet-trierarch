@@ -158,9 +158,10 @@ jobs:
           cache-dependency-path: go/go.mod
       - run: npm ci
       - uses: ./.github/actions/test-images
-      - run: go build -o "$RUNNER_TEMP/aeolus-trierarch" ./cmd/aeolus-trierarch
+      # A version of its own, as a release's is, so it and today's trierarch take over each other's holds.
+      - run: go build -ldflags "-X github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/cli.Version=0.0.0-go" -o "$RUNNER_TEMP/aeolus-trierarch" ./cmd/aeolus-trierarch
         working-directory: go
-      - run: npx vitest run --project contract:integration init.integration run.integration
+      - run: npx vitest run --project contract:integration init.integration run.integration hold.integration takeover.integration
         env:
           AEOLUS_TRIERARCH_UNDER_TEST: ${{ runner.temp }}/aeolus-trierarch
 

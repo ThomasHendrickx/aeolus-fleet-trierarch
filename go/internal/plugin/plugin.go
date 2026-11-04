@@ -109,6 +109,47 @@ func (p Plugin) DeleteIdentity(folder string) error {
 	return err
 }
 
+// Turn is the session's turn as its plugin marks it: busy, idle, or unknown before one is marked.
+func (p Plugin) Turn(folder string) string {
+	marked, err := p.run("aeolus-identity.sh", folder, "", "turn")
+	state, _, _ := strings.Cut(strings.TrimSpace(marked), " ")
+	if err != nil || (state != "busy" && state != "idle") {
+		return "unknown"
+	}
+	return state
+}
+
+// toHand are the states of a store entry the trierarch hands over (#756): received, handed and not confirmed, or to hand once more.
+var toHand = []string{"received", "handed", "onceMore"}
+
+// IsHolding is whether the session's store holds a message to hand; the store keeps one line per entry: its delivery id, its state and when.
+func (p Plugin) IsHolding(folder string) bool {
+	store, _ := p.run("aeolus-identity.sh", folder, "", "store")
+	for _, line := range strings.Split(store, "\n") {
+		if fields := strings.Fields(line); len(fields) > 1 && slices.Contains(toHand, fields[1]) {
+			return true
+		}
+	}
+	return false
+}
+
+// HandOverLine hands one message over (#756) and answers the line to type into the session; none when nothing is handed.
+func (p Plugin) HandOverLine(folder string) (string, bool) {
+	return p.lineOf(folder, "hand")
+}
+
+// ForceOverLine hands a forced message over first (decision 0040); the plugin marks the stop before it hands over, so a stopped turn is not taken as one that died.
+func (p Plugin) ForceOverLine(folder string) (string, bool) {
+	return p.lineOf(folder, "force")
+}
+
+// lineOf runs aeolus-push.sh: exit 0 hands a message over and prints its line; anything else hands nothing.
+func (p Plugin) lineOf(folder string, command string) (string, bool) {
+	printed, err := p.run("aeolus-push.sh", folder, "", command)
+	line := strings.TrimSpace(printed)
+	return line, err == nil && line != ""
+}
+
 // ClearLaunch forgets the folder's launch marker, before a session is started for a new launch.
 func (p Plugin) ClearLaunch(folder string) error {
 	_, err := p.run("aeolus-identity.sh", folder, "", "launch", "clear")

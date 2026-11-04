@@ -12,10 +12,11 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 )
 
-// Runtime is the session runtime as a harness uses it: start a session, send it a line.
+// Runtime is the session runtime as a harness uses it: start a session, send it a line, stop its turn.
 type Runtime interface {
 	Start(session sessions.Start) error
 	Send(shipID string, line string) error
+	Interrupt(shipID string) error
 }
 
 // Onboarding is Claude Code's onboarding, completed before every launch, so a session stops at no first-run screen (#403).
@@ -105,5 +106,32 @@ func (h Harness) HasIdentity(folder string) bool { return h.Plugin.HasIdentity(f
 func (h Harness) DeleteIdentity(folder string) error { return h.Plugin.DeleteIdentity(folder) }
 
 func (h Harness) SessionDied(folder string) error { return h.Plugin.SessionDied(folder) }
+
+func (h Harness) Turn(folder string) string { return h.Plugin.Turn(folder) }
+
+func (h Harness) IsHolding(folder string) bool { return h.Plugin.IsHolding(folder) }
+
+// HandOver hands one message over to the entry's idle session (#756): the plugin's line, typed in as a wake; false when nothing is handed.
+func (h Harness) HandOver(entry reconciler.Entry) (bool, error) {
+	line, ok := h.Plugin.HandOverLine(entry.Folder)
+	if !ok {
+		return false, nil
+	}
+	return true, h.Runtime.Send(entry.ShipID, UserLine(WakePromptOf(line)))
+}
+
+// ForceOver hands a forced message over (decision 0040), its busy turn stopped first; false when nothing is handed.
+func (h Harness) ForceOver(entry reconciler.Entry, isTurnBusy bool) (bool, error) {
+	line, ok := h.Plugin.ForceOverLine(entry.Folder)
+	if !ok {
+		return false, nil
+	}
+	if isTurnBusy {
+		if err := h.Runtime.Interrupt(entry.ShipID); err != nil {
+			return false, err
+		}
+	}
+	return true, h.Runtime.Send(entry.ShipID, UserLine(WakePromptOf(line)))
+}
 
 func (h Harness) Problem() error { return h.Plugin.IsInstalled() }

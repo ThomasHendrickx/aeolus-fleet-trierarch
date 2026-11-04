@@ -19,12 +19,14 @@ const scout = "shp_01m6jyczpnpp5c0vxh54c966cy"
 
 var now = time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
 
-// aFleet holds the requests assigned to the trierarch and its ships, and writes down every call it was made.
+// aFleet holds the requests assigned to the trierarch and its ships, and writes down every call it was made; each session's inbox, by crew token, is asked apart.
 type aFleet struct {
 	requests []reconciler.Request
 	ships    map[string]fleet.Ship
 	calls    []string
 	refuse   string
+	inboxes  map[string]reconciler.Inbox
+	asked    []string
 }
 
 func (f *aFleet) call(text string) error {
@@ -58,6 +60,21 @@ func (f *aFleet) GiveBack(shipID string, settingsVersion int, reason string) err
 func (f *aFleet) ReportFor(crewToken string, state string, note string) error {
 	return f.call(fmt.Sprintf("report %s %s %s", crewToken, state, note))
 }
+func (f *aFleet) Inbox(crewToken string) (reconciler.Inbox, error) {
+	f.asked = append(f.asked, crewToken)
+	return f.inboxes[crewToken], nil
+}
+
+// someSockets are the ships' sockets, each under the root, as their identities name them; what was opened and closed, in order.
+type someSockets struct {
+	events []string
+}
+
+func (s *someSockets) Open(shipID string) (string, error) {
+	s.events = append(s.events, "open "+shipID)
+	return "/home/me/.aeolus/trierarch/sockets/" + shipID + "/fleet.sock", nil
+}
+func (s *someSockets) Close(shipID string) { s.events = append(s.events, "close "+shipID) }
 
 // aSessions holds the sessions that run, as the harness's launches start them.
 type aSessions struct {
@@ -89,6 +106,10 @@ type aHarness struct {
 	died       []string
 	seen       map[string]reconciler.LaunchSeen
 	problem    error
+	turns      map[string]string
+	holding    map[string]bool
+	handed     []string
+	sockets    *someSockets
 }
 
 func (h *aHarness) Launch(entry reconciler.Entry, isFirstStart bool, launchID string) error {
@@ -104,7 +125,23 @@ func (h *aHarness) LaunchSeen(entry reconciler.Entry) reconciler.LaunchSeen {
 }
 func (h *aHarness) WriteIdentity(folder string, identity plugin.Identity, crewToken string) error {
 	h.identities[folder], h.tokens[folder] = identity, crewToken
+	h.sockets.events = append(h.sockets.events, "identity "+identity.Socket)
 	return nil
+}
+func (h *aHarness) Turn(folder string) string {
+	if turn, ok := h.turns[folder]; ok {
+		return turn
+	}
+	return reconciler.TurnUnknown
+}
+func (h *aHarness) IsHolding(folder string) bool { return h.holding[folder] }
+func (h *aHarness) HandOver(entry reconciler.Entry) (bool, error) {
+	h.handed = append(h.handed, "wake "+entry.ShipID)
+	return true, nil
+}
+func (h *aHarness) ForceOver(entry reconciler.Entry, isTurnBusy bool) (bool, error) {
+	h.handed = append(h.handed, fmt.Sprintf("force %s busy %v", entry.ShipID, isTurnBusy))
+	return true, nil
 }
 func (h *aHarness) HasIdentity(folder string) bool {
 	_, ok := h.identities[folder]
@@ -148,6 +185,7 @@ func (s *aStore) Load() (reconciler.State, error)   { return s.state, nil }
 func (s *aStore) Save(state reconciler.State) error { s.state, s.saves = state, s.saves+1; return nil }
 
 type aPass struct {
+	sockets   *someSockets
 	fleet     *aFleet
 	sessions  *aSessions
 	harness   *aHarness
@@ -160,10 +198,12 @@ type aPass struct {
 func aRunPass(t *testing.T) *aPass {
 	t.Helper()
 	running := &aSessions{}
+	sockets := &someSockets{}
 	at := &aPass{
-		fleet:     &aFleet{ships: map[string]fleet.Ship{scout: {Name: "scout", Status: "awaitingCrew"}}},
+		sockets:   sockets,
+		fleet:     &aFleet{ships: map[string]fleet.Ship{scout: {Name: "scout", Status: "awaitingCrew"}}, inboxes: map[string]reconciler.Inbox{}},
 		sessions:  running,
-		harness:   &aHarness{sessions: running, identities: map[string]plugin.Identity{}, tokens: map[string]string{}, seen: map[string]reconciler.LaunchSeen{}},
+		harness:   &aHarness{sessions: running, identities: map[string]plugin.Identity{}, tokens: map[string]string{}, seen: map[string]reconciler.LaunchSeen{}, turns: map[string]string{}, holding: map[string]bool{}, sockets: sockets},
 		workspace: &aWorkspace{made: map[string]bool{}, unsaved: map[string][]string{}},
 		store:     &aStore{state: reconciler.Empty()},
 	}
@@ -178,7 +218,7 @@ func aRunPass(t *testing.T) *aPass {
 		Now:          func() time.Time { return now },
 		NewLaunchID:  func() string { launches++; return fmt.Sprintf("launch-%d", launches) },
 		FleetURL:     "https://fleet.example",
-		Sockets:      "/home/me/.aeolus/trierarch/sockets",
+		Sockets:      sockets,
 		Offered:      []string{"claude-code"},
 		Repositories: []string{"aeolus-fleet"},
 		RunningCap:   2,
@@ -435,5 +475,135 @@ func TestAFailedActionIsLoggedAndTheOthersAreCarriedOut(t *testing.T) {
 	}
 	if !slices.ContainsFunc(pass.logged, func(line string) bool { return strings.Contains(line, "the fleet refused status") }) {
 		t.Fatalf("logged %q", pass.logged)
+	}
+}
+
+const folder = "/worktrees/aeolus-fleet/scout"
+
+func TestTheShipsSocketIsOpenedBeforeItsIdentityNamesIt(t *testing.T) {
+	pass := aRunPass(t)
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+
+	pass.run(t)
+
+	want := []string{"open " + scout, "identity /home/me/.aeolus/trierarch/sockets/" + scout + "/fleet.sock"}
+	if !slices.Equal(pass.sockets.events, want) {
+		t.Fatalf("sockets %q, want %q", pass.sockets.events, want)
+	}
+}
+
+func TestARunningSessionsSocketIsOpenedAgainAtEachPassAsAfterTheTrierarchRestarted(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	pass.sockets.events = nil
+
+	pass.run(t)
+
+	if !slices.Equal(pass.sockets.events, []string{"open " + scout}) {
+		t.Fatalf("sockets %q, want it opened", pass.sockets.events)
+	}
+}
+
+func TestAnIdleSessionWithDeliveriesWaitingIsHandedAMessageItsInboxAskedWithItsCrewToken(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	pass.harness.turns[folder] = reconciler.TurnIdle
+	pass.fleet.inboxes["aeolus_ct_v1_scout"] = reconciler.Inbox{Waiting: 1}
+	pass.fleet.asked = nil
+
+	pass.run(t)
+
+	if !slices.Equal(pass.harness.handed, []string{"wake " + scout}) || !slices.Equal(pass.fleet.asked, []string{"aeolus_ct_v1_scout"}) {
+		t.Fatalf("handed %q, inbox asked with %q", pass.harness.handed, pass.fleet.asked)
+	}
+}
+
+func TestAnIdleSessionWhoseStoreHoldsAMessageIsHandedIt(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	pass.harness.turns[folder] = reconciler.TurnIdle
+	pass.harness.holding[folder] = true
+
+	pass.run(t)
+
+	if !slices.Equal(pass.harness.handed, []string{"wake " + scout}) {
+		t.Fatalf("handed %q", pass.harness.handed)
+	}
+}
+
+func TestABusySessionIsHandedAForcedMessageItsTurnStopped(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	pass.harness.turns[folder] = reconciler.TurnBusy
+	pass.fleet.inboxes["aeolus_ct_v1_scout"] = reconciler.Inbox{Waiting: 1, Forced: 1}
+
+	pass.run(t)
+
+	if !slices.Equal(pass.harness.handed, []string{"force " + scout + " busy true"}) {
+		t.Fatalf("handed %q", pass.harness.handed)
+	}
+}
+
+func TestASessionThatExitedIsNotWatched(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	pass.sessions.observed = []sessions.Observed{{ShipID: scout, Status: "exited"}}
+	pass.harness.turns[folder] = reconciler.TurnIdle
+	pass.fleet.inboxes["aeolus_ct_v1_scout"] = reconciler.Inbox{Waiting: 1}
+	pass.fleet.asked = nil
+
+	pass.run(t)
+
+	if len(pass.fleet.asked) != 0 || len(pass.harness.handed) != 0 {
+		t.Fatalf("inbox asked with %q, handed %q, want neither", pass.fleet.asked, pass.harness.handed)
+	}
+}
+
+func TestASessionAnotherVersionHoldsIsStartedAgainOnceIdle(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	pass.sessions.observed = []sessions.Observed{{ShipID: scout, Status: "running", IsOtherVersion: true}}
+	pass.harness.turns[folder] = reconciler.TurnIdle
+	pass.fleet.inboxes["aeolus_ct_v1_scout"] = reconciler.Inbox{Waiting: 1}
+
+	pass.run(t)
+
+	last := pass.harness.launches[len(pass.harness.launches)-1]
+	if len(pass.harness.launches) != 2 || last.isFirstStart || len(pass.harness.handed) != 0 || !slices.Equal(pass.harness.died, []string{folder}) {
+		t.Fatalf("launches %+v, handed %q, died %q", pass.harness.launches, pass.harness.handed, pass.harness.died)
+	}
+}
+
+func TestTheSocketClosesWithTheIdentity(t *testing.T) {
+	cases := []struct {
+		name string
+		end  func(p *aPass)
+	}{
+		{"forgotten", func(p *aPass) { p.fleet.requests = nil }},
+		{"released", func(p *aPass) { p.fleet.requests = []reconciler.Request{aRequest("releasing")} }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			pass := aRunPass(t)
+			pass.crewed(t)
+			c.end(pass)
+			pass.sockets.events = nil
+
+			pass.run(t)
+
+			if !slices.Contains(pass.sockets.events, "close "+scout) {
+				t.Fatalf("sockets %q, want it closed", pass.sockets.events)
+			}
+		})
+	}
+}
+
+func TestASocketClosesWhenItsRequestIsGivenBack(t *testing.T) {
+	pass := aRunPass(t)
+
+	pass.givenBack(t)
+
+	if !slices.Contains(pass.sockets.events, "close "+scout) {
+		t.Fatalf("sockets %q, want it closed", pass.sockets.events)
 	}
 }
