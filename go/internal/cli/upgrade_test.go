@@ -138,7 +138,7 @@ func anUpgradeOn(t *testing.T) *anUpgrade {
 		Service:   machine.service,
 		Plugins:   machine.plugins,
 		Sleep:     func() {},
-		Run: func(file string, isPluginStep bool, words ...string) (string, int) {
+		Trierarch: func(file string, isPluginStep bool, words ...string) (string, int) {
 			text, err := os.ReadFile(file)
 			if err != nil {
 				return err.Error(), 127
@@ -360,8 +360,8 @@ func TestUpgradeLeavesTheOldBinaryWhenTheNewOneDoesNotRun(t *testing.T) {
 
 func TestUpgradeLeavesTheOldBinaryWhenTheNewOneDoesNotAcceptTheConfiguration(t *testing.T) {
 	machine := anUpgradeOn(t)
-	run := machine.upgrade.Run
-	machine.upgrade.Run = func(file string, isPluginStep bool, words ...string) (string, int) {
+	run := machine.upgrade.Trierarch
+	machine.upgrade.Trierarch = func(file string, isPluginStep bool, words ...string) (string, int) {
 		if words[0] == "config" {
 			return `{"error":"the configuration at config.json does not fit: json: unknown field \"model\""}`, 1
 		}
@@ -370,7 +370,7 @@ func TestUpgradeLeavesTheOldBinaryWhenTheNewOneDoesNotAcceptTheConfiguration(t *
 
 	_, err := machine.upgrade.Run(released)
 
-	if err == nil || !strings.Contains(err.Error(), "The trierarch 0.41.0 does not accept the configuration") || !strings.Contains(err.Error(), `unknown field \"model\"`) {
+	if err == nil || !strings.Contains(err.Error(), "The trierarch 0.41.0 does not accept the configuration") || !strings.Contains(err.Error(), `unknown field "model"`) {
 		t.Fatalf("Run(a configuration 0.41.0 refuses) = %v, want it refused, saying why", err)
 	}
 	leavesTheOldBinary(t, machine)
