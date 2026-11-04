@@ -638,6 +638,10 @@ type someLogins struct {
 	defaults map[string]string
 	ships    map[string]string
 	problems map[string]string
+	// inFolder are, by folder, why a session there cannot start on its subscription, as a key in reach (K6).
+	inFolder map[string]string
+	// asked are the options each start problem was asked with.
+	asked    []map[string]string
 	notReady map[string]bool
 	// keyStates are, by harness, the state of its key and since when.
 	keyStates map[string][2]string
@@ -652,7 +656,11 @@ func (l *someLogins) LoginOf(harness string, shipName string) string {
 	}
 	return "subscription"
 }
-func (l *someLogins) StartProblem(harness string, login string) string {
+func (l *someLogins) StartProblem(harness string, login string, options map[string]string, folder string) string {
+	l.asked = append(l.asked, options)
+	if problem, ok := l.inFolder[folder]; ok && login == "subscription" {
+		return problem
+	}
 	return l.problems[harness+":"+login]
 }
 func (l *someLogins) IsKeyReady(harness string) bool { return !l.notReady[harness] }
@@ -784,6 +792,46 @@ func TestACrewWhoseLoginCannotStartIsGivenBackWithTheCauseBeforeItRegisters(t *t
 	}
 	if len(pass.store.state.Entries) != 0 {
 		t.Fatalf("entries %+v", pass.store.state.Entries)
+	}
+}
+
+const keyInReach = "claude-code would reach an API key on its subscription (apiKeyHelper in /home/.claude/settings.json): remove it, or run the ship on its API key"
+
+func TestACrewOnItsSubscriptionWithAKeyInReachInItsFolderIsGivenBackBeforeItRegistersAndItsWorktreeRemoved(t *testing.T) {
+	pass := aRunPass(t)
+	logins := &someLogins{inFolder: map[string]string{"/worktrees/aeolus-fleet/scout": keyInReach}}
+	pass.pass.Logins = logins
+	request := aRequest("")
+	request.Settings.Options = map[string]string{"model": "opus"}
+	pass.fleet.requests = []reconciler.Request{request}
+
+	pass.run(t)
+
+	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 "+keyInReach) || slices.ContainsFunc(pass.fleet.calls, func(call string) bool { return strings.HasPrefix(call, "register") }) || len(pass.harness.launches) != 0 {
+		t.Fatalf("calls %q, launches %d, want given back before it registers", pass.fleet.calls, len(pass.harness.launches))
+	}
+	if !slices.Equal(pass.workspace.removed, []string{"/worktrees/aeolus-fleet/scout"}) || len(pass.store.state.Entries) != 0 {
+		t.Fatalf("removed %q, entries %+v, want its worktree removed and no entry", pass.workspace.removed, pass.store.state.Entries)
+	}
+	if len(logins.asked) != 1 || logins.asked[0]["model"] != "opus" {
+		t.Fatalf("asked with %v, want the request's options", logins.asked)
+	}
+}
+
+func TestAShipWhoseSessionIsGoneWaitsWhileAKeyIsInReachInItsFolder(t *testing.T) {
+	pass := aRunPass(t)
+	logins := &someLogins{}
+	pass.pass.Logins = logins
+	pass.crewed(t)
+	logins.inFolder = map[string]string{"/worktrees/aeolus-fleet/scout": keyInReach}
+	pass.sessions.observed = nil
+
+	pass.run(t)
+	pass.fleet.requests = []reconciler.Request{aRequest("restarting")}
+	pass.run(t)
+
+	if len(pass.harness.launches) != 1 || pass.store.state.Entries[scout].State != "restarting" || len(pass.store.state.Entries[scout].Exits) != 0 {
+		t.Fatalf("launches %d, entry %+v, want waiting restarting with no restart counted", len(pass.harness.launches), pass.store.state.Entries[scout])
 	}
 }
 
