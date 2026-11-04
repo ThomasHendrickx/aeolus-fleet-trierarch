@@ -374,7 +374,11 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Repositories: repositories,
 		Folders:      folders,
 		RunningCap:   configuration.Caps.Running,
-		Logins:       keys.Logins{Configured: configuration.Logins, States: keys.States{Keys: at.Keys, File: modelproxy.FilesOf(at.Proxy).KeyStates}},
+		Logins: keys.Logins{Configured: configuration.Logins, States: keys.States{Keys: at.Keys, File: modelproxy.FilesOf(at.Proxy).KeyStates}, Subscriptions: map[string]keys.Subscription{
+			// What each harness reads itself, checked before a session starts on its subscription (api keys K6).
+			"claude-code": claudecode.Subscription{Settings: configuration.Harnesses["claude-code"], Managed: claudecode.ManagedSettings(), User: claudecode.UserSettings(home, env["CLAUDE_CONFIG_DIR"])},
+			"codex":       codex.Subscription{},
+		}},
 		// The model proxy runs while any harness holds an API key (headless H16); a pass starts it again when it is gone.
 		Proxy: proxy,
 		Keys:  keys.Files{Folder: at.Keys},

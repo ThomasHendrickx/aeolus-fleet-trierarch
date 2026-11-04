@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -222,4 +223,40 @@ func IsInstalled() bool {
 // IsSignedIn says whether `codex login status` reports a login.
 func IsSignedIn() bool {
 	return exec.Command("codex", "login", "status").Run() == nil
+}
+
+// Subscription is what Codex reads itself before a session on its subscription starts (api keys K6): how it is logged in, as `codex login status` says.
+type Subscription struct {
+	// Program is the program to run, `codex` unless a test runs another.
+	Program string
+}
+
+// Problem is why a session would reach a key on its subscription: Codex logged in with an API key, not ChatGPT; empty otherwise. Its line may show part of the key, so only the kind is kept.
+func (s Subscription) Problem(options map[string]string, folder string) string {
+	program := s.Program
+	if program == "" {
+		program = "codex"
+	}
+	// It says how it is logged in, and exits other than 0 when it is not: the text alone tells.
+	said, _ := exec.Command(program, "login", "status").CombinedOutput()
+	if loginKindOf(string(said)) != "apiKey" {
+		return ""
+	}
+	return "codex is logged in with an API key, not ChatGPT: log Codex in with ChatGPT (codex logout, then codex login), or run the ship on its API key"
+}
+
+var (
+	usingChatGPT = regexp.MustCompile(`(?i)using ChatGPT`)
+	usingAPIKey  = regexp.MustCompile(`(?i)API key`)
+)
+
+// loginKindOf is how `codex login status` says Codex is logged in: chatgpt, apiKey or none.
+func loginKindOf(said string) string {
+	switch {
+	case usingChatGPT.MatchString(said):
+		return "chatgpt"
+	case usingAPIKey.MatchString(said):
+		return "apiKey"
+	}
+	return "none"
 }

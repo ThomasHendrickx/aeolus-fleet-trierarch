@@ -82,8 +82,8 @@ type Workspace interface {
 type Logins interface {
 	// LoginOf is the login a ship's next session starts on: its own, else its harness's default, else its subscription.
 	LoginOf(harness string, shipName string) string
-	// StartProblem is why a session of the harness cannot start on the login now, empty when it can.
-	StartProblem(harness string, login string) string
+	// StartProblem is why a session of the harness, with the options, in the folder, cannot start on the login now, empty when it can.
+	StartProblem(harness string, login string, options map[string]string, folder string) string
 	IsKeyReady(harness string) bool
 	// KeyState is where the harness's API key stands: none, ready, refused or outOfCredit, and since when for one its vendor's answer set.
 	KeyState(harness string) (state string, at string)
@@ -140,11 +140,12 @@ func (p Pass) loginOf(entry reconciler.Entry) string {
 	return p.Logins.LoginOf(entry.Harness, nameOf(entry))
 }
 
-func (p Pass) startProblem(harness string, login string) string {
+// startProblem is why the entry's session cannot start on the login now, asked in its folder with its options, whose own settings count (api keys K6).
+func (p Pass) startProblem(entry reconciler.Entry, login string) string {
 	if p.Logins == nil {
 		return ""
 	}
-	return p.Logins.StartProblem(harness, login)
+	return p.Logins.StartProblem(entry.Harness, login, entry.Options, entry.Folder)
 }
 
 // keepProxy runs the proxy while any harness holds a key; a failure is logged, and the next pass tries again.
@@ -228,7 +229,7 @@ func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reco
 		status, hasSession := statusOf[shipID]
 		// Asked only of an entry whose session would start: a running session keeps the login it started with (K3).
 		if entry.State == "restarting" || (entry.State == "running" && !hasSession) {
-			if problem := p.startProblem(entry.Harness, p.loginOf(entry)); problem != "" {
+			if problem := p.startProblem(entry, p.loginOf(entry)); problem != "" {
 				observed.StartProblems[shipID] = problem
 			}
 		}
@@ -410,12 +411,6 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	if problem := harness.Problem(); problem != nil {
 		return p.giveBack(state, entry.ShipID, entry.SettingsVersion, problem.Error(), &entry)
 	}
-	// A login that cannot start it is this computer's state (api keys A5): given back at once, it may be crewed on another.
-	entry.ShipName = ship.Name
-	login := p.loginOf(entry)
-	if problem := p.startProblem(entry.Harness, login); problem != "" {
-		return p.giveBack(state, entry.ShipID, entry.SettingsVersion, problem, &entry)
-	}
 	folder, err := p.Workspace.Prepare(entry, ship.Name)
 	if err != nil {
 		return state, err
@@ -424,6 +419,11 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	entry.ShipName, entry.Folder = ship.Name, folder
 	if state, err = p.put(state, entry); err != nil {
 		return state, err
+	}
+	// A login that cannot start it is this computer's state (api keys A5): given back at once, it may be crewed on another. Asked in its folder with its options, whose own settings count (K6).
+	login := p.loginOf(entry)
+	if problem := p.startProblem(entry, login); problem != "" {
+		return p.giveBack(state, entry.ShipID, entry.SettingsVersion, problem, &entry)
 	}
 	secret, err := p.Fleet.StartingSecret(entry.ShipID)
 	if err != nil {
