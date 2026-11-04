@@ -176,28 +176,40 @@ func (r releaseSource) Fetch(version string) ([]byte, error) {
 	return r.source.Fetch(context.Background(), version, runtime.GOOS, runtime.GOARCH)
 }
 
-// plugins is the aeolus-fleet plugin of Claude Code, as upgrade updates it; Codex's upgrade does not update yet.
+// plugins is the aeolus-fleet plugin of Claude Code and of Codex, as upgrade updates it.
 type plugins struct {
 	home string
 	env  map[string]string
 }
 
 func (p plugins) Update(harness string, tag string) error {
-	if harness != "claude-code" {
-		return fmt.Errorf("the plugin for %s is not updated by the Go trierarch", harness)
+	switch harness {
+	case "claude-code":
+		return claudecode.PluginUpdateOf(p.home, p.env["CLAUDE_CONFIG_DIR"]).Update(tag)
+	case "codex":
+		// The running trierarch took its plugin scripts from the newest version when it started.
+		running := paths.Of(p.home, "").Running
+		return codex.PluginUpdateOf(p.home, p.env["CODEX_HOME"], func() int { return cli.RunningPID(running) }).Update(tag)
 	}
-	return claudecode.PluginUpdateOf(p.home, p.env["CLAUDE_CONFIG_DIR"]).Update(tag)
+	return fmt.Errorf("the plugin for %s is not updated by upgrade", harness)
 }
 
 func (p plugins) Version(harness string) string {
-	if harness != "claude-code" {
-		return ""
+	switch harness {
+	case "claude-code":
+		found, err := plugin.Find(p.home, p.env)
+		if err != nil {
+			return ""
+		}
+		return claudecode.PluginVersion(found.Root)
+	case "codex":
+		found, err := plugin.FindCodex(p.home, p.env)
+		if err != nil {
+			return ""
+		}
+		return codex.PluginVersion(found.Root)
 	}
-	found, err := plugin.Find(p.home, p.env)
-	if err != nil {
-		return ""
-	}
-	return claudecode.PluginVersion(found.Root)
+	return ""
 }
 
 // runTrierarch runs a trierarch file with the words, as the plugin step of an upgrade when isPluginStep: its stdout and its exit status, 127 when it could not run at all.

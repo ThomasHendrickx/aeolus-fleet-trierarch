@@ -63,6 +63,10 @@ type Upgrade struct {
 	Releases  Releases
 	Service   UpgradeService
 	Plugins   Plugins
+	// Codex trusts the aeolus-fleet plugin's new or changed hooks once Codex's plugin is updated.
+	Codex Codex
+	// HookFolder is the folder Codex sees the plugin's hooks from: the configuration's worktree root.
+	HookFolder string
 	// Trierarch runs a trierarch file with the words, as the plugin step of an upgrade when isPluginStep: what it says on stdout and its exit status.
 	Trierarch func(program string, isPluginStep bool, words ...string) (string, int)
 	Sleep     func()
@@ -169,11 +173,6 @@ func (u Upgrade) updatePlugin() (bool, []string) {
 	tag := "v" + u.Version
 	for _, harness := range u.Harnesses {
 		name := harnessNames[harness]
-		if harness == codex {
-			isUpdated = false
-			said = append(said, "The aeolus-fleet plugin for Codex is not updated by the Go trierarch yet: run codex plugin marketplace upgrade aeolus-fleet, then trust its hooks once with aeolus-trierarch init.")
-			continue
-		}
 		if name == "" {
 			continue
 		}
@@ -184,10 +183,30 @@ func (u Upgrade) updatePlugin() (bool, []string) {
 			continue
 		}
 		after := orNone(u.Plugins.Version(harness))
+		keeps := ""
+		if harness == codex {
+			keeps = " Running Codex sessions keep the version they started with."
+		}
 		if after == before {
 			said = append(said, fmt.Sprintf("The aeolus-fleet plugin for %s is on %s already.", name, after))
 		} else {
-			said = append(said, fmt.Sprintf("Updated the aeolus-fleet plugin for %s from %s to %s.", name, before, after))
+			said = append(said, fmt.Sprintf("Updated the aeolus-fleet plugin for %s from %s to %s.%s", name, before, after, keeps))
+		}
+		if harness != codex {
+			continue
+		}
+		// Codex starts on its newest version folder, and the update keeps a newer one for the sessions running on it (#652).
+		if releaseVersion.MatchString(after) && byVersion(after, u.Version) > 0 {
+			said = append(said, fmt.Sprintf("New Codex sessions keep starting on the aeolus-fleet plugin %s, not on %s: Codex starts on the newest version it has, and %s stays for the Codex sessions running on it.", after, u.Version, after))
+		}
+		trusted, err := u.Codex.TrustAeolusHooks(u.HookFolder)
+		if err != nil {
+			isUpdated = false
+			said = append(said, fmt.Sprintf("Codex does not trust the aeolus-fleet plugin's hooks yet: %v. Each Codex launch trusts them first, and starts no session while they cannot be; fix what it says, then run aeolus-trierarch upgrade again.", err))
+			continue
+		}
+		if len(trusted) > 0 {
+			said = append(said, fmt.Sprintf("Codex trusts the aeolus-fleet plugin's %d new or changed hooks.", len(trusted)))
 		}
 	}
 	return isUpdated, said
