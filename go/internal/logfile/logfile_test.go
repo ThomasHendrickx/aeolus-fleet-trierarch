@@ -17,10 +17,9 @@ const record = `2026-10-11T12:00:00Z aeolus-trierarch runs` + "\n"
 var now = time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
 
 type aLog struct {
-	t       *testing.T
-	folder  string
-	file    string
-	written *os.File
+	t      *testing.T
+	folder string
+	file   string
 }
 
 func newLog(t *testing.T) aLog {
