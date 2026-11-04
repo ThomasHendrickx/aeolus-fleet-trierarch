@@ -235,7 +235,13 @@ func (u Upgrade) install(to string) (UpgradeReport, error) {
 	if err := os.Link(u.Program, previous); err != nil {
 		return UpgradeReport{}, refused(err, "The trierarch %s could not be kept aside: %v\n%s", from, err, keeps)
 	}
-	defer os.Remove(previous)
+	// The old file is removed once the new one is confirmed or the old one is back in place, never when it could not be put back: then it is the only copy.
+	isKept := false
+	defer func() {
+		if !isKept {
+			os.Remove(previous)
+		}
+	}()
 	if err := os.Rename(staged, u.Program); err != nil {
 		return UpgradeReport{}, refused(err, "The trierarch %s could not be put in place of %s: %v\n%s", to, u.Program, err, keeps)
 	}
@@ -251,15 +257,20 @@ func (u Upgrade) install(to string) (UpgradeReport, error) {
 		report.Said = append(report.Said, fmt.Sprintf("The service runs %s now. Its sessions kept running: the new process takes them over.", to))
 		return report, nil
 	}
-	return UpgradeReport{}, u.putBack(previous, to)
+	err = u.putBack(previous, to)
+	isKept = errors.Is(err, errNotPutBack)
+	return UpgradeReport{}, err
 }
+
+// errNotPutBack is the reason of a refusal whose old file could not be put back, which stays kept beside the program.
+var errNotPutBack = errors.New("the old trierarch could not be put back")
 
 // putBack puts the old file back after the installed version did not start, and restarts the service on it.
 func (u Upgrade) putBack(previous string, to string) error {
 	from := u.Version
 	failed := fmt.Sprintf("The trierarch %s did not start: it did not say its version within 30 seconds (aeolus-trierarch logs says why).", to)
 	if err := os.Rename(previous, u.Program); err != nil {
-		return refused(err, "%s\nThe trierarch %s could not be put back in place of %s: %v. Run aeolus-trierarch upgrade %s from a copy of it.", failed, from, u.Program, err, from)
+		return refused(errors.Join(errNotPutBack, err), "%s\nThe trierarch %s could not be put back in place of %s: %v. It is kept at %s: run aeolus-trierarch upgrade %s from it.", failed, from, u.Program, err, previous, from)
 	}
 	if err := errors.Join(u.Service.Rewrite(), u.Service.Restart()); err != nil {
 		return refused(err, "%s\nThe trierarch %s is back in place, but the service did not restart on it: %v", failed, from, err)
