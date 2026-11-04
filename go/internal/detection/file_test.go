@@ -60,6 +60,7 @@ func TestTheFileReadsWhatTodaysTrierarchWrote(t *testing.T) {
 	}
 }
 
+// Its options are written by name, where today's trierarch writes them as detected: the order of an object's keys means nothing to either.
 func TestTheFileWritesItAsTodaysTrierarchDoes(t *testing.T) {
 	file := File{Path: filepath.Join(t.TempDir(), "trierarch", "detected.json")}
 	if err := os.MkdirAll(filepath.Dir(file.Path), 0o700); err != nil {
@@ -80,18 +81,6 @@ func TestTheFileWritesItAsTodaysTrierarchDoes(t *testing.T) {
     "detectedAt": "2026-11-04T10:00:00.000Z",
     "confirmedAt": "2026-11-04T10:00:00.000Z",
     "options": {
-      "model": {
-        "values": {
-          "claude-sonnet-5": [
-            "--model",
-            "claude-sonnet-5"
-          ],
-          "claude-opus-5": [
-            "--model",
-            "claude-opus-5"
-          ]
-        }
-      },
       "effort": {
         "values": {
           "low": [
@@ -101,6 +90,18 @@ func TestTheFileWritesItAsTodaysTrierarchDoes(t *testing.T) {
           "high": [
             "--effort",
             "high"
+          ]
+        }
+      },
+      "model": {
+        "values": {
+          "claude-sonnet-5": [
+            "--model",
+            "claude-sonnet-5"
+          ],
+          "claude-opus-5": [
+            "--model",
+            "claude-opus-5"
           ]
         }
       }
