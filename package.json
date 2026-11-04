@@ -19,7 +19,8 @@
     "test:unit": "vitest run --project '*:unit'",
     "test:integration": "vitest run --project '*:integration'",
     "test:e2e": "vitest run --project '*:e2e'",
-    "set-version": "node scripts/set-version.ts"
+    "set-version": "node scripts/set-version.ts",
+    "go:schema": "vitest run --project trierarch:unit go-configuration-schema --update"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
