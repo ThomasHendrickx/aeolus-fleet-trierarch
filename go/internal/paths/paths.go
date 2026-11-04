@@ -14,6 +14,11 @@ type Paths struct {
 	Running      string
 	Logs         string
 	Worktrees    string
+	State        string
+	// Sessions holds a folder per ship with its hold's files.
+	Sessions string
+	// Sockets holds a folder per ship with its fleet socket.
+	Sockets string
 }
 
 // Of the user's home folder, with the configuration at config when it is not empty.
@@ -30,5 +35,8 @@ func Of(homeDirectory string, config string) Paths {
 		Running:      filepath.Join(home, "running.json"),
 		Logs:         filepath.Join(home, "logs"),
 		Worktrees:    filepath.Join(home, "worktrees"),
+		State:        filepath.Join(home, "state.json"),
+		Sessions:     filepath.Join(home, "sessions"),
+		Sockets:      filepath.Join(home, "sockets"),
 	}
 }

@@ -1,18 +1,23 @@
 // Package cli is the Go trierarch's command line, `aeolus-trierarch`: init,
-// status, run and uninstall so far, as docs/trierarch.md says them. Each
+// status, list, add, start, stop, restart, run, uninstall and hold so far, as docs/trierarch.md says them. Each
 // command answers what it says and its exit status; a refusal is said on
 // stdout, as JSON under --json.
 package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 )
 
 // Version is the version this trierarch runs, set by the release as it builds the binary.
@@ -21,7 +26,15 @@ var Version = "0.0.0"
 // ServiceManager is the service as the commands use it.
 type ServiceManager interface {
 	Service
+	Start() error
+	Stop() error
 	Uninstall() error
+}
+
+// Sessions are the sessions that run on the machine, as uninstall stops them.
+type Sessions interface {
+	List() ([]sessions.Observed, error)
+	Stop(shipID string) error
 }
 
 // Machine is what the commands reach on the machine they run on.
@@ -41,6 +54,14 @@ type Machine struct {
 	Sleep       func()
 	// Stop is closed when the process is told to stop (SIGTERM, SIGINT).
 	Stop <-chan struct{}
+	// CoreVersionRefusal is why the trierarch may not run against the fleet's core, empty when it may.
+	CoreVersionRefusal func(fleetURL string) string
+	// NewPass is one pass of the run loop, with the crew file and configuration run read.
+	NewPass   func(at paths.Paths, kept crew.File, configuration config.Configuration) (func() error, error)
+	PassEvery time.Duration
+	Sessions  func(at paths.Paths) Sessions
+	// Log writes a line to the trierarch's log.
+	Log func(line string)
 }
 
 const usage = `Usage: aeolus-trierarch <command>
@@ -48,8 +69,13 @@ const usage = `Usage: aeolus-trierarch <command>
   init --fleet-url <url> --ship-id <id> --secret <secret> [--plugin-ship-id <id>] [--yes]
                  set this machine up from the trierarch plugin's setup line
   status         how the trierarch stands on this machine
+  list           the ships it crews
+  add repository|folder <name> <path>
+                 add a place the trierarch may crew ships in, and trust it
+  start, stop, restart
+                 drive the service; the sessions keep running
   run            what the service runs
-  uninstall      remove the service
+  uninstall      remove the service and stop every session
   --version, -v  the version this runs
 
   --json         answer as JSON
@@ -106,6 +132,10 @@ type answer struct {
 
 // Main runs one command line of aeolus-trierarch and answers what it says and its exit status.
 func Main(args []string, machine Machine) (string, int) {
+	// The hold takes its own words: the trierarch starts it, never a person.
+	if len(args) > 0 && args[0] == "hold" {
+		return "", hold.Main(args[1:], Version, machine.Environ)
+	}
 	command, ok := parse(args)
 	if !ok {
 		return usage, 2
@@ -150,21 +180,52 @@ func Main(args []string, machine Machine) (string, int) {
 		"run": func() (answer, error) {
 			return run(at, machine)
 		},
+		"list": func() (answer, error) {
+			return list(at)
+		},
+		"start": func() (answer, error) {
+			return drive(at, machine, "started", machine.Service(at).Start)
+		},
+		"restart": func() (answer, error) {
+			return drive(at, machine, "restarted", machine.Service(at).Restart)
+		},
+		"stop": func() (answer, error) {
+			if err := machine.Service(at).Stop(); err != nil {
+				return answer{}, err
+			}
+			said := "The trierarch stopped; its sessions keep running, and nothing is handed to them until it runs again."
+			return answer{data: map[string]any{"service": "stopped", "said": []string{said}}, text: said}, nil
+		},
 		"uninstall": func() (answer, error) {
 			manager := machine.Service(at)
 			before, err := manager.Status()
 			if err != nil {
 				return answer{}, err
 			}
+			// The service goes first, so nothing starts a session again.
 			if err := manager.Uninstall(); err != nil {
 				return answer{}, err
 			}
+			running, err := machine.Sessions(at).List()
+			if err != nil {
+				return answer{}, err
+			}
+			for _, session := range running {
+				if err := machine.Sessions(at).Stop(session.ShipID); err != nil {
+					return answer{}, err
+				}
+			}
 			said := []string{
-				fmt.Sprintf("Removed the service (%s): the trierarch no longer runs.", before.File),
+				fmt.Sprintf("Removed the service (%s): the trierarch no longer runs, and stopped every session it ran.", before.File),
 				fmt.Sprintf("Its configuration, crew token, state and logs stay in %s. Its ship, and the ships it crewed, stay crewed in the fleet: release them in the console.", at.Home),
 			}
 			return answer{data: map[string]any{"service": before.File, "said": said}, text: strings.Join(said, "\n")}, nil
 		},
+	}
+	if len(command.words) == 4 && command.words[0] == "add" && (command.words[1] == "repository" || command.words[1] == "folder") {
+		commands[strings.Join(command.words, " ")] = func() (answer, error) {
+			return add(at, machine, command.words[1:])
+		}
 	}
 	do, isKnown := commands[strings.Join(command.words, " ")]
 	if !isKnown {
@@ -226,15 +287,38 @@ func status(at paths.Paths, machine Machine) (answer, error) {
 	return answer{data: report, text: strings.Join(text, "\n")}, nil
 }
 
-// run is what the service runs: it says its pid and version in running.json, then waits to be stopped. It crews no ship yet.
+// run is what the service runs: once the fleet's core is one it runs against, it says its pid and version in running.json, then runs a pass every interval until it is stopped. A failed pass is logged and the loop goes on.
 func run(at paths.Paths, machine Machine) (answer, error) {
+	kept, err := crew.Read(at.CrewToken)
+	if err != nil {
+		return answer{}, err
+	}
+	configuration, err := config.Load(at.Config)
+	if err != nil {
+		return answer{}, err
+	}
+	if refusal := machine.CoreVersionRefusal(kept.FleetURL); refusal != "" {
+		return answer{}, errors.New(refusal)
+	}
+	pass, err := machine.NewPass(at, kept, configuration)
+	if err != nil {
+		return answer{}, err
+	}
 	if err := os.MkdirAll(at.Home, 0o700); err != nil {
 		return answer{}, err
 	}
 	if err := os.WriteFile(at.Running, []byte(mustJSON(Running{PID: machine.PID, Version: Version})+"\n"), 0o644); err != nil {
 		return answer{}, err
 	}
-	fmt.Fprintf(os.Stderr, "aeolus-trierarch %s runs as pid %d; it crews no ship yet.\n", Version, machine.PID)
-	<-machine.Stop
-	return answer{data: map[string]bool{"stopped": true}, text: "aeolus-trierarch stopped."}, nil
+	machine.Log(fmt.Sprintf("aeolus-trierarch %s runs as pid %d", Version, machine.PID))
+	for {
+		if err := pass(); err != nil {
+			machine.Log("the pass failed: " + err.Error())
+		}
+		select {
+		case <-machine.Stop:
+			return answer{data: map[string]bool{"stopped": true}, text: "aeolus-trierarch stopped."}, nil
+		case <-time.After(machine.PassEvery):
+		}
+	}
 }

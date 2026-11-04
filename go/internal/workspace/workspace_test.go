@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 )
 
 func gitIn(t *testing.T, args ...string) string {
@@ -117,5 +119,49 @@ func TestAWorktreeIsRemovedWhateverItHolds(t *testing.T) {
 	}
 	if strings.Contains(gitIn(t, "-C", repository, "worktree", "list"), folder) {
 		t.Fatalf("git still lists it")
+	}
+}
+
+func TestAShipsWorktreeIsMadeFromItsConfiguredRepository(t *testing.T) {
+	repository, root := aRepository(t)
+	places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}, Folders: map[string]string{}}
+	entry := reconciler.Entry{Workspace: reconciler.Workspace{Kind: "worktree", Repository: "aeolus-fleet"}}
+
+	folder, err := places.Prepare(entry, "scout")
+	if err != nil || folder != filepath.Join(root, "aeolus-fleet", "scout") {
+		t.Fatalf("folder %s, %v", folder, err)
+	}
+	entry.Folder = folder
+	if err := places.Remove(entry); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(folder); err == nil {
+		t.Fatalf("the worktree stayed")
+	}
+}
+
+func TestAConfiguredFolderIsUsedAsItIsAndNeverRemoved(t *testing.T) {
+	folder := t.TempDir()
+	places := Places{Root: t.TempDir(), Repositories: map[string]string{}, Folders: map[string]string{"notes": folder}}
+	entry := reconciler.Entry{Workspace: reconciler.Workspace{Kind: "folder", Name: "notes"}}
+
+	got, err := places.Prepare(entry, "scout")
+	if err != nil || got != folder {
+		t.Fatalf("folder %s, %v", got, err)
+	}
+	entry.Folder = got
+	if err := places.Remove(entry); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(folder); err != nil {
+		t.Fatalf("the configured folder was removed")
+	}
+}
+
+func TestARepositoryNotConfiguredIsSaid(t *testing.T) {
+	places := Places{Root: t.TempDir(), Repositories: map[string]string{}, Folders: map[string]string{}}
+
+	if _, err := places.Prepare(reconciler.Entry{Workspace: reconciler.Workspace{Kind: "worktree", Repository: "website"}}, "scout"); err == nil {
+		t.Fatalf("a worktree of a repository not configured")
 	}
 }

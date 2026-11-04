@@ -337,16 +337,22 @@ func (i Init) setUpClaudeCode(configuration config.Configuration, root string) (
 
 // hasSaidItsVersion waits until the process the service runs has said its version in running.json, 30 seconds at most.
 func (i Init) hasSaidItsVersion() bool {
+	return hasSaidItsVersion(i.Service, i.Paths.Running, i.Sleep)
+}
+
+func hasSaidItsVersion(service interface {
+	Status() (service.Status, error)
+}, runningFile string, sleep func()) bool {
 	for check := 0; ; check++ {
-		status, err := i.Service.Status()
-		running, isRead := readRunning(i.Paths.Running)
+		status, err := service.Status()
+		running, isRead := readRunning(runningFile)
 		if err == nil && status.IsRunning && isRead && running.PID == status.PID {
 			return true
 		}
 		if check >= waitChecks {
 			return false
 		}
-		i.Sleep()
+		sleep()
 	}
 }
 
