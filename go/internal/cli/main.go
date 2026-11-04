@@ -1,5 +1,5 @@
 // Package cli is the Go trierarch's command line, `aeolus-trierarch`: init,
-// status, list, add, login, start, stop, restart, run, uninstall, hold and proxy so far, as docs/trierarch.md says them. Each
+// status, list, add, login, start, stop, restart, run, uninstall, upgrade, config check, hold and proxy so far, as docs/trierarch.md says them. Each
 // command answers what it says and its exit status; a refusal is said on
 // stdout, as JSON under --json.
 package cli
@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -74,6 +75,14 @@ type Machine struct {
 	CheckKey func(harness string, key string) keys.Checked
 	// CheckNow has the model proxy check the harness's key at once (K10): its state after; false when the proxy does not run.
 	CheckNow func(at paths.Paths, harness string) (keys.StateAt, bool)
+	// Program is the trierarch's own file, which upgrade replaces.
+	Program string
+	// Releases is where upgrade takes another version from.
+	Releases func() Releases
+	// Plugins is the aeolus-fleet plugin of each harness, as upgrade updates it.
+	Plugins func() Plugins
+	// Trierarch runs a trierarch file with the words, as the plugin step of an upgrade when isPluginStep: its stdout and its exit status.
+	Trierarch func(program string, isPluginStep bool, words ...string) (string, int)
 }
 
 const usage = `Usage: aeolus-trierarch <command>
@@ -100,6 +109,10 @@ const usage = `Usage: aeolus-trierarch <command>
                  drive the service; the sessions keep running
   run            what the service runs
   uninstall      remove the service and stop every session
+  upgrade [version]
+                 take that version, or the latest, from its GitHub Release, checked against its
+                 checksum and attestation, and restart the service on it; update the aeolus-fleet plugin
+  config check   check the configuration this version runs on
   --version, -v  the version this runs
 
   --json         answer as JSON
@@ -148,10 +161,11 @@ func variable(environ []string, name string) string {
 	return ""
 }
 
-// answer is what a command says: its data under --json, its text otherwise.
+// answer is what a command says: its data under --json, its text otherwise, and its exit status when it is not 0.
 type answer struct {
 	data any
 	text string
+	code int
 }
 
 // Main runs one command line of aeolus-trierarch and answers what it says and its exit status.
@@ -226,6 +240,14 @@ func Main(args []string, machine Machine) (string, int) {
 			said := "The trierarch stopped; its sessions keep running, and nothing is handed to them until it runs again."
 			return answer{data: map[string]any{"service": "stopped", "said": []string{said}}, text: said}, nil
 		},
+		"config check": func() (answer, error) {
+			configuration, err := config.Load(at.Config)
+			if err != nil {
+				return answer{}, err
+			}
+			harnesses := slices.Sorted(maps.Keys(configuration.Harnesses))
+			return answer{data: map[string]any{"path": at.Config, "harnesses": harnesses}, text: fmt.Sprintf("The configuration at %s is one this trierarch runs on, offering %s.", at.Config, strings.Join(harnesses, ", "))}, nil
+		},
 		"uninstall": func() (answer, error) {
 			manager := machine.Service(at)
 			before, err := manager.Status()
@@ -252,6 +274,11 @@ func Main(args []string, machine Machine) (string, int) {
 			return answer{data: map[string]any{"service": before.File, "said": said}, text: strings.Join(said, "\n")}, nil
 		},
 	}
+	if len(command.words) <= 2 && len(command.words) >= 1 && command.words[0] == "upgrade" {
+		commands[strings.Join(command.words, " ")] = func() (answer, error) {
+			return upgrade(at, machine, command)
+		}
+	}
 	if len(command.words) == 4 && command.words[0] == "add" && (command.words[1] == "repository" || command.words[1] == "folder") {
 		commands[strings.Join(command.words, " ")] = func() (answer, error) {
 			return add(at, machine, command.words[1:])
@@ -274,9 +301,41 @@ func Main(args []string, machine Machine) (string, int) {
 		return err.Error(), 1
 	}
 	if isJSON {
-		return mustJSON(said.data), 0
+		return mustJSON(said.data), said.code
 	}
-	return said.text, 0
+	return said.text, said.code
+}
+
+// upgrade is `upgrade [version]`, with the harnesses the configuration offers; none without a configuration yet. A plugin that could not be updated shows in the exit status.
+func upgrade(at paths.Paths, machine Machine, command parsed) (answer, error) {
+	var harnesses []string
+	if configuration, err := config.Load(at.Config); err == nil {
+		harnesses = slices.Sorted(maps.Keys(configuration.Harnesses))
+	}
+	version := ""
+	if len(command.words) == 2 {
+		version = command.words[1]
+	}
+	report, err := Upgrade{
+		Paths:        at,
+		Version:      Version,
+		Program:      machine.Program,
+		Harnesses:    harnesses,
+		Releases:     machine.Releases(),
+		Service:      machine.Service(at),
+		Plugins:      machine.Plugins(),
+		Trierarch:    machine.Trierarch,
+		Sleep:        machine.Sleep,
+		IsPluginStep: variable(machine.Environ, PluginStepVariable) == "1",
+	}.Run(version)
+	if err != nil {
+		return answer{}, err
+	}
+	code := 0
+	if !report.IsPluginUpdated {
+		code = 1
+	}
+	return answer{data: report, text: strings.Join(report.Said, "\n"), code: code}, nil
 }
 
 func mustJSON(value any) string {

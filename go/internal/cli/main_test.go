@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -220,5 +221,51 @@ func TestTheProxyTakesItsOwnWords(t *testing.T) {
 
 	if _, code := Main([]string{"proxy", "--folder", t.TempDir()}, machine); code != 2 {
 		t.Errorf("proxy without its folders answered %d, want 2", code)
+	}
+}
+
+func TestConfigCheckAcceptsTheConfigurationThisVersionRunsOn(t *testing.T) {
+	machine, _, _ := aMain(t)
+	Main(setupWords(), machine)
+
+	output, code := Main([]string{"config", "check", "--json"}, machine)
+
+	if code != 0 || decoded(t, output)["path"] != filepath.Join(machine.HomeDirectory, ".aeolus", "trierarch", "config.json") {
+		t.Errorf("config check answered %q, %d, want the configuration accepted", output, code)
+	}
+}
+
+func TestConfigCheckRefusesAConfigurationThisVersionDoesNotRunOn(t *testing.T) {
+	machine, _, _ := aMain(t)
+	Main(setupWords(), machine)
+	file := filepath.Join(machine.HomeDirectory, ".aeolus", "trierarch", "config.json")
+	if err := os.WriteFile(file, []byte(`{"caps":{},"repositories":{},"folders":{},"harnesses":{},"model":"opus"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	output, code := Main([]string{"config", "check", "--json"}, machine)
+
+	if code != 1 || !strings.Contains(decoded(t, output)["error"].(string), "model") {
+		t.Errorf("config check answered %q, %d, want it refused naming the key", output, code)
+	}
+}
+
+func TestUpgradeAnswersItsReportAndExitsOneWhenThePluginIsNotUpdated(t *testing.T) {
+	machine, _, _ := aMain(t)
+	Main(setupWords(), machine)
+	plugins := &somePlugins{versions: map[string]string{}}
+	machine.Plugins = func() Plugins { return plugins }
+	machine.Releases = func() Releases { return &someReleases{latest: Version} }
+	machine.Program = filepath.Join(machine.HomeDirectory, "aeolus-trierarch")
+
+	output, code := Main([]string{"upgrade", Version, "--json"}, machine)
+
+	report := decoded(t, output)
+	if code != 0 || report["from"] != Version || report["isUpgraded"] != false || report["isPluginUpdated"] != true {
+		t.Errorf("upgrade answered %q, %d, want on %s, the plugin updated", output, code, Version)
+	}
+	plugins.failing = errors.New("claude plugin marketplace update aeolus-fleet failed: Failed to reach the marketplace")
+	if output, code := Main([]string{"upgrade", "--json"}, machine); code != 1 || decoded(t, output)["isPluginUpdated"] != false {
+		t.Errorf("upgrade with the plugin failing answered %q, %d, want exit 1", output, code)
 	}
 }
