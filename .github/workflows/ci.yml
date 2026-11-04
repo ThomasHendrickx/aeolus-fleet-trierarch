@@ -133,6 +133,28 @@ jobs:
       - uses: ./.github/actions/test-images
       - run: npm run test:integration
 
+  contract-go:
+    # The contract suite's parts the Go trierarch is built to so far, driven against its binary.
+    name: Contract tests on the Go trierarch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.mod
+      - run: npm ci
+      - uses: ./.github/actions/test-images
+      - run: go build -o "$RUNNER_TEMP/aeolus-trierarch" ./cmd/aeolus-trierarch
+        working-directory: go
+      - run: npx vitest run --project contract:integration init.integration --testNamePattern '^init '
+        env:
+          AEOLUS_TRIERARCH_UNDER_TEST: ${{ runner.temp }}/aeolus-trierarch
+
   session-image:
     # The image a trierarch runs container sessions from (decision 0039), built
     # as release.yml builds it, with a throwaway prerelease version so the
