@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func git(t *testing.T, args ...string) string {
+func gitIn(t *testing.T, args ...string) string {
 	t.Helper()
 	command := exec.Command("git", args...)
 	command.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=t@example.com")
@@ -24,12 +24,12 @@ func git(t *testing.T, args ...string) string {
 func aRepository(t *testing.T) (string, string) {
 	t.Helper()
 	repository := filepath.Join(t.TempDir(), "aeolus-fleet")
-	git(t, "init", "-q", "-b", "main", repository)
+	gitIn(t, "init", "-q", "-b", "main", repository)
 	if err := os.WriteFile(filepath.Join(repository, "README.md"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	git(t, "-C", repository, "add", ".")
-	git(t, "-C", repository, "commit", "-q", "-m", "init")
+	gitIn(t, "-C", repository, "add", ".")
+	gitIn(t, "-C", repository, "commit", "-q", "-m", "init")
 	return repository, t.TempDir()
 }
 
@@ -69,16 +69,16 @@ func TestAWorktreeLeftByAStopMidCrewIsUsedAsItIs(t *testing.T) {
 
 func TestAWorktreeIsMadeAtTheRefItsRequestNames(t *testing.T) {
 	repository, root := aRepository(t)
-	git(t, "-C", repository, "branch", "issue-99")
-	git(t, "-C", repository, "commit", "-q", "--allow-empty", "-m", "later on main")
-	want := strings.TrimSpace(git(t, "-C", repository, "rev-parse", "issue-99"))
+	gitIn(t, "-C", repository, "branch", "issue-99")
+	gitIn(t, "-C", repository, "commit", "-q", "--allow-empty", "-m", "later on main")
+	want := strings.TrimSpace(gitIn(t, "-C", repository, "rev-parse", "issue-99"))
 
 	folder, err := Prepare(Worktree{Root: root, Repository: "aeolus-fleet", Path: repository, ShipName: "scout", Ref: "issue-99"})
 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.TrimSpace(git(t, "-C", folder, "rev-parse", "HEAD")); got != want {
+	if got := strings.TrimSpace(gitIn(t, "-C", folder, "rev-parse", "HEAD")); got != want {
 		t.Fatalf("HEAD %s, want %s", got, want)
 	}
 }
@@ -89,7 +89,7 @@ func TestWhatAWorktreeHoldsUnsavedIsItsChangesAndItsCommitsNoBranchHas(t *testin
 	if err := os.WriteFile(filepath.Join(folder, "notes.md"), []byte("mine\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	git(t, "-C", folder, "commit", "-q", "--allow-empty", "-m", "unpushed work")
+	gitIn(t, "-C", folder, "commit", "-q", "--allow-empty", "-m", "unpushed work")
 
 	unsaved, err := Unsaved(folder)
 
@@ -115,7 +115,7 @@ func TestAWorktreeIsRemovedWhateverItHolds(t *testing.T) {
 	if _, err := os.Stat(folder); err == nil {
 		t.Fatalf("the worktree stayed")
 	}
-	if strings.Contains(git(t, "-C", repository, "worktree", "list"), folder) {
+	if strings.Contains(gitIn(t, "-C", repository, "worktree", "list"), folder) {
 		t.Fatalf("git still lists it")
 	}
 }
