@@ -1,5 +1,5 @@
-# Puts the images Testcontainers starts on the runner from the Actions cache, so
-# a test job pulls nothing: ECR Public throttles anonymous pulls per IP, as
+# Puts the images Testcontainers starts on the runner from the Actions cache, one
+# cache per chip, so a test job pulls nothing: ECR Public throttles anonymous pulls per IP, as
 # Docker Hub does, and CI runners share IPs. On a cache miss, after the image
 # list changed or the cache expired, it pulls them once with retries and caches
 # them. Docker's official images come from Google's mirror of Docker Hub instead
@@ -23,7 +23,7 @@ runs:
       uses: actions/cache/restore@v6
       with:
         path: ${{ runner.temp }}/test-images.tar
-        key: test-images-${{ hashFiles('node_modules/@aeolus-fleet/core/dist/testing/container-images.js') }}
+        key: test-images-${{ runner.arch }}-${{ hashFiles('node_modules/@aeolus-fleet/core/dist/testing/container-images.js') }}
     - name: Load the images from the cache
       if: steps.restore.outputs.cache-hit == 'true'
       shell: bash
