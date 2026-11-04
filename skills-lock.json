@@ -15,6 +15,13 @@
       "skillPath": "skills/domain-modelling/SKILL.md",
       "computedHash": "cfed78607594e8c581415454c91d1b5516ed2c8b11d44d420ba39351ccd43e23"
     },
+    "go": {
+      "source": "ThomasHendrickx/skills",
+      "ref": "v3.14.0",
+      "sourceType": "github",
+      "skillPath": "skills/go/SKILL.md",
+      "computedHash": "893a4d140bb63bc75fe53a71004900cee2a828c05487de0207f626f1dc45934e"
+    },
     "performance": {
       "source": "ThomasHendrickx/skills",
       "ref": "v3.13.0",
