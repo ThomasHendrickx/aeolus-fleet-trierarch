@@ -17,13 +17,11 @@ type aClaude struct {
 func aClaudeWith(t *testing.T, installed ...string) aClaude {
 	t.Helper()
 	folder := t.TempDir()
-	list := `[` + strings.Join(slices.Collect(func(yield func(string) bool) {
-		for _, id := range installed {
-			if !yield(`{"id":"` + id + `"}`) {
-				return
-			}
-		}
-	}), ",") + `]`
+	var listed []string
+	for _, id := range installed {
+		listed = append(listed, `{"id":"`+id+`"}`)
+	}
+	list := "[" + strings.Join(listed, ",") + "]"
 	if err := os.WriteFile(filepath.Join(folder, "list.json"), []byte(list), 0o644); err != nil {
 		t.Fatal(err)
 	}
