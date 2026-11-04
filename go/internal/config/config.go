@@ -6,12 +6,22 @@
 // holds these types to it.
 package config
 
-import _ "embed"
+import (
+	"bytes"
+	_ "embed"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+)
 
 // Schema is the configuration's JSON Schema, written beside it so an editor checks it.
 //
 //go:embed config.schema.json
 var Schema []byte
+
+// SchemaReference is what a configuration names as its schema: the file beside it.
+const SchemaReference = "./config.schema.json"
 
 type Configuration struct {
 	Schema       string                `json:"$schema,omitempty"`
@@ -74,4 +84,59 @@ type Logins struct {
 type DefaultLogins struct {
 	ClaudeCode string `json:"claude-code,omitempty"`
 	Codex      string `json:"codex,omitempty"`
+}
+
+// Initial is the configuration a fresh init writes: no repository or folder yet, Claude Code with no flag.
+func Initial() Configuration {
+	return Configuration{
+		Schema:       SchemaReference,
+		Caps:         Caps{Ships: 4, Running: 2},
+		Repositories: map[string]Repository{},
+		Folders:      map[string]Folder{},
+		Harnesses:    map[string]Harness{"claude-code": {Flags: []string{}, Options: map[string]Option{}}},
+	}
+}
+
+// requiredKeys are the keys the schema requires at the top.
+var requiredKeys = []string{"caps", "repositories", "folders", "harnesses"}
+
+// Load reads the configuration at the path, refusing one that is missing, no JSON, or of another shape.
+func Load(path string) (Configuration, error) {
+	text, err := os.ReadFile(path)
+	if err != nil {
+		return Configuration{}, fmt.Errorf("no configuration at %s: run aeolus-trierarch init first", path)
+	}
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(text, &keys); err != nil {
+		return Configuration{}, fmt.Errorf("the configuration at %s is no JSON object: %v", path, err)
+	}
+	for _, key := range requiredKeys {
+		if _, ok := keys[key]; !ok {
+			return Configuration{}, fmt.Errorf("the configuration at %s does not fit: it has no %s", path, key)
+		}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(text))
+	decoder.DisallowUnknownFields()
+	var configuration Configuration
+	if err := decoder.Decode(&configuration); err != nil {
+		return Configuration{}, fmt.Errorf("the configuration at %s does not fit: %v", path, err)
+	}
+	return configuration, nil
+}
+
+// Write writes the configuration to the path, as today's trierarch does: indented by two, with a last newline.
+func Write(path string, configuration Configuration) error {
+	text, err := json.MarshalIndent(configuration, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(text, '\n'), 0o644)
+}
+
+// WriteSchema writes the configuration's JSON Schema of this version to the path.
+func WriteSchema(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, Schema, 0o644)
 }
