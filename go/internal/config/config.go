@@ -11,8 +11,10 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
 // Schema is the configuration's JSON Schema, written beside it so an editor checks it.
@@ -139,4 +141,15 @@ func WriteSchema(path string) error {
 		return err
 	}
 	return os.WriteFile(path, Schema, 0o644)
+}
+
+// Places are the paths of the configured repositories, then of the configured folders, each by name.
+func (c Configuration) Places() (repositories []string, folders []string) {
+	for _, name := range slices.Sorted(maps.Keys(c.Repositories)) {
+		repositories = append(repositories, c.Repositories[name].Path)
+	}
+	for _, name := range slices.Sorted(maps.Keys(c.Folders)) {
+		folders = append(folders, c.Folders[name].Path)
+	}
+	return repositories, folders
 }
