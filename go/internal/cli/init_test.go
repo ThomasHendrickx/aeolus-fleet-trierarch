@@ -353,7 +353,7 @@ func TestInitNeverRegistersAnotherShipOnAMachineSetUpAlready(t *testing.T) {
 
 	_, err := machine.init.Run(flags)
 
-	if err == nil || !strings.Contains(err.Error(), "This machine is set up already") || !slices.Equal(machine.fleet.registered, []string{shipID}) {
+	if err == nil || !strings.Contains(err.Error(), "this machine is set up already") || !slices.Equal(machine.fleet.registered, []string{shipID}) {
 		t.Errorf("err %v, registered %q", err, machine.fleet.registered)
 	}
 }

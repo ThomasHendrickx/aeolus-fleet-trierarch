@@ -89,10 +89,10 @@ func (i Init) checkMachine() error {
 		return errors.New("`ss` is not installed, and the trierarch needs it to tell which process calls a ship socket: without it no session starts. Install iproute2 (Debian and Ubuntu: sudo apt-get install iproute2), then run the setup line again")
 	}
 	if !i.IsClaudeCodeInstalled {
-		return errors.New("Claude Code does not run on this machine, so it could crew nothing. Install Claude Code (https://code.claude.com/docs/en/setup) and sign in to it, then run the setup line again")
+		return errors.New("no Claude Code runs on this machine, so it could crew nothing. Install Claude Code (https://code.claude.com/docs/en/setup) and sign in to it, then run the setup line again")
 	}
 	if !i.IsClaudeCodeSignedIn {
-		return errors.New("Claude Code (run `claude` and sign in) is installed but not signed in, so no session could answer. Sign in: run `claude` and sign in, then run the setup line again")
+		return errors.New("this machine's Claude Code (run `claude` and sign in) is installed but not signed in, so no session could answer. Sign in: run `claude` and sign in, then run the setup line again")
 	}
 	return nil
 }
@@ -192,7 +192,7 @@ func (i Init) Run(flags Flags) (Report, error) {
 		// The setup line run again names the ship this machine crews: its setup may not have finished.
 		isSetupLineAgain := kept.ShipID != "" && strings.TrimSpace(flags.ShipID) == kept.ShipID && (flags.FleetURL == "" || strings.TrimSuffix(strings.TrimSpace(flags.FleetURL), "/") == kept.FleetURL)
 		if !isSetupLineAgain && (flags.ShipID != "" || flags.Secret != "") {
-			return Report{}, fmt.Errorf("This machine is set up already: %s. init never registers again: to register another ship, remove %s first", crews, i.Paths.CrewToken)
+			return Report{}, fmt.Errorf("this machine is set up already: %s. init never registers again: to register another ship, remove %s first", crews, i.Paths.CrewToken)
 		}
 		crewToken := kept.CrewToken
 		if isSetupLineAgain {

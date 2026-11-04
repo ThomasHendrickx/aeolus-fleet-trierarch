@@ -51,7 +51,7 @@ jobs:
 
   go:
     # The Go trierarch (docs/design/trierarch-binary.md), built beside today's.
-    name: Go vet and tests
+    name: Go format, vet, staticcheck and tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -62,8 +62,17 @@ jobs:
         with:
           go-version-file: go/go.mod
           cache-dependency-path: go/go.mod
+      - name: gofmt lists no file
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt would change:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
       - run: go vet ./...
-      - run: go test ./...
+      - run: go run honnef.co/go/tools/cmd/staticcheck@2026.2.2 ./...
+      - run: go test -race ./...
 
   trierarch-macos:
     # The trierarch and the aeolus-fleet plugin's scripts run on macOS too, where
