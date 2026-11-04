@@ -187,3 +187,21 @@ func TestStoppingASessionThatRunsNotIsNoError(t *testing.T) {
 		t.Fatalf("stop: %v", err)
 	}
 }
+
+func TestUnderASystemdUnitAHoldStartsInAScopeOfItsOwnExpandingNothingFrom254(t *testing.T) {
+	cases := []struct {
+		platform, invocation string
+		version              int
+		want                 string
+	}{
+		{"linux", "abc", 254, "systemd-run --user --scope --quiet --collect --expand-environment=no --"},
+		{"linux", "abc", 253, "systemd-run --user --scope --quiet --collect --"},
+		{"linux", "", 259, ""},
+		{"darwin", "abc", 259, ""},
+	}
+	for _, each := range cases {
+		if got := strings.Join(Launch(each.platform, each.invocation, each.version), " "); got != each.want {
+			t.Errorf("%+v: %q", each, got)
+		}
+	}
+}

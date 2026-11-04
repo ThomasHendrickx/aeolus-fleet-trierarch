@@ -16,11 +16,15 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -245,4 +249,46 @@ func Call(socket string, request Request, timeout time.Duration) (Answer, error)
 		return Answer{}, errors.New("the hold at " + socket + " gave no answer to " + request.Call)
 	}
 	return answer, nil
+}
+
+// keptVariables are what the harness takes of the hold's own environment; everything else it is given. USER and LOGNAME name the user, by which Claude Code finds its login on macOS.
+var keptVariables = []string{"HOME", "PATH", "USER", "LOGNAME"}
+
+const usage = "Usage: aeolus-trierarch hold <ship id> --sessions <folder> --folder <folder> --harness <name> [--env NAME=value]... -- <command>..."
+
+// Main runs `aeolus-trierarch hold` with the words after `hold`, as the trierarch starts it, never a person: the harness's environment is built from nothing (H10), the kept variables of the hold's own, then each --env given. Answers its exit code, or 2 for words it cannot take.
+func Main(words []string, version string, environ []string) int {
+	end := slices.Index(words, "--")
+	if end < 1 || end == len(words)-1 {
+		fmt.Fprintln(os.Stderr, usage)
+		return 2
+	}
+	shipID, options, command := words[0], words[1:end], words[end+1:]
+	values := map[string]string{}
+	given := []string{}
+	for at := 0; at+1 < len(options); at += 2 {
+		if options[at] == "--env" {
+			given = append(given, options[at+1])
+		} else {
+			values[options[at]] = options[at+1]
+		}
+	}
+	if values["--sessions"] == "" || values["--folder"] == "" || values["--harness"] == "" || strings.Contains(shipID, "/") {
+		fmt.Fprintln(os.Stderr, usage)
+		return 2
+	}
+	environment := []string{}
+	for _, entry := range environ {
+		if name, _, _ := strings.Cut(entry, "="); slices.Contains(keptVariables, name) {
+			environment = append(environment, entry)
+		}
+	}
+	stop := make(chan struct{})
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
+	go func() {
+		<-signals
+		close(stop)
+	}()
+	return Run(Options{Files: FilesOf(values["--sessions"], shipID), Folder: values["--folder"], Command: command, Environment: append(environment, given...), Version: version, Stop: stop})
 }
