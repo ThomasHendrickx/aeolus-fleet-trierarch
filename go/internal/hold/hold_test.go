@@ -162,10 +162,7 @@ func TestAStoppedHoldEndsItsHarnessAndEveryProcessItStarted(t *testing.T) {
 		t.Fatalf("the hold did not end")
 	}
 	pid := strings.TrimSpace(read(marker))
-	eventually(t, "the harness's child ended", func() bool {
-		_, err := os.Stat("/proc/" + pid)
-		return err != nil || strings.Contains(read("/proc/"+pid+"/stat"), ") Z ")
-	})
+	eventually(t, "the harness's child ended", func() bool { return isGone(pid) })
 }
 
 // aClaudeCodeHold is a hold of a harness that answers as Claude Code does in stream-json: each start noted in the starts file with its words, a turn per line but one saying slowly, which runs until it is interrupted; the interrupt control request ends the turn, or is refused when isRefusing; SIGINT ends the turn and the process.

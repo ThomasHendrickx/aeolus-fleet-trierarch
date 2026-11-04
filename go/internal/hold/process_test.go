@@ -69,9 +69,10 @@ func aHoldProcessOf(t *testing.T, sessions string, shipID string, script string)
 	return files, command
 }
 
+// isGone holds once no process has the pid, or only a zombie, as ps says it on Linux and macOS alike, which has no /proc.
 func isGone(pid string) bool {
-	stat, err := os.ReadFile("/proc/" + pid + "/stat")
-	return err != nil || strings.Contains(string(stat), ") Z ")
+	state, err := exec.Command("ps", "-o", "stat=", "-p", pid).Output()
+	return err != nil || strings.HasPrefix(strings.TrimSpace(string(state)), "Z")
 }
 
 func TestAHoldKilledWithNoChanceToStopStillEndsItsHarnessAndWhatItStarted(t *testing.T) {
@@ -96,8 +97,8 @@ func TestTheGuardIsAProcessOfItsOwnAndNoNodeScript(t *testing.T) {
 
 	found := false
 	for _, pid := range guards {
-		line := strings.ReplaceAll(read("/proc/"+strconv.Itoa(pid)+"/cmdline"), "\x00", " ")
-		if strings.HasPrefix(line, program+" hold --guard") {
+		line, err := exec.Command("ps", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
+		if err == nil && strings.HasPrefix(strings.TrimSpace(string(line)), program+" hold --guard") {
 			found = true
 		}
 	}
@@ -106,22 +107,20 @@ func TestTheGuardIsAProcessOfItsOwnAndNoNodeScript(t *testing.T) {
 	}
 }
 
-// childrenOf is every process whose parent is the pid.
+// childrenOf is every process whose parent is the pid, as ps lists them.
 func childrenOf(t *testing.T, pid int) []int {
 	t.Helper()
-	entries, err := os.ReadDir("/proc")
+	listed, err := exec.Command("ps", "-A", "-o", "pid=,ppid=").Output()
 	if err != nil {
-		t.Skip("no /proc on this system")
+		t.Fatalf("ps -A -o pid=,ppid=: %v", err)
 	}
-	children := []int{}
-	for _, entry := range entries {
-		child, err := strconv.Atoi(entry.Name())
-		if err != nil {
+	var children []int
+	for _, line := range strings.Split(string(listed), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 || fields[1] != strconv.Itoa(pid) {
 			continue
 		}
-		stat := read("/proc/" + entry.Name() + "/stat")
-		fields := strings.Fields(stat[strings.LastIndex(stat, ")")+1:])
-		if len(fields) > 1 && fields[1] == strconv.Itoa(pid) {
+		if child, err := strconv.Atoi(fields[0]); err == nil {
 			children = append(children, child)
 		}
 	}
