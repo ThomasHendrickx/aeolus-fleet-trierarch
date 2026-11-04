@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/prompt"
 )
 
@@ -45,25 +44,6 @@ func CommandLine(flags []string, isContinued bool) []string {
 		command = append(command, "--continue")
 	}
 	return command
-}
-
-// EffectiveFlags are the flags a launch gets: the harness's own, then each option's value as the settings picked it, or its default, by option name.
-func EffectiveFlags(harness config.Harness, picked map[string]string) []string {
-	flags := append([]string{}, harness.Flags...)
-	names := []string{}
-	for name := range harness.Options {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	for _, name := range names {
-		option := harness.Options[name]
-		value, ok := picked[name]
-		if !ok {
-			value = option.Default
-		}
-		flags = append(flags, option.Values[value]...)
-	}
-	return flags
 }
 
 var notLetterOrDigit = regexp.MustCompile(`[^a-zA-Z0-9]`)

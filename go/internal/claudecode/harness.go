@@ -72,7 +72,7 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if isFirstStart && entry.FirstPrompt != "" {
 		line = prompt.First(entry.FirstPrompt)
 	}
-	command := CommandLine(EffectiveFlags(h.Settings, entry.Options), !isFirstStart && HasConversation(h.Projects, entry.Folder))
+	command := CommandLine(h.Settings.EffectiveFlags(entry.Options), !isFirstStart && HasConversation(h.Projects, entry.Folder))
 	if err := h.Plugin.ClearLaunch(entry.Folder); err != nil {
 		return err
 	}
