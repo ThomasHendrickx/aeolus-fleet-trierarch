@@ -1,16 +1,16 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, inject, it } from 'vitest';
 import { z } from 'zod';
 
-import type { ReleaseBuild } from './support/build-global-setup.js';
 import { aCrewingMachine } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
 import { aBinaryThatDoesNotStart, aReleaseSource, type Fault, type ReleaseSource } from './support/release.js';
 
-// upgrade on the version the trierarch runs: it installs nothing and updates the aeolus-fleet plugin through each offered harness's own commands (docs/trierarch.md, "A machine joins"). Another version comes from its GitHub Release, the binary for the machine's system and chip checked against SHA256SUMS and its attestation, in place of the trierarch's own file, the old one left or put back when that fails. Today's trierarch takes another version from npm until #142, so those tests run against a trierarch that is one file.
+// upgrade on the version the trierarch runs: it installs nothing and updates the aeolus-fleet plugin through each offered harness's own commands (docs/trierarch.md, "A machine joins"). Another version comes from its GitHub Release when it carries a binary for the machine's system and chip, checked against SHA256SUMS and its attestation, put in ~/.local/bin/aeolus-trierarch, the old file left or put back when that fails: in place of the trierarch's own file, or beside today's trierarch, which moves to the binary that way (#142).
 
 /** The plugin's marketplace, as Claude Code adds it: the repository, at a release tag or main. */
 const MARKETPLACE = 'plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch';
@@ -72,17 +72,9 @@ describe('upgrade on the version it runs', () => {
   });
 });
 
-const release = inject('release');
+const built = () => inject('release');
 
-/** The release build the suite made: there is one wherever these tests run. */
-function built(): ReleaseBuild {
-  if (release === undefined) {
-    throw new Error('no release was built for the trierarch under test');
-  }
-  return release;
-}
-
-describe.skipIf(release === undefined)('upgrade to another version from its GitHub Release', () => {
+describe('upgrade to another version from its GitHub Release', () => {
   let source: ReleaseSource | undefined;
 
   afterEach(async () => {
@@ -90,10 +82,14 @@ describe.skipIf(release === undefined)('upgrade to another version from its GitH
     source = undefined;
   });
 
-  const installed = (): string => createHash('sha256').update(readFileSync(machine.underTest[0] ?? '')).digest('hex');
+  /** The digest of ~/.local/bin/aeolus-trierarch, where a release's binary goes; none when there is no file, as beside today's trierarch before it moved. */
+  const installed = (): string | undefined => {
+    const file = join(machine.home, '.local', 'bin', 'aeolus-trierarch');
+    return existsSync(file) ? createHash('sha256').update(readFileSync(file)).digest('hex') : undefined;
+  };
   const runningVersion = async (): Promise<string | undefined> => z.object({ runningVersion: z.string().optional() }).parse(JSON.parse((await machine.trierarch(['status', '--json'])).stdout)).runningVersion;
 
-  it("installs the release's binary in place of its own file, and the service runs it", async () => {
+  it("installs the release's binary in ~/.local/bin, and the service runs it", async () => {
     source = await aReleaseSource(built());
 
     const upgrade = await machine.trierarch(['upgrade', source.version, '--json'], { env: source.env });

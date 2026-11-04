@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import type { TestProject } from 'vitest/node';
 import { z } from 'zod';
 
-import { isTodaysTrierarch, TRIERARCH_UNDER_TEST } from './trierarch-under-test.js';
+import { TRIERARCH_UNDER_TEST } from './trierarch-under-test.js';
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -20,7 +20,7 @@ export interface ReleaseBuild {
 
 declare module 'vitest' {
   export interface ProvidedContext {
-    release: ReleaseBuild | undefined;
+    release: ReleaseBuild;
   }
 }
 
@@ -34,16 +34,12 @@ function nextOf(version: string): string {
  * Builds today's trierarch once before the suite, as `npm install --global`
  * would install it: the trierarch under test when no other is named, and the
  * one another takes over holds from and gives them to. Another trierarch
- * under test comes built; for it, the Go trierarch of the next version and
+ * under test comes built. For either, the Go trierarch of the next version and
  * the test Sigstore's signer are built too, for the release upgrade takes
  * (`go` on PATH).
  */
 export function setup(project: TestProject): () => void {
   execFileSync('npm', ['run', 'build'], { cwd: REPOSITORY_ROOT, stdio: 'inherit' });
-  if (isTodaysTrierarch) {
-    project.provide('release', undefined);
-    return () => undefined;
-  }
   const [program = '', ...words] = TRIERARCH_UNDER_TEST;
   const under = z.object({ version: z.string() }).parse(JSON.parse(execFileSync(program, [...words, '--version', '--json'], { encoding: 'utf8' }))).version;
   const version = nextOf(under);

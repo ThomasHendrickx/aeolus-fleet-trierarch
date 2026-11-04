@@ -1,14 +1,16 @@
-import { z } from 'zod';
-
 import { TrierarchFileError, type RunningFile } from '../adapters/files.js';
 import { byVersion, type PluginHarness } from '../adapters/plugin.js';
 import type { CommandResult } from '../adapters/run-command.js';
 import type { Service } from '../adapters/service.js';
 import { NOT_SAID_YET_REASON, startNewProcess } from './new-process.js';
+import { alreadyOn, pluginStepOf } from './plugin-step.js';
+import { upgradeToBinary, type BinaryRoute } from './upgrade-to-binary.js';
 
 /**
  * `aeolus-trierarch upgrade [version]` (#255): installs the given version, or
- * the latest on npm, globally and pinned to it, then stops the old process and
+ * the latest on npm, from its GitHub Release when it carries a binary for this
+ * system and chip, the Go trierarch (#142, upgrade-to-binary.ts), else from
+ * npm, globally and pinned to it, then stops the old process and
  * starts the new one. Sessions are not touched: they run under holds of their
  * own, and the new process takes them over from its saved state.
  * It reports once the new process has said its version in running.json, so
@@ -144,34 +146,12 @@ function remoteControlRemoved(harnesses: readonly string[]): string {
   return `Took --remote-control out of the flags of ${harnesses.join(', ')} in the configuration: a session the trierarch runs has no terminal, so no Remote Control.`;
 }
 
-function alreadyOn(version: string): string {
-  return `The trierarch is already on ${version}.`;
-}
-
-/** What the installed version's `upgrade --json` says that the plugin step needs. */
-const installedReportSchema = z.object({ isPluginUpdated: z.boolean(), said: z.array(z.string()) });
-
-/** The plugin step as the installed version ran it, from what its upgrade at its own version answered. */
-function pluginStepOf(answer: CommandResult, version: string): { isPluginUpdated: boolean; said: string[] } {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(answer.stdout);
-  } catch {
-    raw = undefined;
-  }
-  const parsed = installedReportSchema.safeParse(raw);
-  if (!parsed.success) {
-    const output = `${answer.stdout}${answer.stderr}`.trim();
-    return { isPluginUpdated: false, said: [`The aeolus-fleet plugin was not updated: the trierarch ${version} said ${output}. Fix what it says, then run aeolus-trierarch upgrade again.`] };
-  }
-  return { isPluginUpdated: parsed.data.isPluginUpdated, said: parsed.data.said.filter((line) => line !== alreadyOn(version)) };
-}
-
 /** What restarting the service on the installed version needs. */
 interface Restart {
   /** The installed version's `install --no-load`: this process still runs the code of the version it replaces. */
   writeInstalledServiceFile: () => Promise<CommandResult>;
-  service: Pick<Service, 'reload' | 'stop' | 'start' | 'status'>;
+  /** `rewrite` writes the service's file of this process, as the GitHub Release route puts it back (#142). */
+  service: Pick<Service, 'rewrite' | 'reload' | 'stop' | 'start' | 'status'>;
   /** What running.json says now: the new process writes it as it starts. */
   running: () => Promise<RunningFile | undefined>;
   /** Waits between reads of running.json; a test passes one that does not wait. */
@@ -222,6 +202,8 @@ export async function upgradeTrierarch(at: Restart & {
   /** The version installed now, read afresh each time: the install replaces it. */
   installedVersion: () => string;
   npm: Npm;
+  /** The GitHub Release route: a release that carries a binary for this system and chip is taken instead of npm (#142); none takes npm always. */
+  binaryRoute?: BinaryRoute;
   /** The installed version's `upgrade <version> --json`: on its version already, it runs the plugin step as that version runs it. */
   upgradeInstalledPlugin: (version: string) => Promise<CommandResult>;
   /** The aeolus-fleet plugin; none updates nothing. */
@@ -254,6 +236,14 @@ export async function upgradeTrierarch(at: Restart & {
     return { from, to: from, isUpgraded: false, isPluginUpdated: plugin.isPluginUpdated, said };
   }
 
+  if (at.binaryRoute !== undefined) {
+    const binary = await at.binaryRoute.release(target).catch((error: unknown) => {
+      throw error instanceof TrierarchFileError ? new TrierarchFileError(`${error.message}\nThe trierarch keeps running ${from}.`) : error;
+    });
+    if (binary !== undefined) {
+      return upgradeToBinary({ from, to: target, binary, route: at.binaryRoute, service: at.service, running: at.running, ...(at.sleep !== undefined && { sleep: at.sleep }) });
+    }
+  }
   const spec = `${PACKAGE}@${target}`;
   const folder = await at.npm.globalFolder();
   if (!folder.isWritable) {
