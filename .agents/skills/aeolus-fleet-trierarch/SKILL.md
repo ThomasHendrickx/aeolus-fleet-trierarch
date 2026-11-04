@@ -11,7 +11,7 @@ Layout:
 - `packages/trierarch/src/core`: pure domain, use cases and ports (`ports.ts`); the reconciler and the restart policy decide. A use case is a file in `core` that exports a factory named `create<Name>` (like `createRunPass`).
 - `packages/trierarch/src/adapters`: the fleet over REST (`rest-fleet.ts`), the ship sockets, tmux and the container session runtime, git workspaces, the Claude Code and Codex harnesses, the service; `cli/` holds the commands, `bin/` the entry.
 - `packages/trierarch/image`: the session image, built from the repository root with `.containerignore`, smoke-tested by `image/test/smoke-test.sh`.
-- `go/`: the Go trierarch (docs/design/trierarch-binary.md), standard library only, built beside today's part by part; `cmd/aeolus-trierarch` the entry, `internal/` its parts. It embeds `internal/config/config.schema.json`, which `npm run go:schema` writes again from today's configuration schema; a test fails when they drift. Its tests: `go test ./...` in `go/`, and the contract suite with `AEOLUS_TRIERARCH_UNDER_TEST` naming its built binary.
+- `go/`: the Go trierarch (docs/design/trierarch-binary.md), the standard library and sigstore-go (a release's attestation) only, built beside today's part by part; `cmd/aeolus-trierarch` the entry, `internal/` its parts. It embeds `internal/config/config.schema.json`, which `npm run go:schema` writes again from today's configuration schema; a test fails when they drift. Its tests: `go test ./...` in `go/`, and the contract suite with `AEOLUS_TRIERARCH_UNDER_TEST` naming its built binary.
 - `plugins/aeolus-fleet`: bash scripts, hooks, commands and the user skills it ships (product, not skills for working here). Its version is set by the release, never by hand.
 
 The doors:
