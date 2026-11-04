@@ -78,6 +78,8 @@ export function runProgram(command: readonly string[], at: { cwd: string; env: R
     child.on('close', (code) => {
       resolve({ status: code ?? 1, stdout, stderr });
     });
+    // A program that ends without reading its input fails the write (EPIPE): its outcome says what happened.
+    child.stdin.on('error', () => undefined);
     child.stdin.end(at.input ?? '');
   });
 }
