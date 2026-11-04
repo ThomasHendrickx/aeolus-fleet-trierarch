@@ -1,0 +1,109 @@
+package claudecode
+
+import (
+	"bufio"
+	"encoding/json"
+	"os"
+	"strings"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
+)
+
+// Runtime is the session runtime as a harness uses it: start a session, send it a line.
+type Runtime interface {
+	Start(session sessions.Start) error
+	Send(shipID string, line string) error
+}
+
+// Onboarding is Claude Code's onboarding, completed before every launch, so a session stops at no first-run screen (#403).
+type Onboarding interface {
+	CompleteOnboarding() error
+}
+
+// launchVariable is the variable a session's launch id is passed in, for the plugin's hooks to mark that launch (#490).
+const launchVariable = "AEOLUS_LAUNCH"
+
+// Harness is Claude Code as the run pass starts and watches its sessions, on the host, each under its hold; its sessions' identities through the aeolus-fleet plugin.
+type Harness struct {
+	Plugin   plugin.Plugin
+	Runtime  Runtime
+	Settings config.Harness
+	// Projects is Claude Code's projects folder, where it keeps each folder's conversations.
+	Projects   string
+	Onboarding Onboarding
+	// Events is where the ship's hold keeps every line its session wrote.
+	Events func(shipID string) string
+}
+
+// Launch starts the entry's session in its folder: its first prompt on a first start, the wake otherwise, continuing the folder's conversation when Claude Code keeps one.
+func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID string) error {
+	if err := h.Onboarding.CompleteOnboarding(); err != nil {
+		return err
+	}
+	prompt := WakePrompt()
+	if isFirstStart && entry.FirstPrompt != "" {
+		prompt = FirstPrompt(entry.FirstPrompt)
+	}
+	command := CommandLine(EffectiveFlags(h.Settings, entry.Options), !isFirstStart && HasConversation(h.Projects, entry.Folder))
+	if err := h.Plugin.ClearLaunch(entry.Folder); err != nil {
+		return err
+	}
+	if err := h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, Harness: "claude-code", Command: command, Env: map[string]string{launchVariable: launchID}}); err != nil {
+		return err
+	}
+	return h.Runtime.Send(entry.ShipID, UserLine(prompt))
+}
+
+// LaunchSeen is what the session did in its launch window, as its marker says; with no activity, the cause its last error event gives (H13).
+func (h Harness) LaunchSeen(entry reconciler.Entry) reconciler.LaunchSeen {
+	if h.Plugin.LaunchSeen(entry.Folder, entry.LaunchID).IsActive {
+		return reconciler.LaunchSeen{Kind: reconciler.LaunchActive}
+	}
+	return reconciler.LaunchSeen{Kind: reconciler.LaunchNone, Cause: errorIn(h.Events(entry.ShipID))}
+}
+
+// errorIn is why Claude Code's last error event says it failed: the last result that is an error; empty without one.
+func errorIn(events string) string {
+	file, err := os.Open(events)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	cause := ""
+	lines := bufio.NewScanner(file)
+	lines.Buffer(make([]byte, 64*1024), 64*1024*1024)
+	for lines.Scan() {
+		var event struct {
+			Type    string `json:"type"`
+			IsError bool   `json:"is_error"`
+			Result  any    `json:"result"`
+			Subtype string `json:"subtype"`
+		}
+		if json.Unmarshal([]byte(lines.Text()), &event) != nil || event.Type != "result" || !event.IsError {
+			continue
+		}
+		if result, ok := event.Result.(string); ok && strings.TrimSpace(result) != "" {
+			cause = result
+		} else if event.Subtype != "" {
+			cause = event.Subtype
+		} else {
+			cause = "an error"
+		}
+	}
+	return cause
+}
+
+func (h Harness) WriteIdentity(folder string, identity plugin.Identity, crewToken string) error {
+	return h.Plugin.WriteIdentity(folder, identity, crewToken)
+}
+
+func (h Harness) HasIdentity(folder string) bool { return h.Plugin.HasIdentity(folder) }
+
+func (h Harness) DeleteIdentity(folder string) error { return h.Plugin.DeleteIdentity(folder) }
+
+func (h Harness) SessionDied(folder string) error { return h.Plugin.SessionDied(folder) }
+
+func (h Harness) Problem() error { return h.Plugin.IsInstalled() }
