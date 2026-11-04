@@ -31,12 +31,12 @@ func anEntry(shipID string, state string) Entry {
 
 func aContext(requests ...Request) Context {
 	return Context{
-		Requests:      requests,
-		Now:           now,
-		Harnesses:     []string{"claude-code"},
-		Repositories:  []string{"aeolus-fleet"},
-		RunningCap:    2,
-		Observed:      Observed{Launches: map[string]Launch{}},
+		Requests:     requests,
+		Now:          now,
+		Harnesses:    []string{"claude-code"},
+		Repositories: []string{"aeolus-fleet"},
+		RunningCap:   2,
+		Observed:     Observed{Launches: map[string]LaunchSeen{}},
 	}
 }
 
@@ -161,7 +161,7 @@ func TestACrewingSessionActiveInItsLaunchWindowRunsSinceItStarted(t *testing.T) 
 	context := aContext(aRequest(scout))
 	context.Requests[0].Status = status("crewing")
 	context.Observed.Sessions = running(scout)
-	context.Observed.Launches[scout] = Launch{Kind: LaunchActive}
+	context.Observed.Launches[scout] = LaunchSeen{Kind: LaunchActive}
 
 	next, actions := Reconcile(withEntries(entry), context)
 
@@ -178,7 +178,7 @@ func TestACrewingSessionStillQuietInItsLaunchWindowWaits(t *testing.T) {
 	context := aContext(aRequest(scout))
 	context.Requests[0].Status = status("crewing")
 	context.Observed.Sessions = running(scout)
-	context.Observed.Launches[scout] = Launch{Kind: LaunchNone}
+	context.Observed.Launches[scout] = LaunchSeen{Kind: LaunchNone}
 
 	next, actions := Reconcile(withEntries(entry), context)
 
@@ -193,7 +193,7 @@ func TestACrewingSessionQuietForItsWholeLaunchWindowIsGivenBack(t *testing.T) {
 	entry.LaunchedAt, entry.LaunchID = ago(60*time.Second), "launch-1"
 	context := aContext(aRequest(scout))
 	context.Observed.Sessions = running(scout)
-	context.Observed.Launches[scout] = Launch{Kind: LaunchNone, Cause: "Not logged in"}
+	context.Observed.Launches[scout] = LaunchSeen{Kind: LaunchNone, Cause: "Not logged in"}
 
 	next, actions := Reconcile(withEntries(entry), context)
 
@@ -211,7 +211,7 @@ func TestAFinalCrewQuietForItsWholeLaunchWindowRestartsAgainstItsBudget(t *testi
 	context.Requests[0].IsFinal = true
 	context.Requests[0].Status = status("crewing")
 	context.Observed.Sessions = running(scout)
-	context.Observed.Launches[scout] = Launch{Kind: LaunchNone}
+	context.Observed.Launches[scout] = LaunchSeen{Kind: LaunchNone}
 
 	next, actions := Reconcile(withEntries(entry), context)
 
@@ -343,7 +343,7 @@ func TestARestartedSessionQuietForItsWholeLaunchWindowIsAFailedStart(t *testing.
 	context := aContext(aRequest(scout))
 	context.Requests[0].Status = status("running")
 	context.Observed.Sessions = running(scout)
-	context.Observed.Launches[scout] = Launch{Kind: LaunchNone}
+	context.Observed.Launches[scout] = LaunchSeen{Kind: LaunchNone}
 
 	next, actions := Reconcile(withEntries(entry), context)
 
@@ -363,7 +363,7 @@ func TestARestartedSessionActiveClosesItsLaunchWindow(t *testing.T) {
 	context := aContext(aRequest(scout))
 	context.Requests[0].Status = status("running")
 	context.Observed.Sessions = running(scout)
-	context.Observed.Launches[scout] = Launch{Kind: LaunchActive}
+	context.Observed.Launches[scout] = LaunchSeen{Kind: LaunchActive}
 
 	next, actions := Reconcile(withEntries(entry), context)
 
