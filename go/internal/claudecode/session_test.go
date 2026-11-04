@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
@@ -73,11 +72,5 @@ func TestAPromptIsOneStreamJSONUserMessageWithTheLineThatNoHumanReads(t *testing
 	want := `{"type":"user","message":{"role":"user","content":"/aeolus-fleet:wake No human reads this terminal. Never ask here; ask over the fleet. A question only a human can answer goes to your ship's owner (argo when argo owns your ship)."}}`
 	if got != want {
 		t.Fatalf("line %s", got)
-	}
-}
-
-func TestAFirstPromptEndsWithTheLineThatNoHumanReadsOnALineOfItsOwn(t *testing.T) {
-	if got := FirstPrompt("Review PR 12"); !strings.HasPrefix(got, "Review PR 12\n\nNo human reads this terminal.") {
-		t.Fatalf("prompt %q", got)
 	}
 }

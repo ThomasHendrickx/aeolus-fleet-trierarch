@@ -10,6 +10,7 @@ import (
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/prompt"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 )
@@ -69,7 +70,7 @@ func TestAFirstStartRunsClaudeCodeInTheFolderWithItsLaunchIdAndItsFirstPrompt(t 
 	if len(running.started) != 1 || running.started[0].Folder != entry.Folder || running.started[0].Harness != "claude-code" || running.started[0].Env["AEOLUS_LAUNCH"] != "launch-1" || slices.Contains(running.started[0].Command, "--continue") || !slices.Contains(running.started[0].Command, "opus") {
 		t.Fatalf("started %+v", running.started)
 	}
-	if !slices.Equal(running.sent, []string{UserLine(FirstPrompt("Review PR 12"))}) || onboarding.completed != 1 {
+	if !slices.Equal(running.sent, []string{UserLine(prompt.First("Review PR 12"))}) || onboarding.completed != 1 {
 		t.Fatalf("sent %q, onboarding %d", running.sent, onboarding.completed)
 	}
 }
@@ -160,7 +161,7 @@ func TestAHandOverTypesThePluginsLineIntoTheSessionAsAWake(t *testing.T) {
 	if err != nil || !isHanded {
 		t.Fatalf("HandOver = %v %v, want handed", isHanded, err)
 	}
-	want := UserLine("Aeolus handed a message " + noTerminalQuestions)
+	want := UserLine("Aeolus handed a message " + prompt.NoTerminalQuestions)
 	if !slices.Equal(running.sent, []string{want}) {
 		t.Fatalf("sent %q, want %q", running.sent, want)
 	}
@@ -182,8 +183,8 @@ func TestAForcedMessageStopsABusyTurnBeforeItsLineGoesIn(t *testing.T) {
 		isTurnBusy bool
 		want       []string
 	}{
-		{true, []string{"interrupt", UserLine("Aeolus forced " + noTerminalQuestions)}},
-		{false, []string{UserLine("Aeolus forced " + noTerminalQuestions)}},
+		{true, []string{"interrupt", UserLine("Aeolus forced " + prompt.NoTerminalQuestions)}},
+		{false, []string{UserLine("Aeolus forced " + prompt.NoTerminalQuestions)}},
 	}
 	for _, c := range cases {
 		harness, running, _ := aHarness(t)

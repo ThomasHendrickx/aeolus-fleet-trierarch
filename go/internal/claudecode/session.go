@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/prompt"
 )
 
 // A session of Claude Code (docs/architecture.md, "First adapters"): one
@@ -23,9 +24,6 @@ import (
 var headless = []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"}
 
 const noPanePrompts = "--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode"
-
-// noTerminalQuestions is common's NO_TERMINAL_QUESTIONS: every prompt carries it (#585).
-const noTerminalQuestions = "No human reads this terminal. Never ask here; ask over the fleet. A question only a human can answer goes to your ship's owner (argo when argo owns your ship)."
 
 const wakeCommand = "/aeolus-fleet:wake"
 
@@ -105,15 +103,5 @@ func UserLine(prompt string) string {
 
 // WakePrompt is the prompt of every start but a first one with its own: the wake command, with the line that no human reads.
 func WakePrompt() string {
-	return WakePromptOf(wakeCommand)
-}
-
-// WakePromptOf is a wake with the line that no human reads as its argument: a typed wake is one line, as Enter sends it.
-func WakePromptOf(command string) string {
-	return command + " " + noTerminalQuestions
-}
-
-// FirstPrompt is a crew request's first prompt with the line that no human reads last, on a line of its own.
-func FirstPrompt(prompt string) string {
-	return prompt + "\n\n" + noTerminalQuestions
+	return prompt.Wake(wakeCommand)
 }
