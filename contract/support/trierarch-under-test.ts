@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
  * that does what docs/trierarch.md says passes the suite run with its own
  * command here; no test reaches the trierarch any other way.
  */
-const TODAYS_TRIERARCH: readonly string[] = [process.execPath, fileURLToPath(new URL('../../packages/trierarch/dist/bin/aeolus-trierarch.js', import.meta.url))];
+export const TODAYS_TRIERARCH: readonly string[] = [process.execPath, fileURLToPath(new URL('../../packages/trierarch/dist/bin/aeolus-trierarch.js', import.meta.url))];
 
 const named = process.env.AEOLUS_TRIERARCH_UNDER_TEST?.trim();
 

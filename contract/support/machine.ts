@@ -31,8 +31,8 @@ export interface Machine {
   readonly repository: string;
   /** The aeolus-fleet plugin's data folder for Claude Code. */
   readonly pluginData: string;
-  /** Runs the trierarch under test with the words given, from the home, to its end. */
-  trierarch(words: readonly string[], at?: { input?: string }): Promise<CommandOutcome>;
+  /** Runs the trierarch under test with the words given, from the home, to its end; another trierarch's command when `as` names one. */
+  trierarch(words: readonly string[], at?: { input?: string; as?: readonly string[] }): Promise<CommandOutcome>;
   /** Makes the stand-in answer otherwise, as the file of that name says. */
   toggle(name: StandInSwitch, isOn: boolean): void;
   /** The pid of the trierarch the service runs now, none when it is stopped. */
@@ -273,7 +273,7 @@ export async function aMachine(at: { others?: readonly OtherHarness[] } = {}): P
     const file = join(machine, 'systemd', 'pid');
     return existsSync(file) ? Number(readFileSync(file, 'utf8').trim()) : undefined;
   };
-  const trierarch = (words: readonly string[], at: { input?: string } = {}) => runProgram([...TRIERARCH_UNDER_TEST, ...words], { cwd: home, env, ...at });
+  const trierarch = (words: readonly string[], at: { input?: string; as?: readonly string[] } = {}) => runProgram([...(at.as ?? TRIERARCH_UNDER_TEST), ...words], { cwd: home, env, ...(at.input !== undefined && { input: at.input }) });
   return {
     home,
     machine,

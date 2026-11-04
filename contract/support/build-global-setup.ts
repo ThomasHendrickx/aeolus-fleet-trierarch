@@ -1,11 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { isTodaysTrierarch } from './trierarch-under-test.js';
-
-/** Builds today's trierarch once before the suite, as `npm install --global` would install it; another trierarch under test comes built. */
+/** Builds today's trierarch once before the suite, as `npm install --global` would install it: the trierarch under test when no other is named, and the one another takes over holds from and gives them to. Another trierarch under test comes built. */
 export function setup(): void {
-  if (isTodaysTrierarch) {
-    execFileSync('npm', ['run', 'build'], { cwd: fileURLToPath(new URL('../..', import.meta.url)), stdio: 'inherit' });
-  }
+  execFileSync('npm', ['run', 'build'], { cwd: fileURLToPath(new URL('../..', import.meta.url)), stdio: 'inherit' });
 }
