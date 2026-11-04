@@ -309,8 +309,12 @@ func Main(args []string, machine Machine) (string, int) {
 // upgrade is `upgrade [version]`, with the harnesses the configuration offers; none without a configuration yet. A plugin that could not be updated shows in the exit status.
 func upgrade(at paths.Paths, machine Machine, command parsed) (answer, error) {
 	var harnesses []string
+	hookFolder := at.Worktrees
 	if configuration, err := config.Load(at.Config); err == nil {
 		harnesses = slices.Sorted(maps.Keys(configuration.Harnesses))
+		if configuration.WorktreeRoot != "" {
+			hookFolder = configuration.WorktreeRoot
+		}
 	}
 	version := ""
 	if len(command.words) == 2 {
@@ -324,6 +328,8 @@ func upgrade(at paths.Paths, machine Machine, command parsed) (answer, error) {
 		Releases:     machine.Releases(),
 		Service:      machine.Service(at),
 		Plugins:      machine.Plugins(),
+		Codex:        machine.Codex(),
+		HookFolder:   hookFolder,
 		Trierarch:    machine.Trierarch,
 		Sleep:        machine.Sleep,
 		IsPluginStep: variable(machine.Environ, PluginStepVariable) == "1",

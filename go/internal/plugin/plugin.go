@@ -24,8 +24,8 @@ type Plugin struct {
 	Crews string
 }
 
-// dataFolder is the plugin's data folder in Claude Code's and Codex's plugins folders, as both name it.
-const dataFolder = "aeolus-fleet-aeolus-fleet"
+// DataFolder is the plugin's data folder in Claude Code's and Codex's plugins folders, as both name it.
+const DataFolder = "aeolus-fleet-aeolus-fleet"
 
 var releaseVersion = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 
@@ -80,7 +80,7 @@ func crewsOf(homeDirectory string, harness string) string {
 // newestIn is the plugin as given, its data folder in the harness's plugins folder when none is given, and its root the newest version in that folder's cache when none is given.
 func newestIn(plugins string, plugin Plugin, harness string, rootVariable string) (Plugin, error) {
 	if plugin.Data == "" {
-		plugin.Data = filepath.Join(plugins, "data", dataFolder)
+		plugin.Data = filepath.Join(plugins, "data", DataFolder)
 	}
 	if plugin.Root != "" {
 		return plugin, nil

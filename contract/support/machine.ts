@@ -19,7 +19,15 @@ import { isTodaysTrierarch, TRIERARCH_UNDER_TEST } from './trierarch-under-test.
  * each harness command line (`<harness>-calls.txt`), the service's log
  * (`systemd/trierarch.log`). A file there changes their answers:
  * `claude-signed-out` makes `claude auth status` fail, `claude-plugin-fails`
- * makes every `claude plugin` command fail.
+ * makes every `claude plugin` command fail. Codex's plugin commands keep
+ * its plugin cache as Codex does: `plugin marketplace upgrade` replaces every
+ * version folder with the version of the release tag the marketplace was added
+ * at, or the one `codex-marketplace-version` holds, when there is one to
+ * update, and `plugin add` installs that version;
+ * `codex-plugin-fails` makes the upgrade fail once it deleted them,
+ * `codex-deletes-plugin-data` makes `plugin marketplace remove` delete the
+ * plugin data folders of its Codex home, and `codex-untrusted-hook` makes the
+ * app server list one aeolus-fleet hook to trust.
  */
 export interface Machine {
   readonly home: string;
@@ -51,7 +59,7 @@ export interface Machine {
   remove(): Promise<void>;
 }
 
-export type StandInSwitch = 'claude-signed-out' | 'claude-plugin-fails';
+export type StandInSwitch = 'claude-signed-out' | 'claude-plugin-fails' | 'codex-plugin-fails' | 'codex-deletes-plugin-data' | 'codex-untrusted-hook';
 
 export interface CommandOutcome {
   readonly status: number;
@@ -203,8 +211,28 @@ case "$1" in
   --version) echo 'codex-cli 0.163.0'; exit 0 ;;
   login) echo "$*" >> "$machine/codex-calls.txt"; echo 'Logged in using ChatGPT'; exit 0 ;;
   debug) echo "$*" >> "$machine/codex-calls.txt"; echo '{"models":[{"slug":"gpt-5.6-terra","visibility":"list"}]}'; exit 0 ;;
-  app-server) exec '${process.execPath}' '${join(CONTRACT_SUPPORT, 'fake-codex-app-server.ts')}' ;;
-  plugin) echo "$*" >> "$machine/codex-calls.txt"; exit 0 ;;
+  app-server)
+    [ -e "$machine/codex-untrusted-hook" ] && export FAKE_CODEX_UNTRUSTED_HOOK=1
+    exec '${process.execPath}' '${join(CONTRACT_SUPPORT, 'fake-codex-app-server.ts')}' ;;
+  plugin)
+    echo "$*" >> "$machine/codex-calls.txt"
+    codexHome="\${CODEX_HOME:-$HOME/.codex}"
+    cache="$codexHome/plugins/cache/aeolus-fleet/aeolus-fleet"
+    ref="$(cat "$machine/codex-marketplace-version" 2>/dev/null || cat "$machine/codex-ref" 2>/dev/null || echo 0.0.0)"
+    versions() { ls "$cache" 2>/dev/null | grep -E '^[0-9]+\\.[0-9]+\\.[0-9]+$'; }
+    install() { mkdir -p "$cache/$ref/.codex-plugin" && echo "{\\"name\\":\\"aeolus-fleet\\",\\"version\\":\\"$ref\\"}" > "$cache/$ref/.codex-plugin/plugin.json"; }
+    case "$2 $3" in
+      'marketplace add') [ "$5" = --ref ] && echo "\${6#v}" > "$machine/codex-ref" ;;
+      'marketplace remove') [ -e "$machine/codex-deletes-plugin-data" ] && rm -rf "$codexHome/plugins/data" ;;
+      'marketplace upgrade')
+        if [ -n "$(versions)" ]; then
+          for version in $(versions); do rm -rf "\${cache:?}/$version"; done
+          if [ -e "$machine/codex-plugin-fails" ]; then echo 'Failed to reach github.com' >&2; exit 1; fi
+          install
+        fi ;;
+      'add aeolus-fleet@aeolus-fleet') install ;;
+    esac
+    exit 0 ;;
 esac
 exec '${process.execPath}' '${join(STAND_INS, 'fake-codex.ts')}' "$@" --plugin '${PLUGIN_ROOT}' '${at.pluginData}'
 `;

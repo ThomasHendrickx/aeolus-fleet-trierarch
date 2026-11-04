@@ -427,6 +427,12 @@ type Running struct {
 	Version string `json:"version"`
 }
 
+// RunningPID is the pid of the trierarch running.json at the path names, 0 when it names none.
+func RunningPID(path string) int {
+	running, _ := readRunning(path)
+	return running.PID
+}
+
 func readRunning(path string) (Running, bool) {
 	text, err := os.ReadFile(path)
 	if err != nil {
