@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { TRIERARCH_UNDER_TEST } from './trierarch-under-test.js';
+import { isTodaysTrierarch, TRIERARCH_UNDER_TEST } from './trierarch-under-test.js';
 
 /**
  * A machine for the trierarch under test, as a program sees one: a home of
@@ -31,8 +31,10 @@ export interface Machine {
   readonly repository: string;
   /** The aeolus-fleet plugin's data folder for Claude Code. */
   readonly pluginData: string;
-  /** Runs the trierarch under test with the words given, from the home, to its end; another trierarch's command when `as` names one. */
-  trierarch(words: readonly string[], at?: { input?: string; as?: readonly string[] }): Promise<CommandOutcome>;
+  /** The trierarch under test as this machine runs it: a copy of its file in the home's ~/.local/bin, as an install puts it, so an upgrade replaces this machine's alone; one run by an interpreter, as today's, as it is. */
+  readonly underTest: readonly string[];
+  /** Runs the trierarch under test with the words given, from the home, to its end; another trierarch's command when `as` names one, with more variables when `env` gives them. */
+  trierarch(words: readonly string[], at?: { input?: string; as?: readonly string[]; env?: Readonly<Record<string, string>> }): Promise<CommandOutcome>;
   /** Makes the stand-in answer otherwise, as the file of that name says. */
   toggle(name: StandInSwitch, isOn: boolean): void;
   /** The pid of the trierarch the service runs now, none when it is stopped. */
@@ -273,13 +275,25 @@ export async function aMachine(at: { others?: readonly OtherHarness[] } = {}): P
     const file = join(machine, 'systemd', 'pid');
     return existsSync(file) ? Number(readFileSync(file, 'utf8').trim()) : undefined;
   };
-  const trierarch = (words: readonly string[], at: { input?: string; as?: readonly string[] } = {}) => runProgram([...(at.as ?? TRIERARCH_UNDER_TEST), ...words], { cwd: home, env, ...(at.input !== undefined && { input: at.input }) });
+  // A trierarch that is one file is copied, as an install puts it in the user's own folder; one run by an interpreter is run as it is.
+  const [program = '', ...programWords] = TRIERARCH_UNDER_TEST;
+  const installed = join(home, '.local', 'bin', 'aeolus-trierarch');
+  const isOneFile = !isTodaysTrierarch && programWords.length === 0;
+  const underTest = isOneFile ? [installed] : TRIERARCH_UNDER_TEST;
+  if (isOneFile) {
+    mkdirSync(dirname(installed), { recursive: true });
+    copyFileSync(program, installed);
+    chmodSync(installed, 0o755);
+  }
+  const trierarch = (words: readonly string[], at: { input?: string; as?: readonly string[]; env?: Readonly<Record<string, string>> } = {}) =>
+    runProgram([...(at.as ?? underTest), ...words], { cwd: home, env: { ...env, ...at.env }, ...(at.input !== undefined && { input: at.input }) });
   return {
     home,
     machine,
     trierarchHome: join(home, '.aeolus', 'trierarch'),
     repository,
     pluginData,
+    underTest,
     trierarch,
     toggle: (name, isOn) => {
       const file = join(machine, name);

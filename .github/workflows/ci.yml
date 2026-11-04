@@ -61,7 +61,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go/go.mod
-          cache-dependency-path: go/go.mod
+          cache-dependency-path: go/go.sum
       - name: gofmt lists no file
         run: |
           unformatted=$(gofmt -l .)
@@ -88,7 +88,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go/go.mod
-          cache-dependency-path: go/go.mod
+          cache-dependency-path: go/go.sum
       - run: go test -race -v ./internal/service ./internal/logfile
 
   trierarch-macos:
@@ -172,13 +172,14 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go/go.mod
-          cache-dependency-path: go/go.mod
+          cache-dependency-path: go/go.sum
       - run: npm ci
       - uses: ./.github/actions/test-images
-      # A version of its own, as a release's is, so it and today's trierarch take over each other's holds.
-      - run: go build -ldflags "-X github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/cli.Version=0.0.0-go" -o "$RUNNER_TEMP/aeolus-trierarch" ./cmd/aeolus-trierarch
+      # A version of its own, as a release's is, so it and today's trierarch take over each other's holds; MAJOR.MINOR.PATCH, the only versions upgrade takes.
+      - run: go build -ldflags "-X github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/cli.Version=0.0.1" -o "$RUNNER_TEMP/aeolus-trierarch" ./cmd/aeolus-trierarch
         working-directory: go
-      - run: npx vitest run --project contract:integration init.integration run.integration hold.integration takeover.integration model-proxy.integration harnesses.integration
+      # The upgrade tests build the Go trierarch of the next version for the suite's own GitHub Release, with go on PATH.
+      - run: npx vitest run --project contract:integration init.integration run.integration hold.integration takeover.integration model-proxy.integration harnesses.integration upgrade.integration
         env:
           AEOLUS_TRIERARCH_UNDER_TEST: ${{ runner.temp }}/aeolus-trierarch
 

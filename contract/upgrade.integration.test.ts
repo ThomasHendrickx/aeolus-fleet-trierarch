@@ -1,11 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+
+import { afterEach, beforeEach, describe, expect, inject, it } from 'vitest';
 import { z } from 'zod';
 
+import type { ReleaseBuild } from './support/build-global-setup.js';
 import { aCrewingMachine } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
+import { aBinaryThatDoesNotStart, aReleaseSource, type Fault, type ReleaseSource } from './support/release.js';
 
-// upgrade on the version the trierarch runs: it installs nothing and updates the aeolus-fleet plugin through each offered harness's own commands (docs/trierarch.md, "A machine joins"). Installing another version, and putting the old one back when that fails, come from where a release is fetched, which the Go trierarch changes (#104): they are not in the suite yet.
+// upgrade on the version the trierarch runs: it installs nothing and updates the aeolus-fleet plugin through each offered harness's own commands (docs/trierarch.md, "A machine joins"). Another version comes from its GitHub Release, the binary for the machine's system and chip checked against SHA256SUMS and its attestation, in place of the trierarch's own file, the old one left or put back when that fails. Today's trierarch takes another version from npm until #142, so those tests run against a trierarch that is one file.
 
 /** The plugin's marketplace, as Claude Code adds it: the repository, at a release tag or main. */
 const MARKETPLACE = 'plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch';
@@ -64,5 +69,66 @@ describe('upgrade on the version it runs', () => {
 
     expect(upgrade.status).toBe(1);
     expect(machine.callsOf('claude').filter((call) => call.startsWith('plugin '))).toEqual([]);
+  });
+});
+
+const release = inject('release');
+
+/** The release build the suite made: there is one wherever these tests run. */
+function built(): ReleaseBuild {
+  if (release === undefined) {
+    throw new Error('no release was built for the trierarch under test');
+  }
+  return release;
+}
+
+describe.skipIf(release === undefined)('upgrade to another version from its GitHub Release', () => {
+  let source: ReleaseSource | undefined;
+
+  afterEach(async () => {
+    await source?.close();
+    source = undefined;
+  });
+
+  const installed = (): string => createHash('sha256').update(readFileSync(machine.underTest[0] ?? '')).digest('hex');
+  const runningVersion = async (): Promise<string | undefined> => z.object({ runningVersion: z.string().optional() }).parse(JSON.parse((await machine.trierarch(['status', '--json'])).stdout)).runningVersion;
+
+  it("installs the release's binary in place of its own file, and the service runs it", async () => {
+    source = await aReleaseSource(built());
+
+    const upgrade = await machine.trierarch(['upgrade', source.version, '--json'], { env: source.env });
+
+    expect(upgrade.status, upgrade.stdout + upgrade.stderr).toBe(0);
+    expect(reportSchema.parse(JSON.parse(upgrade.stdout))).toEqual({ from: version, to: source.version, isUpgraded: true, isPluginUpdated: true });
+    expect(installed()).toBe(createHash('sha256').update(source.binary).digest('hex'));
+    expect(await runningVersion()).toBe(source.version);
+    expect(machine.callsOf('claude')).toContain(`${MARKETPLACE}#v${source.version}`);
+  });
+
+  it.each<Fault>(['bad checksum', 'bad attestation'])('leaves the old binary in place, the service running it, on a %s', async (fault) => {
+    source = await aReleaseSource(built(), { fault });
+    const before = installed();
+    const pid = machine.servicePid();
+    const pluginCalls = machine.callsOf('claude').filter((call) => call.startsWith('plugin '));
+
+    const upgrade = await machine.trierarch(['upgrade', source.version, '--json'], { env: source.env });
+
+    expect(upgrade.status, upgrade.stdout).toBe(1);
+    expect(installed()).toBe(before);
+    expect(machine.servicePid()).toBe(pid);
+    expect(await runningVersion()).toBe(version);
+    expect(machine.callsOf('claude').filter((call) => call.startsWith('plugin '))).toEqual(pluginCalls);
+  });
+
+  it('puts the old binary back when the new one does not start, and the service runs it again', async () => {
+    source = await aReleaseSource(built(), { binary: aBinaryThatDoesNotStart(built().version) });
+    const before = installed();
+
+    const upgrade = await machine.trierarch(['upgrade', source.version, '--json'], { env: source.env });
+
+    expect(upgrade.status, upgrade.stdout).toBe(1);
+    expect(upgrade.stdout).toContain('did not start');
+    expect(installed()).toBe(before);
+    expect(await runningVersion()).toBe(version);
   });
 });
