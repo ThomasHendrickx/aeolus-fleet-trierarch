@@ -9,6 +9,7 @@ import (
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/prompt"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
@@ -67,11 +68,11 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if err := h.Onboarding.CompleteOnboarding(); err != nil {
 		return err
 	}
-	prompt := WakePrompt()
+	line := WakePrompt()
 	if isFirstStart && entry.FirstPrompt != "" {
-		prompt = FirstPrompt(entry.FirstPrompt)
+		line = prompt.First(entry.FirstPrompt)
 	}
-	command := CommandLine(EffectiveFlags(h.Settings, entry.Options), !isFirstStart && HasConversation(h.Projects, entry.Folder))
+	command := CommandLine(h.Settings.EffectiveFlags(entry.Options), !isFirstStart && HasConversation(h.Projects, entry.Folder))
 	if err := h.Plugin.ClearLaunch(entry.Folder); err != nil {
 		return err
 	}
@@ -79,7 +80,7 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if err := h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, Harness: "claude-code", Command: command, Env: env, ProxyToken: token}); err != nil {
 		return err
 	}
-	return h.Runtime.Send(entry.ShipID, UserLine(prompt))
+	return h.Runtime.Send(entry.ShipID, UserLine(line))
 }
 
 // LaunchSeen is what the session did in its launch window, as its marker says; with no activity, the cause its last error event gives (H13).
@@ -141,7 +142,7 @@ func (h Harness) HandOver(entry reconciler.Entry) (bool, error) {
 	if !ok {
 		return false, nil
 	}
-	return true, h.Runtime.Send(entry.ShipID, UserLine(WakePromptOf(line)))
+	return true, h.Runtime.Send(entry.ShipID, UserLine(prompt.Wake(line)))
 }
 
 // ForceOver hands a forced message over (decision 0040), its busy turn stopped first; false when nothing is handed.
@@ -155,7 +156,7 @@ func (h Harness) ForceOver(entry reconciler.Entry, isTurnBusy bool) (bool, error
 			return false, err
 		}
 	}
-	return true, h.Runtime.Send(entry.ShipID, UserLine(WakePromptOf(line)))
+	return true, h.Runtime.Send(entry.ShipID, UserLine(prompt.Wake(line)))
 }
 
 func (h Harness) Problem() error { return h.Plugin.IsInstalled() }

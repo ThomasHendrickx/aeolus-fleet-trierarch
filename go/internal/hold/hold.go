@@ -15,6 +15,23 @@
 // stdin, which keeps the process (H12). When Claude Code refuses it, SIGINT
 // stops the turn and the process, and the hold starts it again resuming its
 // session, so the trierarch sees no exit.
+//
+// Codex runs one `codex exec` per turn (H11): the start command is the first
+// turn, and each line sent is the prompt of a `codex exec resume` of the
+// thread the first named, started once the last turn's process has ended.
+// Between turns no Codex process runs and the hold stays; its turn is stopped
+// with SIGINT, which ends the process (H12).
+//
+// Copilot runs one `copilot -p` per turn in the same way (CC4), each line the
+// prompt of one resuming the session the last turn's result named. The
+// `copilot` on the PATH is a launcher that runs the native Copilot as its
+// child: a turn ends when the native process closed its output, not when the
+// launcher exits, and its turn is stopped with SIGINT to its whole process
+// group, since a SIGINT to the launcher alone ends the launcher and leaves the
+// native process running the turn to its end. What Copilot writes on stderr is
+// kept among the events, as it says a refused model or login there before any
+// event. A turn that ends with a failing exit status ends the hold with it: the
+// turn died, and the trierarch starts the session again.
 package hold
 
 import (
@@ -86,7 +103,12 @@ const (
 	resume       = "--resume"
 	continueFlag = "--continue"
 	claudeCode   = "claude-code"
+	codex        = "codex"
+	copilot      = "copilot"
 )
+
+// StderrEvent is the type of the line the hold keeps for each line Copilot writes on stderr, so the launch window reads what Copilot says before any event.
+const StderrEvent = "aeolus.stderr"
 
 type Options struct {
 	Files  Files
@@ -125,6 +147,11 @@ type harness struct {
 	stdin   io.WriteCloser
 }
 
+// isTurnPerProcess is whether the harness runs one process per turn, with none between turns (H11, CC4).
+func (h *held) isTurnPerProcess() bool {
+	return h.options.Harness == codex || h.options.Harness == copilot
+}
+
 type held struct {
 	options Options
 	events  *os.File
@@ -137,7 +164,9 @@ type held struct {
 	isRestarting bool
 	isStopping   bool
 	controls     int
-	watchers     map[chan event]struct{}
+	// turns takes the lines of a harness with a process per turn one at a time, so two never start a turn on one session.
+	turns    sync.Mutex
+	watchers map[chan event]struct{}
 	// ended takes the exit code that ends the hold, once.
 	ended chan int
 }
@@ -215,57 +244,105 @@ func startGuard(line []string) (io.WriteCloser, error) {
 	return stdin, nil
 }
 
-// start starts a run of the command, with the hold's mutex held, and makes it the hold's child.
+// start starts a run of the command, with the hold's mutex held, and makes it the hold's child. A harness with a process per turn gets no stdin: codex exec reads one that is no terminal to its end before its turn, and copilot -p may take it as its prompt.
 func (h *held) start(command []string) (*harness, error) {
 	run := exec.Command(command[0], command[1:]...)
 	run.Dir = h.options.Folder
 	run.Env = h.options.Environment
 	// A process group of its own: a stop ends the harness and every process it started.
 	run.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	stdin, err := run.StdinPipe()
-	if err != nil {
-		return nil, err
+	var stdin io.WriteCloser
+	if !h.isTurnPerProcess() {
+		pipe, err := run.StdinPipe()
+		if err != nil {
+			return nil, err
+		}
+		stdin = pipe
 	}
-	// A pipe of its own, so the harness's end is seen even while a process it started still holds its output.
+	// Pipes of its own, so the harness's end is seen even while a process it started still holds its output.
 	stdout, output, err := os.Pipe()
 	if err != nil {
 		return nil, err
 	}
 	run.Stdout = output
+	readers := []*os.File{stdout}
+	writers := []*os.File{output}
+	if h.options.Harness == copilot {
+		stderr, errorOutput, err := os.Pipe()
+		if err != nil {
+			_ = stdout.Close()
+			_ = output.Close()
+			return nil, err
+		}
+		run.Stderr = errorOutput
+		readers = append(readers, stderr)
+		writers = append(writers, errorOutput)
+	}
 	if err := run.Start(); err != nil {
-		_ = stdout.Close()
-		_ = output.Close()
+		for _, file := range append(readers, writers...) {
+			_ = file.Close()
+		}
 		return nil, err
 	}
-	_ = output.Close()
+	for _, writer := range writers {
+		_ = writer.Close()
+	}
 	started := &harness{command: run, stdin: stdin}
 	h.child = started
+	if h.isTurnPerProcess() {
+		h.isBusy = true
+	}
 	if h.guard != nil {
 		_, _ = fmt.Fprintf(h.guard, "%d\n", run.Process.Pid)
 	}
 	read := make(chan struct{})
-	go h.read(stdout, read)
-	go h.wait(started, stdout, read)
+	var reading sync.WaitGroup
+	reading.Add(len(readers))
+	go h.read(stdout, h.onLine, &reading)
+	if len(readers) > 1 {
+		go h.read(readers[1], func(line string) { h.onLine(stderrLine(line)) }, &reading)
+	}
+	go func() {
+		reading.Wait()
+		close(read)
+	}()
+	go h.wait(started, readers, read)
 	return started, nil
 }
 
+// stderrLine is the line the hold keeps for a line Copilot wrote on stderr.
+func stderrLine(line string) string {
+	var text strings.Builder
+	encoder := json.NewEncoder(&text)
+	encoder.SetEscapeHTML(false)
+	_ = encoder.Encode(struct {
+		Type string `json:"type"`
+		Line string `json:"line"`
+	}{Type: StderrEvent, Line: line})
+	return strings.TrimSuffix(text.String(), "\n")
+}
+
 // read appends each line the harness writes to the events, and tells what it says.
-func (h *held) read(stdout io.Reader, done chan<- struct{}) {
-	defer close(done)
-	lines := bufio.NewScanner(stdout)
+func (h *held) read(output io.Reader, onLine func(line string), reading *sync.WaitGroup) {
+	defer reading.Done()
+	lines := bufio.NewScanner(output)
 	lines.Buffer(make([]byte, 64*1024), 64*1024*1024)
 	for lines.Scan() {
-		line := lines.Text()
-		_, _ = h.events.WriteString(line + "\n")
-		h.onLine(line)
+		onLine(lines.Text())
 	}
 }
 
+// onLine keeps the line in the events, then acts on it, so whoever a result or a control response answers finds it there.
 func (h *held) onLine(line string) {
+	_, _ = h.events.WriteString(line + "\n")
 	var said struct {
 		Type      string `json:"type"`
 		SessionID string `json:"session_id"`
-		Response  *struct {
+		// ThreadID is the thread a Codex turn names, which a later turn resumes.
+		ThreadID string `json:"thread_id"`
+		// CopilotSessionID is the session a Copilot result names, the only event naming it.
+		CopilotSessionID string `json:"sessionId"`
+		Response         *struct {
 			Subtype   string `json:"subtype"`
 			RequestID string `json:"request_id"`
 		} `json:"response"`
@@ -275,9 +352,22 @@ func (h *held) onLine(line string) {
 	}
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
-	if said.SessionID != "" && said.SessionID != h.sessionID {
-		h.sessionID = said.SessionID
-		_ = os.WriteFile(h.options.Files.SessionID, []byte(said.SessionID), 0o600)
+	id := said.SessionID
+	switch h.options.Harness {
+	case codex:
+		id = ""
+		if said.Type == "thread.started" {
+			id = said.ThreadID
+		}
+	case copilot:
+		id = ""
+		if said.Type == "result" {
+			id = said.CopilotSessionID
+		}
+	}
+	if id != "" && id != h.sessionID {
+		h.sessionID = id
+		_ = os.WriteFile(h.options.Files.SessionID, []byte(id), 0o600)
 	}
 	if said.Type == "result" {
 		h.isBusy = false
@@ -288,26 +378,39 @@ func (h *held) onLine(line string) {
 	}
 }
 
-// wait waits for the run to end, its last lines kept, and ends the hold with it unless the hold starts its harness again.
-func (h *held) wait(run *harness, stdout *os.File, read <-chan struct{}) {
+// wait waits for the run to end, its last lines kept, and ends the hold with it unless the hold starts its harness again or runs a process per turn. Copilot's turn ends once its native process closed the output it inherited from the launcher, which may exit first; a Copilot turn that failed died, and ends the hold with its status, one the hold stopped by a signal not.
+func (h *held) wait(run *harness, outputs []*os.File, read <-chan struct{}) {
 	err := run.command.Wait()
-	select {
-	case <-read:
-	case <-time.After(time.Second):
+	if h.options.Harness == copilot {
+		<-read
+	} else {
+		select {
+		case <-read:
+		case <-time.After(time.Second):
+		}
 	}
-	_ = stdout.Close()
+	for _, output := range outputs {
+		_ = output.Close()
+	}
 	code := 1
+	isExited := false
 	var exit *exec.ExitError
 	switch {
 	case err == nil:
-		code = 0
+		code, isExited = 0, true
 	case errors.As(err, &exit) && exit.ExitCode() >= 0:
-		code = exit.ExitCode()
+		code, isExited = exit.ExitCode(), true
 	}
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
+	isTurnPerProcess := h.isTurnPerProcess()
+	if isTurnPerProcess && h.child == run {
+		h.isBusy = false
+		h.child = nil
+	}
 	h.tell(event{kind: exitEvent})
-	if h.isStopping || !h.isRestarting {
+	isDiedTurn := h.options.Harness == copilot && isExited && code != 0
+	if h.isStopping || isDiedTurn || (!h.isRestarting && !isTurnPerProcess) {
 		select {
 		case h.ended <- code:
 		default:
@@ -393,6 +496,9 @@ func writeAnswer(connection net.Conn, answer Answer) {
 func (h *held) answer(request Request) Answer {
 	switch request.Call {
 	case "send":
+		if h.isTurnPerProcess() {
+			return h.sendTurn(request.Line)
+		}
 		h.mutex.Lock()
 		defer h.mutex.Unlock()
 		if h.child == nil {
@@ -423,6 +529,11 @@ func (h *held) interrupt() {
 	current := h.child
 	if !h.isBusy || current == nil {
 		h.mutex.Unlock()
+		return
+	}
+	if h.isTurnPerProcess() {
+		h.mutex.Unlock()
+		h.endTurn(watcher, syscall.SIGINT)
 		return
 	}
 	isClaudeCode := h.options.Harness == claudeCode
@@ -465,6 +576,107 @@ func (h *held) interrupt() {
 		default:
 		}
 	}
+}
+
+// sendTurn starts the line's turn once the last turn's process has ended: a codex exec resume of the session's thread (H11), or a copilot -p resuming its session (CC4). A last turn that has not ended within the wait is ended.
+func (h *held) sendTurn(line string) Answer {
+	h.turns.Lock()
+	defer h.turns.Unlock()
+	watcher := h.watch()
+	defer h.unwatch(watcher)
+	h.mutex.Lock()
+	running := h.child
+	h.mutex.Unlock()
+	if running != nil {
+		_, _ = waitFor(watcher, func(said event) bool { return said.kind == exitEvent }, time.Now().Add(InterruptWait))
+		h.mutex.Lock()
+		isStill := h.child == running
+		h.mutex.Unlock()
+		if isStill {
+			h.endTurn(watcher, syscall.SIGKILL)
+		}
+	}
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	if h.isStopping {
+		return Answer{Error: "the hold is stopping"}
+	}
+	if h.sessionID == "" {
+		if h.options.Harness == copilot {
+			return Answer{Error: "Copilot named no session to resume yet"}
+		}
+		return Answer{Error: "Codex named no thread to resume yet"}
+	}
+	command := codexTurn(h.options.Command, h.sessionID, line)
+	if h.options.Harness == copilot {
+		command = copilotTurn(h.options.Command, h.sessionID, line)
+	}
+	if _, err := h.start(command); err != nil {
+		return Answer{Error: "the turn did not start: " + err.Error()}
+	}
+	return Answer{IsOK: true}
+}
+
+// endTurn ends the running turn of a harness with a process per turn: SIGINT, to Copilot's whole group, since the launcher alone would end and leave the turn running, or SIGKILL to its group; its group killed when it has not ended within the wait (H12).
+func (h *held) endTurn(watcher <-chan event, signal syscall.Signal) {
+	h.mutex.Lock()
+	running := h.child
+	h.mutex.Unlock()
+	if running == nil {
+		return
+	}
+	switch {
+	case signal == syscall.SIGINT && h.options.Harness == copilot:
+		killGroup(running, syscall.SIGINT)
+	case signal == syscall.SIGINT:
+		_ = running.command.Process.Signal(syscall.SIGINT)
+	default:
+		killGroup(running, signal)
+	}
+	isEnded := func() bool {
+		h.mutex.Lock()
+		defer h.mutex.Unlock()
+		return h.child != running
+	}
+	for range 2 {
+		if isEnded() {
+			return
+		}
+		if _, ok := waitFor(watcher, func(said event) bool { return said.kind == exitEvent }, time.Now().Add(InterruptWait)); ok && isEnded() {
+			return
+		}
+		killGroup(running, syscall.SIGKILL)
+	}
+}
+
+// codexTurn is the command of a later Codex turn (H11): the session's start command, resuming its thread by id instead of the folder's last conversation, with the line as its prompt after `--`. The program is every word before exec.
+func codexTurn(start []string, threadID string, line string) []string {
+	words := start
+	if end := slices.Index(start, "--"); end >= 0 {
+		words = start[:end]
+	}
+	at := slices.Index(words, "exec")
+	if at < 0 {
+		at = len(words)
+	}
+	flags := []string{}
+	if at < len(words) {
+		flags = words[at+1:]
+	}
+	if len(flags) >= 2 && flags[0] == "resume" && flags[1] == "--last" {
+		flags = flags[2:]
+	}
+	turn := append(slices.Clone(words[:at]), "exec", "resume", threadID)
+	turn = append(turn, flags...)
+	return append(turn, "--", line)
+}
+
+// copilotTurn is the command of a later Copilot turn (CC4): the session's start command, resuming the session by the id given, with the line as its prompt.
+func copilotTurn(start []string, sessionID string, line string) []string {
+	turn := slices.DeleteFunc(slices.Clone(start), func(word string) bool {
+		return strings.HasPrefix(word, "--resume=") || strings.HasPrefix(word, "--prompt=")
+	})
+	return append(turn, "--resume="+sessionID, "--prompt="+line)
 }
 
 // resumed is the command that starts Claude Code again resuming its session, or continuing the folder's last when it named none.

@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/prompt"
 )
 
 // A session of Claude Code (docs/architecture.md, "First adapters"): one
@@ -23,9 +23,6 @@ import (
 var headless = []string{"-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"}
 
 const noPanePrompts = "--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode"
-
-// noTerminalQuestions is common's NO_TERMINAL_QUESTIONS: every prompt carries it (#585).
-const noTerminalQuestions = "No human reads this terminal. Never ask here; ask over the fleet. A question only a human can answer goes to your ship's owner (argo when argo owns your ship)."
 
 const wakeCommand = "/aeolus-fleet:wake"
 
@@ -47,25 +44,6 @@ func CommandLine(flags []string, isContinued bool) []string {
 		command = append(command, "--continue")
 	}
 	return command
-}
-
-// EffectiveFlags are the flags a launch gets: the harness's own, then each option's value as the settings picked it, or its default, by option name.
-func EffectiveFlags(harness config.Harness, picked map[string]string) []string {
-	flags := append([]string{}, harness.Flags...)
-	names := []string{}
-	for name := range harness.Options {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	for _, name := range names {
-		option := harness.Options[name]
-		value, ok := picked[name]
-		if !ok {
-			value = option.Default
-		}
-		flags = append(flags, option.Values[value]...)
-	}
-	return flags
 }
 
 var notLetterOrDigit = regexp.MustCompile(`[^a-zA-Z0-9]`)
@@ -105,15 +83,5 @@ func UserLine(prompt string) string {
 
 // WakePrompt is the prompt of every start but a first one with its own: the wake command, with the line that no human reads.
 func WakePrompt() string {
-	return WakePromptOf(wakeCommand)
-}
-
-// WakePromptOf is a wake with the line that no human reads as its argument: a typed wake is one line, as Enter sends it.
-func WakePromptOf(command string) string {
-	return command + " " + noTerminalQuestions
-}
-
-// FirstPrompt is a crew request's first prompt with the line that no human reads last, on a line of its own.
-func FirstPrompt(prompt string) string {
-	return prompt + "\n\n" + noTerminalQuestions
+	return prompt.Wake(wakeCommand)
 }

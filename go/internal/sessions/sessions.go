@@ -240,7 +240,7 @@ func (r Runtime) must(shipID string, request hold.Request, timeout time.Duration
 	return nil
 }
 
-// Send sends the line to the ship's session.
+// Send sends the line to the ship's session. A hold of a harness with a process per turn starts the line's turn once the last turn's process has ended, which it waits for as long as for an interrupted turn.
 func (r Runtime) Send(shipID string, line string) error {
-	return r.must(shipID, hold.Request{Call: "send", Line: line}, callTimeout)
+	return r.must(shipID, hold.Request{Call: "send", Line: line}, hold.InterruptWait+callTimeout)
 }

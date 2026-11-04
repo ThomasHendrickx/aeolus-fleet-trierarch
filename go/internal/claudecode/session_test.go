@@ -4,10 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
-
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 )
 
 func TestASessionRunsHeadlessWithItsFlagsAndNoQuestionForm(t *testing.T) {
@@ -32,19 +29,6 @@ func TestAConfiguredPlanModeIsLeftOutInEitherSpelling(t *testing.T) {
 
 	if slices.Contains(got, "plan") || slices.Contains(got, "--permission-mode=plan") || slices.Contains(got, "--permission-mode") {
 		t.Fatalf("command %q", got)
-	}
-}
-
-func TestTheFlagsAreTheHarnesssOwnThenEachPickedOptionsOrItsDefault(t *testing.T) {
-	harness := config.Harness{Flags: []string{"--verbose"}, Options: map[string]config.Option{
-		"effort": {Values: map[string][]string{"high": {"--effort", "high"}, "low": {"--effort", "low"}}, Default: "low"},
-		"model":  {Values: map[string][]string{"opus": {"--model", "opus"}}},
-	}}
-
-	got := EffectiveFlags(harness, map[string]string{"model": "opus"})
-
-	if !slices.Equal(got, []string{"--verbose", "--effort", "low", "--model", "opus"}) {
-		t.Fatalf("flags %q", got)
 	}
 }
 
@@ -73,11 +57,5 @@ func TestAPromptIsOneStreamJSONUserMessageWithTheLineThatNoHumanReads(t *testing
 	want := `{"type":"user","message":{"role":"user","content":"/aeolus-fleet:wake No human reads this terminal. Never ask here; ask over the fleet. A question only a human can answer goes to your ship's owner (argo when argo owns your ship)."}}`
 	if got != want {
 		t.Fatalf("line %s", got)
-	}
-}
-
-func TestAFirstPromptEndsWithTheLineThatNoHumanReadsOnALineOfItsOwn(t *testing.T) {
-	if got := FirstPrompt("Review PR 12"); !strings.HasPrefix(got, "Review PR 12\n\nNo human reads this terminal.") {
-		t.Fatalf("prompt %q", got)
 	}
 }

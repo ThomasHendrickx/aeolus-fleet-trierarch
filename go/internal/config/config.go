@@ -64,6 +64,20 @@ type Harness struct {
 	Options map[string]Option `json:"options"`
 }
 
+// EffectiveFlags are the flags a launch gets: the harness's own, then each option's value as the settings picked it, or its default, by option name.
+func (h Harness) EffectiveFlags(picked map[string]string) []string {
+	flags := append([]string{}, h.Flags...)
+	for _, name := range slices.Sorted(maps.Keys(h.Options)) {
+		option := h.Options[name]
+		value, ok := picked[name]
+		if !ok {
+			value = option.Default
+		}
+		flags = append(flags, option.Values[value]...)
+	}
+	return flags
+}
+
 type Option struct {
 	Values  map[string][]string `json:"values"`
 	Default string              `json:"default,omitempty"`
