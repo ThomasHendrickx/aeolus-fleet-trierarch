@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 )
 
 const scout = "shp_01m6jyczpnpp5c0vxh54c966cy"
@@ -193,5 +195,36 @@ func TestACoreThatSaysNoVersionIsRefused(t *testing.T) {
 	want := "trierarch 1.0.0 needs core 0.35.0 or later, and could not read the version of the fleet at " + client.URL + ": its /api/version answered no core version"
 	if refusal != want {
 		t.Fatalf("refusal %q, want %q", refusal, want)
+	}
+}
+
+func TestASessionsInboxIsAskedWithItsCrewToken(t *testing.T) {
+	recorded, client := aFleetAnswering(t, map[string]string{"/api/v1/ship/inbox": `{"waiting":3,"forced":1}`})
+
+	inbox, err := client.Inbox("aeolus_ct_v1_scout")
+
+	if err != nil || inbox != (reconciler.Inbox{Waiting: 3, Forced: 1}) {
+		t.Fatalf("Inbox = %+v %v, want 3 waiting, 1 forced", inbox, err)
+	}
+	if got := recorded.bearers["/api/v1/ship/inbox"]; got != "Bearer aeolus_ct_v1_scout" {
+		t.Fatalf("asked with %q, want the session's crew token", got)
+	}
+}
+
+func TestAnInboxWhoseLeaseEndedSaysSo(t *testing.T) {
+	for _, code := range []string{"LEASE_ENDED", "UNAUTHORIZED"} {
+		t.Run(code, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"code":"` + code + `","message":"gone"}`))
+			}))
+			t.Cleanup(server.Close)
+
+			inbox, err := Client{URL: server.URL}.Inbox("aeolus_ct_v1_scout")
+
+			if err != nil || !inbox.IsLeaseEnded {
+				t.Fatalf("Inbox = %+v %v, want the lease ended", inbox, err)
+			}
+		})
 	}
 }
