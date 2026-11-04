@@ -2,6 +2,7 @@ package sessions
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -69,6 +70,16 @@ func read(path string) string {
 	return strings.TrimSpace(string(text))
 }
 
+// processOf is a field of the running process as ps says it, on Linux and macOS alike, which has no /proc.
+func processOf(t *testing.T, pid string, field string) string {
+	t.Helper()
+	said, err := exec.Command("ps", "-o", field+"=", "-p", pid).Output()
+	if err != nil {
+		t.Fatalf("ps -o %s= -p %s: %v", field, pid, err)
+	}
+	return strings.TrimSpace(string(said))
+}
+
 func listed(t *testing.T, runtime Runtime) []Observed {
 	t.Helper()
 	sessions, err := runtime.List()
@@ -95,14 +106,12 @@ func TestTheSessionRunsUnderAHoldThatIsNoChildOfTheTrierarch(t *testing.T) {
 	eventually(t, "the harness's pid", func() bool { return read(filepath.Join(folder, "harness.pid")) != "" })
 
 	holdPID := read(hold.FilesOf(runtime.Sessions, scout).PID)
-	stat := strings.Fields(read("/proc/" + read(filepath.Join(folder, "harness.pid")) + "/stat"))
-	holdStat := strings.Fields(read("/proc/" + holdPID + "/stat"))
 
-	if len(stat) < 4 || stat[3] != holdPID {
-		t.Fatalf("the harness's parent is %v, not the hold %s", stat, holdPID)
+	if parent := processOf(t, read(filepath.Join(folder, "harness.pid")), "ppid"); parent != holdPID {
+		t.Fatalf("the harness's parent is %q, not the hold %s", parent, holdPID)
 	}
-	if len(holdStat) < 4 || holdStat[3] == strings.TrimSpace(strings.Fields(read("/proc/self/stat"))[0]) {
-		t.Fatalf("the hold is the trierarch's child: %v", holdStat)
+	if parent := processOf(t, holdPID, "ppid"); parent == strconv.Itoa(os.Getpid()) {
+		t.Fatalf("the hold %s is the trierarch's child", holdPID)
 	}
 }
 
@@ -283,7 +292,7 @@ func TestASessionsProxyTokenIsKeptInItsFolderAndHandedToItsHarnessInItsVariableN
 		t.Fatalf("the session's folder keeps %+v, %v, want its token", kept, ok)
 	}
 	for _, pid := range []string{read(hold.FilesOf(runtime.Sessions, scout).PID), read(filepath.Join(folder, "harness.pid"))} {
-		if line := read("/proc/" + pid + "/cmdline"); strings.Contains(line, "scouts-proxy-token") {
+		if line := processOf(t, pid, "command"); strings.Contains(line, "scouts-proxy-token") {
 			t.Fatalf("the command line of %s holds the token: %q", pid, line)
 		}
 	}

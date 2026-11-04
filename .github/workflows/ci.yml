@@ -179,7 +179,7 @@ jobs:
       - run: go build -ldflags "-X github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/cli.Version=0.0.1" -o "$RUNNER_TEMP/aeolus-trierarch" ./cmd/aeolus-trierarch
         working-directory: go
       # The upgrade tests build the Go trierarch of the next version for the suite's own GitHub Release, with go on PATH.
-      - run: npx vitest run --project contract:integration init.integration run.integration hold.integration takeover.integration model-proxy.integration harnesses.integration upgrade.integration
+      - run: npm run test:contract:go
         env:
           AEOLUS_TRIERARCH_UNDER_TEST: ${{ runner.temp }}/aeolus-trierarch
 
