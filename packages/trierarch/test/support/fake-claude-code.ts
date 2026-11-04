@@ -12,6 +12,10 @@
  * start's arguments, environment and pid (`fake-starts.jsonl`) and each stdin line
  * (`fake-received.jsonl`).
  *
+ * With FAKE_CLAUDE_REFUSES_MODEL set to a model id, the first turn fails as
+ * Claude Code's does when the model is not found: the plugin's StopFailure
+ * hook is told, and the session makes no tool call.
+ *
  * Its flags: `--refuse-interrupt` answers the control request with an error;
  * `--fail-login` answers its first turn as Claude Code does without a login,
  * then exits 1; `--plugin <root> <data>` runs the aeolus-fleet plugin's hooks from
@@ -29,6 +33,7 @@ const pluginAt = args.indexOf('--plugin');
 const plugin = pluginAt === -1 ? undefined : { root: args[pluginAt + 1] ?? '', data: args[pluginAt + 2] ?? '' };
 const resumeAt = args.indexOf('--resume');
 const sessionId = resumeAt === -1 ? `fake-${String(process.pid)}` : (args[resumeAt + 1] ?? '');
+const refusedModel = process.env.FAKE_CLAUDE_REFUSES_MODEL;
 const NOT_LOGGED_IN = 'Not logged in · Please run /login';
 
 appendFileSync('fake-starts.jsonl', `${JSON.stringify({ args, env: process.env, pid: process.pid })}\n`);
@@ -79,6 +84,13 @@ function onUser(content: string): void {
     emit({ type: 'assistant', message: { content: [{ type: 'text', text: NOT_LOGGED_IN }] }, error: 'authentication_failed' });
     emit({ type: 'result', subtype: 'success', is_error: true, result: NOT_LOGGED_IN });
     process.exit(1);
+  }
+  if (refusedModel !== undefined && refusedModel !== '') {
+    const message = `There's an issue with the selected model (${refusedModel}). It may not exist or you may not have access to it.`;
+    hook('aeolus-launch.sh', { hook_event_name: 'StopFailure', error: 'model_not_found', last_assistant_message: message });
+    emit({ type: 'assistant', message: { content: [{ type: 'text', text: message }] }, error: 'model_not_found' });
+    emit({ type: 'result', subtype: 'success', is_error: true, result: message });
+    return;
   }
   isBusy = true;
   const context = hook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: content });

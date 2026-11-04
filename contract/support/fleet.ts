@@ -14,10 +14,10 @@ export interface Fleet {
   readonly database: PrismaClient;
   /** The trierarch ship's id and the secret its setup line carries. */
   readonly trierarchShip: { readonly shipId: ShipId; readonly secret: string };
-  /** Commissions a ship argo can request a crew for. */
-  commission(name: string): Promise<ShipId>;
-  /** Requests a crew for the ship in a worktree of the repository, with the harness, and assigns it to the machine's trierarch. */
-  crewInWorktree(shipId: ShipId, at: { repository: string; harness: string }): Promise<void>;
+  /** Commissions a ship argo can request a crew for; with `owner`, a ship of that name answers for it instead of argo. */
+  commission(name: string, at?: { owner?: ShipId }): Promise<ShipId>;
+  /** Requests a crew for the ship in a worktree of the repository, with the harness and the options given, and assigns it to the machine's trierarch. */
+  crewInWorktree(shipId: ShipId, at: { repository: string; harness: string; options?: Readonly<Record<string, string>> }): Promise<void>;
   /** Removes the ship's crew request: its lease ends. */
   removeCrewRequest(shipId: ShipId): Promise<void>;
   /** Sends the ship a message from argo: its id. */
@@ -26,9 +26,19 @@ export interface Fleet {
   leasesOf(shipId: ShipId): Promise<number>;
   /** The harness the ship's held lease was registered with. */
   leaseHarnessOf(shipId: ShipId): Promise<string | undefined>;
+  /** Applies network rules that allow nothing: ships reach only what the fixed rules let them, such as argo. */
+  closeTheNetwork(): Promise<void>;
+  /** What the machine's trierarch sent, oldest first: the recipient's name and the text. */
+  toldByTrierarch(): Promise<readonly Told[]>;
   /** The delivery's state, as core keeps it. */
   deliveryStateOf(messageId: string): Promise<string>;
   close(): Promise<void>;
+}
+
+/** A message the trierarch sent: who it went to, and its text. */
+export interface Told {
+  readonly to: string;
+  readonly text: string;
 }
 
 export async function aFleet(): Promise<Fleet> {
@@ -46,9 +56,15 @@ export async function aFleet(): Promise<Fleet> {
     argo,
     database,
     trierarchShip,
-    commission: async (name) => unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name, type: 'reviewer' })).shipId,
-    crewInWorktree: async (shipId, { repository, harness }) => {
-      unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness, workspace: { kind: 'worktree', repository }, options: {} } }));
+    commission: async (name, at = {}) => {
+      const { shipId } = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name, type: 'reviewer' }));
+      if (at.owner !== undefined) {
+        await database.ship.update({ where: { id: shipId }, data: { ownerShipId: at.owner } });
+      }
+      return shipId;
+    },
+    crewInWorktree: async (shipId, { repository, harness, options = {} }) => {
+      unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness, workspace: { kind: 'worktree', repository }, options } }));
       unwrap(await useCases.assignCrew(argo, { shipId, trierarchShipId: trierarchShip.shipId }));
     },
     removeCrewRequest: async (shipId) => {
@@ -57,6 +73,20 @@ export async function aFleet(): Promise<Fleet> {
     send: async (shipName, payload) => unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', name: shipName }, payload, idempotencyKey: newKey() })).messageId,
     leasesOf: (shipId) => database.lease.count({ where: { shipId, endedAt: null } }),
     leaseHarnessOf: async (shipId) => (await database.lease.findFirst({ where: { shipId, endedAt: null }, select: { harness: true } }))?.harness ?? undefined,
+    closeTheNetwork: async () => {
+      const { savedAgainstVersion } = unwrap(await useCases.saveNetworkRulesDraft(argo, { rules: [] }));
+      unwrap(await useCases.applyNetworkRules(argo, { version: savedAgainstVersion }));
+    },
+    toldByTrierarch: async () => {
+      const messages = await database.message.findMany({ where: { senderShipId: trierarchShip.shipId }, orderBy: { createdAt: 'asc' }, select: { id: true, payload: true } });
+      const told: Told[] = [];
+      for (const message of messages) {
+        const delivery = await database.delivery.findFirst({ where: { messageId: message.id }, select: { recipientShipId: true } });
+        const recipient = delivery?.recipientShipId == null ? undefined : await database.ship.findUnique({ where: { id: delivery.recipientShipId }, select: { name: true } });
+        told.push({ to: recipient?.name ?? '', text: message.payload ?? '' });
+      }
+      return told;
+    },
     deliveryStateOf: async (messageId) => (await database.delivery.findFirstOrThrow({ where: { messageId }, select: { state: true } })).state,
     close: async () => {
       await server.close();

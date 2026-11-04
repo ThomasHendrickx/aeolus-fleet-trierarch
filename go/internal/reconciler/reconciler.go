@@ -20,6 +20,8 @@ type State struct {
 	Kept    []any            `json:"kept"`
 	Orphans []any            `json:"orphans"`
 	Refused map[string]int   `json:"refused"`
+	// KeysTold is, by harness, the state of its API key argo was told, so it is told once per state (api keys K9).
+	KeysTold map[string]string `json:"keysTold,omitempty"`
 }
 
 // Empty is the state of a trierarch that crewed nothing yet.
@@ -63,6 +65,8 @@ type Entry struct {
 	Login string `json:"login,omitempty"`
 	// EarlierLogins are its earlier sessions' logins, oldest first, each kept only when a start changed it.
 	EarlierLogins []EarlierLogin `json:"earlierLogins,omitempty"`
+	// IsIdentityGone is set once argo was told its folder holds no identity (#659, #664), until the identity is back.
+	IsIdentityGone bool `json:"isIdentityGone,omitempty"`
 }
 
 // EarlierLogin is the login of a ship's earlier session, until the start that changed it (ISO 8601).
@@ -88,6 +92,9 @@ type Request struct {
 	// Status is the crew status the fleet holds, none before the first is written.
 	Status  *string `json:"status"`
 	IsFinal bool    `json:"isFinal"`
+	// Owner is the ship that answers for the ship, none for one without an owner.
+	OwnerShipID *string `json:"ownerShipId"`
+	OwnerName   *string `json:"ownerName"`
 }
 
 const (
@@ -125,14 +132,16 @@ type Seen struct {
 }
 
 const (
-	LaunchActive = "active"
-	LaunchNone   = "none"
+	LaunchActive  = "active"
+	LaunchNone    = "none"
+	LaunchRefused = "refused"
 )
 
-// Launch is what a session in its launch window did, as the plugin's launch marker says: active at its first tool call, or nothing yet, with the cause its harness gave.
+// LaunchSeen is what a session in its launch window did, as the plugin's launch marker says: active at its first tool call, refused the model it launched with (the model it names, when it names one), or nothing yet, with the cause its harness gave.
 type LaunchSeen struct {
 	Kind  string
 	Cause string
+	Model string
 }
 
 // Observed is what the trierarch saw this pass.
@@ -144,6 +153,8 @@ type Observed struct {
 	Ships map[string]Seen
 	// StartProblems are, by ship id, why its session cannot start on its login now, as a key not ready (api keys K9).
 	StartProblems map[string]string
+	// WithoutIdentity are the ships whose entry would be watched or reported for, but whose folder holds no identity (#659, #664).
+	WithoutIdentity []string
 }
 
 // Context is what reconciling needs beside the state.
@@ -156,6 +167,8 @@ type Context struct {
 	Repositories []string
 	Folders      []string
 	RunningCap   int
+	// Versions are each harness's version, for the harnesses whose session refused its model.
+	Versions map[string]string
 }
 
 type ActionKind string
@@ -181,6 +194,12 @@ const (
 	Wake ActionKind = "wake"
 	// Force hands a forced message over, its busy turn stopped first (decision 0040).
 	Force ActionKind = "force"
+	// ModelRefused tells argo a session refused the model it launched with (#382).
+	ModelRefused ActionKind = "modelRefused"
+	// IdentityGone tells argo a ship's folder holds no identity, so nothing wakes it (#659, #664).
+	IdentityGone ActionKind = "identityGone"
+	// Crashed tells the ship's owner its restart budget is spent (#397).
+	Crashed ActionKind = "crashed"
 )
 
 // Status is a crew status as the trierarch writes it (#332).
@@ -202,6 +221,14 @@ type Action struct {
 	Reason          string
 	// Entry is the entry that ends with a forget or a give back.
 	Entry *Entry
+	// ShipName, Harness, Version, Model, Exits, FailedStart and Key are what a notice names: the ship, the harness at its version and the model it refused, how often the session exited and why its last start failed, and the key that makes the notice told once.
+	ShipName    string
+	Harness     string
+	Version     string
+	Model       string
+	Exits       int
+	FailedStart string
+	Key         string
 }
 
 // LaunchWindow is how long after its start a session has to show activity (#382).
@@ -219,6 +246,8 @@ const (
 	restartingNote   = "blocked: session crashed, restarting"
 	crashedNote      = "blocked: session crashed, restart budget spent"
 	noActivityReason = "no activity within a minute of its start"
+	// defaultModel is what a refusal names when the session refused a model it does not name, as its harness's own default.
+	defaultModel = "its default model"
 )
 
 func stamp(at time.Time) string {
@@ -249,7 +278,7 @@ func Reconcile(state State, context Context) (State, []Action) {
 	for _, request := range context.Requests {
 		requested[request.ShipID] = request
 	}
-	next := State{Entries: map[string]Entry{}, Kept: state.Kept, Orphans: state.Orphans, Refused: state.Refused}
+	next := State{Entries: map[string]Entry{}, Kept: state.Kept, Orphans: state.Orphans, Refused: state.Refused, KeysTold: state.KeysTold}
 	actions := []Action{}
 	runningSessions := 0
 	for _, session := range context.Observed.Sessions {
@@ -286,6 +315,8 @@ func Reconcile(state State, context Context) (State, []Action) {
 		if taken.entry != nil {
 			after = *taken.entry
 		}
+		after, told := identityStep(after, context.Observed)
+		actions = append(actions, told...)
 		next.Entries[shipID] = after
 		if slices.Contains(written, after.State) && (request.Status == nil || *request.Status != after.State) {
 			actions = append(actions, Action{Kind: WriteStatus, ShipID: shipID, Status: statusOf(after)})
@@ -450,15 +481,65 @@ func launchStep(entry Entry, context Context, isFinal bool) step {
 		woken.entry = &final
 		return woken
 	}
+	if launch.Kind == LaunchRefused {
+		refused := modelRefusal(entry, launch.Model, context.Versions)
+		return failedLaunch(entry, context.Now, refused, isFinal)
+	}
 	if !isWindowOver(entry, context.Now) {
 		return wakeStep(entry, context)
 	}
-	reason := noActivity(entry, launch)
+	return failedLaunch(entry, context.Now, refusal{reason: noActivity(entry, launch)}, isFinal)
+}
+
+// failedLaunch is a launch window that ended without activity, or with the model refused: the request is given back with the reason while its crew is not final, with what the refusal tells first; for a final crew it is a failed start against the restart budget.
+func failedLaunch(entry Entry, now time.Time, why refusal, isFinal bool) step {
 	if isFinal {
-		return exitStep(withoutLaunch(entry), context.Now, true)
+		failed := exitStep(withoutLaunch(entry), now, why.reason)
+		failed.actions = append(append([]Action{}, why.actions...), failed.actions...)
+		return failed
 	}
 	given := entry
-	return step{isGivenBack: true, actions: []Action{{Kind: GiveBack, ShipID: entry.ShipID, SettingsVersion: entry.SettingsVersion, Reason: reason, Entry: &given}}}
+	return step{isGivenBack: true, actions: append(append([]Action{}, why.actions...), Action{Kind: GiveBack, ShipID: entry.ShipID, SettingsVersion: entry.SettingsVersion, Reason: why.reason, Entry: &given})}
+}
+
+// refusal is why a launch failed, with the notice a refused model tells argo.
+type refusal struct {
+	reason  string
+	actions []Action
+}
+
+// modelOption is the option that names the model a session launches with.
+const modelOption = "model"
+
+// modelRefusal is why a session refused the model it launched with, naming the harness and its version. Argo is told only when the settings picked the model and the refusal names it, at a version known (#382).
+func modelRefusal(entry Entry, model string, versions map[string]string) refusal {
+	version := versions[entry.Harness]
+	named := model
+	if named == "" {
+		named = defaultModel
+	}
+	reason := entry.Harness
+	if version != "" {
+		reason += " " + version
+	}
+	reason += " refused " + named
+	if _, isPicked := entry.Options[modelOption]; !isPicked || version == "" || model == "" {
+		return refusal{reason: reason}
+	}
+	return refusal{reason: reason, actions: []Action{{Kind: ModelRefused, ShipID: entry.ShipID, ShipName: entry.ShipName, Harness: entry.Harness, Version: version, Model: model}}}
+}
+
+// identityStep is an entry running, restarting or crashed whose folder holds no identity (#659, #664), as when its harness's plugin was uninstalled: its inbox cannot be seen and no report goes on its behalf, so it is woken no more. Argo is told once per loss, whatever state it moves between; once the identity is back, a later loss is told again.
+func identityStep(entry Entry, observed Observed) (Entry, []Action) {
+	isGone := slices.Contains(written, entry.State) && slices.Contains(observed.WithoutIdentity, entry.ShipID)
+	switch {
+	case isGone && !entry.IsIdentityGone:
+		entry.IsIdentityGone = true
+		return entry, []Action{{Kind: IdentityGone, ShipID: entry.ShipID, ShipName: entry.ShipName}}
+	case !isGone && entry.IsIdentityGone:
+		entry.IsIdentityGone = false
+	}
+	return entry, nil
 }
 
 func isWindowOver(entry Entry, now time.Time) bool {
@@ -489,7 +570,7 @@ func runningStep(entry Entry, context Context, canStart bool) step {
 		return step{entry: &started, actions: []Action{{Kind: Launch, ShipID: entry.ShipID}}, starts: 1}
 	}
 	if session.Status == SessionExited {
-		return exitStep(entry, context.Now, false)
+		return exitStep(entry, context.Now, "")
 	}
 	if session.IsOtherVersion {
 		return otherVersionStep(entry, context)
@@ -504,10 +585,13 @@ func runningStep(entry Entry, context Context, canStart bool) step {
 		woken.entry = &closed
 		return woken
 	}
+	if launch.Kind == LaunchRefused {
+		return failedLaunch(entry, context.Now, modelRefusal(entry, launch.Model, context.Versions), true)
+	}
 	if !isWindowOver(entry, context.Now) {
 		return wakeStep(entry, context)
 	}
-	return exitStep(entry, context.Now, true)
+	return exitStep(entry, context.Now, noActivity(entry, launch))
 }
 
 // otherVersionStep is a session another version of the trierarch started, as before an upgrade (H19): this one does not speak to it, so it is handed nothing, forced or not. Once its turn is idle it is started again, continuing its conversation, with no restart counted.
@@ -534,8 +618,8 @@ func wakeStep(entry Entry, context Context) step {
 	return step{}
 }
 
-// exitStep is a session that exited, or failed its start: it starts again after its wait, or, with the restart budget spent, the entry is crashed. A session that failed its start still runs, so it stops first.
-func exitStep(entry Entry, now time.Time, isFailedStart bool) step {
+// exitStep is a session that exited, or failed its start with the reason given: it starts again after its wait, or, with the restart budget spent, the entry is crashed and its owner told, with why its last start failed when it did. A session that failed its start still runs, so it stops first.
+func exitStep(entry Entry, now time.Time, failedStart string) step {
 	exits := []string{}
 	for _, exit := range entry.Exits {
 		if now.Sub(parsed(exit)) < RestartWindow {
@@ -547,13 +631,14 @@ func exitStep(entry Entry, now time.Time, isFailedStart bool) step {
 	if len(exits) > RestartBudget {
 		crashed := withState(withoutLaunch(entry), "crashed", now)
 		crashed.Exits = exits
-		return step{entry: &crashed, actions: []Action{stop, {Kind: Report, ShipID: entry.ShipID, Note: crashedNote}}}
+		told := Action{Kind: Crashed, ShipID: entry.ShipID, ShipName: entry.ShipName, Exits: len(exits), FailedStart: failedStart, Key: "trierarch:crashed:" + entry.ShipID + ":" + now.UTC().Format("2006-01-02T15:04:05.000Z")}
+		return step{entry: &crashed, actions: []Action{stop, {Kind: Report, ShipID: entry.ShipID, Note: crashedNote}, told}}
 	}
 	restarting := withState(withoutLaunch(entry), "restarting", now)
 	restarting.Exits = exits
 	restarting.RestartAt = stamp(now.Add(RestartDelays[min(len(exits), len(RestartDelays))-1]))
 	actions := []Action{}
-	if isFailedStart {
+	if failedStart != "" {
 		actions = append(actions, stop)
 	}
 	actions = append(actions, Action{Kind: Report, ShipID: entry.ShipID, Note: restartingNote})

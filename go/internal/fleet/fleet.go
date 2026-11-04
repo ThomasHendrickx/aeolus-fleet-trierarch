@@ -128,6 +128,8 @@ func IsLeaseHeld(fleetURL string, crewToken string) (bool, error) {
 type Client struct {
 	URL       string
 	CrewToken string
+	// Model is what every message the trierarch sends states as the model it runs, as today's trierarch states its package and version.
+	Model string
 }
 
 // AssignedRequests are the crew requests assigned to the trierarch.
@@ -223,6 +225,27 @@ func (c Client) Inbox(crewToken string) (reconciler.Inbox, error) {
 // ReportFor reports on a ship's behalf, with its session's crew token.
 func (c Client) ReportFor(crewToken string, state string, note string) error {
 	return call(c.URL, request{path: "/ship/report", crewToken: crewToken, body: map[string]string{"state": state, "note": note}}, &map[string]any{})
+}
+
+// send sends a message from the trierarch's own ship to the ship named or identified by the selector, as markdown.
+func (c Client) send(selector map[string]string, text string, idempotencyKey string) error {
+	body := map[string]any{"selector": selector, "payload": text, "contentType": "text/markdown", "model": c.Model, "idempotencyKey": idempotencyKey}
+	return call(c.URL, request{path: "/ship/send", crewToken: c.CrewToken, body: body}, &map[string]any{})
+}
+
+// ReportToArgo tells argo; the idempotency key makes a retry safe, so a notice told twice reaches argo once.
+func (c Client) ReportToArgo(text string, idempotencyKey string) error {
+	return c.send(map[string]string{"kind": "ship", "name": "argo"}, text, idempotencyKey)
+}
+
+// ReportToOwner tells a ship's owner. A refusal of the fleet, as when no rule lets the trierarch reach the owner, is answered as the refusal, not as a failure.
+func (c Client) ReportToOwner(ownerShipID string, text string, idempotencyKey string) (*Refusal, error) {
+	err := c.send(map[string]string{"kind": "ship", "shipId": ownerShipID}, text, idempotencyKey)
+	var refusal *Refusal
+	if errors.As(err, &refusal) {
+		return refusal, nil
+	}
+	return nil, err
 }
 
 var versionPattern = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$`)

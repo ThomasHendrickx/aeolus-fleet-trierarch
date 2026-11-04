@@ -93,3 +93,70 @@ func mustJSON(value any) string {
 	text, _ := json.Marshal(value)
 	return string(text)
 }
+
+func aSendingFleet(t *testing.T, answer func(w http.ResponseWriter)) (Client, *map[string]any) {
+	t.Helper()
+	var sent map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer aeolus_ct_v1_trierarch" || r.URL.Path != "/api/v1/ship/send" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&sent)
+		answer(w)
+	}))
+	t.Cleanup(server.Close)
+	return Client{URL: server.URL, CrewToken: "aeolus_ct_v1_trierarch", Model: "aeolus-trierarch@1.2.3"}, &sent
+}
+
+func TestTellsArgoByNameInMarkdownStatingItsModelWithAKeyThatMakesARetrySafe(t *testing.T) {
+	client, sent := aSendingFleet(t, func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"messageId":"msg_1"}`)) })
+
+	if err := client.ReportToArgo("headline\n\nbody", "trierarch:key:1"); err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]any{"selector": map[string]any{"kind": "ship", "name": "argo"}, "payload": "headline\n\nbody", "contentType": "text/markdown", "model": "aeolus-trierarch@1.2.3", "idempotencyKey": "trierarch:key:1"}
+	if got, _ := json.Marshal(*sent); string(got) != mustJSON(want) {
+		t.Errorf("sent %s, want %s", got, mustJSON(want))
+	}
+}
+
+func TestTellsAnOwnerByItsShipId(t *testing.T) {
+	client, sent := aSendingFleet(t, func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"messageId":"msg_1"}`)) })
+
+	refusal, err := client.ReportToOwner("shp_owner", "text", "key")
+
+	if err != nil || refusal != nil {
+		t.Fatalf("refusal %v, err %v", refusal, err)
+	}
+	if got, _ := json.Marshal((*sent)["selector"]); string(got) != `{"kind":"ship","shipId":"shp_owner"}` {
+		t.Errorf("selector %s", got)
+	}
+}
+
+func TestAnOwnerTheFleetRefusesIsAnAnswerNotAFailure(t *testing.T) {
+	client, _ := aSendingFleet(t, func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code":"FORBIDDEN","message":"The network rules do not allow this send"}`))
+	})
+
+	refusal, err := client.ReportToOwner("shp_owner", "text", "key")
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refusal == nil || refusal.Code != "FORBIDDEN" || refusal.Message != "The network rules do not allow this send" {
+		t.Errorf("refusal %v", refusal)
+	}
+}
+
+func TestAnOwnerTheFleetCannotBeReachedForIsAFailure(t *testing.T) {
+	client := Client{URL: "http://127.0.0.1:1", CrewToken: "aeolus_ct_v1_trierarch"}
+
+	refusal, err := client.ReportToOwner("shp_owner", "text", "key")
+
+	if err == nil || refusal != nil {
+		t.Errorf("refusal %v, err %v", refusal, err)
+	}
+}

@@ -37,6 +37,10 @@ export interface Machine {
   trierarch(words: readonly string[], at?: { input?: string; as?: readonly string[]; env?: Readonly<Record<string, string>> }): Promise<CommandOutcome>;
   /** Makes the stand-in answer otherwise, as the file of that name says. */
   toggle(name: StandInSwitch, isOn: boolean): void;
+  /** Makes every Claude Code session's turn fail as when the model is not found, naming the model; none makes them answer again. */
+  refuseModel(model: string | undefined): void;
+  /** Takes the identity out of the session's folder, as the aeolus-fleet plugin's own script does when a plugin is uninstalled. */
+  removeIdentity(folder: string): Promise<void>;
   /** The pid of the trierarch the service runs now, none when it is stopped. */
   servicePid(): number | undefined;
   /** What the service's trierarch wrote, for a failing test to show. */
@@ -137,6 +141,7 @@ if [ "$1" = -p ] && [ "$2" = --model ]; then
   echo "$*" >> "$machine/claude-calls.txt"
   echo "{\\"modelUsage\\":{\\"claude-$3-5\\":{}}}"; exit 0
 fi
+[ -s "$machine/claude-refuses-model" ] && export FAKE_CLAUDE_REFUSES_MODEL="$(cat "$machine/claude-refuses-model")"
 exec '${process.execPath}' '${join(STAND_INS, 'fake-claude-code.ts')}' --plugin '${PLUGIN_ROOT}' '${at.pluginData}' "$@"
 `;
 }
@@ -301,6 +306,20 @@ export async function aMachine(at: { others?: readonly OtherHarness[] } = {}): P
         writeFileSync(file, '');
       } else {
         rmSync(file, { force: true });
+      }
+    },
+    refuseModel: (model) => {
+      const file = join(machine, 'claude-refuses-model');
+      if (model === undefined) {
+        rmSync(file, { force: true });
+      } else {
+        writeFileSync(file, model);
+      }
+    },
+    removeIdentity: async (folder) => {
+      const ran = await runProgram(['bash', join(PLUGIN_ROOT, 'scripts', 'aeolus-identity.sh'), 'delete'], { cwd: folder, env });
+      if (ran.status !== 0) {
+        throw new Error(`aeolus-identity.sh delete failed: ${ran.stdout}${ran.stderr}`);
       }
     },
     servicePid,
