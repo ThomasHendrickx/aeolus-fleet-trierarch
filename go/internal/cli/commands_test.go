@@ -148,7 +148,7 @@ func TestAddRepositoryRefusesAFolderThatIsNoGitCheckout(t *testing.T) {
 
 	output, code := Main([]string{"add", "repository", "aeolus-fleet", folder}, machine)
 
-	if code != 1 || output != folder+" is no git checkout." {
+	if code != 1 || output != folder+" is no git checkout" {
 		t.Fatalf("answered %q, %d", output, code)
 	}
 }
