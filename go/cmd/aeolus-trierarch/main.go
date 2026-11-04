@@ -360,7 +360,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	}
 	opened = shipSockets(at, kept.FleetURL, running)
 	pass := runpass.Pass{
-		Fleet:        fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken},
+		Fleet:        fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken, Model: "@aeolus-fleet/trierarch@" + cli.Version},
 		Sessions:     running,
 		Harnesses:    harnesses,
 		Workspace:    places,
@@ -378,8 +378,19 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		// The model proxy runs while any harness holds an API key (headless H16); a pass starts it again when it is gone.
 		Proxy: proxy,
 		Keys:  keys.Files{Folder: at.Keys},
+		// A harness's version, as its program says it, for the notice of a refused model.
+		VersionOf: harnessVersion,
 	}
 	return pass.Run, nil
+}
+
+// harnessPrograms are the programs the harnesses are run as.
+var harnessPrograms = map[string]string{"claude-code": "claude", "codex": "codex", "copilot": "copilot"}
+
+// harnessVersion is the version the harness's program says on the first line of its --version; empty when it says none.
+func harnessVersion(harness string) string {
+	version, _ := copilot.VersionOf(harnessPrograms[harness])
+	return version
 }
 
 // adapters are the harnesses this trierarch has an adapter for, the default first.

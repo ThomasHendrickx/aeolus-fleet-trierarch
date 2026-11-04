@@ -101,7 +101,11 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 
 // LaunchSeen is what the session did in its launch window, as its marker says; with no activity, the cause Codex's last error event gives (H13).
 func (h Harness) LaunchSeen(entry reconciler.Entry) reconciler.LaunchSeen {
-	if h.Plugin.LaunchSeen(entry.Folder, entry.LaunchID).IsActive {
+	seen := h.Plugin.LaunchSeen(entry.Folder, entry.LaunchID)
+	if seen.IsRefused {
+		return reconciler.LaunchSeen{Kind: reconciler.LaunchRefused, Model: seen.RefusedModel}
+	}
+	if seen.IsActive {
 		return reconciler.LaunchSeen{Kind: reconciler.LaunchActive}
 	}
 	return reconciler.LaunchSeen{Kind: reconciler.LaunchNone, Cause: ErrorIn(h.Events(entry.ShipID))}

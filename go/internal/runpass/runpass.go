@@ -7,11 +7,13 @@ package runpass
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
@@ -29,6 +31,10 @@ type Fleet interface {
 	GiveBack(shipID string, settingsVersion int, reason string) error
 	ReportFor(crewToken string, state string, note string) error
 	Inbox(crewToken string) (reconciler.Inbox, error)
+	// ReportToArgo tells argo; a key makes a retry safe.
+	ReportToArgo(text string, idempotencyKey string) error
+	// ReportToOwner tells a ship's owner; the fleet's refusal is answered, not failed.
+	ReportToOwner(ownerShipID string, text string, idempotencyKey string) (*fleet.Refusal, error)
 }
 
 // Sockets are the ships' sockets, each session's fleet calls (decision 0026).
@@ -79,6 +85,8 @@ type Logins interface {
 	// StartProblem is why a session of the harness cannot start on the login now, empty when it can.
 	StartProblem(harness string, login string) string
 	IsKeyReady(harness string) bool
+	// KeyState is where the harness's API key stands: none, ready, refused or outOfCredit, and since when for one its vendor's answer set.
+	KeyState(harness string) (state string, at string)
 }
 
 // Proxy is the model proxy, kept running while it is needed (headless H16).
@@ -121,6 +129,8 @@ type Pass struct {
 	// Proxy runs while any harness in Keys holds a key; none is kept without.
 	Proxy Proxy
 	Keys  Keys
+	// VersionOf is the version a harness says it is, empty when it says none; asked only for a harness whose session refused its model.
+	VersionOf func(harness string) string
 }
 
 func (p Pass) loginOf(entry reconciler.Entry) string {
@@ -172,32 +182,41 @@ func (p Pass) Run() error {
 	if err != nil {
 		return err
 	}
-	observed, err := p.observe(state, running)
+	observed, versions, err := p.observe(state, running)
 	if err != nil {
 		return err
 	}
 	now := p.Now()
-	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap})
+	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions})
 	if err := p.Store.Save(next); err != nil {
 		return err
 	}
-	// An entry whose action fails is not acted on further this pass: its next actions build on it.
+	if next, err = p.tellKeysNotReady(next); err != nil {
+		return err
+	}
+	// An entry whose action fails is not acted on further this pass: its next actions build on it. A notice that fails is logged and nothing more: it does not hold the entry back.
 	failed := map[string]bool{}
 	for _, action := range actions {
 		if failed[action.ShipID] {
 			continue
 		}
 		if next, err = p.carryOut(next, action); err != nil {
-			failed[action.ShipID] = true
+			failed[action.ShipID] = failed[action.ShipID] || !isNotice(action.Kind)
 			p.Log(fmt.Sprintf("%s of %s failed: %v", action.Kind, action.ShipID, err))
 		}
 	}
 	return nil
 }
 
+// isNotice is whether an action only tells argo or an owner something.
+func isNotice(kind reconciler.ActionKind) bool {
+	return kind == reconciler.ModelRefused || kind == reconciler.IdentityGone || kind == reconciler.Crashed
+}
+
 // observe is what runs: the sessions, what each in its launch window did, and for each entry whose session runs its inbox and turn. An inbox is watched only while its session runs, a crewing one from the moment its session runs (#473); its socket is opened again, as after the trierarch stopped, since its session keeps running and calls over it (decision 0026).
-func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reconciler.Observed, error) {
+func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reconciler.Observed, map[string]string, error) {
 	observed := reconciler.Observed{Sessions: []reconciler.Session{}, Launches: map[string]reconciler.LaunchSeen{}, Ships: map[string]reconciler.Seen{}, StartProblems: map[string]string{}}
+	versions := map[string]string{}
 	statusOf := map[string]string{}
 	for _, session := range running {
 		observed.Sessions = append(observed.Sessions, reconciler.Session{ShipID: session.ShipID, Status: session.Status, IsOtherVersion: session.IsOtherVersion})
@@ -217,27 +236,49 @@ func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reco
 			continue
 		}
 		if entry.LaunchedAt != "" && status == reconciler.SessionRunning {
-			observed.Launches[shipID] = harness.LaunchSeen(entry)
+			launch := harness.LaunchSeen(entry)
+			if launch.Kind == reconciler.LaunchRefused {
+				// The model the settings picked is the one named, else the one the refusal names.
+				if model := entry.Options[modelOption]; model != "" {
+					launch.Model = model
+				}
+				if _, ok := versions[entry.Harness]; !ok && p.VersionOf != nil {
+					versions[entry.Harness] = p.VersionOf(entry.Harness)
+				}
+			}
+			observed.Launches[shipID] = launch
 		}
 		isWatched := (entry.State == "running" || (entry.State == "crewing" && hasSession)) && status != reconciler.SessionExited
-		if !isWatched || entry.CrewToken == "" || !harness.HasIdentity(entry.Folder) {
+		// Its identity is looked at too while the trierarch would report on its behalf, as when its session exits in this pass (#664). An entry with no crew token is crewed again, so its identity says nothing.
+		holdsIdentity := entry.State == "running" || entry.State == "restarting" || entry.State == "crashed"
+		if (!isWatched && !holdsIdentity) || entry.CrewToken == "" {
+			continue
+		}
+		if !harness.HasIdentity(entry.Folder) {
+			observed.WithoutIdentity = append(observed.WithoutIdentity, shipID)
+			continue
+		}
+		if !isWatched {
 			continue
 		}
 		if _, err := p.Sockets.Open(shipID); err != nil {
-			return observed, err
+			return observed, versions, err
 		}
 		turn := harness.Turn(entry.Folder)
 		// The store is asked only when a hand-over could follow.
 		isHolding := turn == reconciler.TurnIdle && harness.IsHolding(entry.Folder)
 		inbox, err := p.Fleet.Inbox(entry.CrewToken)
 		if err != nil {
-			return observed, err
+			return observed, versions, err
 		}
 		isKeyNotReady := entry.Login == "apiKey" && p.Logins != nil && !p.Logins.IsKeyReady(entry.Harness)
 		observed.Ships[shipID] = reconciler.Seen{Inbox: inbox, Turn: turn, IsHolding: isHolding, IsKeyNotReady: isKeyNotReady}
 	}
-	return observed, nil
+	return observed, versions, nil
 }
+
+// modelOption is the option that names the model a session launches with.
+const modelOption = "model"
 
 func sortedIDs(entries map[string]reconciler.Entry) []string {
 	ids := make([]string, 0, len(entries))
@@ -312,6 +353,12 @@ func (p Pass) carryOut(state reconciler.State, action reconciler.Action) (reconc
 		return state, p.Fleet.ReportFor(entry.CrewToken, "blocked", action.Note)
 	case reconciler.GiveBack:
 		return p.giveBack(state, action.ShipID, action.SettingsVersion, action.Reason, action.Entry)
+	case reconciler.ModelRefused:
+		return state, p.modelRefused(action)
+	case reconciler.IdentityGone:
+		return state, p.identityGone(action)
+	case reconciler.Crashed:
+		return state, p.crashed(action)
 	case reconciler.Wake, reconciler.Force:
 		if !isEntry || entry.Folder == "" {
 			return state, nil
@@ -544,6 +591,140 @@ func (p Pass) endWorkspace(entry reconciler.Entry) error {
 	}
 	if unsaved, err := p.Workspace.Unsaved(entry.Folder); err == nil && len(unsaved) > 0 {
 		p.Log(fmt.Sprintf("Discarded from the worktree of %s (%s), %s: %s", nameOf(entry), entry.ShipID, entry.Folder, strings.Join(unsaved, "; ")))
+		// Told before the worktree goes, once per release; a failure to tell leaves the worktree for the next pass.
+		text := notices.Discarded(notices.Ship{ID: entry.ShipID, Name: entry.ShipName}, entry.Workspace.Repository, unsaved)
+		if err := p.Fleet.ReportToArgo(text, "trierarch:discarded:"+entry.ShipID+":"+entry.Since); err != nil {
+			return err
+		}
 	}
 	return p.Workspace.Remove(entry)
+}
+
+// modelRefused tells argo, once per harness, version and model, that a session refused the model it launched with (#382).
+func (p Pass) modelRefused(action reconciler.Action) error {
+	ship := notices.Ship{ID: action.ShipID, Name: action.ShipName}
+	key := fmt.Sprintf("trierarch:refused-model:%s:%s:%s", action.Harness, action.Version, action.Model)
+	if err := p.Fleet.ReportToArgo(notices.ModelRefused(ship, action.Harness, action.Version, action.Model), key); err != nil {
+		return err
+	}
+	p.Log(fmt.Sprintf("%s (%s): %s %s refused %s, offered no more at this version", nameOfShip(ship), action.ShipID, action.Harness, action.Version, action.Model))
+	return nil
+}
+
+// identityGone tells argo that a ship's folder holds no identity: the trierarch cannot report on its behalf or see its inbox, so nothing wakes it while its lease holds (#659, #664).
+func (p Pass) identityGone(action reconciler.Action) error {
+	ship := notices.Ship{ID: action.ShipID, Name: action.ShipName}
+	key := fmt.Sprintf("trierarch:identity-gone:%s:%s", action.ShipID, p.Now().UTC().Format(isoMillis))
+	if err := p.Fleet.ReportToArgo(notices.IdentityGone(ship), key); err != nil {
+		return err
+	}
+	p.Log(fmt.Sprintf("%s (%s): its folder holds no identity, so it is no longer woken; argo told", nameOfShip(ship), action.ShipID))
+	return nil
+}
+
+// isoMillis is a time as today's trierarch writes it in a key, to the millisecond in UTC.
+const isoMillis = "2006-01-02T15:04:05.000Z"
+
+func nameOfShip(ship notices.Ship) string {
+	if ship.Name != "" {
+		return ship.Name
+	}
+	return ship.ID
+}
+
+// argoName is argo's name: trouble of a ship argo owns, or of one with no owner, goes to argo by name.
+const argoName = "argo"
+
+// crashed tells the ship's owner its session's restart budget is spent (decision 0045): its owner as the fleet holds it now, argo when argo owns it. When the fleet refuses the report to a person's ship, as when no rule lets this trierarch reach it, argo is told instead, with why.
+func (p Pass) crashed(action reconciler.Action) error {
+	ship := notices.Ship{ID: action.ShipID, Name: action.ShipName}
+	told, err := p.reportTrouble(ship, action.Key, func(isForArgo bool) string {
+		return notices.Crash(ship, action.Exits, action.FailedStart, isForArgo)
+	})
+	if err != nil {
+		return err
+	}
+	p.Log(fmt.Sprintf("%s (%s): crashed, its restart budget spent; %s told", nameOfShip(ship), action.ShipID, told))
+	return nil
+}
+
+// reportTrouble tells a ship's owner of trouble with its crew and answers the name of the ship told.
+func (p Pass) reportTrouble(ship notices.Ship, key string, text func(isForArgo bool) string) (string, error) {
+	requests, err := p.Fleet.AssignedRequests()
+	if err != nil {
+		return "", err
+	}
+	var ownerID, ownerName string
+	for _, request := range requests {
+		if request.ShipID == ship.ID && request.OwnerShipID != nil && request.OwnerName != nil {
+			ownerID, ownerName = *request.OwnerShipID, *request.OwnerName
+		}
+	}
+	if ownerID == "" || ownerName == argoName {
+		return argoName, p.Fleet.ReportToArgo(text(true), key)
+	}
+	refusal, err := p.Fleet.ReportToOwner(ownerID, text(false), key)
+	if err != nil {
+		return "", err
+	}
+	if refusal == nil {
+		return ownerName, nil
+	}
+	p.Log(fmt.Sprintf("Could not reach %s (%s), the owner of %s (%s): %s: %s; argo is told instead", ownerName, ownerID, nameOfShip(ship), ship.ID, refusal.Code, refusal.Message))
+	return argoName, p.Fleet.ReportToArgo(notices.OwnerUnreachable(text(true), ownerName, refusal.Code, refusal.Message), key+":owner-unreachable")
+}
+
+// tellKeysNotReady tells argo once per harness and state of its API key while ships on it wait (api keys K9): the harness, the state since when and those ships. A key ready again is forgotten, so a later state is told again; a key no ship here is on is nobody's concern. A failure to tell is logged and tried again on the next pass.
+func (p Pass) tellKeysNotReady(state reconciler.State) (reconciler.State, error) {
+	if p.Logins == nil {
+		return state, nil
+	}
+	onKey := []reconciler.Entry{}
+	for _, shipID := range sortedIDs(state.Entries) {
+		entry := state.Entries[shipID]
+		login := entry.Login
+		if login == "" {
+			login = p.loginOf(entry)
+		}
+		if login == "apiKey" {
+			onKey = append(onKey, entry)
+		}
+	}
+	harnesses := []string{}
+	for _, entry := range onKey {
+		if !slices.Contains(harnesses, entry.Harness) {
+			harnesses = append(harnesses, entry.Harness)
+		}
+	}
+	slices.Sort(harnesses)
+	told := map[string]string{}
+	for _, harness := range harnesses {
+		key, at := p.Logins.KeyState(harness)
+		if key == "ready" {
+			continue
+		}
+		if state.KeysTold[harness] == key {
+			told[harness] = key
+			continue
+		}
+		ships := []notices.Ship{}
+		for _, entry := range onKey {
+			if entry.Harness == harness {
+				ships = append(ships, notices.Ship{ID: entry.ShipID, Name: entry.ShipName})
+			}
+		}
+		if err := p.Fleet.ReportToArgo(notices.KeyNotReady(harness, key, at, ships), fmt.Sprintf("trierarch:key:%s:%s:%s", harness, key, at)); err != nil {
+			p.Log(fmt.Sprintf("Could not tell argo that %s's API key is not ready: %v", harness, err))
+			continue
+		}
+		told[harness] = key
+	}
+	if maps.Equal(told, state.KeysTold) || (len(told) == 0 && len(state.KeysTold) == 0) {
+		return state, nil
+	}
+	if len(told) == 0 {
+		told = nil
+	}
+	state.KeysTold = told
+	return state, p.Store.Save(state)
 }
