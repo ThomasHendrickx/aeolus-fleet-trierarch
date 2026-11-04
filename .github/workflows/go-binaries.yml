@@ -1,0 +1,95 @@
+# Builds the Go trierarch (docs/design/trierarch-binary.md) of a version for
+# each system and chip, where it runs, and tests it there: the Go tests on
+# every runner, the binary saying its version, and the contract suite against
+# the binary on Linux (the suite runs core on Testcontainers Postgres and has a
+# systemd stand-in: macOS runners have no Docker, and launchd has no stand-in).
+# Each binary is uploaded as the Actions artifact of its asset name,
+# aeolus-trierarch-<goos>-<goarch>, the name upgrade reads. release.yml calls
+# it, then attests and publishes the binaries itself: upgrade takes only an
+# attestation signed by release.yml.
+name: Go binaries
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: The version the binaries say they run, MAJOR.MINOR.PATCH
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  binary:
+    name: aeolus-trierarch-${{ matrix.goos }}-${{ matrix.goarch }}
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-latest, goos: linux, goarch: amd64 }
+          - { runner: ubuntu-24.04-arm, goos: linux, goarch: arm64 }
+          - { runner: macos-latest, goos: darwin, goarch: arm64 }
+          # Built and tested on Intel while GitHub offers an Intel runner.
+          - { runner: macos-15-intel, goos: darwin, goarch: amd64 }
+    runs-on: ${{ matrix.runner }}
+    env:
+      NAME: aeolus-trierarch-${{ matrix.goos }}-${{ matrix.goarch }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+
+      # Static, with no C library.
+      - name: Build ${{ env.NAME }} ${{ inputs.version }}
+        working-directory: go
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -ldflags "-X github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/cli.Version=$VERSION" -o "$RUNNER_TEMP/$NAME" ./cmd/aeolus-trierarch
+
+      # An ad hoc signature: the Go linker writes one on arm64, codesign on amd64.
+      - name: Sign ${{ env.NAME }} ad hoc
+        if: runner.os == 'macOS'
+        run: |
+          codesign --verify "$RUNNER_TEMP/$NAME" 2> /dev/null || codesign --sign - "$RUNNER_TEMP/$NAME"
+          codesign --display --verbose=2 "$RUNNER_TEMP/$NAME"
+          codesign --verify --strict "$RUNNER_TEMP/$NAME"
+
+      - name: ${{ env.NAME }} runs here and says ${{ inputs.version }}
+        run: |
+          said=$("$RUNNER_TEMP/$NAME" --version --json)
+          echo "$said"
+          if [[ "$(jq -r .version <<< "$said")" != "$VERSION" ]]; then
+            echo "::error::$NAME says $said, want version $VERSION"
+            exit 1
+          fi
+
+      - name: Go tests
+        working-directory: go
+        run: go test -race ./...
+
+      - if: runner.os == 'Linux'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+      - if: runner.os == 'Linux'
+        run: npm ci
+      - if: runner.os == 'Linux'
+        uses: ./.github/actions/test-images
+      # The upgrade tests build the Go trierarch of the next version for the suite's own GitHub Release, with go on PATH.
+      - name: Contract tests on ${{ env.NAME }}
+        if: runner.os == 'Linux'
+        run: npm run test:contract:go
+        env:
+          AEOLUS_TRIERARCH_UNDER_TEST: ${{ runner.temp }}/${{ env.NAME }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.NAME }}
+          path: ${{ runner.temp }}/${{ env.NAME }}
+          if-no-files-found: error
