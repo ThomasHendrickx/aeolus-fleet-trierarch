@@ -400,3 +400,35 @@ type releasesOf string
 func (r releasesOf) Latest() (string, error) { return released, nil }
 
 func (r releasesOf) Fetch(string) ([]byte, error) { return binaryOf(string(r)), nil }
+
+// aServiceThatTakesTheProgram is the service as aServiceOf runs it, but the new version leaves a folder at the program, where no file can be put back.
+type aServiceThatTakesTheProgram struct{ *aServiceOf }
+
+func (s aServiceThatTakesTheProgram) Restart() error {
+	if err := s.aServiceOf.Restart(); err != nil {
+		return err
+	}
+	if s.restarts[len(s.restarts)-1] != noStart {
+		return nil
+	}
+	if err := os.Remove(s.program); err != nil {
+		return err
+	}
+	return os.MkdirAll(filepath.Join(s.program, "taken"), 0o755)
+}
+
+func TestUpgradeKeepsTheOldBinaryWhenItCannotBePutBack(t *testing.T) {
+	machine := anUpgradeOn(t)
+	machine.upgrade.Releases = releasesOf(noStart)
+	machine.upgrade.Service = aServiceThatTakesTheProgram{machine.service}
+
+	_, err := machine.upgrade.Run(released)
+
+	kept := filepath.Join(filepath.Dir(machine.upgrade.Program), ".aeolus-trierarch-"+running)
+	if err == nil || !strings.Contains(err.Error(), "could not be put back") || !strings.Contains(err.Error(), kept) {
+		t.Fatalf("Run(a put-back that fails) = %v, want it refused, naming where the old binary is kept", err)
+	}
+	if text, err := os.ReadFile(kept); err != nil || string(text) != string(binaryOf(running)) {
+		t.Errorf("%s holds %q (%v), want the old binary kept", kept, text, err)
+	}
+}
