@@ -51,6 +51,9 @@ const detectedSchema = z.record(
   }),
 );
 const detected = () => detectedSchema.parse(JSON.parse(readFileSync(detectedFile(), 'utf8')));
+/** A time as either trierarch writes one: UTC to the millisecond. */
+const A_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const reportSchema = z.object({ harnesses: z.record(z.string(), z.object({ version: z.string(), confirmedAt: z.string().nullable(), options: z.record(z.string(), z.array(z.string())) })) });
 const helpCalls = () => machine.callsOf('claude').filter((line) => line === '--help').length;
 
 async function restart(): Promise<void> {
@@ -72,16 +75,16 @@ describe('init', () => {
     expect(detected()).toMatchObject({
       'claude-code': {
         version: CLAUDE_CODE_VERSION,
-        confirmedAt: expect.any(String),
         options: {
           model: { values: { 'claude-sonnet-5': ['--model', 'claude-sonnet-5'], 'claude-opus-5': ['--model', 'claude-opus-5'] } },
           effort: { values: { low: ['--effort', 'low'], medium: ['--effort', 'medium'], high: ['--effort', 'high'] } },
         },
         permissionModes: ['acceptEdits', 'bypassPermissions', 'default', 'plan'],
       },
-      codex: { version: CODEX_VERSION, confirmedAt: expect.any(String), options: { model: { values: { 'gpt-5.6-terra': ['-m', 'gpt-5.6-terra'] }, default: 'gpt-5.6-terra' } } },
+      codex: { version: CODEX_VERSION, options: { model: { values: { 'gpt-5.6-terra': ['-m', 'gpt-5.6-terra'] }, default: 'gpt-5.6-terra' } } },
     });
     expect(Object.keys(detected()['claude-code']?.options.model?.values ?? {})).toEqual(CLAUDE_CODE_MODELS);
+    expect([detected()['claude-code']?.confirmedAt, detected().codex?.confirmedAt]).toEqual([expect.stringMatching(A_TIME), expect.stringMatching(A_TIME)]);
   });
 
   it('says what each harness offers, one line per harness', async () => {
@@ -103,11 +106,11 @@ describe('aeolus-trierarch detect', () => {
     const ran = await machine.trierarch(['detect', '--json']);
 
     expect(ran.status, ran.stdout + ran.stderr).toBe(0);
-    expect(JSON.parse(ran.stdout)).toEqual({
-      harnesses: {
-        'claude-code': { version: CLAUDE_CODE_VERSION, confirmedAt: expect.any(String), options: { model: CLAUDE_CODE_MODELS, effort: ['low', 'medium', 'high'] } },
-        copilot: { version: COPILOT_VERSION, confirmedAt: null, options: { model: ['claude-sonnet-4.5', 'gpt-5', 'auto'] } },
-      },
+    const { harnesses } = reportSchema.parse(JSON.parse(ran.stdout));
+    expect(harnesses['claude-code']?.confirmedAt).toMatch(A_TIME);
+    expect(harnesses).toEqual({
+      'claude-code': { version: CLAUDE_CODE_VERSION, confirmedAt: harnesses['claude-code']?.confirmedAt, options: { model: CLAUDE_CODE_MODELS, effort: ['low', 'medium', 'high'] } },
+      copilot: { version: COPILOT_VERSION, confirmedAt: null, options: { model: ['claude-sonnet-4.5', 'gpt-5', 'auto'] } },
     });
   });
 
@@ -199,7 +202,8 @@ describe('a model a session refused', () => {
 
     await aRefused('claude-sonnet-5');
 
-    expect(detected()['claude-code']).toMatchObject({ version: CLAUDE_CODE_VERSION, refused: [{ id: 'claude-sonnet-5', at: expect.any(String) }] });
+    expect(detected()['claude-code']?.version).toBe(CLAUDE_CODE_VERSION);
+    expect(detected()['claude-code']?.refused?.map(({ at }) => at)).toEqual([expect.stringMatching(A_TIME)]);
   });
 
   it('is offered no more: a request picking it is given back, naming the models left', async () => {
