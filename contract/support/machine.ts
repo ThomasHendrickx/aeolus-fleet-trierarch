@@ -20,7 +20,8 @@ import { isTodaysTrierarch, TRIERARCH_UNDER_TEST } from './trierarch-under-test.
  * (`systemd/trierarch.log`). A file there changes their answers:
  * `claude-signed-out` makes `claude auth status` fail, `claude-help-names-no-alias` makes
  * `claude --help` name no model alias, `claude-plugin-fails`
- * makes every `claude plugin` command fail. Codex's plugin commands keep
+ * makes every `claude plugin` command fail, and `claude-rate-limit-event` is
+ * the rate limit event a stream-json print-mode turn streams. Codex's plugin commands keep
  * its plugin cache as Codex does: `plugin marketplace upgrade` replaces every
  * version folder with the version of the release tag the marketplace was added
  * at, or the one `codex-marketplace-version` holds, when there is one to
@@ -50,6 +51,8 @@ export interface Machine {
   toggle(name: StandInSwitch, isOn: boolean): void;
   /** Makes every Claude Code session's turn fail as when the model is not found, naming the model; none makes them answer again. */
   refuseModel(model: string | undefined): void;
+  /** Makes every stream-json print-mode turn of Claude Code stream the rate limit event, as one on its subscription does; none streams none. */
+  streamRateLimitEvent(event: string | undefined): void;
   /** Takes the identity out of the session's folder, as the aeolus-fleet plugin's own script does when a plugin is uninstalled. */
   removeIdentity(folder: string): Promise<void>;
   /** The pid of the trierarch the service runs now, none when it is stopped. */
@@ -167,6 +170,7 @@ case "$1" in
 esac
 if [ "$1" = -p ] && [ "$2" = --model ]; then
   echo "$*" >> "$machine/claude-calls.txt"
+  case "$*" in *'--output-format stream-json'*) [ -s "$machine/claude-rate-limit-event" ] && cat "$machine/claude-rate-limit-event" ;; esac
   echo "{\\"modelUsage\\":{\\"claude-$3-5\\":{}}}"; exit 0
 fi
 [ -s "$machine/claude-refuses-model" ] && export FAKE_CLAUDE_REFUSES_MODEL="$(cat "$machine/claude-refuses-model")"
@@ -413,6 +417,14 @@ export async function aMachine(at: { others?: readonly OtherHarness[] } = {}): P
       const ran = await runProgram(['bash', join(PLUGIN_ROOT, 'scripts', 'aeolus-identity.sh'), 'delete'], { cwd: folder, env });
       if (ran.status !== 0) {
         throw new Error(`aeolus-identity.sh delete failed: ${ran.stdout}${ran.stderr}`);
+      }
+    },
+    streamRateLimitEvent: (event) => {
+      const file = join(machine, 'claude-rate-limit-event');
+      if (event === undefined) {
+        rmSync(file, { force: true });
+      } else {
+        writeFileSync(file, `${event}\n`);
       }
     },
     servicePid,

@@ -55,6 +55,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trust"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/usage"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/workspace"
 )
 
@@ -512,6 +513,8 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Sessions: running,
 		// The pass reads the load first; the report takes the one it read.
 		Load: load,
+		// The harnesses' usage, each part read on its own interval (#353).
+		Usage: usageOf(configured, env, home, pass.Store),
 		Input: func() selfreport.Input {
 			offered, detected := offers.current()
 			offered = withTrusted(offered)
@@ -528,6 +531,25 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		}
 		return reporter.Report(isKeyCutOff)
 	}, nil
+}
+
+// usageOf reads the usage of the configured harnesses: Claude Code's from its projects folder and a short turn, Codex's from its session logs in CODEX_HOME, or in ~/.codex.
+func usageOf(configured config.Configuration, env map[string]string, home string, store usage.Store) *usage.Reader {
+	return &usage.Reader{
+		Harnesses: map[string]usage.Harness{
+			"claude-code": &claudecode.Usage{Projects: claudecode.Projects(home, env["CLAUDE_CONFIG_DIR"]), MadeAt: usage.FolderMadeAt, Run: detection.Run, NeutralFolder: detection.NeutralFolder},
+			"codex":       &codex.Usage{Sessions: filepath.Join(codex.HomeOf(home, env["CODEX_HOME"]), "sessions"), MadeAt: usage.FolderMadeAt},
+		},
+		// Each configured harness's subscription, in the adapters' order, the order init writes them in.
+		Configured: slices.DeleteFunc(slices.Clone(adapters), func(name string) bool {
+			_, ok := configured.Harnesses[name]
+			return !ok
+		}),
+		Store:  store,
+		Prices: usage.PricesOf(configured.Prices),
+		Now:    time.Now,
+		Log:    logLine,
+	}
 }
 
 // detectionOf is detection of this machine's harnesses, kept in detected.json, telling the operator what it kept as before with warn.
