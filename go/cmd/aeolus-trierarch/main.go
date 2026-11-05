@@ -431,6 +431,14 @@ func isInContainers(configured *config.Runtime) bool {
 	return configured != nil && configured.Kind == "container"
 }
 
+// homesOf is where each ship has a home of its own, in containers (decision 0039); none on the host, where every session shares the user's.
+func homesOf(at paths.Paths, configured *config.Runtime) string {
+	if !isInContainers(configured) {
+		return ""
+	}
+	return at.Homes
+}
+
 func environment() map[string]string {
 	env := map[string]string{}
 	for _, entry := range os.Environ() {
@@ -547,7 +555,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		"codex":       func() map[string]bool { return codex.TrustedFolders(codex.HomeOf(home, env["CODEX_HOME"])) },
 		"copilot":     func() map[string]bool { return trust.Everything(withTrusted(configuration))() },
 	}
-	read := usageOf(configured, env, home, pass.Store)
+	read := usageOf(configured, env, home, homesOf(at, configured.Runtime), pass.Store)
 	// The usage goes to the trierarch plugin's ship once an hour, and a released ship's last usage before its folder goes.
 	sender := &usage.Sender{Harnesses: read.Harnesses, Reader: read, MadeAt: usage.FolderMadeAt, Store: saved, Fleet: client, Prices: read.Prices, Now: time.Now, Log: logLine, TrierarchShipID: kept.ShipID, PluginShipID: kept.PluginShipID}
 	pass.SendReleasedUsage = sender.SendReleased
@@ -581,10 +589,11 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 }
 
 // usageOf reads the usage of the configured harnesses: Claude Code's from its projects folder and a short turn, Codex's from its session logs in CODEX_HOME, or in ~/.codex.
-func usageOf(configured config.Configuration, env map[string]string, home string, store usage.Store) *usage.Reader {
+func usageOf(configured config.Configuration, env map[string]string, home string, homes string, store usage.Store) *usage.Reader {
 	return &usage.Reader{
 		Harnesses: map[string]usage.Harness{
-			"claude-code": &claudecode.Usage{Projects: claudecode.Projects(home, env["CLAUDE_CONFIG_DIR"]), MadeAt: usage.FolderMadeAt, Run: detection.Run, NeutralFolder: detection.NeutralFolder},
+			// In containers each ship's conversations are in its own home (decision 0039).
+			"claude-code": &claudecode.Usage{Projects: claudecode.Projects(home, env["CLAUDE_CONFIG_DIR"]), Homes: homes, MadeAt: usage.FolderMadeAt, Run: detection.Run, NeutralFolder: detection.NeutralFolder},
 			"codex":       &codex.Usage{Sessions: filepath.Join(codex.HomeOf(home, env["CODEX_HOME"]), "sessions"), MadeAt: usage.FolderMadeAt},
 		},
 		// Each configured harness's subscription, in the adapters' order, the order init writes them in.
@@ -735,6 +744,7 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 				PermissionModes: func() []string { return offers.permissionModes("claude-code") },
 				Events:          events,
 				ProxyURL:        proxyURL,
+				Homes:           homesOf(at, configuration.Runtime),
 			}
 		case "codex":
 			found, err := plugin.FindCodex(home, env)

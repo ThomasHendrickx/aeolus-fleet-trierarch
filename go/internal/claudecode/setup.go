@@ -100,6 +100,29 @@ func (s Setup) CompleteOnboarding() error {
 	return writeObject(s.ClaudeJSON, claude)
 }
 
+// skipPermissionsAccepted is the key in Claude Code's user settings that says bypass permissions mode was accepted.
+const skipPermissionsAccepted = "skipDangerousModePermissionPrompt"
+
+// IsSkipPermissionsAccepted says whether the user settings file says bypass permissions mode was accepted.
+func IsSkipPermissionsAccepted(settings string) bool {
+	values, err := readObject(settings)
+	if err != nil {
+		return false
+	}
+	accepted, _ := values[skipPermissionsAccepted].(bool)
+	return accepted
+}
+
+// AcceptSkipPermissions accepts bypass permissions mode in the user settings file, keeping all else it holds.
+func AcceptSkipPermissions(settings string) error {
+	values, err := readObject(settings)
+	if err != nil {
+		return err
+	}
+	values[skipPermissionsAccepted] = true
+	return writeObject(settings, values)
+}
+
 // IsInstalled says whether `claude` runs on this machine.
 func IsInstalled() bool {
 	_, err := exec.LookPath("claude")
