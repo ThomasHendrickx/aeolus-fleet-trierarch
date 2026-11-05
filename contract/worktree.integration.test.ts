@@ -118,9 +118,10 @@ describe('an orphan worktree', () => {
   it('is removed once what runs in it is stopped', async () => {
     const { folder, pid } = anOrphanWithAProcess('stray');
 
-    await expect.poll(() => existsSync(folder), { timeout: CLEARED_WITHIN_MS }).toBe(false);
+    // Said once the worktree is removed and the state saved.
+    await expect.poll(() => machine.serviceLog(), { timeout: CLEARED_WITHIN_MS }).toContain(`Removed the orphan worktree ${folder}, after stopping 1 process in it`);
+    expect(existsSync(folder)).toBe(false);
     expect(isRunning(pid)).toBe(false);
-    expect(machine.serviceLog()).toContain(`Removed the orphan worktree ${folder}, after stopping 1 process in it`);
   });
 
   it('that holds unsaved work stays, with what runs in it stopped, and status names it', async () => {
