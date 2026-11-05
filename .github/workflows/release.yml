@@ -2,15 +2,17 @@
 # (decision 0039) to ghcr.io with that version, and tags v<version> a commit
 # with the aeolus-fleet plugin's version on top of the released commit, so a version
 # on npm always matches a tag in git and the tag holds the plugin of that
-# version (aeolus-trierarch upgrade installs it from there). Then creates the
-# GitHub Release for the tag, with notes from the merged pull requests carrying
-# the label <version>, the Go trierarch's binary for each system and chip
+# version (aeolus-trierarch upgrade installs it from there). Before it publishes,
+# it attests the Go trierarch's binary for each system and chip
 # (aeolus-trierarch-<goos>-<goarch>, built and tested by go-binaries.yml where
-# it runs), their SHA256SUMS and a GitHub artifact attestation per binary,
-# signed here: upgrade takes only an attestation signed by this file. Then sets the aeolus-fleet plugin to that version on main for
-# every release, a hotfix branch's included, unless main's plugin is newer already:
-# the plugin marketplaces install from main by default. A release from main also
-# writes the Homebrew formula of the version to the tap (ThomasHendrickx/homebrew-aeolus).
+# it runs), a GitHub artifact attestation per binary, signed here: upgrade takes
+# only an attestation signed by this file. After the tag, finish-release.yml,
+# called with this run's id, creates the GitHub Release with this run's
+# binaries and their SHA256SUMS, closes the release's milestone, sets the
+# aeolus-fleet plugin to the version on main and, for a release from main,
+# writes the Homebrew formula to the tap. When a run stops after its tag,
+# dispatch finish-release.yml with the version and this run's id: the version
+# cannot be published or tagged again.
 #
 # The only way the package can be published: npm trusted publishing (OIDC) is
 # configured for exactly this file name, and tokens are disallowed (decision
@@ -108,6 +110,7 @@ jobs:
       - name: Check the commit is on a release branch and passed CI
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           gh run list --workflow ci.yml --commit "$GITHUB_SHA" --branch "$GITHUB_REF_NAME" --event push --json status,conclusion,url \
             | node scripts/release-gate.ts "$GITHUB_REF" "$GITHUB_SHA"
@@ -125,6 +128,7 @@ jobs:
       - name: Check the release's milestone has no open issues
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ inputs.version }}
         shell: bash
         run: |
@@ -204,15 +208,16 @@ jobs:
         working-directory: ${{ runner.temp }}/binaries
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           for binary in aeolus-trierarch-*; do
             gh attestation verify "$binary" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
           done
 
       # Skips a version on npm already, so releasing a version again after it
-      # failed partway pushes the image again, tags it and sets the plugin.
-      # Dispatch it again from main: Re-run jobs replays the failed run's own
-      # copy of this file.
+      # failed before its tag pushes the image again and tags it. Dispatch it
+      # again from main: Re-run jobs replays the failed run's own copy of this
+      # file.
       - name: Publish @aeolus-fleet/trierarch
         env:
           PACKAGE: '@aeolus-fleet/trierarch'
@@ -238,7 +243,8 @@ jobs:
       # plugin's manifests at the version on top (set above), off main's
       # history, so a harness installing the plugin from the tag gets the
       # plugin of that version under its version. If this step fails, push the
-      # tag by hand: the version is already published and cannot be released again.
+      # tag by hand and dispatch finish-release.yml with this run's id: the
+      # version is already published and cannot be released again.
       - name: Tag v${{ inputs.version }}, the released commit with the plugin's version
         env:
           VERSION: ${{ inputs.version }}
@@ -249,116 +255,13 @@ jobs:
           git tag "v$VERSION" HEAD
           git push origin "refs/tags/v$VERSION"
 
-      # Notes from the merged pull requests labelled with the version: git and the
-      # labels are the source, there is no changelog file. With the Go binaries
-      # and their SHA256SUMS. When the Release exists already, as when a release
-      # is dispatched again, only the binaries and SHA256SUMS are put on it
-      # again, those of this run, which this run attested.
-      - name: Create the GitHub Release v${{ inputs.version }}
-        working-directory: ${{ runner.temp }}/binaries
-        env:
-          VERSION: ${{ inputs.version }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh release view "v$VERSION" > /dev/null 2>&1; then
-            echo "The GitHub Release v$VERSION exists already: its Go binaries and SHA256SUMS are put on it again"
-            gh release upload "v$VERSION" aeolus-trierarch-* SHA256SUMS --clobber
-            exit 0
-          fi
-          gh pr list --state merged --label "$VERSION" --json number,title,url --limit 1000 \
-            | node "$GITHUB_WORKSPACE/scripts/release-notes.ts" "$VERSION" > "$RUNNER_TEMP/release-notes.md"
-          gh release create "v$VERSION" --verify-tag --title "v$VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" aeolus-trierarch-* SHA256SUMS
-
-      # After the tag and the GitHub Release, so a run that failed before them
-      # leaves the milestone open. The steps below leave the release whole.
-      # Closing a closed milestone changes nothing, as when a release is
-      # dispatched again.
-      - name: Close the release's milestone
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.version }}
-        shell: bash
-        run: |
-          MILESTONE="trierarch $VERSION"
-          number=$(gh api --paginate "repos/$GITHUB_REPOSITORY/milestones?state=all&per_page=100" \
-            | jq -r --arg title "$MILESTONE" '.[] | select(.title == $title) | .number')
-          if [[ -z "$number" ]]; then
-            echo "No milestone named '$MILESTONE': nothing to close." | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          gh api --method PATCH "repos/$GITHUB_REPOSITORY/milestones/$number" -f state=closed > /dev/null
-          echo "Closed milestone '$MILESTONE'." | tee -a "$GITHUB_STEP_SUMMARY"
-
-      # The plugin marketplace installs from main, so main carries the plugin's
-      # latest released version, whichever branch released it (the package on
-      # main keeps 0.0.0). After the tag: if
-      # this step fails, the release is whole; set it by hand with
-      # npm run set-version -- --plugin-only <version>, commit and push.
-      - name: Set the aeolus-fleet plugin to ${{ inputs.version }} on main
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          for attempt in 1 2 3; do
-            git fetch --quiet origin main
-            git checkout --quiet --force -B plugin-version origin/main
-            npm run set-version -- --plugin-only "$VERSION"
-            if git diff --quiet; then
-              echo "main already carries the aeolus-fleet plugin at $VERSION"
-              exit 0
-            fi
-            git commit --quiet --all --message "chore(release): the aeolus-fleet plugin is $VERSION"
-            if git push origin HEAD:main; then
-              exit 0
-            fi
-            echo "main moved meanwhile (attempt $attempt); trying again on top of it"
-          done
-          echo "::error::Could not push the aeolus-fleet plugin version to main"
-          exit 1
-
-      # The tap (ThomasHendrickx/homebrew-aeolus) is kept current by the release:
-      # its formula is homebrew/aeolus-trierarch.rb with this version's binaries
-      # and their checksums, pushed with a deploy key that can write to the tap
-      # only. A hotfix branch's release leaves the tap alone, so a newer formula
-      # is never replaced by an older one. After the Release, whose binaries the
-      # formula names, and after the plugin version step, so a failure here
-      # leaves the release whole and main's plugin set; write the
-      # formula by hand with node scripts/homebrew-formula.ts and push it.
-      - name: Update the Homebrew tap to ${{ inputs.version }}
-        env:
-          VERSION: ${{ inputs.version }}
-          TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
-        run: |
-          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
-            echo "Released from $GITHUB_REF, not main: the Homebrew tap is left as it is"
-            exit 0
-          fi
-          key="$RUNNER_TEMP/tap-deploy-key"
-          known_hosts="$RUNNER_TEMP/tap-known-hosts"
-          (umask 077 && printf '%s\n' "$TAP_DEPLOY_KEY" > "$key")
-          echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > "$known_hosts"
-          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$known_hosts -o StrictHostKeyChecking=yes"
-          node scripts/homebrew-formula.ts "$VERSION" "$GITHUB_REPOSITORY" "$RUNNER_TEMP/binaries/SHA256SUMS" < homebrew/aeolus-trierarch.rb > "$RUNNER_TEMP/aeolus-trierarch.rb"
-          git clone --quiet git@github.com:ThomasHendrickx/homebrew-aeolus.git "$RUNNER_TEMP/tap"
-          cd "$RUNNER_TEMP/tap"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          for attempt in 1 2 3; do
-            git fetch --quiet origin main
-            git checkout --quiet --force -B main origin/main
-            mkdir -p Formula
-            cp "$RUNNER_TEMP/aeolus-trierarch.rb" Formula/aeolus-trierarch.rb
-            git add Formula/aeolus-trierarch.rb
-            if git diff --cached --quiet; then
-              echo "The tap carries $VERSION already"
-              exit 0
-            fi
-            git commit --quiet --message "aeolus-trierarch $VERSION"
-            if git push origin HEAD:main; then
-              exit 0
-            fi
-            echo "The tap moved meanwhile (attempt $attempt); trying again on top of it"
-          done
-          echo "::error::Could not push the formula to the tap"
-          exit 1
+  # The run's own binaries, which the job above attested, go on the GitHub Release.
+  finish:
+    name: Finish ${{ inputs.version }}
+    needs: release
+    uses: ./.github/workflows/finish-release.yml
+    with:
+      version: ${{ inputs.version }}
+      run-id: ${{ github.run_id }}
+    secrets:
+      HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
