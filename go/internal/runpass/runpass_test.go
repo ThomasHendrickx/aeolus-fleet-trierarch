@@ -163,10 +163,14 @@ type aHarness struct {
 	died       []string
 	seen       map[string]reconciler.LaunchSeen
 	problem    error
-	turns      map[string]string
-	holding    map[string]bool
-	handed     []string
-	sockets    *someSockets
+	// marksNoLaunches is a plugin older than the launch marker; pluginMissing one that cannot be found; notOffered why the machine does not offer the harness.
+	marksNoLaunches bool
+	pluginMissing   bool
+	notOffered      string
+	turns           map[string]string
+	holding         map[string]bool
+	handed          []string
+	sockets         *someSockets
 	// logins are the login each launch started on, in order.
 	logins []string
 	// activities are what each ship's session shows, by ship.
@@ -226,6 +230,13 @@ func (h *aHarness) SessionDied(entry reconciler.Entry) error {
 	return nil
 }
 func (h *aHarness) Problem() error { return h.problem }
+func (h *aHarness) MarksLaunches() (bool, error) {
+	if h.pluginMissing {
+		return false, errors.New("the aeolus-fleet plugin's scripts are not at /plugin/scripts")
+	}
+	return !h.marksNoLaunches, nil
+}
+func (h *aHarness) NotOfferedReason() string { return h.notOffered }
 
 // aWorkspace makes each worktree as a folder that holds what the test puts in it.
 type aWorkspace struct {
@@ -1535,6 +1546,64 @@ func TestARequestInARepositoryTheHarnessDoesNotTrustIsGivenBack(t *testing.T) {
 	want := "giveBack " + scout + " 1 mac-mini: workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it"
 	if !slices.Contains(pass.fleet.calls, want) {
 		t.Fatalf("calls %q, want %q", pass.fleet.calls, want)
+	}
+}
+
+func TestARequestForAHarnessTheMachineDoesNotOfferIsGivenBackWithWhy(t *testing.T) {
+	pass := aRunPass(t)
+	pass.harness.notOffered = "its Copilot CLI version is not detected yet"
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+
+	pass.run(t)
+
+	if want := "giveBack " + scout + " 1 mac-mini: harness: claude-code is not offered: its Copilot CLI version is not detected yet"; !slices.Contains(pass.fleet.calls, want) {
+		t.Fatalf("calls %q, want %q", pass.fleet.calls, want)
+	}
+}
+
+func TestARequestForAHarnessWhosePluginIsMissingIsGivenBackAndThePassGoesOn(t *testing.T) {
+	pass := aRunPass(t)
+	pass.harness.pluginMissing = true
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+
+	pass.run(t)
+
+	if want := "giveBack " + scout + " 1 mac-mini: harness: claude-code's aeolus-fleet plugin is not installed: run aeolus-trierarch upgrade"; !slices.Contains(pass.fleet.calls, want) {
+		t.Fatalf("calls %q, want %q", pass.fleet.calls, want)
+	}
+}
+
+func TestARequestForAHarnessWhosePluginMarksNoLaunchesIsGivenBack(t *testing.T) {
+	pass := aRunPass(t)
+	pass.harness.marksNoLaunches = true
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+
+	pass.run(t)
+
+	if want := "giveBack " + scout + " 1 mac-mini: harness: claude-code's aeolus-fleet plugin marks no launches: run aeolus-trierarch upgrade"; !slices.Contains(pass.fleet.calls, want) {
+		t.Fatalf("calls %q, want %q", pass.fleet.calls, want)
+	}
+}
+
+func TestThePassKeepsWhichHarnessesAreNotOfferedAndWhyForTheReport(t *testing.T) {
+	pass := aRunPass(t)
+	pass.harness.pluginMissing = true
+
+	pass.run(t)
+
+	if got := pass.store.state.MissingPlugins; !slices.Equal(got, []string{"claude-code"}) {
+		t.Fatalf("missing plugins %q, want claude-code", got)
+	}
+}
+
+func TestThePassKeepsWhyAnAdapterDoesNotOfferItsHarness(t *testing.T) {
+	pass := aRunPass(t)
+	pass.harness.notOffered = "its Copilot CLI version is not detected yet"
+
+	pass.run(t)
+
+	if want := []reconciler.NotOfferedHarness{{Harness: "claude-code", Reason: "its Copilot CLI version is not detected yet"}}; !slices.Equal(pass.store.state.NotOffered, want) {
+		t.Fatalf("not offered %+v, want %+v", pass.store.state.NotOffered, want)
 	}
 }
 

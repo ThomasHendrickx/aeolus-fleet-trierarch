@@ -169,7 +169,7 @@ func TestCopilotIsNotOfferedWithoutItsPluginOrOnABuildItsHooksAreNotProvenOn(t *
 	}{
 		{"its plugin not installed", false, "1.0.105", true, "its aeolus-fleet plugin is not installed for Copilot: copilot plugin install aeolus-fleet@aeolus-fleet"},
 		{"no version found", true, "", false, "its Copilot CLI version is not detected yet: the hooks of its aeolus-fleet plugin are proven on Copilot CLI 1.0.105"},
-		{"a build not proven", true, "1.0.106", true, "copilot CLI 1.0.106 is not proven: the hooks of its aeolus-fleet plugin are proven on Copilot CLI 1.0.105"},
+		{"a build not proven", true, "1.0.106", true, "Copilot CLI 1.0.106 is not proven: the hooks of its aeolus-fleet plugin are proven on Copilot CLI 1.0.105"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			harness, _ := aHarness(t)
@@ -197,7 +197,7 @@ func TestCopilotIsNotOfferedInContainersWhereItIsNotProven(t *testing.T) {
 	harness, _ := aHarness(t)
 	harness.IsInContainer = true
 
-	if err := harness.Problem(); err == nil || err.Error() != "copilot is not proven in a container: the container runtime runs claude-code only" {
-		t.Fatalf("Problem = %v", err)
+	if got := harness.NotOfferedReason(); got != "Copilot is not proven in a container: the container runtime runs claude-code only" {
+		t.Fatalf("NotOfferedReason = %q", got)
 	}
 }

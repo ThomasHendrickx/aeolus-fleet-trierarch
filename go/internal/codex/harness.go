@@ -152,3 +152,6 @@ func (h Harness) SessionDied(entry reconciler.Entry) error { return h.Plugin.Ses
 func (h Harness) Turn(entry reconciler.Entry) string { return h.Plugin.Turn(entry.Folder) }
 
 func (h Harness) IsHolding(entry reconciler.Entry) bool { return h.Plugin.IsHolding(entry.Folder) }
+
+// NotOfferedReason is none: the machine offers it once its plugin is found.
+func (h Harness) NotOfferedReason() string { return "" }

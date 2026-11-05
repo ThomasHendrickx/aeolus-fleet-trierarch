@@ -29,10 +29,20 @@ type State struct {
 	KeysTold map[string]string `json:"keysTold,omitempty"`
 	// LowResources are what the machine was low on when argo was told, so a restart while it stays low tells nothing again (#400).
 	LowResources []string `json:"lowResources,omitempty"`
+	// MissingPlugins are the harnesses whose aeolus-fleet plugin the last pass could not find (#1212): not offered in the report until it is back.
+	MissingPlugins []string `json:"missingPlugins,omitempty"`
+	// NotOffered are the harnesses the last pass found their adapters do not offer, with why (CC3, CC10), by harness.
+	NotOffered []NotOfferedHarness `json:"notOffered,omitempty"`
 	// PassFailure is why the last pass failed and since when; none while passes succeed.
 	PassFailure *PassFailure `json:"passFailure,omitempty"`
 	// FailedStarts are the machine's failed session starts since a start last succeeded; once 3 ships' starts failed in a row it stops offering itself (#853).
 	FailedStarts *failedstarts.Starts `json:"failedStarts,omitempty"`
+}
+
+// NotOfferedHarness is a harness the machine does not offer now, with why.
+type NotOfferedHarness struct {
+	Harness string `json:"harness"`
+	Reason  string `json:"reason"`
 }
 
 // PassFailure is a failing pass: the reason of the latest failure, and when the passes began to fail.
@@ -212,6 +222,12 @@ type Context struct {
 	Configuration map[string]config.Harness
 	// Trusted is, by harness, what it trusts; a harness missing trusts nothing (#381).
 	Trusted map[string]Trust
+	// MarksLaunches is, by harness, whether its aeolus-fleet plugin keeps launch markers (#490); a harness missing from it is in MissingPlugins.
+	MarksLaunches map[string]bool
+	// MissingPlugins are the harnesses whose plugin could not be found, so it is not known what it marks (#1212).
+	MissingPlugins []string
+	// NotOffered is, by harness, why the machine does not offer it now (CC3, CC10).
+	NotOffered map[string]string
 	// ConfigurationFile is the configuration as its file gives it, as the failed starts keep it: another one than the machine stopped offering itself with offers it again (#853).
 	ConfigurationFile string
 }
@@ -376,6 +392,13 @@ func Reconcile(state State, context Context) (State, []Action) {
 			actions = append(actions, Action{Kind: Release, ShipID: shipID})
 			continue
 		}
+		// A harness that lost its aeolus-fleet plugin under a running session cannot crew its ship any more (#1212): the request is given back with why while its crew is not final, and the other harnesses go on.
+		if reason := launchMarkerRefusal(entry.Harness, context); reason != "" && !request.IsFinal && refused[shipID] != request.SettingsVersion {
+			given := entry
+			next.Entries[shipID] = entry
+			actions = append(actions, Action{Kind: GiveBack, ShipID: shipID, SettingsVersion: request.SettingsVersion, Reason: reason, Entry: &given})
+			continue
+		}
 		var taken step
 		if request.SettingsVersion == entry.SettingsVersion {
 			taken = stepOf(entry, context, canStart(), request.IsFinal)
@@ -516,7 +539,24 @@ func check(settings Settings, shipID string, state State, context Context) (stri
 	if flag := unacceptedFlag(harness, options, context); flag != "" {
 		return "", nil, fmt.Sprintf("harness: %s still asks to accept %s: accept it with aeolus-trierarch init", harness, flag)
 	}
+	if reason := launchMarkerRefusal(harness, context); reason != "" {
+		return "", nil, reason
+	}
 	return harness, options, ""
+}
+
+// launchMarkerRefusal is why the harness may not start a session: the machine does not offer it (CC3, CC10), its plugin could not be found (#1212), or it is older than the launch marker (#490), so the launch window could see nothing of the session. Upgrade updates the plugin, so the reason says to run it.
+func launchMarkerRefusal(harness string, context Context) string {
+	if why, ok := context.NotOffered[harness]; ok {
+		return fmt.Sprintf("harness: %s is not offered: %s", harness, why)
+	}
+	if slices.Contains(context.MissingPlugins, harness) {
+		return fmt.Sprintf("harness: %s's aeolus-fleet plugin is not installed: run aeolus-trierarch upgrade", harness)
+	}
+	if marks, ok := context.MarksLaunches[harness]; ok && !marks {
+		return fmt.Sprintf("harness: %s's aeolus-fleet plugin marks no launches: run aeolus-trierarch upgrade", harness)
+	}
+	return ""
 }
 
 // unacceptedFlag is the first flag the harness would launch with that it still asks to accept, or none (#403).
