@@ -28,8 +28,18 @@ type State struct {
 	KeysTold map[string]string `json:"keysTold,omitempty"`
 	// LowResources are what the machine was low on when argo was told, so a restart while it stays low tells nothing again (#400).
 	LowResources []string `json:"lowResources,omitempty"`
+	// MissingPlugins are the harnesses whose aeolus-fleet plugin the last pass could not find (#1212): not offered in the report until it is back.
+	MissingPlugins []string `json:"missingPlugins,omitempty"`
+	// NotOffered are the harnesses the last pass found their adapters do not offer, with why (CC3, CC10), by harness.
+	NotOffered []NotOfferedHarness `json:"notOffered,omitempty"`
 	// PassFailure is why the last pass failed and since when; none while passes succeed.
 	PassFailure *PassFailure `json:"passFailure,omitempty"`
+}
+
+// NotOfferedHarness is a harness the machine does not offer now, with why.
+type NotOfferedHarness struct {
+	Harness string `json:"harness"`
+	Reason  string `json:"reason"`
 }
 
 // PassFailure is a failing pass: the reason of the latest failure, and when the passes began to fail.

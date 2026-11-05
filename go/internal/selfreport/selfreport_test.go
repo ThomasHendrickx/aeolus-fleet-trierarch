@@ -442,3 +442,44 @@ func TestAReportWhoseUsageCouldNotBeReadIsNotSent(t *testing.T) {
 		t.Fatalf("reports = %d; want none", len(fleet.reports))
 	}
 }
+
+func TestAHarnessWhosePluginIsMissingIsNotOfferedAndTheNoteSaysWhy(t *testing.T) {
+	in := anInput()
+	in.State.MissingPlugins = []string{"claude-code"}
+
+	report := Of(in)
+
+	if want := "0 of 6 running, claude-code not offered: its aeolus-fleet plugin is not installed (run aeolus-trierarch upgrade)"; report.Note != want {
+		t.Fatalf("note = %q; want %q", report.Note, want)
+	}
+	details := asJSON(t, report)["details"].(map[string]any)
+	if got := details["harnesses"]; !reflect.DeepEqual(got, []any{}) {
+		t.Fatalf("harnesses = %v; want none", got)
+	}
+	want := []any{map[string]any{"harness": "claude-code", "reason": "its aeolus-fleet plugin is not installed (run aeolus-trierarch upgrade)"}}
+	if got := details["notOffered"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("notOffered = %v; want %v", got, want)
+	}
+}
+
+func TestAHarnessItsAdapterDoesNotOfferIsNotOfferedWithItsOwnReason(t *testing.T) {
+	in := anInput()
+	in.State.MissingPlugins = []string{"claude-code"}
+	in.State.NotOffered = []reconciler.NotOfferedHarness{{Harness: "claude-code", Reason: "its Copilot CLI version is not detected yet"}}
+
+	report := Of(in)
+
+	if want := "0 of 6 running, claude-code not offered: its Copilot CLI version is not detected yet"; report.Note != want {
+		t.Fatalf("note = %q; want %q", report.Note, want)
+	}
+	want := []any{map[string]any{"harness": "claude-code", "reason": "its Copilot CLI version is not detected yet"}}
+	if got := detailsJSON(t, in)["notOffered"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("notOffered = %v; want %v", got, want)
+	}
+}
+
+func TestADetailsOfAMachineOfferingEveryHarnessNameNoneNotOffered(t *testing.T) {
+	if _, ok := detailsJSON(t, anInput())["notOffered"]; ok {
+		t.Fatal("notOffered is named while every harness is offered")
+	}
+}
