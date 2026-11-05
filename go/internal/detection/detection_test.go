@@ -45,6 +45,7 @@ type aDetector struct {
 	found      *Harness
 	detections int
 	previous   *Harness
+	during     func()
 }
 
 func (d *aDetector) Version(context.Context) (string, bool) {
@@ -54,6 +55,9 @@ func (d *aDetector) Version(context.Context) (string, bool) {
 func (d *aDetector) Detect(_ context.Context, version string, previous *Harness, at time.Time) (Harness, bool) {
 	d.detections++
 	d.previous = previous
+	if d.during != nil {
+		d.during()
+	}
 	if d.found == nil {
 		return Harness{}, false
 	}
@@ -180,6 +184,32 @@ func TestDetectingAfterARefusalKeepsTheRefusedIDsAtTheSameVersion(t *testing.T) 
 
 	if got, want := detected["claude-code"].Refused, before.Refused; !reflect.DeepEqual(got, want) {
 		t.Errorf("refused = %v, want %v", got, want)
+	}
+}
+
+func TestRefusalsSavedWhileTheProbeRunsAreKeptWhenDetectionSaves(t *testing.T) {
+	found := aHarness("", "claude-sonnet-5", "claude-opus-5", "claude-haiku-5")
+	before := aHarness("2.1.306", "claude-sonnet-5", "claude-opus-5", "claude-haiku-5")
+	before.Refused = []Refused{{ID: "claude-sonnet-5", At: Timestamp(earlier)}}
+	store := &aStore{detected: Detected{"claude-code": before}}
+	detector := &aDetector{version: "2.1.306", found: &found}
+	detector.during = func() {
+		_, _ = Refuse(store, "claude-code", "claude-opus-5", now)
+		_, _ = Refuse(store, "claude-code", "claude-haiku-5", now)
+	}
+	detection, _ := aDetection(store, map[string]Detector{"claude-code": detector})
+
+	detected, _ := detection.Detect(context.Background(), []string{"claude-code"}, ByRefusal)
+
+	want := []string{"claude-sonnet-5", "claude-opus-5", "claude-haiku-5"}
+	for name, got := range map[string]Detected{"saved": store.detected, "given": detected} {
+		var ids []string
+		for _, each := range got["claude-code"].Refused {
+			ids = append(ids, each.ID)
+		}
+		if !slices.Equal(ids, want) {
+			t.Errorf("%s refused = %v, want %v", name, ids, want)
+		}
 	}
 }
 
