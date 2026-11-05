@@ -199,3 +199,14 @@ describe('a clear request for a worktree the trierarch keeps none of', () => {
     await expect.poll(() => fleet.clearedOutcomeOf(scout, REPOSITORY), { timeout: CLEARED_WITHIN_MS }).toBe('not-kept');
   });
 });
+
+describe('a clear request for a ship whose crew fails in the same pass', () => {
+  it('is carried out in that pass, before the crew is given back', async () => {
+    git(machine.repository, 'update-ref', '-d', 'refs/heads/main');
+    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.requestWorktreeClear(scout, REPOSITORY);
+
+    await expect.poll(() => fleet.clearedOutcomeOf(scout, REPOSITORY), { timeout: CLEARED_WITHIN_MS }).toBe('not-kept');
+    expect(await fleet.givenBackReasonOf(scout)).toBeUndefined();
+  });
+});
