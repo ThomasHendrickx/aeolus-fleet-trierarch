@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 
+import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
@@ -49,7 +50,7 @@ async function offered() {
 
 /** The starts of the named ships fail, each refused by its session. */
 async function failedStarts(names: readonly string[]): Promise<void> {
-  const shipIds = [];
+  const shipIds: ShipId[] = [];
   for (const name of names) {
     const shipId = await fleet.commission(name);
     await fleet.crewInWorktree(shipId, { repository: REPOSITORY, harness: 'claude-code' });
@@ -72,7 +73,8 @@ describe('a machine whose session starts keep failing', () => {
     await expect.poll(async () => (await offered())?.details.harnesses, { timeout: REPORTED_WITHIN_MS }).toEqual([]);
     const report = await offered();
     expect(report?.details.workspaces).toEqual({ repositories: [], folders: [] });
-    expect(report?.details.notOffered).toEqual([{ harness: 'claude-code', reason: expect.stringMatching(/^the starts of 3 ships failed in a row; first: claude-code .*refused claude-opus-5; it offers itself again at \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/) }]);
+    expect(report?.details.notOffered?.map(({ harness }) => harness)).toEqual(['claude-code']);
+    expect(report?.details.notOffered?.[0]?.reason).toMatch(/^the starts of 3 ships failed in a row; first: claude-code .*refused claude-opus-5; it offers itself again at \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     expect(report?.note).toContain(', not offered: the starts of 3 ships failed in a row');
   });
 
