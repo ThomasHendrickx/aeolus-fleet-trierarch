@@ -154,7 +154,7 @@ describe("Claude Code's subscription", () => {
 });
 
 const sentMessageSchema = z.object({
-  hours: z.array(z.object({ hour: z.string(), ships: z.array(z.object({ shipId: z.string(), harness: z.string(), login: z.string().nullable(), models: z.array(z.object({ model: z.string(), tokens: z.record(z.string(), z.number()), estimatedCostUsd: z.record(z.string(), z.number()).nullable() })) })) })),
+  hours: z.array(z.object({ hour: z.string(), ships: z.array(z.object({ shipId: z.string(), harness: z.string(), login: z.string().nullable(), models: z.array(z.object({ model: z.string(), tokens: z.looseObject({ output: z.number() }), estimatedCostUsd: z.record(z.string(), z.number()).nullable() })) })) })),
   subscriptions: z.array(z.unknown()),
   readAt: z.string(),
 });
@@ -167,7 +167,7 @@ async function usageSent(): Promise<z.infer<typeof sentMessageSchema>[]> {
 }
 
 const outputOf = (messages: readonly z.infer<typeof sentMessageSchema>[], shipId: ShipId): number[] =>
-  messages.flatMap(({ hours }) => hours.flatMap(({ ships }) => ships.filter((ship) => ship.shipId === shipId).flatMap(({ models }) => models.map(({ tokens }) => tokens['output'] ?? 0))));
+  messages.flatMap(({ hours }) => hours.flatMap(({ ships }) => ships.filter((ship) => ship.shipId === shipId).flatMap(({ models }) => models.map(({ tokens }) => tokens.output))));
 
 describe("a ship's usage sent to the trierarch plugin's ship", () => {
   it('goes at the first pass after the trierarch starts, per UTC hour with its login and its cost per kind of tokens', async () => {

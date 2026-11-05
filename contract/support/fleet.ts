@@ -111,7 +111,7 @@ export async function aFleet(): Promise<Fleet> {
     },
     usageSentByTrierarch: async () => {
       const messages = await database.message.findMany({ where: { senderShipId: trierarchShip.shipId, contentType: 'application/vnd.aeolus.trierarch.usage+json' }, orderBy: { createdAt: 'asc' }, select: { selectorShipId: true, payload: true } });
-      return messages.flatMap(({ selectorShipId, payload }) => (selectorShipId === null ? [] : [{ to: idSchema('ship').parse(selectorShipId), message: JSON.parse(payload ?? 'null') as unknown }]));
+      return messages.flatMap(({ selectorShipId, payload }) => (selectorShipId === null ? [] : [{ to: idSchema('ship').parse(selectorShipId), message: z.unknown().parse(JSON.parse(payload ?? 'null')) }]));
     },
     pingTrierarch: async () => unwrap(await useCases.pingShip(argo, { shipId: trierarchShip.shipId })).messageId,
     reportOfTrierarch: async () => {
