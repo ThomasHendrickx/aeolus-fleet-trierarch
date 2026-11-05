@@ -186,6 +186,12 @@ func ModelRefused(ship Ship, harness string, version string, model string) strin
 	return Message(fmt.Sprintf("%s refused the model %s for %s", harness, model, ship.nameOf()), paragraphs(facts, "This machine offers the model no more at this version, until `aeolus-trierarch detect` runs by hand."))
 }
 
+// StoppedOffering is what argo is told when the machine stopped offering itself after the starts of several ships failed in a row (#853): how many, the first reason and how it offers itself again.
+func StoppedOffering(ships int, firstReason string) string {
+	facts := fmt.Sprintf("- Failed in a row: the starts of %d ships\n- First: %s", ships, firstReason)
+	return Message("Session starts fail here: this machine takes no new ships", paragraphs(facts, "It offers itself again for one start 10 minutes after its last failed start, and for good once a start succeeds or the trierarch starts with a changed configuration."))
+}
+
 // SettingsRefused is what argo is told when the trierarch cannot crew a ship's settings and the fleet refused to take the request back.
 func SettingsRefused(ship Ship, settingsVersion int, why string) string {
 	facts := strings.Join([]string{ship.fact(), fmt.Sprintf("- Settings version: %d", settingsVersion), "- Why: " + why}, "\n")

@@ -36,6 +36,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/folderprocess"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/logfile"
@@ -484,23 +485,30 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	opened = shipSockets(at, kept.FleetURL, running, checked)
 	load := &machineload.Reader{Source: machineload.System{WorktreeRoot: root}, Now: time.Now, Log: logLine}
 	saved := state.File{Path: at.State}
+	// The configuration as its file gives it, as the failed starts keep it: another one than the machine stopped offering itself with offers it again (#853).
+	configurationText, err := json.Marshal(configured)
+	if err != nil {
+		return nil, err
+	}
 	pass := runpass.Pass{
-		Fleet:        client,
-		Sessions:     running,
-		Harnesses:    harnesses,
-		Workspace:    places,
-		Checkouts:    checked,
-		Store:        saved,
-		Log:          logLine,
-		Now:          time.Now,
-		NewLaunchID:  newLaunchID,
-		FleetURL:     kept.FleetURL,
-		Sockets:      opened,
-		Offered:      offeredHarnesses,
-		Repositories: repositories,
-		Folders:      folders,
-		RunningCap:   configuration.Caps.Running,
-		Logins:       logins,
+		Fleet:             client,
+		Sessions:          running,
+		Harnesses:         harnesses,
+		Workspace:         places,
+		FolderProcesses:   folderprocess.Stopper{},
+		Checkouts:         checked,
+		Store:             saved,
+		Log:               logLine,
+		Now:               time.Now,
+		NewLaunchID:       newLaunchID,
+		FleetURL:          kept.FleetURL,
+		Sockets:           opened,
+		Offered:           offeredHarnesses,
+		Repositories:      repositories,
+		Folders:           folders,
+		RunningCap:        configuration.Caps.Running,
+		ConfigurationFile: string(configurationText),
+		Logins:            logins,
 		// The model proxy runs while any harness holds an API key (headless H16); a pass starts it again when it is gone.
 		Proxy: proxy,
 		Keys:  keys.Files{Folder: at.Keys},
@@ -553,7 +561,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Input: func() selfreport.Input {
 			offered, detected := offers.current()
 			offered = withTrusted(offered)
-			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Trusted: trust.Of(offered, trustReaders), Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH}
+			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Trusted: trust.Of(offered, trustReaders), Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, Now: time.Now()}
 		},
 	}
 	// Each pass ends with the trierarch's own report: the first at start, then only when it changed.

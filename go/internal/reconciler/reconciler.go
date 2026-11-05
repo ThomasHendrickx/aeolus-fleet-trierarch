@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/failedstarts"
 )
 
 // State is the trierarch's saved state, in the shape today's trierarch saves
@@ -34,6 +35,8 @@ type State struct {
 	NotOffered []NotOfferedHarness `json:"notOffered,omitempty"`
 	// PassFailure is why the last pass failed and since when; none while passes succeed.
 	PassFailure *PassFailure `json:"passFailure,omitempty"`
+	// FailedStarts are the machine's failed session starts since a start last succeeded; once 3 ships' starts failed in a row it stops offering itself (#853).
+	FailedStarts *failedstarts.Starts `json:"failedStarts,omitempty"`
 }
 
 // NotOfferedHarness is a harness the machine does not offer now, with why.
@@ -190,6 +193,15 @@ type Observed struct {
 	StartProblems map[string]string
 	// WithoutIdentity are the ships whose entry would be watched or reported for, but whose folder holds no identity (#659, #664).
 	WithoutIdentity []string
+	// Worktrees are the worktrees under the trierarch's root.
+	Worktrees []Worktree
+}
+
+// Worktree is a worktree under the trierarch's root, `<root>/<repository>/<name>`.
+type Worktree struct {
+	Path       string
+	Repository string
+	Name       string
 }
 
 // Context is what reconciling needs beside the state.
@@ -216,6 +228,8 @@ type Context struct {
 	MissingPlugins []string
 	// NotOffered is, by harness, why the machine does not offer it now (CC3, CC10).
 	NotOffered map[string]string
+	// ConfigurationFile is the configuration as its file gives it, as the failed starts keep it: another one than the machine stopped offering itself with offers it again (#853).
+	ConfigurationFile string
 }
 
 // Trust is what a harness trusts, read from its own files: the names of the repositories and folders, and the flags it still asks to accept before a session starts with them (#403).
@@ -254,6 +268,10 @@ const (
 	IdentityGone ActionKind = "identityGone"
 	// Crashed tells the ship's owner its restart budget is spent (#397).
 	Crashed ActionKind = "crashed"
+	// ClearOrphan stops what runs in a worktree no entry works in, then removes it unless it holds unsaved work (#1041).
+	ClearOrphan ActionKind = "clearOrphan"
+	// StoppedOffering tells argo the machine stopped offering itself after the starts of 3 ships failed in a row (#853).
+	StoppedOffering ActionKind = "stoppedOffering"
 )
 
 // Status is a crew status as the trierarch writes it (#332).
@@ -275,6 +293,9 @@ type Action struct {
 	Reason          string
 	// Entry is the entry that ends with a forget or a give back.
 	Entry *Entry
+	// Orphan is the worktree a clear orphan clears, new when the state did not hold it yet, so what is left of it is logged once.
+	Orphan *Worktree
+	IsNew  bool
 	// ShipName, Harness, Version, Model, Exits, FailedStart and Key are what a notice names: the ship, the harness at its version and the model it refused, how often the session exited and why its last start failed, and the key that makes the notice told once.
 	ShipName    string
 	Harness     string
@@ -283,6 +304,8 @@ type Action struct {
 	Exits       int
 	FailedStart string
 	Key         string
+	// FailedStarts are the failed starts a StoppedOffering tells.
+	FailedStarts *failedstarts.Starts
 }
 
 // LaunchWindow is how long after its start a session has to show activity (#382).
@@ -324,6 +347,8 @@ type step struct {
 	isGivenBack bool
 	actions     []Action
 	starts      int
+	// outcome is how the launch window that closed in this step ended, for the machine's failed starts (#853).
+	outcome *failedstarts.Outcome
 }
 
 // Reconcile answers the state the actions start from and the actions, in order.
@@ -340,6 +365,9 @@ func Reconcile(state State, context Context) (State, []Action) {
 		}
 	}
 	next := State{Entries: map[string]Entry{}, Kept: state.Kept, Orphans: state.Orphans, Refused: refused, KeysTold: state.KeysTold, LowResources: state.LowResources}
+	// Another configuration than the machine stopped offering itself with counts afresh, then each launch window that closed is counted in turn (#853).
+	failed := failedstarts.WithConfiguration(state.FailedStarts, context.ConfigurationFile)
+	isNewlyStopped := false
 	actions := []Action{}
 	runningSessions := 0
 	for _, session := range context.Observed.Sessions {
@@ -376,6 +404,11 @@ func Reconcile(state State, context Context) (State, []Action) {
 			taken = stepOf(entry, context, canStart(), request.IsFinal)
 		} else {
 			taken = newVersionStep(entry, request, state, context)
+		}
+		if taken.outcome != nil {
+			var isNew bool
+			failed, isNew = failedstarts.Count(failed, *taken.outcome, context.Now, context.ConfigurationFile)
+			isNewlyStopped = isNewlyStopped || isNew
 		}
 		actions = append(actions, taken.actions...)
 		if taken.isGivenBack {
@@ -422,7 +455,58 @@ func Reconcile(state State, context Context) (State, []Action) {
 			actions = append(actions, Action{Kind: Stop, ShipID: session.ShipID})
 		}
 	}
-	return next, actions
+	next.FailedStarts = failed
+	if isNewlyStopped {
+		actions = append(actions, Action{Kind: StoppedOffering, FailedStarts: failed})
+	}
+	orphans, cleared := orphansOf(state, next, context)
+	next.Orphans = orphans
+	return next, append(actions, cleared...)
+}
+
+// orphansOf are the worktrees under the root that no entry works in and the trierarch did not keep, as after their ship was retired (gap rule 2, #1041), as the state holds them, and their clears. A forgotten entry works in its worktree no more.
+func orphansOf(state State, next State, context Context) ([]any, []Action) {
+	known := map[string]bool{}
+	for shipID, entry := range next.Entries {
+		if _, ok := state.Entries[shipID]; ok && !isAssigned(shipID, context.Requests) {
+			continue
+		}
+		if entry.Folder != "" {
+			known[entry.Folder] = true
+		}
+	}
+	for _, kept := range next.Kept {
+		known[pathOf(kept)] = true
+	}
+	reported := map[string]bool{}
+	for _, held := range state.Orphans {
+		reported[pathOf(held)] = true
+	}
+	orphans := []any{}
+	actions := []Action{}
+	for _, worktree := range context.Observed.Worktrees {
+		if known[worktree.Path] {
+			continue
+		}
+		orphans = append(orphans, map[string]any{"path": worktree.Path, "repository": worktree.Repository, "name": worktree.Name})
+		cleared := worktree
+		actions = append(actions, Action{Kind: ClearOrphan, Orphan: &cleared, IsNew: !reported[worktree.Path]})
+	}
+	return orphans, actions
+}
+
+func isAssigned(shipID string, requests []Request) bool {
+	return slices.ContainsFunc(requests, func(request Request) bool { return request.ShipID == shipID })
+}
+
+// pathOf is the path of a kept worktree or an orphan as the state holds it; empty when it names none.
+func pathOf(held any) string {
+	fields, ok := held.(map[string]any)
+	if !ok {
+		return ""
+	}
+	path, _ := fields["path"].(string)
+	return path
 }
 
 func sortedKeys(entries map[string]Entry) []string {
@@ -621,6 +705,7 @@ func launchStep(entry Entry, context Context, isFinal bool) step {
 		final.State, final.Since = "running", entry.LaunchedAt
 		woken := wakeStep(final, context)
 		woken.entry = &final
+		woken.outcome = &failedstarts.Outcome{ShipID: entry.ShipID, IsSuccess: true}
 		return woken
 	}
 	if launch.Kind == LaunchRefused {
@@ -635,19 +720,31 @@ func launchStep(entry Entry, context Context, isFinal bool) step {
 
 // failedLaunch is a launch window that ended without activity, or with the model refused: the request is given back with the reason while its crew is not final, with what the refusal tells first; for a final crew it is a failed start against the restart budget.
 func failedLaunch(entry Entry, now time.Time, why refusal, isFinal bool) step {
+	outcome := machineFailedStart(entry, why)
 	if isFinal {
 		failed := exitStep(withoutLaunch(entry), now, why.reason)
 		failed.actions = append(append([]Action{}, why.actions...), failed.actions...)
+		failed.outcome = outcome
 		return failed
 	}
 	given := entry
-	return step{isGivenBack: true, actions: append(append([]Action{}, why.actions...), Action{Kind: GiveBack, ShipID: entry.ShipID, SettingsVersion: entry.SettingsVersion, Reason: why.reason, Entry: &given})}
+	return step{outcome: outcome, isGivenBack: true, actions: append(append([]Action{}, why.actions...), Action{Kind: GiveBack, ShipID: entry.ShipID, SettingsVersion: entry.SettingsVersion, Reason: why.reason, Entry: &given})}
 }
 
 // refusal is why a launch failed, with the notice a refused model tells argo.
 type refusal struct {
 	reason  string
 	actions []Action
+	// isModelRefused is whether the session refused the model it launched with.
+	isModelRefused bool
+}
+
+// machineFailedStart is a failed start counted against the machine (#853): any but a refusal of a model the settings picked, which is the settings' cause, kept refused on its own (#382).
+func machineFailedStart(entry Entry, why refusal) *failedstarts.Outcome {
+	if _, isPicked := entry.Options[modelOption]; why.isModelRefused && isPicked {
+		return nil
+	}
+	return &failedstarts.Outcome{ShipID: entry.ShipID, Reason: why.reason}
 }
 
 // modelOption is the option that names the model a session launches with.
@@ -666,9 +763,9 @@ func modelRefusal(entry Entry, model string, versions map[string]string) refusal
 	}
 	reason += " refused " + named
 	if _, isPicked := entry.Options[modelOption]; !isPicked || version == "" || model == "" {
-		return refusal{reason: reason}
+		return refusal{reason: reason, isModelRefused: true}
 	}
-	return refusal{reason: reason, actions: []Action{{Kind: ModelRefused, ShipID: entry.ShipID, ShipName: entry.ShipName, Harness: entry.Harness, Version: version, Model: model}}}
+	return refusal{reason: reason, isModelRefused: true, actions: []Action{{Kind: ModelRefused, ShipID: entry.ShipID, ShipName: entry.ShipName, Harness: entry.Harness, Version: version, Model: model}}}
 }
 
 // identityStep is an entry running, restarting or crashed whose folder holds no identity (#659, #664), as when its harness's plugin was uninstalled: its inbox cannot be seen and no report goes on its behalf, so it is woken no more. Argo is told once per loss, whatever state it moves between; once the identity is back, a later loss is told again.
@@ -725,6 +822,7 @@ func runningStep(entry Entry, context Context, canStart bool) step {
 		closed := withoutLaunch(entry)
 		woken := wakeStep(closed, context)
 		woken.entry = &closed
+		woken.outcome = &failedstarts.Outcome{ShipID: entry.ShipID, IsSuccess: true}
 		return woken
 	}
 	if launch.Kind == LaunchRefused {
@@ -733,7 +831,9 @@ func runningStep(entry Entry, context Context, canStart bool) step {
 	if !isWindowOver(entry, context.Now) {
 		return wakeStep(entry, context)
 	}
-	return exitStep(entry, context.Now, noActivity(entry, launch))
+	quiet := exitStep(entry, context.Now, noActivity(entry, launch))
+	quiet.outcome = &failedstarts.Outcome{ShipID: entry.ShipID, Reason: noActivity(entry, launch)}
+	return quiet
 }
 
 // otherVersionStep is a session another version of the trierarch started, as before an upgrade (H19): this one does not speak to it, so it is handed nothing, forced or not. Once its turn is idle it is started again, continuing its conversation, with no restart counted.
