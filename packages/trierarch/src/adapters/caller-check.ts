@@ -93,7 +93,7 @@ async function holdersOfInode(inode: string): Promise<number[]> {
 interface Peers {
   holdersOf(at: { fd: number; root: number | undefined }): Promise<number[]>;
   parentOf(pid: number): Promise<number | undefined>;
-  /** The process session (setsid) the process is in, which it keeps when it forks and when it is reparented; none when it does not resolve. */
+  /** The process session (setsid) the process is in, on macOS its process group, which it keeps when it forks and when it is reparented; none when it does not resolve. */
   sessionOf(pid: number): Promise<string | undefined>;
 }
 
@@ -171,11 +171,11 @@ function darwinPeers(run: typeof runCommand, ownPid: number): Peers {
       const parent = Number(shown.stdout.trim());
       return shown.status === 0 && Number.isInteger(parent) ? parent : undefined;
     },
-    // ps names a session by its kernel address, 0 where macOS hides it.
+    // ps shows no session id on macOS, only its kernel address, 0 where macOS hides it, so the process group stands for it: a harness the hold started detached leads both, and a process it forked keeps both when it is reparented (#196).
     sessionOf: async (pid) => {
-      const shown = await run('ps', { args: ['-o', 'sess=', '-p', String(pid)] });
-      const session = shown.stdout.trim();
-      return shown.status === 0 && session !== '' && /^(0x)?0*$/.exec(session) === null ? session : undefined;
+      const shown = await run('ps', { args: ['-o', 'pgid=', '-p', String(pid)] });
+      const group = Number(shown.stdout.trim());
+      return shown.status === 0 && Number.isInteger(group) && group > 0 ? String(group) : undefined;
     },
   };
 }
