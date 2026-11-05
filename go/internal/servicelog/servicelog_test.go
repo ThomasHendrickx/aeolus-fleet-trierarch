@@ -86,11 +86,24 @@ func TestElsewhereTheLogIsTheFileTheServiceWrites(t *testing.T) {
 	}
 
 	last, _ := log.Tail(2)
-	none, _ := log.Tail(0)
 	more, _ := log.Tail(9)
 
-	if log.Where.File != file || !reflect.DeepEqual(last, []string{"three", "four"}) || len(none) != 0 || len(more) != 4 {
-		t.Errorf("read %q, %q, %q from %+v", last, none, more, log.Where)
+	if log.Where.File != file || !reflect.DeepEqual(last, []string{"three", "four"}) || len(more) != 4 {
+		t.Errorf("read %q, %q from %+v", last, more, log.Where)
+	}
+}
+
+func TestZeroLinesOfTheFileIsTheWholeFileAsTodaysTrierarchReadsIt(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "trierarch.log")
+	log := Of("darwin", file, nil, nil, time.Millisecond)
+	if err := os.WriteFile(file, []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	all, _ := log.Tail(0)
+
+	if !reflect.DeepEqual(all, []string{"one", "two"}) {
+		t.Errorf("--lines 0 read %q", all)
 	}
 }
 
