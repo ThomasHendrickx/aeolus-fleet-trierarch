@@ -139,8 +139,9 @@ describe('status', () => {
     await withState((state) => {
       const entries = z.record(z.string(), z.record(z.string(), z.unknown())).parse(state.entries);
       const [id = '', entry = {}] = Object.entries(entries)[0] ?? [];
-      const another = (last: string, to: string) => ({ ...entry, shipId: `${id.slice(0, -1)}${last}`, state: to });
-      state.entries = { ...entries, [`${id.slice(0, -1)}0`]: another('0', 'restarting'), [`${id.slice(0, -1)}1`]: another('1', 'crashed') };
+      // Two other ships' ids, which differ from the ship's by their last character.
+      const [restarting = '', crashed = ''] = ['0', '1', '2'].filter((last) => !id.endsWith(last)).map((last) => `${id.slice(0, -1)}${last}`);
+      state.entries = { ...entries, [restarting]: { ...entry, shipId: restarting, state: 'restarting' }, [crashed]: { ...entry, shipId: crashed, state: 'crashed' } };
       state.kept = [{ shipId: scout, repository: REPOSITORY, path: '/worktrees/aeolus-fleet/scout' }];
       state.orphans = [{ path: '/worktrees/aeolus-fleet/stray', repository: REPOSITORY, name: 'stray' }];
     });
