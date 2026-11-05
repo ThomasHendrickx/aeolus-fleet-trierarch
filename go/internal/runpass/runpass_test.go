@@ -1523,6 +1523,28 @@ func TestARequestForAHarnessWhosePluginMarksNoLaunchesIsGivenBack(t *testing.T) 
 	}
 }
 
+func TestThePassKeepsWhichHarnessesAreNotOfferedAndWhyForTheReport(t *testing.T) {
+	pass := aRunPass(t)
+	pass.harness.pluginMissing = true
+
+	pass.run(t)
+
+	if got := pass.store.state.MissingPlugins; !slices.Equal(got, []string{"claude-code"}) {
+		t.Fatalf("missing plugins %q, want claude-code", got)
+	}
+}
+
+func TestThePassKeepsWhyAnAdapterDoesNotOfferItsHarness(t *testing.T) {
+	pass := aRunPass(t)
+	pass.harness.notOffered = "its Copilot CLI version is not detected yet"
+
+	pass.run(t)
+
+	if want := []reconciler.NotOfferedHarness{{Harness: "claude-code", Reason: "its Copilot CLI version is not detected yet"}}; !slices.Equal(pass.store.state.NotOffered, want) {
+		t.Fatalf("not offered %+v, want %+v", pass.store.state.NotOffered, want)
+	}
+}
+
 func TestAModelRefusedAtAVersionTheHarnessDoesNotSayTellsArgoNothing(t *testing.T) {
 	pass := aRunPass(t)
 
