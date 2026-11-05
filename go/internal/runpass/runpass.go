@@ -776,6 +776,12 @@ func (p Pass) clearOrphan(state reconciler.State, orphan reconciler.Worktree, is
 		}
 		return state, nil
 	}
+	// An entry crewed earlier in this pass works here now: the reconcile saw it with no folder.
+	for _, entry := range state.Entries {
+		if entry.Folder == orphan.Path {
+			return p.dropOrphan(state, orphan)
+		}
+	}
 	stopped, err := p.FolderProcesses.StopIn(orphan.Path)
 	if err != nil {
 		return state, err
@@ -793,14 +799,8 @@ func (p Pass) clearOrphan(state reconciler.State, orphan reconciler.Worktree, is
 	if err := p.Workspace.RemoveWorktree(orphan.Path); err != nil {
 		return state, err
 	}
-	held := []any{}
-	for _, each := range state.Orphans {
-		if fields, ok := each.(map[string]any); !ok || fields["path"] != orphan.Path {
-			held = append(held, each)
-		}
-	}
-	state.Orphans = held
-	if err := p.Store.Save(state); err != nil {
+	state, err = p.dropOrphan(state, orphan)
+	if err != nil {
 		return state, err
 	}
 	switch stopped {
@@ -812,6 +812,18 @@ func (p Pass) clearOrphan(state reconciler.State, orphan reconciler.Worktree, is
 		p.Log(fmt.Sprintf("Removed the orphan worktree %s, after stopping %d processes in it", orphan.Path, stopped))
 	}
 	return state, nil
+}
+
+// dropOrphan holds the orphan no more.
+func (p Pass) dropOrphan(state reconciler.State, orphan reconciler.Worktree) (reconciler.State, error) {
+	held := []any{}
+	for _, each := range state.Orphans {
+		if fields, ok := each.(map[string]any); !ok || fields["path"] != orphan.Path {
+			held = append(held, each)
+		}
+	}
+	state.Orphans = held
+	return state, p.Store.Save(state)
 }
 
 // modelRefused keeps the model a session refused as refused at its harness's version, so this machine offers it no more, and tells argo once per harness, version and model (#382).
