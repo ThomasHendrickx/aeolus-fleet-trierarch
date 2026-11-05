@@ -8,6 +8,7 @@ import (
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 )
@@ -208,6 +209,7 @@ func (l aLogins) KeyState(harness string) (string, string) {
 
 type aFleet struct {
 	reports []Report
+	details []any
 	err     error
 }
 
@@ -216,6 +218,7 @@ func (f *aFleet) ReportSelf(state string, note string, details any) error {
 		return f.err
 	}
 	f.reports = append(f.reports, Report{State: state, Note: note})
+	f.details = append(f.details, details)
 	return nil
 }
 
@@ -283,5 +286,64 @@ func TestAReportTheFleetRefusedIsSentAgainOnTheNextPass(t *testing.T) {
 	}
 	if len(fleet.reports) != 1 {
 		t.Fatalf("reports = %d; want the report sent once the fleet answers", len(fleet.reports))
+	}
+}
+
+func aLoad(memoryAvailable int64) *machineload.Load {
+	return &machineload.Load{
+		Memory: machineload.Memory{TotalBytes: 100, AvailableBytes: memoryAvailable},
+		Swap:   &machineload.Swap{TotalBytes: 100, UsedBytes: 10},
+		CPU:    machineload.CPU{Cores: 4, LoadAverage: 3.5},
+		Disk:   machineload.Disk{TotalBytes: 1000, FreeBytes: 250},
+	}
+}
+
+func TestTheDetailsCarryTheMachinesLoadAsItWasRead(t *testing.T) {
+	in := anInput()
+	in.Load = aLoad(30)
+	want := map[string]any{
+		"memory": map[string]any{"totalBytes": 100.0, "availableBytes": 30.0},
+		"swap":   map[string]any{"totalBytes": 100.0, "usedBytes": 10.0},
+		"cpu":    map[string]any{"cores": 4.0, "loadAverage": 3.5},
+		"disk":   map[string]any{"totalBytes": 1000.0, "freeBytes": 250.0},
+	}
+	if got := detailsJSON(t, in)["load"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("load = %v; want %v", got, want)
+	}
+}
+
+func TestTheDetailsCarryNoLoadWhileNoneWasRead(t *testing.T) {
+	if _, ok := detailsJSON(t, anInput())["load"]; ok {
+		t.Fatal("details name a load that was never read")
+	}
+}
+
+type aLoadReader struct{ load *machineload.Load }
+
+func (r *aLoadReader) Read() (*machineload.Load, bool) { return r.load, false }
+
+func TestTheReportGoesAgainForTheLoadOnlyOnceItTakesAnotherStep(t *testing.T) {
+	reporter, fleet, _ := aReporter()
+	loads := &aLoadReader{load: aLoad(30)}
+	reporter.Load = loads
+	for _, available := range []int64{30, 31, 29, 28} {
+		loads.load = aLoad(available)
+		if err := reporter.Report(false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(fleet.reports) != 1 {
+		t.Fatalf("reports = %d while the load stayed in its step; want 1", len(fleet.reports))
+	}
+	loads.load = aLoad(20)
+	if err := reporter.Report(false); err != nil {
+		t.Fatal(err)
+	}
+	if len(fleet.reports) != 2 {
+		t.Fatalf("reports = %d after memory moved 10 points; want 2", len(fleet.reports))
+	}
+	sent, ok := fleet.details[1].(map[string]any)["load"].(*machineload.Load)
+	if !ok || sent.Memory.AvailableBytes != 20 {
+		t.Fatalf("the second report carries %v; want the load as last read", fleet.details[1])
 	}
 }
