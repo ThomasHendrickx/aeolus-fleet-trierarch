@@ -55,3 +55,37 @@ describe("a machine that is not low", () => {
     ).toEqual([]);
   });
 });
+
+describe("the trierarch report", () => {
+  it("carries the load of the machine: its memory, CPU and the disk of its worktree root", async () => {
+    await expect
+      .poll(async () => (await fleet.reportOfTrierarch())?.details, {
+        timeout: SAVED_WITHIN_MS,
+      })
+      .toHaveProperty("load");
+    const load = z
+      .object({
+        memory: z.object({
+          totalBytes: z.number().positive(),
+          availableBytes: z.number().positive(),
+        }),
+        cpu: z.object({
+          cores: z.number().positive(),
+          loadAverage: z.number().min(0),
+        }),
+        disk: z.object({
+          totalBytes: z.number().positive(),
+          freeBytes: z.number().min(0),
+        }),
+      })
+      .parse(
+        z
+          .looseObject({ load: z.unknown() })
+          .parse((await fleet.reportOfTrierarch())?.details).load,
+      );
+    expect(load.memory.availableBytes).toBeLessThanOrEqual(
+      load.memory.totalBytes,
+    );
+    expect(load.disk.freeBytes).toBeLessThanOrEqual(load.disk.totalBytes);
+  });
+});
