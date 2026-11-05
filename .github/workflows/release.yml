@@ -37,6 +37,8 @@ permissions:
   packages: write
   # To attest each Go binary, with id-token above.
   attestations: write
+  # To read the release's milestone and close it.
+  issues: write
 
 concurrency:
   group: release
@@ -116,6 +118,29 @@ jobs:
         run: npm run set-version -- "$VERSION"
 
       - run: npm run build
+
+      # The milestone "trierarch <version>" is the release's scope: open issues in it
+      # stop the run before anything is published. A hotfix without one goes on.
+      - name: Check the release's milestone has no open issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          MILESTONE="trierarch $VERSION"
+          number=$(gh api --paginate "repos/$GITHUB_REPOSITORY/milestones?state=all&per_page=100" \
+            | jq -r --arg title "$MILESTONE" '.[] | select(.title == $title) | .number')
+          if [[ -z "$number" ]]; then
+            echo "No milestone named '$MILESTONE': going on without one." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          open=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues?milestone=$number&state=open&per_page=100" \
+            | jq -r '.[] | "#\(.number) \(.title)"')
+          if [[ -n "$open" ]]; then
+            echo "::error::Milestone '$MILESTONE' has open issues, nothing is published:"
+            echo "$open"
+            exit 1
+          fi
+          echo "Milestone '$MILESTONE' has no open issues." | tee -a "$GITHUB_STEP_SUMMARY"
 
       # Catches a problem in the package before it is published. A dry run
       # refuses a version on npm already too, so it skips it, as the publish
@@ -241,6 +266,25 @@ jobs:
           gh pr list --state merged --label "$VERSION" --json number,title,url --limit 1000 \
             | node "$GITHUB_WORKSPACE/scripts/release-notes.ts" "$VERSION" > "$RUNNER_TEMP/release-notes.md"
           gh release create "v$VERSION" --verify-tag --title "v$VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" aeolus-trierarch-* SHA256SUMS
+
+      # After the tag and the GitHub Release, so a run that failed before them
+      # leaves the milestone open. The steps below leave the release whole.
+      # Closing a closed milestone changes nothing, as when a release is
+      # dispatched again.
+      - name: Close the release's milestone
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          MILESTONE="trierarch $VERSION"
+          number=$(gh api --paginate "repos/$GITHUB_REPOSITORY/milestones?state=all&per_page=100" \
+            | jq -r --arg title "$MILESTONE" '.[] | select(.title == $title) | .number')
+          if [[ -z "$number" ]]; then
+            echo "No milestone named '$MILESTONE': nothing to close." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/milestones/$number" -f state=closed > /dev/null
+          echo "Closed milestone '$MILESTONE'." | tee -a "$GITHUB_STEP_SUMMARY"
 
       # The plugin marketplace installs from main, so main carries the plugin's
       # latest released version, whichever branch released it (the package on
