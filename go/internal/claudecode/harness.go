@@ -137,19 +137,19 @@ func errorIn(events string) string {
 	return cause
 }
 
-func (h Harness) WriteIdentity(folder string, identity plugin.Identity, crewToken string) error {
-	return h.Plugin.WriteIdentity(folder, identity, crewToken)
+func (h Harness) WriteIdentity(entry reconciler.Entry, identity plugin.Identity, crewToken string) error {
+	return h.Plugin.WriteIdentity(entry.Folder, identity, crewToken)
 }
 
-func (h Harness) HasIdentity(folder string) bool { return h.Plugin.HasIdentity(folder) }
+func (h Harness) HasIdentity(entry reconciler.Entry) bool { return h.Plugin.HasIdentity(entry.Folder) }
 
-func (h Harness) DeleteIdentity(folder string) error { return h.Plugin.DeleteIdentity(folder) }
+func (h Harness) DeleteIdentity(entry reconciler.Entry) error { return h.Plugin.DeleteIdentity(entry.Folder) }
 
-func (h Harness) SessionDied(folder string) error { return h.Plugin.SessionDied(folder) }
+func (h Harness) SessionDied(entry reconciler.Entry) error { return h.Plugin.SessionDied(entry.Folder) }
 
-func (h Harness) Turn(folder string) string { return h.Plugin.Turn(folder) }
+func (h Harness) Turn(entry reconciler.Entry) string { return h.Plugin.Turn(entry.Folder) }
 
-func (h Harness) IsHolding(folder string) bool { return h.Plugin.IsHolding(folder) }
+func (h Harness) IsHolding(entry reconciler.Entry) bool { return h.Plugin.IsHolding(entry.Folder) }
 
 // HandOver hands one message over to the entry's idle session (#756): the plugin's line, typed in as a wake; false when nothing is handed.
 func (h Harness) HandOver(entry reconciler.Entry) (bool, error) {

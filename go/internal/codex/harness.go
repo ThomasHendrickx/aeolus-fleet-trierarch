@@ -136,3 +136,17 @@ func (h Harness) ForceOver(entry reconciler.Entry, isTurnBusy bool) (bool, error
 
 // Problem is why no Codex session can start on this machine now: its plugin's scripts gone (#827).
 func (h Harness) Problem() error { return h.IsInstalled() }
+
+func (h Harness) WriteIdentity(entry reconciler.Entry, identity plugin.Identity, crewToken string) error {
+	return h.Plugin.WriteIdentity(entry.Folder, identity, crewToken)
+}
+
+func (h Harness) HasIdentity(entry reconciler.Entry) bool { return h.Plugin.HasIdentity(entry.Folder) }
+
+func (h Harness) DeleteIdentity(entry reconciler.Entry) error { return h.Plugin.DeleteIdentity(entry.Folder) }
+
+func (h Harness) SessionDied(entry reconciler.Entry) error { return h.Plugin.SessionDied(entry.Folder) }
+
+func (h Harness) Turn(entry reconciler.Entry) string { return h.Plugin.Turn(entry.Folder) }
+
+func (h Harness) IsHolding(entry reconciler.Entry) bool { return h.Plugin.IsHolding(entry.Folder) }

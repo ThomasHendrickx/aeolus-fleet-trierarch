@@ -125,3 +125,17 @@ func (h Harness) Problem() error {
 	}
 	return nil
 }
+
+func (h Harness) WriteIdentity(entry reconciler.Entry, identity plugin.Identity, crewToken string) error {
+	return h.Plugin.WriteIdentity(entry.Folder, identity, crewToken)
+}
+
+func (h Harness) HasIdentity(entry reconciler.Entry) bool { return h.Plugin.HasIdentity(entry.Folder) }
+
+func (h Harness) DeleteIdentity(entry reconciler.Entry) error { return h.Plugin.DeleteIdentity(entry.Folder) }
+
+func (h Harness) SessionDied(entry reconciler.Entry) error { return h.Plugin.SessionDied(entry.Folder) }
+
+func (h Harness) Turn(entry reconciler.Entry) string { return h.Plugin.Turn(entry.Folder) }
+
+func (h Harness) IsHolding(entry reconciler.Entry) bool { return h.Plugin.IsHolding(entry.Folder) }
