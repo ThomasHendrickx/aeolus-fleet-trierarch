@@ -158,11 +158,13 @@ type launched struct {
 type aHarness struct {
 	sessions   *aSessions
 	identities map[string]plugin.Identity
-	tokens     map[string]string
-	launches   []launched
-	died       []string
-	seen       map[string]reconciler.LaunchSeen
-	problem    error
+	// kept is what the harness keeps for each ship beside its identity, by ship, as Claude Code keeps a ship's home in a container.
+	kept     map[string]bool
+	tokens   map[string]string
+	launches []launched
+	died     []string
+	seen     map[string]reconciler.LaunchSeen
+	problem  error
 	// marksNoLaunches is a plugin older than the launch marker; pluginMissing one that cannot be found; notOffered why the machine does not offer the harness.
 	marksNoLaunches bool
 	pluginMissing   bool
@@ -199,6 +201,7 @@ func (h *aHarness) LaunchSeen(entry reconciler.Entry) reconciler.LaunchSeen {
 }
 func (h *aHarness) WriteIdentity(entry reconciler.Entry, identity plugin.Identity, crewToken string) error {
 	h.identities[entry.Folder], h.tokens[entry.Folder] = identity, crewToken
+	h.kept[entry.ShipID] = true
 	h.sockets.events = append(h.sockets.events, "identity "+identity.Socket)
 	return nil
 }
@@ -223,6 +226,7 @@ func (h *aHarness) HasIdentity(entry reconciler.Entry) bool {
 }
 func (h *aHarness) DeleteIdentity(entry reconciler.Entry) error {
 	delete(h.identities, entry.Folder)
+	delete(h.kept, entry.ShipID)
 	return nil
 }
 func (h *aHarness) SessionDied(entry reconciler.Entry) error {
@@ -370,7 +374,7 @@ func aRunPass(t *testing.T) *aPass {
 		sockets:   sockets,
 		fleet:     &aFleet{ships: map[string]fleet.Ship{scout: {Name: "scout", Status: "awaitingCrew"}}, inboxes: map[string]reconciler.Inbox{}},
 		sessions:  running,
-		harness:   &aHarness{sessions: running, identities: map[string]plugin.Identity{}, tokens: map[string]string{}, seen: map[string]reconciler.LaunchSeen{}, turns: map[string]string{}, holding: map[string]bool{}, sockets: sockets},
+		harness:   &aHarness{sessions: running, identities: map[string]plugin.Identity{}, kept: map[string]bool{}, tokens: map[string]string{}, seen: map[string]reconciler.LaunchSeen{}, turns: map[string]string{}, holding: map[string]bool{}, sockets: sockets},
 		workspace: &aWorkspace{made: map[string]bool{}, unsaved: map[string][]string{}, notMade: map[string]bool{}},
 		checkouts: &someCheckouts{},
 		store:     &aStore{state: reconciler.Empty()},
@@ -2197,6 +2201,19 @@ func TestAReleaseRemovesTheShipsReadOnlyCheckouts(t *testing.T) {
 
 	if !slices.Equal(pass.checkouts.removed, []string{scout}) {
 		t.Fatalf("removed %q", pass.checkouts.removed)
+	}
+}
+
+func TestARequestNoLongerAssignedHereRemovesWhatTheHarnessKeepsForTheShipEvenWhenItsIdentityIsAlreadyGone(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	delete(pass.harness.identities, folder)
+	pass.fleet.requests = nil
+
+	pass.run(t)
+
+	if len(pass.harness.kept) != 0 {
+		t.Fatalf("the harness still keeps %v", pass.harness.kept)
 	}
 }
 
