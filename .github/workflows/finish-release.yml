@@ -149,31 +149,11 @@ jobs:
             gh attestation verify "$binary" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" --source-digest "$RELEASED_COMMIT"
           done
 
-      # Notes from the merged pull requests labelled with the version: git and the
-      # labels are the source, there is no changelog file. With the Go binaries
-      # and their SHA256SUMS. When the Release exists already, as when a release
-      # is finished again, only the binaries and SHA256SUMS are put on it again,
-      # those of the named run, which it attested.
-      - name: Create the GitHub Release v${{ inputs.version }}
-        working-directory: ${{ runner.temp }}/binaries
-        env:
-          VERSION: ${{ inputs.version }}
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          if gh release view "v$VERSION" > /dev/null 2>&1; then
-            echo "The GitHub Release v$VERSION exists already: its Go binaries and SHA256SUMS are put on it again"
-            gh release upload "v$VERSION" aeolus-trierarch-* SHA256SUMS --clobber
-            exit 0
-          fi
-          gh pr list --state merged --label "$VERSION" --json number,title,url --limit 1000 \
-            | node "$GITHUB_WORKSPACE/scripts/release-notes.ts" "$VERSION" > "$RUNNER_TEMP/release-notes.md"
-          gh release create "v$VERSION" --verify-tag --title "v$VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" aeolus-trierarch-* SHA256SUMS
-
-      # After the GitHub Release, so a run that failed before it leaves the
-      # milestone open. The steps below leave the release whole. Closing a
-      # closed milestone changes nothing, as when a release is finished again.
-      - name: Close the release's milestone
+      # The milestone "trierarch <version>" is the release's scope, as in
+      # release.yml: open issues in it stop the finish before anything changes.
+      # A release without one goes on. A lookup that fails fails the run
+      # (shell: bash adds pipefail).
+      - name: Check the release's milestone has no open issues
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -184,7 +164,65 @@ jobs:
           number=$(gh api --paginate "repos/$GITHUB_REPOSITORY/milestones?state=all&per_page=100" \
             | jq -r --arg title "$MILESTONE" '.[] | select(.title == $title) | .number')
           if [[ -z "$number" ]]; then
+            echo "No milestone named '$MILESTONE': going on without one." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          open=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues?milestone=$number&state=open&per_page=100" \
+            | jq -r '.[] | "#\(.number) \(.title)"')
+          if [[ -n "$open" ]]; then
+            echo "::error::Milestone '$MILESTONE' has open issues, nothing is finished:"
+            echo "$open"
+            exit 1
+          fi
+          echo "Milestone '$MILESTONE' has no open issues." | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Notes from the merged pull requests labelled with the version: git and the
+      # labels are the source, there is no changelog file. With the Go binaries
+      # and their SHA256SUMS. When the Release exists already, as when a release
+      # is finished again, it is left as it is if its SHA256SUMS is this one;
+      # otherwise only the binaries and SHA256SUMS are put on it again, those of
+      # the named run, which it attested.
+      - name: Create the GitHub Release v${{ inputs.version }}
+        working-directory: ${{ runner.temp }}/binaries
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "v$VERSION" > /dev/null 2>&1; then
+            if gh release download "v$VERSION" --pattern SHA256SUMS --output "$RUNNER_TEMP/released-SHA256SUMS" 2> /dev/null \
+              && cmp --silent SHA256SUMS "$RUNNER_TEMP/released-SHA256SUMS"; then
+              echo "The GitHub Release v$VERSION carries these Go binaries already: left as it is"
+              exit 0
+            fi
+            echo "The GitHub Release v$VERSION exists already: its Go binaries and SHA256SUMS are put on it again"
+            gh release upload "v$VERSION" aeolus-trierarch-* SHA256SUMS --clobber
+            exit 0
+          fi
+          gh pr list --state merged --label "$VERSION" --json number,title,url --limit 1000 \
+            | node "$GITHUB_WORKSPACE/scripts/release-notes.ts" "$VERSION" > "$RUNNER_TEMP/release-notes.md"
+          gh release create "v$VERSION" --verify-tag --title "v$VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" aeolus-trierarch-* SHA256SUMS
+
+      # After the GitHub Release, so a run that failed before it leaves the
+      # milestone open. The steps below leave the release whole. A closed
+      # milestone is left as it is, as when a release is finished again.
+      - name: Close the release's milestone
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          MILESTONE="trierarch $VERSION"
+          milestone=$(gh api --paginate "repos/$GITHUB_REPOSITORY/milestones?state=all&per_page=100" \
+            | jq -r --arg title "$MILESTONE" '.[] | select(.title == $title) | "\(.number) \(.state)"')
+          read -r number state <<< "$milestone"
+          if [[ -z "$number" ]]; then
             echo "No milestone named '$MILESTONE': nothing to close." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ "$state" == closed ]]; then
+            echo "Milestone '$MILESTONE' is closed already." | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/milestones/$number" -f state=closed > /dev/null
