@@ -5,6 +5,7 @@ package fleet
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/receiving"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 )
 
@@ -28,24 +30,24 @@ const Harness = "aeolus-trierarch"
 const callTimeout = 30 * time.Second
 
 // Refusal is the fleet's own refusal: its code and its message.
-type Refusal struct {
-	Code    string
-	Message string
-}
-
-func (r *Refusal) Error() string {
-	return r.Code + ": " + r.Message
-}
+type Refusal = receiving.Refusal
 
 // request is one call to the fleet.
 type request struct {
 	path      string
 	crewToken string
 	body      any
+	// isLongPoll leaves the call to end when the fleet answers or the context ends: the fleet holds a receive until something comes.
+	isLongPoll bool
 }
 
 // call makes one call: a GET without a body, a POST with one. A crew token that is empty is not sent.
 func call(fleetURL string, at request, answer any) error {
+	return callIn(context.Background(), fleetURL, at, answer)
+}
+
+// callIn is call that ends with ctx.
+func callIn(ctx context.Context, fleetURL string, at request, answer any) error {
 	url := strings.TrimSuffix(fleetURL, "/") + "/api/v1" + at.path
 	method := http.MethodGet
 	var body io.Reader
@@ -57,7 +59,7 @@ func call(fleetURL string, at request, answer any) error {
 		method = http.MethodPost
 		body = bytes.NewReader(text)
 	}
-	request, err := http.NewRequest(method, url, body)
+	request, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return err
 	}
@@ -68,6 +70,9 @@ func call(fleetURL string, at request, answer any) error {
 		request.Header.Set("Authorization", "Bearer "+at.crewToken)
 	}
 	client := http.Client{Timeout: callTimeout}
+	if at.isLongPoll {
+		client.Timeout = 0
+	}
 	response, err := client.Do(request)
 	if err != nil {
 		return fmt.Errorf("the fleet at %s cannot be reached: %w", fleetURL, err)
@@ -197,6 +202,35 @@ func (c Client) WriteStatus(shipID string, status string, attempt int, startedAt
 	}
 	body := map[string]any{"shipId": shipID, "status": status, "attempt": attempt, "startedAt": started}
 	return call(c.URL, request{path: "/fleet/reportCrewStatus", crewToken: c.CrewToken, body: body}, &map[string]any{})
+}
+
+// Receive waits for what is sent to the trierarch's own ship, at most 10 deliveries (decision 0026), until ctx ends.
+func (c Client) Receive(ctx context.Context) ([]receiving.Delivery, error) {
+	var answer struct {
+		Deliveries []struct {
+			DeliveryID   string `json:"deliveryId"`
+			SenderShipID string `json:"senderShipId"`
+			ContentType  string `json:"contentType"`
+		} `json:"deliveries"`
+	}
+	if err := callIn(ctx, c.URL, request{path: "/ship/receive", crewToken: c.CrewToken, body: map[string]int{"max": 10}, isLongPoll: true}, &answer); err != nil {
+		return nil, err
+	}
+	deliveries := []receiving.Delivery{}
+	for _, delivery := range answer.Deliveries {
+		deliveries = append(deliveries, receiving.Delivery{DeliveryID: delivery.DeliveryID, SenderShipID: delivery.SenderShipID, ContentType: delivery.ContentType})
+	}
+	return deliveries, nil
+}
+
+// Ack acknowledges a delivery.
+func (c Client) Ack(deliveryID string) error {
+	return call(c.URL, request{path: "/ship/ack", crewToken: c.CrewToken, body: map[string]string{"deliveryId": deliveryID}}, &map[string]any{})
+}
+
+// Pong answers a ping.
+func (c Client) Pong(deliveryID string) error {
+	return call(c.URL, request{path: "/ship/pong", crewToken: c.CrewToken, body: map[string]string{"deliveryId": deliveryID}}, &map[string]any{})
 }
 
 // Name is the trierarch's own ship's name, as the fleet knows it.

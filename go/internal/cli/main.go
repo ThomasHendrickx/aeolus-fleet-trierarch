@@ -5,6 +5,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/modelproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/receiving"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 )
 
@@ -68,7 +70,9 @@ type Machine struct {
 	// NewPass is one pass of the run loop, with the crew file and configuration run read.
 	NewPass   func(at paths.Paths, kept crew.File, configuration config.Configuration) (func() error, error)
 	PassEvery time.Duration
-	Sessions  func(at paths.Paths) Sessions
+	// OwnShip is the trierarch's own ship at the fleet, which run receives for beside the passes; none when nil.
+	OwnShip  func(kept crew.File) receiving.Ship
+	Sessions func(at paths.Paths) Sessions
 	// Log writes a line to the trierarch's log.
 	Log func(line string)
 	// ReadKey is the API key the operator types, not shown, or pipes in.
@@ -440,14 +444,38 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 		return answer{}, err
 	}
 	machine.Log(fmt.Sprintf("aeolus-trierarch %s runs as pid %d", Version, machine.PID))
+	stopped, done := context.WithCancel(context.Background())
+	defer done()
+	received := make(chan struct{})
+	go func() {
+		defer close(received)
+		if machine.OwnShip == nil {
+			return
+		}
+		receiving.Loop{Ship: machine.OwnShip(kept), Log: machine.Log, Interval: machine.PassEvery, KeyWaitMax: KeyWaitMax, Pause: pause}.Run(stopped)
+	}()
 	for {
 		if err := pass(); err != nil {
 			machine.Log("the pass failed: " + err.Error())
 		}
 		select {
 		case <-machine.Stop:
+			// The stop ends a receive the fleet still holds at once: a service manager that stops the trierarch sees it gone in a moment.
+			done()
+			<-received
 			return answer{data: map[string]bool{"stopped": true}, text: "aeolus-trierarch stopped."}, nil
 		case <-time.After(machine.PassEvery):
 		}
+	}
+}
+
+// KeyWaitMax is the most run waits between receives while the fleet's key is cut off: core's key cache lasts 5 minutes (decision 0068).
+const KeyWaitMax = 5 * time.Minute
+
+// pause waits, ending at once when ctx ends.
+func pause(ctx context.Context, wait time.Duration) {
+	select {
+	case <-ctx.Done():
+	case <-time.After(wait):
 	}
 }

@@ -1,16 +1,19 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/receiving"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
 )
@@ -199,5 +202,67 @@ func TestUninstallStopsEverySessionItRan(t *testing.T) {
 
 	if code != 0 || !slices.Equal(running.stopped, []string{scout}) {
 		t.Fatalf("code %d, stopped %q", code, running.stopped)
+	}
+}
+
+// anOwnShip is the trierarch's own ship: it is sent a ping and a message, receives until the run is stopped and keeps what the run answered.
+type anOwnShip struct {
+	mu     sync.Mutex
+	sent   bool
+	acked  []string
+	ponged []string
+}
+
+func (s *anOwnShip) Receive(ctx context.Context) ([]receiving.Delivery, error) {
+	s.mu.Lock()
+	if !s.sent {
+		s.sent = true
+		s.mu.Unlock()
+		return []receiving.Delivery{{DeliveryID: "d1", ContentType: "application/vnd.aeolus.ping"}, {DeliveryID: "d2", ContentType: "text/markdown"}}, nil
+	}
+	s.mu.Unlock()
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (s *anOwnShip) Ack(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.acked = append(s.acked, id)
+	return nil
+}
+
+func (s *anOwnShip) Pong(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ponged = append(s.ponged, id)
+	return nil
+}
+
+func TestRunReceivesBesideThePassesAnswersAPingAndAcknowledgesTheRest(t *testing.T) {
+	machine, _, _ := aMain(t)
+	Main(setupWords(), machine)
+	stop := make(chan struct{})
+	machine.Stop = stop
+	ship := &anOwnShip{}
+	machine.OwnShip = func(crew.File) receiving.Ship { return ship }
+	passes := 0
+	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func() error, error) {
+		return func() error {
+			passes++
+			ship.mu.Lock()
+			isAnswered := len(ship.acked) == 1 && len(ship.ponged) == 1
+			ship.mu.Unlock()
+			if isAnswered {
+				close(stop)
+			}
+			return nil
+		}, nil
+	}
+
+	_, code := Main([]string{"run"}, machine)
+
+	if code != 0 || !slices.Equal(ship.ponged, []string{"d1"}) || !slices.Equal(ship.acked, []string{"d2"}) {
+		t.Fatalf("code %d, ponged %v, acked %v", code, ship.ponged, ship.acked)
 	}
 }

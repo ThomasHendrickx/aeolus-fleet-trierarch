@@ -43,6 +43,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/peer"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/receiving"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/release"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/runpass"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/service"
@@ -109,9 +110,12 @@ func main() {
 			return newPass(at, kept, configuration, home, program)
 		},
 		PassEvery: passEvery,
-		Sessions:  func(at paths.Paths) cli.Sessions { return sessionRuntime(at, program) },
-		Log:       logLine,
-		ReadKey:   readKey,
+		OwnShip: func(kept crew.File) receiving.Ship {
+			return fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken, Model: "@aeolus-fleet/trierarch@" + cli.Version}
+		},
+		Sessions: func(at paths.Paths) cli.Sessions { return sessionRuntime(at, program) },
+		Log:      logLine,
+		ReadKey:  readKey,
 		CheckKey: func(harness string, key string) keys.Checked {
 			return keys.Check(harness, key, "")
 		},
