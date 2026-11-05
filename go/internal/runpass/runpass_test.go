@@ -12,6 +12,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/activity"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/failedstarts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
@@ -2078,5 +2079,100 @@ func TestARequestNoLongerAssignedHereRemovesTheShipsReadOnlyCheckoutsWithItsIden
 
 	if !slices.Equal(pass.checkouts.removed, []string{scout}) {
 		t.Fatalf("removed %q", pass.checkouts.removed)
+	}
+}
+
+const machineConfiguration = `{"caps":{"ships":8,"running":4}}`
+
+// failedStartsOf are the failed starts of the other ships, the last a minute ago, as the state keeps them.
+func failedStartsOf(shipIDs ...string) *failedstarts.Starts {
+	var starts *failedstarts.Starts
+	for _, shipID := range shipIDs {
+		starts, _ = failedstarts.Count(starts, failedstarts.Outcome{ShipID: shipID, Reason: "no activity within a minute of its start"}, now.Add(-time.Minute), machineConfiguration)
+	}
+	return starts
+}
+
+// refusedDefaultModel crews scout, whose session refuses the model its harness picked: a failed start of the machine's.
+func (p *aPass) refusedDefaultModel(t *testing.T) {
+	t.Helper()
+	p.pass.Configuration = machineConfiguration
+	p.fleet.requests = []reconciler.Request{aRequest("")}
+	p.run(t)
+	p.harness.seen[scout] = reconciler.LaunchSeen{Kind: reconciler.LaunchRefused, Model: "claude-opus-4"}
+	p.fleet.requests = []reconciler.Request{aRequest("crewing")}
+	p.run(t)
+}
+
+func TestTheThirdShipWhoseStartFailedTellsArgoOnceThatTheMachineStoppedOfferingItself(t *testing.T) {
+	pass := aRunPass(t)
+	pass.store.state.FailedStarts = failedStartsOf("shp_other_a", "shp_other_b")
+
+	pass.refusedDefaultModel(t)
+	pass.run(t)
+
+	want := []told{{to: "argo", key: "trierarch:stopped-offering:2026-11-04T12:00:00.000Z", text: notices.StoppedOffering(3, "no activity within a minute of its start")}}
+	if !reflect.DeepEqual(pass.fleet.told, want) {
+		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
+	}
+	if got := pass.store.state.FailedStarts; got == nil || got.Stopped == nil || len(got.ShipIDs) != 3 {
+		t.Fatalf("failed starts %+v", got)
+	}
+	log := "The machine stops offering itself: the starts of 3 ships failed in a row, first: no activity within a minute of its start; it offers itself again 10 minutes after its last failed start"
+	if !slices.Contains(pass.logged, log) {
+		t.Fatalf("logged %q", pass.logged)
+	}
+}
+
+func TestAMachineThatCannotTellArgoItStoppedOfferingItselfLogsItAndGoesOn(t *testing.T) {
+	pass := aRunPass(t)
+	pass.store.state.FailedStarts = failedStartsOf("shp_other_a", "shp_other_b")
+	pass.fleet.refuse = "tellArgo"
+
+	pass.refusedDefaultModel(t)
+
+	if !slices.ContainsFunc(pass.logged, func(line string) bool {
+		return strings.HasPrefix(line, "Could not tell argo the machine stopped offering itself: the fleet refused tellArgo trierarch:stopped-offering:")
+	}) {
+		t.Fatalf("logged %q", pass.logged)
+	}
+	if pass.store.state.FailedStarts == nil || pass.store.state.FailedStarts.Stopped == nil {
+		t.Fatalf("failed starts %+v", pass.store.state.FailedStarts)
+	}
+}
+
+func TestAFailedCrewCountsAsAFailedStartOfTheMachine(t *testing.T) {
+	pass := aRunPass(t)
+	pass.pass.Configuration = machineConfiguration
+	pass.store.state.FailedStarts = failedStartsOf("shp_other_a", "shp_other_b")
+
+	pass.crewFails(t, 1)
+
+	want := []told{{to: "argo", key: "trierarch:stopped-offering:2026-11-04T12:00:00.000Z", text: notices.StoppedOffering(3, "no activity within a minute of its start")}}
+	if !reflect.DeepEqual(pass.fleet.told, want) {
+		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
+	}
+}
+
+func TestACrewOfOneShipThatFailsOverAndOverCountsAsOneShipSoItNeverStopsTheMachine(t *testing.T) {
+	pass := aRunPass(t)
+	pass.pass.Configuration = machineConfiguration
+
+	pass.crewFails(t, 2)
+
+	if got := pass.store.state.FailedStarts; got == nil || len(got.ShipIDs) != 1 || got.Stopped != nil || len(pass.fleet.told) != 0 {
+		t.Fatalf("failed starts %+v, told %+v", got, pass.fleet.told)
+	}
+}
+
+func TestAStartThatSucceedsClearsTheFailedStartsTheStateKeeps(t *testing.T) {
+	pass := aRunPass(t)
+	pass.pass.Configuration = machineConfiguration
+	pass.store.state.FailedStarts = failedStartsOf("shp_other_a", "shp_other_b")
+
+	pass.crewed(t)
+
+	if pass.store.state.FailedStarts != nil {
+		t.Fatalf("failed starts %+v", pass.store.state.FailedStarts)
 	}
 }

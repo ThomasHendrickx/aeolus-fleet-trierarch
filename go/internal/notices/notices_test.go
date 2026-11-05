@@ -139,3 +139,19 @@ func TestDiscardedElsewhereSaysWhyTheWorktreeWentThenTheFacts(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestStoppedOfferingSaysHowManyShipsFailedTheFirstReasonAndHowTheMachineOffersItselfAgain(t *testing.T) {
+	got := StoppedOffering(3, "no activity within a minute of its start")
+
+	want := strings.Join([]string{
+		"Session starts fail here: this machine takes no new ships",
+		"",
+		"- Failed in a row: the starts of 3 ships",
+		"- First: no activity within a minute of its start",
+		"",
+		"It offers itself again for one start 10 minutes after its last failed start, and for good once a start succeeds or the trierarch starts with a changed configuration.",
+	}, "\n")
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
