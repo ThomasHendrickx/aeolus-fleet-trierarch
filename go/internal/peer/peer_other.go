@@ -6,3 +6,5 @@ package peer
 func peerPID(int) int { return 0 }
 
 func parentOf(int) int { return 0 }
+
+func sessionOf(int) int { return 0 }

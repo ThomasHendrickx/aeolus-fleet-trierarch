@@ -30,6 +30,20 @@ func PID(connection net.Conn) int {
 	return pid
 }
 
+// IsInSessionOf is whether the process is in the process session (setsid) of one of the roots. A process keeps its session when its parent ends and it is reparented, as it keeps it when it forks, so this holds where IsUnder no longer does. A process whose session does not resolve is in every session, so a check built on it refuses rather than allows; a root whose session does not resolve is in none.
+func IsInSessionOf(pid int, roots []int) bool {
+	session := sessionOf(pid)
+	if session <= 0 {
+		return true
+	}
+	for _, root := range roots {
+		if sessionOf(root) == session {
+			return true
+		}
+	}
+	return false
+}
+
 // IsUnder is whether the process is one of the roots or descends from one.
 func IsUnder(pid int, roots []int) bool {
 	current := pid
