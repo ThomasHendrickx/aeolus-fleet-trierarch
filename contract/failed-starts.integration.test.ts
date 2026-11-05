@@ -77,7 +77,10 @@ describe('a machine whose session starts keep failing', () => {
   });
 
   it('tells argo once, with the first reason and how it offers itself again', async () => {
-    await failedStarts(['scout', 'lookout', 'helm', 'bosun']);
+    await failedStarts(['scout', 'lookout', 'helm']);
+    await expect.poll(async () => (await toldStopped()).length, { timeout: REPORTED_WITHIN_MS }).toBe(1);
+
+    await failedStarts(['bosun']);
     await wait(PASSES_MS);
 
     const told = await toldStopped();
