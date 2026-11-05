@@ -9,7 +9,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { aCrewingMachine, sessionOf, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
-import { isTodaysTrierarch } from './support/trierarch-under-test.js';
 
 // A ship's worktree is made from the ref the workspace names as origin has it, never from a clone's local branch, and a worktree that cannot be made says why (docs/trierarch.md, "Workspaces").
 
@@ -83,8 +82,7 @@ describe('a ship in a worktree of a repository', () => {
     await expect.poll(() => machine.serviceLog(), { timeout: CREWED_WITHIN_MS }).toContain('git worktree add failed: fatal: invalid reference: HEAD');
   });
 
-  // The Go trierarch gives no crew back yet (#169): its give-back is held here once it does.
-  it.runIf(isTodaysTrierarch)("gives the request back with git's message when no worktree can be made", async () => {
+  it("gives the request back with git's message when no worktree can be made", async () => {
     git(machine.repository, 'update-ref', '-d', 'refs/heads/main');
 
     await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });

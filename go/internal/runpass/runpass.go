@@ -208,10 +208,47 @@ func (p Pass) Run() error {
 		}
 		if next, err = p.carryOut(next, action); err != nil {
 			failed[action.ShipID] = failed[action.ShipID] || !isNotice(action.Kind)
+			if action.Kind == reconciler.Crew {
+				next = p.crewFailed(next, action.ShipID, err)
+				continue
+			}
 			p.Log(fmt.Sprintf("%s of %s failed: %v", action.Kind, action.ShipID, err))
 		}
 	}
 	return nil
+}
+
+// crewFailed counts a failed crew against its settings version, from the state the crew saved before it failed: the last of the budget gives the request back with the last failure as the reason (#827). What fails here is logged and left to the next pass.
+func (p Pass) crewFailed(held reconciler.State, shipID string, failure error) reconciler.State {
+	state, err := p.Store.Load()
+	if err != nil {
+		p.Log(fmt.Sprintf("crew of %s failed: %v; counting it failed: %v", shipID, failure, err))
+		return held
+	}
+	entry, ok := state.Entries[shipID]
+	if !ok {
+		p.Log(fmt.Sprintf("crew of %s failed: %v", shipID, failure))
+		return state
+	}
+	logged := fmt.Sprintf("%s (%s): crew failed: %v; ", nameOf(entry), shipID, failure)
+	entry.CrewFailures++
+	if entry.CrewFailures < reconciler.CrewFailureBudget {
+		p.Log(logged + nextAfterFailure)
+		next, err := p.put(state, entry)
+		if err != nil {
+			p.Log(fmt.Sprintf("%s (%s): the failed crew was not counted: %v", nameOf(entry), shipID, err))
+			return state
+		}
+		return next
+	}
+	p.Log(fmt.Sprintf("%sfailed %d times in a row, so the trierarch gives it back", logged, reconciler.CrewFailureBudget))
+	given := fmt.Sprintf("crew failed %d times: %v", reconciler.CrewFailureBudget, failure)
+	next, err := p.giveBack(state, shipID, entry.SettingsVersion, given, &entry)
+	if err != nil {
+		p.Log(fmt.Sprintf("%s (%s): giving it back failed: %v; %s", nameOf(entry), shipID, err, nextAfterFailure))
+		return state
+	}
+	return next
 }
 
 // isNotice is whether an action only tells argo or an owner something.
@@ -420,7 +457,7 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	}
 	// Registered only once the crew can start, so a crew that cannot never takes the ship's lease (#827).
 	if problem := harness.Problem(); problem != nil {
-		return p.giveBack(state, entry.ShipID, entry.SettingsVersion, problem.Error(), &entry)
+		return state, problem
 	}
 	folder, err := p.Workspace.Prepare(entry, ship.Name)
 	if err != nil {
@@ -463,6 +500,7 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	if err := harness.Launch(starting, !entry.HasStarted, launchID); err != nil {
 		return state, err
 	}
+	entry.CrewFailures = 0
 	entry.HasStarted, entry.LaunchedAt, entry.LaunchID = true, p.Now().Format(time.RFC3339Nano), launchID
 	entry = startedOn(entry, login, entry.LaunchedAt)
 	p.Log(fmt.Sprintf("%s (%s): crewed, %s started in %s", ship.Name, entry.ShipID, entry.Harness, folder))
