@@ -192,9 +192,34 @@ describe("the caller check of a hold's socket on macOS, as its ps and lsof show 
       [harness, { parent: hold, group: harness }],
       [reparented, { parent: 1, group: harness }],
     ]);
-    const mayCall = createTrierarchCallerCheck({ platform: 'darwin', sessionRoots: () => Promise.resolve([hold]), run: macOs({ fd, caller: reparented, table }) });
+    const mayCall = createTrierarchCallerCheck({ platform: 'darwin', sessionRoots: () => Promise.resolve([hold]), harnessSessions: () => Promise.resolve([harness]), run: macOs({ fd, caller: reparented, table }) });
 
     await expect(mayCall(await theConnection())).resolves.toBe(false);
+  });
+
+  it("refuses a process a turn of another ship's session forked once that turn's harness has ended and it is reparented, by the group of the harness the hold started (#208)", async () => {
+    aChild();
+    const fd = descriptorOfConnection(await theConnection());
+    // The turn's harness led the group and is gone; the process it forked stays in that group under launchd.
+    const table = new Map<number, ShownProcess>([
+      [hold, { parent: 1, group: hold }],
+      [reparented, { parent: 1, group: harness }],
+    ]);
+    const mayCall = createTrierarchCallerCheck({ platform: 'darwin', sessionRoots: () => Promise.resolve([hold]), harnessSessions: () => Promise.resolve([harness]), run: macOs({ fd, caller: reparented, table }) });
+
+    await expect(mayCall(await theConnection())).resolves.toBe(false);
+  });
+
+  it('lets the trierarch call from a group whose pid a harness the hold started once had, as a pid is used again once its group is gone', async () => {
+    aChild();
+    const fd = descriptorOfConnection(await theConnection());
+    const table = new Map<number, ShownProcess>([
+      [hold, { parent: 1, group: hold }],
+      [harness, { parent: 1, group: harness }],
+    ]);
+    const mayCall = createTrierarchCallerCheck({ platform: 'darwin', sessionRoots: () => Promise.resolve([hold]), harnessSessions: () => Promise.resolve([harness]), run: macOs({ fd, caller: harness, table }) });
+
+    await expect(mayCall(await theConnection())).resolves.toBe(true);
   });
 
   it('lets the trierarch call, in a process group of its own', async () => {
@@ -206,7 +231,7 @@ describe("the caller check of a hold's socket on macOS, as its ps and lsof show 
       [harness, { parent: hold, group: harness }],
       [trierarch, { parent: 1, group: trierarch }],
     ]);
-    const mayCall = createTrierarchCallerCheck({ platform: 'darwin', sessionRoots: () => Promise.resolve([hold]), run: macOs({ fd, caller: trierarch, table }) });
+    const mayCall = createTrierarchCallerCheck({ platform: 'darwin', sessionRoots: () => Promise.resolve([hold]), harnessSessions: () => Promise.resolve([harness]), run: macOs({ fd, caller: trierarch, table }) });
 
     await expect(mayCall(await theConnection())).resolves.toBe(true);
   });

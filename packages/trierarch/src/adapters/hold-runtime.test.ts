@@ -314,6 +314,18 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
     await expect.poll(() => (existsSync(join(folder, 'answer.txt')) ? readFileSync(join(folder, 'answer.txt'), 'utf8') : undefined)).toContain('refused');
   });
 
+  it.each(['codex', 'copilot'])("refuses a call to a hold's socket from a process a %s turn of another ship's session forked once that turn has ended and it is reparented (#208)", { timeout: 20_000 }, async (harness) => {
+    const runtime = aRuntime();
+    const scout = await aClaudeCodeSession(runtime);
+    const socket = join(sessions, scout, 'hold.sock');
+    const calls = "const net = require('node:net'); setTimeout(() => { const c = net.connect(process.argv[1]); c.on('connect', () => c.write(JSON.stringify({ call: 'send', line: 'from an ended turn' }) + '\\n')); let answer = ''; c.on('data', (d) => { answer += d; }); c.on('close', () => { require('node:fs').writeFileSync('answer.txt', answer); }); }, 1000);";
+
+    // The turn's process ends at once and the hold stays for the next turn; the process it forked calls once the turn is gone.
+    await runtime.start({ shipId: newId('ship'), folder, command: ['sh', '-c', '( "$0" -e "$1" "$2" </dev/null >/dev/null 2>&1 & )', process.execPath, calls, socket], harness });
+
+    await expect.poll(() => (existsSync(join(folder, 'answer.txt')) ? readFileSync(join(folder, 'answer.txt'), 'utf8') : undefined), { timeout: 10_000 }).toContain('refused');
+  });
+
   it("answers a process that left another ship's session by its own setsid once it is reparented: no refusal list tells it from the trierarch, and a container is the isolation against it (#196, #174)", { timeout: 20_000 }, async () => {
     const runtime = aRuntime();
     const scout = await aClaudeCodeSession(runtime);
