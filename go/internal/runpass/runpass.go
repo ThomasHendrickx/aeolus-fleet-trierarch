@@ -13,7 +13,9 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/activity"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
@@ -33,6 +35,8 @@ type Fleet interface {
 	WriteStatus(shipID string, status string, attempt int, startedAt string) error
 	// GiveBack gives a request back; the fleet's refusal is answered, not failed.
 	GiveBack(shipID string, settingsVersion int, reason string) (*fleet.Refusal, error)
+	// ReportActivity writes the sessions' activities with the interval stated (monitoring W3b).
+	ReportActivity(intervalSeconds int, activities []fleet.ShipActivity) error
 	// Name is the trierarch's own ship's name.
 	Name() (string, error)
 	ReportFor(crewToken string, state string, note string) error
@@ -73,6 +77,8 @@ type Harness interface {
 	HandOver(entry reconciler.Entry) (bool, error)
 	// ForceOver hands a forced message over, its busy turn stopped first (decision 0040); false when nothing is handed.
 	ForceOver(entry reconciler.Entry, isTurnBusy bool) (bool, error)
+	// Activity is what the entry's session did last, from its events; none while they show none.
+	Activity(entry reconciler.Entry) (activity.Activity, bool)
 	// Problem is why no session of it can start on this machine now, nil when one can (#827).
 	Problem() error
 }
@@ -159,6 +165,10 @@ type Pass struct {
 	VersionOf func(harness string) string
 	// Offers are, by harness, each option it offers now and its value names in order, read each pass: a model a session refused is offered no more (#382).
 	Offers func() map[string]map[string][]string
+	// Configuration is each offered harness as configured and detected, read each pass: the flags a session launches with.
+	Configuration func() map[string]config.Harness
+	// Trusted is, by harness, what it trusts, read each pass from its own files (#381, #403).
+	Trusted func() map[string]reconciler.Trust
 	// RefuseModel keeps a model a session refused as refused for its harness's detected version.
 	RefuseModel func(harness string, model string) error
 	// SendReleasedUsage sends a released ship's last usage before its folder goes (the usage design, U9); it fails while the fleet does not take it, so the folder stays. None sends nothing.
@@ -243,7 +253,41 @@ func (p Pass) Run() error {
 			p.Log(fmt.Sprintf("%s of %s failed: %v", action.Kind, action.ShipID, err))
 		}
 	}
+	p.writeActivities(next)
 	return nil
+}
+
+// activityIntervalSeconds is the interval the trierarch states with the activity it writes each pass: the fleet reads it as unknown past twice this, a pass being 5 seconds and a slow one a few more.
+const activityIntervalSeconds = 30
+
+// writeActivities writes the activity of every running session, each pass (monitoring W3b): a trierarch that is down then reads as unknown, not as stopped work. A failure is logged and never fails the pass.
+func (p Pass) writeActivities(state reconciler.State) {
+	running, err := p.Sessions.List()
+	if err != nil {
+		p.Log(fmt.Sprintf("The activity of the sessions was not written: %v; the next pass tries again", err))
+		return
+	}
+	var activities []fleet.ShipActivity
+	for _, shipID := range sortedIDs(state.Entries) {
+		entry := state.Entries[shipID]
+		harness, ok := p.Harnesses[entry.Harness]
+		if !ok || entry.State != "running" || entry.Folder == "" {
+			continue
+		}
+		at := slices.IndexFunc(running, func(each sessions.Observed) bool { return each.ShipID == shipID })
+		if at < 0 || running[at].Status != reconciler.SessionRunning {
+			continue
+		}
+		if shown, ok := harness.Activity(entry); ok {
+			activities = append(activities, fleet.ShipActivity{ShipID: shipID, Activity: shown})
+		}
+	}
+	if len(activities) == 0 {
+		return
+	}
+	if err := p.Fleet.ReportActivity(activityIntervalSeconds, activities); err != nil {
+		p.Log(fmt.Sprintf("The activity of the sessions was not written: %v; the next pass tries again", err))
+	}
 }
 
 // crewFailed counts a failed crew against its settings version, from the state the crew saved before it failed: the last of the budget gives the request back with the last failure as the reason (#827). What fails here is logged and left to the next pass.
@@ -411,7 +455,7 @@ func (p Pass) carryOut(state reconciler.State, action reconciler.Action) (reconc
 		p.Log(fmt.Sprintf("%s (%s): its request is no longer assigned here, so its session and identity ended", nameOf(*action.Entry), action.ShipID))
 		return p.remove(state, action.ShipID)
 	case reconciler.WriteStatus:
-		return state, p.Fleet.WriteStatus(action.ShipID, action.Status.Status, action.Status.Attempt, action.Status.StartedAt)
+		return state, p.Fleet.WriteStatus(action.ShipID, action.Status.Status, action.Status.Attempt, fleetTime(action.Status.StartedAt))
 	case reconciler.Report:
 		if !isEntry || entry.CrewToken == "" || entry.Folder == "" {
 			return state, nil
@@ -976,7 +1020,7 @@ func (p Pass) reconcile(state reconciler.State) (reconciler.State, []reconciler.
 		return state, nil, err
 	}
 	now := p.Now()
-	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers()})
+	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers(), Configuration: p.Configuration(), Trusted: p.Trusted()})
 	next.PassFailure = nil
 	if err := p.Store.Save(next); err != nil {
 		return state, nil, err
@@ -1021,4 +1065,13 @@ func (p Pass) tellLow(load machineload.Load) error {
 	}
 	state.LowResources = low
 	return p.Store.Save(state)
+}
+
+// fleetTime is a time as the fleet accepts it: ISO 8601 in UTC with milliseconds, whatever the machine's zone; as it came when it is not a time, and empty stays empty.
+func fleetTime(text string) string {
+	at, err := time.Parse(time.RFC3339Nano, text)
+	if err != nil {
+		return text
+	}
+	return at.UTC().Format("2006-01-02T15:04:05.000Z")
 }

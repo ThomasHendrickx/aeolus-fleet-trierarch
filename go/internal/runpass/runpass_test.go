@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/activity"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
@@ -38,6 +40,19 @@ type aFleet struct {
 	refuseGiveBack *fleet.Refusal
 	// cannotRead makes the read of the assigned requests fail.
 	cannotRead error
+	// activityWrites are the activities written, one slice per call, with the interval stated; cannotWriteActivity makes the write fail.
+	activityWrites      [][]fleet.ShipActivity
+	activityInterval    int
+	cannotWriteActivity error
+}
+
+func (f *aFleet) ReportActivity(intervalSeconds int, activities []fleet.ShipActivity) error {
+	if f.cannotWriteActivity != nil {
+		return f.cannotWriteActivity
+	}
+	f.activityInterval = intervalSeconds
+	f.activityWrites = append(f.activityWrites, activities)
+	return nil
 }
 
 // told is a notice the trierarch sent: to argo, or to a ship by its id.
@@ -153,8 +168,15 @@ type aHarness struct {
 	sockets    *someSockets
 	// logins are the login each launch started on, in order.
 	logins []string
+	// activities are what each ship's session shows, by ship.
+	activities map[string]activity.Activity
 	// readOnly are the read-only checkouts each launch was given, in order.
 	readOnly [][]string
+}
+
+func (h *aHarness) Activity(entry reconciler.Entry) (activity.Activity, bool) {
+	shown, ok := h.activities[entry.ShipID]
+	return shown, ok
 }
 
 func (h *aHarness) Launch(entry reconciler.Entry, isFirstStart bool, launchID string) error {
@@ -359,6 +381,12 @@ func aRunPass(t *testing.T) *aPass {
 		Offered:         []string{"claude-code"},
 		Repositories:    []string{"aeolus-fleet"},
 		RunningCap:      2,
+		Trusted: func() map[string]reconciler.Trust {
+			return map[string]reconciler.Trust{"claude-code": {Repositories: []string{"aeolus-fleet"}}}
+		},
+		Configuration: func() map[string]config.Harness {
+			return map[string]config.Harness{"claude-code": {Flags: []string{}, Options: map[string]config.Option{}}}
+		},
 		Offers: func() map[string]map[string][]string {
 			return map[string]map[string][]string{"claude-code": {"model": {"opus", "claude-sonnet-5", "claude-opus-4"}}}
 		},
@@ -440,11 +468,31 @@ func TestACrewThatIsActiveInItsLaunchWindowRuns(t *testing.T) {
 
 	pass.run(t)
 
-	if !slices.Equal(pass.fleet.calls, []string{"status " + scout + " running 0 " + now.Format(time.RFC3339Nano)}) {
+	if !slices.Equal(pass.fleet.calls, []string{"status " + scout + " running 0 2026-11-04T12:00:00.000Z"}) {
 		t.Fatalf("calls %q", pass.fleet.calls)
 	}
 	if pass.store.state.Entries[scout].State != "running" {
 		t.Fatalf("entry %+v", pass.store.state.Entries[scout])
+	}
+}
+
+func TestARunningStatusSaysWhenTheSessionStartedInUTCWithMillisecondsWhateverTheMachinesZone(t *testing.T) {
+	zone := time.FixedZone("UTC+1", 3600)
+	local := time.Local
+	time.Local = zone
+	t.Cleanup(func() { time.Local = local })
+	pass := aRunPass(t)
+	pass.pass.Now = func() time.Time { return time.Date(2026, 11, 5, 13, 11, 12, 123456789, time.Local) }
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+	pass.run(t)
+	pass.harness.seen[scout] = reconciler.LaunchSeen{Kind: reconciler.LaunchActive}
+	pass.fleet.requests = []reconciler.Request{aRequest("crewing")}
+	pass.fleet.calls = nil
+
+	pass.run(t)
+
+	if !slices.Equal(pass.fleet.calls, []string{"status " + scout + " running 0 2026-11-05T12:11:12.123Z"}) {
+		t.Fatalf("calls %q", pass.fleet.calls)
 	}
 }
 
@@ -618,7 +666,7 @@ func TestAGiveBackTheFleetRefusesIsRefusedInsteadAndArgoIsToldOnce(t *testing.T)
 
 	pass.run(t)
 
-	want := []told{{to: "argo", key: "trierarch:refused:" + scout + ":1", text: notices.SettingsRefused(notices.Ship{ID: scout, Name: "scout"}, 1, "harness: codex is not offered on this machine")}}
+	want := []told{{to: "argo", key: "trierarch:refused:" + scout + ":1", text: notices.SettingsRefused(notices.Ship{ID: scout, Name: "scout"}, 1, "harness: This trierarch offers no harness codex")}}
 	if !reflect.DeepEqual(pass.fleet.told, want) {
 		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
 	}
@@ -1476,6 +1524,19 @@ func TestARequestPickingAModelItsHarnessOffersNoMoreIsGivenBack(t *testing.T) {
 	}
 }
 
+func TestARequestInARepositoryTheHarnessDoesNotTrustIsGivenBack(t *testing.T) {
+	pass := aRunPass(t)
+	pass.pass.Trusted = func() map[string]reconciler.Trust { return map[string]reconciler.Trust{} }
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+
+	pass.run(t)
+
+	want := "giveBack " + scout + " 1 mac-mini: workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it"
+	if !slices.Contains(pass.fleet.calls, want) {
+		t.Fatalf("calls %q, want %q", pass.fleet.calls, want)
+	}
+}
+
 func TestAModelRefusedAtAVersionTheHarnessDoesNotSayTellsArgoNothing(t *testing.T) {
 	pass := aRunPass(t)
 
@@ -1924,6 +1985,61 @@ func TestAShipReleasedElsewhereWhoseLastUsageTheFleetDoesNotTakeKeepsItsWorktree
 	}
 }
 
+func TestTheActivityOfARunningSessionIsWrittenEachPassWithTheInterval30Seconds(t *testing.T) {
+	at := aRunPass(t)
+	at.crewed(t)
+	wrote := now.Add(-2 * time.Second)
+	at.harness.activities = map[string]activity.Activity{scout: {At: wrote, Kind: "tool", Tool: "Bash"}}
+
+	at.run(t)
+	at.run(t)
+
+	want := []fleet.ShipActivity{{ShipID: scout, Activity: activity.Activity{At: wrote, Kind: "tool", Tool: "Bash"}}}
+	if len(at.fleet.activityWrites) != 2 || !reflect.DeepEqual(at.fleet.activityWrites[1], want) || at.fleet.activityInterval != 30 {
+		t.Fatalf("written %+v at an interval of %d, want %+v each pass at 30", at.fleet.activityWrites, at.fleet.activityInterval, want)
+	}
+}
+
+func TestNoActivityIsWrittenForASessionThatShowsNoneOrHasExited(t *testing.T) {
+	at := aRunPass(t)
+	at.crewed(t)
+	at.harness.activities = map[string]activity.Activity{scout: {At: now, Kind: "text"}}
+	at.run(t)
+	at.fleet.activityWrites = nil
+
+	at.harness.activities = map[string]activity.Activity{}
+	at.run(t)
+	if len(at.fleet.activityWrites) != 0 {
+		t.Errorf("wrote %+v for a session that shows no activity", at.fleet.activityWrites)
+	}
+
+	at.harness.activities = map[string]activity.Activity{scout: {At: now, Kind: "text"}}
+	at.sessions.observed = []sessions.Observed{{ShipID: scout, Status: "exited"}}
+	at.run(t)
+	for _, written := range at.fleet.activityWrites {
+		if len(written) != 0 {
+			t.Errorf("wrote %+v for a session that exited", written)
+		}
+	}
+}
+
+func TestAnActivityThatCannotBeWrittenIsToldAndNeverFailsThePass(t *testing.T) {
+	at := aRunPass(t)
+	at.crewed(t)
+	at.harness.activities = map[string]activity.Activity{scout: {At: now, Kind: "text"}}
+	at.fleet.cannotWriteActivity = errors.New("the fleet is busy")
+	at.logged = nil
+
+	at.run(t)
+
+	if !slices.Contains(at.logged, "The activity of the sessions was not written: the fleet is busy; the next pass tries again") {
+		t.Errorf("logged %q", at.logged)
+	}
+	if at.store.state.PassFailure != nil {
+		t.Errorf("pass failure %+v, want none", at.store.state.PassFailure)
+	}
+}
+
 func TestACrewGetsItsReadOnlyCheckoutsMadeBeforeItsIdentityNamesThemAndItsSessionStartsWithThem(t *testing.T) {
 	pass := aRunPass(t)
 	pass.checkouts.sockets = pass.sockets
@@ -1950,6 +2066,9 @@ func TestACrewInAConfiguredFolderGetsNoCheckouts(t *testing.T) {
 	pass.fleet.requests = []reconciler.Request{request}
 	pass.pass.Workspace = &aFolders{aWorkspace: pass.workspace}
 	pass.pass.Folders = []string{"notes"}
+	pass.pass.Trusted = func() map[string]reconciler.Trust {
+		return map[string]reconciler.Trust{"claude-code": {Folders: []string{"notes"}}}
+	}
 
 	pass.run(t)
 

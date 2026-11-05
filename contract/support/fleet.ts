@@ -19,6 +19,8 @@ export interface Fleet {
   commission(name: string, at?: { owner?: ShipId; scopes?: readonly string[] }): Promise<ShipId>;
   /** Requests a crew for the ship in a worktree of the repository, with the harness and the options given, and assigns it to the machine's trierarch. */
   crewInWorktree(shipId: ShipId, at: { repository: string; harness: string; options?: Readonly<Record<string, string>> }): Promise<void>;
+  /** Requests a crew for the ship in the configured folder, with the harness given, and assigns it to the machine's trierarch. */
+  crewInFolder(shipId: ShipId, at: { folder: string; harness: string }): Promise<void>;
   /** Removes the ship's crew request: its lease ends. */
   removeCrewRequest(shipId: ShipId): Promise<void>;
   /** Ends the ship's lease under its session while its crew request stands, as the console's Re-crew does. */
@@ -33,6 +35,8 @@ export interface Fleet {
   sentByTrierarch(contentType: string): Promise<readonly ShipId[]>;
   /** The usage messages the machine's trierarch sent, oldest first: the ship each went to and its payload as JSON. */
   usageSentByTrierarch(): Promise<readonly { readonly to: ShipId; readonly message: unknown }[]>;
+  /** The activity the machine's trierarch last wrote for the ship's held lease, with the interval it stated; none before it wrote one. */
+  activityOf(shipId: ShipId): Promise<ShipActivity | undefined>;
   /** Pings the machine's trierarch ship from argo: the ping's message id. */
   pingTrierarch(): Promise<string>;
   /** What the machine's trierarch last reported as its own ship: its state, note and details; none before it reported. */
@@ -59,6 +63,13 @@ export interface TrierarchReport {
   readonly state: string;
   readonly note: string;
   readonly details: unknown;
+}
+
+/** A session's activity as core keeps it: its kind, the tool of a tool call, and the interval the trierarch stated with it. */
+export interface ShipActivity {
+  readonly kind: string;
+  readonly tool: string | null;
+  readonly intervalSeconds: number;
 }
 
 /** A message the trierarch sent: who it went to, and its text. */
@@ -93,6 +104,10 @@ export async function aFleet(): Promise<Fleet> {
       unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness, workspace: { kind: 'worktree', repository }, options } }));
       unwrap(await useCases.assignCrew(argo, { shipId, trierarchShipId: trierarchShip.shipId }));
     },
+    crewInFolder: async (shipId, { folder, harness }) => {
+      unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness, workspace: { kind: 'folder', name: folder }, options: {} } }));
+      unwrap(await useCases.assignCrew(argo, { shipId, trierarchShipId: trierarchShip.shipId }));
+    },
     removeCrewRequest: async (shipId) => {
       unwrap(await useCases.removeCrewRequest(argo, { shipId }));
     },
@@ -112,6 +127,10 @@ export async function aFleet(): Promise<Fleet> {
     usageSentByTrierarch: async () => {
       const messages = await database.message.findMany({ where: { senderShipId: trierarchShip.shipId, contentType: 'application/vnd.aeolus.trierarch.usage+json' }, orderBy: { createdAt: 'asc' }, select: { selectorShipId: true, payload: true } });
       return messages.flatMap(({ selectorShipId, payload }) => (selectorShipId === null ? [] : [{ to: idSchema('ship').parse(selectorShipId), message: z.unknown().parse(JSON.parse(payload ?? 'null')) }]));
+    },
+    activityOf: async (shipId) => {
+      const lease = await database.lease.findFirst({ where: { shipId, endedAt: null }, select: { activityKind: true, activityTool: true, activityIntervalSeconds: true } });
+      return lease?.activityKind == null || lease.activityIntervalSeconds === null ? undefined : { kind: lease.activityKind, tool: lease.activityTool, intervalSeconds: lease.activityIntervalSeconds };
     },
     pingTrierarch: async () => unwrap(await useCases.pingShip(argo, { shipId: trierarchShip.shipId })).messageId,
     reportOfTrierarch: async () => {
