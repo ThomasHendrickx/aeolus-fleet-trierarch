@@ -160,3 +160,37 @@ func TestTheHoldRefusesAnotherShipsSession(t *testing.T) {
 		t.Fatalf("another ship's session's call = %s, want %q", got, Refused)
 	}
 }
+
+func TestTheGuardLeavesAGroupWhoseIdAnotherProcessNowHasAndEndsTheHoldsOwn(t *testing.T) {
+	other := exec.Command("sleep", "300")
+	other.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	own := exec.Command("sleep", "300")
+	own.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	for _, command := range []*exec.Cmd{other, own} {
+		if err := command.Start(); err != nil {
+			t.Fatal(err)
+		}
+		defer func(command *exec.Cmd) { _ = command.Process.Kill(); _ = command.Wait() }(command)
+	}
+	// The hold recorded another process under the id the other group now has: that group is not the hold's.
+	lines := strconv.Itoa(other.Process.Pid) + " Thu_Jan_1_00:00:00_1970\n" + strconv.Itoa(own.Process.Pid) + " " + startOf(own.Process.Pid) + "\n"
+
+	// A process of its own, as it runs: the guard ignores the signals a session may send, and the tests' children would inherit that.
+	program, _ := os.Executable()
+	guard := exec.Command(program, "hold", "--guard")
+	guard.Stdin = strings.NewReader(lines)
+	if err := guard.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	ownEnded := make(chan error, 1)
+	go func() { ownEnded <- own.Wait() }()
+	select {
+	case <-ownEnded:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the hold's own group was not ended")
+	}
+	if err := other.Process.Signal(syscall.Signal(0)); err != nil {
+		t.Fatalf("the group with a reused id was signalled: %v", err)
+	}
+}
