@@ -132,6 +132,14 @@ function script(path: string, text: string): void {
   chmodSync(path, 0o755);
 }
 
+/** `ssh`: a remote that is this machine's own folder, as git's ssh transport reaches it: the command git sends runs here. */
+function sshStandIn(): string {
+  return `#!/bin/sh
+for command; do :; done
+exec sh -c "$command"
+`;
+}
+
 /** `claude`: the commands init, detection and upgrade run answered as Claude Code answers them, and a session run by fake-claude-code.ts with the plugin's hooks. */
 function claudeStandIn(at: { machine: string; pluginData: string }): string {
   return `#!/bin/sh
@@ -313,6 +321,7 @@ export async function aMachine(at: { others?: readonly OtherHarness[] } = {}): P
   script(join(bin, 'claude'), claudeStandIn({ machine, pluginData }));
   script(join(bin, 'systemctl'), systemctlStandIn({ machine, home }));
   script(join(bin, 'journalctl'), journalctlStandIn({ machine }));
+  script(join(bin, 'ssh'), sshStandIn());
   if (others.includes('codex')) {
     script(join(bin, 'codex'), codexStandIn({ machine, pluginData: codexPluginData }));
   }
