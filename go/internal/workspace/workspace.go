@@ -1,8 +1,8 @@
 // Package workspace is a session's workspace as git makes it (docs/architecture.md,
 // "First adapters"): a worktree of a configured repository, one folder per
 // ship, `<root>/<repository>/<ship>`, the repository fetched first and a ref
-// the remote has a branch for taken as that remote branch, so a ship starts
-// from current code. A worktree ends with its session: it is removed whatever
+// the remote has a branch for taken as that remote branch, and none named the
+// remote's default branch, so a ship starts from current code. A worktree ends with its session: it is removed whatever
 // it holds (worktrees design, items 1 to 3), and what it held is said first.
 package workspace
 
@@ -31,9 +31,56 @@ type Worktree struct {
 func git(args ...string) (string, error) {
 	out, err := exec.Command("git", args...).CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("git %s failed: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("git %s failed: %s", actionOf(args), messageOf(string(out)))
 	}
 	return string(out), nil
+}
+
+// actionOf names the git command by its subcommand alone: git's message follows it at once, since a reason is cut at a length and the command's paths would use it up.
+func actionOf(args []string) string {
+	if len(args) >= 2 && args[0] == "-C" {
+		args = args[2:]
+	}
+	if len(args) >= 2 && args[0] == "worktree" {
+		return "worktree " + args[1]
+	}
+	if len(args) > 0 {
+		return args[0]
+	}
+	return ""
+}
+
+// messageOf is what git said, on one line (a reason is one line) and without its hints, which are advice, not the cause.
+func messageOf(output string) string {
+	lines := []string{}
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "hint:") {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "; ")
+}
+
+// remoteBranch is the remote's branch of that name when the clone has it.
+func remoteBranch(path string, name string) (string, bool) {
+	if exec.Command("git", "-C", path, "rev-parse", "--verify", "--quiet", "refs/remotes/"+remote+"/"+name).Run() == nil {
+		return remote + "/" + name, true
+	}
+	return "", false
+}
+
+// defaultRef is the branch the remote has as its default: what its HEAD names, else the branch the clone's HEAD names (which may be unborn) when the remote has it; empty without one.
+func defaultRef(path string) string {
+	if out, err := exec.Command("git", "-C", path, "symbolic-ref", "--short", "refs/remotes/"+remote+"/HEAD").Output(); err == nil && strings.TrimSpace(string(out)) != "" {
+		return strings.TrimSpace(string(out))
+	}
+	if out, err := exec.Command("git", "-C", path, "symbolic-ref", "--short", "HEAD").Output(); err == nil {
+		if ref, ok := remoteBranch(path, strings.TrimSpace(string(out))); ok {
+			return ref
+		}
+	}
+	return ""
 }
 
 // Prepare makes the ship's worktree, or takes the one a stop mid-crew left, and answers its folder.
@@ -48,11 +95,14 @@ func Prepare(at Worktree) (string, error) {
 	// A repository with no remote, or one that cannot be reached now, is made from as it is.
 	_ = exec.Command("git", "-C", at.Path, "fetch", "--quiet", remote).Run()
 	args := []string{"-C", at.Path, "worktree", "add", "--detach", folder}
+	ref := defaultRef(at.Path)
 	if at.Ref != "" {
-		ref := at.Ref
-		if exec.Command("git", "-C", at.Path, "rev-parse", "--verify", "--quiet", "refs/remotes/"+remote+"/"+ref).Run() == nil {
-			ref = remote + "/" + ref
+		ref = at.Ref
+		if branch, ok := remoteBranch(at.Path, ref); ok {
+			ref = branch
 		}
+	}
+	if ref != "" {
 		args = append(args, ref)
 	}
 	if _, err := git(args...); err != nil {
