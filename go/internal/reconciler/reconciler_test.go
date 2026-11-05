@@ -116,6 +116,43 @@ func TestARequestForAHarnessNotOfferedIsGivenBackWithWhy(t *testing.T) {
 	}
 }
 
+func TestARequestAlreadyRefusedAtItsVersionIsNotGivenBackAgain(t *testing.T) {
+	request := aRequest(scout)
+	request.Settings.Harness = "codex"
+	state := Empty()
+	state.Refused[scout] = 1
+
+	next, actions := Reconcile(state, aContext(request))
+
+	assertActions(t, actions)
+	if next.Refused[scout] != 1 {
+		t.Fatalf("refused: %+v", next.Refused)
+	}
+}
+
+func TestARequestRefusedAtAnEarlierVersionIsGivenBackAtItsNewVersion(t *testing.T) {
+	request := aRequest(scout)
+	request.Settings.Harness = "codex"
+	request.SettingsVersion = 2
+	state := Empty()
+	state.Refused[scout] = 1
+
+	_, actions := Reconcile(state, aContext(request))
+
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 2, Reason: "harness: codex is not offered on this machine"})
+}
+
+func TestARefusalIsForgottenOnceTheRequestIsNoLongerAssigned(t *testing.T) {
+	state := Empty()
+	state.Refused[scout] = 1
+
+	next, _ := Reconcile(state, aContext())
+
+	if len(next.Refused) != 0 {
+		t.Fatalf("refused: %+v", next.Refused)
+	}
+}
+
 func TestARequestInARepositoryNotConfiguredIsGivenBackWithWhy(t *testing.T) {
 	request := aRequest(scout)
 	request.Settings.Workspace.Repository = "website"

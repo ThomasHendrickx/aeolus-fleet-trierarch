@@ -31,6 +31,8 @@ type aFleet struct {
 	// told is every notice, in order; refuseOwner is the refusal the fleet gives a report to an owner.
 	told        []told
 	refuseOwner *fleet.Refusal
+	// refuseGiveBack is the refusal the fleet gives a give-back.
+	refuseGiveBack *fleet.Refusal
 }
 
 // told is a notice the trierarch sent: to argo, or to a ship by its id.
@@ -65,8 +67,10 @@ func (f *aFleet) ConfirmRelease(shipID string) error { return f.call("confirm " 
 func (f *aFleet) WriteStatus(shipID string, status string, attempt int, startedAt string) error {
 	return f.call(fmt.Sprintf("status %s %s %d %s", shipID, status, attempt, startedAt))
 }
-func (f *aFleet) GiveBack(shipID string, settingsVersion int, reason string) error {
-	return f.call(fmt.Sprintf("giveBack %s %d %s", shipID, settingsVersion, reason))
+func (f *aFleet) Name() (string, error) { return "mac-mini", nil }
+func (f *aFleet) GiveBack(shipID string, settingsVersion int, reason string) (*fleet.Refusal, error) {
+	f.calls = append(f.calls, fmt.Sprintf("giveBack %s %d %s", shipID, settingsVersion, reason))
+	return f.refuseGiveBack, nil
 }
 func (f *aFleet) ReportFor(crewToken string, state string, note string) error {
 	return f.call(fmt.Sprintf("report %s %s %s", crewToken, state, note))
@@ -362,11 +366,52 @@ func TestACrewWhoseHarnessCannotStartIsGivenBackBeforeItRegisters(t *testing.T) 
 
 	pass.run(t)
 
-	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 the aeolus-fleet plugin's scripts are not at /plugin/scripts") || slices.ContainsFunc(pass.fleet.calls, func(call string) bool { return strings.HasPrefix(call, "register") }) {
+	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 mac-mini: the aeolus-fleet plugin's scripts are not at /plugin/scripts") || slices.ContainsFunc(pass.fleet.calls, func(call string) bool { return strings.HasPrefix(call, "register") }) {
 		t.Fatalf("calls %q", pass.fleet.calls)
 	}
 	if len(pass.store.state.Entries) != 0 {
 		t.Fatalf("entries %+v", pass.store.state.Entries)
+	}
+}
+
+func TestAGivenBackReasonIsCutToWhatTheFleetTakes(t *testing.T) {
+	pass := aRunPass(t)
+	pass.harness.problem = errors.New(strings.Repeat("x", 300))
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+
+	pass.run(t)
+
+	want := "giveBack " + scout + " 1 " + ("mac-mini: " + strings.Repeat("x", 300))[:200]
+	if !slices.Contains(pass.fleet.calls, want) {
+		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+}
+
+func TestAGiveBackTheFleetRefusesIsRefusedInsteadAndArgoIsToldOnce(t *testing.T) {
+	pass := aRunPass(t)
+	pass.fleet.refuseGiveBack = &fleet.Refusal{Code: "CONFLICT", Message: "The crew is final"}
+	request := aRequest("")
+	request.Settings.Harness = "codex"
+	pass.fleet.requests = []reconciler.Request{request}
+
+	pass.run(t)
+
+	want := []told{{to: "argo", key: "trierarch:refused:" + scout + ":1", text: notices.SettingsRefused(notices.Ship{ID: scout, Name: "scout"}, 1, "harness: codex is not offered on this machine")}}
+	if !reflect.DeepEqual(pass.fleet.told, want) {
+		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
+	}
+	if pass.store.state.Refused[scout] != 1 {
+		t.Fatalf("refused %+v", pass.store.state.Refused)
+	}
+	if !slices.Contains(pass.logged, "The fleet refused to take back the crew request of "+scout+": CONFLICT: The crew is final") {
+		t.Fatalf("logged %q", pass.logged)
+	}
+	pass.fleet.calls, pass.fleet.told = nil, nil
+
+	pass.run(t)
+
+	if len(pass.fleet.calls) != 0 || len(pass.fleet.told) != 0 {
+		t.Fatalf("calls %q, told %+v", pass.fleet.calls, pass.fleet.told)
 	}
 }
 
@@ -485,7 +530,7 @@ func TestARequestGivenBackRemovesItsCleanWorktree(t *testing.T) {
 
 	pass.givenBack(t)
 
-	if !slices.Equal(pass.workspace.removed, []string{"/worktrees/aeolus-fleet/scout"}) || len(pass.store.state.Kept) != 0 || !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 no activity within a minute of its start") {
+	if !slices.Equal(pass.workspace.removed, []string{"/worktrees/aeolus-fleet/scout"}) || len(pass.store.state.Kept) != 0 || !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 mac-mini: no activity within a minute of its start") {
 		t.Fatalf("removed %q, kept %+v, calls %q", pass.workspace.removed, pass.store.state.Kept, pass.fleet.calls)
 	}
 }
@@ -801,7 +846,7 @@ func TestACrewWhoseLoginCannotStartIsGivenBackWithTheCauseBeforeItRegisters(t *t
 
 	pass.run(t)
 
-	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 "+noKey) || slices.ContainsFunc(pass.fleet.calls, func(call string) bool { return strings.HasPrefix(call, "register") }) || len(pass.harness.launches) != 0 {
+	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 mac-mini: "+noKey) || slices.ContainsFunc(pass.fleet.calls, func(call string) bool { return strings.HasPrefix(call, "register") }) || len(pass.harness.launches) != 0 {
 		t.Fatalf("calls %q, launches %d", pass.fleet.calls, len(pass.harness.launches))
 	}
 	if len(pass.store.state.Entries) != 0 {
@@ -821,7 +866,7 @@ func TestACrewOnItsSubscriptionWithAKeyInReachInItsFolderIsGivenBackBeforeItRegi
 
 	pass.run(t)
 
-	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 "+keyInReach) || slices.ContainsFunc(pass.fleet.calls, func(call string) bool { return strings.HasPrefix(call, "register") }) || len(pass.harness.launches) != 0 {
+	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 mac-mini: "+keyInReach) || slices.ContainsFunc(pass.fleet.calls, func(call string) bool { return strings.HasPrefix(call, "register") }) || len(pass.harness.launches) != 0 {
 		t.Fatalf("calls %q, launches %d, want given back before it registers", pass.fleet.calls, len(pass.harness.launches))
 	}
 	if !slices.Equal(pass.workspace.removed, []string{"/worktrees/aeolus-fleet/scout"}) || len(pass.store.state.Entries) != 0 {
@@ -1123,7 +1168,7 @@ func TestAModelRefusedTellsArgoWhichModelTheSettingsPickedAtWhichVersionThenGive
 	if !reflect.DeepEqual(pass.fleet.told, want) {
 		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
 	}
-	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 claude-code 2.1.306 refused claude-sonnet-5") {
+	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 mac-mini: claude-code 2.1.306 refused claude-sonnet-5") {
 		t.Fatalf("calls %q", pass.fleet.calls)
 	}
 }
@@ -1149,7 +1194,7 @@ func TestARequestPickingAModelItsHarnessOffersNoMoreIsGivenBack(t *testing.T) {
 
 	pass.run(t)
 
-	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 options.model: model must be one of opus") {
+	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 mac-mini: options.model: model must be one of opus") {
 		t.Fatalf("calls %q, want it given back", pass.fleet.calls)
 	}
 }
@@ -1159,7 +1204,7 @@ func TestAModelRefusedAtAVersionTheHarnessDoesNotSayTellsArgoNothing(t *testing.
 
 	pass.refusedModel(t, "")
 
-	if len(pass.fleet.told) != 0 || !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 claude-code refused claude-sonnet-5") {
+	if len(pass.fleet.told) != 0 || !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 mac-mini: claude-code refused claude-sonnet-5") {
 		t.Fatalf("told %+v, calls %q", pass.fleet.told, pass.fleet.calls)
 	}
 }
@@ -1170,7 +1215,7 @@ func TestAModelRefusedThatCannotBeToldDoesNotHoldBackTheGiveBack(t *testing.T) {
 
 	pass.refusedModel(t, "2.1.306")
 
-	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 claude-code 2.1.306 refused claude-sonnet-5") {
+	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 mac-mini: claude-code 2.1.306 refused claude-sonnet-5") {
 		t.Fatalf("calls %q", pass.fleet.calls)
 	}
 }

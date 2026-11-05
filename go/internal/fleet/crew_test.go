@@ -142,10 +142,34 @@ func TestAReleaseIsConfirmedAfterTheLeaseEnds(t *testing.T) {
 func TestARequestIsGivenBackWithItsVersionAndWhy(t *testing.T) {
 	recorded, client := aFleetAnswering(t, map[string]string{"/api/v1/fleet/giveBackCrewRequest": `{}`})
 
-	if err := client.GiveBack(scout, 3, "harness: codex is not offered on this machine"); err != nil {
-		t.Fatal(err)
+	refusal, err := client.GiveBack(scout, 3, "harness: codex is not offered on this machine")
+	if err != nil || refusal != nil {
+		t.Fatal(refusal, err)
 	}
 	sameJSON(t, recorded.asked["/api/v1/fleet/giveBackCrewRequest"], `{"shipId":"`+scout+`","settingsVersion":3,"reason":"harness: codex is not offered on this machine"}`)
+}
+
+func TestAGiveBackTheFleetRefusesIsAnsweredAsTheRefusalNotAsAFailure(t *testing.T) {
+	_, client := aFleetAnswering(t, map[string]string{})
+
+	refusal, err := client.GiveBack(scout, 3, "harness: codex is not offered on this machine")
+
+	if err != nil || refusal == nil || refusal.Code != "NOT_FOUND" {
+		t.Fatalf("refusal %+v, error %v", refusal, err)
+	}
+}
+
+func TestTheTrierarchsNameIsWhatTheFleetKnowsItBy(t *testing.T) {
+	recorded, client := aFleetAnswering(t, map[string]string{"/api/v1/ship/whoami": `{"shipId":"` + scout + `","name":"mac-mini"}`})
+
+	name, err := client.Name()
+
+	if err != nil || name != "mac-mini" {
+		t.Fatalf("name %q, error %v", name, err)
+	}
+	if recorded.bearers["/api/v1/ship/whoami"] != "Bearer aeolus_ct_v1_trierarch" {
+		t.Fatalf("bearer %q", recorded.bearers["/api/v1/ship/whoami"])
+	}
 }
 
 func TestAReportOnAShipsBehalfCarriesItsSessionsCrewToken(t *testing.T) {

@@ -199,10 +199,24 @@ func (c Client) WriteStatus(shipID string, status string, attempt int, startedAt
 	return call(c.URL, request{path: "/fleet/reportCrewStatus", crewToken: c.CrewToken, body: body}, &map[string]any{})
 }
 
-// GiveBack gives back a request the trierarch cannot crew, with why.
-func (c Client) GiveBack(shipID string, settingsVersion int, reason string) error {
+// Name is the trierarch's own ship's name, as the fleet knows it.
+func (c Client) Name() (string, error) {
+	var answer struct {
+		Name string `json:"name"`
+	}
+	err := call(c.URL, request{path: "/ship/whoami", crewToken: c.CrewToken}, &answer)
+	return answer.Name, err
+}
+
+// GiveBack gives back a request the trierarch cannot crew, with why. A refusal of the fleet, as when the crew is final, is answered as the refusal, not as a failure.
+func (c Client) GiveBack(shipID string, settingsVersion int, reason string) (*Refusal, error) {
 	body := map[string]any{"shipId": shipID, "settingsVersion": settingsVersion, "reason": reason}
-	return call(c.URL, request{path: "/fleet/giveBackCrewRequest", crewToken: c.CrewToken, body: body}, &map[string]any{})
+	err := call(c.URL, request{path: "/fleet/giveBackCrewRequest", crewToken: c.CrewToken, body: body}, &map[string]any{})
+	var refusal *Refusal
+	if errors.As(err, &refusal) {
+		return refusal, nil
+	}
+	return nil, err
 }
 
 // Inbox is a session's inbox, asked with its crew token: what waits, of it what is forced, or its lease ended (released or retired elsewhere).

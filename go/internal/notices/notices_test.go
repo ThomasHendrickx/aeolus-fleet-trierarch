@@ -87,6 +87,14 @@ func TestModelRefusedNamesTheHarnessItsVersionAndTheModel(t *testing.T) {
 	}
 }
 
+func TestSettingsRefusedNamesTheirVersionAndWhy(t *testing.T) {
+	got := SettingsRefused(scout, 3, "harness: codex is not offered on this machine")
+	want := "Cannot crew scout with its settings\n\n- Ship: scout (`shp_1`)\n- Settings version: 3\n- Why: harness: codex is not offered on this machine"
+	if got != want {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestIdentityGoneSaysNothingWakesTheShipUntilItIsCrewedAgain(t *testing.T) {
 	got := IdentityGone(scout)
 	want := "scout is no longer woken: its folder holds no identity\n\n- Ship: scout (`shp_1`)\n\nThe trierarch can no longer report on its behalf, watch its inbox or wake it. Restart it in the console to crew it again."
