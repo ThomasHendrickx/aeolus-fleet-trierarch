@@ -28,6 +28,16 @@ func aProcessIn(t *testing.T, folder string, name string, args ...string) (*exec
 	return process, ended
 }
 
+// aFolder is a new folder under the name a process's working folder is given in: macOS keeps temporary folders under the symlink /var, and lsof says /private/var.
+func aFolder(t *testing.T) string {
+	t.Helper()
+	folder, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return folder
+}
+
 func isEnded(ended <-chan struct{}, within time.Duration) bool {
 	select {
 	case <-ended:
@@ -38,7 +48,7 @@ func isEnded(ended <-chan struct{}, within time.Duration) bool {
 }
 
 func TestWhatRunsInAFolderIsAskedToEnd(t *testing.T) {
-	folder := t.TempDir()
+	folder := aFolder(t)
 	_, ended := aProcessIn(t, folder, "sleep", "30")
 
 	stopped, err := Stopper{Grace: 5 * time.Second}.StopIn(folder)
@@ -52,7 +62,7 @@ func TestWhatRunsInAFolderIsAskedToEnd(t *testing.T) {
 }
 
 func TestWhatRunsInAFolderInsideItIsStoppedToo(t *testing.T) {
-	folder := t.TempDir()
+	folder := aFolder(t)
 	inside := filepath.Join(folder, "app")
 	if err := exec.Command("mkdir", inside).Run(); err != nil {
 		t.Fatal(err)
@@ -67,7 +77,7 @@ func TestWhatRunsInAFolderInsideItIsStoppedToo(t *testing.T) {
 }
 
 func TestWhatDoesNotEndWithinTheGraceIsKilled(t *testing.T) {
-	folder := t.TempDir()
+	folder := aFolder(t)
 	_, ended := aProcessIn(t, folder, "sh", "-c", `trap "" TERM; while :; do sleep 0.1; done`)
 	time.Sleep(200 * time.Millisecond)
 
@@ -79,8 +89,8 @@ func TestWhatDoesNotEndWithinTheGraceIsKilled(t *testing.T) {
 }
 
 func TestWhatRunsElsewhereIsLeftRunning(t *testing.T) {
-	folder := t.TempDir()
-	_, ended := aProcessIn(t, t.TempDir(), "sleep", "30")
+	folder := aFolder(t)
+	_, ended := aProcessIn(t, aFolder(t), "sleep", "30")
 
 	stopped, _ := Stopper{Grace: 5 * time.Second}.StopIn(folder)
 
