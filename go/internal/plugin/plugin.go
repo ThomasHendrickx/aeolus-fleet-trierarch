@@ -15,6 +15,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
 )
 
 // Plugin is where the plugin's scripts are, its data folder, and where its sessions' identities live (~/.aeolus/crews/<harness>).
@@ -114,18 +116,24 @@ func (p Plugin) run(script string, folder string, input string, args ...string) 
 	return string(out), nil
 }
 
-// Identity is what a session's identity names: its fleet, its ship, the ship's socket it calls over, and its squadron.
+// Identity is what a session's identity names: its fleet, its ship, the ship's socket it calls over, its squadron, and its read-only checkouts.
 type Identity struct {
-	FleetURL string
-	ShipID   string
-	ShipName string
-	Socket   string
-	Squadron string
+	FleetURL  string
+	ShipID    string
+	ShipName  string
+	Socket    string
+	Squadron  string
+	Checkouts []checkouts.Checkout
 }
 
 // WriteIdentity writes the folder's identity, woken by the trierarch; the crew token goes on stdin, never the command line (#822), for the plugin to keep its lease.
 func (p Plugin) WriteIdentity(folder string, identity Identity, crewToken string) error {
-	args := []string{"write", "--wake-by", "trierarch", "--socket", identity.Socket, identity.FleetURL, identity.ShipID, identity.ShipName}
+	args := []string{"write", "--wake-by", "trierarch", "--socket", identity.Socket}
+	// Each read-only checkout, which the session's start context names.
+	for _, checkout := range identity.Checkouts {
+		args = append(args, "--checkout", checkout.Repository+"="+checkout.Path)
+	}
+	args = append(args, identity.FleetURL, identity.ShipID, identity.ShipName)
 	if identity.Squadron != "" {
 		args = append(args, identity.Squadron)
 	}

@@ -315,3 +315,18 @@ func TestASessionLaunchedBeforeDetectionFoundPermissionModesStartsInDefaultMode(
 		t.Fatalf("started %q", command)
 	}
 }
+
+func TestASessionIsStartedReadingItsReadOnlyCheckouts(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	entry := anEntry(t)
+	entry.ReadOnly = []string{"/checkouts/shp_scout/governance"}
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	command := running.started[0].Command
+	if !slices.Equal(command[len(command)-2:], []string{"--add-dir", "/checkouts/shp_scout/governance"}) {
+		t.Fatalf("command %q", command)
+	}
+}

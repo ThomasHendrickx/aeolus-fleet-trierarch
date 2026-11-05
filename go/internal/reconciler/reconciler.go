@@ -87,6 +87,8 @@ type Entry struct {
 	IsReleasedElsewhere bool `json:"isReleasedElsewhere,omitempty"`
 	// CrewFailures counts the crews of its settings version that failed in a row, until a crew starts its session (#827). The last of CrewFailureBudget gives the request back.
 	CrewFailures int `json:"crewFailures,omitempty"`
+	// ReadOnly are the paths of the ship's read-only checkouts, which its next launch reads beside its folder; made at each launch, never kept.
+	ReadOnly []string `json:"-"`
 }
 
 // CrewFailureBudget is how many crews of a settings version may fail in a row before the request is given back (#827): the restart budget's count.

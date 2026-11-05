@@ -28,6 +28,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/peer"
 )
 
@@ -42,6 +43,9 @@ const protocol = "/api/v1/openapi.json"
 // forwardedCall is one word under the ship API or the fleet API: `/api/v1/ship/send`, `/api/v1/fleet/commission`.
 var forwardedCall = regexp.MustCompile(`^/api/v1/(?:ship|fleet)/([A-Za-z]+)$`)
 
+// refreshCheckouts is a refresh of the ship's read-only checkouts (`aeolus-checkouts.sh refresh`), which the trierarch answers itself.
+const refreshCheckouts = "/trierarch/checkouts/refresh"
+
 // crewCalls make or end a crew: only the trierarch makes them, never a session.
 var crewCalls = map[string]bool{"register": true, "deregister": true}
 
@@ -53,6 +57,8 @@ type Options struct {
 	// MayCall is whether the process at the other end of a connection may call the ship's socket.
 	MayCall func(shipID string, pid int) bool
 	Log     func(line string)
+	// RefreshCheckouts brings the ship's read-only checkouts to the latest main; none answers no refresh.
+	RefreshCheckouts func(shipID string) []checkouts.Refreshed
 }
 
 type open struct {
@@ -163,6 +169,13 @@ func (s *Sockets) handle(shipID string, w http.ResponseWriter, r *http.Request) 
 	if connection == nil || !s.options.MayCall(shipID, peer.PID(connection)) {
 		refuse(w, http.StatusForbidden, "This socket answers only its ship's own session")
 		said("403")
+		return
+	}
+	if r.Method == http.MethodPost && r.URL.Path == refreshCheckouts && s.options.RefreshCheckouts != nil {
+		w.Header().Set("Content-Type", "application/json")
+		text, _ := json.Marshal(map[string][]checkouts.Refreshed{"checkouts": s.options.RefreshCheckouts(shipID)})
+		_, _ = w.Write(text)
+		said("200")
 		return
 	}
 	if !isForwarded(r.Method, r.URL.Path) {
