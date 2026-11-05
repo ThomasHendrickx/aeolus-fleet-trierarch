@@ -27,6 +27,10 @@ type Paths struct {
 	Detected string
 	// ModelToken is the token sessions in containers run on (decision 0039).
 	ModelToken string
+	// TrustedRepositories is the list the trierarch plugin's ship sent last (aeolus-fleet#384), apart from the configuration.
+	TrustedRepositories string
+	// Repositories holds the clones of the trusted repositories, one folder per repository.
+	Repositories string
 }
 
 // Of the user's home folder, with the configuration at config when it is not empty.
@@ -50,5 +54,8 @@ func Of(homeDirectory string, config string) Paths {
 		Proxy:        filepath.Join(home, "proxy"),
 		Detected:     filepath.Join(home, "detected.json"),
 		ModelToken:   filepath.Join(home, "model-token"),
+
+		TrustedRepositories: filepath.Join(home, "trusted-repositories.json"),
+		Repositories:        filepath.Join(home, "repositories"),
 	}
 }
