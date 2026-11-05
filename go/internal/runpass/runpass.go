@@ -244,12 +244,8 @@ func (p Pass) Run() error {
 		next.PassFailure = &reconciler.PassFailure{Reason: err.Error(), Since: since}
 		return p.Store.Save(next)
 	}
-	// An entry whose action fails is not acted on further this pass: its next actions build on it. A notice that fails is logged and nothing more: it does not hold the entry back.
-	failed := map[string]bool{}
+	// Every action is carried out, whatever an earlier one did: a failed action is logged and the pass goes on from the saved state.
 	for _, action := range actions {
-		if failed[action.ShipID] {
-			continue
-		}
 		if next, err = p.carryOut(next, action); err != nil {
 			if action.Kind == reconciler.ClearOrphan {
 				// An orphan is no ship's: the next orphan is cleared all the same.
@@ -261,7 +257,6 @@ func (p Pass) Run() error {
 				p.Log(fmt.Sprintf("%s of %s failed: %v", action.Kind, action.ShipID, err))
 				continue
 			}
-			failed[action.ShipID] = failed[action.ShipID] || !isNotice(action.Kind)
 			if action.Kind == reconciler.Crew {
 				next = p.crewFailed(next, action.ShipID, err)
 				continue
@@ -348,11 +343,6 @@ func (p Pass) crewFailed(held reconciler.State, shipID string, failure error) re
 		return state
 	}
 	return next
-}
-
-// isNotice is whether an action only tells argo or an owner something.
-func isNotice(kind reconciler.ActionKind) bool {
-	return kind == reconciler.ModelRefused || kind == reconciler.IdentityGone || kind == reconciler.Crashed || kind == reconciler.StoppedOffering
 }
 
 // observe is what runs: the sessions, what each in its launch window did, and for each entry whose session runs its inbox and turn. An inbox is watched only while its session runs, a crewing one from the moment its session runs (#473); its socket is opened again, as after the trierarch stopped, since its session keeps running and calls over it (decision 0026).
