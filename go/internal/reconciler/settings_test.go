@@ -38,15 +38,14 @@ func TestARequestInAFolderAnotherShipCrewsIsGivenBack(t *testing.T) {
 	crewing := anEntry(lookout, "running")
 	crewing.Workspace = Workspace{Kind: "folder", Name: "notes"}
 
-	_, actions := Reconcile(withEntries(crewing), aContext(aFolderRequest(scout), aRequestKeeping(lookout)))
+	keeping := aFolderRequest(lookout)
+	keeping.Status = status("running")
+	context := aContext(aFolderRequest(scout), keeping)
+	context.Observed.Sessions = running(lookout)
+
+	_, actions := Reconcile(withEntries(crewing), context)
 
 	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "workspace.name: The folder notes crews " + lookout + " already: one folder crews one ship"})
-}
-
-// aRequestKeeping is the request that keeps the ship's entry assigned here.
-func aRequestKeeping(shipID string) Request {
-	request := aFolderRequest(shipID)
-	return request
 }
 
 func TestAShipsOwnFolderDoesNotCountAsCrewedByAnother(t *testing.T) {

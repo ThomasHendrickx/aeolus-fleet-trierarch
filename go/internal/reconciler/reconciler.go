@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 )
 
 // State is the trierarch's saved state, in the shape today's trierarch saves
@@ -190,6 +192,17 @@ type Context struct {
 	Versions map[string]string
 	// Options are, by harness, each option it offers now and its value names in order: a model a session refused is offered no more (#382).
 	Options map[string]map[string][]string
+	// Configuration is each offered harness as configured and detected: the flags it launches with, from which a flag still waiting on a one-time question is found.
+	Configuration map[string]config.Harness
+	// Trusted is, by harness, what it trusts; a harness missing trusts nothing (#381).
+	Trusted map[string]Trust
+}
+
+// Trust is what a harness trusts, read from its own files: the names of the repositories and folders, and the flags it still asks to accept before a session starts with them (#403).
+type Trust struct {
+	Repositories    []string
+	Folders         []string
+	UnacceptedFlags []string
 }
 
 type ActionKind string
@@ -335,7 +348,7 @@ func Reconcile(state State, context Context) (State, []Action) {
 		if request.SettingsVersion == entry.SettingsVersion {
 			taken = stepOf(entry, context, canStart(), request.IsFinal)
 		} else {
-			taken = newVersionStep(entry, request, context)
+			taken = newVersionStep(entry, request, state, context)
 		}
 		actions = append(actions, taken.actions...)
 		if taken.isGivenBack {
@@ -363,7 +376,7 @@ func Reconcile(state State, context Context) (State, []Action) {
 			actions = append(actions, Action{Kind: Confirm, ShipID: request.ShipID})
 			continue
 		}
-		harness, options, reason := check(request.Settings, context)
+		harness, options, reason := check(request.Settings, request.ShipID, state, context)
 		if reason != "" {
 			if !request.IsFinal && refused[request.ShipID] != request.SettingsVersion {
 				actions = append(actions, Action{Kind: GiveBack, ShipID: request.ShipID, SettingsVersion: request.SettingsVersion, Reason: reason})
@@ -394,9 +407,9 @@ func sortedKeys(entries map[string]Entry) []string {
 	return keys
 }
 
-// check answers the harness settings crew with and the options they pick of those it offers, or why this machine cannot crew them, naming the field at fault. An option the harness does not declare is ignored: no flag, no refusal (#366).
-func check(settings Settings, context Context) (string, map[string]string, string) {
-	harness, reason := checkPlace(settings, context)
+// check answers the harness settings crew with and the options they pick of those it offers, or why this machine cannot crew them, naming the field at fault: the harness and the place, that no other ship crews the folder, that the harness trusts the place, each option's value, and that no flag waits on a one-time question. An option the harness does not declare is ignored: no flag, no refusal (#366).
+func check(settings Settings, shipID string, state State, context Context) (string, map[string]string, string) {
+	harness, reason := checkPlace(settings, shipID, state, context)
 	if reason != "" {
 		return "", nil, reason
 	}
@@ -412,26 +425,57 @@ func check(settings Settings, context Context) (string, map[string]string, strin
 		}
 		options[name] = settings.Options[name]
 	}
+	if flag := unacceptedFlag(harness, options, context); flag != "" {
+		return "", nil, fmt.Sprintf("harness: %s still asks to accept %s: accept it with aeolus-trierarch init", harness, flag)
+	}
 	return harness, options, ""
 }
 
-// checkPlace answers the harness settings crew with, or why this machine does not offer it or their workspace.
-func checkPlace(settings Settings, context Context) (string, string) {
+// unacceptedFlag is the first flag the harness would launch with that it still asks to accept, or none (#403).
+func unacceptedFlag(harness string, options map[string]string, context Context) string {
+	unaccepted := context.Trusted[harness].UnacceptedFlags
+	for _, flag := range context.Configuration[harness].EffectiveFlags(options) {
+		if slices.Contains(unaccepted, flag) {
+			return flag
+		}
+	}
+	return ""
+}
+
+// checkPlace answers the harness settings crew with, or why this machine does not offer it or their workspace, another ship crews the folder already, or the harness does not trust the place.
+func checkPlace(settings Settings, shipID string, state State, context Context) (string, string) {
 	harness := settings.Harness
 	if harness == "" && len(context.Harnesses) > 0 {
 		harness = context.Harnesses[0]
 	}
 	if !slices.Contains(context.Harnesses, harness) {
-		return "", fmt.Sprintf("harness: %s is not offered on this machine", harness)
+		if settings.Harness == "" {
+			return "", "harness: This trierarch offers no harness"
+		}
+		return "", fmt.Sprintf("harness: This trierarch offers no harness %s", harness)
 	}
+	trust := context.Trusted[harness]
 	switch settings.Workspace.Kind {
 	case "worktree":
-		if !slices.Contains(context.Repositories, settings.Workspace.Repository) {
-			return "", fmt.Sprintf("workspace.repository: %s is not configured on this machine", settings.Workspace.Repository)
+		name := settings.Workspace.Repository
+		if !slices.Contains(context.Repositories, name) {
+			return "", fmt.Sprintf("workspace.repository: This trierarch offers no repository %s", name)
+		}
+		if !slices.Contains(trust.Repositories, name) {
+			return "", fmt.Sprintf("workspace.repository: %s does not trust the repository %s: add it with aeolus-trierarch init, which trusts it", harness, name)
 		}
 	case "folder":
-		if !slices.Contains(context.Folders, settings.Workspace.Name) {
-			return "", fmt.Sprintf("workspace.name: %s is not configured on this machine", settings.Workspace.Name)
+		name := settings.Workspace.Name
+		if !slices.Contains(context.Folders, name) {
+			return "", fmt.Sprintf("workspace.name: This trierarch offers no folder %s", name)
+		}
+		for _, other := range sortedKeys(state.Entries) {
+			if entry := state.Entries[other]; other != shipID && entry.Workspace.Kind == "folder" && entry.Workspace.Name == name {
+				return "", fmt.Sprintf("workspace.name: The folder %s crews %s already: one folder crews one ship", name, other)
+			}
+		}
+		if !slices.Contains(trust.Folders, name) {
+			return "", fmt.Sprintf("workspace.name: %s does not trust the folder %s: add it with aeolus-trierarch init, which trusts it", harness, name)
 		}
 	default:
 		return "", fmt.Sprintf("workspace.kind: %s is no workspace", settings.Workspace.Kind)
@@ -487,8 +531,8 @@ func sessionOf(context Context, shipID string) (Session, bool) {
 }
 
 // newVersionStep crews the ship again with a new settings version (Restart or Edit), in its folder, as a first start with a fresh restart budget; settings it cannot crew are given back while the crew is not final.
-func newVersionStep(entry Entry, request Request, context Context) step {
-	harness, options, reason := check(request.Settings, context)
+func newVersionStep(entry Entry, request Request, state State, context Context) step {
+	harness, options, reason := check(request.Settings, request.ShipID, state, context)
 	if reason != "" {
 		if request.IsFinal {
 			return stepOf(entry, context, false, true)
