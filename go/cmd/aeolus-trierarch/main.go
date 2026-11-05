@@ -46,6 +46,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/receiving"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/release"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/runpass"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/selfreport"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/service"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/servicelog"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
@@ -108,7 +109,7 @@ func main() {
 		CoreVersionRefusal: func(fleetURL string) string {
 			return fleet.CoreVersionRefusal(fleetURL, cli.Version, fleet.MinimumCoreVersion)
 		},
-		NewPass: func(at paths.Paths, kept crew.File, configuration config.Configuration) (func() error, error) {
+		NewPass: func(at paths.Paths, kept crew.File, configuration config.Configuration) (func(isKeyCutOff bool) error, error) {
 			return newPass(at, kept, configuration, home, program)
 		},
 		PassEvery: passEvery,
@@ -366,7 +367,7 @@ func environment() map[string]string {
 }
 
 // newPass is one pass of the run loop with this machine's adapters: the fleet over /api/v1 with the trierarch's crew token, the harnesses the configuration offers, worktrees of the configured repositories, and the state file.
-func newPass(at paths.Paths, kept crew.File, configuration config.Configuration, home string, program string) (func() error, error) {
+func newPass(at paths.Paths, kept crew.File, configuration config.Configuration, home string, program string) (func(isKeyCutOff bool) error, error) {
 	env := environment()
 	client := fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken, Model: "@aeolus-fleet/trierarch@" + cli.Version}
 	// Detected again only for a harness whose version changed since (#365); the operator's own options win.
@@ -383,7 +384,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	configuration = detection.Offered(configuration, detected)
 	running := sessionRuntime(at, program)
 	proxy := modelProxy(at, program)
-	harnesses, offered, err := harnessesOf(configuration, at, env, home, running, proxy, offers)
+	harnesses, offeredHarnesses, err := harnessesOf(configuration, at, env, home, running, proxy, offers)
 	if err != nil {
 		return nil, err
 	}
@@ -401,6 +402,11 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		places.Folders[name] = folder.Path
 		folders = append(folders, name)
 	}
+	logins := keys.Logins{Configured: configuration.Logins, States: keys.States{Keys: at.Keys, File: modelproxy.FilesOf(at.Proxy).KeyStates}, Subscriptions: map[string]keys.Subscription{
+		// What each harness reads itself, checked before a session starts on its subscription (api keys K6).
+		"claude-code": claudecode.Subscription{Settings: configuration.Harnesses["claude-code"], Managed: claudecode.ManagedSettings(), User: claudecode.UserSettings(home, env["CLAUDE_CONFIG_DIR"])},
+		"codex":       codex.Subscription{},
+	}}
 	opened = shipSockets(at, kept.FleetURL, running)
 	pass := runpass.Pass{
 		Fleet:        client,
@@ -413,15 +419,11 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		NewLaunchID:  newLaunchID,
 		FleetURL:     kept.FleetURL,
 		Sockets:      opened,
-		Offered:      offered,
+		Offered:      offeredHarnesses,
 		Repositories: repositories,
 		Folders:      folders,
 		RunningCap:   configuration.Caps.Running,
-		Logins: keys.Logins{Configured: configuration.Logins, States: keys.States{Keys: at.Keys, File: modelproxy.FilesOf(at.Proxy).KeyStates}, Subscriptions: map[string]keys.Subscription{
-			// What each harness reads itself, checked before a session starts on its subscription (api keys K6).
-			"claude-code": claudecode.Subscription{Settings: configuration.Harnesses["claude-code"], Managed: claudecode.ManagedSettings(), User: claudecode.UserSettings(home, env["CLAUDE_CONFIG_DIR"])},
-			"codex":       codex.Subscription{},
-		}},
+		Logins:       logins,
 		// The model proxy runs while any harness holds an API key (headless H16); a pass starts it again when it is gone.
 		Proxy: proxy,
 		Keys:  keys.Files{Folder: at.Keys},
@@ -433,7 +435,22 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 			return offers.refuse(detect, harness, model)
 		},
 	}
-	return pass.Run, nil
+	reporter := &selfreport.Reporter{
+		Fleet:    client,
+		Store:    pass.Store,
+		Sessions: running,
+		Input: func() selfreport.Input {
+			offered, detected := offers.current()
+			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH}
+		},
+	}
+	// Each pass ends with the trierarch's own report: the first at start, then only when it changed.
+	return func(isKeyCutOff bool) error {
+		if err := pass.Run(); err != nil {
+			return err
+		}
+		return reporter.Report(isKeyCutOff)
+	}, nil
 }
 
 // detectionOf is detection of this machine's harnesses, kept in detected.json, telling the operator what it kept as before with warn.
@@ -490,6 +507,13 @@ func (o *offers) set(detected detection.Detected) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.detected = detected
+}
+
+// current is the configuration as offered now, with what detection found.
+func (o *offers) current() (config.Configuration, detection.Detected) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return detection.Offered(o.configured, o.detected), o.detected
 }
 
 // version is the harness's version as detection found it; empty when it found none.

@@ -46,8 +46,8 @@ func TestRunRunsAPassEveryIntervalUntilItIsStopped(t *testing.T) {
 	stop := make(chan struct{})
 	machine.Stop = stop
 	passes := 0
-	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func() error, error) {
-		return func() error {
+	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func(isKeyCutOff bool) error, error) {
+		return func(bool) error {
 			passes++
 			if passes == 3 {
 				close(stop)
@@ -71,8 +71,8 @@ func TestAFailedPassIsLoggedAndTheLoopGoesOn(t *testing.T) {
 	logged := []string{}
 	machine.Log = func(line string) { logged = append(logged, line) }
 	passes := 0
-	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func() error, error) {
-		return func() error {
+	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func(isKeyCutOff bool) error, error) {
+		return func(bool) error {
 			passes++
 			if passes == 2 {
 				close(stop)
@@ -247,8 +247,8 @@ func TestRunReceivesBesideThePassesAnswersAPingAndAcknowledgesTheRest(t *testing
 	ship := &anOwnShip{}
 	machine.OwnShip = func(crew.File) receiving.Ship { return ship }
 	passes := 0
-	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func() error, error) {
-		return func() error {
+	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func(isKeyCutOff bool) error, error) {
+		return func(bool) error {
 			passes++
 			ship.mu.Lock()
 			isAnswered := len(ship.acked) == 1 && len(ship.ponged) == 1
@@ -264,5 +264,39 @@ func TestRunReceivesBesideThePassesAnswersAPingAndAcknowledgesTheRest(t *testing
 
 	if code != 0 || !slices.Equal(ship.ponged, []string{"d1"}) || !slices.Equal(ship.acked, []string{"d2"}) {
 		t.Fatalf("code %d, ponged %v, acked %v", code, ship.ponged, ship.acked)
+	}
+}
+
+// aCutOffOwnShip is a trierarch's own ship whose fleet refuses to receive for lack of its key, until the run is stopped.
+type aCutOffOwnShip struct{}
+
+func (aCutOffOwnShip) Receive(context.Context) ([]receiving.Delivery, error) {
+	return nil, &receiving.Refusal{Code: "KEY_UNAVAILABLE", Message: "the key cannot be had"}
+}
+
+func (aCutOffOwnShip) Ack(string) error  { return nil }
+func (aCutOffOwnShip) Pong(string) error { return nil }
+
+func TestRunTellsEachPassWhetherTheFleetsKeyIsCutOff(t *testing.T) {
+	machine, _, _ := aMain(t)
+	Main(setupWords(), machine)
+	stop := make(chan struct{})
+	machine.Stop = stop
+	machine.OwnShip = func(crew.File) receiving.Ship { return aCutOffOwnShip{} }
+	var told []bool
+	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func(isKeyCutOff bool) error, error) {
+		return func(isKeyCutOff bool) error {
+			told = append(told, isKeyCutOff)
+			if isKeyCutOff {
+				close(stop)
+			}
+			return nil
+		}, nil
+	}
+
+	_, code := Main([]string{"run"}, machine)
+
+	if code != 0 || len(told) == 0 || !told[len(told)-1] {
+		t.Fatalf("code %d, passes told %v; want the last pass told the key is cut off", code, told)
 	}
 }

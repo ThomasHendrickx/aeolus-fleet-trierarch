@@ -13,6 +13,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
@@ -70,8 +71,8 @@ type Machine struct {
 	Stop <-chan struct{}
 	// CoreVersionRefusal is why the trierarch may not run against the fleet's core, empty when it may.
 	CoreVersionRefusal func(fleetURL string) string
-	// NewPass is one pass of the run loop, with the crew file and configuration run read.
-	NewPass   func(at paths.Paths, kept crew.File, configuration config.Configuration) (func() error, error)
+	// NewPass is one pass of the run loop, with the crew file and configuration run read; the pass is told whether the fleet's key is cut off, which the trierarch's own report says.
+	NewPass   func(at paths.Paths, kept crew.File, configuration config.Configuration) (func(isKeyCutOff bool) error, error)
 	PassEvery time.Duration
 	// OwnShip is the trierarch's own ship at the fleet, which run receives for beside the passes; none when nil.
 	OwnShip  func(kept crew.File) receiving.Ship
@@ -451,15 +452,16 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 	stopped, done := context.WithCancel(context.Background())
 	defer done()
 	received := make(chan struct{})
+	var isKeyCutOff atomic.Bool
 	go func() {
 		defer close(received)
 		if machine.OwnShip == nil {
 			return
 		}
-		receiving.Loop{Ship: machine.OwnShip(kept), Log: machine.Log, Interval: machine.PassEvery, KeyWaitMax: KeyWaitMax, Pause: pause}.Run(stopped)
+		receiving.Loop{Ship: machine.OwnShip(kept), Log: machine.Log, Interval: machine.PassEvery, KeyWaitMax: KeyWaitMax, Pause: pause, OnKeyCutOff: isKeyCutOff.Store}.Run(stopped)
 	}()
 	for {
-		if err := pass(); err != nil {
+		if err := pass(isKeyCutOff.Load()); err != nil {
 			machine.Log("the pass failed: " + err.Error())
 		}
 		select {

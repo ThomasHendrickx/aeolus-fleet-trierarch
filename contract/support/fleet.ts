@@ -29,6 +29,8 @@ export interface Fleet {
   sendToTrierarch(payload: string): Promise<string>;
   /** Pings the machine's trierarch ship from argo: the ping's message id. */
   pingTrierarch(): Promise<string>;
+  /** What the machine's trierarch last reported as its own ship: its state, note and details; none before it reported. */
+  reportOfTrierarch(): Promise<TrierarchReport | undefined>;
   /** How many of the ship's leases are held. */
   leasesOf(shipId: ShipId): Promise<number>;
   /** The harness the ship's held lease was registered with. */
@@ -44,6 +46,13 @@ export interface Fleet {
   /** Why the machine's trierarch gave the ship's crew request back; none while it gave none back. */
   givenBackReasonOf(shipId: ShipId): Promise<string | undefined>;
   close(): Promise<void>;
+}
+
+/** The trierarch's report as core keeps it. */
+export interface TrierarchReport {
+  readonly state: string;
+  readonly note: string;
+  readonly details: unknown;
 }
 
 /** A message the trierarch sent: who it went to, and its text. */
@@ -87,6 +96,10 @@ export async function aFleet(): Promise<Fleet> {
     send: async (shipName, payload) => unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', name: shipName }, payload, idempotencyKey: newKey() })).messageId,
     sendToTrierarch: async (payload) => unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', shipId: trierarchShip.shipId }, payload, idempotencyKey: newKey() })).messageId,
     pingTrierarch: async () => unwrap(await useCases.pingShip(argo, { shipId: trierarchShip.shipId })).messageId,
+    reportOfTrierarch: async () => {
+      const lease = await database.lease.findFirst({ where: { shipId: trierarchShip.shipId, endedAt: null }, select: { reportState: true, reportNote: true, reportDetails: true } });
+      return lease?.reportState == null ? undefined : { state: lease.reportState, note: lease.reportNote ?? '', details: lease.reportDetails };
+    },
     leasesOf: (shipId) => database.lease.count({ where: { shipId, endedAt: null } }),
     leaseHarnessOf: async (shipId) => (await database.lease.findFirst({ where: { shipId, endedAt: null }, select: { harness: true } }))?.harness ?? undefined,
     closeTheNetwork: async () => {

@@ -187,6 +187,18 @@ func TestAReportOnAShipsBehalfCarriesItsSessionsCrewToken(t *testing.T) {
 	}
 }
 
+func TestTheTrierarchReportsAsItsOwnShipWithItsOwnCrewToken(t *testing.T) {
+	recorded, client := aFleetAnswering(t, map[string]string{"/api/v1/ship/report": `{}`})
+
+	if err := client.ReportSelf("idle", "0 of 8 running", map[string]any{"version": "0.40.0"}); err != nil {
+		t.Fatal(err)
+	}
+	sameJSON(t, recorded.asked["/api/v1/ship/report"], `{"state":"idle","note":"0 of 8 running","details":{"version":"0.40.0"}}`)
+	if recorded.bearers["/api/v1/ship/report"] != "Bearer aeolus_ct_v1_trierarch" {
+		t.Fatalf("bearer %q", recorded.bearers["/api/v1/ship/report"])
+	}
+}
+
 func TestACoreAtLeastTheMinimumIsAccepted(t *testing.T) {
 	_, client := aFleetAnswering(t, map[string]string{"/api/version": `{"server":"0.35.0"}`})
 
