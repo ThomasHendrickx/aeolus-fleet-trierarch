@@ -108,6 +108,11 @@ func alreadyOn(version string) string {
 	return fmt.Sprintf("The trierarch is already on %s.", version)
 }
 
+// remoteControlRemoved is what an upgrade says when it took Remote Control out of the configuration (headless H20).
+func remoteControlRemoved(harnesses []string) string {
+	return fmt.Sprintf("Took %s out of the flags of %s in the configuration: a session the trierarch runs has no terminal, so no Remote Control.", config.RemoteControlFlag, strings.Join(harnesses, ", "))
+}
+
 // Run upgrades to the version, the latest release when it is empty.
 func (u Upgrade) Run(version string) (UpgradeReport, error) {
 	from := u.Version
@@ -132,14 +137,22 @@ func (u Upgrade) Run(version string) (UpgradeReport, error) {
 	return u.install(target)
 }
 
-// onItsVersion writes the configuration's schema of this version and updates the plugin from its release tag; then writes the service file as the plugin step of an upgrade, or restarts a service that runs another version.
+// onItsVersion takes Remote Control out of the configuration, writes its schema of this version and updates the plugin from its release tag; then writes the service file as the plugin step of an upgrade, or restarts a service that runs another version.
 func (u Upgrade) onItsVersion() (UpgradeReport, error) {
 	from := u.Version
+	removed, err := config.RemoveRemoteControl(u.Paths.Config)
+	if err != nil {
+		return UpgradeReport{}, err
+	}
 	if err := config.WriteSchema(u.Paths.ConfigSchema); err != nil {
 		return UpgradeReport{}, err
 	}
 	isPluginUpdated, pluginSaid := u.updatePlugin()
-	report := UpgradeReport{From: from, To: from, IsPluginUpdated: isPluginUpdated, Said: append([]string{alreadyOn(from)}, pluginSaid...)}
+	said := []string{alreadyOn(from)}
+	if len(removed) > 0 {
+		said = append(said, remoteControlRemoved(removed))
+	}
+	report := UpgradeReport{From: from, To: from, IsPluginUpdated: isPluginUpdated, Said: append(said, pluginSaid...)}
 	status, err := u.Service.Status()
 	if err != nil || !status.IsInstalled {
 		return report, err

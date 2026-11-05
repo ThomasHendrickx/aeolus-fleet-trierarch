@@ -64,9 +64,9 @@ func CommandParts(flags []string, override commandline.Part, isContinued bool) [
 	return commandline.WithWords(parts)
 }
 
-// CommandLine is `claude` with the flags given, plan mode left out, continuing the folder's conversation when told.
-func CommandLine(flags []string, isContinued bool) []string {
-	return commandline.Words(CommandParts(flags, commandline.Part{}, isContinued))
+// CommandLine is `claude` with the flags given, plan mode left out and a plan default mode overridden, continuing the folder's conversation when told.
+func CommandLine(flags []string, override commandline.Part, isContinued bool) []string {
+	return commandline.Words(CommandParts(flags, override, isContinued))
 }
 
 var notLetterOrDigit = regexp.MustCompile(`[^a-zA-Z0-9]`)

@@ -38,6 +38,11 @@ type Harness struct {
 	// Projects is Claude Code's projects folder, where it keeps each folder's conversations.
 	Projects   string
 	Onboarding Onboarding
+	// Managed is the folder Claude Code reads its managed settings from, User its user settings file: where a plan default mode is read from (#505).
+	Managed string
+	User    string
+	// PermissionModes are the modes the installed Claude Code lists, as detection last found them; nil before it found any (#517).
+	PermissionModes func() []string
 	// Events is where the ship's hold keeps every line its session wrote.
 	Events func(shipID string) string
 	// ProxyURL is where sessions on an API key reach the model proxy (headless H16); false before it first listened.
@@ -72,7 +77,13 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if isFirstStart && entry.FirstPrompt != "" {
 		line = prompt.First(entry.FirstPrompt)
 	}
-	command := CommandLine(h.Settings.EffectiveFlags(entry.Options), !isFirstStart && HasConversation(h.Projects, entry.Folder))
+	flags := h.Settings.EffectiveFlags(entry.Options)
+	var modes []string
+	if h.PermissionModes != nil {
+		modes = h.PermissionModes()
+	}
+	override := PlanOverride(flags, DefaultModeOf(h.Managed, h.User, flags, entry.Folder), modes)
+	command := CommandLine(flags, override, !isFirstStart && HasConversation(h.Projects, entry.Folder))
 	if err := h.Plugin.ClearLaunch(entry.Folder); err != nil {
 		return err
 	}

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
-import { createWriteStream } from 'node:fs';
+import { appendFileSync, createWriteStream } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { createServer, type Socket } from 'node:net';
 import type { Readable, Writable } from 'node:stream';
@@ -107,6 +107,7 @@ export async function runHold(options: HoldOptions): Promise<number> {
   await mkdir(files.folder, { recursive: true, mode: 0o700 });
   await rm(files.socket, { force: true });
   await writeFile(files.pid, String(process.pid));
+  await writeFile(files.harnessSessions, '');
   const events = createWriteStream(files.events, { flags: 'a', mode: 0o600 });
   let sessionId: string | undefined;
   let isBusy = false;
@@ -186,6 +187,8 @@ export async function runHold(options: HoldOptions): Promise<number> {
     const started = spawnHarness(program, args);
     if (started.pid !== undefined) {
       guard.stdin.write(`${String(started.pid)}\n`);
+      // Written before the turn can end, so a process it forked is refused once the harness is gone (#208).
+      appendFileSync(files.harnessSessions, `${String(started.pid)}\n`);
     }
     started.stdin.on('error', () => undefined);
     // codex exec reads a stdin that is no terminal to its end before its turn, and copilot -p may take it as its prompt: neither gets one.

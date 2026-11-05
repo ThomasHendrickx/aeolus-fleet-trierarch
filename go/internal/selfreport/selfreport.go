@@ -17,6 +17,8 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trust"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/usage"
 )
 
 // keyCutOffNote is what the report says while the fleet refuses to receive for lack of its key (decision 0068).
@@ -49,7 +51,9 @@ type Input struct {
 	Detected      detection.Detected
 	// Harnesses are the harnesses this trierarch offers, in order.
 	Harnesses []string
-	State     reconciler.State
+	// Trusted is what each harness trusts, read afresh for this report (#381).
+	Trusted map[string]trust.Places
+	State   reconciler.State
 	// Running is how many sessions run.
 	Running int
 	Logins  Logins
@@ -59,6 +63,8 @@ type Input struct {
 	IsKeyCutOff bool
 	// Load is the machine's load as last read; none before one could be (#400).
 	Load *machineload.Load
+	// Usage is the harnesses' usage as last read (#353); none reports none.
+	Usage *usage.Usage
 }
 
 // Logins are which login each ship's next session starts on, and where each harness's API key stands.
@@ -91,9 +97,12 @@ func Of(in Input) Report {
 
 func detailsOf(in Input) map[string]any {
 	details := map[string]any{
-		"harnesses":  harnessesOf(in),
-		"workspaces": map[string]any{"repositories": offeredPlaces(in, slices.Sorted(maps.Keys(in.Configuration.Repositories))), "folders": offeredPlaces(in, slices.Sorted(maps.Keys(in.Configuration.Folders)))},
-		"caps":       in.Configuration.Caps,
+		"harnesses": harnessesOf(in),
+		"workspaces": map[string]any{
+			"repositories": offeredPlaces(in, slices.Sorted(maps.Keys(in.Configuration.Repositories)), func(places trust.Places) []string { return places.Repositories }),
+			"folders":      offeredPlaces(in, slices.Sorted(maps.Keys(in.Configuration.Folders)), func(places trust.Places) []string { return places.Folders }),
+		},
+		"caps": in.Configuration.Caps,
 		// Paths stay on the machine: names only (decision 0032).
 		"kept":    pickedFrom(in.State.Kept, "shipId", "repository"),
 		"orphans": pickedFrom(in.State.Orphans, "repository", "name"),
@@ -104,6 +113,9 @@ func detailsOf(in Input) map[string]any {
 	}
 	if in.Load != nil {
 		details["load"] = in.Load
+	}
+	if in.Usage != nil {
+		details["usage"] = in.Usage
 	}
 	machine := map[string]string{}
 	if name, ok := osOf[in.OS]; ok {
@@ -125,12 +137,19 @@ func runtimeOf(configuration config.Configuration) string {
 	return configuration.Runtime.Kind
 }
 
-// offeredPlaces are the places to offer: none without a harness to crew them.
-func offeredPlaces(in Input, names []string) []string {
+// offeredPlaces are the places every offered harness trusts, and none without a harness to crew them (#381).
+func offeredPlaces(in Input, names []string, trustedOf func(trust.Places) []string) []string {
+	offered := []string{}
 	if len(in.Harnesses) == 0 {
-		return []string{}
+		return offered
 	}
-	return append([]string{}, names...)
+	for _, name := range names {
+		if slices.ContainsFunc(in.Harnesses, func(harness string) bool { return !slices.Contains(trustedOf(in.Trusted[harness]), name) }) {
+			continue
+		}
+		offered = append(offered, name)
+	}
+	return offered
 }
 
 func harnessesOf(in Input) []map[string]any {
@@ -251,6 +270,11 @@ type LoadReader interface {
 	Read() (load *machineload.Load, isFresh bool)
 }
 
+// UsageReader is the harnesses' usage, each part read on its own interval.
+type UsageReader interface {
+	Read() (usage.Usage, error)
+}
+
 // Reporter reports on start and then only when the report would differ from the last one sent.
 type Reporter struct {
 	Fleet    Fleet
@@ -258,6 +282,8 @@ type Reporter struct {
 	Sessions Sessions
 	// Load reads the machine's load, at most once a minute (#400); none reports none.
 	Load LoadReader
+	// Usage reads the harnesses' usage (#353); none reports none.
+	Usage UsageReader
 	// Input is the input as this machine has it now, without what a pass reads: the state and the sessions that run.
 	Input func() Input
 	last  string
@@ -279,6 +305,13 @@ func (r *Reporter) Report(isKeyCutOff bool) error {
 	in.IsKeyCutOff = isKeyCutOff
 	if r.Load != nil {
 		in.Load, _ = r.Load.Read()
+	}
+	if r.Usage != nil {
+		read, err := r.Usage.Read()
+		if err != nil {
+			return err
+		}
+		in.Usage = &read
 	}
 	report := Of(in)
 	text, err := changeOf(report, in.Load)

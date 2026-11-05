@@ -160,3 +160,34 @@ func TestAnOwnerTheFleetCannotBeReachedForIsAFailure(t *testing.T) {
 		t.Errorf("refusal %v, err %v", refusal, err)
 	}
 }
+
+func TestAsksThePluginsShipForTheTrustedRepositoriesAsItsOwnShipWithAKeyOfItsOwn(t *testing.T) {
+	client, sent := aSendingFleet(t, func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"messageId":"msg_1"}`)) })
+
+	if err := client.AskForTrustedRepositories("shp_plugin"); err != nil {
+		t.Fatal(err)
+	}
+	first := (*sent)["idempotencyKey"]
+	if err := client.AskForTrustedRepositories("shp_plugin"); err != nil {
+		t.Fatal(err)
+	}
+
+	got := *sent
+	if got["payload"] != "{}" || got["contentType"] != "application/vnd.aeolus.trierarch.trusted-repositories-request+json" || got["model"] != "aeolus-trierarch@1.2.3" || mustJSON(got["selector"]) != mustJSON(map[string]any{"kind": "ship", "shipId": "shp_plugin"}) {
+		t.Errorf("sent %v", got)
+	}
+	if key, _ := got["idempotencyKey"].(string); key == "" || key == first {
+		t.Errorf("idempotency keys %v then %v, want one of its own each time", first, got["idempotencyKey"])
+	}
+}
+
+func TestAFleetThatRefusesTheAskIsAnError(t *testing.T) {
+	client, _ := aSendingFleet(t, func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code":"FORBIDDEN","message":"no"}`))
+	})
+
+	if err := client.AskForTrustedRepositories("shp_plugin"); err == nil {
+		t.Error("AskForTrustedRepositories = nil, want the refusal")
+	}
+}

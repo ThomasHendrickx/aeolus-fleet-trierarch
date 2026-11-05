@@ -6,6 +6,8 @@ package fleet
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +21,7 @@ import (
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/receiving"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
 )
 
 // MinimumCoreVersion is the oldest core the trierarch runs against (decision 0049, docs/compatibility.md), today's trierarch's MINIMUM_CORE_VERSION.
@@ -211,6 +214,7 @@ func (c Client) Receive(ctx context.Context) ([]receiving.Delivery, error) {
 			DeliveryID   string `json:"deliveryId"`
 			SenderShipID string `json:"senderShipId"`
 			ContentType  string `json:"contentType"`
+			Payload      string `json:"payload"`
 		} `json:"deliveries"`
 	}
 	if err := callIn(ctx, c.URL, request{path: "/ship/receive", crewToken: c.CrewToken, body: map[string]int{"max": 10}, isLongPoll: true}, &answer); err != nil {
@@ -218,7 +222,7 @@ func (c Client) Receive(ctx context.Context) ([]receiving.Delivery, error) {
 	}
 	deliveries := []receiving.Delivery{}
 	for _, delivery := range answer.Deliveries {
-		deliveries = append(deliveries, receiving.Delivery{DeliveryID: delivery.DeliveryID, SenderShipID: delivery.SenderShipID, ContentType: delivery.ContentType})
+		deliveries = append(deliveries, receiving.Delivery{DeliveryID: delivery.DeliveryID, SenderShipID: delivery.SenderShipID, ContentType: delivery.ContentType, Payload: delivery.Payload})
 	}
 	return deliveries, nil
 }
@@ -286,6 +290,12 @@ func (c Client) send(selector map[string]string, text string, idempotencyKey str
 	return call(c.URL, request{path: "/ship/send", crewToken: c.CrewToken, body: body}, &map[string]any{})
 }
 
+// AskForTrustedRepositories asks the trierarch plugin's ship for the trusted repositories again, as the trierarch's own ship (aeolus-fleet#384).
+func (c Client) AskForTrustedRepositories(pluginShipID string) error {
+	body := map[string]any{"selector": map[string]string{"kind": "ship", "shipId": pluginShipID}, "payload": "{}", "contentType": trusted.RequestContentType, "model": c.Model, "idempotencyKey": newKey()}
+	return call(c.URL, request{path: "/ship/send", crewToken: c.CrewToken, body: body}, &map[string]any{})
+}
+
 // ReportToArgo tells argo; the idempotency key makes a retry safe, so a notice told twice reaches argo once.
 func (c Client) ReportToArgo(text string, idempotencyKey string) error {
 	return c.send(map[string]string{"kind": "ship", "name": "argo"}, text, idempotencyKey)
@@ -345,4 +355,13 @@ func CoreVersionRefusal(fleetURL string, version string, minimum string) string 
 		return ""
 	}
 	return fmt.Sprintf("%s; the fleet at %s runs core %s: upgrade core first", needs, fleetURL, answer.Server)
+}
+
+// newKey is an idempotency key of its own, a random UUID.
+func newKey() string {
+	bytes := make([]byte, 16)
+	_, _ = rand.Read(bytes)
+	bytes[6], bytes[8] = bytes[6]&0x0f|0x40, bytes[8]&0x3f|0x80
+	text := hex.EncodeToString(bytes)
+	return text[0:8] + "-" + text[8:12] + "-" + text[12:16] + "-" + text[16:20] + "-" + text[20:]
 }

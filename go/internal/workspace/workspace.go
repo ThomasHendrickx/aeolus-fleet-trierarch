@@ -145,6 +145,10 @@ type Places struct {
 	Root         string
 	Repositories map[string]string
 	Folders      map[string]string
+	// Clone clones a trusted repository the machine lacks into its path before its first workspace (aeolus-fleet#384); none clones nothing.
+	Clone func(repository string, path string) error
+	// ClonedPath is the clone of a repository that left the trusted repositories, which still holds the workspaces made from it; none finds none.
+	ClonedPath func(repository string) (string, bool)
 }
 
 // Prepare is the ship's folder: its worktree, made when missing, or the configured folder as it is.
@@ -160,6 +164,11 @@ func (p Places) Prepare(entry reconciler.Entry, shipName string) (string, error)
 	if !ok {
 		return "", fmt.Errorf("the configuration has no repository %s", entry.Workspace.Repository)
 	}
+	if p.Clone != nil {
+		if err := p.Clone(entry.Workspace.Repository, repository); err != nil {
+			return "", err
+		}
+	}
 	return Prepare(Worktree{Root: p.Root, Repository: entry.Workspace.Repository, Path: repository, ShipName: shipName, Ref: entry.Workspace.Ref})
 }
 
@@ -173,6 +182,10 @@ func (p Places) Remove(entry reconciler.Entry) error {
 		return nil
 	}
 	repository, ok := p.Repositories[entry.Workspace.Repository]
+	if !ok && p.ClonedPath != nil {
+		// A clone whose repository left the trusted repositories still holds the worktrees made from it.
+		repository, ok = p.ClonedPath(entry.Workspace.Repository)
+	}
 	if !ok {
 		return fmt.Errorf("the configuration has no repository %s to remove %s from", entry.Workspace.Repository, entry.Folder)
 	}

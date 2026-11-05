@@ -76,7 +76,9 @@ type Machine struct {
 	NewPass   func(at paths.Paths, kept crew.File, configuration config.Configuration) (func(isKeyCutOff bool) error, error)
 	PassEvery time.Duration
 	// OwnShip is the trierarch's own ship at the fleet, which run receives for beside the passes; none when nil.
-	OwnShip  func(kept crew.File) receiving.Ship
+	OwnShip func(kept crew.File) receiving.Ship
+	// Trusted keeps the trusted repositories the trierarch plugin's ship sends (aeolus-fleet#384), with the configuration run read; none when nil.
+	Trusted  func(at paths.Paths, configuration config.Configuration) receiving.Keeper
 	Sessions func(at paths.Paths) Sessions
 	// Log writes a line to the trierarch's log.
 	Log func(line string)
@@ -433,7 +435,11 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 		if machine.OwnShip == nil {
 			return
 		}
-		receiving.Loop{Ship: machine.OwnShip(kept), Log: machine.Log, Interval: machine.PassEvery, KeyWaitMax: KeyWaitMax, Pause: pause, OnKeyCutOff: isKeyCutOff.Store}.Run(stopped)
+		loop := receiving.Loop{Ship: machine.OwnShip(kept), Log: machine.Log, Interval: machine.PassEvery, KeyWaitMax: KeyWaitMax, Pause: pause, PluginShipID: kept.PluginShipID, OnKeyCutOff: isKeyCutOff.Store}
+		if machine.Trusted != nil {
+			loop.Trusted = machine.Trusted(at, configuration)
+		}
+		loop.Run(stopped)
 	}()
 	for {
 		if err := pass(isKeyCutOff.Load()); err != nil {

@@ -53,6 +53,9 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/shipsocket"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trust"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/usage"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/workspace"
 
 	"golang.org/x/term"
@@ -118,6 +121,9 @@ func main() {
 		PassEvery: passEvery,
 		OwnShip: func(kept crew.File) receiving.Ship {
 			return fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken, Model: "@aeolus-fleet/trierarch@" + cli.Version}
+		},
+		Trusted: func(at paths.Paths, configuration config.Configuration) receiving.Keeper {
+			return trustedRepositories(at, configuration, home)
 		},
 		Sessions: func(at paths.Paths) cli.Sessions { return sessionRuntime(at, program) },
 		Log:      logLine,
@@ -287,6 +293,38 @@ func shipSockets(at paths.Paths, fleetURL string, running sessions.Runtime) *shi
 	})
 }
 
+// held is the trusted repositories this process holds, loaded once and shared by the receiving loop that accepts a list and the passes that offer, report and crew from it.
+var (
+	held     *trusted.File
+	holdOnce sync.Once
+)
+
+// trustedRepositories are the trusted repositories the trierarch plugin sent last (aeolus-fleet#384): each one's clone is trusted as the list arrives, as adding a place trusts it (#381).
+func trustedRepositories(at paths.Paths, configuration config.Configuration, home string) *trusted.File {
+	holdOnce.Do(func() {
+		env := environment()
+		held = &trusted.File{Path: at.TrustedRepositories, ClonesRoot: at.Repositories, TrustClones: func(clones []string) error {
+			if _, ok := configuration.Harnesses["claude-code"]; ok {
+				setup := claudecode.Of(home, env["CLAUDE_CONFIG_DIR"])
+				for _, clone := range clones {
+					if err := setup.Trust(clone); err != nil {
+						return err
+					}
+				}
+			}
+			if _, ok := configuration.Harnesses["codex"]; ok && len(clones) > 0 {
+				// As add does: a clone Codex does not trust is not offered until it does (#381).
+				if err := (codex.AppServer{Program: "codex", Version: cli.Version}).Trust(clones); err != nil {
+					logLine("Codex does not trust the trusted repositories' clones: " + err.Error())
+				}
+			}
+			return nil
+		}}
+		held.Load()
+	})
+	return held
+}
+
 // modelProxy is the model proxy on this machine (headless H16), started as a hold is.
 func modelProxy(at paths.Paths, program string) modelproxy.Runtime {
 	return modelproxy.Runtime{Folder: at.Proxy, Sessions: at.Sessions, Keys: at.Keys, Program: []string{program}, Version: cli.Version, Launch: sessions.Launch(runtime.GOOS, os.Getenv("INVOCATION_ID"), sessions.SystemdVersion())}
@@ -388,7 +426,25 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		logLine(harness + ": the configuration's model option is ignored: model ids come from detection only (#382); remove it")
 	}
 	offers := &offers{configured: configuration, detected: detected}
+	configured := configuration
 	configuration = detection.Offered(configuration, detected)
+	// The trusted repositories the trierarch plugin sent last change while the trierarch runs: each pass and report reads them afresh (aeolus-fleet#384).
+	held := trustedRepositories(at, configured, home)
+	withTrusted := func(base config.Configuration) config.Configuration {
+		return trusted.WithRepositories(base, held.Current(), held.CloneOf)
+	}
+	clones := trusted.Clones{Root: at.Repositories, URLOf: func(name string) string {
+		if _, isConfigured := configured.Repositories[name]; isConfigured {
+			return ""
+		}
+		for _, repository := range held.Current() {
+			if repository.Name == name {
+				return repository.URL
+			}
+		}
+		return ""
+	}}
+	ask := &trusted.Ask{Fleet: client, PluginShipID: kept.PluginShipID, Log: logLine}
 	running := sessionRuntime(at, program)
 	proxy := modelProxy(at, program)
 	harnesses, offeredHarnesses, err := harnessesOf(configuration, at, env, home, running, proxy, offers)
@@ -399,16 +455,22 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	if root == "" {
 		root = at.Worktrees
 	}
-	places := workspace.Places{Root: root, Repositories: map[string]string{}, Folders: map[string]string{}}
-	repositories, folders := []string{}, []string{}
-	for name, repository := range configuration.Repositories {
-		places.Repositories[name] = repository.Path
-		repositories = append(repositories, name)
+	// The places a pass makes workspaces in and offers: the configured ones and the trusted repositories beside them.
+	placesOf := func() (workspace.Places, []string, []string) {
+		offered := withTrusted(configuration)
+		places := workspace.Places{Root: root, Repositories: map[string]string{}, Folders: map[string]string{}, Clone: clones.WhenMissing, ClonedPath: clones.ClonedPath}
+		repositories, folders := []string{}, []string{}
+		for name, repository := range offered.Repositories {
+			places.Repositories[name] = repository.Path
+			repositories = append(repositories, name)
+		}
+		for name, folder := range offered.Folders {
+			places.Folders[name] = folder.Path
+			folders = append(folders, name)
+		}
+		return places, repositories, folders
 	}
-	for name, folder := range configuration.Folders {
-		places.Folders[name] = folder.Path
-		folders = append(folders, name)
-	}
+	places, repositories, folders := placesOf()
 	logins := keys.Logins{Configured: configuration.Logins, States: keys.States{Keys: at.Keys, File: modelproxy.FilesOf(at.Proxy).KeyStates}, Subscriptions: map[string]keys.Subscription{
 		// What each harness reads itself, checked before a session starts on its subscription (api keys K6).
 		"claude-code": claudecode.Subscription{Settings: configuration.Harnesses["claude-code"], Managed: claudecode.ManagedSettings(), User: claudecode.UserSettings(home, env["CLAUDE_CONFIG_DIR"])},
@@ -445,24 +507,55 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		// The machine's memory and disk, read each minute; argo is told once when one is low (#400).
 		Load: load,
 	}
+	// What each harness trusts is read from its own files at each report (#381).
+	trustReaders := map[string]func() map[string]bool{
+		"claude-code": claudecode.Of(home, env["CLAUDE_CONFIG_DIR"]).TrustedFolders,
+		"codex":       func() map[string]bool { return codex.TrustedFolders(codex.HomeOf(home, env["CODEX_HOME"])) },
+		"copilot":     func() map[string]bool { return trust.Everything(withTrusted(configuration))() },
+	}
 	reporter := &selfreport.Reporter{
 		Fleet:    client,
 		Store:    pass.Store,
 		Sessions: running,
 		// The pass reads the load first; the report takes the one it read.
 		Load: load,
+		// The harnesses' usage, each part read on its own interval (#353).
+		Usage: usageOf(configured, env, home, pass.Store),
 		Input: func() selfreport.Input {
 			offered, detected := offers.current()
-			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH}
+			offered = withTrusted(offered)
+			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Trusted: trust.Of(offered, trustReaders), Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH}
 		},
 	}
 	// Each pass ends with the trierarch's own report: the first at start, then only when it changed.
 	return func(isKeyCutOff bool) error {
-		if err := pass.Run(); err != nil {
+		ask.Once()
+		current := pass
+		current.Workspace, current.Repositories, current.Folders = placesOf()
+		if err := current.Run(); err != nil {
 			return err
 		}
 		return reporter.Report(isKeyCutOff)
 	}, nil
+}
+
+// usageOf reads the usage of the configured harnesses: Claude Code's from its projects folder and a short turn, Codex's from its session logs in CODEX_HOME, or in ~/.codex.
+func usageOf(configured config.Configuration, env map[string]string, home string, store usage.Store) *usage.Reader {
+	return &usage.Reader{
+		Harnesses: map[string]usage.Harness{
+			"claude-code": &claudecode.Usage{Projects: claudecode.Projects(home, env["CLAUDE_CONFIG_DIR"]), MadeAt: usage.FolderMadeAt, Run: detection.Run, NeutralFolder: detection.NeutralFolder},
+			"codex":       &codex.Usage{Sessions: filepath.Join(codex.HomeOf(home, env["CODEX_HOME"]), "sessions"), MadeAt: usage.FolderMadeAt},
+		},
+		// Each configured harness's subscription, in the adapters' order, the order init writes them in.
+		Configured: slices.DeleteFunc(slices.Clone(adapters), func(name string) bool {
+			_, ok := configured.Harnesses[name]
+			return !ok
+		}),
+		Store:  store,
+		Prices: usage.PricesOf(configured.Prices),
+		Now:    time.Now,
+		Log:    logLine,
+	}
 }
 
 // detectionOf is detection of this machine's harnesses, kept in detected.json, telling the operator what it kept as before with warn.
@@ -535,6 +628,13 @@ func (o *offers) version(harness string) string {
 	return o.detected[harness].Version
 }
 
+// permissionModes are the permission modes the harness lists as detection found them; none when it found none.
+func (o *offers) permissionModes(harness string) []string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.detected[harness].PermissionModes
+}
+
 // options are, by harness, each option it offers now and its value names in order.
 func (o *offers) options() map[string]map[string][]string {
 	o.mu.Lock()
@@ -580,8 +680,12 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 				Settings:   settings,
 				Projects:   claudecode.Projects(home, env["CLAUDE_CONFIG_DIR"]),
 				Onboarding: claudecode.Of(home, env["CLAUDE_CONFIG_DIR"]),
-				Events:     events,
-				ProxyURL:   proxy.URL,
+				Managed:    claudecode.ManagedSettings(),
+				User:       claudecode.UserSettings(home, env["CLAUDE_CONFIG_DIR"]),
+				// As detection last found them: none before it found any.
+				PermissionModes: func() []string { return offers.permissionModes("claude-code") },
+				Events:          events,
+				ProxyURL:        proxy.URL,
 			}
 		case "codex":
 			found, err := plugin.FindCodex(home, env)

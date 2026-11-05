@@ -34,3 +34,12 @@ func parentOf(pid int) int {
 	}
 	return parent
 }
+
+// sessionOf is the process's session as getsid says it; 0 when it is gone.
+func sessionOf(pid int) int {
+	session, err := syscall.Getsid(pid)
+	if err != nil {
+		return 0
+	}
+	return session
+}

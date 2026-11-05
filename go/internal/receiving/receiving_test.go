@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
 )
 
 const argo = "shp_01m6jyczpnpp5c0vxh54c966cy"
@@ -180,5 +182,109 @@ func TestAFailureThatComesWithTheStopIsNotLoggedAndEndsTheLoop(t *testing.T) {
 
 	if len(ran.logged) != 0 || len(ran.waits) != 0 {
 		t.Fatalf("logged %q, waited %v", ran.logged, ran.waits)
+	}
+}
+
+const plugin = "shp_01m6jyczpnpp5c0vxh54c966cz"
+
+// aKeeper keeps what it is given, or fails to.
+type aKeeper struct {
+	kept []trusted.Repository
+	err  error
+	took int
+}
+
+func (k *aKeeper) Accept(list []trusted.Repository) error {
+	k.took++
+	if k.err != nil {
+		return k.err
+	}
+	k.kept = list
+	return nil
+}
+
+// runKeeping runs the loop of a machine that knows the plugin's ship (when pluginShip is set) and keeps the trusted repositories.
+func runKeeping(keeper *aKeeper, pluginShip string, answers ...answer) *aRun {
+	ctx, cancel := context.WithCancel(context.Background())
+	ran := &aRun{ship: &aShip{cancel: cancel, answers: answers}}
+	Loop{
+		Ship:         ran.ship,
+		Log:          func(line string) { ran.logged = append(ran.logged, line) },
+		Interval:     5 * time.Second,
+		KeyWaitMax:   300 * time.Second,
+		Pause:        func(_ context.Context, wait time.Duration) { ran.waits = append(ran.waits, wait) },
+		PluginShipID: pluginShip,
+		Trusted:      keeper,
+	}.Run(ctx)
+	return ran
+}
+
+func aList(from string, id string, payload string) Delivery {
+	return Delivery{DeliveryID: id, SenderShipID: from, ContentType: trusted.ListContentType, Payload: payload}
+}
+
+const hemma = `{"repositories":[{"name":"hemma","url":"git@github.com:a/hemma.git"}]}`
+
+func TestTheListFromThePluginsShipIsKeptAndAcknowledged(t *testing.T) {
+	keeper := &aKeeper{}
+
+	ran := runKeeping(keeper, plugin, answer{deliveries: []Delivery{aList(plugin, "d1", hemma)}})
+
+	if len(keeper.kept) != 1 || keeper.kept[0].Name != "hemma" || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 0 {
+		t.Fatalf("kept %v, acked %v, logged %q", keeper.kept, ran.ship.acked, ran.logged)
+	}
+}
+
+func TestAnEmptyListFromThePluginsShipIsKept(t *testing.T) {
+	keeper := &aKeeper{kept: []trusted.Repository{{Name: "hemma", URL: "git@github.com:a/hemma.git"}}}
+
+	runKeeping(keeper, plugin, answer{deliveries: []Delivery{aList(plugin, "d1", `{"repositories":[]}`)}})
+
+	if keeper.took != 1 || len(keeper.kept) != 0 {
+		t.Fatalf("kept %v after %d takes", keeper.kept, keeper.took)
+	}
+}
+
+func TestAListFromAnotherShipIsAcknowledgedLoggedAsNotHandledAndNotKept(t *testing.T) {
+	keeper := &aKeeper{}
+
+	ran := runKeeping(keeper, plugin, answer{deliveries: []Delivery{aList(argo, "d1", hemma)}})
+
+	want := "Not handled: trusted repositories from " + argo + ". The trierarch takes them only from the trierarch plugin's ship " + plugin + "."
+	if keeper.took != 0 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || ran.logged[0] != want {
+		t.Fatalf("took %d, acked %v, logged %q", keeper.took, ran.ship.acked, ran.logged)
+	}
+}
+
+func TestAListOnAMachineThatDoesNotKnowThePluginsShipIsAcknowledgedAndNotKept(t *testing.T) {
+	keeper := &aKeeper{}
+
+	ran := runKeeping(keeper, "", answer{deliveries: []Delivery{aList(plugin, "d1", hemma)}})
+
+	want := "Not handled: trusted repositories from " + plugin + ". This machine does not know the trierarch plugin's ship: run aeolus-trierarch init --plugin-ship-id <its ship id>."
+	if keeper.took != 0 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || ran.logged[0] != want {
+		t.Fatalf("took %d, acked %v, logged %q", keeper.took, ran.ship.acked, ran.logged)
+	}
+}
+
+func TestAListThatDoesNotFitIsAcknowledgedAndTheHeldListStays(t *testing.T) {
+	held := []trusted.Repository{{Name: "hemma", URL: "git@github.com:a/hemma.git"}}
+	keeper := &aKeeper{kept: held}
+
+	ran := runKeeping(keeper, plugin, answer{deliveries: []Delivery{aList(plugin, "d1", `{"repositories":[{"name":"hemma","url":"https://token@github.com/a/hemma.git"}]}`)}})
+
+	want := "Not handled: trusted repositories that do not fit (hemma: a trusted repository is an https:// or ssh URL, never a path, a file URL or a credential). The trierarch keeps the list it holds."
+	if keeper.took != 0 || len(keeper.kept) != 1 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || ran.logged[0] != want {
+		t.Fatalf("took %d, kept %v, acked %v, logged %q", keeper.took, keeper.kept, ran.ship.acked, ran.logged)
+	}
+}
+
+func TestAListThatCannotBeKeptIsNotAcknowledgedSoItComesAgain(t *testing.T) {
+	keeper := &aKeeper{err: errors.New("Claude Code's file cannot be written")}
+
+	ran := runKeeping(keeper, plugin, answer{deliveries: []Delivery{aList(plugin, "d1", hemma)}})
+
+	if len(ran.ship.acked) != 0 || !slices.Contains(ran.logged, "The loop failed and goes on: Claude Code's file cannot be written") {
+		t.Fatalf("acked %v, logged %q", ran.ship.acked, ran.logged)
 	}
 }
