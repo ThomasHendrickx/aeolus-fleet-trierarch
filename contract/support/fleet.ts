@@ -19,6 +19,8 @@ export interface Fleet {
   commission(name: string, at?: { owner?: ShipId; scopes?: readonly string[] }): Promise<ShipId>;
   /** Requests a crew for the ship in a worktree of the repository, with the harness and the options given, and assigns it to the machine's trierarch. */
   crewInWorktree(shipId: ShipId, at: { repository: string; harness: string; options?: Readonly<Record<string, string>> }): Promise<void>;
+  /** Requests a crew for the ship in the configured folder, with the harness given, and assigns it to the machine's trierarch. */
+  crewInFolder(shipId: ShipId, at: { folder: string; harness: string }): Promise<void>;
   /** Removes the ship's crew request: its lease ends. */
   removeCrewRequest(shipId: ShipId): Promise<void>;
   /** Ends the ship's lease under its session while its crew request stands, as the console's Re-crew does. */
@@ -89,6 +91,10 @@ export async function aFleet(): Promise<Fleet> {
     },
     crewInWorktree: async (shipId, { repository, harness, options = {} }) => {
       unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness, workspace: { kind: 'worktree', repository }, options } }));
+      unwrap(await useCases.assignCrew(argo, { shipId, trierarchShipId: trierarchShip.shipId }));
+    },
+    crewInFolder: async (shipId, { folder, harness }) => {
+      unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness, workspace: { kind: 'folder', name: folder }, options: {} } }));
       unwrap(await useCases.assignCrew(argo, { shipId, trierarchShipId: trierarchShip.shipId }));
     },
     removeCrewRequest: async (shipId) => {

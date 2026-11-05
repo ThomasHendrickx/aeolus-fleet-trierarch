@@ -1,6 +1,7 @@
 package reconciler
 
 import (
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"reflect"
 	"testing"
 	"time"
@@ -31,12 +32,15 @@ func anEntry(shipID string, state string) Entry {
 
 func aContext(requests ...Request) Context {
 	return Context{
-		Requests:     requests,
-		Now:          now,
-		Harnesses:    []string{"claude-code"},
-		Repositories: []string{"aeolus-fleet"},
-		RunningCap:   2,
-		Observed:     Observed{Launches: map[string]LaunchSeen{}},
+		Requests:      requests,
+		Now:           now,
+		Harnesses:     []string{"claude-code"},
+		Repositories:  []string{"aeolus-fleet"},
+		Folders:       []string{"notes"},
+		Trusted:       map[string]Trust{"claude-code": {Repositories: []string{"aeolus-fleet"}, Folders: []string{"notes"}}},
+		Configuration: map[string]config.Harness{"claude-code": {Flags: []string{}, Options: map[string]config.Option{}}},
+		RunningCap:    2,
+		Observed:      Observed{Launches: map[string]LaunchSeen{}},
 	}
 }
 
@@ -110,7 +114,7 @@ func TestARequestForAHarnessNotOfferedIsGivenBackWithWhy(t *testing.T) {
 
 	next, actions := Reconcile(Empty(), aContext(request))
 
-	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "harness: codex is not offered on this machine"})
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "harness: This trierarch offers no harness codex"})
 	if len(next.Entries) != 0 {
 		t.Fatalf("entries: %+v", next.Entries)
 	}
@@ -139,7 +143,7 @@ func TestARequestRefusedAtAnEarlierVersionIsGivenBackAtItsNewVersion(t *testing.
 
 	_, actions := Reconcile(state, aContext(request))
 
-	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 2, Reason: "harness: codex is not offered on this machine"})
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 2, Reason: "harness: This trierarch offers no harness codex"})
 }
 
 func TestARefusalIsForgottenOnceTheRequestIsNoLongerAssigned(t *testing.T) {
@@ -159,7 +163,7 @@ func TestARequestInARepositoryNotConfiguredIsGivenBackWithWhy(t *testing.T) {
 
 	_, actions := Reconcile(Empty(), aContext(request))
 
-	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "workspace.repository: website is not configured on this machine"})
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "workspace.repository: This trierarch offers no repository website"})
 }
 
 func TestARequestWithoutAHarnessTakesTheFirstOffered(t *testing.T) {
