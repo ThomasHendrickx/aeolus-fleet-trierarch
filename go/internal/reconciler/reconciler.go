@@ -200,6 +200,12 @@ type Context struct {
 	Configuration map[string]config.Harness
 	// Trusted is, by harness, what it trusts; a harness missing trusts nothing (#381).
 	Trusted map[string]Trust
+	// MarksLaunches is, by harness, whether its aeolus-fleet plugin keeps launch markers (#490); a harness missing from it is in MissingPlugins.
+	MarksLaunches map[string]bool
+	// MissingPlugins are the harnesses whose plugin could not be found, so it is not known what it marks (#1212).
+	MissingPlugins []string
+	// NotOffered is, by harness, why the machine does not offer it now (CC3, CC10).
+	NotOffered map[string]string
 }
 
 // Trust is what a harness trusts, read from its own files: the names of the repositories and folders, and the flags it still asks to accept before a session starts with them (#403).
@@ -432,7 +438,24 @@ func check(settings Settings, shipID string, state State, context Context) (stri
 	if flag := unacceptedFlag(harness, options, context); flag != "" {
 		return "", nil, fmt.Sprintf("harness: %s still asks to accept %s: accept it with aeolus-trierarch init", harness, flag)
 	}
+	if reason := launchMarkerRefusal(harness, context); reason != "" {
+		return "", nil, reason
+	}
 	return harness, options, ""
+}
+
+// launchMarkerRefusal is why the harness may not start a session: the machine does not offer it (CC3, CC10), its plugin could not be found (#1212), or it is older than the launch marker (#490), so the launch window could see nothing of the session. Upgrade updates the plugin, so the reason says to run it.
+func launchMarkerRefusal(harness string, context Context) string {
+	if why, ok := context.NotOffered[harness]; ok {
+		return fmt.Sprintf("harness: %s is not offered: %s", harness, why)
+	}
+	if slices.Contains(context.MissingPlugins, harness) {
+		return fmt.Sprintf("harness: %s's aeolus-fleet plugin is not installed: run aeolus-trierarch upgrade", harness)
+	}
+	if marks, ok := context.MarksLaunches[harness]; ok && !marks {
+		return fmt.Sprintf("harness: %s's aeolus-fleet plugin marks no launches: run aeolus-trierarch upgrade", harness)
+	}
+	return ""
 }
 
 // unacceptedFlag is the first flag the harness would launch with that it still asks to accept, or none (#403).
