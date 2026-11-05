@@ -389,13 +389,14 @@ func TestAGivenBackReasonIsCutToWhatTheFleetTakes(t *testing.T) {
 
 func TestAGiveBackTheFleetRefusesIsRefusedInsteadAndArgoIsToldOnce(t *testing.T) {
 	pass := aRunPass(t)
-	pass.harness.problem = errors.New("the aeolus-fleet plugin's scripts are not at /plugin/scripts")
 	pass.fleet.refuseGiveBack = &fleet.Refusal{Code: "CONFLICT", Message: "The crew is final"}
-	pass.fleet.requests = []reconciler.Request{aRequest("")}
+	request := aRequest("")
+	request.Settings.Harness = "codex"
+	pass.fleet.requests = []reconciler.Request{request}
 
 	pass.run(t)
 
-	want := []told{{to: "argo", key: "trierarch:refused:" + scout + ":1", text: notices.SettingsRefused(notices.Ship{ID: scout, Name: "scout"}, 1, "the aeolus-fleet plugin's scripts are not at /plugin/scripts")}}
+	want := []told{{to: "argo", key: "trierarch:refused:" + scout + ":1", text: notices.SettingsRefused(notices.Ship{ID: scout, Name: "scout"}, 1, "harness: codex is not offered on this machine")}}
 	if !reflect.DeepEqual(pass.fleet.told, want) {
 		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
 	}

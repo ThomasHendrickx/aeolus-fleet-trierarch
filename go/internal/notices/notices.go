@@ -181,6 +181,12 @@ func ModelRefused(ship Ship, harness string, version string, model string) strin
 	return Message(fmt.Sprintf("%s refused the model %s for %s", harness, model, ship.nameOf()), paragraphs(facts, "This machine offers the model no more at this version, until `aeolus-trierarch detect` runs by hand."))
 }
 
+// SettingsRefused is what argo is told when the trierarch cannot crew a ship's settings and the fleet refused to take the request back.
+func SettingsRefused(ship Ship, settingsVersion int, why string) string {
+	facts := strings.Join([]string{ship.fact(), fmt.Sprintf("- Settings version: %d", settingsVersion), "- Why: " + why}, "\n")
+	return Message("Cannot crew "+ship.nameOf()+" with its settings", facts)
+}
+
 // IdentityGone is what argo is told when a running, restarting or crashed ship's folder holds no identity.
 func IdentityGone(ship Ship) string {
 	return Message(ship.nameOf()+" is no longer woken: its folder holds no identity", paragraphs(ship.fact(), "The trierarch can no longer report on its behalf, watch its inbox or wake it. Restart it in the console to crew it again."))

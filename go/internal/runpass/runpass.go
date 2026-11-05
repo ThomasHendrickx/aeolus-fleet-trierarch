@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
@@ -28,7 +29,10 @@ type Fleet interface {
 	Release(shipID string) error
 	ConfirmRelease(shipID string) error
 	WriteStatus(shipID string, status string, attempt int, startedAt string) error
-	GiveBack(shipID string, settingsVersion int, reason string) error
+	// GiveBack gives a request back; the fleet's refusal is answered, not failed.
+	GiveBack(shipID string, settingsVersion int, reason string) (*fleet.Refusal, error)
+	// Name is the trierarch's own ship's name.
+	Name() (string, error)
 	ReportFor(crewToken string, state string, note string) error
 	Inbox(crewToken string) (reconciler.Inbox, error)
 	// ReportToArgo tells argo; a key makes a retry safe.
@@ -557,11 +561,53 @@ func (p Pass) giveBack(state reconciler.State, shipID string, settingsVersion in
 			return state, err
 		}
 	}
-	if err := p.Fleet.GiveBack(shipID, settingsVersion, reason); err != nil {
+	name, err := p.Fleet.Name()
+	if err != nil {
 		return state, err
 	}
-	p.Log(fmt.Sprintf("%s: given back, %s", shipID, reason))
+	given := cutToUTF16(name+": "+reason, reasonMaxLength)
+	refusal, err := p.Fleet.GiveBack(shipID, settingsVersion, given)
+	if err != nil {
+		return state, err
+	}
+	if refusal != nil {
+		p.Log(fmt.Sprintf("The fleet refused to take back the crew request of %s: %s: %s", shipID, refusal.Code, refusal.Message))
+		return p.refuse(state, shipID, settingsVersion, reason)
+	}
+	p.Log(fmt.Sprintf("%s: given back, %s", shipID, given))
 	return state, nil
+}
+
+// reasonMaxLength is how long a given-back reason may be, in the UTF-16 units a JavaScript string counts them in, as the fleet counts them.
+const reasonMaxLength = 200
+
+// cutToUTF16 cuts text to at most length UTF-16 units, as today's trierarch cuts it with slice.
+func cutToUTF16(text string, length int) string {
+	units := utf16.Encode([]rune(text))
+	if len(units) <= length {
+		return text
+	}
+	return string(utf16.Decode(units[:length]))
+}
+
+// refuse keeps a request the trierarch cannot crew, and the fleet will not take back, as refused at its settings version, and tells its ship's owner once.
+func (p Pass) refuse(state reconciler.State, shipID string, settingsVersion int, why string) (reconciler.State, error) {
+	ship, err := p.Fleet.Ship(shipID)
+	if err != nil {
+		return state, err
+	}
+	named := notices.Ship{ID: shipID, Name: ship.Name}
+	key := fmt.Sprintf("trierarch:refused:%s:%d", shipID, settingsVersion)
+	if _, err := p.reportTrouble(named, key, func(bool) string { return notices.SettingsRefused(named, settingsVersion, why) }); err != nil {
+		return state, err
+	}
+	state.Refused = maps.Clone(state.Refused)
+	if state.Refused == nil {
+		state.Refused = map[string]int{}
+	}
+	state.Refused[shipID] = settingsVersion
+	p.Log(fmt.Sprintf("Cannot crew %s (%s), settings version %d: %s", nameOfShip(named), shipID, settingsVersion, why))
+	return state, p.Store.Save(state)
 }
 
 // handOver hands a message over to the entry's session, forced or not.

@@ -284,7 +284,14 @@ func Reconcile(state State, context Context) (State, []Action) {
 	for _, request := range context.Requests {
 		requested[request.ShipID] = request
 	}
-	next := State{Entries: map[string]Entry{}, Kept: state.Kept, Orphans: state.Orphans, Refused: state.Refused, KeysTold: state.KeysTold}
+	// A refusal is kept only while its request is assigned here.
+	refused := map[string]int{}
+	for shipID, version := range state.Refused {
+		if _, ok := requested[shipID]; ok {
+			refused[shipID] = version
+		}
+	}
+	next := State{Entries: map[string]Entry{}, Kept: state.Kept, Orphans: state.Orphans, Refused: refused, KeysTold: state.KeysTold}
 	actions := []Action{}
 	runningSessions := 0
 	for _, session := range context.Observed.Sessions {
@@ -340,7 +347,7 @@ func Reconcile(state State, context Context) (State, []Action) {
 		}
 		harness, options, reason := check(request.Settings, context)
 		if reason != "" {
-			if !request.IsFinal {
+			if !request.IsFinal && refused[request.ShipID] != request.SettingsVersion {
 				actions = append(actions, Action{Kind: GiveBack, ShipID: request.ShipID, SettingsVersion: request.SettingsVersion, Reason: reason})
 			}
 			continue
