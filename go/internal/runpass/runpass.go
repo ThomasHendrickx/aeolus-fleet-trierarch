@@ -15,6 +15,8 @@ import (
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/activity"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/failedstarts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
@@ -143,6 +145,8 @@ type Pass struct {
 	Repositories []string
 	Folders      []string
 	RunningCap   int
+	// ConfigurationFile is the configuration as its file gives it, as the failed starts keep it: another one than the machine stopped offering itself with offers it again (#853).
+	ConfigurationFile string
 	// Logins are each session's login; every session starts on its subscription without.
 	Logins Logins
 	// Proxy runs while any harness in Keys holds a key; none is kept without.
@@ -152,6 +156,10 @@ type Pass struct {
 	VersionOf func(harness string) string
 	// Offers are, by harness, each option it offers now and its value names in order, read each pass: a model a session refused is offered no more (#382).
 	Offers func() map[string]map[string][]string
+	// Configuration is each offered harness as configured and detected, read each pass: the flags a session launches with.
+	Configuration func() map[string]config.Harness
+	// Trusted is, by harness, what it trusts, read each pass from its own files (#381, #403).
+	Trusted func() map[string]reconciler.Trust
 	// RefuseModel keeps a model a session refused as refused for its harness's detected version.
 	RefuseModel func(harness string, model string) error
 	// SendReleasedUsage sends a released ship's last usage before its folder goes (the usage design, U9); it fails while the fleet does not take it, so the folder stays. None sends nothing.
@@ -282,6 +290,9 @@ func (p Pass) crewFailed(held reconciler.State, shipID string, failure error) re
 	}
 	logged := fmt.Sprintf("%s (%s): crew failed: %v; ", nameOf(entry), shipID, failure)
 	entry.CrewFailures++
+	// Every failed crew is a failed start of the machine's too (#853).
+	counted, isNewlyStopped := failedstarts.Count(failedstarts.WithConfiguration(state.FailedStarts, p.ConfigurationFile), failedstarts.Outcome{ShipID: shipID, Reason: failure.Error()}, p.Now(), p.ConfigurationFile)
+	state.FailedStarts = counted
 	if entry.CrewFailures < reconciler.CrewFailureBudget {
 		p.Log(logged + nextAfterFailure)
 		next, err := p.put(state, entry)
@@ -289,9 +300,17 @@ func (p Pass) crewFailed(held reconciler.State, shipID string, failure error) re
 			p.Log(fmt.Sprintf("%s (%s): the failed crew was not counted: %v", nameOf(entry), shipID, err))
 			return state
 		}
+		if isNewlyStopped {
+			p.tellStopped(counted)
+		}
 		return next
 	}
 	p.Log(fmt.Sprintf("%sfailed %d times in a row, so the trierarch gives it back", logged, reconciler.CrewFailureBudget))
+	if err := p.Store.Save(state); err != nil {
+		p.Log(fmt.Sprintf("%s (%s): the failed crew was not counted: %v", nameOf(entry), shipID, err))
+	} else if isNewlyStopped {
+		p.tellStopped(counted)
+	}
 	given := fmt.Sprintf("crew failed %d times: %v", reconciler.CrewFailureBudget, failure)
 	next, err := p.giveBack(state, shipID, entry.SettingsVersion, given, &entry)
 	if err != nil {
@@ -303,7 +322,7 @@ func (p Pass) crewFailed(held reconciler.State, shipID string, failure error) re
 
 // isNotice is whether an action only tells argo or an owner something.
 func isNotice(kind reconciler.ActionKind) bool {
-	return kind == reconciler.ModelRefused || kind == reconciler.IdentityGone || kind == reconciler.Crashed
+	return kind == reconciler.ModelRefused || kind == reconciler.IdentityGone || kind == reconciler.Crashed || kind == reconciler.StoppedOffering
 }
 
 // observe is what runs: the sessions, what each in its launch window did, and for each entry whose session runs its inbox and turn. An inbox is watched only while its session runs, a crewing one from the moment its session runs (#473); its socket is opened again, as after the trierarch stopped, since its session keeps running and calls over it (decision 0026).
@@ -452,6 +471,9 @@ func (p Pass) carryOut(state reconciler.State, action reconciler.Action) (reconc
 		return state, p.identityGone(action)
 	case reconciler.Crashed:
 		return state, p.crashed(action)
+	case reconciler.StoppedOffering:
+		p.tellStopped(action.FailedStarts)
+		return state, nil
 	case reconciler.Wake, reconciler.Force:
 		if !isEntry || entry.Folder == "" {
 			return state, nil
@@ -812,6 +834,17 @@ func (p Pass) identityGone(action reconciler.Action) error {
 	return nil
 }
 
+// tellStopped tells argo, once per stop, that the machine stopped offering itself, with the first reason (#853); a failure to tell is logged, and the pass goes on.
+func (p Pass) tellStopped(starts *failedstarts.Starts) {
+	if starts == nil || starts.Stopped == nil {
+		return
+	}
+	p.Log(fmt.Sprintf("The machine stops offering itself: the starts of %d ships failed in a row, first: %s; it offers itself again %d minutes after its last failed start", len(starts.ShipIDs), starts.Reason, int(failedstarts.ProbeAfter.Minutes())))
+	if err := p.Fleet.ReportToArgo(notices.StoppedOffering(len(starts.ShipIDs), starts.Reason), "trierarch:stopped-offering:"+starts.Stopped.Since); err != nil {
+		p.Log(fmt.Sprintf("Could not tell argo the machine stopped offering itself: %v", err))
+	}
+}
+
 // isoMillis is a time as today's trierarch writes it in a key, to the millisecond in UTC.
 const isoMillis = "2006-01-02T15:04:05.000Z"
 
@@ -934,7 +967,7 @@ func (p Pass) reconcile(state reconciler.State) (reconciler.State, []reconciler.
 		return state, nil, err
 	}
 	now := p.Now()
-	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers()})
+	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers(), Configuration: p.Configuration(), Trusted: p.Trusted(), ConfigurationFile: p.ConfigurationFile})
 	next.PassFailure = nil
 	if err := p.Store.Save(next); err != nil {
 		return state, nil, err

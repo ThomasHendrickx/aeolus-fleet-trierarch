@@ -47,6 +47,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/peer"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/receiving"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/release"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/runpass"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/selfreport"
@@ -519,23 +520,29 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	opened = shipSockets(at, kept.FleetURL, running, checked)
 	load := &machineload.Reader{Source: machineload.System{WorktreeRoot: root}, Now: time.Now, Log: logLine}
 	saved := state.File{Path: at.State}
+	// The configuration as its file gives it, as the failed starts keep it: another one than the machine stopped offering itself with offers it again (#853).
+	configurationText, err := json.Marshal(configured)
+	if err != nil {
+		return nil, err
+	}
 	pass := runpass.Pass{
-		Fleet:        client,
-		Sessions:     running,
-		Harnesses:    harnesses,
-		Workspace:    places,
-		Checkouts:    checked,
-		Store:        saved,
-		Log:          logLine,
-		Now:          time.Now,
-		NewLaunchID:  newLaunchID,
-		FleetURL:     kept.FleetURL,
-		Sockets:      opened,
-		Offered:      offeredHarnesses,
-		Repositories: repositories,
-		Folders:      folders,
-		RunningCap:   configuration.Caps.Running,
-		Logins:       logins,
+		Fleet:             client,
+		Sessions:          running,
+		Harnesses:         harnesses,
+		Workspace:         places,
+		Checkouts:         checked,
+		Store:             saved,
+		Log:               logLine,
+		Now:               time.Now,
+		NewLaunchID:       newLaunchID,
+		FleetURL:          kept.FleetURL,
+		Sockets:           opened,
+		Offered:           offeredHarnesses,
+		Repositories:      repositories,
+		Folders:           folders,
+		RunningCap:        configuration.Caps.Running,
+		ConfigurationFile: string(configurationText),
+		Logins:            logins,
 		// The model proxy runs while any harness holds an API key (headless H16); a pass starts it again when it is gone.
 		Proxy: proxy,
 		Keys:  keys.Files{Folder: at.Keys},
@@ -555,6 +562,24 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		"codex":       func() map[string]bool { return codex.TrustedFolders(codex.HomeOf(home, env["CODEX_HOME"])) },
 		"copilot":     func() map[string]bool { return trust.Everything(withTrusted(configuration))() },
 	}
+	// The harnesses as offered now, and what each trusts and still asks to accept, are read at each pass (#381, #403).
+	pass.Configuration = func() map[string]config.Harness {
+		offered, _ := offers.current()
+		return offered.Harnesses
+	}
+	pass.Trusted = func() map[string]reconciler.Trust {
+		offered, _ := offers.current()
+		trusted := map[string]reconciler.Trust{}
+		for harness, places := range trust.Of(withTrusted(offered), trustReaders) {
+			trusted[harness] = reconciler.Trust{Repositories: places.Repositories, Folders: places.Folders}
+		}
+		if claudeCode, ok := trusted["claude-code"]; ok && !claudecode.IsSkipPermissionsAccepted(claudecode.UserSettings(home, env["CLAUDE_CONFIG_DIR"])) {
+			claudeCode.UnacceptedFlags = []string{"--dangerously-skip-permissions"}
+			trusted["claude-code"] = claudeCode
+		}
+		return trusted
+	}
+
 	read := usageOf(configured, env, home, homesOf(at, configured.Runtime), pass.Store)
 	// The usage goes to the trierarch plugin's ship once an hour, and a released ship's last usage before its folder goes.
 	sender := &usage.Sender{Harnesses: read.Harnesses, Reader: read, MadeAt: usage.FolderMadeAt, Store: saved, Fleet: client, Prices: read.Prices, Now: time.Now, Log: logLine, TrierarchShipID: kept.ShipID, PluginShipID: kept.PluginShipID}
@@ -570,7 +595,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Input: func() selfreport.Input {
 			offered, detected := offers.current()
 			offered = withTrusted(offered)
-			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Trusted: trust.Of(offered, trustReaders), Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH}
+			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Trusted: trust.Of(offered, trustReaders), Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, Now: time.Now()}
 		},
 	}
 	// Each pass ends with the trierarch's own report: the first at start, then only when it changed.

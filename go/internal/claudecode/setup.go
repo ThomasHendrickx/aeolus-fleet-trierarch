@@ -103,16 +103,6 @@ func (s Setup) CompleteOnboarding() error {
 // skipPermissionsAccepted is the key in Claude Code's user settings that says bypass permissions mode was accepted.
 const skipPermissionsAccepted = "skipDangerousModePermissionPrompt"
 
-// IsSkipPermissionsAccepted says whether the user settings file says bypass permissions mode was accepted.
-func IsSkipPermissionsAccepted(settings string) bool {
-	values, err := readObject(settings)
-	if err != nil {
-		return false
-	}
-	accepted, _ := values[skipPermissionsAccepted].(bool)
-	return accepted
-}
-
 // AcceptSkipPermissions accepts bypass permissions mode in the user settings file, keeping all else it holds.
 func AcceptSkipPermissions(settings string) error {
 	values, err := readObject(settings)
