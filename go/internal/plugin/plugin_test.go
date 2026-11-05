@@ -168,3 +168,41 @@ func TestNothingIsHandedOverWhenTheFleetGivesNothing(t *testing.T) {
 		}
 	}
 }
+
+// anOlderPlugin is a plugin whose identity script answers `launch` with its usage, as one older than the launch marker does.
+func anOlderPlugin(t *testing.T) Plugin {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/usr/bin/env bash\necho 'usage: aeolus-identity.sh write|show' >&2\nexit 2\n"
+	if err := os.WriteFile(filepath.Join(root, "scripts", "aeolus-identity.sh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return Plugin{Root: root, Data: t.TempDir(), Crews: t.TempDir()}
+}
+
+func TestAPluginMarksLaunchesWhenItKnowsTheLaunchCommand(t *testing.T) {
+	marks, err := thePlugin(t).MarksLaunches()
+
+	if err != nil || !marks {
+		t.Fatalf("MarksLaunches = %v, %v, want true", marks, err)
+	}
+}
+
+func TestAPluginOlderThanTheLaunchMarkerMarksNoLaunches(t *testing.T) {
+	marks, err := anOlderPlugin(t).MarksLaunches()
+
+	if err != nil || marks {
+		t.Fatalf("MarksLaunches = %v, %v, want false", marks, err)
+	}
+}
+
+func TestAPluginThatCannotBeFoundCannotSayWhetherItMarksLaunches(t *testing.T) {
+	plugin := Plugin{Root: t.TempDir(), Data: t.TempDir(), Crews: t.TempDir()}
+
+	if _, err := plugin.MarksLaunches(); err == nil {
+		t.Fatal("MarksLaunches had no error for a plugin that is not there")
+	}
+}
