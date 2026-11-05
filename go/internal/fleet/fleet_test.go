@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/activity"
 )
 
 const shipID = "shp_01m6jwb5xwnnezed207ddz58ep"
@@ -213,5 +216,61 @@ func TestAFleetThatRefusesTheUsageIsAnError(t *testing.T) {
 
 	if err := client.SendUsage("shp_plugin", "{}", "usage:key"); err == nil {
 		t.Error("SendUsage = nil, want the refusal")
+	}
+}
+
+func TestSessionsActivitiesAreWrittenToTheFleetWithTheIntervalTheTrierarchStates(t *testing.T) {
+	var asked map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/fleet/reportActivity" || r.Header.Get("Authorization") != "Bearer aeolus_ct_v1_trierarch" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&asked)
+		_, _ = w.Write([]byte(`{"refused":[]}`))
+	}))
+	defer server.Close()
+	at := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+
+	err := Client{URL: server.URL, CrewToken: "aeolus_ct_v1_trierarch"}.ReportActivity(30, []ShipActivity{
+		{ShipID: shipID, Activity: activity.Activity{At: at, Kind: "tool", Tool: "Bash"}},
+		{ShipID: "shp_other", Activity: activity.Activity{At: at, Kind: "result"}},
+	})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"intervalSeconds": 30, "activities": []any{
+		map[string]any{"shipId": shipID, "at": "2026-11-05T12:00:00.000Z", "kind": "tool", "tool": "Bash"},
+		map[string]any{"shipId": "shp_other", "at": "2026-11-05T12:00:00.000Z", "kind": "result"},
+	}}
+	if got, _ := json.Marshal(asked); string(got) != mustJSON(want) {
+		t.Errorf("asked %s, want %s", got, mustJSON(want))
+	}
+}
+
+func TestMoreThan100ActivitiesAreWrittenInCallsOfAtMost100(t *testing.T) {
+	var sizes []int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var asked struct {
+			Activities []any `json:"activities"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&asked)
+		sizes = append(sizes, len(asked.Activities))
+		_, _ = w.Write([]byte(`{"refused":[]}`))
+	}))
+	defer server.Close()
+	activities := make([]ShipActivity, 101)
+	for i := range activities {
+		activities[i] = ShipActivity{ShipID: shipID, Activity: activity.Activity{At: time.Now(), Kind: "text"}}
+	}
+
+	err := Client{URL: server.URL, CrewToken: "aeolus_ct_v1_trierarch"}.ReportActivity(30, activities)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sizes) != 2 || sizes[0] != 100 || sizes[1] != 1 {
+		t.Errorf("calls of %v activities, want [100 1]", sizes)
 	}
 }
