@@ -21,6 +21,11 @@
  * then exits 1; `--plugin <root> <data>` runs the aeolus-fleet plugin's hooks from
  * that root as Claude Code runs them: SessionStart, UserPromptSubmit (its
  * output added to the turn), a first tool call, Stop.
+ *
+ * A turn whose text or context holds `socket call: <base64url of JSON>`, the
+ * JSON `{ socket, method, path, body }`, makes that call over the socket as a
+ * session's curl does, the path as it is, and writes down the answer's status
+ * and body (`fake-socket-calls.jsonl`).
  */
 import { spawnSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
@@ -53,6 +58,23 @@ function hook(script: string, payload: Record<string, unknown>): string {
     encoding: 'utf8',
   });
   return ran.stdout;
+}
+
+const SOCKET_CALL = /socket call: ([A-Za-z0-9_-]+)/g;
+
+/** Makes each socket call the text names, as `curl --unix-socket` does, and writes down what it answered. */
+function callSockets(text: string): void {
+  for (const [, encoded = ''] of text.matchAll(SOCKET_CALL)) {
+    const call: unknown = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+    const field = (name: string): string => {
+      const value: unknown = typeof call === 'object' && call !== null ? Reflect.get(call, name) : undefined;
+      return typeof value === 'string' ? value : '';
+    };
+    const ran = spawnSync('curl', ['-sS', '--path-as-is', '-w', '\n%{http_code}', '-X', field('method'), '--unix-socket', field('socket'), '-H', 'content-type: application/json', '--data-binary', field('body'), `http://trierarch${field('path')}`], { encoding: 'utf8' });
+    const lines = ran.stdout.split('\n');
+    const status = Number(lines.pop());
+    appendFileSync('fake-socket-calls.jsonl', `${JSON.stringify({ path: field('path'), status, body: lines.join('\n') })}\n`);
+  }
 }
 
 let hasStarted = false;
@@ -95,6 +117,7 @@ function onUser(content: string): void {
   isBusy = true;
   const context = hook('aeolus-turn.sh', { hook_event_name: 'UserPromptSubmit', prompt: content });
   appendFileSync('fake-turns.jsonl', `${JSON.stringify({ prompt: content, context })}\n`);
+  callSockets(`${content}\n${context}`);
   if (!hasMadeToolCall) {
     hasMadeToolCall = true;
     hook('aeolus-launch.sh', { hook_event_name: 'PreToolUse', tool_name: 'Bash' });

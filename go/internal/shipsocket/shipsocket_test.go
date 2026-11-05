@@ -153,12 +153,48 @@ func TestTheShipProtocolIsForwarded(t *testing.T) {
 	}
 }
 
-func TestOnlyShipCallsGoToTheFleetNeverRegisterOrDeregister(t *testing.T) {
+func TestAFleetCallGoesToTheFleetWithTheShipsCrewToken(t *testing.T) {
+	fleet := aFleetAnswering(t, 200, "application/json", `{"shipId":"shp_1"}`)
+	token := "aeolus_ct_v1_scout"
+	socket := opened(t, someSockets(t, fleet.server.URL, &token, false))
+
+	response, body := post(t, socket, "/api/v1/fleet/commission", `{"name":"scout"}`)
+
+	if response.StatusCode != 200 || body != `{"shipId":"shp_1"}` {
+		t.Fatalf("answer = %d %q, want the fleet's 200 and body", response.StatusCode, body)
+	}
+	want := call{"POST", "/api/v1/fleet/commission", "Bearer aeolus_ct_v1_scout", "application/json", `{"name":"scout"}`}
+	if got := fleet.called(); len(got) != 1 || got[0] != want {
+		t.Fatalf("the fleet was called with %+v, want %+v", got, want)
+	}
+}
+
+func TestTheFleetsForbiddenForAMissingScopeComesBackUnchanged(t *testing.T) {
+	refusal := `{"code":"FORBIDDEN","message":"This ship lacks the scope fleet:commission"}`
+	fleet := aFleetAnswering(t, 403, "application/json", refusal)
+	token := "aeolus_ct_v1_scout"
+	socket := opened(t, someSockets(t, fleet.server.URL, &token, false))
+
+	response, body := post(t, socket, "/api/v1/fleet/commission", `{}`)
+
+	if response.StatusCode != 403 || body != refusal || response.Header.Get("Content-Type") != "application/json" {
+		t.Fatalf("answer = %d %s %q, want the fleet's 403 unchanged", response.StatusCode, response.Header.Get("Content-Type"), body)
+	}
+	if got := fleet.called(); len(got) != 1 {
+		t.Fatalf("the fleet was called %d times, want once", len(got))
+	}
+}
+
+func TestOnlyShipAndFleetCallsGoToTheFleetNeverRegisterOrDeregister(t *testing.T) {
 	fleet := aFleetAnswering(t, 200, "application/json", `{}`)
 	token := "aeolus_ct_v1_scout"
 	socket := opened(t, someSockets(t, fleet.server.URL, &token, false))
 
-	for _, path := range []string{"/api/v1/ship/register", "/api/v1/ship/deregister", "/api/v1/fleet/assignedCrewRequests", "/api/v1/ship/a/b", "/mcp"} {
+	for _, path := range []string{
+		"/api/v1/ship/register", "/api/v1/ship/deregister", "/api/v1/fleet/register", "/api/v1/fleet/deregister",
+		"/api/v1/console/list", "/api/v1/ship/a/b", "/api/v1/fleet/ship/release", "/mcp", "/trpc/ship.send", "/trpc/fleet.commission",
+		"/api/v1/ship/../../trpc/ship.send", "/api/v1/fleet/../ship/register",
+	} {
 		t.Run(path, func(t *testing.T) {
 			response, body := post(t, socket, path, `{}`)
 
@@ -188,6 +224,40 @@ func TestACallOverTheBoundIsRefusedAndTheExactBoundIsForwarded(t *testing.T) {
 	}
 	if got := fleet.called(); len(got) != 1 {
 		t.Fatalf("the fleet was called %d times, want once", len(got))
+	}
+}
+
+func TestAFleetCallOverTheBoundIsRefusedAndTheExactBoundIsForwarded(t *testing.T) {
+	fleet := aFleetAnswering(t, 200, "application/json", `{}`)
+	token := "aeolus_ct_v1_scout"
+	socket := opened(t, someSockets(t, fleet.server.URL, &token, false))
+
+	atBound, _ := post(t, socket, "/api/v1/fleet/commission", string(bytes.Repeat([]byte("a"), 320*1024)))
+	overBound, body := post(t, socket, "/api/v1/fleet/commission", string(bytes.Repeat([]byte("a"), 320*1024+1)))
+
+	if atBound.StatusCode != 200 {
+		t.Fatalf("a fleet call of exactly 320 KiB = %d, want 200", atBound.StatusCode)
+	}
+	if overBound.StatusCode != 413 || !strings.Contains(body, `"code":"PAYLOAD_TOO_LARGE"`) {
+		t.Fatalf("a fleet call one byte over = %d %s, want 413 PAYLOAD_TOO_LARGE", overBound.StatusCode, body)
+	}
+	if got := fleet.called(); len(got) != 1 {
+		t.Fatalf("the fleet was called %d times, want once", len(got))
+	}
+}
+
+func TestACallerTheSocketMayNotAnswerIsRefusedAFleetCallToo(t *testing.T) {
+	fleet := aFleetAnswering(t, 200, "application/json", `{}`)
+	token := "aeolus_ct_v1_scout"
+	socket := opened(t, someSockets(t, fleet.server.URL, &token, true))
+
+	response, body := post(t, socket, "/api/v1/fleet/commission", `{}`)
+
+	if response.StatusCode != 403 || !strings.Contains(body, "only its ship's own session") {
+		t.Fatalf("answer = %d %s, want 403 for a caller of another session", response.StatusCode, body)
+	}
+	if got := fleet.called(); len(got) != 0 {
+		t.Fatalf("the fleet was called with %+v, want none", got)
 	}
 }
 

@@ -176,6 +176,22 @@ describe('a call over the socket', () => {
     expect(calls.map((call) => call.authorization)).toEqual([`Bearer ${CREW_TOKEN}`, 'Bearer aeolus_ct_v1_of_the_next_crew']);
   });
 
+  it("goes to the fleet API with the ship's crew token as the bearer, its method, path, content type and body unchanged", async () => {
+    const socket = await sockets.open(shipId);
+    const body = '{"idempotencyKey":"k-2","name":"scout","type":"reviewer"}';
+
+    await callOver(socket, { method: 'POST', path: '/api/v1/fleet/commission', body });
+
+    expect(calls).toEqual([{ method: 'POST', path: '/api/v1/fleet/commission', authorization: `Bearer ${CREW_TOKEN}`, contentType: 'application/json', body }]);
+  });
+
+  it("hands back the fleet's 403 for a missing scope unchanged: core decides a fleet call, not the socket", async () => {
+    answer = { status: 403, body: '{"code":"FORBIDDEN","message":"This ship lacks the scope fleet:commission"}' };
+    const socket = await sockets.open(shipId);
+
+    await expect(callOver(socket, { method: 'POST', path: '/api/v1/fleet/commission', body: '{}' })).resolves.toEqual({ status: 403, contentType: 'application/json', body: answer.body });
+  });
+
   it('lets the session read the ship protocol, which it reads at each start', async () => {
     const socket = await sockets.open(shipId);
 
@@ -197,9 +213,14 @@ describe('a call the socket refuses, never forwarded', () => {
   it.each([
     { label: 'register', method: 'POST', path: '/api/v1/ship/register' },
     { label: 'deregister', method: 'POST', path: '/api/v1/ship/deregister' },
-    { label: 'a call outside the ship API', method: 'GET', path: '/api/v1/fleet/list' },
+    { label: 'register under the fleet API', method: 'POST', path: '/api/v1/fleet/register' },
+    { label: 'deregister under the fleet API', method: 'POST', path: '/api/v1/fleet/deregister' },
+    { label: 'a call outside the ship and fleet APIs', method: 'GET', path: '/api/v1/console/list' },
+    { label: 'a path of two words under the fleet API', method: 'POST', path: '/api/v1/fleet/ship/release' },
     { label: 'the tRPC door', method: 'POST', path: '/trpc/ship.send' },
-    { label: 'a path that climbs out of the ship API', method: 'GET', path: '/api/v1/ship/../fleet/list' },
+    { label: 'the tRPC door for a fleet call', method: 'POST', path: '/trpc/fleet.commission' },
+    { label: 'a path that climbs out of the ship API', method: 'GET', path: '/api/v1/ship/../../trpc/ship.send' },
+    { label: 'a path that climbs out of the fleet API', method: 'POST', path: '/api/v1/fleet/../ship/register' },
   ])('refuses $label with 403', async ({ method, path }) => {
     const socket = await sockets.open(shipId);
 
@@ -222,6 +243,14 @@ describe('a call the socket refuses, never forwarded', () => {
     await expect(callOver(socket, { method: 'POST', path: '/api/v1/ship/send', body: 'x'.repeat(SHIP_CALL_MAX_BYTES) })).resolves.toMatchObject({ status: 200 });
   });
 
+  it(`forwards a fleet call of ${String(SHIP_CALL_MAX_BYTES)} bytes, and refuses one byte over with 413`, async () => {
+    const socket = await sockets.open(shipId);
+
+    await expect(callOver(socket, { method: 'POST', path: '/api/v1/fleet/commission', body: 'x'.repeat(SHIP_CALL_MAX_BYTES) })).resolves.toMatchObject({ status: 200 });
+    await expect(callOver(socket, { method: 'POST', path: '/api/v1/fleet/commission', body: 'x'.repeat(SHIP_CALL_MAX_BYTES + 1) })).resolves.toMatchObject({ status: 413 });
+    expect(calls).toHaveLength(1);
+  });
+
   it('refuses a body one byte over with 413', async () => {
     const socket = await sockets.open(shipId);
 
@@ -238,6 +267,14 @@ describe("a caller outside the ship's session (the caller check)", () => {
     await expect(callOver(socket, { method: 'POST', path: '/api/v1/ship/send', body: '{}' })).resolves.toMatchObject({ status: 403 });
     expect(calls).toEqual([]);
     expect(logged).toEqual([`${shipId} POST /api/v1/ship/send 403`]);
+  });
+
+  it('is refused a fleet call with 403 too, never forwarded', async () => {
+    isCallerLet = false;
+    const socket = await sockets.open(shipId);
+
+    await expect(callOver(socket, { method: 'POST', path: '/api/v1/fleet/commission', body: '{}' })).resolves.toMatchObject({ status: 403 });
+    expect(calls).toEqual([]);
   });
 
   it.runIf(process.platform === 'linux' || process.platform === 'darwin')("gets 403 when it is a process outside the ship's session and the trierarch, with nothing forwarded", async () => {
