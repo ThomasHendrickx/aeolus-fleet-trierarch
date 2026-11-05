@@ -1,11 +1,13 @@
 package claudecode
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
@@ -342,5 +344,133 @@ func TestASessionsReadOnlyCheckoutsAreNamedToItsRuntime(t *testing.T) {
 
 	if got := running.started[0].ReadOnly; !slices.Equal(got, []string{"/checkouts/shp_scout/governance"}) {
 		t.Fatalf("read-only %q", got)
+	}
+}
+
+// inContainers is the harness with a home of each ship's own under homes, as sessions in containers have them, the host's user settings in hostSettings.
+func inContainers(t *testing.T) (Harness, *aRuntime, *anOnboarding, string) {
+	t.Helper()
+	harness, running, onboarding := aHarness(t)
+	homes := t.TempDir()
+	harness.Homes = homes
+	return harness, running, onboarding, filepath.Join(homes, scout)
+}
+
+func anIdentity() plugin.Identity {
+	return plugin.Identity{FleetURL: "https://fleet.example", ShipID: scout, ShipName: "scout", Socket: "/sockets/" + scout + "/fleet.sock"}
+}
+
+func filesUnder(t *testing.T, folder string) []string {
+	t.Helper()
+	var files []string
+	_ = filepath.WalkDir(folder, func(path string, entry os.DirEntry, err error) error {
+		if err == nil && !entry.IsDir() {
+			files = append(files, path)
+		}
+		return nil
+	})
+	return files
+}
+
+func TestInContainersAShipsIdentityIsKeptInItsOwnHomeNeverTheUsers(t *testing.T) {
+	harness, _, _, home := inContainers(t)
+	entry := anEntry(t)
+
+	if err := harness.WriteIdentity(entry, anIdentity(), "crew-token"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(filesUnder(t, filepath.Join(home, ".aeolus", "crews", "claude-code"))) == 0 || len(filesUnder(t, harness.Plugin.Crews)) != 0 {
+		t.Fatalf("the ship's home holds %q, the user's %q", filesUnder(t, home), filesUnder(t, harness.Plugin.Crews))
+	}
+	if !harness.HasIdentity(entry) {
+		t.Fatal("the identity in the ship's home is not found")
+	}
+}
+
+func TestInContainersAShipsHomeGoesWithItsIdentity(t *testing.T) {
+	harness, _, _, home := inContainers(t)
+	entry := anEntry(t)
+	if err := harness.WriteIdentity(entry, anIdentity(), "crew-token"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := harness.DeleteIdentity(entry); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(home); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the ship's home is still there: %v", err)
+	}
+}
+
+func TestInContainersClaudeCodesQuestionsAreAnsweredInTheShipsOwnHomeBeforeEachLaunch(t *testing.T) {
+	harness, _, onboarding, home := inContainers(t)
+	entry := anEntry(t)
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	claude := Of(home, "")
+	if trusted := claude.TrustedFolders(); !trusted[entry.Folder] || onboarding.completed != 0 {
+		t.Fatalf("trusted %v in the ship's home, the user's onboarding completed %d times", trusted, onboarding.completed)
+	}
+	if text, _ := os.ReadFile(claude.ClaudeJSON); !strings.Contains(string(text), `"hasCompletedOnboarding": true`) {
+		t.Fatalf(".claude.json:\n%s", text)
+	}
+	if info, err := os.Stat(home); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("the ship's home: %v, %v", info, err)
+	}
+}
+
+func TestInContainersBypassPermissionsIsAcceptedInTheShipsHomeOnlyWhereTheOperatorAcceptedItOnTheHost(t *testing.T) {
+	for _, isAccepted := range []bool{false, true} {
+		harness, _, _, home := inContainers(t)
+		if isAccepted {
+			write(t, harness.User, `{"skipDangerousModePermissionPrompt":true}`)
+		}
+
+		if err := harness.Launch(anEntry(t), true, "launch-1"); err != nil {
+			t.Fatal(err)
+		}
+
+		if got := IsSkipPermissionsAccepted(filepath.Join(home, ".claude", "settings.json")); got != isAccepted {
+			t.Errorf("accepted on the host %v: accepted in the ship's home %v", isAccepted, got)
+		}
+	}
+}
+
+func TestInContainersAStartAgainContinuesTheConversationKeptInTheShipsHome(t *testing.T) {
+	harness, running, _, home := inContainers(t)
+	entry := anEntry(t)
+	kept := filepath.Join(home, ".claude", "projects", notLetterOrDigit.ReplaceAllString(entry.Folder, "-"))
+	if err := os.MkdirAll(kept, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(kept, "a.jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := harness.Launch(entry, false, "launch-2"); err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Contains(running.started[0].Command, "--continue") {
+		t.Fatalf("started %q", running.started[0].Command)
+	}
+}
+
+func TestInContainersThePlanDefaultModeIsReadFromTheShipsHome(t *testing.T) {
+	harness, running, _, home := inContainers(t)
+	harness.PermissionModes = func() []string { return []string{"default", "plan"} }
+	write(t, filepath.Join(home, ".claude", "settings.json"), planSettings)
+
+	if err := harness.Launch(anEntry(t), true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if command := running.started[0].Command; !slices.Contains(command, "--permission-mode") {
+		t.Fatalf("started %q", command)
 	}
 }
