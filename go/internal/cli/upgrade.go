@@ -252,9 +252,11 @@ func (u Upgrade) install(to string) (UpgradeReport, error) {
 		}
 	}
 	previous := filepath.Join(folder, ".aeolus-trierarch-"+from)
-	// An upgrade killed between the link and the replacement leaves this file: it is the old binary of an earlier try, and this one replaces it.
-	if err := os.Remove(previous); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return UpgradeReport{}, refused(err, "The trierarch %s could not be kept aside: %v\n%s", from, err, keeps)
+	// An upgrade killed between the link and the replacement leaves this file: it is the old binary of an earlier try, and this one replaces it. Run from that very file, it is the program itself and stays.
+	if !u.isProgram(previous) {
+		if err := os.Remove(previous); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return UpgradeReport{}, refused(err, "The trierarch %s could not be kept aside: %v\n%s", from, err, keeps)
+		}
 	}
 	if err := os.Link(u.Program, previous); err != nil {
 		return UpgradeReport{}, refused(err, "The trierarch %s could not be kept aside: %v\n%s", from, err, keeps)
@@ -284,6 +286,16 @@ func (u Upgrade) install(to string) (UpgradeReport, error) {
 	err = u.putBack(previous, to)
 	isKept = errors.Is(err, errNotPutBack)
 	return UpgradeReport{}, err
+}
+
+// isProgram tells whether the file is the one this upgrade runs from.
+func (u Upgrade) isProgram(file string) bool {
+	program, err := os.Stat(u.Program)
+	if err != nil {
+		return false
+	}
+	other, err := os.Stat(file)
+	return err == nil && os.SameFile(program, other)
 }
 
 // errNotPutBack is the reason of a refusal whose old file could not be put back, which stays kept beside the program.
