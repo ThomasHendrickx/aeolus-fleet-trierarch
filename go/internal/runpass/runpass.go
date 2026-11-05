@@ -385,7 +385,7 @@ func (p Pass) carryOut(state reconciler.State, action reconciler.Action) (reconc
 		p.Log(fmt.Sprintf("%s (%s): its request is no longer assigned here, so its session and identity ended; its worktree stays", nameOf(*action.Entry), action.ShipID))
 		return p.remove(state, action.ShipID)
 	case reconciler.WriteStatus:
-		return state, p.Fleet.WriteStatus(action.ShipID, action.Status.Status, action.Status.Attempt, action.Status.StartedAt)
+		return state, p.Fleet.WriteStatus(action.ShipID, action.Status.Status, action.Status.Attempt, fleetTime(action.Status.StartedAt))
 	case reconciler.Report:
 		if !isEntry || entry.CrewToken == "" || entry.Folder == "" {
 			return state, nil
@@ -902,4 +902,13 @@ func (p Pass) tellLow(load machineload.Load) error {
 	}
 	state.LowResources = low
 	return p.Store.Save(state)
+}
+
+// fleetTime is a time as the fleet accepts it: ISO 8601 in UTC with milliseconds, whatever the machine's zone; as it came when it is not a time, and empty stays empty.
+func fleetTime(text string) string {
+	at, err := time.Parse(time.RFC3339Nano, text)
+	if err != nil {
+		return text
+	}
+	return at.UTC().Format("2006-01-02T15:04:05.000Z")
 }
