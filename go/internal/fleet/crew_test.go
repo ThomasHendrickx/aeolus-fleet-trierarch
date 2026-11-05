@@ -330,3 +330,43 @@ func TestAReceiveTheFleetHoldsEndsWhenItsContextDoes(t *testing.T) {
 		t.Fatalf("error %v", err)
 	}
 }
+
+func TestThePendingClearRequestsAreReadWithTheTrierarchsCrewToken(t *testing.T) {
+	recorded, client := aFleetAnswering(t, map[string]string{"/api/v1/fleet/clearRequests": `[{"trierarchShipId":"shp_trierarch","shipId":"` + scout + `","repository":"aeolus-fleet","requestedBy":"shp_argo","requestedAt":"2026-11-05T10:00:00.000Z"}]`})
+
+	clears, err := client.PendingClears()
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []reconciler.ClearRequest{{ShipID: scout, Repository: "aeolus-fleet"}}; len(clears) != 1 || clears[0] != want[0] {
+		t.Fatalf("clears %+v, want %+v", clears, want)
+	}
+	if recorded.asked["/api/v1/fleet/clearRequests"] != "GET " || recorded.bearers["/api/v1/fleet/clearRequests"] != "Bearer aeolus_ct_v1_trierarch" {
+		t.Fatalf("asked %q with %q", recorded.asked["/api/v1/fleet/clearRequests"], recorded.bearers["/api/v1/fleet/clearRequests"])
+	}
+}
+
+func TestAClearIsConfirmedWithHowItCameOut(t *testing.T) {
+	recorded, client := aFleetAnswering(t, map[string]string{"/api/v1/fleet/confirmWorktreeCleared": `{}`})
+
+	if err := client.ConfirmCleared(scout, "aeolus-fleet", "removed"); err != nil {
+		t.Fatal(err)
+	}
+
+	sameJSON(t, recorded.asked["/api/v1/fleet/confirmWorktreeCleared"], `{"shipId":"`+scout+`","repository":"aeolus-fleet","outcome":"removed"}`)
+	if recorded.bearers["/api/v1/fleet/confirmWorktreeCleared"] != "Bearer aeolus_ct_v1_trierarch" {
+		t.Fatalf("confirmed with %q", recorded.bearers["/api/v1/fleet/confirmWorktreeCleared"])
+	}
+}
+
+func TestAClearTheFleetRefusesIsAFailure(t *testing.T) {
+	_, client := aFleetAnswering(t, map[string]string{})
+
+	err := client.ConfirmCleared(scout, "aeolus-fleet", "not-kept")
+
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("err %v, want the fleet's refusal", err)
+	}
+}
