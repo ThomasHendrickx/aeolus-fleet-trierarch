@@ -247,3 +247,21 @@ func (p Plugin) IsInstalled() error {
 	}
 	return nil
 }
+
+// usageExit is the exit of a plugin script that does not know the command it was given, as a plugin older than the launch marker answers `launch`.
+const usageExit = 2
+
+// MarksLaunches is whether the plugin keeps launch markers (#490): one older than them answers `launch` with its usage. It is asked for the crews folder itself, which no session crews, so the answer is only whether the command is known. It fails when the plugin cannot be found at all (#1212), when it is not known what it marks.
+func (p Plugin) MarksLaunches() (bool, error) {
+	if err := p.IsInstalled(); err != nil {
+		return false, err
+	}
+	command := exec.Command("bash", filepath.Join(p.Root, "scripts", "aeolus-identity.sh"), "launch")
+	command.Env = append(os.Environ(), "AEOLUS_FOLDER="+p.Crews, "AEOLUS_DATA="+p.Data, "AEOLUS_CREWS="+p.Crews)
+	err := command.Run()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return exit.ExitCode() != usageExit, nil
+	}
+	return err == nil, err
+}

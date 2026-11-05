@@ -82,6 +82,10 @@ type Harness interface {
 	Activity(entry reconciler.Entry) (activity.Activity, bool)
 	// Problem is why no session of it can start on this machine now, nil when one can (#827).
 	Problem() error
+	// MarksLaunches is whether the harness's aeolus-fleet plugin keeps launch markers (#490); it fails when the plugin cannot be found (#1212).
+	MarksLaunches() (bool, error)
+	// NotOfferedReason is why the machine does not offer the harness now (CC3, CC10); empty when it does.
+	NotOfferedReason() string
 }
 
 // Workspace makes and removes a ship's workspace, and lists the worktrees under the root.
@@ -1048,8 +1052,10 @@ func (p Pass) reconcile(state reconciler.State) (reconciler.State, []reconciler.
 		return state, nil, err
 	}
 	now := p.Now()
-	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers(), Configuration: p.Configuration(), Trusted: p.Trusted(), ConfigurationFile: p.ConfigurationFile})
+	marksLaunches, missingPlugins, notOffered := p.launchMarks()
+	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers(), Configuration: p.Configuration(), Trusted: p.Trusted(), ConfigurationFile: p.ConfigurationFile, MarksLaunches: marksLaunches, MissingPlugins: missingPlugins, NotOffered: notOffered})
 	next.PassFailure = nil
+	next.MissingPlugins, next.NotOffered = notOfferedState(missingPlugins, notOffered)
 	if err := p.Store.Save(next); err != nil {
 		return state, nil, err
 	}
@@ -1057,6 +1063,40 @@ func (p Pass) reconcile(state reconciler.State) (reconciler.State, []reconciler.
 		return next, nil, err
 	}
 	return next, actions, nil
+}
+
+// notOfferedState are the harnesses whose plugin could not be found and those not offered with why, by harness, as the state keeps them for the report; none when there are none.
+func notOfferedState(missingPlugins []string, notOffered map[string]string) ([]string, []reconciler.NotOfferedHarness) {
+	var missing []string
+	if len(missingPlugins) > 0 {
+		missing = slices.Sorted(slices.Values(missingPlugins))
+	}
+	var offeredNot []reconciler.NotOfferedHarness
+	for _, harness := range slices.Sorted(maps.Keys(notOffered)) {
+		offeredNot = append(offeredNot, reconciler.NotOfferedHarness{Harness: harness, Reason: notOffered[harness]})
+	}
+	return missing, offeredNot
+}
+
+// launchMarks reads whether each harness's aeolus-fleet plugin marks launches, which harnesses have no plugin to ask (#1212), one missing never failing the pass for the others, and why the machine does not offer a harness (CC3, CC10).
+func (p Pass) launchMarks() (map[string]bool, []string, map[string]string) {
+	marksLaunches := map[string]bool{}
+	missingPlugins := []string{}
+	notOffered := map[string]string{}
+	for _, name := range slices.Sorted(maps.Keys(p.Harnesses)) {
+		harness := p.Harnesses[name]
+		if reason := harness.NotOfferedReason(); reason != "" {
+			notOffered[name] = reason
+		}
+		marks, err := harness.MarksLaunches()
+		if err != nil {
+			missingPlugins = append(missingPlugins, name)
+			p.Log(fmt.Sprintf("The aeolus-fleet plugin for %s cannot be used: %v; its requests are given back until it is installed (aeolus-trierarch upgrade)", name, err))
+			continue
+		}
+		marksLaunches[name] = marks
+	}
+	return marksLaunches, missingPlugins, notOffered
 }
 
 // watchLoad reads the machine's load and tells argo each resource it started to be low on, once: again only after it recovered and dropped again. What argo was told is kept in the state, so a restart while it stays low tells nothing. A failure is logged; the next read tries again (#400).

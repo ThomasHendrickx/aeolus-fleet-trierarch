@@ -33,6 +33,9 @@ var riskyFlags = map[string][]string{
 	"copilot":     {"--allow-all", "--yolo", "--allow-all-paths", "--allow-all-urls"},
 }
 
+// pluginMissingReason is why a harness whose aeolus-fleet plugin could not be found is not offered (#1212).
+const pluginMissingReason = "its aeolus-fleet plugin is not installed (run aeolus-trierarch upgrade)"
+
 // osOf and archOf name the platforms the trierarch plugin labels by; any other is left out.
 var (
 	osOf   = map[string]string{"darwin": "macos", "linux": "linux", "windows": "windows"}
@@ -89,6 +92,10 @@ func Of(in Input) Report {
 	if crashed > 0 {
 		note += fmt.Sprintf(", %d crashed", crashed)
 	}
+	// A harness without its aeolus-fleet plugin cannot crew a ship (#1212), nor one its adapter does not offer (CC3): the note says why. An adapter's own reason says more than the plugin missing.
+	for _, each := range notOfferedOf(in) {
+		note += fmt.Sprintf(", %s not offered: %s", each.Harness, each.Reason)
+	}
 	// A machine whose session starts keep failing offers nothing (#853) until its probe is due.
 	stopped := whyNotOffered(in)
 	if stopped != "" {
@@ -102,6 +109,39 @@ func Of(in Input) Report {
 		state, note = "blocked", note+", "+keyCutOffNote
 	}
 	return Report{State: state, Note: note, Details: detailsOf(in)}
+}
+
+// notOfferedOf are the harnesses the last pass found not offered, with why: those whose plugin is missing first, then those their adapters do not offer.
+func notOfferedOf(in Input) []reconciler.NotOfferedHarness {
+	notOffered := []reconciler.NotOfferedHarness{}
+	for _, harness := range in.State.MissingPlugins {
+		if !slices.ContainsFunc(in.State.NotOffered, func(each reconciler.NotOfferedHarness) bool { return each.Harness == harness }) {
+			notOffered = append(notOffered, reconciler.NotOfferedHarness{Harness: harness, Reason: pluginMissingReason})
+		}
+	}
+	return append(notOffered, in.State.NotOffered...)
+}
+
+// notOfferedDetailsOf are the harnesses the report names as not offered, each with why: its own reason when the last pass found one, else why the machine offers itself for no placement now (#853).
+func notOfferedDetailsOf(in Input, stopped string) []reconciler.NotOfferedHarness {
+	notOffered := notOfferedOf(in)
+	if stopped == "" {
+		return notOffered
+	}
+	for _, name := range in.Harnesses {
+		if !slices.ContainsFunc(notOffered, func(each reconciler.NotOfferedHarness) bool { return each.Harness == name }) {
+			notOffered = append(notOffered, reconciler.NotOfferedHarness{Harness: name, Reason: stopped})
+		}
+	}
+	return notOffered
+}
+
+// offeredHarnessesOf are the harnesses this trierarch offers that the machine can crew now: those not left out of the report as not offered.
+func offeredHarnessesOf(in Input) []string {
+	notOffered := notOfferedOf(in)
+	return slices.DeleteFunc(slices.Clone(in.Harnesses), func(name string) bool {
+		return slices.ContainsFunc(notOffered, func(each reconciler.NotOfferedHarness) bool { return each.Harness == name })
+	})
 }
 
 // whyNotOffered is why the machine offers itself for no placement now (#853), or none while it offers itself.
@@ -130,6 +170,7 @@ func capsOf(in Input) config.Caps {
 func detailsOf(in Input) map[string]any {
 	stopped := whyNotOffered(in)
 	named := in
+	named.Harnesses = offeredHarnessesOf(in)
 	if stopped != "" {
 		// It offers no harness, and so no place, naming each harness with why.
 		named.Harnesses = nil
@@ -149,11 +190,7 @@ func detailsOf(in Input) map[string]any {
 		"runtime": runtimeOf(in.Configuration),
 		"version": in.Version,
 	}
-	if stopped != "" {
-		notOffered := []map[string]string{}
-		for _, name := range in.Harnesses {
-			notOffered = append(notOffered, map[string]string{"harness": name, "reason": stopped})
-		}
+	if notOffered := notOfferedDetailsOf(in, stopped); len(notOffered) > 0 {
 		details["notOffered"] = notOffered
 	}
 	if in.Load != nil {

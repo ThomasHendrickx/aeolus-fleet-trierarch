@@ -136,3 +136,6 @@ func (h Harness) ForceOver(entry reconciler.Entry, isTurnBusy bool) (bool, error
 
 // Problem is why no Codex session can start on this machine now: its plugin's scripts gone (#827).
 func (h Harness) Problem() error { return h.IsInstalled() }
+
+// NotOfferedReason is none: the machine offers it once its plugin is found.
+func (h Harness) NotOfferedReason() string { return "" }
