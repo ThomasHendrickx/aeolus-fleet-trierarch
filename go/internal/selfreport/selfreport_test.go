@@ -326,7 +326,7 @@ func TestTheReportGoesAgainForTheLoadOnlyOnceItTakesAnotherStep(t *testing.T) {
 	reporter, fleet, _ := aReporter()
 	loads := &aLoadReader{load: aLoad(30)}
 	reporter.Load = loads
-	for _, available := range []int64{30, 31, 29, 28} {
+	for _, available := range []int64{30, 29, 28, 27} {
 		loads.load = aLoad(available)
 		if err := reporter.Report(false); err != nil {
 			t.Fatal(err)

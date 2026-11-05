@@ -409,6 +409,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		"codex":       codex.Subscription{},
 	}}
 	opened = shipSockets(at, kept.FleetURL, running)
+	load := &machineload.Reader{Source: machineload.System{WorktreeRoot: root}, Now: time.Now, Log: logLine}
 	pass := runpass.Pass{
 		Fleet:        client,
 		Sessions:     running,
@@ -436,12 +437,14 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 			return offers.refuse(detect, harness, model)
 		},
 		// The machine's memory and disk, read each minute; argo is told once when one is low (#400).
-		Load: &machineload.Reader{Source: machineload.System{WorktreeRoot: root}, Now: time.Now, Log: logLine},
+		Load: load,
 	}
 	reporter := &selfreport.Reporter{
 		Fleet:    client,
 		Store:    pass.Store,
 		Sessions: running,
+		// The pass reads the load first; the report takes the one it read.
+		Load: load,
 		Input: func() selfreport.Input {
 			offered, detected := offers.current()
 			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH}

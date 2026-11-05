@@ -14,6 +14,7 @@ import (
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 )
@@ -56,6 +57,8 @@ type Input struct {
 	// OS and Arch are Go's names of the platform and chip.
 	OS, Arch    string
 	IsKeyCutOff bool
+	// Load is the machine's load as last read; none before one could be (#400).
+	Load *machineload.Load
 }
 
 // Logins are which login each ship's next session starts on, and where each harness's API key stands.
@@ -98,6 +101,9 @@ func detailsOf(in Input) map[string]any {
 		// A fact for the console, never a label: placement does not read it (decision 0039).
 		"runtime": runtimeOf(in.Configuration),
 		"version": in.Version,
+	}
+	if in.Load != nil {
+		details["load"] = in.Load
 	}
 	machine := map[string]string{}
 	if name, ok := osOf[in.OS]; ok {
@@ -240,11 +246,18 @@ type Sessions interface {
 	List() ([]sessions.Observed, error)
 }
 
+// LoadReader is the machine's load, as last read.
+type LoadReader interface {
+	Read() (load *machineload.Load, isFresh bool)
+}
+
 // Reporter reports on start and then only when the report would differ from the last one sent.
 type Reporter struct {
 	Fleet    Fleet
 	Store    Store
 	Sessions Sessions
+	// Load reads the machine's load, at most once a minute (#400); none reports none.
+	Load LoadReader
 	// Input is the input as this machine has it now, without what a pass reads: the state and the sessions that run.
 	Input func() Input
 	last  string
@@ -264,17 +277,31 @@ func (r *Reporter) Report(isKeyCutOff bool) error {
 	in.State = state
 	in.Running = len(slices.DeleteFunc(running, func(each sessions.Observed) bool { return each.Status != "running" }))
 	in.IsKeyCutOff = isKeyCutOff
+	if r.Load != nil {
+		in.Load, _ = r.Load.Read()
+	}
 	report := Of(in)
-	text, err := json.Marshal(report)
+	text, err := changeOf(report, in.Load)
 	if err != nil {
 		return err
 	}
-	if string(text) == r.last {
+	if text == r.last {
 		return nil
 	}
 	if err := r.Fleet.ReportSelf(report.State, report.Note, report.Details); err != nil {
 		return err
 	}
-	r.last = string(text)
+	r.last = text
 	return nil
+}
+
+// changeOf is what makes a report another one: the report with its load by steps only, as a load always moves (#400).
+func changeOf(report Report, load *machineload.Load) (string, error) {
+	details := maps.Clone(report.Details)
+	if load != nil {
+		details["load"] = load.Steps()
+	}
+	report.Details = details
+	text, err := json.Marshal(report)
+	return string(text), err
 }
