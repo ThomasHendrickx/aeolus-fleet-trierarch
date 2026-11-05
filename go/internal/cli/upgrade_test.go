@@ -522,3 +522,21 @@ func TestUpgradeReplacesAnOldBinaryAnInterruptedUpgradeLeftBesideTheProgram(t *t
 		t.Errorf("its folder holds %v, want the program alone", left)
 	}
 }
+
+func TestUpgradeRunFromTheKeptFileLeavesItInPlace(t *testing.T) {
+	machine := anUpgradeOn(t)
+	kept := filepath.Join(filepath.Dir(machine.upgrade.Program), ".aeolus-trierarch-"+running)
+	if err := os.Rename(machine.upgrade.Program, kept); err != nil {
+		t.Fatal(err)
+	}
+	machine.upgrade.Program = kept
+
+	_, err := machine.upgrade.Run(released)
+
+	if err == nil {
+		t.Fatalf("Run(from the kept file) = nil, want it refused: the old file cannot be kept aside from itself")
+	}
+	if text, err := os.ReadFile(kept); err != nil || string(text) != string(binaryOf(running)) {
+		t.Errorf("%s holds %q (%v), want the file it runs from left in place", kept, text, err)
+	}
+}
