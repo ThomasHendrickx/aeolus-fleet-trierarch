@@ -204,9 +204,24 @@ type Worktree struct {
 	Name       string
 }
 
+// ClearRequest is a pending request to the trierarch's ship that it clear the worktree it kept for a ship in a repository (decision 0032).
+type ClearRequest struct {
+	ShipID     string
+	Repository string
+}
+
+// KeptWorktree is a worktree kept because it had changes, until a human clears it, as the state holds it.
+type KeptWorktree struct {
+	ShipID     string
+	Repository string
+	Path       string
+}
+
 // Context is what reconciling needs beside the state.
 type Context struct {
 	Requests []Request
+	// Clears are the pending clear requests to the trierarch's ship.
+	Clears   []ClearRequest
 	Observed Observed
 	Now      time.Time
 	// Harnesses are the ones the configuration offers, the default first.
@@ -270,6 +285,8 @@ const (
 	Crashed ActionKind = "crashed"
 	// ClearOrphan stops what runs in a worktree no entry works in, then removes it unless it holds unsaved work (#1041).
 	ClearOrphan ActionKind = "clearOrphan"
+	// Clear removes the kept worktree a clear request names, or, when none is kept, confirms it alone (decision 0032).
+	Clear ActionKind = "clear"
 	// StoppedOffering tells argo the machine stopped offering itself after the starts of 3 ships failed in a row (#853).
 	StoppedOffering ActionKind = "stoppedOffering"
 )
@@ -296,6 +313,9 @@ type Action struct {
 	// Orphan is the worktree a clear orphan clears, new when the state did not hold it yet, so what is left of it is logged once.
 	Orphan *Worktree
 	IsNew  bool
+	// Repository and Kept are what a clear names: the repository of the ship's worktree, and the worktree kept for them, none when none is.
+	Repository string
+	Kept       *KeptWorktree
 	// ShipName, Harness, Version, Model, Exits, FailedStart and Key are what a notice names: the ship, the harness at its version and the model it refused, how often the session exited and why its last start failed, and the key that makes the notice told once.
 	ShipName    string
 	Harness     string
@@ -459,9 +479,56 @@ func Reconcile(state State, context Context) (State, []Action) {
 	if isNewlyStopped {
 		actions = append(actions, Action{Kind: StoppedOffering, FailedStarts: failed})
 	}
+	next.Kept = keptOf(next, context.Observed)
+	actions = append(actions, clearsOf(next, context.Clears)...)
 	orphans, cleared := orphansOf(state, next, context)
 	next.Orphans = orphans
 	return next, append(actions, cleared...)
+}
+
+// keptOf are the kept worktrees still kept: one stays until it is gone from disk, as when a human removed it (#325). One an entry works in again is that entry's worktree, no longer kept, so a clear never removes it (decision 0032).
+func keptOf(next State, observed Observed) []any {
+	onDisk := map[string]bool{}
+	for _, worktree := range observed.Worktrees {
+		onDisk[worktree.Path] = true
+	}
+	inUse := map[string]bool{}
+	for _, entry := range next.Entries {
+		if entry.Folder != "" {
+			inUse[entry.Folder] = true
+		}
+	}
+	kept := []any{}
+	for _, each := range next.Kept {
+		if path := pathOf(each); onDisk[path] && !inUse[path] {
+			kept = append(kept, each)
+		}
+	}
+	return kept
+}
+
+// clearsOf are the clears of the clear requests: each removes only a worktree this trierarch kept for its ship and repository; for any other it keeps none (decision 0032).
+func clearsOf(next State, clears []ClearRequest) []Action {
+	actions := []Action{}
+	for _, request := range clears {
+		action := Action{Kind: Clear, ShipID: request.ShipID, Repository: request.Repository}
+		for _, each := range next.Kept {
+			if held := keptWorktreeOf(each); held.ShipID == request.ShipID && held.Repository == request.Repository {
+				action.Kept = &held
+				break
+			}
+		}
+		actions = append(actions, action)
+	}
+	return actions
+}
+
+// keptWorktreeOf is a kept worktree as the state holds it.
+func keptWorktreeOf(held any) KeptWorktree {
+	fields, _ := held.(map[string]any)
+	shipID, _ := fields["shipId"].(string)
+	repository, _ := fields["repository"].(string)
+	return KeptWorktree{ShipID: shipID, Repository: repository, Path: pathOf(held)}
 }
 
 // orphansOf are the worktrees under the root that no entry works in and the trierarch did not keep, as after their ship was retired (gap rule 2, #1041), as the state holds them, and their clears. A forgotten entry works in its worktree no more.
