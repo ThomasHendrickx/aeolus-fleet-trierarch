@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
@@ -1433,5 +1434,127 @@ func TestAPassThatSucceedsClearsTheFailureOfTheOnesBefore(t *testing.T) {
 
 	if p.store.state.PassFailure != nil {
 		t.Errorf("passFailure after a pass that succeeded = %+v, want none", p.store.state.PassFailure)
+	}
+}
+
+// aMachine is a machine whose load a test sets; it is read each time the pass asks.
+type aMachine struct {
+	load  machineload.Load
+	reads int
+}
+
+func (m *aMachine) Read() (machineload.Load, error) { m.reads++; return m.load, nil }
+
+func aLoad(memoryAvailablePercent int64, diskFreePercent int64) machineload.Load {
+	return machineload.Load{
+		Memory: machineload.Memory{TotalBytes: 16 << 30, AvailableBytes: 16 << 30 * memoryAvailablePercent / 100},
+		CPU:    machineload.CPU{Cores: 4},
+		Disk:   machineload.Disk{TotalBytes: 500_000_000_000, FreeBytes: 500_000_000_000 * diskFreePercent / 100},
+	}
+}
+
+// onAMachine has the pass read the machine each time a minute has passed.
+func (p *aPass) onAMachine(machine *aMachine) {
+	p.pass.Load = &machineload.Reader{Source: machine, Now: func() time.Time { return now }, Log: p.pass.Log}
+}
+
+func TestAMachineLowOnMemoryTellsArgoOnceAndTheStateKeepsIt(t *testing.T) {
+	pass := aRunPass(t)
+	machine := &aMachine{load: aLoad(9, 50)}
+	pass.onAMachine(machine)
+	pass.run(t)
+	pass.run(t)
+	if len(pass.fleet.told) != 1 {
+		t.Fatalf("told %+v", pass.fleet.told)
+	}
+	got := pass.fleet.told[0]
+	if got.to != "argo" || got.key != "low-memory-2026-11-04T12:00:00.000Z" || got.text != notices.LowResource("memory", machine.load) {
+		t.Fatalf("told %+v", got)
+	}
+	if !reflect.DeepEqual(pass.store.state.LowResources, []string{"memory"}) {
+		t.Fatalf("low resources %v", pass.store.state.LowResources)
+	}
+}
+
+func TestAMachineLowOnBothTellsMemoryThenDisk(t *testing.T) {
+	pass := aRunPass(t)
+	pass.onAMachine(&aMachine{load: aLoad(9, 4)})
+	pass.run(t)
+	keys := []string{}
+	for _, each := range pass.fleet.told {
+		keys = append(keys, each.key)
+	}
+	if !reflect.DeepEqual(keys, []string{"low-memory-2026-11-04T12:00:00.000Z", "low-disk-2026-11-04T12:00:00.000Z"}) {
+		t.Fatalf("told %q", keys)
+	}
+}
+
+func TestAMachineThatStaysLowAcrossARestartTellsNothingAgain(t *testing.T) {
+	pass := aRunPass(t)
+	pass.store.state.LowResources = []string{"memory"}
+	pass.onAMachine(&aMachine{load: aLoad(9, 50)})
+	pass.run(t)
+	if len(pass.fleet.told) != 0 || !reflect.DeepEqual(pass.store.state.LowResources, []string{"memory"}) {
+		t.Fatalf("told %+v, low resources %v", pass.fleet.told, pass.store.state.LowResources)
+	}
+}
+
+func TestAMachineThatRecoveredAndDroppedAgainTellsAgain(t *testing.T) {
+	pass := aRunPass(t)
+	machine := &aMachine{load: aLoad(9, 50)}
+	pass.onAMachine(machine)
+	pass.run(t)
+	machine.load = aLoad(40, 50)
+	later := now.Add(time.Minute)
+	pass.pass.Now = func() time.Time { return later }
+	pass.pass.Load = &machineload.Reader{Source: machine, Now: pass.pass.Now, Log: pass.pass.Log}
+	pass.run(t)
+	if len(pass.fleet.told) != 1 || len(pass.store.state.LowResources) != 0 {
+		t.Fatalf("told %+v, low resources %v", pass.fleet.told, pass.store.state.LowResources)
+	}
+	machine.load = aLoad(8, 50)
+	again := later.Add(time.Minute)
+	pass.pass.Now = func() time.Time { return again }
+	pass.pass.Load = &machineload.Reader{Source: machine, Now: pass.pass.Now, Log: pass.pass.Log}
+	pass.run(t)
+	if len(pass.fleet.told) != 2 || pass.fleet.told[1].key != "low-memory-2026-11-04T12:02:00.000Z" {
+		t.Fatalf("told %+v", pass.fleet.told)
+	}
+}
+
+func TestAMachineLowOnOneThatRecoversOfAnotherStaysToldOfTheOther(t *testing.T) {
+	pass := aRunPass(t)
+	pass.store.state.LowResources = []string{"memory", "disk"}
+	pass.onAMachine(&aMachine{load: aLoad(40, 4)})
+	pass.run(t)
+	if len(pass.fleet.told) != 0 || !reflect.DeepEqual(pass.store.state.LowResources, []string{"disk"}) {
+		t.Fatalf("told %+v, low resources %v", pass.fleet.told, pass.store.state.LowResources)
+	}
+}
+
+func TestAFleetThatRefusesTheNoticeIsLoggedAndTheNoticeIsTriedAtTheNextRead(t *testing.T) {
+	pass := aRunPass(t)
+	pass.fleet.refuse = "tellArgo low-memory"
+	machine := &aMachine{load: aLoad(9, 50)}
+	pass.onAMachine(machine)
+	pass.run(t)
+	if len(pass.store.state.LowResources) != 0 || !slices.Contains(pass.logged, "Could not tell argo the machine is low: the fleet refused tellArgo low-memory-2026-11-04T12:00:00.000Z") {
+		t.Fatalf("low resources %v, logged %q", pass.store.state.LowResources, pass.logged)
+	}
+	pass.fleet.refuse = ""
+	later := now.Add(time.Minute)
+	pass.pass.Now = func() time.Time { return later }
+	pass.pass.Load = &machineload.Reader{Source: machine, Now: pass.pass.Now, Log: pass.pass.Log}
+	pass.run(t)
+	if !reflect.DeepEqual(pass.store.state.LowResources, []string{"memory"}) || len(pass.fleet.told) != 2 || pass.fleet.told[1].key != "low-memory-2026-11-04T12:01:00.000Z" {
+		t.Fatalf("told %+v, low resources %v", pass.fleet.told, pass.store.state.LowResources)
+	}
+}
+
+func TestAPassWithNoMachineReadsNoLoadAndTellsNothing(t *testing.T) {
+	pass := aRunPass(t)
+	pass.run(t)
+	if len(pass.fleet.told) != 0 || pass.store.state.LowResources != nil {
+		t.Fatalf("told %+v", pass.fleet.told)
 	}
 }

@@ -24,6 +24,8 @@ type State struct {
 	Refused map[string]int   `json:"refused"`
 	// KeysTold is, by harness, the state of its API key argo was told, so it is told once per state (api keys K9).
 	KeysTold map[string]string `json:"keysTold,omitempty"`
+	// LowResources are what the machine was low on when argo was told, so a restart while it stays low tells nothing again (#400).
+	LowResources []string `json:"lowResources,omitempty"`
 	// PassFailure is why the last pass failed and since when; none while passes succeed.
 	PassFailure *PassFailure `json:"passFailure,omitempty"`
 }
@@ -299,7 +301,7 @@ func Reconcile(state State, context Context) (State, []Action) {
 			refused[shipID] = version
 		}
 	}
-	next := State{Entries: map[string]Entry{}, Kept: state.Kept, Orphans: state.Orphans, Refused: refused, KeysTold: state.KeysTold}
+	next := State{Entries: map[string]Entry{}, Kept: state.Kept, Orphans: state.Orphans, Refused: refused, KeysTold: state.KeysTold, LowResources: state.LowResources}
 	actions := []Action{}
 	runningSessions := 0
 	for _, session := range context.Observed.Sessions {

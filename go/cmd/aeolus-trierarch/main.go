@@ -38,6 +38,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/logfile"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/modelproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
@@ -408,6 +409,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		"codex":       codex.Subscription{},
 	}}
 	opened = shipSockets(at, kept.FleetURL, running)
+	load := &machineload.Reader{Source: machineload.System{WorktreeRoot: root}, Now: time.Now, Log: logLine}
 	pass := runpass.Pass{
 		Fleet:        client,
 		Sessions:     running,
@@ -434,11 +436,15 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		RefuseModel: func(harness string, model string) error {
 			return offers.refuse(detect, harness, model)
 		},
+		// The machine's memory and disk, read each minute; argo is told once when one is low (#400).
+		Load: load,
 	}
 	reporter := &selfreport.Reporter{
 		Fleet:    client,
 		Store:    pass.Store,
 		Sessions: running,
+		// The pass reads the load first; the report takes the one it read.
+		Load: load,
 		Input: func() selfreport.Input {
 			offered, detected := offers.current()
 			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH}
