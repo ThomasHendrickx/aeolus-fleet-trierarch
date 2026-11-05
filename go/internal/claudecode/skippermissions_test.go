@@ -4,11 +4,11 @@ import "testing"
 
 func TestBypassPermissionsModeIsAcceptedOnlyWhereTheUserSettingsSayTrue(t *testing.T) {
 	for name, text := range map[string]string{
-		"accepted":  `{"skipDangerousModePermissionPrompt":true}`,
-		"false":     `{"skipDangerousModePermissionPrompt":false}`,
-		"not true":  `{"skipDangerousModePermissionPrompt":"yes"}`,
-		"absent":    `{}`,
-		"not JSON":  `nope`,
+		"accepted": `{"skipDangerousModePermissionPrompt":true}`,
+		"false":    `{"skipDangerousModePermissionPrompt":false}`,
+		"not true": `{"skipDangerousModePermissionPrompt":"yes"}`,
+		"absent":   `{}`,
+		"not JSON": `nope`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			machine := aMachineOf(t)
