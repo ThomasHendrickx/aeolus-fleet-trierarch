@@ -187,6 +187,8 @@ type aWorkspace struct {
 	made    map[string]bool
 	unsaved map[string][]string
 	removed []string
+	// failRemove makes a removal fail, as a worktree that cannot be removed does.
+	failRemove bool
 }
 
 func (w *aWorkspace) Prepare(entry reconciler.Entry, shipName string) (string, error) {
@@ -196,6 +198,9 @@ func (w *aWorkspace) Prepare(entry reconciler.Entry, shipName string) (string, e
 }
 func (w *aWorkspace) Unsaved(folder string) ([]string, error) { return w.unsaved[folder], nil }
 func (w *aWorkspace) Remove(entry reconciler.Entry) error {
+	if w.failRemove {
+		return errors.New("cannot remove " + entry.Folder)
+	}
 	delete(w.made, entry.Folder)
 	w.removed = append(w.removed, entry.Folder)
 	return nil
@@ -1242,5 +1247,92 @@ func TestAKeyNoShipHereIsOnIsNobodysConcern(t *testing.T) {
 
 	if len(pass.fleet.told) != 0 {
 		t.Fatalf("told %+v", pass.fleet.told)
+	}
+}
+
+const scoutFolder = "/worktrees/aeolus-fleet/scout"
+
+// releasedElsewhere is scout running, its lease ended under it and the ship crewed again by none: its next pass sees it.
+func (p *aPass) releasedElsewhere(t *testing.T) {
+	t.Helper()
+	p.crewed(t)
+	p.fleet.inboxes[p.store.state.Entries[scout].CrewToken] = reconciler.Inbox{IsLeaseEnded: true}
+	p.fleet.ships[scout] = fleet.Ship{Name: "scout", Status: "awaitingCrew"}
+	p.harness.launches = nil
+}
+
+func TestAShipReleasedElsewhereHasItsSessionStoppedAndIsCrewedAgainInAFreshWorktreeAsAFirstStart(t *testing.T) {
+	pass := aRunPass(t)
+	pass.releasedElsewhere(t)
+
+	pass.run(t)
+
+	if !slices.Equal(pass.sessions.stopped, []string{scout}) || !slices.Equal(pass.workspace.removed, []string{scoutFolder}) {
+		t.Fatalf("stopped %q, removed %q", pass.sessions.stopped, pass.workspace.removed)
+	}
+	if len(pass.harness.launches) != 1 || !pass.harness.launches[0].isFirstStart || pass.harness.launches[0].firstPrompt != "Review PR 12" || pass.harness.launches[0].folder != scoutFolder {
+		t.Fatalf("launches %+v", pass.harness.launches)
+	}
+	entry := pass.store.state.Entries[scout]
+	if entry.IsReleasedElsewhere || entry.State != "crewing" || entry.CrewToken == "" {
+		t.Fatalf("entry %+v", entry)
+	}
+	if !slices.ContainsFunc(pass.logged, func(line string) bool { return strings.Contains(line, "scout ("+scout+"): released elsewhere, its worktree removed") }) {
+		t.Fatalf("logged %q", pass.logged)
+	}
+}
+
+func TestAShipReleasedElsewhereTellsArgoWhatItsRemovedWorktreeHeldOnce(t *testing.T) {
+	pass := aRunPass(t)
+	pass.releasedElsewhere(t)
+	pass.workspace.unsaved[scoutFolder] = []string{" M README.md", "?? draft.md"}
+
+	pass.run(t)
+
+	want := []told{{to: "argo", key: "trierarch:discarded:" + scout + ":" + now.Format(time.RFC3339Nano), text: notices.DiscardedElsewhere(notices.Ship{ID: scout, Name: "scout"}, "aeolus-fleet", []string{" M README.md", "?? draft.md"})}}
+	if !slices.Equal(pass.fleet.told, want) {
+		t.Fatalf("told %+v", pass.fleet.told)
+	}
+}
+
+func TestAShipReleasedElsewhereWhoseWorktreeHeldNothingTellsArgoNothing(t *testing.T) {
+	pass := aRunPass(t)
+	pass.releasedElsewhere(t)
+
+	pass.run(t)
+
+	if len(pass.fleet.told) != 0 {
+		t.Fatalf("told %+v", pass.fleet.told)
+	}
+}
+
+func TestAShipReleasedElsewhereWhoseWorktreeCannotBeRemovedIsCrewedNowhereAndTheNextPassTriesAgain(t *testing.T) {
+	pass := aRunPass(t)
+	pass.releasedElsewhere(t)
+	pass.workspace.unsaved[scoutFolder] = []string{"?? draft.md"}
+	pass.workspace.failRemove = true
+
+	pass.run(t)
+
+	if len(pass.harness.launches) != 0 || !pass.store.state.Entries[scout].IsReleasedElsewhere {
+		t.Fatalf("launches %+v, entry %+v", pass.harness.launches, pass.store.state.Entries[scout])
+	}
+	pass.workspace.failRemove = false
+	pass.run(t)
+
+	if len(pass.harness.launches) != 1 || !pass.harness.launches[0].isFirstStart || pass.store.state.Entries[scout].IsReleasedElsewhere {
+		t.Fatalf("launches %+v, entry %+v", pass.harness.launches, pass.store.state.Entries[scout])
+	}
+}
+
+func TestAShipReleasedElsewhereAndCrewedByAnotherSessionIsLeft(t *testing.T) {
+	pass := aRunPass(t)
+	pass.releasedElsewhere(t)
+	pass.fleet.ships[scout] = fleet.Ship{Name: "scout", Status: "crewed"}
+
+	pass.run(t)
+
+	if len(pass.store.state.Entries) != 0 || len(pass.harness.launches) != 0 {
+		t.Fatalf("entries %+v, launches %+v", pass.store.state.Entries, pass.harness.launches)
 	}
 }
