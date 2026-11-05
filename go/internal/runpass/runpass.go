@@ -256,6 +256,11 @@ func (p Pass) Run() error {
 				p.Log(fmt.Sprintf("The pass failed at %s: %v; %s", action.Kind, err, nextAfterFailure))
 				continue
 			}
+			if action.Kind == reconciler.Clear {
+				// A clear holds back no other: the next clear request is carried out all the same.
+				p.Log(fmt.Sprintf("%s of %s failed: %v", action.Kind, action.ShipID, err))
+				continue
+			}
 			failed[action.ShipID] = failed[action.ShipID] || !isNotice(action.Kind)
 			if action.Kind == reconciler.Crew {
 				next = p.crewFailed(next, action.ShipID, err)
