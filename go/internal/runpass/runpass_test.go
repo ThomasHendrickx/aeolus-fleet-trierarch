@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
@@ -151,11 +152,14 @@ type aHarness struct {
 	sockets    *someSockets
 	// logins are the login each launch started on, in order.
 	logins []string
+	// readOnly are the read-only checkouts each launch was given, in order.
+	readOnly [][]string
 }
 
 func (h *aHarness) Launch(entry reconciler.Entry, isFirstStart bool, launchID string) error {
 	h.launches = append(h.launches, launched{shipID: entry.ShipID, folder: entry.Folder, isFirstStart: isFirstStart, launchID: launchID, firstPrompt: entry.FirstPrompt})
 	h.logins = append(h.logins, entry.Login)
+	h.readOnly = append(h.readOnly, entry.ReadOnly)
 	h.sessions.observed = append(h.sessions.observed, sessions.Observed{ShipID: entry.ShipID, Status: "running"})
 	return nil
 }
@@ -223,6 +227,34 @@ func (w *aWorkspace) Remove(entry reconciler.Entry) error {
 	return nil
 }
 
+// someCheckouts make the checkouts of the working repository aeolus-fleet as the test names them, and write down what was made and removed.
+type someCheckouts struct {
+	made    []string
+	removed []string
+	// sockets, when given, are told of each Prepare, so a test sees it in order with their own calls.
+	sockets *someSockets
+	failure error
+}
+
+func (c *someCheckouts) Prepare(shipID string, repository string) ([]checkouts.Checkout, error) {
+	if c.failure != nil {
+		return nil, c.failure
+	}
+	c.made = append(c.made, shipID+" "+repository)
+	if c.sockets != nil {
+		c.sockets.events = append(c.sockets.events, "checkouts "+shipID)
+	}
+	if repository != "aeolus-fleet" {
+		return []checkouts.Checkout{}, nil
+	}
+	return []checkouts.Checkout{{Repository: "governance", Path: "/checkouts/" + shipID + "/governance"}, {Repository: "skills", Path: "/checkouts/" + shipID + "/skills"}}, nil
+}
+
+func (c *someCheckouts) Remove(shipID string) error {
+	c.removed = append(c.removed, shipID)
+	return nil
+}
+
 type aStore struct {
 	state reconciler.State
 	saves int
@@ -246,6 +278,7 @@ type aPass struct {
 	sessions  *aSessions
 	harness   *aHarness
 	workspace *aWorkspace
+	checkouts *someCheckouts
 	store     *aStore
 	logged    []string
 	// refusedModels are the models kept refused, each as its harness and id.
@@ -263,6 +296,7 @@ func aRunPass(t *testing.T) *aPass {
 		sessions:  running,
 		harness:   &aHarness{sessions: running, identities: map[string]plugin.Identity{}, tokens: map[string]string{}, seen: map[string]reconciler.LaunchSeen{}, turns: map[string]string{}, holding: map[string]bool{}, sockets: sockets},
 		workspace: &aWorkspace{made: map[string]bool{}, unsaved: map[string][]string{}},
+		checkouts: &someCheckouts{},
 		store:     &aStore{state: reconciler.Empty()},
 	}
 	launches := 0
@@ -271,6 +305,7 @@ func aRunPass(t *testing.T) *aPass {
 		Sessions:     at.sessions,
 		Harnesses:    map[string]Harness{"claude-code": at.harness},
 		Workspace:    at.workspace,
+		Checkouts:    at.checkouts,
 		Store:        at.store,
 		Log:          func(line string) { at.logged = append(at.logged, line) },
 		Now:          func() time.Time { return now },
@@ -1729,5 +1764,104 @@ func TestAPassWithNoMachineReadsNoLoadAndTellsNothing(t *testing.T) {
 	pass.run(t)
 	if len(pass.fleet.told) != 0 || pass.store.state.LowResources != nil {
 		t.Fatalf("told %+v", pass.fleet.told)
+	}
+}
+
+func TestACrewGetsItsReadOnlyCheckoutsMadeBeforeItsIdentityNamesThemAndItsSessionStartsWithThem(t *testing.T) {
+	pass := aRunPass(t)
+	pass.checkouts.sockets = pass.sockets
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+
+	pass.run(t)
+
+	want := []checkouts.Checkout{{Repository: "governance", Path: "/checkouts/" + scout + "/governance"}, {Repository: "skills", Path: "/checkouts/" + scout + "/skills"}}
+	if got := pass.harness.identities["/worktrees/aeolus-fleet/scout"].Checkouts; !slices.Equal(got, want) {
+		t.Fatalf("identity checkouts %v, want %v", got, want)
+	}
+	if len(pass.harness.readOnly) != 1 || !slices.Equal(pass.harness.readOnly[0], []string{"/checkouts/" + scout + "/governance", "/checkouts/" + scout + "/skills"}) {
+		t.Fatalf("read-only %v", pass.harness.readOnly)
+	}
+	if !slices.Equal(pass.checkouts.made, []string{scout + " aeolus-fleet"}) || !slices.Equal(pass.sockets.events, []string{"open " + scout, "checkouts " + scout, "identity /home/me/.aeolus/trierarch/sockets/" + scout + "/fleet.sock"}) {
+		t.Fatalf("made %q, sockets and checkouts %q", pass.checkouts.made, pass.sockets.events)
+	}
+}
+
+func TestACrewInAConfiguredFolderGetsNoCheckouts(t *testing.T) {
+	pass := aRunPass(t)
+	request := aRequest("")
+	request.Settings.Workspace = reconciler.Workspace{Kind: "folder", Name: "notes"}
+	pass.fleet.requests = []reconciler.Request{request}
+	pass.pass.Workspace = &aFolders{aWorkspace: pass.workspace}
+	pass.pass.Folders = []string{"notes"}
+
+	pass.run(t)
+
+	if len(pass.checkouts.made) != 0 || len(pass.harness.identities) != 1 || len(pass.harness.readOnly) != 1 || len(pass.harness.readOnly[0]) != 0 {
+		t.Fatalf("made %q, identities %+v, read-only %v", pass.checkouts.made, pass.harness.identities, pass.harness.readOnly)
+	}
+}
+
+// aFolders prepare a configured folder as it is.
+type aFolders struct{ *aWorkspace }
+
+func (f *aFolders) Prepare(entry reconciler.Entry, shipName string) (string, error) {
+	return "/folders/" + entry.Workspace.Name, nil
+}
+
+func TestACrewWhoseCheckoutsCannotBeMadeDoesNotStart(t *testing.T) {
+	pass := aRunPass(t)
+	pass.checkouts.failure = errors.New("git clone failed: no space left")
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+
+	pass.run(t)
+
+	if len(pass.harness.launches) != 0 || len(pass.harness.identities) != 0 {
+		t.Fatalf("launches %+v, identities %+v", pass.harness.launches, pass.harness.identities)
+	}
+	if !slices.ContainsFunc(pass.logged, func(line string) bool { return strings.Contains(line, "git clone failed: no space left") }) {
+		t.Fatalf("logged %q", pass.logged)
+	}
+}
+
+func TestASessionStartedAgainGetsItsReadOnlyCheckoutsMadeWhenMissing(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	pass.sessions.observed = []sessions.Observed{{ShipID: scout, Status: "exited"}}
+	pass.run(t)
+	pass.fleet.requests = []reconciler.Request{aRequest("restarting")}
+	pass.pass.Now = func() time.Time { return now.Add(5 * time.Second) }
+	pass.checkouts.made = nil
+
+	pass.run(t)
+
+	if !slices.Equal(pass.checkouts.made, []string{scout + " aeolus-fleet"}) {
+		t.Fatalf("made %q", pass.checkouts.made)
+	}
+	if last := pass.harness.readOnly[len(pass.harness.readOnly)-1]; !slices.Equal(last, []string{"/checkouts/" + scout + "/governance", "/checkouts/" + scout + "/skills"}) {
+		t.Fatalf("read-only %v", last)
+	}
+}
+
+func TestAReleaseRemovesTheShipsReadOnlyCheckouts(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	pass.fleet.requests = []reconciler.Request{aRequest("releasing")}
+
+	pass.run(t)
+
+	if !slices.Equal(pass.checkouts.removed, []string{scout}) {
+		t.Fatalf("removed %q", pass.checkouts.removed)
+	}
+}
+
+func TestARequestNoLongerAssignedHereRemovesTheShipsReadOnlyCheckoutsWithItsIdentity(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	pass.fleet.requests = nil
+
+	pass.run(t)
+
+	if !slices.Equal(pass.checkouts.removed, []string{scout}) {
+		t.Fatalf("removed %q", pass.checkouts.removed)
 	}
 }

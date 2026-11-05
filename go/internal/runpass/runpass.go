@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
@@ -83,6 +84,13 @@ type Workspace interface {
 	Remove(entry reconciler.Entry) error
 }
 
+// Checkouts are each ship's read-only checkouts, made before its session starts and removed with its identity.
+type Checkouts interface {
+	// Prepare makes the checkouts the working repository names, those the ship has already staying as they are.
+	Prepare(shipID string, repository string) ([]checkouts.Checkout, error)
+	Remove(shipID string) error
+}
+
 // Logins are which login each session starts on and whether it can start on it now (api keys K5, K9).
 type Logins interface {
 	// LoginOf is the login a ship's next session starts on: its own, else its harness's default, else its subscription.
@@ -117,6 +125,7 @@ type Pass struct {
 	Sessions  Sessions
 	Harnesses map[string]Harness
 	Workspace Workspace
+	Checkouts Checkouts
 	Store     Store
 	Log       func(line string)
 	Now       func() time.Time
@@ -490,13 +499,18 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	if err != nil {
 		return state, err
 	}
-	identity := plugin.Identity{FleetURL: p.FleetURL, ShipID: entry.ShipID, ShipName: ship.Name, Socket: socket, Squadron: entry.Squadron}
+	made, err := p.checkoutsOf(entry)
+	if err != nil {
+		return state, err
+	}
+	identity := plugin.Identity{FleetURL: p.FleetURL, ShipID: entry.ShipID, ShipName: ship.Name, Socket: socket, Squadron: entry.Squadron, Checkouts: made}
 	if err := harness.WriteIdentity(folder, identity, crewToken); err != nil {
 		return state, err
 	}
 	launchID := p.NewLaunchID()
 	starting := entry
 	starting.Login = login
+	starting.ReadOnly = pathsOf(made)
 	if err := harness.Launch(starting, !entry.HasStarted, launchID); err != nil {
 		return state, err
 	}
@@ -527,10 +541,15 @@ func (p Pass) launch(state reconciler.State, entry reconciler.Entry) (reconciler
 	if err := harness.SessionDied(entry.Folder); err != nil {
 		return state, err
 	}
+	made, err := p.checkoutsOf(entry)
+	if err != nil {
+		return state, err
+	}
 	launchID := p.NewLaunchID()
 	login := p.loginOf(entry)
 	starting := entry
 	starting.Login = login
+	starting.ReadOnly = pathsOf(made)
 	if err := harness.Launch(starting, false, launchID); err != nil {
 		return state, err
 	}
@@ -671,9 +690,28 @@ func (p Pass) handOver(entry reconciler.Entry, action reconciler.Action) error {
 	return nil
 }
 
-// deleteIdentity removes the entry's identity, and with it its ship's socket, as nothing calls over it any more (decision 0026).
+// checkoutsOf is the read-only checkouts a session in the entry's repository gets, made when missing; none in a configured folder.
+func (p Pass) checkoutsOf(entry reconciler.Entry) ([]checkouts.Checkout, error) {
+	if entry.Workspace.Kind != "worktree" {
+		return nil, nil
+	}
+	return p.Checkouts.Prepare(entry.ShipID, entry.Workspace.Repository)
+}
+
+func pathsOf(made []checkouts.Checkout) []string {
+	paths := make([]string, 0, len(made))
+	for _, checkout := range made {
+		paths = append(paths, checkout.Path)
+	}
+	return paths
+}
+
+// deleteIdentity removes the entry's identity, and with it its ship's socket, as nothing calls over it any more (decision 0026), and its read-only checkouts.
 func (p Pass) deleteIdentity(entry reconciler.Entry) error {
 	p.Sockets.Close(entry.ShipID)
+	if err := p.Checkouts.Remove(entry.ShipID); err != nil {
+		return err
+	}
 	if entry.Folder == "" {
 		return nil
 	}
