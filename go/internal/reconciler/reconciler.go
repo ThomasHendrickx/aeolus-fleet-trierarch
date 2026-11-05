@@ -315,7 +315,9 @@ func Reconcile(state State, context Context) (State, []Action) {
 		entry := state.Entries[shipID]
 		request, ok := requested[shipID]
 		if !ok {
+			// The entry stays in the state until its cleanup succeeded, so a pass that stops meanwhile finds its folder and token again.
 			forgotten := entry
+			next.Entries[shipID] = entry
 			actions = append(actions, Action{Kind: Forget, ShipID: shipID, Entry: &forgotten})
 			continue
 		}
@@ -332,6 +334,7 @@ func Reconcile(state State, context Context) (State, []Action) {
 		}
 		actions = append(actions, taken.actions...)
 		if taken.isGivenBack {
+			next.Entries[shipID] = entry
 			continue
 		}
 		after := entry
