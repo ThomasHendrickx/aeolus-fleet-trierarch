@@ -178,6 +178,15 @@ type Observed struct {
 	StartProblems map[string]string
 	// WithoutIdentity are the ships whose entry would be watched or reported for, but whose folder holds no identity (#659, #664).
 	WithoutIdentity []string
+	// Worktrees are the worktrees under the trierarch's root.
+	Worktrees []Worktree
+}
+
+// Worktree is a worktree under the trierarch's root, `<root>/<repository>/<name>`.
+type Worktree struct {
+	Path       string
+	Repository string
+	Name       string
 }
 
 // Context is what reconciling needs beside the state.
@@ -225,6 +234,8 @@ const (
 	IdentityGone ActionKind = "identityGone"
 	// Crashed tells the ship's owner its restart budget is spent (#397).
 	Crashed ActionKind = "crashed"
+	// ClearOrphan stops what runs in a worktree no entry works in, then removes it unless it holds unsaved work (#1041).
+	ClearOrphan ActionKind = "clearOrphan"
 )
 
 // Status is a crew status as the trierarch writes it (#332).
@@ -246,6 +257,9 @@ type Action struct {
 	Reason          string
 	// Entry is the entry that ends with a forget or a give back.
 	Entry *Entry
+	// Orphan is the worktree a clear orphan clears, new when the state did not hold it yet, so what is left of it is logged once.
+	Orphan *Worktree
+	IsNew  bool
 	// ShipName, Harness, Version, Model, Exits, FailedStart and Key are what a notice names: the ship, the harness at its version and the model it refused, how often the session exited and why its last start failed, and the key that makes the notice told once.
 	ShipName    string
 	Harness     string
@@ -386,7 +400,55 @@ func Reconcile(state State, context Context) (State, []Action) {
 			actions = append(actions, Action{Kind: Stop, ShipID: session.ShipID})
 		}
 	}
-	return next, actions
+
+	orphans, cleared := orphansOf(state, next, context)
+	next.Orphans = orphans
+	return next, append(actions, cleared...)
+}
+
+// orphansOf are the worktrees under the root that no entry works in and the trierarch did not keep, as after their ship was retired (gap rule 2, #1041), as the state holds them, and their clears. A forgotten entry works in its worktree no more.
+func orphansOf(state State, next State, context Context) ([]any, []Action) {
+	known := map[string]bool{}
+	for shipID, entry := range next.Entries {
+		if _, ok := state.Entries[shipID]; ok && !isAssigned(shipID, context.Requests) {
+			continue
+		}
+		if entry.Folder != "" {
+			known[entry.Folder] = true
+		}
+	}
+	for _, kept := range next.Kept {
+		known[pathOf(kept)] = true
+	}
+	reported := map[string]bool{}
+	for _, held := range state.Orphans {
+		reported[pathOf(held)] = true
+	}
+	orphans := []any{}
+	actions := []Action{}
+	for _, worktree := range context.Observed.Worktrees {
+		if known[worktree.Path] {
+			continue
+		}
+		orphans = append(orphans, map[string]any{"path": worktree.Path, "repository": worktree.Repository, "name": worktree.Name})
+		cleared := worktree
+		actions = append(actions, Action{Kind: ClearOrphan, Orphan: &cleared, IsNew: !reported[worktree.Path]})
+	}
+	return orphans, actions
+}
+
+func isAssigned(shipID string, requests []Request) bool {
+	return slices.ContainsFunc(requests, func(request Request) bool { return request.ShipID == shipID })
+}
+
+// pathOf is the path of a kept worktree or an orphan as the state holds it; empty when it names none.
+func pathOf(held any) string {
+	fields, ok := held.(map[string]any)
+	if !ok {
+		return ""
+	}
+	path, _ := fields["path"].(string)
+	return path
 }
 
 func sortedKeys(entries map[string]Entry) []string {

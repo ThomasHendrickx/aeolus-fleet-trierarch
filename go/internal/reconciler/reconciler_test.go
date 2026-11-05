@@ -893,7 +893,9 @@ func TestAnOrphanGoneFromDiskIsNoLongerHeld(t *testing.T) {
 }
 
 func TestTheWorktreeAnEntryWorksInIsNoOrphan(t *testing.T) {
-	context := aContext(aRequest(scout))
+	request := aRequest(scout)
+	request.Status = status("running")
+	context := aContext(request)
 	context.Observed.Sessions = running(scout)
 	context.Observed.Worktrees = []Worktree{aWorktree("scout")}
 
