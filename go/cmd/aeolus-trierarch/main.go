@@ -27,10 +27,10 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/attestation"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/claudecode"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/cli"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/codex"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/copilot"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
