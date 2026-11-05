@@ -275,6 +275,11 @@ func (c Client) ReportFor(crewToken string, state string, note string) error {
 	return call(c.URL, request{path: "/ship/report", crewToken: crewToken, body: map[string]string{"state": state, "note": note}}, &map[string]any{})
 }
 
+// ReportSelf reports as the trierarch's own ship, with its own crew token: its state, note and details.
+func (c Client) ReportSelf(state string, note string, details any) error {
+	return call(c.URL, request{path: "/ship/report", crewToken: c.CrewToken, body: map[string]any{"state": state, "note": note, "details": details}}, &map[string]any{})
+}
+
 // send sends a message from the trierarch's own ship to the ship named or identified by the selector, as markdown.
 func (c Client) send(selector map[string]string, text string, idempotencyKey string) error {
 	body := map[string]any{"selector": selector, "payload": text, "contentType": "text/markdown", "model": c.Model, "idempotencyKey": idempotencyKey}

@@ -74,8 +74,8 @@ func aMain(t *testing.T) (Machine, *anInstalledService, *aFleet) {
 		Sleep:                 func() {},
 		Stop:                  make(chan struct{}),
 		CoreVersionRefusal:    func(string) string { return "" },
-		NewPass: func(paths.Paths, crew.File, config.Configuration) (func() error, error) {
-			return func() error { return nil }, nil
+		NewPass: func(paths.Paths, crew.File, config.Configuration) (func(isKeyCutOff bool) error, error) {
+			return func(bool) error { return nil }, nil
 		},
 		PassEvery: time.Millisecond,
 		Sessions:  func(paths.Paths) Sessions { return &aSessionRuntime{} },
