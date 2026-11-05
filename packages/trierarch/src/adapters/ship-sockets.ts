@@ -15,9 +15,10 @@ import type { RefreshedCheckout } from '../core/ports.js';
  * crew token, read at each call so a new crew reaches the same socket, and
  * forwards the call unchanged; the fleet's answer goes back unchanged, a 503
  * included. It answers only a caller of the ship's own session or of the
- * trierarch (the caller check), and checks only the path (the ship API and the ship protocol,
- * never register or deregister) and the size, and logs one line per call
- * without the body. It queues nothing: when the fleet gives no answer, the
+ * trierarch (the caller check), and checks only the path (the ship API, the
+ * fleet API and the ship protocol, never register or deregister) and the
+ * size: core decides each fleet call by the ship's scopes and reach
+ * (decision 0057). It logs one line per call without the body. It queues nothing: when the fleet gives no answer, the
  * session gets none either. One call it answers itself, never the fleet's: a
  * refresh of its ship's read-only checkouts (#1182), which answers the
  * revision each now holds, or why it could not.
@@ -27,8 +28,8 @@ import type { RefreshedCheckout } from '../core/ports.js';
 export const SHIP_CALL_MAX_BYTES = 320 * 1024;
 
 const SOCKET_FILE = 'fleet.sock';
-/** A ship call is one word under the ship API: `/api/v1/ship/send`. */
-const SHIP_CALL = /^\/api\/v1\/ship\/([A-Za-z]+)$/;
+/** A call is one word under the ship API or the fleet API: `/api/v1/ship/send`, `/api/v1/fleet/commission`. */
+const FORWARDED_CALL = /^\/api\/v1\/(?:ship|fleet)\/([A-Za-z]+)$/;
 /** The calls that make or end a crew: only the trierarch makes them, never a session. */
 const CREW_CALLS = new Set(['register', 'deregister']);
 /** The ship protocol, which a session reads at each start (`aeolus-fleet.sh protocol`). */
@@ -44,12 +45,12 @@ export interface ShipSockets {
   closeAll(): Promise<void>;
 }
 
-/** Whether the socket forwards a call to this path: the ship API but crewing, and the protocol. */
+/** Whether the socket forwards a call to this path: the ship API and the fleet API but crewing, and the protocol. */
 function isForwarded(method: string, path: string): boolean {
   if (method === 'GET' && path === PROTOCOL) {
     return true;
   }
-  const call = SHIP_CALL.exec(path)?.[1];
+  const call = FORWARDED_CALL.exec(path)?.[1];
   return call !== undefined && !CREW_CALLS.has(call);
 }
 
@@ -119,7 +120,7 @@ export function createShipSockets(options: {
       return;
     }
     if (!isForwarded(method, path)) {
-      refuse(response, { status: 403, message: 'This socket forwards only ship calls, never register or deregister' });
+      refuse(response, { status: 403, message: 'This socket forwards only ship and fleet calls, never register or deregister' });
       said('403');
       return;
     }
