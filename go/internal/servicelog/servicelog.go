@@ -84,6 +84,10 @@ func tailFile(file string, count int) []string {
 	if string(text) == "" {
 		lines = []string{}
 	}
+	// As today's trierarch, whose slice(-0) is the whole file.
+	if count == 0 {
+		return lines
+	}
 	return lines[max(0, len(lines)-count):]
 }
 
