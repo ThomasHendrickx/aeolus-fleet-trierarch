@@ -134,9 +134,9 @@ func TestItOffersItselfUnlessItStoppedAndItsProbeIsNotDue(t *testing.T) {
 
 func TestAProbeHasRoomForOneStartAboveTheShipsItHoldsWhileNoStartIsUndecided(t *testing.T) {
 	cases := []struct {
-		name                   string
-		held, ships, want      int
-		isStartUndecided       bool
+		name              string
+		held, ships, want int
+		isStartUndecided  bool
 	}{
 		{"one more", 1, 8, 2, false},
 		{"none held", 0, 8, 1, false},
