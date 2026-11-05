@@ -64,9 +64,9 @@ export interface Machine {
 
 export interface RunningCommand {
   /** Everything it wrote to stdout so far. */
-  stdout(): string;
+  readonly stdout: () => string;
   /** Ends it as an operator does (SIGINT) and says its exit status. */
-  interrupt(): Promise<number>;
+  readonly interrupt: () => Promise<number>;
 }
 
 export type StandInSwitch = 'claude-signed-out' | 'claude-help-names-no-alias' | 'claude-plugin-fails' | 'codex-plugin-fails' | 'codex-deletes-plugin-data' | 'codex-untrusted-hook';
@@ -359,8 +359,14 @@ export async function aMachine(at: { others?: readonly OtherHarness[] } = {}): P
     const [program = '', ...args] = [...underTest, ...words];
     const child = spawn(program, args, { cwd: home, env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
-    child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString()));
-    const ended = new Promise<number>((resolve) => child.on('close', (code) => resolve(code ?? 1)));
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    const ended = new Promise<number>((resolve) => {
+      child.on('close', (code) => {
+        resolve(code ?? 1);
+      });
+    });
     return {
       stdout: () => stdout,
       interrupt: () => {

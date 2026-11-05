@@ -47,6 +47,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/release"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/runpass"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/service"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/servicelog"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/shipsocket"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
@@ -126,6 +127,10 @@ func main() {
 			return plugins{home: home, env: environment()}
 		},
 		Trierarch: runTrierarch,
+		ServiceLog: func(at paths.Paths) servicelog.Log {
+			return servicelog.Of(runtime.GOOS, filepath.Join(at.Logs, "trierarch.log"), servicelog.RunProgram, servicelog.StreamProgram, 500*time.Millisecond)
+		},
+		Print: func(line string) { fmt.Fprintln(stdout, line) },
 		Detect: func(at paths.Paths, harnesses []string, by detection.By) (detection.Detected, error) {
 			warn := func(line string) { fmt.Fprintln(os.Stderr, line) }
 			return detectionOf(at, environment(), home, warn).Detect(context.Background(), harnesses, by)
