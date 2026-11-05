@@ -97,6 +97,24 @@ describe('the finish workflow', () => {
     expect(verify).toContain('--source-digest');
   });
 
+  it('stops before it changes anything while the release\'s milestone has open issues', () => {
+    const check = stepIndex('Check the release\'s milestone has no open issues');
+    expect(check).toBeGreaterThan(-1);
+    expect(check).toBeLessThan(stepIndex('Create the GitHub Release'));
+    expect(stepNamed(workflow(FINISH), 'Check the release\'s milestone has no open issues')).toContain('state=open');
+  });
+
+  it('leaves a GitHub Release alone that carries the same SHA256SUMS already', () => {
+    const create = stepNamed(workflow(FINISH), 'Create the GitHub Release');
+    expect(create).toMatch(/gh release download "v\$VERSION" --pattern SHA256SUMS/);
+    expect(create).toMatch(/cmp --silent SHA256SUMS/);
+  });
+
+  it('leaves a closed milestone alone', () => {
+    const close = stepNamed(workflow(FINISH), 'Close the release');
+    expect(close).toMatch(/if \[\[ "\$state" == closed \]\]; then\n +echo "Milestone '\$MILESTONE' is closed already/);
+  });
+
   it('creates the GitHub Release, closes the milestone, sets the plugin on main, then updates the tap', () => {
     const order = ['Create the GitHub Release', 'Close the release', 'Set the aeolus-fleet plugin to', 'Update the Homebrew tap to'].map(stepIndex);
     expect(order[0]).toBeGreaterThan(-1);
