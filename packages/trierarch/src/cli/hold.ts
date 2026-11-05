@@ -42,6 +42,13 @@ async function holdPids(sessions: string): Promise<number[]> {
   return pids.filter((pid) => Number.isInteger(pid) && pid > 1);
 }
 
+/** The process session each harness a hold started leads, ended ones among them: every hold's, from its harness sessions file. */
+async function harnessSessions(sessions: string): Promise<number[]> {
+  const folders = await readdir(sessions).catch(() => []);
+  const listed = await Promise.all(folders.map(async (folder) => (await readFile(join(sessions, folder, 'harness-sessions'), 'utf8').catch(() => '')).split('\n').map(Number)));
+  return listed.flat().filter((pid) => Number.isInteger(pid) && pid > 1);
+}
+
 /** Runs the hold with the words after `hold`; answers its exit code, or 2 for words it cannot take. */
 export async function holdCommand(words: readonly string[], at: { env: Readonly<Record<string, string | undefined>>; platform: string }): Promise<number> {
   const end = words.indexOf('--');
@@ -77,6 +84,6 @@ export async function holdCommand(words: readonly string[], at: { env: Readonly<
     command,
     environment: harnessEnvironment(at.env, { ...given, ...(tokenVariable !== undefined && proxyToken !== undefined && { [tokenVariable]: proxyToken.token }) }),
     version: runningVersion(),
-    mayCall: createTrierarchCallerCheck({ platform: at.platform, sessionRoots: () => holdPids(sessions) }),
+    mayCall: createTrierarchCallerCheck({ platform: at.platform, sessionRoots: () => holdPids(sessions), harnessSessions: () => harnessSessions(sessions) }),
   });
 }

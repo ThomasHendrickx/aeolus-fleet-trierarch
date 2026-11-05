@@ -20,11 +20,13 @@ export interface HoldFiles {
   readonly events: string;
   /** The harness's own session id, as its first event names it, so a start resumes it. */
   readonly sessionId: string;
+  /** The pid of each harness process the hold started, a line each: each leads a process session of its own, which a process it forked keeps once that harness has ended. */
+  readonly harnessSessions: string;
 }
 
 export function holdFilesOf(sessions: string, shipId: ShipId): HoldFiles {
   const folder = join(sessions, shipId);
-  return { folder, socket: join(folder, 'hold.sock'), pid: join(folder, 'hold.pid'), events: join(folder, 'events.jsonl'), sessionId: join(folder, 'session-id') };
+  return { folder, socket: join(folder, 'hold.sock'), pid: join(folder, 'hold.pid'), events: join(folder, 'events.jsonl'), sessionId: join(folder, 'session-id'), harnessSessions: join(folder, 'harness-sessions') };
 }
 
 export const holdRequestSchema = z.discriminatedUnion('call', [
