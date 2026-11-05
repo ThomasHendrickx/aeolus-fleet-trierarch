@@ -145,6 +145,15 @@ func countsOf(lines []discardedLine) string {
 
 // Discarded is what argo is told a released ship's removed worktree held: its git status lines and commits not kept anywhere.
 func Discarded(ship Ship, repository string, unsaved []string) string {
+	return discarded(ship, repository, unsaved, false)
+}
+
+// DiscardedElsewhere is the same for a ship released elsewhere, whose worktree goes before the trierarch crews it again.
+func DiscardedElsewhere(ship Ship, repository string, unsaved []string) string {
+	return discarded(ship, repository, unsaved, true)
+}
+
+func discarded(ship Ship, repository string, unsaved []string, isReleasedElsewhere bool) string {
 	lines := make([]discardedLine, 0, len(unsaved))
 	for _, line := range unsaved {
 		lines = append(lines, lineOf(line))
@@ -157,7 +166,13 @@ func Discarded(ship Ship, repository string, unsaved []string) string {
 		named = append(named, fmt.Sprintf("- and %d more, in this trierarch's log", more))
 	}
 	facts := strings.Join([]string{ship.fact(), "- Worktree: " + repository, "- Discarded: " + countsOf(lines)}, "\n")
-	return Message(ship.nameOf()+" released: unpushed work discarded", paragraphs(facts, strings.Join(named, "\n")))
+	parts := []string{facts, strings.Join(named, "\n")}
+	headline := ship.nameOf() + " released: unpushed work discarded"
+	if isReleasedElsewhere {
+		parts = append([]string{"The trierarch removed its worktree before crewing it again."}, parts...)
+		headline = ship.nameOf() + " released elsewhere: unpushed work discarded"
+	}
+	return Message(headline, paragraphs(parts...))
 }
 
 // ModelRefused is what argo is told when a session refused the model it launched with.

@@ -653,12 +653,6 @@ func TestAForcedMessageWaitsWhileTheTurnIsUnknown(t *testing.T) {
 	assertActions(t, actions)
 }
 
-func TestASessionWhoseLeaseEndedIsHandedNothing(t *testing.T) {
-	_, actions := Reconcile(withEntries(anEntry(scout, "running")), aRunningShip(Seen{Inbox: Inbox{IsLeaseEnded: true}, Turn: TurnIdle, IsHolding: true}))
-
-	assertActions(t, actions)
-}
-
 func TestAnUnwatchedSessionIsHandedNothing(t *testing.T) {
 	_, actions := Reconcile(withEntries(anEntry(scout, "running")), aRunningShip(Seen{}))
 

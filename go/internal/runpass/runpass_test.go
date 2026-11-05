@@ -1277,7 +1277,9 @@ func TestAShipReleasedElsewhereHasItsSessionStoppedAndIsCrewedAgainInAFreshWorkt
 	if entry.IsReleasedElsewhere || entry.State != "crewing" || entry.CrewToken == "" {
 		t.Fatalf("entry %+v", entry)
 	}
-	if !slices.ContainsFunc(pass.logged, func(line string) bool { return strings.Contains(line, "scout ("+scout+"): released elsewhere, its worktree removed") }) {
+	if !slices.ContainsFunc(pass.logged, func(line string) bool {
+		return strings.Contains(line, "scout ("+scout+"): released elsewhere, its worktree removed")
+	}) {
 		t.Fatalf("logged %q", pass.logged)
 	}
 }
