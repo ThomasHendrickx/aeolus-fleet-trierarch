@@ -9,6 +9,8 @@ import { aMachine, type Machine } from './support/machine.js';
 // `aeolus-trierarch logs`: the last lines of the trierarch's log, which on Linux is the journal of its systemd user unit (docs/trierarch.md, "Logs"), and with --follow each line written after (#177).
 
 const FOLLOWED_WITHIN_MS = 15_000;
+/** A follower starts reading after it printed the last lines: lines written in that moment are not followed. */
+const FOLLOWER_STARTS_MS = 2_000;
 const JOURNAL = 'journalctl --user --unit aeolus-trierarch.service';
 const SHIP = 'shp_01m6n75scq9v1tqcttft530g8t';
 
@@ -101,6 +103,7 @@ describe('logs', () => {
 
     const following = machine.start(['logs', '--follow', '--lines', '2']);
     await until(following.stdout, 'an older line\n');
+    await wait(FOLLOWER_STARTS_MS);
     appendFileSync(journal(), `${JSON.stringify({ ...message, message: 'a later record' })}\nplain later line\n`);
     await until(following.stdout, 'plain later line\n');
     const status = await following.interrupt();
@@ -120,6 +123,7 @@ describe('logs', () => {
 
     const following = machine.start(['logs', '--follow', '--json']);
     await until(following.stdout, '"crew"');
+    await wait(FOLLOWER_STARTS_MS);
     appendFileSync(journal(), 'plain later line\n');
     await until(following.stdout, 'plain later line');
     await following.interrupt();
