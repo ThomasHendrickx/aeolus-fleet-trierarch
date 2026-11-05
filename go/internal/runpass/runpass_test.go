@@ -1909,6 +1909,9 @@ func TestACrewInAConfiguredFolderGetsNoCheckouts(t *testing.T) {
 	pass.fleet.requests = []reconciler.Request{request}
 	pass.pass.Workspace = &aFolders{aWorkspace: pass.workspace}
 	pass.pass.Folders = []string{"notes"}
+	pass.pass.Trusted = func() map[string]reconciler.Trust {
+		return map[string]reconciler.Trust{"claude-code": {Folders: []string{"notes"}}}
+	}
 
 	pass.run(t)
 
