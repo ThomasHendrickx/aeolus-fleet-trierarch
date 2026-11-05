@@ -15,8 +15,8 @@ export interface Fleet {
   readonly database: PrismaClient;
   /** The trierarch ship's id and the secret its setup line carries. */
   readonly trierarchShip: { readonly shipId: ShipId; readonly secret: string };
-  /** Commissions a ship argo can request a crew for; with `owner`, a ship of that name answers for it instead of argo. */
-  commission(name: string, at?: { owner?: ShipId }): Promise<ShipId>;
+  /** Commissions a ship argo can request a crew for; with `owner`, a ship of that name answers for it instead of argo; with `scopes`, the ship holds them. */
+  commission(name: string, at?: { owner?: ShipId; scopes?: readonly string[] }): Promise<ShipId>;
   /** Requests a crew for the ship in a worktree of the repository, with the harness and the options given, and assigns it to the machine's trierarch. */
   crewInWorktree(shipId: ShipId, at: { repository: string; harness: string; options?: Readonly<Record<string, string>> }): Promise<void>;
   /** Removes the ship's crew request: its lease ends. */
@@ -77,7 +77,7 @@ export async function aFleet(): Promise<Fleet> {
     database,
     trierarchShip,
     commission: async (name, at = {}) => {
-      const { shipId } = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name, type: 'reviewer' }));
+      const { shipId } = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name, type: 'reviewer', ...(at.scopes !== undefined && { scopes: [...at.scopes] }) }));
       if (at.owner !== undefined) {
         await database.ship.update({ where: { id: shipId }, data: { ownerShipId: at.owner } });
       }
