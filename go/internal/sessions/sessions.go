@@ -104,19 +104,6 @@ func SystemdVersion() int {
 	return version
 }
 
-// BootedAt is when the machine started, from /proc/uptime.
-func BootedAt() time.Time {
-	text, err := os.ReadFile("/proc/uptime")
-	if err != nil {
-		return time.Time{}
-	}
-	seconds, err := strconv.ParseFloat(strings.Fields(string(text))[0], 64)
-	if err != nil {
-		return time.Time{}
-	}
-	return time.Now().Add(-time.Duration(seconds * float64(time.Second)))
-}
-
 // runningPID is the hold's pid while its process runs, 0 otherwise: a pid file's pid that is not this ship's hold by its command line is nobody to signal.
 func (r Runtime) runningPID(shipID string) int {
 	text, err := os.ReadFile(hold.FilesOf(r.Sessions, shipID).PID)
