@@ -121,10 +121,12 @@ jobs:
 
       # The milestone "trierarch <version>" is the release's scope: open issues in it
       # stop the run before anything is published. A hotfix without one goes on.
+      # A lookup that fails fails the run (shell: bash adds pipefail).
       - name: Check the release's milestone has no open issues
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
+        shell: bash
         run: |
           MILESTONE="trierarch $VERSION"
           number=$(gh api --paginate "repos/$GITHUB_REPOSITORY/milestones?state=all&per_page=100" \
@@ -275,6 +277,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
+        shell: bash
         run: |
           MILESTONE="trierarch $VERSION"
           number=$(gh api --paginate "repos/$GITHUB_REPOSITORY/milestones?state=all&per_page=100" \
