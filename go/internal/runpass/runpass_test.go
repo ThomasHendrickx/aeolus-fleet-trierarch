@@ -361,11 +361,31 @@ func TestACrewThatIsActiveInItsLaunchWindowRuns(t *testing.T) {
 
 	pass.run(t)
 
-	if !slices.Equal(pass.fleet.calls, []string{"status " + scout + " running 0 " + now.Format(time.RFC3339Nano)}) {
+	if !slices.Equal(pass.fleet.calls, []string{"status " + scout + " running 0 2026-11-04T12:00:00.000Z"}) {
 		t.Fatalf("calls %q", pass.fleet.calls)
 	}
 	if pass.store.state.Entries[scout].State != "running" {
 		t.Fatalf("entry %+v", pass.store.state.Entries[scout])
+	}
+}
+
+func TestARunningStatusSaysWhenTheSessionStartedInUTCWithMillisecondsWhateverTheMachinesZone(t *testing.T) {
+	zone := time.FixedZone("UTC+1", 3600)
+	local := time.Local
+	time.Local = zone
+	t.Cleanup(func() { time.Local = local })
+	pass := aRunPass(t)
+	pass.pass.Now = func() time.Time { return time.Date(2026, 11, 5, 13, 11, 12, 123456789, time.Local) }
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+	pass.run(t)
+	pass.harness.seen[scout] = reconciler.LaunchSeen{Kind: reconciler.LaunchActive}
+	pass.fleet.requests = []reconciler.Request{aRequest("crewing")}
+	pass.fleet.calls = nil
+
+	pass.run(t)
+
+	if !slices.Equal(pass.fleet.calls, []string{"status " + scout + " running 0 2026-11-05T12:11:12.123Z"}) {
+		t.Fatalf("calls %q", pass.fleet.calls)
 	}
 }
 
