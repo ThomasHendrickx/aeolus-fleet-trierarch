@@ -60,6 +60,7 @@ Static binaries with no C library, cross-built for each operating system and chi
 
 - An install script (`curl -fsSL <url> | sh`) downloads the binary for the machine's system and chip from the GitHub Release, checks its checksum, puts it in `~/.local/bin` and runs `init`. The trierarch plugin's setup line is that script.
 - The bare binary from the GitHub Release, by hand, with its checksum.
+- Homebrew, natural on macOS and available on Linux: `brew install thomashendrickx/aeolus/aeolus-trierarch` from the tap `ThomasHendrickx/homebrew-aeolus`, whose formula installs the release binary for the machine's system and chip, checked against the checksum in the formula, and `brew upgrade` moves to a newer release. The release workflow writes the formula (`homebrew/aeolus-trierarch.rb` with the version, URLs and checksums of the release) to the tap at each release from main, with a deploy key that can write to the tap only.
 - `upgrade` fetches the release itself, checks its checksum and attestation, and replaces the file. It does not use npm.
 - The npm package stays during the move, so today's machines upgrade as they do now.
 
