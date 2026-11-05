@@ -946,6 +946,7 @@ func (p Pass) reconcile(state reconciler.State) (reconciler.State, []reconciler.
 	marksLaunches, missingPlugins, notOffered := p.launchMarks()
 	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers(), Configuration: p.Configuration(), Trusted: p.Trusted(), MarksLaunches: marksLaunches, MissingPlugins: missingPlugins, NotOffered: notOffered})
 	next.PassFailure = nil
+	next.MissingPlugins, next.NotOffered = notOfferedState(missingPlugins, notOffered)
 	if err := p.Store.Save(next); err != nil {
 		return state, nil, err
 	}
@@ -953,6 +954,19 @@ func (p Pass) reconcile(state reconciler.State) (reconciler.State, []reconciler.
 		return next, nil, err
 	}
 	return next, actions, nil
+}
+
+// notOfferedState are the harnesses whose plugin could not be found and those not offered with why, by harness, as the state keeps them for the report; none when there are none.
+func notOfferedState(missingPlugins []string, notOffered map[string]string) ([]string, []reconciler.NotOfferedHarness) {
+	var missing []string
+	if len(missingPlugins) > 0 {
+		missing = slices.Sorted(slices.Values(missingPlugins))
+	}
+	var offeredNot []reconciler.NotOfferedHarness
+	for _, harness := range slices.Sorted(maps.Keys(notOffered)) {
+		offeredNot = append(offeredNot, reconciler.NotOfferedHarness{Harness: harness, Reason: notOffered[harness]})
+	}
+	return missing, offeredNot
 }
 
 // launchMarks reads whether each harness's aeolus-fleet plugin marks launches, which harnesses have no plugin to ask (#1212), one missing never failing the pass for the others, and why the machine does not offer a harness (CC3, CC10).
