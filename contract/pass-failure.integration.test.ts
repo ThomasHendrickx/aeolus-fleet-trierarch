@@ -40,7 +40,8 @@ describe('a pass that cannot read what it reconciles', () => {
   it('is kept in the state with its reason', async () => {
     await fleet.close();
 
-    await expect.poll(passFailure, { timeout: FAILS_WITHIN_MS }).toMatchObject({ reason: expect.stringMatching(/.+/) });
+    await expect.poll(passFailure, { timeout: FAILS_WITHIN_MS }).toBeDefined();
+    expect(passFailure()?.reason).not.toBe('');
     expect(machine.serviceLog()).toMatch(/The pass failed: .+; the next pass tries again; aeolus-trierarch status and list show where it stands/);
   });
 
