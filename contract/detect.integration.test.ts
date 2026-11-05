@@ -68,6 +68,31 @@ function offerCopilot(): void {
   writeFileSync(file, JSON.stringify({ ...configuration, harnesses: { ...configuration.harnesses, copilot: { flags: [], options: {} } } }));
 }
 
+/** Gives Claude Code a flag and an option of its own, default fast, beside the detected ones. */
+function configureOwnOptions(): void {
+  const file = join(machine.trierarchHome, 'config.json');
+  const configuration = z.looseObject({ harnesses: z.record(z.string(), z.looseObject({})) }).parse(JSON.parse(readFileSync(file, 'utf8')));
+  const claudeCode = { flags: ['--chrome'], options: { speed: { values: { fast: ['--fast'], slow: ['--slow'] }, default: 'fast' } } };
+  writeFileSync(file, JSON.stringify({ ...configuration, harnesses: { ...configuration.harnesses, 'claude-code': claudeCode } }));
+}
+
+const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const partSchema = z.object({ words: z.array(z.string()), source: z.enum(['configuration', 'adapter']).optional(), when: z.string().optional() });
+const checkedSchema = z.object({
+  path: z.string(),
+  runtime: z.object({ kind: z.string() }),
+  harnesses: z.record(
+    z.string(),
+    z.object({
+      flags: z.array(z.string()),
+      options: z.record(z.string(), z.record(z.string(), z.array(z.string()))),
+      adapterFlags: z.array(z.object({ flag: z.string(), when: z.string() })),
+      firstStart: z.array(partSchema).optional(),
+      restart: z.array(partSchema).optional(),
+    }),
+  ),
+});
+
 describe('init', () => {
   it("detects what each harness offers and keeps it in detected.json: its version, when its models were confirmed, its options and Claude Code's permission modes", async () => {
     await aCrewing({ others: ['codex'] });
@@ -240,5 +265,76 @@ describe('config check', () => {
 
     expect(ran.status).toBe(1);
     expect(ran.stdout + ran.stderr).toContain('sets a model option for claude-code: model ids come from detection only');
+  });
+
+  it("says where the sessions run, the flags per harness with the detected options, and what each harness launches on a first start and a restart, each flag part with its source", async () => {
+    await aCrewing({ others: ['codex'] });
+    configureOwnOptions();
+
+    const ran = await machine.trierarch(['config', 'check']);
+
+    expect(ran.status, ran.stdout + ran.stderr).toBe(0);
+    const lines = ran.stdout.split('\n');
+    expect(lines[0]).toBe(`The configuration at ${join(machine.trierarchHome, 'config.json')} fits.`);
+    expect(lines[1]).toBe('Sessions run on the host.');
+    expect(lines[2]).toBe('Flags per harness (settings pick option values by name):');
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        'claude-code: --chrome --fast',
+        '  model=claude-sonnet-5: --model claude-sonnet-5',
+        '  model=claude-opus-5: --model claude-opus-5',
+        '  effort=low: --effort low',
+        '  speed=fast (default): --fast',
+        '  speed=slow: --slow',
+        'codex: -m gpt-5.6-terra',
+        '  model=gpt-5.6-terra (default): -m gpt-5.6-terra',
+        'What each harness launches, with the default options:',
+      ]),
+    );
+    const claude = 'claude -p --input-format stream-json --output-format stream-json --verbose (adapter) --chrome --fast (configuration) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter)';
+    expect(lines).toContain(`  first start: ${claude}`);
+    expect(lines).toContain(`  restart: ${claude} --continue (adapter)`);
+    const codex = 'codex exec -m gpt-5.6-terra (configuration) --json (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- ';
+    expect(lines.find((line) => line.startsWith('  first start: codex'))).toMatch(new RegExp(`^  first start: ${escaped(codex)}"<first prompt>\\\\n\\\\nNo human reads this terminal\\.`));
+    expect(lines.find((line) => line.startsWith('  restart: codex'))).toMatch(new RegExp(`^  restart: codex exec resume --last -m gpt-5.6-terra \\(configuration\\) --json`));
+  });
+
+  it('gives the same as JSON: the runtime, and per harness its flags, option values, adapter flags and command lines in parts', async () => {
+    await aCrewing();
+    configureOwnOptions();
+
+    const ran = await machine.trierarch(['config', 'check', '--json']);
+
+    expect(ran.status, ran.stdout + ran.stderr).toBe(0);
+    const checked = checkedSchema.parse(JSON.parse(ran.stdout));
+    expect(checked.path).toBe(join(machine.trierarchHome, 'config.json'));
+    expect(checked.runtime).toEqual({ kind: 'host' });
+    const claude = checked.harnesses['claude-code'];
+    expect(claude?.flags).toEqual(['--chrome', '--fast']);
+    expect(claude?.options.speed).toEqual({ fast: ['--fast'], slow: ['--slow'] });
+    expect(claude?.options.model).toEqual({ 'claude-sonnet-5': ['--model', 'claude-sonnet-5'], 'claude-opus-5': ['--model', 'claude-opus-5'] });
+    expect(claude?.adapterFlags).toEqual([
+      { flag: '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode', when: 'always' },
+      { flag: '--continue', when: 'restart' },
+    ]);
+    expect(claude?.firstStart).toEqual([
+      { words: ['claude'] },
+      { words: ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'], source: 'adapter' },
+      { words: ['--chrome', '--fast'], source: 'configuration' },
+      { words: ['--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode'], source: 'adapter' },
+    ]);
+    expect(claude?.restart?.at(-1)).toEqual({ words: ['--continue'], source: 'adapter' });
+  });
+
+  it('says a configured harness it has no adapter for, without a command line', async () => {
+    await aCrewing();
+    const file = join(machine.trierarchHome, 'config.json');
+    const configuration = z.looseObject({ harnesses: z.record(z.string(), z.unknown()) }).parse(JSON.parse(readFileSync(file, 'utf8')));
+    writeFileSync(file, JSON.stringify({ ...configuration, harnesses: { ...configuration.harnesses, aider: { flags: [], options: {} } } }));
+
+    const ran = await machine.trierarch(['config', 'check']);
+
+    expect(ran.status, ran.stdout + ran.stderr).toBe(0);
+    expect(ran.stdout).toContain('aider: this trierarch has no adapter for it');
   });
 });
