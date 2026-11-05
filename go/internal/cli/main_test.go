@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +15,9 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
 )
 
 // anInstalledService is a service that runs as pid 41 once installed, and removes itself on uninstall.
@@ -80,6 +83,8 @@ func aMain(t *testing.T) (Machine, *anInstalledService, *aFleet) {
 		},
 		PassEvery: time.Millisecond,
 		Sessions:  func(paths.Paths) Sessions { return &aSessionRuntime{} },
+		Plugins:   func() Plugins { return &somePlugins{versions: map[string]string{"claude-code": "0.20.4"}} },
+		StartedAt: func(int) string { return "2026-10-06T07:00:00.000Z" },
 		Log:       func(string) {},
 		Detect: func(paths.Paths, []string, detection.By) (detection.Detected, error) {
 			return detection.Detected{}, nil
@@ -148,7 +153,43 @@ func TestInitAnswersItsReportAsJSON(t *testing.T) {
 	}
 }
 
-func TestStatusSaysTheVersionTheServiceAndTheLease(t *testing.T) {
+func TestStatusSaysTheWholeState(t *testing.T) {
+	machine, _, _ := aMain(t)
+	Main(setupWords(), machine)
+	at := paths.Of(machine.HomeDirectory, "")
+	configuration, _ := config.Load(at.Config)
+	configuration.Repositories["aeolus-fleet"] = config.Repository{Path: "/repository"}
+	configuration.Harnesses["codex"] = config.Harness{Flags: []string{}, Options: map[string]config.Option{}}
+	_ = config.Write(at.Config, configuration)
+	machine.Sessions = func(paths.Paths) Sessions { return &aSessionRuntime{running: []string{"shp_a"}} }
+	saved := reconciler.Empty()
+	saved.Entries["shp_a"] = reconciler.Entry{ShipID: "shp_a", State: "running"}
+	saved.Entries["shp_b"] = reconciler.Entry{ShipID: "shp_b", State: "restarting"}
+	saved.Kept = []any{map[string]any{"shipId": "shp_k", "repository": "aeolus-fleet", "path": "/worktrees/kept"}}
+	saved.Orphans = []any{map[string]any{"path": "/worktrees/stray", "repository": "aeolus-fleet", "name": "stray"}}
+	saved.PassFailure = &reconciler.PassFailure{Reason: "the fleet cannot be reached", Since: "2026-10-06T08:00:00.000Z"}
+	_ = state.File{Path: at.State}.Save(saved)
+
+	output, code := Main([]string{"status"}, machine)
+
+	want := strings.Join([]string{
+		"Version: " + Version,
+		"Aeolus Fleet plugin: claude-code 0.20.4, codex not found (install the aeolus-fleet plugin for it)",
+		"Repositories: aeolus-fleet",
+		"Service: running, pid 41, since 2026-10-06T07:00:00.000Z",
+		"Fleet: " + fleetURL + ", the lease of " + shipID + " is valid",
+		"Caps: 2 of 4 ships crewed here, 1 of 2 sessions running",
+		"Last pass: failing since 2026-10-06T08:00:00.000Z: the fleet cannot be reached",
+		"Entries: running 1, restarting 1",
+		"Kept worktrees: /worktrees/kept (shp_k)",
+		"Orphans: /worktrees/stray",
+	}, "\n")
+	if code != 0 || output != want {
+		t.Errorf("answered %q, %d, want %q", output, code, want)
+	}
+}
+
+func TestStatusAnswersTheReportAsJSON(t *testing.T) {
 	machine, _, _ := aMain(t)
 	Main(setupWords(), machine)
 
@@ -157,11 +198,92 @@ func TestStatusSaysTheVersionTheServiceAndTheLease(t *testing.T) {
 	want := map[string]any{
 		"version":        Version,
 		"runningVersion": Version,
-		"service":        map[string]any{"file": "/unit", "isInstalled": true, "isRunning": true, "pid": float64(41)},
+		"plugins":        map[string]any{"claude-code": "0.20.4"},
+		"repositories":   []any{},
+		"service":        map[string]any{"file": "/unit", "isInstalled": true, "isRunning": true, "pid": float64(41), "since": "2026-10-06T07:00:00.000Z"},
 		"fleet":          map[string]any{"url": fleetURL, "shipId": shipID, "lease": "valid"},
+		"caps":           map[string]any{"ships": map[string]any{"used": float64(0), "cap": float64(4)}, "running": map[string]any{"used": float64(0), "cap": float64(2)}},
+		"entries":        map[string]any{"crewing": float64(0), "running": float64(0), "restarting": float64(0), "crashed": float64(0), "releasing": float64(0)},
+		"kept":           []any{},
+		"orphans":        []any{},
 	}
 	if got := decoded(t, output); code != 0 || !reflect.DeepEqual(got, want) {
 		t.Errorf("answered %v, %d, want %v", got, code, want)
+	}
+}
+
+func TestStatusSaysWhenTheServiceRunsAnotherVersionThanIsInstalled(t *testing.T) {
+	machine, _, _ := aMain(t)
+	Main(setupWords(), machine)
+	at := paths.Of(machine.HomeDirectory, "")
+	for running, want := range map[string]string{
+		`{"pid":41,"version":"0.17.4"}`: "0.0.0 installed, 0.17.4 running: restart the service to run the installed one (aeolus-trierarch restart)",
+		`{"pid":7,"version":"0.0.0"}`:   "0.0.0 installed, the running service did not say its version, so it started before 0.0.0: restart it to run the installed one (aeolus-trierarch restart)",
+	} {
+		_ = os.WriteFile(at.Running, []byte(running), 0o644)
+
+		output, _ := Main([]string{"status"}, machine)
+
+		if line := strings.Split(output, "\n")[0]; line != "Version: "+want {
+			t.Errorf("%s: %q", running, line)
+		}
+	}
+}
+
+func TestStatusSaysWhenTheServiceIsNotInstalledOrNotRunning(t *testing.T) {
+	machine, installed, _ := aMain(t)
+	Main(setupWords(), machine)
+
+	installed.running = false
+	if output, _ := Main([]string{"status"}, machine); !strings.Contains(output, "Service: installed, not running (aeolus-trierarch start)\n") {
+		t.Errorf("answered %q", output)
+	}
+	installed.installed = false
+	if output, _ := Main([]string{"status"}, machine); !strings.Contains(output, "Service: not installed (aeolus-trierarch install)\n") {
+		t.Errorf("answered %q", output)
+	}
+}
+
+func TestStatusColoursItsWordsOnAColourTerminalAndNotUnderJSON(t *testing.T) {
+	machine, _, _ := aMain(t)
+	Main(setupWords(), machine)
+	plain, _ := Main([]string{"status"}, machine)
+	machine.IsTerminal = true
+
+	coloured, _ := Main([]string{"status"}, machine)
+	machine.Environ = append(machine.Environ, "NO_COLOR=1")
+	refused, _ := Main([]string{"status"}, machine)
+	machine.Environ = append(machine.Environ, "FORCE_COLOR=1")
+	asJSON, _ := Main([]string{"status", "--json"}, machine)
+
+	if !strings.Contains(coloured, "\x1b[1mVersion:\x1b[22m") || !strings.Contains(coloured, "\x1b[32mrunning\x1b[39m") {
+		t.Errorf("answered %q", coloured)
+	}
+	if stripped := regexp.MustCompile("\x1b\\[[0-9;]*m").ReplaceAllString(coloured, ""); stripped != plain {
+		t.Errorf("coloured says %q, plain says %q", stripped, plain)
+	}
+	if refused != plain || strings.Contains(asJSON, "\x1b") {
+		t.Errorf("NO_COLOR gave %q, --json %q", refused, asJSON)
+	}
+}
+
+func TestListColoursItsHeaderAndStatesOnAColourTerminal(t *testing.T) {
+	machine, _, _ := aMain(t)
+	Main(setupWords(), machine)
+	at := paths.Of(machine.HomeDirectory, "")
+	saved := reconciler.Empty()
+	saved.Entries["shp_a"] = reconciler.Entry{ShipID: "shp_a", State: "running", Harness: "claude-code", Workspace: reconciler.Workspace{Kind: "folder", Name: "scratch"}, Since: "2026-10-06T08:00:00.000Z"}
+	_ = state.File{Path: at.State}.Save(saved)
+	plain, _ := Main([]string{"list"}, machine)
+	machine.IsTerminal = true
+
+	coloured, _ := Main([]string{"list"}, machine)
+
+	if !strings.HasPrefix(coloured, "\x1b[1mSHIP") || !strings.Contains(coloured, "\x1b[32mrunning\x1b[39m") {
+		t.Errorf("answered %q", coloured)
+	}
+	if stripped := regexp.MustCompile("\x1b\\[[0-9;]*m").ReplaceAllString(coloured, ""); stripped != plain {
+		t.Errorf("coloured says %q, plain says %q", stripped, plain)
 	}
 }
 
