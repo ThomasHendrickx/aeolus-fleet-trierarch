@@ -81,7 +81,12 @@ type Entry struct {
 	IsIdentityGone bool `json:"isIdentityGone,omitempty"`
 	// IsReleasedElsewhere is set as it goes back to crewing after a release elsewhere (row 11): its worktree goes before it is crewed again (#475).
 	IsReleasedElsewhere bool `json:"isReleasedElsewhere,omitempty"`
+	// CrewFailures counts the crews of its settings version that failed in a row, until a crew starts its session (#827). The last of CrewFailureBudget gives the request back.
+	CrewFailures int `json:"crewFailures,omitempty"`
 }
+
+// CrewFailureBudget is how many crews of a settings version may fail in a row before the request is given back (#827): the restart budget's count.
+const CrewFailureBudget = 3
 
 // EarlierLogin is the login of a ship's earlier session, until the start that changed it (ISO 8601).
 type EarlierLogin struct {
