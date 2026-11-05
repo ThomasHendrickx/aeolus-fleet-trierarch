@@ -30,6 +30,7 @@ var Version = "0.0.0"
 // ServiceManager is the service as the commands use it.
 type ServiceManager interface {
 	Service
+	Write() error
 	Start() error
 	Stop() error
 	Uninstall() error
@@ -108,6 +109,8 @@ const usage = `Usage: aeolus-trierarch <command>
                  the login that harness's sessions run on, from each one's next start
   login --ship <name> api-key|subscription|default
                  the login that ship runs on, or its harness's default again, from its next start
+  install [--no-load]
+                 install the service: launchd on macOS, systemd on Linux; --no-load only writes its file
   start, stop, restart
                  drive the service; the sessions keep running
   run            what the service runs
@@ -123,7 +126,7 @@ const usage = `Usage: aeolus-trierarch <command>
   --config <path> the configuration (AEOLUS_TRIERARCH_CONFIG)`
 
 var valueFlags = []string{"--fleet-url", "--ship-id", "--secret", "--plugin-ship-id", "--config", "--default", "--ship"}
-var switchFlags = []string{"--json", "--yes", "--version", "--api-key", "--remove-key", "--check"}
+var switchFlags = []string{"--json", "--yes", "--version", "--api-key", "--remove-key", "--check", "--no-load"}
 
 type parsed struct {
 	words    []string
@@ -236,6 +239,9 @@ func Main(args []string, machine Machine) (string, int) {
 		},
 		"start": func() (answer, error) {
 			return drive(at, machine, "started", machine.Service(at).Start)
+		},
+		"install": func() (answer, error) {
+			return install(at, machine, command.switches["--no-load"])
 		},
 		"restart": func() (answer, error) {
 			return drive(at, machine, "restarted", machine.Service(at).Restart)

@@ -155,3 +155,19 @@ func TestTheServiceEnvironmentCarriesPATHAndTheTrierarchsOwnVariablesOnly(t *tes
 		}
 	}
 }
+
+func TestWriteWritesTheUnitAndRunsNothing(t *testing.T) {
+	systemctl := &aSystemctl{}
+	service := aService(t, systemctl)
+
+	if err := service.Write(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(service.File()); err != nil {
+		t.Errorf("the unit is not written: %v", err)
+	}
+	if len(systemctl.calls) != 0 {
+		t.Errorf("ran %q, want nothing", systemctl.calls)
+	}
+}

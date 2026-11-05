@@ -64,6 +64,12 @@ func (s *aServiceManager) Install() error {
 	return nil
 }
 
+func (s *aServiceManager) Write() error {
+	s.calls = append(s.calls, "write")
+	s.installed = true
+	return nil
+}
+
 func (s *aServiceManager) Rewrite() error {
 	s.calls = append(s.calls, "rewrite")
 	return nil

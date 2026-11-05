@@ -83,6 +83,31 @@ func drive(at paths.Paths, machine Machine, done string, start func() error) (an
 	return answer{data: map[string]any{"service": done, "said": said}, text: strings.Join(said, "\n")}, nil
 }
 
+// install is `install [--no-load]`: it writes the configuration's JSON Schema for this version, then installs the service and waits for the new process to say its version; with --no-load it only writes the service's file, as init and upgrade do. The answer is the service's status.
+func install(at paths.Paths, machine Machine, isNoLoad bool) (answer, error) {
+	if err := config.WriteSchema(at.ConfigSchema); err != nil {
+		return answer{}, err
+	}
+	manager := machine.Service(at)
+	start := manager.Install
+	if isNoLoad {
+		start = manager.Write
+	}
+	if err := start(); err != nil {
+		return answer{}, err
+	}
+	hasSaid := isNoLoad || hasSaidItsVersion(manager, at.Running, machine.Sleep)
+	status, err := manager.Status()
+	if err != nil {
+		return answer{}, err
+	}
+	said := fmt.Sprintf("Installed %s. Logs: %s", status.File, at.Logs)
+	if !hasSaid {
+		said += " " + notSaidYet
+	}
+	return answer{data: status, text: said}, nil
+}
+
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
 // nameMaxLength is common's TRIERARCH_NAME_MAX_LENGTH.

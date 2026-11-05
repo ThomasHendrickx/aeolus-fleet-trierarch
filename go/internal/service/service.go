@@ -100,7 +100,8 @@ WantedBy=default.target
 `
 }
 
-func (s Systemd) write() error {
+// Write writes the unit and runs nothing: install --no-load, as upgrade and init use it.
+func (s Systemd) Write() error {
 	if err := os.MkdirAll(s.Logs, 0o755); err != nil {
 		return err
 	}
@@ -112,7 +113,7 @@ func (s Systemd) write() error {
 
 // Install writes the unit, then enables and starts it: restart, not start, since an active unit runs the old file until it restarts.
 func (s Systemd) Install() error {
-	if err := s.write(); err != nil {
+	if err := s.Write(); err != nil {
 		return err
 	}
 	for _, args := range [][]string{{"daemon-reload"}, {"enable", Unit}, {"restart", Unit}} {
@@ -125,7 +126,7 @@ func (s Systemd) Install() error {
 
 // Rewrite writes the unit over an installed one for its next start, and reloads systemd, leaving the running trierarch and its sessions alone.
 func (s Systemd) Rewrite() error {
-	if err := s.write(); err != nil {
+	if err := s.Write(); err != nil {
 		return err
 	}
 	_, err := s.systemctl("daemon-reload")
