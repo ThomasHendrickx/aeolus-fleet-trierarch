@@ -801,7 +801,8 @@ func (p Pass) deleteIdentity(entry reconciler.Entry) error {
 	if entry.Folder == "" {
 		return nil
 	}
-	if harness, err := p.harnessOf(entry); err == nil && harness.HasIdentity(entry) {
+	// Even without its identity: the harness may keep more for the ship, as Claude Code keeps its home in a container.
+	if harness, err := p.harnessOf(entry); err == nil {
 		return harness.DeleteIdentity(entry)
 	}
 	return nil
