@@ -310,3 +310,19 @@ func TestRewriteWritesTheAgentWithoutLoadingItAgainSoTheRunningTrierarchIsLeftAl
 		t.Errorf("ran %q, want nothing", launchctl.calls)
 	}
 }
+
+func TestWriteWritesTheAgentAndLoadsNothing(t *testing.T) {
+	launchctl := &aLaunchctl{}
+	agent := anAgent(t, launchctl)
+
+	if err := agent.Write(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(agent.File()); err != nil {
+		t.Errorf("the agent is not written: %v", err)
+	}
+	if len(launchctl.calls) != 0 {
+		t.Errorf("ran %q, want nothing", launchctl.calls)
+	}
+}
