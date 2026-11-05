@@ -402,7 +402,7 @@ func TestACallBodyThatEndsBeforeItsContentLengthIsAnsweredNoSuccess(t *testing.T
 	}
 }
 
-func TestAStreamedAnswerReachesTheShipAsItArrivesAndWaitsPastTheWholeCallTimeout(t *testing.T) {
+func TestAStreamedAnswerReachesTheShipAsItArrivesAndHasNoWholeCallTimeout(t *testing.T) {
 	release := make(chan struct{})
 	fleet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -419,7 +419,9 @@ func TestAStreamedAnswerReachesTheShipAsItArrivesAndWaitsPastTheWholeCallTimeout
 	t.Cleanup(fleet.Close)
 	token := "aeolus_ct_v1_scout"
 	sockets := someSockets(t, fleet.URL, &token, false)
-	sockets.client.Timeout = 300 * time.Millisecond
+	if sockets.client.Timeout != 0 {
+		t.Fatalf("the fleet client waits %v for a whole call, want no timeout", sockets.client.Timeout)
+	}
 	socket := opened(t, sockets)
 	client := over(socket)
 	client.Timeout = 0
@@ -444,10 +446,9 @@ func TestAStreamedAnswerReachesTheShipAsItArrivesAndWaitsPastTheWholeCallTimeout
 	case <-time.After(3 * time.Second):
 		t.Fatal("the first event did not arrive while the stream was open")
 	}
-	time.Sleep(600 * time.Millisecond)
 	close(release)
 	rest, err := io.ReadAll(reader)
 	if err != nil || !strings.Contains(string(rest), "event: end") {
-		t.Fatalf("rest = %q, err = %v, want the end event after the call timeout", rest, err)
+		t.Fatalf("rest = %q, err = %v, want the end event after the stream stayed open", rest, err)
 	}
 }

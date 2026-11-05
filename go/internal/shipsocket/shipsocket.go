@@ -3,7 +3,7 @@
 // come over a Unix socket of its ship's own, `<root>/<ship id>/fleet.sock`,
 // in a folder only the trierarch's user opens. The trierarch adds the ship's
 // crew token, read at each call so a new crew reaches the same socket, and
-// forwards the call unchanged; the fleet's answer goes back unchanged, a 503
+// forwards the call unchanged; the fleet's answer goes back unchanged as it arrives (a stream too, with no timeout on the whole call), a 503
 // included. It answers only a caller the caller check allows, and checks
 // only the path (the ship API, the fleet API and the ship protocol, never
 // register or deregister) and the size: core decides each fleet call by the
@@ -24,9 +24,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/peer"
 )
@@ -44,9 +44,6 @@ var forwardedCall = regexp.MustCompile(`^/api/v1/(?:ship|fleet)/([A-Za-z]+)$`)
 
 // crewCalls make or end a crew: only the trierarch makes them, never a session.
 var crewCalls = map[string]bool{"register": true, "deregister": true}
-
-// fleetTimeout is the longest a forwarded call waits for the fleet; a push receive waits about 25 seconds when nothing is there.
-const fleetTimeout = 2 * time.Minute
 
 type Options struct {
 	Root     string
@@ -73,7 +70,7 @@ type Sockets struct {
 }
 
 func New(options Options) *Sockets {
-	return &Sockets{options: options, client: &http.Client{Timeout: fleetTimeout}, servers: map[string]open{}}
+	return &Sockets{options: options, client: &http.Client{}, servers: map[string]open{}}
 }
 
 type connectionKey struct{}
@@ -175,6 +172,8 @@ func (s *Sockets) handle(shipID string, w http.ResponseWriter, r *http.Request) 
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, MaxBytes+1))
 	if err != nil {
+		// The call did not arrive whole: none forwarded, no answer, never a 200.
+		closeWithoutAnswer(w)
 		said("no body")
 		return
 	}
@@ -202,24 +201,54 @@ func (s *Sockets) handle(shipID string, w http.ResponseWriter, r *http.Request) 
 	answer, err := s.client.Do(call)
 	if err != nil {
 		// No answer from the fleet: none for the session either, as when it calls a fleet that is down.
-		if hijacker, ok := w.(http.Hijacker); ok {
-			if raw, _, err := hijacker.Hijack(); err == nil {
-				_ = raw.Close()
-			}
-		}
+		closeWithoutAnswer(w)
 		said("no answer")
 		return
 	}
 	defer answer.Body.Close()
-	answered, err := io.ReadAll(answer.Body)
-	if err != nil {
-		said("no answer")
-		return
-	}
 	if contentType := answer.Header.Get("Content-Type"); contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
+	if answer.ContentLength >= 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(answer.ContentLength, 10))
+	}
 	w.WriteHeader(answer.StatusCode)
-	_, _ = w.Write(answered)
+	if err := stream(w, answer.Body); err != nil {
+		// The answer ended before it was whole: close the connection, so the session sees a failed call, not a short answer.
+		said("answer broke off")
+		panic(http.ErrAbortHandler)
+	}
 	said(fmt.Sprint(answer.StatusCode))
+}
+
+// closeWithoutAnswer closes the session's connection with nothing written.
+func closeWithoutAnswer(w http.ResponseWriter) {
+	if hijacker, ok := w.(http.Hijacker); ok {
+		if raw, _, err := hijacker.Hijack(); err == nil {
+			_ = raw.Close()
+		}
+	}
+}
+
+// stream copies the fleet's answer to the session as it arrives, flushing each piece, so an event stream delivers its events when they come.
+func stream(w http.ResponseWriter, from io.Reader) error {
+	flusher, _ := w.(http.Flusher)
+	buffer := make([]byte, 32*1024)
+	for {
+		read, readErr := from.Read(buffer)
+		if read > 0 {
+			if _, err := w.Write(buffer[:read]); err != nil {
+				return err
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			return nil
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
 }
