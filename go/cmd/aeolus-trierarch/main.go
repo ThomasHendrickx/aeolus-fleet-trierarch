@@ -32,6 +32,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/cli"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/codex"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/container"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/copilot"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
@@ -118,6 +119,7 @@ func main() {
 		CoreVersionRefusal: func(fleetURL string) string {
 			return fleet.CoreVersionRefusal(fleetURL, cli.Version, fleet.MinimumCoreVersion)
 		},
+		ContainerHost: func(modelToken string) container.Host { return container.Machine{ModelToken: modelToken} },
 		NewPass: func(at paths.Paths, kept crew.File, configuration config.Configuration) (func(isKeyCutOff bool) error, error) {
 			return newPass(at, kept, configuration, home, program)
 		},
@@ -128,9 +130,13 @@ func main() {
 		Trusted: func(at paths.Paths, configuration config.Configuration) receiving.Keeper {
 			return trustedRepositories(at, configuration, home)
 		},
-		Sessions: func(at paths.Paths) cli.Sessions { return sessionRuntime(at, program) },
-		Log:      logLine,
-		ReadKey:  readKey,
+		Sessions: func(at paths.Paths) cli.Sessions {
+			// A configuration that cannot be read runs no session in a container.
+			configured, _ := config.Load(at.Config)
+			return sessionRuntime(at, program, configured.Runtime)
+		},
+		Log:     logLine,
+		ReadKey: readKey,
 		CheckKey: func(harness string, key string) keys.Checked {
 			return keys.Check(harness, key, "")
 		},
@@ -272,7 +278,7 @@ func runTrierarch(program string, isPluginStep bool, words ...string) (string, i
 var opened *shipsocket.Sockets
 
 // shipSockets are each ship's socket for its session's fleet calls, with its crew token from the state at each call (decision 0026). A caller is allowed only under the ship's own hold, or under the trierarch itself, as its aeolus-push.sh.
-func shipSockets(at paths.Paths, fleetURL string, running sessions.Runtime, checked checkouts.Git) *shipsocket.Sockets {
+func shipSockets(at paths.Paths, fleetURL string, running runningSessions, checked checkouts.Git) *shipsocket.Sockets {
 	store := state.File{Path: at.State}
 	trierarch := os.Getpid()
 	return shipsocket.New(shipsocket.Options{
@@ -400,9 +406,39 @@ func logLine(line string) {
 	fmt.Fprintf(stderr, "%s %s\n", time.Now().UTC().Format(time.RFC3339), line)
 }
 
-// sessionRuntime is the host session runtime: each session under a hold, the trierarch program run as `hold`, in a systemd scope of its own under the service.
-func sessionRuntime(at paths.Paths, program string) sessions.Runtime {
-	return sessions.Runtime{Sessions: at.Sessions, Program: []string{program}, Version: cli.Version, Launch: sessions.Launch(runtime.GOOS, os.Getenv("INVOCATION_ID"), sessions.SystemdVersion()), BootedAt: sessions.BootedAt}
+// runningSessions are the sessions as the passes, the harnesses and the ships' sockets reach them, on either runtime.
+type runningSessions interface {
+	List() ([]sessions.Observed, error)
+	Stop(shipID string) error
+	Start(session sessions.Start) error
+	Send(shipID string, line string) error
+	Interrupt(shipID string) error
+	// Root is the process the ship's session runs under, 0 when it runs not.
+	Root(shipID string) int
+}
+
+// sessionImage is the session image release.yml publishes with each version (decision 0011, 0039).
+const sessionImage = "ghcr.io/thomashendrickx/aeolus-session"
+
+// sessionRuntime is what the configuration's session runtime picks (decision 0039): each session under a hold, the trierarch program run as `hold`, in a systemd scope of its own under the service; in containers, a container per ship that its hold runs, from the image of the trierarch's own version, with the configured binary and caps and the machine's model token.
+func sessionRuntime(at paths.Paths, program string, configured *config.Runtime) runningSessions {
+	holds := sessions.Runtime{Sessions: at.Sessions, Program: []string{program}, Version: cli.Version, Launch: sessions.Launch(runtime.GOOS, os.Getenv("INVOCATION_ID"), sessions.SystemdVersion()), BootedAt: sessions.BootedAt}
+	if !isInContainers(configured) {
+		return holds
+	}
+	return container.Runtime{Holds: holds, Binary: configured.Binary, Image: sessionImage + ":" + cli.Version, ModelToken: at.ModelToken, Homes: at.Homes, Sockets: at.Sockets, Memory: configured.Memory, Cpus: configured.Cpus}
+}
+
+func isInContainers(configured *config.Runtime) bool {
+	return configured != nil && configured.Kind == "container"
+}
+
+// homesOf is where each ship has a home of its own, in containers (decision 0039); none on the host, where every session shares the user's.
+func homesOf(at paths.Paths, configured *config.Runtime) string {
+	if !isInContainers(configured) {
+		return ""
+	}
+	return at.Homes
 }
 
 func environment() map[string]string {
@@ -449,7 +485,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		return ""
 	}}
 	ask := &trusted.Ask{Fleet: client, PluginShipID: kept.PluginShipID, Log: logLine}
-	running := sessionRuntime(at, program)
+	running := sessionRuntime(at, program, configuration.Runtime)
 	proxy := modelProxy(at, program)
 	harnesses, offeredHarnesses, err := harnessesOf(configuration, at, env, home, running, proxy, offers)
 	if err != nil {
@@ -462,7 +498,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	// The places a pass makes workspaces in and offers: the configured ones and the trusted repositories beside them.
 	placesOf := func() (workspace.Places, []string, []string) {
 		offered := withTrusted(configuration)
-		places := workspace.Places{Root: root, Repositories: map[string]string{}, Folders: map[string]string{}, Clone: clones.WhenMissing, ClonedPath: clones.ClonedPath}
+		places := workspace.Places{Root: root, Repositories: map[string]string{}, Folders: map[string]string{}, Clone: clones.WhenMissing, ClonedPath: clones.ClonedPath, IsByRealPath: isInContainers(configuration.Runtime)}
 		repositories, folders := []string{}, []string{}
 		for name, repository := range offered.Repositories {
 			places.Repositories[name] = repository.Path
@@ -546,7 +582,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		return trusted
 	}
 
-	read := usageOf(configured, env, home, pass.Store)
+	read := usageOf(configured, env, home, homesOf(at, configured.Runtime), pass.Store)
 	// The usage goes to the trierarch plugin's ship once an hour, and a released ship's last usage before its folder goes.
 	sender := &usage.Sender{Harnesses: read.Harnesses, Reader: read, MadeAt: usage.FolderMadeAt, Store: saved, Fleet: client, Prices: read.Prices, Now: time.Now, Log: logLine, TrierarchShipID: kept.ShipID, PluginShipID: kept.PluginShipID}
 	pass.SendReleasedUsage = sender.SendReleased
@@ -580,10 +616,11 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 }
 
 // usageOf reads the usage of the configured harnesses: Claude Code's from its projects folder and a short turn, Codex's from its session logs in CODEX_HOME, or in ~/.codex.
-func usageOf(configured config.Configuration, env map[string]string, home string, store usage.Store) *usage.Reader {
+func usageOf(configured config.Configuration, env map[string]string, home string, homes string, store usage.Store) *usage.Reader {
 	return &usage.Reader{
 		Harnesses: map[string]usage.Harness{
-			"claude-code": &claudecode.Usage{Projects: claudecode.Projects(home, env["CLAUDE_CONFIG_DIR"]), MadeAt: usage.FolderMadeAt, Run: detection.Run, NeutralFolder: detection.NeutralFolder},
+			// In containers each ship's conversations are in its own home (decision 0039).
+			"claude-code": &claudecode.Usage{Projects: claudecode.Projects(home, env["CLAUDE_CONFIG_DIR"]), Homes: homes, MadeAt: usage.FolderMadeAt, Run: detection.Run, NeutralFolder: detection.NeutralFolder},
 			"codex":       &codex.Usage{Sessions: filepath.Join(codex.HomeOf(home, env["CODEX_HOME"]), "sessions"), MadeAt: usage.FolderMadeAt},
 		},
 		// Each configured harness's subscription, in the adapters' order, the order init writes them in.
@@ -694,13 +731,21 @@ func (o *offers) options() map[string]map[string][]string {
 var adapters = []string{"claude-code", "codex", "copilot"}
 
 // harnessesOf are the adapters of the harnesses the configuration offers, each with the aeolus-fleet plugin its harness installed, and their names, the default first. Claude Code's and Codex's plugin is looked for at start, so a trierarch without it does not start; Copilot's at each crew, so the machine offers Copilot once it is installed. A configured harness this trierarch has no adapter for stops it at start, so no request for it is ever crewed.
-func harnessesOf(configuration config.Configuration, at paths.Paths, env map[string]string, home string, running sessions.Runtime, proxy modelproxy.Runtime, offers *offers) (map[string]runpass.Harness, []string, error) {
+func harnessesOf(configuration config.Configuration, at paths.Paths, env map[string]string, home string, running runningSessions, proxy modelproxy.Runtime, offers *offers) (map[string]runpass.Harness, []string, error) {
 	for name := range configuration.Harnesses {
 		if !slices.Contains(adapters, name) {
 			return nil, nil, fmt.Errorf("this trierarch has no adapter for the harness %s: it offers %s", name, strings.Join(adapters, ", "))
 		}
 	}
 	events := func(shipID string) string { return hold.FilesOf(at.Sessions, shipID).Events }
+	// Where a session reaches the model proxy (headless H16): on the host's loopback, at Podman's host address in a container.
+	proxyURL := proxy.URL
+	if isInContainers(configuration.Runtime) {
+		proxyURL = func() (string, bool) {
+			address, ok := proxy.URL()
+			return container.ProxyURL(address), ok
+		}
+	}
 	harnesses := map[string]runpass.Harness{}
 	offered := []string{}
 	for _, name := range adapters {
@@ -725,7 +770,8 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 				// As detection last found them: none before it found any.
 				PermissionModes: func() []string { return offers.permissionModes("claude-code") },
 				Events:          events,
-				ProxyURL:        proxy.URL,
+				ProxyURL:        proxyURL,
+				Homes:           homesOf(at, configuration.Runtime),
 			}
 		case "codex":
 			found, err := plugin.FindCodex(home, env)
@@ -738,7 +784,7 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 				// As detection last found it: a Copilot not detected yet is not offered.
 				version := offers.version("copilot")
 				return version, version != ""
-			}, CopilotHome: env["COPILOT_HOME"]}
+			}, CopilotHome: env["COPILOT_HOME"], IsInContainer: isInContainers(configuration.Runtime)}
 		}
 		offered = append(offered, name)
 	}

@@ -345,3 +345,32 @@ func TestAPidFileNamingAnUnrelatedLiveProcessSignalsNothingAndIsNoRoot(t *testin
 		t.Fatal("the session's folder stays, want it removed")
 	}
 }
+
+func TestHeldAsReplacesWhatTheHoldRunsOnceTheShipsLastSessionStoppedAndItsFolderIsNew(t *testing.T) {
+	runtime := aRuntime(t)
+	folder := t.TempDir()
+	var given Start
+	runtime.HeldAs = func(session Start, files hold.Files) (Start, error) {
+		given = session
+		if err := os.WriteFile(filepath.Join(files.Folder, "held-as"), []byte("kept"), 0o600); err != nil {
+			return Start{}, err
+		}
+		session.Command = []string{"sh", "-c", "cat " + filepath.Join(files.Folder, "held-as") + " > held.txt; env > harness.env; " + aHarness}
+		session.Env = map[string]string{}
+		return session, nil
+	}
+
+	if err := runtime.Start(Start{ShipID: scout, Folder: folder, Harness: "claude-code", Command: []string{"claude"}, Env: map[string]string{"AEOLUS_LAUNCH": "launch-1"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	eventually(t, "the held command's output", func() bool {
+		return read(filepath.Join(folder, "held.txt")) != "" && read(filepath.Join(folder, "harness.env")) != ""
+	})
+	if got := read(filepath.Join(folder, "held.txt")); got != "kept" || given.Command[0] != "claude" {
+		t.Fatalf("held %q, given %q", got, given.Command)
+	}
+	if env := read(filepath.Join(folder, "harness.env")); strings.Contains(env, "AEOLUS_LAUNCH") {
+		t.Fatalf("the hold was given the session's own environment:\n%s", env)
+	}
+}

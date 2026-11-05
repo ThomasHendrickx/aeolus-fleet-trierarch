@@ -46,6 +46,8 @@ type Harness struct {
 	Version func() (string, bool)
 	// CopilotHome is the trierarch's COPILOT_HOME, which its sessions get so they use the login and plugin it found; empty when it has none.
 	CopilotHome string
+	// IsInContainer is whether sessions run in containers, where Copilot is not proven (CC10).
+	IsInContainer bool
 }
 
 // Launch starts the entry's session in its folder: its first turn with its first prompt on a first start, else the wake resuming the session its last turn named, read before the start, which clears the session's events.
@@ -106,10 +108,13 @@ func (h Harness) ForceOver(entry reconciler.Entry, isTurnBusy bool) (bool, error
 	return true, h.Runtime.Send(entry.ShipID, prompt.Wake(line))
 }
 
-// NotOfferedReason is why the machine does not offer Copilot now (CC3): its plugin not installed, which the trierarch's upgrade does not install, so the reason says Copilot's own command; its version not found; or a build its plugin's hooks are not proven on. Empty when it does.
+// NotOfferedReason is why the machine does not offer Copilot now (CC3): its plugin not installed, which the trierarch's upgrade does not install, so the reason says Copilot's own command; sessions in containers, where Copilot is not proven (CC10); its version not found; or a build its plugin's hooks are not proven on. Empty when it does.
 func (h Harness) NotOfferedReason() string {
 	if h.IsInstalled() != nil {
 		return "its aeolus-fleet plugin is not installed for Copilot: copilot plugin install aeolus-fleet@aeolus-fleet"
+	}
+	if h.IsInContainer {
+		return "Copilot is not proven in a container: the container runtime runs claude-code only"
 	}
 	proven := []string{}
 	for _, version := range ProvenVersions {
@@ -133,3 +138,19 @@ func (h Harness) Problem() error {
 	}
 	return nil
 }
+
+func (h Harness) WriteIdentity(entry reconciler.Entry, identity plugin.Identity, crewToken string) error {
+	return h.Plugin.WriteIdentity(entry.Folder, identity, crewToken)
+}
+
+func (h Harness) HasIdentity(entry reconciler.Entry) bool { return h.Plugin.HasIdentity(entry.Folder) }
+
+func (h Harness) DeleteIdentity(entry reconciler.Entry) error {
+	return h.Plugin.DeleteIdentity(entry.Folder)
+}
+
+func (h Harness) SessionDied(entry reconciler.Entry) error { return h.Plugin.SessionDied(entry.Folder) }
+
+func (h Harness) Turn(entry reconciler.Entry) string { return h.Plugin.Turn(entry.Folder) }
+
+func (h Harness) IsHolding(entry reconciler.Entry) bool { return h.Plugin.IsHolding(entry.Folder) }

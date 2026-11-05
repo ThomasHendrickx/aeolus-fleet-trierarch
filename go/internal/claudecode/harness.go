@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
@@ -47,6 +48,61 @@ type Harness struct {
 	Events func(shipID string) string
 	// ProxyURL is where sessions on an API key reach the model proxy (headless H16); false before it first listened.
 	ProxyURL func() (string, bool)
+	// Homes is where each ship has a home of its own, for sessions in containers, which its container gets as its home (decision 0039); empty on the host, where every session shares the user's.
+	Homes string
+}
+
+// homeOf is the ship's own home, which holds its identity and Claude Code's files and nothing of another ship.
+func (h Harness) homeOf(entry reconciler.Entry) string { return filepath.Join(h.Homes, entry.ShipID) }
+
+// pluginOf is the plugin as the entry's session finds its files: in its ship's home in a container, where the image's plugin of the same version finds the identity the host's scripts wrote.
+func (h Harness) pluginOf(entry reconciler.Entry) plugin.Plugin {
+	if h.Homes == "" {
+		return h.Plugin
+	}
+	home := h.homeOf(entry)
+	return plugin.Plugin{Root: h.Plugin.Root, Data: filepath.Join(home, ".claude", "plugins", "data", plugin.DataFolder), Crews: filepath.Join(home, ".aeolus", "crews", "claude-code")}
+}
+
+// projectsOf is the projects folder the entry's session keeps its conversations in.
+func (h Harness) projectsOf(entry reconciler.Entry) string {
+	if h.Homes == "" {
+		return h.Projects
+	}
+	return Projects(h.homeOf(entry), "")
+}
+
+// userOf is the user settings file the entry's session reads.
+func (h Harness) userOf(entry reconciler.Entry) string {
+	if h.Homes == "" {
+		return h.User
+	}
+	return UserSettings(h.homeOf(entry), "")
+}
+
+// privateFolderMode is a ship's home's mode: only its owner reads it, as it holds the ship's crew token.
+const privateFolderMode = 0o700
+
+// prepare answers Claude Code's one-time questions before a launch, a restart too, so the session asks nothing (#403): on the host the user's onboarding; in a container the ship's home, made for its owner alone, with its onboarding completed, the folder trusted at its path, which the container mounts at the same path, and bypass permissions mode accepted only where the operator accepted it on the host.
+func (h Harness) prepare(entry reconciler.Entry) error {
+	if h.Homes == "" {
+		return h.Onboarding.CompleteOnboarding()
+	}
+	home := h.homeOf(entry)
+	if err := os.MkdirAll(home, privateFolderMode); err != nil {
+		return err
+	}
+	setup := Of(home, "")
+	if err := setup.CompleteOnboarding(); err != nil {
+		return err
+	}
+	if err := setup.Trust(entry.Folder); err != nil {
+		return err
+	}
+	if IsSkipPermissionsAccepted(h.User) {
+		return AcceptSkipPermissions(h.userOf(entry))
+	}
+	return nil
 }
 
 // routeOf is how a session on the login reaches its model: on an API key, the proxy's address and a token of the session's own, fresh for each start, which its hold hands it; on its subscription, nothing.
@@ -70,7 +126,7 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if err != nil {
 		return err
 	}
-	if err := h.Onboarding.CompleteOnboarding(); err != nil {
+	if err := h.prepare(entry); err != nil {
 		return err
 	}
 	line := WakePrompt()
@@ -82,13 +138,13 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if h.PermissionModes != nil {
 		modes = h.PermissionModes()
 	}
-	override := PlanOverride(flags, DefaultModeOf(h.Managed, h.User, flags, entry.Folder), modes)
-	command := CommandLine(flags, override, !isFirstStart && HasConversation(h.Projects, entry.Folder), entry.ReadOnly)
-	if err := h.Plugin.ClearLaunch(entry.Folder); err != nil {
+	override := PlanOverride(flags, DefaultModeOf(h.Managed, h.userOf(entry), flags, entry.Folder), modes)
+	command := CommandLine(flags, override, !isFirstStart && HasConversation(h.projectsOf(entry), entry.Folder), entry.ReadOnly)
+	if err := h.pluginOf(entry).ClearLaunch(entry.Folder); err != nil {
 		return err
 	}
 	env[launchVariable] = launchID
-	if err := h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, Harness: "claude-code", Command: command, Env: env, ProxyToken: token}); err != nil {
+	if err := h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, Harness: "claude-code", Command: command, Env: env, ProxyToken: token, ReadOnly: entry.ReadOnly}); err != nil {
 		return err
 	}
 	return h.Runtime.Send(entry.ShipID, UserLine(line))
@@ -96,7 +152,7 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 
 // LaunchSeen is what the session did in its launch window, as its marker says; with no activity, the cause its last error event gives (H13).
 func (h Harness) LaunchSeen(entry reconciler.Entry) reconciler.LaunchSeen {
-	seen := h.Plugin.LaunchSeen(entry.Folder, entry.LaunchID)
+	seen := h.pluginOf(entry).LaunchSeen(entry.Folder, entry.LaunchID)
 	if seen.IsRefused {
 		return reconciler.LaunchSeen{Kind: reconciler.LaunchRefused, Model: seen.RefusedModel}
 	}
@@ -137,23 +193,38 @@ func errorIn(events string) string {
 	return cause
 }
 
-func (h Harness) WriteIdentity(folder string, identity plugin.Identity, crewToken string) error {
-	return h.Plugin.WriteIdentity(folder, identity, crewToken)
+func (h Harness) WriteIdentity(entry reconciler.Entry, identity plugin.Identity, crewToken string) error {
+	return h.pluginOf(entry).WriteIdentity(entry.Folder, identity, crewToken)
 }
 
-func (h Harness) HasIdentity(folder string) bool { return h.Plugin.HasIdentity(folder) }
+func (h Harness) HasIdentity(entry reconciler.Entry) bool {
+	return h.pluginOf(entry).HasIdentity(entry.Folder)
+}
 
-func (h Harness) DeleteIdentity(folder string) error { return h.Plugin.DeleteIdentity(folder) }
+// DeleteIdentity deletes the session's identity, and in a container its ship's home with it, as on a release.
+func (h Harness) DeleteIdentity(entry reconciler.Entry) error {
+	if err := h.pluginOf(entry).DeleteIdentity(entry.Folder); err != nil {
+		return err
+	}
+	if h.Homes == "" {
+		return nil
+	}
+	return os.RemoveAll(h.homeOf(entry))
+}
 
-func (h Harness) SessionDied(folder string) error { return h.Plugin.SessionDied(folder) }
+func (h Harness) SessionDied(entry reconciler.Entry) error {
+	return h.pluginOf(entry).SessionDied(entry.Folder)
+}
 
-func (h Harness) Turn(folder string) string { return h.Plugin.Turn(folder) }
+func (h Harness) Turn(entry reconciler.Entry) string { return h.pluginOf(entry).Turn(entry.Folder) }
 
-func (h Harness) IsHolding(folder string) bool { return h.Plugin.IsHolding(folder) }
+func (h Harness) IsHolding(entry reconciler.Entry) bool {
+	return h.pluginOf(entry).IsHolding(entry.Folder)
+}
 
 // HandOver hands one message over to the entry's idle session (#756): the plugin's line, typed in as a wake; false when nothing is handed.
 func (h Harness) HandOver(entry reconciler.Entry) (bool, error) {
-	line, ok := h.Plugin.HandOverLine(entry.Folder)
+	line, ok := h.pluginOf(entry).HandOverLine(entry.Folder)
 	if !ok {
 		return false, nil
 	}
@@ -162,7 +233,7 @@ func (h Harness) HandOver(entry reconciler.Entry) (bool, error) {
 
 // ForceOver hands a forced message over (decision 0040), its busy turn stopped first; false when nothing is handed.
 func (h Harness) ForceOver(entry reconciler.Entry, isTurnBusy bool) (bool, error) {
-	line, ok := h.Plugin.ForceOverLine(entry.Folder)
+	line, ok := h.pluginOf(entry).ForceOverLine(entry.Folder)
 	if !ok {
 		return false, nil
 	}

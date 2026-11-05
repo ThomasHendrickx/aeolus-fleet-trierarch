@@ -27,6 +27,8 @@ var windowMinutes = map[string]float64{"five_hour": 300, "seven_day": 10_080}
 type Usage struct {
 	// Projects is Claude Code's projects folder.
 	Projects string
+	// Homes is where each ship has a home of its own, with its projects folder, for sessions in containers (decision 0039); empty on the host.
+	Homes string
 	// MadeAt is when the ship's folder was made: what came before was another crew's.
 	MadeAt func(folder string) (time.Time, error)
 	Run    detection.Runner
@@ -82,7 +84,11 @@ func (u *Usage) TokensOf(ship usage.Ship) ([]usage.HourTokens, error) {
 	if err != nil {
 		return nil, err
 	}
-	project := filepath.Join(u.Projects, projectName(ship.Folder))
+	projects := u.Projects
+	if u.Homes != "" {
+		projects = Projects(filepath.Join(u.Homes, ship.ShipID), "")
+	}
+	project := filepath.Join(projects, projectName(ship.Folder))
 	var counted usage.Counter
 	for _, path := range transcriptsIn(project) {
 		totals, err := u.readTranscript(path, since, ship.Logins)

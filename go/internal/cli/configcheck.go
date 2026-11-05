@@ -95,6 +95,9 @@ func configCheck(at paths.Paths, machine Machine) (answer, error) {
 	if ignored := detection.ModelOptionsIgnored(loaded); len(ignored) > 0 {
 		return answer{}, refused(nil, "The configuration at %s sets a model option for %s: model ids come from detection only (#382), so remove it; aeolus-trierarch detect lists them", at.Config, strings.Join(ignored, ", "))
 	}
+	if err := checkRuntime(at, loaded, machine); err != nil {
+		return answer{}, err
+	}
 	runtime := config.Runtime{Kind: "host"}
 	if loaded.Runtime != nil {
 		runtime = *loaded.Runtime

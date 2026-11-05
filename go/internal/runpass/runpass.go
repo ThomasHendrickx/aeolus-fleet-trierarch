@@ -70,14 +70,14 @@ type Harness interface {
 	// Launch starts the entry's session in its folder, with its first prompt on a first start and the wake otherwise.
 	Launch(entry reconciler.Entry, isFirstStart bool, launchID string) error
 	LaunchSeen(entry reconciler.Entry) reconciler.LaunchSeen
-	WriteIdentity(folder string, identity plugin.Identity, crewToken string) error
-	HasIdentity(folder string) bool
-	DeleteIdentity(folder string) error
-	SessionDied(folder string) error
+	WriteIdentity(entry reconciler.Entry, identity plugin.Identity, crewToken string) error
+	HasIdentity(entry reconciler.Entry) bool
+	DeleteIdentity(entry reconciler.Entry) error
+	SessionDied(entry reconciler.Entry) error
 	// Turn is the session's turn as its plugin marks it: busy, idle or unknown.
-	Turn(folder string) string
+	Turn(entry reconciler.Entry) string
 	// IsHolding is whether the session's store holds a message to hand.
-	IsHolding(folder string) bool
+	IsHolding(entry reconciler.Entry) bool
 	// HandOver hands one message over to the idle session (#756); false when nothing is handed.
 	HandOver(entry reconciler.Entry) (bool, error)
 	// ForceOver hands a forced message over, its busy turn stopped first (decision 0040); false when nothing is handed.
@@ -386,7 +386,7 @@ func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reco
 		if (!isWatched && !holdsIdentity) || entry.CrewToken == "" {
 			continue
 		}
-		if !harness.HasIdentity(entry.Folder) {
+		if !harness.HasIdentity(entry) {
 			observed.WithoutIdentity = append(observed.WithoutIdentity, shipID)
 			continue
 		}
@@ -396,9 +396,9 @@ func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reco
 		if _, err := p.Sockets.Open(shipID); err != nil {
 			return observed, versions, err
 		}
-		turn := harness.Turn(entry.Folder)
+		turn := harness.Turn(entry)
 		// The store is asked only when a hand-over could follow.
-		isHolding := turn == reconciler.TurnIdle && harness.IsHolding(entry.Folder)
+		isHolding := turn == reconciler.TurnIdle && harness.IsHolding(entry)
 		inbox, err := p.Fleet.Inbox(entry.CrewToken)
 		if err != nil {
 			return observed, versions, err
@@ -478,7 +478,7 @@ func (p Pass) carryOut(state reconciler.State, action reconciler.Action) (reconc
 			return state, nil
 		}
 		harness, err := p.harnessOf(entry)
-		if err != nil || !harness.HasIdentity(entry.Folder) {
+		if err != nil || !harness.HasIdentity(entry) {
 			p.Log(fmt.Sprintf("%s (%s): not reported %s, as its folder holds no identity", nameOf(entry), entry.ShipID, action.Note))
 			return state, nil
 		}
@@ -591,7 +591,7 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 		return state, err
 	}
 	identity := plugin.Identity{FleetURL: p.FleetURL, ShipID: entry.ShipID, ShipName: ship.Name, Socket: socket, Squadron: entry.Squadron, Checkouts: made}
-	if err := harness.WriteIdentity(folder, identity, crewToken); err != nil {
+	if err := harness.WriteIdentity(entry, identity, crewToken); err != nil {
 		return state, err
 	}
 	launchID := p.NewLaunchID()
@@ -625,7 +625,7 @@ func (p Pass) launch(state reconciler.State, entry reconciler.Entry) (reconciler
 	if err != nil || entry.Folder == "" {
 		return state, err
 	}
-	if err := harness.SessionDied(entry.Folder); err != nil {
+	if err := harness.SessionDied(entry); err != nil {
 		return state, err
 	}
 	made, err := p.checkoutsOf(entry)
@@ -802,8 +802,9 @@ func (p Pass) deleteIdentity(entry reconciler.Entry) error {
 	if entry.Folder == "" {
 		return nil
 	}
-	if harness, err := p.harnessOf(entry); err == nil && harness.HasIdentity(entry.Folder) {
-		return harness.DeleteIdentity(entry.Folder)
+	// Even without its identity: the harness may keep more for the ship, as Claude Code keeps its home in a container.
+	if harness, err := p.harnessOf(entry); err == nil {
+		return harness.DeleteIdentity(entry)
 	}
 	return nil
 }
