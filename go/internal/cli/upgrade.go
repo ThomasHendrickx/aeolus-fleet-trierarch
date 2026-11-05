@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -251,6 +252,10 @@ func (u Upgrade) install(to string) (UpgradeReport, error) {
 		}
 	}
 	previous := filepath.Join(folder, ".aeolus-trierarch-"+from)
+	// An upgrade killed between the link and the replacement leaves this file: it is the old binary of an earlier try, and this one replaces it.
+	if err := os.Remove(previous); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return UpgradeReport{}, refused(err, "The trierarch %s could not be kept aside: %v\n%s", from, err, keeps)
+	}
 	if err := os.Link(u.Program, previous); err != nil {
 		return UpgradeReport{}, refused(err, "The trierarch %s could not be kept aside: %v\n%s", from, err, keeps)
 	}
