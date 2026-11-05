@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/processproof"
 )
 
 const (
@@ -88,13 +89,14 @@ func (r Runtime) answeredVersion() string {
 	return state.Version
 }
 
+// runningPID is the proxy's pid while its process runs, 0 otherwise: a pid file's pid that is not this proxy by its command line is nobody to signal.
 func (r Runtime) runningPID() int {
 	text, err := os.ReadFile(FilesOf(r.Folder).PID)
 	if err != nil {
 		return 0
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(text)))
-	if err != nil || pid <= 1 || syscall.Kill(pid, 0) != nil {
+	if err != nil || pid <= 1 || syscall.Kill(pid, 0) != nil || !processproof.Runs(pid, "proxy", "--folder", r.Folder) {
 		return 0
 	}
 	return pid
