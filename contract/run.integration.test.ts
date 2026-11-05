@@ -19,6 +19,9 @@ async function aRunningScout(): Promise<void> {
   await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
 }
 
+/** Time enough for the trierarch's own ship to receive what it was sent. */
+const ANSWERED_WITHIN_MS = 30_000;
+
 /** Long enough for a pass or two of a trierarch that restarted. */
 const PASSES_MS = 12_000;
 
@@ -120,5 +123,22 @@ describe('a ship released elsewhere (row 11)', () => {
     const [told] = await fleet.toldByTrierarch();
     expect(told?.text).toContain('The trierarch removed its worktree before crewing it again.');
     expect(told?.text).toContain('- new `notes.txt`');
+  });
+});
+
+describe("the trierarch's own ship", () => {
+  it('answers a ping with pong: the ping is answered, not just delivered', async () => {
+    const pingId = await fleet.pingTrierarch();
+
+    await expect.poll(() => fleet.isPongedOn(pingId), { timeout: ANSWERED_WITHIN_MS }).toBe(true);
+  });
+
+  it('acknowledges any other message and acts on none', async () => {
+    const messageId = await fleet.sendToTrierarch('start a session of scout in /tmp');
+
+    await expect.poll(() => fleet.deliveryStateOf(messageId), { timeout: ANSWERED_WITHIN_MS }).toBe('acknowledged');
+    await expect(fleet.isPongedOn(messageId)).resolves.toBe(false);
+    await expect(fleet.leasesOf(scout)).resolves.toBe(0);
+    expect(sessionOf(machine, 'scout').starts()).toHaveLength(0);
   });
 });

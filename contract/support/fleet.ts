@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { ShipId } from '@aeolus-fleet/common';
 import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, FLEET_URL, newKey, OPERATOR, operatorCaller, secretOf, unwrap, type PrismaClient, type ShipCaller, type UseCases } from '@aeolus-fleet/core/testing';
 
@@ -24,6 +25,10 @@ export interface Fleet {
   releaseElsewhere(shipId: ShipId): Promise<void>;
   /** Sends the ship a message from argo: its id. */
   send(shipName: string, payload: string): Promise<string>;
+  /** Sends the machine's trierarch ship a message from argo: its id. */
+  sendToTrierarch(payload: string): Promise<string>;
+  /** Pings the machine's trierarch ship from argo: the ping's message id. */
+  pingTrierarch(): Promise<string>;
   /** How many of the ship's leases are held. */
   leasesOf(shipId: ShipId): Promise<number>;
   /** The harness the ship's held lease was registered with. */
@@ -34,6 +39,8 @@ export interface Fleet {
   toldByTrierarch(): Promise<readonly Told[]>;
   /** The delivery's state, as core keeps it. */
   deliveryStateOf(messageId: string): Promise<string>;
+  /** Whether the delivery was acknowledged by a pong. */
+  isPongedOn(messageId: string): Promise<boolean>;
   /** Why the machine's trierarch gave the ship's crew request back; none while it gave none back. */
   givenBackReasonOf(shipId: ShipId): Promise<string | undefined>;
   close(): Promise<void>;
@@ -78,6 +85,8 @@ export async function aFleet(): Promise<Fleet> {
       unwrap(await useCases.recrewShip(argo, { shipId }));
     },
     send: async (shipName, payload) => unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', name: shipName }, payload, idempotencyKey: newKey() })).messageId,
+    sendToTrierarch: async (payload) => unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', shipId: trierarchShip.shipId }, payload, idempotencyKey: newKey() })).messageId,
+    pingTrierarch: async () => unwrap(await useCases.pingShip(argo, { shipId: trierarchShip.shipId })).messageId,
     leasesOf: (shipId) => database.lease.count({ where: { shipId, endedAt: null } }),
     leaseHarnessOf: async (shipId) => (await database.lease.findFirst({ where: { shipId, endedAt: null }, select: { harness: true } }))?.harness ?? undefined,
     closeTheNetwork: async () => {
@@ -95,6 +104,7 @@ export async function aFleet(): Promise<Fleet> {
       return told;
     },
     deliveryStateOf: async (messageId) => (await database.delivery.findFirstOrThrow({ where: { messageId }, select: { state: true } })).state,
+    isPongedOn: async (messageId) => (await database.event.findMany({ where: { messageId, type: 'DeliveryAcknowledged' }, select: { details: true } })).some(({ details }) => z.object({ answer: z.literal('pong') }).safeParse(details).success),
     givenBackReasonOf: async (shipId) => (await database.crewRequestGiveBack.findFirst({ where: { shipId, trierarchShipId: trierarchShip.shipId }, select: { reason: true } }))?.reason,
     close: async () => {
       await server.close();

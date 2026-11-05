@@ -1,12 +1,15 @@
 package fleet
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 )
@@ -250,5 +253,68 @@ func TestAnInboxWhoseLeaseEndedSaysSo(t *testing.T) {
 				t.Fatalf("Inbox = %+v %v, want the lease ended", inbox, err)
 			}
 		})
+	}
+}
+
+func TestTheTrierarchsOwnShipReceivesAtMostTenDeliveriesWithItsCrewToken(t *testing.T) {
+	recorded, client := aFleetAnswering(t, map[string]string{"/api/v1/ship/receive": `{"deliveries":[{"deliveryId":"dlv_1","messageId":"msg_1","senderShipId":"` + scout + `","contentType":"application/vnd.aeolus.ping","payload":"ping"}]}`})
+
+	deliveries, err := client.Receive(context.Background())
+
+	if err != nil || len(deliveries) != 1 || deliveries[0].DeliveryID != "dlv_1" || deliveries[0].SenderShipID != scout || deliveries[0].ContentType != "application/vnd.aeolus.ping" {
+		t.Fatalf("deliveries %+v, %v", deliveries, err)
+	}
+	sameJSON(t, recorded.asked["/api/v1/ship/receive"], `{"max":10}`)
+	if recorded.bearers["/api/v1/ship/receive"] != "Bearer aeolus_ct_v1_trierarch" {
+		t.Fatalf("bearer %q", recorded.bearers["/api/v1/ship/receive"])
+	}
+}
+
+func TestADeliveryIsAcknowledgedAndAPingGetsPong(t *testing.T) {
+	recorded, client := aFleetAnswering(t, map[string]string{"/api/v1/ship/ack": `{}`, "/api/v1/ship/pong": `{}`})
+
+	if err := client.Ack("dlv_1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Pong("dlv_2"); err != nil {
+		t.Fatal(err)
+	}
+
+	sameJSON(t, recorded.asked["/api/v1/ship/ack"], `{"deliveryId":"dlv_1"}`)
+	sameJSON(t, recorded.asked["/api/v1/ship/pong"], `{"deliveryId":"dlv_2"}`)
+}
+
+func TestAReceiveTheFleetRefusesIsItsRefusal(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"code":"KEY_UNAVAILABLE","message":"the key cannot be had"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	_, err := Client{URL: server.URL, CrewToken: "t"}.Receive(context.Background())
+
+	var refusal *Refusal
+	if !errors.As(err, &refusal) || refusal.Code != "KEY_UNAVAILABLE" {
+		t.Fatalf("error %v", err)
+	}
+}
+
+func TestAReceiveTheFleetHoldsEndsWhenItsContextDoes(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { close(release) })
+	ctx, stop := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, stop)
+
+	_, err := Client{URL: server.URL, CrewToken: "t"}.Receive(ctx)
+
+	if err == nil || ctx.Err() == nil {
+		t.Fatalf("error %v", err)
 	}
 }
