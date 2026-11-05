@@ -9,7 +9,8 @@
 # it runs), their SHA256SUMS and a GitHub artifact attestation per binary,
 # signed here: upgrade takes only an attestation signed by this file. Then sets the aeolus-fleet plugin to that version on main for
 # every release, a hotfix branch's included, unless main's plugin is newer already:
-# the plugin marketplaces install from main by default.
+# the plugin marketplaces install from main by default. A release from main also
+# writes the Homebrew formula of the version to the tap (ThomasHendrickx/homebrew-aeolus).
 #
 # The only way the package can be published: npm trusted publishing (OIDC) is
 # configured for exactly this file name, and tokens are disallowed (decision
@@ -267,4 +268,50 @@ jobs:
             echo "main moved meanwhile (attempt $attempt); trying again on top of it"
           done
           echo "::error::Could not push the aeolus-fleet plugin version to main"
+          exit 1
+
+      # The tap (ThomasHendrickx/homebrew-aeolus) is kept current by the release:
+      # its formula is homebrew/aeolus-trierarch.rb with this version's binaries
+      # and their checksums, pushed with a deploy key that can write to the tap
+      # only. A hotfix branch's release leaves the tap alone, so a newer formula
+      # is never replaced by an older one. After the Release, whose binaries the
+      # formula names, and after the plugin version step, so a failure here
+      # leaves the release whole and main's plugin set; write the
+      # formula by hand with node scripts/homebrew-formula.ts and push it.
+      - name: Update the Homebrew tap to ${{ inputs.version }}
+        env:
+          VERSION: ${{ inputs.version }}
+          TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Released from $GITHUB_REF, not main: the Homebrew tap is left as it is"
+            exit 0
+          fi
+          key="$RUNNER_TEMP/tap-deploy-key"
+          known_hosts="$RUNNER_TEMP/tap-known-hosts"
+          (umask 077 && printf '%s\n' "$TAP_DEPLOY_KEY" > "$key")
+          echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > "$known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o UserKnownHostsFile=$known_hosts -o StrictHostKeyChecking=yes"
+          node scripts/homebrew-formula.ts "$VERSION" "$GITHUB_REPOSITORY" "$RUNNER_TEMP/binaries/SHA256SUMS" < homebrew/aeolus-trierarch.rb > "$RUNNER_TEMP/aeolus-trierarch.rb"
+          git clone --quiet git@github.com:ThomasHendrickx/homebrew-aeolus.git "$RUNNER_TEMP/tap"
+          cd "$RUNNER_TEMP/tap"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          for attempt in 1 2 3; do
+            git fetch --quiet origin main
+            git checkout --quiet --force -B main origin/main
+            mkdir -p Formula
+            cp "$RUNNER_TEMP/aeolus-trierarch.rb" Formula/aeolus-trierarch.rb
+            git add Formula/aeolus-trierarch.rb
+            if git diff --cached --quiet; then
+              echo "The tap carries $VERSION already"
+              exit 0
+            fi
+            git commit --quiet --message "aeolus-trierarch $VERSION"
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "The tap moved meanwhile (attempt $attempt); trying again on top of it"
+          done
+          echo "::error::Could not push the formula to the tap"
           exit 1
