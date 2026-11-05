@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 
 import type { ShipId } from '@aeolus-fleet/common';
@@ -97,5 +98,27 @@ describe('run with the reconciler', () => {
     expect(session.starts()).toHaveLength(1);
     expect(isRunning(session.starts()[0]?.pid ?? 0)).toBe(true);
     await expect(fleet.leasesOf(scout)).resolves.toBe(1);
+  });
+});
+
+describe('a ship released elsewhere (row 11)', () => {
+  it('is crewed again in a fresh worktree as a first start, and argo is told what the old one held', async () => {
+    await aRunningScout();
+    const session = sessionOf(machine, 'scout');
+    const first = session.starts()[0];
+    writeFileSync(join(session.worktree, 'notes.txt'), 'unsaved\n');
+
+    await fleet.releaseElsewhere(scout);
+
+    await expect.poll(() => fleet.leasesOf(scout), { timeout: CREWED_WITHIN_MS }).toBe(1);
+    await expect.poll(() => existsSync(join(session.worktree, 'notes.txt')) || session.starts().length !== 1, { timeout: CREWED_WITHIN_MS }).toBe(false);
+    await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
+    expect(session.starts()).toHaveLength(1);
+    expect(session.starts()[0]?.pid).not.toBe(first?.pid);
+    expect(session.starts()[0]?.args).not.toContain('--resume');
+    await expect.poll(async () => (await fleet.toldByTrierarch()).map((told) => told.text.split('\n')[0]), { timeout: CREWED_WITHIN_MS }).toEqual(['scout released elsewhere: unpushed work discarded']);
+    const [told] = await fleet.toldByTrierarch();
+    expect(told?.text).toContain('The trierarch removed its worktree before crewing it again.');
+    expect(told?.text).toContain('- new `notes.txt`');
   });
 });
