@@ -54,6 +54,8 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/shipsocket"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/workspace"
+
+	"golang.org/x/term"
 )
 
 func main() {
@@ -618,10 +620,9 @@ func systemctl(name string, args ...string) (string, error) {
 	return service.Run(name, args...)
 }
 
-// isTerminal says whether the file is a terminal.
+// isTerminal says whether the file is a terminal, as Node's isTTY does: the null device is a character device, no terminal.
 func isTerminal(file *os.File) bool {
-	info, err := file.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(int(file.Fd()))
 }
 
 // startedAt is when the process started, as ps says how long it runs; empty when ps cannot tell.
