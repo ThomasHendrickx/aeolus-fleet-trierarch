@@ -12,6 +12,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
@@ -64,6 +65,9 @@ const (
 	ByRefusal By = "refusal"
 )
 
+// keeping serialises each load, change and save of the detected file in this process: a refusal and a detection finishing together each keep the other's change.
+var keeping sync.Mutex
+
 // Detection detects the harnesses with their detectors and keeps what it finds.
 type Detection struct {
 	Detectors map[string]Detector
@@ -76,8 +80,7 @@ type Detection struct {
 // Detect detects the harnesses given that have a detector, as by says, and gives what is detected of them. A harness whose CLI does not say its version, or gives nothing to detect, keeps what was detected before.
 func (d Detection) Detect(ctx context.Context, harnesses []string, by By) (Detected, error) {
 	before := d.Store.Load()
-	detected := maps.Clone(before)
-	isChanged := false
+	found := Detected{}
 	for _, name := range harnesses {
 		detector, ok := d.Detectors[name]
 		if !ok {
@@ -96,22 +99,16 @@ func (d Detection) Detect(ctx context.Context, harnesses []string, by By) (Detec
 		if wasDetected {
 			given = &previous
 		}
-		found, ok := detector.Detect(ctx, version, given, d.Now())
+		harness, ok := detector.Detect(ctx, version, given, d.Now())
 		if !ok {
 			d.Warn(fmt.Sprintf("%s %s gave nothing to detect, so its options stay as detected before", name, version))
 			continue
 		}
-		found.Refused = nil
-		if by == ByRefusal && wasDetected && previous.Version == version {
-			found.Refused = previous.Refused
-		}
-		detected[name] = found
-		isChanged = true
+		found[name] = harness
 	}
-	if isChanged {
-		if err := d.Store.Save(detected); err != nil {
-			return nil, fmt.Errorf("keep what detection found: %w", err)
-		}
+	detected, err := d.keep(found, by)
+	if err != nil {
+		return nil, err
 	}
 	given := Detected{}
 	for _, name := range harnesses {
@@ -122,8 +119,30 @@ func (d Detection) Detect(ctx context.Context, harnesses []string, by By) (Detec
 	return given, nil
 }
 
+// keep saves what was found onto what is kept now, not onto what was kept when the probes began: a model refused while they ran stays refused, as Refuse does under the same lock.
+func (d Detection) keep(found Detected, by By) (Detected, error) {
+	keeping.Lock()
+	defer keeping.Unlock()
+	detected := d.Store.Load()
+	for name, harness := range found {
+		harness.Refused = nil
+		if kept, ok := detected[name]; by == ByRefusal && ok && kept.Version == harness.Version {
+			harness.Refused = kept.Refused
+		}
+		detected[name] = harness
+	}
+	if len(found) > 0 {
+		if err := d.Store.Save(detected); err != nil {
+			return nil, fmt.Errorf("keep what detection found: %w", err)
+		}
+	}
+	return detected, nil
+}
+
 // Refuse keeps a model a session refused as refused for its harness's detected version, so the machine offers it no more, and gives what is detected now. A harness detection never found has no models to refuse.
 func Refuse(store Store, harness string, id string, at time.Time) (Detected, error) {
+	keeping.Lock()
+	defer keeping.Unlock()
 	detected := store.Load()
 	found, ok := detected[harness]
 	if !ok || slices.ContainsFunc(found.Refused, func(each Refused) bool { return each.ID == id }) {
