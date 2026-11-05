@@ -9,7 +9,7 @@ import (
 )
 
 func harness(flags ...string) Harness {
-	return Harness{Flags: flags, Options: map[string]Option{}}
+	return Harness{Flags: append([]string{}, flags...), Options: map[string]Option{}}
 }
 
 func TestWithoutRemoteControlTakesItOutOfEachHarnessWithTheNameGivenAfterItOrWithEquals(t *testing.T) {
@@ -73,7 +73,10 @@ func TestRemoveRemoteControlRewritesTheFileKeepingAllElseAndNamesTheHarness(t *t
 		t.Fatal(err)
 	}
 
-	named := RemoveRemoteControl(path)
+	named, err := RemoveRemoteControl(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if !reflect.DeepEqual(named, []string{"claude-code"}) {
 		t.Errorf("named %v", named)
@@ -101,7 +104,7 @@ func TestRemoveRemoteControlLeavesAFileWithoutItAsItIsAndAMissingOrMisfitOne(t *
 	}
 
 	for _, file := range []string{path, filepath.Join(folder, "none.json"), misfit} {
-		if named := RemoveRemoteControl(file); len(named) != 0 {
+		if named, err := RemoveRemoteControl(file); len(named) != 0 || err != nil {
 			t.Errorf("%s named %v", file, named)
 		}
 	}
