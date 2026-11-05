@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/activity"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
@@ -38,6 +39,19 @@ type aFleet struct {
 	refuseGiveBack *fleet.Refusal
 	// cannotRead makes the read of the assigned requests fail.
 	cannotRead error
+	// activityWrites are the activities written, one slice per call, with the interval stated; cannotWriteActivity makes the write fail.
+	activityWrites      [][]fleet.ShipActivity
+	activityInterval    int
+	cannotWriteActivity error
+}
+
+func (f *aFleet) ReportActivity(intervalSeconds int, activities []fleet.ShipActivity) error {
+	if f.cannotWriteActivity != nil {
+		return f.cannotWriteActivity
+	}
+	f.activityInterval = intervalSeconds
+	f.activityWrites = append(f.activityWrites, activities)
+	return nil
 }
 
 // told is a notice the trierarch sent: to argo, or to a ship by its id.
@@ -153,8 +167,15 @@ type aHarness struct {
 	sockets    *someSockets
 	// logins are the login each launch started on, in order.
 	logins []string
+	// activities are what each ship's session shows, by ship.
+	activities map[string]activity.Activity
 	// readOnly are the read-only checkouts each launch was given, in order.
 	readOnly [][]string
+}
+
+func (h *aHarness) Activity(entry reconciler.Entry) (activity.Activity, bool) {
+	shown, ok := h.activities[entry.ShipID]
+	return shown, ok
 }
 
 func (h *aHarness) Launch(entry reconciler.Entry, isFirstStart bool, launchID string) error {
@@ -1880,6 +1901,61 @@ func TestAShipReleasedElsewhereWhoseLastUsageTheFleetDoesNotTakeKeepsItsWorktree
 
 	if len(pass.workspace.removed) != 0 || len(pass.harness.launches) != 0 || !pass.store.state.Entries[scout].IsReleasedElsewhere {
 		t.Fatalf("removed %q, launches %+v, entry %+v", pass.workspace.removed, pass.harness.launches, pass.store.state.Entries[scout])
+	}
+}
+
+func TestTheActivityOfARunningSessionIsWrittenEachPassWithTheInterval30Seconds(t *testing.T) {
+	at := aRunPass(t)
+	at.crewed(t)
+	wrote := now.Add(-2 * time.Second)
+	at.harness.activities = map[string]activity.Activity{scout: {At: wrote, Kind: "tool", Tool: "Bash"}}
+
+	at.run(t)
+	at.run(t)
+
+	want := []fleet.ShipActivity{{ShipID: scout, Activity: activity.Activity{At: wrote, Kind: "tool", Tool: "Bash"}}}
+	if len(at.fleet.activityWrites) != 2 || !reflect.DeepEqual(at.fleet.activityWrites[1], want) || at.fleet.activityInterval != 30 {
+		t.Fatalf("written %+v at an interval of %d, want %+v each pass at 30", at.fleet.activityWrites, at.fleet.activityInterval, want)
+	}
+}
+
+func TestNoActivityIsWrittenForASessionThatShowsNoneOrHasExited(t *testing.T) {
+	at := aRunPass(t)
+	at.crewed(t)
+	at.harness.activities = map[string]activity.Activity{scout: {At: now, Kind: "text"}}
+	at.run(t)
+	at.fleet.activityWrites = nil
+
+	at.harness.activities = map[string]activity.Activity{}
+	at.run(t)
+	if len(at.fleet.activityWrites) != 0 {
+		t.Errorf("wrote %+v for a session that shows no activity", at.fleet.activityWrites)
+	}
+
+	at.harness.activities = map[string]activity.Activity{scout: {At: now, Kind: "text"}}
+	at.sessions.observed = []sessions.Observed{{ShipID: scout, Status: "exited"}}
+	at.run(t)
+	for _, written := range at.fleet.activityWrites {
+		if len(written) != 0 {
+			t.Errorf("wrote %+v for a session that exited", written)
+		}
+	}
+}
+
+func TestAnActivityThatCannotBeWrittenIsToldAndNeverFailsThePass(t *testing.T) {
+	at := aRunPass(t)
+	at.crewed(t)
+	at.harness.activities = map[string]activity.Activity{scout: {At: now, Kind: "text"}}
+	at.fleet.cannotWriteActivity = errors.New("the fleet is busy")
+	at.logged = nil
+
+	at.run(t)
+
+	if !slices.Contains(at.logged, "The activity of the sessions was not written: the fleet is busy; the next pass tries again") {
+		t.Errorf("logged %q", at.logged)
+	}
+	if at.store.state.PassFailure != nil {
+		t.Errorf("pass failure %+v, want none", at.store.state.PassFailure)
 	}
 }
 
