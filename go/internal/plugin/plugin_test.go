@@ -47,6 +47,14 @@ func TestADeletedIdentityIsShownNoMore(t *testing.T) {
 	}
 }
 
+func TestDeletingAnIdentityUnderAPluginThatIsLostLeavesNothingToDo(t *testing.T) {
+	plugin := Plugin{Root: t.TempDir(), Data: t.TempDir(), Crews: t.TempDir()}
+
+	if err := plugin.DeleteIdentity(t.TempDir()); err != nil {
+		t.Fatalf("DeleteIdentity under a lost plugin = %v, want nil", err)
+	}
+}
+
 func TestAFolderWithNoIdentityShowsNone(t *testing.T) {
 	if thePlugin(t).HasIdentity(t.TempDir()) {
 		t.Fatalf("an identity for a folder never crewed")
