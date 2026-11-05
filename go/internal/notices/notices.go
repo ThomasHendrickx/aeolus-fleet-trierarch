@@ -8,9 +8,14 @@ package notices
 
 import (
 	"fmt"
+	"math"
+	"math/big"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf16"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 )
 
 // MarkdownContentType is the content type of a message whose body holds lists or links.
@@ -231,4 +236,30 @@ func KeyNotReady(harness string, state string, at string, ships []Ship) string {
 	}
 	facts := strings.Join([]string{"- Harness: " + harness, "- State: " + said, "- Ships that wait: " + strings.Join(waiting, ", ")}, "\n")
 	return Message(headline, paragraphs(facts, next))
+}
+
+const (
+	gib = 1 << 30
+	gb  = 1_000_000_000
+)
+
+// tenths is a number with one decimal, a tie rounded up as JavaScript's toFixed does, where Go's rounds it to even.
+func tenths(value float64) string {
+	if scaled := value * 10; scaled == math.Floor(scaled)+0.5 && new(big.Rat).Mul(new(big.Rat).SetFloat64(value), big.NewRat(20, 1)).IsInt() {
+		return strconv.FormatFloat((math.Floor(scaled)+1)/10, 'f', 1, 64)
+	}
+	return strconv.FormatFloat(value, 'f', 1, 64)
+}
+
+// LowResource is what argo is told when the machine is low on memory or disk (#400). The trierarch stops nothing for it: freeing memory or disk is the operator's.
+func LowResource(resource string, load machineload.Load) string {
+	memory, disk := load.Memory, load.Disk
+	var headline string
+	if resource == machineload.LowMemory {
+		headline = fmt.Sprintf("Low on memory: %d %% available", int(math.Round(float64(memory.AvailableBytes)/float64(memory.TotalBytes)*100)))
+	} else {
+		headline = fmt.Sprintf("Low on disk: %d %% free", int(math.Round(float64(disk.FreeBytes)/float64(disk.TotalBytes)*100)))
+	}
+	facts := fmt.Sprintf("- Memory: %s of %s GiB available\n- Disk: %s of %s GB free", tenths(float64(memory.AvailableBytes)/gib), tenths(float64(memory.TotalBytes)/gib), tenths(float64(disk.FreeBytes)/gb), tenths(float64(disk.TotalBytes)/gb))
+	return Message(headline, paragraphs(facts, "The trierarch stops no session for it."))
 }
