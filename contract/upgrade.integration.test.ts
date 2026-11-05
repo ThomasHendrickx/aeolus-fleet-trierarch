@@ -49,6 +49,27 @@ describe('upgrade on the version it runs', () => {
     expect(reportSchema.parse(JSON.parse(upgrade.stdout))).toEqual({ from: version, to: version, isUpgraded: false, isPluginUpdated: true });
   });
 
+  it("takes --remote-control out of a harness's flags, keeping all else the configuration holds, and says which harnesses (headless H20)", async () => {
+    const file = join(machine.trierarchHome, 'config.json');
+    const configured = z.record(z.string(), z.unknown()).parse(JSON.parse(readFileSync(file, 'utf8')));
+    writeFileSync(file, JSON.stringify({ ...configured, harnesses: { 'claude-code': { flags: ['--remote-control', 'mine', '--verbose'], options: {} } } }));
+
+    const upgrade = await machine.trierarch(['upgrade', version, '--json']);
+
+    expect(upgrade.status, upgrade.stdout + upgrade.stderr).toBe(0);
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ ...configured, harnesses: { 'claude-code': { flags: ['--verbose'], options: {} } } });
+    expect(z.object({ said: z.array(z.string()) }).parse(JSON.parse(upgrade.stdout)).said.join('\n')).toContain('Took --remote-control out of the flags of claude-code in the configuration');
+  });
+
+  it('leaves a configuration without Remote Control as it is', async () => {
+    const file = join(machine.trierarchHome, 'config.json');
+    const text = readFileSync(file, 'utf8');
+
+    await machine.trierarch(['upgrade', version, '--json']);
+
+    expect(readFileSync(file, 'utf8')).toBe(text);
+  });
+
   it("updates the aeolus-fleet plugin through Claude Code's own plugin commands", async () => {
     await machine.trierarch(['upgrade', version, '--json']);
 

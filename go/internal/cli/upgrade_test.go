@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/service"
 )
@@ -538,5 +539,29 @@ func TestUpgradeRunFromTheKeptFileLeavesItInPlace(t *testing.T) {
 	}
 	if text, err := os.ReadFile(kept); err != nil || string(text) != string(binaryOf(running)) {
 		t.Errorf("%s holds %q (%v), want the file it runs from left in place", kept, text, err)
+	}
+}
+
+func TestUpgradeOnItsVersionTakesRemoteControlOutOfTheConfigurationAndSaysSo(t *testing.T) {
+	machine := anUpgradeOn(t)
+	configured := config.Initial()
+	configured.Harnesses["claude-code"] = config.Harness{Flags: []string{"--remote-control", "--verbose"}, Options: map[string]config.Option{}}
+	configured.Harnesses["codex"] = config.Harness{Flags: []string{"--remote-control=mine"}, Options: map[string]config.Option{}}
+	if err := config.Write(machine.upgrade.Paths.Config, configured); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := machine.upgrade.Run(running)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, _ := config.Load(machine.upgrade.Paths.Config)
+	if !slices.Equal(loaded.Harnesses["claude-code"].Flags, []string{"--verbose"}) || len(loaded.Harnesses["codex"].Flags) != 0 {
+		t.Errorf("flags = %+v, want no Remote Control", loaded.Harnesses)
+	}
+	want := "Took --remote-control out of the flags of claude-code, codex in the configuration: a session the trierarch runs has no terminal, so no Remote Control."
+	if len(report.Said) < 2 || report.Said[0] != "The trierarch is already on 0.40.0." || report.Said[1] != want {
+		t.Errorf("said %q, want the version, then %q", report.Said, want)
 	}
 }
