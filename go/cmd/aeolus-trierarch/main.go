@@ -45,6 +45,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/peer"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/receiving"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/release"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/runpass"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/selfreport"
@@ -506,6 +507,23 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		"claude-code": claudecode.Of(home, env["CLAUDE_CONFIG_DIR"]).TrustedFolders,
 		"codex":       func() map[string]bool { return codex.TrustedFolders(codex.HomeOf(home, env["CODEX_HOME"])) },
 		"copilot":     func() map[string]bool { return trust.Everything(withTrusted(configuration))() },
+	}
+	// The harnesses as offered now, and what each trusts and still asks to accept, are read at each pass (#381, #403).
+	pass.Configuration = func() map[string]config.Harness {
+		offered, _ := offers.current()
+		return offered.Harnesses
+	}
+	pass.Trusted = func() map[string]reconciler.Trust {
+		offered, _ := offers.current()
+		trusted := map[string]reconciler.Trust{}
+		for harness, places := range trust.Of(withTrusted(offered), trustReaders) {
+			trusted[harness] = reconciler.Trust{Repositories: places.Repositories, Folders: places.Folders}
+		}
+		if claudeCode, ok := trusted["claude-code"]; ok && !claudecode.IsSkipPermissionsAccepted(claudecode.UserSettings(home, env["CLAUDE_CONFIG_DIR"])) {
+			claudeCode.UnacceptedFlags = []string{"--dangerously-skip-permissions"}
+			trusted["claude-code"] = claudeCode
+		}
+		return trusted
 	}
 	reporter := &selfreport.Reporter{
 		Fleet:    client,
