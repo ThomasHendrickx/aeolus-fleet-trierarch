@@ -192,3 +192,12 @@ func TestCopilotIsOfferedWithItsPluginOnAProvenBuild(t *testing.T) {
 		t.Fatalf("Problem = %v, want none", err)
 	}
 }
+
+func TestCopilotIsNotOfferedInContainersWhereItIsNotProven(t *testing.T) {
+	harness, _ := aHarness(t)
+	harness.IsInContainer = true
+
+	if err := harness.Problem(); err == nil || err.Error() != "Copilot is not proven in a container: the container runtime runs claude-code only" {
+		t.Fatalf("Problem = %v", err)
+	}
+}
