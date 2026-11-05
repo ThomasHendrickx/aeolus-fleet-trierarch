@@ -106,10 +106,10 @@ func (h Harness) ForceOver(entry reconciler.Entry, isTurnBusy bool) (bool, error
 	return true, h.Runtime.Send(entry.ShipID, prompt.Wake(line))
 }
 
-// Problem is why the machine does not offer Copilot now (CC3): its plugin not installed, which the trierarch's upgrade does not install, so the reason says Copilot's own command; its version not found; or a build its plugin's hooks are not proven on.
-func (h Harness) Problem() error {
+// NotOfferedReason is why the machine does not offer Copilot now (CC3): its plugin not installed, which the trierarch's upgrade does not install, so the reason says Copilot's own command; its version not found; or a build its plugin's hooks are not proven on. Empty when it does.
+func (h Harness) NotOfferedReason() string {
 	if h.IsInstalled() != nil {
-		return errors.New("its aeolus-fleet plugin is not installed for Copilot: copilot plugin install aeolus-fleet@aeolus-fleet")
+		return "its aeolus-fleet plugin is not installed for Copilot: copilot plugin install aeolus-fleet@aeolus-fleet"
 	}
 	proven := []string{}
 	for _, version := range ProvenVersions {
@@ -118,10 +118,18 @@ func (h Harness) Problem() error {
 	onProven := "the hooks of its aeolus-fleet plugin are proven on " + strings.Join(proven, ", ")
 	version, ok := h.Version()
 	if !ok {
-		return errors.New("its Copilot CLI version is not detected yet: " + onProven)
+		return "its Copilot CLI version is not detected yet: " + onProven
 	}
 	if !slices.Contains(ProvenVersions, version) {
-		return fmt.Errorf("copilot CLI %s is not proven: %s", version, onProven)
+		return fmt.Sprintf("Copilot CLI %s is not proven: %s", version, onProven)
+	}
+	return ""
+}
+
+// Problem is the reason the machine does not offer Copilot now, as an error, nil when it does (#827).
+func (h Harness) Problem() error {
+	if reason := h.NotOfferedReason(); reason != "" {
+		return errors.New(reason)
 	}
 	return nil
 }

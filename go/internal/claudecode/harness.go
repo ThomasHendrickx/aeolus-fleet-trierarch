@@ -175,3 +175,9 @@ func (h Harness) ForceOver(entry reconciler.Entry, isTurnBusy bool) (bool, error
 }
 
 func (h Harness) Problem() error { return h.Plugin.IsInstalled() }
+
+// NotOfferedReason is none: the machine offers it once its plugin is found.
+func (h Harness) NotOfferedReason() string { return "" }
+
+// MarksLaunches is whether the aeolus-fleet plugin keeps launch markers (#490).
+func (h Harness) MarksLaunches() (bool, error) { return h.Plugin.MarksLaunches() }
