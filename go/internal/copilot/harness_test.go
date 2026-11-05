@@ -192,17 +192,3 @@ func TestCopilotIsOfferedWithItsPluginOnAProvenBuild(t *testing.T) {
 		t.Fatalf("Problem = %v, want none", err)
 	}
 }
-
-func TestTheVersionIsWhatCopilotSaysOnItsFirstLine(t *testing.T) {
-	program := filepath.Join(t.TempDir(), "copilot")
-	if err := os.WriteFile(program, []byte("#!/bin/sh\n[ \"$1\" = --version ] || exit 2\necho 'GitHub Copilot CLI 1.0.105.'\necho 'Run copilot update to check for updates.'\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	if version, ok := VersionOf(program); !ok || version != "1.0.105" {
-		t.Fatalf("VersionOf = %q %v, want 1.0.105", version, ok)
-	}
-	if _, ok := VersionOf(filepath.Join(t.TempDir(), "none")); ok {
-		t.Fatal("VersionOf a program that does not run says a version, want none")
-	}
-}

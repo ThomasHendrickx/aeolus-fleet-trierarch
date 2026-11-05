@@ -8,7 +8,9 @@ package reconciler
 
 import (
 	"fmt"
+	"maps"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -169,6 +171,8 @@ type Context struct {
 	RunningCap   int
 	// Versions are each harness's version, for the harnesses whose session refused its model.
 	Versions map[string]string
+	// Options are, by harness, each option it offers now and its value names in order: a model a session refused is offered no more (#382).
+	Options map[string]map[string][]string
 }
 
 type ActionKind string
@@ -332,7 +336,7 @@ func Reconcile(state State, context Context) (State, []Action) {
 			actions = append(actions, Action{Kind: Confirm, ShipID: request.ShipID})
 			continue
 		}
-		harness, reason := check(request.Settings, context)
+		harness, options, reason := check(request.Settings, context)
 		if reason != "" {
 			if !request.IsFinal {
 				actions = append(actions, Action{Kind: GiveBack, ShipID: request.ShipID, SettingsVersion: request.SettingsVersion, Reason: reason})
@@ -340,7 +344,7 @@ func Reconcile(state State, context Context) (State, []Action) {
 			continue
 		}
 		if canStart() {
-			next.Entries[request.ShipID] = entryOf(request, harness, context.Now)
+			next.Entries[request.ShipID] = entryOf(request, harness, options, context.Now)
 			actions = append(actions, Action{Kind: Crew, ShipID: request.ShipID})
 			runningSessions++
 		}
@@ -363,8 +367,29 @@ func sortedKeys(entries map[string]Entry) []string {
 	return keys
 }
 
-// check answers the harness settings crew with, or why this machine cannot crew them, naming the field at fault.
-func check(settings Settings, context Context) (string, string) {
+// check answers the harness settings crew with and the options they pick of those it offers, or why this machine cannot crew them, naming the field at fault. An option the harness does not declare is ignored: no flag, no refusal (#366).
+func check(settings Settings, context Context) (string, map[string]string, string) {
+	harness, reason := checkPlace(settings, context)
+	if reason != "" {
+		return "", nil, reason
+	}
+	offered := context.Options[harness]
+	options := map[string]string{}
+	for _, name := range slices.Sorted(maps.Keys(settings.Options)) {
+		values, ok := offered[name]
+		if !ok {
+			continue
+		}
+		if value := settings.Options[name]; !slices.Contains(values, value) {
+			return "", nil, fmt.Sprintf("options.%s: %s must be one of %s", name, name, strings.Join(values, ", "))
+		}
+		options[name] = settings.Options[name]
+	}
+	return harness, options, ""
+}
+
+// checkPlace answers the harness settings crew with, or why this machine does not offer it or their workspace.
+func checkPlace(settings Settings, context Context) (string, string) {
 	harness := settings.Harness
 	if harness == "" && len(context.Harnesses) > 0 {
 		harness = context.Harnesses[0]
@@ -387,11 +412,7 @@ func check(settings Settings, context Context) (string, string) {
 	return harness, ""
 }
 
-func entryOf(request Request, harness string, now time.Time) Entry {
-	options := request.Settings.Options
-	if options == nil {
-		options = map[string]string{}
-	}
+func entryOf(request Request, harness string, options map[string]string, now time.Time) Entry {
 	return Entry{
 		ShipID:          request.ShipID,
 		SettingsVersion: request.SettingsVersion,
@@ -440,7 +461,7 @@ func sessionOf(context Context, shipID string) (Session, bool) {
 
 // newVersionStep crews the ship again with a new settings version (Restart or Edit), in its folder, as a first start with a fresh restart budget; settings it cannot crew are given back while the crew is not final.
 func newVersionStep(entry Entry, request Request, context Context) step {
-	harness, reason := check(request.Settings, context)
+	harness, options, reason := check(request.Settings, context)
 	if reason != "" {
 		if request.IsFinal {
 			return stepOf(entry, context, false, true)
@@ -448,7 +469,7 @@ func newVersionStep(entry Entry, request Request, context Context) step {
 		given := entry
 		return step{isGivenBack: true, actions: []Action{{Kind: GiveBack, ShipID: entry.ShipID, SettingsVersion: request.SettingsVersion, Reason: reason, Entry: &given}}}
 	}
-	fresh := entryOf(request, harness, context.Now)
+	fresh := entryOf(request, harness, options, context.Now)
 	fresh.ShipName, fresh.Folder = entry.ShipName, entry.Folder
 	return step{entry: &fresh, actions: []Action{{Kind: Stop, ShipID: entry.ShipID}, {Kind: Crew, ShipID: entry.ShipID, IsResumed: true}}}
 }

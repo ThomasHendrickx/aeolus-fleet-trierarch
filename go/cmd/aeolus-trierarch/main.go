@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"os/exec"
@@ -21,6 +22,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -31,11 +33,13 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/copilot"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/logfile"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/modelproxy"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/peer"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
@@ -118,6 +122,10 @@ func main() {
 			return plugins{home: home, env: environment()}
 		},
 		Trierarch: runTrierarch,
+		Detect: func(at paths.Paths, harnesses []string, by detection.By) (detection.Detected, error) {
+			warn := func(line string) { fmt.Fprintln(os.Stderr, line) }
+			return detectionOf(at, environment(), home, warn).Detect(context.Background(), harnesses, by)
+		},
 	}
 	output, code := cli.Main(os.Args[1:], machine)
 	// While the trierarch is down a session's call gets no answer, as when the fleet is down (decision 0026).
@@ -350,9 +358,22 @@ func environment() map[string]string {
 // newPass is one pass of the run loop with this machine's adapters: the fleet over /api/v1 with the trierarch's crew token, the harnesses the configuration offers, worktrees of the configured repositories, and the state file.
 func newPass(at paths.Paths, kept crew.File, configuration config.Configuration, home string, program string) (func() error, error) {
 	env := environment()
+	client := fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken, Model: "@aeolus-fleet/trierarch@" + cli.Version}
+	// Detected again only for a harness whose version changed since (#365); the operator's own options win.
+	detect := detectionOf(at, env, home, logLine)
+	detected, err := detect.Detect(context.Background(), slices.Sorted(maps.Keys(configuration.Harnesses)), detection.ByStart)
+	if err != nil {
+		return nil, err
+	}
+	tellDetectionProblems(client, detected)
+	for _, harness := range detection.ModelOptionsIgnored(configuration) {
+		logLine(harness + ": the configuration's model option is ignored: model ids come from detection only (#382); remove it")
+	}
+	offers := &offers{configured: configuration, detected: detected}
+	configuration = detection.Offered(configuration, detected)
 	running := sessionRuntime(at, program)
 	proxy := modelProxy(at, program)
-	harnesses, offered, err := harnessesOf(configuration, at, env, home, running, proxy)
+	harnesses, offered, err := harnessesOf(configuration, at, env, home, running, proxy, offers)
 	if err != nil {
 		return nil, err
 	}
@@ -372,7 +393,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	}
 	opened = shipSockets(at, kept.FleetURL, running)
 	pass := runpass.Pass{
-		Fleet:        fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken, Model: "@aeolus-fleet/trierarch@" + cli.Version},
+		Fleet:        client,
 		Sessions:     running,
 		Harnesses:    harnesses,
 		Workspace:    places,
@@ -394,26 +415,117 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		// The model proxy runs while any harness holds an API key (headless H16); a pass starts it again when it is gone.
 		Proxy: proxy,
 		Keys:  keys.Files{Folder: at.Keys},
-		// A harness's version, as its program says it, for the notice of a refused model.
-		VersionOf: harnessVersion,
+		// A harness's version as detection found it, for the notice of a refused model.
+		VersionOf: offers.version,
+		// What the machine offers changes while it runs, as sessions refuse models (#382): each pass reads it afresh.
+		Offers: offers.options,
+		RefuseModel: func(harness string, model string) error {
+			return offers.refuse(detect, harness, model)
+		},
 	}
 	return pass.Run, nil
 }
 
-// harnessPrograms are the programs the harnesses are run as.
-var harnessPrograms = map[string]string{"claude-code": "claude", "codex": "codex", "copilot": "copilot"}
+// detectionOf is detection of this machine's harnesses, kept in detected.json, telling the operator what it kept as before with warn.
+func detectionOf(at paths.Paths, env map[string]string, home string, warn func(line string)) detection.Detection {
+	// Codex's and Copilot's own files, in CODEX_HOME and COPILOT_HOME when set (#521).
+	codexHome, copilotHome := env["CODEX_HOME"], env["COPILOT_HOME"]
+	if codexHome == "" {
+		codexHome = filepath.Join(home, ".codex")
+	}
+	if copilotHome == "" {
+		copilotHome = filepath.Join(home, ".copilot")
+	}
+	return detection.Detection{
+		Detectors: map[string]detection.Detector{
+			"claude-code": claudecode.Detector{Run: detection.Run, NeutralFolder: detection.NeutralFolder},
+			"codex":       codex.Detector{Run: detection.Run, ReadConfig: textOf(filepath.Join(codexHome, "config.toml")), NeutralFolder: detection.NeutralFolder},
+			"copilot":     copilot.Detector{Run: detection.Run, ReadSettings: textOf(filepath.Join(copilotHome, "settings.json"))},
+		},
+		Store: detection.File{Path: at.Detected},
+		Now:   time.Now,
+		Warn:  warn,
+	}
+}
 
-// harnessVersion is the version the harness's program says on the first line of its --version; empty when it says none.
-func harnessVersion(harness string) string {
-	version, _ := copilot.VersionOf(harnessPrograms[harness])
-	return version
+// textOf reads the file each time it is asked; empty when there is none.
+func textOf(path string) func() string {
+	return func() string {
+		text, _ := os.ReadFile(path)
+		return string(text)
+	}
+}
+
+// tellDetectionProblems tells argo what detection could not find, once per harness version: the idempotency key names both, so the fleet keeps it once however often the trierarch starts.
+func tellDetectionProblems(client fleet.Client, detected detection.Detected) {
+	for _, harness := range slices.Sorted(maps.Keys(detected)) {
+		found := detected[harness]
+		if found.Problem == "" {
+			continue
+		}
+		if err := client.ReportToArgo(notices.DetectionProblem(harness, found.Version, found.Problem), fmt.Sprintf("trierarch:detection:%s:%s", harness, found.Version)); err != nil {
+			logLine("Could not tell argo what detection found: " + err.Error())
+		}
+	}
+}
+
+// offers are what the configured harnesses offer as detected, changed while the trierarch runs as sessions refuse models (#382), and read by each pass.
+type offers struct {
+	configured config.Configuration
+	mu         sync.Mutex
+	detected   detection.Detected
+}
+
+func (o *offers) set(detected detection.Detected) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.detected = detected
+}
+
+// version is the harness's version as detection found it; empty when it found none.
+func (o *offers) version(harness string) string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.detected[harness].Version
+}
+
+// options are, by harness, each option it offers now and its value names in order.
+func (o *offers) options() map[string]map[string][]string {
+	o.mu.Lock()
+	offered := detection.Offered(o.configured, o.detected)
+	o.mu.Unlock()
+	options := map[string]map[string][]string{}
+	for harness, settings := range offered.Harnesses {
+		options[harness] = map[string][]string{}
+		for name, option := range settings.Options {
+			options[harness][name] = option.Names()
+		}
+	}
+	return options
+}
+
+// refuse keeps a model a session refused as refused, offered no more from the next pass, then detects its harness again in the background, keeping it refused: the loop never waits on a probe, and each probe ends within its time.
+func (o *offers) refuse(detect detection.Detection, harness string, model string) error {
+	detected, err := detection.Refuse(detect.Store, harness, model, time.Now())
+	if err != nil {
+		return err
+	}
+	o.set(detected)
+	go func() {
+		if _, err := detect.Detect(context.Background(), []string{harness}, detection.ByRefusal); err != nil {
+			logLine(fmt.Sprintf("%s could not be detected again after it refused %s: %v", harness, model, err))
+			return
+		}
+		o.set(detect.Store.Load())
+	}()
+	return nil
 }
 
 // adapters are the harnesses this trierarch has an adapter for, the default first.
 var adapters = []string{"claude-code", "codex", "copilot"}
 
 // harnessesOf are the adapters of the harnesses the configuration offers, each with the aeolus-fleet plugin its harness installed, and their names, the default first. Claude Code's and Codex's plugin is looked for at start, so a trierarch without it does not start; Copilot's at each crew, so the machine offers Copilot once it is installed. A configured harness this trierarch has no adapter for stops it at start, so no request for it is ever crewed.
-func harnessesOf(configuration config.Configuration, at paths.Paths, env map[string]string, home string, running sessions.Runtime, proxy modelproxy.Runtime) (map[string]runpass.Harness, []string, error) {
+func harnessesOf(configuration config.Configuration, at paths.Paths, env map[string]string, home string, running sessions.Runtime, proxy modelproxy.Runtime, offers *offers) (map[string]runpass.Harness, []string, error) {
 	for name := range configuration.Harnesses {
 		if !slices.Contains(adapters, name) {
 			return nil, nil, fmt.Errorf("this trierarch has no adapter for the harness %s: it offers %s", name, strings.Join(adapters, ", "))
@@ -449,7 +561,11 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 			}
 			harnesses[name] = codex.Harness{Plugin: found, Runtime: running, Settings: settings, Hooks: codex.AppServer{Program: "codex", Version: cli.Version}, Events: events, ProxyURL: proxy.URL}
 		case "copilot":
-			harnesses[name] = copilot.Harness{Plugin: plugin.FindCopilot(home, env), Runtime: running, Settings: settings, Events: events, Version: func() (string, bool) { return copilot.VersionOf("copilot") }, CopilotHome: env["COPILOT_HOME"]}
+			harnesses[name] = copilot.Harness{Plugin: plugin.FindCopilot(home, env), Runtime: running, Settings: settings, Events: events, Version: func() (string, bool) {
+				// As detection last found it: a Copilot not detected yet is not offered.
+				version := offers.version("copilot")
+				return version, version != ""
+			}, CopilotHome: env["COPILOT_HOME"]}
 		}
 		offered = append(offered, name)
 	}

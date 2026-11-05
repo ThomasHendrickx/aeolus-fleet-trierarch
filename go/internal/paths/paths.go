@@ -23,6 +23,8 @@ type Paths struct {
 	Keys string
 	// Proxy holds the model proxy's files: its pid, its port and the key states (headless H16).
 	Proxy string
+	// Detected is what detection found per harness (#365), apart from the configuration.
+	Detected string
 }
 
 // Of the user's home folder, with the configuration at config when it is not empty.
@@ -44,5 +46,6 @@ func Of(homeDirectory string, config string) Paths {
 		Sockets:      filepath.Join(home, "sockets"),
 		Keys:         filepath.Join(home, "keys"),
 		Proxy:        filepath.Join(home, "proxy"),
+		Detected:     filepath.Join(home, "detected.json"),
 	}
 }

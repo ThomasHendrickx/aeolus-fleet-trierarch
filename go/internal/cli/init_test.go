@@ -10,6 +10,7 @@ import (
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/service"
@@ -136,6 +137,9 @@ func newMachine(t *testing.T) *aMachine {
 		Register:              machine.fleet.register,
 		IsLeaseHeld:           machine.fleet.isLeaseHeld,
 		Sleep:                 func() {},
+		Detect: func([]string, detection.By) (detection.Detected, error) {
+			return detection.Detected{}, nil
+		},
 	}
 	return machine
 }

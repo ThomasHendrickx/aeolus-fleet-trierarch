@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"regexp"
 	"strings"
 
@@ -99,15 +98,5 @@ func LastSessionIn(events string) string {
 	return sessionID
 }
 
+// versionPattern is a version as Copilot says it, such as 1.0.105.
 var versionPattern = regexp.MustCompile(`\d+\.\d+\.\d+`)
-
-// VersionOf is the version the program says on the first line of `--version`, as "GitHub Copilot CLI 1.0.105."; false when it says none or does not run.
-func VersionOf(program string) (string, bool) {
-	said, err := exec.Command(program, "--version").Output()
-	if err != nil {
-		return "", false
-	}
-	first, _, _ := strings.Cut(string(said), "\n")
-	version := versionPattern.FindString(first)
-	return version, version != ""
-}
