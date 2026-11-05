@@ -354,6 +354,13 @@ func Reconcile(state State, context Context) (State, []Action) {
 			actions = append(actions, Action{Kind: Release, ShipID: shipID})
 			continue
 		}
+		// A harness that lost its aeolus-fleet plugin under a running session cannot crew its ship any more (#1212): the request is given back with why while its crew is not final, and the other harnesses go on.
+		if reason := launchMarkerRefusal(entry.Harness, context); reason != "" && !request.IsFinal && refused[shipID] != request.SettingsVersion {
+			given := entry
+			next.Entries[shipID] = entry
+			actions = append(actions, Action{Kind: GiveBack, ShipID: shipID, SettingsVersion: request.SettingsVersion, Reason: reason, Entry: &given})
+			continue
+		}
 		var taken step
 		if request.SettingsVersion == entry.SettingsVersion {
 			taken = stepOf(entry, context, canStart(), request.IsFinal)
