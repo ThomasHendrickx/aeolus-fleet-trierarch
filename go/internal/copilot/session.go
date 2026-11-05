@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/commandline"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 )
 
@@ -37,13 +38,32 @@ const (
 	errorPrefix = "Error: "
 )
 
-// CommandLine is `copilot`, the configured flags, JSON output, every tool allowed and no question tool, then the session to resume when there is one, and the prompt last as the value of --prompt, so it never reads as a flag.
-func CommandLine(flags []string, line string, sessionID string) []string {
-	command := append(append([]string{"copilot"}, flags...), jsonOutput, allowAllTools, noAskUser)
+// AdapterFlags are the flags the adapter adds itself, for config check.
+var AdapterFlags = []commandline.AdapterFlag{
+	{Flag: jsonOutput, When: "always"},
+	{Flag: allowAllTools, When: "always"},
+	{Flag: noAskUser, When: "always"},
+}
+
+// CommandParts are `copilot` in parts, the configured flags, JSON output, every tool allowed and no question tool, then the session to resume when there is one, and the prompt last as the value of --prompt, so it never reads as a flag.
+func CommandParts(flags []string, line string, sessionID string) []commandline.Part {
+	last := []string{}
 	if sessionID != "" {
-		command = append(command, resumeFlag+sessionID)
+		last = append(last, resumeFlag+sessionID)
 	}
-	return append(command, promptFlag+line)
+	return commandline.WithWords([]commandline.Part{
+		{Words: []string{"copilot"}},
+		{Words: flags, Source: commandline.Configuration},
+		{Words: []string{jsonOutput}, Source: commandline.Adapter},
+		{Words: []string{allowAllTools}, Source: commandline.Adapter},
+		{Words: []string{noAskUser}, Source: commandline.Adapter},
+		{Words: append(last, promptFlag+line)},
+	})
+}
+
+// CommandLine is the words of CommandParts.
+func CommandLine(flags []string, line string, sessionID string) []string {
+	return commandline.Words(CommandParts(flags, line, sessionID))
 }
 
 // event is the part of a line of Copilot's output, or of a stderr line the hold kept, that the trierarch reads.

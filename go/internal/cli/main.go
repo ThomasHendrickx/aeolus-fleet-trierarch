@@ -47,10 +47,12 @@ type Sessions interface {
 
 // Machine is what the commands reach on the machine they run on.
 type Machine struct {
-	Environ               []string
-	HomeDirectory         string
-	Platform              string
-	PID                   int
+	Environ       []string
+	HomeDirectory string
+	Platform      string
+	PID           int
+	// ManagedSettings is the folder Claude Code reads its managed settings from.
+	ManagedSettings       string
 	IsClaudeCodeInstalled func() bool
 	IsClaudeCodeSignedIn  func() bool
 	IsSsMissing           func() bool
@@ -268,15 +270,7 @@ func Main(args []string, machine Machine) (string, int) {
 			return logs(at, machine, command)
 		},
 		"config check": func() (answer, error) {
-			configuration, err := config.Load(at.Config)
-			if err != nil {
-				return answer{}, err
-			}
-			if ignored := detection.ModelOptionsIgnored(configuration); len(ignored) > 0 {
-				return answer{}, refused(nil, "The configuration at %s sets a model option for %s: model ids come from detection only (#382), so remove it; aeolus-trierarch detect lists them", at.Config, strings.Join(ignored, ", "))
-			}
-			harnesses := slices.Sorted(maps.Keys(configuration.Harnesses))
-			return answer{data: map[string]any{"path": at.Config, "harnesses": harnesses}, text: fmt.Sprintf("The configuration at %s is one this trierarch runs on, offering %s.", at.Config, strings.Join(harnesses, ", "))}, nil
+			return configCheck(at, machine)
 		},
 		"detect": func() (answer, error) {
 			configuration, err := config.Load(at.Config)

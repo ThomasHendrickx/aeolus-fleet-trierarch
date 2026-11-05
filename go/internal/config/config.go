@@ -64,10 +64,22 @@ type Harness struct {
 	Options map[string]Option `json:"options"`
 }
 
+// ModelOption is the option that names the model: its ids come from detection only (#382).
+const ModelOption = "model"
+
+// OptionNames are the harness's option names in the order they launch in: the model first, then the others by name.
+func (h Harness) OptionNames() []string {
+	names := slices.Sorted(maps.Keys(h.Options))
+	if at := slices.Index(names, ModelOption); at > 0 {
+		names = append([]string{ModelOption}, slices.Delete(names, at, at+1)...)
+	}
+	return names
+}
+
 // EffectiveFlags are the flags a launch gets: the harness's own, then each option's value as the settings picked it, or its default, by option name.
 func (h Harness) EffectiveFlags(picked map[string]string) []string {
 	flags := append([]string{}, h.Flags...)
-	for _, name := range slices.Sorted(maps.Keys(h.Options)) {
+	for _, name := range h.OptionNames() {
 		option := h.Options[name]
 		value, ok := picked[name]
 		if !ok {
