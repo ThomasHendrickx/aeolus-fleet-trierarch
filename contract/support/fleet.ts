@@ -33,6 +33,8 @@ export interface Fleet {
   sentByTrierarch(contentType: string): Promise<readonly ShipId[]>;
   /** The usage messages the machine's trierarch sent, oldest first: the ship each went to and its payload as JSON. */
   usageSentByTrierarch(): Promise<readonly { readonly to: ShipId; readonly message: unknown }[]>;
+  /** The activity the machine's trierarch last wrote for the ship's held lease, with the interval it stated; none before it wrote one. */
+  activityOf(shipId: ShipId): Promise<ShipActivity | undefined>;
   /** Pings the machine's trierarch ship from argo: the ping's message id. */
   pingTrierarch(): Promise<string>;
   /** What the machine's trierarch last reported as its own ship: its state, note and details; none before it reported. */
@@ -59,6 +61,13 @@ export interface TrierarchReport {
   readonly state: string;
   readonly note: string;
   readonly details: unknown;
+}
+
+/** A session's activity as core keeps it: its kind, the tool of a tool call, and the interval the trierarch stated with it. */
+export interface ShipActivity {
+  readonly kind: string;
+  readonly tool: string | null;
+  readonly intervalSeconds: number;
 }
 
 /** A message the trierarch sent: who it went to, and its text. */
@@ -112,6 +121,10 @@ export async function aFleet(): Promise<Fleet> {
     usageSentByTrierarch: async () => {
       const messages = await database.message.findMany({ where: { senderShipId: trierarchShip.shipId, contentType: 'application/vnd.aeolus.trierarch.usage+json' }, orderBy: { createdAt: 'asc' }, select: { selectorShipId: true, payload: true } });
       return messages.flatMap(({ selectorShipId, payload }) => (selectorShipId === null ? [] : [{ to: idSchema('ship').parse(selectorShipId), message: z.unknown().parse(JSON.parse(payload ?? 'null')) }]));
+    },
+    activityOf: async (shipId) => {
+      const lease = await database.lease.findFirst({ where: { shipId, endedAt: null }, select: { activityKind: true, activityTool: true, activityIntervalSeconds: true } });
+      return lease?.activityKind == null || lease.activityIntervalSeconds === null ? undefined : { kind: lease.activityKind, tool: lease.activityTool, intervalSeconds: lease.activityIntervalSeconds };
     },
     pingTrierarch: async () => unwrap(await useCases.pingShip(argo, { shipId: trierarchShip.shipId })).messageId,
     reportOfTrierarch: async () => {

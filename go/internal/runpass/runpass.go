@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/activity"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
@@ -33,6 +34,8 @@ type Fleet interface {
 	WriteStatus(shipID string, status string, attempt int, startedAt string) error
 	// GiveBack gives a request back; the fleet's refusal is answered, not failed.
 	GiveBack(shipID string, settingsVersion int, reason string) (*fleet.Refusal, error)
+	// ReportActivity writes the sessions' activities with the interval stated (monitoring W3b).
+	ReportActivity(intervalSeconds int, activities []fleet.ShipActivity) error
 	// Name is the trierarch's own ship's name.
 	Name() (string, error)
 	ReportFor(crewToken string, state string, note string) error
@@ -73,6 +76,8 @@ type Harness interface {
 	HandOver(entry reconciler.Entry) (bool, error)
 	// ForceOver hands a forced message over, its busy turn stopped first (decision 0040); false when nothing is handed.
 	ForceOver(entry reconciler.Entry, isTurnBusy bool) (bool, error)
+	// Activity is what the entry's session did last, from its events; none while they show none.
+	Activity(entry reconciler.Entry) (activity.Activity, bool)
 	// Problem is why no session of it can start on this machine now, nil when one can (#827).
 	Problem() error
 }
@@ -226,7 +231,41 @@ func (p Pass) Run() error {
 			p.Log(fmt.Sprintf("%s of %s failed: %v", action.Kind, action.ShipID, err))
 		}
 	}
+	p.writeActivities(next)
 	return nil
+}
+
+// activityIntervalSeconds is the interval the trierarch states with the activity it writes each pass: the fleet reads it as unknown past twice this, a pass being 5 seconds and a slow one a few more.
+const activityIntervalSeconds = 30
+
+// writeActivities writes the activity of every running session, each pass (monitoring W3b): a trierarch that is down then reads as unknown, not as stopped work. A failure is logged and never fails the pass.
+func (p Pass) writeActivities(state reconciler.State) {
+	running, err := p.Sessions.List()
+	if err != nil {
+		p.Log(fmt.Sprintf("The activity of the sessions was not written: %v; the next pass tries again", err))
+		return
+	}
+	var activities []fleet.ShipActivity
+	for _, shipID := range sortedIDs(state.Entries) {
+		entry := state.Entries[shipID]
+		harness, ok := p.Harnesses[entry.Harness]
+		if !ok || entry.State != "running" || entry.Folder == "" {
+			continue
+		}
+		at := slices.IndexFunc(running, func(each sessions.Observed) bool { return each.ShipID == shipID })
+		if at < 0 || running[at].Status != reconciler.SessionRunning {
+			continue
+		}
+		if shown, ok := harness.Activity(entry); ok {
+			activities = append(activities, fleet.ShipActivity{ShipID: shipID, Activity: shown})
+		}
+	}
+	if len(activities) == 0 {
+		return
+	}
+	if err := p.Fleet.ReportActivity(activityIntervalSeconds, activities); err != nil {
+		p.Log(fmt.Sprintf("The activity of the sessions was not written: %v; the next pass tries again", err))
+	}
 }
 
 // crewFailed counts a failed crew against its settings version, from the state the crew saved before it failed: the last of the budget gives the request back with the last failure as the reason (#827). What fails here is logged and left to the next pass.

@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/activity"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/receiving"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
@@ -294,6 +295,34 @@ func (c Client) send(selector map[string]string, text string, idempotencyKey str
 func (c Client) AskForTrustedRepositories(pluginShipID string) error {
 	body := map[string]any{"selector": map[string]string{"kind": "ship", "shipId": pluginShipID}, "payload": "{}", "contentType": trusted.RequestContentType, "model": c.Model, "idempotencyKey": newKey()}
 	return call(c.URL, request{path: "/ship/send", crewToken: c.CrewToken, body: body}, &map[string]any{})
+}
+
+// activitiesPerCall is the most activities the fleet takes in one reportActivity call.
+const activitiesPerCall = 100
+
+// ShipActivity is what a ship's session is doing now.
+type ShipActivity struct {
+	ShipID   string
+	Activity activity.Activity
+}
+
+// ReportActivity writes the activities of the sessions the trierarch runs, in calls of at most 100, each with the interval the trierarch states: the fleet reads a write older than twice it as unknown (monitoring W3b).
+func (c Client) ReportActivity(intervalSeconds int, activities []ShipActivity) error {
+	for from := 0; from < len(activities); from += activitiesPerCall {
+		chunk := []map[string]string{}
+		for _, each := range activities[from:min(from+activitiesPerCall, len(activities))] {
+			written := map[string]string{"shipId": each.ShipID, "at": each.Activity.At.UTC().Format("2006-01-02T15:04:05.000Z"), "kind": each.Activity.Kind}
+			if each.Activity.Tool != "" {
+				written["tool"] = each.Activity.Tool
+			}
+			chunk = append(chunk, written)
+		}
+		body := map[string]any{"intervalSeconds": intervalSeconds, "activities": chunk}
+		if err := call(c.URL, request{path: "/fleet/reportActivity", crewToken: c.CrewToken, body: body}, &map[string]any{}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // usageContentType is the usage message's content type, its schema common's trierarchUsageMessageSchema.
