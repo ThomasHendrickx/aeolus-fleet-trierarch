@@ -145,6 +145,8 @@ type Pass struct {
 	Trusted func() map[string]reconciler.Trust
 	// RefuseModel keeps a model a session refused as refused for its harness's detected version.
 	RefuseModel func(harness string, model string) error
+	// SendReleasedUsage sends a released ship's last usage before its folder goes (the usage design, U9); it fails while the fleet does not take it, so the folder stays. None sends nothing.
+	SendReleasedUsage func(entry reconciler.Entry) error
 	// Load reads the machine's load, at most once a minute; none reads nothing (#400).
 	Load *machineload.Reader
 }
@@ -688,8 +690,14 @@ func (p Pass) deleteIdentity(entry reconciler.Entry) error {
 	return nil
 }
 
-// endWorkspace removes the entry's identity, and a worktree it made, whatever that holds, logged first, as a release does (#450). A configured folder is never removed.
+// endWorkspace sends a released entry's last usage, removes its identity, and a worktree it made, whatever that holds, logged first, as a release does (#450). A configured folder is never removed.
 func (p Pass) endWorkspace(entry reconciler.Entry, told func(notices.Ship, string, []string) string) error {
+	// Its usage goes first: what it used since the last send would be lost with the folder.
+	if entry.Folder != "" && p.SendReleasedUsage != nil {
+		if err := p.SendReleasedUsage(entry); err != nil {
+			return err
+		}
+	}
 	if err := p.deleteIdentity(entry); err != nil {
 		return err
 	}

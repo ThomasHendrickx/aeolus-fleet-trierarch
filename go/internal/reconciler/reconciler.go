@@ -79,6 +79,8 @@ type Entry struct {
 	Login string `json:"login,omitempty"`
 	// EarlierLogins are its earlier sessions' logins, oldest first, each kept only when a start changed it.
 	EarlierLogins []EarlierLogin `json:"earlierLogins,omitempty"`
+	// SentUsage is what it last sent the trierarch plugin's ship of each UTC hour of its folder's usage, by the folder's made time and the hour: each hour's ships as sent, so an hour is sent again only once they change.
+	SentUsage map[string]string `json:"sentUsage,omitempty"`
 	// IsIdentityGone is set once argo was told its folder holds no identity (#659, #664), until the identity is back.
 	IsIdentityGone bool `json:"isIdentityGone,omitempty"`
 	// IsReleasedElsewhere is set as it goes back to crewing after a release elsewhere (row 11): its worktree goes before it is crewed again (#475).

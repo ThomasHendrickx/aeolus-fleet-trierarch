@@ -296,6 +296,15 @@ func (c Client) AskForTrustedRepositories(pluginShipID string) error {
 	return call(c.URL, request{path: "/ship/send", crewToken: c.CrewToken, body: body}, &map[string]any{})
 }
 
+// usageContentType is the usage message's content type, its schema common's trierarchUsageMessageSchema.
+const usageContentType = "application/vnd.aeolus.trierarch.usage+json"
+
+// SendUsage sends the trierarch plugin's ship a usage message as the trierarch's own ship; the fleet's refusal, such as its daily message limit, is an error, and the key makes a retry safe.
+func (c Client) SendUsage(pluginShipID string, payload string, idempotencyKey string) error {
+	body := map[string]any{"selector": map[string]string{"kind": "ship", "shipId": pluginShipID}, "payload": payload, "contentType": usageContentType, "model": c.Model, "idempotencyKey": idempotencyKey}
+	return call(c.URL, request{path: "/ship/send", crewToken: c.CrewToken, body: body}, &map[string]any{})
+}
+
 // ReportToArgo tells argo; the idempotency key makes a retry safe, so a notice told twice reaches argo once.
 func (c Client) ReportToArgo(text string, idempotencyKey string) error {
 	return c.send(map[string]string{"kind": "ship", "name": "argo"}, text, idempotencyKey)

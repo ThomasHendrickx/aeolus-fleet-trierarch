@@ -479,12 +479,13 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	}}
 	opened = shipSockets(at, kept.FleetURL, running)
 	load := &machineload.Reader{Source: machineload.System{WorktreeRoot: root}, Now: time.Now, Log: logLine}
+	saved := state.File{Path: at.State}
 	pass := runpass.Pass{
 		Fleet:        client,
 		Sessions:     running,
 		Harnesses:    harnesses,
 		Workspace:    places,
-		Store:        state.File{Path: at.State},
+		Store:        saved,
 		Log:          logLine,
 		Now:          time.Now,
 		NewLaunchID:  newLaunchID,
@@ -531,6 +532,11 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		}
 		return trusted
 	}
+
+	read := usageOf(configured, env, home, pass.Store)
+	// The usage goes to the trierarch plugin's ship once an hour, and a released ship's last usage before its folder goes.
+	sender := &usage.Sender{Harnesses: read.Harnesses, Reader: read, MadeAt: usage.FolderMadeAt, Store: saved, Fleet: client, Prices: read.Prices, Now: time.Now, Log: logLine, TrierarchShipID: kept.ShipID, PluginShipID: kept.PluginShipID}
+	pass.SendReleasedUsage = sender.SendReleased
 	reporter := &selfreport.Reporter{
 		Fleet:    client,
 		Store:    pass.Store,
@@ -538,7 +544,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		// The pass reads the load first; the report takes the one it read.
 		Load: load,
 		// The harnesses' usage, each part read on its own interval (#353).
-		Usage: usageOf(configured, env, home, pass.Store),
+		Usage: read,
 		Input: func() selfreport.Input {
 			offered, detected := offers.current()
 			offered = withTrusted(offered)
@@ -553,7 +559,10 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		if err := current.Run(); err != nil {
 			return err
 		}
-		return reporter.Report(isKeyCutOff)
+		if err := reporter.Report(isKeyCutOff); err != nil {
+			return err
+		}
+		return sender.Send()
 	}, nil
 }
 

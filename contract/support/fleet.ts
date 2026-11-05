@@ -33,6 +33,8 @@ export interface Fleet {
   sendToTrierarchAs(sender: ShipId, message: { payload: string; contentType: string }): Promise<string>;
   /** The ships the machine's trierarch sent a message of the content type to, oldest first. */
   sentByTrierarch(contentType: string): Promise<readonly ShipId[]>;
+  /** The usage messages the machine's trierarch sent, oldest first: the ship each went to and its payload as JSON. */
+  usageSentByTrierarch(): Promise<readonly { readonly to: ShipId; readonly message: unknown }[]>;
   /** Pings the machine's trierarch ship from argo: the ping's message id. */
   pingTrierarch(): Promise<string>;
   /** What the machine's trierarch last reported as its own ship: its state, note and details; none before it reported. */
@@ -112,6 +114,10 @@ export async function aFleet(): Promise<Fleet> {
     sentByTrierarch: async (contentType) => {
       const messages = await database.message.findMany({ where: { senderShipId: trierarchShip.shipId, contentType }, orderBy: { createdAt: 'asc' }, select: { selectorShipId: true } });
       return messages.flatMap(({ selectorShipId }) => (selectorShipId === null ? [] : [idSchema('ship').parse(selectorShipId)]));
+    },
+    usageSentByTrierarch: async () => {
+      const messages = await database.message.findMany({ where: { senderShipId: trierarchShip.shipId, contentType: 'application/vnd.aeolus.trierarch.usage+json' }, orderBy: { createdAt: 'asc' }, select: { selectorShipId: true, payload: true } });
+      return messages.flatMap(({ selectorShipId, payload }) => (selectorShipId === null ? [] : [{ to: idSchema('ship').parse(selectorShipId), message: z.unknown().parse(JSON.parse(payload ?? 'null')) }]));
     },
     pingTrierarch: async () => unwrap(await useCases.pingShip(argo, { shipId: trierarchShip.shipId })).messageId,
     reportOfTrierarch: async () => {
