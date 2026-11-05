@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
@@ -280,6 +281,12 @@ func aRunPass(t *testing.T) *aPass {
 		Offered:      []string{"claude-code"},
 		Repositories: []string{"aeolus-fleet"},
 		RunningCap:   2,
+		Trusted: func() map[string]reconciler.Trust {
+			return map[string]reconciler.Trust{"claude-code": {Repositories: []string{"aeolus-fleet"}}}
+		},
+		Configuration: func() map[string]config.Harness {
+			return map[string]config.Harness{"claude-code": {Flags: []string{}, Options: map[string]config.Option{}}}
+		},
 		Offers: func() map[string]map[string][]string {
 			return map[string]map[string][]string{"claude-code": {"model": {"opus", "claude-sonnet-5", "claude-opus-4"}}}
 		},
@@ -1377,6 +1384,19 @@ func TestARequestPickingAModelItsHarnessOffersNoMoreIsGivenBack(t *testing.T) {
 
 	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 mac-mini: options.model: model must be one of opus") {
 		t.Fatalf("calls %q, want it given back", pass.fleet.calls)
+	}
+}
+
+func TestARequestInARepositoryTheHarnessDoesNotTrustIsGivenBack(t *testing.T) {
+	pass := aRunPass(t)
+	pass.pass.Trusted = func() map[string]reconciler.Trust { return map[string]reconciler.Trust{} }
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+
+	pass.run(t)
+
+	want := "giveBack " + scout + " 1 mac-mini: workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it"
+	if !slices.Contains(pass.fleet.calls, want) {
+		t.Fatalf("calls %q, want %q", pass.fleet.calls, want)
 	}
 }
 
