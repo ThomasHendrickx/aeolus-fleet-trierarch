@@ -36,6 +36,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/folderprocess"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/logfile"
@@ -494,6 +495,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Sessions:          running,
 		Harnesses:         harnesses,
 		Workspace:         places,
+		FolderProcesses:   folderprocess.Stopper{},
 		Checkouts:         checked,
 		Store:             saved,
 		Log:               logLine,
