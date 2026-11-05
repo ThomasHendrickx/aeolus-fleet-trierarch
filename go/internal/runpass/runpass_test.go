@@ -1731,3 +1731,99 @@ func TestAPassWithNoMachineReadsNoLoadAndTellsNothing(t *testing.T) {
 		t.Fatalf("told %+v", pass.fleet.told)
 	}
 }
+
+// aUsageSend writes down each released entry whose last usage was sent, with whether its folder and identity were still there; it fails while failWith is set.
+type aUsageSend struct {
+	pass     *aPass
+	sent     []string
+	wasThere []bool
+	failWith error
+}
+
+func (u *aUsageSend) send(entry reconciler.Entry) error {
+	if u.failWith != nil {
+		return u.failWith
+	}
+	u.sent = append(u.sent, entry.ShipID)
+	u.wasThere = append(u.wasThere, u.pass.workspace.made[entry.Folder] && u.pass.harness.HasIdentity(entry.Folder))
+	return nil
+}
+
+func (p *aPass) sendingReleasedUsage() *aUsageSend {
+	sending := &aUsageSend{pass: p}
+	p.pass.SendReleasedUsage = sending.send
+	return sending
+}
+
+func TestAReleaseSendsTheShipsLastUsageBeforeItsIdentityAndWorktreeGo(t *testing.T) {
+	pass := aRunPass(t)
+	sending := pass.sendingReleasedUsage()
+
+	pass.released(t)
+
+	if !slices.Equal(sending.sent, []string{scout}) || !slices.Equal(sending.wasThere, []bool{true}) || len(pass.workspace.removed) != 1 {
+		t.Fatalf("sent %q with folder and identity there %v, removed %q", sending.sent, sending.wasThere, pass.workspace.removed)
+	}
+}
+
+func TestAReleaseWhoseLastUsageTheFleetDoesNotTakeKeepsTheWorktreeAndTheRequestAndTriesAgainOnTheNextPass(t *testing.T) {
+	pass := aRunPass(t)
+	sending := pass.sendingReleasedUsage()
+	sending.failWith = errors.New("unreachable")
+
+	pass.released(t)
+
+	if len(pass.workspace.removed) != 0 || slices.Contains(pass.fleet.calls, "confirm "+scout) || !pass.harness.HasIdentity(scoutFolder) {
+		t.Fatalf("removed %q, calls %q, identities %+v", pass.workspace.removed, pass.fleet.calls, pass.harness.identities)
+	}
+	if _, ok := pass.store.state.Entries[scout]; !ok {
+		t.Fatalf("the entry went though its usage was not sent")
+	}
+	sending.failWith = nil
+	pass.run(t)
+
+	if !slices.Equal(sending.sent, []string{scout}) || len(pass.workspace.removed) != 1 || !slices.Contains(pass.fleet.calls, "confirm "+scout) {
+		t.Fatalf("sent %q, removed %q, calls %q", sending.sent, pass.workspace.removed, pass.fleet.calls)
+	}
+}
+
+func TestAReleaseOfAFolderCrewSendsTheShipsLastUsageToo(t *testing.T) {
+	pass := aRunPass(t)
+	sending := pass.sendingReleasedUsage()
+	pass.crewed(t)
+	entry := pass.store.state.Entries[scout]
+	entry.Workspace = reconciler.Workspace{Kind: "folder", Name: "notes"}
+	pass.store.state.Entries[scout] = entry
+	pass.fleet.requests = []reconciler.Request{aRequest("releasing")}
+
+	pass.run(t)
+
+	if !slices.Equal(sending.sent, []string{scout}) {
+		t.Fatalf("sent %q", sending.sent)
+	}
+}
+
+func TestAShipReleasedElsewhereSendsItsLastUsageBeforeItsWorktreeGoes(t *testing.T) {
+	pass := aRunPass(t)
+	sending := pass.sendingReleasedUsage()
+	pass.releasedElsewhere(t)
+
+	pass.run(t)
+
+	if !slices.Equal(sending.sent, []string{scout}) || !slices.Equal(sending.wasThere, []bool{true}) || !slices.Equal(pass.workspace.removed, []string{scoutFolder}) {
+		t.Fatalf("sent %q with folder and identity there %v, removed %q", sending.sent, sending.wasThere, pass.workspace.removed)
+	}
+}
+
+func TestAShipReleasedElsewhereWhoseLastUsageTheFleetDoesNotTakeKeepsItsWorktreeAndIsCrewedNowhere(t *testing.T) {
+	pass := aRunPass(t)
+	sending := pass.sendingReleasedUsage()
+	pass.releasedElsewhere(t)
+	sending.failWith = errors.New("unreachable")
+
+	pass.run(t)
+
+	if len(pass.workspace.removed) != 0 || len(pass.harness.launches) != 0 || !pass.store.state.Entries[scout].IsReleasedElsewhere {
+		t.Fatalf("removed %q, launches %+v, entry %+v", pass.workspace.removed, pass.harness.launches, pass.store.state.Entries[scout])
+	}
+}

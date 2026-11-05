@@ -191,3 +191,27 @@ func TestAFleetThatRefusesTheAskIsAnError(t *testing.T) {
 		t.Error("AskForTrustedRepositories = nil, want the refusal")
 	}
 }
+
+func TestSendsTheUsageToThePluginsShipAsItsOwnShipUnderTheKeyItIsGiven(t *testing.T) {
+	client, sent := aSendingFleet(t, func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"messageId":"msg_1"}`)) })
+
+	if err := client.SendUsage("shp_plugin", `{"hours":[]}`, "usage:shp_trierarch:2026-10-06T08:00:00.000Z"); err != nil {
+		t.Fatal(err)
+	}
+
+	got := *sent
+	if got["payload"] != `{"hours":[]}` || got["contentType"] != "application/vnd.aeolus.trierarch.usage+json" || got["model"] != "aeolus-trierarch@1.2.3" || got["idempotencyKey"] != "usage:shp_trierarch:2026-10-06T08:00:00.000Z" || mustJSON(got["selector"]) != mustJSON(map[string]any{"kind": "ship", "shipId": "shp_plugin"}) {
+		t.Errorf("sent %v", got)
+	}
+}
+
+func TestAFleetThatRefusesTheUsageIsAnError(t *testing.T) {
+	client, _ := aSendingFleet(t, func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"code":"RATE_LIMITED","message":"the daily message limit"}`))
+	})
+
+	if err := client.SendUsage("shp_plugin", "{}", "usage:key"); err == nil {
+		t.Error("SendUsage = nil, want the refusal")
+	}
+}
