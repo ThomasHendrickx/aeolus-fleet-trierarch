@@ -119,7 +119,11 @@ func (s Setup) TrustedFolders() map[string]bool {
 		return trusted
 	}
 	for folder, project := range objectIn(claude, "projects") {
-		if accepted, _ := project.(map[string]any)["hasTrustDialogAccepted"].(bool); accepted {
+		entry, isObject := project.(map[string]any)
+		if !isObject {
+			continue
+		}
+		if accepted, _ := entry["hasTrustDialogAccepted"].(bool); accepted {
 			trusted[folder] = true
 		}
 	}
