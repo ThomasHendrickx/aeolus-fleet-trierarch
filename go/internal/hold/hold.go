@@ -759,10 +759,11 @@ func Guard(input io.Reader) int {
 	return 0
 }
 
-// TrierarchOnly is whether a caller may call a hold (H9): only the trierarch, never a session. A caller is refused when it runs under any hold in the sessions folder, whichever ship's, and when it does not resolve. The trierarch starts each hold outside its own process tree, so the trierarch is under none of them.
+// TrierarchOnly is whether a caller may call a hold (H9): only the trierarch, never a session. A caller is refused when it runs under any hold in the sessions folder, whichever ship's, when it is in the process session of one, as a process a session forked stays once it is reparented (#196), and when it does not resolve. The trierarch starts each hold outside its own process tree and in a process session of its own, so the trierarch is under none of them and in none of their sessions. A process that leaves its session on purpose (setsid) and is reparented is answered: no refusal list tells it from the trierarch, and a container is the isolation against it (#174).
 func TrierarchOnly(sessions string) func(pid int) bool {
 	return func(pid int) bool {
-		return pid > 0 && !peer.IsUnder(pid, Roots(sessions))
+		roots := Roots(sessions)
+		return pid > 0 && !peer.IsUnder(pid, roots) && !peer.IsInSessionOf(pid, roots)
 	}
 }
 

@@ -93,6 +93,14 @@ async function holdersOfInode(inode: string): Promise<number[]> {
 interface Peers {
   holdersOf(at: { fd: number; root: number | undefined }): Promise<number[]>;
   parentOf(pid: number): Promise<number | undefined>;
+  /** The process session (setsid) the process is in, on macOS its process group, which it keeps when it forks and when it is reparented; none when it does not resolve. */
+  sessionOf(pid: number): Promise<string | undefined>;
+}
+
+/** The field at that place of the process's stat line after its name, which may hold spaces and parentheses: the fields after its last `)`, from its state. */
+async function statFieldOf(pid: number, place: number): Promise<string | undefined> {
+  const stat = await readFile(`/proc/${String(pid)}/stat`, 'utf8').catch(() => '');
+  return stat === '' ? undefined : stat.slice(stat.lastIndexOf(')') + 1).trim().split(' ')[place];
 }
 
 function linuxPeers(run: typeof runCommand): Peers {
@@ -102,11 +110,13 @@ function linuxPeers(run: typeof runCommand): Peers {
       const peer = inode === undefined ? undefined : peerInodeIn(await listings({ root, run }), inode);
       return peer === undefined ? [] : holdersOfInode(peer);
     },
-    // From its stat line, whose name may hold spaces and parentheses: the fields after its last `)`.
     parentOf: async (pid) => {
-      const stat = await readFile(`/proc/${String(pid)}/stat`, 'utf8').catch(() => '');
-      const parent = Number(stat.slice(stat.lastIndexOf(')') + 1).trim().split(' ')[1]);
+      const parent = Number(await statFieldOf(pid, 1));
       return Number.isInteger(parent) ? parent : undefined;
+    },
+    sessionOf: async (pid) => {
+      const session = await statFieldOf(pid, 3);
+      return session === undefined || session === '0' ? undefined : session;
     },
   };
 }
@@ -161,7 +171,32 @@ function darwinPeers(run: typeof runCommand, ownPid: number): Peers {
       const parent = Number(shown.stdout.trim());
       return shown.status === 0 && Number.isInteger(parent) ? parent : undefined;
     },
+    // ps shows no session id on macOS, only its kernel address, 0 where macOS hides it, so the process group stands for it: a harness the hold started detached leads both, and a process it forked keeps both when it is reparented (#196).
+    sessionOf: async (pid) => {
+      const shown = await run('ps', { args: ['-o', 'pgid=', '-p', String(pid)] });
+      const group = Number(shown.stdout.trim());
+      return shown.status === 0 && Number.isInteger(group) && group > 0 ? String(group) : undefined;
+    },
   };
+}
+
+/**
+ * Whether the process is in the process session of one of the roots, or of a
+ * process under one: a hold starts its harness in a session of its own, led by
+ * the harness, so a session is named by its leader's pid. A session that does
+ * not resolve is none of theirs.
+ */
+async function isInSessionOf(pid: number, at: { roots: ReadonlySet<number>; peers: Peers }): Promise<boolean> {
+  const session = await at.peers.sessionOf(pid);
+  if (session === undefined) {
+    return false;
+  }
+  const leader = /^\d+$/.test(session) ? Number(session) : 0;
+  if (leader > 1 && (await isUnder(leader, at))) {
+    return true;
+  }
+  const sessions = await Promise.all([...at.roots].map((root) => at.peers.sessionOf(root)));
+  return sessions.includes(session);
 }
 
 async function isUnder(pid: number, at: { roots: ReadonlySet<number>; peers: Peers }): Promise<boolean> {
@@ -209,9 +244,14 @@ export function createCallerCheck(options: {
 /**
  * Who may call a hold's socket (headless H9): only the trierarch, never a
  * session. A caller is refused when any process holding the connection's other
- * end runs under a session's root (a hold), whichever ship's, and when it does
- * not resolve. The trierarch starts each hold outside its own process tree, so
- * the trierarch is under none of them.
+ * end runs under a session's root (a hold), whichever ship's, or is in the
+ * process session of one, as a process a session forked stays once it is
+ * reparented (#196), and when it does not resolve. The trierarch starts each
+ * hold outside its own process tree and in a process session of its own, so
+ * the trierarch is under none of them and in none of their sessions. A
+ * process that leaves its session or group on purpose (setsid, setpgid) and is
+ * reparented is answered: no refusal list tells it from the trierarch, and a
+ * container is the isolation against it (#174).
  */
 export function createTrierarchCallerCheck(options: {
   platform: string;
@@ -233,8 +273,8 @@ export function createTrierarchCallerCheck(options: {
     try {
       const roots = new Set(await options.sessionRoots());
       const holders = await peers.holdersOf({ fd, root: undefined });
-      const under = await Promise.all(holders.map((holder) => isUnder(holder, { roots, peers })));
-      return under.length > 0 && under.every((isUnderASession) => !isUnderASession);
+      const under = await Promise.all(holders.map(async (holder) => (await isUnder(holder, { roots, peers })) || isInSessionOf(holder, { roots, peers })));
+      return under.length > 0 && under.every((isOfASession) => !isOfASession);
     } catch {
       // A caller that does not resolve is refused, never allowed.
       return false;
