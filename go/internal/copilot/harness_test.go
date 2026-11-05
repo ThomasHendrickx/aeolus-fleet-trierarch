@@ -197,7 +197,7 @@ func TestCopilotIsNotOfferedInContainersWhereItIsNotProven(t *testing.T) {
 	harness, _ := aHarness(t)
 	harness.IsInContainer = true
 
-	if err := harness.Problem(); err == nil || err.Error() != "Copilot is not proven in a container: the container runtime runs claude-code only" {
+	if err := harness.Problem(); err == nil || err.Error() != "copilot is not proven in a container: the container runtime runs claude-code only" {
 		t.Fatalf("Problem = %v", err)
 	}
 }
