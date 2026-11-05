@@ -148,6 +148,28 @@ func (c Client) AssignedRequests() ([]reconciler.Request, error) {
 	return requests, err
 }
 
+// PendingClears are the pending clear requests to the trierarch's ship (decision 0032).
+func (c Client) PendingClears() ([]reconciler.ClearRequest, error) {
+	var answer []struct {
+		ShipID     string `json:"shipId"`
+		Repository string `json:"repository"`
+	}
+	if err := call(c.URL, request{path: "/fleet/clearRequests", crewToken: c.CrewToken}, &answer); err != nil {
+		return nil, err
+	}
+	clears := []reconciler.ClearRequest{}
+	for _, each := range answer {
+		clears = append(clears, reconciler.ClearRequest{ShipID: each.ShipID, Repository: each.Repository})
+	}
+	return clears, nil
+}
+
+// ConfirmCleared confirms a clear request to the trierarch's ship with how it came out: removed, or not-kept when it kept no such worktree.
+func (c Client) ConfirmCleared(shipID string, repository string, outcome string) error {
+	body := map[string]string{"shipId": shipID, "repository": repository, "outcome": outcome}
+	return call(c.URL, request{path: "/fleet/confirmWorktreeCleared", crewToken: c.CrewToken, body: body}, &map[string]any{})
+}
+
 // Ship is a ship as the fleet holds it: its name and its status, awaitingCrew, crewed or retired, or notFound.
 type Ship struct {
 	Name   string `json:"name"`

@@ -1003,3 +1003,79 @@ func TestTheWorktreeOfAnEntryForgottenIsAnOrphanAfterItsForget(t *testing.T) {
 	assertActions(t, actions, Action{Kind: Forget, ShipID: scout, Entry: &entry}, Action{Kind: ClearOrphan, Orphan: &worktree, IsNew: true})
 	assertOrphans(t, next.Orphans, orphan("scout"))
 }
+
+func kept(shipID string, name string) any {
+	return map[string]any{"shipId": shipID, "repository": "aeolus-fleet", "path": "/worktrees/aeolus-fleet/" + name}
+}
+
+func assertKept(t *testing.T, got []any, want ...any) {
+	t.Helper()
+	if want == nil {
+		want = []any{}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("kept:\n got  %+v\n want %+v", got, want)
+	}
+}
+
+func TestAClearRequestForAKeptWorktreeClearsIt(t *testing.T) {
+	context := aContext()
+	context.Observed.Worktrees = []Worktree{aWorktree("lookout")}
+	context.Clears = []ClearRequest{{ShipID: lookout, Repository: "aeolus-fleet"}}
+	state := Empty()
+	state.Kept = []any{kept(lookout, "lookout")}
+
+	next, actions := Reconcile(state, context)
+
+	held := KeptWorktree{ShipID: lookout, Repository: "aeolus-fleet", Path: "/worktrees/aeolus-fleet/lookout"}
+	assertActions(t, actions, Action{Kind: Clear, ShipID: lookout, Repository: "aeolus-fleet", Kept: &held})
+	assertKept(t, next.Kept, kept(lookout, "lookout"))
+}
+
+func TestAClearRequestForAWorktreeKeptOfNoneIsClearedWithNoneKept(t *testing.T) {
+	context := aContext()
+	context.Clears = []ClearRequest{{ShipID: lookout, Repository: "aeolus-fleet"}}
+
+	_, actions := Reconcile(Empty(), context)
+
+	assertActions(t, actions, Action{Kind: Clear, ShipID: lookout, Repository: "aeolus-fleet"})
+}
+
+func TestAClearRequestForAnotherRepositoryClearsNoKeptWorktree(t *testing.T) {
+	context := aContext()
+	context.Observed.Worktrees = []Worktree{aWorktree("lookout")}
+	context.Clears = []ClearRequest{{ShipID: lookout, Repository: "aeolus-fleet-core"}}
+	state := Empty()
+	state.Kept = []any{kept(lookout, "lookout")}
+
+	_, actions := Reconcile(state, context)
+
+	assertActions(t, actions, Action{Kind: Clear, ShipID: lookout, Repository: "aeolus-fleet-core"})
+}
+
+func TestAKeptWorktreeGoneFromDiskIsNoLongerKept(t *testing.T) {
+	state := Empty()
+	state.Kept = []any{kept(lookout, "lookout")}
+
+	next, actions := Reconcile(state, aContext())
+
+	assertActions(t, actions)
+	assertKept(t, next.Kept)
+}
+
+func TestAKeptWorktreeAnEntryWorksInAgainIsNoLongerKeptSoAClearRemovesNothing(t *testing.T) {
+	request := aRequest(scout)
+	request.Status = status("running")
+	context := aContext(request)
+	context.Observed.Sessions = running(scout)
+	context.Observed.Worktrees = []Worktree{aWorktree("scout")}
+	context.Clears = []ClearRequest{{ShipID: scout, Repository: "aeolus-fleet"}}
+	state := withEntries(anEntry(scout, "running"))
+	state.Kept = []any{kept(scout, "scout")}
+
+	next, actions := Reconcile(state, context)
+
+	assertActions(t, actions, Action{Kind: Clear, ShipID: scout, Repository: "aeolus-fleet"})
+	assertKept(t, next.Kept)
+	assertOrphans(t, next.Orphans)
+}

@@ -21,6 +21,8 @@ export interface Fleet {
   crewInWorktree(shipId: ShipId, at: { repository: string; harness: string; options?: Readonly<Record<string, string>> }): Promise<void>;
   /** Requests a crew for the ship in the configured folder, with the harness given, and assigns it to the machine's trierarch. */
   crewInFolder(shipId: ShipId, at: { folder: string; harness: string }): Promise<void>;
+  /** Requests the ship's crew again in a worktree of the repository, with the harness given: a new settings version, its assignment kept. */
+  requestCrewAgainInWorktree(shipId: ShipId, at: { repository: string; harness: string }): Promise<void>;
   /** Removes the ship's crew request: its lease ends. */
   removeCrewRequest(shipId: ShipId): Promise<void>;
   /** Ends the ship's lease under its session while its crew request stands, as the console's Re-crew does. */
@@ -55,6 +57,10 @@ export interface Fleet {
   isPongedOn(messageId: string): Promise<boolean>;
   /** Why the machine's trierarch gave the ship's crew request back; none while it gave none back. */
   givenBackReasonOf(shipId: ShipId): Promise<string | undefined>;
+  /** Asks the machine's trierarch, as argo, to clear the worktree it kept for the ship in the repository (decision 0032). */
+  requestWorktreeClear(shipId: ShipId, repository: string): Promise<void>;
+  /** How the machine's trierarch confirmed the clear of the ship's worktree in the repository: removed or not-kept; none before it confirmed. */
+  clearedOutcomeOf(shipId: ShipId, repository: string): Promise<string | undefined>;
   close(): Promise<void>;
 }
 
@@ -108,6 +114,9 @@ export async function aFleet(): Promise<Fleet> {
       unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness, workspace: { kind: 'folder', name: folder }, options: {} } }));
       unwrap(await useCases.assignCrew(argo, { shipId, trierarchShipId: trierarchShip.shipId }));
     },
+    requestCrewAgainInWorktree: async (shipId, { repository, harness }) => {
+      unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness, workspace: { kind: 'worktree', repository }, options: {} } }));
+    },
     removeCrewRequest: async (shipId) => {
       unwrap(await useCases.removeCrewRequest(argo, { shipId }));
     },
@@ -156,6 +165,17 @@ export async function aFleet(): Promise<Fleet> {
     deliveryStateOf: async (messageId) => (await database.delivery.findFirstOrThrow({ where: { messageId }, select: { state: true } })).state,
     isPongedOn: async (messageId) => (await database.event.findMany({ where: { messageId, type: 'DeliveryAcknowledged' }, select: { details: true } })).some(({ details }) => z.object({ answer: z.literal('pong') }).safeParse(details).success),
     givenBackReasonOf: async (shipId) => (await database.crewRequestGiveBack.findFirst({ where: { shipId, trierarchShipId: trierarchShip.shipId }, select: { reason: true } }))?.reason,
+    requestWorktreeClear: async (shipId, repository) => {
+      unwrap(await useCases.requestWorktreeClear(argo, { trierarchShipId: trierarchShip.shipId, shipId, repository }));
+    },
+    clearedOutcomeOf: async (shipId, repository) => {
+      const events = await database.event.findMany({ where: { type: 'WorktreeCleared' }, select: { details: true } });
+      const cleared = z.object({ worktreeShipId: z.string(), repository: z.string(), outcome: z.string() });
+      return events.flatMap(({ details }) => {
+        const parsed = cleared.safeParse(details);
+        return parsed.success && parsed.data.worktreeShipId === shipId && parsed.data.repository === repository ? [parsed.data.outcome] : [];
+      })[0];
+    },
     close: async () => {
       await server.close();
       await database.$disconnect();

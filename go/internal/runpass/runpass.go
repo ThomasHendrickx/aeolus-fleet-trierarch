@@ -28,6 +28,10 @@ import (
 // Fleet is the fleet as a pass calls it: the trierarch's crew:run calls, and a report with a session's crew token.
 type Fleet interface {
 	AssignedRequests() ([]reconciler.Request, error)
+	// PendingClears are the pending clear requests to the trierarch's ship (decision 0032).
+	PendingClears() ([]reconciler.ClearRequest, error)
+	// ConfirmCleared confirms a clear request with how it came out: removed or not-kept.
+	ConfirmCleared(shipID string, repository string, outcome string) error
 	Ship(shipID string) (fleet.Ship, error)
 	StartingSecret(shipID string) (string, error)
 	RegisterShip(shipID string, secret string, harness string) (string, error)
@@ -250,6 +254,11 @@ func (p Pass) Run() error {
 			if action.Kind == reconciler.ClearOrphan {
 				// An orphan is no ship's: the next orphan is cleared all the same.
 				p.Log(fmt.Sprintf("The pass failed at %s: %v; %s", action.Kind, err, nextAfterFailure))
+				continue
+			}
+			if action.Kind == reconciler.Clear {
+				// A clear holds back no other: the next clear request is carried out all the same.
+				p.Log(fmt.Sprintf("%s of %s failed: %v", action.Kind, action.ShipID, err))
 				continue
 			}
 			failed[action.ShipID] = failed[action.ShipID] || !isNotice(action.Kind)
@@ -502,6 +511,8 @@ func (p Pass) carryOut(state reconciler.State, action reconciler.Action) (reconc
 		return state, p.handOver(entry, action)
 	case reconciler.ClearOrphan:
 		return p.clearOrphan(state, *action.Orphan, action.IsNew)
+	case reconciler.Clear:
+		return p.clear(state, action)
 	}
 	return state, fmt.Errorf("no such action %s", action.Kind)
 }
@@ -879,6 +890,35 @@ func (p Pass) clearOrphan(state reconciler.State, orphan reconciler.Worktree, is
 	return state, nil
 }
 
+// clear carries out a clear request (decision 0032): the kept worktree it names is removed (only one under the root) and dropped from the state, saved, then the request is confirmed removed. With none kept, it is confirmed not-kept. A failed remove leaves both for the next pass; a lost confirmation is confirmed not-kept on the next one.
+func (p Pass) clear(state reconciler.State, action reconciler.Action) (reconciler.State, error) {
+	if action.Kept == nil {
+		if err := p.Fleet.ConfirmCleared(action.ShipID, action.Repository, "not-kept"); err != nil {
+			return state, err
+		}
+		p.Log(fmt.Sprintf("%s: cleared, no kept %s worktree of it here", action.ShipID, action.Repository))
+		return state, nil
+	}
+	if err := p.Workspace.RemoveWorktree(action.Kept.Path); err != nil {
+		return state, err
+	}
+	kept := []any{}
+	for _, each := range state.Kept {
+		if fields, ok := each.(map[string]any); !ok || fields["path"] != action.Kept.Path {
+			kept = append(kept, each)
+		}
+	}
+	state.Kept = kept
+	if err := p.Store.Save(state); err != nil {
+		return state, err
+	}
+	if err := p.Fleet.ConfirmCleared(action.ShipID, action.Repository, "removed"); err != nil {
+		return state, err
+	}
+	p.Log(fmt.Sprintf("%s: cleared, its kept worktree removed: %s", action.ShipID, action.Kept.Path))
+	return state, nil
+}
+
 // dropOrphan holds the orphan no more.
 func (p Pass) dropOrphan(state reconciler.State, orphan reconciler.Worktree) (reconciler.State, error) {
 	held := []any{}
@@ -1040,6 +1080,10 @@ func (p Pass) reconcile(state reconciler.State) (reconciler.State, []reconciler.
 	if err != nil {
 		return state, nil, err
 	}
+	clears, err := p.Fleet.PendingClears()
+	if err != nil {
+		return state, nil, err
+	}
 	running, err := p.Sessions.List()
 	if err != nil {
 		return state, nil, err
@@ -1053,7 +1097,7 @@ func (p Pass) reconcile(state reconciler.State) (reconciler.State, []reconciler.
 	}
 	now := p.Now()
 	marksLaunches, missingPlugins, notOffered := p.launchMarks()
-	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers(), Configuration: p.Configuration(), Trusted: p.Trusted(), ConfigurationFile: p.ConfigurationFile, MarksLaunches: marksLaunches, MissingPlugins: missingPlugins, NotOffered: notOffered})
+	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Clears: clears, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers(), Configuration: p.Configuration(), Trusted: p.Trusted(), ConfigurationFile: p.ConfigurationFile, MarksLaunches: marksLaunches, MissingPlugins: missingPlugins, NotOffered: notOffered})
 	next.PassFailure = nil
 	next.MissingPlugins, next.NotOffered = notOfferedState(missingPlugins, notOffered)
 	if err := p.Store.Save(next); err != nil {
