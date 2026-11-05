@@ -36,6 +36,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/folderprocess"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/logfile"
@@ -484,22 +485,23 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	load := &machineload.Reader{Source: machineload.System{WorktreeRoot: root}, Now: time.Now, Log: logLine}
 	saved := state.File{Path: at.State}
 	pass := runpass.Pass{
-		Fleet:        client,
-		Sessions:     running,
-		Harnesses:    harnesses,
-		Workspace:    places,
-		Checkouts:    checked,
-		Store:        saved,
-		Log:          logLine,
-		Now:          time.Now,
-		NewLaunchID:  newLaunchID,
-		FleetURL:     kept.FleetURL,
-		Sockets:      opened,
-		Offered:      offeredHarnesses,
-		Repositories: repositories,
-		Folders:      folders,
-		RunningCap:   configuration.Caps.Running,
-		Logins:       logins,
+		Fleet:           client,
+		Sessions:        running,
+		Harnesses:       harnesses,
+		Workspace:       places,
+		FolderProcesses: folderprocess.Stopper{},
+		Checkouts:       checked,
+		Store:           saved,
+		Log:             logLine,
+		Now:             time.Now,
+		NewLaunchID:     newLaunchID,
+		FleetURL:        kept.FleetURL,
+		Sockets:         opened,
+		Offered:         offeredHarnesses,
+		Repositories:    repositories,
+		Folders:         folders,
+		RunningCap:      configuration.Caps.Running,
+		Logins:          logins,
 		// The model proxy runs while any harness holds an API key (headless H16); a pass starts it again when it is gone.
 		Proxy: proxy,
 		Keys:  keys.Files{Folder: at.Keys},
