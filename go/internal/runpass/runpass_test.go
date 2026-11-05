@@ -2554,3 +2554,15 @@ func TestAPassWhoseClearRequestsCannotBeReadFailsActingOnNothing(t *testing.T) {
 		t.Fatalf("removed %q, pass failure %+v", pass.workspace.removed, pass.store.state.PassFailure)
 	}
 }
+
+func TestAClearThatFailsHoldsBackNoOtherClearOfItsShip(t *testing.T) {
+	pass := aRunPass(t)
+	pass.fleet.clears = []reconciler.ClearRequest{{ShipID: lookout, Repository: "aeolus-fleet-core"}, {ShipID: lookout, Repository: "aeolus-fleet"}}
+	pass.fleet.refuse = "confirmCleared " + lookout + " aeolus-fleet-core"
+
+	pass.run(t)
+
+	if !slices.Contains(pass.fleet.calls, "confirmCleared "+lookout+" aeolus-fleet not-kept") {
+		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+}
