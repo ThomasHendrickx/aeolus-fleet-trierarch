@@ -1,6 +1,7 @@
 package shipsocket
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"io"
@@ -351,5 +352,103 @@ func TestOpeningAnOpenSocketKeepsIt(t *testing.T) {
 
 	if first != second {
 		t.Fatalf("Open again = %s, want %s", second, first)
+	}
+}
+
+func TestAnAnswerThatEndsBeforeItsContentLengthGivesTheShipNoCompleteAnswer(t *testing.T) {
+	fleet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		connection, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			return
+		}
+		_, _ = connection.Write([]byte("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{\"id\":"))
+		_ = connection.Close()
+	}))
+	t.Cleanup(fleet.Close)
+	token := "aeolus_ct_v1_scout"
+	socket := opened(t, someSockets(t, fleet.URL, &token, false))
+
+	response, err := over(socket).Post("http://ship/api/v1/ship/send", "application/json", strings.NewReader(`{}`))
+	if err == nil {
+		_, err = io.ReadAll(response.Body)
+		_ = response.Body.Close()
+	}
+
+	if err == nil {
+		t.Fatal("the ship got a whole answer, want an error or a closed connection")
+	}
+}
+
+func TestACallBodyThatEndsBeforeItsContentLengthIsAnsweredNoSuccess(t *testing.T) {
+	fleet := aFleetAnswering(t, http.StatusOK, "application/json", `{}`)
+	token := "aeolus_ct_v1_scout"
+	socket := opened(t, someSockets(t, fleet.server.URL, &token, false))
+	connection, err := net.Dial("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	_ = connection.SetDeadline(time.Now().Add(5 * time.Second))
+
+	_, _ = connection.Write([]byte("POST /api/v1/ship/send HTTP/1.1\r\nHost: ship\r\nContent-Length: 50\r\n\r\n{\"payload\":"))
+	_ = connection.(*net.UnixConn).CloseWrite()
+	answered, _ := io.ReadAll(connection)
+
+	if strings.HasPrefix(string(answered), "HTTP/1.1 2") {
+		t.Fatalf("the ship got %q, want no success", answered)
+	}
+	if got := fleet.called(); len(got) != 0 {
+		t.Fatalf("the fleet was called with %+v, want none", got)
+	}
+}
+
+func TestAStreamedAnswerReachesTheShipAsItArrivesAndHasNoWholeCallTimeout(t *testing.T) {
+	release := make(chan struct{})
+	fleet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("event: wake\ndata: {}\n\n"))
+		w.(http.Flusher).Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+			return
+		}
+		_, _ = w.Write([]byte("event: end\ndata: {}\n\n"))
+	}))
+	t.Cleanup(fleet.Close)
+	token := "aeolus_ct_v1_scout"
+	sockets := someSockets(t, fleet.URL, &token, false)
+	if sockets.client.Timeout != 0 {
+		t.Fatalf("the fleet client waits %v for a whole call, want no timeout", sockets.client.Timeout)
+	}
+	socket := opened(t, sockets)
+	client := over(socket)
+	client.Timeout = 0
+
+	response, err := client.Get("http://ship/api/v1/ship/wakeups")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	reader := bufio.NewReader(response.Body)
+	first := make(chan string, 1)
+	go func() {
+		line, _ := reader.ReadString('\n')
+		first <- line
+	}()
+
+	select {
+	case line := <-first:
+		if line != "event: wake\n" {
+			t.Fatalf("first line = %q, want the wake event", line)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the first event did not arrive while the stream was open")
+	}
+	close(release)
+	rest, err := io.ReadAll(reader)
+	if err != nil || !strings.Contains(string(rest), "event: end") {
+		t.Fatalf("rest = %q, err = %v, want the end event after the stream stayed open", rest, err)
 	}
 }
