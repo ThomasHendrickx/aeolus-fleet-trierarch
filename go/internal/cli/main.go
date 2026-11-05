@@ -26,6 +26,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/receiving"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/servicelog"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/style"
 )
 
 // Version is the version this trierarch runs, set by the release as it builds the binary.
@@ -97,6 +98,10 @@ type Machine struct {
 	Detect func(at paths.Paths, harnesses []string, by detection.By) (detection.Detected, error)
 	// ServiceLog is the trierarch's log where its service writes it, as logs reads it.
 	ServiceLog func(at paths.Paths) servicelog.Log
+	// IsTerminal says whether stdout is a terminal, where status and list colour their words.
+	IsTerminal bool
+	// StartedAt is when the process started, ISO 8601; empty when it cannot be told.
+	StartedAt func(pid int) string
 	// Print writes a line to stdout at once, as logs --follow does for each line it follows.
 	Print func(line string)
 }
@@ -214,6 +219,11 @@ func Main(args []string, machine Machine) (string, int) {
 		configPath = variable(machine.Environ, "AEOLUS_TRIERARCH_CONFIG")
 	}
 	at := paths.Of(machine.HomeDirectory, configPath)
+	// Colour only where a person reads it: --json and a pipe get the plain words.
+	look := style.Plain
+	if !isJSON {
+		look = style.Of(machine.Environ, machine.IsTerminal)
+	}
 	commands := map[string]func() (answer, error){
 		"init": func() (answer, error) {
 			report, err := Init{
@@ -243,13 +253,13 @@ func Main(args []string, machine Machine) (string, int) {
 			return answer{data: report, text: strings.Join(report.Said, "\n")}, err
 		},
 		"status": func() (answer, error) {
-			return status(at, machine)
+			return status(at, machine, look)
 		},
 		"run": func() (answer, error) {
 			return run(at, machine)
 		},
 		"list": func() (answer, error) {
-			return list(at)
+			return list(at, look)
 		},
 		"start": func() (answer, error) {
 			return drive(at, machine, "started", machine.Service(at).Start)
@@ -388,41 +398,6 @@ func mustJSON(value any) string {
 		return fmt.Sprintf(`{"error":%q}`, err.Error())
 	}
 	return string(text)
-}
-
-// status is how the trierarch stands on this machine: the version it runs, the service and the trierarch's own lease.
-func status(at paths.Paths, machine Machine) (answer, error) {
-	kept, err := crew.Read(at.CrewToken)
-	if err != nil {
-		return answer{}, err
-	}
-	service, err := machine.Service(at).Status()
-	if err != nil {
-		return answer{}, err
-	}
-	lease := "valid"
-	if held, err := machine.IsLeaseHeld(kept.FleetURL, kept.CrewToken); err != nil {
-		lease = "unreachable"
-	} else if !held {
-		lease = "ended"
-	}
-	report := map[string]any{"version": Version, "service": service, "fleet": map[string]any{"url": kept.FleetURL, "shipId": kept.ShipID, "lease": lease}}
-	// Only the service's own process counts: a file left by an earlier process says nothing of it.
-	running, isRead := readRunning(at.Running)
-	text := []string{"Version: " + Version}
-	if service.IsRunning && isRead && running.PID == service.PID {
-		report["runningVersion"] = running.Version
-	}
-	switch {
-	case !service.IsInstalled:
-		text = append(text, "Service: not installed (aeolus-trierarch init)")
-	case !service.IsRunning:
-		text = append(text, "Service: installed, not running")
-	default:
-		text = append(text, fmt.Sprintf("Service: running, pid %d", service.PID))
-	}
-	text = append(text, fmt.Sprintf("Fleet: %s, the lease of %s is %s", kept.FleetURL, kept.ShipID, lease))
-	return answer{data: report, text: strings.Join(text, "\n")}, nil
 }
 
 // run is what the service runs: once the fleet's core is one it runs against, it says its pid and version in running.json, then runs a pass every interval until it is stopped. A failed pass is logged and the loop goes on.

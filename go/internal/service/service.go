@@ -44,6 +44,8 @@ type Status struct {
 	IsInstalled bool   `json:"isInstalled"`
 	IsRunning   bool   `json:"isRunning"`
 	PID         int    `json:"pid,omitempty"`
+	// Since is when the running process started, ISO 8601; none when it is not known.
+	Since string `json:"since,omitempty"`
 }
 
 // Exec runs a program and answers its output.

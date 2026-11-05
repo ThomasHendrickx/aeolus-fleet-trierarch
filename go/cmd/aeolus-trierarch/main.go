@@ -133,7 +133,9 @@ func main() {
 		ServiceLog: func(at paths.Paths) servicelog.Log {
 			return servicelog.Of(runtime.GOOS, filepath.Join(at.Logs, "trierarch.log"), servicelog.RunProgram, servicelog.StreamProgram, 500*time.Millisecond)
 		},
-		Print: func(line string) { fmt.Fprintln(stdout, line) },
+		Print:      func(line string) { fmt.Fprintln(stdout, line) },
+		IsTerminal: isTerminal(os.Stdout),
+		StartedAt:  startedAt,
 		Detect: func(at paths.Paths, harnesses []string, by detection.By) (detection.Detected, error) {
 			warn := func(line string) { fmt.Fprintln(os.Stderr, line) }
 			return detectionOf(at, environment(), home, warn).Detect(context.Background(), harnesses, by)
@@ -228,6 +230,8 @@ func (p plugins) Version(harness string) string {
 			return ""
 		}
 		return codex.PluginVersion(found.Root)
+	case "copilot":
+		return copilot.PluginVersion(plugin.FindCopilot(p.home, p.env).Root)
 	}
 	return ""
 }
@@ -612,4 +616,19 @@ func systemctl(name string, args ...string) (string, error) {
 		}
 	}
 	return service.Run(name, args...)
+}
+
+// isTerminal says whether the file is a terminal.
+func isTerminal(file *os.File) bool {
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+// startedAt is when the process started, as ps says how long it runs; empty when ps cannot tell.
+func startedAt(pid int) string {
+	output, err := exec.Command("ps", "-o", "etime=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return ""
+	}
+	return cli.StartedAtFrom(string(output), time.Now())
 }
