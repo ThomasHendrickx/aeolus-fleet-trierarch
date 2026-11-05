@@ -15,6 +15,7 @@ import (
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/activity"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
@@ -152,6 +153,10 @@ type Pass struct {
 	VersionOf func(harness string) string
 	// Offers are, by harness, each option it offers now and its value names in order, read each pass: a model a session refused is offered no more (#382).
 	Offers func() map[string]map[string][]string
+	// Configuration is each offered harness as configured and detected, read each pass: the flags a session launches with.
+	Configuration func() map[string]config.Harness
+	// Trusted is, by harness, what it trusts, read each pass from its own files (#381, #403).
+	Trusted func() map[string]reconciler.Trust
 	// RefuseModel keeps a model a session refused as refused for its harness's detected version.
 	RefuseModel func(harness string, model string) error
 	// SendReleasedUsage sends a released ship's last usage before its folder goes (the usage design, U9); it fails while the fleet does not take it, so the folder stays. None sends nothing.
@@ -934,7 +939,7 @@ func (p Pass) reconcile(state reconciler.State) (reconciler.State, []reconciler.
 		return state, nil, err
 	}
 	now := p.Now()
-	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers()})
+	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers(), Configuration: p.Configuration(), Trusted: p.Trusted()})
 	next.PassFailure = nil
 	if err := p.Store.Save(next); err != nil {
 		return state, nil, err

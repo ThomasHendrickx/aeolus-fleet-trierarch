@@ -11,6 +11,7 @@ import (
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/activity"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
@@ -336,6 +337,12 @@ func aRunPass(t *testing.T) *aPass {
 		Offered:      []string{"claude-code"},
 		Repositories: []string{"aeolus-fleet"},
 		RunningCap:   2,
+		Trusted: func() map[string]reconciler.Trust {
+			return map[string]reconciler.Trust{"claude-code": {Repositories: []string{"aeolus-fleet"}}}
+		},
+		Configuration: func() map[string]config.Harness {
+			return map[string]config.Harness{"claude-code": {Flags: []string{}, Options: map[string]config.Option{}}}
+		},
 		Offers: func() map[string]map[string][]string {
 			return map[string]map[string][]string{"claude-code": {"model": {"opus", "claude-sonnet-5", "claude-opus-4"}}}
 		},
@@ -615,7 +622,7 @@ func TestAGiveBackTheFleetRefusesIsRefusedInsteadAndArgoIsToldOnce(t *testing.T)
 
 	pass.run(t)
 
-	want := []told{{to: "argo", key: "trierarch:refused:" + scout + ":1", text: notices.SettingsRefused(notices.Ship{ID: scout, Name: "scout"}, 1, "harness: codex is not offered on this machine")}}
+	want := []told{{to: "argo", key: "trierarch:refused:" + scout + ":1", text: notices.SettingsRefused(notices.Ship{ID: scout, Name: "scout"}, 1, "harness: This trierarch offers no harness codex")}}
 	if !reflect.DeepEqual(pass.fleet.told, want) {
 		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
 	}
@@ -1456,6 +1463,19 @@ func TestARequestPickingAModelItsHarnessOffersNoMoreIsGivenBack(t *testing.T) {
 	}
 }
 
+func TestARequestInARepositoryTheHarnessDoesNotTrustIsGivenBack(t *testing.T) {
+	pass := aRunPass(t)
+	pass.pass.Trusted = func() map[string]reconciler.Trust { return map[string]reconciler.Trust{} }
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+
+	pass.run(t)
+
+	want := "giveBack " + scout + " 1 mac-mini: workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it"
+	if !slices.Contains(pass.fleet.calls, want) {
+		t.Fatalf("calls %q, want %q", pass.fleet.calls, want)
+	}
+}
+
 func TestAModelRefusedAtAVersionTheHarnessDoesNotSayTellsArgoNothing(t *testing.T) {
 	pass := aRunPass(t)
 
@@ -1985,6 +2005,9 @@ func TestACrewInAConfiguredFolderGetsNoCheckouts(t *testing.T) {
 	pass.fleet.requests = []reconciler.Request{request}
 	pass.pass.Workspace = &aFolders{aWorkspace: pass.workspace}
 	pass.pass.Folders = []string{"notes"}
+	pass.pass.Trusted = func() map[string]reconciler.Trust {
+		return map[string]reconciler.Trust{"claude-code": {Folders: []string{"notes"}}}
+	}
 
 	pass.run(t)
 
