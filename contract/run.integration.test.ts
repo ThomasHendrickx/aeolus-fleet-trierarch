@@ -1,15 +1,18 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 
 import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import { aCrewingMachine, sessionOf, isRunning, listedEntryOf, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, CLAUDE_CODE_VERSION, type Machine } from './support/machine.js';
 
 // run with the reconciler, as the service runs it: what is assigned is crewed, what ends is ended, a session that ended is started again (docs/trierarch.md, "Lifecycles").
+
+const jsonObjectSchema = z.record(z.string(), z.unknown());
 
 /** A pass runs every 5 seconds, and a session that ended first waits 5 seconds before it starts again. */
 const CREWED_WITHIN_MS = 30_000;
@@ -161,6 +164,20 @@ describe("the trierarch's report as its own ship", () => {
     expect(report?.details).toHaveProperty('caps.ships');
     expect(report?.details).toHaveProperty('caps.running');
     expect(report?.details).toHaveProperty('version');
+  });
+
+  it('offers a place only while every offered harness trusts it', async () => {
+    const notes = join(machine.home, 'notes');
+    mkdirSync(notes);
+    const added = await machine.trierarch(['add', 'folder', 'notes', notes]);
+    expect(added.status).toBe(0);
+    const claudeJson = join(machine.home, '.claude.json');
+    const claude: unknown = JSON.parse(readFileSync(claudeJson, 'utf8'));
+    writeFileSync(claudeJson, JSON.stringify({ ...jsonObjectSchema.parse(claude), projects: { [machine.repository]: { hasTrustDialogAccepted: true }, [notes]: { hasTrustDialogAccepted: false } } }));
+
+    await expect
+      .poll(async () => (await fleet.reportOfTrierarch())?.details, { timeout: ANSWERED_WITHIN_MS })
+      .toMatchObject({ workspaces: { repositories: [REPOSITORY], folders: [] } });
   });
 
   it('reports working once a session runs, with how many run of its cap', async () => {

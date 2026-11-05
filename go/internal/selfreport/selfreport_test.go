@@ -11,6 +11,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trust"
 )
 
 const scout = "shp_01m6jyczpnpp5c0vxh54c966cy"
@@ -25,7 +26,7 @@ func aConfiguration() config.Configuration {
 }
 
 func anInput() Input {
-	return Input{Configuration: aConfiguration(), Harnesses: []string{"claude-code"}, State: reconciler.Empty(), Version: "0.40.0", OS: "darwin", Arch: "arm64"}
+	return Input{Configuration: aConfiguration(), Harnesses: []string{"claude-code"}, Trusted: map[string]trust.Places{"claude-code": {Repositories: []string{"aeolus-fleet"}, Folders: []string{"notes"}}}, State: reconciler.Empty(), Version: "0.40.0", OS: "darwin", Arch: "arm64"}
 }
 
 // asJSON is the report as the fleet receives it.
@@ -157,6 +158,35 @@ func TestAFlagWithAValueIsRiskyByItsName(t *testing.T) {
 func TestNoPlaceIsOfferedWithoutAHarness(t *testing.T) {
 	in := anInput()
 	in.Harnesses = nil
+	assertJSON(t, map[string]any{"workspaces": detailsJSON(t, in)["workspaces"]}, `{"workspaces": {"repositories": [], "folders": []}}`)
+}
+
+func TestOnlyThePlacesEveryOfferedHarnessTrustsAreOffered(t *testing.T) {
+	in := anInput()
+	in.Configuration.Repositories["other"] = config.Repository{Path: "/repos/other"}
+	in.Configuration.Folders["scratch"] = config.Folder{Path: "/scratch"}
+	in.Configuration.Harnesses["codex"] = config.Harness{}
+	in.Harnesses = []string{"claude-code", "codex"}
+	in.Trusted = map[string]trust.Places{
+		"claude-code": {Repositories: []string{"aeolus-fleet", "other"}, Folders: []string{"notes", "scratch"}},
+		"codex":       {Repositories: []string{"aeolus-fleet"}, Folders: []string{"scratch"}},
+	}
+
+	assertJSON(t, map[string]any{"workspaces": detailsJSON(t, in)["workspaces"]}, `{"workspaces": {"repositories": ["aeolus-fleet"], "folders": ["scratch"]}}`)
+}
+
+func TestAHarnessNotOfferedDoesNotHoldBackAPlace(t *testing.T) {
+	in := anInput()
+	in.Configuration.Harnesses["codex"] = config.Harness{}
+	in.Trusted["codex"] = trust.Places{}
+
+	assertJSON(t, map[string]any{"workspaces": detailsJSON(t, in)["workspaces"]}, `{"workspaces": {"repositories": ["aeolus-fleet"], "folders": ["notes"]}}`)
+}
+
+func TestAHarnessWithNoTrustReadTrustsNothing(t *testing.T) {
+	in := anInput()
+	in.Trusted = nil
+
 	assertJSON(t, map[string]any{"workspaces": detailsJSON(t, in)["workspaces"]}, `{"workspaces": {"repositories": [], "folders": []}}`)
 }
 

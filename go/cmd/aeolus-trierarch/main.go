@@ -53,6 +53,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/shipsocket"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trust"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/workspace"
 )
 
@@ -434,10 +435,16 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		// What the machine offers changes while it runs, as sessions refuse models (#382): each pass reads it afresh.
 		Offers: offers.options,
 		RefuseModel: func(harness string, model string) error {
-			return offers.refuse(detect, harness, model)
+			return detect.Refuse(context.Background(), harness, model, time.Now(), offers.set)
 		},
 		// The machine's memory and disk, read each minute; argo is told once when one is low (#400).
 		Load: load,
+	}
+	// What each harness trusts is read from its own files at each report (#381).
+	trustReaders := map[string]func() map[string]bool{
+		"claude-code": claudecode.Of(home, env["CLAUDE_CONFIG_DIR"]).TrustedFolders,
+		"codex":       func() map[string]bool { return codex.TrustedFolders(codex.HomeOf(home, env["CODEX_HOME"])) },
+		"copilot":     trust.Everything(configuration),
 	}
 	reporter := &selfreport.Reporter{
 		Fleet:    client,
@@ -447,7 +454,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Load: load,
 		Input: func() selfreport.Input {
 			offered, detected := offers.current()
-			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH}
+			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Trusted: trust.Of(configuration, trustReaders), Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH}
 		},
 	}
 	// Each pass ends with the trierarch's own report: the first at start, then only when it changed.
@@ -542,23 +549,6 @@ func (o *offers) options() map[string]map[string][]string {
 		}
 	}
 	return options
-}
-
-// refuse keeps a model a session refused as refused, offered no more from the next pass, then detects its harness again in the background, keeping it refused: the loop never waits on a probe, and each probe ends within its time.
-func (o *offers) refuse(detect detection.Detection, harness string, model string) error {
-	detected, err := detection.Refuse(detect.Store, harness, model, time.Now())
-	if err != nil {
-		return err
-	}
-	o.set(detected)
-	go func() {
-		if _, err := detect.Detect(context.Background(), []string{harness}, detection.ByRefusal); err != nil {
-			logLine(fmt.Sprintf("%s could not be detected again after it refused %s: %v", harness, model, err))
-			return
-		}
-		o.set(detect.Store.Load())
-	}()
-	return nil
 }
 
 // adapters are the harnesses this trierarch has an adapter for, the default first.

@@ -311,3 +311,37 @@ func TestALineSentToACodexSessionWaitsForItsLastTurnToEndAsLongAsForAnInterrupte
 	}
 	eventually(t, "the line's turn", func() bool { return strings.Contains(read(filepath.Join(folder, "turns")), "-- hello") })
 }
+
+func TestAPidFileNamingAnUnrelatedLiveProcessSignalsNothingAndIsNoRoot(t *testing.T) {
+	runtime := aRuntime(t)
+	unrelated := exec.Command("sleep", "60")
+	if err := unrelated.Start(); err != nil {
+		t.Fatal(err)
+	}
+	ended := make(chan struct{})
+	go func() { _ = unrelated.Wait(); close(ended) }()
+	t.Cleanup(func() { _ = unrelated.Process.Kill(); <-ended })
+	files := hold.FilesOf(runtime.Sessions, scout)
+	if err := os.MkdirAll(files.Folder, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(files.PID, []byte(strconv.Itoa(unrelated.Process.Pid)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := runtime.Root(scout); got != 0 {
+		t.Fatalf("Root = %d, want 0 for a pid that is not the ship's hold", got)
+	}
+	if err := runtime.Stop(scout); err != nil {
+		t.Fatalf("Stop = %v", err)
+	}
+
+	select {
+	case <-ended:
+		t.Fatalf("the unrelated process (pid %d) was signalled", unrelated.Process.Pid)
+	case <-time.After(200 * time.Millisecond):
+	}
+	if _, err := os.Stat(files.Folder); err == nil {
+		t.Fatal("the session's folder stays, want it removed")
+	}
+}

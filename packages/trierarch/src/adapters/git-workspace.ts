@@ -21,12 +21,24 @@ import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clon
 
 const REMOTE = 'origin';
 
+/** What git said, on one line (a reason is one line) and without its hints, which are advice, not the cause. */
+function messageOf(stderr: string): string {
+  return stderr
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '' && !line.startsWith('hint:'))
+    .join('; ');
+}
+
 export function createGitWorkspace(options: { configuration: TrierarchConfiguration; root: string; clones?: TrustedClones }): WorkspacePort {
   const { configuration, root, clones } = options;
   const git = async (args: readonly string[]): Promise<string> => {
     const result = await runCommand('git', { args });
     if (result.status !== 0) {
-      throw new Error(`git ${args.join(' ')} failed: ${result.stderr.trim()}`);
+      // Git's message follows the subcommand at once: a reason is cut at a length, and the command's paths would use it up.
+      const [subcommand, ...rest] = args[0] === '-C' ? args.slice(2) : args;
+      const action = subcommand === 'worktree' ? `worktree ${rest[0] ?? ''}`.trim() : (subcommand ?? '');
+      throw new Error(`git ${action} failed: ${messageOf(result.stderr)}`);
     }
     return result.stdout;
   };
@@ -34,6 +46,15 @@ export function createGitWorkspace(options: { configuration: TrierarchConfigurat
   const resolve = async (repository: string, ref: string): Promise<string> => {
     const remote = await runCommand('git', { args: ['-C', repository, 'rev-parse', '--verify', '--quiet', `refs/remotes/${REMOTE}/${ref}`] });
     return remote.status === 0 ? `${REMOTE}/${ref}` : ref;
+  };
+  /** The branch origin has as its default: what its HEAD names, else the branch the clone's HEAD names (which may be unborn) when origin has it; none without one. */
+  const defaultRef = async (repository: string): Promise<string | undefined> => {
+    const head = await runCommand('git', { args: ['-C', repository, 'symbolic-ref', '--short', `refs/remotes/${REMOTE}/HEAD`] });
+    if (head.status === 0 && head.stdout.trim() !== '') {
+      return head.stdout.trim();
+    }
+    const branch = await runCommand('git', { args: ['-C', repository, 'symbolic-ref', '--short', 'HEAD'] });
+    return branch.status === 0 && (await resolve(repository, branch.stdout.trim())).startsWith(`${REMOTE}/`) ? `${REMOTE}/${branch.stdout.trim()}` : undefined;
   };
   const exists = async (path: string): Promise<boolean> => (await stat(path).catch(() => undefined)) !== undefined;
   const repositoryOf = async (folder: string): Promise<string | undefined> => {
@@ -64,7 +85,8 @@ export function createGitWorkspace(options: { configuration: TrierarchConfigurat
       if (!(await exists(folder))) {
         await mkdir(join(root, workspace.repository), { recursive: true });
         await runCommand('git', { args: ['-C', repository, 'fetch', '--quiet', REMOTE] });
-        await git(['-C', repository, 'worktree', 'add', '--detach', folder, ...(workspace.ref === undefined ? [] : [await resolve(repository, workspace.ref)])]);
+        const ref = workspace.ref === undefined ? await defaultRef(repository) : await resolve(repository, workspace.ref);
+        await git(['-C', repository, 'worktree', 'add', '--detach', folder, ...(ref === undefined ? [] : [ref])]);
       }
       return { folder };
     },

@@ -417,3 +417,44 @@ func TestTheReportGivesEachHarnesssVersionConfirmationAndOptionValues(t *testing
 		t.Errorf("ReportOf() = %+v, want %+v", got, want)
 	}
 }
+
+func TestARefusalGivesWhatIsOfferedAtOnceAndDetectsTheHarnessAgainKeepingTheIDRefused(t *testing.T) {
+	found := aHarness("", "claude-sonnet-5", "claude-opus-5")
+	detector := &aDetector{version: "2.1.306", found: &found}
+	store := &aStore{detected: Detected{"claude-code": aHarness("2.1.306", "claude-sonnet-5", "claude-opus-5")}}
+	detection, _ := aDetection(store, map[string]Detector{"claude-code": detector})
+	given := make(chan Detected, 2)
+
+	err := detection.Refuse(context.Background(), "claude-code", "claude-sonnet-5", now, func(detected Detected) { given <- detected })
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []string{"at once", "after the harness was detected again"} {
+		select {
+		case detected := <-given:
+			if got := detected["claude-code"].Refused; len(got) != 1 || got[0].ID != "claude-sonnet-5" {
+				t.Errorf("refused %s = %v, want claude-sonnet-5", step, got)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("nothing was given %s", step)
+		}
+	}
+	if detector.detections != 1 {
+		t.Errorf("detections = %d, want 1", detector.detections)
+	}
+}
+
+func TestARefusalOfAHarnessDetectionNeverFoundGivesNothingAndDetectsNothing(t *testing.T) {
+	found := aHarness("", "claude-opus-5")
+	detector := &aDetector{version: "2.1.306", found: &found}
+	store := &aStore{detected: Detected{}}
+	detection, _ := aDetection(store, map[string]Detector{"claude-code": detector})
+	var given []Detected
+
+	err := detection.Refuse(context.Background(), "claude-code", "claude-sonnet-5", now, func(detected Detected) { given = append(given, detected) })
+
+	if err != nil || len(given) != 0 || detector.detections != 0 || store.saves != 0 {
+		t.Errorf("Refuse() = %v, gave %v, detected %d times, saved %d times; want nothing at all", err, given, detector.detections, store.saves)
+	}
+}

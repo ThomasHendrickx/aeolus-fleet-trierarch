@@ -156,6 +156,26 @@ func Refuse(store Store, harness string, id string, at time.Time) (Detected, err
 	return detected, nil
 }
 
+// Refuse keeps a model a session refused as refused and gives what is detected now to given at once, so the next pass offers it no more. Then it detects the harness again in the background, keeping the id refused, and gives what that finds too: the loop never waits on a probe. A harness detection never found has no models to refuse, so nothing is given and nothing is detected.
+func (d Detection) Refuse(ctx context.Context, harness string, id string, at time.Time, given func(Detected)) error {
+	if _, ok := d.Store.Load()[harness]; !ok {
+		return nil
+	}
+	detected, err := Refuse(d.Store, harness, id, at)
+	if err != nil {
+		return err
+	}
+	given(detected)
+	go func() {
+		if _, err := d.Detect(ctx, []string{harness}, ByRefusal); err != nil {
+			d.Warn(fmt.Sprintf("%s could not be detected again after it refused %s: %v", harness, id, err))
+			return
+		}
+		given(d.Store.Load())
+	}()
+	return nil
+}
+
 // Timestamp is the time as today's trierarch writes one: UTC to the millisecond.
 func Timestamp(at time.Time) string {
 	return at.UTC().Format("2006-01-02T15:04:05.000Z")
