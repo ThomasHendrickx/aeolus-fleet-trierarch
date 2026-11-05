@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/container"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/prompt"
@@ -158,5 +160,67 @@ func TestConfigCheckShowsTheOverrideWithoutWhenWhereTheManagedSettingsMakePlanTh
 
 	if want := "--effort high (configuration) --permission-mode manual (adapter) --disallowedTools"; !strings.Contains(output, want) {
 		t.Errorf("config check said %q, want it to contain %q", output, want)
+	}
+}
+
+// aRuntime is the container runtime as the machine answers it: rootful when isRootful.
+type aRuntime struct{ isRootful bool }
+
+func (r aRuntime) Mode(string) container.Mode {
+	if r.isRootful {
+		return container.Rootful
+	}
+	return container.Rootless
+}
+func (aRuntime) Groups() ([]string, error) { return []string{"user"}, nil }
+func (aRuntime) IsModelTokenWritten() bool { return true }
+
+// inContainers sets the machine's configuration to run its sessions in containers of a runtime that runs rootful when isRootful.
+func inContainers(t *testing.T, machine *Machine, at paths.Paths, isRootful bool) {
+	t.Helper()
+	configuration := `{"caps":{"ships":4,"running":2},"repositories":{},"folders":{},"runtime":{"kind":"container","binary":"podman","memory":"4g","cpus":2},"harnesses":{"claude-code":{"flags":[],"options":{}}}}`
+	if err := os.WriteFile(at.Config, []byte(configuration), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	machine.ContainerHost = func(string) container.Host { return aRuntime{isRootful: isRootful} }
+}
+
+func TestConfigCheckRefusesARuntimeThatCannotHoldASessionToItsShip(t *testing.T) {
+	machine, at := aCheckedMachine(t)
+	inContainers(t, &machine, at, true)
+
+	output, code := Main([]string{"config", "check"}, machine)
+
+	want := "The configuration at " + at.Config + " cannot run its sessions in containers:\n  podman runs rootful: the container runtime runs rootless only, as the user that runs the trierarch"
+	if code == 0 || !strings.Contains(output, want) {
+		t.Fatalf("config check = %d %q, want a refusal %q", code, output, want)
+	}
+}
+
+func TestConfigCheckSaysHowTheSessionsRunInContainers(t *testing.T) {
+	machine, at := aCheckedMachine(t)
+	inContainers(t, &machine, at, false)
+
+	output, code := Main([]string{"config", "check"}, machine)
+
+	want := "Sessions run in containers of podman, each capped at 4g of memory and 2 cpus, with the model token in " + at.ModelToken + "."
+	if code != 0 || !strings.Contains(output, want) {
+		t.Fatalf("config check = %d %q, want %q", code, output, want)
+	}
+}
+
+func TestRunRefusesARuntimeThatCannotHoldASessionToItsShipBeforeAnyPass(t *testing.T) {
+	machine, at := aCheckedMachine(t)
+	inContainers(t, &machine, at, true)
+	passes := 0
+	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func(isKeyCutOff bool) error, error) {
+		passes++
+		return func(bool) error { return nil }, nil
+	}
+
+	output, code := Main([]string{"run"}, machine)
+
+	if code == 0 || passes != 0 || !strings.Contains(output, "cannot run its sessions in containers:\n  podman runs rootful") {
+		t.Fatalf("run = %d %q after %d passes, want a refusal before any", code, output, passes)
 	}
 }
