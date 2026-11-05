@@ -242,12 +242,41 @@ jobs:
             | node "$GITHUB_WORKSPACE/scripts/release-notes.ts" "$VERSION" > "$RUNNER_TEMP/release-notes.md"
           gh release create "v$VERSION" --verify-tag --title "v$VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" aeolus-trierarch-* SHA256SUMS
 
+      # The plugin marketplace installs from main, so main carries the plugin's
+      # latest released version, whichever branch released it (the package on
+      # main keeps 0.0.0). After the tag: if
+      # this step fails, the release is whole; set it by hand with
+      # npm run set-version -- --plugin-only <version>, commit and push.
+      - name: Set the aeolus-fleet plugin to ${{ inputs.version }} on main
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          for attempt in 1 2 3; do
+            git fetch --quiet origin main
+            git checkout --quiet --force -B plugin-version origin/main
+            npm run set-version -- --plugin-only "$VERSION"
+            if git diff --quiet; then
+              echo "main already carries the aeolus-fleet plugin at $VERSION"
+              exit 0
+            fi
+            git commit --quiet --all --message "chore(release): the aeolus-fleet plugin is $VERSION"
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "main moved meanwhile (attempt $attempt); trying again on top of it"
+          done
+          echo "::error::Could not push the aeolus-fleet plugin version to main"
+          exit 1
+
       # The tap (ThomasHendrickx/homebrew-aeolus) is kept current by the release:
       # its formula is homebrew/aeolus-trierarch.rb with this version's binaries
       # and their checksums, pushed with a deploy key that can write to the tap
       # only. A hotfix branch's release leaves the tap alone, so a newer formula
       # is never replaced by an older one. After the Release, whose binaries the
-      # formula names: if this step fails, the release is whole; write the
+      # formula names, and after the plugin version step, so a failure here
+      # leaves the release whole and main's plugin set; write the
       # formula by hand with node scripts/homebrew-formula.ts and push it.
       - name: Update the Homebrew tap to ${{ inputs.version }}
         env:
@@ -285,32 +314,4 @@ jobs:
             echo "The tap moved meanwhile (attempt $attempt); trying again on top of it"
           done
           echo "::error::Could not push the formula to the tap"
-          exit 1
-
-      # The plugin marketplace installs from main, so main carries the plugin's
-      # latest released version, whichever branch released it (the package on
-      # main keeps 0.0.0). After the tag: if
-      # this step fails, the release is whole; set it by hand with
-      # npm run set-version -- --plugin-only <version>, commit and push.
-      - name: Set the aeolus-fleet plugin to ${{ inputs.version }} on main
-        env:
-          VERSION: ${{ inputs.version }}
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          for attempt in 1 2 3; do
-            git fetch --quiet origin main
-            git checkout --quiet --force -B plugin-version origin/main
-            npm run set-version -- --plugin-only "$VERSION"
-            if git diff --quiet; then
-              echo "main already carries the aeolus-fleet plugin at $VERSION"
-              exit 0
-            fi
-            git commit --quiet --all --message "chore(release): the aeolus-fleet plugin is $VERSION"
-            if git push origin HEAD:main; then
-              exit 0
-            fi
-            echo "main moved meanwhile (attempt $attempt); trying again on top of it"
-          done
-          echo "::error::Could not push the aeolus-fleet plugin version to main"
           exit 1
