@@ -32,6 +32,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/cli"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/codex"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/container"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/copilot"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
@@ -116,6 +117,7 @@ func main() {
 		CoreVersionRefusal: func(fleetURL string) string {
 			return fleet.CoreVersionRefusal(fleetURL, cli.Version, fleet.MinimumCoreVersion)
 		},
+		ContainerHost: func(modelToken string) container.Host { return container.Machine{ModelToken: modelToken} },
 		NewPass: func(at paths.Paths, kept crew.File, configuration config.Configuration) (func(isKeyCutOff bool) error, error) {
 			return newPass(at, kept, configuration, home, program)
 		},

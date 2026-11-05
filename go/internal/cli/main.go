@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/container"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
@@ -72,6 +73,8 @@ type Machine struct {
 	Stop <-chan struct{}
 	// CoreVersionRefusal is why the trierarch may not run against the fleet's core, empty when it may.
 	CoreVersionRefusal func(fleetURL string) string
+	// ContainerHost is the machine as the container runtime's check reads it, with the model token file given (decision 0039).
+	ContainerHost func(modelToken string) container.Host
 	// NewPass is one pass of the run loop, with the crew file and configuration run read; the pass is told whether the fleet's key is cut off, which the trierarch's own report says.
 	NewPass   func(at paths.Paths, kept crew.File, configuration config.Configuration) (func(isKeyCutOff bool) error, error)
 	PassEvery time.Duration
@@ -412,6 +415,10 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 	if err != nil {
 		return answer{}, err
 	}
+	// A session in a container is held to its ship only on a runtime config check takes (decision 0039): none starts otherwise.
+	if err := checkRuntime(at, configuration, machine); err != nil {
+		return answer{}, err
+	}
 	if refusal := machine.CoreVersionRefusal(kept.FleetURL); refusal != "" {
 		return answer{}, errors.New(refusal)
 	}
@@ -454,6 +461,18 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 		case <-time.After(machine.PassEvery):
 		}
 	}
+}
+
+// checkRuntime refuses a configuration whose sessions cannot run on the machine, with every reason.
+func checkRuntime(at paths.Paths, configuration config.Configuration, machine Machine) error {
+	refusals, err := container.Check(configuration, machine.ContainerHost(at.ModelToken), at.ModelToken)
+	if err != nil {
+		return err
+	}
+	if len(refusals) > 0 {
+		return container.Refusal(at.Config, refusals)
+	}
+	return nil
 }
 
 // KeyWaitMax is the most run waits between receives while the fleet's key is cut off: core's key cache lasts 5 minutes (decision 0068).

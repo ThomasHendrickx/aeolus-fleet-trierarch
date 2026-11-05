@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/container"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
@@ -78,6 +79,7 @@ func aMain(t *testing.T) (Machine, *anInstalledService, *aFleet) {
 		Sleep:                 func() {},
 		Stop:                  make(chan struct{}),
 		CoreVersionRefusal:    func(string) string { return "" },
+		ContainerHost:         func(string) container.Host { return aRuntime{} },
 		NewPass: func(paths.Paths, crew.File, config.Configuration) (func(isKeyCutOff bool) error, error) {
 			return func(bool) error { return nil }, nil
 		},

@@ -143,7 +143,9 @@ func (h Harness) WriteIdentity(entry reconciler.Entry, identity plugin.Identity,
 
 func (h Harness) HasIdentity(entry reconciler.Entry) bool { return h.Plugin.HasIdentity(entry.Folder) }
 
-func (h Harness) DeleteIdentity(entry reconciler.Entry) error { return h.Plugin.DeleteIdentity(entry.Folder) }
+func (h Harness) DeleteIdentity(entry reconciler.Entry) error {
+	return h.Plugin.DeleteIdentity(entry.Folder)
+}
 
 func (h Harness) SessionDied(entry reconciler.Entry) error { return h.Plugin.SessionDied(entry.Folder) }
 

@@ -27,8 +27,8 @@ func withoutRemoteControl(flags []string) []string {
 	return kept
 }
 
-// carriesRemoteControl is whether the harness launches with Remote Control, in its flags or an option's values.
-func (h Harness) carriesRemoteControl() bool {
+// CarriesRemoteControl is whether the harness launches with Remote Control, in its flags or an option's values.
+func (h Harness) CarriesRemoteControl() bool {
 	if slices.ContainsFunc(h.Flags, isRemoteControl) {
 		return true
 	}
@@ -48,7 +48,7 @@ func (c Configuration) WithoutRemoteControl() (Configuration, []string) {
 	var named []string
 	harnesses := map[string]Harness{}
 	for name, harness := range c.Harnesses {
-		if !harness.carriesRemoteControl() {
+		if !harness.CarriesRemoteControl() {
 			harnesses[name] = harness
 			continue
 		}
