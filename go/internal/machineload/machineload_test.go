@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-const gib = 1 << 30
-
 func aLoad(memoryAvailable, memoryTotal, diskFree, diskTotal int64) Load {
 	return Load{Memory: Memory{TotalBytes: memoryTotal, AvailableBytes: memoryAvailable}, CPU: CPU{Cores: 4, LoadAverage: 1}, Disk: Disk{TotalBytes: diskTotal, FreeBytes: diskFree}}
 }

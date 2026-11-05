@@ -38,6 +38,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/logfile"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/modelproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
@@ -434,6 +435,8 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		RefuseModel: func(harness string, model string) error {
 			return offers.refuse(detect, harness, model)
 		},
+		// The machine's memory and disk, read each minute; argo is told once when one is low (#400).
+		Load: &machineload.Reader{Source: machineload.System{WorktreeRoot: root}, Now: time.Now, Log: logLine},
 	}
 	reporter := &selfreport.Reporter{
 		Fleet:    client,

@@ -3,6 +3,7 @@ package state
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
@@ -21,6 +22,7 @@ func TestNoStateFileIsTheEmptyState(t *testing.T) {
 func TestASavedStateIsLoadedAsItWasSaved(t *testing.T) {
 	file := File{Path: filepath.Join(t.TempDir(), "state.json")}
 	saved := reconciler.Empty()
+	saved.LowResources = []string{"memory", "disk"}
 	saved.Entries[scout] = reconciler.Entry{ShipID: scout, State: "running", Harness: "claude-code", Exits: []string{}, Options: map[string]string{}, CrewToken: "aeolus_ct_v1_scout"}
 
 	if err := file.Save(saved); err != nil {
@@ -28,7 +30,7 @@ func TestASavedStateIsLoadedAsItWasSaved(t *testing.T) {
 	}
 	loaded, err := file.Load()
 
-	if err != nil || loaded.Entries[scout].CrewToken != "aeolus_ct_v1_scout" || loaded.Entries[scout].State != "running" {
+	if err != nil || loaded.Entries[scout].CrewToken != "aeolus_ct_v1_scout" || loaded.Entries[scout].State != "running" || !slices.Equal(loaded.LowResources, []string{"memory", "disk"}) {
 		t.Fatalf("loaded %+v, %v", loaded, err)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
@@ -139,6 +140,8 @@ type Pass struct {
 	Offers func() map[string]map[string][]string
 	// RefuseModel keeps a model a session refused as refused for its harness's detected version.
 	RefuseModel func(harness string, model string) error
+	// Load reads the machine's load, at most once a minute; none reads nothing (#400).
+	Load *machineload.Reader
 }
 
 func (p Pass) loginOf(entry reconciler.Entry) string {
@@ -182,6 +185,7 @@ const nextAfterFailure = "the next pass tries again; aeolus-trierarch status and
 // Run runs one pass; it fails only when it cannot load its saved state. A pass that cannot read what it reconciles is logged and kept in the state with its reason and since when, which a pass that succeeds clears.
 func (p Pass) Run() error {
 	p.keepProxy()
+	p.watchLoad()
 	state, err := p.Store.Load()
 	if err != nil {
 		return err
@@ -816,4 +820,40 @@ func (p Pass) reconcile(state reconciler.State) (reconciler.State, []reconciler.
 		return next, nil, err
 	}
 	return next, actions, nil
+}
+
+// watchLoad reads the machine's load and tells argo each resource it started to be low on, once: again only after it recovered and dropped again. What argo was told is kept in the state, so a restart while it stays low tells nothing. A failure is logged; the next read tries again (#400).
+func (p Pass) watchLoad() {
+	if p.Load == nil {
+		return
+	}
+	load, isFresh := p.Load.Read()
+	if load == nil || !isFresh {
+		return
+	}
+	if err := p.tellLow(*load); err != nil {
+		p.Log("Could not tell argo the machine is low: " + err.Error())
+	}
+}
+
+func (p Pass) tellLow(load machineload.Load) error {
+	state, err := p.Store.Load()
+	if err != nil {
+		return err
+	}
+	low := load.Low()
+	for _, resource := range low {
+		if slices.Contains(state.LowResources, resource) {
+			continue
+		}
+		key := "low-" + resource + "-" + p.Now().UTC().Format(isoMillis)
+		if err := p.Fleet.ReportToArgo(notices.LowResource(resource, load), key); err != nil {
+			return err
+		}
+	}
+	if slices.Equal(low, state.LowResources) || (len(low) == 0 && len(state.LowResources) == 0) {
+		return nil
+	}
+	state.LowResources = low
+	return p.Store.Save(state)
 }

@@ -1434,6 +1434,8 @@ func TestAPassThatSucceedsClearsTheFailureOfTheOnesBefore(t *testing.T) {
 
 	if p.store.state.PassFailure != nil {
 		t.Errorf("passFailure after a pass that succeeded = %+v, want none", p.store.state.PassFailure)
+	}
+}
 
 // aMachine is a machine whose load a test sets; it is read each time the pass asks.
 type aMachine struct {
@@ -1504,14 +1506,16 @@ func TestAMachineThatRecoveredAndDroppedAgainTellsAgain(t *testing.T) {
 	pass.run(t)
 	machine.load = aLoad(40, 50)
 	later := now.Add(time.Minute)
-	pass.pass.Load = &machineload.Reader{Source: machine, Now: func() time.Time { return later }, Log: pass.pass.Log}
+	pass.pass.Now = func() time.Time { return later }
+	pass.pass.Load = &machineload.Reader{Source: machine, Now: pass.pass.Now, Log: pass.pass.Log}
 	pass.run(t)
 	if len(pass.fleet.told) != 1 || len(pass.store.state.LowResources) != 0 {
 		t.Fatalf("told %+v, low resources %v", pass.fleet.told, pass.store.state.LowResources)
 	}
 	machine.load = aLoad(8, 50)
 	again := later.Add(time.Minute)
-	pass.pass.Load = &machineload.Reader{Source: machine, Now: func() time.Time { return again }, Log: pass.pass.Log}
+	pass.pass.Now = func() time.Time { return again }
+	pass.pass.Load = &machineload.Reader{Source: machine, Now: pass.pass.Now, Log: pass.pass.Log}
 	pass.run(t)
 	if len(pass.fleet.told) != 2 || pass.fleet.told[1].key != "low-memory-2026-11-04T12:02:00.000Z" {
 		t.Fatalf("told %+v", pass.fleet.told)
@@ -1539,9 +1543,10 @@ func TestAFleetThatRefusesTheNoticeIsLoggedAndTheNoticeIsTriedAtTheNextRead(t *t
 	}
 	pass.fleet.refuse = ""
 	later := now.Add(time.Minute)
-	pass.pass.Load = &machineload.Reader{Source: machine, Now: func() time.Time { return later }, Log: pass.pass.Log}
+	pass.pass.Now = func() time.Time { return later }
+	pass.pass.Load = &machineload.Reader{Source: machine, Now: pass.pass.Now, Log: pass.pass.Log}
 	pass.run(t)
-	if !reflect.DeepEqual(pass.store.state.LowResources, []string{"memory"}) || len(pass.fleet.told) != 2 {
+	if !reflect.DeepEqual(pass.store.state.LowResources, []string{"memory"}) || len(pass.fleet.told) != 2 || pass.fleet.told[1].key != "low-memory-2026-11-04T12:01:00.000Z" {
 		t.Fatalf("told %+v, low resources %v", pass.fleet.told, pass.store.state.LowResources)
 	}
 }
