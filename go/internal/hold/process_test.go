@@ -174,3 +174,18 @@ func TestTheHoldRefusesAProcessAnotherShipsSessionForkedOnceItIsReparented(t *te
 		t.Fatalf("a reparented process of another ship's session called = %s, want %q", got, Refused)
 	}
 }
+
+// A process that deliberately leaves its session's process session (setsid) and is reparented is answered: no refusal list tells it from the trierarch, and a container is the isolation against it (#196, #174).
+func TestTheHoldAnswersAProcessThatLeftAnotherShipsSessionByItsOwnSetsidOnceItIsReparented(t *testing.T) {
+	sessions := shortFolder(t)
+	scout, _ := aHoldProcessOf(t, sessions, ship, `while read -r line; do :; done`)
+	answered := filepath.Join(t.TempDir(), "answer")
+
+	// perl's setsid, as macOS has no setsid command; the subshell ends at once, so the process calls once its parent is gone.
+	aHoldProcessOf(t, sessions, "shp_01m6jyczpnpp5c0vxh54c966cz", `( perl -MPOSIX -e 'POSIX::setsid(); sleep 1; exec @ARGV' "$CALLER" call `+scout.Socket+` `+answered+` & ); while read -r line; do :; done`)
+
+	eventually(t, "the call of the process that left its session answered", func() bool { return read(answered) != "" })
+	if got := read(answered); !strings.Contains(got, `"isOk":true`) {
+		t.Fatalf("a reparented process that left another ship's session called = %s, want it answered", got)
+	}
+}
