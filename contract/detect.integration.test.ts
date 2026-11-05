@@ -291,7 +291,7 @@ describe('config check', () => {
         'What each harness launches, with the default options:',
       ]),
     );
-    const claude = 'claude -p --input-format stream-json --output-format stream-json --verbose (adapter) --chrome --fast (configuration) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter)';
+    const claude = 'claude -p --input-format stream-json --output-format stream-json --verbose (adapter) --chrome --fast (configuration) --permission-mode default (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter)';
     expect(lines).toContain(`  first start: ${claude}`);
     expect(lines).toContain(`  restart: ${claude} --continue (adapter)`);
     const codex = 'codex exec -m gpt-5.6-terra (configuration) --json (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- ';
@@ -321,6 +321,7 @@ describe('config check', () => {
       { words: ['claude'] },
       { words: ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'], source: 'adapter' },
       { words: ['--chrome', '--fast'], source: 'configuration' },
+      { words: ['--permission-mode', 'default'], source: 'adapter', when: 'the Claude Code settings for the folder make plan the default mode' },
       { words: ['--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode'], source: 'adapter' },
     ]);
     expect(claude?.restart?.at(-1)).toEqual({ words: ['--continue'], source: 'adapter' });

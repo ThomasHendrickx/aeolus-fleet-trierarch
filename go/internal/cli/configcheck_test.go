@@ -2,6 +2,7 @@ package cli
 
 import (
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -27,7 +28,7 @@ func aCheckedMachine(t *testing.T) (Machine, paths.Paths) {
 	model := detection.OptionOf([]string{"claude-sonnet-5", "claude-opus-5"}, "--model")
 	model.Default = "claude-sonnet-5"
 	confirmed := detectedAt
-	found := detection.Detected{"claude-code": {Version: "2.1.306", DetectedAt: detectedAt, ConfirmedAt: &confirmed, Options: map[string]config.Option{"model": model}}}
+	found := detection.Detected{"claude-code": {Version: "2.1.306", DetectedAt: detectedAt, ConfirmedAt: &confirmed, PermissionModes: []string{"default", "manual", "plan"}, Options: map[string]config.Option{"model": model}}}
 	if err := (detection.File{Path: at.Detected}).Save(found); err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +40,7 @@ func TestConfigCheckSaysTheFlagsAndWhatEachHarnessLaunches(t *testing.T) {
 
 	output, code := Main([]string{"config", "check"}, machine)
 
-	const claude = "claude -p --input-format stream-json --output-format stream-json --verbose (adapter) --chrome --model claude-sonnet-5 --effort high (configuration) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter)"
+	const claude = "claude -p --input-format stream-json --output-format stream-json --verbose (adapter) --chrome --model claude-sonnet-5 --effort high (configuration) --permission-mode manual (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter)"
 	first := strings.ReplaceAll(prompt.First("<first prompt>"), "\n", `\n`)
 	const codex = "codex exec"
 	const codexFlags = " --json (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- "
@@ -128,5 +129,34 @@ func TestConfigCheckSaysTheContainerRuntimeWithItsCapsAndTokenFile(t *testing.T)
 	want := "Sessions run in containers of podman, each capped at 4g of memory and 1.5 cpus, with the model token in " + at.ModelToken + "."
 	if !strings.Contains(output, "\n"+want+"\n") {
 		t.Errorf("config check said %q, want the line %q", output, want)
+	}
+}
+
+func TestConfigCheckShowsNoOverrideWhereTheFlagsNameAPermissionMode(t *testing.T) {
+	machine, at := aCheckedMachine(t)
+	if err := os.WriteFile(at.Config, []byte(`{"caps":{"ships":4,"running":2},"repositories":{},"folders":{},"harnesses":{"claude-code":{"flags":["--dangerously-skip-permissions"],"options":{}}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	output, _ := Main([]string{"config", "check"}, machine)
+
+	if strings.Contains(output, "--permission-mode") {
+		t.Errorf("config check said %q, want no permission mode override", output)
+	}
+}
+
+func TestConfigCheckShowsTheOverrideWithoutWhenWhereTheManagedSettingsMakePlanTheDefault(t *testing.T) {
+	machine, _ := aCheckedMachine(t)
+	if err := os.MkdirAll(machine.ManagedSettings, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(machine.ManagedSettings, "managed-settings.json"), []byte(`{"permissions":{"defaultMode":"plan"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	output, _ := Main([]string{"config", "check"}, machine)
+
+	if want := "--effort high (configuration) --permission-mode manual (adapter) --disallowedTools"; !strings.Contains(output, want) {
+		t.Errorf("config check said %q, want it to contain %q", output, want)
 	}
 }

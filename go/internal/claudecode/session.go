@@ -33,8 +33,8 @@ var AdapterFlags = []commandline.AdapterFlag{
 	{Flag: "--continue", When: "restart"},
 }
 
-// CommandParts are `claude` in parts, each marked by its source: headless, the flags with plan mode left out, AskUserQuestion and plan mode disallowed, `--continue` when told.
-func CommandParts(flags []string, isContinued bool) []commandline.Part {
+// withoutPlanMode are the flags without `--permission-mode plan` (or `=plan`): a session started in plan mode could never leave it (#465).
+func withoutPlanMode(flags []string) []string {
 	kept := []string{}
 	for at := 0; at < len(flags); at++ {
 		if flags[at] == "--permission-mode=plan" {
@@ -46,10 +46,16 @@ func CommandParts(flags []string, isContinued bool) []commandline.Part {
 		}
 		kept = append(kept, flags[at])
 	}
+	return kept
+}
+
+// CommandParts are `claude` in parts, each marked by its source: headless, the flags with plan mode left out, the override of a plan default mode (no words for none), AskUserQuestion and plan mode disallowed, `--continue` when told.
+func CommandParts(flags []string, override commandline.Part, isContinued bool) []commandline.Part {
 	parts := []commandline.Part{
 		{Words: []string{"claude"}},
 		{Words: headless, Source: commandline.Adapter},
-		{Words: kept, Source: commandline.Configuration},
+		{Words: withoutPlanMode(flags), Source: commandline.Configuration},
+		override,
 		{Words: []string{noPanePrompts}, Source: commandline.Adapter},
 	}
 	if isContinued {
@@ -60,7 +66,7 @@ func CommandParts(flags []string, isContinued bool) []commandline.Part {
 
 // CommandLine is `claude` with the flags given, plan mode left out, continuing the folder's conversation when told.
 func CommandLine(flags []string, isContinued bool) []string {
-	return commandline.Words(CommandParts(flags, isContinued))
+	return commandline.Words(CommandParts(flags, commandline.Part{}, isContinued))
 }
 
 var notLetterOrDigit = regexp.MustCompile(`[^a-zA-Z0-9]`)

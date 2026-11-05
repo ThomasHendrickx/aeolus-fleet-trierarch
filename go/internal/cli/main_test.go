@@ -60,6 +60,7 @@ func aMain(t *testing.T) (Machine, *anInstalledService, *aFleet) {
 		Environ:               []string{"HOME=" + home},
 		HomeDirectory:         home,
 		Platform:              "linux",
+		ManagedSettings:       filepath.Join(home, "managed-settings"),
 		PID:                   41,
 		IsClaudeCodeInstalled: func() bool { return true },
 		IsClaudeCodeSignedIn:  func() bool { return true },

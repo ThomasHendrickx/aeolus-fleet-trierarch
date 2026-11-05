@@ -80,6 +80,7 @@ func main() {
 		Environ:               environ,
 		HomeDirectory:         home,
 		Platform:              runtime.GOOS,
+		ManagedSettings:       claudecode.ManagedSettings(),
 		PID:                   os.Getpid(),
 		IsClaudeCodeInstalled: claudecode.IsInstalled,
 		IsClaudeCodeSignedIn:  claudecode.IsSignedIn,

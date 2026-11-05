@@ -23,18 +23,20 @@ const firstPrompt = "<first prompt>"
 // launched is what a harness's adapter adds itself and launches with some flags, on a first start and a restart.
 type launched struct {
 	adapterFlags []commandline.AdapterFlag
-	commandLines func(flags []string) (firstStart []commandline.Part, restart []commandline.Part)
+	commandLines func(flags []string, machine Machine, detected detection.Harness) (firstStart []commandline.Part, restart []commandline.Part)
 }
 
 // adapters are the harnesses this trierarch has an adapter for.
 var adapters = map[string]launched{
-	"claude-code": {claudecode.AdapterFlags, func(flags []string) ([]commandline.Part, []commandline.Part) {
-		return claudecode.CommandParts(flags, false), claudecode.CommandParts(flags, true)
+	"claude-code": {claudecode.AdapterFlags, func(flags []string, machine Machine, detected detection.Harness) ([]commandline.Part, []commandline.Part) {
+		// Without a folder the settings may decide per folder: the override is shown with when it applies.
+		override := claudecode.PlanOverride(flags, claudecode.DefaultModeOf(machine.ManagedSettings, claudecode.UserSettings(machine.HomeDirectory, variable(machine.Environ, "CLAUDE_CONFIG_DIR")), flags, ""), detected.PermissionModes)
+		return claudecode.CommandParts(flags, override, false), claudecode.CommandParts(flags, override, true)
 	}},
-	"codex": {codexharness.AdapterFlags, func(flags []string) ([]commandline.Part, []commandline.Part) {
+	"codex": {codexharness.AdapterFlags, func(flags []string, machine Machine, detected detection.Harness) ([]commandline.Part, []commandline.Part) {
 		return codexharness.CommandParts(flags, prompt.First(firstPrompt), true), codexharness.CommandParts(flags, prompt.Wake(codexharness.WakeCommand), false)
 	}},
-	"copilot": {copilot.AdapterFlags, func(flags []string) ([]commandline.Part, []commandline.Part) {
+	"copilot": {copilot.AdapterFlags, func(flags []string, machine Machine, detected detection.Harness) ([]commandline.Part, []commandline.Part) {
 		// A restart resumes the session its last turn named, which config check cannot know: it shows the restart without it.
 		return copilot.CommandParts(flags, prompt.First(firstPrompt), ""), copilot.CommandParts(flags, prompt.Wake(copilot.WakePrompt), "")
 	}},
@@ -85,7 +87,7 @@ func orNoFlags(flags []string) string {
 }
 
 // configCheck checks the configuration and says how the sessions run, the flags per harness with the detected options as a running trierarch has them, and what each harness launches with the default options.
-func configCheck(at paths.Paths) (answer, error) {
+func configCheck(at paths.Paths, machine Machine) (answer, error) {
 	loaded, err := config.Load(at.Config)
 	if err != nil {
 		return answer{}, err
@@ -98,7 +100,8 @@ func configCheck(at paths.Paths) (answer, error) {
 		runtime = *loaded.Runtime
 	}
 	// The detected options too (#365), as the running trierarch has them.
-	configuration := detection.Offered(loaded, (detection.File{Path: at.Detected}).Load())
+	detected := (detection.File{Path: at.Detected}).Load()
+	configuration := detection.Offered(loaded, detected)
 	names := slices.Sorted(maps.Keys(configuration.Harnesses))
 	checks := map[string]harnessCheck{}
 	commands := []string{}
@@ -121,7 +124,7 @@ func configCheck(at paths.Paths) (answer, error) {
 			continue
 		}
 		check.AdapterFlags = adapter.adapterFlags
-		check.FirstStart, check.Restart = adapter.commandLines(flags)
+		check.FirstStart, check.Restart = adapter.commandLines(flags, machine, detected[name])
 		checks[name] = check
 		commands = append(commands, name+":", "  first start: "+commandline.Describe(check.FirstStart), "  restart: "+commandline.Describe(check.Restart))
 	}

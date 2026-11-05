@@ -46,10 +46,12 @@ type Sessions interface {
 
 // Machine is what the commands reach on the machine they run on.
 type Machine struct {
-	Environ               []string
-	HomeDirectory         string
-	Platform              string
-	PID                   int
+	Environ       []string
+	HomeDirectory string
+	Platform      string
+	PID           int
+	// ManagedSettings is the folder Claude Code reads its managed settings from.
+	ManagedSettings       string
 	IsClaudeCodeInstalled func() bool
 	IsClaudeCodeSignedIn  func() bool
 	IsSsMissing           func() bool
@@ -258,7 +260,7 @@ func Main(args []string, machine Machine) (string, int) {
 			return answer{data: map[string]any{"service": "stopped", "said": []string{said}}, text: said}, nil
 		},
 		"config check": func() (answer, error) {
-			return configCheck(at)
+			return configCheck(at, machine)
 		},
 		"detect": func() (answer, error) {
 			configuration, err := config.Load(at.Config)
