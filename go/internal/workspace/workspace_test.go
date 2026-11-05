@@ -220,3 +220,28 @@ func TestAWorktreeOfARepositoryThatLeftTheListIsRemovedFromItsClone(t *testing.T
 		t.Error("the worktree stayed")
 	}
 }
+
+func TestInContainersAShipsFolderIsItsRealPathWhichTheContainerMountsAsTheHostKeysIt(t *testing.T) {
+	repository, root := aRepository(t)
+	linked := filepath.Join(t.TempDir(), "worktrees")
+	if err := os.Symlink(root, linked); err != nil {
+		t.Fatal(err)
+	}
+	real, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := reconciler.Entry{Workspace: reconciler.Workspace{Kind: "worktree", Repository: "aeolus-fleet"}}
+
+	for _, isByRealPath := range []bool{false, true} {
+		places := Places{Root: linked, Repositories: map[string]string{"aeolus-fleet": repository}, IsByRealPath: isByRealPath}
+		want := filepath.Join(linked, "aeolus-fleet", "scout")
+		if isByRealPath {
+			want = filepath.Join(real, "aeolus-fleet", "scout")
+		}
+
+		if folder, err := places.Prepare(entry, "scout"); err != nil || folder != want {
+			t.Errorf("by its real path %v: Prepare = %q, %v; want %q", isByRealPath, folder, err, want)
+		}
+	}
+}
