@@ -146,7 +146,11 @@ func (p Plugin) HasIdentity(folder string) bool {
 	return err == nil
 }
 
+// DeleteIdentity deletes the folder's identity; a folder with none, or a plugin that is lost, leaves nothing to do.
 func (p Plugin) DeleteIdentity(folder string) error {
+	if !p.HasIdentity(folder) {
+		return nil
+	}
 	_, err := p.run("aeolus-identity.sh", folder, "", "delete")
 	return err
 }

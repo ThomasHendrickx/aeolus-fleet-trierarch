@@ -151,10 +151,20 @@ type Places struct {
 	Clone func(repository string, path string) error
 	// ClonedPath is the clone of a repository that left the trusted repositories, which still holds the workspaces made from it; none finds none.
 	ClonedPath func(repository string) (string, bool)
+	// IsByRealPath gives each folder by its real path, as sessions in containers need it: the container mounts the folder at the path it is given, where the plugin inside keys it by `pwd -P` as the host's does (decision 0039).
+	IsByRealPath bool
 }
 
-// Prepare is the ship's folder: its worktree, made when missing, or the configured folder as it is.
+// Prepare is the ship's folder: its worktree, made when missing, or the configured folder as it is; by its real path when the places say so.
 func (p Places) Prepare(entry reconciler.Entry, shipName string) (string, error) {
+	folder, err := p.prepare(entry, shipName)
+	if err != nil || !p.IsByRealPath {
+		return folder, err
+	}
+	return filepath.EvalSymlinks(folder)
+}
+
+func (p Places) prepare(entry reconciler.Entry, shipName string) (string, error) {
 	if entry.Workspace.Kind == "folder" {
 		folder, ok := p.Folders[entry.Workspace.Name]
 		if !ok {

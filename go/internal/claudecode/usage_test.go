@@ -235,3 +235,16 @@ func TestClaudeCodesSubscriptionIsNoneWhenTheTurnSaysNothingOfItsWindows(t *test
 		t.Fatalf("Subscription = %+v, %v, want none", got, err)
 	}
 }
+
+func TestInContainersAClaudeCodeShipsTokensAreReadFromItsOwnHome(t *testing.T) {
+	homes := t.TempDir()
+	withConversations(t, filepath.Join(homes, "shp_scout", ".claude", "projects"))
+	reader := aUsage(t.TempDir(), "2026-10-09T00:00:00Z", notLoggedIn)
+	reader.Homes = homes
+
+	got := perModel(mustTokensOf(t, reader, usage.Ship{ShipID: "shp_scout", Folder: usageFolder}))
+
+	if want := []usage.HourTokens{opus, sonnet}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("tokens = %+v, want %+v", got, want)
+	}
+}

@@ -58,6 +58,8 @@ type Start struct {
 	Env map[string]string
 	// ProxyToken is the session's model proxy token, none for a session on its subscription (headless H16).
 	ProxyToken *ProxyToken
+	// ReadOnly are the paths of the ship's read-only checkouts, which a container mounts read-only.
+	ReadOnly []string
 }
 
 // ProxyToken is a session's model proxy token, for the harness whose vendor it reaches, handed to it in Variable.
@@ -76,6 +78,8 @@ type Runtime struct {
 	// Launch is what a hold's start goes through (see Launch).
 	Launch   []string
 	BootedAt func() time.Time
+	// HeldAs is what the hold runs for a session, once the ship's last session is stopped and its folder is new: the session as it is when nil. A container runtime's hold runs the runtime's run of it (H18).
+	HeldAs func(session Start, files hold.Files) (Start, error)
 }
 
 // Launch is what a session's start goes through on Linux under a systemd unit, which sets INVOCATION_ID: a systemd scope of its own, expanding no variable in the command where systemd-run can be told so (from systemd 254).
@@ -179,6 +183,13 @@ func (r Runtime) Start(session Start) error {
 	files := hold.FilesOf(r.Sessions, session.ShipID)
 	if err := os.MkdirAll(files.Folder, 0o700); err != nil {
 		return err
+	}
+	if r.HeldAs != nil {
+		held, err := r.HeldAs(session, files)
+		if err != nil {
+			return err
+		}
+		session = held
 	}
 	words := append(append([]string{}, r.Program...), "hold", session.ShipID, "--sessions", r.Sessions, "--folder", session.Folder, "--harness", session.Harness)
 	// The token goes in the session's folder, which only its user reads, and the hold reads it there: a command line is anyone's to see.

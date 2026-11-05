@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isTodaysTrierarch, TRIERARCH_UNDER_TEST } from './trierarch-under-test.js';
@@ -29,7 +29,9 @@ import { isTodaysTrierarch, TRIERARCH_UNDER_TEST } from './trierarch-under-test.
  * `codex-plugin-fails` makes the upgrade fail once it deleted them,
  * `codex-deletes-plugin-data` makes `plugin marketplace remove` delete the
  * plugin data folders of its Codex home, and `codex-untrusted-hook` makes the
- * app server list one aeolus-fleet hook to trust.
+ * app server list one aeolus-fleet hook to trust. `podman` runs each container's
+ * command on this machine (`containers/<name>.run` its words), rootful with
+ * `podman-rootful`; `id -Gn` names the docker group with `user-in-docker-group`.
  */
 export interface Machine {
   readonly home: string;
@@ -59,8 +61,10 @@ export interface Machine {
   servicePid(): number | undefined;
   /** What the service's trierarch wrote, for a failing test to show. */
   serviceLog(): string;
-  /** Each command line a harness's stand-in was given outside a session, in order. */
-  callsOf(harness: 'claude' | 'codex' | 'copilot'): string[];
+  /** Each command line a harness's stand-in was given outside a session, in order; Podman's, every one. */
+  callsOf(harness: 'claude' | 'codex' | 'copilot' | 'podman'): string[];
+  /** The words of the last `podman run` of the container, none before one ran. */
+  containerRunOf(container: string): string[] | undefined;
   /** Stops every session and the service, then removes the machine. */
   remove(): Promise<void>;
 }
@@ -72,7 +76,7 @@ export interface RunningCommand {
   readonly interrupt: () => Promise<number>;
 }
 
-export type StandInSwitch = 'claude-signed-out' | 'claude-help-names-no-alias' | 'claude-plugin-fails' | 'codex-plugin-fails' | 'codex-deletes-plugin-data' | 'codex-untrusted-hook';
+export type StandInSwitch = 'claude-signed-out' | 'claude-help-names-no-alias' | 'claude-plugin-fails' | 'codex-plugin-fails' | 'codex-deletes-plugin-data' | 'codex-untrusted-hook' | 'podman-rootful' | 'user-in-docker-group';
 
 export interface CommandOutcome {
   readonly status: number;
@@ -114,7 +118,7 @@ export function runProgram(command: readonly string[], at: { cwd: string; env: R
 /** Where the machine's own programs are: git, ss, bash, curl and the rest the trierarch and the plugin's scripts run. */
 const SYSTEM_FOLDERS = ['/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
 /** The harnesses and service managers a real install of this machine may hold: only the stand-ins answer to them. */
-const STOOD_IN = new Set(['claude', 'codex', 'copilot', 'systemctl', 'journalctl', 'systemd-run', 'launchctl', 'npm', 'npx']);
+const STOOD_IN = new Set(['claude', 'codex', 'copilot', 'systemctl', 'journalctl', 'systemd-run', 'launchctl', 'npm', 'npx', 'podman', 'id']);
 
 /** Links each of the machine's programs into `tools`, but for the ones stood in for, so a real Claude Code or Codex on this machine is never found. */
 function linkSystemPrograms(tools: string): void {
@@ -144,7 +148,7 @@ exec sh -c "$command"
 }
 
 /** `claude`: the commands init, detection and upgrade run answered as Claude Code answers them, and a session run by fake-claude-code.ts with the plugin's hooks. */
-function claudeStandIn(at: { machine: string; pluginData: string }): string {
+function claudeStandIn(at: { machine: string; home: string; pluginData: string }): string {
   return `#!/bin/sh
 machine='${at.machine}'
 case "$1" in
@@ -174,7 +178,80 @@ if [ "$1" = -p ] && [ "$2" = --model ]; then
   echo "{\\"modelUsage\\":{\\"claude-$3-5\\":{}}}"; exit 0
 fi
 [ -s "$machine/claude-refuses-model" ] && export FAKE_CLAUDE_REFUSES_MODEL="$(cat "$machine/claude-refuses-model")"
-exec '${process.execPath}' '${join(STAND_INS, 'fake-claude-code.ts')}' --plugin '${PLUGIN_ROOT}' '${at.pluginData}' "$@"
+exec '${process.execPath}' '${join(STAND_INS, 'fake-claude-code.ts')}' --plugin '${PLUGIN_ROOT}' "$HOME/${relative(at.home, at.pluginData)}" "$@"
+`;
+}
+
+/** The home a container session sees, as the session image has it (decision 0039). */
+const SESSION_HOME = '/home/ubuntu';
+
+/**
+ * `podman`, rootless unless `podman-rootful`: `info` as Podman says how it
+ * runs; `run` writes down its words (`containers/<name>.run`, one per line)
+ * and runs the command after the image as the container would, in its
+ * workdir, with nothing of the caller's environment but its PATH, the env
+ * file's variables and the ones passed on, and the folder mounted at
+ * /home/ubuntu as its HOME; its first process's pid is the container's
+ * (`containers/<name>.pid`), which `inspect`, `ps`, `kill` and `rm` read.
+ */
+function podmanStandIn(at: { machine: string }): string {
+  return `#!/bin/bash
+machine='${at.machine}'
+containers="$machine/containers"
+mkdir -p "$containers"
+echo "$*" >> "$machine/podman-calls.txt"
+name="\${@: -1}"
+pid() { [ -f "$containers/$1.pid" ] && kill -0 "$(cat "$containers/$1.pid")" 2>/dev/null && cat "$containers/$1.pid"; }
+case "$1" in
+  info)
+    rootless=true; [ -e "$machine/podman-rootful" ] && rootless=false
+    echo "{\\"host\\":{\\"security\\":{\\"rootless\\":$rootless}}}"; exit 0 ;;
+  ps)
+    for file in "$containers"/*.pid; do
+      [ -e "$file" ] || continue
+      container="$(basename "$file" .pid)"
+      if pid "$container" > /dev/null; then echo "$container running"; else echo "$container exited"; fi
+    done
+    exit 0 ;;
+  inspect) pid "$name" || exit 1; exit 0 ;;
+  kill) running="$(pid "$name")" && kill -KILL "$running"; exit 0 ;;
+  rm) rm -f "$containers/$name.pid"; exit 0 ;;
+  run) ;;
+  *) echo "podman stand-in: no $1" >&2; exit 125 ;;
+esac
+words=("$@")
+shift
+environment=(PATH="$PATH")
+home= workdir= envFile= container=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --rm|-i|--*=*) shift ;;
+    --name) container="$2"; shift 2 ;;
+    --volume) [ "\${2#*:}" = '${SESSION_HOME}' ] && home="\${2%%:*}"; shift 2 ;;
+    --env) if [[ "$2" == *=* ]]; then environment+=("$2"); else environment+=("$2=\${!2}"); fi; shift 2 ;;
+    --workdir) workdir="$2"; shift 2 ;;
+    --env-file) envFile="$2"; shift 2 ;;
+    --*) shift 2 ;;
+    *) shift; break ;;
+  esac
+done
+printf '%s\\n' "\${words[@]}" > "$containers/$container.run"
+while IFS= read -r line; do environment+=("$line"); done < "$envFile"
+[ -n "$home" ] && environment+=(HOME="$home")
+echo $$ > "$containers/$container.pid"
+cd "$workdir" || exit 125
+exec env -i "\${environment[@]}" "$@"
+`;
+}
+
+/** `id`: the user's groups are `user`, and `docker` too with `user-in-docker-group`; anything else as the machine's own id answers it. */
+function idStandIn(at: { machine: string }): string {
+  return `#!/bin/sh
+if [ "$1" = -Gn ]; then
+  if [ -e '${at.machine}/user-in-docker-group' ]; then echo 'user docker'; else echo user; fi
+  exit 0
+fi
+exec /usr/bin/id "$@"
 `;
 }
 
@@ -322,10 +399,12 @@ export async function aMachine(at: { others?: readonly OtherHarness[] } = {}): P
   linkSystemPrograms(tools);
   const pluginData = join(home, '.claude', 'plugins', 'data', 'aeolus-fleet-aeolus-fleet');
   const codexPluginData = join(home, '.codex', 'plugins', 'data', 'aeolus-fleet-aeolus-fleet');
-  script(join(bin, 'claude'), claudeStandIn({ machine, pluginData }));
+  script(join(bin, 'claude'), claudeStandIn({ machine, home, pluginData }));
   script(join(bin, 'systemctl'), systemctlStandIn({ machine, home }));
   script(join(bin, 'journalctl'), journalctlStandIn({ machine }));
   script(join(bin, 'ssh'), sshStandIn());
+  script(join(bin, 'podman'), podmanStandIn({ machine }));
+  script(join(bin, 'id'), idStandIn({ machine }));
   if (others.includes('codex')) {
     script(join(bin, 'codex'), codexStandIn({ machine, pluginData: codexPluginData }));
   }
@@ -429,6 +508,10 @@ export async function aMachine(at: { others?: readonly OtherHarness[] } = {}): P
     },
     servicePid,
     serviceLog: () => readFileSync(join(machine, 'systemd', 'trierarch.log'), { encoding: 'utf8', flag: 'a+' }),
+    containerRunOf: (container) => {
+      const file = join(machine, 'containers', `${container}.run`);
+      return existsSync(file) ? readFileSync(file, 'utf8').split('\n').slice(0, -1) : undefined;
+    },
     callsOf: (harness) =>
       readFileSync(join(machine, `${harness}-calls.txt`), { encoding: 'utf8', flag: 'a+' })
         .split('\n')

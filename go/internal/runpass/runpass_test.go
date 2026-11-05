@@ -171,11 +171,13 @@ type launched struct {
 type aHarness struct {
 	sessions   *aSessions
 	identities map[string]plugin.Identity
-	tokens     map[string]string
-	launches   []launched
-	died       []string
-	seen       map[string]reconciler.LaunchSeen
-	problem    error
+	// kept is what the harness keeps for each ship beside its identity, by ship, as Claude Code keeps a ship's home in a container.
+	kept     map[string]bool
+	tokens   map[string]string
+	launches []launched
+	died     []string
+	seen     map[string]reconciler.LaunchSeen
+	problem  error
 	// marksNoLaunches is a plugin older than the launch marker; pluginMissing one that cannot be found; notOffered why the machine does not offer the harness.
 	marksNoLaunches bool
 	pluginMissing   bool
@@ -210,18 +212,19 @@ func (h *aHarness) LaunchSeen(entry reconciler.Entry) reconciler.LaunchSeen {
 	}
 	return reconciler.LaunchSeen{Kind: reconciler.LaunchNone}
 }
-func (h *aHarness) WriteIdentity(folder string, identity plugin.Identity, crewToken string) error {
-	h.identities[folder], h.tokens[folder] = identity, crewToken
+func (h *aHarness) WriteIdentity(entry reconciler.Entry, identity plugin.Identity, crewToken string) error {
+	h.identities[entry.Folder], h.tokens[entry.Folder] = identity, crewToken
+	h.kept[entry.ShipID] = true
 	h.sockets.events = append(h.sockets.events, "identity "+identity.Socket)
 	return nil
 }
-func (h *aHarness) Turn(folder string) string {
-	if turn, ok := h.turns[folder]; ok {
+func (h *aHarness) Turn(entry reconciler.Entry) string {
+	if turn, ok := h.turns[entry.Folder]; ok {
 		return turn
 	}
 	return reconciler.TurnUnknown
 }
-func (h *aHarness) IsHolding(folder string) bool { return h.holding[folder] }
+func (h *aHarness) IsHolding(entry reconciler.Entry) bool { return h.holding[entry.Folder] }
 func (h *aHarness) HandOver(entry reconciler.Entry) (bool, error) {
 	h.handed = append(h.handed, "wake "+entry.ShipID)
 	return true, nil
@@ -230,16 +233,17 @@ func (h *aHarness) ForceOver(entry reconciler.Entry, isTurnBusy bool) (bool, err
 	h.handed = append(h.handed, fmt.Sprintf("force %s busy %v", entry.ShipID, isTurnBusy))
 	return true, nil
 }
-func (h *aHarness) HasIdentity(folder string) bool {
-	_, ok := h.identities[folder]
+func (h *aHarness) HasIdentity(entry reconciler.Entry) bool {
+	_, ok := h.identities[entry.Folder]
 	return ok
 }
-func (h *aHarness) DeleteIdentity(folder string) error {
-	delete(h.identities, folder)
+func (h *aHarness) DeleteIdentity(entry reconciler.Entry) error {
+	delete(h.identities, entry.Folder)
+	delete(h.kept, entry.ShipID)
 	return nil
 }
-func (h *aHarness) SessionDied(folder string) error {
-	h.died = append(h.died, folder)
+func (h *aHarness) SessionDied(entry reconciler.Entry) error {
+	h.died = append(h.died, entry.Folder)
 	return nil
 }
 func (h *aHarness) Problem() error { return h.problem }
@@ -383,7 +387,7 @@ func aRunPass(t *testing.T) *aPass {
 		sockets:   sockets,
 		fleet:     &aFleet{ships: map[string]fleet.Ship{scout: {Name: "scout", Status: "awaitingCrew"}}, inboxes: map[string]reconciler.Inbox{}},
 		sessions:  running,
-		harness:   &aHarness{sessions: running, identities: map[string]plugin.Identity{}, tokens: map[string]string{}, seen: map[string]reconciler.LaunchSeen{}, turns: map[string]string{}, holding: map[string]bool{}, sockets: sockets},
+		harness:   &aHarness{sessions: running, identities: map[string]plugin.Identity{}, kept: map[string]bool{}, tokens: map[string]string{}, seen: map[string]reconciler.LaunchSeen{}, turns: map[string]string{}, holding: map[string]bool{}, sockets: sockets},
 		workspace: &aWorkspace{made: map[string]bool{}, unsaved: map[string][]string{}, notMade: map[string]bool{}},
 		checkouts: &someCheckouts{},
 		store:     &aStore{state: reconciler.Empty()},
@@ -754,7 +758,7 @@ func TestAReleaseStopsTheSessionEndsTheLeaseRemovesTheWorktreeThenConfirms(t *te
 	if !slices.Equal(pass.sessions.stopped, []string{scout}) || !slices.Equal(pass.fleet.calls, []string{"release " + scout, "confirm " + scout}) {
 		t.Fatalf("stopped %q, calls %q", pass.sessions.stopped, pass.fleet.calls)
 	}
-	if !slices.Equal(pass.workspace.removed, []string{"/worktrees/aeolus-fleet/scout"}) || pass.harness.HasIdentity("/worktrees/aeolus-fleet/scout") {
+	if !slices.Equal(pass.workspace.removed, []string{"/worktrees/aeolus-fleet/scout"}) || pass.harness.HasIdentity(reconciler.Entry{Folder: "/worktrees/aeolus-fleet/scout"}) {
 		t.Fatalf("removed %q, identities %+v", pass.workspace.removed, pass.harness.identities)
 	}
 	if len(pass.store.state.Entries) != 0 {
@@ -1985,7 +1989,7 @@ func (u *aUsageSend) send(entry reconciler.Entry) error {
 		return u.failWith
 	}
 	u.sent = append(u.sent, entry.ShipID)
-	u.wasThere = append(u.wasThere, u.pass.workspace.made[entry.Folder] && u.pass.harness.HasIdentity(entry.Folder))
+	u.wasThere = append(u.wasThere, u.pass.workspace.made[entry.Folder] && u.pass.harness.HasIdentity(entry))
 	return nil
 }
 
@@ -2013,7 +2017,7 @@ func TestAReleaseWhoseLastUsageTheFleetDoesNotTakeKeepsTheWorktreeAndTheRequestA
 
 	pass.released(t)
 
-	if len(pass.workspace.removed) != 0 || slices.Contains(pass.fleet.calls, "confirm "+scout) || !pass.harness.HasIdentity(scoutFolder) {
+	if len(pass.workspace.removed) != 0 || slices.Contains(pass.fleet.calls, "confirm "+scout) || !pass.harness.HasIdentity(reconciler.Entry{Folder: scoutFolder}) {
 		t.Fatalf("removed %q, calls %q, identities %+v", pass.workspace.removed, pass.fleet.calls, pass.harness.identities)
 	}
 	if _, ok := pass.store.state.Entries[scout]; !ok {
@@ -2210,6 +2214,19 @@ func TestAReleaseRemovesTheShipsReadOnlyCheckouts(t *testing.T) {
 
 	if !slices.Equal(pass.checkouts.removed, []string{scout}) {
 		t.Fatalf("removed %q", pass.checkouts.removed)
+	}
+}
+
+func TestARequestNoLongerAssignedHereRemovesWhatTheHarnessKeepsForTheShipEvenWhenItsIdentityIsAlreadyGone(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	delete(pass.harness.identities, folder)
+	pass.fleet.requests = nil
+
+	pass.run(t)
+
+	if len(pass.harness.kept) != 0 {
+		t.Fatalf("the harness still keeps %v", pass.harness.kept)
 	}
 }
 
