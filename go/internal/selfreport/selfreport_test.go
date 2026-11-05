@@ -12,6 +12,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trust"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/usage"
 )
 
 const scout = "shp_01m6jyczpnpp5c0vxh54c966cy"
@@ -375,5 +376,69 @@ func TestTheReportGoesAgainForTheLoadOnlyOnceItTakesAnotherStep(t *testing.T) {
 	sent, ok := fleet.details[1].(map[string]any)["load"].(*machineload.Load)
 	if !ok || sent.Memory.AvailableBytes != 20 {
 		t.Fatalf("the second report carries %v; want the load as last read", fleet.details[1])
+	}
+}
+
+func aUsage(input float64) *usage.Usage {
+	cost := 0.0
+	return &usage.Usage{
+		Subscriptions: []usage.Subscription{{Harness: "claude-code", ReadAt: "2026-11-05T10:00:00.000Z", Windows: []usage.WindowReport{{WindowMinutes: 300, UsedPercent: 25.6, ResetsAt: "2026-12-23T04:26:40.000Z"}}}},
+		Ships:         []usage.ShipUsage{{ShipID: scout, Models: []usage.ModelUsage{{Model: "claude-opus-5-5", Login: "subscription", Tokens: usage.Tokens{Input: input}, EstimatedCostUSD: &cost}}}},
+	}
+}
+
+func TestTheDetailsCarryTheHarnessesUsageAsItWasRead(t *testing.T) {
+	in := anInput()
+	in.Usage = aUsage(10)
+	want := map[string]any{
+		"subscriptions": []any{map[string]any{"harness": "claude-code", "readAt": "2026-11-05T10:00:00.000Z", "windows": []any{map[string]any{"windowMinutes": 300.0, "usedPercent": 25.6, "resetsAt": "2026-12-23T04:26:40.000Z"}}}},
+		"ships":         []any{map[string]any{"shipId": scout, "models": []any{map[string]any{"model": "claude-opus-5-5", "login": "subscription", "tokens": map[string]any{"input": 10.0, "output": 0.0, "cacheRead": 0.0, "cacheWrite": 0.0}, "estimatedCostUsd": 0.0}}}},
+	}
+	if got := detailsJSON(t, in)["usage"]; !reflect.DeepEqual(got, want) {
+		t.Fatalf("usage = %v; want %v", got, want)
+	}
+}
+
+type aUsageReader struct {
+	usage *usage.Usage
+	err   error
+}
+
+func (r *aUsageReader) Read() (usage.Usage, error) {
+	if r.err != nil {
+		return usage.Usage{}, r.err
+	}
+	return *r.usage, nil
+}
+
+func TestTheReportGoesAgainOnceTheUsageChanged(t *testing.T) {
+	reporter, fleet, _ := aReporter()
+	usages := &aUsageReader{usage: aUsage(10)}
+	reporter.Usage = usages
+	for range 2 {
+		if err := reporter.Report(false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	usages.usage = aUsage(11)
+	if err := reporter.Report(false); err != nil {
+		t.Fatal(err)
+	}
+	if len(fleet.reports) != 2 {
+		t.Fatalf("reports = %d; want one at start and one once the usage changed", len(fleet.reports))
+	}
+	if sent, ok := fleet.details[1].(map[string]any)["usage"].(*usage.Usage); !ok || sent.Ships[0].Models[0].Tokens.Input != 11 {
+		t.Fatalf("the second report carries %v; want the usage as last read", fleet.details[1])
+	}
+}
+
+func TestAReportWhoseUsageCouldNotBeReadIsNotSent(t *testing.T) {
+	reporter, fleet, _ := aReporter()
+	reporter.Usage = &aUsageReader{err: errors.New("the state cannot be read")}
+	if err := reporter.Report(false); err == nil {
+		t.Fatal("a report whose usage could not be read was not an error")
+	}
+	if len(fleet.reports) != 0 {
+		t.Fatalf("reports = %d; want none", len(fleet.reports))
 	}
 }
