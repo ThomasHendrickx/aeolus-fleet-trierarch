@@ -236,8 +236,8 @@ func TestACrewingSessionQuietForItsWholeLaunchWindowIsGivenBack(t *testing.T) {
 
 	given := entry
 	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "no activity within a minute of its start, claude-code said: Not logged in", Entry: &given})
-	if _, ok := next.Entries[scout]; ok {
-		t.Fatalf("the entry stayed: %+v", next.Entries[scout])
+	if _, ok := next.Entries[scout]; !ok {
+		t.Fatalf("the entry went before its cleanup was carried out")
 	}
 }
 
@@ -375,8 +375,8 @@ func TestAModelRefusedTellsArgoThenGivesTheRequestBackAtOnce(t *testing.T) {
 		Action{Kind: ModelRefused, ShipID: scout, ShipName: "scout", Harness: "claude-code", Version: "2.1.306", Model: "claude-sonnet-5"},
 		Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "claude-code 2.1.306 refused claude-sonnet-5", Entry: &given},
 	)
-	if _, ok := next.Entries[scout]; ok {
-		t.Fatalf("the entry stayed: %+v", next.Entries[scout])
+	if _, ok := next.Entries[scout]; !ok {
+		t.Fatalf("the entry went before its cleanup was carried out")
 	}
 }
 
@@ -591,8 +591,8 @@ func TestAnEntryWhoseRequestIsNoLongerAssignedHereIsForgotten(t *testing.T) {
 	next, actions := Reconcile(withEntries(entry), aContext())
 
 	assertActions(t, actions, Action{Kind: Forget, ShipID: scout, Entry: &entry})
-	if len(next.Entries) != 0 {
-		t.Fatalf("entries: %+v", next.Entries)
+	if _, ok := next.Entries[scout]; !ok {
+		t.Fatalf("the entry went before its cleanup was carried out")
 	}
 }
 

@@ -344,7 +344,7 @@ func (p Pass) carryOut(state reconciler.State, action reconciler.Action) (reconc
 			return state, err
 		}
 		p.Log(fmt.Sprintf("%s (%s): its request is no longer assigned here, so its session and identity ended; its worktree stays", nameOf(*action.Entry), action.ShipID))
-		return state, nil
+		return p.remove(state, action.ShipID)
 	case reconciler.WriteStatus:
 		return state, p.Fleet.WriteStatus(action.ShipID, action.Status.Status, action.Status.Attempt, action.Status.StartedAt)
 	case reconciler.Report:
