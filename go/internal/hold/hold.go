@@ -293,7 +293,7 @@ func (h *held) start(command []string) (*harness, error) {
 		h.isBusy = true
 	}
 	if h.guard != nil {
-		_, _ = fmt.Fprintf(h.guard, "%d\n", run.Process.Pid)
+		_, _ = fmt.Fprintf(h.guard, "%d %s\n", run.Process.Pid, startOf(run.Process.Pid))
 	}
 	read := make(chan struct{})
 	var reading sync.WaitGroup
@@ -717,23 +717,44 @@ const stopGrace = 5 * time.Second
 // guardGrace is how long the guard gives a harness's group to end after SIGTERM before SIGKILL.
 const guardGrace = 2 * time.Second
 
-// Guard is the guard: each line it reads is the group of a harness the hold started; once its input closes, as the hold's end closes it, every such group is ended.
+// isOwned is whether the group is still the one the hold started: its leader is gone, so only members it started can remain (the kernel gives no pid out while it names a group), or it is the process that started at the time recorded. Another process with the pid means the id was reused, and that group is none of the hold's.
+func isOwned(group int, started string) bool {
+	now := startOf(group)
+	return now == "" || now == started
+}
+
+// Guard is the guard: each line it reads is the group of a harness the hold started and when its leader started; once its input closes, as the hold's end closes it, every such group still the hold's is ended.
 func Guard(input io.Reader) int {
 	// The hold's group may be signalled as a whole: the guard outlives it.
 	signal.Ignore(syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
-	groups := []int{}
+	type owned struct {
+		group   int
+		started string
+	}
+	groups := []owned{}
 	lines := bufio.NewScanner(input)
 	for lines.Scan() {
-		if group, err := strconv.Atoi(strings.TrimSpace(lines.Text())); err == nil && group > 1 {
-			groups = append(groups, group)
+		fields := strings.Fields(lines.Text())
+		if len(fields) != 2 {
+			continue
+		}
+		if group, err := strconv.Atoi(fields[0]); err == nil && group > 1 {
+			groups = append(groups, owned{group, fields[1]})
 		}
 	}
+	// The ones signalled are the only ones killed after the grace: a group that ended meanwhile may have had its id reused.
+	ended := []owned{}
 	for _, group := range groups {
-		_ = syscall.Kill(-group, syscall.SIGTERM)
+		if isOwned(group.group, group.started) {
+			_ = syscall.Kill(-group.group, syscall.SIGTERM)
+			ended = append(ended, group)
+		}
 	}
 	time.Sleep(guardGrace)
-	for _, group := range groups {
-		_ = syscall.Kill(-group, syscall.SIGKILL)
+	for _, group := range ended {
+		if isOwned(group.group, group.started) {
+			_ = syscall.Kill(-group.group, syscall.SIGKILL)
+		}
 	}
 	return 0
 }
