@@ -50,6 +50,8 @@ func aHarness(t *testing.T) (Harness, *aRuntime, *anOnboarding) {
 		Settings:   config.Harness{Flags: []string{"--model", "opus"}, Options: map[string]config.Option{}},
 		Projects:   t.TempDir(),
 		Onboarding: onboarding,
+		Managed:    t.TempDir(),
+		User:       filepath.Join(t.TempDir(), "settings.json"),
 		Events:     func(shipID string) string { return filepath.Join(events, shipID+".jsonl") },
 	}, running, onboarding
 }
@@ -247,5 +249,69 @@ func TestASessionOnAnAPIKeyDoesNotStartBeforeTheProxyListens(t *testing.T) {
 
 	if err == nil || len(running.started) != 0 {
 		t.Fatalf("Launch = %v, started %d, want an error and nothing started", err, len(running.started))
+	}
+}
+
+func TestASessionWhoseFoldersSettingsMakePlanTheDefaultModeStartsInManualMode(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	harness.PermissionModes = func() []string { return []string{"default", "manual"} }
+	entry := anEntry(t)
+	write(t, filepath.Join(entry.Folder, ".claude", "settings.json"), planSettings)
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if command := running.started[0].Command; !slices.Contains(command, "--permission-mode") || command[slices.Index(command, "--permission-mode")+1] != "manual" {
+		t.Fatalf("started %q", command)
+	}
+}
+
+func TestASessionStartsInDefaultModeWhereTheInstalledClaudeCodeListsNoManual(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	harness.PermissionModes = func() []string { return []string{"default"} }
+	entry := anEntry(t)
+	write(t, harness.User, planSettings)
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if command := running.started[0].Command; command[slices.Index(command, "--permission-mode")+1] != "default" {
+		t.Fatalf("started %q", command)
+	}
+}
+
+func TestASessionWhoseFlagsNameAModeOrWhoseSettingsMakeNoPlanDefaultGetsNoOverride(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	harness.PermissionModes = func() []string { return []string{"manual"} }
+	entry := anEntry(t)
+	write(t, harness.User, `{"permissions":{"defaultMode":"acceptEdits"}}`)
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+	harness.Settings.Flags = []string{"--permission-mode", "acceptEdits"}
+	write(t, harness.User, planSettings)
+	if err := harness.Launch(entry, true, "launch-2"); err != nil {
+		t.Fatal(err)
+	}
+
+	first, second := running.started[0].Command, running.started[1].Command
+	if slices.Contains(first, "manual") || slices.Contains(second, "manual") || !slices.Contains(second, "acceptEdits") {
+		t.Fatalf("started %q and %q", first, second)
+	}
+}
+
+func TestASessionLaunchedBeforeDetectionFoundPermissionModesStartsInDefaultMode(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	entry := anEntry(t)
+	write(t, harness.User, planSettings)
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if command := running.started[0].Command; command[slices.Index(command, "--permission-mode")+1] != "default" {
+		t.Fatalf("started %q", command)
 	}
 }

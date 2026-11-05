@@ -536,6 +536,13 @@ func (o *offers) version(harness string) string {
 	return o.detected[harness].Version
 }
 
+// permissionModes are the permission modes the harness lists as detection found them; none when it found none.
+func (o *offers) permissionModes(harness string) []string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.detected[harness].PermissionModes
+}
+
 // options are, by harness, each option it offers now and its value names in order.
 func (o *offers) options() map[string]map[string][]string {
 	o.mu.Lock()
@@ -581,8 +588,12 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 				Settings:   settings,
 				Projects:   claudecode.Projects(home, env["CLAUDE_CONFIG_DIR"]),
 				Onboarding: claudecode.Of(home, env["CLAUDE_CONFIG_DIR"]),
-				Events:     events,
-				ProxyURL:   proxy.URL,
+				Managed:    claudecode.ManagedSettings(),
+				User:       claudecode.UserSettings(home, env["CLAUDE_CONFIG_DIR"]),
+				// As detection last found them: none before it found any.
+				PermissionModes: func() []string { return offers.permissionModes("claude-code") },
+				Events:          events,
+				ProxyURL:        proxy.URL,
 			}
 		case "codex":
 			found, err := plugin.FindCodex(home, env)
