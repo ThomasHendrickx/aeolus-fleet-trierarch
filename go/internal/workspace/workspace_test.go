@@ -165,3 +165,58 @@ func TestARepositoryNotConfiguredIsSaid(t *testing.T) {
 		t.Fatalf("a worktree of a repository not configured")
 	}
 }
+
+func TestATrustedRepositoryIsClonedBeforeItsFirstWorktreeIsMade(t *testing.T) {
+	source, root := aRepository(t)
+	clone := filepath.Join(t.TempDir(), "hemma")
+	var cloned []string
+	places := Places{Root: root, Repositories: map[string]string{"hemma": clone}, Folders: map[string]string{}, Clone: func(repository string, path string) error {
+		cloned = append(cloned, repository+" at "+path)
+		gitIn(t, "clone", "-q", source, path)
+		return nil
+	}}
+	entry := reconciler.Entry{Workspace: reconciler.Workspace{Kind: "worktree", Repository: "hemma"}}
+
+	folder, err := places.Prepare(entry, "scout")
+
+	if err != nil || folder != filepath.Join(root, "hemma", "scout") {
+		t.Fatalf("folder %s, %v", folder, err)
+	}
+	if !slices.Equal(cloned, []string{"hemma at " + clone}) {
+		t.Errorf("cloned %v, want hemma at its path", cloned)
+	}
+}
+
+func TestACloneThatFailsFailsTheWorkspaceWithItsReasonAndMakesNoWorktree(t *testing.T) {
+	root := t.TempDir()
+	places := Places{Root: root, Repositories: map[string]string{"hemma": filepath.Join(t.TempDir(), "hemma")}, Folders: map[string]string{}, Clone: func(string, string) error {
+		return os.ErrPermission
+	}}
+
+	_, err := places.Prepare(reconciler.Entry{Workspace: reconciler.Workspace{Kind: "worktree", Repository: "hemma"}}, "scout")
+
+	if err == nil || err.Error() != os.ErrPermission.Error() {
+		t.Errorf("Prepare = %v, want the clone's failure", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "hemma", "scout")); err == nil {
+		t.Error("a worktree was made though the clone failed")
+	}
+}
+
+func TestAWorktreeOfARepositoryThatLeftTheListIsRemovedFromItsClone(t *testing.T) {
+	clone, root := aRepository(t)
+	folder := filepath.Join(root, "hemma", "scout")
+	gitIn(t, "-C", clone, "worktree", "add", "--detach", folder)
+	places := Places{Root: root, Repositories: map[string]string{}, Folders: map[string]string{}, ClonedPath: func(repository string) (string, bool) {
+		return clone, repository == "hemma"
+	}}
+
+	err := places.Remove(reconciler.Entry{Workspace: reconciler.Workspace{Kind: "worktree", Repository: "hemma"}, Folder: folder})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(folder); err == nil {
+		t.Error("the worktree stayed")
+	}
+}

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { ShipId } from '@aeolus-fleet/common';
+import { idSchema, type ShipId } from '@aeolus-fleet/common';
 import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, FLEET_URL, newKey, OPERATOR, operatorCaller, secretOf, unwrap, type PrismaClient, type ShipCaller, type UseCases } from '@aeolus-fleet/core/testing';
 
 /**
@@ -100,12 +100,12 @@ export async function aFleet(): Promise<Fleet> {
     send: async (shipName, payload) => unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', name: shipName }, payload, idempotencyKey: newKey() })).messageId,
     sendToTrierarch: async (payload) => unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', shipId: trierarchShip.shipId }, payload, idempotencyKey: newKey() })).messageId,
     sendToTrierarchAs: async (sender, { payload, contentType }) => {
-      const caller: ShipCaller = { shipId: sender, fleetId: argo.fleetId, kind: 'ship', scopes: argo.scopes };
-      return unwrap(await useCases.sendMessage(caller, { selector: { kind: 'ship', shipId: trierarchShip.shipId }, payload, contentType, idempotencyKey: newKey() })).messageId;
+      const caller: ShipCaller = { shipId: sender, fleetId: argo.fleetId, kind: 'agent', scopes: argo.scopes };
+      return unwrap(await useCases.sendMessage(caller, { selector: { kind: 'ship', shipId: trierarchShip.shipId }, payload, contentType, model: 'claude-sonnet-5-5', idempotencyKey: newKey() })).messageId;
     },
     sentByTrierarch: async (contentType) => {
       const messages = await database.message.findMany({ where: { senderShipId: trierarchShip.shipId, contentType }, orderBy: { createdAt: 'asc' }, select: { selectorShipId: true } });
-      return messages.flatMap(({ selectorShipId }) => (selectorShipId === null ? [] : [selectorShipId as ShipId]));
+      return messages.flatMap(({ selectorShipId }) => (selectorShipId === null ? [] : [idSchema('ship').parse(selectorShipId)]));
     },
     pingTrierarch: async () => unwrap(await useCases.pingShip(argo, { shipId: trierarchShip.shipId })).messageId,
     reportOfTrierarch: async () => {
