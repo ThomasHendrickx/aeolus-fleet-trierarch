@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -176,9 +175,13 @@ func TestTheGuardLeavesAGroupWhoseIdAnotherProcessNowHasAndEndsTheHoldsOwn(t *te
 	// The hold recorded another process under the id the other group now has: that group is not the hold's.
 	lines := strconv.Itoa(other.Process.Pid) + " Thu_Jan_1_00:00:00_1970\n" + strconv.Itoa(own.Process.Pid) + " " + startOf(own.Process.Pid) + "\n"
 
-	// The guard ignores these signals in the process it runs in, and a child would inherit that.
-	defer signal.Reset(syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
-	Guard(strings.NewReader(lines))
+	// A process of its own, as it runs: the guard ignores the signals a session may send, and the tests' children would inherit that.
+	program, _ := os.Executable()
+	guard := exec.Command(program, "hold", "--guard")
+	guard.Stdin = strings.NewReader(lines)
+	if err := guard.Run(); err != nil {
+		t.Fatal(err)
+	}
 
 	ownEnded := make(chan error, 1)
 	go func() { ownEnded <- own.Wait() }()
