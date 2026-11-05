@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,6 +12,7 @@ import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
 
 // Sessions in containers (decision 0039; docs/trierarch.md, "Session runtime"): run checks the runtime and refuses one that cannot hold a session to its ship; each session then runs in a container of its own, run by its hold, with its ship's own home.
+// Its workspace is a clone of its own in place of a worktree, at the same path, holding its own objects, with the repository's own remote as its origin, so git works inside and no ship reaches another's.
 
 const CREWED_WITHIN_MS = 30_000;
 const ANSWERED_WITHIN_MS = 30_000;
@@ -19,6 +20,8 @@ const MODEL_TOKEN = 'sk-ant-oat01-contract-token-not-real';
 const KEY = 'sk-ant-api03-contract-key-not-real';
 const RUNTIME = { kind: 'container', binary: 'podman', memory: '4g', cpus: 2 };
 const SESSION_IMAGE = 'ghcr.io/thomashendrickx/aeolus-session';
+/** A pass runs every 5 seconds. */
+const SAID_WITHIN_MS = 30_000;
 
 const IDENTITY = { GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 't@example.com' };
 const git = (folder: string, ...args: string[]): string => execFileSync('git', ['-C', folder, ...args], { env: { ...process.env, ...IDENTITY }, encoding: 'utf8' }).trim();
@@ -280,5 +283,80 @@ describe('a session in a container', () => {
 
     await expect.poll(() => existsSync(shipHome()), { timeout: CREWED_WITHIN_MS }).toBe(false);
     expect(machine.callsOf('podman')).toEqual(expect.arrayContaining([`kill ${container()}`, `rm --force ${container()}`]));
+  });
+});
+
+describe("a ship's clone in containers", () => {
+  let scout: ShipId;
+
+  /** Configures the container runtime and crews scout in a workspace of the machine's repository. */
+  async function aCrewedScout(): Promise<string> {
+    configure((configuration) => ({ ...configuration, runtime: RUNTIME }));
+    writeModelToken();
+    const restart = await machine.trierarch(['restart']);
+    expect(restart.status, restart.stdout + restart.stderr).toBe(0);
+    scout = await fleet.commission('scout', { scopes: ['fleet:read'] });
+    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
+    return sessionOf(machine, 'scout').worktree;
+  }
+
+  /** An upstream the machine's repository has as its origin, fetched: its URL. */
+  function anUpstream(): string {
+    const upstream = join(mkdtempSync(join(tmpdir(), 'trierarch-upstream-')), 'upstream.git');
+    execFileSync('git', ['clone', '-q', '--bare', machine.repository, upstream]);
+    git(machine.repository, 'remote', 'add', 'origin', upstream);
+    git(machine.repository, 'fetch', '-q', 'origin');
+    return upstream;
+  }
+
+  beforeEach(async () => {
+    fleet = await aFleet();
+    machine = await aMachine();
+    await aCrewingMachine({ fleet, machine });
+  });
+
+  it("is a clone of its own at the worktree's path, with a .git of its own holding its own objects, detached at the repository's commit, so git works inside", async () => {
+    const folder = await aCrewedScout();
+
+    expect(folder).toBe(join(machine.trierarchHome, 'worktrees', REPOSITORY, 'scout'));
+    expect(statSync(join(folder, '.git')).isDirectory()).toBe(true);
+    expect(existsSync(join(folder, '.git', 'objects', 'info', 'alternates'))).toBe(false);
+    expect(git(folder, 'rev-parse', 'HEAD')).toBe(git(machine.repository, 'rev-parse', 'HEAD'));
+    expect(git(folder, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('HEAD');
+    expect(git(machine.repository, 'worktree', 'list', '--porcelain').split('\n').filter((line) => line.startsWith('worktree '))).toEqual([`worktree ${realpathSync(machine.repository)}`]);
+  });
+
+  it("has the repository's own remote as its origin, with its remote branches as the repository last fetched them", async () => {
+    const upstream = anUpstream();
+
+    const folder = await aCrewedScout();
+
+    expect(git(folder, 'remote')).toBe('origin');
+    expect(git(folder, 'remote', 'get-url', 'origin')).toBe(upstream);
+    expect(git(folder, 'rev-parse', 'refs/remotes/origin/main')).toBe(git(machine.repository, 'rev-parse', 'refs/remotes/origin/main'));
+  });
+
+  it('has no remote when the repository has none, never the repository itself', async () => {
+    const folder = await aCrewedScout();
+
+    expect(git(folder, 'remote')).toBe('');
+  });
+
+  it('goes when its crew request is removed', async () => {
+    const folder = await aCrewedScout();
+
+    await fleet.removeCrewRequest(scout);
+
+    await expect.poll(() => existsSync(folder), { timeout: CREWED_WITHIN_MS }).toBe(false);
+  });
+
+  it('that no ship works in is an orphan the trierarch says it will not clear, and stays', async () => {
+    await aCrewedScout();
+    const stray = join(machine.trierarchHome, 'worktrees', REPOSITORY, 'stray');
+    execFileSync('git', ['clone', '-q', machine.repository, stray]);
+
+    await expect.poll(() => machine.serviceLog(), { timeout: SAID_WITHIN_MS }).toContain(`Will not clear the orphan ${stray}: the trierarch made no worktree of it, or git no longer knows it; it removes only what it made`);
+    expect(existsSync(stray)).toBe(true);
   });
 });
