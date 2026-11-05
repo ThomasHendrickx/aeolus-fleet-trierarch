@@ -1,20 +1,23 @@
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { aCrewingMachine, sessionOf, REPOSITORY } from './support/crewing.js';
+import { aCrewingMachine, isRunning, sessionOf, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
 
 // A ship's worktree is made from the ref the workspace names as origin has it, never from a clone's local branch, and a worktree that cannot be made says why (docs/trierarch.md, "Workspaces").
+// A worktree under the root that no ship works in is an orphan: what runs in it is stopped, then it is removed, unless it holds unsaved work (#1041).
 
 /** A pass runs every 5 seconds, and a crew that fails 3 times in a row is given back. */
 const CREWED_WITHIN_MS = 30_000;
 const GIVEN_BACK_WITHIN_MS = 60_000;
+/** A pass every 5 seconds, and a process that does not end is killed 5 seconds after it was asked to. */
+const CLEARED_WITHIN_MS = 30_000;
 
 const IDENTITY = { GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 't@example.com' };
 
@@ -23,6 +26,8 @@ const git = (folder: string, ...args: string[]): string => execFileSync('git', [
 let fleet: Fleet;
 let machine: Machine;
 let scout: ShipId;
+/** The processes a test started, each stopped after it by its pid. */
+let started: number[] = [];
 
 beforeEach(async () => {
   fleet = await aFleet();
@@ -35,6 +40,10 @@ afterEach(async ({ task }) => {
   if (task.result?.state === 'fail') {
     console.log(`The service's log:\n${machine.serviceLog()}`);
   }
+  for (const pid of started.filter(isRunning)) {
+    process.kill(pid, 'SIGKILL');
+  }
+  started = [];
   await machine.remove();
   await fleet.close();
 });
@@ -89,5 +98,39 @@ describe('a ship in a worktree of a repository', () => {
 
     await expect.poll(() => fleet.givenBackReasonOf(scout), { timeout: GIVEN_BACK_WITHIN_MS }).toContain('git worktree add failed: fatal: invalid reference: HEAD');
     expect((await fleet.givenBackReasonOf(scout))?.length).toBeLessThanOrEqual(200);
+  });
+});
+
+/** A worktree of the machine's repository under the trierarch's root that no ship works in, with a process already running in it, as a dev server a retired ship's session left: its folder and the process's pid. */
+function anOrphanWithAProcess(name: string): { folder: string; pid: number } {
+  const folder = join(machine.trierarchHome, 'worktrees', REPOSITORY, name);
+  mkdirSync(folder, { recursive: true });
+  // Started before the folder is a worktree, so no pass finds the orphan with nothing running in it.
+  const child = spawn('sleep', ['600'], { cwd: folder, detached: true, stdio: 'ignore' });
+  child.unref();
+  const pid = child.pid ?? 0;
+  started.push(pid);
+  git(machine.repository, 'worktree', 'add', '-q', '--detach', folder);
+  return { folder, pid };
+}
+
+describe('an orphan worktree', () => {
+  it('is removed once what runs in it is stopped', async () => {
+    const { folder, pid } = anOrphanWithAProcess('stray');
+
+    await expect.poll(() => existsSync(folder), { timeout: CLEARED_WITHIN_MS }).toBe(false);
+    expect(isRunning(pid)).toBe(false);
+    expect(machine.serviceLog()).toContain(`Removed the orphan worktree ${folder}, after stopping 1 process in it`);
+  });
+
+  it('that holds unsaved work stays, with what runs in it stopped, and status names it', async () => {
+    const { folder, pid } = anOrphanWithAProcess('stray');
+    writeFileSync(join(folder, 'unsaved.txt'), 'unsaved\n');
+
+    await expect.poll(() => isRunning(pid), { timeout: CLEARED_WITHIN_MS }).toBe(false);
+    await expect.poll(() => machine.serviceLog(), { timeout: CLEARED_WITHIN_MS }).toContain(`Kept the orphan worktree ${folder}, which holds unsaved work: ?? unsaved.txt`);
+    expect(existsSync(folder)).toBe(true);
+    const status = await machine.trierarch(['status', '--json']);
+    expect(JSON.parse(status.stdout)).toMatchObject({ orphans: [folder] });
   });
 });
