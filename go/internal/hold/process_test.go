@@ -160,3 +160,17 @@ func TestTheHoldRefusesAnotherShipsSession(t *testing.T) {
 		t.Fatalf("another ship's session's call = %s, want %q", got, Refused)
 	}
 }
+
+func TestTheHoldRefusesAProcessAnotherShipsSessionForkedOnceItIsReparented(t *testing.T) {
+	sessions := shortFolder(t)
+	scout, _ := aHoldProcessOf(t, sessions, ship, `while read -r line; do :; done`)
+	answered := filepath.Join(t.TempDir(), "answer")
+
+	// The subshell ends at once, so the process it forked calls once its parent is gone.
+	aHoldProcessOf(t, sessions, "shp_01m6jyczpnpp5c0vxh54c966cz", `( (sleep 1; "$CALLER" call `+scout.Socket+` `+answered+`) & ); while read -r line; do :; done`)
+
+	eventually(t, "the reparented process's call answered", func() bool { return read(answered) != "" })
+	if got := read(answered); !strings.Contains(got, Refused) {
+		t.Fatalf("a reparented process of another ship's session called = %s, want %q", got, Refused)
+	}
+}
