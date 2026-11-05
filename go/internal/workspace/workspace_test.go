@@ -245,3 +245,87 @@ func TestInContainersAShipsFolderIsItsRealPathWhichTheContainerMountsAsTheHostKe
 		}
 	}
 }
+
+func TestTheWorktreesUnderTheRootAreListedByRepositoryAndName(t *testing.T) {
+	repository, root := aRepository(t)
+	for _, folder := range []string{filepath.Join(root, "aeolus-fleet", "scout"), filepath.Join(root, "aeolus-fleet", "deeper", "lookout"), filepath.Join(t.TempDir(), "elsewhere")} {
+		gitIn(t, "-C", repository, "worktree", "add", "-q", "--detach", folder)
+	}
+	places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}}
+
+	got, err := places.Worktrees()
+
+	want := []reconciler.Worktree{{Path: filepath.Join(root, "aeolus-fleet", "scout"), Repository: "aeolus-fleet", Name: "scout"}}
+	if err != nil || !slices.Equal(got, want) {
+		t.Fatalf("Worktrees() = %v, %v, want %v", got, err, want)
+	}
+}
+
+func TestTheWorktreesUnderARootReachedThroughALinkAreListedUnderTheRoot(t *testing.T) {
+	repository, real := aRepository(t)
+	root := filepath.Join(t.TempDir(), "root")
+	if err := os.Symlink(real, root); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, "-C", repository, "worktree", "add", "-q", "--detach", filepath.Join(root, "aeolus-fleet", "scout"))
+	places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}}
+
+	got, err := places.Worktrees()
+
+	want := []reconciler.Worktree{{Path: filepath.Join(root, "aeolus-fleet", "scout"), Repository: "aeolus-fleet", Name: "scout"}}
+	if err != nil || !slices.Equal(got, want) {
+		t.Fatalf("Worktrees() = %v, %v, want %v", got, err, want)
+	}
+}
+
+func TestOnlyAWorktreeGitKnowsOfAConfiguredRepositoryByRepositoryAndShipIsMade(t *testing.T) {
+	repository, root := aRepository(t)
+	made := filepath.Join(root, "aeolus-fleet", "scout")
+	gitIn(t, "-C", repository, "worktree", "add", "-q", "--detach", made)
+	deeper := filepath.Join(root, "aeolus-fleet", "deeper", "lookout")
+	gitIn(t, "-C", repository, "worktree", "add", "-q", "--detach", deeper)
+	plain := filepath.Join(root, "aeolus-fleet", "plain")
+	other := filepath.Join(root, "hemma", "scout")
+	for _, folder := range []string{plain, other} {
+		if err := os.MkdirAll(folder, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}}
+
+	for folder, want := range map[string]bool{made: true, deeper: false, plain: false, other: false} {
+		if got := places.IsMade(folder); got != want {
+			t.Errorf("IsMade(%s) = %v, want %v", folder, got, want)
+		}
+	}
+}
+
+func TestAWorktreeIsRemovedByItsPathFromTheRepositoryItsPathNames(t *testing.T) {
+	repository, root := aRepository(t)
+	folder := filepath.Join(root, "aeolus-fleet", "stray")
+	gitIn(t, "-C", repository, "worktree", "add", "-q", "--detach", folder)
+	places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}}
+
+	if err := places.RemoveWorktree(folder); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(folder); err == nil {
+		t.Error("the worktree stayed")
+	}
+}
+
+func TestAFolderNoRepositoryNamesIsNotRemoved(t *testing.T) {
+	_, root := aRepository(t)
+	folder := filepath.Join(root, "hemma", "stray")
+	if err := os.MkdirAll(folder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	places := Places{Root: root, Repositories: map[string]string{}}
+
+	if err := places.RemoveWorktree(folder); err == nil {
+		t.Error("RemoveWorktree() = nil, want an error")
+	}
+	if _, err := os.Stat(folder); err != nil {
+		t.Errorf("the folder went: %v", err)
+	}
+}

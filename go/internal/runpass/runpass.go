@@ -84,11 +84,21 @@ type Harness interface {
 	Problem() error
 }
 
-// Workspace makes and removes a ship's workspace.
+// Workspace makes and removes a ship's workspace, and lists the worktrees under the root.
 type Workspace interface {
 	Prepare(entry reconciler.Entry, shipName string) (string, error)
 	Unsaved(folder string) ([]string, error)
 	Remove(entry reconciler.Entry) error
+	Worktrees() ([]reconciler.Worktree, error)
+	// IsMade is whether the folder is a worktree the trierarch made, which git knows: anything else under its root is not its to clear.
+	IsMade(folder string) bool
+	RemoveWorktree(folder string) error
+}
+
+// FolderProcesses are the processes running in a folder, whatever started them: a dev server a session left behind (#1041).
+type FolderProcesses interface {
+	// StopIn stops every process whose working folder is the folder or inside it, and answers how many it stopped.
+	StopIn(folder string) (int, error)
 }
 
 // Checkouts are each ship's read-only checkouts, made before its session starts and removed with its identity.
@@ -132,10 +142,12 @@ type Pass struct {
 	Sessions  Sessions
 	Harnesses map[string]Harness
 	Workspace Workspace
-	Checkouts Checkouts
-	Store     Store
-	Log       func(line string)
-	Now       func() time.Time
+	// FolderProcesses are stopped in an orphan worktree before it is removed.
+	FolderProcesses FolderProcesses
+	Checkouts       Checkouts
+	Store           Store
+	Log             func(line string)
+	Now             func() time.Time
 	// NewLaunchID is a launch id of its own for each start (#490).
 	NewLaunchID func() string
 	FleetURL    string
@@ -231,6 +243,11 @@ func (p Pass) Run() error {
 			continue
 		}
 		if next, err = p.carryOut(next, action); err != nil {
+			if action.Kind == reconciler.ClearOrphan {
+				// An orphan is no ship's: the next orphan is cleared all the same.
+				p.Log(fmt.Sprintf("The pass failed at %s: %v; %s", action.Kind, err, nextAfterFailure))
+				continue
+			}
 			failed[action.ShipID] = failed[action.ShipID] || !isNotice(action.Kind)
 			if action.Kind == reconciler.Crew {
 				next = p.crewFailed(next, action.ShipID, err)
@@ -442,14 +459,14 @@ func (p Pass) carryOut(state reconciler.State, action reconciler.Action) (reconc
 	case reconciler.Confirm:
 		return state, p.Fleet.ConfirmRelease(action.ShipID)
 	case reconciler.Forget:
-		// Its worktree stays, as today's trierarch leaves it (an orphan).
+		// Its worktree stays, an orphan its clear removes unless it holds unsaved work.
 		if err := p.Sessions.Stop(action.ShipID); err != nil {
 			return state, err
 		}
 		if err := p.deleteIdentity(*action.Entry); err != nil {
 			return state, err
 		}
-		p.Log(fmt.Sprintf("%s (%s): its request is no longer assigned here, so its session and identity ended; its worktree stays", nameOf(*action.Entry), action.ShipID))
+		p.Log(fmt.Sprintf("%s (%s): its request is no longer assigned here, so its session and identity ended", nameOf(*action.Entry), action.ShipID))
 		return p.remove(state, action.ShipID)
 	case reconciler.WriteStatus:
 		return state, p.Fleet.WriteStatus(action.ShipID, action.Status.Status, action.Status.Attempt, fleetTime(action.Status.StartedAt))
@@ -479,6 +496,8 @@ func (p Pass) carryOut(state reconciler.State, action reconciler.Action) (reconc
 			return state, nil
 		}
 		return state, p.handOver(entry, action)
+	case reconciler.ClearOrphan:
+		return p.clearOrphan(state, *action.Orphan, action.IsNew)
 	}
 	return state, fmt.Errorf("no such action %s", action.Kind)
 }
@@ -809,6 +828,65 @@ func (p Pass) endWorkspace(entry reconciler.Entry, told func(notices.Ship, strin
 	return p.Workspace.Remove(entry)
 }
 
+// clearOrphan clears a worktree under the root no entry works in, as after its ship is retired (gap rule 2, #1041): what runs in it stops first, as it would be left running from a folder that is gone. Then it is removed, unless it holds unsaved work: that stays, held as an orphan, for a human. A failure leaves it held and tried again on the next pass.
+func (p Pass) clearOrphan(state reconciler.State, orphan reconciler.Worktree, isNew bool) (reconciler.State, error) {
+	// Checked first: nothing is stopped or removed in a folder the trierarch did not make, and it is no failure to leave one (it stays held, said once).
+	if !p.Workspace.IsMade(orphan.Path) {
+		if isNew {
+			p.Log(fmt.Sprintf("Will not clear the orphan %s: the trierarch made no worktree of it, or git no longer knows it; it removes only what it made", orphan.Path))
+		}
+		return state, nil
+	}
+	// An entry crewed earlier in this pass works here now: the reconcile saw it with no folder.
+	for _, entry := range state.Entries {
+		if entry.Folder == orphan.Path {
+			return p.dropOrphan(state, orphan)
+		}
+	}
+	stopped, err := p.FolderProcesses.StopIn(orphan.Path)
+	if err != nil {
+		return state, err
+	}
+	unsaved, err := p.Workspace.Unsaved(orphan.Path)
+	if err != nil {
+		return state, err
+	}
+	if len(unsaved) > 0 {
+		if isNew {
+			p.Log(fmt.Sprintf("Kept the orphan worktree %s, which holds unsaved work: %s", orphan.Path, strings.Join(unsaved, "; ")))
+		}
+		return state, nil
+	}
+	if err := p.Workspace.RemoveWorktree(orphan.Path); err != nil {
+		return state, err
+	}
+	state, err = p.dropOrphan(state, orphan)
+	if err != nil {
+		return state, err
+	}
+	switch stopped {
+	case 0:
+		p.Log(fmt.Sprintf("Removed the orphan worktree %s", orphan.Path))
+	case 1:
+		p.Log(fmt.Sprintf("Removed the orphan worktree %s, after stopping 1 process in it", orphan.Path))
+	default:
+		p.Log(fmt.Sprintf("Removed the orphan worktree %s, after stopping %d processes in it", orphan.Path, stopped))
+	}
+	return state, nil
+}
+
+// dropOrphan holds the orphan no more.
+func (p Pass) dropOrphan(state reconciler.State, orphan reconciler.Worktree) (reconciler.State, error) {
+	held := []any{}
+	for _, each := range state.Orphans {
+		if fields, ok := each.(map[string]any); !ok || fields["path"] != orphan.Path {
+			held = append(held, each)
+		}
+	}
+	state.Orphans = held
+	return state, p.Store.Save(state)
+}
+
 // modelRefused keeps the model a session refused as refused at its harness's version, so this machine offers it no more, and tells argo once per harness, version and model (#382).
 func (p Pass) modelRefused(action reconciler.Action) error {
 	if err := p.RefuseModel(action.Harness, action.Model); err != nil {
@@ -964,6 +1042,9 @@ func (p Pass) reconcile(state reconciler.State) (reconciler.State, []reconciler.
 	}
 	observed, versions, err := p.observe(state, running)
 	if err != nil {
+		return state, nil, err
+	}
+	if observed.Worktrees, err = p.Workspace.Worktrees(); err != nil {
 		return state, nil, err
 	}
 	now := p.Now()

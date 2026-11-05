@@ -843,3 +843,92 @@ func TestAShipReleasedElsewhereInItsLaunchWindowIsCrewedAgainAtOnce(t *testing.T
 		t.Fatalf("entry: %+v", next.Entries[scout])
 	}
 }
+
+// aWorktree is a worktree of aeolus-fleet under the root, by its name.
+func aWorktree(name string) Worktree {
+	return Worktree{Path: "/worktrees/aeolus-fleet/" + name, Repository: "aeolus-fleet", Name: name}
+}
+
+func orphan(name string) any {
+	return map[string]any{"path": "/worktrees/aeolus-fleet/" + name, "repository": "aeolus-fleet", "name": name}
+}
+
+func assertOrphans(t *testing.T, got []any, want ...any) {
+	t.Helper()
+	if want == nil {
+		want = []any{}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("orphans:\n got  %+v\n want %+v", got, want)
+	}
+}
+
+func TestAWorktreeNoEntryWorksInIsAnOrphanToClear(t *testing.T) {
+	context := aContext()
+	stray := aWorktree("stray")
+	context.Observed.Worktrees = []Worktree{stray}
+
+	next, actions := Reconcile(Empty(), context)
+
+	assertActions(t, actions, Action{Kind: ClearOrphan, Orphan: &stray, IsNew: true})
+	assertOrphans(t, next.Orphans, orphan("stray"))
+}
+
+func TestAnOrphanTheStateHoldsAlreadyIsNotNew(t *testing.T) {
+	context := aContext()
+	stray := aWorktree("stray")
+	context.Observed.Worktrees = []Worktree{stray}
+	state := Empty()
+	state.Orphans = []any{orphan("stray")}
+
+	_, actions := Reconcile(state, context)
+
+	assertActions(t, actions, Action{Kind: ClearOrphan, Orphan: &stray})
+}
+
+func TestAnOrphanGoneFromDiskIsNoLongerHeld(t *testing.T) {
+	state := Empty()
+	state.Orphans = []any{orphan("stray")}
+
+	next, actions := Reconcile(state, aContext())
+
+	assertActions(t, actions)
+	assertOrphans(t, next.Orphans)
+}
+
+func TestTheWorktreeAnEntryWorksInIsNoOrphan(t *testing.T) {
+	request := aRequest(scout)
+	request.Status = status("running")
+	context := aContext(request)
+	context.Observed.Sessions = running(scout)
+	context.Observed.Worktrees = []Worktree{aWorktree("scout")}
+
+	next, actions := Reconcile(withEntries(anEntry(scout, "running")), context)
+
+	assertActions(t, actions)
+	assertOrphans(t, next.Orphans)
+}
+
+func TestAKeptWorktreeIsNoOrphan(t *testing.T) {
+	context := aContext()
+	context.Observed.Worktrees = []Worktree{aWorktree("lookout")}
+	state := Empty()
+	state.Kept = []any{map[string]any{"shipId": lookout, "repository": "aeolus-fleet", "path": "/worktrees/aeolus-fleet/lookout"}}
+
+	next, actions := Reconcile(state, context)
+
+	assertActions(t, actions)
+	assertOrphans(t, next.Orphans)
+}
+
+func TestTheWorktreeOfAnEntryForgottenIsAnOrphanAfterItsForget(t *testing.T) {
+	context := aContext()
+	worktree := aWorktree("scout")
+	context.Observed.Worktrees = []Worktree{worktree}
+	entry := anEntry(scout, "running")
+
+	next, actions := Reconcile(withEntries(entry), context)
+
+	assertActions(t, actions, Action{Kind: Forget, ShipID: scout, Entry: &entry}, Action{Kind: ClearOrphan, Orphan: &worktree, IsNew: true})
+	assertOrphans(t, next.Orphans, orphan("scout"))
+}
