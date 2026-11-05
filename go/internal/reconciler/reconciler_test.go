@@ -158,6 +158,39 @@ func TestAHarnessNotOfferedIsToldBeforeItsPluginIsMissing(t *testing.T) {
 	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "harness: claude-code is not offered: why"})
 }
 
+func TestAnEntryWhosePluginIsLostUnderItsRunningSessionIsGivenBackSayingToUpgrade(t *testing.T) {
+	entry := anEntry(scout, "running")
+	other := anEntry("shp_other", "running")
+	other.Harness = "codex"
+	request, otherRequest := aRequest(scout), aRequest("shp_other")
+	request.Status, otherRequest.Status = status("running"), status("running")
+	context := aContext(request, otherRequest)
+	context.Harnesses = []string{"claude-code", "codex"}
+	context.Observed.Sessions = running(scout, "shp_other")
+	context.MissingPlugins = []string{"claude-code"}
+	context.MarksLaunches = map[string]bool{"codex": true}
+
+	_, actions := Reconcile(withEntries(entry, other), context)
+
+	given := entry
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "harness: claude-code's aeolus-fleet plugin is not installed: run aeolus-trierarch upgrade", Entry: &given})
+}
+
+func TestAnEntryWhosePluginIsLostIsNotGivenBackOnceMoreAtTheVersionRefused(t *testing.T) {
+	entry := anEntry(scout, "running")
+	state := withEntries(entry)
+	state.Refused[scout] = 1
+	request := aRequest(scout)
+	request.Status = status("running")
+	context := aContext(request)
+	context.Observed.Sessions = running(scout)
+	context.MissingPlugins = []string{"claude-code"}
+
+	_, actions := Reconcile(state, context)
+
+	assertActions(t, actions)
+}
+
 func TestARequestAlreadyRefusedAtItsVersionIsNotGivenBackAgain(t *testing.T) {
 	request := aRequest(scout)
 	request.Settings.Harness = "codex"
