@@ -89,3 +89,19 @@ describe("a GitHub Release's binary for this system and chip", () => {
     await expect(release().binaryOf('0.18.0')).rejects.toThrow(`Could not read the release v0.18.0 of ${REPOSITORY}: ${api}/repos/${REPOSITORY}/releases/tags/v0.18.0 answered 403`);
   });
 });
+
+describe('the latest GitHub Release', () => {
+  it('is the version its tag names', async () => {
+    routes.set(`/repos/${REPOSITORY}/releases/latest`, { body: JSON.stringify({ tag_name: 'v0.18.0', assets: [] }) });
+    expect(await release().latest()).toBe('0.18.0');
+  });
+
+  it('is none when the repository has no release', async () => {
+    expect(await release().latest()).toBeUndefined();
+  });
+
+  it('is none when GitHub does not answer, so npm decides', async () => {
+    routes.set(`/repos/${REPOSITORY}/releases/latest`, { body: 'busy', status: 503 });
+    expect(await release().latest()).toBeUndefined();
+  });
+});
