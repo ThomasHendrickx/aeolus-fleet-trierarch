@@ -84,7 +84,8 @@ func (l Launchd) plist() string {
 `
 }
 
-func (l Launchd) write() error {
+// Write writes the agent and loads nothing: install --no-load.
+func (l Launchd) Write() error {
 	if err := os.MkdirAll(l.Logs, 0o755); err != nil {
 		return err
 	}
@@ -124,7 +125,7 @@ func (l Launchd) isInstalled() bool {
 
 // Install writes the agent, then loads it, unloading an earlier copy first: bootstrap refuses a loaded agent.
 func (l Launchd) Install() error {
-	if err := l.write(); err != nil {
+	if err := l.Write(); err != nil {
 		return err
 	}
 	if err := l.bootout(); err != nil {
@@ -135,7 +136,7 @@ func (l Launchd) Install() error {
 
 // Rewrite writes the agent over an installed one, leaving the running trierarch and its sessions alone: launchd reads the file when it loads the agent again, as the trierarch's own stop and start do.
 func (l Launchd) Rewrite() error {
-	return l.write()
+	return l.Write()
 }
 
 // Start loads an unloaded agent and kicks a loaded one.
