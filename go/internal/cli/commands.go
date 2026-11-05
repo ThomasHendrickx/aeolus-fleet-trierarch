@@ -12,6 +12,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/style"
 )
 
 // Listed is a ship as `list` says it, in the shape today's trierarch answers.
@@ -27,7 +28,7 @@ type Listed struct {
 }
 
 // list is the ships the trierarch crews, from its saved state.
-func list(at paths.Paths) (answer, error) {
+func list(at paths.Paths, look style.Style) (answer, error) {
 	saved, err := state.File{Path: at.State}.Load()
 	if err != nil {
 		return answer{}, err
@@ -58,18 +59,28 @@ func list(at paths.Paths) (answer, error) {
 		}
 	}
 	lines := []string{}
-	for _, row := range rows {
+	for at, row := range rows {
 		cells := []string{}
 		for column, cell := range row {
+			toned := cell
 			if column < len(row)-1 {
-				cell += strings.Repeat(" ", widths[column]-len(cell))
+				toned += strings.Repeat(" ", widths[column]-len(cell))
 			}
-			cells = append(cells, cell)
+			switch {
+			case at == 0:
+				toned = look.Tone(style.Strong, toned)
+			case column == stateColumn:
+				toned = look.Tone(style.OfState(cell), toned)
+			}
+			cells = append(cells, toned)
 		}
 		lines = append(lines, strings.Join(cells, "  "))
 	}
 	return answer{data: listed, text: strings.Join(lines, "\n")}, nil
 }
+
+// stateColumn is the column of list that holds a ship's state.
+const stateColumn = 1
 
 // drive starts or restarts the service, and says once the new process said its version in running.json, 30 seconds at most.
 func drive(at paths.Paths, machine Machine, done string, start func() error) (answer, error) {
