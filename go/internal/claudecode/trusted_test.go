@@ -26,3 +26,17 @@ func TestNoFolderIsTrustedWhereClaudeCodeKeepsNoFile(t *testing.T) {
 		t.Errorf("TrustedFolders() = %v, want none", got)
 	}
 }
+
+func TestAProjectEntryThatIsNotAnObjectIsSkipped(t *testing.T) {
+	home := t.TempDir()
+	text := `{"projects":{"/a":{"hasTrustDialogAccepted":true},"/b":null,"/c":"yes","/d":[1]}}`
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got := Of(home, "").TrustedFolders()
+
+	if want := map[string]bool{"/a": true}; !reflect.DeepEqual(got, want) {
+		t.Errorf("TrustedFolders() = %v, want %v", got, want)
+	}
+}
