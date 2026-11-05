@@ -1,5 +1,5 @@
 // Package cli is the Go trierarch's command line, `aeolus-trierarch`: init,
-// status, list, add, login, start, stop, restart, run, uninstall, upgrade, config check, detect, hold and proxy so far, as docs/trierarch.md says them. Each
+// status, list, add, login, logs, start, stop, restart, run, uninstall, upgrade, config check, detect, hold and proxy so far, as docs/trierarch.md says them. Each
 // command answers what it says and its exit status; a refusal is said on
 // stdout, as JSON under --json.
 package cli
@@ -23,6 +23,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/modelproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/receiving"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/servicelog"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 )
 
@@ -91,6 +92,10 @@ type Machine struct {
 	Trierarch func(program string, isPluginStep bool, words ...string) (string, int)
 	// Detect detects what the harnesses given offer, as by says, and keeps it in detected.json (#365).
 	Detect func(at paths.Paths, harnesses []string, by detection.By) (detection.Detected, error)
+	// ServiceLog is the trierarch's log where its service writes it, as logs reads it.
+	ServiceLog func(at paths.Paths) servicelog.Log
+	// Print writes a line to stdout at once, as logs --follow does for each line it follows.
+	Print func(line string)
 }
 
 const usage = `Usage: aeolus-trierarch <command>
@@ -115,6 +120,8 @@ const usage = `Usage: aeolus-trierarch <command>
                  the login that ship runs on, or its harness's default again, from its next start
   install [--no-load]
                  install the service: launchd on macOS, systemd on Linux; --no-load only writes its file
+  logs [--lines <n>] [--follow]
+                 the last lines of the log (the journal on Linux), and with --follow each new one
   start, stop, restart
                  drive the service; the sessions keep running
   run            what the service runs
@@ -129,8 +136,8 @@ const usage = `Usage: aeolus-trierarch <command>
   --json         answer as JSON
   --config <path> the configuration (AEOLUS_TRIERARCH_CONFIG)`
 
-var valueFlags = []string{"--fleet-url", "--ship-id", "--secret", "--plugin-ship-id", "--config", "--default", "--ship"}
-var switchFlags = []string{"--json", "--yes", "--version", "--api-key", "--remove-key", "--check", "--no-load"}
+var valueFlags = []string{"--fleet-url", "--ship-id", "--secret", "--plugin-ship-id", "--config", "--default", "--ship", "--lines"}
+var switchFlags = []string{"--json", "--yes", "--version", "--api-key", "--remove-key", "--check", "--no-load", "--follow"}
 
 type parsed struct {
 	words    []string
@@ -257,6 +264,9 @@ func Main(args []string, machine Machine) (string, int) {
 			said := "The trierarch stopped; its sessions keep running, and nothing is handed to them until it runs again."
 			return answer{data: map[string]any{"service": "stopped", "said": []string{said}}, text: said}, nil
 		},
+		"logs": func() (answer, error) {
+			return logs(at, machine, command)
+		},
 		"config check": func() (answer, error) {
 			configuration, err := config.Load(at.Config)
 			if err != nil {
@@ -333,7 +343,7 @@ func Main(args []string, machine Machine) (string, int) {
 		}
 		return err.Error(), 1
 	}
-	if isJSON {
+	if isJSON && said.data != nil {
 		return mustJSON(said.data), said.code
 	}
 	return said.text, said.code

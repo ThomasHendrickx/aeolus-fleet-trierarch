@@ -44,6 +44,8 @@ export interface Machine {
   readonly underTest: readonly string[];
   /** Runs the trierarch under test with the words given, from the home, to its end; another trierarch's command when `as` names one, with more variables when `env` gives them. */
   trierarch(words: readonly string[], at?: { input?: string; as?: readonly string[]; env?: Readonly<Record<string, string>> }): Promise<CommandOutcome>;
+  /** Starts the trierarch under test with the words given, from the home, and leaves it running: for a command that runs until it is stopped. */
+  start(words: readonly string[]): RunningCommand;
   /** Makes the stand-in answer otherwise, as the file of that name says. */
   toggle(name: StandInSwitch, isOn: boolean): void;
   /** Makes every Claude Code session's turn fail as when the model is not found, naming the model; none makes them answer again. */
@@ -58,6 +60,13 @@ export interface Machine {
   callsOf(harness: 'claude' | 'codex' | 'copilot'): string[];
   /** Stops every session and the service, then removes the machine. */
   remove(): Promise<void>;
+}
+
+export interface RunningCommand {
+  /** Everything it wrote to stdout so far. */
+  readonly stdout: () => string;
+  /** Ends it as an operator does (SIGINT) and says its exit status. */
+  readonly interrupt: () => Promise<number>;
 }
 
 export type StandInSwitch = 'claude-signed-out' | 'claude-help-names-no-alias' | 'claude-plugin-fails' | 'codex-plugin-fails' | 'codex-deletes-plugin-data' | 'codex-untrusted-hook';
@@ -102,7 +111,7 @@ export function runProgram(command: readonly string[], at: { cwd: string; env: R
 /** Where the machine's own programs are: git, ss, bash, curl and the rest the trierarch and the plugin's scripts run. */
 const SYSTEM_FOLDERS = ['/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'];
 /** The harnesses and service managers a real install of this machine may hold: only the stand-ins answer to them. */
-const STOOD_IN = new Set(['claude', 'codex', 'copilot', 'systemctl', 'systemd-run', 'launchctl', 'npm', 'npx']);
+const STOOD_IN = new Set(['claude', 'codex', 'copilot', 'systemctl', 'journalctl', 'systemd-run', 'launchctl', 'npm', 'npx']);
 
 /** Links each of the machine's programs into `tools`, but for the ones stood in for, so a real Claude Code or Codex on this machine is never found. */
 function linkSystemPrograms(tools: string): void {
@@ -206,6 +215,28 @@ esac
 `;
 }
 
+/** `journalctl` for the trierarch's unit: the journal is the file the stand-in systemd writes the service's output to. */
+function journalctlStandIn(at: { machine: string }): string {
+  return `#!/bin/bash
+log='${join(at.machine, 'systemd', 'trierarch.log')}'
+mkdir -p "$(dirname "$log")"
+touch "$log"
+lines=10
+follow=
+unit=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --unit) unit="$2"; shift ;;
+    --lines) lines="$2"; shift ;;
+    --follow) follow=-F ;;
+  esac
+  shift
+done
+[ "$unit" = aeolus-trierarch.service ] || { echo "journalctl stand-in: no unit $unit" >&2; exit 1; }
+exec tail -n "$lines" $follow "$log"
+`;
+}
+
 /** `codex`: the commands init, detection and setup run answered as Codex answers them; `codex exec` runs fake-codex.ts in the folder. */
 function codexStandIn(at: { machine: string; pluginData: string }): string {
   return `#!/bin/sh
@@ -281,6 +312,7 @@ export async function aMachine(at: { others?: readonly OtherHarness[] } = {}): P
   const codexPluginData = join(home, '.codex', 'plugins', 'data', 'aeolus-fleet-aeolus-fleet');
   script(join(bin, 'claude'), claudeStandIn({ machine, pluginData }));
   script(join(bin, 'systemctl'), systemctlStandIn({ machine, home }));
+  script(join(bin, 'journalctl'), journalctlStandIn({ machine }));
   if (others.includes('codex')) {
     script(join(bin, 'codex'), codexStandIn({ machine, pluginData: codexPluginData }));
   }
@@ -323,9 +355,30 @@ export async function aMachine(at: { others?: readonly OtherHarness[] } = {}): P
   }
   const trierarch = (words: readonly string[], at: { input?: string; as?: readonly string[]; env?: Readonly<Record<string, string>> } = {}) =>
     runProgram([...(at.as ?? underTest), ...words], { cwd: home, env: { ...env, ...at.env }, ...(at.input !== undefined && { input: at.input }) });
+  const start = (words: readonly string[]): RunningCommand => {
+    const [program = '', ...args] = [...underTest, ...words];
+    const child = spawn(program, args, { cwd: home, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    const ended = new Promise<number>((resolve) => {
+      child.on('close', (code) => {
+        resolve(code ?? 1);
+      });
+    });
+    return {
+      stdout: () => stdout,
+      interrupt: () => {
+        child.kill('SIGINT');
+        return ended;
+      },
+    };
+  };
   return {
     home,
     machine,
+    start,
     trierarchHome: join(home, '.aeolus', 'trierarch'),
     repository,
     pluginData,
