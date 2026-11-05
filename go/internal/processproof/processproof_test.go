@@ -6,7 +6,8 @@ import (
 )
 
 func TestAProcessRunsTheWordsItWasStartedWith(t *testing.T) {
-	process := exec.Command("sleep", "30", "--folder", "/a/folder")
+	// The shell keeps the words as arguments it ignores: macOS sleep refuses --folder and ends at once.
+	process := exec.Command("sh", "-c", "while :; do sleep 1; done", "sleep", "30", "--folder", "/a/folder")
 	if err := process.Start(); err != nil {
 		t.Fatal(err)
 	}
