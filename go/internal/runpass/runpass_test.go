@@ -372,18 +372,97 @@ func TestAShipCrewedByAnotherSessionIsLeft(t *testing.T) {
 	}
 }
 
-func TestACrewWhoseHarnessCannotStartIsGivenBackBeforeItRegisters(t *testing.T) {
+// crewFails runs passes in which scout's crew fails at its starting prompt, count times.
+func (p *aPass) crewFails(t *testing.T, count int) {
+	t.Helper()
+	p.fleet.refuse = "getStartingPrompt"
+	p.fleet.requests = []reconciler.Request{aRequest("")}
+	for range count {
+		p.run(t)
+	}
+}
+
+func TestACrewThatFailsIsCountedAndTriedAgainOnTheNextPass(t *testing.T) {
+	pass := aRunPass(t)
+
+	pass.crewFails(t, 1)
+
+	if got := pass.store.state.Entries[scout].CrewFailures; got != 1 {
+		t.Fatalf("crew failures = %d, want 1", got)
+	}
+	if slices.ContainsFunc(pass.fleet.calls, func(call string) bool { return strings.HasPrefix(call, "giveBack") }) {
+		t.Fatalf("given back after one failure: %q", pass.fleet.calls)
+	}
+	want := "scout (" + scout + "): crew failed: the fleet refused getStartingPrompt " + scout + "; " + nextAfterFailure
+	if !slices.Contains(pass.logged, want) {
+		t.Fatalf("logged %q, want %q", pass.logged, want)
+	}
+}
+
+func TestACrewThatFailsTwiceIsNotGivenBackYet(t *testing.T) {
+	pass := aRunPass(t)
+
+	pass.crewFails(t, 2)
+
+	if got := pass.store.state.Entries[scout].CrewFailures; got != 2 {
+		t.Fatalf("crew failures = %d, want 2", got)
+	}
+	if slices.ContainsFunc(pass.fleet.calls, func(call string) bool { return strings.HasPrefix(call, "giveBack") }) {
+		t.Fatalf("given back after two failures: %q", pass.fleet.calls)
+	}
+}
+
+func TestACrewThatFailsThreeTimesInARowIsGivenBackWithTheLastFailureAsTheReason(t *testing.T) {
+	pass := aRunPass(t)
+
+	pass.crewFails(t, 3)
+
+	want := "giveBack " + scout + " 1 mac-mini: crew failed 3 times: the fleet refused getStartingPrompt " + scout
+	if !slices.Contains(pass.fleet.calls, want) {
+		t.Fatalf("calls %q, want %q", pass.fleet.calls, want)
+	}
+	if len(pass.store.state.Entries) != 0 {
+		t.Fatalf("entries %+v", pass.store.state.Entries)
+	}
+	if !slices.Contains(pass.logged, "scout ("+scout+"): crew failed: the fleet refused getStartingPrompt "+scout+"; failed 3 times in a row, so the trierarch gives it back") {
+		t.Fatalf("logged %q", pass.logged)
+	}
+}
+
+func TestACrewGivenBackAfterFailingRemovesItsWorktreeAndEndsItsSession(t *testing.T) {
+	pass := aRunPass(t)
+
+	pass.crewFails(t, 3)
+
+	if !slices.Equal(pass.workspace.removed, []string{"/worktrees/aeolus-fleet/scout"}) || !slices.Contains(pass.sessions.stopped, scout) {
+		t.Fatalf("removed %q, stopped %q", pass.workspace.removed, pass.sessions.stopped)
+	}
+}
+
+func TestACrewThatSucceedsAfterFailuresClearsItsCount(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewFails(t, 2)
+	pass.fleet.refuse = ""
+
+	pass.run(t)
+
+	if got := pass.store.state.Entries[scout].CrewFailures; got != 0 {
+		t.Fatalf("crew failures after a crew = %d, want 0", got)
+	}
+}
+
+func TestACrewThatCannotStartCountsAgainstItsBudgetBeforeItRegisters(t *testing.T) {
 	pass := aRunPass(t)
 	pass.harness.problem = errors.New("the aeolus-fleet plugin's scripts are not at /plugin/scripts")
 	pass.fleet.requests = []reconciler.Request{aRequest("")}
 
 	pass.run(t)
+	pass.run(t)
+	pass.run(t)
 
-	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 mac-mini: the aeolus-fleet plugin's scripts are not at /plugin/scripts") || slices.ContainsFunc(pass.fleet.calls, func(call string) bool { return strings.HasPrefix(call, "register") }) {
+	want := "giveBack " + scout + " 1 mac-mini: crew failed 3 times: the aeolus-fleet plugin's scripts are not at /plugin/scripts"
+	if !slices.Contains(pass.fleet.calls, want) || slices.ContainsFunc(pass.fleet.calls, func(call string) bool { return strings.HasPrefix(call, "register") }) {
 		t.Fatalf("calls %q", pass.fleet.calls)
-	}
-	if len(pass.store.state.Entries) != 0 {
-		t.Fatalf("entries %+v", pass.store.state.Entries)
 	}
 }
 
@@ -393,10 +472,30 @@ func TestAGivenBackReasonIsCutToWhatTheFleetTakes(t *testing.T) {
 	pass.fleet.requests = []reconciler.Request{aRequest("")}
 
 	pass.run(t)
+	pass.run(t)
+	pass.run(t)
 
-	want := "giveBack " + scout + " 1 " + ("mac-mini: " + strings.Repeat("x", 300))[:200]
+	want := "giveBack " + scout + " 1 " + ("mac-mini: crew failed 3 times: " + strings.Repeat("x", 300))[:200]
 	if !slices.Contains(pass.fleet.calls, want) {
 		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+}
+
+func TestACrewThatFailedForOneSettingsVersionCountsAfreshForTheNext(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewFails(t, 2)
+	next := aRequest("crewing")
+	next.SettingsVersion = 2
+	pass.fleet.requests = []reconciler.Request{next}
+
+	pass.run(t)
+
+	entry := pass.store.state.Entries[scout]
+	if entry.SettingsVersion != 2 || entry.CrewFailures != 1 {
+		t.Fatalf("settings version %d, crew failures %d, want 2 and 1", entry.SettingsVersion, entry.CrewFailures)
+	}
+	if slices.ContainsFunc(pass.fleet.calls, func(call string) bool { return strings.HasPrefix(call, "giveBack") }) {
+		t.Fatalf("given back: %q", pass.fleet.calls)
 	}
 }
 
