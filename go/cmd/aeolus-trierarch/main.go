@@ -128,9 +128,13 @@ func main() {
 		Trusted: func(at paths.Paths, configuration config.Configuration) receiving.Keeper {
 			return trustedRepositories(at, configuration, home)
 		},
-		Sessions: func(at paths.Paths) cli.Sessions { return sessionRuntime(at, program) },
-		Log:      logLine,
-		ReadKey:  readKey,
+		Sessions: func(at paths.Paths) cli.Sessions {
+			// A configuration that cannot be read runs no session in a container.
+			configured, _ := config.Load(at.Config)
+			return sessionRuntime(at, program, configured.Runtime)
+		},
+		Log:     logLine,
+		ReadKey: readKey,
 		CheckKey: func(harness string, key string) keys.Checked {
 			return keys.Check(harness, key, "")
 		},
@@ -272,7 +276,7 @@ func runTrierarch(program string, isPluginStep bool, words ...string) (string, i
 var opened *shipsocket.Sockets
 
 // shipSockets are each ship's socket for its session's fleet calls, with its crew token from the state at each call (decision 0026). A caller is allowed only under the ship's own hold, or under the trierarch itself, as its aeolus-push.sh.
-func shipSockets(at paths.Paths, fleetURL string, running sessions.Runtime, checked checkouts.Git) *shipsocket.Sockets {
+func shipSockets(at paths.Paths, fleetURL string, running runningSessions, checked checkouts.Git) *shipsocket.Sockets {
 	store := state.File{Path: at.State}
 	trierarch := os.Getpid()
 	return shipsocket.New(shipsocket.Options{
@@ -400,9 +404,31 @@ func logLine(line string) {
 	fmt.Fprintf(stderr, "%s %s\n", time.Now().UTC().Format(time.RFC3339), line)
 }
 
-// sessionRuntime is the host session runtime: each session under a hold, the trierarch program run as `hold`, in a systemd scope of its own under the service.
-func sessionRuntime(at paths.Paths, program string) sessions.Runtime {
-	return sessions.Runtime{Sessions: at.Sessions, Program: []string{program}, Version: cli.Version, Launch: sessions.Launch(runtime.GOOS, os.Getenv("INVOCATION_ID"), sessions.SystemdVersion()), BootedAt: sessions.BootedAt}
+// runningSessions are the sessions as the passes, the harnesses and the ships' sockets reach them, on either runtime.
+type runningSessions interface {
+	List() ([]sessions.Observed, error)
+	Stop(shipID string) error
+	Start(session sessions.Start) error
+	Send(shipID string, line string) error
+	Interrupt(shipID string) error
+	// Root is the process the ship's session runs under, 0 when it runs not.
+	Root(shipID string) int
+}
+
+// sessionImage is the session image release.yml publishes with each version (decision 0011, 0039).
+const sessionImage = "ghcr.io/thomashendrickx/aeolus-session"
+
+// sessionRuntime is what the configuration's session runtime picks (decision 0039): each session under a hold, the trierarch program run as `hold`, in a systemd scope of its own under the service; in containers, a container per ship that its hold runs, from the image of the trierarch's own version, with the configured binary and caps and the machine's model token.
+func sessionRuntime(at paths.Paths, program string, configured *config.Runtime) runningSessions {
+	holds := sessions.Runtime{Sessions: at.Sessions, Program: []string{program}, Version: cli.Version, Launch: sessions.Launch(runtime.GOOS, os.Getenv("INVOCATION_ID"), sessions.SystemdVersion()), BootedAt: sessions.BootedAt}
+	if !isInContainers(configured) {
+		return holds
+	}
+	return container.Runtime{Holds: holds, Binary: configured.Binary, Image: sessionImage + ":" + cli.Version, ModelToken: at.ModelToken, Homes: at.Homes, Sockets: at.Sockets, Memory: configured.Memory, Cpus: configured.Cpus}
+}
+
+func isInContainers(configured *config.Runtime) bool {
+	return configured != nil && configured.Kind == "container"
 }
 
 func environment() map[string]string {
@@ -449,7 +475,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		return ""
 	}}
 	ask := &trusted.Ask{Fleet: client, PluginShipID: kept.PluginShipID, Log: logLine}
-	running := sessionRuntime(at, program)
+	running := sessionRuntime(at, program, configuration.Runtime)
 	proxy := modelProxy(at, program)
 	harnesses, offeredHarnesses, err := harnessesOf(configuration, at, env, home, running, proxy, offers)
 	if err != nil {
@@ -669,13 +695,21 @@ func (o *offers) options() map[string]map[string][]string {
 var adapters = []string{"claude-code", "codex", "copilot"}
 
 // harnessesOf are the adapters of the harnesses the configuration offers, each with the aeolus-fleet plugin its harness installed, and their names, the default first. Claude Code's and Codex's plugin is looked for at start, so a trierarch without it does not start; Copilot's at each crew, so the machine offers Copilot once it is installed. A configured harness this trierarch has no adapter for stops it at start, so no request for it is ever crewed.
-func harnessesOf(configuration config.Configuration, at paths.Paths, env map[string]string, home string, running sessions.Runtime, proxy modelproxy.Runtime, offers *offers) (map[string]runpass.Harness, []string, error) {
+func harnessesOf(configuration config.Configuration, at paths.Paths, env map[string]string, home string, running runningSessions, proxy modelproxy.Runtime, offers *offers) (map[string]runpass.Harness, []string, error) {
 	for name := range configuration.Harnesses {
 		if !slices.Contains(adapters, name) {
 			return nil, nil, fmt.Errorf("this trierarch has no adapter for the harness %s: it offers %s", name, strings.Join(adapters, ", "))
 		}
 	}
 	events := func(shipID string) string { return hold.FilesOf(at.Sessions, shipID).Events }
+	// Where a session reaches the model proxy (headless H16): on the host's loopback, at Podman's host address in a container.
+	proxyURL := proxy.URL
+	if isInContainers(configuration.Runtime) {
+		proxyURL = func() (string, bool) {
+			address, ok := proxy.URL()
+			return container.ProxyURL(address), ok
+		}
+	}
 	harnesses := map[string]runpass.Harness{}
 	offered := []string{}
 	for _, name := range adapters {
@@ -700,7 +734,7 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 				// As detection last found them: none before it found any.
 				PermissionModes: func() []string { return offers.permissionModes("claude-code") },
 				Events:          events,
-				ProxyURL:        proxy.URL,
+				ProxyURL:        proxyURL,
 			}
 		case "codex":
 			found, err := plugin.FindCodex(home, env)

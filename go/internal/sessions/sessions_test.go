@@ -364,7 +364,9 @@ func TestHeldAsReplacesWhatTheHoldRunsOnceTheShipsLastSessionStoppedAndItsFolder
 		t.Fatal(err)
 	}
 
-	eventually(t, "the held command's output", func() bool { return read(filepath.Join(folder, "held.txt")) != "" && read(filepath.Join(folder, "harness.env")) != "" })
+	eventually(t, "the held command's output", func() bool {
+		return read(filepath.Join(folder, "held.txt")) != "" && read(filepath.Join(folder, "harness.env")) != ""
+	})
 	if got := read(filepath.Join(folder, "held.txt")); got != "kept" || given.Command[0] != "claude" {
 		t.Fatalf("held %q, given %q", got, given.Command)
 	}

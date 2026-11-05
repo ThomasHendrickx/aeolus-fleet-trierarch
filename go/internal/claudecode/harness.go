@@ -88,7 +88,7 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 		return err
 	}
 	env[launchVariable] = launchID
-	if err := h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, Harness: "claude-code", Command: command, Env: env, ProxyToken: token}); err != nil {
+	if err := h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, Harness: "claude-code", Command: command, Env: env, ProxyToken: token, ReadOnly: entry.ReadOnly}); err != nil {
 		return err
 	}
 	return h.Runtime.Send(entry.ShipID, UserLine(line))
