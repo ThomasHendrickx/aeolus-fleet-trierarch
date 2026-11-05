@@ -7,14 +7,17 @@ import (
 	"time"
 )
 
-// aCodexHold is a hold of a harness that answers as `codex exec --json` does, one process per turn: each start noted in the starts file with its words, reading its stdin to its end first, the first turn naming its thread, a slow turn running until SIGINT ends it.
+// aCodexHold is a hold of a harness that answers as `codex exec --json` does, one process per turn: each start noted in the starts file with its words, reading its stdin to its end first, the first turn naming its thread, a slow turn running until SIGINT ends it. A slow turn traps SIGINT before its start is noted, so a SIGINT to a start seen always aborts the turn: one between them would end the shell unheard.
 func aCodexHold(t *testing.T, starts string, start ...string) aRunningHold {
 	t.Helper()
 	script := `cat > /dev/null
+case "$*" in
+  *slowly*) trap 'echo "{\"type\":\"turn.aborted\"}"; exit 130' INT ;;
+esac
 echo "$*" >> ` + starts + `
 if [ "$2" != resume ]; then echo '{"type":"thread.started","thread_id":"thread-1"}'; fi
 case "$*" in
-  *slowly*) trap 'echo "{\"type\":\"turn.aborted\"}"; exit 130' INT; sleep 30 > /dev/null & wait ;;
+  *slowly*) sleep 30 > /dev/null & wait ;;
   *quickly*) sleep 0.5 ;;
 esac
 last=$(eval echo \${$#})
