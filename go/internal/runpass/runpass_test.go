@@ -2096,7 +2096,7 @@ func failedStartsOf(shipIDs ...string) *failedstarts.Starts {
 // refusedDefaultModel crews scout, whose session refuses the model its harness picked: a failed start of the machine's.
 func (p *aPass) refusedDefaultModel(t *testing.T) {
 	t.Helper()
-	p.pass.Configuration = machineConfiguration
+	p.pass.ConfigurationFile = machineConfiguration
 	p.fleet.requests = []reconciler.Request{aRequest("")}
 	p.run(t)
 	p.harness.seen[scout] = reconciler.LaunchSeen{Kind: reconciler.LaunchRefused, Model: "claude-opus-4"}
@@ -2143,7 +2143,7 @@ func TestAMachineThatCannotTellArgoItStoppedOfferingItselfLogsItAndGoesOn(t *tes
 
 func TestAFailedCrewCountsAsAFailedStartOfTheMachine(t *testing.T) {
 	pass := aRunPass(t)
-	pass.pass.Configuration = machineConfiguration
+	pass.pass.ConfigurationFile = machineConfiguration
 	pass.store.state.FailedStarts = failedStartsOf("shp_other_a", "shp_other_b")
 
 	pass.crewFails(t, 1)
@@ -2156,7 +2156,7 @@ func TestAFailedCrewCountsAsAFailedStartOfTheMachine(t *testing.T) {
 
 func TestACrewOfOneShipThatFailsOverAndOverCountsAsOneShipSoItNeverStopsTheMachine(t *testing.T) {
 	pass := aRunPass(t)
-	pass.pass.Configuration = machineConfiguration
+	pass.pass.ConfigurationFile = machineConfiguration
 
 	pass.crewFails(t, 2)
 
@@ -2167,7 +2167,7 @@ func TestACrewOfOneShipThatFailsOverAndOverCountsAsOneShipSoItNeverStopsTheMachi
 
 func TestAStartThatSucceedsClearsTheFailedStartsTheStateKeeps(t *testing.T) {
 	pass := aRunPass(t)
-	pass.pass.Configuration = machineConfiguration
+	pass.pass.ConfigurationFile = machineConfiguration
 	pass.store.state.FailedStarts = failedStartsOf("shp_other_a", "shp_other_b")
 
 	pass.crewed(t)
