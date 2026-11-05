@@ -330,3 +330,17 @@ func TestASessionIsStartedReadingItsReadOnlyCheckouts(t *testing.T) {
 		t.Fatalf("command %q", command)
 	}
 }
+
+func TestASessionsReadOnlyCheckoutsAreNamedToItsRuntime(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	entry := anEntry(t)
+	entry.ReadOnly = []string{"/checkouts/shp_scout/governance"}
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := running.started[0].ReadOnly; !slices.Equal(got, []string{"/checkouts/shp_scout/governance"}) {
+		t.Fatalf("read-only %q", got)
+	}
+}
