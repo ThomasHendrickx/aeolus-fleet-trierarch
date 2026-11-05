@@ -58,6 +58,17 @@ describe('run with the reconciler', () => {
     expect(session.starts()[0]?.args).toEqual(expect.arrayContaining(['-p', '--input-format', 'stream-json', '--output-format', 'stream-json']));
   });
 
+  it("overrides a plan default permission mode with the mode the installed Claude Code lists that asks before each action", async () => {
+    mkdirSync(join(machine.home, '.claude'), { recursive: true });
+    writeFileSync(join(machine.home, '.claude', 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'plan' } }));
+    const session = sessionOf(machine, 'scout');
+
+    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+
+    await expect.poll(() => session.starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
+    expect(session.starts()[0]?.args).toEqual(expect.arrayContaining(['--permission-mode', 'default']));
+  });
+
   it('lists the ship it crews', async () => {
     await aRunningScout();
 

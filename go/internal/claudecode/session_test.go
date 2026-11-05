@@ -5,10 +5,12 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/commandline"
 )
 
 func TestASessionRunsHeadlessWithItsFlagsAndNoQuestionForm(t *testing.T) {
-	got := CommandLine([]string{"--model", "opus"}, false)
+	got := CommandLine([]string{"--model", "opus"}, commandline.Part{}, false)
 
 	want := []string{"claude", "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--model", "opus", "--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode"}
 	if !slices.Equal(got, want) {
@@ -17,7 +19,7 @@ func TestASessionRunsHeadlessWithItsFlagsAndNoQuestionForm(t *testing.T) {
 }
 
 func TestASessionStartedAgainContinuesItsConversation(t *testing.T) {
-	got := CommandLine([]string{}, true)
+	got := CommandLine([]string{}, commandline.Part{}, true)
 
 	if got[len(got)-1] != "--continue" {
 		t.Fatalf("command %q", got)
@@ -25,7 +27,7 @@ func TestASessionStartedAgainContinuesItsConversation(t *testing.T) {
 }
 
 func TestAConfiguredPlanModeIsLeftOutInEitherSpelling(t *testing.T) {
-	got := CommandLine([]string{"--permission-mode", "plan", "--permission-mode=plan", "--verbose"}, false)
+	got := CommandLine([]string{"--permission-mode", "plan", "--permission-mode=plan", "--verbose"}, commandline.Part{}, false)
 
 	if slices.Contains(got, "plan") || slices.Contains(got, "--permission-mode=plan") || slices.Contains(got, "--permission-mode") {
 		t.Fatalf("command %q", got)
