@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
@@ -16,6 +16,7 @@ const REPORTED_WITHIN_MS = 30_000;
 
 let fleet: Fleet;
 let machine: Machine;
+let plugin: ShipId;
 
 afterEach(async ({ task }) => {
   if (task.result?.state === 'fail') {
@@ -29,7 +30,8 @@ async function aMachineWith(others: readonly OtherHarness[], before: (machine: M
   fleet = await aFleet();
   machine = await aMachine({ others });
   before(machine);
-  await aCrewingMachine({ fleet, machine });
+  plugin = await fleet.commission('trierarch-plugin');
+  await aCrewingMachine({ fleet, machine, pluginShip: plugin });
 }
 
 /** Crews scout with the harness and waits until the trierarch lists it running. */
@@ -148,5 +150,58 @@ describe("Claude Code's subscription", () => {
         { windowMinutes: 10_080, usedPercent: 50, resetsAt: '2026-12-28T23:20:00.000Z' },
       ]);
     expect(machine.callsOf('claude')).toContain('-p --model haiku --max-turns 1 --output-format stream-json --verbose Reply OK');
+  });
+});
+
+const sentMessageSchema = z.object({
+  hours: z.array(z.object({ hour: z.string(), ships: z.array(z.object({ shipId: z.string(), harness: z.string(), login: z.string().nullable(), models: z.array(z.object({ model: z.string(), tokens: z.record(z.string(), z.number()), estimatedCostUsd: z.record(z.string(), z.number()).nullable() })) })) })),
+  subscriptions: z.array(z.unknown()),
+  readAt: z.string(),
+});
+
+/** The usage messages sent to the plugin's ship, as common's schema shapes them, oldest first. */
+async function usageSent(): Promise<z.infer<typeof sentMessageSchema>[]> {
+  const sent = await fleet.usageSentByTrierarch();
+  expect(sent.every(({ to }) => to === plugin)).toBe(true);
+  return sent.map(({ message }) => sentMessageSchema.parse(message));
+}
+
+const outputOf = (messages: readonly z.infer<typeof sentMessageSchema>[], shipId: ShipId): number[] =>
+  messages.flatMap(({ hours }) => hours.flatMap(({ ships }) => ships.filter((ship) => ship.shipId === shipId).flatMap(({ models }) => models.map(({ tokens }) => tokens['output'] ?? 0))));
+
+describe("a ship's usage sent to the trierarch plugin's ship", () => {
+  it('goes at the first pass after the trierarch starts, per UTC hour with its login and its cost per kind of tokens', async () => {
+    await aMachineWith([]);
+    const scout = await aRunningScoutOn('claude-code');
+    const now = new Date().toISOString();
+    const project = join(machine.home, '.claude', 'projects', sessionOf(machine, 'scout').worktree.replace(/[^a-zA-Z0-9]/gu, '-'));
+
+    await whileStopped(() => {
+      writeLines(join(project, 'conversation.jsonl'), [anAssistantLine({ id: 'msg_1', model: 'claude-opus-5-5', timestamp: now, usage: { input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 10_000, cache_creation_input_tokens: 3000 } })]);
+    });
+
+    await expect
+      .poll(async () => (await usageSent()).flatMap(({ hours }) => hours.flatMap(({ ships }) => ships.filter((ship) => ship.shipId === scout).flatMap(({ harness, login, models }) => models.map((model) => ({ harness, login, ...model }))))), { timeout: REPORTED_WITHIN_MS })
+      .toEqual([
+        { harness: 'claude-code', login: 'subscription', model: 'claude-opus-5-5', tokens: { input: 1000, output: 2000, cacheRead: 10_000, cacheWrite: 3000 }, estimatedCostUsd: { input: 0.004, output: 0.04, cacheRead: 0.002, cacheWrite: 0.024 } },
+      ]);
+  });
+
+  it("goes once more as the ship is released, with what it used since, before its worktree goes", async () => {
+    await aMachineWith([]);
+    const scout = await aRunningScoutOn('claude-code');
+    const now = new Date().toISOString();
+    const worktree = sessionOf(machine, 'scout').worktree;
+    const transcript = join(machine.home, '.claude', 'projects', worktree.replace(/[^a-zA-Z0-9]/gu, '-'), 'conversation.jsonl');
+    await whileStopped(() => {
+      writeLines(transcript, [anAssistantLine({ id: 'msg_1', model: 'claude-opus-5-5', timestamp: now, usage: { input_tokens: 10, output_tokens: 2000 } })]);
+    });
+    await expect.poll(async () => outputOf(await usageSent(), scout), { timeout: REPORTED_WITHIN_MS }).toEqual([2000]);
+
+    appendFileSync(transcript, `${JSON.stringify(anAssistantLine({ id: 'msg_2', model: 'claude-opus-5-5', timestamp: now, usage: { input_tokens: 10, output_tokens: 500 } }))}\n`);
+    await fleet.removeCrewRequest(scout);
+
+    await expect.poll(() => existsSync(worktree), { timeout: CREWED_WITHIN_MS }).toBe(false);
+    expect(outputOf(await usageSent(), scout)).toEqual([2000, 2500]);
   });
 });
