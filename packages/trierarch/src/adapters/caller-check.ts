@@ -182,17 +182,24 @@ function darwinPeers(run: typeof runCommand, ownPid: number): Peers {
 
 /**
  * Whether the process is in the process session of one of the roots, or of a
- * process under one: a hold starts its harness in a session of its own, led by
- * the harness, so a session is named by its leader's pid. A session that does
- * not resolve is none of theirs.
+ * process under one, or of a harness a hold started that has ended: a hold
+ * starts each harness in a session of its own, led by the harness, so a
+ * session is named by its leader's pid. A Codex or Copilot turn's harness
+ * ends with its turn, and a process it forked stays in its session (#208).
+ * While a session has a process in it, its pid is used by no other, so a
+ * leader that still runs and is under no hold has that pid again: it is not
+ * the harness. A session that does not resolve is none of theirs.
  */
-async function isInSessionOf(pid: number, at: { roots: ReadonlySet<number>; peers: Peers }): Promise<boolean> {
+async function isInSessionOf(pid: number, at: { roots: ReadonlySet<number>; harnessSessions: ReadonlySet<number>; peers: Peers }): Promise<boolean> {
   const session = await at.peers.sessionOf(pid);
   if (session === undefined) {
     return false;
   }
   const leader = /^\d+$/.test(session) ? Number(session) : 0;
   if (leader > 1 && (await isUnder(leader, at))) {
+    return true;
+  }
+  if (at.harnessSessions.has(leader) && (await at.peers.parentOf(leader)) === undefined) {
     return true;
   }
   const sessions = await Promise.all([...at.roots].map((root) => at.peers.sessionOf(root)));
@@ -248,7 +255,8 @@ export function createCallerCheck(options: {
  * process session of one, as a process a session forked stays once it is
  * reparented (#196), and when it does not resolve. The trierarch starts each
  * hold outside its own process tree and in a process session of its own, so
- * the trierarch is under none of them and in none of their sessions. A
+ * the trierarch is under none of them and in none of their sessions, nor in
+ * the session of a harness a hold started, even one whose turn has ended. A
  * process that leaves its session or group on purpose (setsid, setpgid) and is
  * reparented is answered: no refusal list tells it from the trierarch, and a
  * container is the isolation against it (#174).
@@ -257,6 +265,8 @@ export function createTrierarchCallerCheck(options: {
   platform: string;
   /** The process each session runs under on this machine: every hold's. */
   sessionRoots: () => Promise<readonly number[]>;
+  /** The process session each harness a hold started leads, as its pid names it: every hold's, ended turns' among them. */
+  harnessSessions: () => Promise<readonly number[]>;
   ownPid?: number;
   run?: typeof runCommand;
 }): (connection: Socket) => Promise<boolean> {
@@ -272,8 +282,9 @@ export function createTrierarchCallerCheck(options: {
     }
     try {
       const roots = new Set(await options.sessionRoots());
+      const harnessSessions = new Set(await options.harnessSessions());
       const holders = await peers.holdersOf({ fd, root: undefined });
-      const under = await Promise.all(holders.map(async (holder) => (await isUnder(holder, { roots, peers })) || isInSessionOf(holder, { roots, peers })));
+      const under = await Promise.all(holders.map(async (holder) => (await isUnder(holder, { roots, peers })) || isInSessionOf(holder, { roots, harnessSessions, peers })));
       return under.length > 0 && under.every((isOfASession) => !isOfASession);
     } catch {
       // A caller that does not resolve is refused, never allowed.
