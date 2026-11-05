@@ -153,6 +153,8 @@ type Places struct {
 	ClonedPath func(repository string) (string, bool)
 	// IsByRealPath gives each folder by its real path, as sessions in containers need it: the container mounts the folder at the path it is given, where the plugin inside keys it by `pwd -P` as the host's does (decision 0039).
 	IsByRealPath bool
+	// IsClone gives each ship a clone of its own in place of a worktree, at the same path, as sessions in containers need it: git works inside, and no ship's container reaches another's (decision 0039).
+	IsClone bool
 }
 
 // Prepare is the ship's folder: its worktree, made when missing, or the configured folder as it is; by its real path when the places say so.
@@ -181,17 +183,24 @@ func (p Places) prepare(entry reconciler.Entry, shipName string) (string, error)
 			return "", err
 		}
 	}
-	return Prepare(Worktree{Root: p.Root, Repository: entry.Workspace.Repository, Path: repository, ShipName: shipName, Ref: entry.Workspace.Ref})
+	at := Worktree{Root: p.Root, Repository: entry.Workspace.Repository, Path: repository, ShipName: shipName, Ref: entry.Workspace.Ref}
+	if p.IsClone {
+		return PrepareClone(at)
+	}
+	return Prepare(at)
 }
 
 func (p Places) Unsaved(folder string) ([]string, error) {
 	return Unsaved(folder)
 }
 
-// Remove removes the ship's worktree; a configured folder is never removed.
+// Remove removes the ship's worktree, or its clone; a configured folder is never removed.
 func (p Places) Remove(entry reconciler.Entry) error {
 	if entry.Workspace.Kind != "worktree" || entry.Folder == "" {
 		return nil
+	}
+	if p.IsClone {
+		return p.removeClone(entry.Folder)
 	}
 	repository, ok := p.Repositories[entry.Workspace.Repository]
 	if !ok && p.ClonedPath != nil {
@@ -235,8 +244,11 @@ func listed(repository string) ([]string, error) {
 	return paths, nil
 }
 
-// Worktrees are the worktrees of the configured repositories under the root, `<root>/<repository>/<name>`; a repository git cannot list has none.
+// Worktrees are the worktrees of the configured repositories under the root, `<root>/<repository>/<name>`, or their clones; a repository git cannot list has none.
 func (p Places) Worktrees() ([]reconciler.Worktree, error) {
+	if p.IsClone {
+		return p.clones(), nil
+	}
 	// Git lists each worktree by its real path, so a root reached through a link is matched by its own.
 	realRoot, err := filepath.EvalSymlinks(p.Root)
 	if err != nil {
@@ -283,8 +295,11 @@ func (p Places) IsMade(folder string) bool {
 	return slices.Contains(paths, folder) || slices.Contains(paths, real)
 }
 
-// RemoveWorktree removes a worktree under the root by its path, from the repository its path names; a folder of no repository it has is never removed.
+// RemoveWorktree removes a worktree or a clone under the root by its path, from the repository its path names; a folder of no repository it has is never removed.
 func (p Places) RemoveWorktree(folder string) error {
+	if p.IsClone {
+		return p.removeClone(folder)
+	}
 	repository, ok := p.repositoryOf(folder)
 	if !ok {
 		return fmt.Errorf("%s is no worktree under %s: the trierarch removes only what it made", folder, p.Root)
