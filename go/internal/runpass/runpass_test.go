@@ -2153,3 +2153,15 @@ func TestTheWorktreeAnEntryWorksInIsNeverClearedNorWhatRunsInItStopped(t *testin
 		t.Fatalf("stopped in %q, removed %q, orphans %+v", pass.processes.stoppedIn, pass.workspace.removed, pass.store.state.Orphans)
 	}
 }
+
+func TestTheWorktreeAnEntryIsCrewedInThisPassIsNeverClearedNorWhatRunsInItStopped(t *testing.T) {
+	pass := aRunPass(t)
+	pass.workspace.made[folder] = true
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+
+	pass.run(t)
+
+	if !pass.workspace.made[folder] || len(pass.processes.stoppedIn) != 0 || len(pass.workspace.removed) != 0 || len(pass.store.state.Orphans) != 0 {
+		t.Fatalf("made %v, stopped in %q, removed %q, orphans %+v", pass.workspace.made[folder], pass.processes.stoppedIn, pass.workspace.removed, pass.store.state.Orphans)
+	}
+}
