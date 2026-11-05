@@ -38,16 +38,15 @@ function claudeTrusts(...folders: readonly string[]): void {
   writeFileSync(file, JSON.stringify({ ...claude, projects: Object.fromEntries(folders.map((folder) => [folder, { hasTrustDialogAccepted: true }])) }));
 }
 
-async function aFolder(name: string): Promise<string> {
+async function aFolder(name: string): Promise<void> {
   const path = join(machine.home, name);
   mkdirSync(path);
   const added = await machine.trierarch(['add', 'folder', name, path]);
   expect(added.status, added.stdout + added.stderr).toBe(0);
-  return path;
 }
 
 /** Gives Claude Code the skip-permissions flag, and takes back its acceptance of bypass permissions mode. */
-function claudeLaunchesSkippingPermissions(): void {
+async function claudeLaunchesSkippingPermissions(): Promise<void> {
   const file = join(machine.trierarchHome, 'config.json');
   const configuration = z.looseObject({ harnesses: z.record(z.string(), z.looseObject({})) }).parse(JSON.parse(readFileSync(file, 'utf8')));
   const claudeCode = { ...configuration.harnesses['claude-code'], flags: [SKIP_PERMISSIONS] };
@@ -55,6 +54,8 @@ function claudeLaunchesSkippingPermissions(): void {
   const settings = join(machine.home, '.claude', 'settings.json');
   mkdirSync(join(machine.home, '.claude'), { recursive: true });
   writeFileSync(settings, JSON.stringify({}));
+  const restarted = await machine.trierarch(['restart']);
+  expect(restarted.status, restarted.stdout + restarted.stderr).toBe(0);
 }
 
 describe('a crew request the harness may not start a session for', () => {
@@ -74,9 +75,8 @@ describe('a crew request the harness may not start a session for', () => {
   });
 
   it('in a folder it does not trust is given back, saying to add it with init', async () => {
-    const notes = await aFolder('notes');
+    await aFolder('notes');
     claudeTrusts(machine.repository);
-    expect(notes).not.toBe(machine.repository);
 
     await fleet.crewInFolder(scout, { folder: 'notes', harness: 'claude-code' });
 
@@ -84,7 +84,7 @@ describe('a crew request the harness may not start a session for', () => {
   });
 
   it('with a flag that waits on a one-time question is given back, saying to accept it with init', async () => {
-    claudeLaunchesSkippingPermissions();
+    await claudeLaunchesSkippingPermissions();
 
     await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
 
