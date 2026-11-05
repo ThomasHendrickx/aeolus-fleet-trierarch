@@ -53,6 +53,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/shipsocket"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trust"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/workspace"
 )
 
@@ -439,6 +440,12 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		// The machine's memory and disk, read each minute; argo is told once when one is low (#400).
 		Load: load,
 	}
+	// What each harness trusts is read from its own files at each report (#381).
+	trustReaders := map[string]func() map[string]bool{
+		"claude-code": claudecode.Of(home, env["CLAUDE_CONFIG_DIR"]).TrustedFolders,
+		"codex":       func() map[string]bool { return codex.TrustedFolders(codex.HomeOf(home, env["CODEX_HOME"])) },
+		"copilot":     trust.Everything(configuration),
+	}
 	reporter := &selfreport.Reporter{
 		Fleet:    client,
 		Store:    pass.Store,
@@ -447,7 +454,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Load: load,
 		Input: func() selfreport.Input {
 			offered, detected := offers.current()
-			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH}
+			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Trusted: trust.Of(configuration, trustReaders), Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH}
 		},
 	}
 	// Each pass ends with the trierarch's own report: the first at start, then only when it changed.
