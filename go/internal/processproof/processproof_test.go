@@ -1,18 +1,36 @@
 package processproof
 
 import (
+	"os"
 	"os/exec"
 	"testing"
+	"time"
 )
 
-func TestAProcessRunsTheWordsItWasStartedWith(t *testing.T) {
-	process := exec.Command("sleep", "30", "--folder", "/a/folder")
+// TestMain makes the test binary a live process for the tests to inspect: started with the words, it sleeps, on every platform, where sleep itself takes other operands on macOS than on Linux.
+func TestMain(m *testing.M) {
+	if os.Getenv("PROCESSPROOF_SLEEP") != "" {
+		time.Sleep(30 * time.Second)
+		return
+	}
+	os.Exit(m.Run())
+}
+
+func startLive(t *testing.T, words ...string) *exec.Cmd {
+	t.Helper()
+	process := exec.Command(os.Args[0], words...)
+	process.Env = append(os.Environ(), "PROCESSPROOF_SLEEP=1")
 	if err := process.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = process.Process.Kill(); _ = process.Wait() })
+	return process
+}
 
-	if !Runs(process.Process.Pid, "sleep", "30", "--folder", "/a/folder") {
+func TestAProcessRunsTheWordsItWasStartedWith(t *testing.T) {
+	process := startLive(t, "hold", "30", "--folder", "/a/folder")
+
+	if !Runs(process.Process.Pid, "hold", "30", "--folder", "/a/folder") {
 		t.Fatal("Runs = false, want true for the words the process was started with")
 	}
 	if !Runs(process.Process.Pid, "--folder", "/a/folder") {
@@ -21,13 +39,9 @@ func TestAProcessRunsTheWordsItWasStartedWith(t *testing.T) {
 }
 
 func TestAProcessRunsNotWordsItWasNotStartedWith(t *testing.T) {
-	process := exec.Command("sleep", "30")
-	if err := process.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = process.Process.Kill(); _ = process.Wait() })
+	process := startLive(t, "hold", "30")
 
-	for _, words := range [][]string{{"hold", "shp_1"}, {"30", "sleep"}, {"slee"}, {"leep"}, {}} {
+	for _, words := range [][]string{{"hold", "shp_1"}, {"30", "hold"}, {"hol"}, {"old"}, {}} {
 		if Runs(process.Process.Pid, words...) {
 			t.Fatalf("Runs(%v) = true, want false", words)
 		}
