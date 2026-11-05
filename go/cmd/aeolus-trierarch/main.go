@@ -496,7 +496,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	// The places a pass makes workspaces in and offers: the configured ones and the trusted repositories beside them.
 	placesOf := func() (workspace.Places, []string, []string) {
 		offered := withTrusted(configuration)
-		places := workspace.Places{Root: root, Repositories: map[string]string{}, Folders: map[string]string{}, Clone: clones.WhenMissing, ClonedPath: clones.ClonedPath}
+		places := workspace.Places{Root: root, Repositories: map[string]string{}, Folders: map[string]string{}, Clone: clones.WhenMissing, ClonedPath: clones.ClonedPath, IsByRealPath: isInContainers(configuration.Runtime)}
 		repositories, folders := []string{}, []string{}
 		for name, repository := range offered.Repositories {
 			places.Repositories[name] = repository.Path
