@@ -17,6 +17,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trust"
 )
 
 // keyCutOffNote is what the report says while the fleet refuses to receive for lack of its key (decision 0068).
@@ -49,7 +50,9 @@ type Input struct {
 	Detected      detection.Detected
 	// Harnesses are the harnesses this trierarch offers, in order.
 	Harnesses []string
-	State     reconciler.State
+	// Trusted is what each harness trusts, read afresh for this report (#381).
+	Trusted map[string]trust.Places
+	State   reconciler.State
 	// Running is how many sessions run.
 	Running int
 	Logins  Logins
@@ -91,9 +94,12 @@ func Of(in Input) Report {
 
 func detailsOf(in Input) map[string]any {
 	details := map[string]any{
-		"harnesses":  harnessesOf(in),
-		"workspaces": map[string]any{"repositories": offeredPlaces(in, slices.Sorted(maps.Keys(in.Configuration.Repositories))), "folders": offeredPlaces(in, slices.Sorted(maps.Keys(in.Configuration.Folders)))},
-		"caps":       in.Configuration.Caps,
+		"harnesses": harnessesOf(in),
+		"workspaces": map[string]any{
+			"repositories": offeredPlaces(in, slices.Sorted(maps.Keys(in.Configuration.Repositories)), func(places trust.Places) []string { return places.Repositories }),
+			"folders":      offeredPlaces(in, slices.Sorted(maps.Keys(in.Configuration.Folders)), func(places trust.Places) []string { return places.Folders }),
+		},
+		"caps": in.Configuration.Caps,
 		// Paths stay on the machine: names only (decision 0032).
 		"kept":    pickedFrom(in.State.Kept, "shipId", "repository"),
 		"orphans": pickedFrom(in.State.Orphans, "repository", "name"),
@@ -125,12 +131,19 @@ func runtimeOf(configuration config.Configuration) string {
 	return configuration.Runtime.Kind
 }
 
-// offeredPlaces are the places to offer: none without a harness to crew them.
-func offeredPlaces(in Input, names []string) []string {
+// offeredPlaces are the places every offered harness trusts, and none without a harness to crew them (#381).
+func offeredPlaces(in Input, names []string, trustedOf func(trust.Places) []string) []string {
+	offered := []string{}
 	if len(in.Harnesses) == 0 {
-		return []string{}
+		return offered
 	}
-	return append([]string{}, names...)
+	for _, name := range names {
+		if slices.ContainsFunc(in.Harnesses, func(harness string) bool { return !slices.Contains(trustedOf(in.Trusted[harness]), name) }) {
+			continue
+		}
+		offered = append(offered, name)
+	}
+	return offered
 }
 
 func harnessesOf(in Input) []map[string]any {

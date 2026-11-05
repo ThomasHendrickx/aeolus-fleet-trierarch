@@ -110,3 +110,18 @@ func IsInstalled() bool {
 func IsSignedIn() bool {
 	return exec.Command("claude", "auth", "status").Run() == nil
 }
+
+// TrustedFolders are the folders whose trust question was accepted, from one read of .claude.json; none where there is no readable file.
+func (s Setup) TrustedFolders() map[string]bool {
+	trusted := map[string]bool{}
+	claude, err := readObject(s.ClaudeJSON)
+	if err != nil {
+		return trusted
+	}
+	for folder, project := range objectIn(claude, "projects") {
+		if accepted, _ := project.(map[string]any)["hasTrustDialogAccepted"].(bool); accepted {
+			trusted[folder] = true
+		}
+	}
+	return trusted
+}
