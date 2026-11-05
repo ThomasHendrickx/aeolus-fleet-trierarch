@@ -226,9 +226,18 @@ func (w *aWorkspace) Remove(entry reconciler.Entry) error {
 type aStore struct {
 	state reconciler.State
 	saves int
+	// unreadableAfter is how many loads succeed before the state file is unreadable; 0 keeps it readable.
+	unreadableAfter int
+	loads           int
 }
 
-func (s *aStore) Load() (reconciler.State, error)   { return s.state, nil }
+func (s *aStore) Load() (reconciler.State, error) {
+	s.loads++
+	if s.unreadableAfter > 0 && s.loads > s.unreadableAfter {
+		return reconciler.State{}, errors.New("the state file is unreadable")
+	}
+	return s.state, nil
+}
 func (s *aStore) Save(state reconciler.State) error { s.state, s.saves = state, s.saves+1; return nil }
 
 type aPass struct {
@@ -396,6 +405,26 @@ func TestACrewThatFailsIsCountedAndTriedAgainOnTheNextPass(t *testing.T) {
 	want := "scout (" + scout + "): crew failed: the fleet refused getStartingPrompt " + scout + "; " + nextAfterFailure
 	if !slices.Contains(pass.logged, want) {
 		t.Fatalf("logged %q, want %q", pass.logged, want)
+	}
+}
+
+func TestACrewThatFailsWhileTheStateIsUnreadableLeavesTheOtherShipsToTheSamePass(t *testing.T) {
+	const other = "shp_02m6jyczpnpp5c0vxh54c966cy"
+	pass := aRunPass(t)
+	pass.fleet.ships[other] = fleet.Ship{Name: "other", Status: "awaitingCrew"}
+	pass.fleet.refuse = "getStartingPrompt " + scout
+	second := aRequest("")
+	second.ShipID = other
+	pass.fleet.requests = []reconciler.Request{aRequest(""), second}
+	pass.store.unreadableAfter = 1
+
+	pass.run(t)
+
+	if !slices.ContainsFunc(pass.logged, func(line string) bool { return strings.Contains(line, "counting it failed: the state file is unreadable") }) {
+		t.Fatalf("logged %q", pass.logged)
+	}
+	if !slices.ContainsFunc(pass.fleet.calls, func(call string) bool { return strings.Contains(call, other) }) {
+		t.Fatalf("the other ship was not carried on: %q", pass.fleet.calls)
 	}
 }
 
