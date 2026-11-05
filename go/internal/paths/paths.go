@@ -25,6 +25,8 @@ type Paths struct {
 	Proxy string
 	// Detected is what detection found per harness (#365), apart from the configuration.
 	Detected string
+	// ModelToken is the token sessions in containers run on (decision 0039).
+	ModelToken string
 }
 
 // Of the user's home folder, with the configuration at config when it is not empty.
@@ -47,5 +49,6 @@ func Of(homeDirectory string, config string) Paths {
 		Keys:         filepath.Join(home, "keys"),
 		Proxy:        filepath.Join(home, "proxy"),
 		Detected:     filepath.Join(home, "detected.json"),
+		ModelToken:   filepath.Join(home, "model-token"),
 	}
 }

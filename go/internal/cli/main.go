@@ -258,15 +258,7 @@ func Main(args []string, machine Machine) (string, int) {
 			return answer{data: map[string]any{"service": "stopped", "said": []string{said}}, text: said}, nil
 		},
 		"config check": func() (answer, error) {
-			configuration, err := config.Load(at.Config)
-			if err != nil {
-				return answer{}, err
-			}
-			if ignored := detection.ModelOptionsIgnored(configuration); len(ignored) > 0 {
-				return answer{}, refused(nil, "The configuration at %s sets a model option for %s: model ids come from detection only (#382), so remove it; aeolus-trierarch detect lists them", at.Config, strings.Join(ignored, ", "))
-			}
-			harnesses := slices.Sorted(maps.Keys(configuration.Harnesses))
-			return answer{data: map[string]any{"path": at.Config, "harnesses": harnesses}, text: fmt.Sprintf("The configuration at %s is one this trierarch runs on, offering %s.", at.Config, strings.Join(harnesses, ", "))}, nil
+			return configCheck(at)
 		},
 		"detect": func() (answer, error) {
 			configuration, err := config.Load(at.Config)

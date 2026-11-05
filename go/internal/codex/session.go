@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/commandline"
 )
 
 // A session of Codex (docs/architecture.md, "First adapters"), headless
@@ -28,14 +30,30 @@ const (
 	endOfFlags     = "--"
 )
 
-// CommandLine is `codex exec`, or `codex exec resume --last` on a restart, then the configured flags but --no-daemon, --json, the question tool off, and the prompt last after `--`, so it never reads as a flag.
-func CommandLine(flags []string, prompt string, isFirstStart bool) []string {
-	command := []string{"codex", "exec"}
+// AdapterFlags are the flags the adapter adds itself, for config check.
+var AdapterFlags = []commandline.AdapterFlag{
+	{Flag: jsonEvents, When: "always"},
+	{Flag: noQuestionTool, When: "always"},
+}
+
+// CommandParts are `codex exec`, or `codex exec resume --last` on a restart, in parts: the configured flags but --no-daemon, --json, the question tool off, and the prompt last after `--`, so it never reads as a flag.
+func CommandParts(flags []string, prompt string, isFirstStart bool) []commandline.Part {
+	program := []string{"codex", "exec"}
 	if !isFirstStart {
-		command = append(command, "resume", "--last")
+		program = append(program, "resume", "--last")
 	}
-	command = append(command, slices.DeleteFunc(slices.Clone(flags), func(flag string) bool { return flag == noDaemon })...)
-	return append(command, jsonEvents, noQuestionTool, endOfFlags, prompt)
+	return commandline.WithWords([]commandline.Part{
+		{Words: program},
+		{Words: slices.DeleteFunc(slices.Clone(flags), func(flag string) bool { return flag == noDaemon }), Source: commandline.Configuration},
+		{Words: []string{jsonEvents}, Source: commandline.Adapter},
+		{Words: []string{noQuestionTool}, Source: commandline.Adapter},
+		{Words: []string{endOfFlags, prompt}},
+	})
+}
+
+// CommandLine is the words of CommandParts.
+func CommandLine(flags []string, prompt string, isFirstStart bool) []string {
+	return commandline.Words(CommandParts(flags, prompt, isFirstStart))
 }
 
 // ErrorIn is why Codex's start failed, from its last error event, a failed turn or an error the turn met (headless H13): an API error Codex passes on as JSON in its message by the API's own message; empty without one. Codex has no hook for a failed turn (#490).

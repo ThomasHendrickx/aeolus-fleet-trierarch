@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/commandline"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/prompt"
 )
 
@@ -26,9 +27,15 @@ const noPanePrompts = "--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanM
 
 const wakeCommand = "/aeolus-fleet:wake"
 
-// CommandLine is `claude` with the flags given, plan mode left out, continuing the folder's conversation when told.
-func CommandLine(flags []string, isContinued bool) []string {
-	command := append([]string{"claude"}, headless...)
+// AdapterFlags are the flags the adapter adds itself, for config check.
+var AdapterFlags = []commandline.AdapterFlag{
+	{Flag: noPanePrompts, When: "always"},
+	{Flag: "--continue", When: "restart"},
+}
+
+// CommandParts are `claude` in parts, each marked by its source: headless, the flags with plan mode left out, AskUserQuestion and plan mode disallowed, `--continue` when told.
+func CommandParts(flags []string, isContinued bool) []commandline.Part {
+	kept := []string{}
 	for at := 0; at < len(flags); at++ {
 		if flags[at] == "--permission-mode=plan" {
 			continue
@@ -37,13 +44,23 @@ func CommandLine(flags []string, isContinued bool) []string {
 			at++
 			continue
 		}
-		command = append(command, flags[at])
+		kept = append(kept, flags[at])
 	}
-	command = append(command, noPanePrompts)
+	parts := []commandline.Part{
+		{Words: []string{"claude"}},
+		{Words: headless, Source: commandline.Adapter},
+		{Words: kept, Source: commandline.Configuration},
+		{Words: []string{noPanePrompts}, Source: commandline.Adapter},
+	}
 	if isContinued {
-		command = append(command, "--continue")
+		parts = append(parts, commandline.Part{Words: []string{"--continue"}, Source: commandline.Adapter})
 	}
-	return command
+	return commandline.WithWords(parts)
+}
+
+// CommandLine is `claude` with the flags given, plan mode left out, continuing the folder's conversation when told.
+func CommandLine(flags []string, isContinued bool) []string {
+	return commandline.Words(CommandParts(flags, isContinued))
 }
 
 var notLetterOrDigit = regexp.MustCompile(`[^a-zA-Z0-9]`)

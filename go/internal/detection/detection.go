@@ -19,7 +19,7 @@ import (
 )
 
 // ModelOption is the option that names the model: its ids come from detection only (#382).
-const ModelOption = "model"
+const ModelOption = config.ModelOption
 
 // Refused is a model id a session on the machine refused, and when.
 type Refused struct {
@@ -232,11 +232,7 @@ func ModelOptionsIgnored(configuration config.Configuration) []string {
 
 // optionNames are the option names in the order detection gives them: the model first, then the others by name.
 func optionNames(options map[string]config.Option) []string {
-	names := slices.Sorted(maps.Keys(options))
-	if at := slices.Index(names, ModelOption); at > 0 {
-		names = append([]string{ModelOption}, slices.Delete(names, at, at+1)...)
-	}
-	return names
+	return config.Harness{Options: options}.OptionNames()
 }
 
 // Describe says a line per harness: its version, each option with its values and default, when its models were last confirmed, and the ids the machine refused.
