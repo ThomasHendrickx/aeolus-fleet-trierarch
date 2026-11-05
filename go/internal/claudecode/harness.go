@@ -83,7 +83,7 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 		modes = h.PermissionModes()
 	}
 	override := PlanOverride(flags, DefaultModeOf(h.Managed, h.User, flags, entry.Folder), modes)
-	command := CommandLine(flags, override, !isFirstStart && HasConversation(h.Projects, entry.Folder))
+	command := CommandLine(flags, override, !isFirstStart && HasConversation(h.Projects, entry.Folder), entry.ReadOnly)
 	if err := h.Plugin.ClearLaunch(entry.Folder); err != nil {
 		return err
 	}
