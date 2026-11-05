@@ -502,3 +502,23 @@ func TestUpgradeKeepsTheOldBinaryWhenItCannotBePutBack(t *testing.T) {
 		t.Errorf("%s holds %q (%v), want the old binary kept", kept, text, err)
 	}
 }
+
+func TestUpgradeReplacesAnOldBinaryAnInterruptedUpgradeLeftBesideTheProgram(t *testing.T) {
+	machine := anUpgradeOn(t)
+	leftover := filepath.Join(filepath.Dir(machine.upgrade.Program), ".aeolus-trierarch-"+running)
+	if err := os.WriteFile(leftover, []byte("left by an upgrade that was killed"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := machine.upgrade.Run(released)
+
+	if err != nil || !report.IsUpgraded {
+		t.Fatalf("Run(%s) = %+v, %v, want upgraded past the leftover", released, report, err)
+	}
+	if got := machine.program(t); got != string(binaryOf(released)) {
+		t.Errorf("the program is %q, want the release's binary", got)
+	}
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(machine.upgrade.Program), "*")); len(left) != 1 {
+		t.Errorf("its folder holds %v, want the program alone", left)
+	}
+}
