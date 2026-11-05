@@ -9,9 +9,11 @@ package workspace
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
@@ -190,4 +192,92 @@ func (p Places) Remove(entry reconciler.Entry) error {
 		return fmt.Errorf("the configuration has no repository %s to remove %s from", entry.Workspace.Repository, entry.Folder)
 	}
 	return Remove(repository, entry.Folder)
+}
+
+// repositoryOf is the repository a folder under the root is a worktree of, by the name its path starts with: a configured one, or the clone of one that left the trusted repositories, which still holds the worktrees made from it.
+func (p Places) repositoryOf(folder string) (string, bool) {
+	relative, err := filepath.Rel(p.Root, folder)
+	if err != nil {
+		return "", false
+	}
+	name := strings.Split(relative, string(filepath.Separator))[0]
+	if repository, ok := p.Repositories[name]; ok {
+		return repository, true
+	}
+	if p.ClonedPath != nil {
+		return p.ClonedPath(name)
+	}
+	return "", false
+}
+
+// listed are the paths of the repository's worktrees as git lists them, by their real paths.
+func listed(repository string) ([]string, error) {
+	out, err := git("-C", repository, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	paths := []string{}
+	for _, line := range strings.Split(out, "\n") {
+		if path, ok := strings.CutPrefix(line, "worktree "); ok {
+			paths = append(paths, path)
+		}
+	}
+	return paths, nil
+}
+
+// Worktrees are the worktrees of the configured repositories under the root, `<root>/<repository>/<name>`; a repository git cannot list has none.
+func (p Places) Worktrees() ([]reconciler.Worktree, error) {
+	// Git lists each worktree by its real path, so a root reached through a link is matched by its own.
+	realRoot, err := filepath.EvalSymlinks(p.Root)
+	if err != nil {
+		realRoot = p.Root
+	}
+	found := []reconciler.Worktree{}
+	for _, name := range slices.Sorted(maps.Keys(p.Repositories)) {
+		paths, err := listed(p.Repositories[name])
+		if err != nil {
+			continue
+		}
+		for _, path := range paths {
+			relative, err := filepath.Rel(realRoot, path)
+			if err != nil {
+				continue
+			}
+			parts := strings.Split(relative, string(filepath.Separator))
+			if len(parts) == 2 && parts[0] == name {
+				found = append(found, reconciler.Worktree{Path: filepath.Join(p.Root, name, parts[1]), Repository: name, Name: parts[1]})
+			}
+		}
+	}
+	return found, nil
+}
+
+// IsMade is whether the folder is a worktree the trierarch made: one `<root>/<repository>/<ship>` of a repository it has, which git knows. Anything else under its root is not its to clear.
+func (p Places) IsMade(folder string) bool {
+	relative, err := filepath.Rel(p.Root, folder)
+	if err != nil || len(strings.Split(relative, string(filepath.Separator))) != 2 {
+		return false
+	}
+	repository, ok := p.repositoryOf(folder)
+	if !ok {
+		return false
+	}
+	paths, err := listed(repository)
+	if err != nil {
+		return false
+	}
+	real, err := filepath.EvalSymlinks(folder)
+	if err != nil {
+		real = folder
+	}
+	return slices.Contains(paths, folder) || slices.Contains(paths, real)
+}
+
+// RemoveWorktree removes a worktree under the root by its path, from the repository its path names; a folder of no repository it has is never removed.
+func (p Places) RemoveWorktree(folder string) error {
+	repository, ok := p.repositoryOf(folder)
+	if !ok {
+		return fmt.Errorf("%s is no worktree under %s: the trierarch removes only what it made", folder, p.Root)
+	}
+	return Remove(repository, folder)
 }
