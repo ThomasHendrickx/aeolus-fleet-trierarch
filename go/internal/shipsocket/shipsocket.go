@@ -5,10 +5,11 @@
 // crew token, read at each call so a new crew reaches the same socket, and
 // forwards the call unchanged; the fleet's answer goes back unchanged, a 503
 // included. It answers only a caller the caller check allows, and checks
-// only the path (the ship API and the ship protocol, never register or
-// deregister) and the size, and logs one line per call without the body. It
-// queues nothing: when the fleet gives no answer, the session gets none
-// either.
+// only the path (the ship API, the fleet API and the ship protocol, never
+// register or deregister) and the size: core decides each fleet call by the
+// ship's scopes and reach (decision 0057). It logs one line per call without
+// the body. It queues nothing: when the fleet gives no answer, the session
+// gets none either.
 package shipsocket
 
 import (
@@ -38,8 +39,8 @@ const socketFile = "fleet.sock"
 // protocol is the ship protocol, which a session reads at each start (`aeolus-fleet.sh protocol`).
 const protocol = "/api/v1/openapi.json"
 
-// shipCall is one word under the ship API: `/api/v1/ship/send`.
-var shipCall = regexp.MustCompile(`^/api/v1/ship/([A-Za-z]+)$`)
+// forwardedCall is one word under the ship API or the fleet API: `/api/v1/ship/send`, `/api/v1/fleet/commission`.
+var forwardedCall = regexp.MustCompile(`^/api/v1/(?:ship|fleet)/([A-Za-z]+)$`)
 
 // crewCalls make or end a crew: only the trierarch makes them, never a session.
 var crewCalls = map[string]bool{"register": true, "deregister": true}
@@ -136,12 +137,12 @@ func (s *Sockets) CloseAll() {
 	}
 }
 
-// isForwarded is whether the socket forwards a call to this path: the ship API but crewing, and the protocol.
+// isForwarded is whether the socket forwards a call to this path: the ship API and the fleet API but crewing, and the protocol.
 func isForwarded(method string, path string) bool {
 	if method == http.MethodGet && path == protocol {
 		return true
 	}
-	match := shipCall.FindStringSubmatch(path)
+	match := forwardedCall.FindStringSubmatch(path)
 	return match != nil && !crewCalls[match[1]]
 }
 
@@ -168,7 +169,7 @@ func (s *Sockets) handle(shipID string, w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if !isForwarded(r.Method, r.URL.Path) {
-		refuse(w, http.StatusForbidden, "This socket forwards only ship calls, never register or deregister")
+		refuse(w, http.StatusForbidden, "This socket forwards only ship and fleet calls, never register or deregister")
 		said("403")
 		return
 	}
