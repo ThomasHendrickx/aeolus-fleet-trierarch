@@ -420,7 +420,9 @@ func TestACrewThatFailsWhileTheStateIsUnreadableLeavesTheOtherShipsToTheSamePass
 
 	pass.run(t)
 
-	if !slices.ContainsFunc(pass.logged, func(line string) bool { return strings.Contains(line, "counting it failed: the state file is unreadable") }) {
+	if !slices.ContainsFunc(pass.logged, func(line string) bool {
+		return strings.Contains(line, "counting it failed: the state file is unreadable")
+	}) {
 		t.Fatalf("logged %q", pass.logged)
 	}
 	if !slices.ContainsFunc(pass.fleet.calls, func(call string) bool { return strings.Contains(call, other) }) {

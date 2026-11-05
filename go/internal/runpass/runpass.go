@@ -209,7 +209,7 @@ func (p Pass) Run() error {
 		if next, err = p.carryOut(next, action); err != nil {
 			failed[action.ShipID] = failed[action.ShipID] || !isNotice(action.Kind)
 			if action.Kind == reconciler.Crew {
-				next = p.crewFailed(action.ShipID, err)
+				next = p.crewFailed(next, action.ShipID, err)
 				continue
 			}
 			p.Log(fmt.Sprintf("%s of %s failed: %v", action.Kind, action.ShipID, err))
@@ -219,11 +219,11 @@ func (p Pass) Run() error {
 }
 
 // crewFailed counts a failed crew against its settings version, from the state the crew saved before it failed: the last of the budget gives the request back with the last failure as the reason (#827). What fails here is logged and left to the next pass.
-func (p Pass) crewFailed(shipID string, failure error) reconciler.State {
+func (p Pass) crewFailed(held reconciler.State, shipID string, failure error) reconciler.State {
 	state, err := p.Store.Load()
 	if err != nil {
 		p.Log(fmt.Sprintf("crew of %s failed: %v; counting it failed: %v", shipID, failure, err))
-		return state
+		return held
 	}
 	entry, ok := state.Entries[shipID]
 	if !ok {
