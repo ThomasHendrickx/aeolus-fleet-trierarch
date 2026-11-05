@@ -184,6 +184,14 @@ describe('status', () => {
     await expect.poll(async () => (await statusReport()).passFailure, { timeout: FAILS_WITHIN_MS }).toBeDefined();
   });
 
+  it("says the harnesses in the configuration file's order, not alphabetically", async () => {
+    const config = join(machine.trierarchHome, 'config.json');
+    const written = z.record(z.string(), z.unknown()).parse(JSON.parse(readFileSync(config, 'utf8')));
+    writeFileSync(config, JSON.stringify({ ...written, harnesses: { copilot: { flags: [], options: {} }, ...z.record(z.string(), z.unknown()).parse(written.harnesses) } }));
+
+    expect(await statusText()).toContain(`Aeolus Fleet plugin: copilot not found (install the aeolus-fleet plugin for it), claude-code ${pluginVersion()}\n`);
+  });
+
   it('says the plugin a configured harness has none of', async () => {
     const config = join(machine.trierarchHome, 'config.json');
     const written = z.record(z.string(), z.unknown()).parse(JSON.parse(readFileSync(config, 'utf8')));
