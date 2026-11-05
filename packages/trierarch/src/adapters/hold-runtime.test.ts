@@ -302,6 +302,18 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
     expect(await runtime.events(shipId)).toEqual([]);
   });
 
+  it("refuses a call to a hold's socket from a process another ship's session forked once it is reparented (#196)", { timeout: 20_000 }, async () => {
+    const runtime = aRuntime();
+    const scout = await aClaudeCodeSession(runtime);
+    const socket = join(sessions, scout, 'hold.sock');
+    const calls = "const net = require('node:net'); setTimeout(() => { const c = net.connect(process.argv[1]); c.on('connect', () => c.write(JSON.stringify({ call: 'send', line: 'from another session' }) + '\\n')); let answer = ''; c.on('data', (d) => { answer += d; }); c.on('close', () => { require('node:fs').writeFileSync('answer.txt', answer); }); }, 300);";
+
+    // The subshell ends at once, so the process it forked calls once its parent is gone.
+    await runtime.start({ shipId: newId('ship'), folder, command: ['sh', '-c', '( "$0" -e "$1" "$2" & ); sleep 30', process.execPath, calls, socket], harness: 'claude-code' });
+
+    await expect.poll(() => (existsSync(join(folder, 'answer.txt')) ? readFileSync(join(folder, 'answer.txt'), 'utf8') : undefined)).toContain('refused');
+  });
+
   it("takes the hold as the session's root, so the fleet socket answers the harness's processes as its ship's own and no other ship's", async () => {
     const runtime = aRuntime();
     const shipId = newId('ship');
