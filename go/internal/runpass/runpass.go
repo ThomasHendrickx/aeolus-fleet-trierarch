@@ -176,32 +176,25 @@ func startedOn(entry reconciler.Entry, login string, at string) reconciler.Entry
 	return entry
 }
 
-// Run runs one pass; it fails only when it cannot read what it reconciles.
+// nextAfterFailure is what a failed pass tells next to its reason.
+const nextAfterFailure = "the next pass tries again; aeolus-trierarch status and list show where it stands"
+
+// Run runs one pass; it fails only when it cannot load its saved state. A pass that cannot read what it reconciles is logged and kept in the state with its reason and since when, which a pass that succeeds clears.
 func (p Pass) Run() error {
 	p.keepProxy()
-	requests, err := p.Fleet.AssignedRequests()
-	if err != nil {
-		return err
-	}
 	state, err := p.Store.Load()
 	if err != nil {
 		return err
 	}
-	running, err := p.Sessions.List()
+	next, actions, err := p.reconcile(state)
 	if err != nil {
-		return err
-	}
-	observed, versions, err := p.observe(state, running)
-	if err != nil {
-		return err
-	}
-	now := p.Now()
-	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers()})
-	if err := p.Store.Save(next); err != nil {
-		return err
-	}
-	if next, err = p.tellKeysNotReady(next); err != nil {
-		return err
+		p.Log(fmt.Sprintf("The pass failed: %v; %s", err, nextAfterFailure))
+		since := p.Now().UTC().Format(isoMillis)
+		if next.PassFailure != nil {
+			since = next.PassFailure.Since
+		}
+		next.PassFailure = &reconciler.PassFailure{Reason: err.Error(), Since: since}
+		return p.Store.Save(next)
 	}
 	// An entry whose action fails is not acted on further this pass: its next actions build on it. A notice that fails is logged and nothing more: it does not hold the entry back.
 	failed := map[string]bool{}
@@ -797,4 +790,30 @@ func (p Pass) tellKeysNotReady(state reconciler.State) (reconciler.State, error)
 	}
 	state.KeysTold = told
 	return state, p.Store.Save(state)
+}
+
+// reconcile reads the requests, what runs and the ships' inboxes, saves what the reconciler made of them and answers the actions to carry out. It answers the latest state it saved, or was given, with the error.
+func (p Pass) reconcile(state reconciler.State) (reconciler.State, []reconciler.Action, error) {
+	requests, err := p.Fleet.AssignedRequests()
+	if err != nil {
+		return state, nil, err
+	}
+	running, err := p.Sessions.List()
+	if err != nil {
+		return state, nil, err
+	}
+	observed, versions, err := p.observe(state, running)
+	if err != nil {
+		return state, nil, err
+	}
+	now := p.Now()
+	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers()})
+	next.PassFailure = nil
+	if err := p.Store.Save(next); err != nil {
+		return state, nil, err
+	}
+	if next, err = p.tellKeysNotReady(next); err != nil {
+		return next, nil, err
+	}
+	return next, actions, nil
 }
