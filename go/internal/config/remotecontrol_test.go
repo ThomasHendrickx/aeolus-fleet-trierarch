@@ -83,6 +83,7 @@ func TestRemoveRemoteControlRewritesTheFileKeepingAllElseAndNamesTheHarness(t *t
 	}
 	want := configured
 	want.Harnesses = map[string]Harness{"claude-code": harness("--verbose")}
+	want.HarnessOrder = []string{"claude-code"}
 	loaded, err := Load(path)
 	if err != nil || !reflect.DeepEqual(loaded, want) {
 		t.Errorf("loaded %+v, %v; want %+v", loaded, err, want)
