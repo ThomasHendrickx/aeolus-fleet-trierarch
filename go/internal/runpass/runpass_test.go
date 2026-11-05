@@ -114,10 +114,15 @@ func (s *someSockets) Close(shipID string) { s.events = append(s.events, "close 
 type aSessions struct {
 	observed []sessions.Observed
 	stopped  []string
+	// stopFails makes every Stop fail, as a session that does not end.
+	stopFails bool
 }
 
 func (s *aSessions) List() ([]sessions.Observed, error) { return s.observed, nil }
 func (s *aSessions) Stop(shipID string) error {
+	if s.stopFails {
+		return errors.New("the session did not stop")
+	}
 	s.stopped = append(s.stopped, shipID)
 	s.observed = slices.DeleteFunc(s.observed, func(each sessions.Observed) bool { return each.ShipID == shipID })
 	return nil
@@ -520,6 +525,44 @@ func TestARequestNoLongerAssignedHereEndsItsSessionAndIdentityAndLeavesItsWorktr
 
 	if !slices.Equal(pass.sessions.stopped, []string{scout}) || len(pass.workspace.removed) != 0 || len(pass.harness.identities) != 0 || len(pass.store.state.Entries) != 0 {
 		t.Fatalf("stopped %q, removed %q, identities %+v, entries %+v", pass.sessions.stopped, pass.workspace.removed, pass.harness.identities, pass.store.state.Entries)
+	}
+}
+
+func TestAForgottenEntryStaysUntilItsSessionStoppedSoTheNextPassTriesAgain(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	pass.fleet.requests = nil
+	pass.sessions.stopFails = true
+
+	pass.run(t)
+	if _, ok := pass.store.state.Entries[scout]; !ok {
+		t.Fatalf("the entry went though its session did not stop")
+	}
+	pass.sessions.stopFails = false
+	pass.run(t)
+
+	if !slices.Equal(pass.sessions.stopped, []string{scout}) || len(pass.harness.identities) != 0 || len(pass.store.state.Entries) != 0 {
+		t.Fatalf("stopped %q, identities %+v, entries %+v", pass.sessions.stopped, pass.harness.identities, pass.store.state.Entries)
+	}
+}
+
+func TestAnEntryGivenBackStaysUntilItsSessionStoppedSoTheNextPassTriesAgain(t *testing.T) {
+	pass := aRunPass(t)
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+	pass.run(t)
+	pass.fleet.requests = []reconciler.Request{aRequest("crewing")}
+	pass.pass.Now = func() time.Time { return now.Add(time.Minute) }
+	pass.sessions.stopFails = true
+
+	pass.run(t)
+	if _, ok := pass.store.state.Entries[scout]; !ok || slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 mac-mini: no activity within a minute of its start") {
+		t.Fatalf("entries %+v, calls %q", pass.store.state.Entries, pass.fleet.calls)
+	}
+	pass.sessions.stopFails = false
+	pass.run(t)
+
+	if len(pass.store.state.Entries) != 0 || !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 mac-mini: no activity within a minute of its start") {
+		t.Fatalf("entries %+v, calls %q", pass.store.state.Entries, pass.fleet.calls)
 	}
 }
 
