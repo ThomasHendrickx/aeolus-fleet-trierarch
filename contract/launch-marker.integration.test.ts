@@ -69,3 +69,26 @@ describe('a crew request for a harness that cannot mark launches', () => {
     expect(sessionOf(machine, 'scout').starts()).toEqual([]);
   });
 });
+
+describe('a harness whose plugin is lost under a running session', () => {
+  it('has its request given back, saying the machine does not offer it', async () => {
+    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'copilot' });
+    await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: GIVEN_BACK_WITHIN_MS }).toBeGreaterThan(0);
+
+    rmSync(installedCopilotPlugin(), { force: true, recursive: true });
+
+    await expect.poll(() => fleet.givenBackReasonOf(scout), { timeout: GIVEN_BACK_WITHIN_MS }).toContain('harness: copilot is not offered: its aeolus-fleet plugin is not installed for Copilot: copilot plugin install aeolus-fleet@aeolus-fleet');
+  });
+});
+
+describe('the trierarch report', () => {
+  it('names a harness whose plugin is not installed, and why, in its note and its details', async () => {
+    rmSync(installedCopilotPlugin(), { force: true, recursive: true });
+
+    const reason = 'its aeolus-fleet plugin is not installed for Copilot: copilot plugin install aeolus-fleet@aeolus-fleet';
+    await expect.poll(async () => (await fleet.reportOfTrierarch())?.note, { timeout: GIVEN_BACK_WITHIN_MS }).toContain(`copilot not offered: ${reason}`);
+    const details = z.looseObject({ notOffered: z.array(z.object({ harness: z.string(), reason: z.string() })), harnesses: z.array(z.looseObject({ harness: z.string() })) }).parse((await fleet.reportOfTrierarch())?.details);
+    expect(details.notOffered).toEqual([{ harness: 'copilot', reason }]);
+    expect(details.harnesses.map((each) => each.harness)).not.toContain('copilot');
+  });
+});
