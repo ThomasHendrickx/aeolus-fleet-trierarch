@@ -11,9 +11,11 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/failedstarts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
@@ -61,6 +63,8 @@ type Input struct {
 	// OS and Arch are Go's names of the platform and chip.
 	OS, Arch    string
 	IsKeyCutOff bool
+	// Now is the time of the report: when the machine that stopped offering itself offers itself again for a probe (#853).
+	Now time.Time
 	// Load is the machine's load as last read; none before one could be (#400).
 	Load *machineload.Load
 	// Usage is the harnesses' usage as last read (#353); none reports none.
@@ -85,6 +89,11 @@ func Of(in Input) Report {
 	if crashed > 0 {
 		note += fmt.Sprintf(", %d crashed", crashed)
 	}
+	// A machine whose session starts keep failing offers nothing (#853) until its probe is due.
+	stopped := whyNotOffered(in)
+	if stopped != "" {
+		note += ", not offered: " + stopped
+	}
 	state := "idle"
 	if in.Running > 0 {
 		state = "working"
@@ -95,14 +104,43 @@ func Of(in Input) Report {
 	return Report{State: state, Note: note, Details: detailsOf(in)}
 }
 
+// whyNotOffered is why the machine offers itself for no placement now (#853), or none while it offers itself.
+func whyNotOffered(in Input) string {
+	starts := in.State.FailedStarts
+	if starts == nil || failedstarts.IsOffering(starts, in.Now) {
+		return ""
+	}
+	return failedstarts.NotOfferedReason(*starts)
+}
+
+// capsOf are the caps as reported: in its probe the machine has room for one start only, above the ships it holds, until a start decides (#853).
+func capsOf(in Input) config.Caps {
+	caps := in.Configuration.Caps
+	if !failedstarts.IsProbing(in.State.FailedStarts, in.Now) {
+		return caps
+	}
+	isStartUndecided := false
+	for _, entry := range in.State.Entries {
+		isStartUndecided = isStartUndecided || entry.State == "crewing" || entry.State == "restarting" || entry.LaunchedAt != ""
+	}
+	caps.Ships = failedstarts.ProbeShipsCap(len(in.State.Entries), caps.Ships, isStartUndecided)
+	return caps
+}
+
 func detailsOf(in Input) map[string]any {
+	stopped := whyNotOffered(in)
+	named := in
+	if stopped != "" {
+		// It offers no harness, and so no place, naming each harness with why.
+		named.Harnesses = nil
+	}
 	details := map[string]any{
-		"harnesses": harnessesOf(in),
+		"harnesses": harnessesOf(named),
 		"workspaces": map[string]any{
-			"repositories": offeredPlaces(in, slices.Sorted(maps.Keys(in.Configuration.Repositories)), func(places trust.Places) []string { return places.Repositories }),
-			"folders":      offeredPlaces(in, slices.Sorted(maps.Keys(in.Configuration.Folders)), func(places trust.Places) []string { return places.Folders }),
+			"repositories": offeredPlaces(named, slices.Sorted(maps.Keys(in.Configuration.Repositories)), func(places trust.Places) []string { return places.Repositories }),
+			"folders":      offeredPlaces(named, slices.Sorted(maps.Keys(in.Configuration.Folders)), func(places trust.Places) []string { return places.Folders }),
 		},
-		"caps": in.Configuration.Caps,
+		"caps": capsOf(in),
 		// Paths stay on the machine: names only (decision 0032).
 		"kept":    pickedFrom(in.State.Kept, "shipId", "repository"),
 		"orphans": pickedFrom(in.State.Orphans, "repository", "name"),
@@ -110,6 +148,13 @@ func detailsOf(in Input) map[string]any {
 		// A fact for the console, never a label: placement does not read it (decision 0039).
 		"runtime": runtimeOf(in.Configuration),
 		"version": in.Version,
+	}
+	if stopped != "" {
+		notOffered := []map[string]string{}
+		for _, name := range in.Harnesses {
+			notOffered = append(notOffered, map[string]string{"harness": name, "reason": stopped})
+		}
+		details["notOffered"] = notOffered
 	}
 	if in.Load != nil {
 		details["load"] = in.Load

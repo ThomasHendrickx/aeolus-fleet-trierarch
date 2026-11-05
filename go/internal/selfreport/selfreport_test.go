@@ -5,9 +5,11 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/failedstarts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
@@ -440,5 +442,94 @@ func TestAReportWhoseUsageCouldNotBeReadIsNotSent(t *testing.T) {
 	}
 	if len(fleet.reports) != 0 {
 		t.Fatalf("reports = %d; want none", len(fleet.reports))
+	}
+}
+
+var stoppedAt = time.Date(2026, 10, 6, 8, 3, 0, 0, time.UTC)
+
+// aStoppedInput is the input of a machine whose last start failed at stoppedAt, after the starts of the ships failed in a row.
+func aStoppedInput(shipIDs ...string) Input {
+	in := anInput()
+	in.Now = stoppedAt
+	for _, shipID := range shipIDs {
+		in.State.FailedStarts, _ = failedstarts.Count(in.State.FailedStarts, failedstarts.Outcome{ShipID: shipID, Reason: "no activity within a minute of its start"}, stoppedAt, "{}")
+	}
+	return in
+}
+
+const stoppedReason = "the starts of 3 ships failed in a row; first: no activity within a minute of its start; it offers itself again at 2026-10-06T08:13:00.000Z"
+
+func TestAMachineWhoseStartsKeepFailingOffersNoHarnessAndNoPlaceAndSaysWhy(t *testing.T) {
+	in := aStoppedInput("shp_a", "shp_b", "shp_c")
+
+	report := Of(in)
+	details := asJSON(t, report)["details"].(map[string]any)
+
+	if want := "0 of 6 running, not offered: " + stoppedReason; report.Note != want {
+		t.Fatalf("note = %q, want %q", report.Note, want)
+	}
+	if got := details["harnesses"]; !reflect.DeepEqual(got, []any{}) {
+		t.Fatalf("harnesses = %v", got)
+	}
+	if got := details["workspaces"]; !reflect.DeepEqual(got, map[string]any{"repositories": []any{}, "folders": []any{}}) {
+		t.Fatalf("workspaces = %v", got)
+	}
+	if got, want := details["notOffered"], []any{map[string]any{"harness": "claude-code", "reason": stoppedReason}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("notOffered = %v, want %v", got, want)
+	}
+}
+
+func TestAMachineWhoseStartsFailedForTwoShipsStillOffersItself(t *testing.T) {
+	in := aStoppedInput("shp_a", "shp_b")
+
+	details := detailsJSON(t, in)
+
+	if _, isNamed := details["notOffered"]; isNamed || len(details["harnesses"].([]any)) != 1 || Of(in).Note != "0 of 6 running" {
+		t.Fatalf("details = %v, note %q", details, Of(in).Note)
+	}
+}
+
+func TestTheNoteSaysItIsNotOfferedAfterTheCrashedShipsAndBeforeTheFleetsKeyIsCutOff(t *testing.T) {
+	in := aStoppedInput("shp_a", "shp_b", "shp_c")
+	in.State.Entries = map[string]reconciler.Entry{scout: {ShipID: scout, State: "crashed"}}
+	in.IsKeyCutOff = true
+
+	want := "0 of 6 running, 1 crashed, not offered: " + stoppedReason + ", waiting for the fleet's key (KEY_UNAVAILABLE)"
+	if got := Of(in).Note; got != want {
+		t.Fatalf("note = %q, want %q", got, want)
+	}
+}
+
+func TestAMachineOffersItselfAgainAsAProbeTenMinutesAfterItsLastFailedStartWithRoomForOneStart(t *testing.T) {
+	in := aStoppedInput("shp_a", "shp_b", "shp_c")
+	in.State.Entries = map[string]reconciler.Entry{scout: {ShipID: scout, State: "running"}}
+	in.Now = stoppedAt.Add(10 * time.Minute)
+
+	details := detailsJSON(t, in)
+
+	if _, isNamed := details["notOffered"]; isNamed || len(details["harnesses"].([]any)) != 1 || Of(in).Note != "0 of 6 running" {
+		t.Fatalf("details = %v, note %q", details, Of(in).Note)
+	}
+	if got, want := details["caps"], map[string]any{"ships": float64(2), "running": float64(4)}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("caps = %v, want %v", got, want)
+	}
+}
+
+func TestAProbeWhoseStartHasNotDecidedYetOffersNoMoreRoom(t *testing.T) {
+	in := aStoppedInput("shp_a", "shp_b", "shp_c")
+	in.State.Entries = map[string]reconciler.Entry{scout: {ShipID: scout, State: "crewing", LaunchedAt: "2026-10-06T08:13:00.000Z"}}
+	in.Now = stoppedAt.Add(10 * time.Minute)
+
+	if got, want := detailsJSON(t, in)["caps"], map[string]any{"ships": float64(1), "running": float64(4)}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("caps = %v, want %v", got, want)
+	}
+}
+
+func TestAMachineNotYetDueItsProbeOffersNoHarnessOneSecondEarly(t *testing.T) {
+	in := aStoppedInput("shp_a", "shp_b", "shp_c")
+	in.Now = stoppedAt.Add(10*time.Minute - time.Second)
+
+	if got := detailsJSON(t, in)["harnesses"]; !reflect.DeepEqual(got, []any{}) {
+		t.Fatalf("harnesses = %v", got)
 	}
 }
