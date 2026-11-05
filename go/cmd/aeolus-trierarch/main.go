@@ -434,7 +434,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		// What the machine offers changes while it runs, as sessions refuse models (#382): each pass reads it afresh.
 		Offers: offers.options,
 		RefuseModel: func(harness string, model string) error {
-			return offers.refuse(detect, harness, model)
+			return detect.Refuse(context.Background(), harness, model, time.Now(), offers.set)
 		},
 		// The machine's memory and disk, read each minute; argo is told once when one is low (#400).
 		Load: load,
@@ -542,23 +542,6 @@ func (o *offers) options() map[string]map[string][]string {
 		}
 	}
 	return options
-}
-
-// refuse keeps a model a session refused as refused, offered no more from the next pass, then detects its harness again in the background, keeping it refused: the loop never waits on a probe, and each probe ends within its time.
-func (o *offers) refuse(detect detection.Detection, harness string, model string) error {
-	detected, err := detection.Refuse(detect.Store, harness, model, time.Now())
-	if err != nil {
-		return err
-	}
-	o.set(detected)
-	go func() {
-		if _, err := detect.Detect(context.Background(), []string{harness}, detection.ByRefusal); err != nil {
-			logLine(fmt.Sprintf("%s could not be detected again after it refused %s: %v", harness, model, err))
-			return
-		}
-		o.set(detect.Store.Load())
-	}()
-	return nil
 }
 
 // adapters are the harnesses this trierarch has an adapter for, the default first.
