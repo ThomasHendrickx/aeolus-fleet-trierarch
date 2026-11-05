@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/processproof"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
 )
 
@@ -116,14 +117,14 @@ func BootedAt() time.Time {
 	return time.Now().Add(-time.Duration(seconds * float64(time.Second)))
 }
 
-// runningPID is the hold's pid while its process runs, 0 otherwise.
+// runningPID is the hold's pid while its process runs, 0 otherwise: a pid file's pid that is not this ship's hold by its command line is nobody to signal.
 func (r Runtime) runningPID(shipID string) int {
 	text, err := os.ReadFile(hold.FilesOf(r.Sessions, shipID).PID)
 	if err != nil {
 		return 0
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(text)))
-	if err != nil || pid <= 1 || syscall.Kill(pid, 0) != nil {
+	if err != nil || pid <= 1 || syscall.Kill(pid, 0) != nil || !processproof.Runs(pid, "hold", shipID, "--sessions", r.Sessions) {
 		return 0
 	}
 	return pid

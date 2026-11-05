@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -181,5 +182,36 @@ func TestAProxyNoHarnessNeedsIsStopped(t *testing.T) {
 func TestTheProxyCommandRefusesWordsItCannotTake(t *testing.T) {
 	if code := Main([]string{"--folder", t.TempDir()}, "1.2.3"); code != 2 {
 		t.Fatalf("Main without --sessions and --keys = %d, want 2", code)
+	}
+}
+
+func TestAPidFileNamingAnUnrelatedLiveProcessSignalsNothing(t *testing.T) {
+	runtime := aRuntime(t)
+	unrelated := exec.Command("sleep", "60")
+	if err := unrelated.Start(); err != nil {
+		t.Fatal(err)
+	}
+	ended := make(chan struct{})
+	go func() { _ = unrelated.Wait(); close(ended) }()
+	t.Cleanup(func() { _ = unrelated.Process.Kill(); <-ended })
+	if err := os.MkdirAll(runtime.Folder, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	pidFile := filepath.Join(runtime.Folder, "proxy.pid")
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(unrelated.Process.Pid)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runtime.Keep(false); err != nil {
+		t.Fatalf("Keep(false) = %v", err)
+	}
+
+	select {
+	case <-ended:
+		t.Fatalf("the unrelated process (pid %d) was signalled", unrelated.Process.Pid)
+	case <-time.After(200 * time.Millisecond):
+	}
+	if _, err := os.Stat(pidFile); err == nil {
+		t.Fatal("the stale pid file stays, want it removed")
 	}
 }
