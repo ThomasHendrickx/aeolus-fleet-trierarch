@@ -120,6 +120,44 @@ func TestARequestForAHarnessNotOfferedIsGivenBackWithWhy(t *testing.T) {
 	}
 }
 
+func TestARequestForAHarnessTheMachineDoesNotOfferIsGivenBackWithWhy(t *testing.T) {
+	context := aContext(aRequest(scout))
+	context.NotOffered = map[string]string{"claude-code": "its Copilot CLI version is not detected yet"}
+
+	_, actions := Reconcile(Empty(), context)
+
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "harness: claude-code is not offered: its Copilot CLI version is not detected yet"})
+}
+
+func TestARequestForAHarnessWhosePluginIsMissingIsGivenBackSayingToUpgrade(t *testing.T) {
+	context := aContext(aRequest(scout))
+	context.MissingPlugins = []string{"claude-code"}
+
+	_, actions := Reconcile(Empty(), context)
+
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "harness: claude-code's aeolus-fleet plugin is not installed: run aeolus-trierarch upgrade"})
+}
+
+func TestARequestForAHarnessWhosePluginMarksNoLaunchesIsGivenBackSayingToUpgrade(t *testing.T) {
+	context := aContext(aRequest(scout))
+	context.MarksLaunches = map[string]bool{"claude-code": false}
+
+	_, actions := Reconcile(Empty(), context)
+
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "harness: claude-code's aeolus-fleet plugin marks no launches: run aeolus-trierarch upgrade"})
+}
+
+func TestAHarnessNotOfferedIsToldBeforeItsPluginIsMissing(t *testing.T) {
+	context := aContext(aRequest(scout))
+	context.NotOffered = map[string]string{"claude-code": "why"}
+	context.MissingPlugins = []string{"claude-code"}
+	context.MarksLaunches = map[string]bool{"claude-code": false}
+
+	_, actions := Reconcile(Empty(), context)
+
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "harness: claude-code is not offered: why"})
+}
+
 func TestARequestAlreadyRefusedAtItsVersionIsNotGivenBackAgain(t *testing.T) {
 	request := aRequest(scout)
 	request.Settings.Harness = "codex"
