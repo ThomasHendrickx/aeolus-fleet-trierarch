@@ -45,6 +45,19 @@ type aFleet struct {
 	activityWrites      [][]fleet.ShipActivity
 	activityInterval    int
 	cannotWriteActivity error
+	// clears are the pending clear requests; cannotReadClears makes their read fail.
+	clears           []reconciler.ClearRequest
+	cannotReadClears error
+}
+
+func (f *aFleet) PendingClears() ([]reconciler.ClearRequest, error) {
+	if f.cannotReadClears != nil {
+		return nil, f.cannotReadClears
+	}
+	return f.clears, nil
+}
+func (f *aFleet) ConfirmCleared(shipID string, repository string, outcome string) error {
+	return f.call(fmt.Sprintf("confirmCleared %s %s %s", shipID, repository, outcome))
 }
 
 func (f *aFleet) ReportActivity(intervalSeconds int, activities []fleet.ShipActivity) error {
@@ -2447,5 +2460,97 @@ func TestAStartThatSucceedsClearsTheFailedStartsTheStateKeeps(t *testing.T) {
 
 	if pass.store.state.FailedStarts != nil {
 		t.Fatalf("failed starts %+v", pass.store.state.FailedStarts)
+	}
+}
+
+const lookout = "shp_01m6jyczpnpp5c0vxh54c966lk"
+
+const keptPath = "/worktrees/aeolus-fleet/lookout"
+
+// aKeptWorktree is lookout's worktree of aeolus-fleet, kept because it had changes, as the state holds it, and on disk.
+func (p *aPass) aKeptWorktree() {
+	p.workspace.made[keptPath] = true
+	p.store.state.Kept = []any{map[string]any{"shipId": lookout, "repository": "aeolus-fleet", "path": keptPath}}
+}
+
+func TestAClearRequestRemovesTheKeptWorktreeItNamesAndConfirmsItRemoved(t *testing.T) {
+	pass := aRunPass(t)
+	pass.aKeptWorktree()
+	pass.fleet.clears = []reconciler.ClearRequest{{ShipID: lookout, Repository: "aeolus-fleet"}}
+
+	pass.run(t)
+
+	if !slices.Equal(pass.workspace.removed, []string{keptPath}) || len(pass.store.state.Kept) != 0 {
+		t.Fatalf("removed %q, kept %+v", pass.workspace.removed, pass.store.state.Kept)
+	}
+	if !slices.Contains(pass.fleet.calls, "confirmCleared "+lookout+" aeolus-fleet removed") {
+		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+}
+
+func TestAClearRequestForAWorktreeKeptOfNoneIsConfirmedNotKeptRemovingNothing(t *testing.T) {
+	pass := aRunPass(t)
+	pass.fleet.clears = []reconciler.ClearRequest{{ShipID: lookout, Repository: "aeolus-fleet"}}
+
+	pass.run(t)
+
+	if len(pass.workspace.removed) != 0 {
+		t.Fatalf("removed %q", pass.workspace.removed)
+	}
+	if !slices.Contains(pass.fleet.calls, "confirmCleared "+lookout+" aeolus-fleet not-kept") {
+		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+}
+
+func TestAKeptWorktreeThatCannotBeRemovedStaysKeptUnconfirmedAndIsClearedOnTheNextPass(t *testing.T) {
+	pass := aRunPass(t)
+	pass.aKeptWorktree()
+	pass.fleet.clears = []reconciler.ClearRequest{{ShipID: lookout, Repository: "aeolus-fleet"}}
+	pass.workspace.failRemove = true
+
+	pass.run(t)
+
+	if len(pass.store.state.Kept) != 1 || slices.ContainsFunc(pass.fleet.calls, func(call string) bool { return strings.HasPrefix(call, "confirmCleared") }) {
+		t.Fatalf("kept %+v, calls %q", pass.store.state.Kept, pass.fleet.calls)
+	}
+
+	pass.workspace.failRemove = false
+	pass.run(t)
+
+	if len(pass.store.state.Kept) != 0 || !slices.Contains(pass.fleet.calls, "confirmCleared "+lookout+" aeolus-fleet removed") {
+		t.Fatalf("kept %+v, calls %q", pass.store.state.Kept, pass.fleet.calls)
+	}
+}
+
+func TestAClearWhoseConfirmationIsLostIsConfirmedNotKeptOnTheNextPass(t *testing.T) {
+	pass := aRunPass(t)
+	pass.aKeptWorktree()
+	pass.fleet.clears = []reconciler.ClearRequest{{ShipID: lookout, Repository: "aeolus-fleet"}}
+	pass.fleet.refuse = "confirmCleared"
+
+	pass.run(t)
+
+	if !slices.Equal(pass.workspace.removed, []string{keptPath}) || len(pass.store.state.Kept) != 0 {
+		t.Fatalf("removed %q, kept %+v", pass.workspace.removed, pass.store.state.Kept)
+	}
+
+	pass.fleet.refuse = ""
+	pass.run(t)
+
+	if !slices.Contains(pass.fleet.calls, "confirmCleared "+lookout+" aeolus-fleet not-kept") {
+		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+}
+
+func TestAPassWhoseClearRequestsCannotBeReadFailsActingOnNothing(t *testing.T) {
+	pass := aRunPass(t)
+	pass.aKeptWorktree()
+	pass.fleet.clears = []reconciler.ClearRequest{{ShipID: lookout, Repository: "aeolus-fleet"}}
+	pass.fleet.cannotReadClears = errors.New("the fleet is down")
+
+	pass.run(t)
+
+	if len(pass.workspace.removed) != 0 || pass.store.state.PassFailure == nil || pass.store.state.PassFailure.Reason != "the fleet is down" {
+		t.Fatalf("removed %q, pass failure %+v", pass.workspace.removed, pass.store.state.PassFailure)
 	}
 }
