@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
 )
 
 // pingContentType is the reserved content type only the fleet's ping call sends.
@@ -22,6 +24,12 @@ type Delivery struct {
 	DeliveryID   string
 	SenderShipID string
 	ContentType  string
+	Payload      string
+}
+
+// Keeper keeps the trusted repositories the trierarch plugin's ship sent.
+type Keeper interface {
+	Accept(list []trusted.Repository) error
 }
 
 // Refusal is the fleet's own refusal: its code and its message.
@@ -50,6 +58,10 @@ type Loop struct {
 	KeyWaitMax time.Duration
 	// Pause waits, ending at once when ctx ends.
 	Pause func(ctx context.Context, wait time.Duration)
+	// PluginShipID is the trierarch plugin's ship, the one ship the trusted repositories are taken from; empty on a machine that does not know it.
+	PluginShipID string
+	// Trusted keeps the trusted repositories; the list is handled as any other message without it.
+	Trusted Keeper
 	// OnKeyCutOff is told at the first refusal (true) and when a receive passes again (false).
 	OnKeyCutOff func(isCutOff bool)
 }
@@ -60,9 +72,34 @@ func IsPing(contentType string) bool {
 	return strings.ToLower(strings.TrimSpace(essence)) == pingContentType
 }
 
+// takeTrusted takes the trusted repositories the delivery carries, but only from the trierarch plugin's ship init kept: a sender's type is any ship's to pick, so no other ship can make the machine clone a repository. A list that does not fit is not taken, and the one held stays; a failure to keep a list that fits is the loop's, so the delivery comes again.
+func (l Loop) takeTrusted(delivery Delivery) error {
+	from := fmt.Sprintf("Not handled: trusted repositories from %s.", delivery.SenderShipID)
+	if l.PluginShipID == "" {
+		l.Log(from + " This machine does not know the trierarch plugin's ship: run aeolus-trierarch init --plugin-ship-id <its ship id>.")
+		return nil
+	}
+	if delivery.SenderShipID != l.PluginShipID {
+		l.Log(fmt.Sprintf("%s The trierarch takes them only from the trierarch plugin's ship %s.", from, l.PluginShipID))
+		return nil
+	}
+	list, err := trusted.Read(delivery.Payload)
+	if err != nil {
+		l.Log(fmt.Sprintf("Not handled: trusted repositories that do not fit (%v). The trierarch keeps the list it holds.", err))
+		return nil
+	}
+	return l.Trusted.Accept(list)
+}
+
 func (l Loop) handle(delivery Delivery) error {
 	if IsPing(delivery.ContentType) {
 		return l.Ship.Pong(delivery.DeliveryID)
+	}
+	if delivery.ContentType == trusted.ListContentType && l.Trusted != nil {
+		if err := l.takeTrusted(delivery); err != nil {
+			return err
+		}
+		return l.Ship.Ack(delivery.DeliveryID)
 	}
 	if err := l.Ship.Ack(delivery.DeliveryID); err != nil {
 		return err

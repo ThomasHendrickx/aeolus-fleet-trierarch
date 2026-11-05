@@ -273,7 +273,7 @@ func TestTheTrierarchsOwnShipReceivesAtMostTenDeliveriesWithItsCrewToken(t *test
 
 	deliveries, err := client.Receive(context.Background())
 
-	if err != nil || len(deliveries) != 1 || deliveries[0].DeliveryID != "dlv_1" || deliveries[0].SenderShipID != scout || deliveries[0].ContentType != "application/vnd.aeolus.ping" {
+	if err != nil || len(deliveries) != 1 || deliveries[0].DeliveryID != "dlv_1" || deliveries[0].SenderShipID != scout || deliveries[0].ContentType != "application/vnd.aeolus.ping" || deliveries[0].Payload != "ping" {
 		t.Fatalf("deliveries %+v, %v", deliveries, err)
 	}
 	sameJSON(t, recorded.asked["/api/v1/ship/receive"], `{"max":10}`)
