@@ -33,8 +33,10 @@ type Configuration struct {
 	Repositories map[string]Repository `json:"repositories"`
 	Folders      map[string]Folder     `json:"folders"`
 	Harnesses    map[string]Harness    `json:"harnesses"`
-	Prices       map[string]Price      `json:"prices,omitempty"`
-	Logins       *Logins               `json:"logins,omitempty"`
+	// HarnessOrder is the harnesses in the order the file names them, as status says them; empty for a configuration not read from a file.
+	HarnessOrder []string         `json:"-"`
+	Prices       map[string]Price `json:"prices,omitempty"`
+	Logins       *Logins          `json:"logins,omitempty"`
 }
 
 // Runtime is where the sessions run: on the host, or in a container of the runtime's binary with its caps.
@@ -152,7 +154,33 @@ func Load(path string) (Configuration, error) {
 	if err := decoder.Decode(&configuration); err != nil {
 		return Configuration{}, fmt.Errorf("the configuration at %s does not fit: %v", path, err)
 	}
+	order, err := keyOrder(keys["harnesses"])
+	if err != nil {
+		return Configuration{}, fmt.Errorf("the configuration at %s does not fit: %v", path, err)
+	}
+	configuration.HarnessOrder = order
 	return configuration, nil
+}
+
+// keyOrder is the keys of a JSON object in the order it names them.
+func keyOrder(object json.RawMessage) ([]string, error) {
+	decoder := json.NewDecoder(bytes.NewReader(object))
+	if _, err := decoder.Token(); err != nil {
+		return nil, err
+	}
+	order := []string{}
+	for decoder.More() {
+		key, err := decoder.Token()
+		if err != nil {
+			return nil, err
+		}
+		order = append(order, key.(string))
+		var skipped json.RawMessage
+		if err := decoder.Decode(&skipped); err != nil {
+			return nil, err
+		}
+	}
+	return order, nil
 }
 
 // Write writes the configuration to the path, as today's trierarch does: indented by two, with a last newline.

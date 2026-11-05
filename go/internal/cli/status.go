@@ -27,14 +27,16 @@ type StatusReport struct {
 	// RunningVersion is the version the running service said when it started; none when it does not run or did not say.
 	RunningVersion string `json:"runningVersion,omitempty"`
 	// Plugins is the aeolus-fleet plugin version per configured harness; null where the harness has none.
-	Plugins      map[string]*string `json:"plugins"`
-	Repositories []string           `json:"repositories"`
-	Service      service.Status     `json:"service"`
-	Fleet        StatusFleet        `json:"fleet"`
-	Caps         StatusCaps         `json:"caps"`
-	Entries      map[string]int     `json:"entries"`
-	Kept         []StatusKept       `json:"kept"`
-	Orphans      []string           `json:"orphans"`
+	Plugins map[string]*string `json:"plugins"`
+	// HarnessOrder is the configured harnesses in the configuration file's order, as the text says them.
+	HarnessOrder []string       `json:"-"`
+	Repositories []string       `json:"repositories"`
+	Service      service.Status `json:"service"`
+	Fleet        StatusFleet    `json:"fleet"`
+	Caps         StatusCaps     `json:"caps"`
+	Entries      map[string]int `json:"entries"`
+	Kept         []StatusKept   `json:"kept"`
+	Orphans      []string       `json:"orphans"`
 	// PassFailure is why the last pass failed and since when; none when it succeeded.
 	PassFailure *reconciler.PassFailure `json:"passFailure,omitempty"`
 }
@@ -99,6 +101,7 @@ func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
 	report := StatusReport{
 		Version:      Version,
 		Plugins:      map[string]*string{},
+		HarnessOrder: configuration.HarnessOrder,
 		Repositories: slices.AppendSeq([]string{}, maps.Keys(configuration.Repositories)),
 		Service:      manager,
 		Fleet:        StatusFleet{URL: kept.FleetURL, ShipID: kept.ShipID, Lease: lease},
@@ -220,12 +223,12 @@ func describeVersion(report StatusReport, look style.Style) string {
 }
 
 // describePlugins is each configured harness with the aeolus-fleet plugin version it uses, or that it has none.
-func describePlugins(plugins map[string]*string, look style.Style) string {
+func describePlugins(plugins map[string]*string, order []string, look style.Style) string {
 	if len(plugins) == 0 {
 		return "no harness configured"
 	}
 	parts := []string{}
-	for _, harness := range slices.Sorted(maps.Keys(plugins)) {
+	for _, harness := range order {
 		if plugins[harness] == nil {
 			parts = append(parts, look.Tone(style.Bad, harness+" not found (install the aeolus-fleet plugin for it)"))
 		} else {
@@ -260,7 +263,7 @@ func describeStatus(report StatusReport, look style.Style) string {
 	}
 	return strings.Join([]string{
 		line("Version", describeVersion(report, look)),
-		line("Aeolus Fleet plugin", describePlugins(report.Plugins, look)),
+		line("Aeolus Fleet plugin", describePlugins(report.Plugins, report.HarnessOrder, look)),
 		line("Repositories", or(len(report.Repositories) == 0, "none", func() string { return strings.Join(report.Repositories, ", ") })),
 		line("Service", describeService(report.Service, look)),
 		line("Fleet", describeFleet(report.Fleet, look)),
