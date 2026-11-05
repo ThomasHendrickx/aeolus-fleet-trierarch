@@ -24,6 +24,14 @@ type State struct {
 	Refused map[string]int   `json:"refused"`
 	// KeysTold is, by harness, the state of its API key argo was told, so it is told once per state (api keys K9).
 	KeysTold map[string]string `json:"keysTold,omitempty"`
+	// PassFailure is why the last pass failed and since when; none while passes succeed.
+	PassFailure *PassFailure `json:"passFailure,omitempty"`
+}
+
+// PassFailure is a failing pass: the reason of the latest failure, and when the passes began to fail.
+type PassFailure struct {
+	Reason string `json:"reason"`
+	Since  string `json:"since"`
 }
 
 // Empty is the state of a trierarch that crewed nothing yet.

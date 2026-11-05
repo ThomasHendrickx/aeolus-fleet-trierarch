@@ -33,6 +33,8 @@ type aFleet struct {
 	refuseOwner *fleet.Refusal
 	// refuseGiveBack is the refusal the fleet gives a give-back.
 	refuseGiveBack *fleet.Refusal
+	// cannotRead makes the read of the assigned requests fail.
+	cannotRead error
 }
 
 // told is a notice the trierarch sent: to argo, or to a ship by its id.
@@ -49,7 +51,12 @@ func (f *aFleet) call(text string) error {
 	}
 	return nil
 }
-func (f *aFleet) AssignedRequests() ([]reconciler.Request, error) { return f.requests, nil }
+func (f *aFleet) AssignedRequests() ([]reconciler.Request, error) {
+	if f.cannotRead != nil {
+		return nil, f.cannotRead
+	}
+	return f.requests, nil
+}
 func (f *aFleet) Ship(shipID string) (fleet.Ship, error) {
 	if ship, ok := f.ships[shipID]; ok {
 		return ship, nil
@@ -1381,5 +1388,50 @@ func TestAShipReleasedElsewhereAndCrewedByAnotherSessionIsLeft(t *testing.T) {
 
 	if len(pass.store.state.Entries) != 0 || len(pass.harness.launches) != 0 {
 		t.Fatalf("entries %+v, launches %+v", pass.store.state.Entries, pass.harness.launches)
+	}
+}
+
+func TestAPassThatCannotReadWhatItReconcilesKeepsItsReasonAndSinceWhenInTheState(t *testing.T) {
+	p := aRunPass(t)
+	p.fleet.cannotRead = errors.New("the fleet cannot be reached")
+
+	p.run(t)
+
+	want := &reconciler.PassFailure{Reason: "the fleet cannot be reached", Since: "2026-11-04T12:00:00.000Z"}
+	if !reflect.DeepEqual(p.store.state.PassFailure, want) {
+		t.Errorf("passFailure after a failed pass = %+v, want %+v", p.store.state.PassFailure, want)
+	}
+	wantLog := "The pass failed: the fleet cannot be reached; the next pass tries again; aeolus-trierarch status and list show where it stands"
+	if !slices.Contains(p.logged, wantLog) {
+		t.Errorf("logged = %q, want it to hold %q", p.logged, wantLog)
+	}
+}
+
+func TestAFailingPassKeepsSinceWhenTheNextPassFailsWithAnotherReason(t *testing.T) {
+	p := aRunPass(t)
+	p.fleet.cannotRead = errors.New("the fleet cannot be reached")
+	p.run(t)
+	now = now.Add(5 * time.Second)
+	t.Cleanup(func() { now = now.Add(-5 * time.Second) })
+	p.fleet.cannotRead = errors.New("the fleet refused")
+
+	p.run(t)
+
+	want := &reconciler.PassFailure{Reason: "the fleet refused", Since: "2026-11-04T12:00:00.000Z"}
+	if !reflect.DeepEqual(p.store.state.PassFailure, want) {
+		t.Errorf("passFailure after a second failed pass = %+v, want %+v", p.store.state.PassFailure, want)
+	}
+}
+
+func TestAPassThatSucceedsClearsTheFailureOfTheOnesBefore(t *testing.T) {
+	p := aRunPass(t)
+	p.fleet.cannotRead = errors.New("the fleet cannot be reached")
+	p.run(t)
+	p.fleet.cannotRead = nil
+
+	p.run(t)
+
+	if p.store.state.PassFailure != nil {
+		t.Errorf("passFailure after a pass that succeeded = %+v, want none", p.store.state.PassFailure)
 	}
 }
