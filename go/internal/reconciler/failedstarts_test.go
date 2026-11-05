@@ -20,7 +20,7 @@ func aQuietStart(shipID string, state State) (State, Context) {
 	entry.LaunchedAt, entry.LaunchID = ago(61*time.Second), "launch-1"
 	state.Entries[shipID] = entry
 	context := aContext(aRequest(shipID))
-	context.Configuration = configuration
+	context.ConfigurationFile = configuration
 	context.Observed.Sessions = running(shipID)
 	context.Observed.Launches[shipID] = LaunchSeen{Kind: LaunchNone}
 	return state, context
@@ -88,7 +88,7 @@ func TestAStartActiveInItsLaunchWindowClearsTheFailedStarts(t *testing.T) {
 	state := withEntries(entry)
 	state.FailedStarts = failedBefore(scout, lookout, "shp_other")
 	context := aContext(aRequest(helm))
-	context.Configuration = configuration
+	context.ConfigurationFile = configuration
 	context.Observed.Sessions = running(helm)
 	context.Observed.Launches[helm] = LaunchSeen{Kind: LaunchActive}
 
@@ -106,7 +106,7 @@ func TestARestartedSessionActiveInItsLaunchWindowClearsTheFailedStarts(t *testin
 	state.FailedStarts = failedBefore(scout, lookout)
 	context := aContext(aRequest(helm))
 	context.Requests[0].Status = status("running")
-	context.Configuration = configuration
+	context.ConfigurationFile = configuration
 	context.Observed.Sessions = running(helm)
 	context.Observed.Launches[helm] = LaunchSeen{Kind: LaunchActive}
 
@@ -124,7 +124,7 @@ func TestARestartedSessionQuietForItsWholeLaunchWindowIsCountedAsAFailedStart(t 
 	state.FailedStarts = failedBefore(scout, lookout)
 	context := aContext(aRequest(helm))
 	context.Requests[0].Status = status("running")
-	context.Configuration = configuration
+	context.ConfigurationFile = configuration
 	context.Observed.Sessions = running(helm)
 	context.Observed.Launches[helm] = LaunchSeen{Kind: LaunchNone}
 
@@ -137,7 +137,7 @@ func TestARestartedSessionQuietForItsWholeLaunchWindowIsCountedAsAFailedStart(t 
 
 func TestAnAnsweredRefusalOfTheHarnessesOwnDefaultModelIsCountedAsAFailedStart(t *testing.T) {
 	entry, context := aRefusedLaunch(map[string]string{}, "claude-opus-5-5")
-	context.Configuration = configuration
+	context.ConfigurationFile = configuration
 
 	next, _ := Reconcile(withEntries(entry), context)
 
@@ -148,7 +148,7 @@ func TestAnAnsweredRefusalOfTheHarnessesOwnDefaultModelIsCountedAsAFailedStart(t
 
 func TestARefusalOfAModelTheSettingsPickedIsNotCountedAgainstTheMachine(t *testing.T) {
 	entry, context := aRefusedLaunch(map[string]string{"model": "claude-sonnet-5"}, "claude-sonnet-5")
-	context.Configuration = configuration
+	context.ConfigurationFile = configuration
 
 	next, _ := Reconcile(withEntries(entry), context)
 
@@ -161,7 +161,7 @@ func TestAnotherConfigurationThanTheMachineStoppedWithCountsAfresh(t *testing.T)
 	state := withEntries()
 	state.FailedStarts = failedBefore(scout, lookout, helm)
 	context := aContext()
-	context.Configuration = `{"caps":{"ships":6,"running":4}}`
+	context.ConfigurationFile = `{"caps":{"ships":6,"running":4}}`
 
 	next, _ := Reconcile(state, context)
 
@@ -174,7 +174,7 @@ func TestTheFailedStartsStayWhileNoStartDecides(t *testing.T) {
 	state := withEntries()
 	state.FailedStarts = failedBefore(scout, lookout, helm)
 	context := aContext()
-	context.Configuration = configuration
+	context.ConfigurationFile = configuration
 
 	next, actions := Reconcile(state, context)
 
