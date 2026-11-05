@@ -123,3 +123,11 @@ func TestDetectionProblemSaysTheHarnessItsVersionAndWhatDetectionCouldNotFind(t 
 		t.Errorf("DetectionProblem() = %q, want %q", got, want)
 	}
 }
+
+func TestDiscardedElsewhereSaysWhyTheWorktreeWentThenTheFacts(t *testing.T) {
+	got := DiscardedElsewhere(scout, "aeolus-fleet", []string{" M README.md", "?? draft.md"})
+	want := "scout released elsewhere: unpushed work discarded\n\nThe trierarch removed its worktree before crewing it again.\n\n- Ship: scout (`shp_1`)\n- Worktree: aeolus-fleet\n- Discarded: 1 changed, 1 new\n\n- changed `README.md`\n- new `draft.md`"
+	if got != want {
+		t.Fatalf("got %q", got)
+	}
+}

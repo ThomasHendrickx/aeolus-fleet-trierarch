@@ -69,6 +69,8 @@ type Entry struct {
 	EarlierLogins []EarlierLogin `json:"earlierLogins,omitempty"`
 	// IsIdentityGone is set once argo was told its folder holds no identity (#659, #664), until the identity is back.
 	IsIdentityGone bool `json:"isIdentityGone,omitempty"`
+	// IsReleasedElsewhere is set as it goes back to crewing after a release elsewhere (row 11): its worktree goes before it is crewed again (#475).
+	IsReleasedElsewhere bool `json:"isReleasedElsewhere,omitempty"`
 }
 
 // EarlierLogin is the login of a ship's earlier session, until the start that changed it (ISO 8601).
@@ -475,6 +477,12 @@ func newVersionStep(entry Entry, request Request, context Context) step {
 }
 
 func stepOf(entry Entry, context Context, canStart bool, isFinal bool) step {
+	if seen, ok := context.Observed.Ships[entry.ShipID]; ok && seen.Inbox.IsLeaseEnded {
+		// Released elsewhere (row 11): its session stops and the ship is crewed again, in a fresh worktree as a first start, with its first prompt and no resume (#475). A final crew stays final in the fleet (#469).
+		again := withState(entry, "crewing", context.Now)
+		again.IsReleasedElsewhere, again.HasStarted = true, false
+		return step{entry: &again, actions: []Action{{Kind: Stop, ShipID: entry.ShipID}, {Kind: Crew, ShipID: entry.ShipID}}}
+	}
 	switch entry.State {
 	case "crewing":
 		return launchStep(entry, context, isFinal)

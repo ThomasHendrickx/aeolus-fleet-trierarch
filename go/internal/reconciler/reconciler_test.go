@@ -653,12 +653,6 @@ func TestAForcedMessageWaitsWhileTheTurnIsUnknown(t *testing.T) {
 	assertActions(t, actions)
 }
 
-func TestASessionWhoseLeaseEndedIsHandedNothing(t *testing.T) {
-	_, actions := Reconcile(withEntries(anEntry(scout, "running")), aRunningShip(Seen{Inbox: Inbox{IsLeaseEnded: true}, Turn: TurnIdle, IsHolding: true}))
-
-	assertActions(t, actions)
-}
-
 func TestAnUnwatchedSessionIsHandedNothing(t *testing.T) {
 	_, actions := Reconcile(withEntries(anEntry(scout, "running")), aRunningShip(Seen{}))
 
@@ -766,5 +760,45 @@ func TestASessionOnAKeyThatIsNotReadyIsHandedNothingForcedOrNot(t *testing.T) {
 		_, actions := Reconcile(withEntries(anEntry(scout, "running")), aRunningShip(seen))
 
 		assertActions(t, actions)
+	}
+}
+
+func TestASessionWhoseLeaseEndedIsStoppedAndCrewedAgainAsAFirstStartInAFreshWorktree(t *testing.T) {
+	entry := anEntry(scout, "running")
+	entry.Exits = []string{ago(time.Minute)}
+	next, actions := Reconcile(withEntries(entry), aRunningShip(Seen{Inbox: Inbox{IsLeaseEnded: true}, Turn: TurnIdle}))
+
+	assertActions(t, actions, Action{Kind: Stop, ShipID: scout}, Action{Kind: Crew, ShipID: scout})
+	got := next.Entries[scout]
+	if got.State != "crewing" || got.Since != now.Format(time.RFC3339Nano) || got.HasStarted || !got.IsReleasedElsewhere || got.Folder != entry.Folder {
+		t.Fatalf("entry: %+v", got)
+	}
+}
+
+func TestACrewWhoseLeaseEndedStaysFinalInTheFleet(t *testing.T) {
+	context := aRunningShip(Seen{Inbox: Inbox{IsLeaseEnded: true}, Turn: TurnIdle})
+	context.Requests[0].IsFinal = true
+
+	next, actions := Reconcile(withEntries(anEntry(scout, "running")), context)
+
+	assertActions(t, actions, Action{Kind: Stop, ShipID: scout}, Action{Kind: Crew, ShipID: scout})
+	if !next.Entries[scout].IsReleasedElsewhere {
+		t.Fatalf("entry: %+v", next.Entries[scout])
+	}
+}
+
+func TestAShipReleasedElsewhereInItsLaunchWindowIsCrewedAgainAtOnce(t *testing.T) {
+	entry := anEntry(scout, "crewing")
+	entry.LaunchedAt, entry.LaunchID = ago(10*time.Second), "launch-1"
+	context := aContext(aRequest(scout))
+	context.Requests[0].Status = status("crewing")
+	context.Observed.Sessions = running(scout)
+	context.Observed.Ships = map[string]Seen{scout: {Inbox: Inbox{IsLeaseEnded: true}, Turn: TurnIdle}}
+
+	next, actions := Reconcile(withEntries(entry), context)
+
+	assertActions(t, actions, Action{Kind: Stop, ShipID: scout}, Action{Kind: Crew, ShipID: scout})
+	if !next.Entries[scout].IsReleasedElsewhere || next.Entries[scout].HasStarted {
+		t.Fatalf("entry: %+v", next.Entries[scout])
 	}
 }

@@ -408,6 +408,12 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 			return state, err
 		}
 	}
+	if entry.IsReleasedElsewhere {
+		var err error
+		if state, entry, err = p.freshAfterReleaseElsewhere(state, entry); err != nil {
+			return state, err
+		}
+	}
 	if err := p.Fleet.WriteStatus(entry.ShipID, "crewing", 0, ""); err != nil {
 		return state, err
 	}
@@ -462,6 +468,17 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	return p.put(state, entry)
 }
 
+// freshAfterReleaseElsewhere removes the workspace of a ship released elsewhere before it is crewed again in a fresh one (row 11, #475), argo told first what that discards. The entry is saved without its mark only once that is done, so a failed removal is tried again on the next pass.
+func (p Pass) freshAfterReleaseElsewhere(state reconciler.State, entry reconciler.Entry) (reconciler.State, reconciler.Entry, error) {
+	if err := p.endWorkspace(entry, notices.DiscardedElsewhere); err != nil {
+		return state, entry, err
+	}
+	p.Log(fmt.Sprintf("%s (%s): released elsewhere, its worktree removed", nameOf(entry), entry.ShipID))
+	entry.IsReleasedElsewhere = false
+	state, err := p.put(state, entry)
+	return state, entry, err
+}
+
 // launch starts the entry's session again in its folder, continuing, its first minute checked from now (#397). The session that held its messages is gone: its store marks them for the session started now (#756).
 func (p Pass) launch(state reconciler.State, entry reconciler.Entry) (reconciler.State, error) {
 	harness, err := p.harnessOf(entry)
@@ -498,7 +515,7 @@ func (p Pass) release(state reconciler.State, entry reconciler.Entry) (reconcile
 			return state, err
 		}
 	}
-	if err := p.endWorkspace(entry); err != nil {
+	if err := p.endWorkspace(entry, notices.Discarded); err != nil {
 		return state, err
 	}
 	if state, err = p.remove(state, entry.ShipID); err != nil {
@@ -586,7 +603,7 @@ func (p Pass) deleteIdentity(entry reconciler.Entry) error {
 }
 
 // endWorkspace removes the entry's identity, and a worktree it made, whatever that holds, logged first, as a release does (#450). A configured folder is never removed.
-func (p Pass) endWorkspace(entry reconciler.Entry) error {
+func (p Pass) endWorkspace(entry reconciler.Entry, told func(notices.Ship, string, []string) string) error {
 	if err := p.deleteIdentity(entry); err != nil {
 		return err
 	}
@@ -596,7 +613,7 @@ func (p Pass) endWorkspace(entry reconciler.Entry) error {
 	if unsaved, err := p.Workspace.Unsaved(entry.Folder); err == nil && len(unsaved) > 0 {
 		p.Log(fmt.Sprintf("Discarded from the worktree of %s (%s), %s: %s", nameOf(entry), entry.ShipID, entry.Folder, strings.Join(unsaved, "; ")))
 		// Told before the worktree goes, once per release; a failure to tell leaves the worktree for the next pass.
-		text := notices.Discarded(notices.Ship{ID: entry.ShipID, Name: entry.ShipName}, entry.Workspace.Repository, unsaved)
+		text := told(notices.Ship{ID: entry.ShipID, Name: entry.ShipName}, entry.Workspace.Repository, unsaved)
 		if err := p.Fleet.ReportToArgo(text, "trierarch:discarded:"+entry.ShipID+":"+entry.Since); err != nil {
 			return err
 		}

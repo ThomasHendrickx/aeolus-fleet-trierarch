@@ -20,6 +20,8 @@ export interface Fleet {
   crewInWorktree(shipId: ShipId, at: { repository: string; harness: string; options?: Readonly<Record<string, string>> }): Promise<void>;
   /** Removes the ship's crew request: its lease ends. */
   removeCrewRequest(shipId: ShipId): Promise<void>;
+  /** Ends the ship's lease under its session while its crew request stands, as the console's Re-crew does. */
+  releaseElsewhere(shipId: ShipId): Promise<void>;
   /** Sends the ship a message from argo: its id. */
   send(shipName: string, payload: string): Promise<string>;
   /** How many of the ship's leases are held. */
@@ -71,6 +73,9 @@ export async function aFleet(): Promise<Fleet> {
     },
     removeCrewRequest: async (shipId) => {
       unwrap(await useCases.removeCrewRequest(argo, { shipId }));
+    },
+    releaseElsewhere: async (shipId) => {
+      unwrap(await useCases.recrewShip(argo, { shipId }));
     },
     send: async (shipName, payload) => unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', name: shipName }, payload, idempotencyKey: newKey() })).messageId,
     leasesOf: (shipId) => database.lease.count({ where: { shipId, endedAt: null } }),
