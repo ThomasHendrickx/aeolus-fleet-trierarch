@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { aCrewingMachine, sessionOf, isRunning, listedEntryOf, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
-import { aMachine, type Machine } from './support/machine.js';
+import { aMachine, CLAUDE_CODE_VERSION, type Machine } from './support/machine.js';
 
 // run with the reconciler, as the service runs it: what is assigned is crewed, what ends is ended, a session that ended is started again (docs/trierarch.md, "Lifecycles").
 
@@ -140,5 +140,39 @@ describe("the trierarch's own ship", () => {
     await expect(fleet.isPongedOn(messageId)).resolves.toBe(false);
     await expect(fleet.leasesOf(scout)).resolves.toBe(0);
     expect(sessionOf(machine, 'scout').starts()).toHaveLength(0);
+  });
+});
+
+describe("the trierarch's report as its own ship", () => {
+  it('reports at start: idle with none running, and the details of what the machine offers', async () => {
+    await expect.poll(() => fleet.reportOfTrierarch(), { timeout: ANSWERED_WITHIN_MS }).toBeDefined();
+
+    const report = await fleet.reportOfTrierarch();
+    expect(report?.state).toBe('idle');
+    expect(report?.note).toMatch(/^0 of \d+ running$/);
+    expect(report?.details).toMatchObject({
+      harnesses: [{ harness: 'claude-code', flags: [], riskyFlags: [], version: CLAUDE_CODE_VERSION, login: { default: 'subscription', key: 'none' } }],
+      workspaces: { repositories: [REPOSITORY], folders: [] },
+      kept: [],
+      orphans: [],
+      logins: [],
+      runtime: 'host',
+    });
+    expect(report?.details).toHaveProperty('caps.ships');
+    expect(report?.details).toHaveProperty('caps.running');
+    expect(report?.details).toHaveProperty('version');
+  });
+
+  it('reports working once a session runs, with how many run of its cap', async () => {
+    await aRunningScout();
+
+    await expect.poll(async () => (await fleet.reportOfTrierarch())?.state, { timeout: ANSWERED_WITHIN_MS }).toBe('working');
+    expect((await fleet.reportOfTrierarch())?.note).toMatch(/^1 of \d+ running$/);
+  });
+
+  it("reports the login of a ship whose session started", async () => {
+    await aRunningScout();
+
+    await expect.poll(async () => (await fleet.reportOfTrierarch())?.details, { timeout: ANSWERED_WITHIN_MS }).toMatchObject({ logins: [{ shipId: scout, login: 'subscription' }] });
   });
 });
