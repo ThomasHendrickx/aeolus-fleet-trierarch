@@ -1,4 +1,4 @@
-import { lstat, readdir } from 'node:fs/promises';
+import { lstat, readdir, readFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { type CommandResult, runCommand } from './run-command.js';
@@ -199,8 +199,40 @@ async function gitIn(folder: string, at: { args: readonly string[]; located: Loc
   return gitWithin(folder, { args: ['-C', folder, ...at.args], env, limits: at.located.limits });
 }
 
-/** Runs git in a ship's folder with the folder's own config naming no program, and only a local repository to fetch from. */
+/** The folder's own git folder: its `.git` when that is a folder, else the one its `.git` file names; none without a `.git`. */
+async function ownGitFolderOf(folder: string): Promise<string | undefined> {
+  const dotGit = join(folder, '.git');
+  const found = await lstat(dotGit).catch(() => undefined);
+  if (found === undefined) {
+    return undefined;
+  }
+  if (found.isDirectory()) {
+    return dotGit;
+  }
+  if (!found.isFile()) {
+    throw new RefusedRead(folder, 'its .git is neither a file nor a folder of its own');
+  }
+  const named = /^gitdir: (?<path>.+)$/m.exec(await readFile(dotGit, 'utf8'))?.groups?.path;
+  return named === undefined ? undefined : resolve(folder, named.trim());
+}
+
+/**
+ * Runs git in a ship's folder with the folder's own config naming no program,
+ * and only a local repository to fetch from. A folder whose `.git` is neither
+ * a file nor a folder, or whose own git folder (a worktree's, which its `.git`
+ * file names) is no folder or holds a link or a special file, is not read.
+ */
 export async function gitInFolder(folder: string, args: readonly string[]): Promise<CommandResult> {
+  const gitFolder = await ownGitFolderOf(folder);
+  if (gitFolder !== undefined) {
+    if ((await lstat(gitFolder).catch(() => undefined))?.isDirectory() !== true) {
+      throw new RefusedRead(folder, 'its .git names no folder of its own');
+    }
+    const irregular = await irregularIn(gitFolder);
+    if (irregular !== undefined) {
+      throw new RefusedRead(folder, irregular);
+    }
+  }
   return gitIn(folder, { args, located: { env: {}, isClone: false, isFresh: false, limits: {} } });
 }
 
