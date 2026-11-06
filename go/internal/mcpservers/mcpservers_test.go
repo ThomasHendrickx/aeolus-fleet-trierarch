@@ -23,6 +23,14 @@ func TestReadTakesEachServerWithItsURLAndItsTools(t *testing.T) {
 	}
 }
 
+func TestReadTakesAnEntryWithNoTransportAsStreamableHTTP(t *testing.T) {
+	got, err := Read(listOf(`{"name":"g","url":"http://g.example.test/mcp","tools":["t"]}`))
+
+	if err != nil || len(got) != 1 || got[0].Transport != "streamable-http" || got[0].URL != "http://g.example.test/mcp" {
+		t.Errorf("Read(list) = %v, %v, want streamable-http and the http URL", got, err)
+	}
+}
+
 func TestReadTakesNoneFromAnEmptyList(t *testing.T) {
 	got, err := Read(`{"servers":[]}`)
 
@@ -40,7 +48,7 @@ func TestReadRefuses(t *testing.T) {
 		{"a name that is a path", listOf(`{"name":"a/b","url":"https://g.example.test/mcp","transport":"streamable-http","tools":["t"]}`)},
 		{"a name given twice", listOf(graph, graph)},
 		{"a transport that is stdio", listOf(`{"name":"g","url":"https://g.example.test/mcp","transport":"stdio","tools":["t"]}`)},
-		{"a URL that is http", listOf(`{"name":"g","url":"http://g.example.test/mcp","transport":"streamable-http","tools":["t"]}`)},
+		{"a URL that is ftp", listOf(`{"name":"g","url":"ftp://g.example.test/mcp","tools":["t"]}`)},
 		{"a URL with a user", listOf(`{"name":"g","url":"https://token@g.example.test/mcp","transport":"streamable-http","tools":["t"]}`)},
 		{"a URL with a query", listOf(`{"name":"g","url":"https://g.example.test/mcp?key=abc","transport":"streamable-http","tools":["t"]}`)},
 		{"a URL that is a path", listOf(`{"name":"g","url":"/srv/mcp","transport":"streamable-http","tools":["t"]}`)},
@@ -58,7 +66,7 @@ func TestReadRefuses(t *testing.T) {
 }
 
 func TestReadNamesTheServerItRefuses(t *testing.T) {
-	_, err := Read(listOf(graph, `{"name":"other","url":"http://g.example.test/mcp","transport":"streamable-http","tools":["t"]}`))
+	_, err := Read(listOf(graph, `{"name":"other","url":"https://t@g.example.test/mcp","transport":"streamable-http","tools":["t"]}`))
 
 	if err == nil || !strings.HasPrefix(err.Error(), "other: ") {
 		t.Errorf("Read(list) error = %v, want it to name other", err)
@@ -77,7 +85,7 @@ func TestFileHoldsNoneWhenMissing(t *testing.T) {
 
 func TestFileHoldsNoneWhenItDoesNotFit(t *testing.T) {
 	file := &File{Path: filepath.Join(t.TempDir(), "mcp-servers.json")}
-	if err := os.WriteFile(file.Path, []byte(listOf(`{"name":"g","url":"http://g.example.test/mcp","transport":"streamable-http","tools":["t"]}`)), 0o644); err != nil {
+	if err := os.WriteFile(file.Path, []byte(listOf(`{"name":"g","url":"https://t@g.example.test/mcp","transport":"streamable-http","tools":["t"]}`)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
