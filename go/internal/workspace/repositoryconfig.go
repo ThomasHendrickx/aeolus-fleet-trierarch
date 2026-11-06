@@ -15,12 +15,13 @@ import (
 // A ship's folder is its session's to write, `.git` and its config included, and with sessions in containers a session runs
 // apart from the host (docs/trierarch.md, "Session runtime"). So the host's git calls in a ship's folder ignore the folder's own
 // config where it names a program for git to run: git runs no hook, in a folder or in the config, no fsmonitor, no filter, diff or merge driver, and no
-// command for a transport, pager, editor or credential the folder's config names, and takes no optional lock. No filter runs, the
+// command for a transport, pager, editor or credential the folder's config names, and takes no optional lock, and fetches no object the folder lacks. No filter runs, the
 // machine's own included, as the folder's attributes may name it. They go through inFolder, so no call can leave one of these in
 // force. Otherwise the machine's own config (global and system) applies as before. A folder whose config names a program for
 // git-lfs, which reads that config itself, is not read. Git is
 // pointed at no folder but the ship's own: a folder whose config sets core.worktree is not read, and a clone is read only
-// through its own `.git` folder, with its own objects alone (inClone). A folder that is not read is refused with why (RefusedError), so what it holds is not
+// through its own `.git` folder, with its own objects alone (inClone): a clone whose config names a remote to fetch missing objects from
+// is not read. A folder that is not read is refused with why (RefusedError), so what it holds is not
 // known.
 
 // RefusedError is a folder the host does not read, with why.
@@ -81,6 +82,15 @@ func filterOffOf(name string) []override {
 	return []override{{driver + ".process", ""}, {driver + ".clean", ""}, {driver + ".smudge", ""}, {driver + ".required", "false"}}
 }
 
+// noLazyFetch fetches no object the folder lacks, from any remote its config names to fetch missing objects from.
+const noLazyFetch = "GIT_NO_LAZY_FETCH=1"
+
+// isPromisor says whether the variable, as git lists it, makes a remote one git fetches missing objects from: a partial clone's, or
+// any promisor remote.
+func isPromisor(name string) bool {
+	return name == "extensions.partialclone" || (strings.HasPrefix(name, "remote.") && strings.HasSuffix(name, ".promisor"))
+}
+
 // lfsPrograms are the sections of git-lfs's own config that name a program it runs, which git-lfs reads from the folder's config
 // itself.
 var lfsPrograms = []string{"lfs.extension.", "lfs.customtransfer."}
@@ -110,10 +120,11 @@ func isProgram(name string) bool {
 }
 
 // overridesIn are the overrides of every variable of the folder's own config that names a program, after the harmless ones; a
-// folder whose config points git at another work tree is not read.
-func overridesIn(folder string, located []string) ([]override, error) {
+// folder whose config points git at another work tree is not read, nor a clone whose config names a remote to fetch missing objects
+// from.
+func overridesIn(folder string, located []string, isClone bool) ([]override, error) {
 	listing := exec.Command("git", "-C", folder, "config", "--list", "--show-scope", "--name-only", "-z")
-	listing.Env = append(os.Environ(), located...)
+	listing.Env = append(append(os.Environ(), located...), noLazyFetch)
 	listed, err := listing.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git config failed in %s: %w", folder, err)
@@ -137,6 +148,9 @@ func overridesIn(folder string, located []string) ([]override, error) {
 		if slices.ContainsFunc(lfsPrograms, func(section string) bool { return strings.HasPrefix(name, section) }) {
 			return nil, &RefusedError{folder, "its config names a program for git-lfs: " + name}
 		}
+		if isClone && isPromisor(name) {
+			return nil, &RefusedError{folder, "its config names a remote to fetch missing objects from: " + name}
+		}
 		if isProgram(name) {
 			overrides = append(overrides, neutralOf(name))
 		}
@@ -151,7 +165,7 @@ func overridesIn(folder string, located []string) ([]override, error) {
 
 // inFolder is git run in a ship's folder with the folder's own config naming no program, and only a local repository to fetch from.
 func inFolder(folder string, args ...string) (*exec.Cmd, error) {
-	return located(folder, nil, args)
+	return located(folder, nil, false, args)
 }
 
 // inClone is git run in a ship's clone as in its folder, through the clone's own `.git` folder and with the clone as its work tree,
@@ -175,7 +189,7 @@ func inClone(clone string, args ...string) (*exec.Cmd, error) {
 	if _, err := os.Lstat(filepath.Join(gitFolder, "objects", "info", "alternates")); err == nil {
 		return nil, &RefusedError{clone, "its .git names another repository's objects in objects/info/alternates"}
 	}
-	return located(clone, []string{"GIT_DIR=" + gitFolder, "GIT_WORK_TREE=" + clone}, args)
+	return located(clone, []string{"GIT_DIR=" + gitFolder, "GIT_WORK_TREE=" + clone}, true, args)
 }
 
 // linkIn is the first link in the git folder, by its path in it, or none: none is read through, as it would lead git out of it.
@@ -201,15 +215,15 @@ func linkIn(gitFolder string) (string, error) {
 	return link, nil
 }
 
-// located is git run in the folder, with where it finds its repository given in the environment when it is.
-func located(folder string, at []string, args []string) (*exec.Cmd, error) {
-	overrides, err := overridesIn(folder, at)
+// located is git run in the folder, with where it finds its repository given in the environment when it is, as a clone or not.
+func located(folder string, at []string, isClone bool, args []string) (*exec.Cmd, error) {
+	overrides, err := overridesIn(folder, at, isClone)
 	if err != nil {
 		return nil, err
 	}
 	command := exec.Command("git", append([]string{"-C", folder}, args...)...)
 	// Given in the environment rather than as -c, so a name holding an equals sign is taken whole.
-	command.Env = append(append(os.Environ(), at...), "GIT_CONFIG_COUNT="+strconv.Itoa(len(overrides)), "GIT_ALLOW_PROTOCOL=file", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
+	command.Env = append(append(os.Environ(), at...), noLazyFetch, "GIT_CONFIG_COUNT="+strconv.Itoa(len(overrides)), "GIT_ALLOW_PROTOCOL=file", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
 	for i, each := range overrides {
 		command.Env = append(command.Env, "GIT_CONFIG_KEY_"+strconv.Itoa(i)+"="+each.name, "GIT_CONFIG_VALUE_"+strconv.Itoa(i)+"="+each.value)
 	}
