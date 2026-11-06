@@ -78,18 +78,18 @@ func PrepareClone(at Worktree) (prepared string, err error) {
 		return "", err
 	}
 	// The clone's origin is the repository's checkout, whose branches are no remote's: dropped with it.
-	if _, err := git("-C", folder, "remote", "remove", remote); err != nil {
+	if _, err := gitInFolder(folder, "remote", "remove", remote); err != nil {
 		return "", err
 	}
 	if url, err := exec.Command("git", "-C", at.Path, "remote", "get-url", remote).Output(); err == nil {
-		if _, err := git("-C", folder, "remote", "add", remote, strings.TrimSpace(string(url))); err != nil {
+		if _, err := gitInFolder(folder, "remote", "add", remote, strings.TrimSpace(string(url))); err != nil {
 			return "", err
 		}
-		if _, err := git("-C", folder, "fetch", "--quiet", "--no-tags", at.Path, "+refs/remotes/"+remote+"/*:refs/remotes/"+remote+"/*"); err != nil {
+		if _, err := gitInFolder(folder, "fetch", "--quiet", "--no-tags", at.Path, "+refs/remotes/"+remote+"/*:refs/remotes/"+remote+"/*"); err != nil {
 			return "", err
 		}
 	}
-	if _, err := git("-C", folder, "checkout", "--quiet", "--detach", commit); err != nil {
+	if _, err := gitInFolder(folder, "checkout", "--quiet", "--detach", commit); err != nil {
 		return "", err
 	}
 	return folder, nil

@@ -31,7 +31,21 @@ type Worktree struct {
 }
 
 func git(args ...string) (string, error) {
-	out, err := exec.Command("git", args...).CombinedOutput()
+	return said(exec.Command("git", args...), args)
+}
+
+// gitInFolder is git run in a ship's folder, which ignores the folder's own config where it names a program.
+func gitInFolder(folder string, args ...string) (string, error) {
+	command, err := inFolder(folder, args...)
+	if err != nil {
+		return "", err
+	}
+	return said(command, args)
+}
+
+// said is what the git command said, or why it failed.
+func said(command *exec.Cmd, args []string) (string, error) {
+	out, err := command.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s failed: %s", actionOf(args), messageOf(string(out)))
 	}
@@ -115,11 +129,11 @@ func Prepare(at Worktree) (string, error) {
 
 // Unsaved is what the worktree holds that no remote, branch or tag has: its changes, then its commits.
 func Unsaved(folder string) ([]string, error) {
-	changes, err := git("-C", folder, "status", "--porcelain")
+	changes, err := gitInFolder(folder, "status", "--porcelain")
 	if err != nil {
 		return nil, err
 	}
-	commits, err := git("-C", folder, "log", "--format=commit %h %s", "HEAD", "--not", "--branches", "--tags", "--remotes")
+	commits, err := gitInFolder(folder, "log", "--format=commit %h %s", "HEAD", "--not", "--branches", "--tags", "--remotes")
 	if err != nil {
 		return nil, err
 	}
