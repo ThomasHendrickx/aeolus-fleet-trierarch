@@ -31,7 +31,7 @@ const (
 	pidsLimit = 4096
 	// proxyHost is where a container reaches the host's loopback, and so the model proxy (headless H16): the host's address in Podman's slirp4netns network.
 	proxyHost = "10.0.2.2"
-	// hostLoopbackNetwork lets a session on an API key reach the host's loopback, and nothing more of the host than the network gives any container.
+	// hostLoopbackNetwork lets a session on an API key or with MCP servers reach the host's loopback, and nothing more of the host than the network gives any container.
 	hostLoopbackNetwork = "slirp4netns:allow_host_loopback=true"
 	// envFile is the env file in the session's own folder, beside its hold's files.
 	envFile = "session.env"
@@ -227,7 +227,11 @@ func (r Runtime) heldAs(session sessions.Start, files hold.Files) (sessions.Star
 	}
 	command = append(command, "--env", "HOME="+SessionHome)
 	if session.ProxyToken != nil {
-		command = append(command, "--env", session.ProxyToken.Variable, "--network", hostLoopbackNetwork)
+		command = append(command, "--env", session.ProxyToken.Variable)
+	}
+	// The model proxy and the MCP proxy listen on the host's loopback.
+	if session.ProxyToken != nil || session.Mcp != nil {
+		command = append(command, "--network", hostLoopbackNetwork)
 	}
 	command = append(command, "--workdir", folder, "--env-file", file, r.Image)
 	session.Command = append(command, session.Command...)

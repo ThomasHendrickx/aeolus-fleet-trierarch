@@ -354,9 +354,9 @@ func mcpServerList(at paths.Paths) *mcpservers.File {
 	return heldServers
 }
 
-// harnessesThatAddMcpServers are the harnesses a session can be started with crew-time MCP servers (decision M4), on the runtime configured: Claude Code on the host, through the MCP proxy. A harness that cannot offers no server, so a request naming one is given back.
-func harnessesThatAddMcpServers(configured *config.Runtime) map[string]bool {
-	return map[string]bool{"claude-code": !isInContainers(configured)}
+// harnessesThatAddMcpServers are the harnesses a session can be started with crew-time MCP servers (decision M4), on the runtime configured: Claude Code, on the host and in a container, through the MCP proxy. A harness that cannot offers no server, so a request naming one is given back.
+func harnessesThatAddMcpServers(*config.Runtime) map[string]bool {
+	return map[string]bool{"claude-code": true}
 }
 
 // modelProxy is the model proxy on this machine (headless H16), started as a hold is.
