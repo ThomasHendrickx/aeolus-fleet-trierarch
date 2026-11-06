@@ -1837,6 +1837,20 @@ func TestAShipReleasedElsewhereWhoseWorktreeCannotBeRemovedIsCrewedNowhereAndThe
 	}
 }
 
+func TestAShipReleasedElsewhereWhoseSessionDoesNotStopKeepsItsWorktreeUnreadAndIsCrewedNowhere(t *testing.T) {
+	pass := aRunPass(t)
+	pass.releasedElsewhere(t)
+	pass.workspace.unsaved[scoutFolder] = []string{"?? draft.md"}
+	pass.sessions.stopFails = true
+
+	pass.run(t)
+	pass.run(t)
+
+	if len(pass.workspace.removed) != 0 || len(pass.fleet.told) != 0 || len(pass.harness.launches) != 0 || !pass.store.state.Entries[scout].IsReleasedElsewhere {
+		t.Fatalf("removed %q, told %+v, launches %+v, entry %+v", pass.workspace.removed, pass.fleet.told, pass.harness.launches, pass.store.state.Entries[scout])
+	}
+}
+
 func TestAShipReleasedElsewhereAndCrewedByAnotherSessionIsLeft(t *testing.T) {
 	pass := aRunPass(t)
 	pass.releasedElsewhere(t)
