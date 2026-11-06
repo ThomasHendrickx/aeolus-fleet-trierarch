@@ -328,6 +328,23 @@ func TestASessionsMCPAccessAndConfigurationAreKeptInItsFolderForItsUserOnlyNever
 	}
 }
 
+func TestASessionsMCPConfigurationIsMode600EvenWhereAWiderFileWasBefore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp-config.json")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeMcpConfig(path, []byte(`{"mcpServers":{}}`)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("%s: %v, %v, want a file of mode 600", path, info, err)
+	}
+	if got := read(path); got != `{"mcpServers":{}}` {
+		t.Fatalf("the MCP configuration = %q, want the one given", got)
+	}
+}
+
 func TestALineSentToACodexSessionWaitsForItsLastTurnToEndAsLongAsForAnInterruptedTurn(t *testing.T) {
 	runtime := aRuntime(t)
 	folder := t.TempDir()
