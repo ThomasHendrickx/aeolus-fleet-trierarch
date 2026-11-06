@@ -110,21 +110,41 @@ func (r Runtime) holds() sessions.Runtime {
 	return holds
 }
 
-// stopContainer kills, then removes the ship's container: a remove alone waits out the stop timeout on podman. One that is not there is no matter.
-func (r Runtime) stopContainer(shipID string) {
+// stopContainer kills, then removes the ship's container: a remove alone waits out the stop timeout on podman. It is gone only once
+// no longer listed, whatever the kill and the remove said: until then the session may still write its folder, which the host then
+// does not read.
+func (r Runtime) stopContainer(shipID string) error {
 	_, _ = r.run("kill", containerName(shipID))
-	_, _ = r.run("rm", "--force", containerName(shipID))
+	_, removeErr := r.run("rm", "--force", containerName(shipID))
+	listed, err := r.run("ps", "--all", "--filter", "label="+ownerLabel+"="+owner, "--format", "{{.Names}} {{.State}}")
+	if err != nil {
+		return fmt.Errorf("list the containers after stopping %s: %w", shipID, err)
+	}
+	removed := "its remove answered no error"
+	if removeErr != nil {
+		removed = removeErr.Error()
+	}
+	for _, line := range strings.Split(listed, "\n") {
+		if name, _, _ := strings.Cut(strings.TrimSpace(line), " "); name == containerName(shipID) {
+			return fmt.Errorf("the container of %s is still there after its stop: %s", shipID, removed)
+		}
+	}
+	return nil
 }
 
 // Start starts the ship's session in a container its hold runs, its last container and hold stopped first.
 func (r Runtime) Start(session sessions.Start) error {
-	r.stopContainer(session.ShipID)
+	if err := r.stopContainer(session.ShipID); err != nil {
+		return err
+	}
 	return r.holds().Start(session)
 }
 
 // Stop stops the ship's container, then its hold, which ends with it.
 func (r Runtime) Stop(shipID string) error {
-	r.stopContainer(shipID)
+	if err := r.stopContainer(shipID); err != nil {
+		return err
+	}
 	return r.Holds.Stop(shipID)
 }
 
