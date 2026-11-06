@@ -1,4 +1,5 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -8,7 +9,21 @@ import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
 import { createCloneWorkspace } from './clone-workspace.js';
 import { runCommand } from './run-command.js';
 
-// Against the real git, in a temporary folder.
+// Against the real git, in a temporary folder. A test that plants in the machine's own config does so in a throwaway HOME.
+
+/** The machine's own config as the tests found it, put back after each. */
+const MACHINE = { HOME: process.env.HOME, GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL };
+/** Whether git-lfs is on the machine: its test runs only where it is. */
+const hasLfs = spawnSync('git', ['lfs', 'version']).status === 0;
+
+/** A throwaway HOME whose git config is the machine's own: answers its config file. */
+function aThrowawayHome(): string {
+  const home = join(folder, 'home');
+  mkdirSync(home, { recursive: true });
+  process.env.HOME = home;
+  process.env.GIT_CONFIG_GLOBAL = join(home, '.gitconfig');
+  return process.env.GIT_CONFIG_GLOBAL;
+}
 
 let folder: string;
 let repository: string;
@@ -54,6 +69,13 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  for (const [name, value] of Object.entries(MACHINE)) {
+    if (value === undefined) {
+      Reflect.deleteProperty(process.env, name);
+    } else {
+      process.env[name] = value;
+    }
+  }
   rmSync(folder, { recursive: true, force: true });
 });
 
@@ -304,6 +326,31 @@ describe("the host's git calls in a session's clone, with a program named in the
         writeFileSync(join(module, 'README.md'), 'README.MD\n');
       },
     },
+    {
+      name: "a filter driver in the machine's own config",
+      plant: async (clone, program) => {
+        const machine = aThrowawayHome();
+        await git(['config', '--file', machine, 'filter.planted.clean', program]);
+        await git(['config', '--file', machine, 'filter.planted.smudge', program]);
+        await git(['config', '--file', machine, 'filter.planted.required', 'true']);
+        writeFileSync(join(clone, '.gitattributes'), '* filter=planted\n');
+      },
+    },
+    ...(hasLfs
+      ? [
+          {
+            name: "git-lfs's filter, as git lfs install writes it, with an extension in the machine's own config",
+            plant: async (clone: string, program: string) => {
+              const machine = aThrowawayHome();
+              await git(['lfs', 'install', '--skip-repo']);
+              await git(['config', '--file', machine, 'lfs.extension.planted.clean', `${program} %f`]);
+              await git(['config', '--file', machine, 'lfs.extension.planted.smudge', `${program} %f`]);
+              await git(['config', '--file', machine, 'lfs.extension.planted.priority', '0']);
+              writeFileSync(join(clone, '.gitattributes'), '*.md filter=lfs diff=lfs merge=lfs\n');
+            },
+          },
+        ]
+      : []),
   ];
 
   it.each(plants)('runs nothing $name names', async ({ plant }) => {
@@ -380,6 +427,11 @@ describe("the host's git calls in a session's clone, with the clone's git pointe
         rmSync(join(clone, '.git', inGit), { recursive: true, force: true });
         symlinkSync(join(other, '.git', inGit), join(clone, '.git', inGit));
       },
+    })),
+    ...['lfs.extension.planted.clean', 'lfs.customtransfer.planted.path'].map((name) => ({
+      name: `${name} in its config`,
+      reason: `its config names a program for git-lfs: ${name}`,
+      point: (clone: string) => git(['-C', clone, 'config', name, join(folder, 'program')]),
     })),
   ];
 
