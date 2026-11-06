@@ -341,6 +341,8 @@ export interface ContainerHostPort {
   userGroups(): Promise<readonly string[]>;
   /** Whether the machine's model token file holds a token. */
   isModelTokenWritten(): Promise<boolean>;
+  /** Whether the runtime is a Podman whose info names no pasta, the network that gives a container the proxy's port alone. */
+  isPastaMissing(binary: string): Promise<boolean>;
 }
 
 export interface WorkspacePort {
