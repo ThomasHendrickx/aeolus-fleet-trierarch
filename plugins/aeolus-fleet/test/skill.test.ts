@@ -126,6 +126,12 @@ describe('the crew-a-ship skill', () => {
     expect(claudeSkill).toContain("This socket answers only its ship's own session");
   });
 
+  it('tells a Codex session that a long command cannot yet send a self-message after the turn ends, and names the refusal (#270, #273)', () => {
+    expect(codexSkill).toContain('A command expected to take more than a few minutes cannot yet be run in the background with a self-message in Codex');
+    expect(codexSkill).toContain("This socket answers only its ship's own session");
+    expect(codexSkill).not.toContain('setsid nohup bash -c');
+  });
+
   it('tells a squadron member how to check in, take up its role, report and stand down', () => {
     const skill = claudeSkill;
 
