@@ -560,4 +560,22 @@ describe('the container a session runs in', () => {
       }
     })() }).toEqual({ calls: ['kill', 'rm'], isHoldRunning: false });
   });
+
+  it("fails a stop while the ship's container is still listed after its kill and remove, saying what the remove said, so its folder is not read", async () => {
+    const runner = recordingRunner((args) => (args[0] === 'rm' ? { status: 1, stderr: 'container is busy' } : args[0] === 'ps' ? { stdout: `trierarch-${shipId} running\n` } : {}));
+
+    await expect(runtimeWith(runner).stop(shipId)).rejects.toThrow(`The container of ${shipId} is still there after its stop: container is busy`);
+  });
+
+  it('fails a stop when the containers cannot be listed after it, so its folder is not read', async () => {
+    const runner = recordingRunner((args) => (args[0] === 'ps' ? { status: 125, stderr: 'cannot connect' } : {}));
+
+    await expect(runtimeWith(runner).stop(shipId)).rejects.toThrow('cannot connect');
+  });
+
+  it('stops a ship whose container is gone, whatever its kill and remove said', async () => {
+    const runner = recordingRunner((args) => (args[0] === 'kill' || args[0] === 'rm' ? { status: 1, stderr: 'no such container' } : {}));
+
+    await expect(runtimeWith(runner).stop(shipId)).resolves.toBeUndefined();
+  });
 });
