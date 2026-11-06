@@ -20,11 +20,11 @@ type aHost struct {
 	isPastaMissing bool
 }
 
-func (h aHost) Mode(binary string) Mode   { return h.mode }
-func (h aHost) Groups() ([]string, error) { return h.groups, h.groupsErr }
-func (h aHost) IsModelTokenWritten() bool { return h.isWritten }
+func (h aHost) Mode(binary string) Mode           { return h.mode }
+func (h aHost) Groups() ([]string, error)         { return h.groups, h.groupsErr }
+func (h aHost) IsModelTokenWritten() bool         { return h.isWritten }
 func (h aHost) IsPastaMissing(binary string) bool { return h.isPastaMissing }
-func aRootlessHost() aHost                { return aHost{mode: Rootless, groups: []string{"user"}, isWritten: true} }
+func aRootlessHost() aHost                        { return aHost{mode: Rootless, groups: []string{"user"}, isWritten: true} }
 func withHarnesses(names ...string) config.Configuration {
 	harnesses := map[string]config.Harness{}
 	for _, name := range names {
