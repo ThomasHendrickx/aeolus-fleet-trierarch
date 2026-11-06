@@ -1,6 +1,7 @@
 package reconciler
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
@@ -174,4 +175,33 @@ func TestARequestNamingNoServerNeedsNone(t *testing.T) {
 	_, actions := Reconcile(Empty(), aContext(aRequest(scout)))
 
 	assertActions(t, actions, Action{Kind: Crew, ShipID: scout})
+}
+
+func TestACrewedShipKeepsTheServersItsRequestNames(t *testing.T) {
+	request := aRequest(scout)
+	request.Settings.McpServers = []string{"company-graph"}
+	context := aContext(request)
+	context.McpServers = map[string][]string{"claude-code": {"company-graph"}}
+
+	next, _ := Reconcile(Empty(), context)
+
+	if got := next.Entries[scout].McpServers; !slices.Equal(got, []string{"company-graph"}) {
+		t.Fatalf("the entry's MCP servers = %v, want [company-graph]", got)
+	}
+}
+
+func TestANewSettingsVersionCrewsTheShipWithTheServersItNames(t *testing.T) {
+	entry := anEntry(scout, "running")
+	entry.McpServers = []string{"company-graph"}
+	request := aRequest(scout)
+	request.SettingsVersion = 2
+	context := aContext(request)
+	context.Observed.Sessions = running(scout)
+	context.McpServers = map[string][]string{"claude-code": {"company-graph"}}
+
+	next, _ := Reconcile(withEntries(entry), context)
+
+	if got := next.Entries[scout].McpServers; len(got) != 0 {
+		t.Fatalf("the entry's MCP servers = %v, want none", got)
+	}
 }

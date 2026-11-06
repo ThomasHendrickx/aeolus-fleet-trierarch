@@ -68,7 +68,8 @@ func Read(folder string) (Token, bool) {
 	return token, true
 }
 
-func isHoldRunning(folder string) bool {
+// IsHoldRunning is whether the hold of the session whose folder it is runs.
+func IsHoldRunning(folder string) bool {
 	text, err := os.ReadFile(filepath.Join(folder, holdPID))
 	if err != nil {
 		return false
@@ -92,7 +93,7 @@ func SessionOf(sessions string, harness string, token string) (string, bool) {
 		}
 		folder := filepath.Join(sessions, each.Name())
 		held, ok := Read(folder)
-		if ok && held.Harness == harness && subtle.ConstantTimeCompare([]byte(token), []byte(held.Token)) == 1 && isHoldRunning(folder) {
+		if ok && held.Harness == harness && subtle.ConstantTimeCompare([]byte(token), []byte(held.Token)) == 1 && IsHoldRunning(folder) {
 			return each.Name(), true
 		}
 	}

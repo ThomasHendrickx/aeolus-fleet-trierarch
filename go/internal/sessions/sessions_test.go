@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
 )
 
@@ -293,6 +294,35 @@ func TestASessionsProxyTokenIsKeptInItsFolderAndHandedToItsHarnessInItsVariableN
 	}
 	for _, pid := range []string{read(hold.FilesOf(runtime.Sessions, scout).PID), read(filepath.Join(folder, "harness.pid"))} {
 		if line := processOf(t, pid, "command"); strings.Contains(line, "scouts-proxy-token") {
+			t.Fatalf("the command line of %s holds the token: %q", pid, line)
+		}
+	}
+}
+
+func TestASessionsMCPAccessAndConfigurationAreKeptInItsFolderForItsUserOnlyNeverOnACommandLine(t *testing.T) {
+	runtime := aRuntime(t)
+	folder := t.TempDir()
+	files := hold.FilesOf(runtime.Sessions, scout)
+	mcp := &Mcp{Access: mcpproxy.Access{Token: "scouts-mcp-token", Servers: []string{"company-graph"}}, Config: []byte(`{"mcpServers":{}}`)}
+	if err := runtime.Start(Start{ShipID: scout, Folder: folder, Harness: "claude-code", Command: []string{"sh", "-c", aHarness, "sh", "--mcp-config", files.McpConfig}, Mcp: mcp}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	eventually(t, "the harness's pid", func() bool { _, err := os.Stat(filepath.Join(folder, "harness.pid")); return err == nil })
+
+	for _, path := range []string{files.McpConfig, filepath.Join(files.Folder, "mcp-access")} {
+		info, err := os.Stat(path)
+		if err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("%s: %v, %v, want a file of mode 600", path, info, err)
+		}
+	}
+	if got := read(files.McpConfig); got != `{"mcpServers":{}}` {
+		t.Fatalf("the MCP configuration = %q, want the one given", got)
+	}
+	if !strings.Contains(read(filepath.Join(files.Folder, "mcp-access")), "scouts-mcp-token") {
+		t.Fatal("the session's folder keeps no MCP access with its token")
+	}
+	for _, pid := range []string{read(files.PID), read(filepath.Join(folder, "harness.pid"))} {
+		if line := processOf(t, pid, "command"); strings.Contains(line, "scouts-mcp-token") {
 			t.Fatalf("the command line of %s holds the token: %q", pid, line)
 		}
 	}

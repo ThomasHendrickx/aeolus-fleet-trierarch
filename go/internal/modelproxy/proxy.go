@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
 )
 
@@ -67,6 +68,8 @@ type Proxy struct {
 	// Vendors replace a harness's vendor's origin, as a test does; each harness's own otherwise.
 	Vendors map[string]string
 	Now     func() time.Time
+	// MCP answers at mcpproxy.Prefix: the MCP proxy, on the same loopback port (crew-time MCP servers, M6); none answers there without it.
+	MCP http.Handler
 }
 
 func (p Proxy) vendorOf(harness string) string {
@@ -113,6 +116,10 @@ func (p Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			p.checkKey(harness)
 		}
 		writeJSON(w, http.StatusOK, p.States.StateOf(harness))
+		return
+	}
+	if strings.HasPrefix(path, mcpproxy.Prefix) && p.MCP != nil {
+		p.MCP.ServeHTTP(w, r)
 		return
 	}
 	if path == StatePath {

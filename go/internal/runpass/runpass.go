@@ -169,7 +169,7 @@ type Pass struct {
 	ConfigurationFile string
 	// Logins are each session's login; every session starts on its subscription without.
 	Logins Logins
-	// Proxy runs while any harness in Keys holds a key; none is kept without.
+	// Proxy runs while any harness in Keys holds a key or any harness offers an MCP server; none is kept without.
 	Proxy Proxy
 	Keys  Keys
 	// VersionOf is the version detection found of a harness, empty when it found none; asked only for a harness whose session refused its model.
@@ -213,12 +213,16 @@ func (p Pass) startProblem(entry reconciler.Entry, login string) string {
 	return p.Logins.StartProblem(entry.Harness, login, entry.Options, entry.Folder)
 }
 
-// keepProxy runs the proxy while any harness holds a key; a failure is logged, and the next pass tries again.
+// keepProxy runs the proxy while any harness holds a key or offers an MCP server, which its sessions reach through it; a failure is logged, and the next pass tries again.
 func (p Pass) keepProxy() {
 	if p.Proxy == nil || p.Keys == nil {
 		return
 	}
-	isNeeded := slices.ContainsFunc(keyHarnesses, p.Keys.Has)
+	isOffering := false
+	for _, names := range p.mcpServers() {
+		isOffering = isOffering || len(names) > 0
+	}
+	isNeeded := isOffering || slices.ContainsFunc(keyHarnesses, p.Keys.Has)
 	if err := p.Proxy.Keep(isNeeded); err != nil {
 		p.Log("the model proxy: " + err.Error())
 	}

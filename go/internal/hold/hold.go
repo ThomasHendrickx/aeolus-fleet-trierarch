@@ -65,11 +65,13 @@ type Files struct {
 	Events string
 	// SessionID is the harness's own session id, as its events name it, so a start resumes it.
 	SessionID string
+	// McpConfig is the MCP configuration the harness reads, with the session's token at the MCP proxy.
+	McpConfig string
 }
 
 func FilesOf(sessions string, shipID string) Files {
 	folder := filepath.Join(sessions, shipID)
-	return Files{Folder: folder, Socket: filepath.Join(folder, "hold.sock"), PID: filepath.Join(folder, "hold.pid"), Events: filepath.Join(folder, "events.jsonl"), SessionID: filepath.Join(folder, "session-id")}
+	return Files{Folder: folder, Socket: filepath.Join(folder, "hold.sock"), PID: filepath.Join(folder, "hold.pid"), Events: filepath.Join(folder, "events.jsonl"), SessionID: filepath.Join(folder, "session-id"), McpConfig: filepath.Join(folder, "mcp-config.json")}
 }
 
 // Request is one call to a hold.

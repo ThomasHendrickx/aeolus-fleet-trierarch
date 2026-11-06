@@ -74,6 +74,8 @@ type Entry struct {
 	Squadron        string            `json:"squadron,omitempty"`
 	FirstPrompt     string            `json:"firstPrompt,omitempty"`
 	Options         map[string]string `json:"options"`
+	// McpServers are the names of the crew-time MCP servers its request names, which each start of its session is given (decision M3).
+	McpServers []string `json:"mcpServers,omitempty"`
 	// State is crewing, running, restarting, crashed or releasing.
 	State string `json:"state"`
 	// Since is when the entry took its state, ISO 8601.
@@ -708,6 +710,7 @@ func entryOf(request Request, harness string, options map[string]string, now tim
 		Squadron:        request.Settings.Squadron,
 		FirstPrompt:     request.Settings.FirstPrompt,
 		Options:         options,
+		McpServers:      request.Settings.McpServers,
 		State:           "crewing",
 		Since:           stamp(now),
 		Exits:           []string{},
