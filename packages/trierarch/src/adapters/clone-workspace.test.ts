@@ -51,11 +51,17 @@ async function withUpstream(): Promise<string> {
   return upstream;
 }
 
-function workspace() {
+function workspace(limits: { timeLimitMs?: number } = {}) {
   return createCloneWorkspace({
     configuration: { ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: repository } }, folders: { notes: { path: notes } } },
     root,
+    ...limits,
   });
+}
+
+/** A named pipe at the path: git reading it waits for a writer that never comes. */
+function aPipe(path: string): void {
+  expect(spawnSync('mkfifo', [path]).status).toBe(0);
 }
 
 beforeEach(async () => {
@@ -433,6 +439,31 @@ describe("the host's git calls in a session's clone, with the clone's git pointe
       reason: `its config names a program for git-lfs: ${name}`,
       point: (clone: string) => git(['-C', clone, 'config', name, join(folder, 'program')]),
     })),
+    ...['HEAD', 'config', 'packed-refs'].map((inGit) => ({
+      name: `a named pipe as its .git's ${inGit}`,
+      reason: `its .git holds a special file: ${inGit}`,
+      point: (clone: string) => {
+        rmSync(join(clone, '.git', inGit), { force: true });
+        aPipe(join(clone, '.git', inGit));
+      },
+    })),
+    {
+      name: 'an include in its config of a named pipe in its work tree',
+      reason: 'its config includes a file outside its .git: ../planted',
+      point: async (clone: string) => {
+        aPipe(join(clone, 'planted'));
+        await git(['-C', clone, 'config', 'include.path', '../planted']);
+      },
+    },
+    {
+      name: 'an include in a file its config includes of a named pipe in its work tree',
+      reason: 'its config includes a file outside its .git: ../planted',
+      point: async (clone: string) => {
+        aPipe(join(clone, 'planted'));
+        await git(['config', '--file', join(clone, '.git', 'inner'), 'include.path', '../planted']);
+        await git(['-C', clone, 'config', 'include.path', 'inner']);
+      },
+    },
     ...[
       { name: 'extensions.partialclone', isPartialClone: true },
       { name: 'remote.other.promisor', isPartialClone: false },
