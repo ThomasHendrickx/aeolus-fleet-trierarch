@@ -1122,6 +1122,22 @@ func TestEachPassKeepsTheProxyRunningWhileAHarnessHoldsAKey(t *testing.T) {
 	}
 }
 
+func TestEachPassKeepsTheProxyRunningWhileAHarnessOffersAnMCPServer(t *testing.T) {
+	pass := aRunPass(t)
+	proxy := &aProxy{}
+	offered := map[string][]string{"claude-code": {}, "codex": {}}
+	pass.pass.Proxy, pass.pass.Keys = proxy, someKeys{}
+	pass.pass.McpServers = func() map[string][]string { return offered }
+
+	pass.run(t)
+	offered["claude-code"] = []string{"company-graph"}
+	pass.run(t)
+
+	if !slices.Equal(proxy.kept, []bool{false, true}) {
+		t.Fatalf("kept %v, want not needed, then needed once claude-code offers company-graph", proxy.kept)
+	}
+}
+
 func TestAProxyThatCannotBeKeptIsLoggedAndThePassGoesOn(t *testing.T) {
 	pass := aRunPass(t)
 	pass.pass.Proxy, pass.pass.Keys = &aProxy{fail: errors.New("the model proxy did not answer within 10s of its start")}, someKeys{"claude-code": true}
