@@ -234,6 +234,25 @@ describe('workspaces as per-ship clones', () => {
     expect(existsSync(made)).toBe(false);
   });
 
+  it('removes a clone holding a folder its session made read-only', async () => {
+    const { folder: made } = await workspace().prepare(scout);
+    const readOnly = join(made, 'a', 'b');
+    mkdirSync(readOnly, { recursive: true });
+    writeFileSync(join(readOnly, 'f'), 'f\n');
+    chmodSync(readOnly, 0o500);
+
+    try {
+      await workspace().remove(made);
+    } finally {
+      // So the test's own folders can go whatever the outcome.
+      if (existsSync(readOnly)) {
+        chmodSync(readOnly, 0o755);
+      }
+    }
+
+    expect(existsSync(made)).toBe(false);
+  });
+
   it('refuses to remove anything outside its root', async () => {
     await expect(workspace().remove(notes)).rejects.toThrow('removes only what it made');
     expect(existsSync(notes)).toBe(true);
