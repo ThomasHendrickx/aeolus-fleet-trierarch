@@ -1,5 +1,5 @@
-import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,7 +7,7 @@ import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { aCrewingMachine, listedEntryOf, REPOSITORY, sessionOf } from './support/crewing.js';
+import { aCrewingMachine, isRunning, listedEntryOf, REPOSITORY, sessionOf } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
 
@@ -103,6 +103,16 @@ describe('the container runtime check', () => {
     const ran = await machine.trierarch(['config', 'check']);
 
     expect(ran.stdout + ran.stderr).toContain(refusalOf('no-such-podman does not answer: install a rootless podman, or name the runtime binary in runtime.binary'));
+  });
+
+  it("refuses a Podman without pasta, which gives a container the trierarch's proxy port and nothing else of the host", async () => {
+    configure((configuration) => ({ ...configuration, runtime: RUNTIME }));
+    writeModelToken();
+    machine.toggle('podman-no-pasta', true);
+
+    const ran = await machine.trierarch(['config', 'check']);
+
+    expect(ran.stdout + ran.stderr).toContain(refusalOf("podman has no pasta: install passt, which gives a container the trierarch's proxy port and nothing else of the host"));
   });
 
   it('refuses --remote-control in a harness on the host too: a session the trierarch runs has no terminal', async () => {
@@ -264,16 +274,16 @@ describe('a session in a container', () => {
     expect(answered.body).toContain('"scout"');
   });
 
-  it('reaches the model proxy at the host address its network gives it, on an API key, with no model token', async () => {
+  it("reaches the model proxy's port alone, on its own loopback, on an API key, with no model token", async () => {
     await aRunningScout({ login: 'api-key' });
     const port = readFileSync(join(machine.trierarchHome, 'proxy', 'port'), 'utf8').trim();
 
     const env = sessionOf(machine, 'scout').starts()[0]?.env ?? {};
 
-    expect(env.ANTHROPIC_BASE_URL).toBe(`http://10.0.2.2:${port}/anthropic`);
+    expect(env.ANTHROPIC_BASE_URL).toBe(`http://127.0.0.1:${port}/anthropic`);
     expect(env.ANTHROPIC_AUTH_TOKEN).toEqual(expect.any(String));
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
-    expect(run()).toEqual(expect.arrayContaining(['--env', 'ANTHROPIC_AUTH_TOKEN', '--network', 'slirp4netns:allow_host_loopback=true']));
+    expect(run()).toEqual(expect.arrayContaining(['--env', 'ANTHROPIC_AUTH_TOKEN', '--network', `pasta:--no-map-gw,-t,none,-u,none,-T,${port},-U,none`]));
   });
 
   it("ends with its container, and its ship's home goes, when its crew request is removed", async () => {
@@ -316,6 +326,40 @@ describe("a ship's clone in containers", () => {
     await aCrewingMachine({ fleet, machine });
   });
 
+  it.each(['clone', 'remote remove', 'remote add', 'fetch', 'checkout'])('removes a half-made clone when %s fails and makes a complete clone on the next pass', async (step) => {
+    anUpstream();
+    const folder = join(machine.trierarchHome, 'worktrees', REPOSITORY, 'scout');
+    const failed = join(machine.machine, 'clone-failed');
+    const wrapper = join(machine.machine, 'bin', 'git');
+    const realGit = realpathSync(join(machine.machine, 'tools', 'git'));
+    const command = step === 'clone' ? 'clone --quiet --no-checkout*' : `-C ${folder} ${step}*`;
+    writeFileSync(wrapper, `#!/bin/sh
+case "$*" in
+  "${command.slice(0, -1)}"*)
+    '${realGit}' "$@" || exit $?
+    touch '${failed}'
+    echo 'clone setup deliberately failed' >&2
+    exit 1 ;;
+esac
+exec '${realGit}' "$@"
+`);
+    chmodSync(wrapper, 0o755);
+    configure((configuration) => ({ ...configuration, runtime: RUNTIME }));
+    writeModelToken();
+    expect((await machine.trierarch(['restart'])).status).toBe(0);
+    scout = await fleet.commission('scout', { scopes: ['fleet:read'] });
+    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+
+    await expect.poll(() => existsSync(failed), { timeout: CREWED_WITHIN_MS }).toBe(true);
+    await expect.poll(() => existsSync(folder)).toBe(false);
+    rmSync(wrapper);
+
+    await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
+    expect(git(folder, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('HEAD');
+    expect(git(folder, 'remote', 'get-url', 'origin')).toBe(git(machine.repository, 'remote', 'get-url', 'origin'));
+    expect(readFileSync(join(folder, 'README.md'), 'utf8')).toBe('hello\n');
+  });
+
   it("is a clone of its own at the worktree's path, with a .git of its own holding its own objects, detached at the repository's commit, so git works inside", async () => {
     const folder = await aCrewedScout();
 
@@ -351,7 +395,40 @@ describe("a ship's clone in containers", () => {
     await expect.poll(() => existsSync(folder), { timeout: CREWED_WITHIN_MS }).toBe(false);
   });
 
-  it('that no ship works in is an orphan the trierarch says it will not clear, and stays', async () => {
+  for (const hasUnsavedWork of [false, true]) {
+    it(`stops what runs in an orphan clone after restart and ${hasUnsavedWork ? 'keeps unsaved work' : 'removes a clean clone'}`, async () => {
+      const folder = await aCrewedScout();
+      expect((await machine.trierarch(['stop'])).status).toBe(0);
+      const stray = join(machine.trierarchHome, 'worktrees', REPOSITORY, 'stray');
+      renameSync(folder, stray);
+      // The stand-in harness writes its observations in the workspace; these are not a ship's unsaved work.
+      writeFileSync(join(stray, '.git', 'info', 'exclude'), 'fake-*.jsonl\n');
+      if (hasUnsavedWork) {
+        writeFileSync(join(stray, 'unsaved.txt'), 'unsaved\n');
+      }
+      const child = spawn('sleep', ['600'], { cwd: stray, stdio: 'ignore' });
+      const pid = child.pid;
+      if (pid === undefined) {
+        throw new Error('sleep did not start');
+      }
+      try {
+        expect((await machine.trierarch(['restart'])).status).toBe(0);
+        await expect.poll(() => isRunning(pid), { timeout: SAID_WITHIN_MS }).toBe(false);
+        if (hasUnsavedWork) {
+          await expect.poll(() => machine.serviceLog(), { timeout: SAID_WITHIN_MS }).toContain(`Kept the orphan worktree ${stray}, which holds unsaved work: ?? unsaved.txt`);
+          expect(existsSync(stray)).toBe(true);
+        } else {
+          await expect.poll(() => existsSync(stray), { timeout: SAID_WITHIN_MS }).toBe(false);
+        }
+      } finally {
+        if (isRunning(pid)) {
+          process.kill(pid, 'SIGKILL');
+        }
+      }
+    });
+  }
+
+  it('that no ship works in and holds no marker of the trierarch is an orphan it says it will not clear, and stays', async () => {
     await aCrewedScout();
     const stray = join(machine.trierarchHome, 'worktrees', REPOSITORY, 'stray');
     execFileSync('git', ['clone', '-q', machine.repository, stray]);

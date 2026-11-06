@@ -62,7 +62,7 @@ function configuration(runtime?: TrierarchConfiguration['runtime']): TrierarchCo
 }
 
 function adaptersOf(runtime?: TrierarchConfiguration['runtime'], worktreeRoot?: string) {
-  return runtimeAdaptersOf({ configuration: { ...configuration(runtime), ...(worktreeRoot !== undefined && { worktreeRoot }) }, paths, version: '0.25.0', launch: [], managedSettings: join(home, 'managed'), program: TRIERARCH_PROGRAM });
+  return runtimeAdaptersOf({ configuration: { ...configuration(runtime), ...(worktreeRoot !== undefined && { worktreeRoot }) }, paths, version: '0.25.0', launch: [], managedSettings: join(home, 'managed'), proxyUrl: () => Promise.resolve(undefined), program: TRIERARCH_PROGRAM });
 }
 
 describe('the adapters the session runtime picks (decision 0039)', () => {
@@ -93,8 +93,8 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
     expect(adaptersOf({ ...CONTAINER, binary }).shipHomes).toEqual({ homes: paths.homes, managedSettings: join(home, 'managed') });
   });
 
-  it("has sessions on the host reach the model proxy where the trierarch does, and sessions in containers at Podman's host address (headless H16)", () => {
-    expect({ host: adaptersOf().modelProxyUrlOf('http://127.0.0.1:4100'), container: adaptersOf({ ...CONTAINER, binary }).modelProxyUrlOf('http://127.0.0.1:4100') }).toEqual({ host: 'http://127.0.0.1:4100', container: 'http://10.0.2.2:4100' });
+  it('has sessions on the host and in containers reach the model proxy where the trierarch does, a container on its own loopback (headless H16)', () => {
+    expect({ host: adaptersOf().modelProxyUrlOf('http://127.0.0.1:4100'), container: adaptersOf({ ...CONTAINER, binary }).modelProxyUrlOf('http://127.0.0.1:4100') }).toEqual({ host: 'http://127.0.0.1:4100', container: 'http://127.0.0.1:4100' });
   });
 
   it('lists the sessions through the binary the configuration names', async () => {

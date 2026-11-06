@@ -1,6 +1,6 @@
 # Design: a trierarch with no Node, one binary for VPSes (trierarch#95)
 
-Status: approved by Thomas. Nothing is built.
+Status: built. Every machine runs the Go trierarch, from trierarch 0.37.2.
 
 ## Purpose
 

@@ -1346,6 +1346,21 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.state.current().orphans).toEqual([{ path: orphan, repository: 'aeolus-fleet', name: 'lookout' }]);
   });
 
+  it('rule 2: a worktree an entry is crewed into in the same pass is never cleared or its processes stopped (#233)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, crewSettings());
+    trierarch.workspace.folders.set(SCOUT_FOLDER, { hasChanges: false, unsaved: [] });
+    trierarch.folderProcesses.start(SCOUT_FOLDER, 'astro dev');
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]?.folder).toBe(SCOUT_FOLDER);
+    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
+    expect(trierarch.folderProcesses.stoppedIn).toEqual([]);
+    expect(trierarch.state.current().orphans).toEqual([]);
+  });
+
   it('rule 2: a worktree an entry works in is never cleared as an orphan, nor are the processes in it stopped (#1041)', async () => {
     const trierarch = aTrierarch();
     await aCrewedShip(trierarch);

@@ -1058,6 +1058,8 @@ export class InMemoryContainerHost implements ContainerHostPort {
   mode: RuntimeMode = 'rootless';
   groups: readonly string[] = ['thomas', 'sudo'];
   hasModelToken = true;
+  /** A Podman whose info names no pasta. */
+  isPastaGone = false;
   readonly asked: string[] = [];
 
   runtimeMode(binary: string): Promise<RuntimeMode> {
@@ -1071,5 +1073,9 @@ export class InMemoryContainerHost implements ContainerHostPort {
 
   isModelTokenWritten(): Promise<boolean> {
     return Promise.resolve(this.hasModelToken);
+  }
+
+  isPastaMissing(): Promise<boolean> {
+    return Promise.resolve(this.isPastaGone);
   }
 }

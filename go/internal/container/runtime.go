@@ -29,10 +29,9 @@ const (
 	sessionUser = "uid=1000,gid=1000"
 	// pidsLimit is the most processes and threads a container may hold, a hard cap beside memory and cpus (decision 0039): room for Claude Code, a test run with its workers, a browser and a nested Postgres, and none for a runaway fork.
 	pidsLimit = 4096
-	// proxyHost is where a container reaches the host's loopback, and so the model proxy (headless H16): the host's address in Podman's slirp4netns network.
-	proxyHost = "10.0.2.2"
-	// hostLoopbackNetwork lets a session on an API key reach the host's loopback, and nothing more of the host than the network gives any container.
-	hostLoopbackNetwork = "slirp4netns:allow_host_loopback=true"
+	// proxyHost is the container's loopback, where pasta forwards only the proxy port.
+	proxyHost = "127.0.0.1"
+
 	// envFile is the env file in the session's own folder, beside its hold's files.
 	envFile = "session.env"
 )
@@ -67,8 +66,8 @@ func ProxyURL(address string) string {
 // an env file in the session's own folder, for its owner alone, never a
 // command line. A session on an API key gets no model token: its proxy token,
 // which its hold holds in the environment it runs the container with, is
-// passed on by its variable's name alone, and the container reaches the
-// host's loopback, where the model proxy listens (headless H16, api keys K7).
+// passed on by its variable's name alone. Only the proxy's TCP port is
+// forwarded from container loopback to host loopback (headless H16, api keys K7).
 type Runtime struct {
 	// Holds are the holds that run the containers.
 	Holds sessions.Runtime
@@ -77,6 +76,8 @@ type Runtime struct {
 	Image  string
 	// ModelToken is the file holding the machine's long-lived model token, read at every start.
 	ModelToken string
+	// ProxyURL is the host proxy listener, read when a session starts.
+	ProxyURL func() (string, bool)
 	// Homes is where the ships' homes are kept on the host, one folder per ship, each mounted as its container's home.
 	Homes string
 	// Sockets is where the ships' sockets are kept on the host, one folder per ship, each mounted at its own path (decision 0026).
@@ -225,9 +226,31 @@ func (r Runtime) heldAs(session sessions.Start, files hold.Files) (sessions.Star
 	for _, path := range session.ReadOnly {
 		command = append(command, "--volume", path+":"+path+":ro")
 	}
+	// Its MCP configuration, read-only at its own path: the one file of the session's folder it sees, kept where it cannot plant a link the trierarch would write through.
+	if session.Mcp != nil {
+		command = append(command, "--volume", files.McpConfig+":"+files.McpConfig+":ro")
+	}
 	command = append(command, "--env", "HOME="+SessionHome)
 	if session.ProxyToken != nil {
-		command = append(command, "--env", session.ProxyToken.Variable, "--network", hostLoopbackNetwork)
+		command = append(command, "--env", session.ProxyToken.Variable)
+	}
+	// The model proxy and the MCP proxy listen on the host's loopback.
+	if session.ProxyToken != nil || session.Mcp != nil {
+		if r.ProxyURL == nil {
+			return sessions.Start{}, fmt.Errorf("the proxy address is unavailable")
+		}
+		address, ok := r.ProxyURL()
+		at, err := url.Parse(address)
+		if !ok || err != nil || at.Port() == "" {
+			return sessions.Start{}, fmt.Errorf("the proxy port is unavailable")
+		}
+		port, err := strconv.Atoi(at.Port())
+		if err != nil || port < 1 || port > 65535 {
+			return sessions.Start{}, fmt.Errorf("the proxy port is invalid")
+		}
+		// No gateway mapping or automatic forwarding: only this TCP port on
+		// the container's loopback reaches the host's loopback listener.
+		command = append(command, "--network", "pasta:--no-map-gw,-t,none,-u,none,-T,"+strconv.Itoa(port)+",-U,none")
 	}
 	command = append(command, "--workdir", folder, "--env-file", file, r.Image)
 	session.Command = append(command, session.Command...)
