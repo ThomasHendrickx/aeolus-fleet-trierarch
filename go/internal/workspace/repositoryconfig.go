@@ -78,7 +78,7 @@ var harmless = []override{{"core.fsmonitor", "false"}, {"core.hooksPath", "/dev/
 
 // noFileNamed are the values the host's reads of a clone take whatever its config says: git reads no file the config names for it, which
 // may be a named pipe git waits on, or another repository's.
-var noFileNamed = []override{{"core.excludesFile", ""}}
+var noFileNamed = []override{{"core.excludesFile", ""}, {"core.attributesFile", ""}}
 
 // namesAProgram are the config variables that name a program git runs, by section, then by variable; a section of three-part
 // names (`filter.<driver>.clean`) holds the variables of any subsection.
