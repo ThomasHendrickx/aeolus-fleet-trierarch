@@ -1777,7 +1777,8 @@ func TestAShipReleasedElsewhereHasItsSessionStoppedAndIsCrewedAgainInAFreshWorkt
 
 	pass.run(t)
 
-	if !slices.Equal(pass.sessions.stopped, []string{scout}) || !slices.Equal(pass.workspace.removed, []string{scoutFolder}) {
+	// Stopped by the pass, then by its crew before its worktree goes.
+	if !slices.Equal(pass.sessions.stopped, []string{scout, scout}) || !slices.Equal(pass.workspace.removed, []string{scoutFolder}) {
 		t.Fatalf("stopped %q, removed %q", pass.sessions.stopped, pass.workspace.removed)
 	}
 	if len(pass.harness.launches) != 1 || !pass.harness.launches[0].isFirstStart || pass.harness.launches[0].firstPrompt != "Review PR 12" || pass.harness.launches[0].folder != scoutFolder {

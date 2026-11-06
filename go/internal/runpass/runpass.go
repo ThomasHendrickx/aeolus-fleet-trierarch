@@ -623,8 +623,11 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	return p.put(state, entry)
 }
 
-// freshAfterReleaseElsewhere removes the workspace of a ship released elsewhere before it is crewed again in a fresh one (row 11, #475), argo told first what that discards. The entry is saved without its mark only once that is done, so a failed removal is tried again on the next pass.
+// freshAfterReleaseElsewhere removes the workspace of a ship released elsewhere before it is crewed again in a fresh one (row 11, #475), argo told first what that discards. Its session stops first, as a release's does, so nothing reads the worktree while a session works in it, whatever the pass's stop did. The entry is saved without its mark only once that is done, so a failed stop or removal is tried again on the next pass.
 func (p Pass) freshAfterReleaseElsewhere(state reconciler.State, entry reconciler.Entry) (reconciler.State, reconciler.Entry, error) {
+	if err := p.Sessions.Stop(entry.ShipID); err != nil {
+		return state, entry, err
+	}
 	if err := p.endWorkspace(entry, notices.DiscardedElsewhere); err != nil {
 		return state, entry, err
 	}
