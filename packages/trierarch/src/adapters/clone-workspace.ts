@@ -1,4 +1,4 @@
-import { mkdir, readdir, rm, stat } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
@@ -23,6 +23,17 @@ import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clon
  */
 
 const REMOTE = 'origin';
+
+/**
+ * A clone the trierarch made holds its marker in its `.git`, where git keeps no
+ * record of it: an orphan clone is cleared only with it. These two are the
+ * marker's one place.
+ */
+const markerOf = (folder: string): string => join(folder, '.git', 'aeolus-trierarch-clone');
+const MARKER_CONTENT = '1\n';
+const markMade = (folder: string): Promise<void> => writeFile(markerOf(folder), MARKER_CONTENT);
+const isMarkedMade = async (folder: string): Promise<boolean> => (await readFile(markerOf(folder), 'utf8').catch(() => undefined)) === MARKER_CONTENT;
+
 export function createCloneWorkspace(options: { configuration: TrierarchConfiguration; root: string; clones?: TrustedClones }): WorkspacePort {
   const { configuration, root, clones } = options;
   const worktrees = createGitWorkspace(options);
@@ -53,6 +64,7 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
 
   return {
     ...worktrees,
+    isMade: async (folder) => (await isUnderRoot(folder)) && (await isMarkedMade(folder)),
     prepare: async (request) => {
       const { shipName, workspace } = request;
       if (workspace.kind === 'folder') {
@@ -71,6 +83,8 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
         const commit = await resolve(repository, workspace.ref);
         try {
           await git(['clone', '--quiet', '--no-checkout', '--reference', repository, '--dissociate', repository, folder]);
+          // Marked before anything else, so a stop mid-crew leaves an orphan the trierarch knows as its own.
+          await markMade(folder);
           // The clone's origin is the repository's checkout, whose branches are no remote's: dropped with it.
           await git(['-C', folder, 'remote', 'remove', REMOTE]);
           const remote = await runCommand('git', { args: ['-C', repository, 'remote', 'get-url', REMOTE] });
