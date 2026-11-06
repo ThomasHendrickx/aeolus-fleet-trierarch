@@ -65,6 +65,9 @@ const HARMLESS: readonly Override[] = [
   { name: 'log.showSignature', value: 'false' },
 ];
 
+/** The values the host's reads of a clone take whatever its config says: git reads no file the config names for it, which may be a named pipe git waits on, or another repository's. */
+const NO_FILE_NAMED: readonly Override[] = [{ name: 'core.excludesFile', value: '' }];
+
 /** The config variables that name a program git runs, by section, then by variable; a section of three-part names (`filter.<driver>.clean`) holds the variables of any subsection. */
 const NAMES_A_PROGRAM: ReadonlyMap<string, readonly string[]> = new Map(
   Object.entries({
@@ -160,7 +163,7 @@ async function overridesIn(folder: string, located: Located): Promise<readonly O
     throw new Error(`git config failed in ${folder}: ${listed.stderr.trim()}`);
   }
   const fields = listed.stdout.split('\0');
-  const overrides = [...HARMLESS];
+  const overrides = [...HARMLESS, ...(located.isClone && !located.isFresh ? NO_FILE_NAMED : [])];
   for (let i = 0; i + 1 < fields.length; i += 2) {
     const scope = fields[i] ?? '';
     const name = fields[i + 1] ?? '';
