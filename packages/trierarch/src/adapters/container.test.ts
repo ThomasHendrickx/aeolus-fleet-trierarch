@@ -371,7 +371,7 @@ describe('the container a session runs in', () => {
 
   /** A runtime the cleanup after each test leaves alone, for one whose container cannot be stopped. */
   function runtimeAlone(runner: ReturnType<typeof recordingRunner>): ReturnType<typeof createContainerRuntime> {
-    return createContainerRuntime({ binary, image, tokenFile, homes, sockets, sessions, program: TRIERARCH_PROGRAM, version: VERSION, platform: process.platform, ...CAPS, run: runner.run });
+    return createContainerRuntime({ binary, image, tokenFile, homes, sockets, sessions, program: TRIERARCH_PROGRAM, version: VERSION, platform: process.platform, ...CAPS, run: runner.run, proxyUrl: () => Promise.resolve('http://127.0.0.1:4100') });
   }
 
   /** The words the hold ran the runtime's binary with, once it ran it. */
