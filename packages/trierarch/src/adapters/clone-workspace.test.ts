@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -328,5 +328,48 @@ describe("the host's git calls in a session's clone, with a program named in the
     writeFileSync(join(made, 'README.md'), 'README.MD\n');
 
     expect({ isClean: await workspace().isClean(made), unsaved: await workspace().unsaved(made) }).toEqual({ isClean: false, unsaved: [' M README.md'] });
+  });
+});
+
+describe("the host's git calls in a session's clone, with the clone's git pointed at another folder", () => {
+  /** Another repository on the host, with a change of its own, where the clone's git is pointed. */
+  async function anotherRepository(): Promise<string> {
+    const other = join(folder, 'other');
+    await git(['init', '-q', '-b', 'main', other]);
+    await commit(other, 'OTHER.md');
+    writeFileSync(join(other, 'OTHER.md'), 'CHANGED\n');
+    return other;
+  }
+
+  const pointings: readonly { name: string; point: (clone: string, other: string) => unknown }[] = [
+    { name: 'core.worktree in its config', point: (clone, other) => git(['-C', clone, 'config', 'core.worktree', other]) },
+    {
+      name: 'a .git file naming another git folder',
+      point: (clone, other) => {
+        renameSync(join(clone, '.git'), join(folder, 'moved.git'));
+        writeFileSync(join(clone, '.git'), `gitdir: ${join(other, '.git')}\n`);
+      },
+    },
+    {
+      name: 'a .git link to another git folder',
+      point: (clone, other) => {
+        renameSync(join(clone, '.git'), join(folder, 'moved.git'));
+        symlinkSync(join(other, '.git'), join(clone, '.git'));
+      },
+    },
+    {
+      name: 'a commondir in its .git naming another git folder',
+      point: (clone, other) => {
+        writeFileSync(join(clone, '.git', 'commondir'), `${join(other, '.git')}\n`);
+      },
+    },
+  ];
+
+  it.each(pointings)('refuses to read a clone with $name, saying why', async ({ point }) => {
+    const { folder: made } = await workspace().prepare(scout);
+    await point(made, await anotherRepository());
+
+    await expect(workspace().unsaved(made)).rejects.toThrow(`Will not read ${made}`);
+    await expect(workspace().isClean(made)).rejects.toThrow(`Will not read ${made}`);
   });
 });
