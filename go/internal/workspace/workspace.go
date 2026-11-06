@@ -182,7 +182,7 @@ func unsavedIn(folder string, gitIn func(folder string, args ...string) (string,
 	if err != nil {
 		return nil, err
 	}
-	commits, err := gitIn(folder, "log", "--format=commit %h %s", "HEAD", "--not", "--branches", "--tags", "--remotes")
+	commits, err := gitIn(folder, "log", "--no-show-signature", "--format=commit %h %s", "HEAD", "--not", "--branches", "--tags", "--remotes")
 	if err != nil {
 		return nil, err
 	}

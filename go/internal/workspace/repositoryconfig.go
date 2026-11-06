@@ -17,7 +17,7 @@ import (
 
 // A ship's folder is its session's to write, `.git` and its config included, and with sessions in containers a session runs
 // apart from the host (docs/trierarch.md, "Session runtime"). So the host's git calls in a ship's folder ignore the folder's own
-// config where it names a program for git to run: git runs no hook, in a folder or in the config, no fsmonitor, no filter, diff or merge driver, and no
+// config where it names a program for git to run: git runs no hook, in a folder or in the config, no fsmonitor, no filter, diff or merge driver, no check of a signature, and no
 // command for a transport, pager, editor or credential the folder's config names, and takes no optional lock, and fetches no object the folder lacks. No filter runs, the
 // machine's own included, as the folder's attributes may name it, but in a fresh clone the trierarch just made, which no session
 // touched yet. They go through inFolder, so no call can leave one of these in
@@ -72,8 +72,9 @@ func (e *RefusedError) Error() string {
 	return fmt.Sprintf("will not read %s: %s", e.Folder, e.Reason)
 }
 
-// harmless are the values the host's git calls take in a ship's folder whatever its config says: no hooks in a folder and no fsmonitor.
-var harmless = []override{{"core.fsmonitor", "false"}, {"core.hooksPath", "/dev/null"}}
+// harmless are the values the host's git calls take in a ship's folder whatever its config says: no hooks in a folder, no fsmonitor,
+// and no check of a commit's signature, which runs the machine's gpg, gpgsm or ssh-keygen.
+var harmless = []override{{"core.fsmonitor", "false"}, {"core.hooksPath", "/dev/null"}, {"log.showSignature", "false"}}
 
 // namesAProgram are the config variables that name a program git runs, by section, then by variable; a section of three-part
 // names (`filter.<driver>.clean`) holds the variables of any subsection.
