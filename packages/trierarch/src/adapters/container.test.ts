@@ -352,8 +352,8 @@ describe('the container a session runs in', () => {
     rmSync(sessions, { recursive: true, force: true });
   });
 
-  function runtimeWith(runner: ReturnType<typeof recordingRunner>, options: { launch?: readonly string[] } = {}): ReturnType<typeof createContainerRuntime> {
-    const runtime = createContainerRuntime({ binary, image, tokenFile, homes, sockets, sessions, program: TRIERARCH_PROGRAM, version: VERSION, platform: process.platform, ...CAPS, run: runner.run, ...(options.launch !== undefined && { launch: options.launch }) });
+  function runtimeWith(runner: ReturnType<typeof recordingRunner>, options: { launch?: readonly string[]; proxyUrl?: () => Promise<string | undefined> } = {}): ReturnType<typeof createContainerRuntime> {
+    const runtime = createContainerRuntime({ binary, image, tokenFile, homes, sockets, sessions, program: TRIERARCH_PROGRAM, version: VERSION, platform: process.platform, ...CAPS, run: runner.run, proxyUrl: options.proxyUrl ?? (async () => 'http://127.0.0.1:4100'), ...(options.launch !== undefined && { launch: options.launch }) });
     runtimes.push(runtime);
     return runtime;
   }
@@ -482,10 +482,16 @@ describe('the container a session runs in', () => {
     expect(readFileSync(envFileOf(words), 'utf8')).toBe('AEOLUS_LAUNCH=launch-1\n');
   });
 
-  it("lets a session on an API key reach the host's loopback, where the model proxy listens, at Podman's host address (headless H16)", async () => {
+  it("lets a session on an API key reach the model proxy's port alone, on its own loopback, and no other port of the host's (headless H16)", async () => {
     const { words } = await started({ proxyToken: PROXY_TOKEN });
 
-    expect(valuesOf(words, '--network')).toEqual(['slirp4netns:allow_host_loopback=true']);
+    expect(valuesOf(words, '--network')).toEqual(['pasta:--no-map-gw,-t,none,-u,none,-T,4100,-U,none']);
+  });
+
+  it('does not start a session on an API key while the model proxy has no address', async () => {
+    const runtime = runtimeWith(recordingRunner(), { proxyUrl: async () => undefined });
+
+    await expect(runtime.start({ shipId, folder, command: ['claude'], harness: 'claude-code', proxyToken: PROXY_TOKEN })).rejects.toThrow('the model proxy has no address yet');
   });
 
   it("keeps a session on its subscription off the host's loopback", async () => {

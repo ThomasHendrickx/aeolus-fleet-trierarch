@@ -264,16 +264,16 @@ describe('a session in a container', () => {
     expect(answered.body).toContain('"scout"');
   });
 
-  it('reaches the model proxy at the host address its network gives it, on an API key, with no model token', async () => {
+  it("reaches the model proxy's port alone, on its own loopback, on an API key, with no model token", async () => {
     await aRunningScout({ login: 'api-key' });
     const port = readFileSync(join(machine.trierarchHome, 'proxy', 'port'), 'utf8').trim();
 
     const env = sessionOf(machine, 'scout').starts()[0]?.env ?? {};
 
-    expect(env.ANTHROPIC_BASE_URL).toBe(`http://10.0.2.2:${port}/anthropic`);
+    expect(env.ANTHROPIC_BASE_URL).toBe(`http://127.0.0.1:${port}/anthropic`);
     expect(env.ANTHROPIC_AUTH_TOKEN).toEqual(expect.any(String));
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
-    expect(run()).toEqual(expect.arrayContaining(['--env', 'ANTHROPIC_AUTH_TOKEN', '--network', 'slirp4netns:allow_host_loopback=true']));
+    expect(run()).toEqual(expect.arrayContaining(['--env', 'ANTHROPIC_AUTH_TOKEN', '--network', `pasta:--no-map-gw,-t,none,-u,none,-T,${port},-U,none`]));
   });
 
   it("ends with its container, and its ship's home goes, when its crew request is removed", async () => {
