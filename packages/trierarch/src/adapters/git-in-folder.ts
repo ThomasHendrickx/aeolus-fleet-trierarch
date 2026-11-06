@@ -1,5 +1,5 @@
-import { lstat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { lstat, readdir } from 'node:fs/promises';
+import { join, relative } from 'node:path';
 
 import { type CommandResult, runCommand } from './run-command.js';
 
@@ -13,7 +13,7 @@ import { type CommandResult, runCommand } from './run-command.js';
  * config names, and takes no optional lock. The machine's own config (global
  * and system) applies as before. Git is pointed at no folder but the ship's
  * own: a folder whose config sets core.worktree is not read, and a clone is
- * read only through its own `.git` folder. A folder that is not read is
+ * read only through its own `.git` folder, with its own objects alone. A folder that is not read is
  * refused with why, so what it holds is not known.
  */
 
@@ -129,11 +129,20 @@ export async function gitInFolder(folder: string, args: readonly string[]): Prom
   return gitIn(folder, { args, located: {} });
 }
 
+/** The first link in the git folder, by its path in it: none is read through, as it would lead git out of it. */
+async function linkIn(gitFolder: string): Promise<string | undefined> {
+  // Not followed: a recursive listing lists a link to a folder as a link.
+  const link = (await readdir(gitFolder, { recursive: true, withFileTypes: true })).find((each) => each.isSymbolicLink());
+  return link === undefined ? undefined : relative(gitFolder, join(link.parentPath, link.name));
+}
+
 /**
  * Runs git in a ship's clone as in its folder, through the clone's own `.git`
  * folder and with the clone as its work tree, whatever the clone says: a
- * `.git` that is a file or a link, or that names another folder's in its
- * commondir, would point git at another folder, so such a clone is not read.
+ * `.git` that is a file or a link, that names another folder's in its
+ * commondir, that holds a link, or that names another repository's objects in
+ * its alternates, would point git at another folder, so such a clone is not
+ * read.
  */
 export async function gitInClone(clone: string, args: readonly string[]): Promise<CommandResult> {
   const gitFolder = join(clone, '.git');
@@ -143,6 +152,13 @@ export async function gitInClone(clone: string, args: readonly string[]): Promis
   }
   if ((await lstat(join(gitFolder, 'commondir')).catch(() => undefined)) !== undefined) {
     throw new RefusedRead(clone, 'its .git names another git folder in its commondir');
+  }
+  const link = await linkIn(gitFolder);
+  if (link !== undefined) {
+    throw new RefusedRead(clone, `its .git holds a link: ${link}`);
+  }
+  if ((await lstat(join(gitFolder, 'objects', 'info', 'alternates')).catch(() => undefined)) !== undefined) {
+    throw new RefusedRead(clone, "its .git names another repository's objects in objects/info/alternates");
   }
   return gitIn(clone, { args, located: { GIT_DIR: gitFolder, GIT_WORK_TREE: clone } });
 }
