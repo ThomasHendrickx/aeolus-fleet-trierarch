@@ -358,6 +358,11 @@ describe('the container a session runs in', () => {
     return runtime;
   }
 
+  /** A runtime the cleanup after each test leaves alone, for one whose container cannot be stopped. */
+  function runtimeAlone(runner: ReturnType<typeof recordingRunner>): ReturnType<typeof createContainerRuntime> {
+    return createContainerRuntime({ binary, image, tokenFile, homes, sockets, sessions, program: TRIERARCH_PROGRAM, version: VERSION, platform: process.platform, ...CAPS, run: runner.run });
+  }
+
   /** The words the hold ran the runtime's binary with, once it ran it. */
   async function wordsRun(): Promise<string[]> {
     await expect.poll(() => existsSync(`${binary}.words`)).toBe(true);
@@ -528,9 +533,18 @@ describe('the container a session runs in', () => {
 
   it("lists a session under its hold once, and of this trierarch's other containers, which an older one started detached, each as of another version", async () => {
     const [older, exited] = [newId('ship'), newId('ship')];
-    const runner = recordingRunner((args) => (args[0] === 'ps' ? { stdout: `trierarch-${shipId} running\ntrierarch-${older} running\ntrierarch-${exited} exited\nsomeone-else running\n` } : {}));
+    // Each container is listed until it is removed, the ship's again once its session starts.
+    const removed = new Set<string>();
+    const runner = recordingRunner((args) => {
+      if (args[0] === 'rm') {
+        removed.add(args.at(-1) ?? '');
+      }
+      const lines = [`trierarch-${shipId} running`, `trierarch-${older} running`, `trierarch-${exited} exited`, 'someone-else running'];
+      return args[0] === 'ps' ? { stdout: lines.filter((line) => !removed.has(line.split(' ')[0] ?? '')).join('\n') } : {};
+    });
     const runtime = runtimeWith(runner);
     await runtime.start({ shipId, folder, command: ['claude'], harness: 'claude-code' });
+    removed.delete(`trierarch-${shipId}`);
 
     const listed = await runtime.list();
 
@@ -564,13 +578,13 @@ describe('the container a session runs in', () => {
   it("fails a stop while the ship's container is still listed after its kill and remove, saying what the remove said, so its folder is not read", async () => {
     const runner = recordingRunner((args) => (args[0] === 'rm' ? { status: 1, stderr: 'container is busy' } : args[0] === 'ps' ? { stdout: `trierarch-${shipId} running\n` } : {}));
 
-    await expect(runtimeWith(runner).stop(shipId)).rejects.toThrow(`The container of ${shipId} is still there after its stop: container is busy`);
+    await expect(runtimeAlone(runner).stop(shipId)).rejects.toThrow(`The container of ${shipId} is still there after its stop: container is busy`);
   });
 
   it('fails a stop when the containers cannot be listed after it, so its folder is not read', async () => {
     const runner = recordingRunner((args) => (args[0] === 'ps' ? { status: 125, stderr: 'cannot connect' } : {}));
 
-    await expect(runtimeWith(runner).stop(shipId)).rejects.toThrow('cannot connect');
+    await expect(runtimeAlone(runner).stop(shipId)).rejects.toThrow('cannot connect');
   });
 
   it('stops a ship whose container is gone, whatever its kill and remove said', async () => {

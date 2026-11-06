@@ -16,7 +16,7 @@ const CONTAINER = { kind: 'container', binary: '', memory: '4g', cpus: 2 } as co
 let home: string;
 let paths: TrierarchPaths;
 let repository: string;
-/** A docker-style binary that logs each call's arguments, and the env file a run passes, and lists one running container, as an older trierarch left it. */
+/** A docker-style binary that logs each call's arguments, and the env file a run passes, and lists one running container, as an older trierarch left it, until it is removed. */
 let binary: string;
 let shipId: ReturnType<typeof newId<'ship'>>;
 
@@ -45,7 +45,10 @@ beforeEach(async () => {
       `printf '%s\\n' "$*" >> '${join(home, 'calls')}'`,
       'previous=""',
       `for argument; do [ "$previous" = --env-file ] && cat "$argument" >> '${join(home, 'env')}'; previous=$argument; done`,
-      `[ "$1" = ps ] && echo 'trierarch-${shipId} running'`,
+      // Its container is listed until removed, and again once run.
+      `[ "$1" = rm ] && touch '${join(home, 'removed')}'`,
+      `[ "$1" = run ] && rm -f '${join(home, 'removed')}'`,
+      `[ "$1" = ps ] && [ ! -e '${join(home, 'removed')}' ] && echo 'trierarch-${shipId} running'`,
       'exit 0',
       '',
     ].join('\n'),
