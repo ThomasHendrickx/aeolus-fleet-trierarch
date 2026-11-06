@@ -292,6 +292,66 @@ func TestASuccessStreamsAsTheVendorWritesIt(t *testing.T) {
 	}
 }
 
+// closedBodyAfterFlush is a request body as the server hands it on: whole at first, and an error to whoever reads it once the answer began, which is when the server closes it.
+type closedBodyAfterFlush struct {
+	whole   *strings.Reader
+	flushed <-chan struct{}
+}
+
+func (b *closedBodyAfterFlush) Read(p []byte) (int, error) {
+	if b.whole.Len() > 0 {
+		return b.whole.Read(p)
+	}
+	<-b.flushed
+	return 0, http.ErrBodyReadAfterClose
+}
+
+func (b *closedBodyAfterFlush) Close() error { return nil }
+
+// flushSignal is a response writer that says when the answer was first flushed.
+type flushSignal struct {
+	*httptest.ResponseRecorder
+	once    sync.Once
+	flushed chan struct{}
+}
+
+func (f *flushSignal) Flush() {
+	f.ResponseRecorder.Flush()
+	f.once.Do(func() { close(f.flushed) })
+}
+
+func TestAStreamIsNotCutByTheRequestBodyBeingClosedOnceTheAnswerBegan(t *testing.T) {
+	m := aMachine(t)
+	release := make(chan struct{})
+	m.anthropic.answer = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: message_start\n\n")
+		w.(http.Flusher).Flush()
+		<-release
+		_, _ = io.WriteString(w, "event: message_stop\n\n")
+	}
+	answer := &flushSignal{ResponseRecorder: httptest.NewRecorder(), flushed: make(chan struct{})}
+	request := httptest.NewRequest("POST", "/anthropic/v1/messages", nil)
+	request.Body = &closedBodyAfterFlush{whole: strings.NewReader("{}"), flushed: answer.flushed}
+	request.ContentLength = 2
+	request.Header.Set("authorization", "Bearer "+scoutsToken)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer func() { _ = recover() }() // a cut stream aborts the handler
+		m.proxy.Config.Handler.ServeHTTP(answer, request)
+	}()
+
+	<-answer.flushed
+	time.Sleep(50 * time.Millisecond) // whatever the request body does to the vendor's connection has happened by now
+	close(release)
+	<-done
+
+	if got := answer.Body.String(); got != "event: message_start\n\nevent: message_stop\n\n" {
+		t.Fatalf("answer = %q, want both events, the vendor's last one written after the request body was closed", got)
+	}
+}
+
 func outOfCreditVendor(t *testing.T, m *machine, credit *bool) {
 	t.Helper()
 	m.anthropic.answer = func(w http.ResponseWriter, r *http.Request) {

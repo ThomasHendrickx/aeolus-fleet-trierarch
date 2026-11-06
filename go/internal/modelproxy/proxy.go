@@ -150,6 +150,13 @@ func (p Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		refuse(w, http.StatusNotFound, onlyVendors)
 		return
 	}
+	if r.ContentLength > 0 {
+		// The server closes the request body once the answer begins; the vendor's connection reading it again after that would fail and close, cutting the stream. A body of known length is read to its length and no further.
+		r.Body = struct {
+			io.Reader
+			io.Closer
+		}{io.LimitReader(r.Body, r.ContentLength), r.Body}
+	}
 	forward := &httputil.ReverseProxy{
 		Rewrite: func(out *httputil.ProxyRequest) {
 			out.Out.URL = target
