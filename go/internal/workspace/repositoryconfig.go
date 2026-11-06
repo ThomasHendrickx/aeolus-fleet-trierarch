@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -169,8 +170,9 @@ func inFolder(folder string, args ...string) (*exec.Cmd, error) {
 }
 
 // inClone is git run in a ship's clone as in its folder, through the clone's own `.git` folder and with the clone as its work tree,
-// whatever the clone says: a `.git` that is a file or a link, that names another folder's in its commondir, that holds a link, or
-// that names another repository's objects in its alternates, would point git at another folder, so such a clone is not read.
+// whatever the clone says: a `.git` that is a file or a link, that names another folder's in its commondir, that holds a link, that
+// names another repository's objects in its alternates, or whose config includes a file from outside it, would point git at another
+// folder, so such a clone is not read; nor one whose `.git` holds a special file, such as a named pipe, which git may wait on forever.
 func inClone(clone string, args ...string) (*exec.Cmd, error) {
 	gitFolder := filepath.Join(clone, ".git")
 	if found, err := os.Lstat(gitFolder); err != nil || !found.IsDir() {
@@ -179,40 +181,107 @@ func inClone(clone string, args ...string) (*exec.Cmd, error) {
 	if _, err := os.Lstat(filepath.Join(gitFolder, "commondir")); err == nil {
 		return nil, &RefusedError{clone, "its .git names another git folder in its commondir"}
 	}
-	link, err := linkIn(gitFolder)
+	irregular, err := irregularIn(gitFolder)
 	if err != nil {
 		return nil, err
 	}
-	if link != "" {
-		return nil, &RefusedError{clone, "its .git holds a link: " + link}
+	if irregular != "" {
+		return nil, &RefusedError{clone, irregular}
 	}
 	if _, err := os.Lstat(filepath.Join(gitFolder, "objects", "info", "alternates")); err == nil {
 		return nil, &RefusedError{clone, "its .git names another repository's objects in objects/info/alternates"}
 	}
+	include, err := includeOutside(gitFolder)
+	if err != nil {
+		return nil, err
+	}
+	if include != "" {
+		return nil, &RefusedError{clone, "its config includes a file outside its .git: " + include}
+	}
 	return located(clone, []string{"GIT_DIR=" + gitFolder, "GIT_WORK_TREE=" + clone}, true, args)
 }
 
-// linkIn is the first link in the git folder, by its path in it, or none: none is read through, as it would lead git out of it.
-func linkIn(gitFolder string) (string, error) {
-	link := ""
+// irregularIn is why the first entry in the git folder that is neither a regular file nor a folder is not read, by its path in it,
+// or none: a link would lead git out of it, and git reading a special file, such as a named pipe, may never end.
+func irregularIn(gitFolder string) (string, error) {
+	why := ""
 	// WalkDir follows no link: one to a folder is a link it does not enter.
 	err := filepath.WalkDir(gitFolder, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if entry.Type()&fs.ModeSymlink != 0 {
-			link, err = filepath.Rel(gitFolder, path)
-			if err != nil {
-				return err
-			}
-			return fs.SkipAll
+		if entry.Type().IsRegular() || entry.IsDir() {
+			return nil
 		}
-		return nil
+		inGit, err := filepath.Rel(gitFolder, path)
+		if err != nil {
+			return err
+		}
+		why = "its .git holds a special file: " + inGit
+		if entry.Type()&fs.ModeSymlink != 0 {
+			why = "its .git holds a link: " + inGit
+		}
+		return fs.SkipAll
 	})
 	if err != nil {
 		return "", fmt.Errorf("list %s: %w", gitFolder, err)
 	}
-	return link, nil
+	return why, nil
+}
+
+// includes are the variables of a config file that include another, as git lists them.
+const includes = `^include(if\..*)?\.path$`
+
+// isIn says whether the path lies in the folder.
+func isIn(folder string, path string) bool {
+	inFolder, err := filepath.Rel(folder, path)
+	return err == nil && inFolder != ".." && !strings.HasPrefix(inFolder, ".."+string(filepath.Separator))
+}
+
+// includeOutside is the first file the git folder's config includes from outside it, as the config names it, or that a file it
+// includes includes in turn, or none: git would read it, and only what lies in the git folder is checked. A path from a home folder
+// or git's own prefix is outside.
+func includeOutside(gitFolder string) (string, error) {
+	toRead := []string{filepath.Join(gitFolder, "config"), filepath.Join(gitFolder, "config.worktree")}
+	read := map[string]bool{}
+	for len(toRead) > 0 {
+		file := toRead[0]
+		toRead = toRead[1:]
+		if _, err := os.Lstat(file); err != nil || read[file] {
+			continue
+		}
+		read[file] = true
+		listing := exec.Command("git", "config", "--file", file, "--null", "--get-regexp", includes)
+		listing.Env = append(os.Environ(), noLazyFetch)
+		listed, err := listing.Output()
+		// None found answers 1.
+		if exit := (*exec.ExitError)(nil); errors.As(err, &exit) && exit.ExitCode() == 1 {
+			continue
+		}
+		if err != nil {
+			return "", failedConfig(err)
+		}
+		for _, entry := range bytes.Split(bytes.TrimSuffix(listed, []byte{0}), []byte{0}) {
+			_, value, _ := strings.Cut(string(entry), "\n")
+			path := value
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(filepath.Dir(file), value)
+			}
+			if strings.HasPrefix(value, "~") || strings.HasPrefix(value, "%(") || !isIn(gitFolder, path) {
+				return value, nil
+			}
+			toRead = append(toRead, path)
+		}
+	}
+	return "", nil
+}
+
+// failedConfig is why a git config call failed, as git said it.
+func failedConfig(err error) error {
+	if exit := (*exec.ExitError)(nil); errors.As(err, &exit) && len(exit.Stderr) > 0 {
+		return fmt.Errorf("git config failed: %s", messageOf(string(exit.Stderr)))
+	}
+	return fmt.Errorf("git config failed: %w", err)
 }
 
 // located is git run in the folder, with where it finds its repository given in the environment when it is, as a clone or not.
