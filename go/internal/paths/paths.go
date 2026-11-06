@@ -35,6 +35,10 @@ type Paths struct {
 	TrustedRepositories string
 	// McpServers is the MCP server list the trierarch plugin's ship sent last, apart from the configuration.
 	McpServers string
+	// Secrets is the secrets the trierarch plugin's ship sent last, opened, mode 600: only the MCP proxy reads them.
+	Secrets string
+	// SealingKey is the trierarch's private key, mode 600, which opens the secrets sealed to the public key its report states.
+	SealingKey string
 	// Repositories holds the clones of the trusted repositories, one folder per repository.
 	Repositories string
 }
@@ -65,6 +69,8 @@ func Of(homeDirectory string, config string) Paths {
 
 		TrustedRepositories: filepath.Join(home, "trusted-repositories.json"),
 		McpServers:          filepath.Join(home, "mcp-servers.json"),
+		Secrets:             filepath.Join(home, "secrets.json"),
+		SealingKey:          filepath.Join(home, "sealing-key"),
 		Repositories:        filepath.Join(home, "repositories"),
 	}
 }

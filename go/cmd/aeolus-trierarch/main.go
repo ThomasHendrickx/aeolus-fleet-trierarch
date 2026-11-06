@@ -361,7 +361,7 @@ func harnessesThatAddMcpServers(configured *config.Runtime) map[string]bool {
 
 // modelProxy is the model proxy on this machine (headless H16), started as a hold is.
 func modelProxy(at paths.Paths, program string) modelproxy.Runtime {
-	return modelproxy.Runtime{Folder: at.Proxy, Sessions: at.Sessions, Keys: at.Keys, McpServers: at.McpServers, Program: []string{program}, Version: cli.Version, Launch: sessions.Launch(runtime.GOOS, os.Getenv("INVOCATION_ID"), sessions.SystemdVersion())}
+	return modelproxy.Runtime{Folder: at.Proxy, Sessions: at.Sessions, Keys: at.Keys, McpServers: at.McpServers, Secrets: at.Secrets, Program: []string{program}, Version: cli.Version, Launch: sessions.Launch(runtime.GOOS, os.Getenv("INVOCATION_ID"), sessions.SystemdVersion())}
 }
 
 // readKey is the key piped in, or typed at a terminal, asked on stderr so stdout holds the answer alone, and not shown as typed.
