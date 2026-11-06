@@ -129,7 +129,7 @@ func Prepare(at Worktree) (string, error) {
 
 // Unsaved is what the worktree holds that no remote, branch or tag has: its changes, then its commits.
 func Unsaved(folder string) ([]string, error) {
-	changes, err := gitInFolder(folder, "status", "--porcelain")
+	changes, err := gitInFolder(folder, "status", "--porcelain", "--ignore-submodules=all")
 	if err != nil {
 		return nil, err
 	}
