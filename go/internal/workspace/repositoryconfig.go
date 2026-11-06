@@ -76,6 +76,10 @@ func (e *RefusedError) Error() string {
 // and no check of a commit's signature, which runs the machine's gpg, gpgsm or ssh-keygen.
 var harmless = []override{{"core.fsmonitor", "false"}, {"core.hooksPath", "/dev/null"}, {"log.showSignature", "false"}}
 
+// noFileNamed are the values the host's reads of a clone take whatever its config says: git reads no file the config names for it, which
+// may be a named pipe git waits on, or another repository's.
+var noFileNamed = []override{{"core.excludesFile", ""}}
+
 // namesAProgram are the config variables that name a program git runs, by section, then by variable; a section of three-part
 // names (`filter.<driver>.clean`) holds the variables of any subsection.
 var namesAProgram = map[string]map[string]bool{
@@ -172,6 +176,9 @@ func overridesIn(ctx context.Context, folder string, located []string, as readin
 		return nil, fmt.Errorf("git config failed in %s: %w", folder, err)
 	}
 	overrides := append([]override{}, harmless...)
+	if as.isClone && !as.isFresh {
+		overrides = append(overrides, noFileNamed...)
+	}
 	fields := bytes.Split(bytes.TrimSuffix(listed, []byte{0}), []byte{0})
 	for i := 0; i+1 < len(fields); i += 2 {
 		scope, name := string(fields[i]), string(fields[i+1])
