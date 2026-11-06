@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -13,7 +14,9 @@ import (
 // apart from the host (docs/trierarch.md, "Session runtime"). So the host's git calls in a ship's folder ignore the folder's own
 // config where it names a program for git to run: git runs no hook, no fsmonitor, no filter, diff or merge driver, and no
 // command for a transport, pager, editor or credential the folder's config names, and takes no optional lock. They go through
-// inFolder, so no call can leave one of these in force. The machine's own config (global and system) applies as before.
+// inFolder, so no call can leave one of these in force. The machine's own config (global and system) applies as before. Git is
+// pointed at no folder but the ship's own: a folder whose config sets core.worktree is not read, and a clone is read only
+// through its own `.git` folder (inClone).
 
 // harmless are the values the host's git calls take in a ship's folder whatever its config says: no hooks and no fsmonitor.
 var harmless = []override{{"core.fsmonitor", "false"}, {"core.hooksPath", "/dev/null"}}
@@ -64,9 +67,12 @@ func isProgram(name string) bool {
 	return section == "pager" || namesAProgram[section][variable]
 }
 
-// overridesIn are the overrides of every variable of the folder's own config that names a program, after the harmless ones.
-func overridesIn(folder string) ([]override, error) {
-	listed, err := exec.Command("git", "-C", folder, "config", "--list", "--show-scope", "--name-only", "-z").Output()
+// overridesIn are the overrides of every variable of the folder's own config that names a program, after the harmless ones; a
+// folder whose config points git at another work tree is not read.
+func overridesIn(folder string, located []string) ([]override, error) {
+	listing := exec.Command("git", "-C", folder, "config", "--list", "--show-scope", "--name-only", "-z")
+	listing.Env = append(os.Environ(), located...)
+	listed, err := listing.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git config failed in %s: %w", folder, err)
 	}
@@ -74,7 +80,13 @@ func overridesIn(folder string) ([]override, error) {
 	fields := bytes.Split(bytes.TrimSuffix(listed, []byte{0}), []byte{0})
 	for i := 0; i+1 < len(fields); i += 2 {
 		scope, name := string(fields[i]), string(fields[i+1])
-		if isTheFolders(scope) && isProgram(name) {
+		if !isTheFolders(scope) {
+			continue
+		}
+		if name == "core.worktree" {
+			return nil, fmt.Errorf("will not read %s: its config sets core.worktree, which points git at another folder", folder)
+		}
+		if isProgram(name) {
 			overrides = append(overrides, neutralOf(name))
 		}
 	}
@@ -83,13 +95,32 @@ func overridesIn(folder string) ([]override, error) {
 
 // inFolder is git run in a ship's folder with the folder's own config naming no program, and only a local repository to fetch from.
 func inFolder(folder string, args ...string) (*exec.Cmd, error) {
-	overrides, err := overridesIn(folder)
+	return located(folder, nil, args)
+}
+
+// inClone is git run in a ship's clone as in its folder, through the clone's own `.git` folder and with the clone as its work tree,
+// whatever the clone says: a `.git` that is a file or a link, or that names another folder's in its commondir, would point git at
+// another folder, so such a clone is not read.
+func inClone(clone string, args ...string) (*exec.Cmd, error) {
+	gitFolder := filepath.Join(clone, ".git")
+	if found, err := os.Lstat(gitFolder); err != nil || !found.IsDir() {
+		return nil, fmt.Errorf("will not read %s: its .git is no folder of its own", clone)
+	}
+	if _, err := os.Lstat(filepath.Join(gitFolder, "commondir")); err == nil {
+		return nil, fmt.Errorf("will not read %s: its .git names another git folder in its commondir", clone)
+	}
+	return located(clone, []string{"GIT_DIR=" + gitFolder, "GIT_WORK_TREE=" + clone}, args)
+}
+
+// located is git run in the folder, with where it finds its repository given in the environment when it is.
+func located(folder string, at []string, args []string) (*exec.Cmd, error) {
+	overrides, err := overridesIn(folder, at)
 	if err != nil {
 		return nil, err
 	}
 	command := exec.Command("git", append([]string{"-C", folder}, args...)...)
 	// Given in the environment rather than as -c, so a name holding an equals sign is taken whole.
-	command.Env = append(os.Environ(), "GIT_CONFIG_COUNT="+strconv.Itoa(len(overrides)), "GIT_ALLOW_PROTOCOL=file", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
+	command.Env = append(append(os.Environ(), at...), "GIT_CONFIG_COUNT="+strconv.Itoa(len(overrides)), "GIT_ALLOW_PROTOCOL=file", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
 	for i, each := range overrides {
 		command.Env = append(command.Env, "GIT_CONFIG_KEY_"+strconv.Itoa(i)+"="+each.name, "GIT_CONFIG_VALUE_"+strconv.Itoa(i)+"="+each.value)
 	}

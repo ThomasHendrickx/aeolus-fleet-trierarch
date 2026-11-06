@@ -43,6 +43,15 @@ func gitInFolder(folder string, args ...string) (string, error) {
 	return said(command, args)
 }
 
+// gitInClone is git run in a ship's clone, which ignores the clone's own config where it names a program, through the clone's own `.git`.
+func gitInClone(clone string, args ...string) (string, error) {
+	command, err := inClone(clone, args...)
+	if err != nil {
+		return "", err
+	}
+	return said(command, args)
+}
+
 // said is what the git command said, or why it failed.
 func said(command *exec.Cmd, args []string) (string, error) {
 	out, err := command.CombinedOutput()
@@ -129,11 +138,16 @@ func Prepare(at Worktree) (string, error) {
 
 // Unsaved is what the worktree holds that no remote, branch or tag has: its changes, then its commits.
 func Unsaved(folder string) ([]string, error) {
-	changes, err := gitInFolder(folder, "status", "--porcelain", "--ignore-submodules=all")
+	return unsavedIn(folder, gitInFolder)
+}
+
+// unsavedIn is what the folder holds that no remote, branch or tag has, as git in it says.
+func unsavedIn(folder string, gitIn func(folder string, args ...string) (string, error)) ([]string, error) {
+	changes, err := gitIn(folder, "status", "--porcelain", "--ignore-submodules=all")
 	if err != nil {
 		return nil, err
 	}
-	commits, err := gitInFolder(folder, "log", "--format=commit %h %s", "HEAD", "--not", "--branches", "--tags", "--remotes")
+	commits, err := gitIn(folder, "log", "--format=commit %h %s", "HEAD", "--not", "--branches", "--tags", "--remotes")
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +218,11 @@ func (p Places) prepare(entry reconciler.Entry, shipName string) (string, error)
 	return Prepare(at)
 }
 
+// Unsaved is what the ship's worktree, or its clone, holds that no remote, branch or tag has.
 func (p Places) Unsaved(folder string) ([]string, error) {
+	if p.IsClone {
+		return unsavedIn(folder, gitInClone)
+	}
 	return Unsaved(folder)
 }
 
