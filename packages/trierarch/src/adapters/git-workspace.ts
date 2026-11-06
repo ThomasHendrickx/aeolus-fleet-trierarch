@@ -106,7 +106,7 @@ export function createGitWorkspace(options: {
     unsaved: async (folder) => {
       try {
         const changes = await gitIn(folder, ['status', '--porcelain', '--ignore-submodules=all']);
-        const commits = await gitIn(folder, ['log', '--format=commit %h %s', 'HEAD', '--not', '--branches', '--tags', '--remotes']);
+        const commits = await gitIn(folder, ['log', '--no-show-signature', '--format=commit %h %s', 'HEAD', '--not', '--branches', '--tags', '--remotes']);
         return [...changes.split('\n'), ...commits.split('\n')].filter((line) => line !== '');
       } catch (error) {
         if (error instanceof RefusedRead) {

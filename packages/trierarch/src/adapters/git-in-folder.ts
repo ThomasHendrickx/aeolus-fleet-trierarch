@@ -8,7 +8,7 @@ import { type CommandResult, runCommand } from './run-command.js';
  * its config included, and with sessions in containers a session runs apart
  * from the host (trierarch.md, "Session runtime"). So the host's git calls in a
  * ship's folder ignore the folder's own config where it names a program for
- * git to run: git runs no hook, in a folder or in the config, no fsmonitor, no filter, diff or merge driver,
+ * git to run: git runs no hook, in a folder or in the config, no fsmonitor, no filter, diff or merge driver, no check of a signature,
  * and no command for a transport, pager, editor or credential the folder's
  * config names, and takes no optional lock, and fetches no object the folder lacks. No filter runs, the machine's own
  * included, as the folder's attributes may name it, but in a fresh clone the
@@ -58,10 +58,11 @@ interface Override {
   readonly value: string;
 }
 
-/** The values the host's git calls take in a ship's folder whatever its config says: no hooks in a folder and no fsmonitor. */
+/** The values the host's git calls take in a ship's folder whatever its config says: no hooks in a folder, no fsmonitor, and no check of a commit's signature, which runs the machine's gpg, gpgsm or ssh-keygen. */
 const HARMLESS: readonly Override[] = [
   { name: 'core.fsmonitor', value: 'false' },
   { name: 'core.hooksPath', value: '/dev/null' },
+  { name: 'log.showSignature', value: 'false' },
 ];
 
 /** The config variables that name a program git runs, by section, then by variable; a section of three-part names (`filter.<driver>.clean`) holds the variables of any subsection. */
