@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -63,5 +63,33 @@ describe('the detected file (#365)', () => {
     writeFileSync(path, '{"claude-code": {"version": 2}}');
 
     await expect(createDetectedFile(path).load()).resolves.toEqual({});
+  });
+
+  it('is never read empty or half written while it is saved again and again', async () => {
+    const path = join(folder, 'detected.json');
+    const file = createDetectedFile(path);
+    const values = Object.fromEntries(Array.from({ length: 2000 }, (_, i) => [`model-${i}`, ['--model', `model-${i}`]]));
+    const detected: Detected = { codex: { version: '0.160.1', detectedAt: AT, confirmedAt: AT, options: { model: { values } } } };
+    await file.save(detected);
+
+    let saving = true;
+    const saves = (async () => {
+      for (let i = 0; i < 100; i += 1) {
+        await file.save(detected);
+      }
+      saving = false;
+    })();
+    let unparsable = 0;
+    while (saving) {
+      try {
+        JSON.parse(readFileSync(path, 'utf8'));
+      } catch {
+        unparsable += 1;
+      }
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    await saves;
+
+    expect(unparsable).toBe(0);
   });
 });
