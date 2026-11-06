@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
@@ -91,6 +92,58 @@ func TestTheHostsGitCallsInASessionsCloneIgnoreTheClonesOwnConfig(t *testing.T) 
 			}
 			if _, statErr := os.Stat(marker); statErr == nil {
 				t.Errorf("with %s planted in the clone's config, the host's git calls ran it", planted.name)
+			}
+		})
+	}
+}
+
+// anotherRepository is another repository on the host, with a change of its own, where a clone's git is pointed.
+func anotherRepository(t *testing.T) string {
+	t.Helper()
+	other := filepath.Join(t.TempDir(), "other")
+	gitIn(t, "init", "-q", "-b", "main", other)
+	commitIn(t, other, "OTHER.md")
+	writeIn(t, other, "OTHER.md", "CHANGED\n")
+	return other
+}
+
+func TestTheHostReadsAClonesOnlyThroughItsOwnGitFolder(t *testing.T) {
+	pointings := []struct {
+		name  string
+		point func(t *testing.T, clone string, other string)
+	}{
+		{"core.worktree in its config", func(t *testing.T, clone string, other string) {
+			gitIn(t, "-C", clone, "config", "core.worktree", other)
+		}},
+		{"a .git file naming another git folder", func(t *testing.T, clone string, other string) {
+			if err := os.Rename(filepath.Join(clone, ".git"), filepath.Join(t.TempDir(), "moved.git")); err != nil {
+				t.Fatal(err)
+			}
+			writeIn(t, clone, ".git", "gitdir: "+filepath.Join(other, ".git")+"\n")
+		}},
+		{"a .git link to another git folder", func(t *testing.T, clone string, other string) {
+			if err := os.Rename(filepath.Join(clone, ".git"), filepath.Join(t.TempDir(), "moved.git")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join(other, ".git"), filepath.Join(clone, ".git")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"a commondir in its .git naming another git folder", func(t *testing.T, clone string, other string) {
+			writeIn(t, filepath.Join(clone, ".git"), "commondir", filepath.Join(other, ".git")+"\n")
+		}},
+	}
+	for _, pointing := range pointings {
+		t.Run(pointing.name, func(t *testing.T) {
+			repository, root := aRepository(t)
+			places := clonePlaces(repository, root, t.TempDir())
+			folder := prepared(t, places, scoutInAeolusFleet, "scout")
+			pointing.point(t, folder, anotherRepository(t))
+
+			unsaved, err := places.Unsaved(folder)
+
+			if err == nil || !strings.Contains(err.Error(), "will not read "+folder) {
+				t.Errorf("Unsaved(%s) with %s = %q, %v, want it refused", folder, pointing.name, unsaved, err)
 			}
 		})
 	}
