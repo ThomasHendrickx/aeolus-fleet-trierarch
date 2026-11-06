@@ -802,6 +802,7 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 				PermissionModes: func() []string { return offers.permissionModes("claude-code") },
 				Events:          events,
 				ProxyURL:        proxyURL,
+				Sessions:        at.Sessions,
 				Homes:           homesOf(at, configuration.Runtime),
 			}
 		case "codex":

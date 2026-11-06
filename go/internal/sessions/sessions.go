@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/processproof"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
 )
@@ -60,6 +61,14 @@ type Start struct {
 	ProxyToken *ProxyToken
 	// ReadOnly are the paths of the ship's read-only checkouts, which a container mounts read-only.
 	ReadOnly []string
+	// Mcp is the session's way to its crew-time MCP servers at the MCP proxy, none for a session that names none.
+	Mcp *Mcp
+}
+
+// Mcp is a session's access at the MCP proxy, and the MCP configuration its harness reads from the session's folder (hold.Files.McpConfig), which holds its token: a command line is anyone's to see.
+type Mcp struct {
+	Access mcpproxy.Access
+	Config []byte
 }
 
 // ProxyToken is a session's model proxy token, for the harness whose vendor it reaches, handed to it in Variable.
@@ -198,6 +207,14 @@ func (r Runtime) Start(session Start) error {
 			return err
 		}
 		words = append(words, "--proxy-token-variable", token.Variable)
+	}
+	if mcp := session.Mcp; mcp != nil {
+		if err := mcpproxy.WriteAccess(files.Folder, mcp.Access); err != nil {
+			return err
+		}
+		if err := os.WriteFile(files.McpConfig, mcp.Config, 0o600); err != nil {
+			return err
+		}
 	}
 	for name, value := range session.Env {
 		words = append(words, "--env", name+"="+value)

@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/prompt"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
@@ -48,6 +50,8 @@ type Harness struct {
 	Events func(shipID string) string
 	// ProxyURL is where sessions on an API key reach the model proxy (headless H16); false before it first listened.
 	ProxyURL func() (string, bool)
+	// Sessions is the sessions folder, where each session's MCP configuration is kept in its folder.
+	Sessions string
 	// Homes is where each ship has a home of its own, for sessions in containers, which its container gets as its home (decision 0039); empty on the host, where every session shares the user's.
 	Homes string
 }
@@ -120,9 +124,46 @@ func (h Harness) routeOf(login string) (map[string]string, *sessions.ProxyToken,
 	return map[string]string{"ANTHROPIC_BASE_URL": address + "/anthropic"}, &sessions.ProxyToken{Harness: "claude-code", Variable: "ANTHROPIC_AUTH_TOKEN", Token: proxytoken.New()}, nil
 }
 
+// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7): each at the MCP proxy with a token of its own, fresh for each start, in an MCP configuration kept in the session's folder, which the command line names by its path alone; nothing for an entry that names none. A session in a container reaches none yet.
+func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) {
+	if len(entry.McpServers) == 0 {
+		return nil, nil, nil
+	}
+	if h.Homes != "" {
+		return nil, nil, errors.New("a session in a container is started with no MCP server yet")
+	}
+	address, ok := "", false
+	if h.ProxyURL != nil {
+		address, ok = h.ProxyURL()
+	}
+	if !ok {
+		return nil, nil, errors.New("the MCP proxy is not running yet")
+	}
+	token := proxytoken.New()
+	type server struct {
+		Type    string            `json:"type"`
+		URL     string            `json:"url"`
+		Headers map[string]string `json:"headers"`
+	}
+	servers := map[string]server{}
+	for _, name := range entry.McpServers {
+		servers[name] = server{Type: "http", URL: address + mcpproxy.PathOf(entry.ShipID, name), Headers: map[string]string{"Authorization": "Bearer " + token}}
+	}
+	config, err := json.Marshal(map[string]any{"mcpServers": servers})
+	if err != nil {
+		return nil, nil, err
+	}
+	path := hold.FilesOf(h.Sessions, entry.ShipID).McpConfig
+	return []string{"--mcp-config", path}, &sessions.Mcp{Access: mcpproxy.Access{Token: token, Servers: entry.McpServers}, Config: config}, nil
+}
+
 // Launch starts the entry's session in its folder, on the login it is to start on: its first prompt on a first start, the wake otherwise, continuing the folder's conversation when Claude Code keeps one.
 func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID string) error {
 	env, token, err := h.routeOf(entry.Login)
+	if err != nil {
+		return err
+	}
+	mcpFlags, mcp, err := h.mcpOf(entry)
 	if err != nil {
 		return err
 	}
@@ -139,12 +180,13 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 		modes = h.PermissionModes()
 	}
 	override := PlanOverride(flags, DefaultModeOf(h.Managed, h.userOf(entry), flags, entry.Folder), modes)
-	command := CommandLine(flags, override, !isFirstStart && HasConversation(h.projectsOf(entry), entry.Folder), entry.ReadOnly)
+	// --mcp-config takes every word up to the next flag, so it comes last.
+	command := append(CommandLine(flags, override, !isFirstStart && HasConversation(h.projectsOf(entry), entry.Folder), entry.ReadOnly), mcpFlags...)
 	if err := h.pluginOf(entry).ClearLaunch(entry.Folder); err != nil {
 		return err
 	}
 	env[launchVariable] = launchID
-	if err := h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, Harness: "claude-code", Command: command, Env: env, ProxyToken: token, ReadOnly: entry.ReadOnly}); err != nil {
+	if err := h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, Harness: "claude-code", Command: command, Env: env, ProxyToken: token, ReadOnly: entry.ReadOnly, Mcp: mcp}); err != nil {
 		return err
 	}
 	return h.Runtime.Send(entry.ShipID, UserLine(line))
