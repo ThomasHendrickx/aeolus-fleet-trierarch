@@ -7,6 +7,7 @@
 package workspace
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -34,22 +35,36 @@ func git(args ...string) (string, error) {
 	return said(exec.Command("git", args...), args)
 }
 
-// gitInFolder is git run in a ship's folder, which ignores the folder's own config where it names a program.
+// gitInFolder is git run in a ship's folder, which ignores the folder's own config where it names a program, within its time limit.
 func gitInFolder(folder string, args ...string) (string, error) {
-	command, err := inFolder(folder, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), timeLimit)
+	defer cancel()
+	command, err := inFolder(ctx, folder, args...)
 	if err != nil {
 		return "", err
 	}
-	return said(command, args)
+	return saidWithin(ctx, folder, command, args)
 }
 
-// gitInClone is git run in a ship's clone, which ignores the clone's own config where it names a program, through the clone's own `.git`.
+// gitInClone is git run in a ship's clone, which ignores the clone's own config where it names a program, through the clone's own
+// `.git`, within its time limit.
 func gitInClone(clone string, args ...string) (string, error) {
-	command, err := inClone(clone, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), timeLimit)
+	defer cancel()
+	command, err := inClone(ctx, clone, args...)
 	if err != nil {
 		return "", err
 	}
-	return said(command, args)
+	return saidWithin(ctx, clone, command, args)
+}
+
+// saidWithin is what the git command in the folder said, or why it failed: a refusal of the folder when it ran past its time limit.
+func saidWithin(ctx context.Context, folder string, command *exec.Cmd, args []string) (string, error) {
+	out, err := said(command, args)
+	if refused := endedAt(ctx, folder, actionOf(args)); err != nil && refused != nil {
+		return "", refused
+	}
+	return out, err
 }
 
 // said is what the git command said, or why it failed.

@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // A ship's folder is its session's to write, `.git` and its config included, and with sessions in containers a session runs
@@ -23,7 +25,28 @@ import (
 // pointed at no folder but the ship's own: a folder whose config sets core.worktree is not read, and a clone is read only
 // through its own `.git` folder, with its own objects alone (inClone): a clone whose config names a remote to fetch missing objects from
 // is not read. A folder that is not read is refused with why (RefusedError), so what it holds is not
-// known.
+// known, as is one where a git call does not end within its time limit (timeLimit), as what git waits on may never come.
+
+// timeLimit is how long the host's git calls in a ship's folder run, together, before they are ended and the folder not read.
+var timeLimit = time.Minute
+
+// waitDelay is how long a git call ended at its time limit is waited for to close its output.
+const waitDelay = time.Second
+
+// command is git run with its arguments, ended when the context is done.
+func command(ctx context.Context, args ...string) *exec.Cmd {
+	command := exec.CommandContext(ctx, "git", args...)
+	command.WaitDelay = waitDelay
+	return command
+}
+
+// endedAt is the refusal of a folder whose git call ran past its time limit, or nil when it did not.
+func endedAt(ctx context.Context, folder string, action string) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return &RefusedError{folder, fmt.Sprintf("git %s did not end within %d seconds", action, int(timeLimit.Seconds()))}
+	}
+	return nil
+}
 
 // RefusedError is a folder the host does not read, with why.
 type RefusedError struct {
@@ -123,10 +146,13 @@ func isProgram(name string) bool {
 // overridesIn are the overrides of every variable of the folder's own config that names a program, after the harmless ones; a
 // folder whose config points git at another work tree is not read, nor a clone whose config names a remote to fetch missing objects
 // from.
-func overridesIn(folder string, located []string, isClone bool) ([]override, error) {
-	listing := exec.Command("git", "-C", folder, "config", "--list", "--show-scope", "--name-only", "-z")
+func overridesIn(ctx context.Context, folder string, located []string, isClone bool) ([]override, error) {
+	listing := command(ctx, "-C", folder, "config", "--list", "--show-scope", "--name-only", "-z")
 	listing.Env = append(append(os.Environ(), located...), noLazyFetch)
 	listed, err := listing.Output()
+	if refused := endedAt(ctx, folder, "config"); refused != nil {
+		return nil, refused
+	}
 	if err != nil {
 		return nil, fmt.Errorf("git config failed in %s: %w", folder, err)
 	}
@@ -165,15 +191,15 @@ func overridesIn(folder string, located []string, isClone bool) ([]override, err
 }
 
 // inFolder is git run in a ship's folder with the folder's own config naming no program, and only a local repository to fetch from.
-func inFolder(folder string, args ...string) (*exec.Cmd, error) {
-	return located(folder, nil, false, args)
+func inFolder(ctx context.Context, folder string, args ...string) (*exec.Cmd, error) {
+	return located(ctx, folder, nil, false, args)
 }
 
 // inClone is git run in a ship's clone as in its folder, through the clone's own `.git` folder and with the clone as its work tree,
 // whatever the clone says: a `.git` that is a file or a link, that names another folder's in its commondir, that holds a link, that
 // names another repository's objects in its alternates, or whose config includes a file from outside it, would point git at another
 // folder, so such a clone is not read; nor one whose `.git` holds a special file, such as a named pipe, which git may wait on forever.
-func inClone(clone string, args ...string) (*exec.Cmd, error) {
+func inClone(ctx context.Context, clone string, args ...string) (*exec.Cmd, error) {
 	gitFolder := filepath.Join(clone, ".git")
 	if found, err := os.Lstat(gitFolder); err != nil || !found.IsDir() {
 		return nil, &RefusedError{clone, "its .git is no folder of its own"}
@@ -191,14 +217,14 @@ func inClone(clone string, args ...string) (*exec.Cmd, error) {
 	if _, err := os.Lstat(filepath.Join(gitFolder, "objects", "info", "alternates")); err == nil {
 		return nil, &RefusedError{clone, "its .git names another repository's objects in objects/info/alternates"}
 	}
-	include, err := includeOutside(gitFolder)
+	include, err := includeOutside(ctx, gitFolder)
 	if err != nil {
 		return nil, err
 	}
 	if include != "" {
 		return nil, &RefusedError{clone, "its config includes a file outside its .git: " + include}
 	}
-	return located(clone, []string{"GIT_DIR=" + gitFolder, "GIT_WORK_TREE=" + clone}, true, args)
+	return located(ctx, clone, []string{"GIT_DIR=" + gitFolder, "GIT_WORK_TREE=" + clone}, true, args)
 }
 
 // irregularIn is why the first entry in the git folder that is neither a regular file nor a folder is not read, by its path in it,
@@ -241,7 +267,7 @@ func isIn(folder string, path string) bool {
 // includeOutside is the first file the git folder's config includes from outside it, as the config names it, or that a file it
 // includes includes in turn, or none: git would read it, and only what lies in the git folder is checked. A path from a home folder
 // or git's own prefix is outside.
-func includeOutside(gitFolder string) (string, error) {
+func includeOutside(ctx context.Context, gitFolder string) (string, error) {
 	toRead := []string{filepath.Join(gitFolder, "config"), filepath.Join(gitFolder, "config.worktree")}
 	read := map[string]bool{}
 	for len(toRead) > 0 {
@@ -251,9 +277,12 @@ func includeOutside(gitFolder string) (string, error) {
 			continue
 		}
 		read[file] = true
-		listing := exec.Command("git", "config", "--file", file, "--null", "--get-regexp", includes)
+		listing := command(ctx, "config", "--file", file, "--null", "--get-regexp", includes)
 		listing.Env = append(os.Environ(), noLazyFetch)
 		listed, err := listing.Output()
+		if refused := endedAt(ctx, filepath.Dir(gitFolder), "config"); refused != nil {
+			return "", refused
+		}
 		// None found answers 1.
 		if exit := (*exec.ExitError)(nil); errors.As(err, &exit) && exit.ExitCode() == 1 {
 			continue
@@ -285,16 +314,16 @@ func failedConfig(err error) error {
 }
 
 // located is git run in the folder, with where it finds its repository given in the environment when it is, as a clone or not.
-func located(folder string, at []string, isClone bool, args []string) (*exec.Cmd, error) {
-	overrides, err := overridesIn(folder, at, isClone)
+func located(ctx context.Context, folder string, at []string, isClone bool, args []string) (*exec.Cmd, error) {
+	overrides, err := overridesIn(ctx, folder, at, isClone)
 	if err != nil {
 		return nil, err
 	}
-	command := exec.Command("git", append([]string{"-C", folder}, args...)...)
+	git := command(ctx, append([]string{"-C", folder}, args...)...)
 	// Given in the environment rather than as -c, so a name holding an equals sign is taken whole.
-	command.Env = append(append(os.Environ(), at...), noLazyFetch, "GIT_CONFIG_COUNT="+strconv.Itoa(len(overrides)), "GIT_ALLOW_PROTOCOL=file", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
+	git.Env = append(append(os.Environ(), at...), noLazyFetch, "GIT_CONFIG_COUNT="+strconv.Itoa(len(overrides)), "GIT_ALLOW_PROTOCOL=file", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
 	for i, each := range overrides {
-		command.Env = append(command.Env, "GIT_CONFIG_KEY_"+strconv.Itoa(i)+"="+each.name, "GIT_CONFIG_VALUE_"+strconv.Itoa(i)+"="+each.value)
+		git.Env = append(git.Env, "GIT_CONFIG_KEY_"+strconv.Itoa(i)+"="+each.name, "GIT_CONFIG_VALUE_"+strconv.Itoa(i)+"="+each.value)
 	}
-	return command, nil
+	return git, nil
 }
