@@ -320,4 +320,13 @@ describe("the host's git calls in a session's clone, with a program named in the
 
     expect({ isClean, isUnsaved: unsaved.length > 0, hasRun: existsSync(marker) }).toEqual({ isClean: false, isUnsaved: true, hasRun: false });
   });
+
+  it('reads a clone whose config has a section named as a property every object has', async () => {
+    await withUpstream();
+    const { folder: made } = await workspace().prepare(scout);
+    await git(['-C', made, 'config', 'constructor.planted', 'value']);
+    writeFileSync(join(made, 'README.md'), 'README.MD\n');
+
+    expect({ isClean: await workspace().isClean(made), unsaved: await workspace().unsaved(made) }).toEqual({ isClean: false, unsaved: [' M README.md'] });
+  });
 });
