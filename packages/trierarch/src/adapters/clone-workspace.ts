@@ -4,7 +4,7 @@ import { join, relative, sep } from 'node:path';
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { WorkspacePort } from '../core/ports.js';
-import { gitInFolder } from './git-in-folder.js';
+import { gitInClone } from './git-in-folder.js';
 import { createGitWorkspace } from './git-workspace.js';
 import { runCommand } from './run-command.js';
 import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
@@ -37,7 +37,7 @@ const isMarkedMade = async (folder: string): Promise<boolean> => (await readFile
 
 export function createCloneWorkspace(options: { configuration: TrierarchConfiguration; root: string; clones?: TrustedClones }): WorkspacePort {
   const { configuration, root, clones } = options;
-  const worktrees = createGitWorkspace(options);
+  const worktrees = createGitWorkspace({ ...options, inFolder: gitInClone });
   const git = async (args: readonly string[]): Promise<string> => {
     const result = await runCommand('git', { args });
     if (result.status !== 0) {
@@ -45,9 +45,9 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
     }
     return result.stdout;
   };
-  /** Git in the ship's clone, which ignores the clone's own config where it names a program. */
+  /** Git in the ship's clone, which ignores the clone's own config where it names a program, through the clone's own `.git`. */
   const gitIn = async (clone: string, args: readonly string[]): Promise<void> => {
-    const result = await gitInFolder(clone, args);
+    const result = await gitInClone(clone, args);
     if (result.status !== 0) {
       throw new Error(`git ${args.join(' ')} failed: ${result.stderr.trim()}`);
     }

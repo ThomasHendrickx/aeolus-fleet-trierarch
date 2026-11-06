@@ -1,3 +1,6 @@
+import { lstat } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import { type CommandResult, runCommand } from './run-command.js';
 
 /**
@@ -8,7 +11,9 @@ import { type CommandResult, runCommand } from './run-command.js';
  * git to run: git runs no hook, no fsmonitor, no filter, diff or merge driver,
  * and no command for a transport, pager, editor or credential the folder's
  * config names, and takes no optional lock. The machine's own config (global
- * and system) applies as before.
+ * and system) applies as before. Git is pointed at no folder but the ship's
+ * own: a folder whose config sets core.worktree is not read, and a clone is
+ * read only through its own `.git` folder.
  */
 
 interface Override {
@@ -55,9 +60,9 @@ function neutralOf(name: string): Override {
   return { name, value: isOff ? 'false' : '' };
 }
 
-/** The overrides of every variable of the folder's own config that names a program, after the harmless ones. */
-async function overridesIn(folder: string): Promise<readonly Override[]> {
-  const listed = await runCommand('git', { args: ['-C', folder, 'config', '--list', '--show-scope', '--name-only', '-z'] });
+/** The overrides of every variable of the folder's own config that names a program, after the harmless ones; a folder whose config points git at another work tree is not read. */
+async function overridesIn(folder: string, located: Readonly<Record<string, string>>): Promise<readonly Override[]> {
+  const listed = await runCommand('git', { args: ['-C', folder, 'config', '--list', '--show-scope', '--name-only', '-z'], env: located });
   if (listed.status !== 0) {
     throw new Error(`git config failed in ${folder}: ${listed.stderr.trim()}`);
   }
@@ -66,21 +71,50 @@ async function overridesIn(folder: string): Promise<readonly Override[]> {
   for (let i = 0; i + 1 < fields.length; i += 2) {
     const scope = fields[i] ?? '';
     const name = fields[i + 1] ?? '';
-    if (FOLDER_SCOPES.includes(scope) && isProgram(name)) {
+    if (!FOLDER_SCOPES.includes(scope)) {
+      continue;
+    }
+    if (name === 'core.worktree') {
+      throw new Error(`Will not read ${folder}: its config sets core.worktree, which points git at another folder`);
+    }
+    if (isProgram(name)) {
       overrides.push(neutralOf(name));
     }
   }
   return overrides;
 }
 
-/** Runs git in a ship's folder with the folder's own config naming no program, and only a local repository to fetch from. */
-export async function gitInFolder(folder: string, args: readonly string[]): Promise<CommandResult> {
-  const overrides = await overridesIn(folder);
+/** Git in the folder, with where it finds its repository given in the environment when it is. */
+async function gitIn(folder: string, at: { args: readonly string[]; located: Readonly<Record<string, string>> }): Promise<CommandResult> {
+  const overrides = await overridesIn(folder, at.located);
   // Given in the environment rather than as -c, so a name holding an equals sign is taken whole.
-  const env: Record<string, string> = { GIT_CONFIG_COUNT: String(overrides.length), GIT_ALLOW_PROTOCOL: 'file', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' };
+  const env: Record<string, string> = { ...at.located, GIT_CONFIG_COUNT: String(overrides.length), GIT_ALLOW_PROTOCOL: 'file', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' };
   for (const [i, { name, value }] of overrides.entries()) {
     env[`GIT_CONFIG_KEY_${i}`] = name;
     env[`GIT_CONFIG_VALUE_${i}`] = value;
   }
-  return runCommand('git', { args: ['-C', folder, ...args], env });
+  return runCommand('git', { args: ['-C', folder, ...at.args], env });
+}
+
+/** Runs git in a ship's folder with the folder's own config naming no program, and only a local repository to fetch from. */
+export async function gitInFolder(folder: string, args: readonly string[]): Promise<CommandResult> {
+  return gitIn(folder, { args, located: {} });
+}
+
+/**
+ * Runs git in a ship's clone as in its folder, through the clone's own `.git`
+ * folder and with the clone as its work tree, whatever the clone says: a
+ * `.git` that is a file or a link, or that names another folder's in its
+ * commondir, would point git at another folder, so such a clone is not read.
+ */
+export async function gitInClone(clone: string, args: readonly string[]): Promise<CommandResult> {
+  const gitFolder = join(clone, '.git');
+  const found = await lstat(gitFolder).catch(() => undefined);
+  if (found?.isDirectory() !== true) {
+    throw new Error(`Will not read ${clone}: its .git is no folder of its own`);
+  }
+  if ((await lstat(join(gitFolder, 'commondir')).catch(() => undefined)) !== undefined) {
+    throw new Error(`Will not read ${clone}: its .git names another git folder in its commondir`);
+  }
+  return gitIn(clone, { args, located: { GIT_DIR: gitFolder, GIT_WORK_TREE: clone } });
 }

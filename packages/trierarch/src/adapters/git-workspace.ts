@@ -31,8 +31,14 @@ function messageOf(stderr: string): string {
     .join('; ');
 }
 
-export function createGitWorkspace(options: { configuration: TrierarchConfiguration; root: string; clones?: TrustedClones }): WorkspacePort {
-  const { configuration, root, clones } = options;
+export function createGitWorkspace(options: {
+  configuration: TrierarchConfiguration;
+  root: string;
+  clones?: TrustedClones;
+  /** Git in a ship's folder; a worktree's, unless the workspaces are clones. */
+  inFolder?: (folder: string, args: readonly string[]) => Promise<CommandResult>;
+}): WorkspacePort {
+  const { configuration, root, clones, inFolder = gitInFolder } = options;
   const said = (args: readonly string[], result: CommandResult): string => {
     if (result.status !== 0) {
       // Git's message follows the subcommand at once: a reason is cut at a length, and the command's paths would use it up.
@@ -44,7 +50,7 @@ export function createGitWorkspace(options: { configuration: TrierarchConfigurat
   };
   const git = async (args: readonly string[]): Promise<string> => said(args, await runCommand('git', { args }));
   /** Git in a ship's folder, which ignores the folder's own config where it names a program. */
-  const gitIn = async (folder: string, args: readonly string[]): Promise<string> => said(args, await gitInFolder(folder, args));
+  const gitIn = async (folder: string, args: readonly string[]): Promise<string> => said(args, await inFolder(folder, args));
   /** The remote branch for the ref when the remote has one, else the ref as it is. */
   const resolve = async (repository: string, ref: string): Promise<string> => {
     const remote = await runCommand('git', { args: ['-C', repository, 'rev-parse', '--verify', '--quiet', `refs/remotes/${REMOTE}/${ref}`] });
