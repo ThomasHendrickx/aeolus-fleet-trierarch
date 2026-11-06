@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"slices"
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
@@ -107,21 +107,23 @@ func anotherRepository(t *testing.T) string {
 	return other
 }
 
+// A clone the host does not read is unsaved, as what it holds is not known.
 func TestTheHostReadsAClonesOnlyThroughItsOwnGitFolder(t *testing.T) {
 	pointings := []struct {
-		name  string
-		point func(t *testing.T, clone string, other string)
+		name   string
+		reason string
+		point  func(t *testing.T, clone string, other string)
 	}{
-		{"core.worktree in its config", func(t *testing.T, clone string, other string) {
+		{"core.worktree in its config", "its config sets core.worktree, which points git at another folder", func(t *testing.T, clone string, other string) {
 			gitIn(t, "-C", clone, "config", "core.worktree", other)
 		}},
-		{"a .git file naming another git folder", func(t *testing.T, clone string, other string) {
+		{"a .git file naming another git folder", "its .git is no folder of its own", func(t *testing.T, clone string, other string) {
 			if err := os.Rename(filepath.Join(clone, ".git"), filepath.Join(t.TempDir(), "moved.git")); err != nil {
 				t.Fatal(err)
 			}
 			writeIn(t, clone, ".git", "gitdir: "+filepath.Join(other, ".git")+"\n")
 		}},
-		{"a .git link to another git folder", func(t *testing.T, clone string, other string) {
+		{"a .git link to another git folder", "its .git is no folder of its own", func(t *testing.T, clone string, other string) {
 			if err := os.Rename(filepath.Join(clone, ".git"), filepath.Join(t.TempDir(), "moved.git")); err != nil {
 				t.Fatal(err)
 			}
@@ -129,7 +131,7 @@ func TestTheHostReadsAClonesOnlyThroughItsOwnGitFolder(t *testing.T) {
 				t.Fatal(err)
 			}
 		}},
-		{"a commondir in its .git naming another git folder", func(t *testing.T, clone string, other string) {
+		{"a commondir in its .git naming another git folder", "its .git names another git folder in its commondir", func(t *testing.T, clone string, other string) {
 			writeIn(t, filepath.Join(clone, ".git"), "commondir", filepath.Join(other, ".git")+"\n")
 		}},
 	}
@@ -142,8 +144,8 @@ func TestTheHostReadsAClonesOnlyThroughItsOwnGitFolder(t *testing.T) {
 
 			unsaved, err := places.Unsaved(folder)
 
-			if err == nil || !strings.Contains(err.Error(), "will not read "+folder) {
-				t.Errorf("Unsaved(%s) with %s = %q, %v, want it refused", folder, pointing.name, unsaved, err)
+			if want := []string{"refused, " + pointing.reason}; err != nil || !slices.Equal(unsaved, want) {
+				t.Errorf("Unsaved(%s) with %s = %q, %v, want %q", folder, pointing.name, unsaved, err, want)
 			}
 		})
 	}

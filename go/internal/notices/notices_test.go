@@ -72,6 +72,13 @@ func TestDiscardedCountsEachKindInOrderAndNamesFiveLines(t *testing.T) {
 	}
 }
 
+func TestDiscardedNamesAWorktreeTheHostWouldNotReadWithWhy(t *testing.T) {
+	got := Discarded(scout, "aeolus-fleet", []string{"refused, its .git is no folder of its own"})
+	if !strings.Contains(got, "- Discarded: 1 refused\n") || !strings.Contains(got, "- refused `its .git is no folder of its own`") {
+		t.Fatalf("got %q", got)
+	}
+}
+
 func TestDiscardedCountsOneCommitInTheSingular(t *testing.T) {
 	got := Discarded(scout, "aeolus-fleet", []string{"commit abc one"})
 	if !strings.Contains(got, "- Discarded: 1 commit\n") || !strings.Contains(got, "- commit `abc one`") {

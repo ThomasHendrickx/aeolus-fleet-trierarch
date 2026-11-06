@@ -262,6 +262,8 @@ type aWorkspace struct {
 	removed []string
 	// failRemove makes a removal fail, as a worktree that cannot be removed does.
 	failRemove bool
+	// failUnsaved makes reading what a worktree holds fail, as git failing does.
+	failUnsaved bool
 	// notMade are the worktrees under the root the trierarch did not make, or git no longer knows.
 	notMade map[string]bool
 }
@@ -309,7 +311,12 @@ func (w *aWorkspace) Prepare(entry reconciler.Entry, shipName string) (string, e
 	w.made[folder] = true
 	return folder, nil
 }
-func (w *aWorkspace) Unsaved(folder string) ([]string, error) { return w.unsaved[folder], nil }
+func (w *aWorkspace) Unsaved(folder string) ([]string, error) {
+	if w.failUnsaved {
+		return nil, errors.New("git status failed in " + folder)
+	}
+	return w.unsaved[folder], nil
+}
 func (w *aWorkspace) Remove(entry reconciler.Entry) error {
 	if w.failRemove {
 		return errors.New("cannot remove " + entry.Folder)
@@ -1366,6 +1373,23 @@ func TestAReleaseThatCannotTellArgoLeavesTheWorktreeAndTellsAgainOnTheNextPass(t
 	pass.run(t)
 
 	if len(pass.workspace.removed) != 1 || !slices.Contains(pass.fleet.calls, "confirm "+scout) || len(pass.fleet.told) != 2 || pass.fleet.told[0].key != pass.fleet.told[1].key {
+		t.Fatalf("removed %q, calls %q, told %+v", pass.workspace.removed, pass.fleet.calls, pass.fleet.told)
+	}
+}
+
+func TestAReleaseWhoseWorktreeCannotBeReadLeavesItAndTriesAgainOnTheNextPass(t *testing.T) {
+	pass := aRunPass(t)
+	pass.workspace.failUnsaved = true
+
+	pass.released(t, "?? notes.md")
+
+	if len(pass.workspace.removed) != 0 || slices.Contains(pass.fleet.calls, "confirm "+scout) {
+		t.Fatalf("removed %q, calls %q", pass.workspace.removed, pass.fleet.calls)
+	}
+	pass.workspace.failUnsaved = false
+	pass.run(t)
+
+	if len(pass.workspace.removed) != 1 || !slices.Contains(pass.fleet.calls, "confirm "+scout) || len(pass.fleet.told) != 1 {
 		t.Fatalf("removed %q, calls %q, told %+v", pass.workspace.removed, pass.fleet.calls, pass.fleet.told)
 	}
 }
