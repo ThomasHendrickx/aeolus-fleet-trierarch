@@ -4,7 +4,8 @@ import { join, relative, sep } from 'node:path';
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { ObservedWorktree, WorkspacePort } from '../core/ports.js';
-import { runCommand } from './run-command.js';
+import { gitInFolder } from './git-in-folder.js';
+import { type CommandResult, runCommand } from './run-command.js';
 import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
 
 /**
@@ -32,8 +33,7 @@ function messageOf(stderr: string): string {
 
 export function createGitWorkspace(options: { configuration: TrierarchConfiguration; root: string; clones?: TrustedClones }): WorkspacePort {
   const { configuration, root, clones } = options;
-  const git = async (args: readonly string[]): Promise<string> => {
-    const result = await runCommand('git', { args });
+  const said = (args: readonly string[], result: CommandResult): string => {
     if (result.status !== 0) {
       // Git's message follows the subcommand at once: a reason is cut at a length, and the command's paths would use it up.
       const [subcommand, ...rest] = args[0] === '-C' ? args.slice(2) : args;
@@ -42,6 +42,9 @@ export function createGitWorkspace(options: { configuration: TrierarchConfigurat
     }
     return result.stdout;
   };
+  const git = async (args: readonly string[]): Promise<string> => said(args, await runCommand('git', { args }));
+  /** Git in a ship's folder, which ignores the folder's own config where it names a program. */
+  const gitIn = async (folder: string, args: readonly string[]): Promise<string> => said(args, await gitInFolder(folder, args));
   /** The remote branch for the ref when the remote has one, else the ref as it is. */
   const resolve = async (repository: string, ref: string): Promise<string> => {
     const remote = await runCommand('git', { args: ['-C', repository, 'rev-parse', '--verify', '--quiet', `refs/remotes/${REMOTE}/${ref}`] });
@@ -90,10 +93,10 @@ export function createGitWorkspace(options: { configuration: TrierarchConfigurat
       }
       return { folder };
     },
-    isClean: async (folder) => (await git(['-C', folder, 'status', '--porcelain'])).trim() === '',
+    isClean: async (folder) => (await gitIn(folder, ['status', '--porcelain'])).trim() === '',
     unsaved: async (folder) => {
-      const changes = await git(['-C', folder, 'status', '--porcelain']);
-      const commits = await git(['-C', folder, 'log', '--format=commit %h %s', 'HEAD', '--not', '--branches', '--tags', '--remotes']);
+      const changes = await gitIn(folder, ['status', '--porcelain']);
+      const commits = await gitIn(folder, ['log', '--format=commit %h %s', 'HEAD', '--not', '--branches', '--tags', '--remotes']);
       return [...changes.split('\n'), ...commits.split('\n')].filter((line) => line !== '');
     },
     isMade: async (folder) => {

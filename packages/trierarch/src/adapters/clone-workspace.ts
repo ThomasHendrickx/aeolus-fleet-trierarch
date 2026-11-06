@@ -4,6 +4,7 @@ import { join, relative, sep } from 'node:path';
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { WorkspacePort } from '../core/ports.js';
+import { gitInFolder } from './git-in-folder.js';
 import { createGitWorkspace } from './git-workspace.js';
 import { runCommand } from './run-command.js';
 import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
@@ -43,6 +44,13 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
       throw new Error(`git ${args.join(' ')} failed: ${result.stderr.trim()}`);
     }
     return result.stdout;
+  };
+  /** Git in the ship's clone, which ignores the clone's own config where it names a program. */
+  const gitIn = async (clone: string, args: readonly string[]): Promise<void> => {
+    const result = await gitInFolder(clone, args);
+    if (result.status !== 0) {
+      throw new Error(`git ${args.join(' ')} failed: ${result.stderr.trim()}`);
+    }
   };
   /** The commit of the remote branch for the ref when the remote has one, else of the ref as it is, or of HEAD with none. */
   const resolve = async (repository: string, ref: string | undefined): Promise<string> => {
@@ -86,13 +94,13 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
           // Marked before anything else, so a stop mid-crew leaves an orphan the trierarch knows as its own.
           await markMade(folder);
           // The clone's origin is the repository's checkout, whose branches are no remote's: dropped with it.
-          await git(['-C', folder, 'remote', 'remove', REMOTE]);
+          await gitIn(folder, ['remote', 'remove', REMOTE]);
           const remote = await runCommand('git', { args: ['-C', repository, 'remote', 'get-url', REMOTE] });
           if (remote.status === 0) {
-            await git(['-C', folder, 'remote', 'add', REMOTE, remote.stdout.trim()]);
-            await git(['-C', folder, 'fetch', '--quiet', '--no-tags', repository, `+refs/remotes/${REMOTE}/*:refs/remotes/${REMOTE}/*`]);
+            await gitIn(folder, ['remote', 'add', REMOTE, remote.stdout.trim()]);
+            await gitIn(folder, ['fetch', '--quiet', '--no-tags', repository, `+refs/remotes/${REMOTE}/*:refs/remotes/${REMOTE}/*`]);
           }
-          await git(['-C', folder, 'checkout', '--quiet', '--detach', commit]);
+          await gitIn(folder, ['checkout', '--quiet', '--detach', commit]);
         } catch (error) {
           await rm(folder, { recursive: true, force: true });
           throw error;
