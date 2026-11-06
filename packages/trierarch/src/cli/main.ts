@@ -345,6 +345,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
         release === undefined
           ? undefined
           : {
+              latest: () => release.latest(),
               release: (to) => release.binaryOf(to),
               file: (to) => createBinaryFile({ path: join(homeDirectory, '.local', 'bin', 'aeolus-trierarch'), version: to }),
               // A trierarch's version takes no configuration.

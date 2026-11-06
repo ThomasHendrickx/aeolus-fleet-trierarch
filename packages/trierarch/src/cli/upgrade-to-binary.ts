@@ -26,6 +26,8 @@ export type { BinaryFile } from '../adapters/binary-file.js';
 
 /** The GitHub Release route of upgrade. */
 export interface BinaryRoute {
+  /** The version of the latest release; none when there is none, or GitHub does not answer it. */
+  latest(): Promise<string | undefined>;
   /** The release's binary of the version for this system and chip, once its checksum and attestation hold; none when the release carries none. Refuses with a TrierarchFileError otherwise. */
   release(version: string): Promise<Buffer | undefined>;
   /** Where the binary of the version goes. */
