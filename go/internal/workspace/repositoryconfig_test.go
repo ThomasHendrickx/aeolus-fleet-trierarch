@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 )
@@ -299,5 +300,22 @@ func TestTheHostsGitCallsInAShipsFolderFetchNoObjectTheFolderLacks(t *testing.T)
 
 	if err == nil {
 		t.Errorf("gitInFolder(log %s) = %q, want a failure, the commit missing", missing, out)
+	}
+}
+
+// A clone the host does not read is unsaved, as what it holds is not known.
+func TestTheHostReadsAsRefusedACloneWhoseGitCallDoesNotEndWithinItsTimeLimit(t *testing.T) {
+	limit := timeLimit
+	timeLimit = 2 * time.Second
+	t.Cleanup(func() { timeLimit = limit })
+	repository, root := aRepository(t)
+	places := clonePlaces(repository, root, t.TempDir())
+	folder := prepared(t, places, scoutInAeolusFleet, "scout")
+	aPipe(t, filepath.Join(folder, ".gitignore"))
+
+	unsaved, err := places.Unsaved(folder)
+
+	if want := []string{"refused, git status did not end within 2 seconds"}; err != nil || !slices.Equal(unsaved, want) {
+		t.Errorf("Unsaved(%s) with a named pipe as its .gitignore = %q, %v, want %q", folder, unsaved, err, want)
 	}
 }
