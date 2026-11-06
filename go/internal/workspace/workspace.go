@@ -239,12 +239,17 @@ func (p Places) prepare(entry reconciler.Entry, shipName string) (string, error)
 	return Prepare(at)
 }
 
-// Unsaved is what the ship's worktree, or its clone, holds that no remote, branch or tag has.
+// Unsaved is what the ship's worktree, or its clone, holds that no remote, branch or tag has. What a clone holds is not known when
+// any read of it fails: told with why, as one the host does not read, so its release tells argo and removes it.
 func (p Places) Unsaved(folder string) ([]string, error) {
-	if p.IsClone {
-		return unsavedIn(folder, gitInClone)
+	if !p.IsClone {
+		return Unsaved(folder)
 	}
-	return Unsaved(folder)
+	unsaved, err := unsavedIn(folder, gitInClone)
+	if err != nil {
+		return []string{refusedPrefix + err.Error()}, nil
+	}
+	return unsaved, nil
 }
 
 // Remove removes the ship's worktree, or its clone; a configured folder is never removed.
