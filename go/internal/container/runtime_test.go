@@ -45,6 +45,7 @@ func aContainerRuntime(t *testing.T) (Runtime, *aBinary) {
 		Binary:     "podman",
 		Image:      "ghcr.io/thomashendrickx/aeolus-session:1.2.3",
 		ModelToken: token,
+		ProxyURL:   func() (string, bool) { return "http://127.0.0.1:41000", true },
 		Homes:      filepath.Join(home, "homes"),
 		Sockets:    filepath.Join(home, "sockets"),
 		Memory:     "4g",
@@ -127,7 +128,7 @@ func TestTheShipsHomeAndSocketFolderAreMadeForTheirOwnerAlone(t *testing.T) {
 	}
 }
 
-func TestASessionOnAnAPIKeyGetsNoModelTokenItsProxyTokenByNameAndTheHostsLoopback(t *testing.T) {
+func TestASessionOnAnAPIKeyGetsNoModelTokenAndOnlyItsProxyPort(t *testing.T) {
 	r, _ := aContainerRuntime(t)
 	files := filesOf(t, r)
 	session := aSession(t.TempDir())
@@ -144,7 +145,7 @@ func TestASessionOnAnAPIKeyGetsNoModelTokenItsProxyTokenByNameAndTheHostsLoopbac
 	}
 }
 
-func TestASessionOfMCPServersReachesTheHostsLoopbackAndKeepsTheModelToken(t *testing.T) {
+func TestASessionOfMCPServersReachesOnlyItsProxyPortAndKeepsTheModelToken(t *testing.T) {
 	r, _ := aContainerRuntime(t)
 	files := filesOf(t, r)
 	session := aSession(t.TempDir())
@@ -157,7 +158,7 @@ func TestASessionOfMCPServersReachesTheHostsLoopbackAndKeepsTheModelToken(t *tes
 	}
 	at := slices.Index(held.Command, "--network")
 	if at < 0 || held.Command[at+1] != "pasta:--no-map-gw,-t,none,-u,none,-T,41000,-U,none" || strings.Contains(strings.Join(held.Command, " "), "mcp-token") {
-		t.Fatalf("held as %q, want the host's loopback reached and no token on the command line", held.Command)
+		t.Fatalf("held as %q, want only the proxy port forwarded and no token on the command line", held.Command)
 	}
 }
 
@@ -171,7 +172,7 @@ func TestAnEnvironmentValueOverMoreThanOneLineIsRefused(t *testing.T) {
 	}
 }
 
-func TestAProxyURLIsReachedAtTheHostsAddressInTheContainersNetwork(t *testing.T) {
+func TestAProxyURLIsReachedOnTheContainersLoopback(t *testing.T) {
 	if got := ProxyURL("http://127.0.0.1:41234"); got != "http://127.0.0.1:41234" {
 		t.Fatalf("ProxyURL = %q", got)
 	}
