@@ -15,8 +15,10 @@ import (
 // A ship's folder is its session's to write, `.git` and its config included, and with sessions in containers a session runs
 // apart from the host (docs/trierarch.md, "Session runtime"). So the host's git calls in a ship's folder ignore the folder's own
 // config where it names a program for git to run: git runs no hook, in a folder or in the config, no fsmonitor, no filter, diff or merge driver, and no
-// command for a transport, pager, editor or credential the folder's config names, and takes no optional lock. They go through
-// inFolder, so no call can leave one of these in force. The machine's own config (global and system) applies as before. Git is
+// command for a transport, pager, editor or credential the folder's config names, and takes no optional lock. No filter runs, the
+// machine's own included, as the folder's attributes may name it. They go through inFolder, so no call can leave one of these in
+// force. Otherwise the machine's own config (global and system) applies as before. A folder whose config names a program for
+// git-lfs, which reads that config itself, is not read. Git is
 // pointed at no folder but the ship's own: a folder whose config sets core.worktree is not read, and a clone is read only
 // through its own `.git` folder, with its own objects alone (inClone). A folder that is not read is refused with why (RefusedError), so what it holds is not
 // known.
@@ -40,7 +42,6 @@ var namesAProgram = map[string]map[string]bool{
 	"core":        {"sshcommand": true, "pager": true, "editor": true, "askpass": true, "gitproxy": true, "alternaterefscommand": true},
 	"sequence":    {"editor": true},
 	"diff":        {"external": true, "command": true, "textconv": true},
-	"filter":      {"clean": true, "smudge": true, "process": true, "required": true},
 	"merge":       {"driver": true},
 	"gpg":         {"program": true},
 	"credential":  {"helper": true},
@@ -60,14 +61,29 @@ func isTheFolders(scope string) bool {
 	return scope == "local" || scope == "worktree"
 }
 
-// neutralOf is the value that turns the variable off: a filter that is not required, no pager, else no program.
+// neutralOf is the value that turns the variable off: no pager, else no program.
 func neutralOf(name string) override {
-	section, _, _ := strings.Cut(name, ".")
-	if section == "pager" || (section == "filter" && strings.HasSuffix(name, ".required")) {
+	if section, _, _ := strings.Cut(name, "."); section == "pager" {
 		return override{name, "false"}
 	}
 	return override{name, ""}
 }
+
+// filterOffOf is the filter driver a variable of a filter (`filter.<driver>.clean`) belongs to, running nothing and not required;
+// none for another variable.
+func filterOffOf(name string) []override {
+	first := strings.Index(name, ".")
+	last := strings.LastIndex(name, ".")
+	if first < 0 || name[:first] != "filter" || last == first {
+		return nil
+	}
+	driver := name[:last]
+	return []override{{driver + ".process", ""}, {driver + ".clean", ""}, {driver + ".smudge", ""}, {driver + ".required", "false"}}
+}
+
+// lfsPrograms are the sections of git-lfs's own config that name a program it runs, which git-lfs reads from the folder's config
+// itself.
+var lfsPrograms = []string{"lfs.extension.", "lfs.customtransfer."}
 
 // hookOffOf is the hook a variable of a hook in the config (`hook.<name>.command`) belongs to, turned off and bound to no event; none
 // for another variable.
@@ -106,11 +122,20 @@ func overridesIn(folder string, located []string) ([]override, error) {
 	fields := bytes.Split(bytes.TrimSuffix(listed, []byte{0}), []byte{0})
 	for i := 0; i+1 < len(fields); i += 2 {
 		scope, name := string(fields[i]), string(fields[i+1])
+		// Of every scope: the folder's attributes may name a filter the machine's own config defines, as git-lfs's.
+		for _, off := range filterOffOf(name) {
+			if !slices.Contains(overrides, off) {
+				overrides = append(overrides, off)
+			}
+		}
 		if !isTheFolders(scope) {
 			continue
 		}
 		if name == "core.worktree" {
 			return nil, &RefusedError{folder, "its config sets core.worktree, which points git at another folder"}
+		}
+		if slices.ContainsFunc(lfsPrograms, func(section string) bool { return strings.HasPrefix(name, section) }) {
+			return nil, &RefusedError{folder, "its config names a program for git-lfs: " + name}
 		}
 		if isProgram(name) {
 			overrides = append(overrides, neutralOf(name))
