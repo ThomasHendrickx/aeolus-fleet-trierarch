@@ -139,7 +139,7 @@ func TestASessionOnAnAPIKeyGetsNoModelTokenItsProxyTokenByNameAndTheHostsLoopbac
 		t.Fatalf("env file %q, %v", readFile(t, filepath.Join(files.Folder, "session.env")), err)
 	}
 	at := slices.Index(held.Command, "HOME=/home/ubuntu")
-	if got := held.Command[at+1 : at+5]; !slices.Equal(got, []string{"--env", "ANTHROPIC_AUTH_TOKEN", "--network", "slirp4netns:allow_host_loopback=true"}) || strings.Contains(strings.Join(held.Command, " "), "proxy-token") {
+	if got := held.Command[at+1 : at+5]; !slices.Equal(got, []string{"--env", "ANTHROPIC_AUTH_TOKEN", "--network", "pasta:--no-map-gw,-t,none,-u,none,-T,41000,-U,none"}) || strings.Contains(strings.Join(held.Command, " "), "proxy-token") {
 		t.Fatalf("held as %q", held.Command)
 	}
 }
@@ -156,7 +156,7 @@ func TestASessionOfMCPServersReachesTheHostsLoopbackAndKeepsTheModelToken(t *tes
 		t.Fatalf("env file %q, %v", readFile(t, filepath.Join(files.Folder, "session.env")), err)
 	}
 	at := slices.Index(held.Command, "--network")
-	if at < 0 || held.Command[at+1] != "slirp4netns:allow_host_loopback=true" || strings.Contains(strings.Join(held.Command, " "), "mcp-token") {
+	if at < 0 || held.Command[at+1] != "pasta:--no-map-gw,-t,none,-u,none,-T,41000,-U,none" || strings.Contains(strings.Join(held.Command, " "), "mcp-token") {
 		t.Fatalf("held as %q, want the host's loopback reached and no token on the command line", held.Command)
 	}
 }
@@ -172,7 +172,7 @@ func TestAnEnvironmentValueOverMoreThanOneLineIsRefused(t *testing.T) {
 }
 
 func TestAProxyURLIsReachedAtTheHostsAddressInTheContainersNetwork(t *testing.T) {
-	if got := ProxyURL("http://127.0.0.1:41234"); got != "http://10.0.2.2:41234" {
+	if got := ProxyURL("http://127.0.0.1:41234"); got != "http://127.0.0.1:41234" {
 		t.Fatalf("ProxyURL = %q", got)
 	}
 }
