@@ -105,6 +105,16 @@ describe('the container runtime check', () => {
     expect(ran.stdout + ran.stderr).toContain(refusalOf('no-such-podman does not answer: install a rootless podman, or name the runtime binary in runtime.binary'));
   });
 
+  it("refuses a Podman without pasta, which gives a container the trierarch's proxy port and nothing else of the host", async () => {
+    configure((configuration) => ({ ...configuration, runtime: RUNTIME }));
+    writeModelToken();
+    machine.toggle('podman-no-pasta', true);
+
+    const ran = await machine.trierarch(['config', 'check']);
+
+    expect(ran.stdout + ran.stderr).toContain(refusalOf("podman has no pasta: install passt, which gives a container the trierarch's proxy port and nothing else of the host"));
+  });
+
   it('refuses --remote-control in a harness on the host too: a session the trierarch runs has no terminal', async () => {
     configure((configuration) => ({ ...configuration, harnesses: { ...configuration.harnesses, 'claude-code': { flags: ['--remote-control'], options: {} } } }));
 
