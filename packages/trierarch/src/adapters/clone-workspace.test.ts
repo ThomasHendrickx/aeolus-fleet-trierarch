@@ -499,3 +499,15 @@ describe("the host's git calls in a session's clone, with a file in its work tre
     expect({ unsaved: await limited.unsaved(made), isClean: await limited.isClean(made) }).toEqual({ unsaved: ['refused, git status did not end within 2 seconds'], isClean: false });
   });
 });
+
+describe("the host's git calls in a session's clone, with a config git cannot read", () => {
+  it('reads the clone as unsaved and not clean, refused, saying what git said', async () => {
+    const { folder: made } = await workspace().prepare(scout);
+    writeFileSync(join(made, '.git', 'config'), '[core]\n\trepositoryformatversion = 0\n=garbage\n');
+
+    expect({ unsaved: await workspace().unsaved(made), isClean: await workspace().isClean(made) }).toEqual({
+      unsaved: [`refused, git config failed: fatal: bad config line 3 in file ${join(made, '.git', 'config')}`],
+      isClean: false,
+    });
+  });
+});
