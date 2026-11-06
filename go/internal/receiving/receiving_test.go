@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
 )
 
@@ -286,5 +287,93 @@ func TestAListThatCannotBeKeptIsNotAcknowledgedSoItComesAgain(t *testing.T) {
 
 	if len(ran.ship.acked) != 0 || !slices.Contains(ran.logged, "The loop failed and goes on: Claude Code's file cannot be written") {
 		t.Fatalf("acked %v, logged %q", ran.ship.acked, ran.logged)
+	}
+}
+
+// aServerKeeper keeps the MCP servers it is given, or fails to.
+type aServerKeeper struct {
+	kept []mcpservers.Server
+	err  error
+	took int
+}
+
+func (k *aServerKeeper) Accept(list []mcpservers.Server) error {
+	k.took++
+	if k.err != nil {
+		return k.err
+	}
+	k.kept = list
+	return nil
+}
+
+func runKeepingServers(keeper *aServerKeeper, pluginShip string, answers ...answer) *aRun {
+	ctx, cancel := context.WithCancel(context.Background())
+	ran := &aRun{ship: &aShip{cancel: cancel, answers: answers}}
+	Loop{
+		Ship:         ran.ship,
+		Log:          func(line string) { ran.logged = append(ran.logged, line) },
+		Interval:     5 * time.Second,
+		KeyWaitMax:   300 * time.Second,
+		Pause:        func(_ context.Context, wait time.Duration) { ran.waits = append(ran.waits, wait) },
+		PluginShipID: pluginShip,
+		McpServers:   keeper,
+	}.Run(ctx)
+	return ran
+}
+
+func aServerList(from string, id string, payload string) Delivery {
+	return Delivery{DeliveryID: id, SenderShipID: from, ContentType: mcpservers.ListContentType, Payload: payload}
+}
+
+const graph = `{"servers":[{"name":"company-graph","url":"https://graph.example.test/mcp","transport":"streamable-http","tools":["read_neo4j_cypher"]}]}`
+
+func TestTheServerListFromThePluginsShipIsKeptAndAcknowledged(t *testing.T) {
+	keeper := &aServerKeeper{}
+
+	ran := runKeepingServers(keeper, plugin, answer{deliveries: []Delivery{aServerList(plugin, "d1", graph)}})
+
+	if len(keeper.kept) != 1 || keeper.kept[0].Name != "company-graph" || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 0 {
+		t.Fatalf("kept %v, acked %v, logged %q", keeper.kept, ran.ship.acked, ran.logged)
+	}
+}
+
+func TestAServerListFromAnotherShipIsAcknowledgedAndNotTaken(t *testing.T) {
+	keeper := &aServerKeeper{}
+
+	ran := runKeepingServers(keeper, plugin, answer{deliveries: []Delivery{aServerList(argo, "d1", graph)}})
+
+	want := "Not handled: MCP servers from " + argo + ". The trierarch takes them only from the trierarch plugin's ship " + plugin + "."
+	if keeper.took != 0 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || ran.logged[0] != want {
+		t.Fatalf("took %d, acked %v, logged %q", keeper.took, ran.ship.acked, ran.logged)
+	}
+}
+
+func TestAServerListOnAMachineThatDoesNotKnowThePluginsShipIsAcknowledgedAndNotTaken(t *testing.T) {
+	keeper := &aServerKeeper{}
+
+	ran := runKeepingServers(keeper, "", answer{deliveries: []Delivery{aServerList(plugin, "d1", graph)}})
+
+	if keeper.took != 0 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || !strings.HasPrefix(ran.logged[0], "Not handled: MCP servers from "+plugin+". This machine does not know") {
+		t.Fatalf("took %d, acked %v, logged %q", keeper.took, ran.ship.acked, ran.logged)
+	}
+}
+
+func TestAServerListThatDoesNotFitIsAcknowledgedAndTheHeldListStays(t *testing.T) {
+	keeper := &aServerKeeper{kept: []mcpservers.Server{{Name: "company-graph"}}}
+
+	ran := runKeepingServers(keeper, plugin, answer{deliveries: []Delivery{aServerList(plugin, "d1", `{"servers":[{"name":"g","url":"https://t@g.example.test/mcp","transport":"streamable-http","tools":["t"]}]}`)}})
+
+	if keeper.took != 0 || len(keeper.kept) != 1 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || !strings.HasSuffix(ran.logged[0], "The trierarch keeps the list it holds.") {
+		t.Fatalf("took %d, kept %v, acked %v, logged %q", keeper.took, keeper.kept, ran.ship.acked, ran.logged)
+	}
+}
+
+func TestAServerListThatCannotBeKeptIsNotAcknowledgedSoItComesAgain(t *testing.T) {
+	keeper := &aServerKeeper{err: errors.New("the file cannot be written")}
+
+	ran := runKeepingServers(keeper, plugin, answer{deliveries: []Delivery{aServerList(plugin, "d1", graph)}})
+
+	if len(ran.ship.acked) != 0 {
+		t.Fatalf("acked %v, want none", ran.ship.acked)
 	}
 }
