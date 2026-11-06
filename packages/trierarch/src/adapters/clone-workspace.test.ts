@@ -291,6 +291,19 @@ describe("the host's git calls in a session's clone, with a program named in the
         await git(['-C', clone, 'remote', 'set-url', 'origin', 'ssh://git@example.com/aeolus-fleet.git']);
       },
     },
+    {
+      name: "a filter driver in a submodule's own config",
+      plant: async (clone, program) => {
+        const module = join(clone, 'module');
+        await git(['init', '-q', '-b', 'main', module]);
+        await commit(module, 'README.md');
+        await git(['-C', clone, 'add', 'module']);
+        writeFileSync(join(clone, '.gitmodules'), '[submodule "module"]\n\tpath = module\n\turl = ./module\n');
+        await git(['-C', module, 'config', 'filter.planted.clean', program]);
+        writeFileSync(join(module, '.gitattributes'), '* filter=planted\n');
+        writeFileSync(join(module, 'README.md'), 'README.MD\n');
+      },
+    },
   ];
 
   it.each(plants)('runs nothing $name names', async ({ plant }) => {
