@@ -4,7 +4,7 @@ import { join, relative, sep } from 'node:path';
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { ObservedWorktree, WorkspacePort } from '../core/ports.js';
-import { gitInFolder, RefusedRead } from './git-in-folder.js';
+import { gitInFolder, messageOf, RefusedRead } from './git-in-folder.js';
 import { type CommandResult, runCommand } from './run-command.js';
 import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
 
@@ -24,15 +24,6 @@ const REMOTE = 'origin';
 
 /** What a folder the host does not read holds, as unsaved: not known, so it is told with why, never taken for clean. */
 const REFUSED_PREFIX = 'refused, ';
-
-/** What git said, on one line (a reason is one line) and without its hints, which are advice, not the cause. */
-function messageOf(stderr: string): string {
-  return stderr
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '' && !line.startsWith('hint:'))
-    .join('; ');
-}
 
 export function createGitWorkspace(options: {
   configuration: TrierarchConfiguration;

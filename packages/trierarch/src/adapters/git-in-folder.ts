@@ -1,5 +1,5 @@
 import { lstat, readdir } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { type CommandResult, runCommand } from './run-command.js';
 
@@ -170,20 +170,77 @@ export async function gitInFolder(folder: string, args: readonly string[]): Prom
   return gitIn(folder, { args, located: { env: {}, isClone: false } });
 }
 
-/** The first link in the git folder, by its path in it: none is read through, as it would lead git out of it. */
-async function linkIn(gitFolder: string): Promise<string | undefined> {
+/** What git said, on one line (a reason is one line) and without its hints, which are advice, not the cause. */
+export function messageOf(stderr: string): string {
+  return stderr
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '' && !line.startsWith('hint:'))
+    .join('; ');
+}
+
+/** Why the first entry in the git folder that is neither a regular file nor a folder is not read, by its path in it: a link would lead git out of it, and git reading a special file, such as a named pipe, may never end. */
+async function irregularIn(gitFolder: string): Promise<string | undefined> {
   // Not followed: a recursive listing lists a link to a folder as a link.
-  const link = (await readdir(gitFolder, { recursive: true, withFileTypes: true })).find((each) => each.isSymbolicLink());
-  return link === undefined ? undefined : relative(gitFolder, join(link.parentPath, link.name));
+  const found = (await readdir(gitFolder, { recursive: true, withFileTypes: true })).find((each) => !each.isFile() && !each.isDirectory());
+  if (found === undefined) {
+    return undefined;
+  }
+  const path = relative(gitFolder, join(found.parentPath, found.name));
+  return found.isSymbolicLink() ? `its .git holds a link: ${path}` : `its .git holds a special file: ${path}`;
+}
+
+/** The variables of a config file that include another, as git lists them. */
+const INCLUDES = '^include(if\\..*)?\\.path$';
+
+/** Whether the path lies in the folder. */
+function isIn(folder: string, path: string): boolean {
+  const inFolder = relative(folder, path);
+  return !isAbsolute(inFolder) && inFolder !== '..' && !inFolder.startsWith(`..${sep}`);
+}
+
+/**
+ * The first file the git folder's config includes from outside it, as the
+ * config names it, or that a file it includes includes in turn: git would read
+ * it, and only what lies in the git folder is checked. A path from a home
+ * folder or git's own prefix is outside.
+ */
+async function includeOutside(gitFolder: string): Promise<string | undefined> {
+  const toRead = [join(gitFolder, 'config'), join(gitFolder, 'config.worktree')];
+  const read = new Set<string>();
+  for (let file = toRead.shift(); file !== undefined; file = toRead.shift()) {
+    if (read.has(file) || (await lstat(file).catch(() => undefined)) === undefined) {
+      continue;
+    }
+    read.add(file);
+    const listed = await runCommand('git', { args: ['config', '--file', file, '--null', '--get-regexp', INCLUDES], env: NO_LAZY_FETCH });
+    // None found answers 1.
+    if (listed.status === 1) {
+      continue;
+    }
+    if (listed.status !== 0) {
+      throw new Error(`git config failed: ${messageOf(listed.stderr)}`);
+    }
+    for (const entry of listed.stdout.split('\0').filter((each) => each !== '')) {
+      const value = entry.slice(entry.indexOf('\n') + 1);
+      const path = resolve(dirname(file), value);
+      if (value.startsWith('~') || value.startsWith('%(') || !isIn(gitFolder, path)) {
+        return value;
+      }
+      toRead.push(path);
+    }
+  }
+  return undefined;
 }
 
 /**
  * Runs git in a ship's clone as in its folder, through the clone's own `.git`
  * folder and with the clone as its work tree, whatever the clone says: a
  * `.git` that is a file or a link, that names another folder's in its
- * commondir, that holds a link, or that names another repository's objects in
- * its alternates, would point git at another folder, so such a clone is not
- * read.
+ * commondir, that holds a link, that names another repository's objects in
+ * its alternates, or whose config includes a file from outside it, would point
+ * git at another folder, so such a clone is not read; nor one whose `.git`
+ * holds a special file, such as a named pipe, which git may wait on forever.
  */
 export async function gitInClone(clone: string, args: readonly string[]): Promise<CommandResult> {
   const gitFolder = join(clone, '.git');
@@ -194,12 +251,16 @@ export async function gitInClone(clone: string, args: readonly string[]): Promis
   if ((await lstat(join(gitFolder, 'commondir')).catch(() => undefined)) !== undefined) {
     throw new RefusedRead(clone, 'its .git names another git folder in its commondir');
   }
-  const link = await linkIn(gitFolder);
-  if (link !== undefined) {
-    throw new RefusedRead(clone, `its .git holds a link: ${link}`);
+  const irregular = await irregularIn(gitFolder);
+  if (irregular !== undefined) {
+    throw new RefusedRead(clone, irregular);
   }
   if ((await lstat(join(gitFolder, 'objects', 'info', 'alternates')).catch(() => undefined)) !== undefined) {
     throw new RefusedRead(clone, "its .git names another repository's objects in objects/info/alternates");
+  }
+  const include = await includeOutside(gitFolder);
+  if (include !== undefined) {
+    throw new RefusedRead(clone, `its config includes a file outside its .git: ${include}`);
   }
   return gitIn(clone, { args, located: { env: { GIT_DIR: gitFolder, GIT_WORK_TREE: clone }, isClone: true } });
 }
