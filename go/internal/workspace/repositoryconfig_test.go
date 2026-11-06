@@ -420,3 +420,27 @@ func TestTheHostsGitCallsInASessionsCloneCheckNoCommitsSignature(t *testing.T) {
 		t.Error("with log.showSignature set in the clone's config, the host's git calls checked a commit's signature")
 	}
 }
+
+func TestTheHostsReadsOfASessionsCloneReadNoFileTheClonesConfigNamesForGit(t *testing.T) {
+	for _, name := range []string{"core.excludesFile"} {
+		t.Run(name, func(t *testing.T) {
+			limit := timeLimit
+			timeLimit = 2 * time.Second
+			t.Cleanup(func() { timeLimit = limit })
+			repository, root := aRepository(t)
+			places := clonePlaces(repository, root, t.TempDir())
+			folder := prepared(t, places, scoutInAeolusFleet, "scout")
+			planted := filepath.Join(t.TempDir(), "planted")
+			aPipe(t, planted)
+			gitIn(t, "-C", folder, "config", name, planted)
+			// The same size as before, so git must read the file to tell whether it changed.
+			writeIn(t, folder, "README.md", "README.MD\n")
+
+			unsaved, err := places.Unsaved(folder)
+
+			if want := []string{" M README.md"}; err != nil || !slices.Equal(unsaved, want) {
+				t.Errorf("Unsaved(%s) with %s naming a named pipe = %q, %v, want %q", folder, name, unsaved, err, want)
+			}
+		})
+	}
+}
