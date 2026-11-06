@@ -671,6 +671,12 @@ async function clear(state: TrierarchState, at: CarryOut & { action: Extract<Act
  */
 async function clearOrphan(state: TrierarchState, at: { orphan: Orphan; isNew: boolean; deps: RunPassDeps }): Promise<TrierarchState> {
   const { orphan, isNew, deps } = at;
+  // A crew earlier in this pass may have set a folder that reconcile did not know yet.
+  if (Object.values(state.entries).some((entry) => entry.folder === orphan.path)) {
+    const next = { ...state, orphans: state.orphans.filter((each) => each.path !== orphan.path) };
+    await deps.state.save(next);
+    return next;
+  }
   // Checked first: nothing is stopped or removed in a folder the trierarch did not make, and it is no failure to leave one (it stays in the state, reported once).
   if (!(await deps.workspace.isMade(orphan.path))) {
     if (isNew) {
