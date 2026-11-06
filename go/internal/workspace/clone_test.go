@@ -315,12 +315,24 @@ func TestTheCloneOfAShipWhoseRepositoryLeftTheListIsRemoved(t *testing.T) {
 	}
 }
 
-func TestACloneIsNoWorktreeTheTrierarchMadeSoNoOrphanClearRemovesIt(t *testing.T) {
+func TestRecognizesACloneItMadeAfterRestartButRefusesAnUnmarkedClone(t *testing.T) {
 	repository, root := aRepository(t)
-	places := clonePlaces(repository, root, t.TempDir())
-	folder := prepared(t, places, scoutInAeolusFleet, "scout")
-
-	if places.IsMade(folder) {
-		t.Errorf("IsMade(%s) = true, want false: today's trierarch knows its worktrees by git worktree list alone", folder)
+	notes := t.TempDir()
+	folder := prepared(t, clonePlaces(repository, root, notes), scoutInAeolusFleet, "scout")
+	stray := filepath.Join(root, "aeolus-fleet", "stray")
+	gitIn(t, "clone", "-q", repository, stray)
+	places := clonePlaces(repository, root, notes)
+	for _, test := range []struct {
+		name   string
+		folder string
+		want   bool
+	}{
+		{"made clone", folder, true}, {"unmarked clone", stray, false}, {"outside root", repository, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := places.IsMade(test.folder); got != test.want {
+				t.Errorf("IsMade(%s) = %v, want %v", test.folder, got, test.want)
+			}
+		})
 	}
 }

@@ -1,5 +1,5 @@
-import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,7 +7,7 @@ import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { aCrewingMachine, listedEntryOf, REPOSITORY, sessionOf } from './support/crewing.js';
+import { aCrewingMachine, isRunning, listedEntryOf, REPOSITORY, sessionOf } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
 
@@ -385,7 +385,40 @@ exec '${realGit}' "$@"
     await expect.poll(() => existsSync(folder), { timeout: CREWED_WITHIN_MS }).toBe(false);
   });
 
-  it('that no ship works in is an orphan the trierarch says it will not clear, and stays', async () => {
+  for (const hasUnsavedWork of [false, true]) {
+    it(`stops what runs in an orphan clone after restart and ${hasUnsavedWork ? 'keeps unsaved work' : 'removes a clean clone'}`, async () => {
+      const folder = await aCrewedScout();
+      expect((await machine.trierarch(['stop'])).status).toBe(0);
+      const stray = join(machine.trierarchHome, 'worktrees', REPOSITORY, 'stray');
+      renameSync(folder, stray);
+      // The stand-in harness writes its observations in the workspace; these are not a ship's unsaved work.
+      writeFileSync(join(stray, '.git', 'info', 'exclude'), 'fake-*.jsonl\n');
+      if (hasUnsavedWork) {
+        writeFileSync(join(stray, 'unsaved.txt'), 'unsaved\n');
+      }
+      const child = spawn('sleep', ['600'], { cwd: stray, stdio: 'ignore' });
+      const pid = child.pid;
+      if (pid === undefined) {
+        throw new Error('sleep did not start');
+      }
+      try {
+        expect((await machine.trierarch(['restart'])).status).toBe(0);
+        await expect.poll(() => isRunning(pid), { timeout: SAID_WITHIN_MS }).toBe(false);
+        if (hasUnsavedWork) {
+          await expect.poll(() => machine.serviceLog(), { timeout: SAID_WITHIN_MS }).toContain(`Kept the orphan worktree ${stray}, which holds unsaved work: ?? unsaved.txt`);
+          expect(existsSync(stray)).toBe(true);
+        } else {
+          await expect.poll(() => existsSync(stray), { timeout: SAID_WITHIN_MS }).toBe(false);
+        }
+      } finally {
+        if (isRunning(pid)) {
+          process.kill(pid, 'SIGKILL');
+        }
+      }
+    });
+  }
+
+  it('that no ship works in and holds no marker of the trierarch is an orphan it says it will not clear, and stays', async () => {
     await aCrewedScout();
     const stray = join(machine.trierarchHome, 'worktrees', REPOSITORY, 'stray');
     execFileSync('git', ['clone', '-q', machine.repository, stray]);

@@ -176,6 +176,16 @@ describe('workspaces as per-ship clones', () => {
     expect(unsaved).toEqual([' M README.md', '?? draft.md', `commit ${done} done.md`]);
   });
 
+  it('recognizes a clone it made after restart, but refuses an unmarked clone', async () => {
+    const { folder: made } = await workspace().prepare(scout);
+    const stray = join(root, 'aeolus-fleet', 'stray');
+    await git(['clone', '-q', repository, stray]);
+
+    expect(await workspace().isMade(made)).toBe(true);
+    expect(await workspace().isMade(stray)).toBe(false);
+    expect(await workspace().isMade(repository)).toBe(false);
+  });
+
   it('removes a clone it made', async () => {
     const { folder: made } = await workspace().prepare(scout);
 

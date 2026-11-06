@@ -274,7 +274,8 @@ func (p Places) Worktrees() ([]reconciler.Worktree, error) {
 	return found, nil
 }
 
-// IsMade is whether the folder is a worktree the trierarch made: one `<root>/<repository>/<ship>` of a repository it has, which git knows. Anything else under its root is not its to clear.
+// IsMade is whether the folder is a workspace the trierarch made: one `<root>/<repository>/<ship>` of a repository it has, a worktree
+// git knows or a clone holding its marker. Anything else under its root is not its to clear.
 func (p Places) IsMade(folder string) bool {
 	relative, err := filepath.Rel(p.Root, folder)
 	if err != nil || len(strings.Split(relative, string(filepath.Separator))) != 2 {
@@ -283,6 +284,9 @@ func (p Places) IsMade(folder string) bool {
 	repository, ok := p.repositoryOf(folder)
 	if !ok {
 		return false
+	}
+	if p.IsClone {
+		return isMarkedMade(folder)
 	}
 	paths, err := listed(repository)
 	if err != nil {

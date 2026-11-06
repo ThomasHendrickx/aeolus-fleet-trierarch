@@ -20,6 +20,21 @@ import (
 // break it. Its origin is the repository's own remote, so the session pushes without the host, with the remote branches as the
 // repository last fetched them; a repository with no remote leaves the clone with none. What it holds unsaved is a worktree's.
 
+// A clone the trierarch made holds its marker in its `.git`, where git keeps no record of it: an orphan clone is cleared only with it.
+// These two are the marker's one place.
+const cloneMarker, cloneMarkerContent = "aeolus-trierarch-clone", "1\n"
+
+// markMade writes the marker in a clone the trierarch just made.
+func markMade(folder string) error {
+	return os.WriteFile(filepath.Join(folder, ".git", cloneMarker), []byte(cloneMarkerContent), 0o644)
+}
+
+// isMarkedMade is whether the clone holds the marker the trierarch writes in each clone it makes.
+func isMarkedMade(folder string) bool {
+	marker, err := os.ReadFile(filepath.Join(folder, ".git", cloneMarker))
+	return err == nil && string(marker) == cloneMarkerContent
+}
+
 // resolve is the commit of the remote branch for the ref when the remote has one, else of the ref as it is, or of HEAD with none.
 func resolve(repository string, ref string) (string, error) {
 	if ref == "" {
@@ -56,6 +71,10 @@ func PrepareClone(at Worktree) (prepared string, err error) {
 		}
 	}()
 	if _, err := git("clone", "--quiet", "--no-checkout", "--reference", at.Path, "--dissociate", at.Path, folder); err != nil {
+		return "", err
+	}
+	// Marked before anything else, so a stop mid-crew leaves an orphan the trierarch knows as its own.
+	if err := markMade(folder); err != nil {
 		return "", err
 	}
 	// The clone's origin is the repository's checkout, whose branches are no remote's: dropped with it.
