@@ -1,8 +1,10 @@
 package modelproxy
 
 import (
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +13,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 )
 
 // TestMain lets this test binary be the trierarch program the proxy is started as: `<binary> proxy ...`, of the version AEOLUS_TEST_PROXY_VERSION names.
@@ -32,7 +36,7 @@ func aRuntime(t *testing.T) Runtime {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime := Runtime{Folder: filepath.Join(home, "proxy"), Sessions: filepath.Join(home, "sessions"), Keys: filepath.Join(home, "keys"), Program: []string{program}, Version: "1.2.3"}
+	runtime := Runtime{Folder: filepath.Join(home, "proxy"), Sessions: filepath.Join(home, "sessions"), Keys: filepath.Join(home, "keys"), McpServers: filepath.Join(home, "mcp-servers.json"), Program: []string{program}, Version: "1.2.3"}
 	t.Cleanup(func() { _ = runtime.Keep(false) })
 	return runtime
 }
@@ -181,7 +185,47 @@ func TestAProxyNoHarnessNeedsIsStopped(t *testing.T) {
 
 func TestTheProxyCommandRefusesWordsItCannotTake(t *testing.T) {
 	if code := Main([]string{"--folder", t.TempDir()}, "1.2.3"); code != 2 {
-		t.Fatalf("Main without --sessions and --keys = %d, want 2", code)
+		t.Fatalf("Main without --sessions, --keys and --mcp-servers = %d, want 2", code)
+	}
+}
+
+func TestARunningProxyIsTheMCPProxyOfTheServersTheTrierarchPluginSentLast(t *testing.T) {
+	graph := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"read_neo4j_cypher"},{"name":"write_neo4j_cypher"}]}}`)
+	}))
+	defer graph.Close()
+	runtime := aRuntime(t)
+	list := `{"servers":[{"name":"company-graph","url":"` + graph.URL + `","tools":["read_neo4j_cypher"]}]}`
+	if err := os.WriteFile(runtime.McpServers, []byte(list), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	folder := filepath.Join(runtime.Sessions, scout)
+	if err := os.MkdirAll(folder, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, "hold.pid"), []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := mcpproxy.WriteAccess(folder, mcpproxy.Access{Token: "scouts-mcp-token", Servers: []string{"company-graph"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.Keep(true); err != nil {
+		t.Fatal(err)
+	}
+	address, _ := runtime.URL()
+
+	request, _ := http.NewRequest(http.MethodPost, address+mcpproxy.PathOf(scout, "company-graph"), strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	request.Header.Set("authorization", "Bearer scouts-mcp-token")
+	answer, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer answer.Body.Close()
+	text, _ := io.ReadAll(answer.Body)
+
+	if want := `{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"read_neo4j_cypher"}]}}`; string(text) != want {
+		t.Fatalf("tools/list at the proxy = %d %s, want %s", answer.StatusCode, text, want)
 	}
 }
 
