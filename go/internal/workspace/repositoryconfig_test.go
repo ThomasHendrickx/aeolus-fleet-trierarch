@@ -148,3 +148,23 @@ func TestTheHostReadsAClonesOnlyThroughItsOwnGitFolder(t *testing.T) {
 		})
 	}
 }
+
+// A git without hooks in its config runs none either way.
+func TestTheHostsGitCallsInAShipsFolderRunNoHookTheFoldersConfigNames(t *testing.T) {
+	repository, _ := aRepository(t)
+	program, marker := aMarkingScript(t, filepath.Join(t.TempDir(), "hook"))
+	gitIn(t, "-C", repository, "config", "hook.planted.command", program)
+	for _, event := range []string{"reference-transaction", "post-checkout", "post-index-change"} {
+		gitIn(t, "-C", repository, "config", "--add", "hook.planted.event", event)
+	}
+
+	for _, args := range [][]string{{"checkout", "--quiet", "--detach", "HEAD"}, {"status", "--porcelain"}} {
+		if _, err := gitInFolder(repository, args...); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+
+	if _, err := os.Stat(marker); err == nil {
+		t.Errorf("with a hook planted in the folder's config, the host's git calls ran it")
+	}
+}
