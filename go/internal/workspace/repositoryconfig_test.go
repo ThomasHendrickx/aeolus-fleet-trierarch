@@ -50,6 +50,16 @@ func TestTheHostsGitCallsInASessionsCloneIgnoreTheClonesOwnConfig(t *testing.T) 
 			gitIn(t, "-C", folder, "config", "core.sshCommand", program)
 			gitIn(t, "-C", folder, "remote", "set-url", "origin", "ssh://git@example.com/aeolus-fleet.git")
 		}},
+		{"a filter driver in a submodule's own config", func(t *testing.T, folder string, program string) {
+			module := filepath.Join(folder, "module")
+			gitIn(t, "init", "-q", "-b", "main", module)
+			commitIn(t, module, "README.md")
+			gitIn(t, "-C", folder, "add", "module")
+			writeIn(t, folder, ".gitmodules", "[submodule \"module\"]\n\tpath = module\n\turl = ./module\n")
+			gitIn(t, "-C", module, "config", "filter.planted.clean", program)
+			writeIn(t, module, ".gitattributes", "* filter=planted\n")
+			writeIn(t, module, "README.md", "README.MD\n")
+		}},
 	}
 	for _, planted := range plants {
 		t.Run(planted.name, func(t *testing.T) {
