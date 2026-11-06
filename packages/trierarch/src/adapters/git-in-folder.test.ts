@@ -1,10 +1,11 @@
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { gitInFolder } from './git-in-folder.js';
+import { gitInFolder, RefusedRead } from './git-in-folder.js';
 import { runCommand } from './run-command.js';
 
 // Against the real git, in a temporary folder. A git without hooks in its config runs none either way.
@@ -62,5 +63,42 @@ describe("the host's git calls in a ship's folder, with a remote in the folder's
     const log = await gitInFolder(repository, ['log', '--format=%s', missing]);
 
     expect({ isFailed: log.status !== 0, stdout: log.stdout }).toEqual({ isFailed: true, stdout: '' });
+  });
+});
+
+describe("the host's git calls in a ship's worktree, with its own git folder holding what is not a file of its own", () => {
+  const plants: readonly { name: string; reason: string; plant: (gitFolder: string, worktree: string) => void }[] = [
+    {
+      name: 'a link as its HEAD',
+      reason: 'its .git holds a link: HEAD',
+      plant: (gitFolder) => {
+        rmSync(join(gitFolder, 'HEAD'));
+        symlinkSync(join(repository, '.git', 'HEAD'), join(gitFolder, 'HEAD'));
+      },
+    },
+    {
+      name: 'a named pipe as its HEAD',
+      reason: 'its .git holds a special file: HEAD',
+      plant: (gitFolder) => {
+        rmSync(join(gitFolder, 'HEAD'));
+        expect(spawnSync('mkfifo', [join(gitFolder, 'HEAD')]).status).toBe(0);
+      },
+    },
+    {
+      name: 'a link as its .git',
+      reason: 'its .git is neither a file nor a folder of its own',
+      plant: (gitFolder, worktree) => {
+        rmSync(join(worktree, '.git'));
+        symlinkSync(join(repository, '.git'), join(worktree, '.git'));
+      },
+    },
+  ];
+
+  it.each(plants)('refuses to read a worktree with $name, saying why', async ({ plant, reason }) => {
+    const worktree = join(folder, 'worktree');
+    await git(['-C', repository, 'worktree', 'add', '-q', '--detach', worktree]);
+    plant(join(repository, '.git', 'worktrees', 'worktree'), worktree);
+
+    await expect(gitInFolder(worktree, ['status', '--porcelain'])).rejects.toEqual(new RefusedRead(worktree, reason));
   });
 });
