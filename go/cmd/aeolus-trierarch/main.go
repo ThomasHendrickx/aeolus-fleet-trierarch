@@ -354,8 +354,10 @@ func mcpServerList(at paths.Paths) *mcpservers.File {
 	return heldServers
 }
 
-// harnessesThatAddMcpServers are the harnesses a session can be started with crew-time MCP servers (decision M4). None yet: each is added with the slice that starts it so (Claude Code on the host first), and until then no harness offers a server, so a request naming one is given back.
-var harnessesThatAddMcpServers = map[string]bool{}
+// harnessesThatAddMcpServers are the harnesses a session can be started with crew-time MCP servers (decision M4), on the runtime configured: Claude Code on the host, through the MCP proxy. A harness that cannot offers no server, so a request naming one is given back.
+func harnessesThatAddMcpServers(configured *config.Runtime) map[string]bool {
+	return map[string]bool{"claude-code": !isInContainers(configured)}
+}
 
 // modelProxy is the model proxy on this machine (headless H16), started as a hold is.
 func modelProxy(at paths.Paths, program string) modelproxy.Runtime {
@@ -518,7 +520,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	servers := mcpServerList(at)
 	// The MCP servers each harness offers, read afresh: the list changes while the trierarch runs.
 	offeredServers := func() map[string][]string {
-		return mcpservers.OfferedBy(servers.Current(), offeredHarnesses, harnessesThatAddMcpServers)
+		return mcpservers.OfferedBy(servers.Current(), offeredHarnesses, harnessesThatAddMcpServers(configuration.Runtime))
 	}
 	root := configuration.WorktreeRoot
 	if root == "" {
