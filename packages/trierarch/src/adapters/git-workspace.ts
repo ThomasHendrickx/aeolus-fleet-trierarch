@@ -23,7 +23,7 @@ import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clon
 const REMOTE = 'origin';
 
 /** What a folder the host does not read holds, as unsaved: not known, so it is told with why, never taken for clean. */
-const REFUSED_PREFIX = 'refused, ';
+export const REFUSED_PREFIX = 'refused, ';
 
 export function createGitWorkspace(options: {
   configuration: TrierarchConfiguration;

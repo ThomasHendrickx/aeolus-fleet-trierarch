@@ -5,7 +5,7 @@ import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { WorkspacePort } from '../core/ports.js';
 import { gitInCloneWithin, type Limits } from './git-in-folder.js';
-import { createGitWorkspace } from './git-workspace.js';
+import { createGitWorkspace, REFUSED_PREFIX } from './git-workspace.js';
 import { runCommand } from './run-command.js';
 import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
 
@@ -20,7 +20,9 @@ import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clon
  * remote, so the session pushes without the host, with the remote branches as
  * the repository last fetched them; a repository with no remote leaves the
  * clone with none. The ref resolves as a worktree's does. A configured folder,
- * cleanliness, what removing discards and the listing are a worktree's.
+ * cleanliness, what removing discards and the listing are a worktree's, but a
+ * clone whose read fails in any way is not clean and is unsaved, saying why,
+ * so its release tells argo and removes it.
  */
 
 const REMOTE = 'origin';
@@ -74,6 +76,10 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
 
   return {
     ...worktrees,
+    // What a clone holds is not known when any read of it fails, so it is not clean.
+    isClean: async (folder) => worktrees.isClean(folder).catch(() => false),
+    // What a clone holds is not known when any read of it fails: told with why, as one the host does not read.
+    unsaved: async (folder) => worktrees.unsaved(folder).catch((error: unknown) => [`${REFUSED_PREFIX}${error instanceof Error ? error.message : String(error)}`]),
     isMade: async (folder) => (await isUnderRoot(folder)) && (await isMarkedMade(folder)),
     prepare: async (request) => {
       const { shipName, workspace } = request;
