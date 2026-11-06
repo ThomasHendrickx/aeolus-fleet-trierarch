@@ -460,7 +460,8 @@ describe('aeolus-trierarch upgrade', () => {
     mkdirSync(paths.home, { recursive: true });
     writeFileSync(paths.config, JSON.stringify({ ...CONFIGURATION, harnesses: { codex: { flags: [], options: {} } } }));
 
-    const { output, code } = await main(['upgrade'], machine({ HOME: home }));
+    // A closed port for GitHub: no latest release, so npm's latest decides (#107).
+    const { output, code } = await main(['upgrade'], machine({ HOME: home, AEOLUS_TRIERARCH_RELEASES_URL: 'http://127.0.0.1:9' }));
 
     expect(code).toBe(1);
     expect(output).toContain('The aeolus-fleet plugin for Codex was not updated: codex plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch failed: Error: could not reach github.com.');

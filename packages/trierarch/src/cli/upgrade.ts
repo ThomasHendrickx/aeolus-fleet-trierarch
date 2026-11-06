@@ -195,6 +195,17 @@ async function otherRunningVersion(at: Restart, installed: string): Promise<stri
   return status.isRunning && running !== undefined && running.version !== installed ? running.version : undefined;
 }
 
+/**
+ * The version a bare upgrade takes, and where it comes from: npm's latest,
+ * or the latest GitHub Release when it is newer, so a machine reaches the
+ * binary once npm publishes no newer trierarch (#107).
+ */
+async function latestOf(at: { npm: Npm; binaryRoute?: BinaryRoute }): Promise<{ version: string; source: string }> {
+  const [npm, released] = await Promise.all([at.npm.latest(), at.binaryRoute?.latest()]);
+  const latest = npm.trim();
+  return released !== undefined && byVersion(released, latest) > 0 ? { version: released, source: 'the latest GitHub Release' } : { version: latest, source: "npm's latest" };
+}
+
 export async function upgradeTrierarch(at: Restart & {
   version?: string;
   /** Runs as the plugin step of an upgrade of another process (#725), which restarts the service itself. */
@@ -219,10 +230,10 @@ export async function upgradeTrierarch(at: Restart & {
   if (at.version !== undefined && !VERSION.test(at.version)) {
     throw new TrierarchFileError(`${at.version} is no version: give one such as 0.17.2`);
   }
-  const target = at.version ?? (await at.npm.latest()).trim();
-  // Only npm's latest is refused when older: a version the user names is their choice, as a downgrade (#652).
-  if (at.version === undefined && byVersion(target, from) < 0) {
-    return { from, to: from, isUpgraded: false, isPluginUpdated: true, said: [`The trierarch runs ${from} and npm's latest is ${target}, an older version: upgrade never moves to an older one, so it stays on ${from}.`] };
+  const { version: target, source } = at.version === undefined ? await latestOf(at) : { version: at.version, source: undefined };
+  // Only the latest is refused when older: a version the user names is their choice, as a downgrade (#652).
+  if (source !== undefined && byVersion(target, from) < 0) {
+    return { from, to: from, isUpgraded: false, isPluginUpdated: true, said: [`The trierarch runs ${from} and ${source} is ${target}, an older version: upgrade never moves to an older one, so it stays on ${from}.`] };
   }
   if (target === from) {
     const removed = await at.removeRemoteControl();

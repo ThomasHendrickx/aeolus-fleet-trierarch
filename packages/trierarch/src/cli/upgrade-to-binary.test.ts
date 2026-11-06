@@ -27,6 +27,9 @@ let runningFile: RunningFile;
 let isRestartedByBinary: boolean;
 /** Whether the service started on the binary says its version, as one that starts. */
 let isBinaryStarting: boolean;
+/** The version of the latest GitHub Release, none when GitHub names none, and npm's latest. */
+let releasedLatest: string | undefined;
+let npmLatest: string;
 
 beforeEach(() => {
   steps = [];
@@ -36,6 +39,8 @@ beforeEach(() => {
   runningFile = { pid: 2, version: '0.17.1' };
   isRestartedByBinary = true;
   isBinaryStarting = true;
+  releasedLatest = '0.18.0';
+  npmLatest = '0.18.0';
   answers = {
     '--version': { status: 0, stdout: '{"version":"0.18.0"}', stderr: '' },
     config: { status: 0, stdout: '{"path":"config.json"}', stderr: '' },
@@ -72,6 +77,7 @@ function startOnBinary(): void {
 }
 
 const route: BinaryRoute = {
+  latest: () => Promise.resolve(releasedLatest),
   release: (version) => {
     steps.push(`release ${version}`);
     return releaseRefusal !== undefined ? Promise.reject(new TrierarchFileError(releaseRefusal)) : Promise.resolve(released);
@@ -88,7 +94,7 @@ const route: BinaryRoute = {
 
 const npm: Npm = {
   globalFolder: () => Promise.resolve({ path: '/usr/local/lib/node_modules', isWritable: true }),
-  latest: () => Promise.resolve('0.18.0'),
+  latest: () => Promise.resolve(npmLatest),
   install: (spec) => {
     steps.push(`npm install ${spec}`);
     return Promise.resolve(OK);
@@ -118,8 +124,13 @@ const serviceAt = {
 };
 
 function upgrade(version = '0.18.0') {
+  return upgradeTo(version);
+}
+
+/** Upgrade with the version given, or with none, as a bare `aeolus-trierarch upgrade`. */
+function upgradeTo(version: string | undefined) {
   return upgradeTrierarch({
-    version,
+    ...(version !== undefined && { version }),
     installedVersion: () => '0.17.1',
     npm,
     binaryRoute: route,
@@ -212,5 +223,44 @@ describe('aeolus-trierarch upgrade to a release that carries a binary for this s
     expect(steps).not.toContain(`${STAGED} config check --json`);
     expect(steps).not.toContain('put back');
     expect(report.said).toContain('The service is not installed: run /home/u/.local/bin/aeolus-trierarch init to run it.');
+  });
+});
+
+describe('a bare aeolus-trierarch upgrade, once npm publishes no newer trierarch (#107)', () => {
+  it("takes the latest GitHub Release when npm's latest is the version installed, so the machine moves to the binary", async () => {
+    npmLatest = '0.17.1';
+    const report = await upgradeTo(undefined);
+    expect(report.to).toBe('0.18.0');
+    expect(steps).toContain('release 0.18.0');
+    expect(steps).toContain('place');
+    expect(steps.filter((step) => step.startsWith('npm install'))).toEqual([]);
+  });
+
+  it("takes npm's latest when it is newer than the latest GitHub Release", async () => {
+    releasedLatest = '0.17.1';
+    const report = await upgradeTo(undefined);
+    expect(report.to).toBe('0.18.0');
+  });
+
+  it("takes npm's latest when GitHub names no latest release", async () => {
+    releasedLatest = undefined;
+    const report = await upgradeTo(undefined);
+    expect(report.to).toBe('0.18.0');
+  });
+
+  it('names the latest GitHub Release as the older version it refuses, when that release is newer than npm\'s latest', async () => {
+    npmLatest = '0.16.0';
+    releasedLatest = '0.17.0';
+    const report = await upgradeTo(undefined);
+    expect(report.isUpgraded).toBe(false);
+    expect(report.said).toEqual(['The trierarch runs 0.17.1 and the latest GitHub Release is 0.17.0, an older version: upgrade never moves to an older one, so it stays on 0.17.1.']);
+  });
+
+  it('stays on the version installed when neither npm nor GitHub has a newer one', async () => {
+    npmLatest = '0.17.1';
+    releasedLatest = '0.17.1';
+    const report = await upgradeTo(undefined);
+    expect(report.isUpgraded).toBe(false);
+    expect(steps).not.toContain('release 0.17.1');
   });
 });

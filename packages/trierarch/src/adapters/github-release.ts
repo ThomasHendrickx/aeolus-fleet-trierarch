@@ -5,7 +5,9 @@
  * release names its digest and a GitHub artifact attestation, signed by the
  * repository's release workflow, holds for it, as the Go trierarch's own
  * upgrade takes it (go/internal/release). A release that carries no such
- * binary is none: upgrade takes npm then.
+ * binary is none: upgrade takes npm then. The latest release is the version
+ * a bare upgrade takes when npm's latest is older, as once npm publishes no
+ * newer trierarch (#107).
  */
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -40,6 +42,7 @@ export async function sigstoreTrustedRoot(file: string | undefined): Promise<unk
   return TrustedRoot.toJSON(await getTrustedRoot());
 }
 
+const latestSchema = z.object({ tag_name: z.string().regex(/^v\d+\.\d+\.\d+$/) });
 const releaseSchema = z.object({ assets: z.array(z.object({ name: z.string(), browser_download_url: z.string() })) });
 const attestationsSchema = z.object({ attestations: z.array(z.object({ bundle: z.unknown() })) });
 
@@ -73,6 +76,8 @@ function checksumOf(sums: string, name: string): string | undefined {
 }
 
 export interface GitHubRelease {
+  /** The version of the latest release; none when the repository has none, or GitHub does not answer it. */
+  latest(): Promise<string | undefined>;
   /** The binary of the version, once its checksum and attestation hold; none when the release carries none for this system and chip. Refuses with a TrierarchFileError otherwise. */
   binaryOf(version: string): Promise<Buffer | undefined>;
 }
@@ -87,6 +92,14 @@ export function createGitHubRelease(at: {
 }): GitHubRelease {
   const { api, repository, asset } = at;
   return {
+    latest: async () => {
+      try {
+        return latestSchema.parse(await readJson(`${api}/repos/${repository}/releases/latest`)).tag_name.slice(1);
+      } catch {
+        // None, unreadable or not answered: npm's latest decides alone.
+        return undefined;
+      }
+    },
     binaryOf: async (version) => {
       const tag = `v${version}`;
       let release: z.infer<typeof releaseSchema>;
