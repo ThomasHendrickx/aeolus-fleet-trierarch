@@ -570,12 +570,15 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
 /**
  * A ship released elsewhere is crewed again in a fresh worktree (row 11,
  * #475): before it registers, its workspace goes as a release's does, argo
- * told first what that discards. The entry is saved without its mark only
- * once that is done, so a failed remove tries again on the next pass.
- * Answers the entry it is crewed with.
+ * told first what that discards. Its session stops first, as a release's
+ * does, so nothing reads the worktree while a session works in it, whatever
+ * the pass's stop did. The entry is saved without its mark only once that is
+ * done, so a failed stop or remove tries again on the next pass. Answers the
+ * entry it is crewed with.
  */
 async function freshAfterReleaseElsewhere(at: EntryAt): Promise<Entry> {
   const { entry, deps } = at;
+  await deps.processes.stop(entry.shipId);
   const workspace = await releaseWorkspace({ entry, deps, cause: 'releasedElsewhere' });
   log(deps, { ...(entry.shipName !== undefined && { shipName: entry.shipName }), shipId: entry.shipId, action: 'release', outcome: `released elsewhere, ${workspace}` });
   const { isReleasedElsewhere, ...fresh } = entry;
