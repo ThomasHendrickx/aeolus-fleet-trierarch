@@ -568,6 +568,19 @@ describe("the host's git calls in a session's clone, with a file in its work tre
   });
 });
 
+describe("the host's reads of a session's clone, with a file the clone's config names for git", () => {
+  it.each(['core.excludesFile'])('reads no file %s names', async (name) => {
+    const { folder: made } = await workspace().prepare(scout);
+    const planted = join(folder, 'planted');
+    aPipe(planted);
+    await git(['-C', made, 'config', name, planted]);
+    // The same size as before, so git must read the file to tell whether it changed.
+    writeFileSync(join(made, 'README.md'), 'README.MD\n');
+
+    expect(await workspace({ timeLimitMs: 2000 }).unsaved(made)).toEqual([' M README.md']);
+  });
+});
+
 describe("the host's git calls in a session's clone, with a config git cannot read", () => {
   it('reads the clone as unsaved and not clean, refused, saying what git said', async () => {
     const { folder: made } = await workspace().prepare(scout);
