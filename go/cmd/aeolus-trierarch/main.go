@@ -453,6 +453,14 @@ func sessionRuntime(at paths.Paths, program string, configured *config.Runtime) 
 	return container.Runtime{Holds: holds, Binary: configured.Binary, Image: sessionImage + ":" + cli.Version, ModelToken: at.ModelToken, Homes: at.Homes, Sockets: at.Sockets, Memory: configured.Memory, Cpus: configured.Cpus}
 }
 
+// folderProcessesOf are the processes running in a folder, stopped before an orphan worktree is read and removed; in containers, only once no container works in it.
+func folderProcessesOf(configured *config.Runtime) runpass.FolderProcesses {
+	if !isInContainers(configured) {
+		return folderprocess.Stopper{}
+	}
+	return container.FolderProcesses{Runtime: container.Runtime{Binary: configured.Binary}, Host: folderprocess.Stopper{}}
+}
+
 func isInContainers(configured *config.Runtime) bool {
 	return configured != nil && configured.Kind == "container"
 }
@@ -562,7 +570,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Sessions:          running,
 		Harnesses:         harnesses,
 		Workspace:         places,
-		FolderProcesses:   folderprocess.Stopper{},
+		FolderProcesses:   folderProcessesOf(configuration.Runtime),
 		Checkouts:         checked,
 		Store:             saved,
 		Log:               logLine,
