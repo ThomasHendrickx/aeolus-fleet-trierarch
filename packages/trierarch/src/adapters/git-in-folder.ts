@@ -13,8 +13,19 @@ import { type CommandResult, runCommand } from './run-command.js';
  * config names, and takes no optional lock. The machine's own config (global
  * and system) applies as before. Git is pointed at no folder but the ship's
  * own: a folder whose config sets core.worktree is not read, and a clone is
- * read only through its own `.git` folder.
+ * read only through its own `.git` folder. A folder that is not read is
+ * refused with why, so what it holds is not known.
  */
+
+/** A folder the host does not read, with why. */
+export class RefusedRead extends Error {
+  constructor(
+    folder: string,
+    readonly reason: string,
+  ) {
+    super(`Will not read ${folder}: ${reason}`);
+  }
+}
 
 interface Override {
   readonly name: string;
@@ -91,7 +102,7 @@ async function overridesIn(folder: string, located: Readonly<Record<string, stri
       continue;
     }
     if (name === 'core.worktree') {
-      throw new Error(`Will not read ${folder}: its config sets core.worktree, which points git at another folder`);
+      throw new RefusedRead(folder, 'its config sets core.worktree, which points git at another folder');
     }
     if (isProgram(name)) {
       overrides.push(neutralOf(name));
@@ -128,10 +139,10 @@ export async function gitInClone(clone: string, args: readonly string[]): Promis
   const gitFolder = join(clone, '.git');
   const found = await lstat(gitFolder).catch(() => undefined);
   if (found?.isDirectory() !== true) {
-    throw new Error(`Will not read ${clone}: its .git is no folder of its own`);
+    throw new RefusedRead(clone, 'its .git is no folder of its own');
   }
   if ((await lstat(join(gitFolder, 'commondir')).catch(() => undefined)) !== undefined) {
-    throw new Error(`Will not read ${clone}: its .git names another git folder in its commondir`);
+    throw new RefusedRead(clone, 'its .git names another git folder in its commondir');
   }
   return gitIn(clone, { args, located: { GIT_DIR: gitFolder, GIT_WORK_TREE: clone } });
 }

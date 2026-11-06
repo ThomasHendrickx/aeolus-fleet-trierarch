@@ -109,17 +109,22 @@ export function lowResourceText(resource: LowResource, load: MachineLoad): strin
 }
 
 /** The kinds of discarded lines, in the order the counts name them. */
-const KINDS = ['deleted', 'changed', 'renamed', 'new', 'commit'] as const;
+const KINDS = ['refused', 'deleted', 'changed', 'renamed', 'new', 'commit'] as const;
 type DiscardedKind = (typeof KINDS)[number];
 
 const COMMIT_PREFIX = 'commit ';
+/** A worktree the host did not read, with why: what it held is not known. */
+const REFUSED_PREFIX = 'refused, ';
 /** A git status line: two status letters and a space before the path. */
 const STATUS_WIDTH = 3;
 
-/** One line of what removing a worktree discards (git status, or an unkept commit), in words. */
+/** One line of what removing a worktree discards (git status, an unkept commit, or why the host did not read it), in words. */
 function discardedLine(line: string): { kind: DiscardedKind; what: string } {
   if (line.startsWith(COMMIT_PREFIX)) {
     return { kind: 'commit', what: line.slice(COMMIT_PREFIX.length) };
+  }
+  if (line.startsWith(REFUSED_PREFIX)) {
+    return { kind: 'refused', what: line.slice(REFUSED_PREFIX.length) };
   }
   const status = line.slice(0, 2);
   const what = line.slice(STATUS_WIDTH);

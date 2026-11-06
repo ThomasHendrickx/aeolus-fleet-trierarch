@@ -4,7 +4,7 @@ import { join, relative, sep } from 'node:path';
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { ObservedWorktree, WorkspacePort } from '../core/ports.js';
-import { gitInFolder } from './git-in-folder.js';
+import { gitInFolder, RefusedRead } from './git-in-folder.js';
 import { type CommandResult, runCommand } from './run-command.js';
 import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
 
@@ -21,6 +21,9 @@ import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clon
  */
 
 const REMOTE = 'origin';
+
+/** What a folder the host does not read holds, as unsaved: not known, so it is told with why, never taken for clean. */
+const REFUSED_PREFIX = 'refused, ';
 
 /** What git said, on one line (a reason is one line) and without its hints, which are advice, not the cause. */
 function messageOf(stderr: string): string {
@@ -99,11 +102,27 @@ export function createGitWorkspace(options: {
       }
       return { folder };
     },
-    isClean: async (folder) => (await gitIn(folder, ['status', '--porcelain', '--ignore-submodules=all'])).trim() === '',
+    isClean: async (folder) => {
+      try {
+        return (await gitIn(folder, ['status', '--porcelain', '--ignore-submodules=all'])).trim() === '';
+      } catch (error) {
+        if (error instanceof RefusedRead) {
+          return false;
+        }
+        throw error;
+      }
+    },
     unsaved: async (folder) => {
-      const changes = await gitIn(folder, ['status', '--porcelain', '--ignore-submodules=all']);
-      const commits = await gitIn(folder, ['log', '--format=commit %h %s', 'HEAD', '--not', '--branches', '--tags', '--remotes']);
-      return [...changes.split('\n'), ...commits.split('\n')].filter((line) => line !== '');
+      try {
+        const changes = await gitIn(folder, ['status', '--porcelain', '--ignore-submodules=all']);
+        const commits = await gitIn(folder, ['log', '--format=commit %h %s', 'HEAD', '--not', '--branches', '--tags', '--remotes']);
+        return [...changes.split('\n'), ...commits.split('\n')].filter((line) => line !== '');
+      } catch (error) {
+        if (error instanceof RefusedRead) {
+          return [`${REFUSED_PREFIX}${error.reason}`];
+        }
+        throw error;
+      }
     },
     isMade: async (folder) => {
       const parts = relative(root, folder).split(sep);
