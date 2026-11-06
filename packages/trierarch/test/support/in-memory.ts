@@ -460,7 +460,13 @@ export class InMemoryProcesses implements Pick<SessionRuntime, 'list' | 'stop'> 
     return Promise.resolve([...this.sessions].map(([shipId, status]) => ({ shipId, status, ...(this.otherVersion.has(shipId) && { isOtherVersion: true }) })));
   }
 
+  /** The ships whose session a stop does not end, as a container still listed. */
+  readonly notStopping = new Set<ShipId>();
+
   stop(shipId: ShipId): Promise<void> {
+    if (this.notStopping.has(shipId)) {
+      return Promise.reject(new Error(`the session of ${shipId} is still listed`));
+    }
     this.sessions.delete(shipId);
     this.otherVersion.delete(shipId);
     return Promise.resolve();

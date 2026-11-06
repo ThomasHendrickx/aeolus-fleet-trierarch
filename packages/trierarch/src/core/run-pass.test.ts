@@ -589,6 +589,22 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.fleet.toArgo).toHaveLength(1);
   });
 
+  it('row 11: a ship released elsewhere whose session does not stop keeps its worktree unread and is crewed nowhere', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.change(SCOUT_FOLDER, '?? draft.md');
+    trierarch.fleet.releaseElsewhere(shipId);
+    trierarch.processes.notStopping.add(shipId);
+    const launches = trierarch.harness.launches.length;
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.workspace.folders.get(SCOUT_FOLDER)?.unsaved).toEqual(['?? draft.md']);
+    expect(trierarch.fleet.toArgo).toEqual([]);
+    expect(trierarch.harness.launches).toHaveLength(launches);
+  });
+
   it('row 11: a ship released elsewhere is crewed again as a first start, with its first prompt and no resume (#475)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch, { firstPrompt: 'Review the open pull requests.' });
