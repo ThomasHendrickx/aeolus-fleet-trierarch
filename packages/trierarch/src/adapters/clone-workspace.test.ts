@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -156,6 +156,18 @@ describe('workspaces as per-ship clones', () => {
 
     expect(existsSync(join(made, 'current.md'))).toBe(true);
     expect((await git(['-C', made, 'rev-parse', 'HEAD'])).trim()).toBe((await git(['-C', current, 'rev-parse', 'HEAD'])).trim());
+  });
+
+  it("checks out through the filters the machine's own config defines, as git-lfs's", async () => {
+    writeFileSync(join(repository, '.gitattributes'), '*.txt filter=upper\n');
+    writeFileSync(join(repository, 'hello.txt'), 'hello\n');
+    await git(['-C', repository, 'add', '.']);
+    await git(['-C', repository, 'commit', '-q', '-m', 'hello.txt']);
+    await git(['config', '--file', aThrowawayHome(), 'filter.upper.smudge', 'tr a-z A-Z']);
+
+    const { folder: made } = await workspace().prepare(scout);
+
+    expect(readFileSync(join(made, 'hello.txt'), 'utf8')).toBe('HELLO\n');
   });
 
   it('crews from what it has when the remote cannot be fetched', async () => {
