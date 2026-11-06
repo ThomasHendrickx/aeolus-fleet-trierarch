@@ -3,6 +3,7 @@ package workspace
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -19,6 +20,21 @@ func aMarkingScript(t *testing.T, at string) (string, string) {
 		t.Fatal(err)
 	}
 	return at, marker
+}
+
+// aThrowawayHome is a HOME whose git config is the machine's own, for the test alone: answers its config file.
+func aThrowawayHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	config := filepath.Join(home, ".gitconfig")
+	t.Setenv("HOME", home)
+	t.Setenv("GIT_CONFIG_GLOBAL", config)
+	return config
+}
+
+// hasLFS says whether git-lfs is on the machine: its test runs only where it is.
+func hasLFS() bool {
+	return exec.Command("git", "lfs", "version").Run() == nil
 }
 
 func writeIn(t *testing.T, folder string, file string, content string) {
@@ -61,6 +77,26 @@ func TestTheHostsGitCallsInASessionsCloneIgnoreTheClonesOwnConfig(t *testing.T) 
 			writeIn(t, module, ".gitattributes", "* filter=planted\n")
 			writeIn(t, module, "README.md", "README.MD\n")
 		}},
+		{"a filter driver in the machine's own config", func(t *testing.T, folder string, program string) {
+			machine := aThrowawayHome(t)
+			gitIn(t, "config", "--file", machine, "filter.planted.clean", program)
+			gitIn(t, "config", "--file", machine, "filter.planted.smudge", program)
+			gitIn(t, "config", "--file", machine, "filter.planted.required", "true")
+			writeIn(t, folder, ".gitattributes", "* filter=planted\n")
+		}},
+	}
+	if hasLFS() {
+		plants = append(plants, struct {
+			name  string
+			plant func(t *testing.T, folder string, program string)
+		}{"git-lfs's filter, as git lfs install writes it, with an extension in the machine's own config", func(t *testing.T, folder string, program string) {
+			machine := aThrowawayHome(t)
+			gitIn(t, "lfs", "install", "--skip-repo")
+			gitIn(t, "config", "--file", machine, "lfs.extension.planted.clean", program+" %f")
+			gitIn(t, "config", "--file", machine, "lfs.extension.planted.smudge", program+" %f")
+			gitIn(t, "config", "--file", machine, "lfs.extension.planted.priority", "0")
+			writeIn(t, folder, ".gitattributes", "*.md filter=lfs diff=lfs merge=lfs\n")
+		}})
 	}
 	for _, planted := range plants {
 		t.Run(planted.name, func(t *testing.T) {
@@ -137,6 +173,15 @@ func TestTheHostReadsAClonesOnlyThroughItsOwnGitFolder(t *testing.T) {
 		{"an alternates file naming another repository's objects", "its .git names another repository's objects in objects/info/alternates", func(t *testing.T, clone string, other string) {
 			writeIn(t, filepath.Join(clone, ".git", "objects", "info"), "alternates", filepath.Join(other, ".git", "objects")+"\n")
 		}},
+	}
+	for _, name := range []string{"lfs.extension.planted.clean", "lfs.customtransfer.planted.path"} {
+		pointings = append(pointings, struct {
+			name   string
+			reason string
+			point  func(t *testing.T, clone string, other string)
+		}{name + " in its config", "its config names a program for git-lfs: " + name, func(t *testing.T, clone string, other string) {
+			gitIn(t, "-C", clone, "config", name, filepath.Join(other, "program"))
+		}})
 	}
 	for _, inGit := range []string{"objects", "config", "HEAD", filepath.Join("refs", "heads")} {
 		pointings = append(pointings, struct {
