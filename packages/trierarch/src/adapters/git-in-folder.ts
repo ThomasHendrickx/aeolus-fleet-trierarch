@@ -8,7 +8,7 @@ import { type CommandResult, runCommand } from './run-command.js';
  * its config included, and with sessions in containers a session runs apart
  * from the host (trierarch.md, "Session runtime"). So the host's git calls in a
  * ship's folder ignore the folder's own config where it names a program for
- * git to run: git runs no hook, no fsmonitor, no filter, diff or merge driver,
+ * git to run: git runs no hook, in a folder or in the config, no fsmonitor, no filter, diff or merge driver,
  * and no command for a transport, pager, editor or credential the folder's
  * config names, and takes no optional lock. The machine's own config (global
  * and system) applies as before. Git is pointed at no folder but the ship's
@@ -21,7 +21,7 @@ interface Override {
   readonly value: string;
 }
 
-/** The values the host's git calls take in a ship's folder whatever its config says: no hooks and no fsmonitor. */
+/** The values the host's git calls take in a ship's folder whatever its config says: no hooks in a folder and no fsmonitor. */
 const HARMLESS: readonly Override[] = [
   { name: 'core.fsmonitor', value: 'false' },
   { name: 'core.hooksPath', value: '/dev/null' },
@@ -60,6 +60,22 @@ function neutralOf(name: string): Override {
   return { name, value: isOff ? 'false' : '' };
 }
 
+/** The hook a variable of a hook in the config (`hook.<name>.command`) belongs to, turned off and bound to no event; none for another variable. */
+function hookOffOf(name: string): readonly Override[] {
+  const first = name.indexOf('.');
+  const last = name.lastIndexOf('.');
+  if (name.slice(0, first) !== 'hook' || last === first) {
+    return [];
+  }
+  const hook = name.slice(0, last);
+  // An empty event resets the hook's events.
+  return [
+    { name: `${hook}.enabled`, value: 'false' },
+    { name: `${hook}.event`, value: '' },
+    { name: `${hook}.command`, value: '' },
+  ];
+}
+
 /** The overrides of every variable of the folder's own config that names a program, after the harmless ones; a folder whose config points git at another work tree is not read. */
 async function overridesIn(folder: string, located: Readonly<Record<string, string>>): Promise<readonly Override[]> {
   const listed = await runCommand('git', { args: ['-C', folder, 'config', '--list', '--show-scope', '--name-only', '-z'], env: located });
@@ -80,6 +96,7 @@ async function overridesIn(folder: string, located: Readonly<Record<string, stri
     if (isProgram(name)) {
       overrides.push(neutralOf(name));
     }
+    overrides.push(...hookOffOf(name).filter((off) => !overrides.some((each) => each.name === off.name)));
   }
   return overrides;
 }
