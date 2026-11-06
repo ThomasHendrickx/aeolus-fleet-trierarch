@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"golang.org/x/crypto/nacl/box"
@@ -43,14 +42,11 @@ func keyOf(private []byte) (Key, error) {
 
 // LoadOrMake is the key kept at path, made there when there is none, the file mode 600 either way. A file that holds no key is refused, never made over: a new key would leave every secret sealed to the old one unreadable.
 func LoadOrMake(path string) (Key, error) {
-	text, err := os.ReadFile(path)
+	text, err := readPrivate(path)
 	if err == nil {
 		private, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(text)))
 		if err != nil || len(private) != 32 {
 			return Key{}, fmt.Errorf("%s holds no sealing key", path)
-		}
-		if err := os.Chmod(path, 0o600); err != nil {
-			return Key{}, err
 		}
 		return keyOf(private)
 	}
@@ -61,18 +57,7 @@ func LoadOrMake(path string) (Key, error) {
 	if err != nil {
 		return Key{}, err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return Key{}, err
-	}
-	// Written beside and renamed into place, so a stop mid-write leaves no half key.
-	partial := path + ".partial"
-	if err := os.WriteFile(partial, []byte(base64.StdEncoding.EncodeToString(private[:])+"\n"), 0o600); err != nil {
-		return Key{}, err
-	}
-	if err := os.Chmod(partial, 0o600); err != nil {
-		return Key{}, err
-	}
-	if err := os.Rename(partial, path); err != nil {
+	if err := writePrivate(path, []byte(base64.StdEncoding.EncodeToString(private[:])+"\n")); err != nil {
 		return Key{}, fmt.Errorf("keep the sealing key: %w", err)
 	}
 	return keyOf(private[:])

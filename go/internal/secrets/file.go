@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"path/filepath"
 	"slices"
 	"sync"
 )
@@ -64,18 +63,7 @@ func (f *File) Accept(secrets map[string]string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(f.Path), 0o755); err != nil {
-		return err
-	}
-	// Written beside and renamed into place, so a stop mid-write leaves the secrets held.
-	partial := f.Path + ".partial"
-	if err := os.WriteFile(partial, append(text, '\n'), 0o600); err != nil {
-		return err
-	}
-	if err := os.Chmod(partial, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(partial, f.Path); err != nil {
+	if err := writePrivate(f.Path, append(text, '\n')); err != nil {
 		return fmt.Errorf("keep the secrets: %w", err)
 	}
 	f.mu.Lock()
