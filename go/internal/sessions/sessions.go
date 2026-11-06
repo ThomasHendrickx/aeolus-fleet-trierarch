@@ -184,6 +184,14 @@ func (r Runtime) Stop(shipID string) error {
 	return os.RemoveAll(hold.FilesOf(r.Sessions, shipID).Folder)
 }
 
+// writeMcpConfig writes the MCP configuration, which holds the session's token, mode 600 whatever mode a file there had: a write keeps the mode of a file that exists.
+func writeMcpConfig(path string, config []byte) error {
+	if err := os.WriteFile(path, config, 0o600); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o600)
+}
+
 // Start starts the ship's session under a hold of its own, its last one stopped first, and returns once the hold answers.
 func (r Runtime) Start(session Start) error {
 	if err := r.Stop(session.ShipID); err != nil {
@@ -212,7 +220,7 @@ func (r Runtime) Start(session Start) error {
 		if err := mcpproxy.WriteAccess(files.Folder, mcp.Access); err != nil {
 			return err
 		}
-		if err := os.WriteFile(files.McpConfig, mcp.Config, 0o600); err != nil {
+		if err := writeMcpConfig(files.McpConfig, mcp.Config); err != nil {
 			return err
 		}
 	}

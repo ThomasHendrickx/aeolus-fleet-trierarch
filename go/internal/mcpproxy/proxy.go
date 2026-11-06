@@ -6,7 +6,9 @@
 // only to the URL the trierarch plugin's list gives the server, never the
 // session's token, and lists and forwards only the tools the list names,
 // whatever the server offers. A call to any other tool is answered with a
-// JSON-RPC error and never reaches the server.
+// JSON-RPC error and never reaches the server, as is any resources/ or
+// prompts/ request, which the list does not name, and the server's
+// capabilities offer neither.
 package mcpproxy
 
 import (
@@ -225,6 +227,16 @@ func forbiddenTool(message any, tools []string) string {
 	return name
 }
 
+// forbiddenMethod is the resources/ or prompts/ method a message requests, which a definition does not name; empty when it requests none.
+func forbiddenMethod(message any) string {
+	fields, _ := message.(map[string]any)
+	method, _ := fields["method"].(string)
+	if strings.HasPrefix(method, "resources/") || strings.HasPrefix(method, "prompts/") {
+		return method
+	}
+	return ""
+}
+
 func errorAnswer(id any, code int, message string) map[string]any {
 	return map[string]any{"jsonrpc": "2.0", "id": id, "error": map[string]any{"code": code, "message": "aeolus MCP proxy: " + message}}
 }
@@ -240,14 +252,35 @@ func refusalOf(body []byte, tools []string) (map[string]any, bool) {
 			if tool := forbiddenTool(message, tools); tool != "" {
 				return errorAnswer(nil, invalidParams, "the batch calls "+tool+", which is not a tool a session may call"), true
 			}
+			if method := forbiddenMethod(message); method != "" {
+				return errorAnswer(nil, invalidRequest, "the batch requests "+method+", which a session may not"), true
+			}
 		}
 		return nil, false
 	}
+	fields, _ := value.(map[string]any)
 	if tool := forbiddenTool(value, tools); tool != "" {
-		fields, _ := value.(map[string]any)
 		return errorAnswer(fields["id"], invalidParams, tool+" is not a tool a session may call"), true
 	}
+	if method := forbiddenMethod(value); method != "" {
+		return errorAnswer(fields["id"], invalidRequest, method+" is not a request a session may make"), true
+	}
 	return nil, false
+}
+
+// withoutResourcesAndPrompts takes the resources and prompts out of an initialize answer's capabilities; false when it holds neither.
+func withoutResourcesAndPrompts(message any) bool {
+	fields, ok := message.(map[string]any)
+	if !ok {
+		return false
+	}
+	result, _ := fields["result"].(map[string]any)
+	capabilities, _ := result["capabilities"].(map[string]any)
+	_, hasResources := capabilities["resources"]
+	_, hasPrompts := capabilities["prompts"]
+	delete(capabilities, "resources")
+	delete(capabilities, "prompts")
+	return hasResources || hasPrompts
 }
 
 // withListedTools leaves in a message's tools list only the tools the list names; false when it holds none.
@@ -272,7 +305,7 @@ func withListedTools(message any, tools []string) bool {
 	return true
 }
 
-// filtered is the server's JSON with every tools list holding only the tools the list names, alone or in a batch; unchanged when it lists none.
+// filtered is the server's JSON with every tools list holding only the tools the list names and no resources or prompts capability, alone or in a batch; unchanged when it lists none.
 func filtered(text []byte, tools []string) []byte {
 	value, err := decode(text)
 	if err != nil {
@@ -282,9 +315,11 @@ func filtered(text []byte, tools []string) []byte {
 	if batch, ok := value.([]any); ok {
 		for _, message := range batch {
 			isChanged = withListedTools(message, tools) || isChanged
+			isChanged = withoutResourcesAndPrompts(message) || isChanged
 		}
 	} else {
 		isChanged = withListedTools(value, tools)
+		isChanged = withoutResourcesAndPrompts(value) || isChanged
 	}
 	if !isChanged {
 		return text
