@@ -343,3 +343,75 @@ func TestTheProxyOffersNoResourcesOrPromptsInTheGraphsCapabilities(t *testing.T)
 		})
 	}
 }
+
+// aProxyWithCredential is the MCP proxy in front of the graph, listed with a credential in the header, and the secrets it holds.
+func aProxyWithCredential(t *testing.T, graph *fakeGraph, header string, held map[string]string) *httptest.Server {
+	t.Helper()
+	upstream := httptest.NewServer(graph)
+	t.Cleanup(upstream.Close)
+	sessions := t.TempDir()
+	aSession(t, sessions, scout, os.Getpid(), Access{Token: "scouts-token", Servers: []string{"company-graph"}})
+	list := []mcpservers.Server{{Name: "company-graph", URL: upstream.URL + "/mcp", Transport: mcpservers.Transport, Tools: []string{"read_neo4j_cypher"}, Credential: &mcpservers.Credential{Secret: "graph-token", Header: header}}}
+	secret := func(name string) (string, bool) {
+		value, ok := held[name]
+		return value, ok
+	}
+	proxy := httptest.NewServer(Proxy{Sessions: sessions, Servers: func() []mcpservers.Server { return list }, Secret: secret})
+	t.Cleanup(proxy.Close)
+	return proxy
+}
+
+func TestTheProxyAddsTheServersCredentialInPlaceOfTheSessionsToken(t *testing.T) {
+	graph := &fakeGraph{}
+	proxy := aProxyWithCredential(t, graph, "Authorization", map[string]string{"graph-token": "Bearer s3cr3t"})
+
+	status, text := call(t, proxy, "/mcp/"+scout+"/company-graph", "scouts-token", listTools)
+
+	if status != http.StatusOK || len(graph.headers) != 1 || graph.headers[0].Get("authorization") != "Bearer s3cr3t" {
+		t.Fatalf("tools/list = %d %s, the graph got %v, want Bearer s3cr3t", status, text, graph.headers)
+	}
+}
+
+func TestTheProxySetsTheCredentialOverWhatTheSessionSentInItsHeader(t *testing.T) {
+	graph := &fakeGraph{}
+	proxy := aProxyWithCredential(t, graph, "X-Api-Key", map[string]string{"graph-token": "s3cr3t"})
+	request, _ := http.NewRequest(http.MethodPost, proxy.URL+"/mcp/"+scout+"/company-graph", strings.NewReader(listTools))
+	request.Header.Set("authorization", "Bearer scouts-token")
+	request.Header.Add("x-api-key", "the session's own")
+	request.Header.Add("x-api-key", "and another")
+	answer, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = answer.Body.Close()
+
+	if len(graph.headers) != 1 || !slices.Equal(graph.headers[0].Values("x-api-key"), []string{"s3cr3t"}) || graph.headers[0].Get("authorization") != "" {
+		t.Fatalf("the graph got %v, want x-api-key s3cr3t alone and no authorization", graph.headers)
+	}
+}
+
+func TestTheProxyRefusesAServerWhoseCredentialIsNotHeldAndNeverReachesIt(t *testing.T) {
+	graph := &fakeGraph{}
+	proxy := aProxyWithCredential(t, graph, "Authorization", map[string]string{"other": "Bearer s3cr3t"})
+
+	status, text := call(t, proxy, "/mcp/"+scout+"/company-graph", "scouts-token", listTools)
+
+	if status != http.StatusServiceUnavailable || graph.requests != 0 || strings.Contains(text, "s3cr3t") {
+		t.Fatalf("tools/list = %d %s, the graph got %d requests, want 503 and none", status, text, graph.requests)
+	}
+}
+
+func TestTheProxyRefusesAServerWithACredentialWhenItHoldsNoSecrets(t *testing.T) {
+	graph := &fakeGraph{}
+	upstream := httptest.NewServer(graph)
+	defer upstream.Close()
+	sessions := t.TempDir()
+	aSession(t, sessions, scout, os.Getpid(), Access{Token: "scouts-token", Servers: []string{"company-graph"}})
+	list := []mcpservers.Server{{Name: "company-graph", URL: upstream.URL + "/mcp", Transport: mcpservers.Transport, Tools: []string{"read_neo4j_cypher"}, Credential: &mcpservers.Credential{Secret: "graph-token", Header: "Authorization"}}}
+	proxy := httptest.NewServer(Proxy{Sessions: sessions, Servers: func() []mcpservers.Server { return list }})
+	defer proxy.Close()
+
+	if status, _ := call(t, proxy, "/mcp/"+scout+"/company-graph", "scouts-token", listTools); status != http.StatusServiceUnavailable || graph.requests != 0 {
+		t.Fatalf("tools/list = %d, the graph got %d requests, want 503 and none", status, graph.requests)
+	}
+}
