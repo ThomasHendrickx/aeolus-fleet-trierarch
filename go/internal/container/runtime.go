@@ -226,6 +226,10 @@ func (r Runtime) heldAs(session sessions.Start, files hold.Files) (sessions.Star
 	for _, path := range session.ReadOnly {
 		command = append(command, "--volume", path+":"+path+":ro")
 	}
+	// Its MCP configuration, read-only at its own path: the one file of the session's folder it sees, kept where it cannot plant a link the trierarch would write through.
+	if session.Mcp != nil {
+		command = append(command, "--volume", files.McpConfig+":"+files.McpConfig+":ro")
+	}
 	command = append(command, "--env", "HOME="+SessionHome)
 	if session.ProxyToken != nil {
 		command = append(command, "--env", session.ProxyToken.Variable)

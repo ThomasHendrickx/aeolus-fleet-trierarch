@@ -421,22 +421,3 @@ func TestHeldAsReplacesWhatTheHoldRunsOnceTheShipsLastSessionStoppedAndItsFolder
 		t.Fatalf("the hold was given the session's own environment:\n%s", env)
 	}
 }
-
-func TestAnMCPConfigurationGivenAPathIsKeptThereForItsUserOnlyAndNotInTheSessionsFolder(t *testing.T) {
-	runtime := aRuntime(t)
-	folder := t.TempDir()
-	files := hold.FilesOf(runtime.Sessions, scout)
-	path := filepath.Join(t.TempDir(), "home", ".aeolus", "mcp-config.json")
-	mcp := &Mcp{Access: mcpproxy.Access{Token: "scouts-mcp-token", Servers: []string{"company-graph"}}, Config: []byte(`{"mcpServers":{}}`), Path: path}
-	if err := runtime.Start(Start{ShipID: scout, Folder: folder, Harness: "claude-code", Command: []string{"sh", "-c", aHarness, "sh"}, Mcp: mcp}); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-
-	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0o600 || read(path) != `{"mcpServers":{}}` {
-		t.Fatalf("%s: %v, %v, want the configuration in a file of mode 600", path, info, err)
-	}
-	if _, err := os.Stat(files.McpConfig); err == nil {
-		t.Fatalf("%s exists, want the configuration at its given path alone", files.McpConfig)
-	}
-}

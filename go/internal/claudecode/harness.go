@@ -33,13 +33,6 @@ type Onboarding interface {
 // launchVariable is the variable a session's launch id is passed in, for the plugin's hooks to mark that launch (#490).
 const launchVariable = "AEOLUS_LAUNCH"
 
-const (
-	// mcpConfigInHome is where a session in a container finds its MCP configuration in its ship's home.
-	mcpConfigInHome = ".aeolus/mcp-config.json"
-	// sessionHome is the home a container session has (container.SessionHome).
-	sessionHome = "/home/ubuntu"
-)
-
 // Harness is Claude Code as the run pass starts and watches its sessions, on the host, each under its hold; its sessions' identities through the aeolus-fleet plugin.
 type Harness struct {
 	Plugin   plugin.Plugin
@@ -131,7 +124,7 @@ func (h Harness) routeOf(login string) (map[string]string, *sessions.ProxyToken,
 	return map[string]string{"ANTHROPIC_BASE_URL": address + "/anthropic"}, &sessions.ProxyToken{Harness: "claude-code", Variable: "ANTHROPIC_AUTH_TOKEN", Token: proxytoken.New()}, nil
 }
 
-// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7): each at the MCP proxy with a token of its own, fresh for each start, in an MCP configuration kept in the session's folder, which the command line names by its path alone; nothing for an entry that names none.  In a container the configuration is kept in the ship's home, where the container finds it, and the proxy is reached at the host's address.
+// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7): each at the MCP proxy with a token of its own, fresh for each start, in an MCP configuration kept in the session's folder, which the command line names by its path alone; nothing for an entry that names none. A container sees that one file read-only at the same path, never the folder it is in, so a session cannot plant a link the trierarch would write through.
 func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) {
 	if len(entry.McpServers) == 0 {
 		return nil, nil, nil
@@ -157,13 +150,7 @@ func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) 
 	if err != nil {
 		return nil, nil, err
 	}
-	mcp := &sessions.Mcp{Access: mcpproxy.Access{Token: token, Servers: entry.McpServers}, Config: config}
-	if h.Homes == "" {
-		path := hold.FilesOf(h.Sessions, entry.ShipID).McpConfig
-		return []string{"--mcp-config", path}, mcp, nil
-	}
-	mcp.Path = filepath.Join(h.homeOf(entry), mcpConfigInHome)
-	return []string{"--mcp-config", sessionHome + "/" + mcpConfigInHome}, mcp, nil
+	return []string{"--mcp-config", hold.FilesOf(h.Sessions, entry.ShipID).McpConfig}, &sessions.Mcp{Access: mcpproxy.Access{Token: token, Servers: entry.McpServers}, Config: config}, nil
 }
 
 // Launch starts the entry's session in its folder, on the login it is to start on: its first prompt on a first start, the wake otherwise, continuing the folder's conversation when Claude Code keeps one.

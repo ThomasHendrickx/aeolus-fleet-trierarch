@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -70,8 +69,6 @@ type Start struct {
 type Mcp struct {
 	Access mcpproxy.Access
 	Config []byte
-	// Path is where the configuration is written when it is not in the session's folder: a session in a container reads it from its ship's home.
-	Path string
 }
 
 // ProxyToken is a session's model proxy token, for the harness whose vendor it reaches, handed to it in Variable.
@@ -223,14 +220,7 @@ func (r Runtime) Start(session Start) error {
 		if err := mcpproxy.WriteAccess(files.Folder, mcp.Access); err != nil {
 			return err
 		}
-		path := files.McpConfig
-		if mcp.Path != "" {
-			path = mcp.Path
-			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-				return err
-			}
-		}
-		if err := writeMcpConfig(path, mcp.Config); err != nil {
+		if err := writeMcpConfig(files.McpConfig, mcp.Config); err != nil {
 			return err
 		}
 	}
