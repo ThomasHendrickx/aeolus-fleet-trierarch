@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -314,6 +314,40 @@ describe("a ship's clone in containers", () => {
     fleet = await aFleet();
     machine = await aMachine();
     await aCrewingMachine({ fleet, machine });
+  });
+
+  it.each(['clone', 'remote remove', 'remote add', 'fetch', 'checkout'])('removes a half-made clone when %s fails and makes a complete clone on the next pass', async (step) => {
+    anUpstream();
+    const folder = join(machine.trierarchHome, 'worktrees', REPOSITORY, 'scout');
+    const failed = join(machine.machine, 'clone-failed');
+    const wrapper = join(machine.machine, 'bin', 'git');
+    const realGit = realpathSync(join(machine.machine, 'tools', 'git'));
+    const command = step === 'clone' ? 'clone --quiet --no-checkout*' : `-C ${folder} ${step}*`;
+    writeFileSync(wrapper, `#!/bin/sh
+case "$*" in
+  "${command.slice(0, -1)}"*)
+    '${realGit}' "$@" || exit $?
+    touch '${failed}'
+    echo 'clone setup deliberately failed' >&2
+    exit 1 ;;
+esac
+exec '${realGit}' "$@"
+`);
+    chmodSync(wrapper, 0o755);
+    configure((configuration) => ({ ...configuration, runtime: RUNTIME }));
+    writeModelToken();
+    expect((await machine.trierarch(['restart'])).status).toBe(0);
+    scout = await fleet.commission('scout', { scopes: ['fleet:read'] });
+    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+
+    await expect.poll(() => existsSync(failed), { timeout: CREWED_WITHIN_MS }).toBe(true);
+    await expect.poll(() => existsSync(folder)).toBe(false);
+    rmSync(wrapper);
+
+    await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
+    expect(git(folder, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('HEAD');
+    expect(git(folder, 'remote', 'get-url', 'origin')).toBe(git(machine.repository, 'remote', 'get-url', 'origin'));
+    expect(readFileSync(join(folder, 'README.md'), 'utf8')).toBe('hello\n');
   });
 
   it("is a clone of its own at the worktree's path, with a .git of its own holding its own objects, detached at the repository's commit, so git works inside", async () => {

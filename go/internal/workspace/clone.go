@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -33,7 +34,7 @@ func resolve(repository string, ref string) (string, error) {
 }
 
 // PrepareClone makes the ship's clone, or takes the one a stop mid-crew left, and answers its folder.
-func PrepareClone(at Worktree) (string, error) {
+func PrepareClone(at Worktree) (prepared string, err error) {
 	folder := filepath.Join(at.Root, at.Repository, at.ShipName)
 	if _, err := os.Stat(folder); err == nil {
 		return folder, nil
@@ -47,6 +48,13 @@ func PrepareClone(at Worktree) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	defer func() {
+		if err != nil {
+			if cleanupErr := os.RemoveAll(folder); cleanupErr != nil {
+				err = errors.Join(err, fmt.Errorf("remove failed clone %s: %w", folder, cleanupErr))
+			}
+		}
+	}()
 	if _, err := git("clone", "--quiet", "--no-checkout", "--reference", at.Path, "--dissociate", at.Path, folder); err != nil {
 		return "", err
 	}

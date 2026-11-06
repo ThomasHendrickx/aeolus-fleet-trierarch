@@ -69,15 +69,20 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
         await mkdir(join(root, workspace.repository), { recursive: true });
         await runCommand('git', { args: ['-C', repository, 'fetch', '--quiet', REMOTE] });
         const commit = await resolve(repository, workspace.ref);
-        await git(['clone', '--quiet', '--no-checkout', '--reference', repository, '--dissociate', repository, folder]);
-        // The clone's origin is the repository's checkout, whose branches are no remote's: dropped with it.
-        await git(['-C', folder, 'remote', 'remove', REMOTE]);
-        const remote = await runCommand('git', { args: ['-C', repository, 'remote', 'get-url', REMOTE] });
-        if (remote.status === 0) {
-          await git(['-C', folder, 'remote', 'add', REMOTE, remote.stdout.trim()]);
-          await git(['-C', folder, 'fetch', '--quiet', '--no-tags', repository, `+refs/remotes/${REMOTE}/*:refs/remotes/${REMOTE}/*`]);
+        try {
+          await git(['clone', '--quiet', '--no-checkout', '--reference', repository, '--dissociate', repository, folder]);
+          // The clone's origin is the repository's checkout, whose branches are no remote's: dropped with it.
+          await git(['-C', folder, 'remote', 'remove', REMOTE]);
+          const remote = await runCommand('git', { args: ['-C', repository, 'remote', 'get-url', REMOTE] });
+          if (remote.status === 0) {
+            await git(['-C', folder, 'remote', 'add', REMOTE, remote.stdout.trim()]);
+            await git(['-C', folder, 'fetch', '--quiet', '--no-tags', repository, `+refs/remotes/${REMOTE}/*:refs/remotes/${REMOTE}/*`]);
+          }
+          await git(['-C', folder, 'checkout', '--quiet', '--detach', commit]);
+        } catch (error) {
+          await rm(folder, { recursive: true, force: true });
+          throw error;
         }
-        await git(['-C', folder, 'checkout', '--quiet', '--detach', commit]);
       }
       return { folder };
     },
