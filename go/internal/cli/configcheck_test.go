@@ -172,8 +172,9 @@ func (r aRuntime) Mode(string) container.Mode {
 	}
 	return container.Rootless
 }
-func (aRuntime) Groups() ([]string, error) { return []string{"user"}, nil }
-func (aRuntime) IsModelTokenWritten() bool { return true }
+func (aRuntime) Groups() ([]string, error)  { return []string{"user"}, nil }
+func (aRuntime) IsModelTokenWritten() bool  { return true }
+func (aRuntime) IsPastaMissing(string) bool { return false }
 
 // inContainers sets the machine's configuration to run its sessions in containers of a runtime that runs rootful when isRootful.
 func inContainers(t *testing.T, machine *Machine, at paths.Paths, isRootful bool) {

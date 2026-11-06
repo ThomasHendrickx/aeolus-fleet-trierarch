@@ -124,13 +124,10 @@ func (h Harness) routeOf(login string) (map[string]string, *sessions.ProxyToken,
 	return map[string]string{"ANTHROPIC_BASE_URL": address + "/anthropic"}, &sessions.ProxyToken{Harness: "claude-code", Variable: "ANTHROPIC_AUTH_TOKEN", Token: proxytoken.New()}, nil
 }
 
-// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7): each at the MCP proxy with a token of its own, fresh for each start, in an MCP configuration kept in the session's folder, which the command line names by its path alone; nothing for an entry that names none. A session in a container reaches none yet.
+// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7): each at the MCP proxy with a token of its own, fresh for each start, in an MCP configuration kept in the session's folder, which the command line names by its path alone; nothing for an entry that names none. A container sees that one file read-only at the same path, never the folder it is in, so a session cannot plant a link the trierarch would write through.
 func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) {
 	if len(entry.McpServers) == 0 {
 		return nil, nil, nil
-	}
-	if h.Homes != "" {
-		return nil, nil, errors.New("a session in a container is started with no MCP server yet")
 	}
 	address, ok := "", false
 	if h.ProxyURL != nil {
@@ -153,8 +150,7 @@ func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) 
 	if err != nil {
 		return nil, nil, err
 	}
-	path := hold.FilesOf(h.Sessions, entry.ShipID).McpConfig
-	return []string{"--mcp-config", path}, &sessions.Mcp{Access: mcpproxy.Access{Token: token, Servers: entry.McpServers}, Config: config}, nil
+	return []string{"--mcp-config", hold.FilesOf(h.Sessions, entry.ShipID).McpConfig}, &sessions.Mcp{Access: mcpproxy.Access{Token: token, Servers: entry.McpServers}, Config: config}, nil
 }
 
 // Launch starts the entry's session in its folder, on the login it is to start on: its first prompt on a first start, the wake otherwise, continuing the folder's conversation when Claude Code keeps one.

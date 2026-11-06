@@ -16,12 +16,15 @@ type aHost struct {
 	groups    []string
 	groupsErr error
 	isWritten bool
+	// isPastaMissing is a Podman whose info names no pasta.
+	isPastaMissing bool
 }
 
-func (h aHost) Mode(binary string) Mode   { return h.mode }
-func (h aHost) Groups() ([]string, error) { return h.groups, h.groupsErr }
-func (h aHost) IsModelTokenWritten() bool { return h.isWritten }
-func aRootlessHost() aHost                { return aHost{mode: Rootless, groups: []string{"user"}, isWritten: true} }
+func (h aHost) Mode(binary string) Mode           { return h.mode }
+func (h aHost) Groups() ([]string, error)         { return h.groups, h.groupsErr }
+func (h aHost) IsModelTokenWritten() bool         { return h.isWritten }
+func (h aHost) IsPastaMissing(binary string) bool { return h.isPastaMissing }
+func aRootlessHost() aHost                        { return aHost{mode: Rootless, groups: []string{"user"}, isWritten: true} }
 func withHarnesses(names ...string) config.Configuration {
 	harnesses := map[string]config.Harness{}
 	for _, name := range names {
@@ -44,6 +47,7 @@ func TestCheckRefusesWhatCannotHoldASessionToItsShip(t *testing.T) {
 		{"a rootful runtime", withHarnesses("claude-code"), aHost{mode: Rootful, groups: []string{"user"}, isWritten: true}, []string{"podman runs rootful: the container runtime runs rootless only, as the user that runs the trierarch"}},
 		{"a runtime that does not answer", withHarnesses("claude-code"), aHost{mode: Missing, groups: []string{"user"}, isWritten: true}, []string{"podman does not answer: install a rootless podman, or name the runtime binary in runtime.binary"}},
 		{"a user in the docker group", withHarnesses("claude-code"), aHost{mode: Rootless, groups: []string{"user", "docker"}, isWritten: true}, []string{"the user that runs the trierarch is in the docker group, which is root on the machine: take the user out of it"}},
+		{"a Podman without pasta", withHarnesses("claude-code"), aHost{mode: Rootless, groups: []string{"user"}, isWritten: true, isPastaMissing: true}, []string{"podman has no pasta: install passt, which gives a container the trierarch's proxy port and nothing else of the host"}},
 		{"Codex configured", withHarnesses("claude-code", "codex"), aRootlessHost(), []string{"codex does not run in a container yet: the container runtime offers claude-code only, so remove codex"}},
 		{"no model token", withHarnesses("claude-code"), aHost{mode: Rootless, groups: []string{"user"}}, []string{"the model token file " + modelToken + " is missing or empty: write the token claude setup-token gives into it, readable by its owner only"}},
 		{
@@ -125,6 +129,24 @@ func TestModeOfReadsPodmansAndDockersInfo(t *testing.T) {
 	for _, test := range tests {
 		if got := modeOfInfo(test.info); got != test.want {
 			t.Errorf("modeOfInfo(%s) = %v, want %v", test.info, got, test.want)
+		}
+	}
+}
+
+func TestPastaIsMissingOnlyFromAPodmanWhoseInfoNamesNone(t *testing.T) {
+	tests := []struct {
+		info string
+		want bool
+	}{
+		{`{"host":{"security":{"rootless":true},"pasta":{"executable":"/usr/bin/pasta"}}}`, false},
+		{`{"host":{"security":{"rootless":true},"pasta":{"executable":""}}}`, true},
+		{`{"host":{"security":{"rootless":true}}}`, true},
+		{`{"SecurityOptions":["name=rootless"]}`, false},
+		{`not json`, false},
+	}
+	for _, test := range tests {
+		if got := isPastaMissingOfInfo(test.info); got != test.want {
+			t.Errorf("isPastaMissingOfInfo(%s) = %v, want %v", test.info, got, test.want)
 		}
 	}
 }

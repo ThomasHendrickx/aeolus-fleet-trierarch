@@ -51,6 +51,12 @@ describe('checking the session runtime (decision 0039)', () => {
     await expect(check(inContainers())).resolves.toEqual(['podman does not answer: install a rootless podman, or name the runtime binary in runtime.binary']);
   });
 
+  it("refuses a Podman without pasta, which gives a container the trierarch's proxy port and nothing else of the host", async () => {
+    host.isPastaGone = true;
+
+    await expect(check(inContainers())).resolves.toEqual(["podman has no pasta: install passt, which gives a container the trierarch's proxy port and nothing else of the host"]);
+  });
+
   it('refuses a user in the docker group, which is root on the machine', async () => {
     host.groups = ['thomas', 'sudo', 'docker'];
 

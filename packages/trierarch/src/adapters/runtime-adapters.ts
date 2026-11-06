@@ -35,7 +35,7 @@ export interface RuntimeAdapters {
   readonly workspace: WorkspacePort;
   /** The homes of the ships, one each, for sessions in containers; none on the host, where every session shares the user's. */
   readonly shipHomes?: { homes: string; managedSettings: string };
-  /** Where a session reaches the model proxy the trierarch reaches at the url (headless H16): there on the host, at Podman's host address in a container. */
+  /** Where a session reaches the model proxy the trierarch reaches at the url (headless H16): there on the host, on its own loopback in a container, where only the proxy's port is forwarded. */
   readonly modelProxyUrlOf: (url: string) => string;
 }
 
@@ -52,6 +52,8 @@ export function runtimeAdaptersOf(at: {
   version: string;
   launch: readonly string[];
   managedSettings: string;
+  /** Where the model proxy listens on the host's loopback; none while it is not running. */
+  proxyUrl: () => Promise<string | undefined>;
   /** The trusted repositories a workspace clones first when the machine does not have them (aeolus-fleet#384). */
   clones?: TrustedClones;
   /** The trierarch program that starts each hold; the one running now unless a test runs another. */
@@ -78,6 +80,7 @@ export function runtimeAdaptersOf(at: {
       version,
       platform: process.platform,
       launch,
+      proxyUrl: at.proxyUrl,
     }),
     // The container mounts the folder at the path it is given, where the plugin inside keys it by `pwd -P` as the host's does: one path for both, the real one.
     workspace: { ...clones, prepare: async (at) => ({ folder: await realpath((await clones.prepare(at)).folder) }) },

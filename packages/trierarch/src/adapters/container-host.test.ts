@@ -54,6 +54,24 @@ describe('the machine as the container runtime checks read it', () => {
     await expect(host.runtimeMode('docker')).resolves.toBe('rootful');
   });
 
+  it('reads pasta as missing from a Podman whose info names none', async () => {
+    const host = createContainerHost({ modelTokenFile, run: answering({ podman: info({ host: { security: { rootless: true }, pasta: { executable: '' } } }) }) });
+
+    await expect(host.isPastaMissing('podman')).resolves.toBe(true);
+  });
+
+  it('reads pasta as there from a Podman whose info names its executable', async () => {
+    const host = createContainerHost({ modelTokenFile, run: answering({ podman: info({ host: { security: { rootless: true }, pasta: { executable: '/usr/bin/pasta' } } }) }) });
+
+    await expect(host.isPastaMissing('podman')).resolves.toBe(false);
+  });
+
+  it('reads pasta as not missing from docker, whose info says nothing of it', async () => {
+    const host = createContainerHost({ modelTokenFile, run: answering({ docker: info({ SecurityOptions: ['name=rootless'] }) }) });
+
+    await expect(host.isPastaMissing('docker')).resolves.toBe(false);
+  });
+
   it('reads a runtime whose info fails as missing', async () => {
     const host = createContainerHost({ modelTokenFile, run: answering({ podman: { status: 125, stdout: '', stderr: 'cannot connect' } }) });
 

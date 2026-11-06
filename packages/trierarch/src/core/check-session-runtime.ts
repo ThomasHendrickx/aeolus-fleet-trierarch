@@ -16,7 +16,8 @@ const DOCKER_GROUP = 'docker';
 /**
  * Use case: the container runtime holds a session to its own ship only when
  * the runtime is rootless and the user is no docker group member, both root
- * on the machine otherwise (decision 0039). A container session runs
+ * on the machine otherwise (decision 0039), and a Podman has pasta, which
+ * gives a container the trierarch's proxy port and nothing else of the host. A container session runs
  * Claude Code only, with the machine's model token. Sessions on the host need
  * none of it, so nothing is asked of the machine. No session the trierarch
  * runs has a terminal, so none has Remote Control, on any runtime (headless
@@ -38,6 +39,8 @@ export function createCheckSessionRuntime(deps: { host: ContainerHostPort; model
       refusals.push(`${runtime.binary} runs rootful: the container runtime runs rootless only, as the user that runs the trierarch`);
     } else if (mode === 'missing') {
       refusals.push(`${runtime.binary} does not answer: install a rootless podman, or name the runtime binary in runtime.binary`);
+    } else if (await deps.host.isPastaMissing(runtime.binary)) {
+      refusals.push(`${runtime.binary} has no pasta: install passt, which gives a container the trierarch's proxy port and nothing else of the host`);
     }
     if ((await deps.host.userGroups()).includes(DOCKER_GROUP)) {
       refusals.push('the user that runs the trierarch is in the docker group, which is root on the machine: take the user out of it');
