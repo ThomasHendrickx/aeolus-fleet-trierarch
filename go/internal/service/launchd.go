@@ -156,16 +156,15 @@ func (l Launchd) Stop() error {
 	return l.bootout()
 }
 
-// Restart kills a loaded agent's process for launchd to start it again, and loads an unloaded one.
+// Restart unloads the agent and loads its file again, so the agent runs what the file names now: kickstart -k restarts the definition launchd already has loaded, not a rewritten file.
 func (l Launchd) Restart() error {
 	if !l.isInstalled() {
 		return errNotInstalled
 	}
-	if !l.isLoaded() {
-		return l.bootstrap()
+	if err := l.bootout(); err != nil {
+		return err
 	}
-	_, err := l.Exec("launchctl", "kickstart", "-k", l.target())
-	return err
+	return l.bootstrap()
 }
 
 // Uninstall unloads the agent and removes its file.

@@ -253,19 +253,44 @@ func TestStartLoadsAnUnloadedAgentAndKicksALoadedOne(t *testing.T) {
 	}
 }
 
-func TestRestartKillsTheAgentAndStartsItAgain(t *testing.T) {
+func TestRestartAfterARewriteLoadsTheNewFileAgain(t *testing.T) {
 	launchctl := &aLaunchctl{}
 	agent := installed(t, launchctl)
 	launchctl.answers["launchctl print "+target] = "state = running"
-	launchctl.answers["launchctl kickstart -k "+target] = ""
+	launchctl.answers["launchctl bootout "+target] = ""
+	launchctl.answers["launchctl bootstrap gui/501 "+plistOf(agent)] = ""
+	launchctl.onSleep = func(int) { delete(launchctl.answers, "launchctl print "+target) }
+	agent.Program = "/Users/me/.local/bin/aeolus-trierarch-new"
+
+	if err := agent.Rewrite(); err != nil {
+		t.Fatal(err)
+	}
+	if err := agent.Restart(); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"launchctl bootout " + target, "launchctl print " + target, "launchctl print " + target, "launchctl bootstrap gui/501 " + plistOf(agent)}
+	if !slices.Equal(launchctl.calls, want) {
+		t.Errorf("ran %q, want %q", launchctl.calls, want)
+	}
+	plist, _ := os.ReadFile(plistOf(agent))
+	if !strings.Contains(string(plist), "<string>/Users/me/.local/bin/aeolus-trierarch-new</string>") {
+		t.Errorf("the file bootstrap loads does not name the new program:\n%s", plist)
+	}
+}
+
+func TestRestartLoadsAnUnloadedAgent(t *testing.T) {
+	launchctl := &aLaunchctl{}
+	agent := installed(t, launchctl)
+	launchctl.answers["launchctl bootstrap gui/501 "+plistOf(agent)] = ""
 
 	if err := agent.Restart(); err != nil {
 		t.Fatal(err)
 	}
 
-	want := []string{"launchctl print " + target, "launchctl kickstart -k " + target}
-	if !slices.Equal(launchctl.calls, want) {
-		t.Errorf("ran %q, want %q", launchctl.calls, want)
+	last := launchctl.calls[len(launchctl.calls)-1]
+	if last != "launchctl bootstrap gui/501 "+plistOf(agent) {
+		t.Errorf("ran %q, want it to end with bootstrap", launchctl.calls)
 	}
 }
 
