@@ -93,9 +93,9 @@ export function createGitWorkspace(options: { configuration: TrierarchConfigurat
       }
       return { folder };
     },
-    isClean: async (folder) => (await gitIn(folder, ['status', '--porcelain'])).trim() === '',
+    isClean: async (folder) => (await gitIn(folder, ['status', '--porcelain', '--ignore-submodules=all'])).trim() === '',
     unsaved: async (folder) => {
-      const changes = await gitIn(folder, ['status', '--porcelain']);
+      const changes = await gitIn(folder, ['status', '--porcelain', '--ignore-submodules=all']);
       const commits = await gitIn(folder, ['log', '--format=commit %h %s', 'HEAD', '--not', '--branches', '--tags', '--remotes']);
       return [...changes.split('\n'), ...commits.split('\n')].filter((line) => line !== '');
     },
