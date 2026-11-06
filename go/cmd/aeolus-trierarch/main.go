@@ -42,6 +42,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/logfile"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/modelproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
@@ -129,6 +130,9 @@ func main() {
 		},
 		Trusted: func(at paths.Paths, configuration config.Configuration) receiving.Keeper {
 			return trustedRepositories(at, configuration, home)
+		},
+		McpServers: func(at paths.Paths) receiving.ServerKeeper {
+			return mcpServerList(at)
 		},
 		Sessions: func(at paths.Paths) cli.Sessions {
 			// A configuration that cannot be read runs no session in a container.
@@ -335,6 +339,24 @@ func trustedRepositories(at paths.Paths, configuration config.Configuration, hom
 	return held
 }
 
+// heldServers is the MCP servers this process holds, loaded once and shared by the receiving loop that accepts a list and the passes that offer, report and crew from it.
+var (
+	heldServers     *mcpservers.File
+	holdServersOnce sync.Once
+)
+
+// mcpServerList is the MCP servers the trierarch plugin sent last.
+func mcpServerList(at paths.Paths) *mcpservers.File {
+	holdServersOnce.Do(func() {
+		heldServers = &mcpservers.File{Path: at.McpServers}
+		heldServers.Load()
+	})
+	return heldServers
+}
+
+// harnessesThatAddMcpServers are the harnesses a session can be started with crew-time MCP servers (decision M4). None yet: each is added with the slice that starts it so (Claude Code on the host first), and until then no harness offers a server, so a request naming one is given back.
+var harnessesThatAddMcpServers = map[string]bool{}
+
 // modelProxy is the model proxy on this machine (headless H16), started as a hold is.
 func modelProxy(at paths.Paths, program string) modelproxy.Runtime {
 	return modelproxy.Runtime{Folder: at.Proxy, Sessions: at.Sessions, Keys: at.Keys, Program: []string{program}, Version: cli.Version, Launch: sessions.Launch(runtime.GOOS, os.Getenv("INVOCATION_ID"), sessions.SystemdVersion())}
@@ -485,11 +507,18 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		return ""
 	}}
 	ask := &trusted.Ask{Fleet: client, PluginShipID: kept.PluginShipID, Log: logLine}
+	askServers := &mcpservers.Ask{Fleet: client, PluginShipID: kept.PluginShipID, Log: logLine}
 	running := sessionRuntime(at, program, configuration.Runtime)
 	proxy := modelProxy(at, program)
 	harnesses, offeredHarnesses, err := harnessesOf(configuration, at, env, home, running, proxy, offers)
 	if err != nil {
 		return nil, err
+	}
+
+	servers := mcpServerList(at)
+	// The MCP servers each harness offers, read afresh: the list changes while the trierarch runs.
+	offeredServers := func() map[string][]string {
+		return mcpservers.OfferedBy(servers.Current(), offeredHarnesses, harnessesThatAddMcpServers)
 	}
 	root := configuration.WorktreeRoot
 	if root == "" {
@@ -569,6 +598,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		offered, _ := offers.current()
 		return offered.Harnesses
 	}
+	pass.McpServers = offeredServers
 	pass.Trusted = func() map[string]reconciler.Trust {
 		offered, _ := offers.current()
 		trusted := map[string]reconciler.Trust{}
@@ -597,12 +627,13 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Input: func() selfreport.Input {
 			offered, detected := offers.current()
 			offered = withTrusted(offered)
-			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Trusted: trust.Of(offered, trustReaders), Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, Now: time.Now()}
+			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Trusted: trust.Of(offered, trustReaders), McpServers: offeredServers(), Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, Now: time.Now()}
 		},
 	}
 	// Each pass ends with the trierarch's own report: the first at start, then only when it changed.
 	return func(isKeyCutOff bool) error {
 		ask.Once()
+		askServers.Once()
 		current := pass
 		current.Workspace, current.Repositories, current.Folders = placesOf()
 		if err := current.Run(); err != nil {

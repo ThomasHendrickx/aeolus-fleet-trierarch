@@ -81,8 +81,10 @@ type Machine struct {
 	// OwnShip is the trierarch's own ship at the fleet, which run receives for beside the passes; none when nil.
 	OwnShip func(kept crew.File) receiving.Ship
 	// Trusted keeps the trusted repositories the trierarch plugin's ship sends (aeolus-fleet#384), with the configuration run read; none when nil.
-	Trusted  func(at paths.Paths, configuration config.Configuration) receiving.Keeper
-	Sessions func(at paths.Paths) Sessions
+	Trusted func(at paths.Paths, configuration config.Configuration) receiving.Keeper
+	// McpServers keeps the MCP servers the trierarch plugin's ship sends; none when nil.
+	McpServers func(at paths.Paths) receiving.ServerKeeper
+	Sessions   func(at paths.Paths) Sessions
 	// Log writes a line to the trierarch's log.
 	Log func(line string)
 	// ReadKey is the API key the operator types, not shown, or pipes in.
@@ -445,6 +447,9 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 		loop := receiving.Loop{Ship: machine.OwnShip(kept), Log: machine.Log, Interval: machine.PassEvery, KeyWaitMax: KeyWaitMax, Pause: pause, PluginShipID: kept.PluginShipID, OnKeyCutOff: isKeyCutOff.Store}
 		if machine.Trusted != nil {
 			loop.Trusted = machine.Trusted(at, configuration)
+		}
+		if machine.McpServers != nil {
+			loop.McpServers = machine.McpServers(at)
 		}
 		loop.Run(stopped)
 	}()

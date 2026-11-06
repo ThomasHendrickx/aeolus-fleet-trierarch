@@ -176,6 +176,8 @@ type Pass struct {
 	VersionOf func(harness string) string
 	// Offers are, by harness, each option it offers now and its value names in order, read each pass: a model a session refused is offered no more (#382).
 	Offers func() map[string]map[string][]string
+	// McpServers are, by harness, the names of the MCP servers it offers now, read each pass; none offers none.
+	McpServers func() map[string][]string
 	// Configuration is each offered harness as configured and detected, read each pass: the flags a session launches with.
 	Configuration func() map[string]config.Harness
 	// Trusted is, by harness, what it trusts, read each pass from its own files (#381, #403).
@@ -186,6 +188,14 @@ type Pass struct {
 	SendReleasedUsage func(entry reconciler.Entry) error
 	// Load reads the machine's load, at most once a minute; none reads nothing (#400).
 	Load *machineload.Reader
+}
+
+// mcpServers are the MCP servers each harness offers now; none without a source.
+func (p Pass) mcpServers() map[string][]string {
+	if p.McpServers == nil {
+		return nil
+	}
+	return p.McpServers()
 }
 
 func (p Pass) loginOf(entry reconciler.Entry) string {
@@ -1088,7 +1098,7 @@ func (p Pass) reconcile(state reconciler.State) (reconciler.State, []reconciler.
 	}
 	now := p.Now()
 	marksLaunches, missingPlugins, notOffered := p.launchMarks()
-	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Clears: clears, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers(), Configuration: p.Configuration(), Trusted: p.Trusted(), ConfigurationFile: p.ConfigurationFile, MarksLaunches: marksLaunches, MissingPlugins: missingPlugins, NotOffered: notOffered})
+	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Clears: clears, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers(), McpServers: p.mcpServers(), Configuration: p.Configuration(), Trusted: p.Trusted(), ConfigurationFile: p.ConfigurationFile, MarksLaunches: marksLaunches, MissingPlugins: missingPlugins, NotOffered: notOffered})
 	next.PassFailure = nil
 	next.MissingPlugins, next.NotOffered = notOfferedState(missingPlugins, notOffered)
 	if err := p.Store.Save(next); err != nil {
