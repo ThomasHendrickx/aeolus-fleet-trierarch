@@ -3,6 +3,7 @@ package workspace
 import (
 	"bytes"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +18,7 @@ import (
 // command for a transport, pager, editor or credential the folder's config names, and takes no optional lock. They go through
 // inFolder, so no call can leave one of these in force. The machine's own config (global and system) applies as before. Git is
 // pointed at no folder but the ship's own: a folder whose config sets core.worktree is not read, and a clone is read only
-// through its own `.git` folder (inClone). A folder that is not read is refused with why (RefusedError), so what it holds is not
+// through its own `.git` folder, with its own objects alone (inClone). A folder that is not read is refused with why (RefusedError), so what it holds is not
 // known.
 
 // RefusedError is a folder the host does not read, with why.
@@ -129,8 +130,8 @@ func inFolder(folder string, args ...string) (*exec.Cmd, error) {
 }
 
 // inClone is git run in a ship's clone as in its folder, through the clone's own `.git` folder and with the clone as its work tree,
-// whatever the clone says: a `.git` that is a file or a link, or that names another folder's in its commondir, would point git at
-// another folder, so such a clone is not read.
+// whatever the clone says: a `.git` that is a file or a link, that names another folder's in its commondir, that holds a link, or
+// that names another repository's objects in its alternates, would point git at another folder, so such a clone is not read.
 func inClone(clone string, args ...string) (*exec.Cmd, error) {
 	gitFolder := filepath.Join(clone, ".git")
 	if found, err := os.Lstat(gitFolder); err != nil || !found.IsDir() {
@@ -139,7 +140,40 @@ func inClone(clone string, args ...string) (*exec.Cmd, error) {
 	if _, err := os.Lstat(filepath.Join(gitFolder, "commondir")); err == nil {
 		return nil, &RefusedError{clone, "its .git names another git folder in its commondir"}
 	}
+	link, err := linkIn(gitFolder)
+	if err != nil {
+		return nil, err
+	}
+	if link != "" {
+		return nil, &RefusedError{clone, "its .git holds a link: " + link}
+	}
+	if _, err := os.Lstat(filepath.Join(gitFolder, "objects", "info", "alternates")); err == nil {
+		return nil, &RefusedError{clone, "its .git names another repository's objects in objects/info/alternates"}
+	}
 	return located(clone, []string{"GIT_DIR=" + gitFolder, "GIT_WORK_TREE=" + clone}, args)
+}
+
+// linkIn is the first link in the git folder, by its path in it, or none: none is read through, as it would lead git out of it.
+func linkIn(gitFolder string) (string, error) {
+	link := ""
+	// WalkDir follows no link: one to a folder is a link it does not enter.
+	err := filepath.WalkDir(gitFolder, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.Type()&fs.ModeSymlink != 0 {
+			link, err = filepath.Rel(gitFolder, path)
+			if err != nil {
+				return err
+			}
+			return fs.SkipAll
+		}
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("list %s: %w", gitFolder, err)
+	}
+	return link, nil
 }
 
 // located is git run in the folder, with where it finds its repository given in the environment when it is.
