@@ -92,6 +92,16 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
     expect(folder).toBe(join(home, 'real-root', 'demo', 'scout'));
   });
 
+  it('stops the processes in a folder on the host, and in containers leaves a folder a container works in', async () => {
+    const empty = join(home, 'empty');
+    mkdirSync(empty);
+
+    expect({ host: await adaptersOf().folderProcesses.stopIn(empty), container: await adaptersOf({ ...CONTAINER, binary }).folderProcesses.stopIn(empty).catch((error: unknown) => String(error)) }).toEqual({
+      host: 0,
+      container: `Error: A container works in ${empty}, so it is left for the next pass: trierarch-${shipId}`,
+    });
+  });
+
   it("gives sessions in containers a home of each ship's own under the trierarch's homes", () => {
     expect(adaptersOf({ ...CONTAINER, binary }).shipHomes).toEqual({ homes: paths.homes, managedSettings: join(home, 'managed') });
   });
