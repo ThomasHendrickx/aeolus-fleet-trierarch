@@ -319,3 +319,16 @@ func TestTheHostReadsAsRefusedACloneWhoseGitCallDoesNotEndWithinItsTimeLimit(t *
 		t.Errorf("Unsaved(%s) with a named pipe as its .gitignore = %q, %v, want %q", folder, unsaved, err, want)
 	}
 }
+
+func TestTheHostReadsAsRefusedACloneWithAConfigGitCannotRead(t *testing.T) {
+	repository, root := aRepository(t)
+	places := clonePlaces(repository, root, t.TempDir())
+	folder := prepared(t, places, scoutInAeolusFleet, "scout")
+	writeIn(t, filepath.Join(folder, ".git"), "config", "[core]\n\trepositoryformatversion = 0\n=garbage\n")
+
+	unsaved, err := places.Unsaved(folder)
+
+	if want := []string{"refused, git config failed: fatal: bad config line 3 in file " + filepath.Join(folder, ".git", "config")}; err != nil || !slices.Equal(unsaved, want) {
+		t.Errorf("Unsaved(%s) with a config git cannot read = %q, %v, want %q", folder, unsaved, err, want)
+	}
+}
