@@ -23,19 +23,21 @@ const HARMLESS: readonly Override[] = [
 ];
 
 /** The config variables that name a program git runs, by section, then by variable; a section of three-part names (`filter.<driver>.clean`) holds the variables of any subsection. */
-const NAMES_A_PROGRAM: Readonly<Record<string, readonly string[]>> = {
-  core: ['sshcommand', 'pager', 'editor', 'askpass', 'gitproxy', 'alternaterefscommand'],
-  sequence: ['editor'],
-  diff: ['external', 'command', 'textconv'],
-  filter: ['clean', 'smudge', 'process', 'required'],
-  merge: ['driver'],
-  gpg: ['program'],
-  credential: ['helper'],
-  interactive: ['difffilter'],
-  remote: ['uploadpack', 'receivepack'],
-  mergetool: ['cmd'],
-  difftool: ['cmd'],
-};
+const NAMES_A_PROGRAM: ReadonlyMap<string, readonly string[]> = new Map(
+  Object.entries({
+    core: ['sshcommand', 'pager', 'editor', 'askpass', 'gitproxy', 'alternaterefscommand'],
+    sequence: ['editor'],
+    diff: ['external', 'command', 'textconv'],
+    filter: ['clean', 'smudge', 'process', 'required'],
+    merge: ['driver'],
+    gpg: ['program'],
+    credential: ['helper'],
+    interactive: ['difffilter'],
+    remote: ['uploadpack', 'receivepack'],
+    mergetool: ['cmd'],
+    difftool: ['cmd'],
+  }),
+);
 
 /** The folder's own config: its `.git/config`, what it includes, and its worktree's config. */
 const FOLDER_SCOPES: readonly string[] = ['local', 'worktree'];
@@ -44,7 +46,7 @@ const FOLDER_SCOPES: readonly string[] = ['local', 'worktree'];
 function isProgram(name: string): boolean {
   const section = name.slice(0, name.indexOf('.'));
   const variable = name.slice(name.lastIndexOf('.') + 1);
-  return section === 'pager' || (NAMES_A_PROGRAM[section]?.includes(variable) ?? false);
+  return section === 'pager' || (NAMES_A_PROGRAM.get(section)?.includes(variable) ?? false);
 }
 
 /** The value that turns the variable off: a filter that is not required, no pager, else no program. */
@@ -62,7 +64,8 @@ async function overridesIn(folder: string): Promise<readonly Override[]> {
   const fields = listed.stdout.split('\0');
   const overrides = [...HARMLESS];
   for (let i = 0; i + 1 < fields.length; i += 2) {
-    const [scope = '', name = ''] = [fields[i], fields[i + 1]];
+    const scope = fields[i] ?? '';
+    const name = fields[i + 1] ?? '';
     if (FOLDER_SCOPES.includes(scope) && isProgram(name)) {
       overrides.push(neutralOf(name));
     }
