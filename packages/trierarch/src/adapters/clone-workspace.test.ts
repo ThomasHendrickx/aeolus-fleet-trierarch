@@ -1,6 +1,6 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -254,5 +254,57 @@ describe('per-ship clones of a trusted repository the machine does not have (aeo
     await trustedWorkspace({ isListed: false }).remove(made);
 
     expect(existsSync(made)).toBe(false);
+  });
+});
+
+describe("the host's git calls in a session's clone, with a program named in the clone's own config", () => {
+  /** A program that leaves a marker file when anything runs it, under every hook's name in its folder. */
+  function aMarkingScript(): { program: string; marker: string } {
+    const hooks = join(folder, 'hooks');
+    mkdirSync(hooks);
+    const marker = join(folder, 'ran');
+    const program = join(hooks, 'post-index-change');
+    writeFileSync(program, `#!/bin/sh\ntouch '${marker}'\ncat >/dev/null 2>&1\nexit 0\n`);
+    chmodSync(program, 0o755);
+    for (const hook of ['pre-commit', 'post-checkout', 'reference-transaction', 'fsmonitor-watchman']) {
+      symlinkSync(program, join(hooks, hook));
+    }
+    return { program, marker };
+  }
+
+  const plants: readonly { name: string; plant: (clone: string, program: string) => Promise<unknown> }[] = [
+    { name: 'core.fsmonitor', plant: (clone, program) => git(['-C', clone, 'config', 'core.fsmonitor', program]) },
+    { name: 'core.hooksPath with a hook', plant: (clone, program) => git(['-C', clone, 'config', 'core.hooksPath', dirname(program)]) },
+    {
+      name: 'a filter driver',
+      plant: async (clone, program) => {
+        await git(['-C', clone, 'config', 'filter.planted.clean', program]);
+        await git(['-C', clone, 'config', 'filter.planted.smudge', program]);
+        writeFileSync(join(clone, '.gitattributes'), '* filter=planted\n');
+      },
+    },
+    { name: 'diff.external', plant: (clone, program) => git(['-C', clone, 'config', 'diff.external', program]) },
+    {
+      name: 'core.sshCommand',
+      plant: async (clone, program) => {
+        await git(['-C', clone, 'config', 'core.sshCommand', program]);
+        await git(['-C', clone, 'remote', 'set-url', 'origin', 'ssh://git@example.com/aeolus-fleet.git']);
+      },
+    },
+  ];
+
+  it.each(plants)('runs nothing $name names', async ({ plant }) => {
+    await withUpstream();
+    const { folder: made } = await workspace().prepare(scout);
+    const { program, marker } = aMarkingScript();
+    await plant(made, program);
+    // The same size as before, so git must read the file through its filter to tell whether it changed.
+    writeFileSync(join(made, 'README.md'), 'README.MD\n');
+
+    const isClean = await workspace().isClean(made);
+    const unsaved = await workspace().unsaved(made);
+    await workspace().prepare(scout);
+
+    expect({ isClean, isUnsaved: unsaved.length > 0, hasRun: existsSync(marker) }).toEqual({ isClean: false, isUnsaved: true, hasRun: false });
   });
 });
