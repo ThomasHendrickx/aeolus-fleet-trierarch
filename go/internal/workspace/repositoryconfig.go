@@ -6,19 +6,20 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
 
 // A ship's folder is its session's to write, `.git` and its config included, and with sessions in containers a session runs
 // apart from the host (docs/trierarch.md, "Session runtime"). So the host's git calls in a ship's folder ignore the folder's own
-// config where it names a program for git to run: git runs no hook, no fsmonitor, no filter, diff or merge driver, and no
+// config where it names a program for git to run: git runs no hook, in a folder or in the config, no fsmonitor, no filter, diff or merge driver, and no
 // command for a transport, pager, editor or credential the folder's config names, and takes no optional lock. They go through
 // inFolder, so no call can leave one of these in force. The machine's own config (global and system) applies as before. Git is
 // pointed at no folder but the ship's own: a folder whose config sets core.worktree is not read, and a clone is read only
 // through its own `.git` folder (inClone).
 
-// harmless are the values the host's git calls take in a ship's folder whatever its config says: no hooks and no fsmonitor.
+// harmless are the values the host's git calls take in a ship's folder whatever its config says: no hooks in a folder and no fsmonitor.
 var harmless = []override{{"core.fsmonitor", "false"}, {"core.hooksPath", "/dev/null"}}
 
 // namesAProgram are the config variables that name a program git runs, by section, then by variable; a section of three-part
@@ -56,6 +57,19 @@ func neutralOf(name string) override {
 	return override{name, ""}
 }
 
+// hookOffOf is the hook a variable of a hook in the config (`hook.<name>.command`) belongs to, turned off and bound to no event; none
+// for another variable.
+func hookOffOf(name string) []override {
+	first := strings.Index(name, ".")
+	last := strings.LastIndex(name, ".")
+	if first < 0 || name[:first] != "hook" || last == first {
+		return nil
+	}
+	hook := name[:last]
+	// An empty event resets the hook's events.
+	return []override{{hook + ".enabled", "false"}, {hook + ".event", ""}, {hook + ".command", ""}}
+}
+
 // isProgram says whether the variable, as git lists it (section and variable in lower case), names a program git runs.
 func isProgram(name string) bool {
 	first := strings.Index(name, ".")
@@ -88,6 +102,11 @@ func overridesIn(folder string, located []string) ([]override, error) {
 		}
 		if isProgram(name) {
 			overrides = append(overrides, neutralOf(name))
+		}
+		for _, off := range hookOffOf(name) {
+			if !slices.Contains(overrides, off) {
+				overrides = append(overrides, off)
+			}
 		}
 	}
 	return overrides, nil
