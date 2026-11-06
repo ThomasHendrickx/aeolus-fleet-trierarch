@@ -1,6 +1,7 @@
 package claudecode
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -251,6 +252,96 @@ func TestASessionOnAnAPIKeyDoesNotStartBeforeTheProxyListens(t *testing.T) {
 
 	if err == nil || len(running.started) != 0 {
 		t.Fatalf("Launch = %v, started %d, want an error and nothing started", err, len(running.started))
+	}
+}
+
+// mcpConfig is a session's MCP configuration as Claude Code reads it.
+type mcpConfig struct {
+	McpServers map[string]struct {
+		Type    string            `json:"type"`
+		URL     string            `json:"url"`
+		Headers map[string]string `json:"headers"`
+	} `json:"mcpServers"`
+}
+
+func TestASessionNamingMCPServersStartsWithEachAtTheMCPProxyWithAFreshTokenOfItsOwn(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	harness.ProxyURL = func() (string, bool) { return "http://127.0.0.1:41000", true }
+	harness.Sessions = t.TempDir()
+	entry := anEntry(t)
+	entry.McpServers = []string{"company-graph", "notes"}
+
+	for range 2 {
+		if err := harness.Launch(entry, false, "launch-1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	first, second := running.started[0], running.started[1]
+	path := filepath.Join(harness.Sessions, scout, "mcp-config.json")
+	if at := slices.Index(first.Command, "--mcp-config"); at < 0 || at+1 >= len(first.Command) || first.Command[at+1] != path {
+		t.Fatalf("command %q, want --mcp-config %s", first.Command, path)
+	}
+	if first.Mcp == nil || first.Mcp.Access.Token == "" || !slices.Equal(first.Mcp.Access.Servers, []string{"company-graph", "notes"}) {
+		t.Fatalf("started with MCP %+v, want a token for company-graph and notes", first.Mcp)
+	}
+	if second.Mcp == nil || second.Mcp.Access.Token == first.Mcp.Access.Token {
+		t.Fatal("the second start has the first one's MCP token, want a fresh one")
+	}
+	var config mcpConfig
+	if err := json.Unmarshal(first.Mcp.Config, &config); err != nil {
+		t.Fatalf("the MCP configuration %s: %v", first.Mcp.Config, err)
+	}
+	if len(config.McpServers) != 2 {
+		t.Fatalf("the MCP configuration names %v, want company-graph and notes", config.McpServers)
+	}
+	for _, name := range []string{"company-graph", "notes"} {
+		server := config.McpServers[name]
+		if want := "http://127.0.0.1:41000/mcp/" + scout + "/" + name; server.Type != "http" || server.URL != want || server.Headers["Authorization"] != "Bearer "+first.Mcp.Access.Token {
+			t.Errorf("the MCP configuration's %s = %+v, want http at %s with the session's token", name, server, want)
+		}
+	}
+	if line := strings.Join(first.Command, " "); strings.Contains(line, first.Mcp.Access.Token) || strings.Contains(line, "/mcp/") {
+		t.Fatalf("the command line %q holds the token or a server's URL", line)
+	}
+}
+
+func TestASessionNamingNoMCPServerStartsWithoutAnMCPConfiguration(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	harness.ProxyURL = func() (string, bool) { return "http://127.0.0.1:41000", true }
+	harness.Sessions = t.TempDir()
+
+	if err := harness.Launch(anEntry(t), true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if slices.Contains(running.started[0].Command, "--mcp-config") || running.started[0].Mcp != nil {
+		t.Fatalf("started %+v, want no MCP configuration", running.started[0])
+	}
+}
+
+func TestASessionNamingMCPServersDoesNotStartBeforeTheProxyListensOrInAContainer(t *testing.T) {
+	cases := map[string]func(harness *Harness){
+		"before the proxy listens": func(harness *Harness) { harness.ProxyURL = func() (string, bool) { return "", false } },
+		"in a container": func(harness *Harness) {
+			harness.ProxyURL = func() (string, bool) { return "http://host.containers.internal:41000", true }
+			harness.Homes = t.TempDir()
+		},
+	}
+	for name, setUp := range cases {
+		t.Run(name, func(t *testing.T) {
+			harness, running, _ := aHarness(t)
+			harness.Sessions = t.TempDir()
+			setUp(&harness)
+			entry := anEntry(t)
+			entry.McpServers = []string{"company-graph"}
+
+			err := harness.Launch(entry, true, "launch-1")
+
+			if err == nil || len(running.started) != 0 {
+				t.Fatalf("Launch = %v, started %d, want an error and nothing started", err, len(running.started))
+			}
+		})
 	}
 }
 
