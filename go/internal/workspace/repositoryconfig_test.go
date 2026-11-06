@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
@@ -134,6 +135,14 @@ func TestTheHostsGitCallsInASessionsCloneIgnoreTheClonesOwnConfig(t *testing.T) 
 	}
 }
 
+// aPipe is a named pipe at the path: git reading it waits for a writer that never comes.
+func aPipe(t *testing.T, path string) {
+	t.Helper()
+	if err := syscall.Mkfifo(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // anotherRepository is another repository on the host, with a change of its own, where a clone's git is pointed.
 func anotherRepository(t *testing.T) string {
 	t.Helper()
@@ -184,6 +193,34 @@ func TestTheHostReadsAClonesOnlyThroughItsOwnGitFolder(t *testing.T) {
 			gitIn(t, "-C", clone, "config", name, filepath.Join(other, "program"))
 		}})
 	}
+	for _, inGit := range []string{"HEAD", "config", "packed-refs"} {
+		pointings = append(pointings, struct {
+			name   string
+			reason string
+			point  func(t *testing.T, clone string, other string)
+		}{"a named pipe as its .git's " + inGit, "its .git holds a special file: " + inGit, func(t *testing.T, clone string, other string) {
+			if err := os.RemoveAll(filepath.Join(clone, ".git", inGit)); err != nil {
+				t.Fatal(err)
+			}
+			aPipe(t, filepath.Join(clone, ".git", inGit))
+		}})
+	}
+	pointings = append(pointings, struct {
+		name   string
+		reason string
+		point  func(t *testing.T, clone string, other string)
+	}{"an include in its config of a named pipe in its work tree", "its config includes a file outside its .git: ../planted", func(t *testing.T, clone string, other string) {
+		aPipe(t, filepath.Join(clone, "planted"))
+		gitIn(t, "-C", clone, "config", "include.path", "../planted")
+	}}, struct {
+		name   string
+		reason string
+		point  func(t *testing.T, clone string, other string)
+	}{"an include in a file its config includes of a named pipe in its work tree", "its config includes a file outside its .git: ../planted", func(t *testing.T, clone string, other string) {
+		aPipe(t, filepath.Join(clone, "planted"))
+		gitIn(t, "config", "--file", filepath.Join(clone, ".git", "inner"), "include.path", "../planted")
+		gitIn(t, "-C", clone, "config", "include.path", "inner")
+	}})
 	for _, name := range []string{"extensions.partialclone", "remote.other.promisor"} {
 		pointings = append(pointings, struct {
 			name   string
