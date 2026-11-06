@@ -66,7 +66,10 @@ const HARMLESS: readonly Override[] = [
 ];
 
 /** The values the host's reads of a clone take whatever its config says: git reads no file the config names for it, which may be a named pipe git waits on, or another repository's. */
-const NO_FILE_NAMED: readonly Override[] = [{ name: 'core.excludesFile', value: '' }];
+const NO_FILE_NAMED: readonly Override[] = [
+  { name: 'core.excludesFile', value: '' },
+  { name: 'core.attributesFile', value: '' },
+];
 
 /** The config variables that name a program git runs, by section, then by variable; a section of three-part names (`filter.<driver>.clean`) holds the variables of any subsection. */
 const NAMES_A_PROGRAM: ReadonlyMap<string, readonly string[]> = new Map(
