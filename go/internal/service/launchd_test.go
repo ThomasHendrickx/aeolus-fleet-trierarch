@@ -269,7 +269,7 @@ func TestRestartAfterARewriteLoadsTheNewFileAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := []string{"launchctl print " + target, "launchctl bootout " + target, "launchctl print " + target, "launchctl print " + target, "launchctl bootstrap gui/501 " + plistOf(agent)}
+	want := []string{"launchctl bootout " + target, "launchctl print " + target, "launchctl print " + target, "launchctl bootstrap gui/501 " + plistOf(agent)}
 	if !slices.Equal(launchctl.calls, want) {
 		t.Errorf("ran %q, want %q", launchctl.calls, want)
 	}
