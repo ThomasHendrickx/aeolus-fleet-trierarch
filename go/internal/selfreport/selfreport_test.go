@@ -593,3 +593,21 @@ func TestAHarnessOfferingNoMcpServerNamesNone(t *testing.T) {
 		t.Errorf("mcpServers = %v, want the field left out", got)
 	}
 }
+
+func TestTheReportStatesTheKeySecretsAreSealedTo(t *testing.T) {
+	in := anInput()
+	in.SealingKey = "q1Xn7bOe0ySd0kT3k2r0cJ0sV1hR6nqv0ZpYd8m2kGQ="
+
+	got := detailsJSON(t, in)["sealingKey"]
+
+	want := map[string]any{"scheme": "nacl-sealed-box", "publicKey": "q1Xn7bOe0ySd0kT3k2r0cJ0sV1hR6nqv0ZpYd8m2kGQ="}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("sealingKey = %v, want %v", got, want)
+	}
+}
+
+func TestATrierarchWithoutAKeyStatesNone(t *testing.T) {
+	if got, ok := detailsJSON(t, anInput())["sealingKey"]; ok {
+		t.Errorf("sealingKey = %v, want the field left out", got)
+	}
+}
