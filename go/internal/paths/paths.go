@@ -33,6 +33,8 @@ type Paths struct {
 	Homes string
 	// TrustedRepositories is the list the trierarch plugin's ship sent last (aeolus-fleet#384), apart from the configuration.
 	TrustedRepositories string
+	// McpServers is the MCP server list the trierarch plugin's ship sent last, apart from the configuration.
+	McpServers string
 	// Repositories holds the clones of the trusted repositories, one folder per repository.
 	Repositories string
 }
@@ -62,6 +64,7 @@ func Of(homeDirectory string, config string) Paths {
 		Homes:        filepath.Join(home, "homes"),
 
 		TrustedRepositories: filepath.Join(home, "trusted-repositories.json"),
+		McpServers:          filepath.Join(home, "mcp-servers.json"),
 		Repositories:        filepath.Join(home, "repositories"),
 	}
 }

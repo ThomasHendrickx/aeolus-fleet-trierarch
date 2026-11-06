@@ -58,7 +58,9 @@ type Input struct {
 	Harnesses []string
 	// Trusted is what each harness trusts, read afresh for this report (#381).
 	Trusted map[string]trust.Places
-	State   reconciler.State
+	// McpServers are, by harness, the names of the MCP servers it offers; a harness missing offers none.
+	McpServers map[string][]string
+	State      reconciler.State
 	// Running is how many sessions run.
 	Running int
 	Logins  Logins
@@ -247,6 +249,9 @@ func harnessesOf(in Input) []map[string]any {
 			}
 		}
 		harness := map[string]any{"harness": name, "options": optionsSchemaOf(settings), "flags": flags, "riskyFlags": risky, "login": loginOf(in, name)}
+		if servers := in.McpServers[name]; len(servers) > 0 {
+			harness["mcpServers"] = servers
+		}
 		if found, ok := in.Detected[name]; ok && found.Version != "" {
 			harness["version"] = found.Version
 			harness["modelsConfirmedAt"] = found.ConfirmedAt

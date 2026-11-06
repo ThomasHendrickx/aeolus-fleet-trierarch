@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
 )
 
@@ -30,6 +31,11 @@ type Delivery struct {
 // Keeper keeps the trusted repositories the trierarch plugin's ship sent.
 type Keeper interface {
 	Accept(list []trusted.Repository) error
+}
+
+// ServerKeeper keeps the MCP servers the trierarch plugin's ship sent.
+type ServerKeeper interface {
+	Accept(list []mcpservers.Server) error
 }
 
 // Refusal is the fleet's own refusal: its code and its message.
@@ -62,6 +68,8 @@ type Loop struct {
 	PluginShipID string
 	// Trusted keeps the trusted repositories; the list is handled as any other message without it.
 	Trusted Keeper
+	// McpServers keeps the MCP servers; the list is handled as any other message without it.
+	McpServers ServerKeeper
 	// OnKeyCutOff is told at the first refusal (true) and when a receive passes again (false).
 	OnKeyCutOff func(isCutOff bool)
 }
@@ -72,15 +80,23 @@ func IsPing(contentType string) bool {
 	return strings.ToLower(strings.TrimSpace(essence)) == pingContentType
 }
 
-// takeTrusted takes the trusted repositories the delivery carries, but only from the trierarch plugin's ship init kept: a sender's type is any ship's to pick, so no other ship can make the machine clone a repository. A list that does not fit is not taken, and the one held stays; a failure to keep a list that fits is the loop's, so the delivery comes again.
-func (l Loop) takeTrusted(delivery Delivery) error {
-	from := fmt.Sprintf("Not handled: trusted repositories from %s.", delivery.SenderShipID)
+// isFromPlugin says whether the delivery comes from the trierarch plugin's ship init kept, the one ship a list is taken from: a sender's type is any ship's to pick, so no other ship can make the machine clone a repository or call a server. Otherwise it logs why the delivery is not handled, naming what it carried.
+func (l Loop) isFromPlugin(delivery Delivery, carried string) bool {
+	from := fmt.Sprintf("Not handled: %s from %s.", carried, delivery.SenderShipID)
 	if l.PluginShipID == "" {
 		l.Log(from + " This machine does not know the trierarch plugin's ship: run aeolus-trierarch init --plugin-ship-id <its ship id>.")
-		return nil
+		return false
 	}
 	if delivery.SenderShipID != l.PluginShipID {
 		l.Log(fmt.Sprintf("%s The trierarch takes them only from the trierarch plugin's ship %s.", from, l.PluginShipID))
+		return false
+	}
+	return true
+}
+
+// takeTrusted takes the trusted repositories the delivery carries, but only from the trierarch plugin's ship. A list that does not fit is not taken, and the one held stays; a failure to keep a list that fits is the loop's, so the delivery comes again.
+func (l Loop) takeTrusted(delivery Delivery) error {
+	if !l.isFromPlugin(delivery, "trusted repositories") {
 		return nil
 	}
 	list, err := trusted.Read(delivery.Payload)
@@ -91,12 +107,31 @@ func (l Loop) takeTrusted(delivery Delivery) error {
 	return l.Trusted.Accept(list)
 }
 
+// takeMcpServers takes the MCP servers the delivery carries, as takeTrusted takes the trusted repositories.
+func (l Loop) takeMcpServers(delivery Delivery) error {
+	if !l.isFromPlugin(delivery, "MCP servers") {
+		return nil
+	}
+	list, err := mcpservers.Read(delivery.Payload)
+	if err != nil {
+		l.Log(fmt.Sprintf("Not handled: MCP servers that do not fit (%v). The trierarch keeps the list it holds.", err))
+		return nil
+	}
+	return l.McpServers.Accept(list)
+}
+
 func (l Loop) handle(delivery Delivery) error {
 	if IsPing(delivery.ContentType) {
 		return l.Ship.Pong(delivery.DeliveryID)
 	}
 	if delivery.ContentType == trusted.ListContentType && l.Trusted != nil {
 		if err := l.takeTrusted(delivery); err != nil {
+			return err
+		}
+		return l.Ship.Ack(delivery.DeliveryID)
+	}
+	if delivery.ContentType == mcpservers.ListContentType && l.McpServers != nil {
+		if err := l.takeMcpServers(delivery); err != nil {
 			return err
 		}
 		return l.Ship.Ack(delivery.DeliveryID)

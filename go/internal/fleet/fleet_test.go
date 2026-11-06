@@ -274,3 +274,23 @@ func TestMoreThan100ActivitiesAreWrittenInCallsOfAtMost100(t *testing.T) {
 		t.Errorf("calls of %v activities, want [100 1]", sizes)
 	}
 }
+
+func TestAsksThePluginsShipForTheMcpServersAsItsOwnShipWithAKeyOfItsOwn(t *testing.T) {
+	client, sent := aSendingFleet(t, func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"messageId":"msg_1"}`)) })
+
+	if err := client.AskForMcpServers("shp_plugin"); err != nil {
+		t.Fatal(err)
+	}
+	first := (*sent)["idempotencyKey"]
+	if err := client.AskForMcpServers("shp_plugin"); err != nil {
+		t.Fatal(err)
+	}
+
+	got := *sent
+	if got["payload"] != "{}" || got["contentType"] != "application/vnd.aeolus.trierarch.mcp-servers-request+json" || mustJSON(got["selector"]) != mustJSON(map[string]any{"kind": "ship", "shipId": "shp_plugin"}) {
+		t.Errorf("sent %v", got)
+	}
+	if key, _ := got["idempotencyKey"].(string); key == "" || key == first {
+		t.Errorf("idempotency keys %v then %v, want one of its own each time", first, got["idempotencyKey"])
+	}
+}

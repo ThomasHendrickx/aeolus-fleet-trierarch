@@ -120,6 +120,8 @@ type Settings struct {
 	Squadron    string            `json:"squadron,omitempty"`
 	FirstPrompt string            `json:"firstPrompt,omitempty"`
 	Options     map[string]string `json:"options,omitempty"`
+	// McpServers are the names of the crew-time MCP servers the ship is crewed with (decision M3).
+	McpServers []string `json:"mcpServers,omitempty"`
 }
 
 // Request is a crew request assigned to the trierarch, as the fleet answers it.
@@ -233,6 +235,8 @@ type Context struct {
 	Versions map[string]string
 	// Options are, by harness, each option it offers now and its value names in order: a model a session refused is offered no more (#382).
 	Options map[string]map[string][]string
+	// McpServers are, by harness, the names of the MCP servers it offers now; a harness missing offers none.
+	McpServers map[string][]string
 	// Configuration is each offered harness as configured and detected: the flags it launches with, from which a flag still waiting on a one-time question is found.
 	Configuration map[string]config.Harness
 	// Trusted is, by harness, what it trusts; a harness missing trusts nothing (#381).
@@ -458,7 +462,8 @@ func Reconcile(state State, context Context) (State, []Action) {
 		}
 		harness, options, reason := check(request.Settings, request.ShipID, state, context)
 		if reason != "" {
-			if !request.IsFinal && refused[request.ShipID] != request.SettingsVersion {
+			// A server not offered is given back even for a final crew: the fleet refuses that, and the owner is told once (decision M4).
+			if (!request.IsFinal || strings.HasPrefix(reason, mcpServersField+": ")) && refused[request.ShipID] != request.SettingsVersion {
 				actions = append(actions, Action{Kind: GiveBack, ShipID: request.ShipID, SettingsVersion: request.SettingsVersion, Reason: reason})
 			}
 			continue
@@ -603,6 +608,9 @@ func check(settings Settings, shipID string, state State, context Context) (stri
 		}
 		options[name] = settings.Options[name]
 	}
+	if reason := checkMcpServers(settings.McpServers, harness, context); reason != "" {
+		return "", nil, reason
+	}
 	if flag := unacceptedFlag(harness, options, context); flag != "" {
 		return "", nil, fmt.Sprintf("harness: %s still asks to accept %s: accept it with aeolus-trierarch init", harness, flag)
 	}
@@ -610,6 +618,19 @@ func check(settings Settings, shipID string, state State, context Context) (stri
 		return "", nil, reason
 	}
 	return harness, options, ""
+}
+
+// mcpServersField is the field at fault when a named MCP server is not offered (decision M4).
+const mcpServersField = "mcpServers"
+
+// checkMcpServers is why the harness cannot be crewed with the MCP servers named, the first it does not offer, or none.
+func checkMcpServers(named []string, harness string, context Context) string {
+	for _, name := range named {
+		if !slices.Contains(context.McpServers[harness], name) {
+			return fmt.Sprintf("%s: This trierarch offers no MCP server %s to %s", mcpServersField, name, harness)
+		}
+	}
+	return ""
 }
 
 // launchMarkerRefusal is why the harness may not start a session: the machine does not offer it (CC3, CC10), its plugin could not be found (#1212), or it is older than the launch marker (#490), so the launch window could see nothing of the session. Upgrade updates the plugin, so the reason says to run it.

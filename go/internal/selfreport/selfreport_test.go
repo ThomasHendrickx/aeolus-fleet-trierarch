@@ -574,3 +574,22 @@ func TestAMachineNotYetDueItsProbeOffersNoHarnessOneSecondEarly(t *testing.T) {
 		t.Fatalf("harnesses = %v", got)
 	}
 }
+
+func TestAHarnessNamesTheMcpServersItOffers(t *testing.T) {
+	in := anInput()
+	in.McpServers = map[string][]string{"claude-code": {"company-graph"}}
+
+	harnesses := detailsJSON(t, in)["harnesses"].([]any)
+
+	if got := harnesses[0].(map[string]any)["mcpServers"]; !reflect.DeepEqual(got, []any{"company-graph"}) {
+		t.Errorf("mcpServers = %v, want company-graph", got)
+	}
+}
+
+func TestAHarnessOfferingNoMcpServerNamesNone(t *testing.T) {
+	harnesses := detailsJSON(t, anInput())["harnesses"].([]any)
+
+	if got, ok := harnesses[0].(map[string]any)["mcpServers"]; ok {
+		t.Errorf("mcpServers = %v, want the field left out", got)
+	}
+}

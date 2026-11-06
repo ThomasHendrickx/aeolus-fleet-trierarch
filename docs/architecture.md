@@ -35,6 +35,7 @@ Everything of the trierarch lives under `~/.aeolus/trierarch/`.
 | The configuration's JSON Schema, for an editor | `~/.aeolus/trierarch/config.schema.json` | `aeolus-trierarch init` |
 | The fleet's URL, the trierarch's own ship id, the trierarch plugin's ship the trusted repositories come from, and its crew token, mode 600 | `~/.aeolus/trierarch/crew-token` | `aeolus-trierarch init` |
 | The trusted repositories the trierarch plugin sent last (aeolus-fleet#384) | `~/.aeolus/trierarch/trusted-repositories.json` | The trierarch, as the list arrives |
+| The MCP servers the trierarch plugin sent last | `~/.aeolus/trierarch/mcp-servers.json` | The trierarch, as the list arrives |
 | The clones of the trusted repositories, one folder per repository, each made before its first workspace | `~/.aeolus/trierarch/repositories/<name>/` | The trierarch |
 | With the container runtime, the machine's long-lived model token (`claude setup-token`), mode 600, handed to each container (decision 0039); never in the configuration | `~/.aeolus/trierarch/model-token` | The operator |
 | Each harness's API key, one file per harness (`claude-code`, `codex`), mode 600 in a folder of mode 700, written only once the vendor took it; never in the configuration, a report, a log or the fleet (api keys K5, K7) | `~/.aeolus/trierarch/keys/<harness>` | `aeolus-trierarch login <harness> --api-key` |

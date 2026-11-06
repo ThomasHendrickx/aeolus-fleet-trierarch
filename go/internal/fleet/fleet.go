@@ -20,13 +20,14 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/activity"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/receiving"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
 )
 
 // MinimumCoreVersion is the oldest core the trierarch runs against (decision 0049, docs/compatibility.md), today's trierarch's MINIMUM_CORE_VERSION.
-const MinimumCoreVersion = "0.35.0"
+const MinimumCoreVersion = "0.38.0"
 
 // Harness is what the trierarch registers its own ship with.
 const Harness = "aeolus-trierarch"
@@ -316,6 +317,12 @@ func (c Client) send(selector map[string]string, text string, idempotencyKey str
 // AskForTrustedRepositories asks the trierarch plugin's ship for the trusted repositories again, as the trierarch's own ship (aeolus-fleet#384).
 func (c Client) AskForTrustedRepositories(pluginShipID string) error {
 	body := map[string]any{"selector": map[string]string{"kind": "ship", "shipId": pluginShipID}, "payload": "{}", "contentType": trusted.RequestContentType, "model": c.Model, "idempotencyKey": newKey()}
+	return call(c.URL, request{path: "/ship/send", crewToken: c.CrewToken, body: body}, &map[string]any{})
+}
+
+// AskForMcpServers asks the trierarch plugin's ship for the MCP servers again, as the trierarch's own ship.
+func (c Client) AskForMcpServers(pluginShipID string) error {
+	body := map[string]any{"selector": map[string]string{"kind": "ship", "shipId": pluginShipID}, "payload": "{}", "contentType": mcpservers.RequestContentType, "model": c.Model, "idempotencyKey": newKey()}
 	return call(c.URL, request{path: "/ship/send", crewToken: c.CrewToken, body: body}, &map[string]any{})
 }
 

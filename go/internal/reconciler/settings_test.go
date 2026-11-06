@@ -128,3 +128,50 @@ func TestANewSettingsVersionInAPlaceNoLongerTrustedIsGivenBack(t *testing.T) {
 	given := entry
 	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 2, Reason: "workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it", Entry: &given})
 }
+
+func TestARequestNamingAServerTheHarnessOffersIsCrewed(t *testing.T) {
+	request := aRequest(scout)
+	request.Settings.McpServers = []string{"company-graph"}
+	context := aContext(request)
+	context.McpServers = map[string][]string{"claude-code": {"company-graph"}}
+
+	_, actions := Reconcile(Empty(), context)
+
+	assertActions(t, actions, Action{Kind: Crew, ShipID: scout})
+}
+
+func TestARequestNamingAServerNotOfferedIsGivenBackWithMcpServersAndTheServersName(t *testing.T) {
+	request := aRequest(scout)
+	request.Settings.McpServers = []string{"company-graph", "notes"}
+	context := aContext(request)
+	context.McpServers = map[string][]string{"claude-code": {"company-graph"}}
+
+	_, actions := Reconcile(Empty(), context)
+
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "mcpServers: This trierarch offers no MCP server notes to claude-code"})
+}
+
+func TestARequestNamingAServerWhenNoneIsOfferedIsGivenBack(t *testing.T) {
+	request := aRequest(scout)
+	request.Settings.McpServers = []string{"company-graph"}
+
+	_, actions := Reconcile(Empty(), aContext(request))
+
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "mcpServers: This trierarch offers no MCP server company-graph to claude-code"})
+}
+
+func TestAFinalRequestNamingAServerNotOfferedIsGivenBackToo(t *testing.T) {
+	request := aRequest(scout)
+	request.IsFinal = true
+	request.Settings.McpServers = []string{"company-graph"}
+
+	_, actions := Reconcile(Empty(), aContext(request))
+
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "mcpServers: This trierarch offers no MCP server company-graph to claude-code"})
+}
+
+func TestARequestNamingNoServerNeedsNone(t *testing.T) {
+	_, actions := Reconcile(Empty(), aContext(aRequest(scout)))
+
+	assertActions(t, actions, Action{Kind: Crew, ShipID: scout})
+}
