@@ -134,6 +134,23 @@ func TestTheHostReadsAClonesOnlyThroughItsOwnGitFolder(t *testing.T) {
 		{"a commondir in its .git naming another git folder", "its .git names another git folder in its commondir", func(t *testing.T, clone string, other string) {
 			writeIn(t, filepath.Join(clone, ".git"), "commondir", filepath.Join(other, ".git")+"\n")
 		}},
+		{"an alternates file naming another repository's objects", "its .git names another repository's objects in objects/info/alternates", func(t *testing.T, clone string, other string) {
+			writeIn(t, filepath.Join(clone, ".git", "objects", "info"), "alternates", filepath.Join(other, ".git", "objects")+"\n")
+		}},
+	}
+	for _, inGit := range []string{"objects", "config", "HEAD", filepath.Join("refs", "heads")} {
+		pointings = append(pointings, struct {
+			name   string
+			reason string
+			point  func(t *testing.T, clone string, other string)
+		}{"a link as its .git's " + inGit, "its .git holds a link: " + inGit, func(t *testing.T, clone string, other string) {
+			if err := os.RemoveAll(filepath.Join(clone, ".git", inGit)); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join(other, ".git", inGit), filepath.Join(clone, ".git", inGit)); err != nil {
+				t.Fatal(err)
+			}
+		}})
 	}
 	for _, pointing := range pointings {
 		t.Run(pointing.name, func(t *testing.T) {
