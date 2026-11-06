@@ -303,7 +303,7 @@ export interface ProxyToken {
 
 /** The processes running in a folder, whatever started them: a dev server a session left behind. */
 export interface FolderProcessesPort {
-  /** Stops every process whose working folder is the folder or inside it, and answers how many it stopped. */
+  /** Stops every process whose working folder is the folder or inside it, and answers how many it stopped; fails, stopping nothing, while something it cannot stop may work in the folder, as a container. */
   stopIn(folder: string): Promise<number>;
 }
 

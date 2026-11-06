@@ -192,7 +192,8 @@ const SESSION_HOME = '/home/ubuntu';
  * workdir, with nothing of the caller's environment but its PATH, the env
  * file's variables and the ones passed on, and the folder mounted at
  * /home/ubuntu as its HOME; its first process's pid is the container's
- * (`containers/<name>.pid`), which `inspect`, `ps`, `kill` and `rm` read.
+ * (`containers/<name>.pid`), which `inspect`, `ps`, `kill` and `rm` read;
+ * `ps` filtered on a volume lists only the containers that mount a folder there.
  */
 function podmanStandIn(at: { machine: string }): string {
   return `#!/bin/bash
@@ -207,9 +208,12 @@ case "$1" in
     rootless=true; [ -e "$machine/podman-rootful" ] && rootless=false
     echo "{\\"host\\":{\\"security\\":{\\"rootless\\":$rootless}}}"; exit 0 ;;
   ps)
+    volume= previous=
+    for argument; do [ "$previous" = --filter ] && [ "\${argument#volume=}" != "$argument" ] && volume="\${argument#volume=}"; previous="$argument"; done
     for file in "$containers"/*.pid; do
       [ -e "$file" ] || continue
       container="$(basename "$file" .pid)"
+      [ -z "$volume" ] || grep -qxF -e "$volume:$volume" "$containers/$container.run" 2>/dev/null || continue
       if pid "$container" > /dev/null; then echo "$container running"; else echo "$container exited"; fi
     done
     exit 0 ;;

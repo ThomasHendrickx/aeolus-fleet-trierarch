@@ -14,7 +14,6 @@ import { loadConfiguration, readCrewFile, writeRunningFile, type TrierarchConfig
 import { createDetectedFile } from '../adapters/detected-file.js';
 import { createDetectors } from '../adapters/detectors.js';
 import { adapterFlagsOf, createHarnesses, riskyFlagsOf } from '../adapters/harnesses.js';
-import { createFolderProcesses } from '../adapters/folder-processes.js';
 import { createGitCheckouts } from '../adapters/git-checkouts.js';
 import { createJsonState } from '../adapters/json-state.js';
 import { createKeyFiles } from '../adapters/key-files.js';
@@ -112,7 +111,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const clones = trustedClonesOf({ configured, held: trustedRepositories, root: paths.repositories });
   const systemdVersion = await systemdVersionOf(runCommand);
   const launch = sessionsLaunch({ platform: process.platform, env, ...(systemdVersion !== undefined && { systemdVersion }) });
-  const { sessions, workspace, shipHomes, modelProxyUrlOf } = runtimeAdaptersOf({ configuration, paths, version, launch, managedSettings, clones });
+  const { sessions, workspace, folderProcesses, shipHomes, modelProxyUrlOf } = runtimeAdaptersOf({ configuration, paths, version, launch, managedSettings, clones });
   // The model proxy runs while any harness holds an API key (headless H16); a pass starts it again when it is gone.
   const keys = createKeyFiles(paths.keys);
   const proxy = modelProxy({ paths, version, launch });
@@ -179,7 +178,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   });
   const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configured.harnesses), prices: priceTableOf(configured.prices) });
   const sendReleasedUsage = createSendReleasedUsage({ fleet, usage, clock, logger, prices: priceTableOf(configured.prices), ...(crew.shipId !== undefined && { trierarchShipId: crew.shipId }), ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
-  const runPass = createRunPass({ fleet, harnesses, processes: sessions, folderProcesses: createFolderProcesses(), workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets, modelLogins, sendReleasedUsage, ...(configured.logins !== undefined && { logins: configured.logins }) });
+  const runPass = createRunPass({ fleet, harnesses, processes: sessions, folderProcesses, workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets, modelLogins, sendReleasedUsage, ...(configured.logins !== undefined && { logins: configured.logins }) });
   // Set by the receive loop, read by each report of the trierarch's own ship.
   let isFleetKeyCutOff = false;
   const reportSelf = createReportSelf({ fleetKey: { isCutOff: () => isFleetKeyCutOff }, fleet, processes: sessions, trust, state, setup, readLoad, readUsage, clock, modelLogins, ...(configured.logins !== undefined && { logins: configured.logins }) });

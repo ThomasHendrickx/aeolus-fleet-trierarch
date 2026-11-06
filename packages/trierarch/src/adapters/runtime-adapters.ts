@@ -3,10 +3,12 @@ import { fileURLToPath } from 'node:url';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
-import type { SessionRuntime, WorkspacePort } from '../core/ports.js';
+import type { FolderProcessesPort, SessionRuntime, WorkspacePort } from '../core/ports.js';
 import type { SessionRoots } from './caller-check.js';
 import { createCloneWorkspace } from './clone-workspace.js';
 import { containerProxyUrl, createContainerRuntime } from './container.js';
+import { createContainerFolderProcesses } from './container-folder-processes.js';
+import { createFolderProcesses } from './folder-processes.js';
 import { createGitWorkspace } from './git-workspace.js';
 import type { TrustedClones } from './trusted-clones.js';
 import type { TrierarchPaths } from './paths.js';
@@ -33,6 +35,8 @@ export function hostSessions(at: { paths: TrierarchPaths; version: string; launc
 export interface RuntimeAdapters {
   readonly sessions: SessionRuntime & SessionRoots;
   readonly workspace: WorkspacePort;
+  /** The processes running in a folder, stopped before an orphan worktree is read and removed; in containers, only once no container works in it. */
+  readonly folderProcesses: FolderProcessesPort;
   /** The homes of the ships, one each, for sessions in containers; none on the host, where every session shares the user's. */
   readonly shipHomes?: { homes: string; managedSettings: string };
   /** Where a session reaches the model proxy the trierarch reaches at the url (headless H16): there on the host, at Podman's host address in a container. */
@@ -61,7 +65,12 @@ export function runtimeAdaptersOf(at: {
   const root = configuration.worktreeRoot ?? paths.worktrees;
   const { runtime } = configuration;
   if (runtime?.kind !== 'container') {
-    return { modelProxyUrlOf: (url) => url, sessions: hostSessions({ paths, version, launch, ...(at.program !== undefined && { program: at.program }) }), workspace: createGitWorkspace({ configuration, root, ...(trusted !== undefined && { clones: trusted }) }) };
+    return {
+      modelProxyUrlOf: (url) => url,
+      sessions: hostSessions({ paths, version, launch, ...(at.program !== undefined && { program: at.program }) }),
+      workspace: createGitWorkspace({ configuration, root, ...(trusted !== undefined && { clones: trusted }) }),
+      folderProcesses: createFolderProcesses(),
+    };
   }
   const clones = createCloneWorkspace({ configuration, root, ...(trusted !== undefined && { clones: trusted }) });
   return {
@@ -81,6 +90,7 @@ export function runtimeAdaptersOf(at: {
     }),
     // The container mounts the folder at the path it is given, where the plugin inside keys it by `pwd -P` as the host's does: one path for both, the real one.
     workspace: { ...clones, prepare: async (at) => ({ folder: await realpath((await clones.prepare(at)).folder) }) },
+    folderProcesses: createContainerFolderProcesses({ binary: runtime.binary, host: createFolderProcesses() }),
     shipHomes: { homes: paths.homes, managedSettings },
     modelProxyUrlOf: containerProxyUrl,
   };
