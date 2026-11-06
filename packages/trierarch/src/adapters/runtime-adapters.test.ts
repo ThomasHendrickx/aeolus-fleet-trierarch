@@ -62,7 +62,7 @@ function configuration(runtime?: TrierarchConfiguration['runtime']): TrierarchCo
 }
 
 function adaptersOf(runtime?: TrierarchConfiguration['runtime'], worktreeRoot?: string) {
-  return runtimeAdaptersOf({ configuration: { ...configuration(runtime), ...(worktreeRoot !== undefined && { worktreeRoot }) }, paths, version: '0.25.0', launch: [], managedSettings: join(home, 'managed'), program: TRIERARCH_PROGRAM });
+  return runtimeAdaptersOf({ configuration: { ...configuration(runtime), ...(worktreeRoot !== undefined && { worktreeRoot }) }, paths, version: '0.25.0', launch: [], managedSettings: join(home, 'managed'), proxyUrl: () => Promise.resolve(undefined), program: TRIERARCH_PROGRAM });
 }
 
 describe('the adapters the session runtime picks (decision 0039)', () => {

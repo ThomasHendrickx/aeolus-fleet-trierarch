@@ -68,10 +68,12 @@ describe('the session runtime contract, on rootless Podman under holds', { timeo
   /** Where the holds keep their files, one folder per ship. */
   let sessions: string;
   let runtime: ReturnType<typeof createContainerRuntime>;
+  /** Where the model proxy listens, as the trierarch reads it at a start; none until a test runs one. */
+  let proxyAt: string | undefined;
   /** The ships' sockets a test listens on, closed after it. */
   const listening: NetServer[] = [];
 
-  const aRuntime = () => createContainerRuntime({ binary: 'podman', image, owner, tokenFile: join(folder, 'model-token'), homes, sockets, sessions, program: TRIERARCH_PROGRAM, version: VERSION, platform: process.platform, ...CAPS });
+  const aRuntime = () => createContainerRuntime({ binary: 'podman', image, owner, tokenFile: join(folder, 'model-token'), homes, sockets, sessions, program: TRIERARCH_PROGRAM, version: VERSION, platform: process.platform, ...CAPS, proxyUrl: () => Promise.resolve(proxyAt) });
 
   // First, so a skip runs neither the setup nor the cleanup, which need podman.
   beforeEach((context) => {
@@ -186,29 +188,38 @@ describe('the session runtime contract, on rootless Podman under holds', { timeo
     await expect.poll(containerNames, { timeout: 10_000 }).toEqual([`trierarch-${shipId}`]);
   });
 
-  it("reaches the model proxy at Podman's host address on an API key, with its own proxy token, and holds no key and no model token (headless H16, api keys K7)", async () => {
+  it("reaches the model proxy's port on its own loopback on an API key, and no other service on the host's loopback, with its own proxy token, and holds no key and no model token (headless H16, api keys K7)", async () => {
     const shipId = newId('ship');
     const proxy = createHttpServer((_request, response) => response.end('the proxy answered\n'));
-    await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
-    const address = proxy.address();
-    const port = typeof address === 'object' && address !== null ? address.port : 0;
+    const other = createHttpServer((_request, response) => response.end('another service answered\n'));
+    const portOf = async (server: typeof proxy): Promise<number> => {
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const address = server.address();
+      return typeof address === 'object' && address !== null ? address.port : 0;
+    };
+    const port = await portOf(proxy);
+    const otherPort = await portOf(other);
+    proxyAt = `http://127.0.0.1:${String(port)}`;
     const key = 'sk-ant-api03-test-key-not-real';
     mkdirSync(join(folder, 'keys'));
     writeFileSync(join(folder, 'keys', 'claude-code'), `${key}\n`, { mode: 0o600 });
+    const asked = (at: number): string => `printf 'GET / HTTP/1.0\\r\\n\\r\\n' | nc -w 5 ${MODEL_PROXY_HOST} ${String(at)}`;
     try {
       await runtime.start({
         shipId,
         folder,
-        command: ['sh', '-c', `export -p; printf 'GET / HTTP/1.0\\r\\n\\r\\n' | nc -w 5 ${MODEL_PROXY_HOST} ${String(port)}; sleep 30`],
+        command: ['sh', '-c', `export -p; ${asked(otherPort)}; echo 'the other port asked'; ${asked(port)}; sleep 30`],
         harness: 'claude-code',
         proxyToken: PROXY_TOKEN,
       });
 
       await expect.poll(async () => shown(shipId), { timeout: 10_000 }).toContain('the proxy answered');
       const screen = await shown(shipId);
-      expect({ token: screen.includes(`${PROXY_TOKEN.variable}='${PROXY_TOKEN.token}'`) || screen.includes(`${PROXY_TOKEN.variable}="${PROXY_TOKEN.token}"`), key: screen.includes(key), modelToken: screen.includes(MODEL_TOKEN) }).toEqual({ token: true, key: false, modelToken: false });
+      expect({ other: screen.includes('another service answered'), token: screen.includes(`${PROXY_TOKEN.variable}='${PROXY_TOKEN.token}'`) || screen.includes(`${PROXY_TOKEN.variable}="${PROXY_TOKEN.token}"`), key: screen.includes(key), modelToken: screen.includes(MODEL_TOKEN) }).toEqual({ other: false, token: true, key: false, modelToken: false });
     } finally {
+      proxyAt = undefined;
       await new Promise((resolve) => proxy.close(resolve));
+      await new Promise((resolve) => other.close(resolve));
     }
   });
 
@@ -353,7 +364,7 @@ describe('the container a session runs in', () => {
   });
 
   function runtimeWith(runner: ReturnType<typeof recordingRunner>, options: { launch?: readonly string[]; proxyUrl?: () => Promise<string | undefined> } = {}): ReturnType<typeof createContainerRuntime> {
-    const runtime = createContainerRuntime({ binary, image, tokenFile, homes, sockets, sessions, program: TRIERARCH_PROGRAM, version: VERSION, platform: process.platform, ...CAPS, run: runner.run, proxyUrl: options.proxyUrl ?? (async () => 'http://127.0.0.1:4100'), ...(options.launch !== undefined && { launch: options.launch }) });
+    const runtime = createContainerRuntime({ binary, image, tokenFile, homes, sockets, sessions, program: TRIERARCH_PROGRAM, version: VERSION, platform: process.platform, ...CAPS, run: runner.run, proxyUrl: options.proxyUrl ?? (() => Promise.resolve('http://127.0.0.1:4100')), ...(options.launch !== undefined && { launch: options.launch }) });
     runtimes.push(runtime);
     return runtime;
   }
@@ -489,7 +500,7 @@ describe('the container a session runs in', () => {
   });
 
   it('does not start a session on an API key while the model proxy has no address', async () => {
-    const runtime = runtimeWith(recordingRunner(), { proxyUrl: async () => undefined });
+    const runtime = runtimeWith(recordingRunner(), { proxyUrl: () => Promise.resolve(undefined) });
 
     await expect(runtime.start({ shipId, folder, command: ['claude'], harness: 'claude-code', proxyToken: PROXY_TOKEN })).rejects.toThrow('the model proxy has no address yet');
   });

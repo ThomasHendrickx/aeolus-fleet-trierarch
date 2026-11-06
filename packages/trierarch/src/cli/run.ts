@@ -112,10 +112,10 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const clones = trustedClonesOf({ configured, held: trustedRepositories, root: paths.repositories });
   const systemdVersion = await systemdVersionOf(runCommand);
   const launch = sessionsLaunch({ platform: process.platform, env, ...(systemdVersion !== undefined && { systemdVersion }) });
-  const { sessions, workspace, shipHomes, modelProxyUrlOf } = runtimeAdaptersOf({ configuration, paths, version, launch, managedSettings, clones });
   // The model proxy runs while any harness holds an API key (headless H16); a pass starts it again when it is gone.
   const keys = createKeyFiles(paths.keys);
   const proxy = modelProxy({ paths, version, launch });
+  const { sessions, workspace, shipHomes, modelProxyUrlOf } = runtimeAdaptersOf({ configuration, paths, version, launch, managedSettings, clones, proxyUrl: async () => proxy.url() });
   const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, managedSettings, detected: () => offered.detected, sessions, proxyUrl: async () => {
       const url = await proxy.url();
       return url === undefined ? undefined : modelProxyUrlOf(url);
