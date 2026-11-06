@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import { trierarchNameSchema } from '@aeolus-fleet/common';
@@ -55,7 +56,11 @@ export function createDetectedFile(path: string): DetectedStore {
     },
     save: async (detected: Detected) => {
       await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-      await writeFile(path, `${JSON.stringify(detected, null, 2)}\n`);
+      // A temporary file in the same folder, then a rename over the file, so a reader sees the whole old file or the whole new one.
+      const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+      await writeFile(temporary, `${JSON.stringify(detected, null, 2)}\n`);
+      await chmod(temporary, 0o644);
+      await rename(temporary, path);
     },
   };
 }

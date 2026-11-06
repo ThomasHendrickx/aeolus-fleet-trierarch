@@ -72,15 +72,15 @@ describe('the detected file (#365)', () => {
     const detected: Detected = { codex: { version: '0.160.1', detectedAt: AT, confirmedAt: AT, options: { model: { values } } } };
     await file.save(detected);
 
-    let saving = true;
+    const state = { isSaving: true };
     const saves = (async () => {
       for (let i = 0; i < 100; i += 1) {
         await file.save(detected);
       }
-      saving = false;
+      state.isSaving = false;
     })();
     let unparsable = 0;
-    while (saving) {
+    while (state.isSaving) {
       try {
         JSON.parse(readFileSync(path, 'utf8'));
       } catch {
