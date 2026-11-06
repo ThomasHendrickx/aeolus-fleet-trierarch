@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
@@ -183,6 +184,21 @@ func TestTheHostReadsAClonesOnlyThroughItsOwnGitFolder(t *testing.T) {
 			gitIn(t, "-C", clone, "config", name, filepath.Join(other, "program"))
 		}})
 	}
+	for _, name := range []string{"extensions.partialclone", "remote.other.promisor"} {
+		pointings = append(pointings, struct {
+			name   string
+			reason string
+			point  func(t *testing.T, clone string, other string)
+		}{name + " in its config, at a commit only another repository has", "its config names a remote to fetch missing objects from: " + name, func(t *testing.T, clone string, other string) {
+			gitIn(t, "-C", clone, "config", "core.repositoryformatversion", "1")
+			if name == "extensions.partialclone" {
+				gitIn(t, "-C", clone, "config", "extensions.partialClone", "other")
+			}
+			gitIn(t, "-C", clone, "config", "remote.other.url", other)
+			gitIn(t, "-C", clone, "config", "remote.other.promisor", "true")
+			writeIn(t, filepath.Join(clone, ".git"), "HEAD", gitIn(t, "-C", other, "rev-parse", "HEAD"))
+		}})
+	}
 	for _, inGit := range []string{"objects", "config", "HEAD", filepath.Join("refs", "heads")} {
 		pointings = append(pointings, struct {
 			name   string
@@ -230,5 +246,21 @@ func TestTheHostsGitCallsInAShipsFolderRunNoHookTheFoldersConfigNames(t *testing
 
 	if _, err := os.Stat(marker); err == nil {
 		t.Errorf("with a hook planted in the folder's config, the host's git calls ran it")
+	}
+}
+
+func TestTheHostsGitCallsInAShipsFolderFetchNoObjectTheFolderLacks(t *testing.T) {
+	repository, _ := aRepository(t)
+	other := filepath.Join(t.TempDir(), "other")
+	gitIn(t, "init", "-q", "-b", "main", other)
+	commitIn(t, other, "OTHER.md")
+	gitIn(t, "-C", repository, "config", "remote.other.url", other)
+	gitIn(t, "-C", repository, "config", "remote.other.promisor", "true")
+	missing := strings.TrimSpace(gitIn(t, "-C", other, "rev-parse", "HEAD"))
+
+	out, err := gitInFolder(repository, "log", "--format=%s", missing)
+
+	if err == nil {
+		t.Errorf("gitInFolder(log %s) = %q, want a failure, the commit missing", missing, out)
 	}
 }
