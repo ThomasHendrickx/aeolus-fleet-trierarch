@@ -422,7 +422,7 @@ func TestTheHostsGitCallsInASessionsCloneCheckNoCommitsSignature(t *testing.T) {
 }
 
 func TestTheHostsReadsOfASessionsCloneReadNoFileTheClonesConfigNamesForGit(t *testing.T) {
-	for _, name := range []string{"core.excludesFile"} {
+	for _, name := range []string{"core.excludesFile", "core.attributesFile"} {
 		t.Run(name, func(t *testing.T) {
 			limit := timeLimit
 			timeLimit = 2 * time.Second
@@ -434,7 +434,7 @@ func TestTheHostsReadsOfASessionsCloneReadNoFileTheClonesConfigNamesForGit(t *te
 			aPipe(t, planted)
 			gitIn(t, "-C", folder, "config", name, planted)
 			// The same size as before, so git must read the file to tell whether it changed.
-			writeIn(t, folder, "README.md", "README.MD\n")
+			writeIn(t, folder, "README.md", "HELLO\n")
 
 			unsaved, err := places.Unsaved(folder)
 
