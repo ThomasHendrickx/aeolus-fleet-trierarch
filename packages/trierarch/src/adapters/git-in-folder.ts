@@ -10,8 +10,10 @@ import { type CommandResult, runCommand } from './run-command.js';
  * ship's folder ignore the folder's own config where it names a program for
  * git to run: git runs no hook, in a folder or in the config, no fsmonitor, no filter, diff or merge driver,
  * and no command for a transport, pager, editor or credential the folder's
- * config names, and takes no optional lock. The machine's own config (global
- * and system) applies as before. Git is pointed at no folder but the ship's
+ * config names, and takes no optional lock. No filter runs, the machine's own
+ * included, as the folder's attributes may name it. Otherwise the machine's own
+ * config (global and system) applies as before. A folder whose config names a
+ * program for git-lfs, which reads that config itself, is not read. Git is pointed at no folder but the ship's
  * own: a folder whose config sets core.worktree is not read, and a clone is
  * read only through its own `.git` folder, with its own objects alone. A folder that is not read is
  * refused with why, so what it holds is not known.
@@ -44,7 +46,6 @@ const NAMES_A_PROGRAM: ReadonlyMap<string, readonly string[]> = new Map(
     core: ['sshcommand', 'pager', 'editor', 'askpass', 'gitproxy', 'alternaterefscommand'],
     sequence: ['editor'],
     diff: ['external', 'command', 'textconv'],
-    filter: ['clean', 'smudge', 'process', 'required'],
     merge: ['driver'],
     gpg: ['program'],
     credential: ['helper'],
@@ -65,11 +66,29 @@ function isProgram(name: string): boolean {
   return section === 'pager' || (NAMES_A_PROGRAM.get(section)?.includes(variable) ?? false);
 }
 
-/** The value that turns the variable off: a filter that is not required, no pager, else no program. */
+/** The value that turns the variable off: no pager, else no program. */
 function neutralOf(name: string): Override {
-  const isOff = name.startsWith('pager.') || (name.startsWith('filter.') && name.endsWith('.required'));
-  return { name, value: isOff ? 'false' : '' };
+  return { name, value: name.startsWith('pager.') ? 'false' : '' };
 }
+
+/** The filter driver a variable of a filter (`filter.<driver>.clean`) belongs to, running nothing and not required; none for another variable. */
+function filterOffOf(name: string): readonly Override[] {
+  const first = name.indexOf('.');
+  const last = name.lastIndexOf('.');
+  if (name.slice(0, first) !== 'filter' || last === first) {
+    return [];
+  }
+  const driver = name.slice(0, last);
+  return [
+    { name: `${driver}.process`, value: '' },
+    { name: `${driver}.clean`, value: '' },
+    { name: `${driver}.smudge`, value: '' },
+    { name: `${driver}.required`, value: 'false' },
+  ];
+}
+
+/** The sections of git-lfs's own config that name a program it runs, which git-lfs reads from the folder's config itself. */
+const LFS_PROGRAMS: readonly string[] = ['lfs.extension.', 'lfs.customtransfer.'];
 
 /** The hook a variable of a hook in the config (`hook.<name>.command`) belongs to, turned off and bound to no event; none for another variable. */
 function hookOffOf(name: string): readonly Override[] {
@@ -98,11 +117,16 @@ async function overridesIn(folder: string, located: Readonly<Record<string, stri
   for (let i = 0; i + 1 < fields.length; i += 2) {
     const scope = fields[i] ?? '';
     const name = fields[i + 1] ?? '';
+    // Of every scope: the folder's attributes may name a filter the machine's own config defines, as git-lfs's.
+    overrides.push(...filterOffOf(name).filter((off) => !overrides.some((each) => each.name === off.name)));
     if (!FOLDER_SCOPES.includes(scope)) {
       continue;
     }
     if (name === 'core.worktree') {
       throw new RefusedRead(folder, 'its config sets core.worktree, which points git at another folder');
+    }
+    if (LFS_PROGRAMS.some((section) => name.startsWith(section))) {
+      throw new RefusedRead(folder, `its config names a program for git-lfs: ${name}`);
     }
     if (isProgram(name)) {
       overrides.push(neutralOf(name));
