@@ -191,8 +191,39 @@ func TestAStoppedSessionsContainerIsKilledThenRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if want := []string{"kill trierarch-" + scout, "rm --force trierarch-" + scout}; !slices.Equal(binary.calls, want) {
+	if want := []string{"kill trierarch-" + scout, "rm --force trierarch-" + scout, "ps --all --filter label=aeolus.trierarch=aeolus-trierarch --format {{.Names}} {{.State}}"}; !slices.Equal(binary.calls, want) {
 		t.Fatalf("asked %q, want %q", binary.calls, want)
+	}
+}
+
+func TestAStopFailsWhileTheShipsContainerIsStillListedSoItsFolderIsNotRead(t *testing.T) {
+	r, binary := aContainerRuntime(t)
+	binary.fails["rm"] = true
+	binary.answers["ps"] = "trierarch-" + scout + " running\n"
+
+	err := r.Stop(scout)
+
+	if err == nil || !strings.Contains(err.Error(), "the container of "+scout+" is still there after its stop: rm failed") {
+		t.Fatalf("Stop = %v, want it to say the container is still there", err)
+	}
+}
+
+func TestAStopFailsWhenTheContainersCannotBeListedAfterItSoItsFolderIsNotRead(t *testing.T) {
+	r, binary := aContainerRuntime(t)
+	binary.fails["ps"] = true
+
+	if err := r.Stop(scout); err == nil {
+		t.Fatal("Stop answered no error")
+	}
+}
+
+func TestAShipWhoseContainerIsGoneIsStoppedWhateverItsKillAndRemoveSaid(t *testing.T) {
+	r, binary := aContainerRuntime(t)
+	binary.fails["kill"] = true
+	binary.fails["rm"] = true
+
+	if err := r.Stop(scout); err != nil {
+		t.Fatalf("Stop = %v, want none", err)
 	}
 }
 
