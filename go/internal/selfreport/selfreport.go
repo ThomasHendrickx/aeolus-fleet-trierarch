@@ -18,6 +18,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/failedstarts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trust"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/usage"
@@ -60,6 +61,8 @@ type Input struct {
 	Trusted map[string]trust.Places
 	// McpServers are, by harness, the names of the MCP servers it offers; a harness missing offers none.
 	McpServers map[string][]string
+	// SealingKey is the trierarch's public key, base64, the trierarch plugin seals each secret to; empty without one.
+	SealingKey string
 	State      reconciler.State
 	// Running is how many sessions run.
 	Running int
@@ -194,6 +197,9 @@ func detailsOf(in Input) map[string]any {
 	}
 	if notOffered := notOfferedDetailsOf(in, stopped); len(notOffered) > 0 {
 		details["notOffered"] = notOffered
+	}
+	if in.SealingKey != "" {
+		details["sealingKey"] = map[string]string{"scheme": secrets.Scheme, "publicKey": in.SealingKey}
 	}
 	if in.Load != nil {
 		details["load"] = in.Load
