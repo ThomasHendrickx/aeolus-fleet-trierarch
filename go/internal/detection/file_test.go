@@ -1,9 +1,11 @@
 package detection
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 )
 
@@ -168,4 +170,63 @@ func TestAFileThatIsMissingOrDoesNotFitHoldsNothing(t *testing.T) {
 			t.Errorf("Load() = %v, want nothing", got)
 		}
 	})
+}
+
+func TestAReaderDuringSavesNeverSeesAFileThatDoesNotParse(t *testing.T) {
+	file := File{Path: filepath.Join(t.TempDir(), "detected.json")}
+	models := make([]string, 2000)
+	for i := range models {
+		models[i] = "model-" + string(rune('a'+i%26)) + string(rune('a'+i/26%26)) + string(rune('a'+i/676))
+	}
+	detected := Detected{"codex": aHarness("0.163.0", models...)}
+	if err := file.Save(detected); err != nil {
+		t.Fatal(err)
+	}
+
+	stop := make(chan struct{})
+	var writer sync.WaitGroup
+	writer.Add(1)
+	go func() {
+		defer writer.Done()
+		for i := 0; i < 300; i++ {
+			if err := file.Save(detected); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+		close(stop)
+	}()
+
+	bad := ""
+	for bad == "" {
+		select {
+		case <-stop:
+			writer.Wait()
+			return
+		default:
+		}
+		text, err := os.ReadFile(file.Path)
+		if err != nil {
+			bad = err.Error()
+		} else if !json.Valid(text) {
+			bad = "a file that does not parse, " + string(rune('0'+len(text)%10)) + " bytes mod 10"
+		}
+	}
+	<-stop
+	writer.Wait()
+	t.Errorf("read during Save: %s, want the whole old file or the whole new one", bad)
+}
+
+func TestSaveKeepsTheFileMode0644(t *testing.T) {
+	file := File{Path: filepath.Join(t.TempDir(), "detected.json")}
+	if err := file.Save(Detected{"codex": aHarness("0.163.0", "gpt-5.6-terra")}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(file.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o644 {
+		t.Errorf("mode = %o, want 644", got)
+	}
 }
