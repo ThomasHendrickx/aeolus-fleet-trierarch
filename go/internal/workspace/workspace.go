@@ -141,9 +141,15 @@ func Unsaved(folder string) ([]string, error) {
 	return unsavedIn(folder, gitInFolder)
 }
 
-// unsavedIn is what the folder holds that no remote, branch or tag has, as git in it says.
+// refusedPrefix starts what a folder the host does not read holds, as unsaved: not known, so it is told with why, never taken for clean.
+const refusedPrefix = "refused, "
+
+// unsavedIn is what the folder holds that no remote, branch or tag has, as git in it says; a folder the host does not read is one line, why.
 func unsavedIn(folder string, gitIn func(folder string, args ...string) (string, error)) ([]string, error) {
 	changes, err := gitIn(folder, "status", "--porcelain", "--ignore-submodules=all")
+	if refused := (*RefusedError)(nil); errors.As(err, &refused) {
+		return []string{refusedPrefix + refused.Reason}, nil
+	}
 	if err != nil {
 		return nil, err
 	}

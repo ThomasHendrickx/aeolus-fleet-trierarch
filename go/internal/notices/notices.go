@@ -90,7 +90,7 @@ func OwnerUnreachable(report string, ownerName string, code string, message stri
 const discardedNamed = 5
 
 // kinds are the kinds of discarded lines, in the order the counts name them.
-var kinds = []string{"deleted", "changed", "renamed", "new", "commit"}
+var kinds = []string{"refused", "deleted", "changed", "renamed", "new", "commit"}
 
 type discardedLine struct {
 	kind string
@@ -99,13 +99,19 @@ type discardedLine struct {
 
 const commitPrefix = "commit "
 
+// refusedPrefix starts the line of a worktree the host did not read, with why: what it held is not known.
+const refusedPrefix = "refused, "
+
 // statusWidth is a git status line's two status letters and the space before the path.
 const statusWidth = 3
 
-// lineOf is one line of what removing a worktree discards (git status, or an unkept commit), in words.
+// lineOf is one line of what removing a worktree discards (git status, an unkept commit, or why the host did not read it), in words.
 func lineOf(line string) discardedLine {
 	if strings.HasPrefix(line, commitPrefix) {
 		return discardedLine{"commit", line[len(commitPrefix):]}
+	}
+	if strings.HasPrefix(line, refusedPrefix) {
+		return discardedLine{"refused", line[len(refusedPrefix):]}
 	}
 	status := line
 	if len(status) > 2 {

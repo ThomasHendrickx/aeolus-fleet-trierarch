@@ -17,7 +17,18 @@ import (
 // command for a transport, pager, editor or credential the folder's config names, and takes no optional lock. They go through
 // inFolder, so no call can leave one of these in force. The machine's own config (global and system) applies as before. Git is
 // pointed at no folder but the ship's own: a folder whose config sets core.worktree is not read, and a clone is read only
-// through its own `.git` folder (inClone).
+// through its own `.git` folder (inClone). A folder that is not read is refused with why (RefusedError), so what it holds is not
+// known.
+
+// RefusedError is a folder the host does not read, with why.
+type RefusedError struct {
+	Folder string
+	Reason string
+}
+
+func (e *RefusedError) Error() string {
+	return fmt.Sprintf("will not read %s: %s", e.Folder, e.Reason)
+}
 
 // harmless are the values the host's git calls take in a ship's folder whatever its config says: no hooks in a folder and no fsmonitor.
 var harmless = []override{{"core.fsmonitor", "false"}, {"core.hooksPath", "/dev/null"}}
@@ -98,7 +109,7 @@ func overridesIn(folder string, located []string) ([]override, error) {
 			continue
 		}
 		if name == "core.worktree" {
-			return nil, fmt.Errorf("will not read %s: its config sets core.worktree, which points git at another folder", folder)
+			return nil, &RefusedError{folder, "its config sets core.worktree, which points git at another folder"}
 		}
 		if isProgram(name) {
 			overrides = append(overrides, neutralOf(name))
@@ -123,10 +134,10 @@ func inFolder(folder string, args ...string) (*exec.Cmd, error) {
 func inClone(clone string, args ...string) (*exec.Cmd, error) {
 	gitFolder := filepath.Join(clone, ".git")
 	if found, err := os.Lstat(gitFolder); err != nil || !found.IsDir() {
-		return nil, fmt.Errorf("will not read %s: its .git is no folder of its own", clone)
+		return nil, &RefusedError{clone, "its .git is no folder of its own"}
 	}
 	if _, err := os.Lstat(filepath.Join(gitFolder, "commondir")); err == nil {
-		return nil, fmt.Errorf("will not read %s: its .git names another git folder in its commondir", clone)
+		return nil, &RefusedError{clone, "its .git names another git folder in its commondir"}
 	}
 	return located(clone, []string{"GIT_DIR=" + gitFolder, "GIT_WORK_TREE=" + clone}, args)
 }

@@ -838,7 +838,12 @@ func (p Pass) endWorkspace(entry reconciler.Entry, told func(notices.Ship, strin
 	if entry.Folder == "" || entry.Workspace.Kind != "worktree" {
 		return nil
 	}
-	if unsaved, err := p.Workspace.Unsaved(entry.Folder); err == nil && len(unsaved) > 0 {
+	unsaved, err := p.Workspace.Unsaved(entry.Folder)
+	if err != nil {
+		// What it holds is not known, so it is not removed untold: the next pass reads it again.
+		return err
+	}
+	if len(unsaved) > 0 {
 		p.Log(fmt.Sprintf("Discarded from the worktree of %s (%s), %s: %s", nameOf(entry), entry.ShipID, entry.Folder, strings.Join(unsaved, "; ")))
 		// Told before the worktree goes, once per release; a failure to tell leaves the worktree for the next pass.
 		text := told(notices.Ship{ID: entry.ShipID, Name: entry.ShipName}, entry.Workspace.Repository, unsaved)
