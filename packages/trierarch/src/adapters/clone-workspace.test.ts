@@ -489,3 +489,13 @@ describe("the host's git calls in a session's clone, with the clone's git pointe
     expect({ unsaved: await workspace().unsaved(made), isClean: await workspace().isClean(made) }).toEqual({ unsaved: [`refused, ${reason}`], isClean: false });
   });
 });
+
+describe("the host's git calls in a session's clone, with a file in its work tree git waits on", () => {
+  it('reads a clone whose git call does not end within its time limit as unsaved and not clean, refused, saying why', async () => {
+    const { folder: made } = await workspace().prepare(scout);
+    aPipe(join(made, '.gitignore'));
+    const limited = workspace({ timeLimitMs: 2000 });
+
+    expect({ unsaved: await limited.unsaved(made), isClean: await limited.isClean(made) }).toEqual({ unsaved: ['refused, git status did not end within 2 seconds'], isClean: false });
+  });
+});
