@@ -1,7 +1,7 @@
 {
   "name": "@aeolus-fleet/trierarch",
   "version": "0.0.0",
-  "description": "Keeps Claude Code and Codex sessions running on your machine for an Aeolus fleet: start, restart, wake.",
+  "description": "Kept for existing machines only: `aeolus-trierarch upgrade` moves a machine to the aeolus-trierarch binary, and a new machine installs the binary with install.sh. Keeps Claude Code and Codex sessions running for an Aeolus fleet.",
   "keywords": [
     "claude-code",
     "codex",

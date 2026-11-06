@@ -1,5 +1,7 @@
 # @aeolus-fleet/trierarch
 
+**Kept for existing machines only.** The trierarch is now one binary with no Node, from its GitHub Release. On a machine that runs this package, `aeolus-trierarch upgrade` moves it to the binary in `~/.local/bin`, and its sessions keep running ([docs/trierarch.md](../../docs/trierarch.md#a-machine-joins)). A new machine installs the binary with the install script, which the trierarch plugin's setup line runs, not with npm.
+
 Keeps the ships whose crew requests are assigned to it crewed on the machine it runs on: it starts, restarts, wakes and stops their sessions, and writes each request's status. It crews with `crew:run`, which reaches only the ships assigned to it; it never commissions, retires or picks them. The trierarch plugin assigns them. What a trierarch does is in [docs/trierarch.md](../../docs/trierarch.md); how this package is built is in [docs/architecture.md](../../docs/architecture.md#the-trierarch). Optional, like squadrons.
 
 ## Install
