@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -330,5 +331,50 @@ func TestTheHostReadsAsRefusedACloneWithAConfigGitCannotRead(t *testing.T) {
 
 	if want := []string{"refused, git config failed: fatal: bad config line 3 in file " + filepath.Join(folder, ".git", "config")}; err != nil || !slices.Equal(unsaved, want) {
 		t.Errorf("Unsaved(%s) with a config git cannot read = %q, %v, want %q", folder, unsaved, err, want)
+	}
+}
+
+func TestTheHostRefusesToReadAWorktreeWhoseOwnGitFolderHoldsWhatIsNotAFileOfItsOwn(t *testing.T) {
+	plants := []struct {
+		name   string
+		reason string
+		plant  func(t *testing.T, repository string, gitFolder string, worktree string)
+	}{
+		{"a link as its HEAD", "its .git holds a link: HEAD", func(t *testing.T, repository string, gitFolder string, worktree string) {
+			if err := os.Remove(filepath.Join(gitFolder, "HEAD")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join(repository, ".git", "HEAD"), filepath.Join(gitFolder, "HEAD")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"a named pipe as its HEAD", "its .git holds a special file: HEAD", func(t *testing.T, repository string, gitFolder string, worktree string) {
+			if err := os.Remove(filepath.Join(gitFolder, "HEAD")); err != nil {
+				t.Fatal(err)
+			}
+			aPipe(t, filepath.Join(gitFolder, "HEAD"))
+		}},
+		{"a link as its .git", "its .git is neither a file nor a folder of its own", func(t *testing.T, repository string, gitFolder string, worktree string) {
+			if err := os.Remove(filepath.Join(worktree, ".git")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join(repository, ".git"), filepath.Join(worktree, ".git")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, planted := range plants {
+		t.Run(planted.name, func(t *testing.T) {
+			repository, _ := aRepository(t)
+			worktree := filepath.Join(t.TempDir(), "worktree")
+			gitIn(t, "-C", repository, "worktree", "add", "-q", "--detach", worktree)
+			planted.plant(t, repository, filepath.Join(repository, ".git", "worktrees", "worktree"), worktree)
+
+			_, err := gitInFolder(worktree, "status", "--porcelain")
+
+			if refused := (*RefusedError)(nil); !errors.As(err, &refused) || refused.Reason != planted.reason {
+				t.Errorf("gitInFolder(%s) with %s = %v, want refused: %s", worktree, planted.name, err, planted.reason)
+			}
+		})
 	}
 }
