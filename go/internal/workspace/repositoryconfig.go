@@ -204,9 +204,57 @@ func overridesIn(ctx context.Context, folder string, located []string, as readin
 	return overrides, nil
 }
 
-// inFolder is git run in a ship's folder with the folder's own config naming no program, and only a local repository to fetch from.
+// inFolder is git run in a ship's folder with the folder's own config naming no program, and only a local repository to fetch from. A
+// folder whose `.git` is neither a file nor a folder, or whose own git folder (a worktree's, which its `.git` file names) is no folder
+// or holds a link or a special file, is not read.
 func inFolder(ctx context.Context, folder string, as reading, args ...string) (*exec.Cmd, error) {
+	gitFolder, err := ownGitFolderOf(folder)
+	if err != nil {
+		return nil, err
+	}
+	if gitFolder != "" {
+		if found, err := os.Lstat(gitFolder); err != nil || !found.IsDir() {
+			return nil, &RefusedError{folder, "its .git names no folder of its own"}
+		}
+		irregular, err := irregularIn(gitFolder)
+		if err != nil {
+			return nil, err
+		}
+		if irregular != "" {
+			return nil, &RefusedError{folder, irregular}
+		}
+	}
 	return located(ctx, folder, nil, as, args)
+}
+
+// ownGitFolderOf is the folder's own git folder: its `.git` when that is a folder, else the one its `.git` file names; none without a
+// `.git`.
+func ownGitFolderOf(folder string) (string, error) {
+	dotGit := filepath.Join(folder, ".git")
+	found, err := os.Lstat(dotGit)
+	if err != nil {
+		return "", nil
+	}
+	if found.IsDir() {
+		return dotGit, nil
+	}
+	if !found.Mode().IsRegular() {
+		return "", &RefusedError{folder, "its .git is neither a file nor a folder of its own"}
+	}
+	content, err := os.ReadFile(dotGit)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", dotGit, err)
+	}
+	for _, line := range strings.Split(string(content), "\n") {
+		if named, ok := strings.CutPrefix(line, "gitdir: "); ok && strings.TrimSpace(named) != "" {
+			named = strings.TrimSpace(named)
+			if !filepath.IsAbs(named) {
+				named = filepath.Join(folder, named)
+			}
+			return named, nil
+		}
+	}
+	return "", nil
 }
 
 // inClone is git run in a ship's clone as in its folder, through the clone's own `.git` folder and with the clone as its work tree,
