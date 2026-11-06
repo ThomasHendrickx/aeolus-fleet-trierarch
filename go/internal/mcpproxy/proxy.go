@@ -8,7 +8,10 @@
 // whatever the server offers. A call to any other tool is answered with a
 // JSON-RPC error and never reaches the server, as is any resources/ or
 // prompts/ request, which the list does not name, and the server's
-// capabilities offer neither.
+// capabilities offer neither. For a server that needs a credential it sets
+// the header the list names to the secret's value, over whatever the session
+// sent in it, and refuses the server while it holds no such secret: the
+// session never sees the value.
 package mcpproxy
 
 import (
@@ -93,6 +96,20 @@ type Proxy struct {
 	Sessions string
 	// Servers is the list the trierarch plugin sent last, read at each request.
 	Servers func() []mcpservers.Server
+	// Secret is a secret's value, read at each request; false when none is held. Without it no secret is held.
+	Secret func(name string) (string, bool)
+}
+
+// credentialOf is the header and value the server's credential sets; false when it needs one the proxy does not hold.
+func (p Proxy) credentialOf(server mcpservers.Server) (header string, value string, ok bool) {
+	if server.Credential == nil {
+		return "", "", true
+	}
+	if p.Secret == nil {
+		return "", "", false
+	}
+	value, ok = p.Secret(server.Credential.Secret)
+	return server.Credential.Header, value, ok
 }
 
 func refuse(w http.ResponseWriter, status int, message string) {
@@ -154,6 +171,11 @@ func (p Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		refuse(w, http.StatusNotFound, name+" is not on the MCP servers this trierarch holds")
 		return
 	}
+	header, credential, ok := p.credentialOf(server)
+	if !ok {
+		refuse(w, http.StatusServiceUnavailable, name+"'s credential is not held by this trierarch")
+		return
+	}
 	if r.Method == http.MethodPost {
 		body, err := io.ReadAll(io.LimitReader(r.Body, requestRead+1))
 		if err != nil || len(body) > requestRead {
@@ -175,6 +197,9 @@ func (p Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			out.Out.Header.Del("cookie")
 			// The answer is read to filter its tools: it comes uncompressed.
 			out.Out.Header.Del("accept-encoding")
+			if header != "" {
+				out.Out.Header.Set(header, credential)
+			}
 		},
 		// A stream goes on as the server writes it.
 		FlushInterval: -1,
