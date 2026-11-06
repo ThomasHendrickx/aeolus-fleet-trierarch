@@ -433,6 +433,22 @@ describe("the host's git calls in a session's clone, with the clone's git pointe
       reason: `its config names a program for git-lfs: ${name}`,
       point: (clone: string) => git(['-C', clone, 'config', name, join(folder, 'program')]),
     })),
+    ...[
+      { name: 'extensions.partialclone', isPartialClone: true },
+      { name: 'remote.other.promisor', isPartialClone: false },
+    ].map(({ name, isPartialClone }) => ({
+      name: `${name} in its config, at a commit only another repository has`,
+      reason: `its config names a remote to fetch missing objects from: ${name}`,
+      point: async (clone: string, other: string) => {
+        await git(['-C', clone, 'config', 'core.repositoryformatversion', '1']);
+        if (isPartialClone) {
+          await git(['-C', clone, 'config', 'extensions.partialClone', 'other']);
+        }
+        await git(['-C', clone, 'config', 'remote.other.url', other]);
+        await git(['-C', clone, 'config', 'remote.other.promisor', 'true']);
+        writeFileSync(join(clone, '.git', 'HEAD'), await git(['-C', other, 'rev-parse', 'HEAD']));
+      },
+    })),
   ];
 
   it.each(pointings)('reads a clone with $name as unsaved and not clean, refused, saying why', async ({ point, reason }) => {

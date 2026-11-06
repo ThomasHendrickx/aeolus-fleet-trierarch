@@ -47,3 +47,20 @@ describe("the host's git calls in a ship's folder, with a hook named in the fold
     expect({ checkout: checkout.status, status: status.status, hasRun: existsSync(marker) }).toEqual({ checkout: 0, status: 0, hasRun: false });
   });
 });
+
+describe("the host's git calls in a ship's folder, with a remote in the folder's own config to fetch missing objects from", () => {
+  it('fetches no object the folder lacks', async () => {
+    const other = join(folder, 'other');
+    await git(['init', '-q', '-b', 'main', other]);
+    writeFileSync(join(other, 'OTHER.md'), 'OTHER.md\n');
+    await git(['-C', other, 'add', '.']);
+    await git(['-C', other, 'commit', '-q', '-m', 'only in the other repository']);
+    await git(['-C', repository, 'config', 'remote.other.url', other]);
+    await git(['-C', repository, 'config', 'remote.other.promisor', 'true']);
+    const missing = (await runCommand('git', { args: ['-C', other, 'rev-parse', 'HEAD'] })).stdout.trim();
+
+    const log = await gitInFolder(repository, ['log', '--format=%s', missing]);
+
+    expect({ isFailed: log.status !== 0, stdout: log.stdout }).toEqual({ isFailed: true, stdout: '' });
+  });
+});
