@@ -98,7 +98,8 @@ type Workspace interface {
 	Unsaved(folder string) ([]string, error)
 	Remove(entry reconciler.Entry) error
 	Worktrees() ([]reconciler.Worktree, error)
-	// IsMade is whether the folder is a worktree the trierarch made, which git knows: anything else under its root is not its to clear.
+	// IsMade is whether the folder is a workspace the trierarch made, a worktree git knows or a clone holding its marker: anything else
+	// under its root is not its to clear.
 	IsMade(folder string) bool
 	RemoveWorktree(folder string) error
 }
