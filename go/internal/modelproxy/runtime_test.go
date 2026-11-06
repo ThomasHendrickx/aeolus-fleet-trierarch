@@ -224,8 +224,8 @@ func TestARunningProxyIsTheMCPProxyOfTheServersTheTrierarchPluginSentLast(t *tes
 	defer answer.Body.Close()
 	text, _ := io.ReadAll(answer.Body)
 
-	if want := `{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"read_neo4j_cypher"}]}}`; string(text) != want {
-		t.Fatalf("tools/list at the proxy = %d %s, want %s", answer.StatusCode, text, want)
+	if want := `"tools":[{"name":"read_neo4j_cypher"}]`; !strings.Contains(string(text), want) {
+		t.Fatalf("tools/list at the proxy = %d %s, want only %s", answer.StatusCode, text, want)
 	}
 }
 

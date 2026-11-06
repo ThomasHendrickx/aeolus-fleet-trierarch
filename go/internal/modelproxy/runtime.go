@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/processproof"
 )
 
@@ -48,6 +50,8 @@ type Runtime struct {
 	Folder   string
 	Sessions string
 	Keys     string
+	// McpServers is the MCP servers file, which the proxy reads at each request to an MCP server.
+	McpServers string
 	// Program is the trierarch program, which `proxy` and its words follow.
 	Program []string
 	Version string
@@ -121,7 +125,7 @@ func (r Runtime) stop() error {
 }
 
 func (r Runtime) start() error {
-	words := append(append([]string{}, r.Program...), "proxy", "--folder", r.Folder, "--sessions", r.Sessions, "--keys", r.Keys)
+	words := append(append([]string{}, r.Program...), "proxy", "--folder", r.Folder, "--sessions", r.Sessions, "--keys", r.Keys, "--mcp-servers", r.McpServers)
 	line := append(append(append([]string{}, r.Launch...), "sh", "-c", detached, "sh"), words...)
 	starter := exec.Command(line[0], line[1:]...)
 	starter.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -153,16 +157,16 @@ func (r Runtime) Keep(isNeeded bool) error {
 	return r.start()
 }
 
-const usage = "Usage: aeolus-trierarch proxy --folder <folder> --sessions <folder> --keys <folder>"
+const usage = "Usage: aeolus-trierarch proxy --folder <folder> --sessions <folder> --keys <folder> --mcp-servers <file>"
 
-// Main runs `aeolus-trierarch proxy` with the words after `proxy`, as the trierarch starts it, never a person. It listens on loopback, on the port it listened on before when it can, so a running session reaches it where it did; it writes its port and pid in its folder, checks each key out of credit every 15 minutes, and ends on SIGTERM. Answers its exit code, or 2 for words it cannot take.
+// Main runs `aeolus-trierarch proxy` with the words after `proxy`, as the trierarch starts it, never a person: the model proxy and the MCP proxy in one process. It listens on loopback, on the port it listened on before when it can, so a running session reaches it where it did; it writes its port and pid in its folder, checks each key out of credit every 15 minutes, and ends on SIGTERM. Answers its exit code, or 2 for words it cannot take.
 func Main(words []string, version string) int {
 	values := map[string]string{}
 	for at := 0; at+1 < len(words); at += 2 {
 		values[words[at]] = words[at+1]
 	}
-	folder, sessions, keysFolder := values["--folder"], values["--sessions"], values["--keys"]
-	if folder == "" || sessions == "" || keysFolder == "" || len(words) != 6 {
+	folder, sessions, keysFolder, servers := values["--folder"], values["--sessions"], values["--keys"], values["--mcp-servers"]
+	if folder == "" || sessions == "" || keysFolder == "" || servers == "" || len(words) != 8 {
 		fmt.Fprintln(os.Stderr, usage)
 		return 2
 	}
@@ -184,7 +188,12 @@ func Main(words []string, version string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	proxy := Proxy{Sessions: sessions, Keys: keys.Files{Folder: keysFolder}, States: keys.States{Keys: keysFolder, File: files.KeyStates}, Version: version, Now: time.Now}
+	proxy := Proxy{Sessions: sessions, Keys: keys.Files{Folder: keysFolder}, States: keys.States{Keys: keysFolder, File: files.KeyStates}, Version: version, Now: time.Now, MCP: mcpproxy.Proxy{Sessions: sessions, Servers: func() []mcpservers.Server {
+		// Read at each request: the trierarch keeps the list as it arrives.
+		held := mcpservers.File{Path: servers}
+		held.Load()
+		return held.Current()
+	}}}
 	server := &http.Server{Handler: proxy, ReadHeaderTimeout: 30 * time.Second}
 	port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
 	if err := os.WriteFile(files.Port, []byte(port), 0o600); err != nil {
