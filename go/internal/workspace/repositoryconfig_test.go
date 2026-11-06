@@ -378,3 +378,45 @@ func TestTheHostRefusesToReadAWorktreeWhoseOwnGitFolderHoldsWhatIsNotAFileOfItsO
 		})
 	}
 }
+
+// aSignedCommit is a commit on top of the folder's HEAD carrying a signature, made HEAD: answers its subject.
+func aSignedCommit(t *testing.T, folder string) string {
+	t.Helper()
+	tree := strings.TrimSpace(gitIn(t, "-C", folder, "rev-parse", "HEAD^{tree}"))
+	parent := strings.TrimSpace(gitIn(t, "-C", folder, "rev-parse", "HEAD"))
+	object := fmt.Sprintf("tree %s\nparent %s\nauthor a <a@example.com> 0 +0000\ncommitter a <a@example.com> 0 +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n c2lnbmVk\n -----END PGP SIGNATURE-----\n\nsigned\n", tree, parent)
+	hashing := exec.Command("git", "-C", folder, "hash-object", "-t", "commit", "-w", "--stdin")
+	hashing.Stdin = strings.NewReader(object)
+	commit, err := hashing.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, "-C", folder, "update-ref", "--no-deref", "HEAD", strings.TrimSpace(string(commit)))
+	return "signed"
+}
+
+func TestTheHostsGitCallsInASessionsCloneCheckNoCommitsSignature(t *testing.T) {
+	repository, root := aRepository(t)
+	places := clonePlaces(repository, root, t.TempDir())
+	folder := prepared(t, places, scoutInAeolusFleet, "scout")
+	// One script under each name git runs to check a signature, first on PATH.
+	programs := t.TempDir()
+	program, marker := aMarkingScript(t, filepath.Join(programs, "gpg"))
+	for _, name := range []string{"gpgsm", "ssh-keygen"} {
+		if err := os.Symlink(program, filepath.Join(programs, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", programs+string(os.PathListSeparator)+os.Getenv("PATH"))
+	subject := aSignedCommit(t, folder)
+	gitIn(t, "-C", folder, "config", "log.showSignature", "true")
+
+	unsaved, err := places.Unsaved(folder)
+
+	if err != nil || len(unsaved) != 1 || !strings.HasSuffix(unsaved[0], " "+subject) {
+		t.Errorf("Unsaved(%s) = %q, %v, want the signed commit", folder, unsaved, err)
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Error("with log.showSignature set in the clone's config, the host's git calls checked a commit's signature")
+	}
+}
