@@ -4,7 +4,7 @@ import { join, relative, sep } from 'node:path';
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { WorkspacePort } from '../core/ports.js';
-import { gitInCloneWithin, type Limits } from './git-in-folder.js';
+import { gitInCloneWithin, gitInFreshClone, type Limits } from './git-in-folder.js';
 import { createGitWorkspace, REFUSED_PREFIX } from './git-workspace.js';
 import { runCommand } from './run-command.js';
 import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
@@ -49,9 +49,9 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
     }
     return result.stdout;
   };
-  /** Git in the ship's clone, which ignores the clone's own config where it names a program, through the clone's own `.git`. */
+  /** Git in the ship's fresh clone, which ignores the clone's own config where it names a program, through the clone's own `.git`, and runs the machine's own filters. */
   const gitIn = async (clone: string, args: readonly string[]): Promise<void> => {
-    const result = await gitInClone(clone, args);
+    const result = await gitInFreshClone(clone, args);
     if (result.status !== 0) {
       throw new Error(`git ${args.join(' ')} failed: ${result.stderr.trim()}`);
     }

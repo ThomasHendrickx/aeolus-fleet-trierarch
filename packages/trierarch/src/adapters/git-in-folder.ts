@@ -11,7 +11,8 @@ import { type CommandResult, runCommand } from './run-command.js';
  * git to run: git runs no hook, in a folder or in the config, no fsmonitor, no filter, diff or merge driver,
  * and no command for a transport, pager, editor or credential the folder's
  * config names, and takes no optional lock, and fetches no object the folder lacks. No filter runs, the machine's own
- * included, as the folder's attributes may name it. Otherwise the machine's own
+ * included, as the folder's attributes may name it, but in a fresh clone the
+ * trierarch just made, which no session touched yet. Otherwise the machine's own
  * config (global and system) applies as before. A folder whose config names a
  * program for git-lfs, which reads that config itself, is not read. Git is pointed at no folder but the ship's
  * own: a folder whose config sets core.worktree is not read, and a clone is
@@ -32,6 +33,9 @@ export class RefusedRead extends Error {
 
 /** How long a host git call in a ship's folder runs before it is ended and the folder not read. */
 const TIME_LIMIT_MS = 60_000;
+
+/** How long a host git call in a fresh clone runs: its fetch and checkout may download what the machine's filters fetch, as git-lfs's. */
+const FRESH_TIME_LIMIT_MS = 600_000;
 
 /** How long each host git call in a ship's folder may run. */
 export interface Limits {
@@ -134,10 +138,17 @@ function hookOffOf(name: string): readonly Override[] {
   ];
 }
 
-/** Where git finds the folder's repository, given in the environment when it is, and whether the folder is a clone, whose config names no remote to fetch missing objects from. */
+/**
+ * Where git finds the folder's repository, given in the environment when it
+ * is; whether the folder is a clone, whose config names no remote to fetch
+ * missing objects from; and whether it is a fresh clone, which no session
+ * touched yet, so its checkout runs the filters the machine's own config
+ * defines.
+ */
 interface Located {
   readonly env: Readonly<Record<string, string>>;
   readonly isClone: boolean;
+  readonly isFresh: boolean;
   readonly limits: Limits;
 }
 
@@ -152,8 +163,10 @@ async function overridesIn(folder: string, located: Located): Promise<readonly O
   for (let i = 0; i + 1 < fields.length; i += 2) {
     const scope = fields[i] ?? '';
     const name = fields[i + 1] ?? '';
-    // Of every scope: the folder's attributes may name a filter the machine's own config defines, as git-lfs's.
-    overrides.push(...filterOffOf(name).filter((off) => !overrides.some((each) => each.name === off.name)));
+    // Of every scope but a fresh clone's: the folder's attributes may name a filter the machine's own config defines, as git-lfs's.
+    if (!located.isFresh || FOLDER_SCOPES.includes(scope)) {
+      overrides.push(...filterOffOf(name).filter((off) => !overrides.some((each) => each.name === off.name)));
+    }
     if (!FOLDER_SCOPES.includes(scope)) {
       continue;
     }
@@ -188,7 +201,7 @@ async function gitIn(folder: string, at: { args: readonly string[]; located: Loc
 
 /** Runs git in a ship's folder with the folder's own config naming no program, and only a local repository to fetch from. */
 export async function gitInFolder(folder: string, args: readonly string[]): Promise<CommandResult> {
-  return gitIn(folder, { args, located: { env: {}, isClone: false, limits: {} } });
+  return gitIn(folder, { args, located: { env: {}, isClone: false, isFresh: false, limits: {} } });
 }
 
 /** What git said, on one line (a reason is one line) and without its hints, which are advice, not the cause. */
@@ -264,11 +277,16 @@ async function includeOutside(gitFolder: string, limits: Limits): Promise<string
  * holds a special file, such as a named pipe, which git may wait on forever.
  */
 export function gitInCloneWithin(limits: Limits): (clone: string, args: readonly string[]) => Promise<CommandResult> {
-  return (clone, args) => gitInCloneAt(clone, { args, limits });
+  return (clone, args) => gitInCloneAt(clone, { args, limits, isFresh: false });
 }
 
-async function gitInCloneAt(clone: string, at: { args: readonly string[]; limits: Limits }): Promise<CommandResult> {
-  const { args, limits } = at;
+/** Git in a clone the trierarch just made from a trusted repository, before any session touched it, as in any clone, but through the filters the machine's own config defines, so its checkout is what a session works on (git-lfs's files, not their pointers). */
+export function gitInFreshClone(clone: string, args: readonly string[]): Promise<CommandResult> {
+  return gitInCloneAt(clone, { args, limits: { timeLimitMs: FRESH_TIME_LIMIT_MS }, isFresh: true });
+}
+
+async function gitInCloneAt(clone: string, at: { args: readonly string[]; limits: Limits; isFresh: boolean }): Promise<CommandResult> {
+  const { args, limits, isFresh } = at;
   const gitFolder = join(clone, '.git');
   const found = await lstat(gitFolder).catch(() => undefined);
   if (found?.isDirectory() !== true) {
@@ -288,5 +306,5 @@ async function gitInCloneAt(clone: string, at: { args: readonly string[]; limits
   if (include !== undefined) {
     throw new RefusedRead(clone, `its config includes a file outside its .git: ${include}`);
   }
-  return gitIn(clone, { args, located: { env: { GIT_DIR: gitFolder, GIT_WORK_TREE: clone }, isClone: true, limits } });
+  return gitIn(clone, { args, located: { env: { GIT_DIR: gitFolder, GIT_WORK_TREE: clone }, isClone: true, isFresh, limits } });
 }
