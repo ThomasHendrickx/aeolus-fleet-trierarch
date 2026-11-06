@@ -19,8 +19,8 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/processproof"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 )
 
 const (
