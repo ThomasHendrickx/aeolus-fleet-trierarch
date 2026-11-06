@@ -402,6 +402,7 @@ describe('a Codex session held by a hold, one codex exec per turn (headless H11,
     const runtime = aRuntime();
     const shipId = await aCodexSession(runtime);
     await expect.poll(hooks).toEqual(['SessionStart', 'UserPromptSubmit', 'Stop']);
+    await expect.poll(async () => eventsOfType({ runtime, shipId }, 'thread.started')).toHaveLength(1);
     const [thread] = await eventsOfType({ runtime, shipId }, 'thread.started');
 
     await runtime.send({ shipId, line: 'the hand-over' });

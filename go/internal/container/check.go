@@ -30,6 +30,8 @@ type Host interface {
 	// Groups are the groups of the user that runs the trierarch.
 	Groups() ([]string, error)
 	IsModelTokenWritten() bool
+	// IsPastaMissing is whether the runtime is a Podman whose info names no pasta, the network that gives a container the proxy's port alone.
+	IsPastaMissing(binary string) bool
 }
 
 // harnesses are the harnesses a container runs, until another is proven in one (decision 0039).
@@ -59,6 +61,10 @@ func Check(configuration config.Configuration, host Host, modelToken string) ([]
 		refusals = append(refusals, runtime.Binary+" runs rootful: the container runtime runs rootless only, as the user that runs the trierarch")
 	case Missing:
 		refusals = append(refusals, runtime.Binary+" does not answer: install a rootless podman, or name the runtime binary in runtime.binary")
+	case Rootless:
+		if host.IsPastaMissing(runtime.Binary) {
+			refusals = append(refusals, runtime.Binary+" has no pasta: install passt, which gives a container the trierarch's proxy port and nothing else of the host")
+		}
 	}
 	groups, err := host.Groups()
 	if err != nil {
@@ -92,7 +98,7 @@ type refusal string
 
 func (r refusal) Error() string { return string(r) }
 
-// Machine is the machine as it is: how the runtime runs, from the info Podman and docker both give as JSON; the user's groups, from `id`; and whether the model token file holds a token.
+// Machine is the machine as it is: how the runtime runs, from the info Podman and docker both give as JSON; the user's groups, from `id`; whether the model token file holds a token; and whether Podman has pasta, from its info.
 type Machine struct {
 	ModelToken string
 }
@@ -103,6 +109,11 @@ func (Machine) Mode(binary string) Mode {
 		return Missing
 	}
 	return modeOfInfo(string(info))
+}
+
+func (Machine) IsPastaMissing(binary string) bool {
+	info, err := exec.Command(binary, "info", "--format", "json").Output()
+	return err == nil && isPastaMissingOfInfo(string(info))
 }
 
 func (Machine) Groups() ([]string, error) {
@@ -120,6 +131,22 @@ func (m Machine) IsModelTokenWritten() bool {
 
 // dockerRootless is among docker's security options when its daemon runs rootless.
 const dockerRootless = "name=rootless"
+
+// isPastaMissingOfInfo is whether the info is Podman's and names no pasta executable; docker's info says nothing of pasta.
+func isPastaMissingOfInfo(info string) bool {
+	var said struct {
+		Host *struct {
+			Security *struct{} `json:"security"`
+			Pasta    *struct {
+				Executable string `json:"executable"`
+			} `json:"pasta"`
+		} `json:"host"`
+	}
+	if json.Unmarshal([]byte(info), &said) != nil || said.Host == nil || said.Host.Security == nil {
+		return false
+	}
+	return said.Host.Pasta == nil || said.Host.Pasta.Executable == ""
+}
 
 // modeOfInfo is how the runtime runs, as its info says: Podman's host security, or docker's security options.
 func modeOfInfo(info string) Mode {

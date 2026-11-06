@@ -354,9 +354,9 @@ func mcpServerList(at paths.Paths) *mcpservers.File {
 	return heldServers
 }
 
-// harnessesThatAddMcpServers are the harnesses a session can be started with crew-time MCP servers (decision M4), on the runtime configured: Claude Code on the host, through the MCP proxy. A harness that cannot offers no server, so a request naming one is given back.
-func harnessesThatAddMcpServers(configured *config.Runtime) map[string]bool {
-	return map[string]bool{"claude-code": !isInContainers(configured)}
+// harnessesThatAddMcpServers are the harnesses a session can be started with crew-time MCP servers (decision M4), on the runtime configured: Claude Code, on the host and in a container, through the MCP proxy. A harness that cannot offers no server, so a request naming one is given back.
+func harnessesThatAddMcpServers(*config.Runtime) map[string]bool {
+	return map[string]bool{"claude-code": true}
 }
 
 // modelProxy is the model proxy on this machine (headless H16), started as a hold is.
@@ -450,7 +450,7 @@ func sessionRuntime(at paths.Paths, program string, configured *config.Runtime) 
 	if !isInContainers(configured) {
 		return holds
 	}
-	return container.Runtime{Holds: holds, Binary: configured.Binary, Image: sessionImage + ":" + cli.Version, ModelToken: at.ModelToken, Homes: at.Homes, Sockets: at.Sockets, Memory: configured.Memory, Cpus: configured.Cpus}
+	return container.Runtime{Holds: holds, Binary: configured.Binary, Image: sessionImage + ":" + cli.Version, ModelToken: at.ModelToken, ProxyURL: modelproxy.Runtime{Folder: at.Proxy}.URL, Homes: at.Homes, Sockets: at.Sockets, Memory: configured.Memory, Cpus: configured.Cpus}
 }
 
 // folderProcessesOf are the processes running in a folder, stopped before an orphan worktree is read and removed; in containers, only once no container works in it.
@@ -779,7 +779,7 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 		}
 	}
 	events := func(shipID string) string { return hold.FilesOf(at.Sessions, shipID).Events }
-	// Where a session reaches the model proxy (headless H16): on the host's loopback, at Podman's host address in a container.
+	// Where a session reaches the model proxy (headless H16): on the host's loopback, and in a container on its own loopback, where pasta forwards the proxy's port alone.
 	proxyURL := proxy.URL
 	if isInContainers(configuration.Runtime) {
 		proxyURL = func() (string, bool) {

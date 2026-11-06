@@ -84,6 +84,7 @@ Slices, each one PR:
 4. **trierarch plugin**: placement leaves out a machine whose report does not offer every named server, with the reason in needs-crew.
 5. **trierarch**: the MCP proxy on the host, forwarding only the listed tools, no credential yet; Claude Code started with `--mcp-config` pointing at it per session. The company graph works end to end here once Thomas's network step is done.
 6. **trierarch**: Claude Code in a container (the proxy at Podman's host address, as the model proxy is reached).
+  Amended 6 Nov 2026: a container reaches the trierarch's proxy through pasta forwarding only the proxy's port, not Podman's host address, so no other host service is reachable (PR 287).
 7. **trierarch**: Codex on the host, pointed at the proxy.
 8. **trierarch**: Copilot on the host, pointed at the proxy.
 9. **trierarch**: the trierarch's key pair at init, its public key in its report, sealed secrets received and kept, the proxy adding the credential.

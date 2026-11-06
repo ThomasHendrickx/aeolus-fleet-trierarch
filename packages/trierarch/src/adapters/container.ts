@@ -24,14 +24,13 @@ const SESSION_USER = 'uid=1000,gid=1000';
  * workers, a browser and a nested Postgres, and none for a runaway fork.
  */
 const PIDS_LIMIT = 4096;
-/**
- * Where a container reaches the host's loopback, and so the model proxy
- * (headless H16): the host's address in Podman's slirp4netns network, which
- * maps it to the host's loopback when the network allows that.
- */
-export const MODEL_PROXY_HOST = '10.0.2.2';
-/** The network that lets a session on an API key reach the host's loopback, and nothing more of the host than the network gives any container. */
-const HOST_LOOPBACK_NETWORK = 'slirp4netns:allow_host_loopback=true';
+/** Where a container reaches the model proxy (headless H16): its own loopback, where pasta forwards the proxy's port alone to the host's. */
+export const MODEL_PROXY_HOST = '127.0.0.1';
+
+/** The network of a session on an API key: only the proxy's TCP port reaches the host's loopback, with no gateway mapping and no other forward. */
+function proxyNetworkOf(port: string): string {
+  return `pasta:--no-map-gw,-t,none,-u,none,-T,${port},-U,none`;
+}
 
 /** Where a session in a container reaches the model proxy the trierarch reaches at the url, on the host's loopback. */
 export function containerProxyUrl(url: string): string {
@@ -58,6 +57,8 @@ export interface ContainerRuntimeOptions {
   /** The memory cap of each container, as the runtime takes it (`4g`). */
   readonly memory: string;
   readonly cpus: number;
+  /** Where the model proxy listens on the host's loopback, read at each start of a session on an API key; none while it is not running. */
+  readonly proxyUrl: () => Promise<string | undefined>;
   /** The sessions folder: a folder per ship, with its hold's files and its env file. */
   readonly sessions: string;
   /** The trierarch program, which `hold` and its words follow. */
@@ -69,6 +70,16 @@ export interface ContainerRuntimeOptions {
   /** What a hold's start goes through: a systemd scope of its own under a systemd unit (see sessionsLaunch). */
   readonly launch?: readonly string[];
   readonly run?: Run;
+}
+
+/** The model proxy's port, which a session on an API key reaches. */
+async function proxyPortOf(proxyUrl: () => Promise<string | undefined>): Promise<string> {
+  const url = await proxyUrl();
+  const port = url === undefined ? '' : new URL(url).port;
+  if (port === '') {
+    throw new Error('the model proxy has no address yet');
+  }
+  return port;
 }
 
 function containerName(shipId: ShipId): string {
@@ -107,8 +118,8 @@ function envFileOf(env: Readonly<Record<string, string>>): string {
  * command line (#445). A session on an API key gets no model token, the
  * subscription's login: its proxy token, which its hold holds in the
  * environment it runs the container with, is passed on by its variable's name
- * alone, and the container reaches the host's loopback, where the model proxy
- * listens (headless H16, api keys K7). It is kept while the session runs, since the hold runs
+ * alone, and the container reaches the model proxy's port alone, on its own
+ * loopback (headless H16, api keys K7). It is kept while the session runs, since the hold runs
  * the container again when it starts Claude Code again (H12), and goes with
  * the session's folder when it stops.
  */
@@ -154,6 +165,7 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
     heldAs: async ({ shipId, folder, command, env = {}, readOnly = [], proxyToken }, files) => {
       const login: Record<string, string> = proxyToken === undefined ? { [MODEL_TOKEN_VARIABLE]: (await readFile(options.tokenFile, 'utf8')).trim() } : {};
       const content = envFileOf({ ...env, ...login });
+      const network = proxyToken === undefined ? [] : ['--network', proxyNetworkOf(await proxyPortOf(options.proxyUrl))];
       const home = shipHome(options.homes, shipId);
       const shipSockets = join(options.sockets, shipId);
       // The runtime mounts only a folder that exists, and the ship's socket may not have made it yet.
@@ -201,7 +213,8 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
           ...readOnly.flatMap((path) => ['--volume', `${path}:${path}:ro`]),
           '--env',
           `HOME=${SESSION_HOME}`,
-          ...(proxyToken === undefined ? [] : ['--env', proxyToken.variable, '--network', HOST_LOOPBACK_NETWORK]),
+          ...(proxyToken === undefined ? [] : ['--env', proxyToken.variable]),
+          ...network,
           '--workdir',
           folder,
           '--env-file',

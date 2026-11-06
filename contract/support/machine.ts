@@ -76,7 +76,7 @@ export interface RunningCommand {
   readonly interrupt: () => Promise<number>;
 }
 
-export type StandInSwitch = 'claude-signed-out' | 'claude-help-names-no-alias' | 'claude-plugin-fails' | 'codex-plugin-fails' | 'codex-deletes-plugin-data' | 'codex-untrusted-hook' | 'podman-rootful' | 'user-in-docker-group';
+export type StandInSwitch = 'claude-signed-out' | 'claude-help-names-no-alias' | 'claude-plugin-fails' | 'codex-plugin-fails' | 'codex-deletes-plugin-data' | 'codex-untrusted-hook' | 'podman-rootful' | 'podman-no-pasta' | 'user-in-docker-group';
 
 export interface CommandOutcome {
   readonly status: number;
@@ -186,8 +186,8 @@ exec '${process.execPath}' '${join(STAND_INS, 'fake-claude-code.ts')}' --plugin 
 const SESSION_HOME = '/home/ubuntu';
 
 /**
- * `podman`, rootless unless `podman-rootful`: `info` as Podman says how it
- * runs; `run` writes down its words (`containers/<name>.run`, one per line)
+ * `podman`, rootless unless `podman-rootful`, with pasta unless
+ * `podman-no-pasta`: `info` as Podman says how it runs; `run` writes down its words (`containers/<name>.run`, one per line)
  * and runs the command after the image as the container would, in its
  * workdir, with nothing of the caller's environment but its PATH, the env
  * file's variables and the ones passed on, and the folder mounted at
@@ -206,7 +206,8 @@ pid() { [ -f "$containers/$1.pid" ] && kill -0 "$(cat "$containers/$1.pid")" 2>/
 case "$1" in
   info)
     rootless=true; [ -e "$machine/podman-rootful" ] && rootless=false
-    echo "{\\"host\\":{\\"security\\":{\\"rootless\\":$rootless}}}"; exit 0 ;;
+    pasta=/usr/bin/pasta; [ -e "$machine/podman-no-pasta" ] && pasta=
+    echo "{\\"host\\":{\\"security\\":{\\"rootless\\":$rootless},\\"pasta\\":{\\"executable\\":\\"$pasta\\"}}}"; exit 0 ;;
   ps)
     volume= previous=
     for argument; do [ "$previous" = --filter ] && [ "\${argument#volume=}" != "$argument" ] && volume="\${argument#volume=}"; previous="$argument"; done

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 )
 
@@ -44,6 +45,7 @@ func aContainerRuntime(t *testing.T) (Runtime, *aBinary) {
 		Binary:     "podman",
 		Image:      "ghcr.io/thomashendrickx/aeolus-session:1.2.3",
 		ModelToken: token,
+		ProxyURL:   func() (string, bool) { return "http://127.0.0.1:41000", true },
 		Homes:      filepath.Join(home, "homes"),
 		Sockets:    filepath.Join(home, "sockets"),
 		Memory:     "4g",
@@ -126,7 +128,7 @@ func TestTheShipsHomeAndSocketFolderAreMadeForTheirOwnerAlone(t *testing.T) {
 	}
 }
 
-func TestASessionOnAnAPIKeyGetsNoModelTokenItsProxyTokenByNameAndTheHostsLoopback(t *testing.T) {
+func TestASessionOnAnAPIKeyGetsNoModelTokenAndOnlyItsProxyPort(t *testing.T) {
 	r, _ := aContainerRuntime(t)
 	files := filesOf(t, r)
 	session := aSession(t.TempDir())
@@ -138,8 +140,50 @@ func TestASessionOnAnAPIKeyGetsNoModelTokenItsProxyTokenByNameAndTheHostsLoopbac
 		t.Fatalf("env file %q, %v", readFile(t, filepath.Join(files.Folder, "session.env")), err)
 	}
 	at := slices.Index(held.Command, "HOME=/home/ubuntu")
-	if got := held.Command[at+1 : at+5]; !slices.Equal(got, []string{"--env", "ANTHROPIC_AUTH_TOKEN", "--network", "slirp4netns:allow_host_loopback=true"}) || strings.Contains(strings.Join(held.Command, " "), "proxy-token") {
+	if got := held.Command[at+1 : at+5]; !slices.Equal(got, []string{"--env", "ANTHROPIC_AUTH_TOKEN", "--network", "pasta:--no-map-gw,-t,none,-u,none,-T,41000,-U,none"}) || strings.Contains(strings.Join(held.Command, " "), "proxy-token") {
 		t.Fatalf("held as %q", held.Command)
+	}
+}
+
+func TestASessionOfMCPServersReachesOnlyItsProxyPortAndKeepsTheModelToken(t *testing.T) {
+	r, _ := aContainerRuntime(t)
+	files := filesOf(t, r)
+	session := aSession(t.TempDir())
+	session.Mcp = &sessions.Mcp{Access: mcpproxy.Access{Token: "mcp-token", Servers: []string{"company-graph"}}, Config: []byte(`{}`)}
+
+	held, err := r.heldAs(session, files)
+
+	if err != nil || !strings.Contains(readFile(t, filepath.Join(files.Folder, "session.env")), "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-token") {
+		t.Fatalf("env file %q, %v", readFile(t, filepath.Join(files.Folder, "session.env")), err)
+	}
+	at := slices.Index(held.Command, "--network")
+	if at < 0 || held.Command[at+1] != "pasta:--no-map-gw,-t,none,-u,none,-T,41000,-U,none" || strings.Contains(strings.Join(held.Command, " "), "mcp-token") {
+		t.Fatalf("held as %q, want only the proxy port forwarded and no token on the command line", held.Command)
+	}
+}
+
+func TestASessionOfMCPServersSeesItsConfigurationOnlyReadOnlyAtItsOwnPath(t *testing.T) {
+	r, _ := aContainerRuntime(t)
+	files := filesOf(t, r)
+	session := aSession(t.TempDir())
+	session.Mcp = &sessions.Mcp{Access: mcpproxy.Access{Token: "mcp-token", Servers: []string{"company-graph"}}, Config: []byte(`{}`)}
+
+	held, err := r.heldAs(session, files)
+
+	mount := files.McpConfig + ":" + files.McpConfig + ":ro"
+	if at := slices.Index(held.Command, mount); err != nil || at < 1 || held.Command[at-1] != "--volume" || slices.Contains(held.Command, files.Folder+":"+files.Folder) {
+		t.Fatalf("held as %q, %v; want --volume %s and nothing else of the session's folder", held.Command, err, mount)
+	}
+}
+
+func TestASessionOfNoMCPServersSeesNoConfiguration(t *testing.T) {
+	r, _ := aContainerRuntime(t)
+	files := filesOf(t, r)
+
+	held, err := r.heldAs(aSession(t.TempDir()), files)
+
+	if err != nil || strings.Contains(strings.Join(held.Command, " "), files.McpConfig) {
+		t.Fatalf("held as %q, %v; want no MCP configuration mounted", held.Command, err)
 	}
 }
 
@@ -153,8 +197,8 @@ func TestAnEnvironmentValueOverMoreThanOneLineIsRefused(t *testing.T) {
 	}
 }
 
-func TestAProxyURLIsReachedAtTheHostsAddressInTheContainersNetwork(t *testing.T) {
-	if got := ProxyURL("http://127.0.0.1:41234"); got != "http://10.0.2.2:41234" {
+func TestAProxyURLIsReachedOnTheContainersLoopback(t *testing.T) {
+	if got := ProxyURL("http://127.0.0.1:41234"); got != "http://127.0.0.1:41234" {
 		t.Fatalf("ProxyURL = %q", got)
 	}
 }

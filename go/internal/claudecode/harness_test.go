@@ -10,8 +10,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/prompt"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
@@ -320,13 +322,9 @@ func TestASessionNamingNoMCPServerStartsWithoutAnMCPConfiguration(t *testing.T) 
 	}
 }
 
-func TestASessionNamingMCPServersDoesNotStartBeforeTheProxyListensOrInAContainer(t *testing.T) {
+func TestASessionNamingMCPServersDoesNotStartBeforeTheProxyListens(t *testing.T) {
 	cases := map[string]func(harness *Harness){
 		"before the proxy listens": func(harness *Harness) { harness.ProxyURL = func() (string, bool) { return "", false } },
-		"in a container": func(harness *Harness) {
-			harness.ProxyURL = func() (string, bool) { return "http://host.containers.internal:41000", true }
-			harness.Homes = t.TempDir()
-		},
 	}
 	for name, setUp := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -564,4 +562,90 @@ func TestInContainersThePlanDefaultModeIsReadFromTheShipsHome(t *testing.T) {
 	if command := running.started[0].Command; !slices.Contains(command, "--permission-mode") {
 		t.Fatalf("started %q", command)
 	}
+}
+
+func TestInContainersASessionNamingMCPServersReachesThemAtTheProxyWithItsConfigurationInItsSessionsFolder(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	harness.ProxyURL = func() (string, bool) { return "http://127.0.0.1:41000", true }
+	harness.Sessions = t.TempDir()
+	harness.Homes = t.TempDir()
+	entry := anEntry(t)
+	entry.McpServers = []string{"company-graph"}
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	started := running.started[0]
+	want := filepath.Join(harness.Sessions, scout, "mcp-config.json")
+	if at := slices.Index(started.Command, "--mcp-config"); at < 0 || at+1 >= len(started.Command) || started.Command[at+1] != want {
+		t.Fatalf("command %q, want --mcp-config %s, in the session's folder, which the container cannot write", started.Command, want)
+	}
+	var config mcpConfig
+	if err := json.Unmarshal(started.Mcp.Config, &config); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := config.McpServers["company-graph"].URL, "http://127.0.0.1:41000/mcp/"+scout+"/company-graph"; got != want {
+		t.Fatalf("the configuration's URL = %q, want %q, the proxy at the address the container reaches it", got, want)
+	}
+	if line := strings.Join(started.Command, " "); strings.Contains(line, started.Mcp.Access.Token) {
+		t.Fatalf("the command line %q holds the token", line)
+	}
+}
+
+func TestInContainersALinkASessionPlantedInItsShipsHomeIsNeverWrittenThroughAcrossARestart(t *testing.T) {
+	harness, _, _ := aHarness(t)
+	harness.ProxyURL = func() (string, bool) { return "http://127.0.0.1:41000", true }
+	program, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A short folder: a hold's socket path has a limit t.TempDir's names exceed.
+	folder, err := os.MkdirTemp("", "sessions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := sessions.Runtime{Sessions: folder, Program: []string{program}, Version: "1.2.3", BootedAt: func() time.Time { return time.Now().Add(-time.Hour) }}
+	// The container's run, which these tests do not start: a session that takes its lines.
+	held.HeldAs = func(session sessions.Start, _ hold.Files) (sessions.Start, error) {
+		session.Command = []string{"sh", "-c", "while read -r line; do :; done"}
+		return session, nil
+	}
+	t.Cleanup(func() {
+		_ = held.Stop(scout)
+		_ = os.RemoveAll(folder)
+	})
+	harness.Runtime, harness.Sessions, harness.Homes = held, held.Sessions, t.TempDir()
+	entry := anEntry(t)
+	entry.McpServers = []string{"company-graph"}
+	outside := filepath.Join(t.TempDir(), "the-hosts-own-file")
+	if err := os.WriteFile(outside, []byte("the host's own file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	planted := filepath.Join(harness.Homes, scout, ".aeolus", "mcp-config.json")
+	if err := os.MkdirAll(filepath.Dir(planted), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, planted); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, isFirstStart := range []bool{true, false} {
+		if err := harness.Launch(entry, isFirstStart, "launch-1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if got := readText(t, outside); got != "the host's own file" {
+		t.Fatalf("%s holds %q, want the host's own file untouched", outside, got)
+	}
+}
+
+func readText(t *testing.T, path string) string {
+	t.Helper()
+	text, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(text)
 }
