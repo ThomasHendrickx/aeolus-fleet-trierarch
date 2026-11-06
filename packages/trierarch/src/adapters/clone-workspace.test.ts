@@ -366,6 +366,21 @@ describe("the host's git calls in a session's clone, with the clone's git pointe
         writeFileSync(join(clone, '.git', 'commondir'), `${join(other, '.git')}\n`);
       },
     },
+    {
+      name: "an alternates file naming another repository's objects",
+      reason: "its .git names another repository's objects in objects/info/alternates",
+      point: (clone, other) => {
+        writeFileSync(join(clone, '.git', 'objects', 'info', 'alternates'), `${join(other, '.git', 'objects')}\n`);
+      },
+    },
+    ...['objects', 'config', 'HEAD', join('refs', 'heads')].map((inGit) => ({
+      name: `a link as its .git's ${inGit}`,
+      reason: `its .git holds a link: ${inGit}`,
+      point: (clone: string, other: string) => {
+        rmSync(join(clone, '.git', inGit), { recursive: true, force: true });
+        symlinkSync(join(other, '.git', inGit), join(clone, '.git', inGit));
+      },
+    })),
   ];
 
   it.each(pointings)('reads a clone with $name as unsaved and not clean, refused, saying why', async ({ point, reason }) => {
