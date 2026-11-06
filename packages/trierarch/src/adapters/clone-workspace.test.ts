@@ -569,7 +569,7 @@ describe("the host's git calls in a session's clone, with a file in its work tre
 });
 
 describe("the host's reads of a session's clone, with a file the clone's config names for git", () => {
-  it.each(['core.excludesFile', 'core.attributesFile'])('reads no file %s names', async (name) => {
+  it.each(['core.excludesFile', 'core.attributesFile', 'mailmap.file'])('reads no file %s names', async (name) => {
     const { folder: made } = await workspace().prepare(scout);
     const planted = join(folder, 'planted');
     aPipe(planted);
