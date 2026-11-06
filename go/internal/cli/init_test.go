@@ -409,3 +409,35 @@ func TestInitKeepsTheTrierarchPluginsShipOnAMachineSetUpBeforeAndRestartsTheTrie
 		t.Errorf("kept %+v, report %+v", kept, report)
 	}
 }
+
+func TestInitMakesTheSealingKeyOnlyItsUserReads(t *testing.T) {
+	machine := newMachine(t)
+
+	if _, err := machine.init.Run(setupLine()); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(machine.init.Paths.SealingKey)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("the sealing key at %s = %v, %v, want a file of mode 600", machine.init.Paths.SealingKey, info, err)
+	}
+}
+
+func TestInitRunAgainKeepsTheSealingKey(t *testing.T) {
+	machine := newMachine(t)
+	if _, err := machine.init.Run(setupLine()); err != nil {
+		t.Fatal(err)
+	}
+	first, err := os.ReadFile(machine.init.Paths.SealingKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := machine.init.Run(setupLine()); err != nil {
+		t.Fatal(err)
+	}
+
+	if again, err := os.ReadFile(machine.init.Paths.SealingKey); err != nil || string(again) != string(first) {
+		t.Errorf("the sealing key changed on init again (%v): the secrets sealed to it would no longer open", err)
+	}
+}

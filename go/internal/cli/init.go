@@ -15,6 +15,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/service"
 )
 
@@ -274,6 +275,10 @@ func (i Init) Run(flags Flags) (Report, error) {
 		return Report{}, err
 	}
 	if err := config.WriteSchema(i.Paths.ConfigSchema); err != nil {
+		return Report{}, err
+	}
+	// The key the trierarch plugin seals each secret to: made once, kept across inits, so what was sealed to it still opens.
+	if _, err := secrets.LoadOrMake(i.Paths.SealingKey); err != nil {
 		return Report{}, err
 	}
 

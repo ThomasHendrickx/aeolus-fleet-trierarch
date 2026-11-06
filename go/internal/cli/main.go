@@ -25,6 +25,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/modelproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/receiving"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/servicelog"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/style"
@@ -84,7 +85,9 @@ type Machine struct {
 	Trusted func(at paths.Paths, configuration config.Configuration) receiving.Keeper
 	// McpServers keeps the MCP servers the trierarch plugin's ship sends; none when nil.
 	McpServers func(at paths.Paths) receiving.ServerKeeper
-	Sessions   func(at paths.Paths) Sessions
+	// Secrets keeps the secrets the trierarch plugin's ship sends, opened with the sealing key; none when nil.
+	Secrets  func(at paths.Paths) receiving.SecretKeeper
+	Sessions func(at paths.Paths) Sessions
 	// Log writes a line to the trierarch's log.
 	Log func(line string)
 	// ReadKey is the API key the operator types, not shown, or pipes in.
@@ -424,6 +427,11 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 	if refusal := machine.CoreVersionRefusal(kept.FleetURL); refusal != "" {
 		return answer{}, errors.New(refusal)
 	}
+	// A machine set up before there was a sealing key gets one at its next start, so no init is needed for it.
+	sealingKey, err := secrets.LoadOrMake(at.SealingKey)
+	if err != nil {
+		return answer{}, err
+	}
 	pass, err := machine.NewPass(at, kept, configuration)
 	if err != nil {
 		return answer{}, err
@@ -450,6 +458,9 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 		}
 		if machine.McpServers != nil {
 			loop.McpServers = machine.McpServers(at)
+		}
+		if machine.Secrets != nil {
+			loop.Secrets, loop.SealingKey = machine.Secrets(at), sealingKey
 		}
 		loop.Run(stopped)
 	}()

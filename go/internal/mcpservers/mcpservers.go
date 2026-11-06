@@ -1,10 +1,12 @@
 // Package mcpservers is the crew-time MCP servers (docs/design/crew-mcp-servers.md,
 // decisions M2, M4 and M7): the trierarch plugin's one list of the remote
 // servers a ship may be crewed with, each by the name a crew request's
-// mcpServers gives it, its URL and the tools a session may call. A trierarch
-// reads the list as strictly as the trierarch plugin wrote it: no entry holds a
-// credential, so a URL has no user, query or fragment, and an entry has no
-// field beyond the four.
+// mcpServers gives it, its URL, the tools a session may call and, for one that
+// needs it, its credential: the name of a secret the trierarch plugin seals to
+// each trierarch (package secrets) and the header the MCP proxy sets it in. A
+// trierarch reads the list as strictly as the trierarch plugin wrote it: no
+// entry holds a credential's value, so a URL has no user, query or fragment,
+// and an entry has no field beyond the five.
 package mcpservers
 
 import (
@@ -33,12 +35,37 @@ const nameMaxLength = 100
 
 var namePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
-// Server is a remote MCP server a session may be crewed with: its name, its URL, its transport and the tools a session may call.
+// Server is a remote MCP server a session may be crewed with: its name, its URL, its transport, the tools a session may call and the credential it needs, if any.
 type Server struct {
-	Name      string   `json:"name"`
-	URL       string   `json:"url"`
-	Transport string   `json:"transport"`
-	Tools     []string `json:"tools"`
+	Name       string      `json:"name"`
+	URL        string      `json:"url"`
+	Transport  string      `json:"transport"`
+	Tools      []string    `json:"tools"`
+	Credential *Credential `json:"credential,omitempty"`
+}
+
+// Credential is how the MCP proxy adds a server's credential to what it forwards: the header it sets to the secret's value, as the secret holds it. It names the secret, never holds its value.
+type Credential struct {
+	Secret string `json:"secret"`
+	Header string `json:"header"`
+}
+
+// headerPattern is an RFC 9110 field name.
+var headerPattern = regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+
+// reservedHeaders are the headers a credential cannot be set in: those of the connection, the proxy's own and the MCP session's, which the proxy forwards as the session sends them.
+var reservedHeaders = []string{"host", "content-length", "content-type", "transfer-encoding", "connection", "upgrade", "te", "trailer", "keep-alive", "cookie", "accept", "accept-encoding", "mcp-session-id", "mcp-protocol-version", "last-event-id"}
+
+// credentialProblem is why a credential cannot be used, empty when it can.
+func credentialProblem(credential Credential) string {
+	if credential.Secret == "" || nameProblem(credential.Secret) != "" {
+		return "a credential names its secret, by a name as a server's"
+	}
+	lower := strings.ToLower(credential.Header)
+	if !headerPattern.MatchString(credential.Header) || slices.Contains(reservedHeaders, lower) || strings.HasPrefix(lower, "proxy-") {
+		return "a credential names the header it is set in, which is not one of the connection's, a proxy's or the MCP session's"
+	}
+	return ""
 }
 
 var errURLRefused = errors.New("an MCP server is an http:// or https:// URL with a host and no user, query or fragment, never a credential")
@@ -64,8 +91,12 @@ func nameProblem(name string) string {
 	return ""
 }
 
-// entryOf reads one entry, refusing a field beyond the four.
+// entryOf reads one entry, refusing a field beyond the five, or one in its credential beyond the two.
 func entryOf(raw json.RawMessage) (Server, error) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) == nil && string(fields["credential"]) == "null" {
+		return Server{}, errors.New("a credential is an object, or left out")
+	}
 	var server Server
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -126,9 +157,25 @@ func Read(payload string) ([]Server, error) {
 				return nil, fmt.Errorf("%s: the tool %s is named once", server.Name, tool)
 			}
 		}
+		if server.Credential != nil {
+			if problem := credentialProblem(*server.Credential); problem != "" {
+				return nil, fmt.Errorf("%s: %s", server.Name, problem)
+			}
+		}
 		list = append(list, server)
 	}
 	return list, nil
+}
+
+// WithCredentialHeld are the servers on the list that need no credential or whose secret is held: one whose secret is missing cannot be given (decision M4).
+func WithCredentialHeld(list []Server, secrets []string) []Server {
+	held := []Server{}
+	for _, server := range list {
+		if server.Credential == nil || slices.Contains(secrets, server.Credential.Secret) {
+			held = append(held, server)
+		}
+	}
+	return held
 }
 
 // nameIn is the name an entry that did not decode gives, or its position-free placeholder.

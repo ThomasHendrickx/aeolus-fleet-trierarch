@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
 )
 
@@ -36,6 +37,11 @@ type Keeper interface {
 // ServerKeeper keeps the MCP servers the trierarch plugin's ship sent.
 type ServerKeeper interface {
 	Accept(list []mcpservers.Server) error
+}
+
+// SecretKeeper keeps the secrets the trierarch plugin's ship sent, opened.
+type SecretKeeper interface {
+	Accept(held map[string]string) error
 }
 
 // Refusal is the fleet's own refusal: its code and its message.
@@ -70,6 +76,9 @@ type Loop struct {
 	Trusted Keeper
 	// McpServers keeps the MCP servers; the list is handled as any other message without it.
 	McpServers ServerKeeper
+	// Secrets keeps the secrets, opened with SealingKey; they are handled as any other message without it.
+	Secrets    SecretKeeper
+	SealingKey secrets.Key
 	// OnKeyCutOff is told at the first refusal (true) and when a receive passes again (false).
 	OnKeyCutOff func(isCutOff bool)
 }
@@ -120,6 +129,19 @@ func (l Loop) takeMcpServers(delivery Delivery) error {
 	return l.McpServers.Accept(list)
 }
 
+// takeSecrets takes the secrets the delivery carries, as takeTrusted takes the trusted repositories; what it logs never says a value.
+func (l Loop) takeSecrets(delivery Delivery) error {
+	if !l.isFromPlugin(delivery, "secrets") {
+		return nil
+	}
+	held, err := secrets.Read(delivery.Payload, l.SealingKey)
+	if err != nil {
+		l.Log(fmt.Sprintf("Not handled: secrets that do not fit (%v). The trierarch keeps the secrets it holds.", err))
+		return nil
+	}
+	return l.Secrets.Accept(held)
+}
+
 func (l Loop) handle(delivery Delivery) error {
 	if IsPing(delivery.ContentType) {
 		return l.Ship.Pong(delivery.DeliveryID)
@@ -132,6 +154,12 @@ func (l Loop) handle(delivery Delivery) error {
 	}
 	if delivery.ContentType == mcpservers.ListContentType && l.McpServers != nil {
 		if err := l.takeMcpServers(delivery); err != nil {
+			return err
+		}
+		return l.Ship.Ack(delivery.DeliveryID)
+	}
+	if delivery.ContentType == secrets.ContentType && l.Secrets != nil {
+		if err := l.takeSecrets(delivery); err != nil {
 			return err
 		}
 		return l.Ship.Ack(delivery.DeliveryID)

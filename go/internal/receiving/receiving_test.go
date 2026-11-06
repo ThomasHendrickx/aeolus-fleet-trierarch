@@ -2,14 +2,20 @@ package receiving
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
+	"golang.org/x/crypto/nacl/box"
 )
 
 const argo = "shp_01m6jyczpnpp5c0vxh54c966cy"
@@ -375,5 +381,120 @@ func TestAServerListThatCannotBeKeptIsNotAcknowledgedSoItComesAgain(t *testing.T
 
 	if len(ran.ship.acked) != 0 {
 		t.Fatalf("acked %v, want none", ran.ship.acked)
+	}
+}
+
+// aSecretKeeper keeps the secrets it is given, or fails to.
+type aSecretKeeper struct {
+	kept map[string]string
+	err  error
+	took int
+}
+
+func (k *aSecretKeeper) Accept(held map[string]string) error {
+	k.took++
+	if k.err != nil {
+		return k.err
+	}
+	k.kept = held
+	return nil
+}
+
+func aSealingKey(t *testing.T) secrets.Key {
+	t.Helper()
+	key, err := secrets.LoadOrMake(filepath.Join(t.TempDir(), "sealing-key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key
+}
+
+// sealedSecrets is the message the trierarch plugin sends: each value sealed to the public key with libsodium's crypto_box_seal.
+func sealedSecrets(t *testing.T, public string, values map[string]string) string {
+	t.Helper()
+	raw, err := base64.StdEncoding.DecodeString(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recipient [32]byte
+	copy(recipient[:], raw)
+	entries := []map[string]string{}
+	for name, value := range values {
+		sealed, err := box.SealAnonymous(nil, []byte(value), &recipient, rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries = append(entries, map[string]string{"name": name, "sealed": base64.StdEncoding.EncodeToString(sealed)})
+	}
+	text, err := json.Marshal(map[string]any{"publicKey": public, "secrets": entries})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(text)
+}
+
+func runKeepingSecrets(keeper *aSecretKeeper, key secrets.Key, answers ...answer) *aRun {
+	ctx, cancel := context.WithCancel(context.Background())
+	ran := &aRun{ship: &aShip{cancel: cancel, answers: answers}}
+	Loop{
+		Ship:         ran.ship,
+		Log:          func(line string) { ran.logged = append(ran.logged, line) },
+		Interval:     5 * time.Second,
+		KeyWaitMax:   300 * time.Second,
+		Pause:        func(_ context.Context, wait time.Duration) { ran.waits = append(ran.waits, wait) },
+		PluginShipID: plugin,
+		Secrets:      keeper,
+		SealingKey:   key,
+	}.Run(ctx)
+	return ran
+}
+
+func someSecrets(from string, id string, payload string) Delivery {
+	return Delivery{DeliveryID: id, SenderShipID: from, ContentType: secrets.ContentType, Payload: payload}
+}
+
+func TestTheSecretsFromThePluginsShipAreOpenedKeptAndAcknowledged(t *testing.T) {
+	key := aSealingKey(t)
+	keeper := &aSecretKeeper{}
+
+	ran := runKeepingSecrets(keeper, key, answer{deliveries: []Delivery{someSecrets(plugin, "d1", sealedSecrets(t, key.Public(), map[string]string{"graph-token": "Bearer s3cr3t"}))}})
+
+	if keeper.kept["graph-token"] != "Bearer s3cr3t" || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 0 {
+		t.Fatalf("kept %d, acked %v, logged %q", len(keeper.kept), ran.ship.acked, ran.logged)
+	}
+}
+
+func TestSecretsFromAnotherShipAreAcknowledgedAndNotTaken(t *testing.T) {
+	key := aSealingKey(t)
+	keeper := &aSecretKeeper{}
+
+	ran := runKeepingSecrets(keeper, key, answer{deliveries: []Delivery{someSecrets(argo, "d1", sealedSecrets(t, key.Public(), map[string]string{"g": "s3cr3t"}))}})
+
+	want := "Not handled: secrets from " + argo + ". The trierarch takes them only from the trierarch plugin's ship " + plugin + "."
+	if keeper.took != 0 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || ran.logged[0] != want {
+		t.Fatalf("took %d, acked %v, logged %q", keeper.took, ran.ship.acked, ran.logged)
+	}
+}
+
+func TestSecretsSealedToAnotherKeyAreAcknowledgedAndTheHeldOnesStay(t *testing.T) {
+	key := aSealingKey(t)
+	other := aSealingKey(t)
+	keeper := &aSecretKeeper{kept: map[string]string{"g": "held"}}
+
+	ran := runKeepingSecrets(keeper, key, answer{deliveries: []Delivery{someSecrets(plugin, "d1", sealedSecrets(t, other.Public(), map[string]string{"g": "s3cr3t"}))}})
+
+	if keeper.took != 0 || keeper.kept["g"] != "held" || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || !strings.HasSuffix(ran.logged[0], "The trierarch keeps the secrets it holds.") || strings.Contains(ran.logged[0], "s3cr3t") {
+		t.Fatalf("took %d, acked %v, logged %q", keeper.took, ran.ship.acked, ran.logged)
+	}
+}
+
+func TestSecretsThatCannotBeKeptAreNotAcknowledgedSoTheyComeAgain(t *testing.T) {
+	key := aSealingKey(t)
+	keeper := &aSecretKeeper{err: errors.New("the file cannot be written")}
+
+	ran := runKeepingSecrets(keeper, key, answer{deliveries: []Delivery{someSecrets(plugin, "d1", sealedSecrets(t, key.Public(), map[string]string{"g": "s3cr3t"}))}})
+
+	if len(ran.ship.acked) != 0 || slices.ContainsFunc(ran.logged, func(line string) bool { return strings.Contains(line, "s3cr3t") }) {
+		t.Fatalf("acked %v, logged %q, want none acked and no value logged", ran.ship.acked, ran.logged)
 	}
 }

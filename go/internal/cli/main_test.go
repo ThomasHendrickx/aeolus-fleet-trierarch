@@ -319,6 +319,26 @@ func TestRunSaysItsPidAndVersionAndEndsWhenStopped(t *testing.T) {
 	}
 }
 
+func TestRunMakesTheSealingKeyOfAMachineSetUpBeforeThereWasOne(t *testing.T) {
+	machine, _, _ := aMain(t)
+	Main(setupWords(), machine)
+	at := paths.Of(machine.HomeDirectory, "")
+	if err := os.Remove(at.SealingKey); err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	machine.Stop = stop
+	close(stop)
+
+	if output, code := Main([]string{"run"}, machine); code != 0 {
+		t.Fatalf("run answered %q, %d", output, code)
+	}
+
+	if info, err := os.Stat(at.SealingKey); err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("the sealing key = %v, %v, want a file of mode 600", info, err)
+	}
+}
+
 func TestUninstallRemovesTheServiceAndKeepsTheTrierarchsFiles(t *testing.T) {
 	machine, installed, _ := aMain(t)
 	Main(setupWords(), machine)

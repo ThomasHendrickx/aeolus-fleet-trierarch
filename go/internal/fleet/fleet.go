@@ -23,6 +23,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/receiving"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
 )
 
@@ -323,6 +324,12 @@ func (c Client) AskForTrustedRepositories(pluginShipID string) error {
 // AskForMcpServers asks the trierarch plugin's ship for the MCP servers again, as the trierarch's own ship.
 func (c Client) AskForMcpServers(pluginShipID string) error {
 	body := map[string]any{"selector": map[string]string{"kind": "ship", "shipId": pluginShipID}, "payload": "{}", "contentType": mcpservers.RequestContentType, "model": c.Model, "idempotencyKey": newKey()}
+	return call(c.URL, request{path: "/ship/send", crewToken: c.CrewToken, body: body}, &map[string]any{})
+}
+
+// AskForSecrets asks the trierarch plugin's ship for the secrets again, as the trierarch's own ship.
+func (c Client) AskForSecrets(pluginShipID string) error {
+	body := map[string]any{"selector": map[string]string{"kind": "ship", "shipId": pluginShipID}, "payload": "{}", "contentType": secrets.RequestContentType, "model": c.Model, "idempotencyKey": newKey()}
 	return call(c.URL, request{path: "/ship/send", crewToken: c.CrewToken, body: body}, &map[string]any{})
 }
 
