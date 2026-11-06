@@ -111,6 +111,27 @@ describe('the crew-a-ship skill', () => {
     }
   });
 
+  it('tells a Claude Code session to run a command that takes more than a few minutes as a background task with a self-message as its last step, end its turn, and read the log when the self-message wakes it (#270)', () => {
+    expect(claudeSkill).toContain('A command expected to take more than a few minutes');
+    expect(claudeSkill).toContain('as a Bash background task (run_in_background)');
+    expect(claudeSkill).toContain('"selector":{"kind":"ship","name":"<your own ship name from whoami>"}');
+    expect(claudeSkill).toContain('"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-fleet.sh" send -');
+    expect(claudeSkill).toContain('the exit code and the log path');
+    expect(claudeSkill).toContain('End your turn right after starting it');
+    expect(claudeSkill).toContain('read the log and carry on');
+  });
+
+  it('warns that a command detached from the session cannot send its self-message, since the ship socket refuses a process that is no descendant of the session (#270)', () => {
+    expect(claudeSkill).toContain('Never detach it with setsid, nohup or a trailing &');
+    expect(claudeSkill).toContain("This socket answers only its ship's own session");
+  });
+
+  it('tells a Codex session that a long command cannot yet send a self-message after the turn ends, and names the refusal (#270, #273)', () => {
+    expect(codexSkill).toContain('A command expected to take more than a few minutes cannot yet be run in the background with a self-message in Codex');
+    expect(codexSkill).toContain("This socket answers only its ship's own session");
+    expect(codexSkill).not.toContain('setsid nohup bash -c');
+  });
+
   it('tells a squadron member how to check in, take up its role, report and stand down', () => {
     const skill = claudeSkill;
 
