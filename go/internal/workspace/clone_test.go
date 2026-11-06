@@ -336,3 +336,18 @@ func TestRecognizesACloneItMadeAfterRestartButRefusesAnUnmarkedClone(t *testing.
 		})
 	}
 }
+
+func TestACloneIsCheckedOutThroughTheFiltersTheMachinesOwnConfigDefines(t *testing.T) {
+	repository, root := aRepository(t)
+	writeIn(t, repository, ".gitattributes", "*.txt filter=upper\n")
+	writeIn(t, repository, "hello.txt", "hello\n")
+	gitIn(t, "-C", repository, "add", ".")
+	gitIn(t, "-C", repository, "commit", "-q", "-m", "hello.txt")
+	gitIn(t, "config", "--file", aThrowawayHome(t), "filter.upper.smudge", "tr a-z A-Z")
+
+	folder := prepared(t, clonePlaces(repository, root, t.TempDir()), scoutInAeolusFleet, "scout")
+
+	if got, err := os.ReadFile(filepath.Join(folder, "hello.txt")); err != nil || string(got) != "HELLO\n" {
+		t.Errorf("hello.txt in the clone = %q, %v, want %q, through the machine's filter", got, err, "HELLO\n")
+	}
+}
