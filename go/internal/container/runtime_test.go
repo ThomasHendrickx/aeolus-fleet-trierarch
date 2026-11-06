@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 )
 
@@ -140,6 +141,23 @@ func TestASessionOnAnAPIKeyGetsNoModelTokenItsProxyTokenByNameAndTheHostsLoopbac
 	at := slices.Index(held.Command, "HOME=/home/ubuntu")
 	if got := held.Command[at+1 : at+5]; !slices.Equal(got, []string{"--env", "ANTHROPIC_AUTH_TOKEN", "--network", "slirp4netns:allow_host_loopback=true"}) || strings.Contains(strings.Join(held.Command, " "), "proxy-token") {
 		t.Fatalf("held as %q", held.Command)
+	}
+}
+
+func TestASessionOfMCPServersReachesTheHostsLoopbackAndKeepsTheModelToken(t *testing.T) {
+	r, _ := aContainerRuntime(t)
+	files := filesOf(t, r)
+	session := aSession(t.TempDir())
+	session.Mcp = &sessions.Mcp{Access: mcpproxy.Access{Token: "mcp-token", Servers: []string{"company-graph"}}, Config: []byte(`{}`)}
+
+	held, err := r.heldAs(session, files)
+
+	if err != nil || !strings.Contains(readFile(t, filepath.Join(files.Folder, "session.env")), "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-token") {
+		t.Fatalf("env file %q, %v", readFile(t, filepath.Join(files.Folder, "session.env")), err)
+	}
+	at := slices.Index(held.Command, "--network")
+	if at < 0 || held.Command[at+1] != "slirp4netns:allow_host_loopback=true" || strings.Contains(strings.Join(held.Command, " "), "mcp-token") {
+		t.Fatalf("held as %q, want the host's loopback reached and no token on the command line", held.Command)
 	}
 }
 

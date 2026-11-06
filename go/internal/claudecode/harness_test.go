@@ -320,13 +320,9 @@ func TestASessionNamingNoMCPServerStartsWithoutAnMCPConfiguration(t *testing.T) 
 	}
 }
 
-func TestASessionNamingMCPServersDoesNotStartBeforeTheProxyListensOrInAContainer(t *testing.T) {
+func TestASessionNamingMCPServersDoesNotStartBeforeTheProxyListens(t *testing.T) {
 	cases := map[string]func(harness *Harness){
 		"before the proxy listens": func(harness *Harness) { harness.ProxyURL = func() (string, bool) { return "", false } },
-		"in a container": func(harness *Harness) {
-			harness.ProxyURL = func() (string, bool) { return "http://host.containers.internal:41000", true }
-			harness.Homes = t.TempDir()
-		},
 	}
 	for name, setUp := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -563,5 +559,36 @@ func TestInContainersThePlanDefaultModeIsReadFromTheShipsHome(t *testing.T) {
 
 	if command := running.started[0].Command; !slices.Contains(command, "--permission-mode") {
 		t.Fatalf("started %q", command)
+	}
+}
+
+func TestInContainersASessionNamingMCPServersReachesThemAtTheProxyWithItsConfigurationInTheShipsHome(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	harness.ProxyURL = func() (string, bool) { return "http://10.0.2.2:41000", true }
+	harness.Sessions = t.TempDir()
+	harness.Homes = t.TempDir()
+	entry := anEntry(t)
+	entry.McpServers = []string{"company-graph"}
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	started := running.started[0]
+	if at := slices.Index(started.Command, "--mcp-config"); at < 0 || at+1 >= len(started.Command) || started.Command[at+1] != "/home/ubuntu/.aeolus/mcp-config.json" {
+		t.Fatalf("command %q, want --mcp-config /home/ubuntu/.aeolus/mcp-config.json, the path the container sees", started.Command)
+	}
+	if want := filepath.Join(harness.Homes, scout, ".aeolus", "mcp-config.json"); started.Mcp == nil || started.Mcp.Path != want {
+		t.Fatalf("started with MCP %+v, want its configuration written at %s", started.Mcp, want)
+	}
+	var config mcpConfig
+	if err := json.Unmarshal(started.Mcp.Config, &config); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := config.McpServers["company-graph"].URL, "http://10.0.2.2:41000/mcp/"+scout+"/company-graph"; got != want {
+		t.Fatalf("the configuration's URL = %q, want %q, the proxy at the host's address", got, want)
+	}
+	if line := strings.Join(started.Command, " "); strings.Contains(line, started.Mcp.Access.Token) {
+		t.Fatalf("the command line %q holds the token", line)
 	}
 }
