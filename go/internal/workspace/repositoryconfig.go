@@ -66,7 +66,7 @@ func isProgram(name string) bool {
 
 // overridesIn are the overrides of every variable of the folder's own config that names a program, after the harmless ones.
 func overridesIn(folder string) ([]override, error) {
-	listed, err := exec.Command("git", "--no-optional-locks", "-C", folder, "config", "--list", "--show-scope", "--name-only", "-z").Output()
+	listed, err := exec.Command("git", "-C", folder, "config", "--list", "--show-scope", "--name-only", "-z").Output()
 	if err != nil {
 		return nil, fmt.Errorf("git config failed in %s: %w", folder, err)
 	}
@@ -87,9 +87,9 @@ func inFolder(folder string, args ...string) (*exec.Cmd, error) {
 	if err != nil {
 		return nil, err
 	}
-	command := exec.Command("git", append([]string{"--no-optional-locks", "-C", folder}, args...)...)
+	command := exec.Command("git", append([]string{"-C", folder}, args...)...)
 	// Given in the environment rather than as -c, so a name holding an equals sign is taken whole.
-	command.Env = append(os.Environ(), "GIT_CONFIG_COUNT="+strconv.Itoa(len(overrides)), "GIT_ALLOW_PROTOCOL=file", "GIT_TERMINAL_PROMPT=0")
+	command.Env = append(os.Environ(), "GIT_CONFIG_COUNT="+strconv.Itoa(len(overrides)), "GIT_ALLOW_PROTOCOL=file", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
 	for i, each := range overrides {
 		command.Env = append(command.Env, "GIT_CONFIG_KEY_"+strconv.Itoa(i)+"="+each.name, "GIT_CONFIG_VALUE_"+strconv.Itoa(i)+"="+each.value)
 	}
