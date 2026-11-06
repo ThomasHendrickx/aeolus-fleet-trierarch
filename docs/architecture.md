@@ -12,7 +12,7 @@ Two processes, each its own package, crew ships on machines: the trierarch plugi
 
 ### The trierarch on a machine
 
-`@aeolus-fleet/trierarch` is a Node command, `aeolus-trierarch run`, kept alive by the operating system: a launchd agent on macOS, a systemd user unit on Linux. It depends on `common` only.
+The trierarch is one Go binary, `aeolus-trierarch`, with no Node, installed from its GitHub Release by `install.sh` into `~/.local/bin` (docs/trierarch.md, "A machine joins"). Its command `aeolus-trierarch run` is kept alive by the operating system: a launchd agent on macOS, a systemd user unit on Linux. The Go code is in `go/` (`go/cmd/aeolus-trierarch`, `go/internal`). The TypeScript in `packages/trierarch` is the npm package `@aeolus-fleet/trierarch`, kept for existing machines only, which depends on `common` only; the parts below are the same in both.
 
 #### Parts
 
