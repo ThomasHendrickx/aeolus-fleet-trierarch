@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 )
@@ -37,31 +38,44 @@ func git(args ...string) (string, error) {
 
 // gitInFolder is git run in a ship's folder, which ignores the folder's own config where it names a program, within its time limit.
 func gitInFolder(folder string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeLimit)
+	as := reading{limit: timeLimit}
+	ctx, cancel := context.WithTimeout(context.Background(), as.limit)
 	defer cancel()
-	command, err := inFolder(ctx, folder, args...)
+	command, err := inFolder(ctx, folder, as, args...)
 	if err != nil {
 		return "", err
 	}
-	return saidWithin(ctx, folder, command, args)
+	return saidWithin(ctx, as.limit, folder, command, args)
 }
 
 // gitInClone is git run in a ship's clone, which ignores the clone's own config where it names a program, through the clone's own
 // `.git`, within its time limit.
 func gitInClone(clone string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeLimit)
+	return gitInCloneAs(clone, reading{isClone: true, limit: timeLimit}, args)
+}
+
+// gitInFreshClone is git run in a clone the trierarch just made from a trusted repository, before any session touched it, as in any
+// clone, but through the filters the machine's own config defines, so its checkout is what a session works on (git-lfs's files, not
+// their pointers).
+func gitInFreshClone(clone string, args ...string) (string, error) {
+	return gitInCloneAs(clone, reading{isClone: true, isFresh: true, limit: freshTimeLimit}, args)
+}
+
+// gitInCloneAs is git run in a ship's clone, read as it says.
+func gitInCloneAs(clone string, as reading, args []string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), as.limit)
 	defer cancel()
-	command, err := inClone(ctx, clone, args...)
+	command, err := inClone(ctx, clone, as, args...)
 	if err != nil {
 		return "", err
 	}
-	return saidWithin(ctx, clone, command, args)
+	return saidWithin(ctx, as.limit, clone, command, args)
 }
 
 // saidWithin is what the git command in the folder said, or why it failed: a refusal of the folder when it ran past its time limit.
-func saidWithin(ctx context.Context, folder string, command *exec.Cmd, args []string) (string, error) {
+func saidWithin(ctx context.Context, limit time.Duration, folder string, command *exec.Cmd, args []string) (string, error) {
 	out, err := said(command, args)
-	if refused := endedAt(ctx, folder, actionOf(args)); err != nil && refused != nil {
+	if refused := endedAt(ctx, limit, folder, actionOf(args)); err != nil && refused != nil {
 		return "", refused
 	}
 	return out, err
