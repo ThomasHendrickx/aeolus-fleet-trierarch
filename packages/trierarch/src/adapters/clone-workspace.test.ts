@@ -12,7 +12,7 @@ import { runCommand } from './run-command.js';
 // Against the real git, in a temporary folder. A test that plants in the machine's own config does so in a throwaway HOME.
 
 /** The machine's own config as the tests found it, put back after each. */
-const MACHINE = { HOME: process.env.HOME, GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL };
+const MACHINE = { HOME: process.env.HOME, GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, PATH: process.env.PATH };
 /** Whether git-lfs is on the machine: its test runs only where it is. */
 const hasLfs = spawnSync('git', ['lfs', 'version']).status === 0;
 
@@ -393,6 +393,43 @@ describe("the host's git calls in a session's clone, with a program named in the
     writeFileSync(join(made, 'README.md'), 'README.MD\n');
 
     expect({ isClean: await workspace().isClean(made), unsaved: await workspace().unsaved(made) }).toEqual({ isClean: false, unsaved: [' M README.md'] });
+  });
+});
+
+describe("the host's git calls in a session's clone, with a signed commit and the clone's config asking log to show signatures", () => {
+  /** A commit on top of the clone's HEAD carrying a signature, made HEAD: answers its subject. */
+  async function aSignedCommit(clone: string): Promise<string> {
+    const tree = (await git(['-C', clone, 'rev-parse', 'HEAD^{tree}'])).trim();
+    const parent = (await git(['-C', clone, 'rev-parse', 'HEAD'])).trim();
+    const object = `tree ${tree}\nparent ${parent}\nauthor a <a@example.com> 0 +0000\ncommitter a <a@example.com> 0 +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n c2lnbmVk\n -----END PGP SIGNATURE-----\n\nsigned\n`;
+    const hashed = await runCommand('git', { args: ['-C', clone, 'hash-object', '-t', 'commit', '-w', '--stdin'], input: object });
+    expect(hashed.status, hashed.stderr).toBe(0);
+    await git(['-C', clone, 'update-ref', '--no-deref', 'HEAD', hashed.stdout.trim()]);
+    return 'signed';
+  }
+
+  /** One program under each name git runs to check a signature, first on PATH, leaving a marker when anything runs it: answers the marker. */
+  function signatureProgramsOnPath(): string {
+    const programs = join(folder, 'programs');
+    mkdirSync(programs);
+    const marker = join(folder, 'ran');
+    for (const name of ['gpg', 'gpgsm', 'ssh-keygen']) {
+      writeFileSync(join(programs, name), `#!/bin/sh\ntouch '${marker}'\ncat >/dev/null 2>&1\nexit 0\n`);
+      chmodSync(join(programs, name), 0o755);
+    }
+    process.env.PATH = `${programs}:${process.env.PATH ?? ''}`;
+    return marker;
+  }
+
+  it("lists the commit as unsaved and checks no commit's signature", async () => {
+    const { folder: made } = await workspace().prepare(scout);
+    const subject = await aSignedCommit(made);
+    await git(['-C', made, 'config', 'log.showSignature', 'true']);
+    const marker = signatureProgramsOnPath();
+
+    const unsaved = await workspace().unsaved(made);
+
+    expect({ unsaved: unsaved.map((line) => line.split(' ').at(-1)), hasRun: existsSync(marker) }).toEqual({ unsaved: [subject], hasRun: false });
   });
 });
 
