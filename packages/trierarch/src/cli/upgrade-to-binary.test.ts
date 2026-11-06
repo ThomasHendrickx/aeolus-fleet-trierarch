@@ -248,6 +248,14 @@ describe('a bare aeolus-trierarch upgrade, once npm publishes no newer trierarch
     expect(report.to).toBe('0.18.0');
   });
 
+  it('names the latest GitHub Release as the older version it refuses, when that release is newer than npm\'s latest', async () => {
+    npmLatest = '0.16.0';
+    releasedLatest = '0.17.0';
+    const report = await upgradeTo(undefined);
+    expect(report.isUpgraded).toBe(false);
+    expect(report.said).toEqual(['The trierarch runs 0.17.1 and the latest GitHub Release is 0.17.0, an older version: upgrade never moves to an older one, so it stays on 0.17.1.']);
+  });
+
   it('stays on the version installed when neither npm nor GitHub has a newer one', async () => {
     npmLatest = '0.17.1';
     releasedLatest = '0.17.1';
