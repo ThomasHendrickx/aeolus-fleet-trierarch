@@ -162,6 +162,31 @@ func TestASessionOfMCPServersReachesOnlyItsProxyPortAndKeepsTheModelToken(t *tes
 	}
 }
 
+func TestASessionOfMCPServersSeesItsConfigurationOnlyReadOnlyAtItsOwnPath(t *testing.T) {
+	r, _ := aContainerRuntime(t)
+	files := filesOf(t, r)
+	session := aSession(t.TempDir())
+	session.Mcp = &sessions.Mcp{Access: mcpproxy.Access{Token: "mcp-token", Servers: []string{"company-graph"}}, Config: []byte(`{}`)}
+
+	held, err := r.heldAs(session, files)
+
+	mount := files.McpConfig + ":" + files.McpConfig + ":ro"
+	if at := slices.Index(held.Command, mount); err != nil || at < 1 || held.Command[at-1] != "--volume" || slices.Contains(held.Command, files.Folder+":"+files.Folder) {
+		t.Fatalf("held as %q, %v; want --volume %s and nothing else of the session's folder", held.Command, err, mount)
+	}
+}
+
+func TestASessionOfNoMCPServersSeesNoConfiguration(t *testing.T) {
+	r, _ := aContainerRuntime(t)
+	files := filesOf(t, r)
+
+	held, err := r.heldAs(aSession(t.TempDir()), files)
+
+	if err != nil || strings.Contains(strings.Join(held.Command, " "), files.McpConfig) {
+		t.Fatalf("held as %q, %v; want no MCP configuration mounted", held.Command, err)
+	}
+}
+
 func TestAnEnvironmentValueOverMoreThanOneLineIsRefused(t *testing.T) {
 	r, _ := aContainerRuntime(t)
 	session := aSession(t.TempDir())
