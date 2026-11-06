@@ -25,7 +25,7 @@ const ListContentType = "application/vnd.aeolus.trierarch.mcp-servers+json"
 // RequestContentType is the content type of the message a trierarch asks the trierarch plugin's ship for the list again with.
 const RequestContentType = "application/vnd.aeolus.trierarch.mcp-servers-request+json"
 
-// Transport is the one transport a server is reached over (decision M8).
+// Transport is the one transport a server is reached over (decision M8); an entry that names none has it.
 const Transport = "streamable-http"
 
 // nameMaxLength is the most a name holds, as common gives it.
@@ -41,7 +41,7 @@ type Server struct {
 	Tools     []string `json:"tools"`
 }
 
-var errURLRefused = errors.New("an MCP server is an https:// URL with a host and no user, query or fragment, never a credential")
+var errURLRefused = errors.New("an MCP server is an http:// or https:// URL with a host and no user, query or fragment, never a credential")
 
 func isReachable(text string) bool {
 	if strings.IndexFunc(text, unicode.IsSpace) >= 0 {
@@ -51,7 +51,7 @@ func isReachable(text string) bool {
 	if err != nil {
 		return false
 	}
-	return parsed.Scheme == "https" && parsed.Hostname() != "" && parsed.User == nil && parsed.RawQuery == "" && !parsed.ForceQuery && parsed.Fragment == "" && !strings.Contains(text, "#")
+	return (parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.Hostname() != "" && parsed.User == nil && parsed.RawQuery == "" && !parsed.ForceQuery && parsed.Fragment == "" && !strings.Contains(text, "#")
 }
 
 func nameProblem(name string) string {
@@ -80,7 +80,7 @@ func Read(payload string) ([]Server, error) {
 	if !json.Valid([]byte(payload)) {
 		return nil, errors.New("the MCP servers are not JSON")
 	}
-	shape := errors.New(`the MCP servers are { "servers": [{ "name", "url", "transport", "tools" }] }`)
+	shape := errors.New(`the MCP servers are { "servers": [{ "name", "url", "transport"?, "tools" }] }`)
 	var message struct {
 		Servers json.RawMessage `json:"servers"`
 	}
@@ -108,6 +108,9 @@ func Read(payload string) ([]Server, error) {
 		}
 		if !isReachable(server.URL) {
 			return nil, fmt.Errorf("%s: %w", server.Name, errURLRefused)
+		}
+		if server.Transport == "" {
+			server.Transport = Transport
 		}
 		if server.Transport != Transport {
 			return nil, fmt.Errorf("%s: the transport is %s, the only one", server.Name, Transport)
