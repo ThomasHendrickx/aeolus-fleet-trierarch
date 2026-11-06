@@ -298,6 +298,21 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     ]);
   });
 
+  it('row 7: tells argo a worktree the host would not read is removed unread, saying why it was not read', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.change(SCOUT_FOLDER, 'refused, its .git is no folder of its own');
+    trierarch.fleet.removeRequest(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
+      `scout released: unpushed work discarded\n\n- Ship: scout (\`${shipId}\`)\n- Worktree: aeolus-fleet\n- Discarded: 1 refused\n\n- refused \`its .git is no folder of its own\``,
+    ]);
+    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.fleet.confirmed).toEqual([shipId]);
+  });
+
   it('row 7: counts each kind of what it discards and names the first 5, then how many more are in the log (#450, #849)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
