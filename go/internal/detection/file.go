@@ -64,5 +64,26 @@ func (f File) Save(detected Detected) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(f.Path, append(text, '\n'), 0o644)
+	return replaceFile(f.Path, append(text, '\n'))
+}
+
+// replaceFile writes the text to a temporary file in the same folder and renames it over the path, so a reader sees the whole old file or the whole new one, never an empty or partial one.
+func replaceFile(path string, text []byte) error {
+	temporary, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(temporary.Name())
+	if _, err := temporary.Write(text); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Chmod(0o644); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporary.Name(), path)
 }
