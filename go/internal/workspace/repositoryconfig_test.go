@@ -422,7 +422,7 @@ func TestTheHostsGitCallsInASessionsCloneCheckNoCommitsSignature(t *testing.T) {
 }
 
 func TestTheHostsReadsOfASessionsCloneReadNoFileTheClonesConfigNamesForGit(t *testing.T) {
-	for _, name := range []string{"core.excludesFile", "core.attributesFile"} {
+	for _, name := range []string{"core.excludesFile", "core.attributesFile", "mailmap.file"} {
 		t.Run(name, func(t *testing.T) {
 			limit := timeLimit
 			timeLimit = 2 * time.Second
