@@ -16,7 +16,8 @@ import { type CommandResult, runCommand } from './run-command.js';
  * program for git-lfs, which reads that config itself, is not read. Git is pointed at no folder but the ship's
  * own: a folder whose config sets core.worktree is not read, and a clone is
  * read only through its own `.git` folder, with its own objects alone: a clone whose config names a remote to fetch missing objects from is not read. A folder that is not read is
- * refused with why, so what it holds is not known.
+ * refused with why, so what it holds is not known, as is one where a git call
+ * does not end within its time limit, as what git waits on may never come.
  */
 
 /** A folder the host does not read, with why. */
@@ -27,6 +28,25 @@ export class RefusedRead extends Error {
   ) {
     super(`Will not read ${folder}: ${reason}`);
   }
+}
+
+/** How long a host git call in a ship's folder runs before it is ended and the folder not read. */
+const TIME_LIMIT_MS = 60_000;
+
+/** How long each host git call in a ship's folder may run. */
+export interface Limits {
+  readonly timeLimitMs?: number;
+}
+
+/** Git, ended at its time limit: a call that did not end refuses the folder. */
+async function gitWithin(folder: string, call: { args: readonly string[]; env: Readonly<Record<string, string>>; limits: Limits }): Promise<CommandResult> {
+  const timeLimitMs = call.limits.timeLimitMs ?? TIME_LIMIT_MS;
+  const result = await runCommand('git', { args: call.args, env: call.env, timeoutMs: timeLimitMs });
+  if (result.isTimedOut === true) {
+    const action = call.args[0] === '-C' ? call.args[2] : call.args[0];
+    throw new RefusedRead(folder, `git ${action ?? ''} did not end within ${String(timeLimitMs / 1000)} seconds`);
+  }
+  return result;
 }
 
 interface Override {
@@ -118,11 +138,12 @@ function hookOffOf(name: string): readonly Override[] {
 interface Located {
   readonly env: Readonly<Record<string, string>>;
   readonly isClone: boolean;
+  readonly limits: Limits;
 }
 
 /** The overrides of every variable of the folder's own config that names a program, after the harmless ones; a folder whose config points git at another work tree is not read, nor a clone whose config names a remote to fetch missing objects from. */
 async function overridesIn(folder: string, located: Located): Promise<readonly Override[]> {
-  const listed = await runCommand('git', { args: ['-C', folder, 'config', '--list', '--show-scope', '--name-only', '-z'], env: { ...located.env, ...NO_LAZY_FETCH } });
+  const listed = await gitWithin(folder, { args: ['-C', folder, 'config', '--list', '--show-scope', '--name-only', '-z'], env: { ...located.env, ...NO_LAZY_FETCH }, limits: located.limits });
   if (listed.status !== 0) {
     throw new Error(`git config failed in ${folder}: ${listed.stderr.trim()}`);
   }
@@ -162,12 +183,12 @@ async function gitIn(folder: string, at: { args: readonly string[]; located: Loc
     env[`GIT_CONFIG_KEY_${i}`] = name;
     env[`GIT_CONFIG_VALUE_${i}`] = value;
   }
-  return runCommand('git', { args: ['-C', folder, ...at.args], env });
+  return gitWithin(folder, { args: ['-C', folder, ...at.args], env, limits: at.located.limits });
 }
 
 /** Runs git in a ship's folder with the folder's own config naming no program, and only a local repository to fetch from. */
 export async function gitInFolder(folder: string, args: readonly string[]): Promise<CommandResult> {
-  return gitIn(folder, { args, located: { env: {}, isClone: false } });
+  return gitIn(folder, { args, located: { env: {}, isClone: false, limits: {} } });
 }
 
 /** What git said, on one line (a reason is one line) and without its hints, which are advice, not the cause. */
@@ -205,7 +226,7 @@ function isIn(folder: string, path: string): boolean {
  * it, and only what lies in the git folder is checked. A path from a home
  * folder or git's own prefix is outside.
  */
-async function includeOutside(gitFolder: string): Promise<string | undefined> {
+async function includeOutside(gitFolder: string, limits: Limits): Promise<string | undefined> {
   const toRead = [join(gitFolder, 'config'), join(gitFolder, 'config.worktree')];
   const read = new Set<string>();
   for (let file = toRead.shift(); file !== undefined; file = toRead.shift()) {
@@ -213,7 +234,7 @@ async function includeOutside(gitFolder: string): Promise<string | undefined> {
       continue;
     }
     read.add(file);
-    const listed = await runCommand('git', { args: ['config', '--file', file, '--null', '--get-regexp', INCLUDES], env: NO_LAZY_FETCH });
+    const listed = await gitWithin(dirname(gitFolder), { args: ['config', '--file', file, '--null', '--get-regexp', INCLUDES], env: NO_LAZY_FETCH, limits });
     // None found answers 1.
     if (listed.status === 1) {
       continue;
@@ -234,7 +255,7 @@ async function includeOutside(gitFolder: string): Promise<string | undefined> {
 }
 
 /**
- * Runs git in a ship's clone as in its folder, through the clone's own `.git`
+ * Git in a ship's clone, within the limits, as in its folder: through the clone's own `.git`
  * folder and with the clone as its work tree, whatever the clone says: a
  * `.git` that is a file or a link, that names another folder's in its
  * commondir, that holds a link, that names another repository's objects in
@@ -242,7 +263,12 @@ async function includeOutside(gitFolder: string): Promise<string | undefined> {
  * git at another folder, so such a clone is not read; nor one whose `.git`
  * holds a special file, such as a named pipe, which git may wait on forever.
  */
-export async function gitInClone(clone: string, args: readonly string[]): Promise<CommandResult> {
+export function gitInCloneWithin(limits: Limits): (clone: string, args: readonly string[]) => Promise<CommandResult> {
+  return (clone, args) => gitInCloneAt(clone, { args, limits });
+}
+
+async function gitInCloneAt(clone: string, at: { args: readonly string[]; limits: Limits }): Promise<CommandResult> {
+  const { args, limits } = at;
   const gitFolder = join(clone, '.git');
   const found = await lstat(gitFolder).catch(() => undefined);
   if (found?.isDirectory() !== true) {
@@ -258,9 +284,9 @@ export async function gitInClone(clone: string, args: readonly string[]): Promis
   if ((await lstat(join(gitFolder, 'objects', 'info', 'alternates')).catch(() => undefined)) !== undefined) {
     throw new RefusedRead(clone, "its .git names another repository's objects in objects/info/alternates");
   }
-  const include = await includeOutside(gitFolder);
+  const include = await includeOutside(gitFolder, limits);
   if (include !== undefined) {
     throw new RefusedRead(clone, `its config includes a file outside its .git: ${include}`);
   }
-  return gitIn(clone, { args, located: { env: { GIT_DIR: gitFolder, GIT_WORK_TREE: clone }, isClone: true } });
+  return gitIn(clone, { args, located: { env: { GIT_DIR: gitFolder, GIT_WORK_TREE: clone }, isClone: true, limits } });
 }

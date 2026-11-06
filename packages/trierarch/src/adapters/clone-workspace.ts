@@ -4,7 +4,7 @@ import { join, relative, sep } from 'node:path';
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { WorkspacePort } from '../core/ports.js';
-import { gitInClone } from './git-in-folder.js';
+import { gitInCloneWithin, type Limits } from './git-in-folder.js';
 import { createGitWorkspace } from './git-workspace.js';
 import { runCommand } from './run-command.js';
 import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
@@ -35,9 +35,11 @@ const MARKER_CONTENT = '1\n';
 const markMade = (folder: string): Promise<void> => writeFile(markerOf(folder), MARKER_CONTENT);
 const isMarkedMade = async (folder: string): Promise<boolean> => (await readFile(markerOf(folder), 'utf8').catch(() => undefined)) === MARKER_CONTENT;
 
-export function createCloneWorkspace(options: { configuration: TrierarchConfiguration; root: string; clones?: TrustedClones }): WorkspacePort {
+export function createCloneWorkspace(options: { configuration: TrierarchConfiguration; root: string; clones?: TrustedClones } & Limits): WorkspacePort {
   const { configuration, root, clones } = options;
-  const worktrees = createGitWorkspace({ ...options, inFolder: gitInClone });
+  const limits: Limits = options.timeLimitMs === undefined ? {} : { timeLimitMs: options.timeLimitMs };
+  const gitInClone = gitInCloneWithin(limits);
+  const worktrees = createGitWorkspace({ configuration, root, ...(clones !== undefined && { clones }), inFolder: gitInClone });
   const git = async (args: readonly string[]): Promise<string> => {
     const result = await runCommand('git', { args });
     if (result.status !== 0) {
