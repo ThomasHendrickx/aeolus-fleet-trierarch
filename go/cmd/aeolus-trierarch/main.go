@@ -771,7 +771,7 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 		}
 	}
 	events := func(shipID string) string { return hold.FilesOf(at.Sessions, shipID).Events }
-	// Where a session reaches the model proxy (headless H16): on the host's loopback, at Podman's host address in a container.
+	// Where a session reaches the model proxy (headless H16): on the host's loopback, and in a container on its own loopback, where pasta forwards the proxy's port alone.
 	proxyURL := proxy.URL
 	if isInContainers(configuration.Runtime) {
 		proxyURL = func() (string, bool) {
