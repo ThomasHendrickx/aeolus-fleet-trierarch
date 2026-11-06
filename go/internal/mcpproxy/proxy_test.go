@@ -63,6 +63,8 @@ func (g *fakeGraph) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		g.called = append(g.called, message.Params.Name)
 		g.mu.Unlock()
 		result = map[string]any{"content": []map[string]any{{"type": "text", "text": "answered by " + message.Params.Name}}}
+	case "initialize":
+		result = map[string]any{"protocolVersion": "2025-06-18", "capabilities": map[string]any{"tools": map[string]any{}, "resources": map[string]any{}, "prompts": map[string]any{}}}
 	default:
 		result = map[string]any{}
 	}
@@ -299,5 +301,45 @@ func TestAnAccessIsKeptInItsSessionsFolderReadableByItsUserOnly(t *testing.T) {
 func TestAServersPathAtTheProxyNamesTheShipAndTheServer(t *testing.T) {
 	if got, want := PathOf(scout, "company-graph"), "/mcp/"+scout+"/company-graph"; got != want {
 		t.Errorf("PathOf(%s, company-graph) = %s, want %s", scout, got, want)
+	}
+}
+
+func TestTheProxyForwardsNoResourcesOrPromptsRequestAndTheGraphNeverGetsOne(t *testing.T) {
+	methods := []string{"resources/list", "resources/read", "resources/templates/list", "resources/subscribe", "prompts/list", "prompts/get"}
+	var bodies []string
+	for _, method := range methods {
+		bodies = append(bodies, `{"jsonrpc":"2.0","id":3,"method":"`+method+`","params":{}}`)
+	}
+	bodies = append(bodies, "["+callTool("read_neo4j_cypher")+","+bodies[0]+"]")
+	for _, body := range bodies {
+		graph := &fakeGraph{}
+		proxy := aProxy(t, graph)
+		_, text := call(t, proxy, "/mcp/"+scout+"/company-graph", "scouts-token", body)
+		var answer struct {
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.Unmarshal([]byte(text), &answer) != nil || answer.Error == nil {
+			t.Errorf("%s = %s, want a JSON-RPC error", body, text)
+		}
+		if graph.requests != 0 {
+			t.Errorf("the graph got %d requests for %s, want none", graph.requests, body)
+		}
+	}
+}
+
+func TestTheProxyOffersNoResourcesOrPromptsInTheGraphsCapabilities(t *testing.T) {
+	for _, isStream := range []bool{false, true} {
+		t.Run("stream "+strconv.FormatBool(isStream), func(t *testing.T) {
+			proxy := aProxy(t, &fakeGraph{isStream: isStream})
+			_, text := call(t, proxy, "/mcp/"+scout+"/company-graph", "scouts-token", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+			if strings.Contains(text, "resources") || strings.Contains(text, "prompts") {
+				t.Errorf("initialize = %s, want capabilities without resources or prompts", text)
+			}
+			if !strings.Contains(text, `"tools"`) {
+				t.Errorf("initialize = %s, want the tools capability kept", text)
+			}
+		})
 	}
 }
