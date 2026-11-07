@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
@@ -16,6 +18,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
 )
 
 // Runtime is the session runtime as a harness uses it: start a session, send it a line, stop its turn.
@@ -247,7 +250,13 @@ func (h Harness) DeleteIdentity(entry reconciler.Entry) error {
 	if h.Homes == "" {
 		return nil
 	}
-	return os.RemoveAll(h.homeOf(entry))
+	home := h.homeOf(entry)
+	// One already gone is removed already.
+	if _, err := os.Lstat(home); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	// Aside at once, so the release goes on whatever its session left in it; the trash removes it (docs/trierarch.md, "Session runtime").
+	return trash.Discard(home, time.Now())
 }
 
 func (h Harness) SessionDied(entry reconciler.Entry) error {
