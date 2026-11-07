@@ -1,6 +1,8 @@
 package sessions
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -325,6 +327,24 @@ func TestASessionsMCPAccessAndConfigurationAreKeptInItsFolderForItsUserOnlyNever
 		if line := processOf(t, pid, "command"); strings.Contains(line, "scouts-mcp-token") {
 			t.Fatalf("the command line of %s holds the token: %q", pid, line)
 		}
+	}
+}
+
+func TestASessionsMCPAccessWithNoConfigurationKeepsNoConfigurationFile(t *testing.T) {
+	runtime := aRuntime(t)
+	folder := t.TempDir()
+	files := hold.FilesOf(runtime.Sessions, scout)
+	mcp := &Mcp{Access: mcpproxy.Access{Token: "scouts-mcp-token", Servers: []string{"company-graph"}}}
+	if err := runtime.Start(Start{ShipID: scout, Folder: folder, Harness: "codex", Command: []string{"sh", "-c", aHarness}, Mcp: mcp}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	eventually(t, "the harness's pid", func() bool { _, err := os.Stat(filepath.Join(folder, "harness.pid")); return err == nil })
+
+	if !strings.Contains(read(filepath.Join(files.Folder, "mcp-access")), "scouts-mcp-token") {
+		t.Fatal("the session's folder keeps no MCP access with its token")
+	}
+	if _, err := os.Stat(files.McpConfig); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("%s: %v, want no MCP configuration file", files.McpConfig, err)
 	}
 }
 
