@@ -177,8 +177,13 @@ func TestAProxyNoHarnessNeedsIsStopped(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A stopped process is gone once init reaps it, which a loaded machine delays.
+	deadline := time.Now().Add(15 * time.Second)
+	for isRunning(pid) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
 	if isRunning(pid) {
-		t.Fatalf("the proxy (pid %d) still runs, want it stopped", pid)
+		t.Fatalf("the proxy (pid %d) still runs 15 s after it was stopped, want it stopped", pid)
 	}
 	if _, err := os.Stat(filepath.Join(runtime.Folder, "proxy.pid")); err == nil {
 		t.Fatal("the proxy's pid file stays, want it removed")

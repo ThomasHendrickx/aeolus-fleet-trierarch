@@ -116,12 +116,18 @@ func TestAnInterruptEndsACodexTurnWithSIGINTAndTheHoldStays(t *testing.T) {
 // aCopilotHold is a hold of a harness that answers as `copilot -p` behind its npm launcher does, one process per turn: each start noted with its words, reading its stdin to its end first, a line on stderr, the native process writing the result naming the session after the launcher exited, a failing turn exiting 1, a slow one running until SIGINT ends its group: a SIGINT to the launcher alone waits for its child.
 func aCopilotHold(t *testing.T, starts string, prompt string) aRunningHold {
 	t.Helper()
+	return aCopilotHoldSleepingAt(t, starts, prompt, filepath.Join(t.TempDir(), "sleeping"))
+}
+
+// aCopilotHoldSleepingAt is a Copilot hold whose slow turn has its child write the file sleeping, then become the sleep: once the file is there, the launcher waits on a running child, where a SIGINT reaches both.
+func aCopilotHoldSleepingAt(t *testing.T, starts string, prompt string, sleeping string) aRunningHold {
+	t.Helper()
 	script := `cat > /dev/null
 echo "$*" >> ` + starts + `
 echo 'warning: something' >&2
 case "$*" in
   *fail*) sleep 0.5; echo 'Error: Model "gpt-0" from --model flag is not available.' >&2; exit 1 ;;
-  *slowly*) sleep 30 ;;
+  *slowly*) sh -c 'echo started > ` + sleeping + `; exec sleep 30' ;;
 esac
 ( sleep 0.3; echo '{"type":"result","sessionId":"copilot-1","exitCode":0}' ) &
 exit 0`
@@ -168,12 +174,13 @@ func TestACopilotTurnThatFailsEndsTheHoldWithItsStatus(t *testing.T) {
 
 func TestAnInterruptEndsACopilotTurnInItsWholeProcessGroup(t *testing.T) {
 	starts := filepath.Join(t.TempDir(), "starts")
-	hold := aCopilotHold(t, starts, "first")
+	sleeping := filepath.Join(t.TempDir(), "sleeping")
+	hold := aCopilotHoldSleepingAt(t, starts, "first", sleeping)
 	eventually(t, "the session named", func() bool { return read(hold.files.SessionID) == "copilot-1" })
 	if _, err := Call(hold.files.Socket, Request{Call: "send", Line: "work slowly"}, 15*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	eventually(t, "the slow turn started", func() bool { return len(lines(starts)) == 2 })
+	eventually(t, "the slow turn sleeping", func() bool { return read(sleeping) != "" })
 	began := time.Now()
 
 	answer, err := Call(hold.files.Socket, Request{Call: "interrupt"}, 15*time.Second)
