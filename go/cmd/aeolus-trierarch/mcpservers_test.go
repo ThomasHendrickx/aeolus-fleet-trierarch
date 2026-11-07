@@ -13,3 +13,9 @@ func TestClaudeCodeOffersMCPServersOnTheHostAndInContainers(t *testing.T) {
 		}
 	}
 }
+
+func TestCopilotOffersMCPServersOnTheHost(t *testing.T) {
+	if !harnessesThatAddMcpServers(nil)["copilot"] {
+		t.Error("Copilot offers no MCP server on the host, want every listed server")
+	}
+}
