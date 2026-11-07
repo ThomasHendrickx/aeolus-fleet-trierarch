@@ -444,3 +444,22 @@ func TestTheHostsReadsOfASessionsCloneReadNoFileTheClonesConfigNamesForGit(t *te
 		})
 	}
 }
+
+func TestTheHostsLogOfASessionsCloneReadsNoMailmapInTheClone(t *testing.T) {
+	limit := timeLimit
+	timeLimit = 2 * time.Second
+	t.Cleanup(func() { timeLimit = limit })
+	repository, root := aRepository(t)
+	places := clonePlaces(repository, root, t.TempDir())
+	folder := prepared(t, places, scoutInAeolusFleet, "scout")
+	commitIn(t, folder, "notes.md")
+	aPipe(t, filepath.Join(folder, ".mailmap"))
+
+	unsaved, err := places.Unsaved(folder)
+
+	isListed := slices.ContainsFunc(unsaved, func(line string) bool { return strings.HasSuffix(line, " notes.md") })
+	isRefused := slices.ContainsFunc(unsaved, func(line string) bool { return strings.HasPrefix(line, refusedPrefix) })
+	if err != nil || !isListed || isRefused {
+		t.Errorf("Unsaved(%s) with a named pipe at .mailmap = %q, %v, want the commit listed and nothing refused", folder, unsaved, err)
+	}
+}
