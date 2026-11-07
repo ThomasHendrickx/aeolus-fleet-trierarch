@@ -23,3 +23,15 @@ func TestCodexOffersMCPServersOnTheHostOnly(t *testing.T) {
 		t.Error("Codex in containers offers MCP servers, want none: Codex is not offered in containers")
 	}
 }
+
+func TestCopilotOffersMCPServersOnTheHost(t *testing.T) {
+	if adds, ok := harnessesThatAddMcpServers(nil)["copilot"]; !ok || !adds("company-graph") || !adds("graph.v2") {
+		t.Error("Copilot offers no MCP server on the host, want every listed server")
+	}
+}
+
+func TestCopilotOffersNoMCPServerInContainers(t *testing.T) {
+	if _, ok := harnessesThatAddMcpServers(&config.Runtime{Kind: "container"})["copilot"]; ok {
+		t.Error("Copilot in containers offers MCP servers, want none: Copilot is not offered in containers")
+	}
+}

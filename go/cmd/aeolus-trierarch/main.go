@@ -374,11 +374,12 @@ func heldSecretsOf(at paths.Paths) *secrets.File {
 	return heldSecrets
 }
 
-// harnessesThatAddMcpServers are the harnesses a session can be started with crew-time MCP servers (decision M4), on the runtime configured, and which servers each can add: Claude Code, on the host and in a container, every server; Codex, on the host only, as it is offered, every server whose name it can name. A harness that cannot offers no server, so a request naming one is given back.
+// harnessesThatAddMcpServers are the harnesses a session can be started with crew-time MCP servers (decision M4), on the runtime configured, and which servers each can add: Claude Code, on the host and in a container, every server; Codex, on the host only, as it is offered, every server whose name it can name; Copilot, on the host only, as it is offered, every server, its configuration being JSON. A harness that cannot offers no server, so a request naming one is given back.
 func harnessesThatAddMcpServers(configured *config.Runtime) map[string]func(name string) bool {
 	adds := map[string]func(name string) bool{"claude-code": func(string) bool { return true }}
 	if !isInContainers(configured) {
 		adds["codex"] = codex.CanAddMcpServer
+		adds["copilot"] = func(string) bool { return true }
 	}
 	return adds
 }

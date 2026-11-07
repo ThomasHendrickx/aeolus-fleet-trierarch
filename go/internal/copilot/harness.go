@@ -10,14 +10,18 @@
 package copilot
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/prompt"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 )
@@ -48,12 +52,50 @@ type Harness struct {
 	CopilotHome string
 	// IsInContainer is whether sessions run in containers, where Copilot is not proven (CC10).
 	IsInContainer bool
+	// ProxyURL is where sessions reach the MCP proxy; false before it first listened.
+	ProxyURL func() (string, bool)
+	// Sessions is the sessions folder, where each session's MCP configuration is kept in its folder.
+	Sessions string
+}
+
+// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7, M8): each at the MCP proxy with a token of its own, fresh for each start, in an MCP configuration of the shape `copilot mcp add --transport http` writes, kept in the session's folder, which --additional-mcp-config names by its path alone; nothing for an entry that names none. Every tool the proxy lists is allowed: the proxy lists only the server's listed tools.
+func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) {
+	if len(entry.McpServers) == 0 {
+		return nil, nil, nil
+	}
+	address, ok := "", false
+	if h.ProxyURL != nil {
+		address, ok = h.ProxyURL()
+	}
+	if !ok {
+		return nil, nil, errors.New("the MCP proxy is not running yet")
+	}
+	token := proxytoken.New()
+	type server struct {
+		Type    string            `json:"type"`
+		URL     string            `json:"url"`
+		Headers map[string]string `json:"headers"`
+		Tools   []string          `json:"tools"`
+	}
+	servers := map[string]server{}
+	for _, name := range entry.McpServers {
+		servers[name] = server{Type: "http", URL: address + mcpproxy.PathOf(entry.ShipID, name), Headers: map[string]string{"Authorization": "Bearer " + token}, Tools: []string{"*"}}
+	}
+	config, err := json.Marshal(map[string]any{"mcpServers": servers})
+	if err != nil {
+		return nil, nil, err
+	}
+	return []string{"--additional-mcp-config=@" + hold.FilesOf(h.Sessions, entry.ShipID).McpConfig}, &sessions.Mcp{Access: mcpproxy.Access{Token: token, Servers: entry.McpServers}, Config: config}, nil
 }
 
 // Launch starts the entry's session in its folder: its first turn with its first prompt on a first start, else the wake resuming the session its last turn named, read before the start, which clears the session's events.
 func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID string) error {
 	if entry.Login != "" && entry.Login != "subscription" {
 		return errors.New("copilot signs in with this computer's own login (copilot login): it runs on no API key")
+	}
+	mcpFlags, mcp, err := h.mcpOf(entry)
+	if err != nil {
+		return err
 	}
 	line, sessionID := prompt.Wake(WakePrompt), ""
 	if isFirstStart && entry.FirstPrompt != "" {
@@ -62,7 +104,8 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if !isFirstStart {
 		sessionID = LastSessionIn(h.Events(entry.ShipID))
 	}
-	command := CommandLine(h.Settings.EffectiveFlags(entry.Options), line, sessionID)
+	// A later turn keeps every flag of the start but its session and prompt, so the MCP configuration holds for every turn.
+	command := CommandLine(append(h.Settings.EffectiveFlags(entry.Options), mcpFlags...), line, sessionID)
 	if err := h.ClearLaunch(entry.Folder); err != nil {
 		return err
 	}
@@ -70,7 +113,7 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if h.CopilotHome != "" {
 		env[copilotHomeVariable] = h.CopilotHome
 	}
-	return h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, Harness: "copilot", Command: command, Env: env})
+	return h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, Harness: "copilot", Command: command, Env: env, Mcp: mcp})
 }
 
 // LaunchSeen is what the session did in its launch window, as its marker says; with no activity, the cause Copilot's last error gives (H13).
