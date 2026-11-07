@@ -67,11 +67,13 @@ type Files struct {
 	SessionID string
 	// McpConfig is the MCP configuration the harness reads, with the session's token at the MCP proxy.
 	McpConfig string
+	// SecretEnv holds the values of the harness's variables that are secrets, mode 600, which the hold hands it: a command line is anyone's to see.
+	SecretEnv string
 }
 
 func FilesOf(sessions string, shipID string) Files {
 	folder := filepath.Join(sessions, shipID)
-	return Files{Folder: folder, Socket: filepath.Join(folder, "hold.sock"), PID: filepath.Join(folder, "hold.pid"), Events: filepath.Join(folder, "events.jsonl"), SessionID: filepath.Join(folder, "session-id"), McpConfig: filepath.Join(folder, "mcp-config.json")}
+	return Files{Folder: folder, Socket: filepath.Join(folder, "hold.sock"), PID: filepath.Join(folder, "hold.pid"), Events: filepath.Join(folder, "events.jsonl"), SessionID: filepath.Join(folder, "session-id"), McpConfig: filepath.Join(folder, "mcp-config.json"), SecretEnv: filepath.Join(folder, "secret-env.json")}
 }
 
 // Request is one call to a hold.
@@ -814,12 +816,37 @@ func Call(socket string, request Request, timeout time.Duration) (Answer, error)
 	return answer, nil
 }
 
+// WriteSecretEnv keeps the values of the harness's secret variables, mode 600 whatever mode a file there had.
+func WriteSecretEnv(path string, secrets map[string]string) error {
+	text, err := json.Marshal(secrets)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, text, 0o600); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o600)
+}
+
+// ReadSecretEnv is the values of the harness's secret variables WriteSecretEnv kept.
+func ReadSecretEnv(path string) (map[string]string, error) {
+	text, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var secrets map[string]string
+	if err := json.Unmarshal(text, &secrets); err != nil {
+		return nil, err
+	}
+	return secrets, nil
+}
+
 // keptVariables are what the harness takes of the hold's own environment; everything else it is given. USER and LOGNAME name the user, by which Claude Code finds its login on macOS.
 var keptVariables = []string{"HOME", "PATH", "USER", "LOGNAME"}
 
-const usage = "Usage: aeolus-trierarch hold <ship id> --sessions <folder> --folder <folder> --harness <name> [--proxy-token-variable NAME] [--env NAME=value]... -- <command>..."
+const usage = "Usage: aeolus-trierarch hold <ship id> --sessions <folder> --folder <folder> --harness <name> [--proxy-token-variable NAME] [--env NAME=value]... [--secret-env NAME]... -- <command>..."
 
-// Main runs `aeolus-trierarch hold` with the words after `hold`, as the trierarch starts it, never a person: the harness's environment is built from nothing (H10), the kept variables of the hold's own, then each --env given, and with --proxy-token-variable the session's model proxy token from its folder in that variable (H16); its guard is this program run as `hold --guard`. Answers its exit code, or 2 for words it cannot take.
+// Main runs `aeolus-trierarch hold` with the words after `hold`, as the trierarch starts it, never a person: the harness's environment is built from nothing (H10), the kept variables of the hold's own, then each --env given, each --secret-env named with its value from the folder's secret file, and with --proxy-token-variable the session's model proxy token from its folder in that variable (H16); its guard is this program run as `hold --guard`. Answers its exit code, or 2 for words it cannot take.
 func Main(words []string, version string, environ []string) int {
 	if len(words) == 1 && words[0] == "--guard" {
 		return Guard(os.Stdin)
@@ -832,9 +859,12 @@ func Main(words []string, version string, environ []string) int {
 	shipID, options, command := words[0], words[1:end], words[end+1:]
 	values := map[string]string{}
 	given := []string{}
+	secretNames := []string{}
 	for at := 0; at+1 < len(options); at += 2 {
 		if options[at] == "--env" {
 			given = append(given, options[at+1])
+		} else if options[at] == "--secret-env" {
+			secretNames = append(secretNames, options[at+1])
 		} else {
 			values[options[at]] = options[at+1]
 		}
@@ -869,6 +899,21 @@ func Main(words []string, version string, environ []string) int {
 			return 1
 		}
 		given = append(given, variable+"="+token.Token)
+	}
+	if len(secretNames) > 0 {
+		secrets, err := ReadSecretEnv(files.SecretEnv)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "No secret variables in %s\n", files.Folder)
+			return 1
+		}
+		for _, name := range secretNames {
+			value, ok := secrets[name]
+			if !ok {
+				fmt.Fprintf(os.Stderr, "No secret variable %s in %s\n", name, files.Folder)
+				return 1
+			}
+			given = append(given, name+"="+value)
+		}
 	}
 	return Run(Options{
 		Files:       files,

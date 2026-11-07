@@ -13,9 +13,11 @@ package sessions
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -63,6 +65,8 @@ type Start struct {
 	ReadOnly []string
 	// Mcp is the session's way to its crew-time MCP servers at the MCP proxy, none for a session that names none.
 	Mcp *Mcp
+	// SecretEnv is given to the harness as Env is, its values secrets: kept in the session's folder for its user only, never on a command line.
+	SecretEnv map[string]string
 }
 
 // Mcp is a session's access at the MCP proxy, and the MCP configuration its harness reads from the session's folder (hold.Files.McpConfig), which holds its token: a command line is anyone's to see.
@@ -78,6 +82,47 @@ type ProxyToken struct {
 	Token    string
 }
 
+// Aip is the aip server every session reaches (#251), with the read token of the secret named: AIP_SERVER and AIP_TOKEN, as the aip CLI reads them.
+type Aip struct {
+	Server      string
+	TokenSecret string
+	Secrets     SecretValues
+	// Log takes the line that says the secret is not held, never a value.
+	Log func(line string)
+}
+
+// SecretValues is the secrets the trierarch holds, read afresh at each start.
+type SecretValues interface {
+	Value(name string) (string, bool)
+}
+
+// withAip is the session with the aip server in its environment, and its read token among its secrets when it is held; as it is without an aip server.
+func (a *Aip) withAip(session Start) Start {
+	if a == nil {
+		return session
+	}
+	env := maps.Clone(session.Env)
+	if env == nil {
+		env = map[string]string{}
+	}
+	env["AIP_SERVER"] = a.Server
+	session.Env = env
+	token, ok := a.Secrets.Value(a.TokenSecret)
+	if !ok {
+		if a.Log != nil {
+			a.Log(fmt.Sprintf("%s: the secret %s is not held, so its session reaches the aip server with no read token", session.ShipID, a.TokenSecret))
+		}
+		return session
+	}
+	secrets := maps.Clone(session.SecretEnv)
+	if secrets == nil {
+		secrets = map[string]string{}
+	}
+	secrets["AIP_TOKEN"] = token
+	session.SecretEnv = secrets
+	return session
+}
+
 type Runtime struct {
 	// Sessions is the sessions folder: a folder per ship, with its hold's files.
 	Sessions string
@@ -87,6 +132,8 @@ type Runtime struct {
 	// Launch is what a hold's start goes through (see Launch).
 	Launch   []string
 	BootedAt func() time.Time
+	// Aip is the aip server every session reaches; none when the configuration names none.
+	Aip *Aip
 	// HeldAs is what the hold runs for a session, once the ship's last session is stopped and its folder is new: the session as it is when nil. A container runtime's hold runs the runtime's run of it (H18).
 	HeldAs func(session Start, files hold.Files) (Start, error)
 }
@@ -201,6 +248,7 @@ func (r Runtime) Start(session Start) error {
 	if err := os.MkdirAll(files.Folder, 0o700); err != nil {
 		return err
 	}
+	session = r.Aip.withAip(session)
 	if r.HeldAs != nil {
 		held, err := r.HeldAs(session, files)
 		if err != nil {
@@ -226,6 +274,14 @@ func (r Runtime) Start(session Start) error {
 	}
 	for name, value := range session.Env {
 		words = append(words, "--env", name+"="+value)
+	}
+	if len(session.SecretEnv) > 0 {
+		if err := hold.WriteSecretEnv(files.SecretEnv, session.SecretEnv); err != nil {
+			return err
+		}
+		for _, name := range slices.Sorted(maps.Keys(session.SecretEnv)) {
+			words = append(words, "--secret-env", name)
+		}
 	}
 	words = append(append(words, "--"), session.Command...)
 	line := append(append(append([]string{}, r.Launch...), "sh", "-c", detached, "sh"), words...)
