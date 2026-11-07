@@ -7,7 +7,7 @@ import { createClaudeCodeSetup, type ClaudeCodeSetup } from './claude-code-setup
 import { shipHome } from './paths.js';
 import type { AeolusPlugin } from './plugin-identity.js';
 import { PLUGIN_DATA_FOLDER } from './plugin.js';
-import { discard } from './trash.js';
+import { discard, type MoveWithinUserNamespace } from './trash.js';
 
 /** Where a ship's Claude Code session keeps its files: its identity through the aeolus-fleet plugin, its conversations, and Claude Code's own files. */
 export interface ClaudeCodeHome {
@@ -52,7 +52,7 @@ const PRIVATE_FOLDER_MODE = 0o700;
  * is accepted only where the operator accepted it on the host (#403). It goes
  * with the ship's identity, as on a release, through the trash beside it.
  */
-export function createShipClaudeCodeHomes(at: { homes: string; managedSettings: string; pluginRoot: AeolusPlugin['root']; host: Pick<ClaudeCodeSetup, 'isSkipPermissionsAccepted'> }): ClaudeCodeHomes {
+export function createShipClaudeCodeHomes(at: { homes: string; managedSettings: string; moveWithinUserNamespace?: MoveWithinUserNamespace; pluginRoot: AeolusPlugin['root']; host: Pick<ClaudeCodeSetup, 'isSkipPermissionsAccepted'> }): ClaudeCodeHomes {
   const setupOf = (shipId: ShipId): ClaudeCodeSetup => createClaudeCodeSetup({ homeDirectory: shipHome(at.homes, shipId), managedSettings: at.managedSettings });
 
   return {
@@ -80,7 +80,7 @@ export function createShipClaudeCodeHomes(at: { homes: string; managedSettings: 
         return;
       }
       // Aside at once, so the release goes on whatever its session left in it; the trash removes it (docs/trierarch.md, "Session runtime").
-      await discard(home, new Date());
+      await discard(home, { at: new Date(), ...(at.moveWithinUserNamespace !== undefined && { withinUserNamespace: at.moveWithinUserNamespace }) });
     },
   };
 }

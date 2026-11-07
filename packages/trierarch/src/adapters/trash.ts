@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { chmod, lstat, mkdir, readdir, rename, rm } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
@@ -9,9 +10,9 @@ import { runCommand, type CommandResult } from './run-command.js';
  * (docs/trierarch.md, "Session runtime"). A session can leave in them what the
  * host user cannot remove: a folder owned by an id its user namespace maps, or
  * one it made read-only. Each is first renamed aside, into a trash folder of
- * the trierarch's own beside it, which needs only the parent the host owns:
- * its ship's place is free at once and nothing reads it again. Every pass then
- * empties the trash, and what stays in it holds back no release.
+ * the trierarch's own beside it: its ship's place is free at once and nothing
+ * reads it again. Every pass then empties the trash, and what stays in it
+ * holds back no release.
  */
 
 /** The trash folder beside what goes in it. */
@@ -31,8 +32,24 @@ const PRIVATE_FOLDER_MODE = 0o700;
 /** The owner's read, write and search on a folder. */
 const OWNER_RWX = 0o700;
 
-/** Renames the folder into the trash beside it. */
-export async function discard(folder: string, at: Date): Promise<void> {
+/** Moves a folder to a path within the runtime's user namespace, where the ids a session mapped are its own. */
+export type MoveWithinUserNamespace = (from: string, to: string) => Promise<void>;
+
+/**
+ * Renames the folder into the trash beside it. Moving a folder to another
+ * parent changes its `..`, which needs write on the folder itself as well as
+ * on both parents, and a session can have made its own top read-only: it is
+ * given its owner's read, write and search first. One the host cannot give
+ * them, or move, is moved within the runtime's user namespace
+ * (`withinUserNamespace`, none on the host). A link is refused, so nothing it
+ * points at is changed.
+ */
+export async function discard(folder: string, options: { at: Date; withinUserNamespace?: MoveWithinUserNamespace }): Promise<void> {
+  const { at, withinUserNamespace } = options;
+  const found = await lstat(folder);
+  if (!found.isDirectory()) {
+    throw new Error(`${folder} is no folder: the trash takes only a folder`);
+  }
   const trash = join(dirname(folder), FOLDER_NAME);
   await mkdir(trash, { mode: PRIVATE_FOLDER_MODE }).catch((error: unknown) => {
     if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) {
@@ -42,7 +59,20 @@ export async function discard(folder: string, at: Date): Promise<void> {
   if (!(await lstat(trash)).isDirectory()) {
     throw new Error(`The trash ${trash} is no folder`);
   }
-  await rename(folder, join(trash, `${basename(folder)}.${String(at.getTime())}`));
+  const to = join(trash, `${basename(folder)}.${String(at.getTime())}`);
+  try {
+    await chmod(folder, found.mode | OWNER_RWX);
+    await rename(folder, to);
+  } catch (error) {
+    if (withinUserNamespace === undefined) {
+      throw error;
+    }
+    try {
+      await withinUserNamespace(folder, to);
+    } catch (moved) {
+      throw new Error(`${reasonOf(error)}; ${reasonOf(moved)}`, { cause: moved });
+    }
+  }
 }
 
 /**
@@ -119,7 +149,9 @@ export function createTrash(options: { beside: () => Promise<readonly string[]>;
           if (why === undefined) {
             continue;
           }
-          const found = { folder: join(beside, parsed.name), trashedAt: parsed.trashedAt, isTold: parsed.state === TOLD_SUFFIX };
+          // Where it was put in the trash, before any state suffix: the same every pass and across a restart.
+          const pathHash = createHash('sha256').update(path.slice(0, path.length - parsed.state.length)).digest('hex');
+          const found = { folder: join(beside, parsed.name), pathHash, trashedAt: parsed.trashedAt, isTold: parsed.state === TOLD_SUFFIX };
           if (parsed.state !== '') {
             left.push({ ...found, path, isNew: false, why });
             continue;
@@ -158,16 +190,40 @@ export function foldersUnder(roots: readonly string[]): () => Promise<readonly s
   };
 }
 
+/** How long a call within the runtime's user namespace may run: a runtime that hangs holds up no pass. A removal it ends is taken up again by the next pass. */
+const UNSHARE_TIME_LIMIT_MS = 60_000;
+
+type Run = (command: string, options: { args: readonly string[]; timeoutMs?: number }) => Promise<CommandResult>;
+
+/** Runs the words within the runtime's user namespace, ended at its time limit. */
+async function withinUserNamespace(runtime: { binary: string; run: Run }, args: readonly string[]): Promise<void> {
+  const { binary, run } = runtime;
+  const result = await run(binary, { args: ['unshare', ...args], timeoutMs: UNSHARE_TIME_LIMIT_MS });
+  if (result.isTimedOut === true) {
+    throw new Error(`${binary} unshare ${args[0] ?? ''} did not end within ${String(UNSHARE_TIME_LIMIT_MS)} ms`);
+  }
+  if (result.status !== 0) {
+    throw new Error(`${binary} unshare ${args[0] ?? ''} failed: ${result.stderr.trim()}`);
+  }
+}
+
 /**
  * Removes a path within the container runtime's user namespace, where the
  * host user is root and the ids a session mapped are its own: what a session
  * left that the host user cannot remove.
  */
-export function removeWithinUserNamespace(binary: string, run: (command: string, options: { args: readonly string[] }) => Promise<CommandResult> = runCommand): (path: string) => Promise<void> {
-  return async (path) => {
-    const result = await run(binary, { args: ['unshare', 'rm', '-rf', '--', path] });
-    if (result.status !== 0) {
-      throw new Error(`${binary} unshare rm failed: ${result.stderr.trim()}`);
-    }
+export function removeWithinUserNamespace(binary: string, run: Run = runCommand): (path: string) => Promise<void> {
+  return (path) => withinUserNamespace({ binary, run }, ['rm', '-rf', '--', path]);
+}
+
+/**
+ * Gives a folder its owner's read, write and search and moves it to the path,
+ * within the container runtime's user namespace: a folder whose own top the
+ * host user cannot give its write, as one owned by an id a session mapped.
+ */
+export function moveWithinUserNamespace(binary: string, run: Run = runCommand): MoveWithinUserNamespace {
+  return async (from, to) => {
+    await withinUserNamespace({ binary, run }, ['chmod', 'u+rwx', '--', from]);
+    await withinUserNamespace({ binary, run }, ['mv', '-T', '--', from, to]);
   };
 }

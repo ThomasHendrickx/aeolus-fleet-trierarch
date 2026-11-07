@@ -103,7 +103,9 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
   });
 
   it("gives sessions in containers a home of each ship's own under the trierarch's homes", () => {
-    expect(adaptersOf({ ...CONTAINER, binary }).shipHomes).toEqual({ homes: paths.homes, managedSettings: join(home, 'managed') });
+    const shipHomes = adaptersOf({ ...CONTAINER, binary }).shipHomes;
+
+    expect({ homes: shipHomes?.homes, managedSettings: shipHomes?.managedSettings, isMovedWithinUserNamespace: typeof shipHomes?.moveWithinUserNamespace === 'function' }).toEqual({ homes: paths.homes, managedSettings: join(home, 'managed'), isMovedWithinUserNamespace: true });
   });
 
   it('has sessions on the host and in containers reach the model proxy where the trierarch does, a container on its own loopback (headless H16)', () => {

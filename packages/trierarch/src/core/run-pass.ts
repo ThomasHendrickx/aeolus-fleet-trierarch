@@ -127,7 +127,7 @@ async function emptyTrash(deps: RunPassDeps): Promise<void> {
       continue;
     }
     try {
-      await deps.fleet.reportToArgo({ text: leftInTrashText(each), idempotencyKey: `trierarch:trash:${each.folder}:${String(each.trashedAt.getTime())}` });
+      await deps.fleet.reportToArgo({ text: leftInTrashText(each), idempotencyKey: `trierarch:trash:${each.pathHash}` });
     } catch (error) {
       deps.logger.warn(`Argo was not told ${each.folder} stays in the trash: ${reasonOf(error)}; the next pass tries again`);
       continue;

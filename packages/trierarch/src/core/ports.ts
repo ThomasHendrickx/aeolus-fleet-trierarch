@@ -367,6 +367,8 @@ export interface WorkspacePort {
 /** What the trash could not remove: where it is, where it was, when it was discarded, whether this is the first time and whether argo was told, and why. */
 export interface LeftInTrash {
   readonly path: string;
+  /** A hash of where it was put in the trash, before any state suffix: the same every pass and across a restart, and short. */
+  readonly pathHash: string;
   readonly folder: string;
   readonly trashedAt: Date;
   readonly isNew: boolean;

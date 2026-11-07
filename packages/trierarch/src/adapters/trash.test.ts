@@ -39,17 +39,17 @@ afterEach(async () => {
 
 describe('the trash beside a released folder', () => {
   it('takes the folder out of its place at once', async () => {
-    await discard(folder, DISCARDED_AT);
+    await discard(folder, { at: DISCARDED_AT });
 
     expect(existsSync(folder)).toBe(false);
     expect(readdirSync(trashOf(folder))).toHaveLength(1);
   });
 
   it('keeps a folder discarded twice under one name as two', async () => {
-    await discard(folder, DISCARDED_AT);
+    await discard(folder, { at: DISCARDED_AT });
     mkdirSync(folder);
 
-    await discard(folder, new Date(DISCARDED_AT.getTime() + 1));
+    await discard(folder, { at: new Date(DISCARDED_AT.getTime() + 1) });
 
     expect(readdirSync(trashOf(folder))).toHaveLength(2);
   });
@@ -57,7 +57,7 @@ describe('the trash beside a released folder', () => {
   it('takes the folder out of its place when its session made its own top read-only', async () => {
     chmodSync(folder, 0o555);
 
-    await discard(folder, DISCARDED_AT);
+    await discard(folder, { at: DISCARDED_AT });
 
     expect(existsSync(folder)).toBe(false);
     expect(readdirSync(trashOf(folder))).toHaveLength(1);
@@ -68,7 +68,7 @@ describe('the trash beside a released folder', () => {
     const link = join(root, 'aeolus-fleet', 'lookout');
     symlinkSync(folder, link);
 
-    await expect(discard(link, DISCARDED_AT, () => Promise.resolve())).rejects.toThrow('no folder');
+    await expect(discard(link, { at: DISCARDED_AT, withinUserNamespace: () => Promise.resolve() })).rejects.toThrow('no folder');
 
     expect({ link: existsSync(link), mode: statSync(folder).mode & 0o777 }).toEqual({ link: true, mode: 0o555 });
   });
@@ -76,7 +76,7 @@ describe('the trash beside a released folder', () => {
   it.skipIf(unremovableReason !== undefined)('moves a folder the host cannot move within the runtime\'s user namespace', async () => {
     makeUnmovable(folder);
 
-    await discard(folder, DISCARDED_AT, moveAsRuntime);
+    await discard(folder, { at: DISCARDED_AT, withinUserNamespace: moveAsRuntime });
 
     expect(existsSync(folder)).toBe(false);
     expect(readdirSync(trashOf(folder))).toHaveLength(1);
@@ -89,7 +89,7 @@ describe('the trash beside a released folder', () => {
     it('stays in its place', async () => {
       makeUnmovable(folder);
 
-      await expect(discard(folder, DISCARDED_AT, move)).rejects.toThrow();
+      await expect(discard(folder, { at: DISCARDED_AT, ...(move !== undefined && { withinUserNamespace: move }) })).rejects.toThrow();
 
       expect(existsSync(folder)).toBe(true);
     });
@@ -100,7 +100,7 @@ describe('the trash beside a released folder', () => {
     mkdirSync(readOnly, { recursive: true });
     writeFileSync(join(readOnly, 'f'), 'f\n');
     chmodSync(readOnly, 0o500);
-    await discard(folder, DISCARDED_AT);
+    await discard(folder, { at: DISCARDED_AT });
 
     await expect(besideTheFolder().empty()).resolves.toEqual([]);
     expect(readdirSync(trashOf(folder))).toEqual([]);
@@ -108,7 +108,7 @@ describe('the trash beside a released folder', () => {
 
   it.skipIf(unremovableReason !== undefined)('removes what the host cannot remove within the runtime\'s user namespace', async () => {
     makeUnremovable(folder);
-    await discard(folder, DISCARDED_AT);
+    await discard(folder, { at: DISCARDED_AT });
 
     await expect(besideTheFolder(removeAsRuntime).empty()).resolves.toEqual([]);
     expect(readdirSync(trashOf(folder))).toEqual([]);
@@ -120,7 +120,7 @@ describe('the trash beside a released folder', () => {
   ])('what cannot be removed $runtime', ({ unshare }) => {
     it('stays in the trash, new only the first time', async () => {
       makeUnremovable(folder);
-      await discard(folder, DISCARDED_AT);
+      await discard(folder, { at: DISCARDED_AT });
       const trash = besideTheFolder(unshare);
 
       const first = await trash.empty();
@@ -139,7 +139,7 @@ describe('the trash beside a released folder', () => {
 
   it.skipIf(unremovableReason !== undefined)('keeps what was left and told as told, and tries it again', async () => {
     makeUnremovable(folder);
-    await discard(folder, DISCARDED_AT);
+    await discard(folder, { at: DISCARDED_AT });
     const trash = besideTheFolder();
     const [left] = await trash.empty();
 

@@ -14,7 +14,7 @@ import type { TrustedClones } from './trusted-clones.js';
 import type { TrierarchPaths } from './paths.js';
 import { createHoldRuntime } from './hold-runtime.js';
 import { createProxyRuntime, type ProxyRuntime } from './proxy-runtime.js';
-import { createTrash, foldersUnder, removeWithinUserNamespace } from './trash.js';
+import { createTrash, foldersUnder, moveWithinUserNamespace, removeWithinUserNamespace, type MoveWithinUserNamespace } from './trash.js';
 
 /** The session image `release.yml` publishes with each version (decision 0011, 0039). */
 const SESSION_IMAGE = 'ghcr.io/thomashendrickx/aeolus-session';
@@ -39,7 +39,7 @@ export interface RuntimeAdapters {
   /** The processes running in a folder, stopped before an orphan worktree is read and removed; in containers, only once no container works in it. */
   readonly folderProcesses: FolderProcessesPort;
   /** The homes of the ships, one each, for sessions in containers; none on the host, where every session shares the user's. */
-  readonly shipHomes?: { homes: string; managedSettings: string };
+  readonly shipHomes?: { homes: string; managedSettings: string; moveWithinUserNamespace?: MoveWithinUserNamespace };
   /** The trash beside each repository's clones and the ships' homes, emptied every pass: within the runtime's user namespace too in containers, by the host's own removal alone on the host. */
   readonly trash: TrashPort;
   /** Where a session reaches the model proxy the trierarch reaches at the url (headless H16): there on the host, on its own loopback in a container, where only the proxy's port is forwarded. */
@@ -78,7 +78,9 @@ export function runtimeAdaptersOf(at: {
       trash: createTrash({ beside: foldersUnder([root]) }),
     };
   }
-  const clones = createCloneWorkspace({ configuration, root, ...(trusted !== undefined && { clones: trusted }) });
+  // A clone or a ship's home whose own top the host cannot give its write goes to the trash as the runtime moves it.
+  const moveAsRuntime = moveWithinUserNamespace(runtime.binary);
+  const clones = createCloneWorkspace({ configuration, root, moveWithinUserNamespace: moveAsRuntime, ...(trusted !== undefined && { clones: trusted }) });
   return {
     sessions: createContainerRuntime({
       binary: runtime.binary,
@@ -98,7 +100,7 @@ export function runtimeAdaptersOf(at: {
     // The container mounts the folder at the path it is given, where the plugin inside keys it by `pwd -P` as the host's does: one path for both, the real one.
     workspace: { ...clones, prepare: async (at) => ({ folder: await realpath((await clones.prepare(at)).folder) }) },
     folderProcesses: createContainerFolderProcesses({ binary: runtime.binary, host: createFolderProcesses() }),
-    shipHomes: { homes: paths.homes, managedSettings },
+    shipHomes: { homes: paths.homes, managedSettings, moveWithinUserNamespace: moveAsRuntime },
     trash: createTrash({ beside: async () => [...(await foldersUnder([root])()), paths.homes], unshare: removeWithinUserNamespace(runtime.binary) }),
     modelProxyUrlOf: containerProxyUrl,
   };

@@ -7,7 +7,7 @@ import type { WorkspacePort } from '../core/ports.js';
 import { gitInCloneWithin, gitInFreshClone, type Limits } from './git-in-folder.js';
 import { createGitWorkspace, REFUSED_PREFIX } from './git-workspace.js';
 import { runCommand } from './run-command.js';
-import { discard } from './trash.js';
+import { discard, type MoveWithinUserNamespace } from './trash.js';
 import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
 
 /**
@@ -38,7 +38,7 @@ const MARKER_CONTENT = '1\n';
 const markMade = (folder: string): Promise<void> => writeFile(markerOf(folder), MARKER_CONTENT);
 const isMarkedMade = async (folder: string): Promise<boolean> => (await readFile(markerOf(folder), 'utf8').catch(() => undefined)) === MARKER_CONTENT;
 
-export function createCloneWorkspace(options: { configuration: TrierarchConfiguration; root: string; clones?: TrustedClones } & Limits): WorkspacePort {
+export function createCloneWorkspace(options: { configuration: TrierarchConfiguration; root: string; clones?: TrustedClones; moveWithinUserNamespace?: MoveWithinUserNamespace } & Limits): WorkspacePort {
   const { configuration, root, clones } = options;
   const limits: Limits = options.timeLimitMs === undefined ? {} : { timeLimitMs: options.timeLimitMs };
   const gitInClone = gitInCloneWithin(limits);
@@ -126,7 +126,7 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
         return;
       }
       // Aside at once, so its ship's place is free and nothing reads it again; the trash removes it (docs/trierarch.md, "Session runtime").
-      await discard(folder, new Date());
+      await discard(folder, { at: new Date(), ...(options.moveWithinUserNamespace !== undefined && { withinUserNamespace: options.moveWithinUserNamespace }) });
     },
     worktrees: async () => {
       const found = [];

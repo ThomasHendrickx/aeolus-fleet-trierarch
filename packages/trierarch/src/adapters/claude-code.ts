@@ -15,6 +15,7 @@ import { createLaunchMarks } from './launch-marker.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
 import { newProxyToken } from './proxy-tokens.js';
 import { claudeCodeActivityIn, sessionActivityOf } from './session-activity.js';
+import type { MoveWithinUserNamespace } from './trash.js';
 
 /**
  * Claude Code as a harness (docs/architecture.md, "First adapters"): `claude`
@@ -197,8 +198,8 @@ export function createClaudeCodeHarness(options: {
   projects: string;
   /** Claude Code's own files, where its onboarding is completed before each launch (#403) and its settings' default mode is read (#505, #507). */
   setup: Pick<ClaudeCodeSetup, 'completeOnboarding' | 'defaultPermissionMode' | 'isSkipPermissionsAccepted'>;
-  /** For sessions in containers: a home of each ship's own under `homes`, in place of the host's (decision 0039). */
-  shipHomes?: { homes: string; managedSettings: string };
+  /** For sessions in containers: a home of each ship's own under `homes`, in place of the host's (decision 0039), moved to the trash within the runtime's user namespace when the host cannot move it. */
+  shipHomes?: { homes: string; managedSettings: string; moveWithinUserNamespace?: MoveWithinUserNamespace };
   /** The permission modes the installed Claude Code lists, as detection last found them (#517); undefined before it found any. */
   permissionModes: () => readonly string[] | undefined;
   /** The program to run; `claude` unless a test runs another. */
