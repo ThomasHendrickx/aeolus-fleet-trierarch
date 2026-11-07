@@ -1,12 +1,14 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { LeftInTrash } from '../core/ports.js';
-import { makeUnremovable, removeAsRuntime, unremovableReason } from '../../test/support/unremovable.js';
-import { createTrash, discard, removeWithinUserNamespace } from './trash.js';
+import { makeUnmovable, makeUnremovable, moveAsRuntime, removeAsRuntime, unremovableReason } from '../../test/support/unremovable.js';
+import { createTrash, discard, moveWithinUserNamespace, removeWithinUserNamespace } from './trash.js';
 
 // Against the real file system, in a temporary folder.
 
@@ -27,6 +29,8 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  // So the test's own folders can go whatever the outcome.
+  spawnSync('chmod', ['-R', 'u+rwx', root]);
   if (unremovableReason === undefined) {
     await removeAsRuntime(root);
   }
@@ -48,6 +52,47 @@ describe('the trash beside a released folder', () => {
     await discard(folder, new Date(DISCARDED_AT.getTime() + 1));
 
     expect(readdirSync(trashOf(folder))).toHaveLength(2);
+  });
+
+  it('takes the folder out of its place when its session made its own top read-only', async () => {
+    chmodSync(folder, 0o555);
+
+    await discard(folder, DISCARDED_AT);
+
+    expect(existsSync(folder)).toBe(false);
+    expect(readdirSync(trashOf(folder))).toHaveLength(1);
+  });
+
+  it('refuses a link, and changes nothing it points at', async () => {
+    chmodSync(folder, 0o555);
+    const link = join(root, 'aeolus-fleet', 'lookout');
+    symlinkSync(folder, link);
+
+    await expect(discard(link, DISCARDED_AT, () => Promise.resolve())).rejects.toThrow('no folder');
+
+    expect({ link: existsSync(link), mode: statSync(folder).mode & 0o777 }).toEqual({ link: true, mode: 0o555 });
+  });
+
+  it.skipIf(unremovableReason !== undefined)('moves a folder the host cannot move within the runtime\'s user namespace', async () => {
+    makeUnmovable(folder);
+
+    await discard(folder, DISCARDED_AT, moveAsRuntime);
+
+    expect(existsSync(folder)).toBe(false);
+    expect(readdirSync(trashOf(folder))).toHaveLength(1);
+  });
+
+  describe.skipIf(unremovableReason !== undefined).each([
+    { runtime: 'on the host', move: undefined },
+    { runtime: 'in containers', move: () => Promise.reject(new Error('unshare refused')) },
+  ])('a folder neither the host nor the runtime can move $runtime', ({ move }) => {
+    it('stays in its place', async () => {
+      makeUnmovable(folder);
+
+      await expect(discard(folder, DISCARDED_AT, move)).rejects.toThrow();
+
+      expect(existsSync(folder)).toBe(true);
+    });
   });
 
   it('removes what it holds when emptied, a folder made read-only included', async () => {
@@ -86,6 +131,9 @@ describe('the trash beside a released folder', () => {
       expect(second.map(leftOf)).toEqual([{ isInTrash: true, folder, trashedAt: DISCARDED_AT, isNew: false, isTold: false, hasWhy: true }]);
       expect(second[0]?.path).toBe(first[0]?.path);
       expect(existsSync(first[0]?.path ?? '')).toBe(true);
+      // Where it was put in the trash, before any state suffix.
+      const put = createHash('sha256').update(join(trashOf(folder), 'scout.1794043800000')).digest('hex');
+      expect([first[0]?.pathHash, second[0]?.pathHash]).toEqual([put, put]);
     });
   });
 
@@ -107,16 +155,48 @@ describe('the trash beside a released folder', () => {
   });
 });
 
-describe('removing within the runtime\'s user namespace', () => {
-  it('runs the runtime\'s unshare rm on the path', async () => {
-    const ran: { command: string; args: readonly string[] }[] = [];
-    const remove = removeWithinUserNamespace('podman', (command, { args }) => {
-      ran.push({ command, args });
-      return Promise.resolve({ status: 0, stdout: '', stderr: '' });
-    });
+describe('the runtime\'s user namespace', () => {
+  /** The minute each call within it may run. */
+  const TIME_LIMIT_MS = 60_000;
+  const aRuntime = (status: (args: readonly string[]) => number = () => 0) => {
+    const ran: { command: string; args: readonly string[]; timeoutMs?: number }[] = [];
+    const run = (command: string, options: { args: readonly string[]; timeoutMs?: number }) => {
+      ran.push({ command, ...options });
+      return Promise.resolve({ status: status(options.args), stdout: '', stderr: 'refused' });
+    };
+    return { ran, run };
+  };
 
-    await remove('/worktrees/aeolus-fleet/.trash/scout.1');
+  it('removes the path with the runtime\'s unshare rm, within its time limit', async () => {
+    const { ran, run } = aRuntime();
 
-    expect(ran).toEqual([{ command: 'podman', args: ['unshare', 'rm', '-rf', '--', '/worktrees/aeolus-fleet/.trash/scout.1'] }]);
+    await removeWithinUserNamespace('podman', run)('/worktrees/aeolus-fleet/.trash/scout.1');
+
+    expect(ran).toEqual([{ command: 'podman', args: ['unshare', 'rm', '-rf', '--', '/worktrees/aeolus-fleet/.trash/scout.1'], timeoutMs: TIME_LIMIT_MS }]);
+  });
+
+  it('moves a folder, its own write given first, each within its time limit', async () => {
+    const { ran, run } = aRuntime();
+
+    await moveWithinUserNamespace('podman', run)('/worktrees/aeolus-fleet/scout', '/worktrees/aeolus-fleet/.trash/scout.1');
+
+    expect(ran).toEqual([
+      { command: 'podman', args: ['unshare', 'chmod', 'u+rwx', '--', '/worktrees/aeolus-fleet/scout'], timeoutMs: TIME_LIMIT_MS },
+      { command: 'podman', args: ['unshare', 'mv', '-T', '--', '/worktrees/aeolus-fleet/scout', '/worktrees/aeolus-fleet/.trash/scout.1'], timeoutMs: TIME_LIMIT_MS },
+    ]);
+  });
+
+  it('does not move a folder whose own write it could not give', async () => {
+    const { ran, run } = aRuntime((args) => (args[1] === 'chmod' ? 1 : 0));
+
+    await expect(moveWithinUserNamespace('podman', run)('/worktrees/aeolus-fleet/scout', '/worktrees/aeolus-fleet/.trash/scout.1')).rejects.toThrow('podman unshare chmod failed: refused');
+
+    expect(ran.map((each) => each.args[1])).toEqual(['chmod']);
+  });
+
+  it('fails a call that ran past its time limit', async () => {
+    const run = () => Promise.resolve({ status: 143, stdout: '', stderr: '', isTimedOut: true });
+
+    await expect(removeWithinUserNamespace('podman', run)('/worktrees/aeolus-fleet/.trash/scout.1')).rejects.toThrow('did not end within');
   });
 });

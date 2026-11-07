@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
-import { makeUnremovable, removeAsRuntime, unremovableReason } from '../../test/support/unremovable.js';
+import { makeUnmovable, makeUnremovable, moveAsRuntime, removeAsRuntime, unremovableReason } from '../../test/support/unremovable.js';
 import { createCloneWorkspace } from './clone-workspace.js';
 import { runCommand } from './run-command.js';
 
@@ -52,7 +52,7 @@ async function withUpstream(): Promise<string> {
   return upstream;
 }
 
-function workspace(limits: { timeLimitMs?: number } = {}) {
+function workspace(limits: { timeLimitMs?: number; moveWithinUserNamespace?: (from: string, to: string) => Promise<void> } = {}) {
   return createCloneWorkspace({
     configuration: { ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: repository } }, folders: { notes: { path: notes } } },
     root,
@@ -246,6 +246,35 @@ describe('workspaces as per-ship clones', () => {
       expect(readdirSync(join(root, 'aeolus-fleet', '.trash'))).toHaveLength(1);
     } finally {
       await removeAsRuntime(folder);
+    }
+  });
+
+  it('frees its ship\'s place for the trash beside it when its session made the clone\'s own top read-only', async () => {
+    const { folder: made } = await workspace().prepare(scout);
+    chmodSync(made, 0o555);
+
+    try {
+      await workspace().remove(made);
+
+      expect(existsSync(made)).toBe(false);
+      expect(readdirSync(join(root, 'aeolus-fleet', '.trash'))).toHaveLength(1);
+    } finally {
+      // So the test's own folders can go whatever the outcome.
+      spawnSync('chmod', ['-R', 'u+rwx', root]);
+    }
+  });
+
+  it.skipIf(unremovableReason !== undefined)('frees its ship\'s place for the trash beside it within the runtime\'s user namespace when the host cannot move the clone', async () => {
+    const { folder: made } = await workspace().prepare(scout);
+    makeUnmovable(made);
+
+    try {
+      await workspace({ moveWithinUserNamespace: moveAsRuntime }).remove(made);
+
+      expect(existsSync(made)).toBe(false);
+      expect(readdirSync(join(root, 'aeolus-fleet', '.trash'))).toHaveLength(1);
+    } finally {
+      await removeAsRuntime(root);
     }
   });
 

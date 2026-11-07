@@ -119,7 +119,7 @@ describe('the activity of the sessions it runs (monitoring W3b)', () => {
 
 describe('the trash a released clone and ship\'s home go aside to (docs/trierarch.md, "Session runtime")', () => {
   const DAY_MS = 24 * 60 * 60 * 1000;
-  const aLeftClone = (trashedAt: Date): LeftInTrash => ({ path: '/worktrees/aeolus-fleet/.trash/scout.1793707200000.left', folder: '/worktrees/aeolus-fleet/scout', trashedAt, isNew: true, isTold: false, why: 'unlinkat a/f: permission denied' });
+  const aLeftClone = (trashedAt: Date): LeftInTrash => ({ path: '/worktrees/aeolus-fleet/.trash/scout.1793707200000.left', pathHash: 'd1b5a804892b892cbac59c6f3cd3dd3dbd9e9d721526f90850ea49e8ce6de972', folder: '/worktrees/aeolus-fleet/scout', trashedAt, isNew: true, isTold: false, why: 'unlinkat a/f: permission denied' });
   const toldOfTheTrash = (trierarch: Trierarch) => trierarch.fleet.toArgo.filter((each) => each.idempotencyKey.startsWith('trierarch:trash:'));
 
   it('is emptied every pass, what it could not remove logged the first time', async () => {
@@ -144,7 +144,7 @@ describe('the trash a released clone and ship\'s home go aside to (docs/trierarc
     await trierarch.pass();
 
     expect(toldOfTheTrash(trierarch)).toEqual([
-      { text: leftInTrashText({ folder: '/worktrees/aeolus-fleet/scout', path: '/worktrees/aeolus-fleet/.trash/scout.1793707200000.left', trashedAt, why: 'unlinkat a/f: permission denied' }), idempotencyKey: `trierarch:trash:/worktrees/aeolus-fleet/scout:${String(trashedAt.getTime())}` },
+      { text: leftInTrashText({ folder: '/worktrees/aeolus-fleet/scout', path: '/worktrees/aeolus-fleet/.trash/scout.1793707200000.left', trashedAt, why: 'unlinkat a/f: permission denied' }), idempotencyKey: 'trierarch:trash:d1b5a804892b892cbac59c6f3cd3dd3dbd9e9d721526f90850ea49e8ce6de972' },
     ]);
     expect(trierarch.trash.left.map((each) => each.isTold)).toEqual([true]);
   });
