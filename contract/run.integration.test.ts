@@ -159,19 +159,21 @@ describe("the trierarch's own ship", () => {
 
 describe("the trierarch's report as its own ship", () => {
   it('reports at start: idle with none running, and the details of what the machine offers', async () => {
-    await expect.poll(() => fleet.reportOfTrierarch(), { timeout: ANSWERED_WITHIN_MS }).toBeDefined();
+    // The first report may come before the repository the crew set up shows among the workspaces: wait for the report that holds it.
+    await expect
+      .poll(async () => (await fleet.reportOfTrierarch())?.details, { timeout: ANSWERED_WITHIN_MS })
+      .toMatchObject({
+        harnesses: [{ harness: 'claude-code', flags: [], riskyFlags: [], version: CLAUDE_CODE_VERSION, login: { default: 'subscription', key: 'none' } }],
+        workspaces: { repositories: [REPOSITORY], folders: [] },
+        kept: [],
+        orphans: [],
+        logins: [],
+        runtime: 'host',
+      });
 
     const report = await fleet.reportOfTrierarch();
     expect(report?.state).toBe('idle');
     expect(report?.note).toMatch(/^0 of \d+ running$/);
-    expect(report?.details).toMatchObject({
-      harnesses: [{ harness: 'claude-code', flags: [], riskyFlags: [], version: CLAUDE_CODE_VERSION, login: { default: 'subscription', key: 'none' } }],
-      workspaces: { repositories: [REPOSITORY], folders: [] },
-      kept: [],
-      orphans: [],
-      logins: [],
-      runtime: 'host',
-    });
     expect(report?.details).toHaveProperty('caps.ships');
     expect(report?.details).toHaveProperty('caps.running');
     expect(report?.details).toHaveProperty('version');
