@@ -23,7 +23,9 @@ import { withoutRemoteControl } from '../core/remote-control.js';
  * ship's tokens is estimated by (#353): per model, in US dollars per million
  * tokens of each kind, in place of its list price or for a model with none.
  * And which login each session runs on (api keys K5): a default per harness
- * and a login per ship name, never a key or a path.
+ * and a login per ship name, never a key or a path. And the aip server every
+ * session reaches (#251), with the name of the sealed secret its read token
+ * is, never the token: only the Go trierarch gives it to its sessions.
  */
 const priceSchema = z.number().nonnegative();
 const loginSchema = z.enum(LOGINS);
@@ -32,6 +34,7 @@ export const trierarchConfigurationSchema = commonConfigurationSchema
   .extend({
     repositories: z.record(trierarchNameSchema, z.strictObject({ path: z.string().min(1), checkouts: z.array(trierarchNameSchema).optional() })),
     prices: z.record(z.string().min(1), z.strictObject({ input: priceSchema, output: priceSchema, cacheRead: priceSchema, cacheWrite: priceSchema })).optional(),
+    aip: z.strictObject({ server: z.url({ protocol: /^https?$/ }), tokenSecret: z.string().max(100).regex(/^[a-z0-9][a-z0-9._-]*$/) }).optional(),
     logins: z.strictObject({ default: z.strictObject({ 'claude-code': loginSchema.optional(), codex: loginSchema.optional() }).optional(), ships: z.record(z.string().min(1), loginSchema).optional() }).optional(),
   })
   .superRefine((configuration, context) => {
