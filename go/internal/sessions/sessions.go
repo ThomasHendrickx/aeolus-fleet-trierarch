@@ -69,7 +69,7 @@ type Start struct {
 	SecretEnv map[string]string
 }
 
-// Mcp is a session's access at the MCP proxy, and the MCP configuration its harness reads from the session's folder (hold.Files.McpConfig), which holds its token: a command line is anyone's to see.
+// Mcp is a session's access at the MCP proxy, and the MCP configuration its harness reads from the session's folder (hold.Files.McpConfig), which holds its token: a command line is anyone's to see. A harness that names its servers on the command line has no configuration, and its token in a secret variable instead.
 type Mcp struct {
 	Access mcpproxy.Access
 	Config []byte
@@ -268,8 +268,10 @@ func (r Runtime) Start(session Start) error {
 		if err := mcpproxy.WriteAccess(files.Folder, mcp.Access); err != nil {
 			return err
 		}
-		if err := writeMcpConfig(files.McpConfig, mcp.Config); err != nil {
-			return err
+		if mcp.Config != nil {
+			if err := writeMcpConfig(files.McpConfig, mcp.Config); err != nil {
+				return err
+			}
 		}
 	}
 	for name, value := range session.Env {

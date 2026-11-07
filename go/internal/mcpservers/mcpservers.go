@@ -189,14 +189,16 @@ func nameIn(raw json.RawMessage) string {
 	return named.Name
 }
 
-// OfferedBy are, by harness, the names of the servers on the list that it can be started with: a harness that cannot add a server offers none (decision M4).
-func OfferedBy(list []Server, harnesses []string, canAdd map[string]bool) map[string][]string {
+// OfferedBy are, by harness, the names of the servers on the list that it can be started with, as canAdd says by a server's name: a harness missing from canAdd offers none, and one offers no server it cannot add (decision M4).
+func OfferedBy(list []Server, harnesses []string, canAdd map[string]func(name string) bool) map[string][]string {
 	offered := map[string][]string{}
 	for _, harness := range harnesses {
 		names := []string{}
-		if canAdd[harness] {
+		if adds, ok := canAdd[harness]; ok {
 			for _, server := range list {
-				names = append(names, server.Name)
+				if adds(server.Name) {
+					names = append(names, server.Name)
+				}
 			}
 		}
 		offered[harness] = names
