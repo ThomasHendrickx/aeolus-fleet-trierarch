@@ -6,7 +6,7 @@
  * files. Every other commit type passes.
  *
  * Production code is every file under that folder except tests and Markdown.
- * A test file is a *.test.ts(x) file, or any file in a test/ or e2e/ folder.
+ * A test file is a *.test.ts(x) or *_test.go file, or any file in a test/ or e2e/ folder.
  * Merge commits are not judged.
  *
  * Usage: node scripts/check-tdd-evidence.ts <base commit> <head commit>
@@ -15,7 +15,7 @@ import { git, repositoryRoot, type PullRequestRange } from './support/git.ts';
 import { runPullRequestCheck } from './support/report.ts';
 
 const PRODUCTION_FOLDER = 'packages/trierarch/src/';
-const TEST_FILE = /\.test\.tsx?$|(^|\/)(test|e2e)\//;
+const TEST_FILE = /\.test\.tsx?$|_test\.go$|(^|\/)(test|e2e)\//;
 /** A conventional commit of type feat or fix, with or without a scope or a breaking mark. */
 const FEAT_OR_FIX_SUBJECT = /^(feat|fix)(\([^)]*\))?!?: /;
 const RECORD_SEPARATOR = '\u001e';
