@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
+import { makeUnremovable, removeAsRuntime, unremovableReason } from '../../test/support/unremovable.js';
 import { createCloneWorkspace } from './clone-workspace.js';
 import { runCommand } from './run-command.js';
 
@@ -234,23 +235,18 @@ describe('workspaces as per-ship clones', () => {
     expect(existsSync(made)).toBe(false);
   });
 
-  it('removes a clone holding a folder its session made read-only', async () => {
+  it.skipIf(unremovableReason !== undefined)('frees its ship\'s place for the trash beside it when the clone holds what the host cannot remove', async () => {
     const { folder: made } = await workspace().prepare(scout);
-    const readOnly = join(made, 'a', 'b');
-    mkdirSync(readOnly, { recursive: true });
-    writeFileSync(join(readOnly, 'f'), 'f\n');
-    chmodSync(readOnly, 0o500);
+    makeUnremovable(made);
 
     try {
       await workspace().remove(made);
-    } finally {
-      // So the test's own folders can go whatever the outcome.
-      if (existsSync(readOnly)) {
-        chmodSync(readOnly, 0o755);
-      }
-    }
 
-    expect(existsSync(made)).toBe(false);
+      expect(existsSync(made)).toBe(false);
+      expect(readdirSync(join(root, 'aeolus-fleet', '.trash'))).toHaveLength(1);
+    } finally {
+      await removeAsRuntime(folder);
+    }
   });
 
   it('refuses to remove anything outside its root', async () => {

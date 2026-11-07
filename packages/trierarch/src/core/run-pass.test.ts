@@ -4,8 +4,9 @@ import { z } from 'zod';
 
 import { aTrierarch, aTrierarchOnLogins, CONFIGURATION, crewSettings, InMemoryCheckouts, InMemoryShipSockets, newId, NOTES_FOLDER, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
 import { putEntry } from './entry.js';
-import type { LaunchSeen } from './ports.js';
+import type { LaunchSeen, LeftInTrash } from './ports.js';
 import { ACTIVITY_INTERVAL_SECONDS } from './run-pass.js';
+import { leftInTrashText } from './argo-reports.js';
 import { RESTART_BUDGET } from './restart-policy.js';
 
 const SECOND_MS = 1000;
@@ -113,6 +114,54 @@ describe('the activity of the sessions it runs (monitoring W3b)', () => {
     await trierarch.pass();
 
     expect(trierarch.state.current().passFailure).toBeUndefined();
+  });
+});
+
+describe('the trash a released clone and ship\'s home go aside to (docs/trierarch.md, "Session runtime")', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const aLeftClone = (trashedAt: Date): LeftInTrash => ({ path: '/worktrees/aeolus-fleet/.trash/scout.1793707200000.left', folder: '/worktrees/aeolus-fleet/scout', trashedAt, isNew: true, isTold: false, why: 'unlinkat a/f: permission denied' });
+  const toldOfTheTrash = (trierarch: Trierarch) => trierarch.fleet.toArgo.filter((each) => each.idempotencyKey.startsWith('trierarch:trash:'));
+
+  it('is emptied every pass, what it could not remove logged the first time', async () => {
+    const trierarch = aTrierarch();
+    trierarch.trash.left = [aLeftClone(trierarch.clock.now())];
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.logger.warnings.filter((warning) => warning.includes('trash'))).toEqual([
+      'Could not remove /worktrees/aeolus-fleet/scout, in the trash at /worktrees/aeolus-fleet/.trash/scout.1793707200000.left: unlinkat a/f: permission denied; every pass tries again',
+    ]);
+    expect(toldOfTheTrash(trierarch)).toEqual([]);
+  });
+
+  it('tells argo once of what it could not remove for a day', async () => {
+    const trierarch = aTrierarch();
+    const trashedAt = new Date(trierarch.clock.now().getTime() - DAY_MS);
+    trierarch.trash.left = [{ ...aLeftClone(trashedAt), isNew: false }];
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(toldOfTheTrash(trierarch)).toEqual([
+      { text: leftInTrashText({ folder: '/worktrees/aeolus-fleet/scout', path: '/worktrees/aeolus-fleet/.trash/scout.1793707200000.left', trashedAt, why: 'unlinkat a/f: permission denied' }), idempotencyKey: `trierarch:trash:/worktrees/aeolus-fleet/scout:${String(trashedAt.getTime())}` },
+    ]);
+    expect(trierarch.trash.left.map((each) => each.isTold)).toEqual([true]);
+  });
+
+  it('tells argo nothing of what it could not remove a millisecond short of a day', async () => {
+    const trierarch = aTrierarch();
+    trierarch.trash.left = [aLeftClone(new Date(trierarch.clock.now().getTime() - DAY_MS + 1))];
+
+    await trierarch.pass();
+
+    expect(toldOfTheTrash(trierarch)).toEqual([]);
+  });
+
+  it('names the folder, where it is aside, since when and why when it tells argo', () => {
+    expect(leftInTrashText({ folder: '/worktrees/aeolus-fleet/scout', path: '/worktrees/aeolus-fleet/.trash/scout.1793707200000', trashedAt: new Date('2026-11-03T12:00:00.000Z'), why: 'unlinkat a/f: permission denied' })).toBe(
+      'A released folder cannot be removed from this machine\n\n- Folder: `/worktrees/aeolus-fleet/scout`\n- In the trash at: `/worktrees/aeolus-fleet/.trash/scout.1793707200000`\n- Since: 2026-11-03T12:00:00.000Z\n- Why: unlinkat a/f: permission denied\n\nIts ship\'s place is free; the folder stays aside, and every pass tries again to remove it.',
+    );
   });
 });
 
