@@ -575,6 +575,16 @@ describe("the host's reads of a session's clone, with a file the clone's config 
 
     expect(await workspace({ timeLimitMs: 2000 }).unsaved(made)).toEqual([' M README.md']);
   });
+
+  it('reads no mailmap in the clone when it reads its log', async () => {
+    const { folder: made } = await workspace().prepare(scout);
+    await commit(made, 'notes.md');
+    aPipe(join(made, '.mailmap'));
+
+    const unsaved = await workspace({ timeLimitMs: 2000 }).unsaved(made);
+
+    expect({ isListed: unsaved.some((line) => line.endsWith(' notes.md')), isRefused: unsaved.some((line) => line.startsWith('refused, ')) }).toEqual({ isListed: true, isRefused: false });
+  });
 });
 
 describe("the host's git calls in a session's clone, with a config git cannot read", () => {
