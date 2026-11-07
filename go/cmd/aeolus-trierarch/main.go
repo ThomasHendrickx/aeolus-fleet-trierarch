@@ -374,9 +374,9 @@ func heldSecretsOf(at paths.Paths) *secrets.File {
 	return heldSecrets
 }
 
-// harnessesThatAddMcpServers are the harnesses a session can be started with crew-time MCP servers (decision M4), on the runtime configured: Claude Code, on the host and in a container, through the MCP proxy. A harness that cannot offers no server, so a request naming one is given back.
+// harnessesThatAddMcpServers are the harnesses a session can be started with crew-time MCP servers (decision M4), on the runtime configured: Claude Code, on the host and in a container, and Copilot, which runs on the host only, through the MCP proxy. A harness that cannot offers no server, so a request naming one is given back.
 func harnessesThatAddMcpServers(*config.Runtime) map[string]bool {
-	return map[string]bool{"claude-code": true}
+	return map[string]bool{"claude-code": true, "copilot": true}
 }
 
 // modelProxy is the model proxy on this machine (headless H16), started as a hold is.
@@ -892,7 +892,7 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 				// As detection last found it: a Copilot not detected yet is not offered.
 				version := offers.version("copilot")
 				return version, version != ""
-			}, CopilotHome: env["COPILOT_HOME"], IsInContainer: isInContainers(configuration.Runtime)}
+			}, CopilotHome: env["COPILOT_HOME"], IsInContainer: isInContainers(configuration.Runtime), ProxyURL: proxy.URL, Sessions: at.Sessions}
 		}
 		offered = append(offered, name)
 	}
