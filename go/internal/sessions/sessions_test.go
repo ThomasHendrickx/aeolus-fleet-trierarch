@@ -421,3 +421,58 @@ func TestHeldAsReplacesWhatTheHoldRunsOnceTheShipsLastSessionStoppedAndItsFolder
 		t.Fatalf("the hold was given the session's own environment:\n%s", env)
 	}
 }
+
+// heldSecrets are the secrets the trierarch holds, by name.
+type heldSecrets map[string]string
+
+func (h heldSecrets) Value(name string) (string, bool) {
+	value, ok := h[name]
+	return value, ok
+}
+
+func TestEverySessionReachesTheAipServerWithItsReadTokenKeptInItsFolderNeverOnACommandLine(t *testing.T) {
+	runtime := aRuntime(t)
+	runtime.Aip = &Aip{Server: "https://aip.example.invalid", TokenSecret: "aip-read", Secrets: heldSecrets{"aip-read": "scouts-aip-token"}}
+	folder := started(t, runtime, aHarness)
+	eventually(t, "the harness's environment", func() bool { return read(filepath.Join(folder, "harness.env")) != "" })
+
+	env := read(filepath.Join(folder, "harness.env"))
+	if !strings.Contains(env, "AIP_SERVER=https://aip.example.invalid") || !strings.Contains(env, "AIP_TOKEN=scouts-aip-token") {
+		t.Fatalf("environment:\n%s\nwant AIP_SERVER and AIP_TOKEN", env)
+	}
+	files := hold.FilesOf(runtime.Sessions, scout)
+	if info, err := os.Stat(files.SecretEnv); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("%s: %v, %v, want a file of mode 600", files.SecretEnv, info, err)
+	}
+	for _, pid := range []string{read(files.PID), read(filepath.Join(folder, "harness.pid"))} {
+		if line := processOf(t, pid, "command"); strings.Contains(line, "scouts-aip-token") {
+			t.Fatalf("the command line of %s holds the token: %q", pid, line)
+		}
+	}
+}
+
+func TestASessionWhoseAipTokenIsNotHeldReachesTheServerAloneAndTheSecretIsLoggedByNameAsNotHeld(t *testing.T) {
+	runtime := aRuntime(t)
+	logged := []string{}
+	runtime.Aip = &Aip{Server: "https://aip.example.invalid", TokenSecret: "aip-read", Secrets: heldSecrets{"another": "another-token"}, Log: func(line string) { logged = append(logged, line) }}
+	folder := started(t, runtime, aHarness)
+	eventually(t, "the harness's environment", func() bool { return read(filepath.Join(folder, "harness.env")) != "" })
+
+	env := read(filepath.Join(folder, "harness.env"))
+	if !strings.Contains(env, "AIP_SERVER=https://aip.example.invalid") || strings.Contains(env, "AIP_TOKEN") {
+		t.Fatalf("environment:\n%s\nwant AIP_SERVER alone", env)
+	}
+	if len(logged) != 1 || !strings.Contains(logged[0], "aip-read") || strings.Contains(logged[0], "another-token") {
+		t.Fatalf("logged %q, want one line naming the secret aip-read and no value", logged)
+	}
+}
+
+func TestASessionOfATrierarchWithNoAipServerGetsNoAipVariables(t *testing.T) {
+	runtime := aRuntime(t)
+	folder := started(t, runtime, aHarness)
+	eventually(t, "the harness's environment", func() bool { return read(filepath.Join(folder, "harness.env")) != "" })
+
+	if env := read(filepath.Join(folder, "harness.env")); strings.Contains(env, "AIP_") {
+		t.Fatalf("environment:\n%s\nwant no AIP variable", env)
+	}
+}

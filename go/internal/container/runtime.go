@@ -239,6 +239,9 @@ func (r Runtime) heldAs(session sessions.Start, files hold.Files) (sessions.Star
 	for name, value := range session.Env {
 		env[name] = value
 	}
+	for name, value := range session.SecretEnv {
+		env[name] = value
+	}
 	if session.ProxyToken == nil {
 		token, err := os.ReadFile(r.ModelToken)
 		if err != nil {
@@ -316,7 +319,8 @@ func (r Runtime) heldAs(session sessions.Start, files hold.Files) (sessions.Star
 	}
 	command = append(command, "--workdir", folder, "--env-file", file, r.Image)
 	session.Command = append(command, session.Command...)
-	// The session's environment reaches the container through the env file alone.
+	// The session's environment, its secrets too, reaches the container through the env file alone.
 	session.Env = map[string]string{}
+	session.SecretEnv = nil
 	return session, nil
 }

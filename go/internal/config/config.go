@@ -12,9 +12,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 )
 
 // Schema is the configuration's JSON Schema, written beside it so an editor checks it.
@@ -37,6 +40,7 @@ type Configuration struct {
 	HarnessOrder []string         `json:"-"`
 	Prices       map[string]Price `json:"prices,omitempty"`
 	Logins       *Logins          `json:"logins,omitempty"`
+	Aip          *Aip             `json:"aip,omitempty"`
 }
 
 // Runtime is where the sessions run: on the host, or in a container of the runtime's binary with its caps.
@@ -108,6 +112,26 @@ type Price struct {
 	CacheWrite float64 `json:"cacheWrite"`
 }
 
+// Aip is the aip server every session reaches (#251), and the name of the sealed secret its read token is: never the token.
+type Aip struct {
+	Server      string `json:"server"`
+	TokenSecret string `json:"tokenSecret"`
+}
+
+// check says why the aip does not fit, nil when it does.
+func (a Aip) check() error {
+	if a.Server == "" || a.TokenSecret == "" {
+		return fmt.Errorf("aip names its server and its tokenSecret")
+	}
+	if server, err := url.Parse(a.Server); err != nil || (server.Scheme != "http" && server.Scheme != "https") || server.Host == "" {
+		return fmt.Errorf("aip's server is an http or https URL")
+	}
+	if !secrets.IsName(a.TokenSecret) {
+		return fmt.Errorf("aip's tokenSecret is a secret's name: lowercase letters, digits, dots, hyphens and underscores, at most 100")
+	}
+	return nil
+}
+
 // Logins is which login each session runs on: a default per harness and a login per ship name.
 type Logins struct {
 	Default *DefaultLogins    `json:"default,omitempty"`
@@ -153,6 +177,11 @@ func Load(path string) (Configuration, error) {
 	var configuration Configuration
 	if err := decoder.Decode(&configuration); err != nil {
 		return Configuration{}, fmt.Errorf("the configuration at %s does not fit: %v", path, err)
+	}
+	if configuration.Aip != nil {
+		if err := configuration.Aip.check(); err != nil {
+			return Configuration{}, fmt.Errorf("the configuration at %s does not fit: %v", path, err)
+		}
 	}
 	order, err := keyOrder(keys["harnesses"])
 	if err != nil {

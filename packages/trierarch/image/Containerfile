@@ -1,6 +1,7 @@
 # The session image (decision 0039): one trierarch session per container, with
 # the harness, the aeolus-fleet plugin of this image's version, Playwright's
-# browser dependencies and a nested rootless Podman for a repository's tests.
+# browser dependencies, a nested rootless Podman for a repository's tests, and
+# the aip CLI with its aip-runtime skill (#251).
 #
 # Built from the repository root, with the version set on the packages and the
 # plugin first (npm run set-version), so the plugin carries the image's version:
@@ -11,6 +12,10 @@ ARG VERSION
 ARG NODE_MAJOR=26
 ARG CLAUDE_CODE_VERSION=latest
 ARG PLAYWRIGHT_VERSION=1.63.0
+# aip at the revision aeolus-company's docs/design/graph-architecture.md pins
+# (7e63f2f, release 0.7.0), which needs Python 3.14 or newer.
+ARG AIP_VERSION=0.7.0
+ARG PYTHON_VERSION=3.14
 
 LABEL org.opencontainers.image.title="aeolus-session" \
       org.opencontainers.image.description="An Aeolus trierarch session: Claude Code, the aeolus-fleet plugin and a nested rootless Podman" \
@@ -41,6 +46,17 @@ RUN chmod u+s /usr/bin/newuidmap /usr/bin/newgidmap \
 COPY packages/trierarch/image/containers.conf /etc/containers/containers.conf
 COPY packages/trierarch/image/storage.conf /etc/containers/storage.conf
 COPY packages/trierarch/image/session-init.sh /usr/local/bin/aeolus-session-init
+
+# The aip CLI, installed with uv as aip's own install.sh does, its Python and
+# tool under /opt so the ship's home mounted over the session's leaves them,
+# and the aip-runtime skill of that same CLI, which the init links into the
+# home's Claude Code skills at every start.
+COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /usr/local/bin/uv
+RUN UV_PYTHON_INSTALL_DIR=/opt/aip/python UV_TOOL_DIR=/opt/aip/tools UV_TOOL_BIN_DIR=/usr/local/bin \
+      uv tool install --python "${PYTHON_VERSION}" "agent-instruction-protocol==${AIP_VERSION}" \
+ && mkdir -p /opt/aeolus-session/skills \
+ && aip runtime --skill --out /opt/aeolus-session/skills \
+ && rm -rf /root/.cache/uv
 
 # The aeolus-fleet plugin of this version, from its marketplace in the image.
 COPY .claude-plugin/marketplace.json /opt/aeolus-fleet/.claude-plugin/marketplace.json

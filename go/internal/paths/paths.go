@@ -35,7 +35,7 @@ type Paths struct {
 	TrustedRepositories string
 	// McpServers is the MCP server list the trierarch plugin's ship sent last, apart from the configuration.
 	McpServers string
-	// Secrets is the secrets the trierarch plugin's ship sent last, opened, mode 600: only the MCP proxy reads them.
+	// Secrets is the secrets the trierarch plugin's ship sent last, opened, mode 600: only the MCP proxy reads them, and a session's start the aip read token.
 	Secrets string
 	// SealingKey is the trierarch's private key, mode 600, which opens the secrets sealed to the public key its report states.
 	SealingKey string

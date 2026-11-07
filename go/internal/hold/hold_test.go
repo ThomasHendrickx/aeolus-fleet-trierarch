@@ -282,3 +282,16 @@ func TestAHoldToldToHandAProxyTokenItsFolderDoesNotKeepStartsNothing(t *testing.
 		t.Fatal("the hold says a pid, want it never started")
 	}
 }
+
+func TestAHoldToldToHandASecretVariableItsFolderDoesNotKeepStartsNothing(t *testing.T) {
+	sessions := t.TempDir()
+
+	code := Main([]string{"shp_01m6jyczpnpp5c0vxh54c966cy", "--sessions", sessions, "--folder", t.TempDir(), "--harness", "claude-code", "--secret-env", "AIP_TOKEN", "--", "sh", "-c", "touch started"}, "1.2.3", nil)
+
+	if code != 1 {
+		t.Fatalf("Main = %d, want 1", code)
+	}
+	if _, err := os.Stat(FilesOf(sessions, "shp_01m6jyczpnpp5c0vxh54c966cy").PID); err == nil {
+		t.Fatal("the hold says a pid, want it never started")
+	}
+}

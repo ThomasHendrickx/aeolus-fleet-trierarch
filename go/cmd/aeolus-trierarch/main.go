@@ -142,7 +142,7 @@ func main() {
 		Sessions: func(at paths.Paths) cli.Sessions {
 			// A configuration that cannot be read runs no session in a container.
 			configured, _ := config.Load(at.Config)
-			return sessionRuntime(at, program, configured.Runtime)
+			return sessionRuntime(at, program, configured)
 		},
 		Log:     logLine,
 		ReadKey: readKey,
@@ -464,9 +464,13 @@ type runningSessions interface {
 // sessionImage is the session image release.yml publishes with each version (decision 0011, 0039).
 const sessionImage = "ghcr.io/thomashendrickx/aeolus-session"
 
-// sessionRuntime is what the configuration's session runtime picks (decision 0039): each session under a hold, the trierarch program run as `hold`, in a systemd scope of its own under the service; in containers, a container per ship that its hold runs, from the image of the trierarch's own version, with the configured binary and caps and the machine's model token.
-func sessionRuntime(at paths.Paths, program string, configured *config.Runtime) runningSessions {
+// sessionRuntime is what the configuration's session runtime picks (decision 0039): each session under a hold, the trierarch program run as `hold`, in a systemd scope of its own under the service; in containers, a container per ship that its hold runs, from the image of the trierarch's own version, with the configured binary and caps and the machine's model token. Every session reaches the configured aip server with the read token the secrets hold (#251).
+func sessionRuntime(at paths.Paths, program string, configuration config.Configuration) runningSessions {
+	configured := configuration.Runtime
 	holds := sessions.Runtime{Sessions: at.Sessions, Program: []string{program}, Version: cli.Version, Launch: sessions.Launch(runtime.GOOS, os.Getenv("INVOCATION_ID"), sessions.SystemdVersion()), BootedAt: sessions.BootedAt}
+	if aip := configuration.Aip; aip != nil {
+		holds.Aip = &sessions.Aip{Server: aip.Server, TokenSecret: aip.TokenSecret, Secrets: heldSecretsOf(at), Log: logLine}
+	}
 	if !isInContainers(configured) {
 		return holds
 	}
@@ -575,7 +579,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	if err != nil {
 		return nil, err
 	}
-	running := sessionRuntime(at, program, configuration.Runtime)
+	running := sessionRuntime(at, program, configuration)
 	proxy := modelProxy(at, program)
 	harnesses, offeredHarnesses, err := harnessesOf(configuration, at, env, home, running, proxy, offers)
 	if err != nil {
