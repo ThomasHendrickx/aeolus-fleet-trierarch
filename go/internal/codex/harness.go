@@ -10,8 +10,10 @@ package codex
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/prompt"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
@@ -39,6 +41,8 @@ const (
 	provider = "aeolus"
 	// proxyTokenVariable is the variable the provider reads its token from, which the hold sets from the session's own file.
 	proxyTokenVariable = "AEOLUS_MODEL_TOKEN"
+	// mcpTokenVariable is the variable each crew-time MCP server reads the session's bearer token at the MCP proxy from, a secret variable of its hold.
+	mcpTokenVariable = "AEOLUS_MCP_TOKEN"
 )
 
 // Harness is Codex as the run pass starts and watches its sessions, each under its hold; the identity, turn and store through the aeolus-fleet plugin Codex installed.
@@ -79,9 +83,35 @@ func (h Harness) routeOf(login string) ([]string, *sessions.ProxyToken, error) {
 	return flags, &sessions.ProxyToken{Harness: "codex", Variable: proxyTokenVariable, Token: proxytoken.New()}, nil
 }
 
+// CanAddMcpServer is whether a session can be started with the server: Codex's -c takes its key's path apart at every dot, quoted or not, so a server whose name holds one cannot be named there, and replacing the whole mcp_servers table would drop the user's own servers.
+func CanAddMcpServer(name string) bool { return !strings.Contains(name, ".") }
+
+// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7): each at the MCP proxy as a streamable HTTP server of its own on the command line, added to the user's own servers, its bearer token read from a secret variable of the hold, a token of the session's own, fresh for each start, so the command line never holds it; nothing for an entry that names none. Every later turn's exec keeps the flags, and the hold keeps the variable.
+func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) {
+	if len(entry.McpServers) == 0 {
+		return nil, nil, nil
+	}
+	address, ok := "", false
+	if h.ProxyURL != nil {
+		address, ok = h.ProxyURL()
+	}
+	if !ok {
+		return nil, nil, errors.New("the MCP proxy is not running yet")
+	}
+	flags := []string{}
+	for _, name := range entry.McpServers {
+		flags = append(flags, "-c", "mcp_servers."+name+`={url="`+address+mcpproxy.PathOf(entry.ShipID, name)+`",bearer_token_env_var="`+mcpTokenVariable+`"}`)
+	}
+	return flags, &sessions.Mcp{Access: mcpproxy.Access{Token: proxytoken.New(), Servers: entry.McpServers}}, nil
+}
+
 // Launch starts the entry's session in its folder, on the login it is to start on: its first turn with its first prompt on a first start, else the wake on the folder's last conversation.
 func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID string) error {
 	route, token, err := h.routeOf(entry.Login)
+	if err != nil {
+		return err
+	}
+	servers, mcp, err := h.mcpOf(entry)
 	if err != nil {
 		return err
 	}
@@ -89,14 +119,18 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if isFirstStart && entry.FirstPrompt != "" {
 		line = prompt.First(entry.FirstPrompt)
 	}
-	command := CommandLine(append(h.Settings.EffectiveFlags(entry.Options), route...), line, isFirstStart)
+	command := CommandLine(append(append(h.Settings.EffectiveFlags(entry.Options), route...), servers...), line, isFirstStart)
 	if _, err := h.Hooks.TrustAeolusHooks(entry.Folder); err != nil {
 		return err
 	}
 	if err := h.ClearLaunch(entry.Folder); err != nil {
 		return err
 	}
-	return h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, Harness: "codex", Command: command, Env: map[string]string{launchVariable: launchID}, ProxyToken: token})
+	start := sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, Harness: "codex", Command: command, Env: map[string]string{launchVariable: launchID}, ProxyToken: token, Mcp: mcp}
+	if mcp != nil {
+		start.SecretEnv = map[string]string{mcpTokenVariable: mcp.Access.Token}
+	}
+	return h.Runtime.Start(start)
 }
 
 // LaunchSeen is what the session did in its launch window, as its marker says; with no activity, the cause Codex's last error event gives (H13).

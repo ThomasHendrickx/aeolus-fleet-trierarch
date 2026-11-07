@@ -239,3 +239,71 @@ func TestAPluginWhoseScriptsAreGoneIsWhyNoSessionCanStart(t *testing.T) {
 		t.Fatal("Problem = nil for a plugin with no scripts, want why")
 	}
 }
+
+func TestASessionNamingMCPServersStartsWithEachAtTheMCPProxyItsFreshTokenInASecretVariable(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	harness.ProxyURL = func() (string, bool) { return "http://127.0.0.1:41000", true }
+	entry := anEntry(t)
+	entry.McpServers = []string{"company-graph", "notes"}
+
+	for range 2 {
+		if err := harness.Launch(entry, true, "launch-1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	first, second := running.started[0], running.started[1]
+	servers := []string{
+		"-c", `mcp_servers.company-graph={url="http://127.0.0.1:41000/mcp/` + scout + `/company-graph",bearer_token_env_var="AEOLUS_MCP_TOKEN"}`,
+		"-c", `mcp_servers.notes={url="http://127.0.0.1:41000/mcp/` + scout + `/notes",bearer_token_env_var="AEOLUS_MCP_TOKEN"}`,
+	}
+	if want := CommandLine(append([]string{"-m", "gpt-5.6-terra"}, servers...), prompt.First("Review PR 12"), true); !slices.Equal(first.Command, want) {
+		t.Fatalf("started %q, want %q", first.Command, want)
+	}
+	if first.Mcp == nil || first.Mcp.Access.Token == "" || !slices.Equal(first.Mcp.Access.Servers, []string{"company-graph", "notes"}) || first.Mcp.Config != nil {
+		t.Fatalf("started with MCP %+v, want a token for company-graph and notes and no configuration file", first.Mcp)
+	}
+	if first.SecretEnv["AEOLUS_MCP_TOKEN"] != first.Mcp.Access.Token {
+		t.Fatalf("secret variables %v, want AEOLUS_MCP_TOKEN with the session's MCP token", first.SecretEnv)
+	}
+	if second.Mcp == nil || second.Mcp.Access.Token == first.Mcp.Access.Token {
+		t.Fatal("the second start has the first one's MCP token, want a fresh one")
+	}
+	if line := strings.Join(first.Command, " "); strings.Contains(line, first.Mcp.Access.Token) {
+		t.Fatalf("the command line %q holds the token", line)
+	}
+}
+
+func TestASessionNamingNoMCPServerStartsWithNone(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	harness.ProxyURL = func() (string, bool) { return "http://127.0.0.1:41000", true }
+
+	if err := harness.Launch(anEntry(t), true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	started := running.started[0]
+	if slices.ContainsFunc(started.Command, func(word string) bool { return strings.Contains(word, "mcp_servers") }) || started.Mcp != nil || started.SecretEnv["AEOLUS_MCP_TOKEN"] != "" {
+		t.Fatalf("started %+v, want no MCP server and no MCP token", started)
+	}
+}
+
+func TestASessionNamingMCPServersDoesNotStartBeforeTheProxyListens(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	harness.ProxyURL = func() (string, bool) { return "", false }
+	entry := anEntry(t)
+	entry.McpServers = []string{"company-graph"}
+
+	if err := harness.Launch(entry, true, "launch-1"); err == nil || len(running.started) != 0 {
+		t.Fatalf("Launch = %v, started %d, want an error and nothing started", err, len(running.started))
+	}
+}
+
+func TestCodexCanAddAServerOnlyWhenItsNameHoldsNoDot(t *testing.T) {
+	cases := map[string]bool{"company-graph": true, "notes_2": true, "graph.v2": false}
+	for name, want := range cases {
+		if got := CanAddMcpServer(name); got != want {
+			t.Errorf("CanAddMcpServer(%q) = %v, want %v", name, got, want)
+		}
+	}
+}

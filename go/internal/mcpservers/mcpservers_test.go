@@ -165,7 +165,7 @@ func TestFileKeepsTheAcceptedListAcrossLoads(t *testing.T) {
 func TestOfferedByNamesEachServerOfTheListToEachHarnessThatCanAddIt(t *testing.T) {
 	list, _ := Read(listOf(graph))
 
-	got := OfferedBy(list, []string{"claude-code", "codex"}, map[string]bool{"claude-code": true})
+	got := OfferedBy(list, []string{"claude-code", "codex"}, map[string]func(string) bool{"claude-code": everyServer})
 
 	if !slices.Equal(got["claude-code"], []string{"company-graph"}) || len(got["codex"]) != 0 {
 		t.Errorf("OfferedBy = %v, want company-graph for claude-code only", got)
@@ -173,10 +173,24 @@ func TestOfferedByNamesEachServerOfTheListToEachHarnessThatCanAddIt(t *testing.T
 }
 
 func TestOfferedByOffersNothingWhenTheListIsEmpty(t *testing.T) {
-	got := OfferedBy(nil, []string{"claude-code"}, map[string]bool{"claude-code": true})
+	got := OfferedBy(nil, []string{"claude-code"}, map[string]func(string) bool{"claude-code": everyServer})
 
 	if len(got["claude-code"]) != 0 {
 		t.Errorf("OfferedBy = %v, want none", got)
+	}
+}
+
+// everyServer is a harness that can add every server on the list.
+func everyServer(string) bool { return true }
+
+func TestOfferedByLeavesOutAServerAHarnessCannotAdd(t *testing.T) {
+	list, _ := Read(listOf(graph, `{"name":"graph.v2","url":"https://graph.example.test/v2","tools":["read_neo4j_cypher"]}`))
+	noDot := func(name string) bool { return !strings.Contains(name, ".") }
+
+	got := OfferedBy(list, []string{"claude-code", "codex"}, map[string]func(string) bool{"claude-code": everyServer, "codex": noDot})
+
+	if !slices.Equal(got["claude-code"], []string{"company-graph", "graph.v2"}) || !slices.Equal(got["codex"], []string{"company-graph"}) {
+		t.Errorf("OfferedBy = %v, want both for claude-code and company-graph alone for codex", got)
 	}
 }
 
