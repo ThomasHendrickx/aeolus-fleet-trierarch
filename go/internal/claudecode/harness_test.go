@@ -18,6 +18,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/prompt"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash/trashtest"
 )
 
 const scout = "shp_01m6jyczpnpp5c0vxh54c966cy"
@@ -490,6 +491,56 @@ func TestInContainersAShipsHomeGoesWithItsIdentity(t *testing.T) {
 
 	if _, err := os.Stat(home); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the ship's home is still there: %v", err)
+	}
+}
+
+func TestInContainersAShipsHomeHoldingWhatTheHostCannotRemoveGoesWithItsIdentityToTheTrashBesideIt(t *testing.T) {
+	cases := map[string]func(t *testing.T, homes string, home string){
+		"a folder its session made read-only": func(t *testing.T, homes string, home string) {
+			readOnly := filepath.Join(home, ".local", "share", "containers")
+			if err := os.MkdirAll(readOnly, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(readOnly, "layer"), []byte("layer\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(readOnly, 0o500); err != nil {
+				t.Fatal(err)
+			}
+			// So the test's own folders can go whatever the outcome.
+			t.Cleanup(func() {
+				_ = filepath.WalkDir(homes, func(path string, entry os.DirEntry, err error) error {
+					if err == nil && entry.IsDir() {
+						_ = os.Chmod(path, 0o755)
+					}
+					return nil
+				})
+			})
+		},
+		"a folder it cannot remove": func(t *testing.T, homes string, home string) {
+			trashtest.Unremovable(t, homes, home)
+		},
+	}
+	for name, holding := range cases {
+		t.Run(name, func(t *testing.T) {
+			harness, _, _, home := inContainers(t)
+			entry := anEntry(t)
+			if err := harness.WriteIdentity(entry, anIdentity(), "crew-token"); err != nil {
+				t.Fatal(err)
+			}
+			holding(t, harness.Homes, home)
+
+			if err := harness.DeleteIdentity(entry); err != nil {
+				t.Fatalf("DeleteIdentity() with %s in the ship's home = %v, want it gone", name, err)
+			}
+
+			if _, err := os.Lstat(home); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("the ship's home is still there: %v", err)
+			}
+			if entries, err := os.ReadDir(filepath.Join(harness.Homes, ".trash")); err != nil || len(entries) != 1 {
+				t.Errorf("the trash beside it holds %v (%v), want the home", entries, err)
+			}
+		})
 	}
 }
 
