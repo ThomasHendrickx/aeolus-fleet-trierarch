@@ -166,6 +166,25 @@ describe('the TDD evidence check', () => {
     expect(violations(head)).toEqual([]);
   });
 
+  it('takes a Go test file as a test: a Go-only (red) commit before a Go code commit passes', () => {
+    repository.write('go/trierarch/crew/crew_test.go', 'package crew\n');
+    repository.commit('test(trierarch): crew a ship (red)');
+    repository.write('go/trierarch/crew/crew.go', 'package crew\n');
+    const head = repository.commit('feat(trierarch): crew a ship');
+
+    expect(violations(head)).toEqual([]);
+  });
+
+  it('takes a Go-only (red) commit as the red commit before a commit that also touches TypeScript source', () => {
+    repository.write('go/trierarch/crew/crew_test.go', 'package crew\n');
+    repository.commit('test(trierarch): crew a ship (red)');
+    repository.write('go/trierarch/crew/crew.go', 'package crew\n');
+    repository.write('packages/trierarch/src/core/rules.ts', "export const fleet = 'crew';\n");
+    const head = repository.commit('feat(trierarch): crew a ship');
+
+    expect(violations(head)).toEqual([]);
+  });
+
   it('judges every file in src, adapters included', () => {
     repository.write('packages/trierarch/src/adapters/rest-fleet.ts', 'export const door = 1;\n');
     const head = repository.commit('feat(trierarch): a door');
@@ -243,6 +262,8 @@ describe('what counts as a test and as production code', () => {
     'packages/trierarch/test/support/in-memory.ts',
     'packages/trierarch/test/trierarch.integration.test.ts',
     'e2e/support/free-port.ts',
+    'go/trierarch/crew/crew_test.go',
+    'crew_test.go',
   ])('%s is a test file', (path) => {
     expect(isTestFile(path)).toBe(true);
     expect(isProductionFile(path)).toBe(false);
