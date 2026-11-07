@@ -25,7 +25,7 @@ import (
 // git-lfs, which reads that config itself, is not read. Git is
 // pointed at no folder but the ship's own: a folder whose config sets core.worktree is not read, and a clone is read only
 // through its own `.git` folder, with its own objects alone (inClone): a clone whose config names a remote to fetch missing objects from
-// is not read, and the host's reads of a clone read no excludes, attributes or mailmap file its config names. A folder that is not read is refused with why (RefusedError), so what it holds is not
+// is not read, and the host's reads of a clone read no excludes, attributes or mailmap file its config names, and no mailmap in the clone. A folder that is not read is refused with why (RefusedError), so what it holds is not
 // known, as is one where a git call does not end within its time limit (timeLimit), as what git waits on may never come.
 
 // timeLimit is how long the host's git calls in a ship's folder run, together, before they are ended and the folder not read.
@@ -77,8 +77,8 @@ func (e *RefusedError) Error() string {
 var harmless = []override{{"core.fsmonitor", "false"}, {"core.hooksPath", "/dev/null"}, {"log.showSignature", "false"}}
 
 // noFileNamed are the values the host's reads of a clone take whatever its config says: git reads no file the config names for it, which
-// may be a named pipe git waits on, or another repository's.
-var noFileNamed = []override{{"core.excludesFile", ""}, {"core.attributesFile", ""}, {"mailmap.file", ""}, {"mailmap.blob", ""}}
+// may be a named pipe git waits on, or another repository's; and log reads no mailmap at all, the clone's own `.mailmap` included.
+var noFileNamed = []override{{"core.excludesFile", ""}, {"core.attributesFile", ""}, {"mailmap.file", ""}, {"mailmap.blob", ""}, {"log.mailmap", "false"}}
 
 // namesAProgram are the config variables that name a program git runs, by section, then by variable; a section of three-part
 // names (`filter.<driver>.clean`) holds the variables of any subsection.
