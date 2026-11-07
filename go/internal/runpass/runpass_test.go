@@ -20,6 +20,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
 )
 
 const scout = "shp_01m6jyczpnpp5c0vxh54c966cy"
@@ -2636,5 +2637,89 @@ func TestAClearThatFailsHoldsBackNoOtherClearOfItsShip(t *testing.T) {
 
 	if !slices.Contains(pass.fleet.calls, "confirmCleared "+lookout+" aeolus-fleet not-kept") {
 		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+}
+
+// aTrash holds what it could not remove, as the trash answers it each pass, and marks told what argo was told of.
+type aTrash struct {
+	left []trash.Left
+}
+
+func (b *aTrash) Empty() []trash.Left { return slices.Clone(b.left) }
+func (b *aTrash) MarkTold(path string) error {
+	for i := range b.left {
+		if b.left[i].Path == path {
+			b.left[i].IsTold, b.left[i].IsNew = true, false
+		}
+	}
+	return nil
+}
+
+func aLeftClone(trashedAt time.Time) trash.Left {
+	return trash.Left{Path: "/worktrees/aeolus-fleet/.trash/scout.1793707200000", Folder: "/worktrees/aeolus-fleet/scout", TrashedAt: trashedAt, IsNew: true, Why: errors.New("unlinkat a/f: permission denied")}
+}
+
+func toldOfTheTrash(told []told) []told {
+	found := []told{}
+	for _, each := range told {
+		if strings.HasPrefix(each.key, "trierarch:trash:") {
+			found = append(found, each)
+		}
+	}
+	return found
+}
+
+func TestEveryPassEmptiesTheTrashAndLogsWhatItCouldNotRemoveOnce(t *testing.T) {
+	pass := aRunPass(t)
+	bin := &aTrash{left: []trash.Left{aLeftClone(now)}}
+	pass.pass.Trash = bin
+
+	if err := pass.pass.Run(); err != nil {
+		t.Fatal(err)
+	}
+	bin.left[0].IsNew = false
+	if err := pass.pass.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	want := "Could not remove /worktrees/aeolus-fleet/scout, in the trash at /worktrees/aeolus-fleet/.trash/scout.1793707200000: unlinkat a/f: permission denied; every pass tries again"
+	if got := slices.DeleteFunc(slices.Clone(pass.logged), func(line string) bool { return !strings.Contains(line, "trash") }); !reflect.DeepEqual(got, []string{want}) {
+		t.Errorf("logged %q, want %q once", got, want)
+	}
+	if got := toldOfTheTrash(pass.fleet.told); len(got) != 0 {
+		t.Errorf("told %+v, want nobody within a day", got)
+	}
+}
+
+func TestArgoIsToldOnceOfWhatTheTrashCouldNotRemoveForADay(t *testing.T) {
+	pass := aRunPass(t)
+	trashedAt := now.Add(-24 * time.Hour)
+	bin := &aTrash{left: []trash.Left{aLeftClone(trashedAt)}}
+	bin.left[0].IsNew = false
+	pass.pass.Trash = bin
+
+	for range 2 {
+		if err := pass.pass.Run(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	want := []told{{to: "argo", key: "trierarch:trash:/worktrees/aeolus-fleet/scout:1793707200000", text: notices.LeftInTrash("/worktrees/aeolus-fleet/scout", "/worktrees/aeolus-fleet/.trash/scout.1793707200000", trashedAt, "unlinkat a/f: permission denied")}}
+	if got := toldOfTheTrash(pass.fleet.told); !reflect.DeepEqual(got, want) {
+		t.Errorf("told %+v, want %+v", got, want)
+	}
+}
+
+func TestArgoIsNotToldOfWhatTheTrashCouldNotRemoveForLessThanADay(t *testing.T) {
+	pass := aRunPass(t)
+	bin := &aTrash{left: []trash.Left{aLeftClone(now.Add(-24*time.Hour + time.Millisecond))}}
+	pass.pass.Trash = bin
+
+	if err := pass.pass.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := toldOfTheTrash(pass.fleet.told); len(got) != 0 {
+		t.Errorf("told %+v, want nobody a millisecond short of a day", got)
 	}
 }

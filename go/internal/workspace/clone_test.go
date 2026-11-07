@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash/trashtest"
 )
 
 // clonePlaces are the places of sessions in containers, each ship in a clone of its own, of the repository and with the folder notes.
@@ -253,6 +254,23 @@ func TestACloneHoldingAFolderItsSessionMadeReadOnlyIsRemoved(t *testing.T) {
 	}
 	if _, err := os.Lstat(folder); err == nil {
 		t.Error("the clone stayed")
+	}
+}
+
+func TestACloneHoldingWhatTheHostCannotRemoveLeavesItsShipsPlaceForTheTrash(t *testing.T) {
+	repository, root := aRepository(t)
+	places := clonePlaces(repository, root, t.TempDir())
+	folder := prepared(t, places, scoutInAeolusFleet, "scout")
+	trashtest.Unremovable(t, root, folder)
+
+	if err := places.RemoveWorktree(folder); err != nil {
+		t.Fatalf("RemoveWorktree(%s) holding what the host cannot remove = %v, want its place free", folder, err)
+	}
+	if _, err := os.Lstat(folder); err == nil {
+		t.Error("the clone stayed in its ship's place")
+	}
+	if entries, err := os.ReadDir(filepath.Join(root, "aeolus-fleet", ".trash")); err != nil || len(entries) != 1 {
+		t.Errorf("the trash beside it holds %v (%v), want the clone", entries, err)
 	}
 }
 
