@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
-import type { FolderProcessesPort, SessionRuntime, WorkspacePort } from '../core/ports.js';
+import type { FolderProcessesPort, SessionRuntime, TrashPort, WorkspacePort } from '../core/ports.js';
 import type { SessionRoots } from './caller-check.js';
 import { createCloneWorkspace } from './clone-workspace.js';
 import { containerProxyUrl, createContainerRuntime } from './container.js';
@@ -14,6 +14,7 @@ import type { TrustedClones } from './trusted-clones.js';
 import type { TrierarchPaths } from './paths.js';
 import { createHoldRuntime } from './hold-runtime.js';
 import { createProxyRuntime, type ProxyRuntime } from './proxy-runtime.js';
+import { createTrash, foldersUnder, removeWithinUserNamespace } from './trash.js';
 
 /** The session image `release.yml` publishes with each version (decision 0011, 0039). */
 const SESSION_IMAGE = 'ghcr.io/thomashendrickx/aeolus-session';
@@ -39,6 +40,8 @@ export interface RuntimeAdapters {
   readonly folderProcesses: FolderProcessesPort;
   /** The homes of the ships, one each, for sessions in containers; none on the host, where every session shares the user's. */
   readonly shipHomes?: { homes: string; managedSettings: string };
+  /** The trash beside each repository's clones and the ships' homes, emptied every pass: within the runtime's user namespace too in containers, by the host's own removal alone on the host. */
+  readonly trash: TrashPort;
   /** Where a session reaches the model proxy the trierarch reaches at the url (headless H16): there on the host, on its own loopback in a container, where only the proxy's port is forwarded. */
   readonly modelProxyUrlOf: (url: string) => string;
 }
@@ -72,6 +75,7 @@ export function runtimeAdaptersOf(at: {
       sessions: hostSessions({ paths, version, launch, ...(at.program !== undefined && { program: at.program }) }),
       workspace: createGitWorkspace({ configuration, root, ...(trusted !== undefined && { clones: trusted }) }),
       folderProcesses: createFolderProcesses(),
+      trash: createTrash({ beside: foldersUnder([root]) }),
     };
   }
   const clones = createCloneWorkspace({ configuration, root, ...(trusted !== undefined && { clones: trusted }) });
@@ -95,6 +99,7 @@ export function runtimeAdaptersOf(at: {
     workspace: { ...clones, prepare: async (at) => ({ folder: await realpath((await clones.prepare(at)).folder) }) },
     folderProcesses: createContainerFolderProcesses({ binary: runtime.binary, host: createFolderProcesses() }),
     shipHomes: { homes: paths.homes, managedSettings },
+    trash: createTrash({ beside: async () => [...(await foldersUnder([root])()), paths.homes], unshare: removeWithinUserNamespace(runtime.binary) }),
     modelProxyUrlOf: containerProxyUrl,
   };
 }

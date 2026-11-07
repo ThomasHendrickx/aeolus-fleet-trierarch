@@ -1,11 +1,11 @@
 import { CREW_REQUEST_REASON_MAX_LENGTH, type ShipId } from '@aeolus-fleet/common';
 
 import { putEntry, removeEntry, withState, type Entry, type Orphan, type TrierarchState } from './entry.js';
-import { crashText, discardedText, identityGoneText, keyNotReadyText, modelRefusedText, ownerUnreachableText, settingsRefusedText, stoppedOfferingText } from './argo-reports.js';
+import { crashText, discardedText, identityGoneText, keyNotReadyText, leftInTrashText, modelRefusedText, ownerUnreachableText, settingsRefusedText, stoppedOfferingText } from './argo-reports.js';
 import { MODEL_OPTION } from './detected-options.js';
 import { countStart, PROBE_AFTER_MINUTES, withConfiguration, type StartOutcome } from './failed-starts.js';
 import { loginOf, startedOn, type KeyState, type Login, type Logins } from './login.js';
-import type { Checkout, CheckoutsPort, FleetPort, FolderProcessesPort, HarnessPort, LaunchSeen, LoggedAction, Logger, ModelLoginsPort, SessionActivity, SessionRuntime, ShipSocketsPort, StatePort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
+import type { Checkout, CheckoutsPort, FleetPort, FolderProcessesPort, HarnessPort, LaunchSeen, LeftInTrash, LoggedAction, Logger, ModelLoginsPort, SessionActivity, SessionRuntime, ShipSocketsPort, StatePort, TrashPort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { HOLDS_IDENTITY, reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
 import type { RefuseModel } from './refuse-model.js';
 import type { SendReleasedUsage } from './send-usage.js';
@@ -52,6 +52,8 @@ export interface RunPassDeps {
   modelLogins: ModelLoginsPort;
   /** Sends a released ship's last usage before its folder goes (the usage design, U9); rejects while the fleet does not take it. */
   sendReleasedUsage: SendReleasedUsage;
+  /** The trash a released clone and ship's home go aside to, emptied every pass; none empties nothing. */
+  trash?: TrashPort;
 }
 
 const NEXT_AFTER_FAILURE = 'the next pass tries again; aeolus-trierarch status and list show where it stands';
@@ -97,8 +99,43 @@ export function createRunPass(deps: RunPassDeps): RunPass {
         state = await failed({ action, deps, reason: reasonOf(error) });
       }
     }
+    await emptyTrash(deps);
     await writeActivities(state, deps);
   };
+}
+
+/** How long the trash tries to remove a folder before argo is told it cannot. */
+const TRASH_TOLD_AFTER_MS = 24 * 60 * 60 * 1000;
+
+/** Empties the trash: what it cannot remove is logged the first time, and argo told once after a day. It never fails the pass. */
+async function emptyTrash(deps: RunPassDeps): Promise<void> {
+  if (deps.trash === undefined) {
+    return;
+  }
+  let left: readonly LeftInTrash[];
+  try {
+    left = await deps.trash.empty();
+  } catch (error) {
+    deps.logger.warn(`The trash was not emptied: ${reasonOf(error)}; the next pass tries again`);
+    return;
+  }
+  for (const each of left) {
+    if (each.isNew) {
+      deps.logger.warn(`Could not remove ${each.folder}, in the trash at ${each.path}: ${each.why}; every pass tries again`);
+    }
+    if (each.isTold || deps.clock.now().getTime() - each.trashedAt.getTime() < TRASH_TOLD_AFTER_MS) {
+      continue;
+    }
+    try {
+      await deps.fleet.reportToArgo({ text: leftInTrashText(each), idempotencyKey: `trierarch:trash:${each.folder}:${String(each.trashedAt.getTime())}` });
+    } catch (error) {
+      deps.logger.warn(`Argo was not told ${each.folder} stays in the trash: ${reasonOf(error)}; the next pass tries again`);
+      continue;
+    }
+    await deps.trash.markTold(each.path).catch((error: unknown) => {
+      deps.logger.warn(`Argo was told ${each.folder} stays in the trash, but it was not marked told: ${reasonOf(error)}`);
+    });
+  }
 }
 
 /**

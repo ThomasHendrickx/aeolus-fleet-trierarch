@@ -4,8 +4,9 @@ import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import type { LeftInTrash } from '../core/ports.js';
 import { makeUnremovable, removeAsRuntime, unremovableReason } from '../../test/support/unremovable.js';
-import { createTrash, discard } from './trash.js';
+import { createTrash, discard, removeWithinUserNamespace } from './trash.js';
 
 // Against the real file system, in a temporary folder.
 
@@ -80,8 +81,10 @@ describe('the trash beside a released folder', () => {
       const first = await trash.empty();
       const second = await trash.empty();
 
-      expect(first).toEqual([{ path: expect.stringContaining(trashOf(folder)) as string, folder, trashedAt: DISCARDED_AT, isNew: true, isTold: false, why: expect.any(String) as string }]);
-      expect(second).toEqual([{ ...first[0], isNew: false }]);
+      const leftOf = (each: LeftInTrash) => ({ isInTrash: each.path.startsWith(trashOf(folder)), folder: each.folder, trashedAt: each.trashedAt, isNew: each.isNew, isTold: each.isTold, hasWhy: each.why !== '' });
+      expect(first.map(leftOf)).toEqual([{ isInTrash: true, folder, trashedAt: DISCARDED_AT, isNew: true, isTold: false, hasWhy: true }]);
+      expect(second.map(leftOf)).toEqual([{ isInTrash: true, folder, trashedAt: DISCARDED_AT, isNew: false, isTold: false, hasWhy: true }]);
+      expect(second[0]?.path).toBe(first[0]?.path);
       expect(existsSync(first[0]?.path ?? '')).toBe(true);
     });
   });
@@ -95,11 +98,25 @@ describe('the trash beside a released folder', () => {
     await trash.markTold(left?.path ?? '');
     const again = await trash.empty();
 
-    expect(again).toEqual([{ path: expect.stringContaining(trashOf(folder)) as string, folder, trashedAt: DISCARDED_AT, isNew: false, isTold: true, why: expect.any(String) as string }]);
+    expect(again.map((each) => ({ folder: each.folder, trashedAt: each.trashedAt, isNew: each.isNew, isTold: each.isTold }))).toEqual([{ folder, trashedAt: DISCARDED_AT, isNew: false, isTold: true }]);
     await expect(besideTheFolder(removeAsRuntime).empty()).resolves.toEqual([]);
   });
 
   it('leaves nothing where there is no trash', async () => {
     await expect(besideTheFolder().empty()).resolves.toEqual([]);
+  });
+});
+
+describe('removing within the runtime\'s user namespace', () => {
+  it('runs the runtime\'s unshare rm on the path', async () => {
+    const ran: { command: string; args: readonly string[] }[] = [];
+    const remove = removeWithinUserNamespace('podman', (command, { args }) => {
+      ran.push({ command, args });
+      return Promise.resolve({ status: 0, stdout: '', stderr: '' });
+    });
+
+    await remove('/worktrees/aeolus-fleet/.trash/scout.1');
+
+    expect(ran).toEqual([{ command: 'podman', args: ['unshare', 'rm', '-rf', '--', '/worktrees/aeolus-fleet/.trash/scout.1'] }]);
   });
 });

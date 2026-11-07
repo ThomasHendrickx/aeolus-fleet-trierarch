@@ -177,3 +177,14 @@ export function keyNotReadyText(at: { harness: string; key: KeyStateAt; ships: r
   const waiting = ships.map((ship) => (ship.shipName === undefined ? `\`${ship.shipId}\`` : `${ship.shipName} (\`${ship.shipId}\`)`)).join(', ');
   return argoMessage({ headline: told.headline, body: paragraphs([`- Harness: ${harness}`, `- State: ${told.state}`, `- Ships that wait: ${waiting}`].join('\n'), told.next) });
 }
+
+/** A released folder the trash has not removed for a day: the folder, where it is aside, since when and why. */
+export function leftInTrashText(left: { folder: string; path: string; trashedAt: Date; why: string }): string {
+  return argoMessage({
+    headline: 'A released folder cannot be removed from this machine',
+    body: paragraphs(
+      [`- Folder: \`${left.folder}\``, `- In the trash at: \`${left.path}\``, `- Since: ${left.trashedAt.toISOString()}`, `- Why: ${left.why}`].join('\n'),
+      "Its ship's place is free; the folder stays aside, and every pass tries again to remove it.",
+    ),
+  });
+}

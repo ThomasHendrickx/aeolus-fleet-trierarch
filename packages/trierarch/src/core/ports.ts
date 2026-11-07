@@ -364,6 +364,27 @@ export interface WorkspacePort {
   worktrees(): Promise<readonly ObservedWorktree[]>;
 }
 
+/** What the trash could not remove: where it is, where it was, when it was discarded, whether this is the first time and whether argo was told, and why. */
+export interface LeftInTrash {
+  readonly path: string;
+  readonly folder: string;
+  readonly trashedAt: Date;
+  readonly isNew: boolean;
+  readonly isTold: boolean;
+  readonly why: string;
+}
+
+/**
+ * The trash a released clone and ship's home go aside to (docs/trierarch.md,
+ * "Session runtime"), so a release confirms whatever its session left in them.
+ */
+export interface TrashPort {
+  /** Removes what the trash holds, and answers what stays. */
+  empty(): Promise<readonly LeftInTrash[]>;
+  /** Marks what was left as told to argo. */
+  markTold(path: string): Promise<void>;
+}
+
 /** A read-only checkout a session gets beside its working folder (#1182): the configured repository it is of, and where it is. */
 export interface Checkout {
   readonly repository: string;

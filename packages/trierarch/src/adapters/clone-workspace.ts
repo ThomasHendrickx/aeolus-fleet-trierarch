@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
@@ -7,6 +7,7 @@ import type { WorkspacePort } from '../core/ports.js';
 import { gitInCloneWithin, gitInFreshClone, type Limits } from './git-in-folder.js';
 import { createGitWorkspace, REFUSED_PREFIX } from './git-workspace.js';
 import { runCommand } from './run-command.js';
+import { discard } from './trash.js';
 import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
 
 /**
@@ -26,29 +27,6 @@ import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clon
  */
 
 const REMOTE = 'origin';
-
-/** The owner's read, write and search on a folder. */
-const OWNER_RWX = 0o700;
-
-/**
- * Gives each folder in the clone, the clone's own included, its owner's read,
- * write and search, following no link: the session owns what it writes in its
- * clone, and a folder it made read-only would keep what it holds from being
- * removed. A clone already gone has nothing to give.
- */
-async function writableByItsOwner(folder: string): Promise<void> {
-  const found = await lstat(folder).catch(() => undefined);
-  if (found?.isDirectory() !== true) {
-    return;
-  }
-  await chmod(folder, found.mode | OWNER_RWX);
-  // An entry read from a folder is a link, not what it points at.
-  for (const entry of await readdir(folder, { withFileTypes: true })) {
-    if (entry.isDirectory()) {
-      await writableByItsOwner(join(folder, entry.name));
-    }
-  }
-}
 
 /**
  * A clone the trierarch made holds its marker in its `.git`, where git keeps no
@@ -143,8 +121,12 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
       if (!(await isUnderRoot(folder))) {
         throw new Error(`${folder} is no clone under ${root}: the trierarch removes only what it made`);
       }
-      await writableByItsOwner(folder);
-      await rm(folder, { recursive: true, force: true });
+      // One already gone is removed already.
+      if ((await lstat(folder).catch(() => undefined)) === undefined) {
+        return;
+      }
+      // Aside at once, so its ship's place is free and nothing reads it again; the trash removes it (docs/trierarch.md, "Session runtime").
+      await discard(folder, new Date());
     },
     worktrees: async () => {
       const found = [];

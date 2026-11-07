@@ -114,7 +114,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   // The model proxy runs while any harness holds an API key (headless H16); a pass starts it again when it is gone.
   const keys = createKeyFiles(paths.keys);
   const proxy = modelProxy({ paths, version, launch });
-  const { sessions, workspace, folderProcesses, shipHomes, modelProxyUrlOf } = runtimeAdaptersOf({ configuration, paths, version, launch, managedSettings, clones, proxyUrl: async () => proxy.url() });
+  const { sessions, workspace, folderProcesses, shipHomes, modelProxyUrlOf, trash } = runtimeAdaptersOf({ configuration, paths, version, launch, managedSettings, clones, proxyUrl: async () => proxy.url() });
   const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, managedSettings, detected: () => offered.detected, sessions, proxyUrl: async () => {
       const url = await proxy.url();
       return url === undefined ? undefined : modelProxyUrlOf(url);
@@ -178,7 +178,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   });
   const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configured.harnesses), prices: priceTableOf(configured.prices) });
   const sendReleasedUsage = createSendReleasedUsage({ fleet, usage, clock, logger, prices: priceTableOf(configured.prices), ...(crew.shipId !== undefined && { trierarchShipId: crew.shipId }), ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
-  const runPass = createRunPass({ fleet, harnesses, processes: sessions, folderProcesses, workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets, modelLogins, sendReleasedUsage, ...(configured.logins !== undefined && { logins: configured.logins }) });
+  const runPass = createRunPass({ fleet, harnesses, processes: sessions, folderProcesses, workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets, modelLogins, sendReleasedUsage, trash, ...(configured.logins !== undefined && { logins: configured.logins }) });
   // Set by the receive loop, read by each report of the trierarch's own ship.
   let isFleetKeyCutOff = false;
   const reportSelf = createReportSelf({ fleetKey: { isCutOff: () => isFleetKeyCutOff }, fleet, processes: sessions, trust, state, setup, readLoad, readUsage, clock, modelLogins, ...(configured.logins !== undefined && { logins: configured.logins }) });
