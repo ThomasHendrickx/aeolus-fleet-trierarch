@@ -1,6 +1,8 @@
 package trash
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -28,7 +30,7 @@ func aFolder(t *testing.T) (string, string) {
 
 func discarded(t *testing.T, folder string) {
 	t.Helper()
-	if err := Discard(folder, discardedAt); err != nil {
+	if err := Discard(folder, discardedAt, nil); err != nil {
 		t.Fatalf("Discard(%s) = %v, want it moved aside", folder, err)
 	}
 }
@@ -70,12 +72,90 @@ func TestAFolderDiscardedTwiceUnderOneNameIsKeptAsTwo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Discard(folder, discardedAt.Add(time.Millisecond)); err != nil {
+	if err := Discard(folder, discardedAt.Add(time.Millisecond), nil); err != nil {
 		t.Fatalf("Discard(%s) again = %v, want it moved aside", folder, err)
 	}
 
 	if got := held(t, filepath.Join(filepath.Dir(folder), ".trash")); len(got) != 2 {
 		t.Errorf("the trash holds %v, want both", got)
+	}
+}
+
+func TestAFolderWhoseOwnTopIsReadOnlyLeavesItsPlaceForTheTrash(t *testing.T) {
+	_, folder := aFolder(t)
+	if err := os.Chmod(folder, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	// So the test's own folders can go whatever the outcome.
+	t.Cleanup(func() { _ = os.Chmod(folder, 0o755) })
+
+	discarded(t, folder)
+
+	if _, err := os.Lstat(folder); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Lstat(%s) = %v, want its place free", folder, err)
+	}
+	if got := held(t, filepath.Join(filepath.Dir(folder), ".trash")); len(got) != 1 {
+		t.Errorf("the trash beside it holds %v, want the folder alone", got)
+	}
+}
+
+func TestALinkIsNotDiscardedNorWhatItPointsAtChanged(t *testing.T) {
+	root, folder := aFolder(t)
+	if err := os.Chmod(folder, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(folder, 0o755) })
+	link := filepath.Join(root, "aeolus-fleet", "lookout")
+	if err := os.Symlink(folder, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Discard(link, discardedAt, func(string, string) error { return nil }); err == nil {
+		t.Errorf("Discard(%s), a link, = nil, want it refused", link)
+	}
+
+	if _, err := os.Lstat(link); err != nil {
+		t.Errorf("Lstat(%s) = %v, want the link where it was", link, err)
+	}
+	if found, err := os.Stat(folder); err != nil || found.Mode().Perm() != 0o555 {
+		t.Errorf("Stat(%s) = %v, %v, want it as it was, 0555", folder, found, err)
+	}
+}
+
+func TestAFolderTheHostCannotMoveIsMovedWithinTheRuntimesUserNamespace(t *testing.T) {
+	root, folder := aFolder(t)
+	trashtest.Unmovable(t, root, folder)
+
+	if err := Discard(folder, discardedAt, trashtest.MoveAsRuntime); err != nil {
+		t.Fatalf("Discard(%s) the host cannot move = %v, want it moved aside within the runtime's user namespace", folder, err)
+	}
+
+	if _, err := os.Lstat(folder); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Lstat(%s) = %v, want its place free", folder, err)
+	}
+	if got := held(t, filepath.Join(filepath.Dir(folder), ".trash")); len(got) != 1 {
+		t.Errorf("the trash beside it holds %v, want the folder alone", got)
+	}
+}
+
+func TestAFolderNeitherTheHostNorTheRuntimeCanMoveStaysInItsPlace(t *testing.T) {
+	cases := map[string]func(string, string) error{
+		"on the host":   nil,
+		"in containers": func(string, string) error { return errors.New("unshare refused") },
+	}
+	for name, move := range cases {
+		t.Run(name, func(t *testing.T) {
+			root, folder := aFolder(t)
+			trashtest.Unmovable(t, root, folder)
+
+			if err := Discard(folder, discardedAt, move); err == nil {
+				t.Errorf("Discard(%s) no one can move = nil, want why", folder)
+			}
+
+			if _, err := os.Lstat(folder); err != nil {
+				t.Errorf("Lstat(%s) = %v, want it still in its place", folder, err)
+			}
+		})
 	}
 }
 
@@ -143,6 +223,11 @@ func TestWhatCannotBeRemovedStaysInTheTrashNewOnlyTheFirstTime(t *testing.T) {
 			}
 			if _, err := os.Lstat(first[0].Path); err != nil {
 				t.Errorf("Lstat(%s) = %v, want it still in the trash", first[0].Path, err)
+			}
+			// Where it was put in the trash, before any state suffix.
+			put := sha256.Sum256([]byte(filepath.Join(filepath.Dir(folder), ".trash", "scout.1794043800000")))
+			if want := hex.EncodeToString(put[:]); first[0].PathHash != want || second[0].PathHash != want {
+				t.Errorf("PathHash = %q then %q, want %q both times", first[0].PathHash, second[0].PathHash, want)
 			}
 		})
 	}

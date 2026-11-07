@@ -317,3 +317,48 @@ func TestAPathIsRemovedWithinTheRuntimesUserNamespace(t *testing.T) {
 		t.Errorf("ran %q, want %q", ran, want)
 	}
 }
+
+func TestAFolderIsMovedWithinTheRuntimesUserNamespaceItsOwnWriteGivenFirst(t *testing.T) {
+	var ran [][]string
+	runtime := Runtime{Run: func(args ...string) (string, error) { ran = append(ran, args); return "", nil }}
+
+	if err := runtime.MoveWithinUserNamespace("/worktrees/aeolus-fleet/scout", "/worktrees/aeolus-fleet/.trash/scout.1"); err != nil {
+		t.Fatal(err)
+	}
+
+	want := [][]string{
+		{"unshare", "chmod", "u+rwx", "--", "/worktrees/aeolus-fleet/scout"},
+		{"unshare", "mv", "-T", "--", "/worktrees/aeolus-fleet/scout", "/worktrees/aeolus-fleet/.trash/scout.1"},
+	}
+	if !reflect.DeepEqual(ran, want) {
+		t.Errorf("ran %q, want %q", ran, want)
+	}
+}
+
+func TestAFolderIsNotMovedWithinTheRuntimesUserNamespaceWhenItsOwnWriteCannotBeGiven(t *testing.T) {
+	var ran [][]string
+	runtime := Runtime{Run: func(args ...string) (string, error) { ran = append(ran, args); return "", errors.New("chmod failed") }}
+
+	if err := runtime.MoveWithinUserNamespace("/worktrees/aeolus-fleet/scout", "/worktrees/aeolus-fleet/.trash/scout.1"); err == nil {
+		t.Error("MoveWithinUserNamespace() with chmod failing = nil, want why")
+	}
+
+	if len(ran) != 1 {
+		t.Errorf("ran %q, want the chmod alone", ran)
+	}
+}
+
+func TestACallWithinTheRuntimesUserNamespaceEndsAtItsTimeLimit(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "podman")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runtime := Runtime{Binary: binary}
+	started := time.Now()
+
+	err := runtime.withinUserNamespace(100*time.Millisecond, "rm", "-rf", "--", "/worktrees/aeolus-fleet/.trash/scout.1")
+
+	if err == nil || time.Since(started) > 5*time.Second {
+		t.Errorf("withinUserNamespace() of a runtime that hangs = %v after %v, want it ended at its time limit", err, time.Since(started))
+	}
+}

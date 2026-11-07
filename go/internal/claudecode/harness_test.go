@@ -495,8 +495,30 @@ func TestInContainersAShipsHomeGoesWithItsIdentity(t *testing.T) {
 }
 
 func TestInContainersAShipsHomeHoldingWhatTheHostCannotRemoveGoesWithItsIdentityToTheTrashBesideIt(t *testing.T) {
-	cases := map[string]func(t *testing.T, homes string, home string){
-		"a folder its session made read-only": func(t *testing.T, homes string, home string) {
+	// So the test's own folders can go whatever the outcome.
+	writable := func(t *testing.T, homes string) {
+		t.Cleanup(func() {
+			_ = filepath.WalkDir(homes, func(path string, entry os.DirEntry, err error) error {
+				if err == nil && entry.IsDir() {
+					_ = os.Chmod(path, 0o755)
+				}
+				return nil
+			})
+		})
+	}
+	cases := map[string]func(t *testing.T, harness *Harness, home string){
+		"its own top folder its session made read-only": func(t *testing.T, harness *Harness, home string) {
+			writable(t, harness.Homes)
+			if err := os.Chmod(home, 0o555); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"its own top folder the host cannot move": func(t *testing.T, harness *Harness, home string) {
+			harness.MoveWithinUserNamespace = trashtest.MoveAsRuntime
+			trashtest.Unmovable(t, harness.Homes, home)
+		},
+		"a folder its session made read-only": func(t *testing.T, harness *Harness, home string) {
+			homes := harness.Homes
 			readOnly := filepath.Join(home, ".local", "share", "containers")
 			if err := os.MkdirAll(readOnly, 0o755); err != nil {
 				t.Fatal(err)
@@ -507,18 +529,10 @@ func TestInContainersAShipsHomeHoldingWhatTheHostCannotRemoveGoesWithItsIdentity
 			if err := os.Chmod(readOnly, 0o500); err != nil {
 				t.Fatal(err)
 			}
-			// So the test's own folders can go whatever the outcome.
-			t.Cleanup(func() {
-				_ = filepath.WalkDir(homes, func(path string, entry os.DirEntry, err error) error {
-					if err == nil && entry.IsDir() {
-						_ = os.Chmod(path, 0o755)
-					}
-					return nil
-				})
-			})
+			writable(t, homes)
 		},
-		"a folder it cannot remove": func(t *testing.T, homes string, home string) {
-			trashtest.Unremovable(t, homes, home)
+		"a folder it cannot remove": func(t *testing.T, harness *Harness, home string) {
+			trashtest.Unremovable(t, harness.Homes, home)
 		},
 	}
 	for name, holding := range cases {
@@ -528,7 +542,7 @@ func TestInContainersAShipsHomeHoldingWhatTheHostCannotRemoveGoesWithItsIdentity
 			if err := harness.WriteIdentity(entry, anIdentity(), "crew-token"); err != nil {
 				t.Fatal(err)
 			}
-			holding(t, harness.Homes, home)
+			holding(t, &harness, home)
 
 			if err := harness.DeleteIdentity(entry); err != nil {
 				t.Fatalf("DeleteIdentity() with %s in the ship's home = %v, want it gone", name, err)

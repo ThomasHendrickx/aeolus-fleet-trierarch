@@ -2656,7 +2656,7 @@ func (b *aTrash) MarkTold(path string) error {
 }
 
 func aLeftClone(trashedAt time.Time) trash.Left {
-	return trash.Left{Path: "/worktrees/aeolus-fleet/.trash/scout.1793707200000", Folder: "/worktrees/aeolus-fleet/scout", TrashedAt: trashedAt, IsNew: true, Why: errors.New("unlinkat a/f: permission denied")}
+	return trash.Left{Path: "/worktrees/aeolus-fleet/.trash/scout.1793707200000", PathHash: "d1b5a804892b892cbac59c6f3cd3dd3dbd9e9d721526f90850ea49e8ce6de972", Folder: "/worktrees/aeolus-fleet/scout", TrashedAt: trashedAt, IsNew: true, Why: errors.New("unlinkat a/f: permission denied")}
 }
 
 func toldOfTheTrash(all []told) []told {
@@ -2704,7 +2704,7 @@ func TestArgoIsToldOnceOfWhatTheTrashCouldNotRemoveForADay(t *testing.T) {
 		}
 	}
 
-	want := []told{{to: "argo", key: "trierarch:trash:/worktrees/aeolus-fleet/scout:1793707200000", text: notices.LeftInTrash("/worktrees/aeolus-fleet/scout", "/worktrees/aeolus-fleet/.trash/scout.1793707200000", trashedAt, "unlinkat a/f: permission denied")}}
+	want := []told{{to: "argo", key: "trierarch:trash:d1b5a804892b892cbac59c6f3cd3dd3dbd9e9d721526f90850ea49e8ce6de972", text: notices.LeftInTrash("/worktrees/aeolus-fleet/scout", "/worktrees/aeolus-fleet/.trash/scout.1793707200000", trashedAt, "unlinkat a/f: permission denied")}}
 	if got := toldOfTheTrash(pass.fleet.told); !reflect.DeepEqual(got, want) {
 		t.Errorf("told %+v, want %+v", got, want)
 	}
