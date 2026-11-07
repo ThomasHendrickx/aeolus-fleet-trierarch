@@ -484,6 +484,15 @@ func trashOf(root string, at paths.Paths, configured *config.Runtime) trash.Tras
 	return trash.Trash{Beside: beside, Unshare: container.Runtime{Binary: configured.Binary}.RemoveWithinUserNamespace}
 }
 
+// moveWithinUserNamespaceOf moves a clone or a ship's home to the trash within the runtime's user namespace in containers, where the
+// host user cannot give its own top its write; nil on the host.
+func moveWithinUserNamespaceOf(configured *config.Runtime) func(from string, to string) error {
+	if !isInContainers(configured) {
+		return nil
+	}
+	return container.Runtime{Binary: configured.Binary}.MoveWithinUserNamespace
+}
+
 func isInContainers(configured *config.Runtime) bool {
 	return configured != nil && configured.Kind == "container"
 }
@@ -560,7 +569,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	// The places a pass makes workspaces in and offers: the configured ones and the trusted repositories beside them.
 	placesOf := func() (workspace.Places, []string, []string) {
 		offered := withTrusted(configuration)
-		places := workspace.Places{Root: root, Repositories: map[string]string{}, Folders: map[string]string{}, Clone: clones.WhenMissing, ClonedPath: clones.ClonedPath, IsByRealPath: isInContainers(configuration.Runtime), IsClone: isInContainers(configuration.Runtime)}
+		places := workspace.Places{Root: root, Repositories: map[string]string{}, Folders: map[string]string{}, Clone: clones.WhenMissing, ClonedPath: clones.ClonedPath, IsByRealPath: isInContainers(configuration.Runtime), IsClone: isInContainers(configuration.Runtime), MoveWithinUserNamespace: moveWithinUserNamespaceOf(configuration.Runtime)}
 		repositories, folders := []string{}, []string{}
 		for name, repository := range offered.Repositories {
 			places.Repositories[name] = repository.Path
@@ -838,6 +847,8 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 				ProxyURL:        proxyURL,
 				Sessions:        at.Sessions,
 				Homes:           homesOf(at, configuration.Runtime),
+				// In containers, a ship's home whose own top the host cannot give its write goes to the trash as the runtime moves it.
+				MoveWithinUserNamespace: moveWithinUserNamespaceOf(configuration.Runtime),
 			}
 		case "codex":
 			found, err := plugin.FindCodex(home, env)

@@ -113,7 +113,7 @@ func (p Places) removeClone(folder string) error {
 		return nil
 	}
 	// Aside at once, so its ship's place is free and nothing reads it again; the trash removes it (docs/trierarch.md, "Session runtime").
-	if err := trash.Discard(folder, time.Now()); err != nil {
+	if err := trash.Discard(folder, time.Now(), p.MoveWithinUserNamespace); err != nil {
 		return fmt.Errorf("remove clone %s: %w", folder, err)
 	}
 	return nil

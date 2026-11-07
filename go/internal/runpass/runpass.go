@@ -309,7 +309,7 @@ func (p Pass) emptyTrash() {
 			continue
 		}
 		text := notices.LeftInTrash(left.Folder, left.Path, left.TrashedAt, left.Why.Error())
-		if err := p.Fleet.ReportToArgo(text, fmt.Sprintf("trierarch:trash:%s:%d", left.Folder, left.TrashedAt.UnixMilli())); err != nil {
+		if err := p.Fleet.ReportToArgo(text, "trierarch:trash:"+left.PathHash); err != nil {
 			p.Log(fmt.Sprintf("Argo was not told %s stays in the trash: %v; the next pass tries again", left.Folder, err))
 			continue
 		}

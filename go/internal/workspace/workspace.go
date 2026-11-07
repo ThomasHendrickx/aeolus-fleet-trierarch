@@ -218,6 +218,9 @@ type Places struct {
 	IsByRealPath bool
 	// IsClone gives each ship a clone of its own in place of a worktree, at the same path, as sessions in containers need it: git works inside, and no ship's container reaches another's (decision 0039).
 	IsClone bool
+	// MoveWithinUserNamespace moves a clone whose own top the host user cannot give its write to the trash within the runtime's user
+	// namespace; nil on the host.
+	MoveWithinUserNamespace func(from string, to string) error
 }
 
 // Prepare is the ship's folder: its worktree, made when missing, or the configured folder as it is; by its real path when the places say so.

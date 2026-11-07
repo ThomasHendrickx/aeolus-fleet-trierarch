@@ -1,6 +1,7 @@
 package container
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
@@ -105,11 +107,44 @@ func (r Runtime) run(args ...string) (string, error) {
 	return string(said), nil
 }
 
+// unshareTimeLimit is how long a call within the runtime's user namespace may run: a runtime that hangs holds up no pass. A removal it
+// ends is taken up again by the next pass.
+const unshareTimeLimit = time.Minute
+
+// withinUserNamespace runs the words within the runtime's user namespace, ended at the limit.
+func (r Runtime) withinUserNamespace(limit time.Duration, args ...string) error {
+	args = append([]string{"unshare"}, args...)
+	if r.Run != nil {
+		_, err := r.Run(args...)
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	defer cancel()
+	command := exec.CommandContext(ctx, r.Binary, args...)
+	// A child it forked may hold its output open after it was ended.
+	command.WaitDelay = time.Second
+	if said, err := command.CombinedOutput(); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("%s unshare %s did not end within %v", r.Binary, args[1], limit)
+		}
+		return fmt.Errorf("%s unshare %s failed: %w: %s", r.Binary, args[1], err, strings.TrimSpace(string(said)))
+	}
+	return nil
+}
+
 // RemoveWithinUserNamespace removes the path within the runtime's user namespace, where the host user is root and the ids a session
 // mapped are its own: what a session left that the host user cannot remove.
 func (r Runtime) RemoveWithinUserNamespace(path string) error {
-	_, err := r.run("unshare", "rm", "-rf", "--", path)
-	return err
+	return r.withinUserNamespace(unshareTimeLimit, "rm", "-rf", "--", path)
+}
+
+// MoveWithinUserNamespace gives the folder its owner's read, write and search and moves it to the path, within the runtime's user
+// namespace: a folder whose own top the host user cannot give its write, as one owned by an id a session mapped.
+func (r Runtime) MoveWithinUserNamespace(from string, to string) error {
+	if err := r.withinUserNamespace(unshareTimeLimit, "chmod", "u+rwx", "--", from); err != nil {
+		return err
+	}
+	return r.withinUserNamespace(unshareTimeLimit, "mv", "-T", "--", from, to)
 }
 
 func (r Runtime) holds() sessions.Runtime {

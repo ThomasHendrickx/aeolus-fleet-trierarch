@@ -1,10 +1,12 @@
 // Package trash is where a ship's clone and its ship's home go when they are removed (docs/trierarch.md, "Session runtime"). A session
 // can leave in them what the host user cannot remove, a folder owned by an id its user namespace maps, or one it made read-only. Each is
-// first renamed aside, into a trash folder of the trierarch's own beside it, which needs only the parent the host owns: its ship's place
-// is free at once and nothing reads it again. Every pass then empties the trash, and what stays in it holds back no release.
+// first renamed aside, into a trash folder of the trierarch's own beside it: its ship's place is free at once and nothing reads it again.
+// Every pass then empties the trash, and what stays in it holds back no release.
 package trash
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -22,8 +24,18 @@ const folderName = ".trash"
 // is in its name, so it holds across a restart.
 const leftSuffix, toldSuffix = ".left", ".told"
 
-// Discard renames the folder into the trash beside it.
-func Discard(folder string, at time.Time) error {
+// Discard renames the folder into the trash beside it. Moving a folder to another parent changes its `..`, which needs write on the folder
+// itself as well as on both parents, and a session can have made its own top read-only: it is given its owner's read, write and search
+// first. One the host cannot give them, or move, is moved within the runtime's user namespace, where the ids a session mapped are its
+// own (withinUserNamespace, nil on the host). A link is refused, so nothing it points at is changed.
+func Discard(folder string, at time.Time, withinUserNamespace func(from string, to string) error) error {
+	found, err := os.Lstat(folder)
+	if err != nil {
+		return err
+	}
+	if !found.IsDir() {
+		return fmt.Errorf("%s is no folder: the trash takes only a folder", folder)
+	}
 	trash := filepath.Join(filepath.Dir(folder), folderName)
 	if err := os.Mkdir(trash, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
 		return fmt.Errorf("make the trash %s: %w", trash, err)
@@ -31,7 +43,18 @@ func Discard(folder string, at time.Time) error {
 	if found, err := os.Lstat(trash); err != nil || !found.IsDir() {
 		return fmt.Errorf("the trash %s is no folder", trash)
 	}
-	return os.Rename(folder, filepath.Join(trash, filepath.Base(folder)+"."+strconv.FormatInt(at.UnixMilli(), 10)))
+	to := filepath.Join(trash, filepath.Base(folder)+"."+strconv.FormatInt(at.UnixMilli(), 10))
+	err = os.Chmod(folder, found.Mode().Perm()|0o700)
+	if err == nil {
+		err = os.Rename(folder, to)
+	}
+	if err == nil || withinUserNamespace == nil {
+		return err
+	}
+	if moved := withinUserNamespace(folder, to); moved != nil {
+		return errors.Join(err, moved)
+	}
+	return nil
 }
 
 // Trash empties the trash folders.
@@ -49,6 +72,8 @@ type Left struct {
 	Folder string
 	// TrashedAt is when it was discarded.
 	TrashedAt time.Time
+	// PathHash is a hash of where it was put in the trash, before any state suffix: the same every pass and across a restart, and short.
+	PathHash string
 	// IsNew is whether this was the first time it could not be removed; IsTold whether argo was told of it.
 	IsNew  bool
 	IsTold bool
@@ -74,7 +99,8 @@ func (t Trash) Empty() []Left {
 			if why == nil {
 				continue
 			}
-			found := Left{Path: path, Folder: filepath.Join(beside, name), TrashedAt: trashedAt, IsTold: state == toldSuffix, Why: why}
+			put := sha256.Sum256([]byte(strings.TrimSuffix(path, state)))
+			found := Left{Path: path, PathHash: hex.EncodeToString(put[:]), Folder: filepath.Join(beside, name), TrashedAt: trashedAt, IsTold: state == toldSuffix, Why: why}
 			if state == "" {
 				// Marked left, so it is new only this once.
 				if err := os.Rename(path, path+leftSuffix); err != nil {

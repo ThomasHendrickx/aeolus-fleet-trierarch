@@ -57,6 +57,9 @@ type Harness struct {
 	Sessions string
 	// Homes is where each ship has a home of its own, for sessions in containers, which its container gets as its home (decision 0039); empty on the host, where every session shares the user's.
 	Homes string
+	// MoveWithinUserNamespace moves a ship's home whose own top the host user cannot give its write to the trash within the runtime's user
+	// namespace; nil on the host.
+	MoveWithinUserNamespace func(from string, to string) error
 }
 
 // homeOf is the ship's own home, which holds its identity and Claude Code's files and nothing of another ship.
@@ -256,7 +259,7 @@ func (h Harness) DeleteIdentity(entry reconciler.Entry) error {
 		return nil
 	}
 	// Aside at once, so the release goes on whatever its session left in it; the trash removes it (docs/trierarch.md, "Session runtime").
-	return trash.Discard(home, time.Now())
+	return trash.Discard(home, time.Now(), h.MoveWithinUserNamespace)
 }
 
 func (h Harness) SessionDied(entry reconciler.Entry) error {
