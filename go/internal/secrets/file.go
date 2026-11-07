@@ -49,7 +49,7 @@ func (f *File) Names() []string {
 	return slices.Sorted(maps.Keys(f.current))
 }
 
-// Value is the secret's value, for the MCP proxy alone; false when none is held.
+// Value is the secret's value, for the MCP proxy and the aip read token a session starts with alone; false when none is held.
 func (f *File) Value(name string) (string, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

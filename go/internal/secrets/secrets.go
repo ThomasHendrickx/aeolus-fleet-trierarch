@@ -4,7 +4,8 @@
 // public key that trierarch made and reports, as a NaCl anonymous sealed box
 // (libsodium's crypto_box_seal), so the fleet stores only what it cannot read.
 // The trierarch opens them with its private key, keeps them mode 600, and only
-// the MCP proxy reads them. No refusal says a value.
+// the MCP proxy reads them, and a session's start the aip read token (#251). No
+// refusal says a value.
 package secrets
 
 import (
