@@ -235,8 +235,39 @@ func TestAStoppedSessionsContainerIsKilledThenRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if want := []string{"kill trierarch-" + scout, "rm --force trierarch-" + scout}; !slices.Equal(binary.calls, want) {
+	if want := []string{"kill trierarch-" + scout, "rm --force trierarch-" + scout, "ps --all --filter label=aeolus.trierarch=aeolus-trierarch --format {{.Names}} {{.State}}"}; !slices.Equal(binary.calls, want) {
 		t.Fatalf("asked %q, want %q", binary.calls, want)
+	}
+}
+
+func TestAStopFailsWhileTheShipsContainerIsStillListedSoItsFolderIsNotRead(t *testing.T) {
+	r, binary := aContainerRuntime(t)
+	binary.fails["rm"] = true
+	binary.answers["ps"] = "trierarch-" + scout + " running\n"
+
+	err := r.Stop(scout)
+
+	if err == nil || !strings.Contains(err.Error(), "the container of "+scout+" is still there after its stop: rm failed") {
+		t.Fatalf("Stop = %v, want it to say the container is still there", err)
+	}
+}
+
+func TestAStopFailsWhenTheContainersCannotBeListedAfterItSoItsFolderIsNotRead(t *testing.T) {
+	r, binary := aContainerRuntime(t)
+	binary.fails["ps"] = true
+
+	if err := r.Stop(scout); err == nil {
+		t.Fatal("Stop answered no error")
+	}
+}
+
+func TestAShipWhoseContainerIsGoneIsStoppedWhateverItsKillAndRemoveSaid(t *testing.T) {
+	r, binary := aContainerRuntime(t)
+	binary.fails["kill"] = true
+	binary.fails["rm"] = true
+
+	if err := r.Stop(scout); err != nil {
+		t.Fatalf("Stop = %v, want none", err)
 	}
 }
 
@@ -272,4 +303,62 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(text)
+}
+
+func TestAPathIsRemovedWithinTheRuntimesUserNamespace(t *testing.T) {
+	var ran []string
+	runtime := Runtime{Run: func(args ...string) (string, error) { ran = args; return "", nil }}
+
+	if err := runtime.RemoveWithinUserNamespace("/worktrees/aeolus-fleet/.trash/scout.1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if want := []string{"unshare", "rm", "-rf", "--", "/worktrees/aeolus-fleet/.trash/scout.1"}; !slices.Equal(ran, want) {
+		t.Errorf("ran %q, want %q", ran, want)
+	}
+}
+
+func TestAFolderIsMovedWithinTheRuntimesUserNamespaceItsOwnWriteGivenFirst(t *testing.T) {
+	var ran [][]string
+	runtime := Runtime{Run: func(args ...string) (string, error) { ran = append(ran, args); return "", nil }}
+
+	if err := runtime.MoveWithinUserNamespace("/worktrees/aeolus-fleet/scout", "/worktrees/aeolus-fleet/.trash/scout.1"); err != nil {
+		t.Fatal(err)
+	}
+
+	want := [][]string{
+		{"unshare", "chmod", "u+rwx", "--", "/worktrees/aeolus-fleet/scout"},
+		{"unshare", "mv", "-T", "--", "/worktrees/aeolus-fleet/scout", "/worktrees/aeolus-fleet/.trash/scout.1"},
+	}
+	if !reflect.DeepEqual(ran, want) {
+		t.Errorf("ran %q, want %q", ran, want)
+	}
+}
+
+func TestAFolderIsNotMovedWithinTheRuntimesUserNamespaceWhenItsOwnWriteCannotBeGiven(t *testing.T) {
+	var ran [][]string
+	runtime := Runtime{Run: func(args ...string) (string, error) { ran = append(ran, args); return "", errors.New("chmod failed") }}
+
+	if err := runtime.MoveWithinUserNamespace("/worktrees/aeolus-fleet/scout", "/worktrees/aeolus-fleet/.trash/scout.1"); err == nil {
+		t.Error("MoveWithinUserNamespace() with chmod failing = nil, want why")
+	}
+
+	if len(ran) != 1 {
+		t.Errorf("ran %q, want the chmod alone", ran)
+	}
+}
+
+func TestACallWithinTheRuntimesUserNamespaceEndsAtItsTimeLimit(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "podman")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runtime := Runtime{Binary: binary}
+	started := time.Now()
+
+	err := runtime.withinUserNamespace(100*time.Millisecond, "rm", "-rf", "--", "/worktrees/aeolus-fleet/.trash/scout.1")
+
+	if err == nil || time.Since(started) > 5*time.Second {
+		t.Errorf("withinUserNamespace() of a runtime that hangs = %v after %v, want it ended at its time limit", err, time.Since(started))
+	}
 }

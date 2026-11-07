@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf16"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
@@ -90,7 +91,7 @@ func OwnerUnreachable(report string, ownerName string, code string, message stri
 const discardedNamed = 5
 
 // kinds are the kinds of discarded lines, in the order the counts name them.
-var kinds = []string{"deleted", "changed", "renamed", "new", "commit"}
+var kinds = []string{"refused", "deleted", "changed", "renamed", "new", "commit"}
 
 type discardedLine struct {
 	kind string
@@ -99,13 +100,19 @@ type discardedLine struct {
 
 const commitPrefix = "commit "
 
+// refusedPrefix starts the line of a worktree the host did not read, with why: what it held is not known.
+const refusedPrefix = "refused, "
+
 // statusWidth is a git status line's two status letters and the space before the path.
 const statusWidth = 3
 
-// lineOf is one line of what removing a worktree discards (git status, or an unkept commit), in words.
+// lineOf is one line of what removing a worktree discards (git status, an unkept commit, or why the host did not read it), in words.
 func lineOf(line string) discardedLine {
 	if strings.HasPrefix(line, commitPrefix) {
 		return discardedLine{"commit", line[len(commitPrefix):]}
+	}
+	if strings.HasPrefix(line, refusedPrefix) {
+		return discardedLine{"refused", line[len(refusedPrefix):]}
 	}
 	status := line
 	if len(status) > 2 {
@@ -268,4 +275,11 @@ func LowResource(resource string, load machineload.Load) string {
 	}
 	facts := fmt.Sprintf("- Memory: %s of %s GiB available\n- Disk: %s of %s GB free", tenths(float64(memory.AvailableBytes)/gib), tenths(float64(memory.TotalBytes)/gib), tenths(float64(disk.FreeBytes)/gb), tenths(float64(disk.TotalBytes)/gb))
 	return Message(headline, paragraphs(facts, "The trierarch stops no session for it."))
+}
+
+// LeftInTrash is what argo is told when the trash has not removed a released folder for a day: the folder, where it is aside, since when
+// and why.
+func LeftInTrash(folder string, path string, trashedAt time.Time, why string) string {
+	facts := strings.Join([]string{"- Folder: `" + folder + "`", "- In the trash at: `" + path + "`", "- Since: " + trashedAt.UTC().Format("2006-01-02T15:04:05.000Z07:00"), "- Why: " + why}, "\n")
+	return Message("A released folder cannot be removed from this machine", paragraphs(facts, "Its ship's place is free; the folder stays aside, and every pass tries again to remove it."))
 }

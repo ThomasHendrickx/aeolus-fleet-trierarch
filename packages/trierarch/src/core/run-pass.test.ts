@@ -4,8 +4,9 @@ import { z } from 'zod';
 
 import { aTrierarch, aTrierarchOnLogins, CONFIGURATION, crewSettings, InMemoryCheckouts, InMemoryShipSockets, newId, NOTES_FOLDER, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
 import { putEntry } from './entry.js';
-import type { LaunchSeen } from './ports.js';
+import type { LaunchSeen, LeftInTrash } from './ports.js';
 import { ACTIVITY_INTERVAL_SECONDS } from './run-pass.js';
+import { leftInTrashText } from './argo-reports.js';
 import { RESTART_BUDGET } from './restart-policy.js';
 
 const SECOND_MS = 1000;
@@ -113,6 +114,54 @@ describe('the activity of the sessions it runs (monitoring W3b)', () => {
     await trierarch.pass();
 
     expect(trierarch.state.current().passFailure).toBeUndefined();
+  });
+});
+
+describe('the trash a released clone and ship\'s home go aside to (docs/trierarch.md, "Session runtime")', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const aLeftClone = (trashedAt: Date): LeftInTrash => ({ path: '/worktrees/aeolus-fleet/.trash/scout.1793707200000.left', pathHash: 'd1b5a804892b892cbac59c6f3cd3dd3dbd9e9d721526f90850ea49e8ce6de972', folder: '/worktrees/aeolus-fleet/scout', trashedAt, isNew: true, isTold: false, why: 'unlinkat a/f: permission denied' });
+  const toldOfTheTrash = (trierarch: Trierarch) => trierarch.fleet.toArgo.filter((each) => each.idempotencyKey.startsWith('trierarch:trash:'));
+
+  it('is emptied every pass, what it could not remove logged the first time', async () => {
+    const trierarch = aTrierarch();
+    trierarch.trash.left = [aLeftClone(trierarch.clock.now())];
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.logger.warnings.filter((warning) => warning.includes('trash'))).toEqual([
+      'Could not remove /worktrees/aeolus-fleet/scout, in the trash at /worktrees/aeolus-fleet/.trash/scout.1793707200000.left: unlinkat a/f: permission denied; every pass tries again',
+    ]);
+    expect(toldOfTheTrash(trierarch)).toEqual([]);
+  });
+
+  it('tells argo once of what it could not remove for a day', async () => {
+    const trierarch = aTrierarch();
+    const trashedAt = new Date(trierarch.clock.now().getTime() - DAY_MS);
+    trierarch.trash.left = [{ ...aLeftClone(trashedAt), isNew: false }];
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(toldOfTheTrash(trierarch)).toEqual([
+      { text: leftInTrashText({ folder: '/worktrees/aeolus-fleet/scout', path: '/worktrees/aeolus-fleet/.trash/scout.1793707200000.left', trashedAt, why: 'unlinkat a/f: permission denied' }), idempotencyKey: 'trierarch:trash:d1b5a804892b892cbac59c6f3cd3dd3dbd9e9d721526f90850ea49e8ce6de972' },
+    ]);
+    expect(trierarch.trash.left.map((each) => each.isTold)).toEqual([true]);
+  });
+
+  it('tells argo nothing of what it could not remove a millisecond short of a day', async () => {
+    const trierarch = aTrierarch();
+    trierarch.trash.left = [aLeftClone(new Date(trierarch.clock.now().getTime() - DAY_MS + 1))];
+
+    await trierarch.pass();
+
+    expect(toldOfTheTrash(trierarch)).toEqual([]);
+  });
+
+  it('names the folder, where it is aside, since when and why when it tells argo', () => {
+    expect(leftInTrashText({ folder: '/worktrees/aeolus-fleet/scout', path: '/worktrees/aeolus-fleet/.trash/scout.1793707200000', trashedAt: new Date('2026-11-03T12:00:00.000Z'), why: 'unlinkat a/f: permission denied' })).toBe(
+      'A released folder cannot be removed from this machine\n\n- Folder: `/worktrees/aeolus-fleet/scout`\n- In the trash at: `/worktrees/aeolus-fleet/.trash/scout.1793707200000`\n- Since: 2026-11-03T12:00:00.000Z\n- Why: unlinkat a/f: permission denied\n\nIts ship\'s place is free; the folder stays aside, and every pass tries again to remove it.',
+    );
   });
 });
 
@@ -296,6 +345,21 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
       `scout released: unpushed work discarded\n\n- Ship: scout (\`${shipId}\`)\n- Worktree: aeolus-fleet\n- Discarded: 1 changed, 1 new\n\n- changed \`README.md\`\n- new \`draft.md\``,
     ]);
+  });
+
+  it('row 7: tells argo a worktree the host would not read is removed unread, saying why it was not read', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.change(SCOUT_FOLDER, 'refused, its .git is no folder of its own');
+    trierarch.fleet.removeRequest(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
+      `scout released: unpushed work discarded\n\n- Ship: scout (\`${shipId}\`)\n- Worktree: aeolus-fleet\n- Discarded: 1 refused\n\n- refused \`its .git is no folder of its own\``,
+    ]);
+    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.fleet.confirmed).toEqual([shipId]);
   });
 
   it('row 7: counts each kind of what it discards and names the first 5, then how many more are in the log (#450, #849)', async () => {
@@ -572,6 +636,22 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.workspace.folders.get(SCOUT_FOLDER)).toMatchObject({ hasChanges: false, unsaved: [] });
     expect(trierarch.fleet.shipOf(shipId).status).toBe('crewed');
     expect(trierarch.fleet.toArgo).toHaveLength(1);
+  });
+
+  it('row 11: a ship released elsewhere whose session does not stop keeps its worktree unread and is crewed nowhere', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.change(SCOUT_FOLDER, '?? draft.md');
+    trierarch.fleet.releaseElsewhere(shipId);
+    trierarch.processes.notStopping.add(shipId);
+    const launches = trierarch.harness.launches.length;
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.workspace.folders.get(SCOUT_FOLDER)?.unsaved).toEqual(['?? draft.md']);
+    expect(trierarch.fleet.toArgo).toEqual([]);
+    expect(trierarch.harness.launches).toHaveLength(launches);
   });
 
   it('row 11: a ship released elsewhere is crewed again as a first start, with its first prompt and no resume (#475)', async () => {

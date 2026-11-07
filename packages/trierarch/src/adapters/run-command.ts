@@ -5,6 +5,8 @@ export interface CommandResult {
   readonly status: number;
   readonly stdout: string;
   readonly stderr: string;
+  /** Whether it ran past its time limit and was ended. */
+  readonly isTimedOut?: boolean;
 }
 
 /**
@@ -36,7 +38,7 @@ export function runCommand(command: string, options: { args: readonly string[]; 
       if (signal !== null) {
         child.stdout?.destroy();
         child.stderr?.destroy();
-        resolve({ status: code ?? 1, stdout, stderr });
+        resolve({ status: code ?? 1, stdout, stderr, ...(child.killed && { isTimedOut: true }) });
       }
     });
     child.on('close', (code) => {

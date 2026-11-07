@@ -59,6 +59,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/shipsocket"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trust"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/usage"
@@ -472,6 +473,45 @@ func sessionRuntime(at paths.Paths, program string, configured *config.Runtime) 
 	return container.Runtime{Holds: holds, Binary: configured.Binary, Image: sessionImage + ":" + cli.Version, ModelToken: at.ModelToken, ProxyURL: modelproxy.Runtime{Folder: at.Proxy}.URL, Homes: at.Homes, Sockets: at.Sockets, Memory: configured.Memory, Cpus: configured.Cpus}
 }
 
+// folderProcessesOf are the processes running in a folder, stopped before an orphan worktree is read and removed; in containers, only once no container works in it.
+func folderProcessesOf(configured *config.Runtime) runpass.FolderProcesses {
+	if !isInContainers(configured) {
+		return folderprocess.Stopper{}
+	}
+	return container.FolderProcesses{Runtime: container.Runtime{Binary: configured.Binary}, Host: folderprocess.Stopper{}}
+}
+
+// trashOf is the trash beside each repository's clones and the ships' homes, emptied every pass: within the runtime's user namespace
+// too in containers, by the host's own removal alone on the host.
+func trashOf(root string, at paths.Paths, configured *config.Runtime) trash.Trash {
+	beside := func() []string {
+		found := []string{}
+		entries, _ := os.ReadDir(root)
+		for _, entry := range entries {
+			if entry.IsDir() {
+				found = append(found, filepath.Join(root, entry.Name()))
+			}
+		}
+		if homes := homesOf(at, configured); homes != "" {
+			found = append(found, homes)
+		}
+		return found
+	}
+	if !isInContainers(configured) {
+		return trash.Trash{Beside: beside}
+	}
+	return trash.Trash{Beside: beside, Unshare: container.Runtime{Binary: configured.Binary}.RemoveWithinUserNamespace}
+}
+
+// moveWithinUserNamespaceOf moves a clone or a ship's home to the trash within the runtime's user namespace in containers, where the
+// host user cannot give its own top its write; nil on the host.
+func moveWithinUserNamespaceOf(configured *config.Runtime) func(from string, to string) error {
+	if !isInContainers(configured) {
+		return nil
+	}
+	return container.Runtime{Binary: configured.Binary}.MoveWithinUserNamespace
+}
+
 func isInContainers(configured *config.Runtime) bool {
 	return configured != nil && configured.Kind == "container"
 }
@@ -555,7 +595,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	// The places a pass makes workspaces in and offers: the configured ones and the trusted repositories beside them.
 	placesOf := func() (workspace.Places, []string, []string) {
 		offered := withTrusted(configuration)
-		places := workspace.Places{Root: root, Repositories: map[string]string{}, Folders: map[string]string{}, Clone: clones.WhenMissing, ClonedPath: clones.ClonedPath, IsByRealPath: isInContainers(configuration.Runtime), IsClone: isInContainers(configuration.Runtime)}
+		places := workspace.Places{Root: root, Repositories: map[string]string{}, Folders: map[string]string{}, Clone: clones.WhenMissing, ClonedPath: clones.ClonedPath, IsByRealPath: isInContainers(configuration.Runtime), IsClone: isInContainers(configuration.Runtime), MoveWithinUserNamespace: moveWithinUserNamespaceOf(configuration.Runtime)}
 		repositories, folders := []string{}, []string{}
 		for name, repository := range offered.Repositories {
 			places.Repositories[name] = repository.Path
@@ -588,7 +628,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Sessions:          running,
 		Harnesses:         harnesses,
 		Workspace:         places,
-		FolderProcesses:   folderprocess.Stopper{},
+		FolderProcesses:   folderProcessesOf(configuration.Runtime),
 		Checkouts:         checked,
 		Store:             saved,
 		Log:               logLine,
@@ -613,7 +653,8 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 			return detect.Refuse(context.Background(), harness, model, time.Now(), offers.set)
 		},
 		// The machine's memory and disk, read each minute; argo is told once when one is low (#400).
-		Load: load,
+		Load:  load,
+		Trash: trashOf(root, at, configuration.Runtime),
 	}
 	// What each harness trusts is read from its own files at each report (#381).
 	trustReaders := map[string]func() map[string]bool{
@@ -833,6 +874,8 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 				ProxyURL:        proxyURL,
 				Sessions:        at.Sessions,
 				Homes:           homesOf(at, configuration.Runtime),
+				// In containers, a ship's home whose own top the host cannot give its write goes to the trash as the runtime moves it.
+				MoveWithinUserNamespace: moveWithinUserNamespaceOf(configuration.Runtime),
 			}
 		case "codex":
 			found, err := plugin.FindCodex(home, env)

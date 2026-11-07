@@ -3,14 +3,17 @@ package workspace
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
 )
 
 // A clone is the workspace of a session in a container (decision 0039; docs/trierarch.md, "Session runtime"): a per-ship clone of the
@@ -78,18 +81,18 @@ func PrepareClone(at Worktree) (prepared string, err error) {
 		return "", err
 	}
 	// The clone's origin is the repository's checkout, whose branches are no remote's: dropped with it.
-	if _, err := git("-C", folder, "remote", "remove", remote); err != nil {
+	if _, err := gitInFreshClone(folder, "remote", "remove", remote); err != nil {
 		return "", err
 	}
 	if url, err := exec.Command("git", "-C", at.Path, "remote", "get-url", remote).Output(); err == nil {
-		if _, err := git("-C", folder, "remote", "add", remote, strings.TrimSpace(string(url))); err != nil {
+		if _, err := gitInFreshClone(folder, "remote", "add", remote, strings.TrimSpace(string(url))); err != nil {
 			return "", err
 		}
-		if _, err := git("-C", folder, "fetch", "--quiet", "--no-tags", at.Path, "+refs/remotes/"+remote+"/*:refs/remotes/"+remote+"/*"); err != nil {
+		if _, err := gitInFreshClone(folder, "fetch", "--quiet", "--no-tags", at.Path, "+refs/remotes/"+remote+"/*:refs/remotes/"+remote+"/*"); err != nil {
 			return "", err
 		}
 	}
-	if _, err := git("-C", folder, "checkout", "--quiet", "--detach", commit); err != nil {
+	if _, err := gitInFreshClone(folder, "checkout", "--quiet", "--detach", commit); err != nil {
 		return "", err
 	}
 	return folder, nil
@@ -105,7 +108,15 @@ func (p Places) removeClone(folder string) error {
 	if _, ok := p.repositoryOf(folder); !ok {
 		return fmt.Errorf("%s is no clone under %s: the trierarch removes only what it made", folder, p.Root)
 	}
-	return os.RemoveAll(folder)
+	// One already gone is removed already.
+	if _, err := os.Lstat(folder); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	// Aside at once, so its ship's place is free and nothing reads it again; the trash removes it (docs/trierarch.md, "Session runtime").
+	if err := trash.Discard(folder, time.Now(), p.MoveWithinUserNamespace); err != nil {
+		return fmt.Errorf("remove clone %s: %w", folder, err)
+	}
+	return nil
 }
 
 // clones are the clones under the root of the configured repositories: each folder `<root>/<repository>/<name>` with a `.git` of

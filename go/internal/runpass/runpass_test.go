@@ -20,6 +20,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
 )
 
 const scout = "shp_01m6jyczpnpp5c0vxh54c966cy"
@@ -262,6 +263,8 @@ type aWorkspace struct {
 	removed []string
 	// failRemove makes a removal fail, as a worktree that cannot be removed does.
 	failRemove bool
+	// failUnsaved makes reading what a worktree holds fail, as git failing does.
+	failUnsaved bool
 	// notMade are the worktrees under the root the trierarch did not make, or git no longer knows.
 	notMade map[string]bool
 }
@@ -309,7 +312,12 @@ func (w *aWorkspace) Prepare(entry reconciler.Entry, shipName string) (string, e
 	w.made[folder] = true
 	return folder, nil
 }
-func (w *aWorkspace) Unsaved(folder string) ([]string, error) { return w.unsaved[folder], nil }
+func (w *aWorkspace) Unsaved(folder string) ([]string, error) {
+	if w.failUnsaved {
+		return nil, errors.New("git status failed in " + folder)
+	}
+	return w.unsaved[folder], nil
+}
 func (w *aWorkspace) Remove(entry reconciler.Entry) error {
 	if w.failRemove {
 		return errors.New("cannot remove " + entry.Folder)
@@ -1370,6 +1378,23 @@ func TestAReleaseThatCannotTellArgoLeavesTheWorktreeAndTellsAgainOnTheNextPass(t
 	}
 }
 
+func TestAReleaseWhoseWorktreeCannotBeReadLeavesItAndTriesAgainOnTheNextPass(t *testing.T) {
+	pass := aRunPass(t)
+	pass.workspace.failUnsaved = true
+
+	pass.released(t, "?? notes.md")
+
+	if len(pass.workspace.removed) != 0 || slices.Contains(pass.fleet.calls, "confirm "+scout) {
+		t.Fatalf("removed %q, calls %q", pass.workspace.removed, pass.fleet.calls)
+	}
+	pass.workspace.failUnsaved = false
+	pass.run(t)
+
+	if len(pass.workspace.removed) != 1 || !slices.Contains(pass.fleet.calls, "confirm "+scout) || len(pass.fleet.told) != 1 {
+		t.Fatalf("removed %q, calls %q, told %+v", pass.workspace.removed, pass.fleet.calls, pass.fleet.told)
+	}
+}
+
 func TestAReleaseOfAFolderCrewTellsNobodyAndRemovesNothing(t *testing.T) {
 	pass := aRunPass(t)
 	pass.crewed(t)
@@ -1753,7 +1778,8 @@ func TestAShipReleasedElsewhereHasItsSessionStoppedAndIsCrewedAgainInAFreshWorkt
 
 	pass.run(t)
 
-	if !slices.Equal(pass.sessions.stopped, []string{scout}) || !slices.Equal(pass.workspace.removed, []string{scoutFolder}) {
+	// Stopped by the pass, then by its crew before its worktree goes.
+	if !slices.Equal(pass.sessions.stopped, []string{scout, scout}) || !slices.Equal(pass.workspace.removed, []string{scoutFolder}) {
 		t.Fatalf("stopped %q, removed %q", pass.sessions.stopped, pass.workspace.removed)
 	}
 	if len(pass.harness.launches) != 1 || !pass.harness.launches[0].isFirstStart || pass.harness.launches[0].firstPrompt != "Review PR 12" || pass.harness.launches[0].folder != scoutFolder {
@@ -1810,6 +1836,20 @@ func TestAShipReleasedElsewhereWhoseWorktreeCannotBeRemovedIsCrewedNowhereAndThe
 
 	if len(pass.harness.launches) != 1 || !pass.harness.launches[0].isFirstStart || pass.store.state.Entries[scout].IsReleasedElsewhere {
 		t.Fatalf("launches %+v, entry %+v", pass.harness.launches, pass.store.state.Entries[scout])
+	}
+}
+
+func TestAShipReleasedElsewhereWhoseSessionDoesNotStopKeepsItsWorktreeUnreadAndIsCrewedNowhere(t *testing.T) {
+	pass := aRunPass(t)
+	pass.releasedElsewhere(t)
+	pass.workspace.unsaved[scoutFolder] = []string{"?? draft.md"}
+	pass.sessions.stopFails = true
+
+	pass.run(t)
+	pass.run(t)
+
+	if len(pass.workspace.removed) != 0 || len(pass.fleet.told) != 0 || len(pass.harness.launches) != 0 || !pass.store.state.Entries[scout].IsReleasedElsewhere {
+		t.Fatalf("removed %q, told %+v, launches %+v, entry %+v", pass.workspace.removed, pass.fleet.told, pass.harness.launches, pass.store.state.Entries[scout])
 	}
 }
 
@@ -2597,5 +2637,89 @@ func TestAClearThatFailsHoldsBackNoOtherClearOfItsShip(t *testing.T) {
 
 	if !slices.Contains(pass.fleet.calls, "confirmCleared "+lookout+" aeolus-fleet not-kept") {
 		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+}
+
+// aTrash holds what it could not remove, as the trash answers it each pass, and marks told what argo was told of.
+type aTrash struct {
+	left []trash.Left
+}
+
+func (b *aTrash) Empty() []trash.Left { return slices.Clone(b.left) }
+func (b *aTrash) MarkTold(path string) error {
+	for i := range b.left {
+		if b.left[i].Path == path {
+			b.left[i].IsTold, b.left[i].IsNew = true, false
+		}
+	}
+	return nil
+}
+
+func aLeftClone(trashedAt time.Time) trash.Left {
+	return trash.Left{Path: "/worktrees/aeolus-fleet/.trash/scout.1793707200000", PathHash: "d1b5a804892b892cbac59c6f3cd3dd3dbd9e9d721526f90850ea49e8ce6de972", Folder: "/worktrees/aeolus-fleet/scout", TrashedAt: trashedAt, IsNew: true, Why: errors.New("unlinkat a/f: permission denied")}
+}
+
+func toldOfTheTrash(all []told) []told {
+	found := []told{}
+	for _, each := range all {
+		if strings.HasPrefix(each.key, "trierarch:trash:") {
+			found = append(found, each)
+		}
+	}
+	return found
+}
+
+func TestEveryPassEmptiesTheTrashAndLogsWhatItCouldNotRemoveOnce(t *testing.T) {
+	pass := aRunPass(t)
+	bin := &aTrash{left: []trash.Left{aLeftClone(now)}}
+	pass.pass.Trash = bin
+
+	if err := pass.pass.Run(); err != nil {
+		t.Fatal(err)
+	}
+	bin.left[0].IsNew = false
+	if err := pass.pass.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	want := "Could not remove /worktrees/aeolus-fleet/scout, in the trash at /worktrees/aeolus-fleet/.trash/scout.1793707200000: unlinkat a/f: permission denied; every pass tries again"
+	if got := slices.DeleteFunc(slices.Clone(pass.logged), func(line string) bool { return !strings.Contains(line, "trash") }); !reflect.DeepEqual(got, []string{want}) {
+		t.Errorf("logged %q, want %q once", got, want)
+	}
+	if got := toldOfTheTrash(pass.fleet.told); len(got) != 0 {
+		t.Errorf("told %+v, want nobody within a day", got)
+	}
+}
+
+func TestArgoIsToldOnceOfWhatTheTrashCouldNotRemoveForADay(t *testing.T) {
+	pass := aRunPass(t)
+	trashedAt := now.Add(-24 * time.Hour)
+	bin := &aTrash{left: []trash.Left{aLeftClone(trashedAt)}}
+	bin.left[0].IsNew = false
+	pass.pass.Trash = bin
+
+	for range 2 {
+		if err := pass.pass.Run(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	want := []told{{to: "argo", key: "trierarch:trash:d1b5a804892b892cbac59c6f3cd3dd3dbd9e9d721526f90850ea49e8ce6de972", text: notices.LeftInTrash("/worktrees/aeolus-fleet/scout", "/worktrees/aeolus-fleet/.trash/scout.1793707200000", trashedAt, "unlinkat a/f: permission denied")}}
+	if got := toldOfTheTrash(pass.fleet.told); !reflect.DeepEqual(got, want) {
+		t.Errorf("told %+v, want %+v", got, want)
+	}
+}
+
+func TestArgoIsNotToldOfWhatTheTrashCouldNotRemoveForLessThanADay(t *testing.T) {
+	pass := aRunPass(t)
+	bin := &aTrash{left: []trash.Left{aLeftClone(now.Add(-24*time.Hour + time.Millisecond))}}
+	pass.pass.Trash = bin
+
+	if err := pass.pass.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := toldOfTheTrash(pass.fleet.told); len(got) != 0 {
+		t.Errorf("told %+v, want nobody a millisecond short of a day", got)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash/trashtest"
 )
 
 // clonePlaces are the places of sessions in containers, each ship in a clone of its own, of the repository and with the folder notes.
@@ -233,6 +234,62 @@ func TestACloneIsRemovedByItsPath(t *testing.T) {
 	}
 }
 
+func TestACloneHoldingWhatTheHostCannotRemoveLeavesItsShipsPlaceForTheTrash(t *testing.T) {
+	repository, root := aRepository(t)
+	places := clonePlaces(repository, root, t.TempDir())
+	folder := prepared(t, places, scoutInAeolusFleet, "scout")
+	trashtest.Unremovable(t, root, folder)
+
+	if err := places.RemoveWorktree(folder); err != nil {
+		t.Fatalf("RemoveWorktree(%s) holding what the host cannot remove = %v, want its place free", folder, err)
+	}
+	if _, err := os.Lstat(folder); err == nil {
+		t.Error("the clone stayed in its ship's place")
+	}
+	if entries, err := os.ReadDir(filepath.Join(root, "aeolus-fleet", ".trash")); err != nil || len(entries) != 1 {
+		t.Errorf("the trash beside it holds %v (%v), want the clone", entries, err)
+	}
+}
+
+func TestACloneWhoseOwnTopFolderItsSessionMadeReadOnlyLeavesItsShipsPlaceForTheTrash(t *testing.T) {
+	repository, root := aRepository(t)
+	places := clonePlaces(repository, root, t.TempDir())
+	folder := prepared(t, places, scoutInAeolusFleet, "scout")
+	if err := os.Chmod(folder, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	// So the test's own folders can go whatever the outcome.
+	t.Cleanup(func() { _ = os.Chmod(folder, 0o755) })
+
+	if err := places.RemoveWorktree(folder); err != nil {
+		t.Fatalf("RemoveWorktree(%s) made read-only = %v, want its place free", folder, err)
+	}
+	if _, err := os.Lstat(folder); err == nil {
+		t.Error("the clone stayed in its ship's place")
+	}
+	if entries, err := os.ReadDir(filepath.Join(root, "aeolus-fleet", ".trash")); err != nil || len(entries) != 1 {
+		t.Errorf("the trash beside it holds %v (%v), want the clone", entries, err)
+	}
+}
+
+func TestACloneWhoseOwnTopFolderTheHostCannotMoveIsMovedToTheTrashWithinTheRuntimesUserNamespace(t *testing.T) {
+	repository, root := aRepository(t)
+	places := clonePlaces(repository, root, t.TempDir())
+	places.MoveWithinUserNamespace = trashtest.MoveAsRuntime
+	folder := prepared(t, places, scoutInAeolusFleet, "scout")
+	trashtest.Unmovable(t, root, folder)
+
+	if err := places.RemoveWorktree(folder); err != nil {
+		t.Fatalf("RemoveWorktree(%s) the host cannot move = %v, want its place free", folder, err)
+	}
+	if _, err := os.Lstat(folder); err == nil {
+		t.Error("the clone stayed in its ship's place")
+	}
+	if entries, err := os.ReadDir(filepath.Join(root, "aeolus-fleet", ".trash")); err != nil || len(entries) != 1 {
+		t.Errorf("the trash beside it holds %v (%v), want the clone", entries, err)
+	}
+}
+
 func TestNothingOutsideTheRootIsRemovedAsAClone(t *testing.T) {
 	repository, root := aRepository(t)
 	notes := t.TempDir()
@@ -334,5 +391,20 @@ func TestRecognizesACloneItMadeAfterRestartButRefusesAnUnmarkedClone(t *testing.
 				t.Errorf("IsMade(%s) = %v, want %v", test.folder, got, test.want)
 			}
 		})
+	}
+}
+
+func TestACloneIsCheckedOutThroughTheFiltersTheMachinesOwnConfigDefines(t *testing.T) {
+	repository, root := aRepository(t)
+	writeIn(t, repository, ".gitattributes", "*.txt filter=upper\n")
+	writeIn(t, repository, "hello.txt", "hello\n")
+	gitIn(t, "-C", repository, "add", ".")
+	gitIn(t, "-C", repository, "commit", "-q", "-m", "hello.txt")
+	gitIn(t, "config", "--file", aThrowawayHome(t), "filter.upper.smudge", "tr a-z A-Z")
+
+	folder := prepared(t, clonePlaces(repository, root, t.TempDir()), scoutInAeolusFleet, "scout")
+
+	if got, err := os.ReadFile(filepath.Join(folder, "hello.txt")); err != nil || string(got) != "HELLO\n" {
+		t.Errorf("hello.txt in the clone = %q, %v, want %q, through the machine's filter", got, err, "HELLO\n")
 	}
 }

@@ -1,4 +1,4 @@
-import { mkdir, rm } from 'node:fs/promises';
+import { lstat, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
@@ -7,6 +7,7 @@ import { createClaudeCodeSetup, type ClaudeCodeSetup } from './claude-code-setup
 import { shipHome } from './paths.js';
 import type { AeolusPlugin } from './plugin-identity.js';
 import { PLUGIN_DATA_FOLDER } from './plugin.js';
+import { discard, type MoveWithinUserNamespace } from './trash.js';
 
 /** Where a ship's Claude Code session keeps its files: its identity through the aeolus-fleet plugin, its conversations, and Claude Code's own files. */
 export interface ClaudeCodeHome {
@@ -49,9 +50,9 @@ const PRIVATE_FOLDER_MODE = 0o700;
  * each launch, the onboarding is completed and the workspace trusted at its
  * path, which the container mounts at the same path; bypass permissions mode
  * is accepted only where the operator accepted it on the host (#403). It goes
- * with the ship's identity, as on a release.
+ * with the ship's identity, as on a release, through the trash beside it.
  */
-export function createShipClaudeCodeHomes(at: { homes: string; managedSettings: string; pluginRoot: AeolusPlugin['root']; host: Pick<ClaudeCodeSetup, 'isSkipPermissionsAccepted'> }): ClaudeCodeHomes {
+export function createShipClaudeCodeHomes(at: { homes: string; managedSettings: string; moveWithinUserNamespace?: MoveWithinUserNamespace; pluginRoot: AeolusPlugin['root']; host: Pick<ClaudeCodeSetup, 'isSkipPermissionsAccepted'> }): ClaudeCodeHomes {
   const setupOf = (shipId: ShipId): ClaudeCodeSetup => createClaudeCodeSetup({ homeDirectory: shipHome(at.homes, shipId), managedSettings: at.managedSettings });
 
   return {
@@ -73,7 +74,13 @@ export function createShipClaudeCodeHomes(at: { homes: string; managedSettings: 
       }
     },
     remove: async (shipId) => {
-      await rm(shipHome(at.homes, shipId), { recursive: true, force: true });
+      const home = shipHome(at.homes, shipId);
+      // One already gone is removed already.
+      if ((await lstat(home).catch(() => undefined)) === undefined) {
+        return;
+      }
+      // Aside at once, so the release goes on whatever its session left in it; the trash removes it (docs/trierarch.md, "Session runtime").
+      await discard(home, { at: new Date(), ...(at.moveWithinUserNamespace !== undefined && { withinUserNamespace: at.moveWithinUserNamespace }) });
     },
   };
 }

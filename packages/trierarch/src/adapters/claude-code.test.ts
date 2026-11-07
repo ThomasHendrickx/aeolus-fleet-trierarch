@@ -1,5 +1,6 @@
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +9,7 @@ import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
+import { makeUnmovable, makeUnremovable, moveAsRuntime, removeAsRuntime, unremovableReason } from '../../test/support/unremovable.js';
 import { effectiveFlags } from '../core/effective-flags.js';
 import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
 import { CLAUDE_CODE_ADAPTER_FLAGS, claudeCodeCommandLine, claudeCodeKeyInReach, createClaudeCodeHarness } from './claude-code.js';
@@ -699,13 +701,13 @@ describe('Claude Code in containers, each ship with a home of its own (decision 
     rmSync(homes, { recursive: true, force: true });
   });
 
-  function inContainers() {
+  function inContainers(runtime: { moveWithinUserNamespace?: (from: string, to: string) => Promise<void> } = {}) {
     return createClaudeCodeHarness({
       configuration: CONFIGURATION,
       plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data, crews },
       projects,
       setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
-      shipHomes: { homes, managedSettings: join(home, 'managed') },
+      shipHomes: { homes, managedSettings: join(home, 'managed'), ...runtime },
       permissionModes: () => undefined,
       sessions: {
         start: (session) => {
@@ -820,6 +822,63 @@ describe('Claude Code in containers, each ship with a home of its own (decision 
     await inContainers().removeIdentity({ shipId, folder });
 
     expect({ scout: existsSync(join(homes, shipId)), other: existsSync(join(homes, other)) }).toEqual({ scout: false, other: true });
+  });
+
+  it("moves the ship's home aside, into the trash beside it, with its identity when its session made a folder in it read-only", async () => {
+    await inContainers().prepareIdentity({ folder, identity, crewToken: CREW_TOKEN });
+    const readOnly = join(homes, shipId, '.local', 'share', 'containers');
+    mkdirSync(readOnly, { recursive: true });
+    writeFileSync(join(readOnly, 'layer'), 'layer\n');
+    chmodSync(readOnly, 0o500);
+
+    try {
+      await inContainers().removeIdentity({ shipId, folder });
+
+      expect({ home: existsSync(join(homes, shipId)), trash: readdirSync(join(homes, '.trash')).length }).toEqual({ home: false, trash: 1 });
+    } finally {
+      // So the test's own folders can go whatever the outcome.
+      spawnSync('chmod', ['-R', 'u+rwx', homes]);
+    }
+  });
+
+  it("moves the ship's home aside, into the trash beside it, with its identity when its session made its own top read-only", async () => {
+    await inContainers().prepareIdentity({ folder, identity, crewToken: CREW_TOKEN });
+    chmodSync(join(homes, shipId), 0o555);
+
+    try {
+      await inContainers().removeIdentity({ shipId, folder });
+
+      expect({ home: existsSync(join(homes, shipId)), trash: readdirSync(join(homes, '.trash')).length }).toEqual({ home: false, trash: 1 });
+    } finally {
+      // So the test's own folders can go whatever the outcome.
+      spawnSync('chmod', ['-R', 'u+rwx', homes]);
+    }
+  });
+
+  it.skipIf(unremovableReason !== undefined)("moves the ship's home aside, into the trash beside it, within the runtime's user namespace when the host cannot move it", async () => {
+    await inContainers().prepareIdentity({ folder, identity, crewToken: CREW_TOKEN });
+    makeUnmovable(join(homes, shipId));
+
+    try {
+      await inContainers({ moveWithinUserNamespace: moveAsRuntime }).removeIdentity({ shipId, folder });
+
+      expect({ home: existsSync(join(homes, shipId)), trash: readdirSync(join(homes, '.trash')).length }).toEqual({ home: false, trash: 1 });
+    } finally {
+      await removeAsRuntime(homes);
+    }
+  });
+
+  it.skipIf(unremovableReason !== undefined)("moves the ship's home aside, into the trash beside it, with its identity when it holds what the host cannot remove", async () => {
+    await inContainers().prepareIdentity({ folder, identity, crewToken: CREW_TOKEN });
+    makeUnremovable(join(homes, shipId));
+
+    try {
+      await inContainers().removeIdentity({ shipId, folder });
+
+      expect({ home: existsSync(join(homes, shipId)), trash: readdirSync(join(homes, '.trash')).length }).toEqual({ home: false, trash: 1 });
+    } finally {
+      await removeAsRuntime(homes);
+    }
   });
 });
 

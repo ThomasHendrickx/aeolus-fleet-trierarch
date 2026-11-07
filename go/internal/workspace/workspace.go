@@ -7,6 +7,7 @@
 package workspace
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 )
@@ -31,7 +33,57 @@ type Worktree struct {
 }
 
 func git(args ...string) (string, error) {
-	out, err := exec.Command("git", args...).CombinedOutput()
+	return said(exec.Command("git", args...), args)
+}
+
+// gitInFolder is git run in a ship's folder, which ignores the folder's own config where it names a program, within its time limit.
+func gitInFolder(folder string, args ...string) (string, error) {
+	as := reading{limit: timeLimit}
+	ctx, cancel := context.WithTimeout(context.Background(), as.limit)
+	defer cancel()
+	command, err := inFolder(ctx, folder, as, args...)
+	if err != nil {
+		return "", err
+	}
+	return saidWithin(ctx, as.limit, folder, command, args)
+}
+
+// gitInClone is git run in a ship's clone, which ignores the clone's own config where it names a program, through the clone's own
+// `.git`, within its time limit.
+func gitInClone(clone string, args ...string) (string, error) {
+	return gitInCloneAs(clone, reading{isClone: true, limit: timeLimit}, args)
+}
+
+// gitInFreshClone is git run in a clone the trierarch just made from a trusted repository, before any session touched it, as in any
+// clone, but through the filters the machine's own config defines, so its checkout is what a session works on (git-lfs's files, not
+// their pointers).
+func gitInFreshClone(clone string, args ...string) (string, error) {
+	return gitInCloneAs(clone, reading{isClone: true, isFresh: true, limit: freshTimeLimit}, args)
+}
+
+// gitInCloneAs is git run in a ship's clone, read as it says.
+func gitInCloneAs(clone string, as reading, args []string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), as.limit)
+	defer cancel()
+	command, err := inClone(ctx, clone, as, args...)
+	if err != nil {
+		return "", err
+	}
+	return saidWithin(ctx, as.limit, clone, command, args)
+}
+
+// saidWithin is what the git command in the folder said, or why it failed: a refusal of the folder when it ran past its time limit.
+func saidWithin(ctx context.Context, limit time.Duration, folder string, command *exec.Cmd, args []string) (string, error) {
+	out, err := said(command, args)
+	if refused := endedAt(ctx, limit, folder, actionOf(args)); err != nil && refused != nil {
+		return "", refused
+	}
+	return out, err
+}
+
+// said is what the git command said, or why it failed.
+func said(command *exec.Cmd, args []string) (string, error) {
+	out, err := command.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git %s failed: %s", actionOf(args), messageOf(string(out)))
 	}
@@ -115,11 +167,22 @@ func Prepare(at Worktree) (string, error) {
 
 // Unsaved is what the worktree holds that no remote, branch or tag has: its changes, then its commits.
 func Unsaved(folder string) ([]string, error) {
-	changes, err := git("-C", folder, "status", "--porcelain")
+	return unsavedIn(folder, gitInFolder)
+}
+
+// refusedPrefix starts what a folder the host does not read holds, as unsaved: not known, so it is told with why, never taken for clean.
+const refusedPrefix = "refused, "
+
+// unsavedIn is what the folder holds that no remote, branch or tag has, as git in it says; a folder the host does not read is one line, why.
+func unsavedIn(folder string, gitIn func(folder string, args ...string) (string, error)) ([]string, error) {
+	changes, err := gitIn(folder, "status", "--porcelain", "--ignore-submodules=all")
+	if refused := (*RefusedError)(nil); errors.As(err, &refused) {
+		return []string{refusedPrefix + refused.Reason}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	commits, err := git("-C", folder, "log", "--format=commit %h %s", "HEAD", "--not", "--branches", "--tags", "--remotes")
+	commits, err := gitIn(folder, "log", "--no-show-signature", "--format=commit %h %s", "HEAD", "--not", "--branches", "--tags", "--remotes")
 	if err != nil {
 		return nil, err
 	}
@@ -155,6 +218,9 @@ type Places struct {
 	IsByRealPath bool
 	// IsClone gives each ship a clone of its own in place of a worktree, at the same path, as sessions in containers need it: git works inside, and no ship's container reaches another's (decision 0039).
 	IsClone bool
+	// MoveWithinUserNamespace moves a clone whose own top the host user cannot give its write to the trash within the runtime's user
+	// namespace; nil on the host.
+	MoveWithinUserNamespace func(from string, to string) error
 }
 
 // Prepare is the ship's folder: its worktree, made when missing, or the configured folder as it is; by its real path when the places say so.
@@ -190,8 +256,17 @@ func (p Places) prepare(entry reconciler.Entry, shipName string) (string, error)
 	return Prepare(at)
 }
 
+// Unsaved is what the ship's worktree, or its clone, holds that no remote, branch or tag has. What a clone holds is not known when
+// any read of it fails: told with why, as one the host does not read, so its release tells argo and removes it.
 func (p Places) Unsaved(folder string) ([]string, error) {
-	return Unsaved(folder)
+	if !p.IsClone {
+		return Unsaved(folder)
+	}
+	unsaved, err := unsavedIn(folder, gitInClone)
+	if err != nil {
+		return []string{refusedPrefix + err.Error()}, nil
+	}
+	return unsaved, nil
 }
 
 // Remove removes the ship's worktree, or its clone; a configured folder is never removed.

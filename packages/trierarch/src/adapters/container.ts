@@ -147,7 +147,11 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
     stop: async (shipId) => {
       // Kill, then remove: a remove alone waits out the stop timeout on podman.
       await runtime(['kill', containerName(shipId)]);
-      await runtime(['rm', '--force', containerName(shipId)]);
+      const removed = await runtime(['rm', '--force', containerName(shipId)]);
+      // Gone only once no longer listed: until then the session may still write its folder, which the host then does not read.
+      if ((await containers.list()).some((session) => session.shipId === shipId)) {
+        throw new Error(`The container of ${shipId} is still there after its stop: ${removed.stderr.trim()}`);
+      }
     },
   };
 

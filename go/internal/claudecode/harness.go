@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
@@ -16,6 +18,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
 )
 
 // Runtime is the session runtime as a harness uses it: start a session, send it a line, stop its turn.
@@ -54,6 +57,9 @@ type Harness struct {
 	Sessions string
 	// Homes is where each ship has a home of its own, for sessions in containers, which its container gets as its home (decision 0039); empty on the host, where every session shares the user's.
 	Homes string
+	// MoveWithinUserNamespace moves a ship's home whose own top the host user cannot give its write to the trash within the runtime's user
+	// namespace; nil on the host.
+	MoveWithinUserNamespace func(from string, to string) error
 }
 
 // homeOf is the ship's own home, which holds its identity and Claude Code's files and nothing of another ship.
@@ -247,7 +253,13 @@ func (h Harness) DeleteIdentity(entry reconciler.Entry) error {
 	if h.Homes == "" {
 		return nil
 	}
-	return os.RemoveAll(h.homeOf(entry))
+	home := h.homeOf(entry)
+	// One already gone is removed already.
+	if _, err := os.Lstat(home); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	// Aside at once, so the release goes on whatever its session left in it; the trash removes it (docs/trierarch.md, "Session runtime").
+	return trash.Discard(home, time.Now(), h.MoveWithinUserNamespace)
 }
 
 func (h Harness) SessionDied(entry reconciler.Entry) error {

@@ -23,6 +23,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
 )
 
 // Fleet is the fleet as a pass calls it: the trierarch's crew:run calls, and a report with a session's crew token.
@@ -117,6 +118,12 @@ type Checkouts interface {
 	Remove(shipID string) error
 }
 
+// Trash is where a released clone and ship's home go aside, emptied every pass; what it cannot remove holds back no release.
+type Trash interface {
+	Empty() []trash.Left
+	MarkTold(path string) error
+}
+
 // Logins are which login each session starts on and whether it can start on it now (api keys K5, K9).
 type Logins interface {
 	// LoginOf is the login a ship's next session starts on: its own, else its harness's default, else its subscription.
@@ -189,6 +196,8 @@ type Pass struct {
 	SendReleasedUsage func(entry reconciler.Entry) error
 	// Load reads the machine's load, at most once a minute; none reads nothing (#400).
 	Load *machineload.Reader
+	// Trash is emptied every pass; none empties nothing.
+	Trash Trash
 }
 
 // mcpServers are the MCP servers each harness offers now; none without a source.
@@ -279,8 +288,35 @@ func (p Pass) Run() error {
 			p.Log(fmt.Sprintf("%s of %s failed: %v", action.Kind, action.ShipID, err))
 		}
 	}
+	p.emptyTrash()
 	p.writeActivities(next)
 	return nil
+}
+
+// trashToldAfter is how long the trash tries to remove a folder before argo is told it cannot.
+const trashToldAfter = 24 * time.Hour
+
+// emptyTrash empties the trash: what it cannot remove is logged the first time, and argo told once after a day. It never fails the pass.
+func (p Pass) emptyTrash() {
+	if p.Trash == nil {
+		return
+	}
+	for _, left := range p.Trash.Empty() {
+		if left.IsNew {
+			p.Log(fmt.Sprintf("Could not remove %s, in the trash at %s: %v; every pass tries again", left.Folder, left.Path, left.Why))
+		}
+		if left.IsTold || p.Now().Sub(left.TrashedAt) < trashToldAfter {
+			continue
+		}
+		text := notices.LeftInTrash(left.Folder, left.Path, left.TrashedAt, left.Why.Error())
+		if err := p.Fleet.ReportToArgo(text, "trierarch:trash:"+left.PathHash); err != nil {
+			p.Log(fmt.Sprintf("Argo was not told %s stays in the trash: %v; the next pass tries again", left.Folder, err))
+			continue
+		}
+		if err := p.Trash.MarkTold(left.Path); err != nil {
+			p.Log(fmt.Sprintf("Argo was told %s stays in the trash, but it was not marked told: %v", left.Folder, err))
+		}
+	}
 }
 
 // activityIntervalSeconds is the interval the trierarch states with the activity it writes each pass: the fleet reads it as unknown past twice this, a pass being 5 seconds and a slow one a few more.
@@ -623,8 +659,11 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	return p.put(state, entry)
 }
 
-// freshAfterReleaseElsewhere removes the workspace of a ship released elsewhere before it is crewed again in a fresh one (row 11, #475), argo told first what that discards. The entry is saved without its mark only once that is done, so a failed removal is tried again on the next pass.
+// freshAfterReleaseElsewhere removes the workspace of a ship released elsewhere before it is crewed again in a fresh one (row 11, #475), argo told first what that discards. Its session stops first, as a release's does, so nothing reads the worktree while a session works in it, whatever the pass's stop did. The entry is saved without its mark only once that is done, so a failed stop or removal is tried again on the next pass.
 func (p Pass) freshAfterReleaseElsewhere(state reconciler.State, entry reconciler.Entry) (reconciler.State, reconciler.Entry, error) {
+	if err := p.Sessions.Stop(entry.ShipID); err != nil {
+		return state, entry, err
+	}
 	if err := p.endWorkspace(entry, notices.DiscardedElsewhere); err != nil {
 		return state, entry, err
 	}
@@ -838,7 +877,12 @@ func (p Pass) endWorkspace(entry reconciler.Entry, told func(notices.Ship, strin
 	if entry.Folder == "" || entry.Workspace.Kind != "worktree" {
 		return nil
 	}
-	if unsaved, err := p.Workspace.Unsaved(entry.Folder); err == nil && len(unsaved) > 0 {
+	unsaved, err := p.Workspace.Unsaved(entry.Folder)
+	if err != nil {
+		// What it holds is not known, so it is not removed untold: the next pass reads it again.
+		return err
+	}
+	if len(unsaved) > 0 {
 		p.Log(fmt.Sprintf("Discarded from the worktree of %s (%s), %s: %s", nameOf(entry), entry.ShipID, entry.Folder, strings.Join(unsaved, "; ")))
 		// Told before the worktree goes, once per release; a failure to tell leaves the worktree for the next pass.
 		text := told(notices.Ship{ID: entry.ShipID, Name: entry.ShipName}, entry.Workspace.Repository, unsaved)

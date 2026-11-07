@@ -16,7 +16,7 @@ const CONTAINER = { kind: 'container', binary: '', memory: '4g', cpus: 2 } as co
 let home: string;
 let paths: TrierarchPaths;
 let repository: string;
-/** A docker-style binary that logs each call's arguments, and the env file a run passes, and lists one running container, as an older trierarch left it. */
+/** A docker-style binary that logs each call's arguments, and the env file a run passes, and lists one running container, as an older trierarch left it, until it is removed. */
 let binary: string;
 let shipId: ReturnType<typeof newId<'ship'>>;
 
@@ -45,7 +45,10 @@ beforeEach(async () => {
       `printf '%s\\n' "$*" >> '${join(home, 'calls')}'`,
       'previous=""',
       `for argument; do [ "$previous" = --env-file ] && cat "$argument" >> '${join(home, 'env')}'; previous=$argument; done`,
-      `[ "$1" = ps ] && echo 'trierarch-${shipId} running'`,
+      // Its container is listed until removed, and again once run.
+      `[ "$1" = rm ] && touch '${join(home, 'removed')}'`,
+      `[ "$1" = run ] && rm -f '${join(home, 'removed')}'`,
+      `[ "$1" = ps ] && [ ! -e '${join(home, 'removed')}' ] && echo 'trierarch-${shipId} running'`,
       'exit 0',
       '',
     ].join('\n'),
@@ -89,8 +92,20 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
     expect(folder).toBe(join(home, 'real-root', 'demo', 'scout'));
   });
 
+  it('stops the processes in a folder on the host, and in containers leaves a folder a container works in', async () => {
+    const empty = join(home, 'empty');
+    mkdirSync(empty);
+
+    expect({ host: await adaptersOf().folderProcesses.stopIn(empty), container: await adaptersOf({ ...CONTAINER, binary }).folderProcesses.stopIn(empty).catch((error: unknown) => String(error)) }).toEqual({
+      host: 0,
+      container: `Error: A container works in ${empty}, so it is left for the next pass: trierarch-${shipId}`,
+    });
+  });
+
   it("gives sessions in containers a home of each ship's own under the trierarch's homes", () => {
-    expect(adaptersOf({ ...CONTAINER, binary }).shipHomes).toEqual({ homes: paths.homes, managedSettings: join(home, 'managed') });
+    const shipHomes = adaptersOf({ ...CONTAINER, binary }).shipHomes;
+
+    expect({ homes: shipHomes?.homes, managedSettings: shipHomes?.managedSettings, isMovedWithinUserNamespace: typeof shipHomes?.moveWithinUserNamespace === 'function' }).toEqual({ homes: paths.homes, managedSettings: join(home, 'managed'), isMovedWithinUserNamespace: true });
   });
 
   it('has sessions on the host and in containers reach the model proxy where the trierarch does, a container on its own loopback (headless H16)', () => {

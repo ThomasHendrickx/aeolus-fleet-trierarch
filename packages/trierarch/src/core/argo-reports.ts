@@ -109,17 +109,22 @@ export function lowResourceText(resource: LowResource, load: MachineLoad): strin
 }
 
 /** The kinds of discarded lines, in the order the counts name them. */
-const KINDS = ['deleted', 'changed', 'renamed', 'new', 'commit'] as const;
+const KINDS = ['refused', 'deleted', 'changed', 'renamed', 'new', 'commit'] as const;
 type DiscardedKind = (typeof KINDS)[number];
 
 const COMMIT_PREFIX = 'commit ';
+/** A worktree the host did not read, with why: what it held is not known. */
+const REFUSED_PREFIX = 'refused, ';
 /** A git status line: two status letters and a space before the path. */
 const STATUS_WIDTH = 3;
 
-/** One line of what removing a worktree discards (git status, or an unkept commit), in words. */
+/** One line of what removing a worktree discards (git status, an unkept commit, or why the host did not read it), in words. */
 function discardedLine(line: string): { kind: DiscardedKind; what: string } {
   if (line.startsWith(COMMIT_PREFIX)) {
     return { kind: 'commit', what: line.slice(COMMIT_PREFIX.length) };
+  }
+  if (line.startsWith(REFUSED_PREFIX)) {
+    return { kind: 'refused', what: line.slice(REFUSED_PREFIX.length) };
   }
   const status = line.slice(0, 2);
   const what = line.slice(STATUS_WIDTH);
@@ -171,4 +176,15 @@ export function keyNotReadyText(at: { harness: string; key: KeyStateAt; ships: r
         : { headline: `${name} has no API key`, state: 'no key', next: `Give it one with aeolus-trierarch login ${harness} --api-key.` };
   const waiting = ships.map((ship) => (ship.shipName === undefined ? `\`${ship.shipId}\`` : `${ship.shipName} (\`${ship.shipId}\`)`)).join(', ');
   return argoMessage({ headline: told.headline, body: paragraphs([`- Harness: ${harness}`, `- State: ${told.state}`, `- Ships that wait: ${waiting}`].join('\n'), told.next) });
+}
+
+/** A released folder the trash has not removed for a day: the folder, where it is aside, since when and why. */
+export function leftInTrashText(left: { folder: string; path: string; trashedAt: Date; why: string }): string {
+  return argoMessage({
+    headline: 'A released folder cannot be removed from this machine',
+    body: paragraphs(
+      [`- Folder: \`${left.folder}\``, `- In the trash at: \`${left.path}\``, `- Since: ${left.trashedAt.toISOString()}`, `- Why: ${left.why}`].join('\n'),
+      "Its ship's place is free; the folder stays aside, and every pass tries again to remove it.",
+    ),
+  });
 }

@@ -3,6 +3,7 @@ package notices
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 var scout = Ship{ID: "shp_1", Name: "scout"}
@@ -69,6 +70,13 @@ func TestDiscardedCountsEachKindInOrderAndNamesFiveLines(t *testing.T) {
 	}, "\n")
 	if got != want {
 		t.Fatalf("got\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestDiscardedNamesAWorktreeTheHostWouldNotReadWithWhy(t *testing.T) {
+	got := Discarded(scout, "aeolus-fleet", []string{"refused, its .git is no folder of its own"})
+	if !strings.Contains(got, "- Discarded: 1 refused\n") || !strings.Contains(got, "- refused `its .git is no folder of its own`") {
+		t.Fatalf("got %q", got)
 	}
 }
 
@@ -153,5 +161,14 @@ func TestStoppedOfferingSaysHowManyShipsFailedTheFirstReasonAndHowTheMachineOffe
 	}, "\n")
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestLeftInTrashNamesTheFolderWhereItIsSinceWhenAndWhy(t *testing.T) {
+	got := LeftInTrash("/worktrees/aeolus-fleet/scout", "/worktrees/aeolus-fleet/.trash/scout.1793707200000", time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC), "unlinkat a/f: permission denied")
+
+	want := "A released folder cannot be removed from this machine\n\n- Folder: `/worktrees/aeolus-fleet/scout`\n- In the trash at: `/worktrees/aeolus-fleet/.trash/scout.1793707200000`\n- Since: 2026-11-03T12:00:00.000Z\n- Why: unlinkat a/f: permission denied\n\nIts ship's place is free; the folder stays aside, and every pass tries again to remove it."
+	if got != want {
+		t.Errorf("LeftInTrash() = %q, want %q", got, want)
 	}
 }

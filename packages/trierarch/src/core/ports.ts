@@ -303,7 +303,7 @@ export interface ProxyToken {
 
 /** The processes running in a folder, whatever started them: a dev server a session left behind. */
 export interface FolderProcessesPort {
-  /** Stops every process whose working folder is the folder or inside it, and answers how many it stopped. */
+  /** Stops every process whose working folder is the folder or inside it, and answers how many it stopped; fails, stopping nothing, while something it cannot stop may work in the folder, as a container. */
   stopIn(folder: string): Promise<number>;
 }
 
@@ -348,11 +348,13 @@ export interface ContainerHostPort {
 export interface WorkspacePort {
   /** Makes the workspace, or finds the one a stop mid-crew left half made: its folder. */
   prepare(workspace: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace }): Promise<{ folder: string }>;
+  /** Whether the worktree holds nothing git would show; never for one the host does not read. */
   isClean(folder: string): Promise<boolean>;
   /**
    * What removing the worktree would discard, one line each (#450): each change
    * not committed, as git status shows it, then each commit no branch, tag or
-   * remote branch keeps. None when everything in it is kept elsewhere.
+   * remote branch keeps. None when everything in it is kept elsewhere. A
+   * worktree the host does not read is one line, `refused, <why>`.
    */
   unsaved(folder: string): Promise<readonly string[]>;
   /** Whether the folder is a worktree the trierarch made: one `<root>/<repository>/<ship>` of a repository it has, which git knows. Anything else under its root is not its to clear. */
@@ -360,6 +362,29 @@ export interface WorkspacePort {
   /** Removes a worktree the trierarch made; never a configured folder. */
   remove(folder: string): Promise<void>;
   worktrees(): Promise<readonly ObservedWorktree[]>;
+}
+
+/** What the trash could not remove: where it is, where it was, when it was discarded, whether this is the first time and whether argo was told, and why. */
+export interface LeftInTrash {
+  readonly path: string;
+  /** A hash of where it was put in the trash, before any state suffix: the same every pass and across a restart, and short. */
+  readonly pathHash: string;
+  readonly folder: string;
+  readonly trashedAt: Date;
+  readonly isNew: boolean;
+  readonly isTold: boolean;
+  readonly why: string;
+}
+
+/**
+ * The trash a released clone and ship's home go aside to (docs/trierarch.md,
+ * "Session runtime"), so a release confirms whatever its session left in them.
+ */
+export interface TrashPort {
+  /** Removes what the trash holds, and answers what stays. */
+  empty(): Promise<readonly LeftInTrash[]>;
+  /** Marks what was left as told to argo. */
+  markTold(path: string): Promise<void>;
 }
 
 /** A read-only checkout a session gets beside its working folder (#1182): the configured repository it is of, and where it is. */

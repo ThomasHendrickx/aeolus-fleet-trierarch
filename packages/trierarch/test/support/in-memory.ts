@@ -47,6 +47,8 @@ import type {
   SubscriptionWindow,
   UsagePort,
   ModelLoginsPort,
+  LeftInTrash,
+  TrashPort,
 } from '../../src/core/ports.js';
 import type { MachineLoad } from '../../src/core/machine-load.js';
 import { createReadLoad } from '../../src/core/read-load.js';
@@ -460,7 +462,13 @@ export class InMemoryProcesses implements Pick<SessionRuntime, 'list' | 'stop'> 
     return Promise.resolve([...this.sessions].map(([shipId, status]) => ({ shipId, status, ...(this.otherVersion.has(shipId) && { isOtherVersion: true }) })));
   }
 
+  /** The ships whose session a stop does not end, as a container still listed. */
+  readonly notStopping = new Set<ShipId>();
+
   stop(shipId: ShipId): Promise<void> {
+    if (this.notStopping.has(shipId)) {
+      return Promise.reject(new Error(`the session of ${shipId} is still listed`));
+    }
     this.sessions.delete(shipId);
     this.otherVersion.delete(shipId);
     return Promise.resolve();
@@ -731,6 +739,22 @@ export class InMemoryState implements StatePort {
 
   current(): TrierarchState {
     return this.saved.at(-1) ?? EMPTY_STATE;
+  }
+}
+
+/** What the trash could not remove, as a test sets it: new only the first time it is answered, as the trash marks it left. */
+export class InMemoryTrash implements TrashPort {
+  left: LeftInTrash[] = [];
+
+  empty(): Promise<readonly LeftInTrash[]> {
+    const answered = this.left.map((each) => ({ ...each }));
+    this.left = this.left.map((each) => ({ ...each, isNew: false }));
+    return Promise.resolve(answered);
+  }
+
+  markTold(path: string): Promise<void> {
+    this.left = this.left.map((each) => (each.path === path ? { ...each, isTold: true } : each));
+    return Promise.resolve();
   }
 }
 
@@ -1031,7 +1055,8 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
   const folderProcesses = new InMemoryFolderProcesses();
   const usage = new InMemoryUsage();
   const sendReleasedUsage = createSendReleasedUsage({ fleet, usage, clock, logger, prices: priceTableOf(undefined), trierarchShipId: TRIERARCH_SHIP_ID, ...(pluginShipId !== undefined && { pluginShipId }) });
-  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, folderProcesses, workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId, sockets, modelLogins, sendReleasedUsage, ...(logins !== undefined && { logins }) });
+  const trash = new InMemoryTrash();
+  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, folderProcesses, workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId, sockets, modelLogins, sendReleasedUsage, trash, ...(logins !== undefined && { logins }) });
   const uninstall = createUninstall({ processes, state });
   const machine = new InMemoryMachine();
   const readLoad = createReadLoad({ machine, fleet, state, clock, logger });
@@ -1047,7 +1072,7 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
     return delivery;
   }
 
-  return { fleetKey, fleet, processes, folderProcesses, harness, codex, modelLogins, workspace, checkouts, trust, state, clock, logger, handle, pass, uninstall, reportSelf, deliver, refusals, sockets, trustedRepositories, machine, usage, readLoad, readUsage, sendUsage };
+  return { fleetKey, fleet, processes, folderProcesses, harness, codex, modelLogins, workspace, checkouts, trust, state, clock, logger, handle, pass, trash, uninstall, reportSelf, deliver, refusals, sockets, trustedRepositories, machine, usage, readLoad, readUsage, sendUsage };
 }
 
 export type Trierarch = ReturnType<typeof aTrierarch>;
