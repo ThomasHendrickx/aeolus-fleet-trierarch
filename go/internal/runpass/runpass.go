@@ -23,6 +23,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
 )
 
 // Fleet is the fleet as a pass calls it: the trierarch's crew:run calls, and a report with a session's crew token.
@@ -117,6 +118,12 @@ type Checkouts interface {
 	Remove(shipID string) error
 }
 
+// Trash is where a released clone and ship's home go aside, emptied every pass; what it cannot remove holds back no release.
+type Trash interface {
+	Empty() []trash.Left
+	MarkTold(path string) error
+}
+
 // Logins are which login each session starts on and whether it can start on it now (api keys K5, K9).
 type Logins interface {
 	// LoginOf is the login a ship's next session starts on: its own, else its harness's default, else its subscription.
@@ -189,6 +196,8 @@ type Pass struct {
 	SendReleasedUsage func(entry reconciler.Entry) error
 	// Load reads the machine's load, at most once a minute; none reads nothing (#400).
 	Load *machineload.Reader
+	// Trash is emptied every pass; none empties nothing.
+	Trash Trash
 }
 
 // mcpServers are the MCP servers each harness offers now; none without a source.
@@ -279,8 +288,35 @@ func (p Pass) Run() error {
 			p.Log(fmt.Sprintf("%s of %s failed: %v", action.Kind, action.ShipID, err))
 		}
 	}
+	p.emptyTrash()
 	p.writeActivities(next)
 	return nil
+}
+
+// trashToldAfter is how long the trash tries to remove a folder before argo is told it cannot.
+const trashToldAfter = 24 * time.Hour
+
+// emptyTrash empties the trash: what it cannot remove is logged the first time, and argo told once after a day. It never fails the pass.
+func (p Pass) emptyTrash() {
+	if p.Trash == nil {
+		return
+	}
+	for _, left := range p.Trash.Empty() {
+		if left.IsNew {
+			p.Log(fmt.Sprintf("Could not remove %s, in the trash at %s: %v; every pass tries again", left.Folder, left.Path, left.Why))
+		}
+		if left.IsTold || p.Now().Sub(left.TrashedAt) < trashToldAfter {
+			continue
+		}
+		text := notices.LeftInTrash(left.Folder, left.Path, left.TrashedAt, left.Why.Error())
+		if err := p.Fleet.ReportToArgo(text, fmt.Sprintf("trierarch:trash:%s:%d", left.Folder, left.TrashedAt.UnixMilli())); err != nil {
+			p.Log(fmt.Sprintf("Argo was not told %s stays in the trash: %v; the next pass tries again", left.Folder, err))
+			continue
+		}
+		if err := p.Trash.MarkTold(left.Path); err != nil {
+			p.Log(fmt.Sprintf("Argo was told %s stays in the trash, but it was not marked told: %v", left.Folder, err))
+		}
+	}
 }
 
 // activityIntervalSeconds is the interval the trierarch states with the activity it writes each pass: the fleet reads it as unknown past twice this, a pass being 5 seconds and a slow one a few more.

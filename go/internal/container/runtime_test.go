@@ -304,3 +304,16 @@ func readFile(t *testing.T, path string) string {
 	}
 	return string(text)
 }
+
+func TestAPathIsRemovedWithinTheRuntimesUserNamespace(t *testing.T) {
+	var ran []string
+	runtime := Runtime{Run: func(args ...string) (string, error) { ran = args; return "", nil }}
+
+	if err := runtime.RemoveWithinUserNamespace("/worktrees/aeolus-fleet/.trash/scout.1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if want := []string{"unshare", "rm", "-rf", "--", "/worktrees/aeolus-fleet/.trash/scout.1"}; !slices.Equal(ran, want) {
+		t.Errorf("ran %q, want %q", ran, want)
+	}
+}

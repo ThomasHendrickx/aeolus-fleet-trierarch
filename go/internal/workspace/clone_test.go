@@ -234,29 +234,6 @@ func TestACloneIsRemovedByItsPath(t *testing.T) {
 	}
 }
 
-func TestACloneHoldingAFolderItsSessionMadeReadOnlyIsRemoved(t *testing.T) {
-	repository, root := aRepository(t)
-	places := clonePlaces(repository, root, t.TempDir())
-	folder := prepared(t, places, scoutInAeolusFleet, "scout")
-	readOnly := filepath.Join(folder, "a", "b")
-	if err := os.MkdirAll(readOnly, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeIn(t, readOnly, "f", "f\n")
-	if err := os.Chmod(readOnly, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	// So the test's own folders can go whatever the outcome.
-	t.Cleanup(func() { _ = os.Chmod(readOnly, 0o755) })
-
-	if err := places.RemoveWorktree(folder); err != nil {
-		t.Fatalf("RemoveWorktree(%s) with a read-only folder in it = %v, want it removed", folder, err)
-	}
-	if _, err := os.Lstat(folder); err == nil {
-		t.Error("the clone stayed")
-	}
-}
-
 func TestACloneHoldingWhatTheHostCannotRemoveLeavesItsShipsPlaceForTheTrash(t *testing.T) {
 	repository, root := aRepository(t)
 	places := clonePlaces(repository, root, t.TempDir())

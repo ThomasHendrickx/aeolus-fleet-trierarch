@@ -105,6 +105,13 @@ func (r Runtime) run(args ...string) (string, error) {
 	return string(said), nil
 }
 
+// RemoveWithinUserNamespace removes the path within the runtime's user namespace, where the host user is root and the ids a session
+// mapped are its own: what a session left that the host user cannot remove.
+func (r Runtime) RemoveWithinUserNamespace(path string) error {
+	_, err := r.run("unshare", "rm", "-rf", "--", path)
+	return err
+}
+
 func (r Runtime) holds() sessions.Runtime {
 	holds := r.Holds
 	holds.HeldAs = r.heldAs

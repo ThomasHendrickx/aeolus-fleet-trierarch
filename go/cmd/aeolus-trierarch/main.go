@@ -58,6 +58,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/shipsocket"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trust"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/usage"
@@ -461,6 +462,28 @@ func folderProcessesOf(configured *config.Runtime) runpass.FolderProcesses {
 	return container.FolderProcesses{Runtime: container.Runtime{Binary: configured.Binary}, Host: folderprocess.Stopper{}}
 }
 
+// trashOf is the trash beside each repository's clones and the ships' homes, emptied every pass: within the runtime's user namespace
+// too in containers, by the host's own removal alone on the host.
+func trashOf(root string, at paths.Paths, configured *config.Runtime) trash.Trash {
+	beside := func() []string {
+		found := []string{}
+		entries, _ := os.ReadDir(root)
+		for _, entry := range entries {
+			if entry.IsDir() {
+				found = append(found, filepath.Join(root, entry.Name()))
+			}
+		}
+		if homes := homesOf(at, configured); homes != "" {
+			found = append(found, homes)
+		}
+		return found
+	}
+	if !isInContainers(configured) {
+		return trash.Trash{Beside: beside}
+	}
+	return trash.Trash{Beside: beside, Unshare: container.Runtime{Binary: configured.Binary}.RemoveWithinUserNamespace}
+}
+
 func isInContainers(configured *config.Runtime) bool {
 	return configured != nil && configured.Kind == "container"
 }
@@ -595,7 +618,8 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 			return detect.Refuse(context.Background(), harness, model, time.Now(), offers.set)
 		},
 		// The machine's memory and disk, read each minute; argo is told once when one is low (#400).
-		Load: load,
+		Load:  load,
+		Trash: trashOf(root, at, configuration.Runtime),
 	}
 	// What each harness trusts is read from its own files at each report (#381).
 	trustReaders := map[string]func() map[string]bool{

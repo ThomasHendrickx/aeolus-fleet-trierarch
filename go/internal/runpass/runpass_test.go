@@ -2659,9 +2659,9 @@ func aLeftClone(trashedAt time.Time) trash.Left {
 	return trash.Left{Path: "/worktrees/aeolus-fleet/.trash/scout.1793707200000", Folder: "/worktrees/aeolus-fleet/scout", TrashedAt: trashedAt, IsNew: true, Why: errors.New("unlinkat a/f: permission denied")}
 }
 
-func toldOfTheTrash(told []told) []told {
+func toldOfTheTrash(all []told) []told {
 	found := []told{}
-	for _, each := range told {
+	for _, each := range all {
 		if strings.HasPrefix(each.key, "trierarch:trash:") {
 			found = append(found, each)
 		}

@@ -10,8 +10,10 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
 )
 
 // A clone is the workspace of a session in a container (decision 0039; docs/trierarch.md, "Session runtime"): a per-ship clone of the
@@ -110,26 +112,11 @@ func (p Places) removeClone(folder string) error {
 	if _, err := os.Lstat(folder); errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
-	if err := writableByItsOwner(folder); err != nil {
+	// Aside at once, so its ship's place is free and nothing reads it again; the trash removes it (docs/trierarch.md, "Session runtime").
+	if err := trash.Discard(folder, time.Now()); err != nil {
 		return fmt.Errorf("remove clone %s: %w", folder, err)
 	}
-	return os.RemoveAll(folder)
-}
-
-// writableByItsOwner gives each folder in the clone, the clone's own included, its owner's read, write and search, following no link:
-// the session owns what it writes in its clone, and a folder it made read-only would keep what it holds from being removed.
-func writableByItsOwner(folder string) error {
-	// WalkDir calls for a folder before it reads it, and follows no link.
-	return filepath.WalkDir(folder, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || !entry.IsDir() {
-			return err
-		}
-		found, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		return os.Chmod(path, found.Mode().Perm()|0o700)
-	})
+	return nil
 }
 
 // clones are the clones under the root of the configured repositories: each folder `<root>/<repository>/<name>` with a `.git` of
