@@ -742,7 +742,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 			offered = withTrusted(offered)
 			in := selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Trusted: trust.Of(offered, trustReaders), McpServers: offeredServers(), SealingKey: sealingKey.Public(), Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, Now: time.Now()}
 			if !isInContainers(configured.Runtime) {
-				in.IsAipMissing = aipCommandOf(at).State().Version == ""
+				in.AipMissing = aipCommandOf(at).State().Brief()
 			}
 			return in
 		},

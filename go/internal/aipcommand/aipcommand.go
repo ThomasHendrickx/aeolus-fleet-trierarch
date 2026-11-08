@@ -96,6 +96,17 @@ type Folder struct {
 	Log func(line string)
 }
 
+// failedPrefix opens why there is no aip when an install failed.
+const failedPrefix = "the install of aip " + Version + " failed: "
+
+// Brief is why there is no aip, as short as a report's note takes it: a failed install's own words are left to status. Empty while aip is there.
+func (s State) Brief() string {
+	if strings.HasPrefix(s.Missing, failedPrefix) {
+		return "its install failed, as aeolus-trierarch status says"
+	}
+	return s.Missing
+}
+
 var notYet = State{Missing: "aip " + Version + " is not installed yet"}
 
 // State is the last install's outcome as kept; not installed yet when none is.
@@ -132,7 +143,7 @@ func (f Folder) Bin() (string, bool) {
 func (f Folder) Ensure() State {
 	unlock, err := f.lock()
 	if err != nil {
-		state := State{Missing: "the install of aip " + Version + " failed: " + err.Error()}
+		state := State{Missing: failedPrefix + err.Error()}
 		if f.Log != nil {
 			f.Log(state.Missing)
 		}
@@ -181,7 +192,7 @@ func (f Folder) install() State {
 	}
 	if err := f.installIn(); err != nil {
 		_ = os.RemoveAll(f.Path)
-		return State{Missing: "the install of aip " + Version + " failed: " + err.Error()}
+		return State{Missing: failedPrefix + err.Error()}
 	}
 	return State{Version: Version}
 }

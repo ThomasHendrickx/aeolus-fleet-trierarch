@@ -83,8 +83,8 @@ type Input struct {
 	Load *machineload.Load
 	// Usage is the harnesses' usage as last read (#353); none reports none.
 	Usage *usage.Usage
-	// IsAipMissing says host sessions get no aip (#314); status says why.
-	IsAipMissing bool
+	// AipMissing is why host sessions get no aip (#314), briefly; empty while they get it or the machine runs none.
+	AipMissing string
 }
 
 // Logins are which login each ship's next session starts on, and where each harness's API key stands.
@@ -121,9 +121,14 @@ func Of(in Input) Report {
 	if in.IsKeyCutOff {
 		state, note = "blocked", note+", "+keyCutOffNote
 	}
-	// Core refuses a longer note, and with it the whole report: the aip is the one part left out for it.
-	if in.IsAipMissing && len(note)+len(aipMissingNote) <= noteMost {
-		note += aipMissingNote
+	// Core refuses a longer note, and with it the whole report: the aip is the one part shortened, then left out, for it.
+	if in.AipMissing != "" {
+		for _, aip := range []string{aipMissingNote + ": " + in.AipMissing, aipMissingNote} {
+			if len(note)+len(aip) <= noteMost {
+				note += aip
+				break
+			}
+		}
 	}
 	return Report{State: state, Note: note, Details: detailsOf(in)}
 }
