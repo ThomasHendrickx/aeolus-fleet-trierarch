@@ -28,7 +28,7 @@ func TestEverySessionOnTheHostAndInContainersReachesTheConfiguredAipServerWithTh
 func TestEverySessionOnTheHostAndInContainersOfATrierarchWithNoAipConfiguredReachesTheAipTheTrierarchPluginSent(t *testing.T) {
 	at := paths.Of(t.TempDir(), "")
 	sent := aip.Setting{Server: "https://aip.example.test", TokenSecret: "company-aip"}
-	if err := heldAipOf(at).Accept(sent); err != nil {
+	if err := heldAipOf(at).Accept(&sent); err != nil {
 		t.Fatal(err)
 	}
 

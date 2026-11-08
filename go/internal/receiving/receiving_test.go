@@ -500,23 +500,23 @@ func TestSecretsThatCannotBeKeptAreNotAcknowledgedSoTheyComeAgain(t *testing.T) 
 	}
 }
 
-// anAipKeeper keeps the aip setting it is given, or fails to.
+// anAipKeeper keeps the aip setting it is given, none included, or fails to.
 type anAipKeeper struct {
 	kept *aip.Setting
 	err  error
 	took int
 }
 
-func (k *anAipKeeper) Accept(setting aip.Setting) error {
+func (k *anAipKeeper) Accept(setting *aip.Setting) error {
 	k.took++
 	if k.err != nil {
 		return k.err
 	}
-	k.kept = &setting
+	k.kept = setting
 	return nil
 }
 
-func runKeepingAip(keeper *anAipKeeper, answers ...answer) *aRun {
+func runKeepingServersAndAip(servers *aServerKeeper, keeper *anAipKeeper, answers ...answer) *aRun {
 	ctx, cancel := context.WithCancel(context.Background())
 	ran := &aRun{ship: &aShip{cancel: cancel, answers: answers}}
 	Loop{
@@ -526,53 +526,60 @@ func runKeepingAip(keeper *anAipKeeper, answers ...answer) *aRun {
 		KeyWaitMax:   300 * time.Second,
 		Pause:        func(_ context.Context, wait time.Duration) { ran.waits = append(ran.waits, wait) },
 		PluginShipID: plugin,
+		McpServers:   servers,
 		Aip:          keeper,
 	}.Run(ctx)
 	return ran
 }
 
-func anAipSetting(from string, id string, payload string) Delivery {
-	return Delivery{DeliveryID: id, SenderShipID: from, ContentType: aip.ContentType, Payload: payload}
-}
+const graphWithAip = `{"servers":[{"name":"company-graph","url":"https://graph.example.test/mcp","transport":"streamable-http","tools":["read_neo4j_cypher"]}],"aip":{"server":"https://aip.example.test","tokenSecret":"aip-read"}}`
 
-const companyAip = `{"server":"https://aip.example.test","tokenSecret":"aip-read"}`
+func TestTheAipTheServerListFromThePluginsShipCarriesIsKeptWithTheList(t *testing.T) {
+	servers, keeper := &aServerKeeper{}, &anAipKeeper{}
 
-func TestTheAipSettingFromThePluginsShipIsKeptAndAcknowledged(t *testing.T) {
-	keeper := &anAipKeeper{}
-
-	ran := runKeepingAip(keeper, answer{deliveries: []Delivery{anAipSetting(plugin, "d1", companyAip)}})
+	ran := runKeepingServersAndAip(servers, keeper, answer{deliveries: []Delivery{aServerList(plugin, "d1", graphWithAip)}})
 
 	want := aip.Setting{Server: "https://aip.example.test", TokenSecret: "aip-read"}
-	if keeper.kept == nil || *keeper.kept != want || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 0 {
-		t.Fatalf("kept %+v, acked %v, logged %q", keeper.kept, ran.ship.acked, ran.logged)
+	if keeper.kept == nil || *keeper.kept != want || len(servers.kept) != 1 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 0 {
+		t.Fatalf("kept %+v and %v, acked %v, logged %q", keeper.kept, servers.kept, ran.ship.acked, ran.logged)
 	}
 }
 
-func TestAnAipSettingFromAnotherShipIsAcknowledgedAndNotTaken(t *testing.T) {
-	keeper := &anAipKeeper{}
+func TestAServerListWithNoAipClearsTheAipThePluginSentBefore(t *testing.T) {
+	servers, keeper := &aServerKeeper{}, &anAipKeeper{kept: &aip.Setting{Server: "https://aip.example.test", TokenSecret: "aip-read"}}
 
-	ran := runKeepingAip(keeper, answer{deliveries: []Delivery{anAipSetting(argo, "d1", companyAip)}})
+	ran := runKeepingServersAndAip(servers, keeper, answer{deliveries: []Delivery{aServerList(plugin, "d1", graph)}})
 
-	want := "Not handled: an aip setting from " + argo + ". The trierarch takes them only from the trierarch plugin's ship " + plugin + "."
-	if keeper.took != 0 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || ran.logged[0] != want {
-		t.Fatalf("took %d, acked %v, logged %q", keeper.took, ran.ship.acked, ran.logged)
+	if keeper.took != 1 || keeper.kept != nil || !slices.Equal(ran.ship.acked, []string{"d1"}) {
+		t.Fatalf("took %d, kept %+v, acked %v, want the aip cleared", keeper.took, keeper.kept, ran.ship.acked)
 	}
 }
 
-func TestAnAipSettingThatDoesNotFitIsAcknowledgedAndTheHeldOneStays(t *testing.T) {
-	keeper := &anAipKeeper{}
+func TestTheAipInAServerListFromAnotherShipIsNotTaken(t *testing.T) {
+	servers, keeper := &aServerKeeper{}, &anAipKeeper{}
 
-	ran := runKeepingAip(keeper, answer{deliveries: []Delivery{anAipSetting(plugin, "d1", `{"server":"https://aip.example.test","tokenSecret":"aip-read","token":"s3cr3t"}`)}})
+	ran := runKeepingServersAndAip(servers, keeper, answer{deliveries: []Delivery{aServerList(argo, "d1", graphWithAip)}})
 
-	if keeper.took != 0 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || !strings.HasSuffix(ran.logged[0], "The trierarch keeps the aip setting it holds.") || strings.Contains(ran.logged[0], "s3cr3t") {
-		t.Fatalf("took %d, acked %v, logged %q", keeper.took, ran.ship.acked, ran.logged)
+	if keeper.took != 0 || servers.took != 0 || !slices.Equal(ran.ship.acked, []string{"d1"}) {
+		t.Fatalf("took %d and %d, acked %v", keeper.took, servers.took, ran.ship.acked)
 	}
 }
 
-func TestAnAipSettingThatCannotBeKeptIsNotAcknowledgedSoItComesAgain(t *testing.T) {
-	keeper := &anAipKeeper{err: errors.New("the file cannot be written")}
+func TestAServerListWhoseAipDoesNotFitIsNotTakenAndTheHeldOnesStay(t *testing.T) {
+	servers, keeper := &aServerKeeper{}, &anAipKeeper{}
+	payload := `{"servers":[],"aip":{"server":"https://aip.example.test","tokenSecret":"aip-read","token":"s3cr3t"}}`
 
-	ran := runKeepingAip(keeper, answer{deliveries: []Delivery{anAipSetting(plugin, "d1", companyAip)}})
+	ran := runKeepingServersAndAip(servers, keeper, answer{deliveries: []Delivery{aServerList(plugin, "d1", payload)}})
+
+	if keeper.took != 0 || servers.took != 0 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || !strings.HasSuffix(ran.logged[0], "The trierarch keeps the list it holds.") || strings.Contains(ran.logged[0], "s3cr3t") {
+		t.Fatalf("took %d and %d, acked %v, logged %q", keeper.took, servers.took, ran.ship.acked, ran.logged)
+	}
+}
+
+func TestAServerListWhoseAipCannotBeKeptIsNotAcknowledgedSoItComesAgain(t *testing.T) {
+	servers, keeper := &aServerKeeper{}, &anAipKeeper{err: errors.New("the file cannot be written")}
+
+	ran := runKeepingServersAndAip(servers, keeper, answer{deliveries: []Delivery{aServerList(plugin, "d1", graphWithAip)}})
 
 	if len(ran.ship.acked) != 0 {
 		t.Fatalf("acked %v, want none", ran.ship.acked)
