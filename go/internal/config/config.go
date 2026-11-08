@@ -12,12 +12,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
 
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aip"
 )
 
 // Schema is the configuration's JSON Schema, written beside it so an editor checks it.
@@ -118,18 +117,9 @@ type Aip struct {
 	TokenSecret string `json:"tokenSecret"`
 }
 
-// check says why the aip does not fit, nil when it does.
+// check says why the aip does not fit, nil when it does: as the trierarch plugin's setting is checked.
 func (a Aip) check() error {
-	if a.Server == "" || a.TokenSecret == "" {
-		return fmt.Errorf("aip names its server and its tokenSecret")
-	}
-	if server, err := url.Parse(a.Server); err != nil || (server.Scheme != "http" && server.Scheme != "https") || server.Host == "" {
-		return fmt.Errorf("aip's server is an http or https URL")
-	}
-	if !secrets.IsName(a.TokenSecret) {
-		return fmt.Errorf("aip's tokenSecret is a secret's name: lowercase letters, digits, dots, hyphens and underscores, at most 100")
-	}
-	return nil
+	return aip.Setting(a).Check()
 }
 
 // Logins is which login each session runs on: a default per harness and a login per ship name.
