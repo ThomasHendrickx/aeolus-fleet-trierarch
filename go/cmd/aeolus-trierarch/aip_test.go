@@ -1,10 +1,12 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aip"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aipcommand"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/container"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
@@ -50,5 +52,42 @@ func TestTheAipSettingTheTrierarchPluginSentIsKeptInAipJsonInTheTrierarchsHome(t
 
 	if at.Aip != filepath.Join(at.Home, "aip.json") {
 		t.Errorf("the aip file is %s, want aip.json in the trierarch's home", at.Aip)
+	}
+}
+
+func TestHostSessionsRunTheAipTheTrierarchKeepsInItsHomeAndSessionsInContainersTheirImagesOwn(t *testing.T) {
+	at := paths.Of(t.TempDir(), "")
+	bin := filepath.Join(at.AipCommand, "bin")
+	for _, name := range []string{"aip", "python"} {
+		if err := os.MkdirAll(bin, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(at.AipCommandOutcome, []byte(`{"version":"`+aipcommand.Version+`"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	onTheHost := sessionRuntime(at, "aeolus-trierarch", config.Configuration{}).(sessions.Runtime).Aip
+	inContainers := sessionRuntime(at, "aeolus-trierarch", config.Configuration{Runtime: &config.Runtime{Kind: "container", Binary: "podman"}}).(container.Runtime).Holds.Aip
+
+	if onTheHost.Command == nil || onTheHost.Path != os.Getenv("PATH") {
+		t.Fatalf("host sessions run aip %+v, want the trierarch's in front of its own PATH", onTheHost)
+	}
+	if got, ok := onTheHost.Command(); !ok || got != bin {
+		t.Errorf("host sessions run the aip in %q, %v, want %s", got, ok, bin)
+	}
+	if inContainers.Command != nil {
+		t.Errorf("sessions in containers run the host's aip, want their image's own")
+	}
+}
+
+func TestTheAipCommandIsKeptInTheTrierarchsHome(t *testing.T) {
+	at := paths.Of(t.TempDir(), "")
+
+	if at.AipCommand != filepath.Join(at.Home, "aip-command") || at.AipCommandOutcome != filepath.Join(at.Home, "aip-command.json") {
+		t.Errorf("the aip command is kept in %s and %s, want aip-command and aip-command.json in the trierarch's home", at.AipCommand, at.AipCommandOutcome)
 	}
 }
