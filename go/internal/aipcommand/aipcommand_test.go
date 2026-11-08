@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -338,5 +339,25 @@ func TestAFolderNeverEnsuredIsNotInstalledYet(t *testing.T) {
 
 	if _, ok := folder.Bin(); ok || folder.State() != (State{Missing: "aip 0.7.0 is not installed yet"}) {
 		t.Errorf("Bin() = %v, State() = %+v, want not installed yet", ok, folder.State())
+	}
+}
+
+// TestTheRealUvInstallsTheRealAip downloads uv, CPython and aip from their releases into a throwaway folder, only with AEOLUS_TEST_AIP_INSTALL=1.
+func TestTheRealUvInstallsTheRealAip(t *testing.T) {
+	if os.Getenv("AEOLUS_TEST_AIP_INSTALL") != "1" {
+		t.Skip("downloads uv, CPython and aip: only with AEOLUS_TEST_AIP_INSTALL=1")
+	}
+	uv, ok := UvFor(runtime.GOOS, runtime.GOARCH)
+	if !ok {
+		t.Skipf("uv has no build for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	home := t.TempDir()
+	folder := Folder{Path: filepath.Join(home, "aip-command"), Outcome: filepath.Join(home, "aip-command.json"), Uv: &uv}
+
+	state := folder.Ensure()
+
+	bin, isHeld := folder.Bin()
+	if state != (State{Version: Version}) || !isHeld || !strings.HasPrefix(aipVersionIn(t, bin), "aip "+Version+" ") {
+		t.Fatalf("Ensure() = %+v, Bin() = %q, %v; want aip %s", state, bin, isHeld, Version)
 	}
 }

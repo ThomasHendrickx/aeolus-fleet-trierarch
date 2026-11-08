@@ -57,7 +57,7 @@ func TestTheAipSettingTheTrierarchPluginSentIsKeptInAipJsonInTheTrierarchsHome(t
 
 func TestHostSessionsRunTheAipTheTrierarchKeepsInItsHomeAndSessionsInContainersTheirImagesOwn(t *testing.T) {
 	at := paths.Of(t.TempDir(), "")
-	bin := filepath.Join(at.AipCommand, "bin")
+	bin := filepath.Join(at.AipCommand, "venv", "bin")
 	for _, name := range []string{"aip", "python"} {
 		if err := os.MkdirAll(bin, 0o755); err != nil {
 			t.Fatal(err)

@@ -367,9 +367,13 @@ func mcpServerList(at paths.Paths) *mcpservers.File {
 	return heldServers
 }
 
-// aipCommandOf is the aip CLI the trierarch keeps for its host sessions (#314), its python3 looked for on the trierarch's own PATH.
+// aipCommandOf is the aip CLI the trierarch keeps for its host sessions (#314), installed by uv's build for this machine.
 func aipCommandOf(at paths.Paths) aipcommand.Folder {
-	return aipcommand.Folder{Path: at.AipCommand, Outcome: at.AipCommandOutcome, SearchPath: os.Getenv("PATH"), Log: logLine}
+	folder := aipcommand.Folder{Path: at.AipCommand, Outcome: at.AipCommandOutcome, Log: logLine}
+	if uv, ok := aipcommand.UvFor(runtime.GOOS, runtime.GOARCH); ok {
+		folder.Uv = &uv
+	}
+	return folder
 }
 
 // heldAip is the aip setting this process holds, loaded once and shared by the receiving loop that accepts it and the session starts that read it.
