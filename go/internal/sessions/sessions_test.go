@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -586,5 +587,70 @@ func TestAHostSessionReachingAnAipServerWhileTheTrierarchHoldsNoAipKeepsThePathI
 
 	if env := read(filepath.Join(folder, "harness.env")); !strings.Contains("\n"+env+"\n", "\nPATH="+os.Getenv("PATH")+"\n") || !strings.Contains(env, "AIP_SERVER=") {
 		t.Errorf("environment:\n%s\nwant AIP_SERVER and the hold's own PATH", env)
+	}
+}
+
+// commandGiven is the command a session's start hands its hold: what HeldAs is given, the hold then running a harness that only waits.
+func commandGiven(t *testing.T, runtime Runtime, harness string) []string {
+	t.Helper()
+	var given []string
+	runtime.HeldAs = func(session Start, files hold.Files) (Start, error) {
+		given = session.Command
+		session.Command = []string{"sh", "-c", "while read -r line; do :; done"}
+		return session, nil
+	}
+	if err := runtime.Start(Start{ShipID: scout, Folder: t.TempDir(), Harness: harness, Command: []string{harness, "-p", "--mcp-config", "/sessions/mcp-config.json"}}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	return given
+}
+
+// aipsSkills is a plugin of aip's skills, as the trierarch's aip folder holds it.
+func aipsSkills() (string, bool) { return "/home/scout/.aeolus/trierarch/aip-command/plugin", true }
+
+func TestAHostClaudeCodeSessionReachingAnAipServerIsStartedWithThePluginOfAipsSkills(t *testing.T) {
+	runtime := aRuntime(t)
+	runtime.Aip = &Aip{Configured: &aip.Setting{Server: "https://aip.example.invalid", TokenSecret: "aip-read"}, Secrets: heldSecrets{}, Command: anAipCommand(t, "0.7.0"), Plugin: aipsSkills, Path: "/usr/bin:/bin"}
+
+	given := commandGiven(t, runtime, "claude-code")
+
+	want := []string{"claude-code", "--plugin-dir", "/home/scout/.aeolus/trierarch/aip-command/plugin", "-p", "--mcp-config", "/sessions/mcp-config.json"}
+	if !slices.Equal(given, want) {
+		t.Errorf("command = %q, want %q", given, want)
+	}
+}
+
+func TestAHostClaudeCodeSessionReachingNoAipServerGetsNoPluginOfAipsSkills(t *testing.T) {
+	runtime := aRuntime(t)
+	runtime.Aip = &Aip{Sent: func() (aip.Setting, bool) { return aip.Setting{}, false }, Secrets: heldSecrets{}, Command: anAipCommand(t, "0.7.0"), Plugin: aipsSkills, Path: "/usr/bin:/bin"}
+
+	given := commandGiven(t, runtime, "claude-code")
+
+	if want := []string{"claude-code", "-p", "--mcp-config", "/sessions/mcp-config.json"}; !slices.Equal(given, want) {
+		t.Errorf("command = %q, want %q", given, want)
+	}
+}
+
+func TestAHostClaudeCodeSessionWhileTheTrierarchHoldsNoAipsSkillsGetsNoPlugin(t *testing.T) {
+	runtime := aRuntime(t)
+	runtime.Aip = &Aip{Configured: &aip.Setting{Server: "https://aip.example.invalid", TokenSecret: "aip-read"}, Secrets: heldSecrets{}, Command: anAipCommand(t, "0.7.0"), Plugin: func() (string, bool) { return "", false }, Path: "/usr/bin:/bin"}
+
+	given := commandGiven(t, runtime, "claude-code")
+
+	if want := []string{"claude-code", "-p", "--mcp-config", "/sessions/mcp-config.json"}; !slices.Equal(given, want) {
+		t.Errorf("command = %q, want %q", given, want)
+	}
+}
+
+func TestOnlyClaudeCodeSessionsAreStartedWithThePluginOfAipsSkills(t *testing.T) {
+	for _, harness := range []string{"codex", "copilot"} {
+		runtime := aRuntime(t)
+		runtime.Aip = &Aip{Configured: &aip.Setting{Server: "https://aip.example.invalid", TokenSecret: "aip-read"}, Secrets: heldSecrets{}, Command: anAipCommand(t, "0.7.0"), Plugin: aipsSkills, Path: "/usr/bin:/bin"}
+
+		given := commandGiven(t, runtime, harness)
+
+		if want := []string{harness, "-p", "--mcp-config", "/sessions/mcp-config.json"}; !slices.Equal(given, want) {
+			t.Errorf("%s: command = %q, want %q", harness, given, want)
+		}
 	}
 }
