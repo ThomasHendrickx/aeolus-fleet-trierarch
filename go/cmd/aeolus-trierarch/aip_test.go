@@ -55,20 +55,33 @@ func TestTheAipSettingTheTrierarchPluginSentIsKeptInAipJsonInTheTrierarchsHome(t
 	}
 }
 
-func TestHostSessionsRunTheAipTheTrierarchKeepsInItsHomeAndSessionsInContainersTheirImagesOwn(t *testing.T) {
-	at := paths.Of(t.TempDir(), "")
-	bin := filepath.Join(at.AipCommand, "venv", "bin")
-	for _, name := range []string{"aip", "python"} {
-		if err := os.MkdirAll(bin, 0o755); err != nil {
+// aHeldAipCommand is the trierarch's aip folder as an install of the pin leaves it: aip and its Python in the venv's bin, and the plugin of aip's skills.
+func aHeldAipCommand(t *testing.T, at paths.Paths) {
+	t.Helper()
+	files := map[string]string{
+		filepath.Join("venv", "bin", "aip"):                          "#!/bin/sh\n",
+		filepath.Join("venv", "bin", "python"):                       "#!/bin/sh\n",
+		filepath.Join("plugin", ".claude-plugin", "plugin.json"):     `{"name":"aip"}`,
+		filepath.Join("plugin", "skills", "aip-compile", "SKILL.md"): "---\nname: aip-compile\n---\n",
+		filepath.Join("plugin", "skills", "aip-runtime", "SKILL.md"): "---\nname: aip-runtime\n---\n",
+	}
+	for name, text := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(at.AipCommand, name)), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		if err := os.WriteFile(filepath.Join(at.AipCommand, name), []byte(text), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := os.WriteFile(at.AipCommandOutcome, []byte(`{"version":"`+aipcommand.Version+`"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestHostSessionsRunTheAipTheTrierarchKeepsInItsHomeAndSessionsInContainersTheirImagesOwn(t *testing.T) {
+	at := paths.Of(t.TempDir(), "")
+	bin := filepath.Join(at.AipCommand, "venv", "bin")
+	aHeldAipCommand(t, at)
 
 	onTheHost := sessionRuntime(at, "aeolus-trierarch", config.Configuration{}).(sessions.Runtime).Aip
 	inContainers := sessionRuntime(at, "aeolus-trierarch", config.Configuration{Runtime: &config.Runtime{Kind: "container", Binary: "podman"}}).(container.Runtime).Holds.Aip
@@ -89,5 +102,23 @@ func TestTheAipCommandIsKeptInTheTrierarchsHome(t *testing.T) {
 
 	if at.AipCommand != filepath.Join(at.Home, "aip-command") || at.AipCommandOutcome != filepath.Join(at.Home, "aip-command.json") {
 		t.Errorf("the aip command is kept in %s and %s, want aip-command and aip-command.json in the trierarch's home", at.AipCommand, at.AipCommandOutcome)
+	}
+}
+
+func TestHostSessionsGetThePluginOfAipsSkillsTheTrierarchKeepsAndSessionsInContainersTheirImagesOwn(t *testing.T) {
+	at := paths.Of(t.TempDir(), "")
+	aHeldAipCommand(t, at)
+
+	onTheHost := sessionRuntime(at, "aeolus-trierarch", config.Configuration{}).(sessions.Runtime).Aip
+	inContainers := sessionRuntime(at, "aeolus-trierarch", config.Configuration{Runtime: &config.Runtime{Kind: "container", Binary: "podman"}}).(container.Runtime).Holds.Aip
+
+	if onTheHost.Plugin == nil {
+		t.Fatalf("host sessions get no plugin of aip's skills, want the trierarch's")
+	}
+	if got, ok := onTheHost.Plugin(); !ok || got != filepath.Join(at.AipCommand, "plugin") {
+		t.Errorf("host sessions get the plugin %q, %v, want %s/plugin", got, ok, at.AipCommand)
+	}
+	if inContainers.Plugin != nil {
+		t.Errorf("sessions in containers get the host's plugin of aip's skills, want their image's own")
 	}
 }
