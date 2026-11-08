@@ -26,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aip"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/attestation"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/claudecode"
@@ -473,8 +474,8 @@ const sessionImage = "ghcr.io/thomashendrickx/aeolus-session"
 func sessionRuntime(at paths.Paths, program string, configuration config.Configuration) runningSessions {
 	configured := configuration.Runtime
 	holds := sessions.Runtime{Sessions: at.Sessions, Program: []string{program}, Version: cli.Version, Launch: sessions.Launch(runtime.GOOS, os.Getenv("INVOCATION_ID"), sessions.SystemdVersion()), BootedAt: sessions.BootedAt}
-	if aip := configuration.Aip; aip != nil {
-		holds.Aip = &sessions.Aip{Server: aip.Server, TokenSecret: aip.TokenSecret, Secrets: heldSecretsOf(at), Log: logLine}
+	if own := configuration.Aip; own != nil {
+		holds.Aip = &sessions.Aip{Configured: &aip.Setting{Server: own.Server, TokenSecret: own.TokenSecret}, Secrets: heldSecretsOf(at), Log: logLine}
 	}
 	if !isInContainers(configured) {
 		return holds
