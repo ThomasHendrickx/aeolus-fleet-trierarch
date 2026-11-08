@@ -455,7 +455,7 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 	keptAip := make(chan struct{})
 	go func() {
 		defer close(keptAip)
-		keepAipCommand(stopped, machine.aipCommandOf(at), machine.PassEvery)
+		keepAipCommand(stopped, machine.aipCommandOf(at), machine.PassEvery, time.Now)
 	}()
 	var isKeyCutOff atomic.Bool
 	go func() {

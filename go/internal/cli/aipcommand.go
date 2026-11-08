@@ -20,8 +20,8 @@ type AipCommand interface {
 // retryFailedEvery is how long run waits before it tries a failed install again, so a host that cannot install aip is not at it every pass.
 const retryFailedEvery = time.Hour
 
-// keepAipCommand installs the aip CLI as run starts unless its folder holds it, and again on a pass that finds its folder broken; a failed install is tried again an hour on. It ends with ctx.
-func keepAipCommand(ctx context.Context, command AipCommand, every time.Duration) {
+// keepAipCommand installs the aip CLI as run starts unless its folder holds it, and again on a pass that finds its folder broken; a failed install is tried again an hour on, as now tells the time. It ends with ctx.
+func keepAipCommand(ctx context.Context, command AipCommand, every time.Duration, now func() time.Time) {
 	if command == nil {
 		return
 	}
@@ -29,10 +29,10 @@ func keepAipCommand(ctx context.Context, command AipCommand, every time.Duration
 	// The start checks the folder's aip itself, which the passes after leave to its files.
 	isStart := true
 	for {
-		if _, ok := command.Bin(); isStart || (!ok && (lastFailed.IsZero() || time.Since(lastFailed) >= retryFailedEvery)) {
+		if _, ok := command.Bin(); isStart || (!ok && (lastFailed.IsZero() || now().Sub(lastFailed) >= retryFailedEvery)) {
 			isStart = false
 			if command.Ensure().Version == "" {
-				lastFailed = time.Now()
+				lastFailed = now()
 			} else {
 				lastFailed = time.Time{}
 			}
