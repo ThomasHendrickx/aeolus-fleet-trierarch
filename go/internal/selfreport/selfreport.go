@@ -77,6 +77,8 @@ type Input struct {
 	Load *machineload.Load
 	// Usage is the harnesses' usage as last read (#353); none reports none.
 	Usage *usage.Usage
+	// AipMissing is why host sessions get no aip (#314); empty when they get it or the machine runs none.
+	AipMissing string
 }
 
 // Logins are which login each ship's next session starts on, and where each harness's API key stands.
@@ -105,6 +107,9 @@ func Of(in Input) Report {
 	stopped := whyNotOffered(in)
 	if stopped != "" {
 		note += ", not offered: " + stopped
+	}
+	if in.AipMissing != "" {
+		note += ", no aip for host sessions: " + in.AipMissing
 	}
 	state := "idle"
 	if in.Running > 0 {
