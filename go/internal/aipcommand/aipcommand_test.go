@@ -368,6 +368,10 @@ func TestTheRealUvInstallsTheRealAip(t *testing.T) {
 		t.Skipf("uv has no build for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 	home := t.TempDir()
+	// uv may look in the home and the XDG folders: each is a throwaway one, so nothing is written outside them.
+	for _, variable := range []string{"HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_BIN_HOME", "XDG_STATE_HOME"} {
+		t.Setenv(variable, t.TempDir())
+	}
 	folder := Folder{Path: filepath.Join(home, "aip-command"), Outcome: filepath.Join(home, "aip-command.json"), Uv: &uv}
 
 	state := folder.Ensure()
