@@ -119,7 +119,7 @@ describe('detecting Claude Code (#365)', () => {
   });
 
   it('takes the id that names its alias when the probe used another model beside it', async () => {
-    const detected = await aClaude({ helper: 'claude-haiku-4-5-20251001' }).detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
+    const detected = await aClaude({ helper: 'claude-compactor-1' }).detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
 
     expect(detected?.options.model).toEqual(modelOption(ALL_IDS));
   });
@@ -127,7 +127,7 @@ describe('detecting Claude Code (#365)', () => {
   it('leaves out an alias the CLI refuses as unrecognized', async () => {
     const detected = await aClaude({ refused: ['fable'] }).detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
 
-    expect(detected?.options.model).toEqual(modelOption(['claude-opus-5-5', 'claude-sonnet-5-5']));
+    expect(detected?.options.model).toEqual(modelOption(['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']));
   });
 
   it('keeps the id an alias resolved to before at the same version when its probe now neither confirms nor refuses it', async () => {

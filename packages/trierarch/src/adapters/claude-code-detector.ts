@@ -6,8 +6,9 @@ import type { CommandResult } from './run-command.js';
 
 /**
  * Detecting Claude Code (#365; docs/trierarch.md, "Detected options"). Its
- * CLI lists no models, but its --help names the aliases it takes, each for
- * the latest of a family: each is probed once with a short print-mode turn,
+ * CLI lists no models, but takes aliases, each for the latest of a family:
+ * those its --help names and the known families (fable, opus, sonnet, haiku),
+ * as --help gives only examples (#308). Each is probed once with a short print-mode turn,
  * from a neutral folder and never as a ship, and the exact id it resolves to
  * is read from the answer's modelUsage. Those ids are declared, so they follow
  * the installed CLI with no list to keep. An alias the CLI refuses is left
@@ -24,6 +25,11 @@ const QUICK_TIMEOUT_MS = 10_000;
 
 /** How Claude Code says it does not know a model. */
 const UNRECOGNIZED_MODEL = 'unrecognized_model';
+/**
+ * The families probed whether --help names them or not: its --model help gives
+ * only examples (#308). An alias the CLI refuses is left out as any other.
+ */
+const KNOWN_ALIASES = ['fable', 'opus', 'sonnet', 'haiku'];
 const PROBE_PROMPT = 'Reply OK';
 
 const probeAnswerSchema = z.object({ modelUsage: z.record(z.string(), z.unknown()) });
@@ -115,10 +121,11 @@ export function createClaudeCodeDetector(deps: {
       const text = help.status === 0 ? help.stdout : '';
       const levels = effortLevelsOf(text);
       const permissionModes = permissionModesOf(text);
-      const aliases = aliasesOf(text);
+      const named = aliasesOf(text);
+      const aliases = [...named, ...KNOWN_ALIASES.filter((alias) => !named.includes(alias))];
       const before = previous?.version === version ? previous : undefined;
       const resolvedBefore = Object.keys(before?.options.model?.values ?? {});
-      const folder = aliases.length === 0 ? undefined : await deps.neutralFolder();
+      const folder = await deps.neutralFolder();
       const ids: string[] = [];
       let isAnyResolved = false;
       for (const alias of aliases) {
@@ -136,7 +143,7 @@ export function createClaudeCodeDetector(deps: {
           ...(levels.length > 0 && { effort: optionOf(levels, '--effort') }),
         },
         ...(permissionModes.length > 0 && { permissionModes }),
-        ...(aliases.length === 0 && {
+        ...(named.length === 0 && ids.length === 0 && {
           problem: `Claude Code ${version}'s --help names no model alias, so this machine declares no Claude Code model until an update of Claude Code names one`,
         }),
       };
