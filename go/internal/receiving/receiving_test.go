@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aip"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
@@ -496,5 +497,84 @@ func TestSecretsThatCannotBeKeptAreNotAcknowledgedSoTheyComeAgain(t *testing.T) 
 
 	if len(ran.ship.acked) != 0 || slices.ContainsFunc(ran.logged, func(line string) bool { return strings.Contains(line, "s3cr3t") }) {
 		t.Fatalf("acked %v, logged %q, want none acked and no value logged", ran.ship.acked, ran.logged)
+	}
+}
+
+// anAipKeeper keeps the aip setting it is given, or fails to.
+type anAipKeeper struct {
+	kept *aip.Setting
+	err  error
+	took int
+}
+
+func (k *anAipKeeper) Accept(setting aip.Setting) error {
+	k.took++
+	if k.err != nil {
+		return k.err
+	}
+	k.kept = &setting
+	return nil
+}
+
+func runKeepingAip(keeper *anAipKeeper, answers ...answer) *aRun {
+	ctx, cancel := context.WithCancel(context.Background())
+	ran := &aRun{ship: &aShip{cancel: cancel, answers: answers}}
+	Loop{
+		Ship:         ran.ship,
+		Log:          func(line string) { ran.logged = append(ran.logged, line) },
+		Interval:     5 * time.Second,
+		KeyWaitMax:   300 * time.Second,
+		Pause:        func(_ context.Context, wait time.Duration) { ran.waits = append(ran.waits, wait) },
+		PluginShipID: plugin,
+		Aip:          keeper,
+	}.Run(ctx)
+	return ran
+}
+
+func anAipSetting(from string, id string, payload string) Delivery {
+	return Delivery{DeliveryID: id, SenderShipID: from, ContentType: aip.ContentType, Payload: payload}
+}
+
+const companyAip = `{"server":"https://aip.example.test","tokenSecret":"aip-read"}`
+
+func TestTheAipSettingFromThePluginsShipIsKeptAndAcknowledged(t *testing.T) {
+	keeper := &anAipKeeper{}
+
+	ran := runKeepingAip(keeper, answer{deliveries: []Delivery{anAipSetting(plugin, "d1", companyAip)}})
+
+	want := aip.Setting{Server: "https://aip.example.test", TokenSecret: "aip-read"}
+	if keeper.kept == nil || *keeper.kept != want || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 0 {
+		t.Fatalf("kept %+v, acked %v, logged %q", keeper.kept, ran.ship.acked, ran.logged)
+	}
+}
+
+func TestAnAipSettingFromAnotherShipIsAcknowledgedAndNotTaken(t *testing.T) {
+	keeper := &anAipKeeper{}
+
+	ran := runKeepingAip(keeper, answer{deliveries: []Delivery{anAipSetting(argo, "d1", companyAip)}})
+
+	want := "Not handled: an aip setting from " + argo + ". The trierarch takes them only from the trierarch plugin's ship " + plugin + "."
+	if keeper.took != 0 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || ran.logged[0] != want {
+		t.Fatalf("took %d, acked %v, logged %q", keeper.took, ran.ship.acked, ran.logged)
+	}
+}
+
+func TestAnAipSettingThatDoesNotFitIsAcknowledgedAndTheHeldOneStays(t *testing.T) {
+	keeper := &anAipKeeper{}
+
+	ran := runKeepingAip(keeper, answer{deliveries: []Delivery{anAipSetting(plugin, "d1", `{"server":"https://aip.example.test","tokenSecret":"aip-read","token":"s3cr3t"}`)}})
+
+	if keeper.took != 0 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || !strings.HasSuffix(ran.logged[0], "The trierarch keeps the aip setting it holds.") || strings.Contains(ran.logged[0], "s3cr3t") {
+		t.Fatalf("took %d, acked %v, logged %q", keeper.took, ran.ship.acked, ran.logged)
+	}
+}
+
+func TestAnAipSettingThatCannotBeKeptIsNotAcknowledgedSoItComesAgain(t *testing.T) {
+	keeper := &anAipKeeper{err: errors.New("the file cannot be written")}
+
+	ran := runKeepingAip(keeper, answer{deliveries: []Delivery{anAipSetting(plugin, "d1", companyAip)}})
+
+	if len(ran.ship.acked) != 0 {
+		t.Fatalf("acked %v, want none", ran.ship.acked)
 	}
 }
