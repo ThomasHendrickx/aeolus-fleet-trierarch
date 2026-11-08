@@ -120,6 +120,9 @@ const SYSTEM_FOLDERS = ['/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbi
 /** The harnesses and service managers a real install of this machine may hold: only the stand-ins answer to them. */
 const STOOD_IN = new Set(['claude', 'codex', 'copilot', 'systemctl', 'journalctl', 'systemd-run', 'launchctl', 'npm', 'npx', 'podman', 'id']);
 
+/** The stand-in machine reaches nothing beyond its loopback: an HTTPS proxy that answers no one, so a trierarch's download of uv for aip fails at once. */
+export const NO_NETWORK_PROXY = 'http://127.0.0.1:9';
+
 /** Links each of the machine's programs into `tools`, but for the ones stood in for, so a real Claude Code or Codex on this machine is never found. */
 function linkSystemPrograms(tools: string): void {
   mkdirSync(tools);
@@ -289,7 +292,7 @@ stop() {
 }
 start() {
   [ -f "$file" ] || { echo "Unit $unit not found." >&2; exit 5; }
-  local line words=() environment=(HOME='${at.home}' USER="$USER" LANG=C.UTF-8)
+  local line words=() environment=(HOME='${at.home}' USER="$USER" LANG=C.UTF-8 HTTPS_PROXY='${NO_NETWORK_PROXY}')
   while IFS= read -r line; do
     case "$line" in
       ExecStart=*) eval "words=(\${line#ExecStart=})" ;;
@@ -433,6 +436,7 @@ export async function aMachine(at: { others?: readonly OtherHarness[] } = {}): P
     HOME: home,
     PATH: `${bin}:${tools}`,
     LANG: 'C.UTF-8',
+    HTTPS_PROXY: NO_NETWORK_PROXY,
     ...GIT_ENV,
     // The aeolus-fleet plugin as Claude Code would have installed it: this repository's own.
     AEOLUS_PLUGIN_ROOT: PLUGIN_ROOT,

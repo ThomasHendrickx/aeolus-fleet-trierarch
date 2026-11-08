@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aip"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aipcommand"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/attestation"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/claudecode"
@@ -139,6 +140,9 @@ func main() {
 		},
 		Aip: func(at paths.Paths) receiving.AipKeeper {
 			return heldAipOf(at)
+		},
+		AipCommand: func(at paths.Paths) cli.AipCommand {
+			return aipCommandOf(at)
 		},
 		Secrets: func(at paths.Paths) receiving.SecretKeeper {
 			return heldSecretsOf(at)
@@ -363,6 +367,15 @@ func mcpServerList(at paths.Paths) *mcpservers.File {
 	return heldServers
 }
 
+// aipCommandOf is the aip CLI the trierarch keeps for its host sessions (#314), installed by uv's build for this machine.
+func aipCommandOf(at paths.Paths) aipcommand.Folder {
+	folder := aipcommand.Folder{Path: at.AipCommand, Outcome: at.AipCommandOutcome, Log: logLine}
+	if uv, ok := aipcommand.UvFor(runtime.GOOS, runtime.GOARCH); ok {
+		folder.Uv = &uv
+	}
+	return folder
+}
+
 // heldAip is the aip setting this process holds, loaded once and shared by the receiving loop that accepts it and the session starts that read it.
 var (
 	heldAip     *aip.File
@@ -497,6 +510,8 @@ func sessionRuntime(at paths.Paths, program string, configuration config.Configu
 		holds.Aip.Configured = &aip.Setting{Server: own.Server, TokenSecret: own.TokenSecret}
 	}
 	if !isInContainers(configured) {
+		// A container's image holds its own aip.
+		holds.Aip.Command, holds.Aip.Path = aipCommandOf(at).Bin, os.Getenv("PATH")
 		return holds
 	}
 	return container.Runtime{Holds: holds, Binary: configured.Binary, Image: sessionImage + ":" + cli.Version, ModelToken: at.ModelToken, ProxyURL: modelproxy.Runtime{Folder: at.Proxy}.URL, Homes: at.Homes, Sockets: at.Sockets, Memory: configured.Memory, Cpus: configured.Cpus}
@@ -725,7 +740,11 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Input: func() selfreport.Input {
 			offered, detected := offers.current()
 			offered = withTrusted(offered)
-			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Trusted: trust.Of(offered, trustReaders), McpServers: offeredServers(), SealingKey: sealingKey.Public(), Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, Now: time.Now()}
+			in := selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Trusted: trust.Of(offered, trustReaders), McpServers: offeredServers(), SealingKey: sealingKey.Public(), Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, Now: time.Now()}
+			if !isInContainers(configured.Runtime) {
+				in.AipMissing = aipCommandOf(at).State().Brief()
+			}
+			return in
 		},
 	}
 	// Each pass ends with the trierarch's own report: the first at start, then only when it changed.

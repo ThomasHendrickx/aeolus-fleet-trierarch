@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { aCrewingMachine, listedEntryOf, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, PLUGIN_ROOT, type Machine } from './support/machine.js';
+import { isTodaysTrierarch } from './support/trierarch-under-test.js';
 
 // `aeolus-trierarch status` says the whole state, and `status` and `list` colour their words where a person reads a colour terminal (docs/trierarch.md, "Commands").
 
@@ -107,7 +108,10 @@ describe('status', () => {
     const report = await statusReport();
 
     // How long it runs is read from the process in whole seconds, so `since` may differ between two calls.
-    const lines = (await statusText()).split('\n').map((line) => line.replace(/(?<=^Service: .*since ).+$/, '<since>'));
+    // Why the download failed is the HTTP client's own words.
+    const lines = (await statusText())
+      .split('\n')
+      .map((line) => line.replace(/(?<=^Service: .*since ).+$/, '<since>').replace(/(?<=^aip: none for host sessions: the install of aip 0\.7\.0 failed: uv 0\.13\.7 could not be downloaded: ).+$/, '<why>'));
 
     expect(lines).toEqual([
       `Version: ${report.version}`,
@@ -120,6 +124,8 @@ describe('status', () => {
       'Entries: running 1',
       'Kept worktrees: none',
       'Orphans: none',
+      // Today's trierarch, kept for existing machines, keeps no aip for its host sessions.
+      ...(isTodaysTrierarch ? [] : ['aip: none for host sessions: the install of aip 0.7.0 failed: uv 0.13.7 could not be downloaded: <why>']),
       '',
     ]);
   });
