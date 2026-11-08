@@ -30,7 +30,7 @@ const WRAPPED_HELP = [
 ].join('\n');
 
 /** What each alias resolves to on Claude Code 2.1.293. */
-const RESOLVES: Readonly<Record<string, string>> = { fable: 'claude-fable-5-1', opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5' };
+const RESOLVES: Readonly<Record<string, string>> = { fable: 'claude-fable-5-1', opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5-5', haiku: 'claude-haiku-5-5' };
 
 const ok = (stdout: string): CommandResult => ({ status: 0, stdout, stderr: '' });
 const failed = (stderr: string): CommandResult => ({ status: 1, stdout: '', stderr });
@@ -68,7 +68,7 @@ function aClaude(at: { resolves?: Readonly<Record<string, string>>; refused?: re
 
 const modelOption = (ids: readonly string[]) => ({ values: Object.fromEntries(ids.map((id) => [id, ['--model', id]])) });
 const EFFORT = { values: { low: ['--effort', 'low'], medium: ['--effort', 'medium'], high: ['--effort', 'high'], xhigh: ['--effort', 'xhigh'], max: ['--effort', 'max'] } };
-const ALL_IDS = ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5'];
+const ALL_IDS = ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
 
 describe('detecting Claude Code (#365)', () => {
   it("reads the aliases and the effort levels from --help whose descriptions wrap over several lines (#383)", async () => {
@@ -102,13 +102,13 @@ describe('detecting Claude Code (#365)', () => {
     expect(CLAUDE_CODE_PROBE_TIMEOUT_MS).toBe(60_000);
   });
 
-  it('probes each alias --help names once, from the neutral folder, with one short print-mode turn within a time limit', async () => {
+  it('probes each alias --help names and each known family it does not name once, from the neutral folder, with one short print-mode turn within a time limit', async () => {
     const claude = aClaude();
 
     await claude.detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
 
     expect(claude.calls.filter((call) => call.args[0] === '-p')).toEqual(
-      ['fable', 'opus', 'sonnet'].map((alias) => ({ args: ['-p', '--model', alias, '--max-turns', '1', '--output-format', 'json', 'Reply OK'], cwd: NEUTRAL, timeoutMs: CLAUDE_CODE_PROBE_TIMEOUT_MS })),
+      ['fable', 'opus', 'sonnet', 'haiku'].map((alias) => ({ args: ['-p', '--model', alias, '--max-turns', '1', '--output-format', 'json', 'Reply OK'], cwd: NEUTRAL, timeoutMs: CLAUDE_CODE_PROBE_TIMEOUT_MS })),
     );
   });
 
@@ -119,7 +119,7 @@ describe('detecting Claude Code (#365)', () => {
   });
 
   it('takes the id that names its alias when the probe used another model beside it', async () => {
-    const detected = await aClaude({ helper: 'claude-haiku-4-5-20251001' }).detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
+    const detected = await aClaude({ helper: 'claude-compactor-1' }).detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
 
     expect(detected?.options.model).toEqual(modelOption(ALL_IDS));
   });
@@ -127,7 +127,7 @@ describe('detecting Claude Code (#365)', () => {
   it('leaves out an alias the CLI refuses as unrecognized', async () => {
     const detected = await aClaude({ refused: ['fable'] }).detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
 
-    expect(detected?.options.model).toEqual(modelOption(['claude-opus-5-5', 'claude-sonnet-5-5']));
+    expect(detected?.options.model).toEqual(modelOption(['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']));
   });
 
   it('keeps the id an alias resolved to before at the same version when its probe now neither confirms nor refuses it', async () => {
@@ -147,8 +147,20 @@ describe('detecting Claude Code (#365)', () => {
     expect(detected).toEqual({ version: '2.1.293', detectedAt: NOW, confirmedAt: null, options: { effort: EFFORT } });
   });
 
-  it('declares no model when --help names no alias, and says why', async () => {
+  it('offers haiku although --help names only fable, opus and sonnet as examples (#308)', async () => {
+    const detected = await aClaude().detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
+
+    expect(Object.keys(detected?.options.model?.values ?? {})).toContain('claude-haiku-5-5');
+  });
+
+  it('probes the known families when --help names no alias, and declares those that resolve (#308)', async () => {
     const detected = await aClaude({ help: '  --effort <level>  Effort level (low, high)' }).detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
+
+    expect(detected?.options.model).toEqual(modelOption(ALL_IDS));
+  });
+
+  it('declares no model when --help names no alias and no known family resolves, and says why', async () => {
+    const detected = await aClaude({ help: '  --effort <level>  Effort level (low, high)', resolves: {} }).detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
 
     expect(detected).toEqual({
       version: '2.1.293',

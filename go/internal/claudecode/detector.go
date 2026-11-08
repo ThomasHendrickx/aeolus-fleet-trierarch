@@ -26,7 +26,7 @@ const unrecognizedModel = "unrecognized_model"
 
 const probePrompt = "Reply OK"
 
-// Detector detects Claude Code (#365; docs/trierarch.md, "Detected options"). Its CLI lists no models, but its --help names the aliases it takes, each for the latest of a family: each is probed once with a short print-mode turn, from a neutral folder and never as a ship, and the exact id it resolves to is read from the answer's modelUsage, so the ids follow the installed CLI with no list to keep. An alias the CLI refuses is left out; one whose probe neither confirms nor refuses it (offline, not logged in) keeps the id it resolved to before at the same version. The effort levels come from --help. Neither has a default: the CLI keeps its own.
+// Detector detects Claude Code (#365; docs/trierarch.md, "Detected options"). Its CLI lists no models, but it takes aliases, each for the latest of a family, those its --help names and the known families (fable, opus, sonnet, haiku), as --help gives only examples (#308): each is probed once with a short print-mode turn, from a neutral folder and never as a ship, and the exact id it resolves to is read from the answer's modelUsage, so the ids follow the installed CLI with no list to keep. An alias the CLI refuses is left out; one whose probe neither confirms nor refuses it (offline, not logged in) keeps the id it resolved to before at the same version. The effort levels come from --help. Neither has a default: the CLI keeps its own.
 type Detector struct {
 	Run detection.Runner
 	// NeutralFolder is a new empty folder to probe from, so no project's hooks or settings run.
@@ -149,13 +149,22 @@ func permissionModesOf(help string) []string {
 	return modes
 }
 
-// Detect reads --help and probes each alias it names.
+// knownAliases are the families probed whether --help names them or not: its --model help gives only examples (#308).
+var knownAliases = []string{"fable", "opus", "sonnet", "haiku"}
+
+// Detect reads --help and probes each alias it names and each known family it does not.
 func (d Detector) Detect(ctx context.Context, version string, previous *detection.Harness, now time.Time) (detection.Harness, bool) {
 	help := ""
 	if ran := d.Run(ctx, detection.Command{Program: d.program(), Args: []string{"--help"}, Timeout: quickTimeout}); ran.Status == 0 {
 		help = ran.Stdout
 	}
-	aliases := aliasesOf(help)
+	named := aliasesOf(help)
+	aliases := slices.Clone(named)
+	for _, alias := range knownAliases {
+		if !slices.Contains(named, alias) {
+			aliases = append(aliases, alias)
+		}
+	}
 	var before *detection.Harness
 	if previous != nil && previous.Version == version {
 		before = previous
@@ -164,16 +173,12 @@ func (d Detector) Detect(ctx context.Context, version string, previous *detectio
 	if before != nil {
 		resolvedBefore = before.Options[detection.ModelOption].Names()
 	}
-	folder := ""
-	if len(aliases) > 0 {
-		made, err := d.NeutralFolder()
-		if err != nil {
-			// With no folder to probe from, nothing is detected: what was detected before stays.
-			return detection.Harness{}, false
-		}
-		defer os.RemoveAll(made)
-		folder = made
+	folder, err := d.NeutralFolder()
+	if err != nil {
+		// With no folder to probe from, nothing is detected: what was detected before stays.
+		return detection.Harness{}, false
 	}
+	defer os.RemoveAll(folder)
 	var ids []string
 	isAnyResolved := false
 	for _, alias := range aliases {
@@ -212,7 +217,7 @@ func (d Detector) Detect(ctx context.Context, version string, previous *detectio
 		found.Options["effort"] = detection.OptionOf(levels, "--effort")
 	}
 	found.PermissionModes = permissionModesOf(help)
-	if len(aliases) == 0 {
+	if len(named) == 0 && len(ids) == 0 {
 		found.Problem = fmt.Sprintf("Claude Code %s's --help names no model alias, so this machine declares no Claude Code model until an update of Claude Code names one", version)
 	}
 	return found, true

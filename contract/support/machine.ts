@@ -175,7 +175,11 @@ esac
 if [ "$1" = -p ] && [ "$2" = --model ]; then
   echo "$*" >> "$machine/claude-calls.txt"
   case "$*" in *'--output-format stream-json'*) [ -s "$machine/claude-rate-limit-event" ] && cat "$machine/claude-rate-limit-event" ;; esac
-  echo "{\\"modelUsage\\":{\\"claude-$3-5\\":{}}}"; exit 0
+  # This stand-in knows sonnet and opus only, and none when its help names no alias.
+  case "$3" in
+    sonnet|opus) [ -e "$machine/claude-help-names-no-alias" ] || { echo "{\\"modelUsage\\":{\\"claude-$3-5\\":{}}}"; exit 0; } ;;
+  esac
+  echo "[claude-code:unrecognized_model] {\\"model\\":\\"$3\\"}" >&2; exit 1
 fi
 [ -s "$machine/claude-refuses-model" ] && export FAKE_CLAUDE_REFUSES_MODEL="$(cat "$machine/claude-refuses-model")"
 exec '${process.execPath}' '${join(STAND_INS, 'fake-claude-code.ts')}' --plugin '${PLUGIN_ROOT}' "$HOME/${relative(at.home, at.pluginData)}" "$@"
