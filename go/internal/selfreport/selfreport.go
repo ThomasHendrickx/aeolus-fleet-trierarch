@@ -77,7 +77,7 @@ type Input struct {
 	Load *machineload.Load
 	// Usage is the harnesses' usage as last read (#353); none reports none.
 	Usage *usage.Usage
-	// AipMissing is why host sessions get no aip (#314); empty when they get it or the machine runs none.
+	// AipMissing is why host sessions get no aip (#314), briefly; empty when they get it or the machine runs none.
 	AipMissing string
 }
 

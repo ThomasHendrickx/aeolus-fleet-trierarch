@@ -99,6 +99,17 @@ type Folder struct {
 // installs lets one install at a time touch a folder: the run loop's checks and init's may meet.
 var installs sync.Mutex
 
+// failedPrefix opens why there is no aip when an install failed.
+const failedPrefix = "the install of aip " + Version + " failed: "
+
+// Brief is why there is no aip, short enough for a report's note, which core takes up to 200 characters: a failed install's own words are left to status. Empty when aip is there.
+func (s State) Brief() string {
+	if strings.HasPrefix(s.Missing, failedPrefix) {
+		return "its install failed, as aeolus-trierarch status says"
+	}
+	return s.Missing
+}
+
 var notYet = State{Missing: "aip " + Version + " is not installed yet"}
 
 // State is the last install's outcome as kept; not installed yet when none is.
@@ -158,7 +169,7 @@ func (f Folder) install() State {
 	}
 	if err := f.installIn(); err != nil {
 		_ = os.RemoveAll(f.Path)
-		return State{Missing: "the install of aip " + Version + " failed: " + err.Error()}
+		return State{Missing: failedPrefix + err.Error()}
 	}
 	return State{Version: Version}
 }
@@ -287,8 +298,9 @@ func run(wait time.Duration, env []string, name string, words ...string) (string
 	return strings.TrimSpace(string(said)), nil
 }
 
+// lastOf is the end of what a command said, on one line, as status says it.
 func lastOf(said string) string {
-	said = strings.TrimSpace(said)
+	said = strings.Join(strings.Fields(said), " ")
 	if len(said) > saidMost {
 		return said[len(said)-saidMost:]
 	}
