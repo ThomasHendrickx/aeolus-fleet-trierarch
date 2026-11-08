@@ -27,6 +27,12 @@ import (
 // keyCutOffNote is what the report says while the fleet refuses to receive for lack of its key (decision 0068).
 const keyCutOffNote = "waiting for the fleet's key (KEY_UNAVAILABLE)"
 
+// aipMissingNote is what the report says while host sessions get no aip (#314).
+const aipMissingNote = ", no aip on the host"
+
+// noteMost is the longest note core takes (common's REPORT_NOTE_MAX_LENGTH).
+const noteMost = 200
+
 // riskyFlags are, by harness, the flags its adapter calls risky, so a reader needs no harness knowledge (#326).
 var riskyFlags = map[string][]string{
 	"claude-code": {"--dangerously-skip-permissions"},
@@ -77,8 +83,8 @@ type Input struct {
 	Load *machineload.Load
 	// Usage is the harnesses' usage as last read (#353); none reports none.
 	Usage *usage.Usage
-	// AipMissing is why host sessions get no aip (#314), briefly; empty when they get it or the machine runs none.
-	AipMissing string
+	// IsAipMissing says host sessions get no aip (#314); status says why.
+	IsAipMissing bool
 }
 
 // Logins are which login each ship's next session starts on, and where each harness's API key stands.
@@ -108,15 +114,16 @@ func Of(in Input) Report {
 	if stopped != "" {
 		note += ", not offered: " + stopped
 	}
-	if in.AipMissing != "" {
-		note += ", no aip for host sessions: " + in.AipMissing
-	}
 	state := "idle"
 	if in.Running > 0 {
 		state = "working"
 	}
 	if in.IsKeyCutOff {
 		state, note = "blocked", note+", "+keyCutOffNote
+	}
+	// Core refuses a longer note, and with it the whole report: the aip is the one part left out for it.
+	if in.IsAipMissing && len(note)+len(aipMissingNote) <= noteMost {
+		note += aipMissingNote
 	}
 	return Report{State: state, Note: note, Details: detailsOf(in)}
 }
