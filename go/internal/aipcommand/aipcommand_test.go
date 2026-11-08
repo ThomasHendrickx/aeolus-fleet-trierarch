@@ -43,7 +43,23 @@ case "$1 $2" in
       shift
     done
     version=$(sed -n 's/^agent-instruction-protocol==\([^ ]*\).*/\1/p' "$log/requirements")
-    printf '#!/bin/sh\necho "aip %s format 0.6a1"\n' "$version" > "$venv/bin/aip" && chmod +x "$venv/bin/aip" ;;
+    sed "s/@VERSION@/$version/" "$log/aip" > "$venv/bin/aip" && chmod +x "$venv/bin/aip" ;;
+esac
+`
+
+// standInAip is the aip the stand-in uv installs: `--version` states the version the requirements pin, and `skill install --path DIR` writes
+// DIR/aip-compile and DIR/aip-runtime, each with its SKILL.md, and $HOME/.aip/skills.json, as aip 0.7.0 does; it fails while a SKILLS_FAIL file
+// is in STAND_IN_UV_LOG.
+const standInAip = `#!/bin/sh
+case "$1 $2 $3" in
+  "--version  ") echo "aip @VERSION@ format 0.6a1" ;;
+  "skill install --path")
+    if [ -e "$STAND_IN_UV_LOG/SKILLS_FAIL" ]; then echo "error: cannot write $4" >&2; exit 1; fi
+    for skill in aip-compile aip-runtime; do
+      mkdir -p "$4/$skill" && printf -- '---\nname: %s\n---\n' "$skill" > "$4/$skill/SKILL.md"
+    done
+    mkdir -p "$HOME/.aip" && echo '{"version":1}' > "$HOME/.aip/skills.json" ;;
+  *) exit 2 ;;
 esac
 `
 
@@ -92,6 +108,9 @@ func aFolder(t *testing.T) (Folder, string) {
 	t.Helper()
 	log := t.TempDir()
 	t.Setenv("STAND_IN_UV_LOG", log)
+	if err := os.WriteFile(filepath.Join(log, "aip"), []byte(standInAip), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	home := t.TempDir()
 	return Folder{Path: filepath.Join(home, "aip-command"), Outcome: filepath.Join(home, "aip-command.json"), Uv: aUvRelease(t)}, log
 }
@@ -440,5 +459,77 @@ func TestBriefIsWhyThereIsNoAipAsShortAsAReportsNoteTakesIt(t *testing.T) {
 		if got := test.state.Brief(); got != test.want {
 			t.Errorf("Brief() of %+v = %q, want %q", test.state, got, test.want)
 		}
+	}
+}
+
+func TestTheInstallWritesAipsSkillsIntoAPluginInTheFolder(t *testing.T) {
+	folder, _ := aFolder(t)
+
+	folder.Ensure()
+
+	plugin, ok := folder.Plugin()
+	if !ok || plugin != filepath.Join(folder.Path, "plugin") {
+		t.Fatalf("Plugin() = %q, %v; want %s/plugin", plugin, ok, folder.Path)
+	}
+	for _, skill := range []string{"aip-compile", "aip-runtime"} {
+		if text := readText(t, filepath.Join(plugin, "skills", skill, "SKILL.md")); !strings.Contains(text, "name: "+skill+"\n") {
+			t.Errorf("%s's SKILL.md = %q, want aip's own", skill, text)
+		}
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(readText(t, filepath.Join(plugin, ".claude-plugin", "plugin.json"))), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if manifest["name"] != "aip" || manifest["version"] != "0.7.0" {
+		t.Errorf("the plugin's manifest = %v, want the plugin aip at 0.7.0", manifest)
+	}
+}
+
+func TestAipsSkillsInstallWritesNothingIntoTheUsersHome(t *testing.T) {
+	folder, _ := aFolder(t)
+	userHome := t.TempDir()
+	t.Setenv("HOME", userHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(userHome, ".config"))
+
+	folder.Ensure()
+
+	if written, _ := os.ReadDir(userHome); len(written) != 0 {
+		t.Errorf("the user's home holds %v after the install, want nothing written there", written)
+	}
+	if _, err := os.Stat(filepath.Join(folder.Path, "aip-home", ".aip", "skills.json")); err != nil {
+		t.Errorf("aip's record of its skills: %v, want it in the folder's own aip-home", err)
+	}
+}
+
+func TestAFolderWithoutAipsSkillsIsBrokenAndInstalledAgain(t *testing.T) {
+	folder, log := aFolder(t)
+	folder.Ensure()
+	if err := os.RemoveAll(filepath.Join(folder.Path, "plugin")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := folder.Bin(); ok {
+		t.Fatalf("Bin() of a folder without aip's skills is offered, want none")
+	}
+
+	state := folder.Ensure()
+
+	if _, ok := folder.Plugin(); state != (State{Version: "0.7.0"}) || !ok || pipRuns(log) != 2 {
+		t.Errorf("Ensure() = %+v, Plugin() = %v after %d pip runs, want 0.7.0 and its skills installed again", state, ok, pipRuns(log))
+	}
+}
+
+func TestAFailedInstallOfAipsSkillsFailsTheInstall(t *testing.T) {
+	folder, log := aFolder(t)
+	if err := os.WriteFile(filepath.Join(log, "SKILLS_FAIL"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state := folder.Ensure()
+
+	if !strings.HasPrefix(state.Missing, "the install of aip 0.7.0 failed: aip skill install ended with ") || !strings.Contains(state.Missing, "cannot write") {
+		t.Errorf("Ensure() = %+v, want the install failed with aip's own words", state)
+	}
+	if _, ok := folder.Plugin(); ok {
+		t.Errorf("Plugin() is offered after a failed install, want none")
 	}
 }
