@@ -84,7 +84,7 @@ type State struct {
 	Missing string `json:"missing,omitempty"`
 }
 
-// Folder is the aip's folder and the outcome of its last install, which status and the report read. In the folder: uv, the Python it installed (python), the venv aip is in (venv) and the lock (requirements.txt).
+// Folder is the aip's folder and the outcome of its last install, which status and the report read. In the folder: uv, the Python it installed (python), the venv aip is in (venv), the lock (requirements.txt), and aip's skills as a plugin a harness is started with (plugin, #315), with the home aip keeps its record of them in (aip-home), never the user's.
 type Folder struct {
 	// Path is the folder, ~/.aeolus/trierarch/aip-command.
 	Path string
@@ -124,7 +124,12 @@ func (f Folder) State() State {
 
 func (f Folder) venvBin() string { return filepath.Join(f.Path, "venv", "bin") }
 
-// Bin is the venv's bin while it holds aip at Version, as its last install said and its files are there; false otherwise. It runs nothing, so a session's start may ask it.
+func (f Folder) plugin() string { return filepath.Join(f.Path, "plugin") }
+
+// skills are the skills `aip skill install` writes, each a folder with its SKILL.md.
+var skills = []string{"aip-compile", "aip-runtime"}
+
+// Bin is the venv's bin while it holds aip at Version and its skills, as its last install said and its files are there; false otherwise. It runs nothing, so a session's start may ask it.
 func (f Folder) Bin() (string, bool) {
 	if f.State().Version != Version {
 		return "", false
@@ -136,7 +141,28 @@ func (f Folder) Bin() (string, bool) {
 			return "", false
 		}
 	}
+	for _, name := range append([]string{filepath.Join(".claude-plugin", "plugin.json")}, skillFiles()...) {
+		if info, err := os.Stat(filepath.Join(f.plugin(), name)); err != nil || info.IsDir() {
+			return "", false
+		}
+	}
 	return bin, true
+}
+
+func skillFiles() []string {
+	files := []string{}
+	for _, skill := range skills {
+		files = append(files, filepath.Join("skills", skill, "SKILL.md"))
+	}
+	return files
+}
+
+// Plugin is the plugin of aip's skills while the folder holds aip at Version, as Bin says; false otherwise. A harness that takes a plugin folder per session is started with it, so its session lists them and nothing is written into the user's own skills folders (#315).
+func (f Folder) Plugin() (string, bool) {
+	if _, ok := f.Bin(); !ok {
+		return "", false
+	}
+	return f.plugin(), true
 }
 
 // Ensure installs aip at Version into the folder unless it holds it already and its aip states it, and keeps the outcome. A failed install is logged and leaves no folder.
@@ -229,7 +255,34 @@ func (f Folder) installIn() error {
 	if !f.states(filepath.Join(venv, "bin", "aip")) {
 		return errors.New("its aip does not state " + Version)
 	}
-	return nil
+	return f.installSkills(filepath.Join(venv, "bin", "aip"))
+}
+
+// manifest is the plugin of aip's skills as Claude Code reads it.
+type manifest struct {
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Description string `json:"description"`
+}
+
+// installSkills writes aip's own skills, as `aip skill install --path` writes them, into the plugin's skills folder, beside the plugin's manifest. aip also keeps a record of them in its home's .aip: its home, and every XDG folder, is the folder's own aip-home, so nothing is written into the user's.
+func (f Folder) installSkills(aip string) error {
+	home := filepath.Join(f.Path, "aip-home")
+	env := []string{"HOME=" + home}
+	for variable, folder := range map[string]string{"XDG_CONFIG_HOME": ".config", "XDG_CACHE_HOME": ".cache", "XDG_DATA_HOME": filepath.Join(".local", "share"), "XDG_STATE_HOME": filepath.Join(".local", "state")} {
+		env = append(env, variable+"="+filepath.Join(home, folder))
+	}
+	if _, err := run(installWait, env, aip, "skill", "install", "--path", filepath.Join(f.plugin(), "skills")); err != nil {
+		return err
+	}
+	text, err := json.Marshal(manifest{Name: "aip", Version: Version, Description: "aip " + Version + "'s own skills, aip-compile and aip-runtime, as aip skill install writes them"})
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(f.plugin(), ".claude-plugin"), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(f.plugin(), ".claude-plugin", "plugin.json"), append(text, '\n'), 0o644)
 }
 
 // uvEnvironment is the trierarch's environment without the user's uv, pip and Python variables, so no other index, Python or configuration comes in, and with uv's Python and cache in the folder.

@@ -1,11 +1,13 @@
 package sessions
 
 import (
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -587,4 +589,143 @@ func TestAHostSessionReachingAnAipServerWhileTheTrierarchHoldsNoAipKeepsThePathI
 	if env := read(filepath.Join(folder, "harness.env")); !strings.Contains("\n"+env+"\n", "\nPATH="+os.Getenv("PATH")+"\n") || !strings.Contains(env, "AIP_SERVER=") {
 		t.Errorf("environment:\n%s\nwant AIP_SERVER and the hold's own PATH", env)
 	}
+}
+
+// commandGiven is the command a session's start hands its hold: what HeldAs is given, the hold then running a harness that only waits.
+func commandGiven(t *testing.T, runtime Runtime, harness string) []string {
+	t.Helper()
+	var given []string
+	runtime.HeldAs = func(session Start, files hold.Files) (Start, error) {
+		given = session.Command
+		session.Command = []string{"sh", "-c", "while read -r line; do :; done"}
+		return session, nil
+	}
+	if err := runtime.Start(Start{ShipID: scout, Folder: t.TempDir(), Harness: harness, Command: []string{harness, "-p", "--mcp-config", "/sessions/mcp-config.json"}}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	return given
+}
+
+// aipsSkills is a plugin of aip's skills, as the trierarch's aip folder holds it.
+func aipsSkills() (string, bool) { return "/home/scout/.aeolus/trierarch/aip-command/plugin", true }
+
+func TestAHostClaudeCodeSessionReachingAnAipServerIsStartedWithThePluginOfAipsSkills(t *testing.T) {
+	runtime := aRuntime(t)
+	runtime.Aip = &Aip{Configured: &aip.Setting{Server: "https://aip.example.invalid", TokenSecret: "aip-read"}, Secrets: heldSecrets{}, Command: anAipCommand(t, "0.7.0"), Plugin: aipsSkills, Path: "/usr/bin:/bin"}
+
+	given := commandGiven(t, runtime, "claude-code")
+
+	want := []string{"claude-code", "--plugin-dir", "/home/scout/.aeolus/trierarch/aip-command/plugin", "-p", "--mcp-config", "/sessions/mcp-config.json"}
+	if !slices.Equal(given, want) {
+		t.Errorf("command = %q, want %q", given, want)
+	}
+}
+
+func TestAHostClaudeCodeSessionReachingNoAipServerGetsNoPluginOfAipsSkills(t *testing.T) {
+	runtime := aRuntime(t)
+	runtime.Aip = &Aip{Sent: func() (aip.Setting, bool) { return aip.Setting{}, false }, Secrets: heldSecrets{}, Command: anAipCommand(t, "0.7.0"), Plugin: aipsSkills, Path: "/usr/bin:/bin"}
+
+	given := commandGiven(t, runtime, "claude-code")
+
+	if want := []string{"claude-code", "-p", "--mcp-config", "/sessions/mcp-config.json"}; !slices.Equal(given, want) {
+		t.Errorf("command = %q, want %q", given, want)
+	}
+}
+
+func TestAHostClaudeCodeSessionWhileTheTrierarchHoldsNoAipsSkillsGetsNoPlugin(t *testing.T) {
+	runtime := aRuntime(t)
+	runtime.Aip = &Aip{Configured: &aip.Setting{Server: "https://aip.example.invalid", TokenSecret: "aip-read"}, Secrets: heldSecrets{}, Command: anAipCommand(t, "0.7.0"), Plugin: func() (string, bool) { return "", false }, Path: "/usr/bin:/bin"}
+
+	given := commandGiven(t, runtime, "claude-code")
+
+	if want := []string{"claude-code", "-p", "--mcp-config", "/sessions/mcp-config.json"}; !slices.Equal(given, want) {
+		t.Errorf("command = %q, want %q", given, want)
+	}
+}
+
+func TestOnlyClaudeCodeSessionsAreStartedWithThePluginOfAipsSkills(t *testing.T) {
+	for _, harness := range []string{"codex", "copilot"} {
+		runtime := aRuntime(t)
+		runtime.Aip = &Aip{Configured: &aip.Setting{Server: "https://aip.example.invalid", TokenSecret: "aip-read"}, Secrets: heldSecrets{}, Command: anAipCommand(t, "0.7.0"), Plugin: aipsSkills, Path: "/usr/bin:/bin"}
+
+		given := commandGiven(t, runtime, harness)
+
+		if want := []string{harness, "-p", "--mcp-config", "/sessions/mcp-config.json"}; !slices.Equal(given, want) {
+			t.Errorf("%s: command = %q, want %q", harness, given, want)
+		}
+	}
+}
+
+// TestARealClaudeCodeSessionListsAipsSkillsAndLeavesTheUsersOwnSettingsPluginsAndSkillsAsTheyWere runs the installed Claude Code under a hold, in
+// a throwaway home, only with AEOLUS_TEST_CLAUDE_CODE=1: it needs no login, as its first event lists its skills before any model call.
+func TestARealClaudeCodeSessionListsAipsSkillsAndLeavesTheUsersOwnSettingsPluginsAndSkillsAsTheyWere(t *testing.T) {
+	if os.Getenv("AEOLUS_TEST_CLAUDE_CODE") != "1" {
+		t.Skip("runs the installed Claude Code: only with AEOLUS_TEST_CLAUDE_CODE=1")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	own := map[string]string{
+		filepath.Join(".claude", "settings.json"):                     `{"theme":"dark","enabledPlugins":{}}` + "\n",
+		filepath.Join(".claude", "plugins", "installed_plugins.json"): `{"version":2,"plugins":{}}` + "\n",
+		filepath.Join(".claude", "skills", "own-skill", "SKILL.md"):   "---\nname: own-skill\ndescription: the user's own skill\n---\n",
+	}
+	plugin := t.TempDir()
+	files := map[string]string{
+		filepath.Join(".claude-plugin", "plugin.json"):     `{"name":"aip","version":"0.7.0","description":"aip's own skills"}` + "\n",
+		filepath.Join("skills", "aip-compile", "SKILL.md"): "---\nname: aip-compile\ndescription: compile skills\n---\n",
+		filepath.Join("skills", "aip-runtime", "SKILL.md"): "---\nname: aip-runtime\ndescription: run procedures\n---\n",
+	}
+	for root, each := range map[string]map[string]string{home: own, plugin: files} {
+		for name, text := range each {
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, name), []byte(text), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	runtime := aRuntime(t)
+	runtime.Aip = &Aip{Configured: &aip.Setting{Server: "https://aip.example.invalid", TokenSecret: "aip-read"}, Secrets: heldSecrets{}, Command: anAipCommand(t, "0.7.0"), Plugin: func() (string, bool) { return plugin, true }, Path: os.Getenv("PATH")}
+	if err := runtime.Start(Start{ShipID: scout, Folder: t.TempDir(), Harness: "claude-code", Command: []string{"claude", "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.Send(scout, `{"type":"user","message":{"role":"user","content":"ok"}}`); err != nil {
+		t.Fatal(err)
+	}
+
+	var skills []string
+	for until := time.Now().Add(60 * time.Second); skills == nil && time.Now().Before(until); time.Sleep(100 * time.Millisecond) {
+		for _, line := range strings.Split(read(hold.FilesOf(runtime.Sessions, scout).Events), "\n") {
+			var event struct {
+				Type    string   `json:"type"`
+				Subtype string   `json:"subtype"`
+				Skills  []string `json:"skills"`
+			}
+			if json.Unmarshal([]byte(line), &event) == nil && event.Type == "system" && event.Subtype == "init" {
+				skills = append([]string{}, event.Skills...)
+			}
+		}
+	}
+	for _, skill := range []string{"aip:aip-compile", "aip:aip-runtime", "own-skill"} {
+		if !slices.Contains(skills, skill) {
+			t.Errorf("the session lists the skills %q, want %s among them", skills, skill)
+		}
+	}
+	_ = runtime.Stop(scout)
+	for name, text := range own {
+		if got := read(filepath.Join(home, name)); got != strings.TrimSpace(text) {
+			t.Errorf("the user's %s = %q after the session, want it as it was: %q", name, got, text)
+		}
+	}
+	if skillsFolder, _ := os.ReadDir(filepath.Join(home, ".claude", "skills")); len(skillsFolder) != 1 {
+		t.Errorf("the user's skills folder holds %v after the session, want only own-skill", skillsFolder)
+	}
+	_ = filepath.WalkDir(filepath.Join(home, ".claude", "plugins"), func(path string, entry os.DirEntry, err error) error {
+		if err == nil && !entry.IsDir() && strings.Contains(read(path), plugin) {
+			t.Errorf("the user's %s names the plugin of aip's skills, want the user's plugins as they were", path)
+		}
+		return nil
+	})
 }
