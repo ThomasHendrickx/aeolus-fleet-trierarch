@@ -361,3 +361,27 @@ func TestTheRealUvInstallsTheRealAip(t *testing.T) {
 		t.Fatalf("Ensure() = %+v, Bin() = %q, %v; want aip %s", state, bin, isHeld, Version)
 	}
 }
+
+func TestAFailedInstallsWordsAreOneLine(t *testing.T) {
+	folder, log := aFolder(t)
+	if err := os.WriteFile(filepath.Join(log, "PIP_FAILS"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if state := folder.Ensure(); strings.Contains(state.Missing, "\n") {
+		t.Errorf("Ensure() = %q, want one line", state.Missing)
+	}
+}
+
+func TestBriefIsWhyAsShortAsAReportsNoteTakesIt(t *testing.T) {
+	for _, test := range []struct{ state, want State }{
+		{State{Version: "0.7.0"}, State{}},
+		{State{Missing: "uv 0.13.7, which installs aip 0.7.0, has no build for this machine"}, State{Missing: "uv 0.13.7, which installs aip 0.7.0, has no build for this machine"}},
+		{State{Missing: "aip 0.7.0 is not installed yet"}, State{Missing: "aip 0.7.0 is not installed yet"}},
+		{State{Missing: "the install of aip 0.7.0 failed: uv 0.13.7 could not be downloaded: " + strings.Repeat("x", 300)}, State{Missing: "its install failed, as aeolus-trierarch status says"}},
+	} {
+		if got := test.state.Brief(); got != test.want.Missing {
+			t.Errorf("Brief() of %+v = %q, want %q", test.state, got, test.want.Missing)
+		}
+	}
+}
