@@ -92,6 +92,10 @@ type Aip struct {
 	Secrets SecretValues
 	// Log takes the line that says the secret is not held, never a value.
 	Log func(line string)
+	// Command is the bin of the aip CLI the trierarch keeps on the host (#314), while it holds one; none in containers, whose image holds its own.
+	Command func() (string, bool)
+	// Path is the PATH a session has without the aip CLI: the hold's own, which Command's bin goes in front of.
+	Path string
 }
 
 // setting is the aip the session reaches: the configured one, or else the one the trierarch plugin sent; false with neither.
@@ -113,7 +117,7 @@ type SecretValues interface {
 	Value(name string) (string, bool)
 }
 
-// withAip is the session with the aip server in its environment, and its read token among its secrets when it is held; as it is without an aip server.
+// withAip is the session with the aip server in its environment, the trierarch's aip CLI first on its PATH while it holds one, and its read token among its secrets when it is held; as it is without an aip server.
 func (a *Aip) withAip(session Start) Start {
 	setting, ok := a.setting()
 	if !ok {
@@ -124,6 +128,11 @@ func (a *Aip) withAip(session Start) Start {
 		env = map[string]string{}
 	}
 	env["AIP_SERVER"] = setting.Server
+	if a.Command != nil {
+		if bin, ok := a.Command(); ok {
+			env["PATH"] = bin + string(os.PathListSeparator) + a.Path
+		}
+	}
 	session.Env = env
 	token, ok := a.Secrets.Value(setting.TokenSecret)
 	if !ok {
