@@ -137,6 +137,9 @@ func main() {
 		McpServers: func(at paths.Paths) receiving.ServerKeeper {
 			return mcpServerList(at)
 		},
+		Aip: func(at paths.Paths) receiving.AipKeeper {
+			return heldAipOf(at)
+		},
 		Secrets: func(at paths.Paths) receiving.SecretKeeper {
 			return heldSecretsOf(at)
 		},
@@ -360,6 +363,21 @@ func mcpServerList(at paths.Paths) *mcpservers.File {
 	return heldServers
 }
 
+// heldAip is the aip setting this process holds, loaded once and shared by the receiving loop that accepts it and the session starts that read it.
+var (
+	heldAip     *aip.File
+	holdAipOnce sync.Once
+)
+
+// heldAipOf is the aip setting the trierarch plugin sent last.
+func heldAipOf(at paths.Paths) *aip.File {
+	holdAipOnce.Do(func() {
+		heldAip = &aip.File{Path: at.Aip}
+		heldAip.Load()
+	})
+	return heldAip
+}
+
 // heldSecrets is the secrets this process holds, loaded once and shared by the receiving loop that accepts them and the passes that offer the servers they are the credentials of.
 var (
 	heldSecrets     *secrets.File
@@ -470,12 +488,13 @@ type runningSessions interface {
 // sessionImage is the session image release.yml publishes with each version (decision 0011, 0039).
 const sessionImage = "ghcr.io/thomashendrickx/aeolus-session"
 
-// sessionRuntime is what the configuration's session runtime picks (decision 0039): each session under a hold, the trierarch program run as `hold`, in a systemd scope of its own under the service; in containers, a container per ship that its hold runs, from the image of the trierarch's own version, with the configured binary and caps and the machine's model token. Every session reaches the configured aip server with the read token the secrets hold (#251).
+// sessionRuntime is what the configuration's session runtime picks (decision 0039): each session under a hold, the trierarch program run as `hold`, in a systemd scope of its own under the service; in containers, a container per ship that its hold runs, from the image of the trierarch's own version, with the configured binary and caps and the machine's model token. Every session reaches the aip server the configuration names, or else the one the trierarch plugin sent, with the read token the secrets hold (#251, #312).
 func sessionRuntime(at paths.Paths, program string, configuration config.Configuration) runningSessions {
 	configured := configuration.Runtime
 	holds := sessions.Runtime{Sessions: at.Sessions, Program: []string{program}, Version: cli.Version, Launch: sessions.Launch(runtime.GOOS, os.Getenv("INVOCATION_ID"), sessions.SystemdVersion()), BootedAt: sessions.BootedAt}
+	holds.Aip = &sessions.Aip{Sent: heldAipOf(at).Current, Secrets: heldSecretsOf(at), Log: logLine}
 	if own := configuration.Aip; own != nil {
-		holds.Aip = &sessions.Aip{Configured: &aip.Setting{Server: own.Server, TokenSecret: own.TokenSecret}, Secrets: heldSecretsOf(at), Log: logLine}
+		holds.Aip.Configured = &aip.Setting{Server: own.Server, TokenSecret: own.TokenSecret}
 	}
 	if !isInContainers(configured) {
 		return holds
