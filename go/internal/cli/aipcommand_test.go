@@ -49,8 +49,8 @@ func (a *anAipCommand) timesEnsured() int {
 }
 
 var (
-	installed = aipcommand.State{Version: "0.7.0"}
-	noPython  = aipcommand.State{Missing: "no python3 on the PATH, and aip 0.7.0 runs on Python 3.14 or newer"}
+	installed     = aipcommand.State{Version: "0.7.0"}
+	notDownloaded = aipcommand.State{Missing: "the install of aip 0.7.0 failed: uv 0.13.7 could not be downloaded: connection refused"}
 )
 
 func TestInitInstallsTheAipCommandAndSaysItsVersion(t *testing.T) {
@@ -65,13 +65,13 @@ func TestInitInstallsTheAipCommandAndSaysItsVersion(t *testing.T) {
 	}
 }
 
-func TestInitOnAHostWithoutPython3SaysWhyHostSessionsGetNoAip(t *testing.T) {
+func TestInitThatCannotInstallAipSaysWhyHostSessionsGetNoAip(t *testing.T) {
 	machine := newMachine(t)
-	machine.init.AipCommand = &anAipCommand{state: noPython}
+	machine.init.AipCommand = &anAipCommand{state: notDownloaded}
 
 	report, err := machine.init.Run(setupLine())
 
-	if err != nil || !slices.Contains(report.Said, "Host sessions get no aip: no python3 on the PATH, and aip 0.7.0 runs on Python 3.14 or newer.") {
+	if err != nil || !slices.Contains(report.Said, "Host sessions get no aip: the install of aip 0.7.0 failed: uv 0.13.7 could not be downloaded: connection refused.") {
 		t.Errorf("Run() = %q, %v, want why there is no aip", report.Said, err)
 	}
 }
@@ -114,11 +114,11 @@ func TestStatusSaysTheAipHostSessionsRun(t *testing.T) {
 func TestStatusSaysWhyHostSessionsGetNoAip(t *testing.T) {
 	machine, _, _ := aMain(t)
 	Main(setupWords(), machine)
-	machine.AipCommand = func(paths.Paths) AipCommand { return &anAipCommand{state: noPython} }
+	machine.AipCommand = func(paths.Paths) AipCommand { return &anAipCommand{state: notDownloaded} }
 
 	output, _ := Main([]string{"status"}, machine)
 
-	if !slices.Contains(strings.Split(output, "\n"), "aip: none for host sessions: no python3 on the PATH, and aip 0.7.0 runs on Python 3.14 or newer") {
+	if !slices.Contains(strings.Split(output, "\n"), "aip: none for host sessions: the install of aip 0.7.0 failed: uv 0.13.7 could not be downloaded: connection refused") {
 		t.Errorf("status said:\n%s\nwant why there is no aip", output)
 	}
 }
@@ -126,11 +126,11 @@ func TestStatusSaysWhyHostSessionsGetNoAip(t *testing.T) {
 func TestStatusAnswersTheAipAsJSON(t *testing.T) {
 	machine, _, _ := aMain(t)
 	Main(setupWords(), machine)
-	machine.AipCommand = func(paths.Paths) AipCommand { return &anAipCommand{state: noPython} }
+	machine.AipCommand = func(paths.Paths) AipCommand { return &anAipCommand{state: notDownloaded} }
 
 	output, _ := Main([]string{"status", "--json"}, machine)
 
-	if got := decoded(t, output)["aip"]; !reflect.DeepEqual(got, map[string]any{"missing": noPython.Missing}) {
+	if got := decoded(t, output)["aip"]; !reflect.DeepEqual(got, map[string]any{"missing": notDownloaded.Missing}) {
 		t.Errorf("status --json aip = %v, want why there is none", got)
 	}
 }

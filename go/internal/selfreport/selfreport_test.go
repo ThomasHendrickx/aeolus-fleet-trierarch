@@ -77,8 +77,8 @@ func TestTheNoteCountsCrashedShips(t *testing.T) {
 
 func TestTheNoteSaysWhyHostSessionsGetNoAip(t *testing.T) {
 	in := anInput()
-	in.AipMissing = "no python3 on the PATH, and aip 0.7.0 runs on Python 3.14 or newer"
-	if got := Of(in).Note; got != "0 of 6 running, no aip for host sessions: no python3 on the PATH, and aip 0.7.0 runs on Python 3.14 or newer" {
+	in.AipMissing = "uv 0.13.7, which installs aip 0.7.0, has no build for this machine"
+	if got := Of(in).Note; got != "0 of 6 running, no aip for host sessions: uv 0.13.7, which installs aip 0.7.0, has no build for this machine" {
 		t.Fatalf("note = %q", got)
 	}
 }
