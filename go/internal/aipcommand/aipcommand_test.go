@@ -1,6 +1,13 @@
 package aipcommand
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,49 +16,67 @@ import (
 	"testing"
 )
 
-// standInPython is a python3 on a stand-in machine: it states its version, makes a venv of itself, and as the venv's python runs pip, which keeps
-// its words and the requirements it was given in the venv and writes a bin/aip that states the version the requirements pin. STAND_IN_PIP_FAILS
-// in the folder of the stand-in makes pip fail; every pip run is counted in pip-runs beside it.
-const standInPython = `#!/bin/sh
-here=$(cd "$(dirname "$0")" && pwd)
-case "$1" in
-  -c) echo "%s" ;;
-  -m)
-    case "$2" in
-      venv) mkdir -p "$3/bin" && cp "$0" "$3/bin/python" && echo "$here" > "$3/bin/stand-in-root" ;;
-      pip)
-        root=$(cat "$here/stand-in-root")
-        echo run >> "$root/pip-runs"
-        if [ -e "$root/STAND_IN_PIP_FAILS" ]; then echo "ERROR: THESE PACKAGES DO NOT MATCH THE HASHES" >&2; exit 1; fi
-        shift 2
-        echo "$@" > "$here/../pip-words"
-        while [ $# -gt 0 ]; do [ "$1" = -r ] && cp "$2" "$here/../pip-requirements"; shift; done
-        version=$(sed -n 's/^agent-instruction-protocol==\([^ ]*\).*/\1/p' "$here/../pip-requirements")
-        printf '#!/bin/sh\necho "aip %s (stand-in)"\n' "$version" > "$here/aip" && chmod +x "$here/aip" ;;
-    esac ;;
+// standInUv is uv on a stand-in machine: `python install` makes a Python in UV_PYTHON_INSTALL_DIR, `venv` a venv of it, and `pip install` writes the
+// venv's bin/aip, which states the version the requirements pin. It keeps its words, the uv variables it was given and the requirements in
+// STAND_IN_UV_LOG, counts every pip run there, and fails pip while a PIP_FAILS file is there.
+const standInUv = `#!/bin/sh
+log="$STAND_IN_UV_LOG"
+echo "$*" >> "$log/words"
+env | grep '^UV_' | sort > "$log/uv-variables"
+case "$1 $2" in
+  "python install")
+    mkdir -p "$UV_PYTHON_INSTALL_DIR/cpython-$3/bin" && printf '#!/bin/sh\n' > "$UV_PYTHON_INSTALL_DIR/cpython-$3/bin/python3" && chmod +x "$UV_PYTHON_INSTALL_DIR/cpython-$3/bin/python3" ;;
+  "venv --python")
+    mkdir -p "$4/bin" && ln -s "$UV_PYTHON_INSTALL_DIR/cpython-$3/bin/python3" "$4/bin/python" ;;
+  "pip install")
+    echo run >> "$log/pip-runs"
+    if [ -e "$log/PIP_FAILS" ]; then echo "error: hash mismatch for typing-extensions" >&2; exit 1; fi
+    shift 2
+    venv=""
+    while [ $# -gt 0 ]; do
+      [ "$1" = --python ] && venv=$(dirname "$(dirname "$2")")
+      [ "$1" = -r ] && cp "$2" "$log/requirements"
+      shift
+    done
+    version=$(sed -n 's/^agent-instruction-protocol==\([^ ]*\).*/\1/p' "$log/requirements")
+    printf '#!/bin/sh\necho "aip %s format 0.6a1"\n' "$version" > "$venv/bin/aip" && chmod +x "$venv/bin/aip" ;;
 esac
 `
 
-// aMachine is a PATH with a python3 of the version, and the folder it is in.
-func aMachine(t *testing.T, version string) (path string, bin string) {
+// aUvRelease serves uv's archive for this machine as the uv release does, and is the build that names it with its sha256.
+func aUvRelease(t *testing.T) *Uv {
 	t.Helper()
-	bin = t.TempDir()
-	writePython(t, filepath.Join(bin, "python3"), version)
-	return bin + string(os.PathListSeparator) + "/usr/bin:/bin", bin
-}
-
-func writePython(t *testing.T, path string, version string) {
-	t.Helper()
-	script := strings.Replace(standInPython, "%s", version, 1)
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+	var archive bytes.Buffer
+	zipped := gzip.NewWriter(&archive)
+	files := tar.NewWriter(zipped)
+	for name, text := range map[string]string{"uv-stand-in/uv": standInUv, "uv-stand-in/uvx": "#!/bin/sh\n"} {
+		if err := files.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(text)), Typeflag: tar.TypeReg}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := files.Write([]byte(text)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := files.Close(); err != nil {
 		t.Fatal(err)
 	}
+	if err := zipped.Close(); err != nil {
+		t.Fatal(err)
+	}
+	served := archive.Bytes()
+	release := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(served) }))
+	t.Cleanup(release.Close)
+	sum := sha256.Sum256(served)
+	return &Uv{URL: release.URL + "/uv-stand-in.tar.gz", SHA256: hex.EncodeToString(sum[:])}
 }
 
-func aFolder(t *testing.T, path string) Folder {
+// aFolder is the aip folder in a throwaway home, with uv from a stand-in release, and the folder its stand-in uv logs in.
+func aFolder(t *testing.T) (Folder, string) {
 	t.Helper()
+	log := t.TempDir()
+	t.Setenv("STAND_IN_UV_LOG", log)
 	home := t.TempDir()
-	return Folder{Path: filepath.Join(home, "aip-command"), Outcome: filepath.Join(home, "aip-command.json"), SearchPath: path}
+	return Folder{Path: filepath.Join(home, "aip-command"), Outcome: filepath.Join(home, "aip-command.json"), Uv: aUvRelease(t)}, log
 }
 
 func aipVersionIn(t *testing.T, bin string) string {
@@ -63,41 +88,63 @@ func aipVersionIn(t *testing.T, bin string) string {
 	return strings.TrimSpace(string(said))
 }
 
-func pipRuns(t *testing.T, standIn string) int {
-	t.Helper()
-	text, _ := os.ReadFile(filepath.Join(standIn, "pip-runs"))
+func pipRuns(log string) int {
+	text, _ := os.ReadFile(filepath.Join(log, "pip-runs"))
 	return strings.Count(string(text), "run")
 }
 
+func readText(t *testing.T, path string) string {
+	t.Helper()
+	text, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(text)
+}
+
 func TestThePinnedAipIsInstalledIntoTheFolderAndItsBinRunsIt(t *testing.T) {
-	path, _ := aMachine(t, "3.14")
-	folder := aFolder(t, path)
+	folder, _ := aFolder(t)
 
 	state := folder.Ensure()
 
 	bin, ok := folder.Bin()
-	if state != (State{Version: "0.7.0"}) || !ok || bin != filepath.Join(folder.Path, "bin") {
-		t.Fatalf("Ensure() = %+v, Bin() = %q, %v; want 0.7.0 in %s/bin", state, bin, ok, folder.Path)
+	if state != (State{Version: "0.7.0"}) || !ok || bin != filepath.Join(folder.Path, "venv", "bin") {
+		t.Fatalf("Ensure() = %+v, Bin() = %q, %v; want 0.7.0 in %s/venv/bin", state, bin, ok, folder.Path)
 	}
-	if got := aipVersionIn(t, bin); got != "aip 0.7.0 (stand-in)" {
+	if got := aipVersionIn(t, bin); got != "aip 0.7.0 format 0.6a1" {
 		t.Errorf("aip --version = %q, want aip 0.7.0", got)
 	}
 }
 
-func TestPipInstallsOnlyTheLockedRequirementsEachByItsHashIntoTheFolderNeverTheUsersPython(t *testing.T) {
-	path, _ := aMachine(t, "3.14")
-	folder := aFolder(t, path)
+func TestUvInstallsThePinnedPythonAndOnlyTheLockedRequirementsEachByItsHashAllInTheFolder(t *testing.T) {
+	folder, log := aFolder(t)
+	t.Setenv("UV_INDEX_URL", "https://index.example.invalid/simple")
 
 	folder.Ensure()
 
-	words := readText(t, filepath.Join(folder.Path, "pip-words"))
-	for _, want := range []string{"install", "--require-hashes", "--no-deps", "--only-binary=:all:", "--isolated"} {
-		if !strings.Contains(" "+words+" ", " "+want+" ") {
-			t.Errorf("pip was given %q, want %s among them", words, want)
+	words := strings.Split(strings.TrimSpace(readText(t, filepath.Join(log, "words"))), "\n")
+	want := []string{
+		"python install 3.14.10 --no-bin",
+		"venv --python 3.14.10 " + filepath.Join(folder.Path, "venv"),
+		"pip install --python " + filepath.Join(folder.Path, "venv", "bin", "python") + " --require-hashes --no-deps --only-binary :all: -r " + filepath.Join(folder.Path, "requirements.txt"),
+	}
+	if strings.Join(words, "\n") != strings.Join(want, "\n") {
+		t.Errorf("uv ran\n%s\nwant\n%s", strings.Join(words, "\n"), strings.Join(want, "\n"))
+	}
+	variables := readText(t, filepath.Join(log, "uv-variables"))
+	for _, each := range []string{"UV_NO_CONFIG=1", "UV_PYTHON_PREFERENCE=only-managed", "UV_PYTHON_INSTALL_DIR=" + filepath.Join(folder.Path, "python"), "UV_CACHE_DIR=" + filepath.Join(folder.Path, "cache")} {
+		if !strings.Contains(variables, each+"\n") {
+			t.Errorf("uv was given\n%s\nwant %s among them", variables, each)
 		}
 	}
-	if given := readText(t, filepath.Join(folder.Path, "pip-requirements")); given != string(requirements) {
-		t.Errorf("pip was given requirements other than the locked ones:\n%s", given)
+	if strings.Contains(variables, "UV_INDEX_URL") {
+		t.Errorf("uv was given the user's UV_INDEX_URL, want none of the user's uv variables")
+	}
+	if given := readText(t, filepath.Join(log, "requirements")); given != string(requirements) {
+		t.Errorf("uv was given requirements other than the locked ones:\n%s", given)
+	}
+	if _, err := os.Stat(filepath.Join(folder.Path, "cache")); !os.IsNotExist(err) {
+		t.Errorf("uv's cache: %v, want it gone once aip is installed", err)
 	}
 }
 
@@ -112,32 +159,49 @@ func TestTheLockPinsEveryRequirementByVersionAndHash(t *testing.T) {
 	}
 }
 
-func TestTheHostsAipIsTheVersionTheSessionImageShips(t *testing.T) {
+func TestTheHostsAipUvAndPythonAreTheOnesTheSessionImageShips(t *testing.T) {
 	containerfile := readText(t, filepath.Join("..", "..", "..", "packages", "trierarch", "image", "Containerfile"))
 
-	match := regexp.MustCompile(`(?m)^ARG AIP_VERSION=(\S+)$`).FindStringSubmatch(containerfile)
-	if match == nil || match[1] != Version {
-		t.Errorf("the image ships aip %v, the host gets %s: want the same", match, Version)
+	aip := regexp.MustCompile(`(?m)^ARG AIP_VERSION=(\S+)$`).FindStringSubmatch(containerfile)
+	python := regexp.MustCompile(`(?m)^ARG PYTHON_VERSION=(\S+)$`).FindStringSubmatch(containerfile)
+	if aip == nil || aip[1] != Version {
+		t.Errorf("the image ships aip %v, the host gets %s: want the same", aip, Version)
+	}
+	if python == nil || !strings.HasPrefix(PythonVersion, python[1]+".") {
+		t.Errorf("the image ships Python %v, the host gets %s: want the same minor", python, PythonVersion)
+	}
+	if !strings.Contains(containerfile, "ghcr.io/astral-sh/uv:"+UvVersion+" ") {
+		t.Errorf("the image takes another uv than the host's %s", UvVersion)
+	}
+}
+
+func TestEveryUvBuildIsOfThePinnedVersionAndCheckedByItsPublishedSha256(t *testing.T) {
+	for _, platform := range [][2]string{{"linux", "amd64"}, {"linux", "arm64"}, {"darwin", "amd64"}, {"darwin", "arm64"}} {
+		build, ok := UvFor(platform[0], platform[1])
+		if !ok || !strings.HasPrefix(build.URL, "https://github.com/astral-sh/uv/releases/download/0.13.7/uv-") || !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(build.SHA256) {
+			t.Errorf("UvFor(%s) = %+v, %v; want uv 0.13.7 from its release with its sha256", platform, build, ok)
+		}
+	}
+	if build, ok := UvFor("linux", "386"); ok {
+		t.Errorf("UvFor(linux/386) = %+v, want none: uv has no build for it", build)
 	}
 }
 
 func TestAnInstalledFolderOfThePinIsKeptAsItIs(t *testing.T) {
-	path, standIn := aMachine(t, "3.14")
-	folder := aFolder(t, path)
+	folder, log := aFolder(t)
 	folder.Ensure()
 
 	state := folder.Ensure()
 
-	if state != (State{Version: "0.7.0"}) || pipRuns(t, standIn) != 1 {
-		t.Errorf("Ensure() again = %+v after %d pip runs, want 0.7.0 kept from the one install", state, pipRuns(t, standIn))
+	if state != (State{Version: "0.7.0"}) || pipRuns(log) != 1 {
+		t.Errorf("Ensure() again = %+v after %d pip runs, want 0.7.0 kept from the one install", state, pipRuns(log))
 	}
 }
 
 func TestAFolderWhoseAipIsGoneIsBrokenAndInstalledAgain(t *testing.T) {
-	path, standIn := aMachine(t, "3.14")
-	folder := aFolder(t, path)
+	folder, log := aFolder(t)
 	folder.Ensure()
-	if err := os.Remove(filepath.Join(folder.Path, "bin", "aip")); err != nil {
+	if err := os.Remove(filepath.Join(folder.Path, "venv", "bin", "aip")); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := folder.Bin(); ok {
@@ -147,30 +211,43 @@ func TestAFolderWhoseAipIsGoneIsBrokenAndInstalledAgain(t *testing.T) {
 	state := folder.Ensure()
 
 	bin, ok := folder.Bin()
-	if state != (State{Version: "0.7.0"}) || !ok || pipRuns(t, standIn) != 2 || aipVersionIn(t, bin) != "aip 0.7.0 (stand-in)" {
-		t.Errorf("Ensure() = %+v, Bin() = %v after %d pip runs, want 0.7.0 installed again", state, ok, pipRuns(t, standIn))
+	if state != (State{Version: "0.7.0"}) || !ok || pipRuns(log) != 2 || aipVersionIn(t, bin) != "aip 0.7.0 format 0.6a1" {
+		t.Errorf("Ensure() = %+v, Bin() = %v after %d pip runs, want 0.7.0 installed again", state, ok, pipRuns(log))
+	}
+}
+
+func TestAFolderWhosePythonIsGoneIsBrokenAndInstalledAgain(t *testing.T) {
+	folder, log := aFolder(t)
+	folder.Ensure()
+	if err := os.RemoveAll(filepath.Join(folder.Path, "python")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := folder.Bin(); ok {
+		t.Fatalf("Bin() of a folder whose venv's Python is gone is offered, want none")
+	}
+
+	if state := folder.Ensure(); state != (State{Version: "0.7.0"}) || pipRuns(log) != 2 {
+		t.Errorf("Ensure() = %+v after %d pip runs, want 0.7.0 installed again", state, pipRuns(log))
 	}
 }
 
 func TestAFolderWhoseAipStatesAnotherVersionIsBrokenAndInstalledAgain(t *testing.T) {
-	path, standIn := aMachine(t, "3.14")
-	folder := aFolder(t, path)
+	folder, log := aFolder(t)
 	folder.Ensure()
-	if err := os.WriteFile(filepath.Join(folder.Path, "bin", "aip"), []byte("#!/bin/sh\necho 'aip 0.6.0 (stand-in)'\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(folder.Path, "venv", "bin", "aip"), []byte("#!/bin/sh\necho 'aip 0.6.0 format 0.5'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
 	state := folder.Ensure()
 
 	bin, _ := folder.Bin()
-	if state != (State{Version: "0.7.0"}) || pipRuns(t, standIn) != 2 || aipVersionIn(t, bin) != "aip 0.7.0 (stand-in)" {
-		t.Errorf("Ensure() = %+v after %d pip runs, want 0.7.0 installed again", state, pipRuns(t, standIn))
+	if state != (State{Version: "0.7.0"}) || pipRuns(log) != 2 || aipVersionIn(t, bin) != "aip 0.7.0 format 0.6a1" {
+		t.Errorf("Ensure() = %+v after %d pip runs, want 0.7.0 installed again", state, pipRuns(log))
 	}
 }
 
 func TestAFolderOfAnEarlierPinIsNotOfferedAndIsInstalledAtTheNewPin(t *testing.T) {
-	path, standIn := aMachine(t, "3.14")
-	folder := aFolder(t, path)
+	folder, log := aFolder(t)
 	folder.Ensure()
 	if err := os.WriteFile(folder.Outcome, []byte(`{"version":"0.6.0"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -181,17 +258,18 @@ func TestAFolderOfAnEarlierPinIsNotOfferedAndIsInstalledAtTheNewPin(t *testing.T
 
 	state := folder.Ensure()
 
-	if _, ok := folder.Bin(); state != (State{Version: "0.7.0"}) || !ok || pipRuns(t, standIn) != 2 {
-		t.Errorf("Ensure() = %+v, Bin() = %v after %d pip runs, want 0.7.0 installed", state, ok, pipRuns(t, standIn))
+	if _, ok := folder.Bin(); state != (State{Version: "0.7.0"}) || !ok || pipRuns(log) != 2 {
+		t.Errorf("Ensure() = %+v, Bin() = %v after %d pip runs, want 0.7.0 installed", state, ok, pipRuns(log))
 	}
 }
 
-func TestAHostWithoutPython3GetsNoAipAndSaysWhy(t *testing.T) {
-	folder := aFolder(t, t.TempDir())
+func TestAMachineUvHasNoBuildForGetsNoAipAndSaysWhy(t *testing.T) {
+	folder, _ := aFolder(t)
+	folder.Uv = nil
 
 	state := folder.Ensure()
 
-	if _, ok := folder.Bin(); state != (State{Missing: "no python3 on the PATH, and aip 0.7.0 runs on Python 3.14 or newer"}) || ok {
+	if _, ok := folder.Bin(); state != (State{Missing: "uv 0.13.7, which installs aip 0.7.0, has no build for this machine"}) || ok {
 		t.Errorf("Ensure() = %+v, Bin() = %v, want no aip and why", state, ok)
 	}
 	if folder.State() != state {
@@ -199,42 +277,53 @@ func TestAHostWithoutPython3GetsNoAipAndSaysWhy(t *testing.T) {
 	}
 }
 
-func TestAHostWhosePython3IsOlderThan314GetsNoAipAndSaysWhy(t *testing.T) {
-	path, _ := aMachine(t, "3.12")
-	folder := aFolder(t, path)
+func TestADownloadOfUvThatDoesNotMatchItsSha256IsNeverRun(t *testing.T) {
+	folder, log := aFolder(t)
+	folder.Uv.SHA256 = strings.Repeat("0", 64)
 
 	state := folder.Ensure()
 
-	if _, ok := folder.Bin(); state != (State{Missing: "python3 on the PATH is 3.12, and aip 0.7.0 runs on Python 3.14 or newer"}) || ok {
-		t.Errorf("Ensure() = %+v, Bin() = %v, want no aip and why", state, ok)
+	if state != (State{Missing: "the install of aip 0.7.0 failed: uv 0.13.7's download does not match its sha256"}) {
+		t.Errorf("Ensure() = %+v, want the download refused", state)
+	}
+	if _, err := os.Stat(filepath.Join(log, "words")); !os.IsNotExist(err) {
+		t.Errorf("uv ran (%v), want a download that does not match never run", err)
+	}
+	if _, err := os.Stat(folder.Path); !os.IsNotExist(err) {
+		t.Errorf("%s: %v, want no folder left of a failed install", folder.Path, err)
 	}
 }
 
-func TestAHostWhosePython3IsOlderTakesItsPython314(t *testing.T) {
-	path, bin := aMachine(t, "3.12")
-	writePython(t, filepath.Join(bin, "python3.14"), "3.14")
-	folder := aFolder(t, path)
-
-	state := folder.Ensure()
-
-	if _, ok := folder.Bin(); state != (State{Version: "0.7.0"}) || !ok {
-		t.Errorf("Ensure() = %+v, Bin() = %v, want 0.7.0 on python3.14", state, ok)
-	}
-}
-
-func TestAFailedInstallIsLoggedLeavesNoFolderAndIsTriedAgain(t *testing.T) {
-	path, standIn := aMachine(t, "3.14")
-	if err := os.WriteFile(filepath.Join(standIn, "STAND_IN_PIP_FAILS"), nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	folder := aFolder(t, path)
+func TestAMachineWithNoNetworkGetsNoAipLogsWhyAndTriesAgainOnceItHasOne(t *testing.T) {
+	folder, _ := aFolder(t)
+	reachable := folder.Uv.URL
+	folder.Uv.URL = "http://127.0.0.1:1/uv.tar.gz"
 	logged := []string{}
 	folder.Log = func(line string) { logged = append(logged, line) }
 
 	state := folder.Ensure()
 
-	if !strings.HasPrefix(state.Missing, "the install of aip 0.7.0 failed: ") || !strings.Contains(state.Missing, "DO NOT MATCH THE HASHES") || state.Version != "" {
-		t.Errorf("Ensure() = %+v, want the install failed with pip's own words", state)
+	if !strings.HasPrefix(state.Missing, "the install of aip 0.7.0 failed: uv 0.13.7 could not be downloaded: ") || len(logged) != 1 || logged[0] != state.Missing {
+		t.Errorf("Ensure() = %+v, logged %q; want the failed download said and logged", state, logged)
+	}
+	folder.Uv.URL = reachable
+	if again := folder.Ensure(); again != (State{Version: "0.7.0"}) {
+		t.Errorf("Ensure() once the network is back = %+v, want 0.7.0", again)
+	}
+}
+
+func TestAFailedInstallIsLoggedWithUvsOwnWordsAndLeavesNoFolder(t *testing.T) {
+	folder, log := aFolder(t)
+	if err := os.WriteFile(filepath.Join(log, "PIP_FAILS"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logged := []string{}
+	folder.Log = func(line string) { logged = append(logged, line) }
+
+	state := folder.Ensure()
+
+	if !strings.HasPrefix(state.Missing, "the install of aip 0.7.0 failed: ") || !strings.Contains(state.Missing, "hash mismatch for typing-extensions") || state.Version != "" {
+		t.Errorf("Ensure() = %+v, want the install failed with uv's own words", state)
 	}
 	if len(logged) != 1 || logged[0] != state.Missing {
 		t.Errorf("logged %q, want the failure", logged)
@@ -242,27 +331,12 @@ func TestAFailedInstallIsLoggedLeavesNoFolderAndIsTriedAgain(t *testing.T) {
 	if _, err := os.Stat(folder.Path); !os.IsNotExist(err) {
 		t.Errorf("%s: %v, want no folder left of a failed install", folder.Path, err)
 	}
-	if err := os.Remove(filepath.Join(standIn, "STAND_IN_PIP_FAILS")); err != nil {
-		t.Fatal(err)
-	}
-	if again := folder.Ensure(); again != (State{Version: "0.7.0"}) {
-		t.Errorf("Ensure() once pip works = %+v, want 0.7.0", again)
-	}
 }
 
 func TestAFolderNeverEnsuredIsNotInstalledYet(t *testing.T) {
-	folder := aFolder(t, t.TempDir())
+	folder, _ := aFolder(t)
 
 	if _, ok := folder.Bin(); ok || folder.State() != (State{Missing: "aip 0.7.0 is not installed yet"}) {
 		t.Errorf("Bin() = %v, State() = %+v, want not installed yet", ok, folder.State())
 	}
-}
-
-func readText(t *testing.T, path string) string {
-	t.Helper()
-	text, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(text)
 }
