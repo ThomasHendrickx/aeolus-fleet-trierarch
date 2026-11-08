@@ -85,6 +85,8 @@ type Machine struct {
 	Trusted func(at paths.Paths, configuration config.Configuration) receiving.Keeper
 	// McpServers keeps the MCP servers the trierarch plugin's ship sends; none when nil.
 	McpServers func(at paths.Paths) receiving.ServerKeeper
+	// Aip keeps the aip setting the trierarch plugin's ship sends; none when nil.
+	Aip func(at paths.Paths) receiving.AipKeeper
 	// Secrets keeps the secrets the trierarch plugin's ship sends, opened with the sealing key; none when nil.
 	Secrets  func(at paths.Paths) receiving.SecretKeeper
 	Sessions func(at paths.Paths) Sessions
@@ -458,6 +460,9 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 		}
 		if machine.McpServers != nil {
 			loop.McpServers = machine.McpServers(at)
+		}
+		if machine.Aip != nil {
+			loop.Aip = machine.Aip(at)
 		}
 		if machine.Secrets != nil {
 			loop.Secrets, loop.SealingKey = machine.Secrets(at), sealingKey

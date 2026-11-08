@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aip"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
@@ -496,5 +497,91 @@ func TestSecretsThatCannotBeKeptAreNotAcknowledgedSoTheyComeAgain(t *testing.T) 
 
 	if len(ran.ship.acked) != 0 || slices.ContainsFunc(ran.logged, func(line string) bool { return strings.Contains(line, "s3cr3t") }) {
 		t.Fatalf("acked %v, logged %q, want none acked and no value logged", ran.ship.acked, ran.logged)
+	}
+}
+
+// anAipKeeper keeps the aip setting it is given, none included, or fails to.
+type anAipKeeper struct {
+	kept *aip.Setting
+	err  error
+	took int
+}
+
+func (k *anAipKeeper) Accept(setting *aip.Setting) error {
+	k.took++
+	if k.err != nil {
+		return k.err
+	}
+	k.kept = setting
+	return nil
+}
+
+func runKeepingServersAndAip(servers *aServerKeeper, keeper *anAipKeeper, answers ...answer) *aRun {
+	ctx, cancel := context.WithCancel(context.Background())
+	ran := &aRun{ship: &aShip{cancel: cancel, answers: answers}}
+	Loop{
+		Ship:         ran.ship,
+		Log:          func(line string) { ran.logged = append(ran.logged, line) },
+		Interval:     5 * time.Second,
+		KeyWaitMax:   300 * time.Second,
+		Pause:        func(_ context.Context, wait time.Duration) { ran.waits = append(ran.waits, wait) },
+		PluginShipID: plugin,
+		McpServers:   servers,
+		Aip:          keeper,
+	}.Run(ctx)
+	return ran
+}
+
+const graphWithAip = `{"servers":[{"name":"company-graph","url":"https://graph.example.test/mcp","transport":"streamable-http","tools":["read_neo4j_cypher"]}],"aip":{"server":"https://aip.example.test","tokenSecret":"aip-read"}}`
+
+func TestTheAipTheServerListFromThePluginsShipCarriesIsKeptWithTheList(t *testing.T) {
+	servers, keeper := &aServerKeeper{}, &anAipKeeper{}
+
+	ran := runKeepingServersAndAip(servers, keeper, answer{deliveries: []Delivery{aServerList(plugin, "d1", graphWithAip)}})
+
+	want := aip.Setting{Server: "https://aip.example.test", TokenSecret: "aip-read"}
+	if keeper.kept == nil || *keeper.kept != want || len(servers.kept) != 1 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 0 {
+		t.Fatalf("kept %+v and %v, acked %v, logged %q", keeper.kept, servers.kept, ran.ship.acked, ran.logged)
+	}
+}
+
+func TestAServerListWithNoAipClearsTheAipThePluginSentBefore(t *testing.T) {
+	servers, keeper := &aServerKeeper{}, &anAipKeeper{kept: &aip.Setting{Server: "https://aip.example.test", TokenSecret: "aip-read"}}
+
+	ran := runKeepingServersAndAip(servers, keeper, answer{deliveries: []Delivery{aServerList(plugin, "d1", graph)}})
+
+	if keeper.took != 1 || keeper.kept != nil || !slices.Equal(ran.ship.acked, []string{"d1"}) {
+		t.Fatalf("took %d, kept %+v, acked %v, want the aip cleared", keeper.took, keeper.kept, ran.ship.acked)
+	}
+}
+
+func TestTheAipInAServerListFromAnotherShipIsNotTaken(t *testing.T) {
+	servers, keeper := &aServerKeeper{}, &anAipKeeper{}
+
+	ran := runKeepingServersAndAip(servers, keeper, answer{deliveries: []Delivery{aServerList(argo, "d1", graphWithAip)}})
+
+	if keeper.took != 0 || servers.took != 0 || !slices.Equal(ran.ship.acked, []string{"d1"}) {
+		t.Fatalf("took %d and %d, acked %v", keeper.took, servers.took, ran.ship.acked)
+	}
+}
+
+func TestAServerListWhoseAipDoesNotFitIsNotTakenAndTheHeldOnesStay(t *testing.T) {
+	servers, keeper := &aServerKeeper{}, &anAipKeeper{}
+	payload := `{"servers":[],"aip":{"server":"https://aip.example.test","tokenSecret":"aip-read","token":"s3cr3t"}}`
+
+	ran := runKeepingServersAndAip(servers, keeper, answer{deliveries: []Delivery{aServerList(plugin, "d1", payload)}})
+
+	if keeper.took != 0 || servers.took != 0 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || !strings.HasSuffix(ran.logged[0], "The trierarch keeps the list it holds.") || strings.Contains(ran.logged[0], "s3cr3t") {
+		t.Fatalf("took %d and %d, acked %v, logged %q", keeper.took, servers.took, ran.ship.acked, ran.logged)
+	}
+}
+
+func TestAServerListWhoseAipCannotBeKeptIsNotAcknowledgedSoItComesAgain(t *testing.T) {
+	servers, keeper := &aServerKeeper{}, &anAipKeeper{err: errors.New("the file cannot be written")}
+
+	ran := runKeepingServersAndAip(servers, keeper, answer{deliveries: []Delivery{aServerList(plugin, "d1", graphWithAip)}})
+
+	if len(ran.ship.acked) != 0 {
+		t.Fatalf("acked %v, want none", ran.ship.acked)
 	}
 }

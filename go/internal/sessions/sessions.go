@@ -23,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aip"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/processproof"
@@ -82,13 +83,29 @@ type ProxyToken struct {
 	Token    string
 }
 
-// Aip is the aip server every session reaches (#251), with the read token of the secret named: AIP_SERVER and AIP_TOKEN, as the aip CLI reads them.
+// Aip is the aip server every session reaches (#251, #312), with the read token of the secret named: AIP_SERVER and AIP_TOKEN, as the aip CLI reads them. The machine's configuration names it, or else the trierarch plugin sent it.
 type Aip struct {
-	Server      string
-	TokenSecret string
-	Secrets     SecretValues
+	// Configured is the aip the configuration names, which wins when set.
+	Configured *aip.Setting
+	// Sent is the aip setting the trierarch plugin sent last, read afresh at each start; false when none was sent. None when nil.
+	Sent    func() (aip.Setting, bool)
+	Secrets SecretValues
 	// Log takes the line that says the secret is not held, never a value.
 	Log func(line string)
+}
+
+// setting is the aip the session reaches: the configured one, or else the one the trierarch plugin sent; false with neither.
+func (a *Aip) setting() (aip.Setting, bool) {
+	if a == nil {
+		return aip.Setting{}, false
+	}
+	if a.Configured != nil {
+		return *a.Configured, true
+	}
+	if a.Sent == nil {
+		return aip.Setting{}, false
+	}
+	return a.Sent()
 }
 
 // SecretValues is the secrets the trierarch holds, read afresh at each start.
@@ -98,19 +115,20 @@ type SecretValues interface {
 
 // withAip is the session with the aip server in its environment, and its read token among its secrets when it is held; as it is without an aip server.
 func (a *Aip) withAip(session Start) Start {
-	if a == nil {
+	setting, ok := a.setting()
+	if !ok {
 		return session
 	}
 	env := maps.Clone(session.Env)
 	if env == nil {
 		env = map[string]string{}
 	}
-	env["AIP_SERVER"] = a.Server
+	env["AIP_SERVER"] = setting.Server
 	session.Env = env
-	token, ok := a.Secrets.Value(a.TokenSecret)
+	token, ok := a.Secrets.Value(setting.TokenSecret)
 	if !ok {
 		if a.Log != nil {
-			a.Log(fmt.Sprintf("%s: the secret %s is not held, so its session reaches the aip server with no read token", session.ShipID, a.TokenSecret))
+			a.Log(fmt.Sprintf("%s: the secret %s is not held, so its session reaches the aip server with no read token", session.ShipID, setting.TokenSecret))
 		}
 		return session
 	}
@@ -132,7 +150,7 @@ type Runtime struct {
 	// Launch is what a hold's start goes through (see Launch).
 	Launch   []string
 	BootedAt func() time.Time
-	// Aip is the aip server every session reaches; none when the configuration names none.
+	// Aip is the aip server every session reaches; none when nil.
 	Aip *Aip
 	// HeldAs is what the hold runs for a session, once the ship's last session is stopped and its folder is new: the session as it is when nil. A container runtime's hold runs the runtime's run of it (H18).
 	HeldAs func(session Start, files hold.Files) (Start, error)
