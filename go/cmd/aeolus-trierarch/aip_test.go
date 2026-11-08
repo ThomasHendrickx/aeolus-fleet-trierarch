@@ -55,12 +55,13 @@ func TestTheAipSettingTheTrierarchPluginSentIsKeptInAipJsonInTheTrierarchsHome(t
 	}
 }
 
-// aHeldAipCommand is the trierarch's aip folder as an install of the pin leaves it: aip and its Python in the venv's bin, and the plugin of aip's skills.
+// aHeldAipCommand is the trierarch's aip folder as an install of the pin leaves it: aip and its Python in the venv's bin, links to aip and aip-spec alone in bin, and the plugin of aip's skills.
 func aHeldAipCommand(t *testing.T, at paths.Paths) {
 	t.Helper()
 	files := map[string]string{
 		filepath.Join("venv", "bin", "aip"):                          "#!/bin/sh\n",
 		filepath.Join("venv", "bin", "python"):                       "#!/bin/sh\n",
+		filepath.Join("venv", "bin", "aip-spec"):                     "#!/bin/sh\n",
 		filepath.Join("plugin", ".claude-plugin", "plugin.json"):     `{"name":"aip"}`,
 		filepath.Join("plugin", "skills", "aip-compile", "SKILL.md"): "---\nname: aip-compile\n---\n",
 		filepath.Join("plugin", "skills", "aip-runtime", "SKILL.md"): "---\nname: aip-runtime\n---\n",
@@ -73,6 +74,14 @@ func aHeldAipCommand(t *testing.T, at paths.Paths) {
 			t.Fatal(err)
 		}
 	}
+	if err := os.MkdirAll(filepath.Join(at.AipCommand, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"aip", "aip-spec"} {
+		if err := os.Symlink(filepath.Join("..", "venv", "bin", name), filepath.Join(at.AipCommand, "bin", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := os.WriteFile(at.AipCommandOutcome, []byte(`{"version":"`+aipcommand.Version+`"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +89,7 @@ func aHeldAipCommand(t *testing.T, at paths.Paths) {
 
 func TestHostSessionsRunTheAipTheTrierarchKeepsInItsHomeAndSessionsInContainersTheirImagesOwn(t *testing.T) {
 	at := paths.Of(t.TempDir(), "")
-	bin := filepath.Join(at.AipCommand, "venv", "bin")
+	bin := filepath.Join(at.AipCommand, "bin")
 	aHeldAipCommand(t, at)
 
 	onTheHost := sessionRuntime(at, "aeolus-trierarch", config.Configuration{}).(sessions.Runtime).Aip

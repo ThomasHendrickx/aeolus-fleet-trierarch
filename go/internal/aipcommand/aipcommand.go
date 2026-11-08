@@ -84,7 +84,7 @@ type State struct {
 	Missing string `json:"missing,omitempty"`
 }
 
-// Folder is the aip's folder and the outcome of its last install, which status and the report read. In the folder: uv, the Python it installed (python), the venv aip is in (venv), the lock (requirements.txt), and aip's skills as a plugin a harness is started with (plugin, #315), with the home aip keeps its record of them in (aip-home), never the user's.
+// Folder is the aip's folder and the outcome of its last install, which status and the report read. In the folder: uv, the Python it installed (python), the venv aip is in (venv), the links to aip and aip-spec alone that a session takes onto its PATH (bin, #319), the lock (requirements.txt), and aip's skills as a plugin a harness is started with (plugin, #315), with the home aip keeps its record of them in (aip-home), never the user's.
 type Folder struct {
 	// Path is the folder, ~/.aeolus/trierarch/aip-command.
 	Path string
@@ -124,29 +124,67 @@ func (f Folder) State() State {
 
 func (f Folder) venvBin() string { return filepath.Join(f.Path, "venv", "bin") }
 
+// bin is the folder of links to aip's commands alone, the one a session takes onto its PATH: the venv's own bin holds its python, python3 and activate scripts and its dependencies' commands too.
+func (f Folder) bin() string { return filepath.Join(f.Path, "bin") }
+
+// commands are the venv's commands a session gets, and no other.
+var commands = []string{"aip", "aip-spec"}
+
 func (f Folder) plugin() string { return filepath.Join(f.Path, "plugin") }
 
 // skills are the skills `aip skill install` writes, each a folder with its SKILL.md.
 var skills = []string{"aip-compile", "aip-runtime"}
 
-// Bin is the venv's bin while it holds aip at Version and its skills, as its last install said and its files are there; false otherwise. It runs nothing, so a session's start may ask it.
+// Bin is the folder of links to aip and aip-spec alone while the venv holds aip at Version and its skills, as its last install said and its files are there; false otherwise. A folder from before it, or one holding anything else, is broken. It runs nothing, so a session's start may ask it.
 func (f Folder) Bin() (string, bool) {
 	if f.State().Version != Version {
 		return "", false
 	}
-	bin := f.venvBin()
 	for _, name := range []string{"aip", "python"} {
 		// Stat follows the venv's python to the Python uv installed, which may be gone.
-		if info, err := os.Stat(filepath.Join(bin, name)); err != nil || info.IsDir() {
+		if info, err := os.Stat(filepath.Join(f.venvBin(), name)); err != nil || info.IsDir() {
 			return "", false
 		}
+	}
+	if !f.holdsCommandsAlone() {
+		return "", false
 	}
 	for _, name := range append([]string{filepath.Join(".claude-plugin", "plugin.json")}, skillFiles()...) {
 		if info, err := os.Stat(filepath.Join(f.plugin(), name)); err != nil || info.IsDir() {
 			return "", false
 		}
 	}
-	return bin, true
+	return f.bin(), true
+}
+
+// holdsCommandsAlone says whether bin holds a link that leads to each command of the venv, and nothing else.
+func (f Folder) holdsCommandsAlone() bool {
+	entries, err := os.ReadDir(f.bin())
+	if err != nil || len(entries) != len(commands) {
+		return false
+	}
+	for _, name := range commands {
+		if info, err := os.Stat(filepath.Join(f.bin(), name)); err != nil || info.IsDir() {
+			return false
+		}
+		if target, err := os.Readlink(filepath.Join(f.bin(), name)); err != nil || target != filepath.Join("..", "venv", "bin", name) {
+			return false
+		}
+	}
+	return true
+}
+
+// linkCommands makes bin with a link to each of the venv's commands.
+func (f Folder) linkCommands() error {
+	if err := os.MkdirAll(f.bin(), 0o700); err != nil {
+		return err
+	}
+	for _, name := range commands {
+		if err := os.Symlink(filepath.Join("..", "venv", "bin", name), filepath.Join(f.bin(), name)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func skillFiles() []string {
@@ -176,7 +214,7 @@ func (f Folder) Ensure() State {
 		return state
 	}
 	defer unlock()
-	if bin, ok := f.Bin(); ok && f.states(filepath.Join(bin, "aip")) {
+	if _, ok := f.Bin(); ok && f.states(filepath.Join(f.bin(), "aip")) {
 		return f.State()
 	}
 	state := f.install()
@@ -254,6 +292,9 @@ func (f Folder) installIn() error {
 	}
 	if !f.states(filepath.Join(venv, "bin", "aip")) {
 		return errors.New("its aip does not state " + Version)
+	}
+	if err := f.linkCommands(); err != nil {
+		return err
 	}
 	return f.installSkills(filepath.Join(venv, "bin", "aip"))
 }

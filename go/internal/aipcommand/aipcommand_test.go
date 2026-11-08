@@ -43,7 +43,8 @@ case "$1 $2" in
       shift
     done
     version=$(sed -n 's/^agent-instruction-protocol==\([^ ]*\).*/\1/p' "$log/requirements")
-    sed -e "s/@VERSION@/$version/" -e "s|@LOG@|$log|" "$log/aip" > "$venv/bin/aip" && chmod +x "$venv/bin/aip" ;;
+    sed -e "s/@VERSION@/$version/" -e "s|@LOG@|$log|" "$log/aip" > "$venv/bin/aip" && chmod +x "$venv/bin/aip"
+    cp "$venv/bin/aip" "$venv/bin/aip-spec" && ln -s python "$venv/bin/python3" && cp "$venv/bin/aip" "$venv/bin/httpx" && echo activate > "$venv/bin/activate" ;;
 esac
 `
 
@@ -144,8 +145,8 @@ func TestThePinnedAipIsInstalledIntoTheFolderAndItsBinRunsIt(t *testing.T) {
 	state := folder.Ensure()
 
 	bin, ok := folder.Bin()
-	if state != (State{Version: "0.7.0"}) || !ok || bin != filepath.Join(folder.Path, "venv", "bin") {
-		t.Fatalf("Ensure() = %+v, Bin() = %q, %v; want 0.7.0 in %s/venv/bin", state, bin, ok, folder.Path)
+	if state != (State{Version: "0.7.0"}) || !ok || bin != filepath.Join(folder.Path, "bin") {
+		t.Fatalf("Ensure() = %+v, Bin() = %q, %v; want 0.7.0 in %s/bin", state, bin, ok, folder.Path)
 	}
 	if got := aipVersionIn(t, bin); got != "aip 0.7.0 format 0.6a1" {
 		t.Errorf("aip --version = %q, want aip 0.7.0", got)
@@ -537,5 +538,52 @@ func TestAFailedInstallOfAipsSkillsFailsTheInstall(t *testing.T) {
 	}
 	if _, ok := folder.Plugin(); ok {
 		t.Errorf("Plugin() is offered after a failed install, want none")
+	}
+}
+
+func TestTheFolderOnPathHoldsAipAndAipSpecAndNothingElse(t *testing.T) {
+	folder, _ := aFolder(t)
+	folder.Ensure()
+
+	bin, ok := folder.Bin()
+
+	entries, err := os.ReadDir(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := []string{}
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	if !ok || strings.Join(names, " ") != "aip aip-spec" {
+		t.Errorf("Bin() = %q, %v holding %v, want aip and aip-spec alone", bin, ok, names)
+	}
+	if got := aipVersionIn(t, bin); got != "aip 0.7.0 format 0.6a1" {
+		t.Errorf("aip --version through the folder = %q, want aip 0.7.0", got)
+	}
+}
+
+func TestAFolderWithoutItsBinOrWithMoreInItIsBrokenAndInstalledAgain(t *testing.T) {
+	for name, damage := range map[string]func(bin string) error{
+		"without its bin":  func(bin string) error { return os.RemoveAll(bin) },
+		"with python3 in":  func(bin string) error { return os.Symlink("../venv/bin/python3", filepath.Join(bin, "python3")) },
+		"without aip-spec": func(bin string) error { return os.Remove(filepath.Join(bin, "aip-spec")) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			folder, log := aFolder(t)
+			folder.Ensure()
+			if err := damage(filepath.Join(folder.Path, "bin")); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := folder.Bin(); ok {
+				t.Fatalf("Bin() of a folder %s is offered, want none", name)
+			}
+
+			state := folder.Ensure()
+
+			if _, ok := folder.Bin(); state != (State{Version: "0.7.0"}) || !ok || pipRuns(log) != 2 {
+				t.Errorf("Ensure() = %+v, Bin() = %v after %d pip runs, want the folder installed again", state, ok, pipRuns(log))
+			}
+		})
 	}
 }
