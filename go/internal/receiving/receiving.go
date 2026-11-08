@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aip"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
@@ -37,6 +38,11 @@ type Keeper interface {
 // ServerKeeper keeps the MCP servers the trierarch plugin's ship sent.
 type ServerKeeper interface {
 	Accept(list []mcpservers.Server) error
+}
+
+// AipKeeper keeps the aip setting the trierarch plugin's ship sent.
+type AipKeeper interface {
+	Accept(setting aip.Setting) error
 }
 
 // SecretKeeper keeps the secrets the trierarch plugin's ship sent, opened.
@@ -76,6 +82,8 @@ type Loop struct {
 	Trusted Keeper
 	// McpServers keeps the MCP servers; the list is handled as any other message without it.
 	McpServers ServerKeeper
+	// Aip keeps the aip setting; it is handled as any other message without it.
+	Aip AipKeeper
 	// Secrets keeps the secrets, opened with SealingKey; they are handled as any other message without it.
 	Secrets    SecretKeeper
 	SealingKey secrets.Key
@@ -129,6 +137,19 @@ func (l Loop) takeMcpServers(delivery Delivery) error {
 	return l.McpServers.Accept(list)
 }
 
+// takeAip takes the aip setting the delivery carries, as takeTrusted takes the trusted repositories.
+func (l Loop) takeAip(delivery Delivery) error {
+	if !l.isFromPlugin(delivery, "an aip setting") {
+		return nil
+	}
+	setting, err := aip.Read(delivery.Payload)
+	if err != nil {
+		l.Log(fmt.Sprintf("Not handled: an aip setting that does not fit (%v). The trierarch keeps the aip setting it holds.", err))
+		return nil
+	}
+	return l.Aip.Accept(setting)
+}
+
 // takeSecrets takes the secrets the delivery carries, as takeTrusted takes the trusted repositories; what it logs never says a value.
 func (l Loop) takeSecrets(delivery Delivery) error {
 	if !l.isFromPlugin(delivery, "secrets") {
@@ -154,6 +175,12 @@ func (l Loop) handle(delivery Delivery) error {
 	}
 	if delivery.ContentType == mcpservers.ListContentType && l.McpServers != nil {
 		if err := l.takeMcpServers(delivery); err != nil {
+			return err
+		}
+		return l.Ship.Ack(delivery.DeliveryID)
+	}
+	if delivery.ContentType == aip.ContentType && l.Aip != nil {
+		if err := l.takeAip(delivery); err != nil {
 			return err
 		}
 		return l.Ship.Ack(delivery.DeliveryID)
