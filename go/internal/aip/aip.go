@@ -1,7 +1,7 @@
 // Package aip is the aip server every session reaches (#251, #312) and the
 // name of the sealed secret its read token is, never the token: as the
 // machine's configuration names it, or as the trierarch plugin sends it to
-// every trierarch, kept apart from the configuration. A trierarch reads the
+// every trierarch in its MCP server list, kept apart from the configuration. A trierarch reads the
 // plugin's setting as strictly as the plugin writes it, with no field beyond
 // the two.
 package aip
@@ -18,9 +18,6 @@ import (
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 )
-
-// ContentType is the content type of the message that carries the setting from the trierarch plugin.
-const ContentType = "application/vnd.aeolus.trierarch.aip+json"
 
 // Setting is the aip server and the name of the secret its read token is.
 type Setting struct {
@@ -56,6 +53,24 @@ func Read(payload string) (Setting, error) {
 	return setting, nil
 }
 
+// InList is the setting the trierarch plugin's MCP server list carries as its aip, none when it carries none, or why not.
+func InList(payload string) (*Setting, error) {
+	var list struct {
+		Aip json.RawMessage `json:"aip"`
+	}
+	if err := json.Unmarshal([]byte(payload), &list); err != nil {
+		return nil, errors.New("the MCP servers are not JSON")
+	}
+	if list.Aip == nil {
+		return nil, nil
+	}
+	setting, err := Read(string(list.Aip))
+	if err != nil {
+		return nil, err
+	}
+	return &setting, nil
+}
+
 // File is the aip file, ~/.aeolus/trierarch/aip.json: the setting the trierarch plugin sent last, as it sent it, apart from the operator's configuration, which the trierarch never writes. A file that is missing or does not fit holds none. It is safe for the receiving loop that accepts a setting and the starts that read it.
 type File struct {
 	Path string
@@ -88,8 +103,17 @@ func (f *File) Current() (Setting, bool) {
 	return *f.current, true
 }
 
-// Accept keeps the setting, in place of the one held.
-func (f *File) Accept(setting Setting) error {
+// Accept keeps the setting, in place of the one held; none removes the one held.
+func (f *File) Accept(setting *Setting) error {
+	if setting == nil {
+		if err := os.Remove(f.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("clear the aip setting: %w", err)
+		}
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.current = nil
+		return nil
+	}
 	text, err := json.MarshalIndent(setting, "", "  ")
 	if err != nil {
 		return err
@@ -107,6 +131,7 @@ func (f *File) Accept(setting Setting) error {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.current = &setting
+	kept := *setting
+	f.current = &kept
 	return nil
 }

@@ -40,9 +40,9 @@ type ServerKeeper interface {
 	Accept(list []mcpservers.Server) error
 }
 
-// AipKeeper keeps the aip setting the trierarch plugin's ship sent.
+// AipKeeper keeps the aip setting the trierarch plugin's ship sent with the MCP servers, none when the list carried none.
 type AipKeeper interface {
-	Accept(setting aip.Setting) error
+	Accept(setting *aip.Setting) error
 }
 
 // SecretKeeper keeps the secrets the trierarch plugin's ship sent, opened.
@@ -82,7 +82,7 @@ type Loop struct {
 	Trusted Keeper
 	// McpServers keeps the MCP servers; the list is handled as any other message without it.
 	McpServers ServerKeeper
-	// Aip keeps the aip setting; it is handled as any other message without it.
+	// Aip keeps the aip setting the MCP server list carries; it is not taken without it.
 	Aip AipKeeper
 	// Secrets keeps the secrets, opened with SealingKey; they are handled as any other message without it.
 	Secrets    SecretKeeper
@@ -124,7 +124,7 @@ func (l Loop) takeTrusted(delivery Delivery) error {
 	return l.Trusted.Accept(list)
 }
 
-// takeMcpServers takes the MCP servers the delivery carries, as takeTrusted takes the trusted repositories.
+// takeMcpServers takes the MCP servers the delivery carries, and the aip setting with them, as takeTrusted takes the trusted repositories: a list whose aip does not fit is not taken either, and a list with no aip clears the one held.
 func (l Loop) takeMcpServers(delivery Delivery) error {
 	if !l.isFromPlugin(delivery, "MCP servers") {
 		return nil
@@ -134,17 +134,15 @@ func (l Loop) takeMcpServers(delivery Delivery) error {
 		l.Log(fmt.Sprintf("Not handled: MCP servers that do not fit (%v). The trierarch keeps the list it holds.", err))
 		return nil
 	}
-	return l.McpServers.Accept(list)
-}
-
-// takeAip takes the aip setting the delivery carries, as takeTrusted takes the trusted repositories.
-func (l Loop) takeAip(delivery Delivery) error {
-	if !l.isFromPlugin(delivery, "an aip setting") {
+	setting, err := aip.InList(delivery.Payload)
+	if err != nil {
+		l.Log(fmt.Sprintf("Not handled: MCP servers whose aip does not fit (%v). The trierarch keeps the list it holds.", err))
 		return nil
 	}
-	setting, err := aip.Read(delivery.Payload)
-	if err != nil {
-		l.Log(fmt.Sprintf("Not handled: an aip setting that does not fit (%v). The trierarch keeps the aip setting it holds.", err))
+	if err := l.McpServers.Accept(list); err != nil {
+		return err
+	}
+	if l.Aip == nil {
 		return nil
 	}
 	return l.Aip.Accept(setting)
@@ -175,12 +173,6 @@ func (l Loop) handle(delivery Delivery) error {
 	}
 	if delivery.ContentType == mcpservers.ListContentType && l.McpServers != nil {
 		if err := l.takeMcpServers(delivery); err != nil {
-			return err
-		}
-		return l.Ship.Ack(delivery.DeliveryID)
-	}
-	if delivery.ContentType == aip.ContentType && l.Aip != nil {
-		if err := l.takeAip(delivery); err != nil {
 			return err
 		}
 		return l.Ship.Ack(delivery.DeliveryID)
