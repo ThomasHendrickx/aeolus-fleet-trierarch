@@ -75,6 +75,14 @@ func TestTheNoteCountsCrashedShips(t *testing.T) {
 	}
 }
 
+func TestTheNoteSaysWhyHostSessionsGetNoAip(t *testing.T) {
+	in := anInput()
+	in.AipMissing = "no python3 on the PATH, and aip 0.7.0 runs on Python 3.14 or newer"
+	if got := Of(in).Note; got != "0 of 6 running, no aip for host sessions: no python3 on the PATH, and aip 0.7.0 runs on Python 3.14 or newer" {
+		t.Fatalf("note = %q", got)
+	}
+}
+
 func TestBlockedWhileTheFleetsKeyIsCutOff(t *testing.T) {
 	in := anInput()
 	in.Running = 1
