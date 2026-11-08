@@ -729,3 +729,18 @@ func TestARealClaudeCodeSessionListsAipsSkillsAndLeavesTheUsersOwnSettingsPlugin
 		return nil
 	})
 }
+
+func TestAHostSessionsPathHoldsTheAipFolderOnceAndNothingElseUnderTheAipCommand(t *testing.T) {
+	runtime := aRuntime(t)
+	command := anAipCommand(t, "0.7.0")
+	bin, _ := command()
+	folder := filepath.Dir(bin)
+	inherited := strings.Join([]string{bin, filepath.Join(folder, "venv", "bin"), "/usr/bin", filepath.Join(folder, "venv", "bin"), "/bin"}, ":")
+	runtime.Aip = &Aip{Configured: &aip.Setting{Server: "https://aip.example.invalid", TokenSecret: "aip-read"}, Secrets: heldSecrets{}, Command: command, Folder: folder, Path: inherited}
+	sessionFolder := started(t, runtime, aHarnessRunningAip)
+	eventually(t, "the harness's environment", func() bool { return read(filepath.Join(sessionFolder, "harness.env")) != "" })
+
+	if env := read(filepath.Join(sessionFolder, "harness.env")); !strings.Contains("\n"+env+"\n", "\nPATH="+bin+":/usr/bin:/bin\n") {
+		t.Errorf("environment:\n%s\nwant PATH=%s:/usr/bin:/bin", env, bin)
+	}
+}
