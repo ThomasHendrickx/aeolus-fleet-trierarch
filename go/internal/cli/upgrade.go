@@ -73,6 +73,8 @@ type Upgrade struct {
 	Sleep     func()
 	// IsPluginStep is set when this runs as the plugin step of another version's upgrade.
 	IsPluginStep bool
+	// AipCommand is the aip CLI the trierarch keeps for its host sessions (#314), installed at this version's pin; none when nil.
+	AipCommand AipCommand
 }
 
 // UpgradeReport is what upgrade did, in the shape today's trierarch answers.
@@ -153,6 +155,9 @@ func (u Upgrade) onItsVersion() (UpgradeReport, error) {
 		said = append(said, remoteControlRemoved(removed))
 	}
 	report := UpgradeReport{From: from, To: from, IsPluginUpdated: isPluginUpdated, Said: append(said, pluginSaid...)}
+	if u.AipCommand != nil {
+		report.Said = append(report.Said, aipCommandSaid(u.AipCommand.Ensure(), u.Paths.AipCommand))
+	}
 	status, err := u.Service.Status()
 	if err != nil || !status.IsInstalled {
 		return report, err

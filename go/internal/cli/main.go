@@ -87,6 +87,8 @@ type Machine struct {
 	McpServers func(at paths.Paths) receiving.ServerKeeper
 	// Aip keeps the aip setting the trierarch plugin's ship sends; none when nil.
 	Aip func(at paths.Paths) receiving.AipKeeper
+	// AipCommand is the aip CLI the trierarch keeps for its host sessions (#314); none when nil.
+	AipCommand func(at paths.Paths) AipCommand
 	// Secrets keeps the secrets the trierarch plugin's ship sends, opened with the sealing key; none when nil.
 	Secrets  func(at paths.Paths) receiving.SecretKeeper
 	Sessions func(at paths.Paths) Sessions
@@ -252,6 +254,7 @@ func Main(args []string, machine Machine) (string, int) {
 				Register:              machine.Register,
 				IsLeaseHeld:           machine.IsLeaseHeld,
 				Sleep:                 machine.Sleep,
+				AipCommand:            machine.aipCommandOf(at),
 				Detect: func(harnesses []string, by detection.By) (detection.Detected, error) {
 					return machine.Detect(at, harnesses, by)
 				},
@@ -393,6 +396,7 @@ func upgrade(at paths.Paths, machine Machine, command parsed) (answer, error) {
 		Trierarch:    machine.Trierarch,
 		Sleep:        machine.Sleep,
 		IsPluginStep: variable(machine.Environ, PluginStepVariable) == "1",
+		AipCommand:   machine.aipCommandOf(at),
 	}.Run(version)
 	if err != nil {
 		return answer{}, err
@@ -448,6 +452,11 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 	stopped, done := context.WithCancel(context.Background())
 	defer done()
 	received := make(chan struct{})
+	keptAip := make(chan struct{})
+	go func() {
+		defer close(keptAip)
+		keepAipCommand(stopped, machine.aipCommandOf(at), machine.PassEvery)
+	}()
 	var isKeyCutOff atomic.Bool
 	go func() {
 		defer close(received)
@@ -478,10 +487,19 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 			// The stop ends a receive the fleet still holds at once: a service manager that stops the trierarch sees it gone in a moment.
 			done()
 			<-received
+			<-keptAip
 			return answer{data: map[string]bool{"stopped": true}, text: "aeolus-trierarch stopped."}, nil
 		case <-time.After(machine.PassEvery):
 		}
 	}
+}
+
+// aipCommandOf is the aip CLI the trierarch keeps on the machine; none when nil.
+func (m Machine) aipCommandOf(at paths.Paths) AipCommand {
+	if m.AipCommand == nil {
+		return nil
+	}
+	return m.AipCommand(at)
 }
 
 // checkRuntime refuses a configuration whose sessions cannot run on the machine, with every reason.

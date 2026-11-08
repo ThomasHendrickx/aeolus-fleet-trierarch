@@ -39,6 +39,10 @@ type Paths struct {
 	Aip string
 	// Secrets is the secrets the trierarch plugin's ship sent last, opened, mode 600: only the MCP proxy reads them, and a session's start the aip read token.
 	Secrets string
+	// AipCommand is the venv of the aip CLI the trierarch keeps for its host sessions (#314).
+	AipCommand string
+	// AipCommandOutcome is the outcome of the aip CLI's last install: its version, or why there is none.
+	AipCommandOutcome string
 	// SealingKey is the trierarch's private key, mode 600, which opens the secrets sealed to the public key its report states.
 	SealingKey string
 	// Repositories holds the clones of the trusted repositories, one folder per repository.
@@ -73,6 +77,8 @@ func Of(homeDirectory string, config string) Paths {
 		McpServers:          filepath.Join(home, "mcp-servers.json"),
 		Aip:                 filepath.Join(home, "aip.json"),
 		Secrets:             filepath.Join(home, "secrets.json"),
+		AipCommand:          filepath.Join(home, "aip-command"),
+		AipCommandOutcome:   filepath.Join(home, "aip-command.json"),
 		SealingKey:          filepath.Join(home, "sealing-key"),
 		Repositories:        filepath.Join(home, "repositories"),
 	}
