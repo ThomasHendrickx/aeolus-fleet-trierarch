@@ -77,17 +77,17 @@ func TestTheNoteCountsCrashedShips(t *testing.T) {
 	}
 }
 
-func TestTheNoteSaysHostSessionsGetNoAip(t *testing.T) {
+func TestTheNoteSaysWhyHostSessionsGetNoAip(t *testing.T) {
 	in := anInput()
-	in.IsAipMissing = true
-	if got := Of(in).Note; got != "0 of 6 running, no aip on the host" {
+	in.AipMissing = "its install failed, as aeolus-trierarch status says"
+	if got := Of(in).Note; got != "0 of 6 running, no aip on the host: its install failed, as aeolus-trierarch status says" {
 		t.Fatalf("note = %q", got)
 	}
 }
 
-func TestTheNoteLeavesOutTheAipWhereItWouldPassTheLongestNoteCoreTakes(t *testing.T) {
+// aCrowdedInput is a report whose note says a lot already: 196 characters, before any aip.
+func aCrowdedInput() Input {
 	in := anInput()
-	in.IsAipMissing = true
 	in.IsKeyCutOff = true
 	in.Running = 1
 	in.State.Entries = map[string]reconciler.Entry{}
@@ -96,6 +96,24 @@ func TestTheNoteLeavesOutTheAipWhereItWouldPassTheLongestNoteCoreTakes(t *testin
 		in.State.Entries[shipID] = reconciler.Entry{ShipID: shipID, State: "crashed"}
 	}
 	in.State.NotOffered = []reconciler.NotOfferedHarness{{Harness: "copilot", Reason: "its aeolus-fleet plugin is not installed for Copilot: copilot plugin install aeolus-fleet@aeolus-fleet"}}
+	return in
+}
+
+func TestTheNoteSaysNoAipWithoutWhyWhereWhyWouldPassTheLongestNoteCoreTakes(t *testing.T) {
+	in := aCrowdedInput()
+	in.IsKeyCutOff = false
+	in.AipMissing = "its install failed, as aeolus-trierarch status says"
+
+	note := Of(in).Note
+
+	if !strings.HasSuffix(note, ", no aip on the host") || len(note) > 200 {
+		t.Fatalf("note = %q (%d characters), want it ending in no aip on the host, within 200", note, len(note))
+	}
+}
+
+func TestTheNoteLeavesOutTheAipWhereItWouldPassTheLongestNoteCoreTakes(t *testing.T) {
+	in := aCrowdedInput()
+	in.AipMissing = "its install failed, as aeolus-trierarch status says"
 
 	note := Of(in).Note
 

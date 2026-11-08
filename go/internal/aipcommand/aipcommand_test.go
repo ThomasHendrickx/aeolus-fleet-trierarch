@@ -426,3 +426,19 @@ func TestAnInstallInAnotherProcessIsWaitedForAndNeitherUndoesTheOther(t *testing
 		t.Errorf("this process = %+v, the other = %+v, Bin() = %v after %d pip runs; want one install that both see as 0.7.0", state, otherState, ok, pipRuns(log))
 	}
 }
+
+func TestBriefIsWhyThereIsNoAipAsShortAsAReportsNoteTakesIt(t *testing.T) {
+	for _, test := range []struct {
+		state State
+		want  string
+	}{
+		{State{Version: "0.7.0"}, ""},
+		{State{Missing: "uv 0.13.7, which installs aip 0.7.0, has no build for this machine"}, "uv 0.13.7, which installs aip 0.7.0, has no build for this machine"},
+		{State{Missing: "aip 0.7.0 is not installed yet"}, "aip 0.7.0 is not installed yet"},
+		{State{Missing: "the install of aip 0.7.0 failed: uv 0.13.7 could not be downloaded: " + strings.Repeat("x", 300)}, "its install failed, as aeolus-trierarch status says"},
+	} {
+		if got := test.state.Brief(); got != test.want {
+			t.Errorf("Brief() of %+v = %q, want %q", test.state, got, test.want)
+		}
+	}
+}
