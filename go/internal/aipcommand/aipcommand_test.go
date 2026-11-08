@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // standInUv is uv on a stand-in machine: `python install` makes a Python in UV_PYTHON_INSTALL_DIR, `venv` a venv of it, and `pip install` writes the
@@ -31,6 +33,7 @@ case "$1 $2" in
     mkdir -p "$4/bin" && ln -s "$UV_PYTHON_INSTALL_DIR/cpython-$3/bin/python3" "$4/bin/python" ;;
   "pip install")
     echo run >> "$log/pip-runs"
+    [ -e "$log/SLOW" ] && sleep 1
     if [ -e "$log/PIP_FAILS" ]; then echo "error: hash mismatch for typing-extensions" >&2; exit 1; fi
     shift 2
     venv=""
@@ -43,6 +46,19 @@ case "$1 $2" in
     printf '#!/bin/sh\necho "aip %s format 0.6a1"\n' "$version" > "$venv/bin/aip" && chmod +x "$venv/bin/aip" ;;
 esac
 `
+
+// TestMain lets this test binary be another trierarch process that installs aip into the folder AIPCOMMAND_INSTALLER names, as init or upgrade does beside the service: it says the state it ended with.
+func TestMain(m *testing.M) {
+	if path := os.Getenv("AIPCOMMAND_INSTALLER"); path != "" {
+		folder := Folder{Path: path, Outcome: os.Getenv("AIPCOMMAND_OUTCOME"), Uv: &Uv{URL: os.Getenv("AIPCOMMAND_UV_URL"), SHA256: os.Getenv("AIPCOMMAND_UV_SHA256")}}
+		state := folder.Ensure()
+		if err := json.NewEncoder(os.Stdout).Encode(state); err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
 
 // aUvRelease serves uv's archive for this machine as the uv release does, and is the build that names it with its sha256.
 func aUvRelease(t *testing.T) *Uv {
@@ -370,5 +386,39 @@ func TestAFailedInstallsWordsAreOneLine(t *testing.T) {
 
 	if state := folder.Ensure(); strings.Contains(state.Missing, "\n") {
 		t.Errorf("Ensure() = %q, want one line", state.Missing)
+	}
+}
+
+func TestAnInstallInAnotherProcessIsWaitedForAndNeitherUndoesTheOther(t *testing.T) {
+	folder, log := aFolder(t)
+	if err := os.WriteFile(filepath.Join(log, "SLOW"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	program, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := exec.Command(program)
+	other.Env = append(os.Environ(), "AIPCOMMAND_INSTALLER="+folder.Path, "AIPCOMMAND_OUTCOME="+folder.Outcome, "AIPCOMMAND_UV_URL="+folder.Uv.URL, "AIPCOMMAND_UV_SHA256="+folder.Uv.SHA256)
+	var said bytes.Buffer
+	other.Stdout = &said
+	if err := other.Start(); err != nil {
+		t.Fatal(err)
+	}
+	for until := time.Now().Add(5 * time.Second); pipRuns(log) == 0 && time.Now().Before(until); time.Sleep(10 * time.Millisecond) {
+	}
+
+	state := folder.Ensure()
+
+	if err := other.Wait(); err != nil {
+		t.Fatalf("the other installer: %v", err)
+	}
+	var otherState State
+	if err := json.Unmarshal(said.Bytes(), &otherState); err != nil {
+		t.Fatalf("the other installer said %q: %v", said.String(), err)
+	}
+	bin, ok := folder.Bin()
+	if state != (State{Version: "0.7.0"}) || otherState != (State{Version: "0.7.0"}) || !ok || pipRuns(log) != 1 || aipVersionIn(t, bin) != "aip 0.7.0 format 0.6a1" {
+		t.Errorf("this process = %+v, the other = %+v, Bin() = %v after %d pip runs; want one install that both see as 0.7.0", state, otherState, ok, pipRuns(log))
 	}
 }
