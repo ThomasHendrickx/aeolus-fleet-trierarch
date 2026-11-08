@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aip"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aipcommand"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/processproof"
@@ -96,6 +97,8 @@ type Aip struct {
 	Command func() (string, bool)
 	// Plugin is the plugin of aip's skills the trierarch keeps beside its aip CLI on the host (#315), while it holds one; none in containers, whose image holds them.
 	Plugin func() (string, bool)
+	// Folder is the aip CLI's folder: no entry in or under it stays on a session's PATH but Command's bin, put in front (#321).
+	Folder string
 	// Path is the PATH a session has without the aip CLI: the hold's own, which Command's bin goes in front of.
 	Path string
 }
@@ -135,7 +138,7 @@ func (a *Aip) withAip(session Start) Start {
 	env["AIP_SERVER"] = setting.Server
 	if a.Command != nil {
 		if bin, ok := a.Command(); ok {
-			env["PATH"] = bin + string(os.PathListSeparator) + a.Path
+			env["PATH"] = bin + string(os.PathListSeparator) + aipcommand.PathWithout(a.Path, a.Folder)
 		}
 	}
 	session.Env = env

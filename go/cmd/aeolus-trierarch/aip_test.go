@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aip"
@@ -129,5 +130,16 @@ func TestHostSessionsGetThePluginOfAipsSkillsTheTrierarchKeepsAndSessionsInConta
 	}
 	if inContainers.Plugin != nil {
 		t.Errorf("sessions in containers get the host's plugin of aip's skills, want their image's own")
+	}
+}
+
+func TestTheServiceStartsFromAPathWithoutAnythingUnderTheAipCommandThatAnUpgradeFromAHostSessionCarried(t *testing.T) {
+	at := paths.Of(t.TempDir(), "")
+	carried := []string{"HOME=/home/me", "PATH=" + filepath.Join(at.AipCommand, "bin") + ":" + filepath.Join(at.AipCommand, "venv", "bin") + ":/usr/bin:" + filepath.Join(at.AipCommand, "venv", "bin") + ":/bin"}
+
+	got := environWithoutAipCommand(carried, at)
+
+	if want := []string{"HOME=/home/me", "PATH=/usr/bin:/bin"}; !slices.Equal(got, want) {
+		t.Errorf("environWithoutAipCommand() = %q, want %q", got, want)
 	}
 }

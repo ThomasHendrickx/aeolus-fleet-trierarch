@@ -91,7 +91,11 @@ func main() {
 		<-signals
 		close(stop)
 	}()
-	environ := os.Environ()
+	environ := environWithoutAipCommand(os.Environ(), paths.Of(home, ""))
+	if path, ok := os.LookupEnv("PATH"); ok {
+		// The service's own PATH, and so every session's, drops what an upgrade run from a host session carried in (#321).
+		_ = os.Setenv("PATH", aipcommand.PathWithout(path, paths.Of(home, "").AipCommand))
+	}
 	capLog(paths.Of(home, "").Logs)
 	machine := cli.Machine{
 		Environ:               environ,
@@ -268,6 +272,18 @@ func (p plugins) Version(harness string) string {
 		return copilot.PluginVersion(plugin.FindCopilot(p.home, p.env).Root)
 	}
 	return ""
+}
+
+// environWithoutAipCommand is the environment with PATH without the aip command's folders, so a service installed or started from a host session with aip does not carry them on (#321).
+func environWithoutAipCommand(environ []string, at paths.Paths) []string {
+	cleaned := make([]string, 0, len(environ))
+	for _, entry := range environ {
+		if path, ok := strings.CutPrefix(entry, "PATH="); ok {
+			entry = "PATH=" + aipcommand.PathWithout(path, at.AipCommand)
+		}
+		cleaned = append(cleaned, entry)
+	}
+	return cleaned
 }
 
 // runTrierarch runs a trierarch file with the words, as the plugin step of an upgrade when isPluginStep: its stdout and its exit status, 127 when it could not run at all.
@@ -511,7 +527,7 @@ func sessionRuntime(at paths.Paths, program string, configuration config.Configu
 	}
 	if !isInContainers(configured) {
 		// A container's image holds its own aip and skills.
-		holds.Aip.Command, holds.Aip.Plugin, holds.Aip.Path = aipCommandOf(at).Bin, aipCommandOf(at).Plugin, os.Getenv("PATH")
+		holds.Aip.Command, holds.Aip.Plugin, holds.Aip.Folder, holds.Aip.Path = aipCommandOf(at).Bin, aipCommandOf(at).Plugin, at.AipCommand, os.Getenv("PATH")
 		return holds
 	}
 	return container.Runtime{Holds: holds, Binary: configured.Binary, Image: sessionImage + ":" + cli.Version, ModelToken: at.ModelToken, ProxyURL: modelproxy.Runtime{Folder: at.Proxy}.URL, Homes: at.Homes, Sockets: at.Sockets, Memory: configured.Memory, Cpus: configured.Cpus}

@@ -587,3 +587,14 @@ func TestAFolderWithoutItsBinOrWithMoreInItIsBrokenAndInstalledAgain(t *testing.
 		})
 	}
 }
+
+func TestPathWithoutDropsEveryEntryUnderTheFolderAndKeepsTheOthersInOrder(t *testing.T) {
+	folder := "/home/me/.aeolus/trierarch/aip-command"
+	path := strings.Join([]string{folder + "/bin", folder + "/venv/bin", "/usr/bin", folder + "/venv/bin", "/home/me/.aeolus/trierarch/aip-command-other/bin", folder, "/bin"}, ":")
+
+	got := PathWithout(path, folder)
+
+	if want := "/usr/bin:/home/me/.aeolus/trierarch/aip-command-other/bin:/bin"; got != want {
+		t.Errorf("PathWithout() = %q, want %q", got, want)
+	}
+}

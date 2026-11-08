@@ -122,6 +122,20 @@ func (f Folder) State() State {
 	return state
 }
 
+// PathWithout is the PATH without any entry in or under the folder, the others in their order: what a session or the service was handed through an upgrade run from a host session that had aip's folders on its PATH (#321).
+func PathWithout(path string, folder string) string {
+	if folder == "" {
+		return path
+	}
+	kept := []string{}
+	for _, entry := range filepath.SplitList(path) {
+		if entry != folder && !strings.HasPrefix(entry, folder+string(filepath.Separator)) {
+			kept = append(kept, entry)
+		}
+	}
+	return strings.Join(kept, string(os.PathListSeparator))
+}
+
 func (f Folder) venvBin() string { return filepath.Join(f.Path, "venv", "bin") }
 
 // bin is the folder of links to aip's commands alone, the one a session takes onto its PATH: the venv's own bin holds its python, python3 and activate scripts and its dependencies' commands too.
