@@ -36,6 +36,7 @@ Everything of the trierarch lives under `~/.aeolus/trierarch/`.
 | The fleet's URL, the trierarch's own ship id, the trierarch plugin's ship the trusted repositories come from, and its crew token, mode 600 | `~/.aeolus/trierarch/crew-token` | `aeolus-trierarch init` |
 | The trusted repositories the trierarch plugin sent last (aeolus-fleet#384) | `~/.aeolus/trierarch/trusted-repositories.json` | The trierarch, as the list arrives |
 | The MCP servers the trierarch plugin sent last | `~/.aeolus/trierarch/mcp-servers.json` | The trierarch, as the list arrives |
+| The aip setting the trierarch plugin sent last: the aip server and the name of the secret its read token is, never the token | `~/.aeolus/trierarch/aip.json` | The trierarch, as the setting arrives |
 | The secrets the trierarch plugin sent last, opened, mode 600: the credentials of the crew-time MCP servers, read only by the MCP proxy, and the aip read token, which a session's start reads into its environment; never in the configuration, a report, a log or the fleet, and in no session but as that token | `~/.aeolus/trierarch/secrets.json` | The trierarch, as the secrets arrive |
 | The trierarch's sealing key, mode 600: the private key that opens the secrets sealed to the public key its report states | `~/.aeolus/trierarch/sealing-key` | `aeolus-trierarch init`, or the trierarch's start when there is none |
 | The clones of the trusted repositories, one folder per repository, each made before its first workspace | `~/.aeolus/trierarch/repositories/<name>/` | The trierarch |
