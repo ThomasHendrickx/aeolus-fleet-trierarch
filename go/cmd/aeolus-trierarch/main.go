@@ -501,7 +501,7 @@ type runningSessions interface {
 // sessionImage is the session image release.yml publishes with each version (decision 0011, 0039).
 const sessionImage = "ghcr.io/thomashendrickx/aeolus-session"
 
-// sessionRuntime is what the configuration's session runtime picks (decision 0039): each session under a hold, the trierarch program run as `hold`, in a systemd scope of its own under the service; in containers, a container per ship that its hold runs, from the image of the trierarch's own version, with the configured binary and caps and the machine's model token. Every session reaches the aip server the configuration names, or else the one the trierarch plugin sent, with the read token the secrets hold (#251, #312).
+// sessionRuntime is what the configuration's session runtime picks (decision 0039): each session under a hold, the trierarch program run as `hold`, in a systemd scope of its own under the service; in containers, a container per ship that its hold runs, from the image of the trierarch's own version, with the configured binary and caps and the machine's model token. Every session reaches the aip server the configuration names, or else the one the trierarch plugin sent, with the read token the secrets hold (#251, #312); host sessions run the trierarch's aip CLI and get its plugin of aip's skills (#314, #315).
 func sessionRuntime(at paths.Paths, program string, configuration config.Configuration) runningSessions {
 	configured := configuration.Runtime
 	holds := sessions.Runtime{Sessions: at.Sessions, Program: []string{program}, Version: cli.Version, Launch: sessions.Launch(runtime.GOOS, os.Getenv("INVOCATION_ID"), sessions.SystemdVersion()), BootedAt: sessions.BootedAt}
@@ -510,8 +510,8 @@ func sessionRuntime(at paths.Paths, program string, configuration config.Configu
 		holds.Aip.Configured = &aip.Setting{Server: own.Server, TokenSecret: own.TokenSecret}
 	}
 	if !isInContainers(configured) {
-		// A container's image holds its own aip.
-		holds.Aip.Command, holds.Aip.Path = aipCommandOf(at).Bin, os.Getenv("PATH")
+		// A container's image holds its own aip and skills.
+		holds.Aip.Command, holds.Aip.Plugin, holds.Aip.Path = aipCommandOf(at).Bin, aipCommandOf(at).Plugin, os.Getenv("PATH")
 		return holds
 	}
 	return container.Runtime{Holds: holds, Binary: configured.Binary, Image: sessionImage + ":" + cli.Version, ModelToken: at.ModelToken, ProxyURL: modelproxy.Runtime{Folder: at.Proxy}.URL, Homes: at.Homes, Sockets: at.Sockets, Memory: configured.Memory, Cpus: configured.Cpus}
