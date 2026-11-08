@@ -537,3 +537,54 @@ func TestASessionOfATrierarchWithNoAipServerGetsNoAipVariables(t *testing.T) {
 		t.Fatalf("environment:\n%s\nwant no AIP variable", env)
 	}
 }
+
+// anAipCommand is a folder holding an aip that states the version, as the trierarch's aip folder's bin does.
+func anAipCommand(t *testing.T, version string) func() (string, bool) {
+	t.Helper()
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "aip"), []byte("#!/bin/sh\necho 'aip "+version+" format 0.6a1'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return func() (string, bool) { return bin, true }
+}
+
+// aHarnessRunningAip writes what `aip --version` says, or that there is no aip, then its environment.
+const aHarnessRunningAip = `{ command -v aip > /dev/null && aip --version || echo "no aip"; } > aip-version; env > harness.env; while read -r line; do :; done`
+
+func TestAHostSessionReachingAnAipServerRunsTheAipOfTheTrierarchsFolderFirstOnItsPath(t *testing.T) {
+	runtime := aRuntime(t)
+	command := anAipCommand(t, "0.7.0")
+	runtime.Aip = &Aip{Configured: &aip.Setting{Server: "https://aip.example.invalid", TokenSecret: "aip-read"}, Secrets: heldSecrets{}, Command: command, Path: "/usr/bin:/bin"}
+	folder := started(t, runtime, aHarnessRunningAip)
+	eventually(t, "the harness's environment", func() bool { return read(filepath.Join(folder, "harness.env")) != "" })
+
+	bin, _ := command()
+	if said := read(filepath.Join(folder, "aip-version")); said != "aip 0.7.0 format 0.6a1" {
+		t.Errorf("aip --version = %q, want the trierarch's aip 0.7.0", said)
+	}
+	if env := read(filepath.Join(folder, "harness.env")); !strings.Contains("\n"+env+"\n", "\nPATH="+bin+":/usr/bin:/bin\n") {
+		t.Errorf("environment:\n%s\nwant PATH=%s:/usr/bin:/bin", env, bin)
+	}
+}
+
+func TestAHostSessionReachingNoAipServerKeepsThePathItHadWithoutAip(t *testing.T) {
+	runtime := aRuntime(t)
+	runtime.Aip = &Aip{Sent: func() (aip.Setting, bool) { return aip.Setting{}, false }, Secrets: heldSecrets{}, Command: anAipCommand(t, "0.7.0"), Path: "/usr/bin:/bin"}
+	folder := started(t, runtime, aHarnessRunningAip)
+	eventually(t, "the harness's environment", func() bool { return read(filepath.Join(folder, "harness.env")) != "" })
+
+	if env := read(filepath.Join(folder, "harness.env")); !strings.Contains("\n"+env+"\n", "\nPATH="+os.Getenv("PATH")+"\n") {
+		t.Errorf("environment:\n%s\nwant the hold's own PATH", env)
+	}
+}
+
+func TestAHostSessionReachingAnAipServerWhileTheTrierarchHoldsNoAipKeepsThePathItHad(t *testing.T) {
+	runtime := aRuntime(t)
+	runtime.Aip = &Aip{Configured: &aip.Setting{Server: "https://aip.example.invalid", TokenSecret: "aip-read"}, Secrets: heldSecrets{}, Command: func() (string, bool) { return "", false }, Path: "/usr/bin:/bin"}
+	folder := started(t, runtime, aHarnessRunningAip)
+	eventually(t, "the harness's environment", func() bool { return read(filepath.Join(folder, "harness.env")) != "" })
+
+	if env := read(filepath.Join(folder, "harness.env")); !strings.Contains("\n"+env+"\n", "\nPATH="+os.Getenv("PATH")+"\n") || !strings.Contains(env, "AIP_SERVER=") {
+		t.Errorf("environment:\n%s\nwant AIP_SERVER and the hold's own PATH", env)
+	}
+}
