@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"reflect"
 	"slices"
 	"strings"
@@ -207,5 +208,57 @@ func TestRunGoesOnAfterAFailedInstallAndDoesNotTryAgainEveryPass(t *testing.T) {
 
 	if command.timesEnsured() != 1 {
 		t.Errorf("installed %d times over 200 passes, want the one at the start", command.timesEnsured())
+	}
+}
+
+// aClock is a time a test moves on.
+type aClock struct {
+	mu sync.Mutex
+	at time.Time
+}
+
+func (c *aClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.at
+}
+
+func (c *aClock) moveOn(by time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.at = c.at.Add(by)
+}
+
+func TestAFailedInstallIsTriedAgainAnHourOnAndNotBefore(t *testing.T) {
+	command := &anAipCommand{state: notDownloaded}
+	clock := &aClock{at: time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)}
+	ctx, stop := context.WithCancel(context.Background())
+	kept := make(chan struct{})
+	go func() {
+		defer close(kept)
+		keepAipCommand(ctx, command, time.Millisecond, clock.now)
+	}()
+	defer func() { stop(); <-kept }()
+	eventuallyEnsured := func(times int) bool {
+		for until := time.Now().Add(5 * time.Second); time.Now().Before(until); time.Sleep(time.Millisecond) {
+			if command.timesEnsured() >= times {
+				return true
+			}
+		}
+		return false
+	}
+	if !eventuallyEnsured(1) {
+		t.Fatalf("installed %d times, want once at the start", command.timesEnsured())
+	}
+
+	clock.moveOn(59 * time.Minute)
+	time.Sleep(50 * time.Millisecond)
+	if got := command.timesEnsured(); got != 1 {
+		t.Fatalf("installed %d times 59 minutes on, want the one at the start", got)
+	}
+	clock.moveOn(time.Minute)
+
+	if !eventuallyEnsured(2) {
+		t.Errorf("installed %d times an hour on, want it tried again", command.timesEnsured())
 	}
 }
