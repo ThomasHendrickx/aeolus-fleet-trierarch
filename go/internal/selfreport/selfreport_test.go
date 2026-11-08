@@ -3,7 +3,9 @@ package selfreport
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,11 +77,30 @@ func TestTheNoteCountsCrashedShips(t *testing.T) {
 	}
 }
 
-func TestTheNoteSaysWhyHostSessionsGetNoAip(t *testing.T) {
+func TestTheNoteSaysHostSessionsGetNoAip(t *testing.T) {
 	in := anInput()
-	in.AipMissing = "uv 0.13.7, which installs aip 0.7.0, has no build for this machine"
-	if got := Of(in).Note; got != "0 of 6 running, no aip for host sessions: uv 0.13.7, which installs aip 0.7.0, has no build for this machine" {
+	in.IsAipMissing = true
+	if got := Of(in).Note; got != "0 of 6 running, no aip on the host" {
 		t.Fatalf("note = %q", got)
+	}
+}
+
+func TestTheNoteLeavesOutTheAipWhereItWouldPassTheLongestNoteCoreTakes(t *testing.T) {
+	in := anInput()
+	in.IsAipMissing = true
+	in.IsKeyCutOff = true
+	in.Running = 1
+	in.State.Entries = map[string]reconciler.Entry{}
+	for at := range 6 {
+		shipID := fmt.Sprintf("shp_01m6jyczpnpp5c0vxh54c966c%d", at)
+		in.State.Entries[shipID] = reconciler.Entry{ShipID: shipID, State: "crashed"}
+	}
+	in.State.NotOffered = []reconciler.NotOfferedHarness{{Harness: "copilot", Reason: "its aeolus-fleet plugin is not installed for Copilot: copilot plugin install aeolus-fleet@aeolus-fleet"}}
+
+	note := Of(in).Note
+
+	if len(note) > 200 || strings.Contains(note, "aip") || !strings.Contains(note, "copilot not offered") {
+		t.Fatalf("note = %q (%d characters), want the rest within 200 and no aip", note, len(note))
 	}
 }
 
