@@ -42,9 +42,9 @@ var wrappedHelp = strings.Join([]string{
 }, "\n")
 
 // resolves is what each alias resolves to on Claude Code 2.1.293.
-var resolves = map[string]string{"fable": "claude-fable-5-1", "opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5"}
+var resolves = map[string]string{"fable": "claude-fable-5-1", "opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
 
-var allIDs = []string{"claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5"}
+var allIDs = []string{"claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"}
 
 // aProbedClaude is Claude Code 2.1.293 as the mac mini runs it: an alias it resolves answers its probe with the exact id in modelUsage, beside helper when set; a refused one is unrecognized; any other fails otherwise. Every command it is given is kept.
 type aProbedClaude struct {
@@ -131,7 +131,7 @@ func TestEachAliasHelpNamesIsProbedOnceFromTheNeutralFolderWithAShortPrintModeTu
 		}
 	}
 	var want []detection.Command
-	for _, alias := range []string{"fable", "opus", "sonnet"} {
+	for _, alias := range []string{"fable", "opus", "sonnet", "haiku"} {
 		want = append(want, detection.Command{Program: "claude", Args: []string{"-p", "--model", alias, "--max-turns", "1", "--output-format", "json", "Reply OK"}, Dir: neutralFolder, Timeout: time.Minute})
 	}
 	if !reflect.DeepEqual(probes, want) {
@@ -190,7 +190,7 @@ func TestClaudeCodesPermissionModesAreReadFromHelpAndNoneWhenItListsNone(t *test
 
 func TestTheIDThatNamesItsAliasIsTakenWhenTheProbeUsedAnotherModelBesideIt(t *testing.T) {
 	claude := aClaudeCode()
-	claude.helper = "claude-haiku-4-5-20251001"
+	claude.helper = "claude-compactor-1"
 
 	if got := modelIDs(claude.detect(t, "2.1.293", nil)); !slices.Equal(got, allIDs) {
 		t.Errorf("models = %v, want %v", got, allIDs)
@@ -201,7 +201,7 @@ func TestAnAliasTheCLIRefusesAsUnrecognizedIsLeftOut(t *testing.T) {
 	claude := aClaudeCode()
 	claude.refused = []string{"fable"}
 
-	if got, want := modelIDs(claude.detect(t, "2.1.293", nil)), []string{"claude-opus-5-5", "claude-sonnet-5-5"}; !slices.Equal(got, want) {
+	if got, want := modelIDs(claude.detect(t, "2.1.293", nil)), []string{"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"}; !slices.Equal(got, want) {
 		t.Errorf("models = %v, want %v", got, want)
 	}
 }
@@ -235,8 +235,18 @@ func TestNoIDResolvedAtAnotherVersionIsKeptAndNoModelIsDeclaredWhenNoneResolves(
 	}
 }
 
-func TestNoModelIsDeclaredWhenHelpNamesNoAliasAndTheProblemSaysWhy(t *testing.T) {
+func TestTheKnownFamiliesAreProbedAndDeclaredWhenHelpNamesNoAlias(t *testing.T) {
 	claude := aClaudeCode()
+	claude.help = "  --effort <level>  Effort level (low, high)"
+
+	if got := modelIDs(claude.detect(t, "2.1.293", nil)); !slices.Equal(got, allIDs) {
+		t.Errorf("models = %v, want %v", got, allIDs)
+	}
+}
+
+func TestNoModelIsDeclaredWhenHelpNamesNoAliasAndNoKnownFamilyResolvesAndTheProblemSaysWhy(t *testing.T) {
+	claude := aClaudeCode()
+	claude.resolves = map[string]string{}
 	claude.help = "  --effort <level>  Effort level (low, high)"
 
 	found := claude.detect(t, "2.1.293", nil)
