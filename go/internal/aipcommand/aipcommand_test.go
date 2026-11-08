@@ -43,18 +43,18 @@ case "$1 $2" in
       shift
     done
     version=$(sed -n 's/^agent-instruction-protocol==\([^ ]*\).*/\1/p' "$log/requirements")
-    sed "s/@VERSION@/$version/" "$log/aip" > "$venv/bin/aip" && chmod +x "$venv/bin/aip" ;;
+    sed -e "s/@VERSION@/$version/" -e "s|@LOG@|$log|" "$log/aip" > "$venv/bin/aip" && chmod +x "$venv/bin/aip" ;;
 esac
 `
 
 // standInAip is the aip the stand-in uv installs: `--version` states the version the requirements pin, and `skill install --path DIR` writes
 // DIR/aip-compile and DIR/aip-runtime, each with its SKILL.md, and $HOME/.aip/skills.json, as aip 0.7.0 does; it fails while a SKILLS_FAIL file
-// is in STAND_IN_UV_LOG.
+// is in the stand-in uv's log, which it is written with, as aip may be given none of the trierarch's variables.
 const standInAip = `#!/bin/sh
 case "$1 $2 $3" in
   "--version  ") echo "aip @VERSION@ format 0.6a1" ;;
   "skill install --path")
-    if [ -e "$STAND_IN_UV_LOG/SKILLS_FAIL" ]; then echo "error: cannot write $4" >&2; exit 1; fi
+    if [ -e "@LOG@/SKILLS_FAIL" ]; then echo "error: cannot write $4" >&2; exit 1; fi
     for skill in aip-compile aip-runtime; do
       mkdir -p "$4/$skill" && printf -- '---\nname: %s\n---\n' "$skill" > "$4/$skill/SKILL.md"
     done
@@ -398,6 +398,12 @@ func TestTheRealUvInstallsTheRealAip(t *testing.T) {
 	bin, isHeld := folder.Bin()
 	if state != (State{Version: Version}) || !isHeld || !strings.HasPrefix(aipVersionIn(t, bin), "aip "+Version+" ") {
 		t.Fatalf("Ensure() = %+v, Bin() = %q, %v; want aip %s", state, bin, isHeld, Version)
+	}
+	plugin, _ := folder.Plugin()
+	for _, skill := range []string{"aip-compile", "aip-runtime"} {
+		if text := readText(t, filepath.Join(plugin, "skills", skill, "SKILL.md")); !strings.Contains(text, "\nname: "+skill+"\n") {
+			t.Errorf("%s's SKILL.md does not name it: %q", skill, text[:min(len(text), 200)])
+		}
 	}
 }
 
