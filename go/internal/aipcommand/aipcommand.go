@@ -25,7 +25,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-	"sync"
+	"syscall"
 	"time"
 )
 
@@ -96,9 +96,6 @@ type Folder struct {
 	Log func(line string)
 }
 
-// installs lets one install at a time touch a folder: the run loop's checks and init's may meet.
-var installs sync.Mutex
-
 var notYet = State{Missing: "aip " + Version + " is not installed yet"}
 
 // State is the last install's outcome as kept; not installed yet when none is.
@@ -133,8 +130,15 @@ func (f Folder) Bin() (string, bool) {
 
 // Ensure installs aip at Version into the folder unless it holds it already and its aip states it, and keeps the outcome. A failed install is logged and leaves no folder.
 func (f Folder) Ensure() State {
-	installs.Lock()
-	defer installs.Unlock()
+	unlock, err := f.lock()
+	if err != nil {
+		state := State{Missing: "the install of aip " + Version + " failed: " + err.Error()}
+		if f.Log != nil {
+			f.Log(state.Missing)
+		}
+		return state
+	}
+	defer unlock()
 	if bin, ok := f.Bin(); ok && f.states(filepath.Join(bin, "aip")) {
 		return f.State()
 	}
@@ -144,6 +148,25 @@ func (f Folder) Ensure() State {
 	}
 	f.keep(state)
 	return state
+}
+
+// lock waits until no other process, nor this one, installs into the folder, and holds it so: init and upgrade run beside the service, each its own process. The lock file lies beside the folder, which an install removes.
+func (f Folder) lock() (func(), error) {
+	if err := os.MkdirAll(filepath.Dir(f.Path), 0o700); err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(f.Path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return func() {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = file.Close()
+	}, nil
 }
 
 // states says whether the aip states Version.
