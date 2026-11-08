@@ -94,9 +94,14 @@ type Aip struct {
 	Log func(line string)
 	// Command is the bin of the aip CLI the trierarch keeps on the host (#314), while it holds one; none in containers, whose image holds its own.
 	Command func() (string, bool)
+	// Plugin is the plugin of aip's skills the trierarch keeps beside its aip CLI on the host (#315), while it holds one; none in containers, whose image holds them.
+	Plugin func() (string, bool)
 	// Path is the PATH a session has without the aip CLI: the hold's own, which Command's bin goes in front of.
 	Path string
 }
+
+// pluginFlags are the flags a harness takes a plugin folder for this session alone with, by harness: so far Claude Code's, which then lists the plugin's skills and writes nothing into the user's own skills folders.
+var pluginFlags = map[string]string{"claude-code": "--plugin-dir"}
 
 // setting is the aip the session reaches: the configured one, or else the one the trierarch plugin sent; false with neither.
 func (a *Aip) setting() (aip.Setting, bool) {
@@ -117,7 +122,7 @@ type SecretValues interface {
 	Value(name string) (string, bool)
 }
 
-// withAip is the session with the aip server in its environment, the trierarch's aip CLI first on its PATH while it holds one, and its read token among its secrets when it is held; as it is without an aip server.
+// withAip is the session with the aip server in its environment, the trierarch's aip CLI first on its PATH while it holds one, the plugin of aip's skills on its command line where its harness takes one and the trierarch holds it, and its read token among its secrets when it is held; as it is without an aip server.
 func (a *Aip) withAip(session Start) Start {
 	setting, ok := a.setting()
 	if !ok {
@@ -134,6 +139,12 @@ func (a *Aip) withAip(session Start) Start {
 		}
 	}
 	session.Env = env
+	if flag, ok := pluginFlags[session.Harness]; ok && a.Plugin != nil && len(session.Command) > 0 {
+		if plugin, ok := a.Plugin(); ok {
+			// Right after the harness's own name: a flag such as --mcp-config takes every word up to the next flag, so it comes last.
+			session.Command = slices.Concat(session.Command[:1], []string{flag, plugin}, session.Command[1:])
+		}
+	}
 	token, ok := a.Secrets.Value(setting.TokenSecret)
 	if !ok {
 		if a.Log != nil {
