@@ -335,3 +335,33 @@ func TestASessionWhoseFoldersServersCannotBeListedStartsNothing(t *testing.T) {
 		t.Fatalf("Launch = %v, started %d, want an error and nothing started, since the session would get the user's servers", err, len(running.started))
 	}
 }
+
+func TestAServerTheUsersCopilotNamesAsACrewedOneIsTheProxysOneInTheSession(t *testing.T) {
+	harness, running, listed := aHarnessListing(t)
+	harness.ProxyURL = func() (string, bool) { return "http://127.0.0.1:41000", true }
+	harness.Sessions = t.TempDir()
+	listed.names = []string{"company-graph"}
+	entry := anEntry(t)
+	entry.McpServers = []string{"company-graph"}
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// --disable-mcp-server goes by name, so it would turn the proxy's off too; the --additional-mcp-config entry takes the user's place whole.
+	started := running.started[0]
+	if slices.Contains(started.Command, "--disable-mcp-server=company-graph") {
+		t.Fatalf("command %q turns company-graph off, want the proxy's in the session", started.Command)
+	}
+	var config struct {
+		McpServers map[string]struct {
+			URL string `json:"url"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(started.Mcp.Config, &config); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := config.McpServers["company-graph"].URL, "http://127.0.0.1:41000/mcp/"+scout+"/company-graph"; got != want {
+		t.Fatalf("the additional configuration's company-graph is at %q, want the proxy at %q", got, want)
+	}
+}
