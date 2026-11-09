@@ -85,6 +85,32 @@ func TestAFirstStartRunsClaudeCodeInTheFolderWithItsLaunchIdAndItsFirstPrompt(t 
 	}
 }
 
+func TestALaunchPickingAModelClaudeCodeGivesNoFlagForStartsNothingAndSaysWhichModel(t *testing.T) {
+	// Detection may drop the model, or never have found it, after the request was checked: before its first start, or before a start again (#335, #337).
+	cases := map[string]struct {
+		settings     config.Harness
+		isFirstStart bool
+	}{
+		"a first start, the model gone from what Claude Code offers since the request was checked": {config.Harness{Flags: []string{}, Options: map[string]config.Option{"model": {Values: map[string][]string{"claude-sonnet-5": {"--model", "claude-sonnet-5"}}}}}, true},
+		"a start again, the model gone from what Claude Code offers since it was crewed":           {config.Harness{Flags: []string{}, Options: map[string]config.Option{"model": {Values: map[string][]string{"claude-sonnet-5": {"--model", "claude-sonnet-5"}}}}}, false},
+		"a start again while Claude Code offers no model":                                          {config.Harness{Flags: []string{}, Options: map[string]config.Option{}}, false},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			harness, running, _ := aHarness(t)
+			harness.Settings = func() config.Harness { return c.settings }
+			entry := anEntry(t)
+			entry.Options = map[string]string{"model": "claude-opus-5"}
+
+			err := harness.Launch(entry, c.isFirstStart, "launch-1")
+
+			if err == nil || !strings.Contains(err.Error(), "claude-opus-5") || len(running.started) != 0 {
+				t.Fatalf("Launch = %v, started %+v, want refused naming claude-opus-5, nothing started", err, running.started)
+			}
+		})
+	}
+}
+
 func TestALaunchTakesItsModelsFlagAsClaudeCodeIsOfferedAtTheLaunchNotAsItWasAtStart(t *testing.T) {
 	harness, running, _ := aHarness(t)
 	offered := config.Harness{Flags: []string{}, Options: map[string]config.Option{}}

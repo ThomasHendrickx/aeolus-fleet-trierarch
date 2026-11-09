@@ -96,6 +96,32 @@ func TestAFirstStartRunsCopilotInTheFolderWithItsFirstPromptAndItsLaunchId(t *te
 	}
 }
 
+func TestALaunchPickingAModelCopilotGivesNoFlagForStartsNothingAndSaysWhichModel(t *testing.T) {
+	// Detection may drop the model, or never have found it, after the request was checked: before its first start, or before a start again (#335, #337).
+	cases := map[string]struct {
+		settings     config.Harness
+		isFirstStart bool
+	}{
+		"a first start, the model gone from what Copilot offers since the request was checked": {config.Harness{Flags: []string{}, Options: map[string]config.Option{"model": {Values: map[string][]string{"gpt-5": {"--model", "gpt-5"}}}}}, true},
+		"a start again, the model gone from what Copilot offers since it was crewed":           {config.Harness{Flags: []string{}, Options: map[string]config.Option{"model": {Values: map[string][]string{"gpt-5": {"--model", "gpt-5"}}}}}, false},
+		"a start again while Copilot offers no model":                                          {config.Harness{Flags: []string{}, Options: map[string]config.Option{}}, false},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			harness, running := aHarness(t)
+			harness.Settings = func() config.Harness { return c.settings }
+			entry := anEntry(t)
+			entry.Options = map[string]string{"model": "gpt-6.1"}
+
+			err := harness.Launch(entry, c.isFirstStart, "launch-1")
+
+			if err == nil || !strings.Contains(err.Error(), "gpt-6.1") || len(running.started) != 0 {
+				t.Fatalf("Launch = %v, started %+v, want refused naming gpt-6.1, nothing started", err, running.started)
+			}
+		})
+	}
+}
+
 func TestALaunchTakesItsModelsFlagAsCopilotIsOfferedAtTheLaunchNotAsItWasAtStart(t *testing.T) {
 	harness, running := aHarness(t)
 	offered := config.Harness{Flags: []string{}, Options: map[string]config.Option{}}
