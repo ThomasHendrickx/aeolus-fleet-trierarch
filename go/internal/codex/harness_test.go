@@ -50,16 +50,18 @@ func (h *someHooks) TrustAeolusHooks(folder string) ([]string, error) {
 	return nil, h.err
 }
 
-// someServers are the MCP servers and enabled plugins Codex's configuration names for a folder, the user's own, noting each folder it is asked about, or fails with the error given.
+// someServers are the MCP servers and enabled plugins Codex's configuration names for a folder, the user's own, noting each folder it is asked about and the configuration flags it is read with, or fails with the error given.
 type someServers struct {
 	names     []string
 	plugins   []string
 	askedFrom []string
+	askedWith [][]string
 	err       error
 }
 
-func (s *someServers) ConfiguredFor(folder string) (Configured, error) {
+func (s *someServers) ConfiguredFor(folder string, overrides []string) (Configured, error) {
 	s.askedFrom = append(s.askedFrom, folder)
+	s.askedWith = append(s.askedWith, overrides)
 	return Configured{McpServers: s.names, Plugins: s.plugins}, s.err
 }
 
@@ -404,5 +406,43 @@ func TestASessionStartsWithEveryPluginCodexsConfigurationEnablesTurnedOffButTheA
 	flags := []string{"-m", "gpt-5.6-terra", "-c", `plugins={"github@openai-curated"={enabled=false},"withmcp@probe-market"={enabled=false}}`}
 	if want := CommandLine(flags, prompt.First("Review PR 12"), true); !slices.Equal(running.started[0].Command, want) {
 		t.Fatalf("started %q, want %q, so no plugin's own MCP server loads and the aeolus-fleet plugin's hooks still run", running.started[0].Command, want)
+	}
+}
+
+func TestTheConfigurationIsReadWithTheLaunchsOwnConfigurationFlags(t *testing.T) {
+	harness, running, _, listed := aHarnessListing(t)
+	harness.Settings.Flags = []string{"-m", "gpt-5.6-terra", "-c", `mcp_servers.from_flag={command="echo"}`, "--config=features.x=true", "--enable", "y", "--disable=z", "--strict-config", "--skip-git-repo-check"}
+	entry := anEntry(t)
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"-c", `mcp_servers.from_flag={command="echo"}`, "--config=features.x=true", "--enable", "y", "--disable=z", "--strict-config"}
+	if len(listed.askedWith) != 1 || !slices.Equal(listed.askedWith[0], want) || len(running.started) != 1 {
+		t.Fatalf("configuration read with %q, want %q, so a server the launch's flags add is turned off too", listed.askedWith, want)
+	}
+}
+
+func TestASessionWhoseFlagsPickAProfileOrAnotherFolderStartsNothing(t *testing.T) {
+	cases := map[string][]string{
+		"-p":         {"-p", "work"},
+		"-p joined":  {"-pwork"},
+		"--profile":  {"--profile", "work"},
+		"--profile=": {"--profile=work"},
+		"-C":         {"-C", "/elsewhere"},
+		"--cd":       {"--cd", "/elsewhere"},
+		"--cd=":      {"--cd=/elsewhere"},
+	}
+	for name, flags := range cases {
+		t.Run(name, func(t *testing.T) {
+			harness, running, _, _ := aHarnessListing(t)
+			harness.Settings.Flags = flags
+
+			// config/read takes neither a profile, whose own file may name servers, nor another folder, whose project configuration may.
+			if err := harness.Launch(anEntry(t), true, "launch-1"); err == nil || len(running.started) != 0 {
+				t.Fatalf("Launch with %q = %v, started %d, want an error and nothing started", flags, err, len(running.started))
+			}
+		})
 	}
 }

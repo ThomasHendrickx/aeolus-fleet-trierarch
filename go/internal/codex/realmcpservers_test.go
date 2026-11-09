@@ -59,7 +59,7 @@ args = ["-c", "touch ` + filepath.Join(started, "projects-own") + `"]
 		}
 	}
 
-	configured, err := AppServer{Program: "codex", Version: "1.2.3"}.ConfiguredFor(folder)
+	configured, err := AppServer{Program: "codex", Version: "1.2.3"}.ConfiguredFor(folder, nil)
 
 	slices.Sort(configured.McpServers)
 	if want := []string{"dot.ted", "projects-own", "users-own"}; err != nil || !slices.Equal(configured.McpServers, want) || !slices.Equal(configured.Plugins, []string{"withmcp@probe-market"}) {
