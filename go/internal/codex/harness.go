@@ -36,9 +36,9 @@ type Hooks interface {
 	TrustAeolusHooks(folder string) ([]string, error)
 }
 
-// McpServers lists the MCP servers Codex's configuration names for a folder, the user's own and the project's.
-type McpServers interface {
-	McpServersIn(folder string) ([]string, error)
+// Configuration reads what Codex's configuration names for a folder: the user's and the project's MCP servers and the plugins it enables.
+type Configuration interface {
+	ConfiguredFor(folder string) (Configured, error)
 }
 
 // launchVariable is the variable a session's launch id is passed in, for the plugin's hooks to mark that launch (#490).
@@ -59,8 +59,8 @@ type Harness struct {
 	Runtime  Runtime
 	Settings config.Harness
 	Hooks    Hooks
-	// McpServers is what Codex's configuration names for a folder, each turned off (#329).
-	McpServers McpServers
+	// Configuration is what Codex's configuration names for a folder, each server and plugin of it turned off but the aeolus-fleet plugin (#329).
+	Configuration Configuration
 	// Events is where the ship's hold keeps every line its session wrote.
 	Events func(shipID string) string
 	// ProxyURL is where sessions on an API key reach the model proxy (headless H16); false before it first listened.
@@ -96,30 +96,45 @@ func (h Harness) routeOf(login string) ([]string, *sessions.ProxyToken, error) {
 // CanAddMcpServer is whether a session can be started with the server: Codex's -c takes its key's path apart at every dot, quoted or not, so a server whose name holds one cannot be named there, and replacing the whole mcp_servers table would drop the user's own servers.
 func CanAddMcpServer(name string) bool { return !strings.Contains(name, ".") }
 
-// othersOff turns off, for this session only, every MCP server Codex's configuration names for the entry's folder (#329): one -c with each server's name as a quoted key, which Codex merges into its table, so the user's config.toml is left as it is and a name holding a dot is turned off too; nothing when it names none. One named as a crewed server is an error: -c merges into its entry, so Codex would refuse it or carry its fields into the proxy's.
+// othersOff turns off, for this session only, every MCP server Codex's configuration names for the entry's folder, and every plugin it enables but the aeolus-fleet plugin, since a plugin may bring servers of its own and no listing that reaches none names them (#329): one -c each, with each name as a quoted key, which Codex merges into its table, so the user's config.toml is left as it is and a name holding a dot is turned off too; nothing for what it names none of. A server named as a crewed one is an error: -c merges into its entry, so Codex would refuse it or carry its fields into the proxy's.
 func (h Harness) othersOff(entry reconciler.Entry) ([]string, error) {
-	listed, err := h.McpServers.McpServersIn(entry.Folder)
+	configured, err := h.Configuration.ConfiguredFor(entry.Folder)
 	if err != nil {
 		return nil, err
 	}
-	// Codex's configuration keeps its order of its own.
-	slices.Sort(listed)
-	var off []string
-	for _, name := range listed {
+	for _, name := range configured.McpServers {
 		if slices.Contains(entry.McpServers, name) {
 			return nil, fmt.Errorf("codex's configuration for %s names its own MCP server %s: -c would merge into it, so the session cannot be started with the crewed %s alone", entry.Folder, name, name)
 		}
+	}
+	servers, err := disabledOf("mcp_servers", configured.McpServers)
+	if err != nil {
+		return nil, err
+	}
+	plugins, err := disabledOf("plugins", slices.DeleteFunc(slices.Clone(configured.Plugins), isTrierarchsPlugin))
+	if err != nil {
+		return nil, err
+	}
+	return append(servers, plugins...), nil
+}
+
+// disabledOf is `-c <key>={"<name>"={enabled=false},...}` for the names, in order; nothing for none.
+func disabledOf(key string, names []string) ([]string, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	// Codex's configuration keeps its order of its own.
+	names = slices.Sorted(slices.Values(names))
+	entries := make([]string, 0, len(names))
+	for _, name := range names {
 		// A JSON string is a TOML basic string.
 		quoted, err := json.Marshal(name)
 		if err != nil {
 			return nil, err
 		}
-		off = append(off, string(quoted)+"={enabled=false}")
+		entries = append(entries, string(quoted)+"={enabled=false}")
 	}
-	if len(off) == 0 {
-		return nil, nil
-	}
-	return []string{"-c", "mcp_servers={" + strings.Join(off, ",") + "}"}, nil
+	return []string{"-c", key + "={" + strings.Join(entries, ",") + "}"}, nil
 }
 
 // mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7), and no other: every one Codex's configuration names turned off, and each named one at the MCP proxy as a streamable HTTP server of its own on the command line, its bearer token read from a secret variable of the hold, a token of the session's own, fresh for each start, so the command line never holds it; no server of its own for an entry that names none. Every later turn's exec keeps the flags, and the hold keeps the variable.
