@@ -212,7 +212,7 @@ func TestARunningProxyIsTheMCPProxyOfTheServersTheTrierarchPluginSentLast(t *tes
 	if err := os.WriteFile(filepath.Join(folder, "hold.pid"), []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := mcpproxy.WriteAccess(folder, mcpproxy.Access{Token: "scouts-mcp-token", Servers: []string{"company-graph"}}); err != nil {
+	if err := mcpproxy.WriteAccess(folder, mcpproxy.Access{Token: "scouts-mcp-token", Servers: []string{"company-graph"}, FleetID: "flt_01m3tb1zgr5h2ffee12xnch8sv", PluginShipID: "shp_01m3tb1zhjs6kthtcs2zvksacv"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runtime.Keep(true); err != nil {
@@ -274,7 +274,7 @@ func TestARunningProxyAddsTheCredentialOfTheSecretsTheTrierarchKeeps(t *testing.
 	if err := os.WriteFile(filepath.Join(folder, "hold.pid"), []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := mcpproxy.WriteAccess(folder, mcpproxy.Access{Token: "scouts-mcp-token", Servers: []string{"company-graph"}}); err != nil {
+	if err := mcpproxy.WriteAccess(folder, mcpproxy.Access{Token: "scouts-mcp-token", Servers: []string{"company-graph"}, FleetID: "flt_01m3tb1zgr5h2ffee12xnch8sv", PluginShipID: "shp_01m3tb1zhjs6kthtcs2zvksacv"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runtime.Keep(true); err != nil {

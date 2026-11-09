@@ -498,6 +498,7 @@ func sessionRuntime(at paths.Paths, program string, configuration config.Configu
 	configured := configuration.Runtime
 	holds := sessions.Runtime{Sessions: at.Sessions, Program: []string{program}, Version: cli.Version, Launch: sessions.Launch(runtime.GOOS, os.Getenv("INVOCATION_ID"), sessions.SystemdVersion()), BootedAt: sessions.BootedAt}
 	holds.Aip = &sessions.Aip{Secrets: appliedSecrets{file: heldMcpConfigurationOf(at)}, Log: logLine}
+	holds.McpIdentity = heldMcpConfigurationOf(at).Identity
 	if own := configuration.Aip; own != nil {
 		holds.Aip.Configured = &aip.Setting{Server: own.Server, TokenSecret: own.TokenSecret}
 	}

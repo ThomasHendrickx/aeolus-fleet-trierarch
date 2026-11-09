@@ -19,7 +19,6 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/processproof"
 )
 
@@ -189,15 +188,9 @@ func Main(words []string, version string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	proxy := Proxy{Sessions: sessions, Keys: keys.Files{Folder: keysFolder}, States: keys.States{Keys: keysFolder, File: files.KeyStates}, Version: version, Now: time.Now, MCP: mcpproxy.Proxy{Sessions: sessions, Servers: func() []mcpservers.Server {
+	proxy := Proxy{Sessions: sessions, Keys: keys.Files{Folder: keysFolder}, States: keys.States{Keys: keysFolder, File: files.KeyStates}, Version: version, Now: time.Now, MCP: mcpproxy.Proxy{Sessions: sessions, Configuration: func() (mcpconfiguration.Configuration, bool) {
 		// Read at each request: the trierarch applies the configuration as it arrives.
-		held, _ := mcpconfiguration.ReadFile(configuration)
-		return held.Servers
-	}, Secret: func(name string) (string, bool) {
-		// Read at each request too, so a rotated or removed secret takes effect on the next call.
-		held, _ := mcpconfiguration.ReadFile(configuration)
-		value, ok := held.Secrets[name]
-		return value, ok
+		return mcpconfiguration.ReadFile(configuration)
 	}}}
 	server := &http.Server{Handler: proxy, ReadHeaderTimeout: 30 * time.Second}
 	port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)

@@ -26,6 +26,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aip"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aipcommand"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/processproof"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
@@ -175,6 +176,8 @@ type Runtime struct {
 	BootedAt func() time.Time
 	// Aip is the aip server every session reaches; none when nil.
 	Aip *Aip
+	// McpIdentity is the fleet and plugin ship of the MCP configuration applied now, which a session started with MCP servers is bound to at the proxy; false, or nil, while none is known.
+	McpIdentity func() (mcpconfiguration.Identity, bool)
 	// HeldAs is what the hold runs for a session, once the ship's last session is stopped and its folder is new: the session as it is when nil. A container runtime's hold runs the runtime's run of it (H18).
 	HeldAs func(session Start, files hold.Files) (Start, error)
 }
@@ -306,7 +309,13 @@ func (r Runtime) Start(session Start) error {
 		words = append(words, "--proxy-token-variable", token.Variable)
 	}
 	if mcp := session.Mcp; mcp != nil {
-		if err := mcpproxy.WriteAccess(files.Folder, mcp.Access); err != nil {
+		access := mcp.Access
+		if r.McpIdentity != nil {
+			if identity, ok := r.McpIdentity(); ok {
+				access.FleetID, access.PluginShipID = identity.FleetID, identity.PluginShipID
+			}
+		}
+		if err := mcpproxy.WriteAccess(files.Folder, access); err != nil {
 			return err
 		}
 		if mcp.Config != nil {
