@@ -75,9 +75,9 @@ func aHarnessListing(t *testing.T) (Harness, *aRuntime, *someHooks, *someServers
 	running, hooks, servers := &aRuntime{}, &someHooks{}, &someServers{}
 	events := t.TempDir()
 	return Harness{
-		Plugin:   plugin.Plugin{Root: filepath.Join(filepath.Dir(file), "..", "..", "..", "plugins", "aeolus-fleet"), Data: t.TempDir(), Crews: t.TempDir()},
-		Runtime:  running,
-		Settings: config.Harness{Flags: []string{"-m", "gpt-5.6-terra"}, Options: map[string]config.Option{}},
+		Plugin:     plugin.Plugin{Root: filepath.Join(filepath.Dir(file), "..", "..", "..", "plugins", "aeolus-fleet"), Data: t.TempDir(), Crews: t.TempDir()},
+		Runtime:    running,
+		Settings:   config.Harness{Flags: []string{"-m", "gpt-5.6-terra"}, Options: map[string]config.Option{}},
 		Hooks:      hooks,
 		McpServers: servers,
 		Events:     func(shipID string) string { return filepath.Join(events, shipID+".jsonl") },

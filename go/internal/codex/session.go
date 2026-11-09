@@ -27,16 +27,19 @@ const (
 	noDaemon = "--no-daemon"
 	// noQuestionTool is added to every launch: Codex's question tool waits for an answer nobody gives.
 	noQuestionTool = "--config=tools.experimental_request_user_input.enabled=false"
-	endOfFlags     = "--"
+	// noApps is added to every launch: the user's ChatGPT apps, which Codex loads as its codex_apps MCP server, stay out of the session (#329).
+	noApps     = "--config=features.apps=false"
+	endOfFlags = "--"
 )
 
 // AdapterFlags are the flags the adapter adds itself, for config check.
 var AdapterFlags = []commandline.AdapterFlag{
 	{Flag: jsonEvents, When: "always"},
 	{Flag: noQuestionTool, When: "always"},
+	{Flag: noApps, When: "always"},
 }
 
-// CommandParts are `codex exec`, or `codex exec resume --last` on a restart, in parts: the configured flags but --no-daemon, --json, the question tool off, and the prompt last after `--`, so it never reads as a flag.
+// CommandParts are `codex exec`, or `codex exec resume --last` on a restart, in parts: the configured flags but --no-daemon, --json, the question tool and the ChatGPT apps off, and the prompt last after `--`, so it never reads as a flag.
 func CommandParts(flags []string, prompt string, isFirstStart bool) []commandline.Part {
 	program := []string{"codex", "exec"}
 	if !isFirstStart {
@@ -47,6 +50,7 @@ func CommandParts(flags []string, prompt string, isFirstStart bool) []commandlin
 		{Words: slices.DeleteFunc(slices.Clone(flags), func(flag string) bool { return flag == noDaemon }), Source: commandline.Configuration},
 		{Words: []string{jsonEvents}, Source: commandline.Adapter},
 		{Words: []string{noQuestionTool}, Source: commandline.Adapter},
+		{Words: []string{noApps}, Source: commandline.Adapter},
 		{Words: []string{endOfFlags, prompt}},
 	})
 }

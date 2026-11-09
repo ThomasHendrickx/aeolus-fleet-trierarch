@@ -9,7 +9,9 @@
 package codex
 
 import (
+	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
@@ -33,6 +35,11 @@ type Hooks interface {
 	TrustAeolusHooks(folder string) ([]string, error)
 }
 
+// McpServers lists the MCP servers Codex loads in a folder, each the user's own, the project's or a plugin's.
+type McpServers interface {
+	McpServersIn(folder string) ([]string, error)
+}
+
 // launchVariable is the variable a session's launch id is passed in, for the plugin's hooks to mark that launch (#490).
 const launchVariable = "AEOLUS_LAUNCH"
 
@@ -51,6 +58,8 @@ type Harness struct {
 	Runtime  Runtime
 	Settings config.Harness
 	Hooks    Hooks
+	// McpServers is what Codex loads in a folder, each turned off but those the entry names (#329).
+	McpServers McpServers
 	// Events is where the ship's hold keeps every line its session wrote.
 	Events func(shipID string) string
 	// ProxyURL is where sessions on an API key reach the model proxy (headless H16); false before it first listened.
@@ -86,10 +95,38 @@ func (h Harness) routeOf(login string) ([]string, *sessions.ProxyToken, error) {
 // CanAddMcpServer is whether a session can be started with the server: Codex's -c takes its key's path apart at every dot, quoted or not, so a server whose name holds one cannot be named there, and replacing the whole mcp_servers table would drop the user's own servers.
 func CanAddMcpServer(name string) bool { return !strings.Contains(name, ".") }
 
-// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7): each at the MCP proxy as a streamable HTTP server of its own on the command line, added to the user's own servers, its bearer token read from a secret variable of the hold, a token of the session's own, fresh for each start, so the command line never holds it; nothing for an entry that names none. Every later turn's exec keeps the flags, and the hold keeps the variable.
+// othersOff turns off, for this session only, every MCP server Codex lists in the entry's folder but those the entry names (#329): one -c with each server's name as a quoted key, which Codex merges into its table, so the user's config.toml is left as it is and a name holding a dot is turned off too; nothing when it lists none other.
+func (h Harness) othersOff(entry reconciler.Entry) ([]string, error) {
+	listed, err := h.McpServers.McpServersIn(entry.Folder)
+	if err != nil {
+		return nil, err
+	}
+	var off []string
+	for _, name := range listed {
+		if slices.Contains(entry.McpServers, name) {
+			continue
+		}
+		// A JSON string is a TOML basic string.
+		quoted, err := json.Marshal(name)
+		if err != nil {
+			return nil, err
+		}
+		off = append(off, string(quoted)+"={enabled=false}")
+	}
+	if len(off) == 0 {
+		return nil, nil
+	}
+	return []string{"-c", "mcp_servers={" + strings.Join(off, ",") + "}"}, nil
+}
+
+// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7), and no other: every other one Codex lists turned off, and each named one at the MCP proxy as a streamable HTTP server of its own on the command line, added to the user's own servers, its bearer token read from a secret variable of the hold, a token of the session's own, fresh for each start, so the command line never holds it; nothing for an entry that names none. Every later turn's exec keeps the flags, and the hold keeps the variable.
 func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) {
+	off, err := h.othersOff(entry)
+	if err != nil {
+		return nil, nil, err
+	}
 	if len(entry.McpServers) == 0 {
-		return nil, nil, nil
+		return off, nil, nil
 	}
 	address, ok := "", false
 	if h.ProxyURL != nil {
@@ -98,7 +135,7 @@ func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) 
 	if !ok {
 		return nil, nil, errors.New("the MCP proxy is not running yet")
 	}
-	flags := []string{}
+	flags := off
 	for _, name := range entry.McpServers {
 		flags = append(flags, "-c", "mcp_servers."+name+`={url="`+address+mcpproxy.PathOf(entry.ShipID, name)+`",bearer_token_env_var="`+mcpTokenVariable+`"}`)
 	}
