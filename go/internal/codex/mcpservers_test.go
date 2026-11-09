@@ -4,59 +4,68 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
-// aCodexListing is a stand-in for `codex mcp list --json`: it notes the folder it ran in and answers the listing given, exiting with the code given.
-func aCodexListing(t *testing.T, listing string, code int) (string, string) {
+// anAppServerReadingConfig is a stand-in for `codex app-server` answering config/read with the configuration given, noting each line it is sent; it touches the marker file if it is asked anything that would start or reach a server.
+func anAppServerReadingConfig(t *testing.T, config string) (string, string, string) {
 	t.Helper()
 	folder := t.TempDir()
-	ranIn := filepath.Join(folder, "ran-in")
+	said, reached := filepath.Join(folder, "said.jsonl"), filepath.Join(folder, "reached")
 	script := `#!/bin/sh
-[ "$*" = "mcp list --json" ] || exit 2
-pwd > ` + ranIn + `
-cat <<'LISTING'
-` + listing + `
-LISTING
-exit ` + string(rune('0'+code)) + `
-`
+[ "$1" = app-server ] || exit 2
+while read -r line; do
+  echo "$line" >> ` + said + `
+  id=$(printf '%s' "$line" | sed -n 's/^{"jsonrpc":"2.0","id":\([0-9]*\),.*/\1/p')
+  [ -z "$id" ] && continue
+  case "$line" in
+    *'"method":"config/read"'*) printf '{"jsonrpc":"2.0","id":%s,"result":%s}\n' "$id" '` + config + `' ;;
+    *'"method":"mcpServerStatus/list"'*|*'"method":"mcpServer/'*) touch ` + reached + `; printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
+    *) printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
+  esac
+done`
 	program := filepath.Join(folder, "codex")
 	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	return program, ranIn
+	return program, said, reached
 }
 
-func TestTheServersCodexListsInAFolderAreEachByItsName(t *testing.T) {
-	program, ranIn := aCodexListing(t, `[{"name":"dot.ted","enabled":true,"transport":{"type":"streamable_http","url":"http://127.0.0.1:2/z"}},{"name":"usersown","enabled":false,"transport":{"type":"stdio","command":"echo"}}]`, 0)
-	folder := t.TempDir()
+func TestTheServersCodexsConfigurationNamesForAFolderAreReadThroughItsAppServerReachingNone(t *testing.T) {
+	program, said, reached := anAppServerReadingConfig(t, `{"config":{"mcp_servers":{"dot.ted":{"url":"http://127.0.0.1:2/z","enabled":true},"projects_own":{"command":"echo","enabled":false}}},"origins":{}}`)
 
-	names, err := McpList{Program: program}.McpServersIn(folder)
+	names, err := AppServer{Program: program, Version: "1.2.3"}.McpServersIn("/home/me/worktrees/scout")
 
-	if err != nil || !slices.Equal(names, []string{"dot.ted", "usersown"}) {
-		t.Fatalf("McpServersIn = %q, %v, want dot.ted and usersown", names, err)
+	slices.Sort(names)
+	if err != nil || !slices.Equal(names, []string{"dot.ted", "projects_own"}) {
+		t.Fatalf("McpServersIn = %q, %v, want dot.ted and projects_own", names, err)
 	}
-	if text, _ := os.ReadFile(ranIn); string(text) != folder+"\n" {
-		t.Fatalf("listed in %q, want %q, where the project's own configuration applies", text, folder)
+	lines := linesOf(said)
+	if !slices.ContainsFunc(lines, func(line string) bool {
+		return strings.Contains(line, `"method":"config/read"`) && strings.Contains(line, `"cwd":"/home/me/worktrees/scout"`)
+	}) {
+		t.Fatalf("the app server was sent %q, want config/read with the folder as its cwd, so the project's configuration applies", lines)
+	}
+	if _, err := os.Stat(reached); err == nil {
+		t.Fatal("the listing asked for the servers' status, which starts and reaches each one")
 	}
 }
 
-func TestAListingCodexRefusesOrAnswersOtherThanJSONIsAnError(t *testing.T) {
-	cases := map[string]struct {
-		listing string
-		code    int
-	}{
-		"codex exits 1":  {`[]`, 1},
-		"not JSON":       {`Name  Command`, 0},
-		"a nameless one": {`[{"enabled":true}]`, 0},
-	}
-	for name, test := range cases {
-		t.Run(name, func(t *testing.T) {
-			program, _ := aCodexListing(t, test.listing, test.code)
+func TestAConfigurationNamingNoServerListsNone(t *testing.T) {
+	program, _, _ := anAppServerReadingConfig(t, `{"config":{"model":"gpt-5.6-terra"},"origins":{}}`)
 
-			if names, err := (McpList{Program: program}).McpServersIn(t.TempDir()); err == nil {
-				t.Fatalf("McpServersIn = %q, want an error", names)
-			}
-		})
+	names, err := AppServer{Program: program}.McpServersIn(t.TempDir())
+
+	if err != nil || len(names) != 0 {
+		t.Fatalf("McpServersIn = %q, %v, want none", names, err)
+	}
+}
+
+func TestAConfigReadWithoutAConfigurationIsAnError(t *testing.T) {
+	program, _, _ := anAppServerReadingConfig(t, `{}`)
+
+	if names, err := (AppServer{Program: program}).McpServersIn(t.TempDir()); err == nil {
+		t.Fatalf("McpServersIn = %q, want an error", names)
 	}
 }

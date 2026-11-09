@@ -328,10 +328,10 @@ func TestCodexCanAddAServerOnlyWhenItsNameHoldsNoDot(t *testing.T) {
 	}
 }
 
-func TestASessionStartsWithEachServerCodexListsInItsFolderTurnedOffButThoseItsEntryNames(t *testing.T) {
+func TestASessionStartsWithEachServerCodexsConfigurationNamesForItsFolderTurnedOff(t *testing.T) {
 	harness, running, _, listed := aHarnessListing(t)
 	harness.ProxyURL = func() (string, bool) { return "http://127.0.0.1:41000", true }
-	listed.names = []string{"gmail", "company-graph", "dot.ted"}
+	listed.names = []string{"gmail", "dot.ted"}
 	entry := anEntry(t)
 	entry.McpServers = []string{"company-graph"}
 
@@ -371,5 +371,23 @@ func TestASessionWhoseFoldersServersCannotBeListedStartsNothing(t *testing.T) {
 
 	if err := harness.Launch(anEntry(t), true, "launch-1"); err == nil || len(running.started) != 0 {
 		t.Fatalf("Launch = %v, started %d, want an error and nothing started, since the session would get the user's servers", err, len(running.started))
+	}
+}
+
+func TestASessionWhoseFoldersConfigurationNamesAServerAsItsEntryDoesStartsNothing(t *testing.T) {
+	harness, running, _, listed := aHarnessListing(t)
+	harness.ProxyURL = func() (string, bool) { return "http://127.0.0.1:41000", true }
+	listed.names = []string{"gmail", "company-graph"}
+	entry := anEntry(t)
+	entry.McpServers = []string{"company-graph"}
+
+	err := harness.Launch(entry, true, "launch-1")
+
+	// Codex merges -c into the configuration's own entry, so the session would not get the proxy's company-graph alone.
+	if err == nil || len(running.started) != 0 {
+		t.Fatalf("Launch = %v, started %d, want an error and nothing started", err, len(running.started))
+	}
+	if !strings.Contains(err.Error(), "company-graph") || strings.Contains(err.Error(), "gmail") {
+		t.Fatalf("Launch = %v, want the cause to name company-graph and no other server of the user's", err)
 	}
 }
