@@ -36,6 +36,13 @@ type Onboarding interface {
 // launchVariable is the variable a session's launch id is passed in, for the plugin's hooks to mark that launch (#490).
 const launchVariable = "AEOLUS_LAUNCH"
 
+const (
+	// strictMcpConfig is on every start: the session loads only the servers --mcp-config names (#329).
+	strictMcpConfig = "--strict-mcp-config"
+	// claudeAiConnectorsVariable set to false keeps the user's claude.ai connectors out of the session (#329), which --strict-mcp-config does not cover.
+	claudeAiConnectorsVariable = "ENABLE_CLAUDEAI_MCP_SERVERS"
+)
+
 // Harness is Claude Code as the run pass starts and watches its sessions, on the host, each under its hold; its sessions' identities through the aeolus-fleet plugin.
 type Harness struct {
 	Plugin   plugin.Plugin
@@ -130,10 +137,10 @@ func (h Harness) routeOf(login string) (map[string]string, *sessions.ProxyToken,
 	return map[string]string{"ANTHROPIC_BASE_URL": address + "/anthropic"}, &sessions.ProxyToken{Harness: "claude-code", Variable: "ANTHROPIC_AUTH_TOKEN", Token: proxytoken.New()}, nil
 }
 
-// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7): each at the MCP proxy with a token of its own, fresh for each start, in an MCP configuration kept in the session's folder, which the command line names by its path alone; nothing for an entry that names none. A container sees that one file read-only at the same path, never the folder it is in, so a session cannot plant a link the trierarch would write through.
+// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7), and no other (#329): --strict-mcp-config, so no server of the user's, the folder's or a plugin's configuration loads, and each named server at the MCP proxy with a token of its own, fresh for each start, in an MCP configuration kept in the session's folder, which the command line names by its path alone; no configuration for an entry that names none. A container sees that one file read-only at the same path, never the folder it is in, so a session cannot plant a link the trierarch would write through.
 func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) {
 	if len(entry.McpServers) == 0 {
-		return nil, nil, nil
+		return []string{strictMcpConfig}, nil, nil
 	}
 	address, ok := "", false
 	if h.ProxyURL != nil {
@@ -156,7 +163,7 @@ func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) 
 	if err != nil {
 		return nil, nil, err
 	}
-	return []string{"--mcp-config", hold.FilesOf(h.Sessions, entry.ShipID).McpConfig}, &sessions.Mcp{Access: mcpproxy.Access{Token: token, Servers: entry.McpServers}, Config: config}, nil
+	return []string{strictMcpConfig, "--mcp-config", hold.FilesOf(h.Sessions, entry.ShipID).McpConfig}, &sessions.Mcp{Access: mcpproxy.Access{Token: token, Servers: entry.McpServers}, Config: config}, nil
 }
 
 // Launch starts the entry's session in its folder, on the login it is to start on: its first prompt on a first start, the wake otherwise, continuing the folder's conversation when Claude Code keeps one.
@@ -188,6 +195,7 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 		return err
 	}
 	env[launchVariable] = launchID
+	env[claudeAiConnectorsVariable] = "false"
 	if err := h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, Harness: "claude-code", Command: command, Env: env, ProxyToken: token, ReadOnly: entry.ReadOnly, Mcp: mcp}); err != nil {
 		return err
 	}

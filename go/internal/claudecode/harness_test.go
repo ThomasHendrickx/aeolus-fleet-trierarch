@@ -344,6 +344,31 @@ func TestASessionNamingMCPServersDoesNotStartBeforeTheProxyListens(t *testing.T)
 	}
 }
 
+func TestASessionGetsOnlyTheMCPServersItsEntryNamesNoneOfTheUsersOrClaudeAisConnectors(t *testing.T) {
+	cases := map[string][]string{"naming company-graph": {"company-graph"}, "naming none": nil}
+	for name, servers := range cases {
+		t.Run(name, func(t *testing.T) {
+			harness, running, _ := aHarness(t)
+			harness.ProxyURL = func() (string, bool) { return "http://127.0.0.1:41000", true }
+			harness.Sessions = t.TempDir()
+			entry := anEntry(t)
+			entry.McpServers = servers
+
+			if err := harness.Launch(entry, true, "launch-1"); err != nil {
+				t.Fatal(err)
+			}
+
+			started := running.started[0]
+			if !slices.Contains(started.Command, "--strict-mcp-config") {
+				t.Errorf("command %q, want --strict-mcp-config, so no server of the user's or the folder's configuration loads", started.Command)
+			}
+			if got := started.Env["ENABLE_CLAUDEAI_MCP_SERVERS"]; got != "false" {
+				t.Errorf("ENABLE_CLAUDEAI_MCP_SERVERS = %q, want false, so no claude.ai connector loads", got)
+			}
+		})
+	}
+}
+
 func TestASessionWhoseFoldersSettingsMakePlanTheDefaultModeStartsInManualMode(t *testing.T) {
 	harness, running, _ := aHarness(t)
 	harness.PermissionModes = func() []string { return []string{"default", "manual"} }
@@ -418,8 +443,8 @@ func TestASessionIsStartedReadingItsReadOnlyCheckouts(t *testing.T) {
 	}
 
 	command := running.started[0].Command
-	if !slices.Equal(command[len(command)-2:], []string{"--add-dir", "/checkouts/shp_scout/governance"}) {
-		t.Fatalf("command %q", command)
+	if at := slices.Index(command, "--add-dir"); at < 0 || at+1 >= len(command) || command[at+1] != "/checkouts/shp_scout/governance" {
+		t.Fatalf("command %q, want --add-dir /checkouts/shp_scout/governance", command)
 	}
 }
 

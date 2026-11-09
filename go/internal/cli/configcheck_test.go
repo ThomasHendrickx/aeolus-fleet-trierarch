@@ -45,7 +45,7 @@ func TestConfigCheckSaysTheFlagsAndWhatEachHarnessLaunches(t *testing.T) {
 	const claude = "claude -p --input-format stream-json --output-format stream-json --verbose (adapter) --chrome --model claude-sonnet-5 --effort high (configuration) --permission-mode manual (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter)"
 	first := strings.ReplaceAll(prompt.First("<first prompt>"), "\n", `\n`)
 	const codex = "codex exec"
-	const codexFlags = " --json (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- "
+	const codexFlags = " --json (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) --config=features.apps=false (adapter) -- "
 	want := strings.Join([]string{
 		"The configuration at " + at.Config + " fits.",
 		"Sessions run on the host.",

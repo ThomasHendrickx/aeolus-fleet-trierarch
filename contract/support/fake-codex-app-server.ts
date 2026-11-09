@@ -5,7 +5,8 @@
  * `projects` writes each folder trusted into config.toml in CODEX_HOME or
  * ~/.codex, as Codex keeps it, and of `hooks.state` each hook's trusted hash;
  * `hooks/list` answers no hook to trust, or one untrusted aeolus-fleet hook
- * with FAKE_CODEX_UNTRUSTED_HOOK set; anything else answers an empty result.
+ * with FAKE_CODEX_UNTRUSTED_HOOK set; `config/read` a configuration naming no
+ * MCP server; anything else answers an empty result.
  * It ends when stdin closes.
  */
 import { appendFileSync, mkdirSync } from 'node:fs';
@@ -28,6 +29,9 @@ const codexHome = process.env.CODEX_HOME ?? join(homedir(), '.codex');
 function answerOf(method: string, params: unknown): unknown {
   if (method === 'hooks/list') {
     return { data: process.env.FAKE_CODEX_UNTRUSTED_HOOK === '1' ? [{ hooks: [UNTRUSTED_HOOK] }] : [] };
+  }
+  if (method === 'config/read') {
+    return { config: {}, origins: {} };
   }
   if (method === 'config/batchWrite') {
     const edits = projectsSchema.safeParse(params).data?.edits ?? [];

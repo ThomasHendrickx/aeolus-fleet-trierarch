@@ -373,7 +373,7 @@ exec '${process.execPath}' '${join(STAND_INS, 'fake-codex.ts')}' "$@" --plugin '
 `;
 }
 
-/** `copilot`: a proven version, its models as its help on config lists them, and a session run by fake-copilot.ts. */
+/** `copilot`: a proven version, its models as its help on config lists them, no MCP server of its own, and a session run by fake-copilot.ts. */
 function copilotStandIn(at: { machine: string; pluginData: string }): string {
   return `#!/bin/sh
 machine='${at.machine}'
@@ -383,6 +383,7 @@ case "$1" in
     echo "$*" >> "$machine/copilot-calls.txt"
     printf '%s\\n' 'Configuration settings:' '' '  \`model\`: AI model to use for Copilot CLI.' '    - "claude-sonnet-4.5"' '    - "gpt-5"' ''
     exit 0 ;;
+  mcp) echo '{"mcpServers":{}}'; exit 0 ;;
 esac
 exec '${process.execPath}' '${join(STAND_INS, 'fake-copilot.ts')}' "$@" --plugin '${PLUGIN_ROOT}' '${at.pluginData}'
 `;

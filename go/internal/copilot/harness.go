@@ -10,6 +10,7 @@
 package copilot
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +32,11 @@ type Runtime interface {
 	Start(session sessions.Start) error
 	Send(shipID string, line string) error
 	Interrupt(shipID string) error
+}
+
+// McpServers lists the MCP servers Copilot loads in a folder, each the user's own, the workspace's or a plugin's.
+type McpServers interface {
+	McpServersIn(ctx context.Context, folder string) ([]string, error)
 }
 
 // launchVariable is the variable a session's launch id is passed in, for the plugin's hooks to mark that launch (#490).
@@ -56,12 +62,36 @@ type Harness struct {
 	ProxyURL func() (string, bool)
 	// Sessions is the sessions folder, where each session's MCP configuration is kept in its folder.
 	Sessions string
+	// McpServers is what Copilot loads in a folder, each turned off but those the entry names (#329).
+	McpServers McpServers
 }
 
-// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7, M8): each at the MCP proxy with a token of its own, fresh for each start, in an MCP configuration of the shape `copilot mcp add --transport http` writes, kept in the session's folder, which --additional-mcp-config names by its path alone; nothing for an entry that names none. Every tool the proxy lists is allowed: the proxy lists only the server's listed tools.
+// othersOff turns off, for this session only, every MCP server Copilot lists in the entry's folder but those the entry names (#329), each with a --disable-mcp-server of its own; Copilot's built-in servers are off on every start.
+func (h Harness) othersOff(entry reconciler.Entry) ([]string, error) {
+	// A launch carries no context of its own; the listing bounds its own time.
+	listed, err := h.McpServers.McpServersIn(context.Background(), entry.Folder)
+	if err != nil {
+		return nil, err
+	}
+	// Copilot's listing is a JSON object, in no order of its own.
+	slices.Sort(listed)
+	var off []string
+	for _, name := range listed {
+		if !slices.Contains(entry.McpServers, name) {
+			off = append(off, disableServerFlag+name)
+		}
+	}
+	return off, nil
+}
+
+// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7, M8), and no other: every other one Copilot lists turned off, and each named one at the MCP proxy with a token of its own, fresh for each start, in an MCP configuration of the shape `copilot mcp add --transport http` writes, kept in the session's folder, which --additional-mcp-config names by its path alone; no configuration for an entry that names none. Every tool the proxy lists is allowed: the proxy lists only the server's listed tools.
 func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) {
+	off, err := h.othersOff(entry)
+	if err != nil {
+		return nil, nil, err
+	}
 	if len(entry.McpServers) == 0 {
-		return nil, nil, nil
+		return off, nil, nil
 	}
 	address, ok := "", false
 	if h.ProxyURL != nil {
@@ -85,7 +115,7 @@ func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) 
 	if err != nil {
 		return nil, nil, err
 	}
-	return []string{"--additional-mcp-config=@" + hold.FilesOf(h.Sessions, entry.ShipID).McpConfig}, &sessions.Mcp{Access: mcpproxy.Access{Token: token, Servers: entry.McpServers}, Config: config}, nil
+	return append(off, "--additional-mcp-config=@"+hold.FilesOf(h.Sessions, entry.ShipID).McpConfig), &sessions.Mcp{Access: mcpproxy.Access{Token: token, Servers: entry.McpServers}, Config: config}, nil
 }
 
 // Launch starts the entry's session in its folder: its first turn with its first prompt on a first start, else the wake resuming the session its last turn named, read before the start, which clears the session's events.

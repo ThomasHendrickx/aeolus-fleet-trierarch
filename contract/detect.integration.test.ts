@@ -294,8 +294,10 @@ describe('config check', () => {
     const claude = 'claude -p --input-format stream-json --output-format stream-json --verbose (adapter) --chrome --fast (configuration) --permission-mode default (adapter, when the Claude Code settings for the folder make plan the default mode) --disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode (adapter)';
     expect(lines).toContain(`  first start: ${claude}`);
     expect(lines).toContain(`  restart: ${claude} --continue (adapter)`);
-    const codex = 'codex exec -m gpt-5.6-terra (configuration) --json (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) -- ';
-    expect(lines.find((line) => line.startsWith('  first start: codex'))).toMatch(new RegExp(`^  first start: ${escaped(codex)}"<first prompt>\\\\n\\\\nNo human reads this terminal\\.`));
+    const codex = 'codex exec -m gpt-5.6-terra (configuration) --json (adapter) --config=tools.experimental_request_user_input.enabled=false (adapter) ';
+    // The ChatGPT apps are off in the Go trierarch's sessions (#329); today's npm trierarch, kept for existing machines, starts Codex without it.
+    const noApps = '(?:--config=features\\.apps=false \\(adapter\\) )?';
+    expect(lines.find((line) => line.startsWith('  first start: codex'))).toMatch(new RegExp(`^  first start: ${escaped(codex)}${noApps}-- "<first prompt>\\\\n\\\\nNo human reads this terminal\\.`));
     expect(lines.find((line) => line.startsWith('  restart: codex'))).toMatch(new RegExp(`^  restart: codex exec resume --last -m gpt-5.6-terra \\(configuration\\) --json`));
   });
 

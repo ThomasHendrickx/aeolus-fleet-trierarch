@@ -14,8 +14,8 @@ func TestAStartIsCopilotWithTheFlagsJSONOutputEveryToolNoQuestionToolAndThePromp
 		sessionID string
 		want      []string
 	}{
-		{"a new session", "", []string{"copilot", "--model", "gpt-5", "--output-format=json", "--allow-all-tools", "--no-ask-user", "--prompt=--look"}},
-		{"resuming a session", "copilot-1", []string{"copilot", "--model", "gpt-5", "--output-format=json", "--allow-all-tools", "--no-ask-user", "--resume=copilot-1", "--prompt=--look"}},
+		{"a new session", "", []string{"copilot", "--model", "gpt-5", "--output-format=json", "--allow-all-tools", "--no-ask-user", "--disable-builtin-mcps", "--prompt=--look"}},
+		{"resuming a session", "copilot-1", []string{"copilot", "--model", "gpt-5", "--output-format=json", "--allow-all-tools", "--no-ask-user", "--disable-builtin-mcps", "--resume=copilot-1", "--prompt=--look"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if got := CommandLine([]string{"--model", "gpt-5"}, "--look", test.sessionID); !slices.Equal(got, test.want) {
