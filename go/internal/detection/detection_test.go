@@ -430,8 +430,9 @@ func TestARefusalGivesWhatIsOfferedAtOnceAndDetectsTheHarnessAgainKeepingTheIDRe
 	store := &aStore{detected: Detected{"claude-code": aHarness("2.1.306", "claude-sonnet-5", "claude-opus-5")}}
 	detection, _ := aDetection(store, map[string]Detector{"claude-code": detector})
 	given := make(chan Detected, 2)
+	detection.Given = func(detected Detected) { given <- detected }
 
-	err := detection.Refuse(context.Background(), "claude-code", "claude-sonnet-5", now, func(detected Detected) { given <- detected })
+	err := detection.Refuse(context.Background(), "claude-code", "claude-sonnet-5", now)
 
 	if err != nil {
 		t.Fatal(err)
@@ -457,8 +458,9 @@ func TestARefusalOfAHarnessDetectionNeverFoundGivesNothingAndDetectsNothing(t *t
 	store := &aStore{detected: Detected{}}
 	detection, _ := aDetection(store, map[string]Detector{"claude-code": detector})
 	var given []Detected
+	detection.Given = func(detected Detected) { given = append(given, detected) }
 
-	err := detection.Refuse(context.Background(), "claude-code", "claude-sonnet-5", now, func(detected Detected) { given = append(given, detected) })
+	err := detection.Refuse(context.Background(), "claude-code", "claude-sonnet-5", now)
 
 	if err != nil || len(given) != 0 || detector.detections != 0 || store.saves != 0 {
 		t.Errorf("Refuse() = %v, gave %v, detected %d times, saved %d times; want nothing at all", err, given, detector.detections, store.saves)
@@ -628,7 +630,7 @@ func TestWhatIsGivenNeverGoesBackToBeforeARefusalKeptMeanwhile(t *testing.T) {
 		mu.Unlock()
 		if isFirst {
 			// A session refuses a model while the detection gives what it kept.
-			go func() { _ = detection.Refuse(context.Background(), "codex", "gpt-6.1-terra", now, func(Detected) {}) }()
+			go func() { _ = detection.Refuse(context.Background(), "codex", "gpt-6.1-terra", now) }()
 			time.Sleep(50 * time.Millisecond)
 		}
 		mu.Lock()

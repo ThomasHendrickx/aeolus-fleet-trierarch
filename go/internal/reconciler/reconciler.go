@@ -622,9 +622,16 @@ func check(settings Settings, shipID string, state State, context Context) (stri
 	return harness, options, ""
 }
 
-// ModelsToConfirm are the harnesses whose models are to be confirmed again before this pass gives a request back (#333): each is named by a request not final, not given back at its settings version yet, whose crew the machine would refuse only for a model its harness does not list.
-func ModelsToConfirm(state State, context Context) []string {
-	harnesses := []string{}
+// Confirmation names a request whose harness's models are to be confirmed again, at its settings version.
+type Confirmation struct {
+	ShipID          string
+	SettingsVersion int
+	Harness         string
+}
+
+// ModelsToConfirm are the requests whose harness's models are to be confirmed again before this pass gives one back or crews it (#333): each not final, not given back at its settings version yet, not crewed at it, and picking a model its harness does not list, or offers no model for, where nothing else keeps the machine from crewing it.
+func ModelsToConfirm(state State, context Context) []Confirmation {
+	confirmations := []Confirmation{}
 	for _, request := range context.Requests {
 		if request.IsFinal || state.Refused[request.ShipID] == request.SettingsVersion {
 			continue
@@ -632,14 +639,21 @@ func ModelsToConfirm(state State, context Context) []string {
 		if entry, ok := state.Entries[request.ShipID]; ok && entry.SettingsVersion == request.SettingsVersion {
 			continue
 		}
-		if _, _, reason := check(request.Settings, request.ShipID, state, context); !strings.HasPrefix(reason, "options."+config.ModelOption+": ") {
+		model, isPicked := request.Settings.Options[config.ModelOption]
+		harness, _ := checkPlace(request.Settings, request.ShipID, state, context)
+		if !isPicked || slices.Contains(context.Options[harness][config.ModelOption], model) {
 			continue
 		}
-		if harness, _ := checkPlace(request.Settings, request.ShipID, state, context); !slices.Contains(harnesses, harness) {
-			harnesses = append(harnesses, harness)
+		// Only a request the machine would crew but for its model: one it gives back for another fault waits on no probe.
+		withoutModel := request.Settings
+		withoutModel.Options = maps.Clone(request.Settings.Options)
+		delete(withoutModel.Options, config.ModelOption)
+		if _, _, reason := check(withoutModel, request.ShipID, state, context); reason != "" {
+			continue
 		}
+		confirmations = append(confirmations, Confirmation{ShipID: request.ShipID, SettingsVersion: request.SettingsVersion, Harness: harness})
 	}
-	return harnesses
+	return confirmations
 }
 
 // mcpServersField is the field at fault when a named MCP server is not offered (decision M4).

@@ -418,6 +418,7 @@ func aRunPass(t *testing.T) *aPass {
 		Offered:         []string{"claude-code"},
 		Repositories:    []string{"aeolus-fleet"},
 		RunningCap:      2,
+		ModelsConfirmed: map[string]int{},
 		Trusted: func() map[string]reconciler.Trust {
 			return map[string]reconciler.Trust{"claude-code": {Repositories: []string{"aeolus-fleet"}}}
 		},

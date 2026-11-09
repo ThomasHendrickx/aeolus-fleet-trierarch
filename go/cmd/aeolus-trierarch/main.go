@@ -610,6 +610,8 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		logLine(harness + ": the configuration's model option is ignored: model ids come from detection only (#382); remove it")
 	}
 	offers := &offers{configured: configuration, detected: detected}
+	// What detection keeps from here on reaches the offers in the order it is kept, so an older snapshot never replaces a newer one (#333).
+	detect.Given = offers.set
 	configured := configuration
 	configuration = detection.Offered(configuration, detected)
 	// The trusted repositories the trierarch plugin sent last change while the trierarch runs: each pass and report reads them afresh (aeolus-fleet#384).
@@ -714,13 +716,12 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		ConfirmModels: func(harness string) {
 			if _, err := detect.Detect(context.Background(), []string{harness}, detection.ByRequest); err != nil {
 				logLine(fmt.Sprintf("%s could not be detected again for a request: %v", harness, err))
-				return
 			}
-			offers.set(detect.Store.Load())
 		},
-		ConfirmDue: confirmDue(detect, slices.Sorted(maps.Keys(configuration.Harnesses)), offers),
+		ModelsConfirmed: map[string]int{},
+		ConfirmDue:      confirmDue(detect, slices.Sorted(maps.Keys(configuration.Harnesses))),
 		RefuseModel: func(harness string, model string) error {
-			return detect.Refuse(context.Background(), harness, model, time.Now(), offers.set)
+			return detect.Refuse(context.Background(), harness, model, time.Now())
 		},
 		// The machine's memory and disk, read each minute; argo is told once when one is low (#400).
 		Load:  load,
@@ -853,21 +854,24 @@ func tellDetectionProblems(client fleet.Client, detected detection.Detected) {
 	}
 }
 
-// confirmDue starts, when no confirming runs, the detection of each harness last detected a day ago or more, and gives what it finds to the offers; the pass never waits on a probe (#333).
-func confirmDue(detect detection.Detection, harnesses []string, offered *offers) func() {
+// confirmDue starts, when no confirming runs, the detection of each harness never detected or last detected a day ago or more, and not tried within a day; detection gives what it finds to the offers, and the pass never waits on a probe (#333).
+func confirmDue(detect detection.Detection, harnesses []string) func() {
 	var running atomic.Bool
+	tried := map[string]time.Time{}
 	return func() {
-		due := detect.Due(harnesses)
-		if len(due) == 0 || !running.CompareAndSwap(false, true) {
+		if !running.CompareAndSwap(false, true) {
+			return
+		}
+		due := detect.Due(harnesses, tried)
+		if len(due) == 0 {
+			running.Store(false)
 			return
 		}
 		go func() {
 			defer running.Store(false)
 			if _, err := detect.Detect(context.Background(), due, detection.ByAge); err != nil {
 				logLine(fmt.Sprintf("%s could not be detected again after a day: %v", strings.Join(due, ", "), err))
-				return
 			}
-			offered.set(detect.Store.Load())
 		}()
 	}
 }
