@@ -401,6 +401,40 @@ func TestRunClearsAnMcpConfigurationOfAnotherFleetBeforeItsFirstPass(t *testing.
 	}
 }
 
+func TestRunClearsTheAppliedMcpConfigurationWhenNoPluginShipIsConfigured(t *testing.T) {
+	machine, _, _ := aMain(t)
+	var words []string
+	for index, word := range setupWords() {
+		if word == "--plugin-ship-id" || (index > 0 && setupWords()[index-1] == "--plugin-ship-id") {
+			continue
+		}
+		words = append(words, word)
+	}
+	if output, code := Main(words, machine); code != 0 {
+		t.Fatalf("init answered %q, %d", output, code)
+	}
+	at := paths.Of(machine.HomeDirectory, "")
+	identity := mcpconfiguration.Identity{FleetID: "flt_01m3tb1zgr5h2ffee12xnch8sv", PluginShipID: pluginShipID}
+	persisted := &mcpconfiguration.File{Path: at.McpConfiguration}
+	persisted.Load(identity)
+	if _, err := persisted.Apply(mcpconfiguration.Configuration{Identity: identity, Version: 3, PublicKey: "key-a", Servers: []mcpservers.Server{}, Secrets: map[string]string{}}); err != nil {
+		t.Fatal(err)
+	}
+	machine.McpConfiguration = func(paths.Paths) *mcpconfiguration.File { return &mcpconfiguration.File{Path: at.McpConfiguration} }
+	machine.McpFleet = func(crew.File) McpFleet { return anMcpFleet{fleetID: identity.FleetID} }
+	stop := make(chan struct{})
+	machine.Stop = stop
+	close(stop)
+
+	if output, code := Main([]string{"run"}, machine); code != 0 {
+		t.Fatalf("run answered %q, %d", output, code)
+	}
+
+	if held, ok := mcpconfiguration.ReadFile(at.McpConfiguration); ok {
+		t.Errorf("after run without a plugin ship the file holds %+v, want none, so the proxy refuses every bound session", held)
+	}
+}
+
 func TestRunRemovesTheSupersededMcpAndAipFilesAndLeavesTheUsersOwnAip(t *testing.T) {
 	machine, _, _ := aMain(t)
 	Main(setupWords(), machine)

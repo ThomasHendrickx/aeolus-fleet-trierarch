@@ -150,6 +150,18 @@ func TestReadRefusesPayloadsThatAreNoConfiguration(t *testing.T) {
 	}
 }
 
+func TestReadRefusesAMessageWithAnythingAfterItsObject(t *testing.T) {
+	key := aKey(t)
+	message := aMessage(t, key, nil)
+	for name, payload := range map[string]string{"garbage": message + " garbage", "a second value": message + message, "a stray bracket": message + "]"} {
+		t.Run(name, func(t *testing.T) {
+			if got, err := Read(payload, configured, key); err == nil {
+				t.Errorf("Read(%s) = %+v, want a refusal", name, got)
+			}
+		})
+	}
+}
+
 func TestReadNeverSaysASecretsValue(t *testing.T) {
 	key := aKey(t)
 
