@@ -15,10 +15,10 @@ type Configured struct {
 	Plugins []string
 }
 
-// ConfiguredFor is what Codex's configuration names for the folder, read through config/read (#329): it reads the configuration as Codex layers it and starts or reaches no server, where `codex mcp list` reaches every HTTP server it lists. A plugin's own servers are not in it, only the plugin.
-func (a AppServer) ConfiguredFor(folder string) (Configured, error) {
+// ConfiguredFor is what Codex's configuration names for the folder, with the overrides as the app server's own flags over it, read through config/read (#329): it reads the configuration as Codex layers it and starts or reaches no server, where `codex mcp list` reaches every HTTP server it lists. A plugin's own servers are not in it, only the plugin.
+func (a AppServer) ConfiguredFor(folder string, overrides []string) (Configured, error) {
 	var configured Configured
-	err := a.talk(func(c *conversation) error {
+	err := a.talkWith(overrides, func(c *conversation) error {
 		read, err := c.ask("config/read", map[string]string{"cwd": folder})
 		if err != nil {
 			return err

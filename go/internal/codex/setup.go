@@ -96,8 +96,11 @@ func (c *conversation) ask(method string, params any) (json.RawMessage, error) {
 }
 
 // talk runs `codex app-server` for one conversation: introduces itself, lets the talk ask its requests, and ends the server after.
-func (a AppServer) talk(talk func(c *conversation) error) error {
-	server := exec.Command(a.Program, "app-server")
+func (a AppServer) talk(talk func(c *conversation) error) error { return a.talkWith(nil, talk) }
+
+// talkWith is talk with the configuration flags given over Codex's configuration.
+func (a AppServer) talkWith(overrides []string, talk func(c *conversation) error) error {
+	server := exec.Command(a.Program, append([]string{"app-server"}, overrides...)...)
 	input, err := server.StdinPipe()
 	if err != nil {
 		return err

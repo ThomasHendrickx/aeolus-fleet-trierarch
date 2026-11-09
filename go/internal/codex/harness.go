@@ -36,9 +36,9 @@ type Hooks interface {
 	TrustAeolusHooks(folder string) ([]string, error)
 }
 
-// Configuration reads what Codex's configuration names for a folder: the user's and the project's MCP servers and the plugins it enables.
+// Configuration reads what Codex's configuration names for a folder, with a launch's configuration flags over it: the user's and the project's MCP servers and the plugins it enables.
 type Configuration interface {
-	ConfiguredFor(folder string) (Configured, error)
+	ConfiguredFor(folder string, overrides []string) (Configured, error)
 }
 
 // launchVariable is the variable a session's launch id is passed in, for the plugin's hooks to mark that launch (#490).
@@ -97,8 +97,12 @@ func (h Harness) routeOf(login string) ([]string, *sessions.ProxyToken, error) {
 func CanAddMcpServer(name string) bool { return !strings.Contains(name, ".") }
 
 // othersOff turns off, for this session only, every MCP server Codex's configuration names for the entry's folder, and every plugin it enables but the aeolus-fleet plugin, since a plugin may bring servers of its own and no listing that reaches none names them (#329): one -c each, with each name as a quoted key, which Codex merges into its table, so the user's config.toml is left as it is and a name holding a dot is turned off too; nothing for what it names none of. A server named as a crewed one is an error: -c merges into its entry, so Codex would refuse it or carry its fields into the proxy's.
-func (h Harness) othersOff(entry reconciler.Entry) ([]string, error) {
-	configured, err := h.Configuration.ConfiguredFor(entry.Folder)
+func (h Harness) othersOff(entry reconciler.Entry, flags []string) ([]string, error) {
+	overrides, err := overridesOf(flags)
+	if err != nil {
+		return nil, err
+	}
+	configured, err := h.Configuration.ConfiguredFor(entry.Folder, overrides)
 	if err != nil {
 		return nil, err
 	}
@@ -116,6 +120,24 @@ func (h Harness) othersOff(entry reconciler.Entry) ([]string, error) {
 		return nil, err
 	}
 	return append(servers, plugins...), nil
+}
+
+// overridesOf are the launch flags that change Codex's configuration, in order, for config/read to read it as the session will: each -c, --enable and --disable, and --strict-config. A profile, whose own file may name servers, or another folder, whose project configuration may, is an error: config/read takes neither, so the session could get a server it does not turn off.
+func overridesOf(flags []string) ([]string, error) {
+	var overrides []string
+	for at := 0; at < len(flags); at++ {
+		flag := flags[at]
+		switch {
+		case flag == "-c" || flag == "--config" || flag == "--enable" || flag == "--disable":
+			overrides = append(overrides, flags[at:min(at+2, len(flags))]...)
+			at++
+		case flag == "--strict-config" || strings.HasPrefix(flag, "-c") || strings.HasPrefix(flag, "--config=") || strings.HasPrefix(flag, "--enable=") || strings.HasPrefix(flag, "--disable="):
+			overrides = append(overrides, flag)
+		case strings.HasPrefix(flag, "-p") || flag == "--profile" || strings.HasPrefix(flag, "--profile=") || strings.HasPrefix(flag, "-C") || flag == "--cd" || strings.HasPrefix(flag, "--cd="):
+			return nil, fmt.Errorf("codex's flag %s picks a configuration the trierarch cannot read before the start, so the session could get MCP servers its crew request does not name", flag)
+		}
+	}
+	return overrides, nil
 }
 
 // disabledOf is `-c <key>={"<name>"={enabled=false},...}` for the names, in order; nothing for none.
@@ -138,8 +160,8 @@ func disabledOf(key string, names []string) ([]string, error) {
 }
 
 // mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7), and no other: every one Codex's configuration names turned off, and each named one at the MCP proxy as a streamable HTTP server of its own on the command line, its bearer token read from a secret variable of the hold, a token of the session's own, fresh for each start, so the command line never holds it; no server of its own for an entry that names none. Every later turn's exec keeps the flags, and the hold keeps the variable.
-func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) {
-	off, err := h.othersOff(entry)
+func (h Harness) mcpOf(entry reconciler.Entry, launchFlags []string) ([]string, *sessions.Mcp, error) {
+	off, err := h.othersOff(entry, launchFlags)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -166,7 +188,8 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if err != nil {
 		return err
 	}
-	servers, mcp, err := h.mcpOf(entry)
+	flags := append(h.Settings.EffectiveFlags(entry.Options), route...)
+	servers, mcp, err := h.mcpOf(entry, flags)
 	if err != nil {
 		return err
 	}
@@ -174,7 +197,7 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if isFirstStart && entry.FirstPrompt != "" {
 		line = prompt.First(entry.FirstPrompt)
 	}
-	command := CommandLine(append(append(h.Settings.EffectiveFlags(entry.Options), route...), servers...), line, isFirstStart)
+	command := CommandLine(append(flags, servers...), line, isFirstStart)
 	if _, err := h.Hooks.TrustAeolusHooks(entry.Folder); err != nil {
 		return err
 	}
