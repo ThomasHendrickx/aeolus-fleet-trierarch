@@ -51,9 +51,11 @@ func aHarness(t *testing.T) (Harness, *aRuntime, *anOnboarding) {
 	running, onboarding := &aRuntime{}, &anOnboarding{}
 	events := t.TempDir()
 	return Harness{
-		Plugin:     plugin.Plugin{Root: filepath.Join(filepath.Dir(file), "..", "..", "..", "plugins", "aeolus-fleet"), Data: t.TempDir(), Crews: t.TempDir()},
-		Runtime:    running,
-		Settings:   config.Harness{Flags: []string{"--model", "opus"}, Options: map[string]config.Option{}},
+		Plugin:  plugin.Plugin{Root: filepath.Join(filepath.Dir(file), "..", "..", "..", "plugins", "aeolus-fleet"), Data: t.TempDir(), Crews: t.TempDir()},
+		Runtime: running,
+		Settings: func() config.Harness {
+			return config.Harness{Flags: []string{"--model", "opus"}, Options: map[string]config.Option{}}
+		},
 		Projects:   t.TempDir(),
 		Onboarding: onboarding,
 		Managed:    t.TempDir(),
@@ -80,6 +82,50 @@ func TestAFirstStartRunsClaudeCodeInTheFolderWithItsLaunchIdAndItsFirstPrompt(t 
 	}
 	if !slices.Equal(running.sent, []string{UserLine(prompt.First("Review PR 12"))}) || onboarding.completed != 1 {
 		t.Fatalf("sent %q, onboarding %d", running.sent, onboarding.completed)
+	}
+}
+
+func TestALaunchPickingAModelClaudeCodeGivesNoFlagForStartsNothingAndSaysWhichModel(t *testing.T) {
+	// Detection may drop the model, or never have found it, after the request was checked: before its first start, or before a start again (#335, #337).
+	cases := map[string]struct {
+		settings     config.Harness
+		isFirstStart bool
+	}{
+		"a first start, the model gone from what Claude Code offers since the request was checked": {config.Harness{Flags: []string{}, Options: map[string]config.Option{"model": {Values: map[string][]string{"claude-sonnet-5": {"--model", "claude-sonnet-5"}}}}}, true},
+		"a start again, the model gone from what Claude Code offers since it was crewed":           {config.Harness{Flags: []string{}, Options: map[string]config.Option{"model": {Values: map[string][]string{"claude-sonnet-5": {"--model", "claude-sonnet-5"}}}}}, false},
+		"a start again while Claude Code offers no model":                                          {config.Harness{Flags: []string{}, Options: map[string]config.Option{}}, false},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			harness, running, _ := aHarness(t)
+			harness.Settings = func() config.Harness { return c.settings }
+			entry := anEntry(t)
+			entry.Options = map[string]string{"model": "claude-opus-5"}
+
+			err := harness.Launch(entry, c.isFirstStart, "launch-1")
+
+			if err == nil || !strings.Contains(err.Error(), "claude-opus-5") || len(running.started) != 0 {
+				t.Fatalf("Launch = %v, started %+v, want refused naming claude-opus-5, nothing started", err, running.started)
+			}
+		})
+	}
+}
+
+func TestALaunchTakesItsModelsFlagAsClaudeCodeIsOfferedAtTheLaunchNotAsItWasAtStart(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	offered := config.Harness{Flags: []string{}, Options: map[string]config.Option{}}
+	harness.Settings = func() config.Harness { return offered }
+	// Claude Code's models are confirmed again after the trierarch started, and list the model the request picks (#335).
+	offered = config.Harness{Flags: []string{}, Options: map[string]config.Option{"model": {Values: map[string][]string{"claude-opus-5": {"--model", "claude-opus-5"}}}}}
+	entry := anEntry(t)
+	entry.Options = map[string]string{"model": "claude-opus-5"}
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(running.started) != 1 || !slices.Contains(running.started[0].Command, "claude-opus-5") {
+		t.Fatalf("started %+v, want the model claude-opus-5 in its command", running.started)
 	}
 }
 
@@ -407,7 +453,9 @@ func TestASessionWhoseFlagsNameAModeOrWhoseSettingsMakeNoPlanDefaultGetsNoOverri
 	if err := harness.Launch(entry, true, "launch-1"); err != nil {
 		t.Fatal(err)
 	}
-	harness.Settings.Flags = []string{"--permission-mode", "acceptEdits"}
+	harness.Settings = func() config.Harness {
+		return config.Harness{Flags: []string{"--permission-mode", "acceptEdits"}, Options: map[string]config.Option{}}
+	}
 	write(t, harness.User, planSettings)
 	if err := harness.Launch(entry, true, "launch-2"); err != nil {
 		t.Fatal(err)

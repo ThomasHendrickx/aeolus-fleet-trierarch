@@ -78,9 +78,11 @@ func aHarnessListing(t *testing.T) (Harness, *aRuntime, *someHooks, *someServers
 	running, hooks, servers := &aRuntime{}, &someHooks{}, &someServers{}
 	events := t.TempDir()
 	return Harness{
-		Plugin:        plugin.Plugin{Root: filepath.Join(filepath.Dir(file), "..", "..", "..", "plugins", "aeolus-fleet"), Data: t.TempDir(), Crews: t.TempDir()},
-		Runtime:       running,
-		Settings:      config.Harness{Flags: []string{"-m", "gpt-5.6-terra"}, Options: map[string]config.Option{}},
+		Plugin:  plugin.Plugin{Root: filepath.Join(filepath.Dir(file), "..", "..", "..", "plugins", "aeolus-fleet"), Data: t.TempDir(), Crews: t.TempDir()},
+		Runtime: running,
+		Settings: func() config.Harness {
+			return config.Harness{Flags: []string{"-m", "gpt-5.6-terra"}, Options: map[string]config.Option{}}
+		},
 		Hooks:         hooks,
 		Configuration: servers,
 		Events:        func(shipID string) string { return filepath.Join(events, shipID+".jsonl") },
@@ -106,6 +108,50 @@ func TestAFirstStartRunsCodexExecInTheFolderWithItsFirstPromptAndItsLaunchIdTheH
 	}
 	if !slices.Equal(hooks.trustedFrom, []string{entry.Folder}) || len(running.sent) != 0 {
 		t.Fatalf("hooks trusted from %q, sent %q, want the folder's hooks trusted and nothing sent", hooks.trustedFrom, running.sent)
+	}
+}
+
+func TestALaunchPickingAModelCodexGivesNoFlagForStartsNothingAndSaysWhichModel(t *testing.T) {
+	// Detection may drop the model, or never have found it, after the request was checked: before its first start, or before a start again (#335, #337).
+	cases := map[string]struct {
+		settings     config.Harness
+		isFirstStart bool
+	}{
+		"a first start, the model gone from what Codex offers since the request was checked": {config.Harness{Flags: []string{}, Options: map[string]config.Option{"model": {Values: map[string][]string{"gpt-6.1-sol": {"-m", "gpt-6.1-sol"}}}}}, true},
+		"a start again, the model gone from what Codex offers since it was crewed":           {config.Harness{Flags: []string{}, Options: map[string]config.Option{"model": {Values: map[string][]string{"gpt-6.1-sol": {"-m", "gpt-6.1-sol"}}}}}, false},
+		"a start again while Codex offers no model":                                          {config.Harness{Flags: []string{}, Options: map[string]config.Option{}}, false},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			harness, running, _ := aHarness(t)
+			harness.Settings = func() config.Harness { return c.settings }
+			entry := anEntry(t)
+			entry.Options = map[string]string{"model": "gpt-6.1-terra"}
+
+			err := harness.Launch(entry, c.isFirstStart, "launch-1")
+
+			if err == nil || !strings.Contains(err.Error(), "gpt-6.1-terra") || len(running.started) != 0 {
+				t.Fatalf("Launch = %v, started %+v, want refused naming gpt-6.1-terra, nothing started", err, running.started)
+			}
+		})
+	}
+}
+
+func TestALaunchTakesItsModelsFlagAsCodexIsOfferedAtTheLaunchNotAsItWasAtStart(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	offered := config.Harness{Flags: []string{}, Options: map[string]config.Option{}}
+	harness.Settings = func() config.Harness { return offered }
+	// Codex's models are confirmed again after the trierarch started, and list the model the request picks (#335).
+	offered = config.Harness{Flags: []string{}, Options: map[string]config.Option{"model": {Values: map[string][]string{"gpt-6.1-terra": {"-m", "gpt-6.1-terra"}}}}}
+	entry := anEntry(t)
+	entry.Options = map[string]string{"model": "gpt-6.1-terra"}
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if want := CommandLine([]string{"-m", "gpt-6.1-terra"}, prompt.First("Review PR 12"), true); len(running.started) != 1 || !slices.Equal(running.started[0].Command, want) {
+		t.Fatalf("started %+v, want %q", running.started, want)
 	}
 }
 
@@ -411,7 +457,9 @@ func TestASessionStartsWithEveryPluginCodexsConfigurationEnablesTurnedOffButTheA
 
 func TestTheConfigurationIsReadWithTheLaunchsOwnConfigurationFlags(t *testing.T) {
 	harness, running, _, listed := aHarnessListing(t)
-	harness.Settings.Flags = []string{"-m", "gpt-5.6-terra", "-c", `mcp_servers.from_flag={command="echo"}`, "--config=features.x=true", "--enable", "y", "--disable=z", "--strict-config", "--skip-git-repo-check"}
+	harness.Settings = func() config.Harness {
+		return config.Harness{Flags: []string{"-m", "gpt-5.6-terra", "-c", `mcp_servers.from_flag={command="echo"}`, "--config=features.x=true", "--enable", "y", "--disable=z", "--strict-config", "--skip-git-repo-check"}, Options: map[string]config.Option{}}
+	}
 	entry := anEntry(t)
 
 	if err := harness.Launch(entry, true, "launch-1"); err != nil {
@@ -437,7 +485,7 @@ func TestASessionWhoseFlagsPickAProfileOrAnotherFolderStartsNothing(t *testing.T
 	for name, flags := range cases {
 		t.Run(name, func(t *testing.T) {
 			harness, running, _, _ := aHarnessListing(t)
-			harness.Settings.Flags = flags
+			harness.Settings = func() config.Harness { return config.Harness{Flags: flags, Options: map[string]config.Option{}} }
 
 			// config/read takes neither a profile, whose own file may name servers, nor another folder, whose project configuration may.
 			if err := harness.Launch(anEntry(t), true, "launch-1"); err == nil || len(running.started) != 0 {

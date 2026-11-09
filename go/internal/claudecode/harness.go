@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -45,9 +46,10 @@ const (
 
 // Harness is Claude Code as the run pass starts and watches its sessions, on the host, each under its hold; its sessions' identities through the aeolus-fleet plugin.
 type Harness struct {
-	Plugin   plugin.Plugin
-	Runtime  Runtime
-	Settings config.Harness
+	Plugin  plugin.Plugin
+	Runtime Runtime
+	// Settings are Claude Code's settings as the machine offers them now, read at each launch: detection confirms its models again while the trierarch runs (#333, #335).
+	Settings func() config.Harness
 	// Projects is Claude Code's projects folder, where it keeps each folder's conversations.
 	Projects   string
 	Onboarding Onboarding
@@ -168,6 +170,11 @@ func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) 
 
 // Launch starts the entry's session in its folder, on the login it is to start on: its first prompt on a first start, the wake otherwise, continuing the folder's conversation when Claude Code keeps one.
 func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID string) error {
+	// The settings are read once: the flags checked are the flags it starts with, whatever detection gives meanwhile.
+	flags, err := h.Settings().LaunchFlags(entry.Options)
+	if err != nil {
+		return fmt.Errorf("claude-code gives %w", err)
+	}
 	env, token, err := h.routeOf(entry.Login)
 	if err != nil {
 		return err
@@ -183,7 +190,6 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if isFirstStart && entry.FirstPrompt != "" {
 		line = prompt.First(entry.FirstPrompt)
 	}
-	flags := h.Settings.EffectiveFlags(entry.Options)
 	var modes []string
 	if h.PermissionModes != nil {
 		modes = h.PermissionModes()

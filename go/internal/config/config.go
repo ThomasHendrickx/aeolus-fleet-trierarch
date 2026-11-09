@@ -95,6 +95,14 @@ func (h Harness) EffectiveFlags(picked map[string]string) []string {
 	return flags
 }
 
+// LaunchFlags are the flags a launch starts with, as EffectiveFlags gives them, or why it may not start: a picked model the settings give no flag for would start the harness's own default model instead (#335, #337).
+func (h Harness) LaunchFlags(picked map[string]string) ([]string, error) {
+	if model, isPicked := picked[ModelOption]; isPicked && len(h.Options[ModelOption].Values[model]) == 0 {
+		return nil, fmt.Errorf("no flag for the model %s", model)
+	}
+	return h.EffectiveFlags(picked), nil
+}
+
 // Option is a setting a crew request may pick: each value's name and the flags it adds, and the value used when none is picked.
 type Option struct {
 	Values  map[string][]string `json:"values"`

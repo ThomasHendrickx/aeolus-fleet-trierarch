@@ -713,11 +713,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		// What the machine offers changes while it runs, as sessions refuse models (#382): each pass reads it afresh.
 		Offers: offers.options,
 		// A harness's models are confirmed again once a day and before a request for a model it does not list is given back (#333): the vendor adds models to a harness without a new version.
-		ConfirmModels: func(harness string) {
-			if _, err := detect.Detect(context.Background(), []string{harness}, detection.ByRequest); err != nil {
-				logLine(fmt.Sprintf("%s could not be detected again for a request: %v", harness, err))
-			}
-		},
+		ConfirmModels:   confirmModelsOf(detect),
 		ModelsConfirmed: map[string]int{},
 		ConfirmDue:      confirmDue(detect, slices.Sorted(maps.Keys(configuration.Harnesses))),
 		RefuseModel: func(harness string, model string) error {
@@ -876,6 +872,23 @@ func confirmDue(detect detection.Detection, harnesses []string) func() {
 	}
 }
 
+// confirmModelsOf confirms a harness's models again for a request, as detection gives them to the offers each launch reads its settings from (#333, #335).
+func confirmModelsOf(detect detection.Detection) func(harness string) {
+	return func(harness string) {
+		if _, err := detect.Detect(context.Background(), []string{harness}, detection.ByRequest); err != nil {
+			logLine(fmt.Sprintf("%s could not be detected again for a request: %v", harness, err))
+		}
+	}
+}
+
+// settingsOf is the harness's settings as the machine offers them when asked, with what detection last gave: a launch takes its model's flag from them, so a model confirmed after the trierarch started launches with it (#335).
+func settingsOf(offers *offers, harness string) func() config.Harness {
+	return func() config.Harness {
+		offered, _ := offers.current()
+		return offered.Harnesses[harness]
+	}
+}
+
 // offers are what the configured harnesses offer as detected, changed while the trierarch runs as sessions refuse models (#382), and read by each pass.
 type offers struct {
 	configured config.Configuration
@@ -947,10 +960,10 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 	harnesses := map[string]runpass.Harness{}
 	offered := []string{}
 	for _, name := range adapters {
-		settings, ok := configuration.Harnesses[name]
-		if !ok {
+		if _, ok := configuration.Harnesses[name]; !ok {
 			continue
 		}
+		settings := settingsOf(offers, name)
 		switch name {
 		case "claude-code":
 			found, err := plugin.Find(home, env)
