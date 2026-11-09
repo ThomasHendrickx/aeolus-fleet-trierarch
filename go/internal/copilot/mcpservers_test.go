@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -90,5 +92,32 @@ func TestAListingCopilotDoesNotAnswerInTimeOrWhoseContextEndsIsAnErrorAtOnce(t *
 				t.Fatalf("McpServersIn = %q, %v after %v, want an error within 5s, so a hung listing holds up no start", names, err, took)
 			}
 		})
+	}
+}
+
+func TestAListingEndedForItsTimeEndsTheProcessesItStarted(t *testing.T) {
+	folder := t.TempDir()
+	program, child := filepath.Join(folder, "copilot"), filepath.Join(folder, "child")
+	// As Copilot's npm launcher runs its native process, the listing runs one of its own.
+	if err := os.WriteFile(program, []byte("#!/bin/sh\nsleep 30 &\necho $! > "+child+"\nwait\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := (McpList{Program: program, Timeout: 200 * time.Millisecond}).McpServersIn(context.Background(), t.TempDir()); err == nil {
+		t.Fatal("McpServersIn = nil, want an error")
+	}
+
+	text, err := os.ReadFile(child)
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(text)))
+	if err != nil || pid == 0 {
+		t.Fatalf("the listing noted %q, %v, want its child's pid", text, err)
+	}
+	// An ended child is gone once whoever adopted it reaps it.
+	for wait := time.Now().Add(2 * time.Second); syscall.Kill(pid, 0) == nil && time.Now().Before(wait); {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if syscall.Kill(pid, 0) == nil {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		t.Fatalf("the listing's child %d still runs, want it ended with the listing", pid)
 	}
 }
