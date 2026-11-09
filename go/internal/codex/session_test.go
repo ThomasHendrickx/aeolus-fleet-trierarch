@@ -8,14 +8,14 @@ import (
 	"testing"
 )
 
-func TestAStartIsCodexExecWithTheFlagsTheJSONEventsNoQuestionToolAndThePromptLast(t *testing.T) {
+func TestAStartIsCodexExecWithTheFlagsTheJSONEventsNoQuestionToolNoChatGPTAppsAndThePromptLast(t *testing.T) {
 	for _, test := range []struct {
 		name         string
 		isFirstStart bool
 		want         []string
 	}{
-		{"a first start", true, []string{"codex", "exec", "-m", "gpt-5.6-terra", "--json", "--config=tools.experimental_request_user_input.enabled=false", "--", "--look"}},
-		{"a restart, on the folder's last conversation", false, []string{"codex", "exec", "resume", "--last", "-m", "gpt-5.6-terra", "--json", "--config=tools.experimental_request_user_input.enabled=false", "--", "--look"}},
+		{"a first start", true, []string{"codex", "exec", "-m", "gpt-5.6-terra", "--json", "--config=tools.experimental_request_user_input.enabled=false", "--config=features.apps=false", "--", "--look"}},
+		{"a restart, on the folder's last conversation", false, []string{"codex", "exec", "resume", "--last", "-m", "gpt-5.6-terra", "--json", "--config=tools.experimental_request_user_input.enabled=false", "--config=features.apps=false", "--", "--look"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got := CommandLine([]string{"-m", "gpt-5.6-terra", "--no-daemon"}, "--look", test.isFirstStart)

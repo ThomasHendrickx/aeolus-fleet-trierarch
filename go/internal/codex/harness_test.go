@@ -50,18 +50,38 @@ func (h *someHooks) TrustAeolusHooks(folder string) ([]string, error) {
 	return nil, h.err
 }
 
+// someServers are the MCP servers Codex lists in a folder, the user's own, noting each folder it is asked about, or fails with the error given.
+type someServers struct {
+	names     []string
+	askedFrom []string
+	err       error
+}
+
+func (s *someServers) McpServersIn(folder string) ([]string, error) {
+	s.askedFrom = append(s.askedFrom, folder)
+	return s.names, s.err
+}
+
 func aHarness(t *testing.T) (Harness, *aRuntime, *someHooks) {
 	t.Helper()
+	harness, running, hooks, _ := aHarnessListing(t)
+	return harness, running, hooks
+}
+
+// aHarnessListing is aHarness with the MCP servers Codex lists in a folder, none until a test names some.
+func aHarnessListing(t *testing.T) (Harness, *aRuntime, *someHooks, *someServers) {
+	t.Helper()
 	_, file, _, _ := runtime.Caller(0)
-	running, hooks := &aRuntime{}, &someHooks{}
+	running, hooks, servers := &aRuntime{}, &someHooks{}, &someServers{}
 	events := t.TempDir()
 	return Harness{
 		Plugin:   plugin.Plugin{Root: filepath.Join(filepath.Dir(file), "..", "..", "..", "plugins", "aeolus-fleet"), Data: t.TempDir(), Crews: t.TempDir()},
 		Runtime:  running,
 		Settings: config.Harness{Flags: []string{"-m", "gpt-5.6-terra"}, Options: map[string]config.Option{}},
-		Hooks:    hooks,
-		Events:   func(shipID string) string { return filepath.Join(events, shipID+".jsonl") },
-	}, running, hooks
+		Hooks:      hooks,
+		McpServers: servers,
+		Events:     func(shipID string) string { return filepath.Join(events, shipID+".jsonl") },
+	}, running, hooks, servers
 }
 
 func anEntry(t *testing.T) reconciler.Entry {
@@ -305,5 +325,51 @@ func TestCodexCanAddAServerOnlyWhenItsNameHoldsNoDot(t *testing.T) {
 		if got := CanAddMcpServer(name); got != want {
 			t.Errorf("CanAddMcpServer(%q) = %v, want %v", name, got, want)
 		}
+	}
+}
+
+func TestASessionStartsWithEachServerCodexListsInItsFolderTurnedOffButThoseItsEntryNames(t *testing.T) {
+	harness, running, _, listed := aHarnessListing(t)
+	harness.ProxyURL = func() (string, bool) { return "http://127.0.0.1:41000", true }
+	listed.names = []string{"gmail", "company-graph", "dot.ted"}
+	entry := anEntry(t)
+	entry.McpServers = []string{"company-graph"}
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	flags := []string{
+		"-m", "gpt-5.6-terra",
+		"-c", `mcp_servers={"gmail"={enabled=false},"dot.ted"={enabled=false}}`,
+		"-c", `mcp_servers.company-graph={url="http://127.0.0.1:41000/mcp/` + scout + `/company-graph",bearer_token_env_var="AEOLUS_MCP_TOKEN"}`,
+	}
+	if want := CommandLine(flags, prompt.First("Review PR 12"), true); !slices.Equal(running.started[0].Command, want) {
+		t.Fatalf("started %q, want %q", running.started[0].Command, want)
+	}
+	if !slices.Equal(listed.askedFrom, []string{entry.Folder}) {
+		t.Fatalf("servers listed from %q, want the session's folder", listed.askedFrom)
+	}
+}
+
+func TestASessionWhoseFolderListsNoServerOfItsOwnTurnsNoneOff(t *testing.T) {
+	harness, running, _, listed := aHarnessListing(t)
+	listed.names = nil
+
+	if err := harness.Launch(anEntry(t), true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if want := CommandLine([]string{"-m", "gpt-5.6-terra"}, prompt.First("Review PR 12"), true); !slices.Equal(running.started[0].Command, want) {
+		t.Fatalf("started %q, want %q", running.started[0].Command, want)
+	}
+}
+
+func TestASessionWhoseFoldersServersCannotBeListedStartsNothing(t *testing.T) {
+	harness, running, _, listed := aHarnessListing(t)
+	listed.err = errors.New("codex mcp list exited 1")
+
+	if err := harness.Launch(anEntry(t), true, "launch-1"); err == nil || len(running.started) != 0 {
+		t.Fatalf("Launch = %v, started %d, want an error and nothing started, since the session would get the user's servers", err, len(running.started))
 	}
 }
