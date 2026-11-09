@@ -1,6 +1,7 @@
 package copilot
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -47,7 +48,7 @@ type someServers struct {
 	err       error
 }
 
-func (s *someServers) McpServersIn(folder string) ([]string, error) {
+func (s *someServers) McpServersIn(ctx context.Context, folder string) ([]string, error) {
 	s.askedFrom = append(s.askedFrom, folder)
 	return s.names, s.err
 }

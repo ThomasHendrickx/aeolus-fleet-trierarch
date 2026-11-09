@@ -1,11 +1,13 @@
 package copilot
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"testing"
+	"time"
 )
 
 // aCopilotListing is a stand-in for `copilot mcp list --json`: it notes the folder it ran in and the COPILOT_HOME it got, and answers the listing given, exiting with the code given.
@@ -32,7 +34,7 @@ func TestTheServersCopilotListsInAFolderAreEachByItsNameWithTheTrierarchsCopilot
 	program, ran := aCopilotListing(t, `{"mcpServers":{"usersown":{"type":"local","command":"echo","source":"user","enabled":true},"workspace_own":{"command":"echo","source":"workspace","enabled":false}}}`, 0)
 	folder := t.TempDir()
 
-	names, err := McpList{Program: program, CopilotHome: "/home/me/.copilot-work"}.McpServersIn(folder)
+	names, err := McpList{Program: program, CopilotHome: "/home/me/.copilot-work"}.McpServersIn(context.Background(), folder)
 
 	slices.Sort(names)
 	if err != nil || !slices.Equal(names, []string{"usersown", "workspace_own"}) {
@@ -55,8 +57,37 @@ func TestAListingCopilotRefusesOrAnswersOtherThanJSONIsAnError(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			program, _ := aCopilotListing(t, test.listing, test.code)
 
-			if names, err := (McpList{Program: program}).McpServersIn(t.TempDir()); err == nil {
+			if names, err := (McpList{Program: program}).McpServersIn(context.Background(), t.TempDir()); err == nil {
 				t.Fatalf("McpServersIn = %q, want an error", names)
+			}
+		})
+	}
+}
+
+func TestAListingCopilotDoesNotAnswerInTimeOrWhoseContextEndsIsAnErrorAtOnce(t *testing.T) {
+	folder := t.TempDir()
+	program := filepath.Join(folder, "copilot")
+	// The sleep is a child of its own, holding the listing's output open after the shell is ended.
+	if err := os.WriteFile(program, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ended, cancel := context.WithCancel(context.Background())
+	cancel()
+	cases := map[string]struct {
+		list    McpList
+		context context.Context
+	}{
+		"past its time limit": {McpList{Program: program, Timeout: 200 * time.Millisecond}, context.Background()},
+		"its context ended":   {McpList{Program: program}, ended},
+	}
+	for name, test := range cases {
+		t.Run(name, func(t *testing.T) {
+			began := time.Now()
+
+			names, err := test.list.McpServersIn(test.context, t.TempDir())
+
+			if took := time.Since(began); err == nil || took > 5*time.Second {
+				t.Fatalf("McpServersIn = %q, %v after %v, want an error within 5s, so a hung listing holds up no start", names, err, took)
 			}
 		})
 	}
