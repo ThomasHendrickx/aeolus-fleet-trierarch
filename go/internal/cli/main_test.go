@@ -15,6 +15,8 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/container"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
@@ -340,6 +342,61 @@ func TestRunMakesTheSealingKeyOfAMachineSetUpBeforeThereWasOne(t *testing.T) {
 
 	if info, err := os.Stat(at.SealingKey); err != nil || info.Mode().Perm() != 0o600 {
 		t.Errorf("the sealing key = %v, %v, want a file of mode 600", info, err)
+	}
+}
+
+// anMcpFleet is the trierarch's own ship in the fleet, as the MCP configuration asks it.
+type anMcpFleet struct{ fleetID string }
+
+func (f anMcpFleet) FleetID() (string, error) { return f.fleetID, nil }
+
+func (anMcpFleet) ConfirmMcpConfiguration(string, string) error { return nil }
+
+// runHoldingMcpConfiguration runs the trierarch of a fleet once, with the MCP configuration of the plugin ship persisted, and answers what the file holds at its first pass.
+func runHoldingMcpConfiguration(t *testing.T, persistedFor mcpconfiguration.Identity) (mcpconfiguration.Configuration, bool) {
+	t.Helper()
+	machine, _, _ := aMain(t)
+	Main(setupWords(), machine)
+	at := paths.Of(machine.HomeDirectory, "")
+	persisted := &mcpconfiguration.File{Path: at.McpConfiguration}
+	persisted.Load(persistedFor)
+	if _, err := persisted.Apply(mcpconfiguration.Configuration{Identity: persistedFor, Version: 3, PublicKey: "key-a", Servers: []mcpservers.Server{}, Secrets: map[string]string{}}); err != nil {
+		t.Fatal(err)
+	}
+	held := &mcpconfiguration.File{Path: at.McpConfiguration}
+	machine.McpConfiguration = func(paths.Paths) *mcpconfiguration.File { return held }
+	machine.McpFleet = func(crew.File) McpFleet { return anMcpFleet{fleetID: "flt_01m3tb1zgr5h2ffee12xnch8sv"} }
+	var atFirstPass mcpconfiguration.Configuration
+	var isHeld bool
+	stop := make(chan struct{})
+	machine.Stop = stop
+	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func(isKeyCutOff bool) error, error) {
+		return func(bool) error {
+			atFirstPass, isHeld = held.Current()
+			close(stop)
+			return nil
+		}, nil
+	}
+
+	if output, code := Main([]string{"run"}, machine); code != 0 {
+		t.Fatalf("run answered %q, %d", output, code)
+	}
+	return atFirstPass, isHeld
+}
+
+func TestRunHoldsThePersistedMcpConfigurationOfItsFleetAndPluginShipFromItsFirstPass(t *testing.T) {
+	held, ok := runHoldingMcpConfiguration(t, mcpconfiguration.Identity{FleetID: "flt_01m3tb1zgr5h2ffee12xnch8sv", PluginShipID: pluginShipID})
+
+	if !ok || held.Version != 3 {
+		t.Errorf("at the first pass the file holds %+v, %v, want version 3", held, ok)
+	}
+}
+
+func TestRunClearsAnMcpConfigurationOfAnotherFleetBeforeItsFirstPass(t *testing.T) {
+	held, ok := runHoldingMcpConfiguration(t, mcpconfiguration.Identity{FleetID: "flt_01m3tb1zgr5h2ffee12xnch8sw", PluginShipID: pluginShipID})
+
+	if ok {
+		t.Errorf("at the first pass the file holds %+v, want none", held)
 	}
 }
 
