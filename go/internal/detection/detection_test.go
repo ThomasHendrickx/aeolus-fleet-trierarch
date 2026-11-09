@@ -458,3 +458,70 @@ func TestARefusalOfAHarnessDetectionNeverFoundGivesNothingAndDetectsNothing(t *t
 		t.Errorf("Refuse() = %v, gave %v, detected %d times, saved %d times; want nothing at all", err, given, detector.detections, store.saves)
 	}
 }
+
+func TestAnAgedDetectionDetectsAgainAHarnessDetectedADayAgoOrMoreWhoseVersionIsTheSame(t *testing.T) {
+	found := aHarness("", "gpt-6.1-sol", "gpt-6.1-terra")
+	detector := &aDetector{version: "0.163.0", found: &found}
+	before := aHarness("0.163.0", "gpt-6.1-sol")
+	before.DetectedAt = Timestamp(now.Add(-24 * time.Hour))
+	store := &aStore{detected: Detected{"codex": before}}
+	detection, _ := aDetection(store, map[string]Detector{"codex": detector})
+
+	detected, err := detection.Detect(context.Background(), []string{"codex"}, ByAge)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := detected["codex"].Options[ModelOption].Names(); !slices.Equal(got, []string{"gpt-6.1-sol", "gpt-6.1-terra"}) {
+		t.Errorf("models = %v, want the new model reported without a new version", got)
+	}
+	if detector.previous == nil || detector.previous.DetectedAt != before.DetectedAt {
+		t.Errorf("detected given %+v, want what was detected before", detector.previous)
+	}
+}
+
+func TestAnAgedDetectionLeavesAHarnessDetectedLessThanADayAgo(t *testing.T) {
+	found := aHarness("", "gpt-6.1-terra")
+	detector := &aDetector{version: "0.163.0", found: &found}
+	before := aHarness("0.163.0", "gpt-6.1-sol")
+	before.DetectedAt = Timestamp(now.Add(-24*time.Hour + time.Minute))
+	store := &aStore{detected: Detected{"codex": before}}
+	detection, _ := aDetection(store, map[string]Detector{"codex": detector})
+
+	detection.Detect(context.Background(), []string{"codex"}, ByAge)
+
+	if detector.detections != 0 || store.saves != 0 {
+		t.Errorf("detections, saves = %d, %d, want 0, 0", detector.detections, store.saves)
+	}
+}
+
+func TestAnAgedDetectionKeepsTheIdsASessionRefusedAtTheSameVersion(t *testing.T) {
+	found := aHarness("", "gpt-6.1-sol", "gpt-6.1-terra")
+	detector := &aDetector{version: "0.163.0", found: &found}
+	before := aHarness("0.163.0", "gpt-6.1-sol")
+	before.DetectedAt = Timestamp(now.Add(-25 * time.Hour))
+	before.Refused = []Refused{{ID: "gpt-6.1-terra", At: Timestamp(earlier)}}
+	store := &aStore{detected: Detected{"codex": before}}
+	detection, _ := aDetection(store, map[string]Detector{"codex": detector})
+
+	detected, _ := detection.Detect(context.Background(), []string{"codex"}, ByAge)
+
+	if got := detected["codex"].Refused; len(got) != 1 || got[0].ID != "gpt-6.1-terra" {
+		t.Errorf("refused = %+v, want gpt-6.1-terra kept", got)
+	}
+}
+
+func TestADetectionOnARequestDetectsAgainAHarnessDetectedJustNowAtTheSameVersion(t *testing.T) {
+	found := aHarness("", "gpt-6.1-sol", "gpt-6.1-terra")
+	detector := &aDetector{version: "0.163.0", found: &found}
+	before := aHarness("0.163.0", "gpt-6.1-sol")
+	before.DetectedAt = Timestamp(now.Add(-time.Minute))
+	store := &aStore{detected: Detected{"codex": before}}
+	detection, _ := aDetection(store, map[string]Detector{"codex": detector})
+
+	detected, _ := detection.Detect(context.Background(), []string{"codex"}, ByRequest)
+
+	if got := detected["codex"].Options[ModelOption].Names(); !slices.Equal(got, []string{"gpt-6.1-sol", "gpt-6.1-terra"}) {
+		t.Errorf("models = %v, want the new model", got)
+	}
+}
