@@ -95,3 +95,20 @@ func Read(payload string, configured Identity, key secrets.Key) (Configuration, 
 	}
 	return Configuration{Identity: identity, Version: *read.Version, PublicKey: *read.PublicKey, Servers: servers, Secrets: opened}, nil
 }
+
+// AppliedPayload is the payload of the confirmation that the configuration is persisted: its identity, version and recipient key.
+func AppliedPayload(configuration Configuration) string {
+	text, _ := json.Marshal(struct {
+		FleetID      string `json:"fleetId"`
+		PluginShipID string `json:"pluginShipId"`
+		Version      int    `json:"version"`
+		PublicKey    string `json:"publicKey"`
+	}{configuration.FleetID, configuration.PluginShipID, configuration.Version, configuration.PublicKey})
+	return string(text)
+}
+
+// RequestPayload is the payload of the request for the current configuration: the identity it is asked for.
+func RequestPayload(identity Identity) string {
+	text, _ := json.Marshal(identity)
+	return string(text)
+}
