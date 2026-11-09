@@ -1642,6 +1642,51 @@ func TestARequestPickingAModelTheHarnessStillDoesNotListAfterConfirmingAgainIsGi
 	}
 }
 
+func TestARequestPickingAModelWhileItsHarnessOffersNoModelConfirmsTheHarnessAgain(t *testing.T) {
+	pass := aRunPass(t)
+	offered := map[string][]string{}
+	pass.pass.Offers = func() map[string]map[string][]string {
+		return map[string]map[string][]string{"claude-code": offered}
+	}
+	confirmed := []string{}
+	pass.pass.ConfirmModels = func(harness string) {
+		confirmed = append(confirmed, harness)
+		offered = map[string][]string{"model": {"opus", "claude-haiku-5"}}
+	}
+	request := aRequest("")
+	request.Settings.Options = map[string]string{"model": "claude-haiku-5"}
+	pass.fleet.requests = []reconciler.Request{request}
+
+	pass.run(t)
+
+	if !slices.Equal(confirmed, []string{"claude-code"}) {
+		t.Fatalf("confirmed %v, want claude-code once", confirmed)
+	}
+	if got := pass.store.state.Entries[scout].Options["model"]; got != "claude-haiku-5" {
+		t.Errorf("crewed with model %q, want claude-haiku-5", got)
+	}
+}
+
+func TestARequestWaitingToBeCrewedConfirmsItsHarnessOnceAtItsSettingsVersion(t *testing.T) {
+	pass := aRunPass(t)
+	pass.pass.RunningCap = 0
+	pass.pass.Offers = func() map[string]map[string][]string {
+		return map[string]map[string][]string{"claude-code": {}}
+	}
+	confirmed := 0
+	pass.pass.ConfirmModels = func(string) { confirmed++ }
+	request := aRequest("")
+	request.Settings.Options = map[string]string{"model": "claude-haiku-5"}
+	pass.fleet.requests = []reconciler.Request{request}
+
+	pass.run(t)
+	pass.run(t)
+
+	if confirmed != 1 {
+		t.Errorf("confirmed %d times, want once while it waits", confirmed)
+	}
+}
+
 func TestEachPassAsksForTheModelsDueToBeConfirmedAgain(t *testing.T) {
 	pass := aRunPass(t)
 	asked := 0

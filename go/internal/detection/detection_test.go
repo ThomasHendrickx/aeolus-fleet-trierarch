@@ -5,6 +5,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,15 +19,20 @@ var (
 
 // aStore is the detected file in memory.
 type aStore struct {
+	mu       sync.Mutex
 	detected Detected
 	saves    int
 }
 
 func (s *aStore) Load() Detected {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return clone(s.detected)
 }
 
 func (s *aStore) Save(detected Detected) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.detected, s.saves = clone(detected), s.saves+1
 	return nil
 }
@@ -532,9 +538,122 @@ func TestDueAreTheHarnessesDetectedADayAgoOrMore(t *testing.T) {
 	store := &aStore{detected: Detected{"claude-code": old, "codex": recent, "copilot": old}}
 	detection, _ := aDetection(store, map[string]Detector{"claude-code": &aDetector{}, "codex": &aDetector{}})
 
-	got := detection.Due([]string{"claude-code", "codex", "copilot", "cursor"})
+	got := detection.Due([]string{"claude-code", "codex", "copilot", "cursor"}, map[string]time.Time{})
 
 	if want := []string{"claude-code"}; !slices.Equal(got, want) {
 		t.Errorf("Due() = %v, want %v", got, want)
+	}
+}
+
+func TestDueIsAHarnessWithADetectorThatDetectionNeverFound(t *testing.T) {
+	store := &aStore{detected: Detected{}}
+	detection, _ := aDetection(store, map[string]Detector{"codex": &aDetector{}})
+
+	got := detection.Due([]string{"codex"}, map[string]time.Time{})
+
+	if want := []string{"codex"}; !slices.Equal(got, want) {
+		t.Errorf("Due() = %v, want %v", got, want)
+	}
+}
+
+func TestDueIsNotAHarnessTriedAgainLessThanADayAgo(t *testing.T) {
+	old := aHarness("1")
+	old.DetectedAt = Timestamp(now.Add(-48 * time.Hour))
+	store := &aStore{detected: Detected{"claude-code": old}}
+	detection, _ := aDetection(store, map[string]Detector{"claude-code": &aDetector{}, "codex": &aDetector{}})
+	tried := map[string]time.Time{"claude-code": now.Add(-24*time.Hour + time.Minute), "codex": now.Add(-time.Hour)}
+
+	got := detection.Due([]string{"claude-code", "codex"}, tried)
+
+	if len(got) != 0 {
+		t.Errorf("Due() = %v, want none: each was tried less than a day ago", got)
+	}
+}
+
+func TestDueIsAHarnessTriedAgainADayAgo(t *testing.T) {
+	store := &aStore{detected: Detected{}}
+	detection, _ := aDetection(store, map[string]Detector{"codex": &aDetector{}})
+
+	got := detection.Due([]string{"codex"}, map[string]time.Time{"codex": now.Add(-24 * time.Hour)})
+
+	if want := []string{"codex"}; !slices.Equal(got, want) {
+		t.Errorf("Due() = %v, want %v", got, want)
+	}
+}
+
+func TestDueCountsTheHarnessesItNamesTriedNow(t *testing.T) {
+	store := &aStore{detected: Detected{}}
+	detection, _ := aDetection(store, map[string]Detector{"codex": &aDetector{}})
+	tried := map[string]time.Time{}
+
+	detection.Due([]string{"codex"}, tried)
+
+	if got := detection.Due([]string{"codex"}, tried); len(got) != 0 {
+		t.Errorf("Due() again = %v, want none: it was tried just now", got)
+	}
+}
+
+func TestADetectionKeepsWhatAProbeBegunLaterKeptMeanwhile(t *testing.T) {
+	later := aHarness("0.164.0", "gpt-6.1-sol", "gpt-6.1-terra")
+	later.DetectedAt = Timestamp(now.Add(time.Second))
+	later.Refused = []Refused{{ID: "gpt-6.1-terra", At: Timestamp(now.Add(2 * time.Second))}}
+	found := aHarness("", "gpt-6.1-sol", "gpt-6.1-terra")
+	store := &aStore{detected: Detected{}}
+	detector := &aDetector{version: "0.163.0", found: &found}
+	detector.during = func() { store.detected["codex"] = later }
+	detection, _ := aDetection(store, map[string]Detector{"codex": detector})
+
+	detected, _ := detection.Detect(context.Background(), []string{"codex"}, ByAge)
+
+	if got := store.detected["codex"]; got.Version != "0.164.0" || len(got.Refused) != 1 {
+		t.Errorf("kept %+v, want what the probe begun later kept", got)
+	}
+	if got := detected["codex"].Version; got != "0.164.0" {
+		t.Errorf("Detect() version = %q, want 0.164.0", got)
+	}
+}
+
+func TestWhatIsGivenNeverGoesBackToBeforeARefusalKeptMeanwhile(t *testing.T) {
+	before := aHarness("0.163.0", "gpt-6.1-sol")
+	before.DetectedAt = Timestamp(now.Add(-25 * time.Hour))
+	found := aHarness("", "gpt-6.1-sol", "gpt-6.1-terra")
+	store := &aStore{detected: Detected{"codex": before}}
+	detection, _ := aDetection(store, map[string]Detector{"codex": &aDetector{version: "0.163.0", found: &found}})
+	var mu sync.Mutex
+	var given []Detected
+	allGiven := make(chan struct{})
+	detection.Given = func(detected Detected) {
+		mu.Lock()
+		isFirst := len(given) == 0
+		mu.Unlock()
+		if isFirst {
+			// A session refuses a model while the detection gives what it kept.
+			go func() { _ = detection.Refuse(context.Background(), "codex", "gpt-6.1-terra", now, func(Detected) {}) }()
+			time.Sleep(50 * time.Millisecond)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		given = append(given, detected)
+		// The detection's, the refusal's and the detection after the refusal.
+		if len(given) == 3 {
+			close(allGiven)
+		}
+	}
+
+	_, _ = detection.Detect(context.Background(), []string{"codex"}, ByAge)
+	<-allGiven
+
+	mu.Lock()
+	defer mu.Unlock()
+	hasRefused := false
+	for i, each := range given {
+		refused := len(each["codex"].Refused) == 1
+		if hasRefused && !refused {
+			t.Fatalf("given %d holds no refusal after one that held it: a refused model is offered again", i)
+		}
+		hasRefused = hasRefused || refused
+	}
+	if !hasRefused {
+		t.Errorf("nothing given held the refusal")
 	}
 }
