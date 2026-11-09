@@ -2,6 +2,7 @@ package copilot
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -39,18 +40,38 @@ func (r *aRuntime) Interrupt(shipID string) error {
 	return nil
 }
 
+// someServers are the MCP servers Copilot lists in a folder, the user's own, noting each folder it is asked about, or fails with the error given.
+type someServers struct {
+	names     []string
+	askedFrom []string
+	err       error
+}
+
+func (s *someServers) McpServersIn(folder string) ([]string, error) {
+	s.askedFrom = append(s.askedFrom, folder)
+	return s.names, s.err
+}
+
 func aHarness(t *testing.T) (Harness, *aRuntime) {
 	t.Helper()
+	harness, running, _ := aHarnessListing(t)
+	return harness, running
+}
+
+// aHarnessListing is aHarness with the MCP servers Copilot lists in a folder, none until a test names some.
+func aHarnessListing(t *testing.T) (Harness, *aRuntime, *someServers) {
+	t.Helper()
 	_, file, _, _ := runtime.Caller(0)
-	running := &aRuntime{}
+	running, servers := &aRuntime{}, &someServers{}
 	events := t.TempDir()
 	return Harness{
-		Plugin:   plugin.Plugin{Root: filepath.Join(filepath.Dir(file), "..", "..", "..", "plugins", "aeolus-fleet"), Data: t.TempDir(), Crews: t.TempDir()},
-		Runtime:  running,
-		Settings: config.Harness{Flags: []string{"--model", "gpt-5"}, Options: map[string]config.Option{}},
-		Events:   func(shipID string) string { return filepath.Join(events, shipID+".jsonl") },
-		Version:  func() (string, bool) { return "1.0.105", true },
-	}, running
+		Plugin:     plugin.Plugin{Root: filepath.Join(filepath.Dir(file), "..", "..", "..", "plugins", "aeolus-fleet"), Data: t.TempDir(), Crews: t.TempDir()},
+		Runtime:    running,
+		Settings:   config.Harness{Flags: []string{"--model", "gpt-5"}, Options: map[string]config.Option{}},
+		Events:     func(shipID string) string { return filepath.Join(events, shipID+".jsonl") },
+		Version:    func() (string, bool) { return "1.0.105", true },
+		McpServers: servers,
+	}, running, servers
 }
 
 func anEntry(t *testing.T) reconciler.Entry {
@@ -282,5 +303,35 @@ func TestASessionNamingMCPServersDoesNotStartBeforeTheProxyListens(t *testing.T)
 
 	if err == nil || !strings.Contains(err.Error(), "MCP proxy") || len(running.started) != 0 {
 		t.Fatalf("Launch = %v, started %d, want refused naming the MCP proxy", err, len(running.started))
+	}
+}
+
+func TestASessionStartsWithEachServerCopilotListsInItsFolderTurnedOffButThoseItsEntryNames(t *testing.T) {
+	harness, running, listed := aHarnessListing(t)
+	harness.ProxyURL = func() (string, bool) { return "http://127.0.0.1:41000", true }
+	harness.Sessions = t.TempDir()
+	listed.names = []string{"gmail", "company-graph", "workspace_own"}
+	entry := anEntry(t)
+	entry.McpServers = []string{"company-graph"}
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	flags := []string{"--model", "gpt-5", "--disable-mcp-server=gmail", "--disable-mcp-server=workspace_own", "--additional-mcp-config=@" + filepath.Join(harness.Sessions, scout, "mcp-config.json")}
+	if want := CommandLine(flags, prompt.First("Review PR 12"), ""); !slices.Equal(running.started[0].Command, want) {
+		t.Fatalf("started %q, want %q", running.started[0].Command, want)
+	}
+	if !slices.Equal(listed.askedFrom, []string{entry.Folder}) {
+		t.Fatalf("servers listed from %q, want the session's folder", listed.askedFrom)
+	}
+}
+
+func TestASessionWhoseFoldersServersCannotBeListedStartsNothing(t *testing.T) {
+	harness, running, listed := aHarnessListing(t)
+	listed.err = errors.New("copilot mcp list exited 1")
+
+	if err := harness.Launch(anEntry(t), true, "launch-1"); err == nil || len(running.started) != 0 {
+		t.Fatalf("Launch = %v, started %d, want an error and nothing started, since the session would get the user's servers", err, len(running.started))
 	}
 }
