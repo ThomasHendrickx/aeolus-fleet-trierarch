@@ -42,7 +42,7 @@ func keyOf(private []byte) (Key, error) {
 
 // LoadOrMake is the key kept at path, made there when there is none, the file mode 600 either way. A file that holds no key is refused, never made over: a new key would leave every secret sealed to the old one unreadable.
 func LoadOrMake(path string) (Key, error) {
-	text, err := readPrivate(path)
+	text, err := ReadPrivate(path)
 	if err == nil {
 		private, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(text)))
 		if err != nil || len(private) != 32 {
@@ -57,7 +57,7 @@ func LoadOrMake(path string) (Key, error) {
 	if err != nil {
 		return Key{}, err
 	}
-	if err := writePrivate(path, []byte(base64.StdEncoding.EncodeToString(private[:])+"\n")); err != nil {
+	if err := WritePrivate(path, []byte(base64.StdEncoding.EncodeToString(private[:])+"\n")); err != nil {
 		return Key{}, fmt.Errorf("keep the sealing key: %w", err)
 	}
 	return keyOf(private[:])

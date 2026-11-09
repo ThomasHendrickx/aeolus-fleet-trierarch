@@ -10,8 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aip"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
 )
@@ -35,19 +34,22 @@ type Keeper interface {
 	Accept(list []trusted.Repository) error
 }
 
-// ServerKeeper keeps the MCP servers the trierarch plugin's ship sent.
-type ServerKeeper interface {
-	Accept(list []mcpservers.Server) error
+// ConfigurationKeeper applies the MCP configuration the trierarch plugin's ship sent, persisted before it answers.
+type ConfigurationKeeper interface {
+	Apply(configuration mcpconfiguration.Configuration) (mcpconfiguration.Outcome, error)
 }
 
-// AipKeeper keeps the aip setting the trierarch plugin's ship sent with the MCP servers, none when the list carried none.
-type AipKeeper interface {
-	Accept(setting *aip.Setting) error
+// Confirmer tells the trierarch plugin's ship, as the trierarch's own ship, that a configuration is persisted.
+type Confirmer interface {
+	ConfirmMcpConfiguration(pluginShipID string, payload string) error
 }
 
-// SecretKeeper keeps the secrets the trierarch plugin's ship sent, opened.
-type SecretKeeper interface {
-	Accept(held map[string]string) error
+// McpConfiguration is how the loop takes the fleet's MCP configuration: for this trierarch's fleet and plugin ship, opened with its sealing key, kept in File and confirmed to the plugin ship.
+type McpConfiguration struct {
+	File       ConfigurationKeeper
+	Identity   mcpconfiguration.Identity
+	SealingKey secrets.Key
+	Confirm    Confirmer
 }
 
 // Refusal is the fleet's own refusal: its code and its message.
@@ -80,13 +82,8 @@ type Loop struct {
 	PluginShipID string
 	// Trusted keeps the trusted repositories; the list is handled as any other message without it.
 	Trusted Keeper
-	// McpServers keeps the MCP servers; the list is handled as any other message without it.
-	McpServers ServerKeeper
-	// Aip keeps the aip setting the MCP server list carries; it is not taken without it.
-	Aip AipKeeper
-	// Secrets keeps the secrets, opened with SealingKey; they are handled as any other message without it.
-	Secrets    SecretKeeper
-	SealingKey secrets.Key
+	// McpConfiguration takes the fleet's MCP configuration; it is handled as any other message without it.
+	McpConfiguration *McpConfiguration
 	// OnKeyCutOff is told at the first refusal (true) and when a receive passes again (false).
 	OnKeyCutOff func(isCutOff bool)
 }
@@ -124,41 +121,26 @@ func (l Loop) takeTrusted(delivery Delivery) error {
 	return l.Trusted.Accept(list)
 }
 
-// takeMcpServers takes the MCP servers the delivery carries, and the aip setting with them, as takeTrusted takes the trusted repositories: a list whose aip does not fit is not taken either, and a list with no aip clears the one held.
-func (l Loop) takeMcpServers(delivery Delivery) error {
-	if !l.isFromPlugin(delivery, "MCP servers") {
+// takeMcpConfiguration applies the MCP configuration the delivery carries, but only from the trierarch plugin's ship, then confirms it to that ship: a configuration applied before, sealed to the same key, is confirmed again, and an older one is neither applied nor confirmed. One that does not fit is not taken, and the one applied stays; a failure to persist or confirm one is the loop's, so the delivery comes again. What it logs never says a value.
+func (l Loop) takeMcpConfiguration(delivery Delivery) error {
+	if !l.isFromPlugin(delivery, "an MCP configuration") {
 		return nil
 	}
-	list, err := mcpservers.Read(delivery.Payload)
+	taken := l.McpConfiguration
+	configuration, err := mcpconfiguration.Read(delivery.Payload, taken.Identity, taken.SealingKey)
 	if err != nil {
-		l.Log(fmt.Sprintf("Not handled: MCP servers that do not fit (%v). The trierarch keeps the list it holds.", err))
+		l.Log(fmt.Sprintf("Not handled: an MCP configuration that does not fit (%v). The trierarch keeps the MCP configuration it applied.", err))
 		return nil
 	}
-	setting, err := aip.InList(delivery.Payload)
+	outcome, err := taken.File.Apply(configuration)
 	if err != nil {
-		l.Log(fmt.Sprintf("Not handled: MCP servers whose aip does not fit (%v). The trierarch keeps the list it holds.", err))
-		return nil
-	}
-	if err := l.McpServers.Accept(list); err != nil {
 		return err
 	}
-	if l.Aip == nil {
+	if outcome == mcpconfiguration.Older {
+		l.Log(fmt.Sprintf("Not handled: MCP configuration version %d, older than the one applied. The trierarch keeps the MCP configuration it applied.", configuration.Version))
 		return nil
 	}
-	return l.Aip.Accept(setting)
-}
-
-// takeSecrets takes the secrets the delivery carries, as takeTrusted takes the trusted repositories; what it logs never says a value.
-func (l Loop) takeSecrets(delivery Delivery) error {
-	if !l.isFromPlugin(delivery, "secrets") {
-		return nil
-	}
-	held, err := secrets.Read(delivery.Payload, l.SealingKey)
-	if err != nil {
-		l.Log(fmt.Sprintf("Not handled: secrets that do not fit (%v). The trierarch keeps the secrets it holds.", err))
-		return nil
-	}
-	return l.Secrets.Accept(held)
+	return taken.Confirm.ConfirmMcpConfiguration(l.PluginShipID, mcpconfiguration.AppliedPayload(configuration))
 }
 
 func (l Loop) handle(delivery Delivery) error {
@@ -171,14 +153,8 @@ func (l Loop) handle(delivery Delivery) error {
 		}
 		return l.Ship.Ack(delivery.DeliveryID)
 	}
-	if delivery.ContentType == mcpservers.ListContentType && l.McpServers != nil {
-		if err := l.takeMcpServers(delivery); err != nil {
-			return err
-		}
-		return l.Ship.Ack(delivery.DeliveryID)
-	}
-	if delivery.ContentType == secrets.ContentType && l.Secrets != nil {
-		if err := l.takeSecrets(delivery); err != nil {
+	if delivery.ContentType == mcpconfiguration.ContentType && l.McpConfiguration != nil {
+		if err := l.takeMcpConfiguration(delivery); err != nil {
 			return err
 		}
 		return l.Ship.Ack(delivery.DeliveryID)

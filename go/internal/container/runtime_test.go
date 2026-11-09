@@ -367,17 +367,17 @@ func TestASessionsSecretVariablesGoInItsEnvFileAloneNeverOnTheCommandLine(t *tes
 	r, _ := aContainerRuntime(t)
 	files := filesOf(t, r)
 	session := aSession(t.TempDir())
-	session.Env["AIP_SERVER"] = "https://aip.example.invalid"
-	session.SecretEnv = map[string]string{"AIP_TOKEN": "scouts-aip-token"}
+	session.Env["AEOLUS_EXAMPLE"] = "plain"
+	session.SecretEnv = map[string]string{"AEOLUS_MCP_TOKEN": "scouts-mcp-token"}
 
 	held, err := r.heldAs(session, files)
 
 	envFile := filepath.Join(files.Folder, "session.env")
-	want := "AEOLUS_LAUNCH=launch-1\nAIP_SERVER=https://aip.example.invalid\nAIP_TOKEN=scouts-aip-token\nCLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-token\n"
+	want := "AEOLUS_EXAMPLE=plain\nAEOLUS_LAUNCH=launch-1\nAEOLUS_MCP_TOKEN=scouts-mcp-token\nCLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-token\n"
 	if got := readFile(t, envFile); err != nil || got != want || modeOf(t, envFile) != 0o600 {
 		t.Fatalf("env file %q (%v), %v; want %q", got, modeOf(t, envFile), err, want)
 	}
-	if strings.Contains(strings.Join(held.Command, " "), "scouts-aip-token") || len(held.SecretEnv) != 0 {
+	if strings.Contains(strings.Join(held.Command, " "), "scouts-mcp-token") || len(held.SecretEnv) != 0 {
 		t.Fatalf("held as %q with secret variables %v, want the token in the env file alone", held.Command, held.SecretEnv)
 	}
 }

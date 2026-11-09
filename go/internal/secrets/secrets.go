@@ -1,11 +1,11 @@
 // Package secrets is the credentials of the crew-time MCP servers
 // (docs/design/crew-mcp-servers.md, decisions M5 and M6): the trierarch
-// plugin keeps them and sends them whole to each trierarch, each sealed to the
-// public key that trierarch made and reports, as a NaCl anonymous sealed box
-// (libsodium's crypto_box_seal), so the fleet stores only what it cannot read.
-// The trierarch opens them with its private key, keeps them mode 600, and only
-// the MCP proxy reads them, and a session's start the aip read token (#251). No
-// refusal says a value.
+// plugin keeps them and sends them whole, in a fleet's MCP configuration
+// (package mcpconfiguration), to each trierarch, each sealed to the public key
+// that trierarch made and reports, as a NaCl anonymous sealed box (libsodium's
+// crypto_box_seal), so the fleet stores only what it cannot read. The
+// trierarch opens them with its private key, keeps them mode 600, and only the
+// MCP proxy reads them. No refusal says a value.
 package secrets
 
 import (
@@ -18,12 +18,6 @@ import (
 	"strings"
 	"unicode/utf8"
 )
-
-// ContentType is the content type of the message that carries the secrets from the trierarch plugin.
-const ContentType = "application/vnd.aeolus.trierarch.secrets+json"
-
-// RequestContentType is the content type of the message a trierarch asks the trierarch plugin's ship for the secrets again with.
-const RequestContentType = "application/vnd.aeolus.trierarch.secrets-request+json"
 
 // Scheme names the sealing in the report.
 const Scheme = "nacl-sealed-box"
@@ -42,8 +36,8 @@ func IsName(name string) bool {
 	return len(name) <= nameMaxLength && namePattern.MatchString(name)
 }
 
-// isValue says whether a value can go into a header as it is.
-func isValue(value []byte) bool {
+// IsValue says whether a value can go into a header as it is.
+func IsValue(value []byte) bool {
 	return len(value) > 0 && len(value) <= valueMaxLength && utf8.Valid(value) && !bytes.ContainsAny(value, "\r\n\x00")
 }
 
@@ -83,7 +77,7 @@ func Read(payload string, key Key) (map[string]string, error) {
 		if !ok {
 			return nil, fmt.Errorf("%s: does not open with this trierarch's key", entry.Name)
 		}
-		if !isValue(value) {
+		if !IsValue(value) {
 			return nil, fmt.Errorf("%s: a value is 1 to %d bytes of UTF-8 with no line break or NUL", entry.Name, valueMaxLength)
 		}
 		opened[entry.Name] = string(value)

@@ -1,6 +1,6 @@
 // Package mcpservers is the crew-time MCP servers (docs/design/crew-mcp-servers.md,
-// decisions M2, M4 and M7): the trierarch plugin's one list of the remote
-// servers a ship may be crewed with, each by the name a crew request's
+// decisions M2, M4 and M7): the servers of a fleet's MCP configuration
+// (package mcpconfiguration), the remote servers a ship may be crewed with, each by the name a crew request's
 // mcpServers gives it, its URL, the tools a session may call and, for one that
 // needs it, its credential: the name of a secret the trierarch plugin seals to
 // each trierarch (package secrets) and the header the MCP proxy sets it in. A
@@ -20,12 +20,6 @@ import (
 	"strings"
 	"unicode"
 )
-
-// ListContentType is the content type of the message that carries the list from the trierarch plugin.
-const ListContentType = "application/vnd.aeolus.trierarch.mcp-servers+json"
-
-// RequestContentType is the content type of the message a trierarch asks the trierarch plugin's ship for the list again with.
-const RequestContentType = "application/vnd.aeolus.trierarch.mcp-servers-request+json"
 
 // Transport is the one transport a server is reached over (decision M8); an entry that names none has it.
 const Transport = "streamable-http"

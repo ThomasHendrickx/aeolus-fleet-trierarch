@@ -33,16 +33,10 @@ type Paths struct {
 	Homes string
 	// TrustedRepositories is the list the trierarch plugin's ship sent last (aeolus-fleet#384), apart from the configuration.
 	TrustedRepositories string
-	// McpServers is the MCP server list the trierarch plugin's ship sent last, apart from the configuration.
-	McpServers string
-	// Aip is the aip setting the trierarch plugin's ship sent last, apart from the configuration, whose own aip wins.
-	Aip string
-	// Secrets is the secrets the trierarch plugin's ship sent last, opened, mode 600: only the MCP proxy reads them, and a session's start the aip read token.
-	Secrets string
-	// AipCommand is the venv of the aip CLI the trierarch keeps for its host sessions (#314).
-	AipCommand string
-	// AipCommandOutcome is the outcome of the aip CLI's last install: its version, or why there is none.
-	AipCommandOutcome string
+	// McpConfiguration is the fleet's MCP configuration the trierarch plugin's ship sent and the trierarch applied last, its secrets opened, mode 600: only the MCP proxy reads a value.
+	McpConfiguration string
+	// Superseded are the files and folders an older trierarch kept that none reads any more: the MCP server list and secrets the fleet's MCP configuration replaced, and the aip setting and CLI a fleet now adds as an MCP server of its own. A start removes them; they are the trierarch's own paths, so no installation of the user's is touched.
+	Superseded []string
 	// SealingKey is the trierarch's private key, mode 600, which opens the secrets sealed to the public key its report states.
 	SealingKey string
 	// Repositories holds the clones of the trusted repositories, one folder per repository.
@@ -74,12 +68,16 @@ func Of(homeDirectory string, config string) Paths {
 		Homes:        filepath.Join(home, "homes"),
 
 		TrustedRepositories: filepath.Join(home, "trusted-repositories.json"),
-		McpServers:          filepath.Join(home, "mcp-servers.json"),
-		Aip:                 filepath.Join(home, "aip.json"),
-		Secrets:             filepath.Join(home, "secrets.json"),
-		AipCommand:          filepath.Join(home, "aip-command"),
-		AipCommandOutcome:   filepath.Join(home, "aip-command.json"),
-		SealingKey:          filepath.Join(home, "sealing-key"),
-		Repositories:        filepath.Join(home, "repositories"),
+		McpConfiguration:    filepath.Join(home, "mcp-configuration.json"),
+		Superseded: []string{
+			filepath.Join(home, "mcp-servers.json"),
+			filepath.Join(home, "secrets.json"),
+			filepath.Join(home, "aip.json"),
+			filepath.Join(home, "aip-command"),
+			filepath.Join(home, "aip-command.json"),
+			filepath.Join(home, "aip-command.lock"),
+		},
+		SealingKey:   filepath.Join(home, "sealing-key"),
+		Repositories: filepath.Join(home, "repositories"),
 	}
 }

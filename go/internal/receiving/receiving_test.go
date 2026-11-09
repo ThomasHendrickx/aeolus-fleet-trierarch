@@ -6,14 +6,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aip"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
 	"golang.org/x/crypto/nacl/box"
@@ -297,107 +297,23 @@ func TestAListThatCannotBeKeptIsNotAcknowledgedSoItComesAgain(t *testing.T) {
 	}
 }
 
-// aServerKeeper keeps the MCP servers it is given, or fails to.
-type aServerKeeper struct {
-	kept []mcpservers.Server
+const fleet = "flt_01m3tb1zgr5h2ffee12xnch8sv"
+
+var identity = mcpconfiguration.Identity{FleetID: fleet, PluginShipID: plugin}
+
+// aConfirmer is the trierarch's own ship confirming an applied configuration to the plugin ship: what it sent, or its failure.
+type aConfirmer struct {
+	sent []string
+	to   []string
 	err  error
-	took int
 }
 
-func (k *aServerKeeper) Accept(list []mcpservers.Server) error {
-	k.took++
-	if k.err != nil {
-		return k.err
+func (c *aConfirmer) ConfirmMcpConfiguration(pluginShipID string, payload string) error {
+	if c.err != nil {
+		return c.err
 	}
-	k.kept = list
-	return nil
-}
-
-func runKeepingServers(keeper *aServerKeeper, pluginShip string, answers ...answer) *aRun {
-	ctx, cancel := context.WithCancel(context.Background())
-	ran := &aRun{ship: &aShip{cancel: cancel, answers: answers}}
-	Loop{
-		Ship:         ran.ship,
-		Log:          func(line string) { ran.logged = append(ran.logged, line) },
-		Interval:     5 * time.Second,
-		KeyWaitMax:   300 * time.Second,
-		Pause:        func(_ context.Context, wait time.Duration) { ran.waits = append(ran.waits, wait) },
-		PluginShipID: pluginShip,
-		McpServers:   keeper,
-	}.Run(ctx)
-	return ran
-}
-
-func aServerList(from string, id string, payload string) Delivery {
-	return Delivery{DeliveryID: id, SenderShipID: from, ContentType: mcpservers.ListContentType, Payload: payload}
-}
-
-const graph = `{"servers":[{"name":"company-graph","url":"https://graph.example.test/mcp","transport":"streamable-http","tools":["read_neo4j_cypher"]}]}`
-
-func TestTheServerListFromThePluginsShipIsKeptAndAcknowledged(t *testing.T) {
-	keeper := &aServerKeeper{}
-
-	ran := runKeepingServers(keeper, plugin, answer{deliveries: []Delivery{aServerList(plugin, "d1", graph)}})
-
-	if len(keeper.kept) != 1 || keeper.kept[0].Name != "company-graph" || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 0 {
-		t.Fatalf("kept %v, acked %v, logged %q", keeper.kept, ran.ship.acked, ran.logged)
-	}
-}
-
-func TestAServerListFromAnotherShipIsAcknowledgedAndNotTaken(t *testing.T) {
-	keeper := &aServerKeeper{}
-
-	ran := runKeepingServers(keeper, plugin, answer{deliveries: []Delivery{aServerList(argo, "d1", graph)}})
-
-	want := "Not handled: MCP servers from " + argo + ". The trierarch takes them only from the trierarch plugin's ship " + plugin + "."
-	if keeper.took != 0 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || ran.logged[0] != want {
-		t.Fatalf("took %d, acked %v, logged %q", keeper.took, ran.ship.acked, ran.logged)
-	}
-}
-
-func TestAServerListOnAMachineThatDoesNotKnowThePluginsShipIsAcknowledgedAndNotTaken(t *testing.T) {
-	keeper := &aServerKeeper{}
-
-	ran := runKeepingServers(keeper, "", answer{deliveries: []Delivery{aServerList(plugin, "d1", graph)}})
-
-	if keeper.took != 0 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || !strings.HasPrefix(ran.logged[0], "Not handled: MCP servers from "+plugin+". This machine does not know") {
-		t.Fatalf("took %d, acked %v, logged %q", keeper.took, ran.ship.acked, ran.logged)
-	}
-}
-
-func TestAServerListThatDoesNotFitIsAcknowledgedAndTheHeldListStays(t *testing.T) {
-	keeper := &aServerKeeper{kept: []mcpservers.Server{{Name: "company-graph"}}}
-
-	ran := runKeepingServers(keeper, plugin, answer{deliveries: []Delivery{aServerList(plugin, "d1", `{"servers":[{"name":"g","url":"https://t@g.example.test/mcp","transport":"streamable-http","tools":["t"]}]}`)}})
-
-	if keeper.took != 0 || len(keeper.kept) != 1 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || !strings.HasSuffix(ran.logged[0], "The trierarch keeps the list it holds.") {
-		t.Fatalf("took %d, kept %v, acked %v, logged %q", keeper.took, keeper.kept, ran.ship.acked, ran.logged)
-	}
-}
-
-func TestAServerListThatCannotBeKeptIsNotAcknowledgedSoItComesAgain(t *testing.T) {
-	keeper := &aServerKeeper{err: errors.New("the file cannot be written")}
-
-	ran := runKeepingServers(keeper, plugin, answer{deliveries: []Delivery{aServerList(plugin, "d1", graph)}})
-
-	if len(ran.ship.acked) != 0 {
-		t.Fatalf("acked %v, want none", ran.ship.acked)
-	}
-}
-
-// aSecretKeeper keeps the secrets it is given, or fails to.
-type aSecretKeeper struct {
-	kept map[string]string
-	err  error
-	took int
-}
-
-func (k *aSecretKeeper) Accept(held map[string]string) error {
-	k.took++
-	if k.err != nil {
-		return k.err
-	}
-	k.kept = held
+	c.to = append(c.to, pluginShipID)
+	c.sent = append(c.sent, payload)
 	return nil
 }
 
@@ -410,8 +326,8 @@ func aSealingKey(t *testing.T) secrets.Key {
 	return key
 }
 
-// sealedSecrets is the message the trierarch plugin sends: each value sealed to the public key with libsodium's crypto_box_seal.
-func sealedSecrets(t *testing.T, public string, values map[string]string) string {
+// aConfigurationOf is the configuration message the plugin ship sends: of the fleet, at the version, with company-graph when isWithGraph, its secret sealed to the public key with libsodium's crypto_box_seal.
+func aConfigurationOf(t *testing.T, fleetID string, version int, public string, isWithGraph bool) string {
 	t.Helper()
 	raw, err := base64.StdEncoding.DecodeString(public)
 	if err != nil {
@@ -419,169 +335,181 @@ func sealedSecrets(t *testing.T, public string, values map[string]string) string
 	}
 	var recipient [32]byte
 	copy(recipient[:], raw)
-	entries := []map[string]string{}
-	for name, value := range values {
-		sealed, err := box.SealAnonymous(nil, []byte(value), &recipient, rand.Reader)
+	servers, entries := []any{}, []map[string]string{}
+	if isWithGraph {
+		sealed, err := box.SealAnonymous(nil, []byte("Bearer abc"), &recipient, rand.Reader)
 		if err != nil {
 			t.Fatal(err)
 		}
-		entries = append(entries, map[string]string{"name": name, "sealed": base64.StdEncoding.EncodeToString(sealed)})
+		servers = append(servers, json.RawMessage(`{"name":"company-graph","url":"https://graph.example.test/mcp","tools":["read_neo4j_cypher"],"credential":{"secret":"graph-token","header":"Authorization"}}`))
+		entries = append(entries, map[string]string{"name": "graph-token", "sealed": base64.StdEncoding.EncodeToString(sealed)})
 	}
-	text, err := json.Marshal(map[string]any{"publicKey": public, "secrets": entries})
+	text, err := json.Marshal(map[string]any{"fleetId": fleetID, "pluginShipId": plugin, "version": version, "publicKey": public, "servers": servers, "secrets": entries})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return string(text)
 }
 
-func runKeepingSecrets(keeper *aSecretKeeper, key secrets.Key, answers ...answer) *aRun {
+func aConfiguration(from string, id string, payload string) Delivery {
+	return Delivery{DeliveryID: id, SenderShipID: from, ContentType: mcpconfiguration.ContentType, Payload: payload}
+}
+
+type aConfigurationRun struct {
+	*aRun
+	file      *mcpconfiguration.File
+	confirmer *aConfirmer
+}
+
+// runApplying runs the loop of a machine of the fleet that knows the plugin ship, applying configurations into the file.
+func runApplying(t *testing.T, key secrets.Key, file *mcpconfiguration.File, confirmer *aConfirmer, answers ...answer) aConfigurationRun {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	ran := &aRun{ship: &aShip{cancel: cancel, answers: answers}}
 	Loop{
-		Ship:         ran.ship,
-		Log:          func(line string) { ran.logged = append(ran.logged, line) },
-		Interval:     5 * time.Second,
-		KeyWaitMax:   300 * time.Second,
-		Pause:        func(_ context.Context, wait time.Duration) { ran.waits = append(ran.waits, wait) },
-		PluginShipID: plugin,
-		Secrets:      keeper,
-		SealingKey:   key,
+		Ship:             ran.ship,
+		Log:              func(line string) { ran.logged = append(ran.logged, line) },
+		Interval:         5 * time.Second,
+		KeyWaitMax:       300 * time.Second,
+		Pause:            func(_ context.Context, wait time.Duration) { ran.waits = append(ran.waits, wait) },
+		PluginShipID:     plugin,
+		McpConfiguration: &McpConfiguration{File: file, Identity: identity, SealingKey: key, Confirm: confirmer},
 	}.Run(ctx)
-	return ran
+	return aConfigurationRun{aRun: ran, file: file, confirmer: confirmer}
 }
 
-func someSecrets(from string, id string, payload string) Delivery {
-	return Delivery{DeliveryID: id, SenderShipID: from, ContentType: secrets.ContentType, Payload: payload}
+func aConfigurationFile(t *testing.T) *mcpconfiguration.File {
+	t.Helper()
+	file := &mcpconfiguration.File{Path: filepath.Join(t.TempDir(), "mcp-configuration.json")}
+	file.Load(identity)
+	return file
 }
 
-func TestTheSecretsFromThePluginsShipAreOpenedKeptAndAcknowledged(t *testing.T) {
+func appliedOf(t *testing.T, version int, public string) string {
+	t.Helper()
+	text, err := json.Marshal(map[string]any{"fleetId": fleet, "pluginShipId": plugin, "version": version, "publicKey": public})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(text)
+}
+
+func sameJSON(t *testing.T, got []string, want []string) bool {
+	t.Helper()
+	if len(got) != len(want) {
+		return false
+	}
+	for index := range got {
+		var left, right any
+		if json.Unmarshal([]byte(got[index]), &left) != nil || json.Unmarshal([]byte(want[index]), &right) != nil {
+			return false
+		}
+		leftText, _ := json.Marshal(left)
+		rightText, _ := json.Marshal(right)
+		if string(leftText) != string(rightText) {
+			return false
+		}
+	}
+	return true
+}
+
+func TestAConfigurationFromThePluginShipIsAppliedConfirmedAndThenAcknowledged(t *testing.T) {
 	key := aSealingKey(t)
-	keeper := &aSecretKeeper{}
 
-	ran := runKeepingSecrets(keeper, key, answer{deliveries: []Delivery{someSecrets(plugin, "d1", sealedSecrets(t, key.Public(), map[string]string{"graph-token": "Bearer s3cr3t"}))}})
+	ran := runApplying(t, key, aConfigurationFile(t), &aConfirmer{}, answer{deliveries: []Delivery{aConfiguration(plugin, "d1", aConfigurationOf(t, fleet, 3, key.Public(), true))}})
 
-	if keeper.kept["graph-token"] != "Bearer s3cr3t" || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 0 {
-		t.Fatalf("kept %d, acked %v, logged %q", len(keeper.kept), ran.ship.acked, ran.logged)
+	held, ok := ran.file.Current()
+	if !ok || held.Version != 3 || len(held.Servers) != 1 || held.Secrets["graph-token"] != "Bearer abc" || !slices.Equal(ran.ship.acked, []string{"d1"}) {
+		t.Fatalf("held %+v, %v, acked %v, want version 3 applied and acknowledged", held, ok, ran.ship.acked)
+	}
+	if !slices.Equal(ran.confirmer.to, []string{plugin}) || !sameJSON(t, ran.confirmer.sent, []string{appliedOf(t, 3, key.Public())}) {
+		t.Fatalf("confirmed %v to %v, want version 3 and the key to the plugin ship", ran.confirmer.sent, ran.confirmer.to)
 	}
 }
 
-func TestSecretsFromAnotherShipAreAcknowledgedAndNotTaken(t *testing.T) {
+func TestADuplicateConfigurationIsConfirmedAgainAndChangesNothing(t *testing.T) {
 	key := aSealingKey(t)
-	keeper := &aSecretKeeper{}
+	payload := aConfigurationOf(t, fleet, 3, key.Public(), true)
 
-	ran := runKeepingSecrets(keeper, key, answer{deliveries: []Delivery{someSecrets(argo, "d1", sealedSecrets(t, key.Public(), map[string]string{"g": "s3cr3t"}))}})
+	ran := runApplying(t, key, aConfigurationFile(t), &aConfirmer{}, answer{deliveries: []Delivery{aConfiguration(plugin, "d1", payload), aConfiguration(plugin, "d2", payload)}})
 
-	want := "Not handled: secrets from " + argo + ". The trierarch takes them only from the trierarch plugin's ship " + plugin + "."
-	if keeper.took != 0 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || ran.logged[0] != want {
-		t.Fatalf("took %d, acked %v, logged %q", keeper.took, ran.ship.acked, ran.logged)
+	if !sameJSON(t, ran.confirmer.sent, []string{appliedOf(t, 3, key.Public()), appliedOf(t, 3, key.Public())}) || !slices.Equal(ran.ship.acked, []string{"d1", "d2"}) {
+		t.Fatalf("confirmed %v, acked %v, want version 3 confirmed twice", ran.confirmer.sent, ran.ship.acked)
 	}
 }
 
-func TestSecretsSealedToAnotherKeyAreAcknowledgedAndTheHeldOnesStay(t *testing.T) {
+func TestAnOlderConfigurationIsAcknowledgedNotAppliedAndNotConfirmed(t *testing.T) {
+	key := aSealingKey(t)
+
+	ran := runApplying(t, key, aConfigurationFile(t), &aConfirmer{}, answer{deliveries: []Delivery{aConfiguration(plugin, "d1", aConfigurationOf(t, fleet, 4, key.Public(), false)), aConfiguration(plugin, "d2", aConfigurationOf(t, fleet, 3, key.Public(), true))}})
+
+	held, _ := ran.file.Current()
+	if held.Version != 4 || len(held.Servers) != 0 || !sameJSON(t, ran.confirmer.sent, []string{appliedOf(t, 4, key.Public())}) || !slices.Equal(ran.ship.acked, []string{"d1", "d2"}) {
+		t.Fatalf("held %+v, confirmed %v, acked %v, want version 4 alone held and confirmed", held, ran.confirmer.sent, ran.ship.acked)
+	}
+}
+
+func TestAConfigurationThatDoesNotFitIsAcknowledgedAndChangesNothing(t *testing.T) {
 	key := aSealingKey(t)
 	other := aSealingKey(t)
-	keeper := &aSecretKeeper{kept: map[string]string{"g": "held"}}
+	for _, test := range []struct {
+		label    string
+		delivery Delivery
+		logged   string
+	}{
+		{"from another ship", aConfiguration(argo, "d2", aConfigurationOf(t, fleet, 5, key.Public(), false)), "Not handled: an MCP configuration from " + argo + ". The trierarch takes them only from the trierarch plugin's ship " + plugin + "."},
+		{"of another fleet", aConfiguration(plugin, "d2", aConfigurationOf(t, "flt_01m3tb1zgr5h2ffee12xnch8sw", 5, key.Public(), false)), "MCP_CONFIGURATION_IDENTITY_MISMATCH"},
+		{"sealed to another key", aConfiguration(plugin, "d2", aConfigurationOf(t, fleet, 5, other.Public(), false)), "The trierarch keeps the MCP configuration it applied."},
+	} {
+		t.Run(test.label, func(t *testing.T) {
+			ran := runApplying(t, key, aConfigurationFile(t), &aConfirmer{}, answer{deliveries: []Delivery{aConfiguration(plugin, "d1", aConfigurationOf(t, fleet, 3, key.Public(), true)), test.delivery}})
 
-	ran := runKeepingSecrets(keeper, key, answer{deliveries: []Delivery{someSecrets(plugin, "d1", sealedSecrets(t, other.Public(), map[string]string{"g": "s3cr3t"}))}})
-
-	if keeper.took != 0 || keeper.kept["g"] != "held" || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || !strings.HasSuffix(ran.logged[0], "The trierarch keeps the secrets it holds.") || strings.Contains(ran.logged[0], "s3cr3t") {
-		t.Fatalf("took %d, acked %v, logged %q", keeper.took, ran.ship.acked, ran.logged)
+			held, _ := ran.file.Current()
+			if held.Version != 3 || len(held.Servers) != 1 || len(ran.confirmer.sent) != 1 || !slices.Equal(ran.ship.acked, []string{"d1", "d2"}) {
+				t.Fatalf("held %+v, confirmed %v, acked %v, want version 3 kept and confirmed once", held, ran.confirmer.sent, ran.ship.acked)
+			}
+			if len(ran.logged) != 1 || !strings.Contains(ran.logged[0], test.logged) || strings.Contains(ran.logged[0], "Bearer") {
+				t.Fatalf("logged %q, want one value-free line with %q", ran.logged, test.logged)
+			}
+		})
 	}
 }
 
-func TestSecretsThatCannotBeKeptAreNotAcknowledgedSoTheyComeAgain(t *testing.T) {
+func TestAConfigurationThatCannotBePersistedIsNotConfirmedOrAcknowledgedSoItComesAgain(t *testing.T) {
 	key := aSealingKey(t)
-	keeper := &aSecretKeeper{err: errors.New("the file cannot be written")}
+	blocked := filepath.Join(t.TempDir(), "a-file")
+	if err := os.WriteFile(blocked, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file := &mcpconfiguration.File{Path: filepath.Join(blocked, "mcp-configuration.json")}
 
-	ran := runKeepingSecrets(keeper, key, answer{deliveries: []Delivery{someSecrets(plugin, "d1", sealedSecrets(t, key.Public(), map[string]string{"g": "s3cr3t"}))}})
+	ran := runApplying(t, key, file, &aConfirmer{}, answer{deliveries: []Delivery{aConfiguration(plugin, "d1", aConfigurationOf(t, fleet, 3, key.Public(), true))}})
 
-	if len(ran.ship.acked) != 0 || slices.ContainsFunc(ran.logged, func(line string) bool { return strings.Contains(line, "s3cr3t") }) {
-		t.Fatalf("acked %v, logged %q, want none acked and no value logged", ran.ship.acked, ran.logged)
+	if len(ran.ship.acked) != 0 || len(ran.confirmer.sent) != 0 {
+		t.Fatalf("acked %v, confirmed %v, want neither", ran.ship.acked, ran.confirmer.sent)
 	}
 }
 
-// anAipKeeper keeps the aip setting it is given, none included, or fails to.
-type anAipKeeper struct {
-	kept *aip.Setting
-	err  error
-	took int
-}
+func TestAConfigurationWhoseConfirmationFailsIsNotAcknowledgedSoItComesAgain(t *testing.T) {
+	key := aSealingKey(t)
 
-func (k *anAipKeeper) Accept(setting *aip.Setting) error {
-	k.took++
-	if k.err != nil {
-		return k.err
-	}
-	k.kept = setting
-	return nil
-}
-
-func runKeepingServersAndAip(servers *aServerKeeper, keeper *anAipKeeper, answers ...answer) *aRun {
-	ctx, cancel := context.WithCancel(context.Background())
-	ran := &aRun{ship: &aShip{cancel: cancel, answers: answers}}
-	Loop{
-		Ship:         ran.ship,
-		Log:          func(line string) { ran.logged = append(ran.logged, line) },
-		Interval:     5 * time.Second,
-		KeyWaitMax:   300 * time.Second,
-		Pause:        func(_ context.Context, wait time.Duration) { ran.waits = append(ran.waits, wait) },
-		PluginShipID: plugin,
-		McpServers:   servers,
-		Aip:          keeper,
-	}.Run(ctx)
-	return ran
-}
-
-const graphWithAip = `{"servers":[{"name":"company-graph","url":"https://graph.example.test/mcp","transport":"streamable-http","tools":["read_neo4j_cypher"]}],"aip":{"server":"https://aip.example.test","tokenSecret":"aip-read"}}`
-
-func TestTheAipTheServerListFromThePluginsShipCarriesIsKeptWithTheList(t *testing.T) {
-	servers, keeper := &aServerKeeper{}, &anAipKeeper{}
-
-	ran := runKeepingServersAndAip(servers, keeper, answer{deliveries: []Delivery{aServerList(plugin, "d1", graphWithAip)}})
-
-	want := aip.Setting{Server: "https://aip.example.test", TokenSecret: "aip-read"}
-	if keeper.kept == nil || *keeper.kept != want || len(servers.kept) != 1 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 0 {
-		t.Fatalf("kept %+v and %v, acked %v, logged %q", keeper.kept, servers.kept, ran.ship.acked, ran.logged)
-	}
-}
-
-func TestAServerListWithNoAipClearsTheAipThePluginSentBefore(t *testing.T) {
-	servers, keeper := &aServerKeeper{}, &anAipKeeper{kept: &aip.Setting{Server: "https://aip.example.test", TokenSecret: "aip-read"}}
-
-	ran := runKeepingServersAndAip(servers, keeper, answer{deliveries: []Delivery{aServerList(plugin, "d1", graph)}})
-
-	if keeper.took != 1 || keeper.kept != nil || !slices.Equal(ran.ship.acked, []string{"d1"}) {
-		t.Fatalf("took %d, kept %+v, acked %v, want the aip cleared", keeper.took, keeper.kept, ran.ship.acked)
-	}
-}
-
-func TestTheAipInAServerListFromAnotherShipIsNotTaken(t *testing.T) {
-	servers, keeper := &aServerKeeper{}, &anAipKeeper{}
-
-	ran := runKeepingServersAndAip(servers, keeper, answer{deliveries: []Delivery{aServerList(argo, "d1", graphWithAip)}})
-
-	if keeper.took != 0 || servers.took != 0 || !slices.Equal(ran.ship.acked, []string{"d1"}) {
-		t.Fatalf("took %d and %d, acked %v", keeper.took, servers.took, ran.ship.acked)
-	}
-}
-
-func TestAServerListWhoseAipDoesNotFitIsNotTakenAndTheHeldOnesStay(t *testing.T) {
-	servers, keeper := &aServerKeeper{}, &anAipKeeper{}
-	payload := `{"servers":[],"aip":{"server":"https://aip.example.test","tokenSecret":"aip-read","token":"s3cr3t"}}`
-
-	ran := runKeepingServersAndAip(servers, keeper, answer{deliveries: []Delivery{aServerList(plugin, "d1", payload)}})
-
-	if keeper.took != 0 || servers.took != 0 || !slices.Equal(ran.ship.acked, []string{"d1"}) || len(ran.logged) != 1 || !strings.HasSuffix(ran.logged[0], "The trierarch keeps the list it holds.") || strings.Contains(ran.logged[0], "s3cr3t") {
-		t.Fatalf("took %d and %d, acked %v, logged %q", keeper.took, servers.took, ran.ship.acked, ran.logged)
-	}
-}
-
-func TestAServerListWhoseAipCannotBeKeptIsNotAcknowledgedSoItComesAgain(t *testing.T) {
-	servers, keeper := &aServerKeeper{}, &anAipKeeper{err: errors.New("the file cannot be written")}
-
-	ran := runKeepingServersAndAip(servers, keeper, answer{deliveries: []Delivery{aServerList(plugin, "d1", graphWithAip)}})
+	ran := runApplying(t, key, aConfigurationFile(t), &aConfirmer{err: errors.New("the fleet cannot be reached")}, answer{deliveries: []Delivery{aConfiguration(plugin, "d1", aConfigurationOf(t, fleet, 3, key.Public(), true))}})
 
 	if len(ran.ship.acked) != 0 {
 		t.Fatalf("acked %v, want none", ran.ship.acked)
+	}
+}
+
+func TestTheOldServerListAndSecretsMessagesAreAcknowledgedAsNotHandled(t *testing.T) {
+	key := aSealingKey(t)
+	old := []Delivery{
+		{DeliveryID: "d1", SenderShipID: plugin, ContentType: "application/vnd.aeolus.trierarch.mcp-servers+json", Payload: `{"servers":[]}`},
+		{DeliveryID: "d2", SenderShipID: plugin, ContentType: "application/vnd.aeolus.trierarch.secrets+json", Payload: `{"publicKey":"` + key.Public() + `","secrets":[]}`},
+	}
+
+	ran := runApplying(t, key, aConfigurationFile(t), &aConfirmer{}, answer{deliveries: old})
+
+	if _, ok := ran.file.Current(); ok || len(ran.confirmer.sent) != 0 || !slices.Equal(ran.ship.acked, []string{"d1", "d2"}) || len(ran.logged) != 2 || !strings.HasPrefix(ran.logged[0], "Not handled: application/vnd.aeolus.trierarch.mcp-servers+json") {
+		t.Fatalf("acked %v, confirmed %v, logged %q, want both acknowledged as not handled", ran.ship.acked, ran.confirmer.sent, ran.logged)
 	}
 }

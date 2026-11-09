@@ -93,30 +93,10 @@ func TestWritesItsJSONSchemaBesideTheConfiguration(t *testing.T) {
 	}
 }
 
-func TestLoadsTheAipServerAndTheNameOfTheSecretItsReadTokenIs(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	text := `{"caps":{"ships":4,"running":2},"repositories":{},"folders":{},"harnesses":{},"aip":{"server":"https://aip.example.invalid","tokenSecret":"aip-read"}}`
-	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	loaded, err := Load(path)
-
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.Aip == nil || *loaded.Aip != (Aip{Server: "https://aip.example.invalid", TokenSecret: "aip-read"}) {
-		t.Errorf("loaded aip %+v, want the server and the secret's name", loaded.Aip)
-	}
-}
-
-func TestRefusesAnAipThatDoesNotFit(t *testing.T) {
+func TestLoadsAConfigurationWithALeftoverAipAndSaysItIsNoLongerUsed(t *testing.T) {
 	for name, aip := range map[string]string{
-		"no server":           `{"tokenSecret":"aip-read"}`,
-		"no token secret":     `{"server":"https://aip.example.invalid"}`,
-		"a server not a URL":  `{"server":"aip.example.invalid","tokenSecret":"aip-read"}`,
-		"a server not HTTP":   `{"server":"ftp://aip.example.invalid","tokenSecret":"aip-read"}`,
-		"a secret not a name": `{"server":"https://aip.example.invalid","tokenSecret":"../aip-read"}`,
+		"an aip as it was written": `{"server":"https://aip.example.invalid","tokenSecret":"aip-read"}`,
+		"an aip that never fitted": `{"server":"ftp://aip.example.invalid"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.json")
@@ -125,9 +105,22 @@ func TestRefusesAnAipThatDoesNotFit(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "aip") {
-				t.Errorf("Load(aip %s) err %v, want a refusal naming aip", aip, err)
+			loaded, err := Load(path)
+
+			if err != nil || !loaded.HasLeftoverAip {
+				t.Errorf("Load(aip %s) = %+v, %v, want it loaded and the aip said to be left over", aip, loaded, err)
 			}
 		})
+	}
+}
+
+func TestAConfigurationWithoutAipHasNoneLeftOver(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"caps":{"ships":4,"running":2},"repositories":{},"folders":{},"harnesses":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if loaded, err := Load(path); err != nil || loaded.HasLeftoverAip {
+		t.Errorf("Load = %+v, %v, want no aip left over", loaded, err)
 	}
 }

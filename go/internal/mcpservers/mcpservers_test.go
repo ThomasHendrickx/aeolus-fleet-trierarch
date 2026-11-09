@@ -1,8 +1,6 @@
 package mcpservers
 
 import (
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -117,51 +115,6 @@ func TestReadNamesTheServerItRefuses(t *testing.T) {
 	}
 }
 
-func TestFileHoldsNoneWhenMissing(t *testing.T) {
-	file := &File{Path: filepath.Join(t.TempDir(), "mcp-servers.json")}
-
-	file.Load()
-
-	if got := file.Current(); len(got) != 0 {
-		t.Errorf("Current() = %v, want none", got)
-	}
-}
-
-func TestFileHoldsNoneWhenItDoesNotFit(t *testing.T) {
-	file := &File{Path: filepath.Join(t.TempDir(), "mcp-servers.json")}
-	if err := os.WriteFile(file.Path, []byte(listOf(`{"name":"g","url":"https://t@g.example.test/mcp","transport":"streamable-http","tools":["t"]}`)), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	file.Load()
-
-	if got := file.Current(); len(got) != 0 {
-		t.Errorf("Current() = %v, want none: a list written by hand is read as strictly as one received", got)
-	}
-}
-
-func TestFileKeepsTheAcceptedListAcrossLoads(t *testing.T) {
-	file := &File{Path: filepath.Join(t.TempDir(), "state", "mcp-servers.json")}
-	list, err := Read(listOf(graph))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := file.Accept(list); err != nil {
-		t.Fatal(err)
-	}
-	again := &File{Path: file.Path}
-	again.Load()
-
-	got := again.Current()
-	if len(got) != 1 || got[0].Name != "company-graph" || !slices.Equal(got[0].Tools, list[0].Tools) {
-		t.Errorf("Current() after Load = %v, want %v", got, list)
-	}
-	if _, err := os.Stat(file.Path + ".partial"); err == nil {
-		t.Error("the partial file was left beside the list")
-	}
-}
-
 func TestOfferedByNamesEachServerOfTheListToEachHarnessThatCanAddIt(t *testing.T) {
 	list, _ := Read(listOf(graph))
 
@@ -191,52 +144,5 @@ func TestOfferedByLeavesOutAServerAHarnessCannotAdd(t *testing.T) {
 
 	if !slices.Equal(got["claude-code"], []string{"company-graph", "graph.v2"}) || !slices.Equal(got["codex"], []string{"company-graph"}) {
 		t.Errorf("OfferedBy = %v, want both for claude-code and company-graph alone for codex", got)
-	}
-}
-
-type anAsker struct {
-	asked []string
-	err   error
-}
-
-func (a *anAsker) AskForMcpServers(pluginShipID string) error {
-	a.asked = append(a.asked, pluginShipID)
-	return a.err
-}
-
-func TestAskAsksTheTrierarchPluginsShipOnceAndNoMore(t *testing.T) {
-	fleet := &anAsker{}
-	ask := &Ask{Fleet: fleet, PluginShipID: "shp_x", Log: func(string) {}}
-
-	ask.Once()
-	ask.Once()
-
-	if !slices.Equal(fleet.asked, []string{"shp_x"}) {
-		t.Errorf("asked %v, want once", fleet.asked)
-	}
-}
-
-func TestAskAsksAgainOnTheNextPassWhenTheFleetDoesNotTakeIt(t *testing.T) {
-	fleet := &anAsker{err: os.ErrDeadlineExceeded}
-	var logged []string
-	ask := &Ask{Fleet: fleet, PluginShipID: "shp_x", Log: func(line string) { logged = append(logged, line) }}
-
-	ask.Once()
-	fleet.err = nil
-	ask.Once()
-	ask.Once()
-
-	if len(fleet.asked) != 2 || len(logged) != 1 {
-		t.Errorf("asked %v, logged %q, want two asks and one line", fleet.asked, logged)
-	}
-}
-
-func TestAskAsksNothingWhenTheMachineDoesNotKnowTheShip(t *testing.T) {
-	fleet := &anAsker{}
-
-	(&Ask{Fleet: fleet, Log: func(string) {}}).Once()
-
-	if len(fleet.asked) != 0 {
-		t.Errorf("asked %v, want none", fleet.asked)
 	}
 }

@@ -15,8 +15,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aip"
 )
 
 // Schema is the configuration's JSON Schema, written beside it so an editor checks it.
@@ -39,7 +37,8 @@ type Configuration struct {
 	HarnessOrder []string         `json:"-"`
 	Prices       map[string]Price `json:"prices,omitempty"`
 	Logins       *Logins          `json:"logins,omitempty"`
-	Aip          *Aip             `json:"aip,omitempty"`
+	// HasLeftoverAip says the file still names an aip, which no session gets any more: a fleet adds aip as an MCP server of its own. It is left out of what is read, so a machine set up before keeps running.
+	HasLeftoverAip bool `json:"-"`
 }
 
 // Runtime is where the sessions run: on the host, or in a container of the runtime's binary with its caps.
@@ -119,17 +118,6 @@ type Price struct {
 	CacheWrite float64 `json:"cacheWrite"`
 }
 
-// Aip is the aip server every session reaches (#251), and the name of the sealed secret its read token is: never the token.
-type Aip struct {
-	Server      string `json:"server"`
-	TokenSecret string `json:"tokenSecret"`
-}
-
-// check says why the aip does not fit, nil when it does: as the trierarch plugin's setting is checked.
-func (a Aip) check() error {
-	return aip.Setting(a).Check()
-}
-
 // Logins is which login each session runs on: a default per harness and a login per ship name.
 type Logins struct {
 	Default *DefaultLogins    `json:"default,omitempty"`
@@ -152,6 +140,9 @@ func Initial() Configuration {
 	}
 }
 
+// leftoverAip is the key a configuration named the aip server by, before a fleet added aip as an MCP server of its own.
+const leftoverAip = "aip"
+
 // requiredKeys are the keys the schema requires at the top.
 var requiredKeys = []string{"caps", "repositories", "folders", "harnesses"}
 
@@ -170,17 +161,21 @@ func Load(path string) (Configuration, error) {
 			return Configuration{}, fmt.Errorf("the configuration at %s does not fit: it has no %s", path, key)
 		}
 	}
+	_, hasLeftoverAip := keys[leftoverAip]
+	if hasLeftoverAip {
+		delete(keys, leftoverAip)
+		text, err = json.Marshal(keys)
+		if err != nil {
+			return Configuration{}, err
+		}
+	}
 	decoder := json.NewDecoder(bytes.NewReader(text))
 	decoder.DisallowUnknownFields()
 	var configuration Configuration
 	if err := decoder.Decode(&configuration); err != nil {
 		return Configuration{}, fmt.Errorf("the configuration at %s does not fit: %v", path, err)
 	}
-	if configuration.Aip != nil {
-		if err := configuration.Aip.check(); err != nil {
-			return Configuration{}, fmt.Errorf("the configuration at %s does not fit: %v", path, err)
-		}
-	}
+	configuration.HasLeftoverAip = hasLeftoverAip
 	order, err := keyOrder(keys["harnesses"])
 	if err != nil {
 		return Configuration{}, fmt.Errorf("the configuration at %s does not fit: %v", path, err)

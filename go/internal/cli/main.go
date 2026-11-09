@@ -22,6 +22,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/modelproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/receiving"
@@ -83,14 +84,10 @@ type Machine struct {
 	OwnShip func(kept crew.File) receiving.Ship
 	// Trusted keeps the trusted repositories the trierarch plugin's ship sends (aeolus-fleet#384), with the configuration run read; none when nil.
 	Trusted func(at paths.Paths, configuration config.Configuration) receiving.Keeper
-	// McpServers keeps the MCP servers the trierarch plugin's ship sends; none when nil.
-	McpServers func(at paths.Paths) receiving.ServerKeeper
-	// Aip keeps the aip setting the trierarch plugin's ship sends; none when nil.
-	Aip func(at paths.Paths) receiving.AipKeeper
-	// AipCommand is the aip CLI the trierarch keeps for its host sessions (#314); none when nil.
-	AipCommand func(at paths.Paths) AipCommand
-	// Secrets keeps the secrets the trierarch plugin's ship sends, opened with the sealing key; none when nil.
-	Secrets  func(at paths.Paths) receiving.SecretKeeper
+	// McpConfiguration is the fleet's MCP configuration the trierarch plugin's ship sends, which run loads for its fleet and plugin ship before its first pass; none when nil.
+	McpConfiguration func(at paths.Paths) *mcpconfiguration.File
+	// McpFleet is the trierarch's own ship as the MCP configuration asks it; none when nil.
+	McpFleet func(kept crew.File) McpFleet
 	Sessions func(at paths.Paths) Sessions
 	// Log writes a line to the trierarch's log.
 	Log func(line string)
@@ -254,7 +251,6 @@ func Main(args []string, machine Machine) (string, int) {
 				Register:              machine.Register,
 				IsLeaseHeld:           machine.IsLeaseHeld,
 				Sleep:                 machine.Sleep,
-				AipCommand:            machine.aipCommandOf(at),
 				Detect: func(harnesses []string, by detection.By) (detection.Detected, error) {
 					return machine.Detect(at, harnesses, by)
 				},
@@ -396,7 +392,6 @@ func upgrade(at paths.Paths, machine Machine, command parsed) (answer, error) {
 		Trierarch:    machine.Trierarch,
 		Sleep:        machine.Sleep,
 		IsPluginStep: variable(machine.Environ, PluginStepVariable) == "1",
-		AipCommand:   machine.aipCommandOf(at),
 	}.Run(version)
 	if err != nil {
 		return answer{}, err
@@ -426,6 +421,10 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 	if err != nil {
 		return answer{}, err
 	}
+	if configuration.HasLeftoverAip {
+		machine.Log("The configuration's aip is no longer used: a fleet adds aip as an MCP server of its own; remove it from " + at.Config)
+	}
+	machine.removeSuperseded(at)
 	// A session in a container is held to its ship only on a runtime config check takes (decision 0039): none starts otherwise.
 	if err := checkRuntime(at, configuration, machine); err != nil {
 		return answer{}, err
@@ -435,6 +434,11 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 	}
 	// A machine set up before there was a sealing key gets one at its next start, so no init is needed for it.
 	sealingKey, err := secrets.LoadOrMake(at.SealingKey)
+	if err != nil {
+		return answer{}, err
+	}
+	// The configuration of another fleet or plugin ship is cleared before any pass can launch with it.
+	held, err := machine.loadMcpConfiguration(at, kept)
 	if err != nil {
 		return answer{}, err
 	}
@@ -452,11 +456,6 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 	stopped, done := context.WithCancel(context.Background())
 	defer done()
 	received := make(chan struct{})
-	keptAip := make(chan struct{})
-	go func() {
-		defer close(keptAip)
-		keepAipCommand(stopped, machine.aipCommandOf(at), machine.PassEvery, time.Now)
-	}()
 	var isKeyCutOff atomic.Bool
 	go func() {
 		defer close(received)
@@ -467,14 +466,9 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 		if machine.Trusted != nil {
 			loop.Trusted = machine.Trusted(at, configuration)
 		}
-		if machine.McpServers != nil {
-			loop.McpServers = machine.McpServers(at)
-		}
-		if machine.Aip != nil {
-			loop.Aip = machine.Aip(at)
-		}
-		if machine.Secrets != nil {
-			loop.Secrets, loop.SealingKey = machine.Secrets(at), sealingKey
+		if held != nil {
+			identity, _ := held.Identity()
+			loop.McpConfiguration = &receiving.McpConfiguration{File: held, Identity: identity, SealingKey: sealingKey, Confirm: machine.McpFleet(kept)}
 		}
 		loop.Run(stopped)
 	}()
@@ -487,19 +481,46 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 			// The stop ends a receive the fleet still holds at once: a service manager that stops the trierarch sees it gone in a moment.
 			done()
 			<-received
-			<-keptAip
 			return answer{data: map[string]bool{"stopped": true}, text: "aeolus-trierarch stopped."}, nil
 		case <-time.After(machine.PassEvery):
 		}
 	}
 }
 
-// aipCommandOf is the aip CLI the trierarch keeps on the machine; none when nil.
-func (m Machine) aipCommandOf(at paths.Paths) AipCommand {
-	if m.AipCommand == nil {
-		return nil
+// McpFleet is the trierarch's own ship as the MCP configuration asks it: the fleet it is in, and its confirmations to the trierarch plugin's ship.
+type McpFleet interface {
+	FleetID() (string, error)
+	receiving.Confirmer
+}
+
+// loadMcpConfiguration loads the MCP configuration file for the trierarch's fleet, as the fleet names it, and the trierarch plugin's ship; none, and the file cleared, on a machine that does not know that ship.
+func (m Machine) loadMcpConfiguration(at paths.Paths, kept crew.File) (*mcpconfiguration.File, error) {
+	if m.McpConfiguration == nil || m.McpFleet == nil {
+		return nil, nil
 	}
-	return m.AipCommand(at)
+	// Without the supplying ship no applied configuration stands: the proxy reads the file at each call, so it must go before any session can use it.
+	if kept.PluginShipID == "" {
+		if err := os.Remove(at.McpConfiguration); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("clear the MCP configuration of a plugin ship no longer configured: %w", err)
+		}
+		return nil, nil
+	}
+	fleetID, err := m.McpFleet(kept).FleetID()
+	if err != nil {
+		return nil, fmt.Errorf("read the fleet this trierarch is in: %w", err)
+	}
+	held := m.McpConfiguration(at)
+	held.Load(mcpconfiguration.Identity{FleetID: fleetID, PluginShipID: kept.PluginShipID})
+	return held, nil
+}
+
+// removeSuperseded removes what an older trierarch kept that none reads any more, each by the trierarch's own path; one that cannot be removed is logged and tried again at the next start.
+func (m Machine) removeSuperseded(at paths.Paths) {
+	for _, path := range at.Superseded {
+		if err := os.RemoveAll(path); err != nil {
+			m.Log(fmt.Sprintf("Could not remove %s, which no trierarch reads any more: %v", path, err))
+		}
+	}
 }
 
 // checkRuntime refuses a configuration whose sessions cannot run on the machine, with every reason.

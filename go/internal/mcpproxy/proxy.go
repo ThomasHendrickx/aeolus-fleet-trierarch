@@ -31,6 +31,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
 )
@@ -56,10 +57,12 @@ var (
 	bearer        = regexp.MustCompile(`^Bearer (\S+)$`)
 )
 
-// Access is what a session may reach at the proxy: its token, fresh at each start, and the names of the servers it was started with.
+// Access is what a session may reach at the proxy: its token, fresh at each start, the names of the servers it was started with, and the fleet and plugin ship of the configuration it was started under, which it stays bound to across a restart of its hold or the trierarch.
 type Access struct {
-	Token   string   `json:"token"`
-	Servers []string `json:"servers"`
+	Token        string   `json:"token"`
+	Servers      []string `json:"servers"`
+	FleetID      string   `json:"fleetId"`
+	PluginShipID string   `json:"pluginShipId"`
 }
 
 // WriteAccess keeps the access in the session's folder, which only its user reads.
@@ -94,21 +97,16 @@ func PathOf(shipID string, server string) string { return Prefix + shipID + "/" 
 type Proxy struct {
 	// Sessions is the sessions folder, where each session keeps its access.
 	Sessions string
-	// Servers is the list the trierarch plugin sent last, read at each request.
-	Servers func() []mcpservers.Server
-	// Secret is a secret's value, read at each request; false when none is held. Without it no secret is held.
-	Secret func(name string) (string, bool)
+	// Configuration is the MCP configuration the trierarch applied last, read once at each request, so a changed URL, allowlist or credential takes effect on the next call; false when none is applied.
+	Configuration func() (mcpconfiguration.Configuration, bool)
 }
 
-// credentialOf is the header and value the server's credential sets; false when it needs one the proxy does not hold.
-func (p Proxy) credentialOf(server mcpservers.Server) (header string, value string, ok bool) {
+// credentialOf is the header and value the server's credential sets; false when it needs one the configuration does not hold.
+func credentialOf(server mcpservers.Server, held map[string]string) (header string, value string, ok bool) {
 	if server.Credential == nil {
 		return "", "", true
 	}
-	if p.Secret == nil {
-		return "", "", false
-	}
-	value, ok = p.Secret(server.Credential.Secret)
+	value, ok = held[server.Credential.Secret]
 	return server.Credential.Header, value, ok
 }
 
@@ -123,21 +121,29 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	_, _ = w.Write(text)
 }
 
-// isAllowed is whether the token is that of the ship's running session, started with the server.
-func (p Proxy) isAllowed(shipID string, server string, token string) bool {
+// accessOf is the access of the ship's running session, started with the server, whose token it is; false when there is none.
+func (p Proxy) accessOf(shipID string, server string, token string) (Access, bool) {
 	if token == "" {
-		return false
+		return Access{}, false
 	}
 	folder := filepath.Join(p.Sessions, shipID)
 	access, ok := readAccess(folder)
-	return ok && subtle.ConstantTimeCompare([]byte(token), []byte(access.Token)) == 1 && slices.Contains(access.Servers, server) && proxytoken.IsHoldRunning(folder)
+	if !ok || subtle.ConstantTimeCompare([]byte(token), []byte(access.Token)) != 1 || !slices.Contains(access.Servers, server) || !proxytoken.IsHoldRunning(folder) {
+		return Access{}, false
+	}
+	return access, true
 }
 
-func (p Proxy) serverOf(name string) (mcpservers.Server, bool) {
-	if p.Servers == nil {
-		return mcpservers.Server{}, false
+// applied is the configuration applied now; false when none is.
+func (p Proxy) applied() (mcpconfiguration.Configuration, bool) {
+	if p.Configuration == nil {
+		return mcpconfiguration.Configuration{}, false
 	}
-	for _, server := range p.Servers() {
+	return p.Configuration()
+}
+
+func serverOf(configuration mcpconfiguration.Configuration, name string) (mcpservers.Server, bool) {
+	for _, server := range configuration.Servers {
 		if server.Name == name {
 			return server, true
 		}
@@ -156,11 +162,18 @@ func (p Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if match := bearer.FindStringSubmatch(r.Header.Get("authorization")); match != nil {
 		token = match[1]
 	}
-	if !p.isAllowed(shipID, name, token) {
+	access, ok := p.accessOf(shipID, name, token)
+	if !ok {
 		refuse(w, http.StatusUnauthorized, "not the token of a running session of this ship started with "+name)
 		return
 	}
-	server, ok := p.serverOf(name)
+	// A session stays bound to the fleet and plugin ship it started under: a configuration of another, even one naming a server of the same name, never serves it.
+	configuration, isApplied := p.applied()
+	if !isApplied || configuration.Identity != (mcpconfiguration.Identity{FleetID: access.FleetID, PluginShipID: access.PluginShipID}) {
+		refuse(w, http.StatusForbidden, mcpconfiguration.IdentityMismatch+": this session started under another MCP configuration than the one applied")
+		return
+	}
+	server, ok := serverOf(configuration, name)
 	if !ok {
 		refuse(w, http.StatusNotFound, name+" is not on the MCP servers this trierarch holds")
 		return
@@ -171,7 +184,7 @@ func (p Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		refuse(w, http.StatusNotFound, name+" is not on the MCP servers this trierarch holds")
 		return
 	}
-	header, credential, ok := p.credentialOf(server)
+	header, credential, ok := credentialOf(server, configuration.Secrets)
 	if !ok {
 		refuse(w, http.StatusServiceUnavailable, name+"'s credential is not held by this trierarch")
 		return

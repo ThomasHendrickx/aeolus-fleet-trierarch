@@ -275,42 +275,37 @@ func TestMoreThan100ActivitiesAreWrittenInCallsOfAtMost100(t *testing.T) {
 	}
 }
 
-func TestAsksThePluginsShipForTheMcpServersAsItsOwnShipWithAKeyOfItsOwn(t *testing.T) {
-	client, sent := aSendingFleet(t, func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"messageId":"msg_1"}`)) })
+func TestAsksAndConfirmsTheMcpConfigurationToThePluginsShipAsItsOwnShipWithAKeyOfItsOwn(t *testing.T) {
+	for _, test := range []struct {
+		label       string
+		send        func(client Client) error
+		contentType string
+	}{
+		{"the request", func(client Client) error {
+			return client.AskForMcpConfiguration("shp_plugin", `{"fleetId":"flt_1","pluginShipId":"shp_plugin"}`)
+		}, "application/vnd.aeolus.trierarch.mcp-configuration-request+json"},
+		{"the confirmation", func(client Client) error {
+			return client.ConfirmMcpConfiguration("shp_plugin", `{"fleetId":"flt_1","pluginShipId":"shp_plugin"}`)
+		}, "application/vnd.aeolus.trierarch.mcp-configuration-applied+json"},
+	} {
+		t.Run(test.label, func(t *testing.T) {
+			client, sent := aSendingFleet(t, func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"messageId":"msg_1"}`)) })
 
-	if err := client.AskForMcpServers("shp_plugin"); err != nil {
-		t.Fatal(err)
-	}
-	first := (*sent)["idempotencyKey"]
-	if err := client.AskForMcpServers("shp_plugin"); err != nil {
-		t.Fatal(err)
-	}
+			if err := test.send(client); err != nil {
+				t.Fatal(err)
+			}
+			first := (*sent)["idempotencyKey"]
+			if err := test.send(client); err != nil {
+				t.Fatal(err)
+			}
 
-	got := *sent
-	if got["payload"] != "{}" || got["contentType"] != "application/vnd.aeolus.trierarch.mcp-servers-request+json" || mustJSON(got["selector"]) != mustJSON(map[string]any{"kind": "ship", "shipId": "shp_plugin"}) {
-		t.Errorf("sent %v", got)
-	}
-	if key, _ := got["idempotencyKey"].(string); key == "" || key == first {
-		t.Errorf("idempotency keys %v then %v, want one of its own each time", first, got["idempotencyKey"])
-	}
-}
-
-func TestAsksThePluginsShipForTheSecretsAsItsOwnShipWithAKeyOfItsOwn(t *testing.T) {
-	client, sent := aSendingFleet(t, func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"messageId":"msg_1"}`)) })
-
-	if err := client.AskForSecrets("shp_plugin"); err != nil {
-		t.Fatal(err)
-	}
-	first := (*sent)["idempotencyKey"]
-	if err := client.AskForSecrets("shp_plugin"); err != nil {
-		t.Fatal(err)
-	}
-
-	got := *sent
-	if got["payload"] != "{}" || got["contentType"] != "application/vnd.aeolus.trierarch.secrets-request+json" || mustJSON(got["selector"]) != mustJSON(map[string]any{"kind": "ship", "shipId": "shp_plugin"}) {
-		t.Errorf("sent %v", got)
-	}
-	if key, _ := got["idempotencyKey"].(string); key == "" || key == first {
-		t.Errorf("idempotency keys %v then %v, want one of its own each time", first, got["idempotencyKey"])
+			got := *sent
+			if got["payload"] != `{"fleetId":"flt_1","pluginShipId":"shp_plugin"}` || got["contentType"] != test.contentType || mustJSON(got["selector"]) != mustJSON(map[string]any{"kind": "ship", "shipId": "shp_plugin"}) {
+				t.Errorf("sent %v", got)
+			}
+			if key, _ := got["idempotencyKey"].(string); key == "" || key == first {
+				t.Errorf("idempotency keys %v then %v, want one of its own each time", first, got["idempotencyKey"])
+			}
+		})
 	}
 }

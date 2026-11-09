@@ -188,14 +188,8 @@ describe('the logins in the configuration (api keys K5)', () => {
 });
 
 
-describe('the aip server in the configuration (#251)', () => {
-  it('takes its http or https URL and the name of the secret its read token is, never the token', () => {
-    const aip = { server: 'https://aip.example.invalid', tokenSecret: 'aip-read' };
-
-    expect(configurationSchema.parse({ ...initialConfiguration(), aip }).aip).toEqual(aip);
-    expect(configurationSchema.safeParse({ ...initialConfiguration(), aip: { server: 'https://aip.example.invalid' } }).success).toBe(false);
-    expect(configurationSchema.safeParse({ ...initialConfiguration(), aip: { server: 'ftp://aip.example.invalid', tokenSecret: 'aip-read' } }).success).toBe(false);
-    expect(configurationSchema.safeParse({ ...initialConfiguration(), aip: { server: 'https://aip.example.invalid', tokenSecret: '../aip-read' } }).success).toBe(false);
-    expect(configurationSchema.safeParse({ ...initialConfiguration(), aip: { ...aip, token: 'a-token' } }).success).toBe(false);
+describe('aip in the configuration', () => {
+  it('is no setting of the trierarch any more: a fleet adds aip as an MCP server of its own', () => {
+    expect(configurationSchema.safeParse({ ...initialConfiguration(), aip: { server: 'https://aip.example.invalid', tokenSecret: 'aip-read' } }).success).toBe(false);
   });
 });

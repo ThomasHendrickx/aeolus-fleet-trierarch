@@ -175,6 +175,24 @@ func TestTheTrierarchsNameIsWhatTheFleetKnowsItBy(t *testing.T) {
 	}
 }
 
+func TestTheTrierarchsFleetIsTheOneTheFleetSaysItIsIn(t *testing.T) {
+	_, client := aFleetAnswering(t, map[string]string{"/api/v1/ship/whoami": `{"shipId":"` + scout + `","fleetId":"flt_01m3tb1zgr5h2ffee12xnch8sv","name":"mac-mini"}`})
+
+	fleetID, err := client.FleetID()
+
+	if err != nil || fleetID != "flt_01m3tb1zgr5h2ffee12xnch8sv" {
+		t.Fatalf("FleetID() = %q, %v, want the fleet whoami names", fleetID, err)
+	}
+}
+
+func TestATrierarchWhoseFleetIsNotNamedHasNone(t *testing.T) {
+	_, client := aFleetAnswering(t, map[string]string{"/api/v1/ship/whoami": `{"shipId":"` + scout + `","name":"mac-mini"}`})
+
+	if fleetID, err := client.FleetID(); err == nil {
+		t.Fatalf("FleetID() = %q, want an error when whoami names no fleet", fleetID)
+	}
+}
+
 func TestAReportOnAShipsBehalfCarriesItsSessionsCrewToken(t *testing.T) {
 	recorded, client := aFleetAnswering(t, map[string]string{"/api/v1/ship/report": `{}`})
 

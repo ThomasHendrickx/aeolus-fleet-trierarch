@@ -23,9 +23,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aip"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aipcommand"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/processproof"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
@@ -84,86 +83,6 @@ type ProxyToken struct {
 	Token    string
 }
 
-// Aip is the aip server every session reaches (#251, #312), with the read token of the secret named: AIP_SERVER and AIP_TOKEN, as the aip CLI reads them. The machine's configuration names it, or else the trierarch plugin sent it.
-type Aip struct {
-	// Configured is the aip the configuration names, which wins when set.
-	Configured *aip.Setting
-	// Sent is the aip setting the trierarch plugin sent last, read afresh at each start; false when none was sent. None when nil.
-	Sent    func() (aip.Setting, bool)
-	Secrets SecretValues
-	// Log takes the line that says the secret is not held, never a value.
-	Log func(line string)
-	// Command is the bin of the aip CLI the trierarch keeps on the host (#314), while it holds one; none in containers, whose image holds its own.
-	Command func() (string, bool)
-	// Plugin is the plugin of aip's skills the trierarch keeps beside its aip CLI on the host (#315), while it holds one; none in containers, whose image holds them.
-	Plugin func() (string, bool)
-	// Folder is the aip CLI's folder: no entry in or under it stays on a session's PATH but Command's bin, put in front (#321).
-	Folder string
-	// Path is the PATH a session has without the aip CLI: the hold's own, which Command's bin goes in front of.
-	Path string
-}
-
-// pluginFlags are the flags a harness takes a plugin folder for this session alone with, by harness: so far Claude Code's, which then lists the plugin's skills and writes nothing into the user's own skills folders.
-var pluginFlags = map[string]string{"claude-code": "--plugin-dir"}
-
-// setting is the aip the session reaches: the configured one, or else the one the trierarch plugin sent; false with neither.
-func (a *Aip) setting() (aip.Setting, bool) {
-	if a == nil {
-		return aip.Setting{}, false
-	}
-	if a.Configured != nil {
-		return *a.Configured, true
-	}
-	if a.Sent == nil {
-		return aip.Setting{}, false
-	}
-	return a.Sent()
-}
-
-// SecretValues is the secrets the trierarch holds, read afresh at each start.
-type SecretValues interface {
-	Value(name string) (string, bool)
-}
-
-// withAip is the session with the aip server in its environment, the trierarch's aip CLI first on its PATH while it holds one, the plugin of aip's skills on its command line where its harness takes one and the trierarch holds it, and its read token among its secrets when it is held; as it is without an aip server.
-func (a *Aip) withAip(session Start) Start {
-	setting, ok := a.setting()
-	if !ok {
-		return session
-	}
-	env := maps.Clone(session.Env)
-	if env == nil {
-		env = map[string]string{}
-	}
-	env["AIP_SERVER"] = setting.Server
-	if a.Command != nil {
-		if bin, ok := a.Command(); ok {
-			env["PATH"] = bin + string(os.PathListSeparator) + aipcommand.PathWithout(a.Path, a.Folder)
-		}
-	}
-	session.Env = env
-	if flag, ok := pluginFlags[session.Harness]; ok && a.Plugin != nil && len(session.Command) > 0 {
-		if plugin, ok := a.Plugin(); ok {
-			// Right after the harness's own name: a flag such as --mcp-config takes every word up to the next flag, so it comes last.
-			session.Command = slices.Concat(session.Command[:1], []string{flag, plugin}, session.Command[1:])
-		}
-	}
-	token, ok := a.Secrets.Value(setting.TokenSecret)
-	if !ok {
-		if a.Log != nil {
-			a.Log(fmt.Sprintf("%s: the secret %s is not held, so its session reaches the aip server with no read token", session.ShipID, setting.TokenSecret))
-		}
-		return session
-	}
-	secrets := maps.Clone(session.SecretEnv)
-	if secrets == nil {
-		secrets = map[string]string{}
-	}
-	secrets["AIP_TOKEN"] = token
-	session.SecretEnv = secrets
-	return session
-}
-
 type Runtime struct {
 	// Sessions is the sessions folder: a folder per ship, with its hold's files.
 	Sessions string
@@ -173,8 +92,8 @@ type Runtime struct {
 	// Launch is what a hold's start goes through (see Launch).
 	Launch   []string
 	BootedAt func() time.Time
-	// Aip is the aip server every session reaches; none when nil.
-	Aip *Aip
+	// McpIdentity is the fleet and plugin ship of the MCP configuration applied now, which a session started with MCP servers is bound to at the proxy; false, or nil, while none is known.
+	McpIdentity func() (mcpconfiguration.Identity, bool)
 	// HeldAs is what the hold runs for a session, once the ship's last session is stopped and its folder is new: the session as it is when nil. A container runtime's hold runs the runtime's run of it (H18).
 	HeldAs func(session Start, files hold.Files) (Start, error)
 }
@@ -289,7 +208,6 @@ func (r Runtime) Start(session Start) error {
 	if err := os.MkdirAll(files.Folder, 0o700); err != nil {
 		return err
 	}
-	session = r.Aip.withAip(session)
 	if r.HeldAs != nil {
 		held, err := r.HeldAs(session, files)
 		if err != nil {
@@ -306,7 +224,13 @@ func (r Runtime) Start(session Start) error {
 		words = append(words, "--proxy-token-variable", token.Variable)
 	}
 	if mcp := session.Mcp; mcp != nil {
-		if err := mcpproxy.WriteAccess(files.Folder, mcp.Access); err != nil {
+		access := mcp.Access
+		if r.McpIdentity != nil {
+			if identity, ok := r.McpIdentity(); ok {
+				access.FleetID, access.PluginShipID = identity.FleetID, identity.PluginShipID
+			}
+		}
+		if err := mcpproxy.WriteAccess(files.Folder, access); err != nil {
 			return err
 		}
 		if mcp.Config != nil {

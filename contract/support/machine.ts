@@ -120,7 +120,7 @@ const SYSTEM_FOLDERS = ['/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbi
 /** The harnesses and service managers a real install of this machine may hold: only the stand-ins answer to them. */
 const STOOD_IN = new Set(['claude', 'codex', 'copilot', 'systemctl', 'journalctl', 'systemd-run', 'launchctl', 'npm', 'npx', 'podman', 'id']);
 
-/** The stand-in machine reaches nothing beyond its loopback: an HTTPS proxy that answers no one, so a trierarch's download of uv for aip fails at once. */
+/** The stand-in machine reaches nothing beyond its loopback: an HTTPS proxy that answers no one, so any download a trierarch tries fails at once. */
 export const NO_NETWORK_PROXY = 'http://127.0.0.1:9';
 
 /** Links each of the machine's programs into `tools`, but for the ones stood in for, so a real Claude Code or Codex on this machine is never found. */

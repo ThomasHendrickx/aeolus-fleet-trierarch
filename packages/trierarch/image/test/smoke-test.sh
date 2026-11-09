@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Smoke test of the session image (decision 0039): the harness, the aeolus-fleet
-# plugin of the image's version, the aip CLI with its aip-runtime skill and a
-# nested rootless Podman all work in a
+# plugin of the image's version and a nested rootless Podman all work in a
 # container started as the trierarch starts one, its input held on the host.
 #
 # Usage: smoke-test.sh <runtime binary> <image> <version>
@@ -78,19 +77,19 @@ in_ship_home() {
 
 check "the aeolus-fleet plugin is installed at $VERSION in a home of the ship's own" in_ship_home bash -c "$PLUGIN_AT_VERSION"
 
-# The aip CLI at the revision aeolus-company pins, on Python 3.14 or newer, and
-# its aip-runtime skill in the session's Claude Code skills, in the ship's home
-# too (#251).
-check 'aip runs at 0.7.0' in_session bash -c '[[ $(aip --version) == "aip 0.7.0 "* ]] || { aip --version; exit 1; }'
+# No aip of the image's own: a fleet adds aip as an MCP server of its own.
+check 'the session has no aip CLI' in_session bash -c '! command -v aip'
 
-AIP_RUNTIME_SKILL='
-  grep -q "^name: aip-runtime$" "$HOME/.claude/skills/aip-runtime/SKILL.md" \
-    && cmp -s "$HOME/.claude/skills/aip-runtime/SKILL.md" <(aip runtime --skill)
+# A link an earlier image made to its aip-runtime skill goes from the ship's
+# home at the next start, and a skill of the session's own stays.
+EARLIER_IMAGE_SKILLS='
+  mkdir -p "$HOME/.claude/skills/own" \
+    && ln -sfn /opt/aeolus-session/skills/aip-runtime "$HOME/.claude/skills/aip-runtime" \
+    && aeolus-session-init true \
+    && [[ ! -e $HOME/.claude/skills/aip-runtime && ! -L $HOME/.claude/skills/aip-runtime && -d $HOME/.claude/skills/own ]]
 '
 
-check 'the aip-runtime skill of that aip is in the session'"'"'s skills' in_session bash -c "$AIP_RUNTIME_SKILL"
-
-check "the aip-runtime skill of that aip is in a home of the ship's own" in_ship_home bash -c "$AIP_RUNTIME_SKILL"
+check "an earlier image's aip-runtime skill goes from a home of the ship's own" in_ship_home bash -c "$EARLIER_IMAGE_SKILLS"
 
 # Nested containers from an image built in place, so the test pulls nothing:
 # a shell, /usr/bin/true, /usr/bin/sleep and the libraries they load.

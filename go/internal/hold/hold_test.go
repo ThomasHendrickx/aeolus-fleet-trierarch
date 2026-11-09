@@ -286,7 +286,7 @@ func TestAHoldToldToHandAProxyTokenItsFolderDoesNotKeepStartsNothing(t *testing.
 func TestAHoldToldToHandASecretVariableItsFolderDoesNotKeepStartsNothing(t *testing.T) {
 	sessions := t.TempDir()
 
-	code := Main([]string{"shp_01m6jyczpnpp5c0vxh54c966cy", "--sessions", sessions, "--folder", t.TempDir(), "--harness", "claude-code", "--secret-env", "AIP_TOKEN", "--", "sh", "-c", "touch started"}, "1.2.3", nil)
+	code := Main([]string{"shp_01m6jyczpnpp5c0vxh54c966cy", "--sessions", sessions, "--folder", t.TempDir(), "--harness", "claude-code", "--secret-env", "AEOLUS_MCP_TOKEN", "--", "sh", "-c", "touch started"}, "1.2.3", nil)
 
 	if code != 1 {
 		t.Fatalf("Main = %d, want 1", code)

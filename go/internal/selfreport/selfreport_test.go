@@ -3,9 +3,7 @@ package selfreport
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -74,51 +72,6 @@ func TestTheNoteCountsCrashedShips(t *testing.T) {
 	in.State.Entries = map[string]reconciler.Entry{scout: {ShipID: scout, State: "crashed"}}
 	if got := Of(in).Note; got != "0 of 6 running, 1 crashed" {
 		t.Fatalf("note = %q", got)
-	}
-}
-
-func TestTheNoteSaysWhyHostSessionsGetNoAip(t *testing.T) {
-	in := anInput()
-	in.AipMissing = "its install failed, as aeolus-trierarch status says"
-	if got := Of(in).Note; got != "0 of 6 running, no aip on the host: its install failed, as aeolus-trierarch status says" {
-		t.Fatalf("note = %q", got)
-	}
-}
-
-// aCrowdedInput is a report whose note says a lot already: 196 characters, before any aip.
-func aCrowdedInput() Input {
-	in := anInput()
-	in.IsKeyCutOff = true
-	in.Running = 1
-	in.State.Entries = map[string]reconciler.Entry{}
-	for at := range 6 {
-		shipID := fmt.Sprintf("shp_01m6jyczpnpp5c0vxh54c966c%d", at)
-		in.State.Entries[shipID] = reconciler.Entry{ShipID: shipID, State: "crashed"}
-	}
-	in.State.NotOffered = []reconciler.NotOfferedHarness{{Harness: "copilot", Reason: "its aeolus-fleet plugin is not installed for Copilot: copilot plugin install aeolus-fleet@aeolus-fleet"}}
-	return in
-}
-
-func TestTheNoteSaysNoAipWithoutWhyWhereWhyWouldPassTheLongestNoteCoreTakes(t *testing.T) {
-	in := aCrowdedInput()
-	in.IsKeyCutOff = false
-	in.AipMissing = "its install failed, as aeolus-trierarch status says"
-
-	note := Of(in).Note
-
-	if !strings.HasSuffix(note, ", no aip on the host") || len(note) > 200 {
-		t.Fatalf("note = %q (%d characters), want it ending in no aip on the host, within 200", note, len(note))
-	}
-}
-
-func TestTheNoteLeavesOutTheAipWhereItWouldPassTheLongestNoteCoreTakes(t *testing.T) {
-	in := aCrowdedInput()
-	in.AipMissing = "its install failed, as aeolus-trierarch status says"
-
-	note := Of(in).Note
-
-	if len(note) > 200 || strings.Contains(note, "aip") || !strings.Contains(note, "copilot not offered") {
-		t.Fatalf("note = %q (%d characters), want the rest within 200 and no aip", note, len(note))
 	}
 }
 

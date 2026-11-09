@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,8 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/container"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
@@ -340,6 +343,158 @@ func TestRunMakesTheSealingKeyOfAMachineSetUpBeforeThereWasOne(t *testing.T) {
 
 	if info, err := os.Stat(at.SealingKey); err != nil || info.Mode().Perm() != 0o600 {
 		t.Errorf("the sealing key = %v, %v, want a file of mode 600", info, err)
+	}
+}
+
+// anMcpFleet is the trierarch's own ship in the fleet, as the MCP configuration asks it.
+type anMcpFleet struct{ fleetID string }
+
+func (f anMcpFleet) FleetID() (string, error) { return f.fleetID, nil }
+
+func (anMcpFleet) ConfirmMcpConfiguration(string, string) error { return nil }
+
+// runHoldingMcpConfiguration runs the trierarch of a fleet once, with the MCP configuration of the plugin ship persisted, and answers what the file holds at its first pass.
+func runHoldingMcpConfiguration(t *testing.T, persistedFor mcpconfiguration.Identity) (mcpconfiguration.Configuration, bool) {
+	t.Helper()
+	machine, _, _ := aMain(t)
+	Main(setupWords(), machine)
+	at := paths.Of(machine.HomeDirectory, "")
+	persisted := &mcpconfiguration.File{Path: at.McpConfiguration}
+	persisted.Load(persistedFor)
+	if _, err := persisted.Apply(mcpconfiguration.Configuration{Identity: persistedFor, Version: 3, PublicKey: "key-a", Servers: []mcpservers.Server{}, Secrets: map[string]string{}}); err != nil {
+		t.Fatal(err)
+	}
+	held := &mcpconfiguration.File{Path: at.McpConfiguration}
+	machine.McpConfiguration = func(paths.Paths) *mcpconfiguration.File { return held }
+	machine.McpFleet = func(crew.File) McpFleet { return anMcpFleet{fleetID: "flt_01m3tb1zgr5h2ffee12xnch8sv"} }
+	var atFirstPass mcpconfiguration.Configuration
+	var isHeld bool
+	stop := make(chan struct{})
+	machine.Stop = stop
+	machine.NewPass = func(paths.Paths, crew.File, config.Configuration) (func(isKeyCutOff bool) error, error) {
+		return func(bool) error {
+			atFirstPass, isHeld = held.Current()
+			close(stop)
+			return nil
+		}, nil
+	}
+
+	if output, code := Main([]string{"run"}, machine); code != 0 {
+		t.Fatalf("run answered %q, %d", output, code)
+	}
+	return atFirstPass, isHeld
+}
+
+func TestRunHoldsThePersistedMcpConfigurationOfItsFleetAndPluginShipFromItsFirstPass(t *testing.T) {
+	held, ok := runHoldingMcpConfiguration(t, mcpconfiguration.Identity{FleetID: "flt_01m3tb1zgr5h2ffee12xnch8sv", PluginShipID: pluginShipID})
+
+	if !ok || held.Version != 3 {
+		t.Errorf("at the first pass the file holds %+v, %v, want version 3", held, ok)
+	}
+}
+
+func TestRunClearsAnMcpConfigurationOfAnotherFleetBeforeItsFirstPass(t *testing.T) {
+	held, ok := runHoldingMcpConfiguration(t, mcpconfiguration.Identity{FleetID: "flt_01m3tb1zgr5h2ffee12xnch8sw", PluginShipID: pluginShipID})
+
+	if ok {
+		t.Errorf("at the first pass the file holds %+v, want none", held)
+	}
+}
+
+func TestRunClearsTheAppliedMcpConfigurationWhenNoPluginShipIsConfigured(t *testing.T) {
+	machine, _, _ := aMain(t)
+	var words []string
+	for index, word := range setupWords() {
+		if word == "--plugin-ship-id" || (index > 0 && setupWords()[index-1] == "--plugin-ship-id") {
+			continue
+		}
+		words = append(words, word)
+	}
+	if output, code := Main(words, machine); code != 0 {
+		t.Fatalf("init answered %q, %d", output, code)
+	}
+	at := paths.Of(machine.HomeDirectory, "")
+	identity := mcpconfiguration.Identity{FleetID: "flt_01m3tb1zgr5h2ffee12xnch8sv", PluginShipID: pluginShipID}
+	persisted := &mcpconfiguration.File{Path: at.McpConfiguration}
+	persisted.Load(identity)
+	if _, err := persisted.Apply(mcpconfiguration.Configuration{Identity: identity, Version: 3, PublicKey: "key-a", Servers: []mcpservers.Server{}, Secrets: map[string]string{}}); err != nil {
+		t.Fatal(err)
+	}
+	machine.McpConfiguration = func(paths.Paths) *mcpconfiguration.File { return &mcpconfiguration.File{Path: at.McpConfiguration} }
+	machine.McpFleet = func(crew.File) McpFleet { return anMcpFleet{fleetID: identity.FleetID} }
+	stop := make(chan struct{})
+	machine.Stop = stop
+	close(stop)
+
+	if output, code := Main([]string{"run"}, machine); code != 0 {
+		t.Fatalf("run answered %q, %d", output, code)
+	}
+
+	if held, ok := mcpconfiguration.ReadFile(at.McpConfiguration); ok {
+		t.Errorf("after run without a plugin ship the file holds %+v, want none, so the proxy refuses every bound session", held)
+	}
+}
+
+func TestRunRemovesTheSupersededMcpAndAipFilesAndLeavesTheUsersOwnAip(t *testing.T) {
+	machine, _, _ := aMain(t)
+	Main(setupWords(), machine)
+	home := filepath.Join(machine.HomeDirectory, ".aeolus", "trierarch")
+	superseded := []string{"mcp-servers.json", "secrets.json", "aip.json", "aip-command.json", "aip-command.lock", filepath.Join("aip-command", "venv", "bin", "aip")}
+	users := filepath.Join(machine.HomeDirectory, ".local", "bin", "aip")
+	for _, path := range append([]string{users}, superseded...) {
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(home, path)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stop := make(chan struct{})
+	machine.Stop = stop
+	close(stop)
+
+	if output, code := Main([]string{"run"}, machine); code != 0 {
+		t.Fatalf("run answered %q, %d", output, code)
+	}
+
+	for _, name := range []string{"mcp-servers.json", "secrets.json", "aip.json", "aip-command.json", "aip-command.lock", "aip-command"} {
+		if _, err := os.Lstat(filepath.Join(home, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s after run: %v, want it removed", name, err)
+		}
+	}
+	if _, err := os.Stat(users); err != nil {
+		t.Errorf("the user's own aip after run: %v, want it left", err)
+	}
+}
+
+func TestRunSaysALeftoverAipInTheConfigurationIsNoLongerUsed(t *testing.T) {
+	machine, _, _ := aMain(t)
+	Main(setupWords(), machine)
+	at := paths.Of(machine.HomeDirectory, "")
+	text, err := os.ReadFile(at.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withAip := strings.Replace(string(text), "{", `{"aip":{"server":"https://aip.example.invalid","tokenSecret":"aip-read"},`, 1)
+	if err := os.WriteFile(at.Config, []byte(withAip), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logged := []string{}
+	machine.Log = func(line string) { logged = append(logged, line) }
+	stop := make(chan struct{})
+	machine.Stop = stop
+	close(stop)
+
+	if output, code := Main([]string{"run"}, machine); code != 0 {
+		t.Fatalf("run answered %q, %d", output, code)
+	}
+
+	want := "The configuration's aip is no longer used: a fleet adds aip as an MCP server of its own; remove it from " + at.Config
+	if !slices.Contains(logged, want) {
+		t.Errorf("logged %q, want %q", logged, want)
 	}
 }
 
