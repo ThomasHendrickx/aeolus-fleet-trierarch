@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
 
@@ -71,7 +72,7 @@ func Read(payload string, configured Identity, key secrets.Key) (Configuration, 
 	var read message
 	decoder := json.NewDecoder(bytes.NewReader([]byte(payload)))
 	decoder.DisallowUnknownFields()
-	if decoder.Decode(&read) != nil || read.FleetID == nil || read.PluginShipID == nil || read.Version == nil || read.PublicKey == nil || read.Servers == nil || read.Secrets == nil {
+	if decoder.Decode(&read) != nil || decoder.More() || decoder.Decode(&struct{}{}) != io.EOF || read.FleetID == nil || read.PluginShipID == nil || read.Version == nil || read.PublicKey == nil || read.Servers == nil || read.Secrets == nil {
 		return Configuration{}, errShape
 	}
 	identity := Identity{FleetID: *read.FleetID, PluginShipID: *read.PluginShipID}

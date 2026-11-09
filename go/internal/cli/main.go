@@ -493,9 +493,16 @@ type McpFleet interface {
 	receiving.Confirmer
 }
 
-// loadMcpConfiguration loads the MCP configuration file for the trierarch's fleet, as the fleet names it, and the trierarch plugin's ship; none on a machine that does not know that ship.
+// loadMcpConfiguration loads the MCP configuration file for the trierarch's fleet, as the fleet names it, and the trierarch plugin's ship; none, and the file cleared, on a machine that does not know that ship.
 func (m Machine) loadMcpConfiguration(at paths.Paths, kept crew.File) (*mcpconfiguration.File, error) {
-	if m.McpConfiguration == nil || m.McpFleet == nil || kept.PluginShipID == "" {
+	if m.McpConfiguration == nil || m.McpFleet == nil {
+		return nil, nil
+	}
+	// Without the supplying ship no applied configuration stands: the proxy reads the file at each call, so it must go before any session can use it.
+	if kept.PluginShipID == "" {
+		if err := os.Remove(at.McpConfiguration); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("clear the MCP configuration of a plugin ship no longer configured: %w", err)
+		}
 		return nil, nil
 	}
 	fleetID, err := m.McpFleet(kept).FleetID()
