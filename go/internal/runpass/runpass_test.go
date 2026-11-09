@@ -418,6 +418,7 @@ func aRunPass(t *testing.T) *aPass {
 		Offered:         []string{"claude-code"},
 		Repositories:    []string{"aeolus-fleet"},
 		RunningCap:      2,
+		ModelsConfirmed: map[string]int{},
 		Trusted: func() map[string]reconciler.Trust {
 			return map[string]reconciler.Trust{"claude-code": {Repositories: []string{"aeolus-fleet"}}}
 		},
@@ -1591,6 +1592,112 @@ func TestARequestPickingAModelItsHarnessOffersNoMoreIsGivenBack(t *testing.T) {
 
 	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 mac-mini: options.model: model must be one of opus") {
 		t.Fatalf("calls %q, want it given back", pass.fleet.calls)
+	}
+}
+
+func TestARequestPickingAModelItsHarnessDoesNotListConfirmsTheHarnessAgainAndTakesTheModelItThenOffers(t *testing.T) {
+	pass := aRunPass(t)
+	offered := []string{"opus"}
+	pass.pass.Offers = func() map[string]map[string][]string {
+		return map[string]map[string][]string{"claude-code": {"model": offered}}
+	}
+	confirmed := []string{}
+	pass.pass.ConfirmModels = func(harness string) {
+		confirmed = append(confirmed, harness)
+		offered = []string{"opus", "claude-haiku-5"}
+	}
+	request := aRequest("")
+	request.Settings.Options = map[string]string{"model": "claude-haiku-5"}
+	pass.fleet.requests = []reconciler.Request{request}
+
+	pass.run(t)
+
+	if !slices.Equal(confirmed, []string{"claude-code"}) {
+		t.Fatalf("confirmed %v, want claude-code once", confirmed)
+	}
+	for _, call := range pass.fleet.calls {
+		if strings.HasPrefix(call, "giveBack") {
+			t.Fatalf("calls %q, want the request taken", pass.fleet.calls)
+		}
+	}
+}
+
+func TestARequestPickingAModelTheHarnessStillDoesNotListAfterConfirmingAgainIsGivenBack(t *testing.T) {
+	pass := aRunPass(t)
+	pass.pass.Offers = func() map[string]map[string][]string {
+		return map[string]map[string][]string{"claude-code": {"model": {"opus"}}}
+	}
+	confirmed := 0
+	pass.pass.ConfirmModels = func(string) { confirmed++ }
+	request := aRequest("")
+	request.Settings.Options = map[string]string{"model": "claude-haiku-5"}
+	pass.fleet.requests = []reconciler.Request{request}
+
+	pass.run(t)
+
+	if confirmed != 1 {
+		t.Errorf("confirmed %d times, want once before the give-back", confirmed)
+	}
+	if !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 mac-mini: options.model: model must be one of opus") {
+		t.Fatalf("calls %q, want it given back", pass.fleet.calls)
+	}
+}
+
+func TestARequestPickingAModelWhileItsHarnessOffersNoModelConfirmsTheHarnessAgain(t *testing.T) {
+	pass := aRunPass(t)
+	offered := map[string][]string{}
+	pass.pass.Offers = func() map[string]map[string][]string {
+		return map[string]map[string][]string{"claude-code": offered}
+	}
+	confirmed := []string{}
+	pass.pass.ConfirmModels = func(harness string) {
+		confirmed = append(confirmed, harness)
+		offered = map[string][]string{"model": {"opus", "claude-haiku-5"}}
+	}
+	request := aRequest("")
+	request.Settings.Options = map[string]string{"model": "claude-haiku-5"}
+	pass.fleet.requests = []reconciler.Request{request}
+
+	pass.run(t)
+
+	if !slices.Equal(confirmed, []string{"claude-code"}) {
+		t.Fatalf("confirmed %v, want claude-code once", confirmed)
+	}
+	if got := pass.store.state.Entries[scout].Options["model"]; got != "claude-haiku-5" {
+		t.Errorf("crewed with model %q, want claude-haiku-5", got)
+	}
+}
+
+func TestARequestWaitingToBeCrewedConfirmsItsHarnessOnceAtItsSettingsVersion(t *testing.T) {
+	pass := aRunPass(t)
+	pass.pass.RunningCap = 0
+	pass.pass.Offers = func() map[string]map[string][]string {
+		return map[string]map[string][]string{"claude-code": {}}
+	}
+	confirmed := 0
+	pass.pass.ConfirmModels = func(string) { confirmed++ }
+	request := aRequest("")
+	request.Settings.Options = map[string]string{"model": "claude-haiku-5"}
+	pass.fleet.requests = []reconciler.Request{request}
+
+	pass.run(t)
+	pass.run(t)
+
+	if confirmed != 1 {
+		t.Errorf("confirmed %d times, want once while it waits", confirmed)
+	}
+}
+
+func TestEachPassAsksForTheModelsDueToBeConfirmedAgain(t *testing.T) {
+	pass := aRunPass(t)
+	asked := 0
+	pass.pass.ConfirmDue = func() { asked++ }
+
+	pass.run(t)
+	pass.run(t)
+
+	if asked != 2 {
+		t.Errorf("asked %d times, want once per pass", asked)
 	}
 }
 

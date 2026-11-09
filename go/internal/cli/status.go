@@ -10,6 +10,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aipcommand"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/service"
@@ -29,6 +30,8 @@ type StatusReport struct {
 	RunningVersion string `json:"runningVersion,omitempty"`
 	// Plugins is the aeolus-fleet plugin version per configured harness; null where the harness has none.
 	Plugins map[string]*string `json:"plugins"`
+	// ModelsConfirmedAt is, per configured harness, when its models were last confirmed; null where none were (docs/trierarch.md, "Detected options").
+	ModelsConfirmedAt map[string]*string `json:"modelsConfirmedAt"`
 	// HarnessOrder is the configured harnesses in the configuration file's order, as the text says them.
 	HarnessOrder []string       `json:"-"`
 	Repositories []string       `json:"repositories"`
@@ -102,12 +105,13 @@ func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
 		lease = "ended"
 	}
 	report := StatusReport{
-		Version:      Version,
-		Plugins:      map[string]*string{},
-		HarnessOrder: configuration.HarnessOrder,
-		Repositories: slices.AppendSeq([]string{}, maps.Keys(configuration.Repositories)),
-		Service:      manager,
-		Fleet:        StatusFleet{URL: kept.FleetURL, ShipID: kept.ShipID, Lease: lease},
+		Version:           Version,
+		Plugins:           map[string]*string{},
+		ModelsConfirmedAt: map[string]*string{},
+		HarnessOrder:      configuration.HarnessOrder,
+		Repositories:      slices.AppendSeq([]string{}, maps.Keys(configuration.Repositories)),
+		Service:           manager,
+		Fleet:             StatusFleet{URL: kept.FleetURL, ShipID: kept.ShipID, Lease: lease},
 		Caps: StatusCaps{
 			Ships:   StatusCap{Used: len(saved.Entries), Cap: configuration.Caps.Ships},
 			Running: StatusCap{Used: countRunning(observed), Cap: configuration.Caps.Running},
@@ -129,6 +133,10 @@ func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
 		} else {
 			report.Plugins[harness] = nil
 		}
+	}
+	detected := detection.File{Path: at.Detected}.Load()
+	for harness := range configuration.Harnesses {
+		report.ModelsConfirmedAt[harness] = detected[harness].ConfirmedAt
 	}
 	for _, each := range entryStates {
 		report.Entries[each] = 0
@@ -245,6 +253,22 @@ func describePlugins(plugins map[string]*string, order []string, look style.Styl
 	return strings.Join(parts, ", ")
 }
 
+// describeModels is each configured harness with when its models were last confirmed, or never.
+func describeModels(confirmed map[string]*string, order []string) string {
+	if len(confirmed) == 0 {
+		return "no harness configured"
+	}
+	parts := []string{}
+	for _, harness := range order {
+		if at := confirmed[harness]; at != nil {
+			parts = append(parts, harness+" "+*at)
+		} else {
+			parts = append(parts, harness+" never")
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
 // describeStatus is each line its label and how it stands; where the style colours, the label strong and each state in its tone.
 func describeStatus(report StatusReport, look style.Style) string {
 	line := func(label string, text string) string { return look.Tone(style.Strong, label+":") + " " + text }
@@ -271,6 +295,7 @@ func describeStatus(report StatusReport, look style.Style) string {
 	lines := []string{
 		line("Version", describeVersion(report, look)),
 		line("Aeolus Fleet plugin", describePlugins(report.Plugins, report.HarnessOrder, look)),
+		line("Models confirmed", describeModels(report.ModelsConfirmedAt, report.HarnessOrder)),
 		line("Repositories", or(len(report.Repositories) == 0, "none", func() string { return strings.Join(report.Repositories, ", ") })),
 		line("Service", describeService(report.Service, look)),
 		line("Fleet", describeFleet(report.Fleet, look)),

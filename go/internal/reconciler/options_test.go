@@ -2,6 +2,7 @@ package reconciler
 
 import (
 	"maps"
+	"slices"
 	"testing"
 )
 
@@ -57,4 +58,56 @@ func TestANewSettingsVersionPickingAValueNoLongerOfferedIsGivenBack(t *testing.T
 
 	given := entry
 	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 2, Reason: "options.model: model must be one of claude-opus-5", Entry: &given})
+}
+
+func TestARequestPickingAModelTheHarnessDoesNotOfferIsToConfirmItsHarnessAgain(t *testing.T) {
+	request := aRequest(scout)
+	request.Settings.Options = map[string]string{"model": "claude-sonnet-5"}
+
+	got := ModelsToConfirm(Empty(), withModels(aContext(request), "claude-opus-5"))
+
+	if want := []Confirmation{{ShipID: scout, SettingsVersion: 1, Harness: "claude-code"}}; !slices.Equal(got, want) {
+		t.Errorf("ModelsToConfirm() = %v, want %v", got, want)
+	}
+}
+
+func TestARequestPickingAModelWhileTheHarnessOffersNoModelIsToConfirmItsHarnessAgain(t *testing.T) {
+	request := aRequest(scout)
+	request.Settings.Options = map[string]string{"model": "claude-sonnet-5"}
+	context := aContext(request)
+	context.Options = map[string]map[string][]string{"claude-code": {"effort": {"high"}}}
+
+	got := ModelsToConfirm(Empty(), context)
+
+	if want := []Confirmation{{ShipID: scout, SettingsVersion: 1, Harness: "claude-code"}}; !slices.Equal(got, want) {
+		t.Errorf("ModelsToConfirm() = %v, want %v", got, want)
+	}
+}
+
+func TestARequestPickingNoModelWhileTheHarnessOffersNoModelIsNotToConfirm(t *testing.T) {
+	request := aRequest(scout)
+	context := aContext(request)
+	context.Options = map[string]map[string][]string{"claude-code": {"effort": {"high"}}}
+
+	if got := ModelsToConfirm(Empty(), context); len(got) != 0 {
+		t.Errorf("ModelsToConfirm() = %v, want none", got)
+	}
+}
+
+func TestARequestPickingAnOfferedModelOrOneGivenBackOrFinalIsNotToConfirm(t *testing.T) {
+	offered := aRequest(scout)
+	offered.Settings.Options = map[string]string{"model": "claude-opus-5"}
+	givenBack := aRequest("shp_back")
+	givenBack.Settings.Options = map[string]string{"model": "claude-sonnet-5"}
+	final := aRequest("shp_final")
+	final.Settings.Options = map[string]string{"model": "claude-sonnet-5"}
+	final.IsFinal = true
+	state := Empty()
+	state.Refused["shp_back"] = 1
+
+	got := ModelsToConfirm(state, withModels(aContext(offered, givenBack, final), "claude-opus-5"))
+
+	if len(got) != 0 {
+		t.Errorf("ModelsToConfirm() = %v, want none", got)
+	}
 }

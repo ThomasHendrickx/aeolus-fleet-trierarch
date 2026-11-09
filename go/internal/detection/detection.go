@@ -2,8 +2,10 @@
 // (docs/trierarch.md, "Detected options"; #365, #382): kept in
 // `~/.aeolus/trierarch/detected.json` apart from the operator's
 // configuration, detected at init, at each start for a harness whose version
-// differs from the one detected, by hand with `aeolus-trierarch detect`, and
-// after a session refused a model, never more often: a probe costs a call.
+// differs from the one detected, by hand with `aeolus-trierarch detect`, after
+// a session refused a model, once a day while the trierarch runs, and before a
+// request for a model no harness lists is given back (#333), never more
+// often: a probe costs a call.
 package detection
 
 import (
@@ -63,7 +65,25 @@ const (
 	ByHand By = "hand"
 	// ByRefusal detects the harness again after a session refused a model, keeping the refused ids while its version is the same.
 	ByRefusal By = "refusal"
+	// ByAge detects a harness last detected ConfirmEvery ago or more, also at the same version, as a vendor adds models to a harness without a new version (#333). It keeps the refused ids like ByRefusal.
+	ByAge By = "age"
+	// ByRequest detects the harness again before a request for a model it does not list is given back (#333), at the same version too, keeping the refused ids like ByRefusal.
+	ByRequest By = "request"
 )
+
+// ConfirmEvery is how long a harness's models stand before they are confirmed again.
+const ConfirmEvery = 24 * time.Hour
+
+// isDue is whether the harness was last detected ConfirmEvery ago or more; one whose time cannot be read is due.
+func isDue(found Harness, at time.Time) bool {
+	detectedAt, err := time.Parse(time.RFC3339, found.DetectedAt)
+	return err != nil || at.Sub(detectedAt) >= ConfirmEvery
+}
+
+// keepsRefused is whether the ids a session refused stay while the harness is detected again at the same version.
+func (by By) keepsRefused() bool {
+	return by == ByRefusal || by == ByAge || by == ByRequest
+}
 
 // keeping serialises each load, change and save of the detected file in this process: a refusal and a detection finishing together each keep the other's change.
 var keeping sync.Mutex
@@ -75,6 +95,8 @@ type Detection struct {
 	Now       func() time.Time
 	// Warn tells the operator what detection kept as before.
 	Warn func(line string)
+	// Given is told what is detected after each save, while no other save can come between, so what it is told never goes back to before a later save (#333). None tells nothing.
+	Given func(Detected)
 }
 
 // Detect detects the harnesses given that have a detector, as by says, and gives what is detected of them. A harness whose CLI does not say its version, or gives nothing to detect, keeps what was detected before.
@@ -93,6 +115,9 @@ func (d Detection) Detect(ctx context.Context, harnesses []string, by By) (Detec
 			continue
 		}
 		if by == ByStart && wasDetected && previous.Version == version {
+			continue
+		}
+		if by == ByAge && wasDetected && previous.Version == version && !isDue(previous, d.Now()) {
 			continue
 		}
 		var given *Harness
@@ -119,14 +144,17 @@ func (d Detection) Detect(ctx context.Context, harnesses []string, by By) (Detec
 	return given, nil
 }
 
-// keep saves what was found onto what is kept now, not onto what was kept when the probes began: a model refused while they ran stays refused, as Refuse does under the same lock.
+// keep saves what was found onto what is kept now, not onto what was kept when the probes began: a model refused while they ran stays refused, as Refuse does under the same lock, and what a probe begun later kept stays (#333).
 func (d Detection) keep(found Detected, by By) (Detected, error) {
 	keeping.Lock()
 	defer keeping.Unlock()
 	detected := d.Store.Load()
 	for name, harness := range found {
+		if kept, ok := detected[name]; ok && isLater(kept.DetectedAt, harness.DetectedAt) {
+			continue
+		}
 		harness.Refused = nil
-		if kept, ok := detected[name]; by == ByRefusal && ok && kept.Version == harness.Version {
+		if kept, ok := detected[name]; by.keepsRefused() && ok && kept.Version == harness.Version {
 			harness.Refused = kept.Refused
 		}
 		detected[name] = harness
@@ -135,12 +163,35 @@ func (d Detection) keep(found Detected, by By) (Detected, error) {
 		if err := d.Store.Save(detected); err != nil {
 			return nil, fmt.Errorf("keep what detection found: %w", err)
 		}
+		d.give(detected)
 	}
 	return detected, nil
 }
 
+// give tells Given what is detected; asked under the lock each save is made under.
+func (d Detection) give(detected Detected) {
+	if d.Given != nil {
+		d.Given(detected)
+	}
+}
+
+// isLater is whether the time kept is after the time found; one that cannot be read is not.
+func isLater(kept string, found string) bool {
+	keptAt, err := time.Parse(time.RFC3339, kept)
+	if err != nil {
+		return false
+	}
+	foundAt, err := time.Parse(time.RFC3339, found)
+	return err == nil && keptAt.After(foundAt)
+}
+
 // Refuse keeps a model a session refused as refused for its harness's detected version, so the machine offers it no more, and gives what is detected now. A harness detection never found has no models to refuse.
 func Refuse(store Store, harness string, id string, at time.Time) (Detected, error) {
+	return refuse(store, harness, id, at, func(Detected) {})
+}
+
+// refuse keeps the model refused and tells given what is detected then, under the same lock.
+func refuse(store Store, harness string, id string, at time.Time, given func(Detected)) (Detected, error) {
 	keeping.Lock()
 	defer keeping.Unlock()
 	detected := store.Load()
@@ -153,25 +204,22 @@ func Refuse(store Store, harness string, id string, at time.Time) (Detected, err
 	if err := store.Save(detected); err != nil {
 		return nil, fmt.Errorf("keep %s refused for %s: %w", id, harness, err)
 	}
+	given(detected)
 	return detected, nil
 }
 
-// Refuse keeps a model a session refused as refused and gives what is detected now to given at once, so the next pass offers it no more. Then it detects the harness again in the background, keeping the id refused, and gives what that finds too: the loop never waits on a probe. A harness detection never found has no models to refuse, so nothing is given and nothing is detected.
-func (d Detection) Refuse(ctx context.Context, harness string, id string, at time.Time, given func(Detected)) error {
+// Refuse keeps a model a session refused as refused and tells Given what is detected now at once, so the next pass offers it no more. Then it detects the harness again in the background, keeping the id refused, and Given is told what that finds too: the loop never waits on a probe. A harness detection never found has no models to refuse, so nothing is given and nothing is detected.
+func (d Detection) Refuse(ctx context.Context, harness string, id string, at time.Time) error {
 	if _, ok := d.Store.Load()[harness]; !ok {
 		return nil
 	}
-	detected, err := Refuse(d.Store, harness, id, at)
-	if err != nil {
+	if _, err := refuse(d.Store, harness, id, at, d.give); err != nil {
 		return err
 	}
-	given(detected)
 	go func() {
 		if _, err := d.Detect(ctx, []string{harness}, ByRefusal); err != nil {
 			d.Warn(fmt.Sprintf("%s could not be detected again after it refused %s: %v", harness, id, err))
-			return
 		}
-		given(d.Store.Load())
 	}()
 	return nil
 }
@@ -315,4 +363,25 @@ func ReportOf(detected Detected) map[string]HarnessReport {
 		report[name] = HarnessReport{Version: found.Version, ConfirmedAt: found.ConfirmedAt, Options: options}
 	}
 	return report
+}
+
+// Due are the harnesses given, each with a detector, that detection never found or last found ConfirmEvery ago or more, and that were not tried, by when tried says, within ConfirmEvery: a detection that fails keeps the time it was last found, so it is tried again once a day, not each pass. Each named is counted tried now in tried.
+func (d Detection) Due(harnesses []string, tried map[string]time.Time) []string {
+	detected := d.Store.Load()
+	now := d.Now()
+	due := []string{}
+	for _, name := range harnesses {
+		if d.Detectors[name] == nil {
+			continue
+		}
+		if found, ok := detected[name]; ok && !isDue(found, now) {
+			continue
+		}
+		if at, ok := tried[name]; ok && now.Sub(at) < ConfirmEvery {
+			continue
+		}
+		tried[name] = now
+		due = append(due, name)
+	}
+	return due
 }

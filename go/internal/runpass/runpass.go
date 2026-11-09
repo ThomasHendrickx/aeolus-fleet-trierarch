@@ -190,6 +190,12 @@ type Pass struct {
 	Configuration func() map[string]config.Harness
 	// Trusted is, by harness, what it trusts, read each pass from its own files (#381, #403).
 	Trusted func() map[string]reconciler.Trust
+	// ConfirmModels confirms a harness's models again, and has Offers answer what that found: asked before a request for a model the harness does not list is given back (#333). None when nothing is to confirm.
+	ConfirmModels func(harness string)
+	// ModelsConfirmed are, by ship, the settings version at which its request's harness's models were confirmed again, kept while the trierarch runs, so a request waiting to be crewed is confirmed once at it. None confirms again each pass.
+	ModelsConfirmed map[string]int
+	// ConfirmDue starts, in the background, the confirming again of the models of each harness last detected a day ago or more (#333); asked once per pass.
+	ConfirmDue func()
 	// RefuseModel keeps a model a session refused as refused for its harness's detected version.
 	RefuseModel func(harness string, model string) error
 	// SendReleasedUsage sends a released ship's last usage before its folder goes (the usage design, U9); it fails while the fleet does not take it, so the folder stays. None sends nothing.
@@ -198,6 +204,23 @@ type Pass struct {
 	Load *machineload.Reader
 	// Trash is emptied every pass; none empties nothing.
 	Trash Trash
+}
+
+// modelsToConfirm are the harnesses to confirm the models of again this pass, each once, for the requests not confirmed at their settings version yet, which it counts confirmed.
+func (p Pass) modelsToConfirm(state reconciler.State, context reconciler.Context) []string {
+	harnesses := []string{}
+	for _, confirmation := range reconciler.ModelsToConfirm(state, context) {
+		if version, ok := p.ModelsConfirmed[confirmation.ShipID]; ok && version == confirmation.SettingsVersion {
+			continue
+		}
+		if p.ModelsConfirmed != nil {
+			p.ModelsConfirmed[confirmation.ShipID] = confirmation.SettingsVersion
+		}
+		if !slices.Contains(harnesses, confirmation.Harness) {
+			harnesses = append(harnesses, confirmation.Harness)
+		}
+	}
+	return harnesses
 }
 
 // mcpServers are the MCP servers each harness offers now; none without a source.
@@ -254,6 +277,9 @@ const nextAfterFailure = "the next pass tries again; aeolus-trierarch status and
 func (p Pass) Run() error {
 	p.keepProxy()
 	p.watchLoad()
+	if p.ConfirmDue != nil {
+		p.ConfirmDue()
+	}
 	state, err := p.Store.Load()
 	if err != nil {
 		return err
@@ -1147,7 +1173,17 @@ func (p Pass) reconcile(state reconciler.State) (reconciler.State, []reconciler.
 	}
 	now := p.Now()
 	marksLaunches, missingPlugins, notOffered := p.launchMarks()
-	next, actions := reconciler.Reconcile(state, reconciler.Context{Requests: requests, Clears: clears, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers(), McpServers: p.mcpServers(), Configuration: p.Configuration(), Trusted: p.Trusted(), ConfigurationFile: p.ConfigurationFile, MarksLaunches: marksLaunches, MissingPlugins: missingPlugins, NotOffered: notOffered})
+	context := reconciler.Context{Requests: requests, Clears: clears, Observed: observed, Now: now, Harnesses: p.Offered, Repositories: p.Repositories, Folders: p.Folders, RunningCap: p.RunningCap, Versions: versions, Options: p.Offers(), McpServers: p.mcpServers(), Configuration: p.Configuration(), Trusted: p.Trusted(), ConfigurationFile: p.ConfigurationFile, MarksLaunches: marksLaunches, MissingPlugins: missingPlugins, NotOffered: notOffered}
+	// A request for a model its harness does not list may name one the vendor added since: the harness's models are confirmed again before the request is given back (#333).
+	if p.ConfirmModels != nil {
+		if harnesses := p.modelsToConfirm(state, context); len(harnesses) > 0 {
+			for _, harness := range harnesses {
+				p.ConfirmModels(harness)
+			}
+			context.Options = p.Offers()
+		}
+	}
+	next, actions := reconciler.Reconcile(state, context)
 	next.PassFailure = nil
 	next.MissingPlugins, next.NotOffered = notOfferedState(missingPlugins, notOffered)
 	if err := p.Store.Save(next); err != nil {
