@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"syscall"
 	"time"
 )
 
@@ -34,6 +35,9 @@ func (l McpList) McpServersIn(ctx context.Context, folder string) ([]string, err
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, l.Program, "mcp", "list", "--json")
+	// Copilot's npm launcher runs its native process as a child, which would outlive the launcher alone.
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	command.Cancel = func() error { return syscall.Kill(-command.Process.Pid, syscall.SIGKILL) }
 	command.WaitDelay = listWaitDelay
 	command.Dir = folder
 	if l.CopilotHome != "" {
