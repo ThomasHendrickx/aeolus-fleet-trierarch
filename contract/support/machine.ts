@@ -338,7 +338,7 @@ exec tail -n "$lines" $follow "$log"
 `;
 }
 
-/** `codex`: the commands init, detection, setup and a start's MCP listing run answered as Codex answers them; `codex exec` runs fake-codex.ts in the folder. */
+/** `codex`: the commands init, detection and setup run answered as Codex answers them; `codex exec` runs fake-codex.ts in the folder. */
 function codexStandIn(at: { machine: string; pluginData: string }): string {
   return `#!/bin/sh
 machine='${at.machine}'
@@ -346,7 +346,6 @@ case "$1" in
   --version) echo 'codex-cli 0.163.0'; exit 0 ;;
   login) echo "$*" >> "$machine/codex-calls.txt"; echo 'Logged in using ChatGPT'; exit 0 ;;
   debug) echo "$*" >> "$machine/codex-calls.txt"; echo '{"models":[{"slug":"gpt-5.6-terra","visibility":"list"}]}'; exit 0 ;;
-  mcp) echo '[]'; exit 0 ;;
   app-server)
     [ -e "$machine/codex-untrusted-hook" ] && export FAKE_CODEX_UNTRUSTED_HOOK=1
     exec '${process.execPath}' '${join(CONTRACT_SUPPORT, 'fake-codex-app-server.ts')}' ;;

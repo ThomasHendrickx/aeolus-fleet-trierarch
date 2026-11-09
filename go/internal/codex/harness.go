@@ -11,6 +11,7 @@ package codex
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -35,7 +36,7 @@ type Hooks interface {
 	TrustAeolusHooks(folder string) ([]string, error)
 }
 
-// McpServers lists the MCP servers Codex loads in a folder, each the user's own, the project's or a plugin's.
+// McpServers lists the MCP servers Codex's configuration names for a folder, the user's own and the project's.
 type McpServers interface {
 	McpServersIn(folder string) ([]string, error)
 }
@@ -58,7 +59,7 @@ type Harness struct {
 	Runtime  Runtime
 	Settings config.Harness
 	Hooks    Hooks
-	// McpServers is what Codex loads in a folder, each turned off but those the entry names (#329).
+	// McpServers is what Codex's configuration names for a folder, each turned off (#329).
 	McpServers McpServers
 	// Events is where the ship's hold keeps every line its session wrote.
 	Events func(shipID string) string
@@ -95,16 +96,18 @@ func (h Harness) routeOf(login string) ([]string, *sessions.ProxyToken, error) {
 // CanAddMcpServer is whether a session can be started with the server: Codex's -c takes its key's path apart at every dot, quoted or not, so a server whose name holds one cannot be named there, and replacing the whole mcp_servers table would drop the user's own servers.
 func CanAddMcpServer(name string) bool { return !strings.Contains(name, ".") }
 
-// othersOff turns off, for this session only, every MCP server Codex lists in the entry's folder but those the entry names (#329): one -c with each server's name as a quoted key, which Codex merges into its table, so the user's config.toml is left as it is and a name holding a dot is turned off too; nothing when it lists none other.
+// othersOff turns off, for this session only, every MCP server Codex's configuration names for the entry's folder (#329): one -c with each server's name as a quoted key, which Codex merges into its table, so the user's config.toml is left as it is and a name holding a dot is turned off too; nothing when it names none. One named as a crewed server is an error: -c merges into its entry, so Codex would refuse it or carry its fields into the proxy's.
 func (h Harness) othersOff(entry reconciler.Entry) ([]string, error) {
 	listed, err := h.McpServers.McpServersIn(entry.Folder)
 	if err != nil {
 		return nil, err
 	}
+	// Codex's configuration keeps its order of its own.
+	slices.Sort(listed)
 	var off []string
 	for _, name := range listed {
 		if slices.Contains(entry.McpServers, name) {
-			continue
+			return nil, fmt.Errorf("codex's configuration for %s names its own MCP server %s: -c would merge into it, so the session cannot be started with the crewed %s alone", entry.Folder, name, name)
 		}
 		// A JSON string is a TOML basic string.
 		quoted, err := json.Marshal(name)
@@ -119,7 +122,7 @@ func (h Harness) othersOff(entry reconciler.Entry) ([]string, error) {
 	return []string{"-c", "mcp_servers={" + strings.Join(off, ",") + "}"}, nil
 }
 
-// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7), and no other: every other one Codex lists turned off, and each named one at the MCP proxy as a streamable HTTP server of its own on the command line, its bearer token read from a secret variable of the hold, a token of the session's own, fresh for each start, so the command line never holds it; no server of its own for an entry that names none. Every later turn's exec keeps the flags, and the hold keeps the variable.
+// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7), and no other: every one Codex's configuration names turned off, and each named one at the MCP proxy as a streamable HTTP server of its own on the command line, its bearer token read from a secret variable of the hold, a token of the session's own, fresh for each start, so the command line never holds it; no server of its own for an entry that names none. Every later turn's exec keeps the flags, and the hold keeps the variable.
 func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) {
 	off, err := h.othersOff(entry)
 	if err != nil {

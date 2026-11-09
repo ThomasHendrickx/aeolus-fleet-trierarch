@@ -341,7 +341,7 @@ func TestASessionStartsWithEachServerCodexsConfigurationNamesForItsFolderTurnedO
 
 	flags := []string{
 		"-m", "gpt-5.6-terra",
-		"-c", `mcp_servers={"gmail"={enabled=false},"dot.ted"={enabled=false}}`,
+		"-c", `mcp_servers={"dot.ted"={enabled=false},"gmail"={enabled=false}}`,
 		"-c", `mcp_servers.company-graph={url="http://127.0.0.1:41000/mcp/` + scout + `/company-graph",bearer_token_env_var="AEOLUS_MCP_TOKEN"}`,
 	}
 	if want := CommandLine(flags, prompt.First("Review PR 12"), true); !slices.Equal(running.started[0].Command, want) {
