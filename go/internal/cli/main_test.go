@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -397,6 +398,69 @@ func TestRunClearsAnMcpConfigurationOfAnotherFleetBeforeItsFirstPass(t *testing.
 
 	if ok {
 		t.Errorf("at the first pass the file holds %+v, want none", held)
+	}
+}
+
+func TestRunRemovesTheSupersededMcpAndAipFilesAndLeavesTheUsersOwnAip(t *testing.T) {
+	machine, _, _ := aMain(t)
+	Main(setupWords(), machine)
+	home := filepath.Join(machine.HomeDirectory, ".aeolus", "trierarch")
+	superseded := []string{"mcp-servers.json", "secrets.json", "aip.json", "aip-command.json", "aip-command.lock", filepath.Join("aip-command", "venv", "bin", "aip")}
+	users := filepath.Join(machine.HomeDirectory, ".local", "bin", "aip")
+	for _, path := range append([]string{users}, superseded...) {
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(home, path)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stop := make(chan struct{})
+	machine.Stop = stop
+	close(stop)
+
+	if output, code := Main([]string{"run"}, machine); code != 0 {
+		t.Fatalf("run answered %q, %d", output, code)
+	}
+
+	for _, name := range []string{"mcp-servers.json", "secrets.json", "aip.json", "aip-command.json", "aip-command.lock", "aip-command"} {
+		if _, err := os.Lstat(filepath.Join(home, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s after run: %v, want it removed", name, err)
+		}
+	}
+	if _, err := os.Stat(users); err != nil {
+		t.Errorf("the user's own aip after run: %v, want it left", err)
+	}
+}
+
+func TestRunSaysALeftoverAipInTheConfigurationIsNoLongerUsed(t *testing.T) {
+	machine, _, _ := aMain(t)
+	Main(setupWords(), machine)
+	at := paths.Of(machine.HomeDirectory, "")
+	text, err := os.ReadFile(at.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withAip := strings.Replace(string(text), "{", `{"aip":{"server":"https://aip.example.invalid","tokenSecret":"aip-read"},`, 1)
+	if err := os.WriteFile(at.Config, []byte(withAip), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logged := []string{}
+	machine.Log = func(line string) { logged = append(logged, line) }
+	stop := make(chan struct{})
+	machine.Stop = stop
+	close(stop)
+
+	if output, code := Main([]string{"run"}, machine); code != 0 {
+		t.Fatalf("run answered %q, %d", output, code)
+	}
+
+	want := "The configuration's aip is no longer used: a fleet adds aip as an MCP server of its own; remove it from " + at.Config
+	if !slices.Contains(logged, want) {
+		t.Errorf("logged %q, want %q", logged, want)
 	}
 }
 
