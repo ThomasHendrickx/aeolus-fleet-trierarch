@@ -171,12 +171,15 @@ func TestStatusSaysTheWholeState(t *testing.T) {
 	saved.Orphans = []any{map[string]any{"path": "/worktrees/stray", "repository": "aeolus-fleet", "name": "stray"}}
 	saved.PassFailure = &reconciler.PassFailure{Reason: "the fleet cannot be reached", Since: "2026-10-06T08:00:00.000Z"}
 	_ = state.File{Path: at.State}.Save(saved)
+	confirmedAt := "2026-11-08T07:30:00.000Z"
+	_ = detection.File{Path: at.Detected}.Save(detection.Detected{"claude-code": {Version: "2.1.306", DetectedAt: confirmedAt, ConfirmedAt: &confirmedAt, Options: map[string]config.Option{}}, "codex": {Version: "0.163.0", DetectedAt: confirmedAt, Options: map[string]config.Option{}}})
 
 	output, code := Main([]string{"status"}, machine)
 
 	want := strings.Join([]string{
 		"Version: " + Version,
 		"Aeolus Fleet plugin: claude-code 0.20.4, codex not found (install the aeolus-fleet plugin for it)",
+		"Models confirmed: claude-code 2026-11-08T07:30:00.000Z, codex never",
 		"Repositories: aeolus-fleet",
 		"Service: running, pid 41, since 2026-10-06T07:00:00.000Z",
 		"Fleet: " + fleetURL + ", the lease of " + shipID + " is valid",
@@ -198,16 +201,17 @@ func TestStatusAnswersTheReportAsJSON(t *testing.T) {
 	output, code := Main([]string{"status", "--json"}, machine)
 
 	want := map[string]any{
-		"version":        Version,
-		"runningVersion": Version,
-		"plugins":        map[string]any{"claude-code": "0.20.4"},
-		"repositories":   []any{},
-		"service":        map[string]any{"file": "/unit", "isInstalled": true, "isRunning": true, "pid": float64(41), "since": "2026-10-06T07:00:00.000Z"},
-		"fleet":          map[string]any{"url": fleetURL, "shipId": shipID, "lease": "valid"},
-		"caps":           map[string]any{"ships": map[string]any{"used": float64(0), "cap": float64(4)}, "running": map[string]any{"used": float64(0), "cap": float64(2)}},
-		"entries":        map[string]any{"crewing": float64(0), "running": float64(0), "restarting": float64(0), "crashed": float64(0), "releasing": float64(0)},
-		"kept":           []any{},
-		"orphans":        []any{},
+		"version":           Version,
+		"runningVersion":    Version,
+		"plugins":           map[string]any{"claude-code": "0.20.4"},
+		"modelsConfirmedAt": map[string]any{"claude-code": nil},
+		"repositories":      []any{},
+		"service":           map[string]any{"file": "/unit", "isInstalled": true, "isRunning": true, "pid": float64(41), "since": "2026-10-06T07:00:00.000Z"},
+		"fleet":             map[string]any{"url": fleetURL, "shipId": shipID, "lease": "valid"},
+		"caps":              map[string]any{"ships": map[string]any{"used": float64(0), "cap": float64(4)}, "running": map[string]any{"used": float64(0), "cap": float64(2)}},
+		"entries":           map[string]any{"crewing": float64(0), "running": float64(0), "restarting": float64(0), "crashed": float64(0), "releasing": float64(0)},
+		"kept":              []any{},
+		"orphans":           []any{},
 	}
 	if got := decoded(t, output); code != 0 || !reflect.DeepEqual(got, want) {
 		t.Errorf("answered %v, %d, want %v", got, code, want)

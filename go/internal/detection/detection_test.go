@@ -525,3 +525,16 @@ func TestADetectionOnARequestDetectsAgainAHarnessDetectedJustNowAtTheSameVersion
 		t.Errorf("models = %v, want the new model", got)
 	}
 }
+
+func TestDueAreTheHarnessesDetectedADayAgoOrMore(t *testing.T) {
+	old, recent := aHarness("1"), aHarness("1")
+	old.DetectedAt, recent.DetectedAt = Timestamp(now.Add(-48*time.Hour)), Timestamp(now.Add(-time.Hour))
+	store := &aStore{detected: Detected{"claude-code": old, "codex": recent, "copilot": old}}
+	detection, _ := aDetection(store, map[string]Detector{"claude-code": &aDetector{}, "codex": &aDetector{}})
+
+	got := detection.Due([]string{"claude-code", "codex", "copilot", "cursor"})
+
+	if want := []string{"claude-code"}; !slices.Equal(got, want) {
+		t.Errorf("Due() = %v, want %v", got, want)
+	}
+}

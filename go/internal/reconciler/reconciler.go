@@ -622,6 +622,26 @@ func check(settings Settings, shipID string, state State, context Context) (stri
 	return harness, options, ""
 }
 
+// ModelsToConfirm are the harnesses whose models are to be confirmed again before this pass gives a request back (#333): each is named by a request not final, not given back at its settings version yet, whose crew the machine would refuse only for a model its harness does not list.
+func ModelsToConfirm(state State, context Context) []string {
+	harnesses := []string{}
+	for _, request := range context.Requests {
+		if request.IsFinal || state.Refused[request.ShipID] == request.SettingsVersion {
+			continue
+		}
+		if entry, ok := state.Entries[request.ShipID]; ok && entry.SettingsVersion == request.SettingsVersion {
+			continue
+		}
+		if _, _, reason := check(request.Settings, request.ShipID, state, context); !strings.HasPrefix(reason, "options."+config.ModelOption+": ") {
+			continue
+		}
+		if harness, _ := checkPlace(request.Settings, request.ShipID, state, context); !slices.Contains(harnesses, harness) {
+			harnesses = append(harnesses, harness)
+		}
+	}
+	return harnesses
+}
+
 // mcpServersField is the field at fault when a named MCP server is not offered (decision M4).
 const mcpServersField = "mcpServers"
 

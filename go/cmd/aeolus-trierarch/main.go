@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -709,6 +710,15 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		VersionOf: offers.version,
 		// What the machine offers changes while it runs, as sessions refuse models (#382): each pass reads it afresh.
 		Offers: offers.options,
+		// A harness's models are confirmed again once a day and before a request for a model it does not list is given back (#333): the vendor adds models to a harness without a new version.
+		ConfirmModels: func(harness string) {
+			if _, err := detect.Detect(context.Background(), []string{harness}, detection.ByRequest); err != nil {
+				logLine(fmt.Sprintf("%s could not be detected again for a request: %v", harness, err))
+				return
+			}
+			offers.set(detect.Store.Load())
+		},
+		ConfirmDue: confirmDue(detect, slices.Sorted(maps.Keys(configuration.Harnesses)), offers),
 		RefuseModel: func(harness string, model string) error {
 			return detect.Refuse(context.Background(), harness, model, time.Now(), offers.set)
 		},
@@ -840,6 +850,25 @@ func tellDetectionProblems(client fleet.Client, detected detection.Detected) {
 		if err := client.ReportToArgo(notices.DetectionProblem(harness, found.Version, found.Problem), fmt.Sprintf("trierarch:detection:%s:%s", harness, found.Version)); err != nil {
 			logLine("Could not tell argo what detection found: " + err.Error())
 		}
+	}
+}
+
+// confirmDue starts, when no confirming runs, the detection of each harness last detected a day ago or more, and gives what it finds to the offers; the pass never waits on a probe (#333).
+func confirmDue(detect detection.Detection, harnesses []string, offered *offers) func() {
+	var running atomic.Bool
+	return func() {
+		due := detect.Due(harnesses)
+		if len(due) == 0 || !running.CompareAndSwap(false, true) {
+			return
+		}
+		go func() {
+			defer running.Store(false)
+			if _, err := detect.Detect(context.Background(), due, detection.ByAge); err != nil {
+				logLine(fmt.Sprintf("%s could not be detected again after a day: %v", strings.Join(due, ", "), err))
+				return
+			}
+			offered.set(detect.Store.Load())
+		}()
 	}
 }
 

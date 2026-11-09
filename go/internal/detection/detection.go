@@ -2,8 +2,10 @@
 // (docs/trierarch.md, "Detected options"; #365, #382): kept in
 // `~/.aeolus/trierarch/detected.json` apart from the operator's
 // configuration, detected at init, at each start for a harness whose version
-// differs from the one detected, by hand with `aeolus-trierarch detect`, and
-// after a session refused a model, never more often: a probe costs a call.
+// differs from the one detected, by hand with `aeolus-trierarch detect`, after
+// a session refused a model, once a day while the trierarch runs, and before a
+// request for a model no harness lists is given back (#333), never more
+// often: a probe costs a call.
 package detection
 
 import (
@@ -63,7 +65,25 @@ const (
 	ByHand By = "hand"
 	// ByRefusal detects the harness again after a session refused a model, keeping the refused ids while its version is the same.
 	ByRefusal By = "refusal"
+	// ByAge detects a harness last detected ConfirmEvery ago or more, also at the same version, as a vendor adds models to a harness without a new version (#333). It keeps the refused ids like ByRefusal.
+	ByAge By = "age"
+	// ByRequest detects the harness again before a request for a model it does not list is given back (#333), at the same version too, keeping the refused ids like ByRefusal.
+	ByRequest By = "request"
 )
+
+// ConfirmEvery is how long a harness's models stand before they are confirmed again.
+const ConfirmEvery = 24 * time.Hour
+
+// isDue is whether the harness was last detected ConfirmEvery ago or more; one whose time cannot be read is due.
+func isDue(found Harness, at time.Time) bool {
+	detectedAt, err := time.Parse(time.RFC3339, found.DetectedAt)
+	return err != nil || at.Sub(detectedAt) >= ConfirmEvery
+}
+
+// keepsRefused is whether the ids a session refused stay while the harness is detected again at the same version.
+func (by By) keepsRefused() bool {
+	return by == ByRefusal || by == ByAge || by == ByRequest
+}
 
 // keeping serialises each load, change and save of the detected file in this process: a refusal and a detection finishing together each keep the other's change.
 var keeping sync.Mutex
@@ -93,6 +113,9 @@ func (d Detection) Detect(ctx context.Context, harnesses []string, by By) (Detec
 			continue
 		}
 		if by == ByStart && wasDetected && previous.Version == version {
+			continue
+		}
+		if by == ByAge && wasDetected && previous.Version == version && !isDue(previous, d.Now()) {
 			continue
 		}
 		var given *Harness
@@ -126,7 +149,7 @@ func (d Detection) keep(found Detected, by By) (Detected, error) {
 	detected := d.Store.Load()
 	for name, harness := range found {
 		harness.Refused = nil
-		if kept, ok := detected[name]; by == ByRefusal && ok && kept.Version == harness.Version {
+		if kept, ok := detected[name]; by.keepsRefused() && ok && kept.Version == harness.Version {
 			harness.Refused = kept.Refused
 		}
 		detected[name] = harness
@@ -315,4 +338,16 @@ func ReportOf(detected Detected) map[string]HarnessReport {
 		report[name] = HarnessReport{Version: found.Version, ConfirmedAt: found.ConfirmedAt, Options: options}
 	}
 	return report
+}
+
+// Due are the harnesses given that were last detected ConfirmEvery ago or more.
+func (d Detection) Due(harnesses []string) []string {
+	detected := d.Store.Load()
+	due := []string{}
+	for _, name := range harnesses {
+		if found, ok := detected[name]; ok && d.Detectors[name] != nil && isDue(found, d.Now()) {
+			due = append(due, name)
+		}
+	}
+	return due
 }
