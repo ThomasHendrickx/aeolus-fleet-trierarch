@@ -80,7 +80,7 @@ func aHarnessListing(t *testing.T) (Harness, *aRuntime, *someHooks, *someServers
 	return Harness{
 		Plugin:        plugin.Plugin{Root: filepath.Join(filepath.Dir(file), "..", "..", "..", "plugins", "aeolus-fleet"), Data: t.TempDir(), Crews: t.TempDir()},
 		Runtime:       running,
-		Settings:      config.Harness{Flags: []string{"-m", "gpt-5.6-terra"}, Options: map[string]config.Option{}},
+		Settings:      func() config.Harness { return config.Harness{Flags: []string{"-m", "gpt-5.6-terra"}, Options: map[string]config.Option{}} },
 		Hooks:         hooks,
 		Configuration: servers,
 		Events:        func(shipID string) string { return filepath.Join(events, shipID+".jsonl") },
@@ -106,6 +106,24 @@ func TestAFirstStartRunsCodexExecInTheFolderWithItsFirstPromptAndItsLaunchIdTheH
 	}
 	if !slices.Equal(hooks.trustedFrom, []string{entry.Folder}) || len(running.sent) != 0 {
 		t.Fatalf("hooks trusted from %q, sent %q, want the folder's hooks trusted and nothing sent", hooks.trustedFrom, running.sent)
+	}
+}
+
+func TestALaunchTakesItsModelsFlagAsCodexIsOfferedAtTheLaunchNotAsItWasAtStart(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	offered := config.Harness{Flags: []string{}, Options: map[string]config.Option{}}
+	harness.Settings = func() config.Harness { return offered }
+	// Codex's models are confirmed again after the trierarch started, and list the model the request picks (#335).
+	offered = config.Harness{Flags: []string{}, Options: map[string]config.Option{"model": {Values: map[string][]string{"gpt-6.1-terra": {"-m", "gpt-6.1-terra"}}}}}
+	entry := anEntry(t)
+	entry.Options = map[string]string{"model": "gpt-6.1-terra"}
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if want := CommandLine([]string{"-m", "gpt-6.1-terra"}, prompt.First("Review PR 12"), true); len(running.started) != 1 || !slices.Equal(running.started[0].Command, want) {
+		t.Fatalf("started %+v, want %q", running.started, want)
 	}
 }
 

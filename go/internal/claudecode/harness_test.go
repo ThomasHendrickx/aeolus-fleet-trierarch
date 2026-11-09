@@ -53,7 +53,7 @@ func aHarness(t *testing.T) (Harness, *aRuntime, *anOnboarding) {
 	return Harness{
 		Plugin:     plugin.Plugin{Root: filepath.Join(filepath.Dir(file), "..", "..", "..", "plugins", "aeolus-fleet"), Data: t.TempDir(), Crews: t.TempDir()},
 		Runtime:    running,
-		Settings:   config.Harness{Flags: []string{"--model", "opus"}, Options: map[string]config.Option{}},
+		Settings:   func() config.Harness { return config.Harness{Flags: []string{"--model", "opus"}, Options: map[string]config.Option{}} },
 		Projects:   t.TempDir(),
 		Onboarding: onboarding,
 		Managed:    t.TempDir(),
@@ -80,6 +80,24 @@ func TestAFirstStartRunsClaudeCodeInTheFolderWithItsLaunchIdAndItsFirstPrompt(t 
 	}
 	if !slices.Equal(running.sent, []string{UserLine(prompt.First("Review PR 12"))}) || onboarding.completed != 1 {
 		t.Fatalf("sent %q, onboarding %d", running.sent, onboarding.completed)
+	}
+}
+
+func TestALaunchTakesItsModelsFlagAsClaudeCodeIsOfferedAtTheLaunchNotAsItWasAtStart(t *testing.T) {
+	harness, running, _ := aHarness(t)
+	offered := config.Harness{Flags: []string{}, Options: map[string]config.Option{}}
+	harness.Settings = func() config.Harness { return offered }
+	// Claude Code's models are confirmed again after the trierarch started, and list the model the request picks (#335).
+	offered = config.Harness{Flags: []string{}, Options: map[string]config.Option{"model": {Values: map[string][]string{"claude-opus-5": {"--model", "claude-opus-5"}}}}}
+	entry := anEntry(t)
+	entry.Options = map[string]string{"model": "claude-opus-5"}
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(running.started) != 1 || !slices.Contains(running.started[0].Command, "claude-opus-5") {
+		t.Fatalf("started %+v, want the model claude-opus-5 in its command", running.started)
 	}
 }
 

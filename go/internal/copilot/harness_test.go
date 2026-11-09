@@ -68,7 +68,7 @@ func aHarnessListing(t *testing.T) (Harness, *aRuntime, *someServers) {
 	return Harness{
 		Plugin:     plugin.Plugin{Root: filepath.Join(filepath.Dir(file), "..", "..", "..", "plugins", "aeolus-fleet"), Data: t.TempDir(), Crews: t.TempDir()},
 		Runtime:    running,
-		Settings:   config.Harness{Flags: []string{"--model", "gpt-5"}, Options: map[string]config.Option{}},
+		Settings:   func() config.Harness { return config.Harness{Flags: []string{"--model", "gpt-5"}, Options: map[string]config.Option{}} },
 		Events:     func(shipID string) string { return filepath.Join(events, shipID+".jsonl") },
 		Version:    func() (string, bool) { return "1.0.105", true },
 		McpServers: servers,
@@ -91,6 +91,24 @@ func TestAFirstStartRunsCopilotInTheFolderWithItsFirstPromptAndItsLaunchId(t *te
 	want := CommandLine([]string{"--model", "gpt-5"}, prompt.First("Review PR 12"), "")
 	if len(running.started) != 1 || !slices.Equal(running.started[0].Command, want) || running.started[0].Folder != entry.Folder || running.started[0].Harness != "copilot" || running.started[0].Env["AEOLUS_LAUNCH"] != "launch-1" || running.started[0].ProxyToken != nil {
 		t.Fatalf("started %+v, want %q in the folder as copilot with its launch id and no token", running.started, want)
+	}
+}
+
+func TestALaunchTakesItsModelsFlagAsCopilotIsOfferedAtTheLaunchNotAsItWasAtStart(t *testing.T) {
+	harness, running := aHarness(t)
+	offered := config.Harness{Flags: []string{}, Options: map[string]config.Option{}}
+	harness.Settings = func() config.Harness { return offered }
+	// Copilot's models are confirmed again after the trierarch started, and list the model the request picks (#335).
+	offered = config.Harness{Flags: []string{}, Options: map[string]config.Option{"model": {Values: map[string][]string{"gpt-6.1": {"--model", "gpt-6.1"}}}}}
+	entry := anEntry(t)
+	entry.Options = map[string]string{"model": "gpt-6.1"}
+
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(running.started) != 1 || !slices.Contains(running.started[0].Command, "gpt-6.1") {
+		t.Fatalf("started %+v, want the model gpt-6.1 in its command", running.started)
 	}
 }
 
