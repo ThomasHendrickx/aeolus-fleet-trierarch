@@ -16,6 +16,7 @@ import (
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aip"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
 )
@@ -330,6 +331,25 @@ func TestASessionsMCPAccessAndConfigurationAreKeptInItsFolderForItsUserOnlyNever
 		if line := processOf(t, pid, "command"); strings.Contains(line, "scouts-mcp-token") {
 			t.Fatalf("the command line of %s holds the token: %q", pid, line)
 		}
+	}
+}
+
+func TestASessionsMCPAccessIsBoundToTheFleetAndPluginShipOfTheConfigurationItStartsUnder(t *testing.T) {
+	runtime := aRuntime(t)
+	runtime.McpIdentity = func() (mcpconfiguration.Identity, bool) {
+		return mcpconfiguration.Identity{FleetID: "flt_01m3tb1zgr5h2ffee12xnch8sv", PluginShipID: "shp_01m3tb1zhjs6kthtcs2zvksacv"}, true
+	}
+	folder := t.TempDir()
+	files := hold.FilesOf(runtime.Sessions, scout)
+	mcp := &Mcp{Access: mcpproxy.Access{Token: "scouts-mcp-token", Servers: []string{"company-graph"}}}
+	if err := runtime.Start(Start{ShipID: scout, Folder: folder, Harness: "codex", Command: []string{"sh", "-c", aHarness}, Mcp: mcp}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	eventually(t, "the harness's pid", func() bool { _, err := os.Stat(filepath.Join(folder, "harness.pid")); return err == nil })
+
+	var access map[string]any
+	if err := json.Unmarshal([]byte(read(filepath.Join(files.Folder, "mcp-access"))), &access); err != nil || access["fleetId"] != "flt_01m3tb1zgr5h2ffee12xnch8sv" || access["pluginShipId"] != "shp_01m3tb1zhjs6kthtcs2zvksacv" {
+		t.Fatalf("the MCP access = %v, %v, want it bound to the fleet and plugin ship", access, err)
 	}
 }
 

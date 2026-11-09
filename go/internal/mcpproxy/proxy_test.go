@@ -15,10 +15,13 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 )
 
 const (
+	fleet   = "flt_01m3tb1zgr5h2ffee12xnch8sv"
+	plugin  = "shp_01m3tb1zhjs6kthtcs2zvksacv"
 	scout   = "shp_01m6jyczpnpp5c0vxh54c966cy"
 	builder = "shp_01m6jyczpnpp5c0vxh54c966cz"
 	// stoppedPID is no running process: the pid file of a session that stopped.
@@ -100,16 +103,27 @@ func aSession(t *testing.T, sessions string, shipID string, pid int, access Acce
 	}
 }
 
+// applied is the configuration the trierarch applied, of this fleet and plugin ship, read at each call.
+func applied(list []mcpservers.Server, held map[string]string) func() (mcpconfiguration.Configuration, bool) {
+	return appliedAs(mcpconfiguration.Identity{FleetID: fleet, PluginShipID: plugin}, list, held)
+}
+
+func appliedAs(identity mcpconfiguration.Identity, list []mcpservers.Server, held map[string]string) func() (mcpconfiguration.Configuration, bool) {
+	return func() (mcpconfiguration.Configuration, bool) {
+		return mcpconfiguration.Configuration{Identity: identity, Version: 1, PublicKey: "key-a", Servers: list, Secrets: held}, true
+	}
+}
+
 // aProxy is the MCP proxy in front of the graph, listed as company-graph with its two read tools, and a running scout session started with it.
 func aProxy(t *testing.T, graph *fakeGraph) *httptest.Server {
 	t.Helper()
 	upstream := httptest.NewServer(graph)
 	t.Cleanup(upstream.Close)
 	sessions := t.TempDir()
-	aSession(t, sessions, scout, os.Getpid(), Access{Token: "scouts-token", Servers: []string{"company-graph"}})
-	aSession(t, sessions, builder, os.Getpid(), Access{Token: "builders-token", Servers: []string{}})
+	aSession(t, sessions, scout, os.Getpid(), Access{Token: "scouts-token", Servers: []string{"company-graph"}, FleetID: fleet, PluginShipID: plugin})
+	aSession(t, sessions, builder, os.Getpid(), Access{Token: "builders-token", Servers: []string{}, FleetID: fleet, PluginShipID: plugin})
 	list := []mcpservers.Server{{Name: "company-graph", URL: upstream.URL + "/mcp", Transport: mcpservers.Transport, Tools: []string{"read_neo4j_cypher", "get_neo4j_schema"}}}
-	proxy := httptest.NewServer(Proxy{Sessions: sessions, Servers: func() []mcpservers.Server { return list }})
+	proxy := httptest.NewServer(Proxy{Sessions: sessions, Configuration: applied(list, nil)})
 	t.Cleanup(proxy.Close)
 	return proxy
 }
@@ -219,12 +233,12 @@ func TestTheProxyRefusesATokenThatIsNotOfARunningSessionStartedWithTheServer(t *
 	upstream := httptest.NewServer(graph)
 	defer upstream.Close()
 	sessions := t.TempDir()
-	aSession(t, sessions, scout, os.Getpid(), Access{Token: "scouts-token", Servers: []string{"company-graph"}})
-	aSession(t, sessions, builder, os.Getpid(), Access{Token: "builders-token", Servers: []string{}})
+	aSession(t, sessions, scout, os.Getpid(), Access{Token: "scouts-token", Servers: []string{"company-graph"}, FleetID: fleet, PluginShipID: plugin})
+	aSession(t, sessions, builder, os.Getpid(), Access{Token: "builders-token", Servers: []string{}, FleetID: fleet, PluginShipID: plugin})
 	const stopped = "shp_01m6jyczpnpp5c0vxh54c966d0"
-	aSession(t, sessions, stopped, stoppedPID, Access{Token: "stopped-token", Servers: []string{"company-graph"}})
+	aSession(t, sessions, stopped, stoppedPID, Access{Token: "stopped-token", Servers: []string{"company-graph"}, FleetID: fleet, PluginShipID: plugin})
 	list := []mcpservers.Server{{Name: "company-graph", URL: upstream.URL, Transport: mcpservers.Transport, Tools: []string{"read_neo4j_cypher"}}}
-	proxy := httptest.NewServer(Proxy{Sessions: sessions, Servers: func() []mcpservers.Server { return list }})
+	proxy := httptest.NewServer(Proxy{Sessions: sessions, Configuration: applied(list, nil)})
 	defer proxy.Close()
 	cases := []struct {
 		name  string
@@ -276,8 +290,8 @@ func TestTheProxyForwardsOnlyToTheServersURLWithoutTheSessionsToken(t *testing.T
 
 func TestTheProxyRefusesAServerNoLongerOnTheList(t *testing.T) {
 	sessions := t.TempDir()
-	aSession(t, sessions, scout, os.Getpid(), Access{Token: "scouts-token", Servers: []string{"company-graph"}})
-	proxy := httptest.NewServer(Proxy{Sessions: sessions, Servers: func() []mcpservers.Server { return nil }})
+	aSession(t, sessions, scout, os.Getpid(), Access{Token: "scouts-token", Servers: []string{"company-graph"}, FleetID: fleet, PluginShipID: plugin})
+	proxy := httptest.NewServer(Proxy{Sessions: sessions, Configuration: applied(nil, nil)})
 	defer proxy.Close()
 	if status, text := call(t, proxy, "/mcp/"+scout+"/company-graph", "scouts-token", listTools); status != http.StatusNotFound {
 		t.Errorf("tools/list of a server off the list = %d %s, want 404", status, text)
@@ -286,7 +300,7 @@ func TestTheProxyRefusesAServerNoLongerOnTheList(t *testing.T) {
 
 func TestAnAccessIsKeptInItsSessionsFolderReadableByItsUserOnly(t *testing.T) {
 	folder := t.TempDir()
-	if err := WriteAccess(folder, Access{Token: "scouts-token", Servers: []string{"company-graph"}}); err != nil {
+	if err := WriteAccess(folder, Access{Token: "scouts-token", Servers: []string{"company-graph"}, FleetID: fleet, PluginShipID: plugin}); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(filepath.Join(folder, "mcp-access"))
@@ -350,13 +364,9 @@ func aProxyWithCredential(t *testing.T, graph *fakeGraph, header string, held ma
 	upstream := httptest.NewServer(graph)
 	t.Cleanup(upstream.Close)
 	sessions := t.TempDir()
-	aSession(t, sessions, scout, os.Getpid(), Access{Token: "scouts-token", Servers: []string{"company-graph"}})
+	aSession(t, sessions, scout, os.Getpid(), Access{Token: "scouts-token", Servers: []string{"company-graph"}, FleetID: fleet, PluginShipID: plugin})
 	list := []mcpservers.Server{{Name: "company-graph", URL: upstream.URL + "/mcp", Transport: mcpservers.Transport, Tools: []string{"read_neo4j_cypher"}, Credential: &mcpservers.Credential{Secret: "graph-token", Header: header}}}
-	secret := func(name string) (string, bool) {
-		value, ok := held[name]
-		return value, ok
-	}
-	proxy := httptest.NewServer(Proxy{Sessions: sessions, Servers: func() []mcpservers.Server { return list }, Secret: secret})
+	proxy := httptest.NewServer(Proxy{Sessions: sessions, Configuration: applied(list, held)})
 	t.Cleanup(proxy.Close)
 	return proxy
 }
@@ -406,12 +416,107 @@ func TestTheProxyRefusesAServerWithACredentialWhenItHoldsNoSecrets(t *testing.T)
 	upstream := httptest.NewServer(graph)
 	defer upstream.Close()
 	sessions := t.TempDir()
-	aSession(t, sessions, scout, os.Getpid(), Access{Token: "scouts-token", Servers: []string{"company-graph"}})
+	aSession(t, sessions, scout, os.Getpid(), Access{Token: "scouts-token", Servers: []string{"company-graph"}, FleetID: fleet, PluginShipID: plugin})
 	list := []mcpservers.Server{{Name: "company-graph", URL: upstream.URL + "/mcp", Transport: mcpservers.Transport, Tools: []string{"read_neo4j_cypher"}, Credential: &mcpservers.Credential{Secret: "graph-token", Header: "Authorization"}}}
-	proxy := httptest.NewServer(Proxy{Sessions: sessions, Servers: func() []mcpservers.Server { return list }})
+	proxy := httptest.NewServer(Proxy{Sessions: sessions, Configuration: applied(list, nil)})
 	defer proxy.Close()
 
 	if status, _ := call(t, proxy, "/mcp/"+scout+"/company-graph", "scouts-token", listTools); status != http.StatusServiceUnavailable || graph.requests != 0 {
 		t.Fatalf("tools/list = %d, the graph got %d requests, want 503 and none", status, graph.requests)
+	}
+}
+
+// aBoundProxy is the MCP proxy in front of the graph, with a running scout session bound to the identity it was started under and the configuration read at each call.
+func aBoundProxy(t *testing.T, graph *fakeGraph, bound mcpconfiguration.Identity, configuration func(url string) func() (mcpconfiguration.Configuration, bool)) *httptest.Server {
+	t.Helper()
+	upstream := httptest.NewServer(graph)
+	t.Cleanup(upstream.Close)
+	sessions := t.TempDir()
+	aSession(t, sessions, scout, os.Getpid(), Access{Token: "scouts-token", Servers: []string{"company-graph"}, FleetID: bound.FleetID, PluginShipID: bound.PluginShipID})
+	proxy := httptest.NewServer(Proxy{Sessions: sessions, Configuration: configuration(upstream.URL + "/mcp")})
+	t.Cleanup(proxy.Close)
+	return proxy
+}
+
+func TestTheProxyRefusesEveryCallOfASessionBoundToAReplacedIdentityAndForwardsNothing(t *testing.T) {
+	ours := mcpconfiguration.Identity{FleetID: fleet, PluginShipID: plugin}
+	for _, test := range []struct {
+		label   string
+		bound   mcpconfiguration.Identity
+		applied mcpconfiguration.Identity
+	}{
+		{"a configuration of another plugin ship applied since", ours, mcpconfiguration.Identity{FleetID: fleet, PluginShipID: "shp_01m3tb1zhjs6kthtcs2zvksacw"}},
+		{"a configuration of another fleet applied since", ours, mcpconfiguration.Identity{FleetID: "flt_01m3tb1zgr5h2ffee12xnch8sw", PluginShipID: plugin}},
+		{"a session started before it was bound to any", mcpconfiguration.Identity{}, ours},
+	} {
+		t.Run(test.label, func(t *testing.T) {
+			graph := &fakeGraph{}
+			proxy := aBoundProxy(t, graph, test.bound, func(url string) func() (mcpconfiguration.Configuration, bool) {
+				// The newly applied configuration names a server of the same name.
+				return appliedAs(test.applied, []mcpservers.Server{{Name: "company-graph", URL: url, Transport: mcpservers.Transport, Tools: []string{"read_neo4j_cypher"}}}, nil)
+			})
+
+			for _, body := range []string{listTools, callTool("read_neo4j_cypher")} {
+				status, text := call(t, proxy, "/mcp/"+scout+"/company-graph", "scouts-token", body)
+				if status != http.StatusForbidden || !strings.Contains(text, "MCP_CONFIGURATION_IDENTITY_MISMATCH") {
+					t.Errorf("%s = %d %s, want 403 MCP_CONFIGURATION_IDENTITY_MISMATCH", body, status, text)
+				}
+			}
+			if graph.requests != 0 {
+				t.Errorf("the graph got %d requests, want none", graph.requests)
+			}
+		})
+	}
+}
+
+func TestTheProxyRefusesASessionBoundToAnIdentityWhenNoConfigurationIsApplied(t *testing.T) {
+	graph := &fakeGraph{}
+	proxy := aBoundProxy(t, graph, mcpconfiguration.Identity{FleetID: fleet, PluginShipID: plugin}, func(string) func() (mcpconfiguration.Configuration, bool) {
+		return func() (mcpconfiguration.Configuration, bool) { return mcpconfiguration.Configuration{}, false }
+	})
+
+	status, text := call(t, proxy, "/mcp/"+scout+"/company-graph", "scouts-token", listTools)
+
+	if status != http.StatusForbidden || !strings.Contains(text, "MCP_CONFIGURATION_IDENTITY_MISMATCH") || graph.requests != 0 {
+		t.Errorf("tools/list with none applied = %d %s, the graph got %d, want 403 MCP_CONFIGURATION_IDENTITY_MISMATCH and none", status, text, graph.requests)
+	}
+}
+
+func TestARotatedCredentialAndAChangedAllowlistTakeEffectOnTheNextCallAfterTheyAreApplied(t *testing.T) {
+	graph := &fakeGraph{}
+	var current mcpconfiguration.Configuration
+	proxy := aBoundProxy(t, graph, mcpconfiguration.Identity{FleetID: fleet, PluginShipID: plugin}, func(url string) func() (mcpconfiguration.Configuration, bool) {
+		current = mcpconfiguration.Configuration{Identity: mcpconfiguration.Identity{FleetID: fleet, PluginShipID: plugin}, Version: 1, Servers: []mcpservers.Server{{Name: "company-graph", URL: url, Transport: mcpservers.Transport, Tools: []string{"read_neo4j_cypher"}, Credential: &mcpservers.Credential{Secret: "graph-token", Header: "Authorization"}}}, Secrets: map[string]string{"graph-token": "Bearer first"}}
+		return func() (mcpconfiguration.Configuration, bool) { return current, true }
+	})
+	call(t, proxy, "/mcp/"+scout+"/company-graph", "scouts-token", callTool("read_neo4j_cypher"))
+
+	rotated := current
+	rotated.Version = 2
+	rotated.Servers = []mcpservers.Server{{Name: "company-graph", URL: current.Servers[0].URL, Transport: mcpservers.Transport, Tools: []string{"get_neo4j_schema"}, Credential: current.Servers[0].Credential}}
+	rotated.Secrets = map[string]string{"graph-token": "Bearer second"}
+	current = rotated
+	call(t, proxy, "/mcp/"+scout+"/company-graph", "scouts-token", callTool("get_neo4j_schema"))
+	_, text := call(t, proxy, "/mcp/"+scout+"/company-graph", "scouts-token", callTool("read_neo4j_cypher"))
+
+	if len(graph.headers) != 2 || graph.headers[0].Get("authorization") != "Bearer first" || graph.headers[1].Get("authorization") != "Bearer second" {
+		t.Errorf("the graph got %v, want Bearer first, then Bearer second", graph.headers)
+	}
+	if got := graph.calls(); !slices.Equal(got, []string{"read_neo4j_cypher", "get_neo4j_schema"}) || !strings.Contains(text, "read_neo4j_cypher") {
+		t.Errorf("the graph was called with %v and the dropped tool answered %s, want the dropped tool refused", got, text)
+	}
+}
+
+func TestAnAccessKeepsTheIdentityItsSessionWasStartedUnderAcrossARestartOfTheProxy(t *testing.T) {
+	folder := t.TempDir()
+	written := Access{Token: "scouts-token", Servers: []string{"company-graph"}, FleetID: fleet, PluginShipID: plugin}
+	if err := WriteAccess(folder, written); err != nil {
+		t.Fatal(err)
+	}
+
+	read, ok := readAccess(folder)
+
+	if !ok || read.FleetID != fleet || read.PluginShipID != plugin {
+		t.Errorf("readAccess = %+v, %v, want the fleet and plugin ship it was written with", read, ok)
 	}
 }
