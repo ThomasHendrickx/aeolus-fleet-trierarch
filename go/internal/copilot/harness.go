@@ -10,6 +10,7 @@
 package copilot
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,7 +36,7 @@ type Runtime interface {
 
 // McpServers lists the MCP servers Copilot loads in a folder, each the user's own, the workspace's or a plugin's.
 type McpServers interface {
-	McpServersIn(folder string) ([]string, error)
+	McpServersIn(ctx context.Context, folder string) ([]string, error)
 }
 
 // launchVariable is the variable a session's launch id is passed in, for the plugin's hooks to mark that launch (#490).
@@ -67,7 +68,8 @@ type Harness struct {
 
 // othersOff turns off, for this session only, every MCP server Copilot lists in the entry's folder but those the entry names (#329), each with a --disable-mcp-server of its own; Copilot's built-in servers are off on every start.
 func (h Harness) othersOff(entry reconciler.Entry) ([]string, error) {
-	listed, err := h.McpServers.McpServersIn(entry.Folder)
+	// A launch carries no context of its own; the listing bounds its own time.
+	listed, err := h.McpServers.McpServersIn(context.Background(), entry.Folder)
 	if err != nil {
 		return nil, err
 	}

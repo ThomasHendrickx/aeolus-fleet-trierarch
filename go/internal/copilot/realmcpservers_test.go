@@ -1,6 +1,7 @@
 package copilot
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -48,7 +49,7 @@ func TestTheInstalledCopilotsServersAreListedWithoutStartingOrReachingOne(t *tes
 		}
 	}
 
-	names, err := McpList{Program: "copilot", CopilotHome: copilotHome}.McpServersIn(folder)
+	names, err := McpList{Program: "copilot", CopilotHome: copilotHome}.McpServersIn(context.Background(), folder)
 
 	slices.Sort(names)
 	if want := []string{"http-own", "users-own", "workspaces-own"}; err != nil || !slices.Equal(names, want) {
