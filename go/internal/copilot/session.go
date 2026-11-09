@@ -31,9 +31,13 @@ const (
 	// allowAllTools is added to every launch: `copilot -p` runs no tool without it, and running every tool without asking is the mode a session the trierarch runs is in (decision 0016).
 	allowAllTools = "--allow-all-tools"
 	// noAskUser is added to every launch: Copilot's question tool waits for an answer nobody gives (#460).
-	noAskUser  = "--no-ask-user"
-	resumeFlag = "--resume="
-	promptFlag = "--prompt="
+	noAskUser = "--no-ask-user"
+	// noBuiltinMcps is added to every launch: Copilot's own GitHub servers stay out of the session, which gets only the servers its crew request names (#329).
+	noBuiltinMcps = "--disable-builtin-mcps"
+	// disableServerFlag turns off the MCP server it names for that run only.
+	disableServerFlag = "--disable-mcp-server="
+	resumeFlag        = "--resume="
+	promptFlag        = "--prompt="
 	// errorPrefix is how Copilot starts the error it writes on stderr.
 	errorPrefix = "Error: "
 )
@@ -43,9 +47,10 @@ var AdapterFlags = []commandline.AdapterFlag{
 	{Flag: jsonOutput, When: "always"},
 	{Flag: allowAllTools, When: "always"},
 	{Flag: noAskUser, When: "always"},
+	{Flag: noBuiltinMcps, When: "always"},
 }
 
-// CommandParts are `copilot` in parts, the configured flags, JSON output, every tool allowed and no question tool, then the session to resume when there is one, and the prompt last as the value of --prompt, so it never reads as a flag.
+// CommandParts are `copilot` in parts, the configured flags, JSON output, every tool allowed, no question tool and no built-in MCP server, then the session to resume when there is one, and the prompt last as the value of --prompt, so it never reads as a flag.
 func CommandParts(flags []string, line string, sessionID string) []commandline.Part {
 	last := []string{}
 	if sessionID != "" {
@@ -57,6 +62,7 @@ func CommandParts(flags []string, line string, sessionID string) []commandline.P
 		{Words: []string{jsonOutput}, Source: commandline.Adapter},
 		{Words: []string{allowAllTools}, Source: commandline.Adapter},
 		{Words: []string{noAskUser}, Source: commandline.Adapter},
+		{Words: []string{noBuiltinMcps}, Source: commandline.Adapter},
 		{Words: append(last, promptFlag+line)},
 	})
 }

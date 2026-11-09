@@ -952,7 +952,7 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 				// As detection last found it: a Copilot not detected yet is not offered.
 				version := offers.version("copilot")
 				return version, version != ""
-			}, CopilotHome: env["COPILOT_HOME"], IsInContainer: isInContainers(configuration.Runtime)}
+			}, CopilotHome: env["COPILOT_HOME"], IsInContainer: isInContainers(configuration.Runtime), McpServers: copilot.McpList{Program: "copilot", CopilotHome: env["COPILOT_HOME"]}}
 		}
 		offered = append(offered, name)
 	}
