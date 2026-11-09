@@ -91,8 +91,6 @@ type Init struct {
 	Sleep func()
 	// Detect detects what the harnesses given offer, as by says, and keeps it in detected.json (#365).
 	Detect func(harnesses []string, by detection.By) (detection.Detected, error)
-	// AipCommand is the aip CLI the trierarch keeps for its host sessions (#314); none when nil.
-	AipCommand AipCommand
 }
 
 const (
@@ -334,9 +332,6 @@ func (i Init) Run(flags Flags) (Report, error) {
 	}
 	for _, line := range strings.Split(detection.Describe(harnesses, detected), "\n") {
 		say(line)
-	}
-	if i.AipCommand != nil {
-		say(aipCommandSaid(i.AipCommand.Ensure(), i.Paths.AipCommand))
 	}
 
 	// The service: installed when it is not, rewritten as this trierarch writes it when it is, and restarted when it should read a new crew file.

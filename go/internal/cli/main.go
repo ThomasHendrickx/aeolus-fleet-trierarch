@@ -88,9 +88,7 @@ type Machine struct {
 	McpConfiguration func(at paths.Paths) *mcpconfiguration.File
 	// McpFleet is the trierarch's own ship as the MCP configuration asks it; none when nil.
 	McpFleet func(kept crew.File) McpFleet
-	// AipCommand is the aip CLI the trierarch keeps for its host sessions (#314); none when nil.
-	AipCommand func(at paths.Paths) AipCommand
-	Sessions   func(at paths.Paths) Sessions
+	Sessions func(at paths.Paths) Sessions
 	// Log writes a line to the trierarch's log.
 	Log func(line string)
 	// ReadKey is the API key the operator types, not shown, or pipes in.
@@ -253,7 +251,6 @@ func Main(args []string, machine Machine) (string, int) {
 				Register:              machine.Register,
 				IsLeaseHeld:           machine.IsLeaseHeld,
 				Sleep:                 machine.Sleep,
-				AipCommand:            machine.aipCommandOf(at),
 				Detect: func(harnesses []string, by detection.By) (detection.Detected, error) {
 					return machine.Detect(at, harnesses, by)
 				},
@@ -395,7 +392,6 @@ func upgrade(at paths.Paths, machine Machine, command parsed) (answer, error) {
 		Trierarch:    machine.Trierarch,
 		Sleep:        machine.Sleep,
 		IsPluginStep: variable(machine.Environ, PluginStepVariable) == "1",
-		AipCommand:   machine.aipCommandOf(at),
 	}.Run(version)
 	if err != nil {
 		return answer{}, err
@@ -425,6 +421,10 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 	if err != nil {
 		return answer{}, err
 	}
+	if configuration.HasLeftoverAip {
+		machine.Log("The configuration's aip is no longer used: a fleet adds aip as an MCP server of its own; remove it from " + at.Config)
+	}
+	machine.removeSuperseded(at)
 	// A session in a container is held to its ship only on a runtime config check takes (decision 0039): none starts otherwise.
 	if err := checkRuntime(at, configuration, machine); err != nil {
 		return answer{}, err
@@ -456,11 +456,6 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 	stopped, done := context.WithCancel(context.Background())
 	defer done()
 	received := make(chan struct{})
-	keptAip := make(chan struct{})
-	go func() {
-		defer close(keptAip)
-		keepAipCommand(stopped, machine.aipCommandOf(at), machine.PassEvery, time.Now)
-	}()
 	var isKeyCutOff atomic.Bool
 	go func() {
 		defer close(received)
@@ -486,7 +481,6 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 			// The stop ends a receive the fleet still holds at once: a service manager that stops the trierarch sees it gone in a moment.
 			done()
 			<-received
-			<-keptAip
 			return answer{data: map[string]bool{"stopped": true}, text: "aeolus-trierarch stopped."}, nil
 		case <-time.After(machine.PassEvery):
 		}
@@ -513,12 +507,13 @@ func (m Machine) loadMcpConfiguration(at paths.Paths, kept crew.File) (*mcpconfi
 	return held, nil
 }
 
-// aipCommandOf is the aip CLI the trierarch keeps on the machine; none when nil.
-func (m Machine) aipCommandOf(at paths.Paths) AipCommand {
-	if m.AipCommand == nil {
-		return nil
+// removeSuperseded removes what an older trierarch kept that none reads any more, each by the trierarch's own path; one that cannot be removed is logged and tried again at the next start.
+func (m Machine) removeSuperseded(at paths.Paths) {
+	for _, path := range at.Superseded {
+		if err := os.RemoveAll(path); err != nil {
+			m.Log(fmt.Sprintf("Could not remove %s, which no trierarch reads any more: %v", path, err))
+		}
 	}
-	return m.AipCommand(at)
 }
 
 // checkRuntime refuses a configuration whose sessions cannot run on the machine, with every reason.

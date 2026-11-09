@@ -173,8 +173,7 @@ describe("the trierarch's report as its own ship", () => {
 
     const report = await fleet.reportOfTrierarch();
     expect(report?.state).toBe('idle');
-    // The stand-in machine reaches no network, so a trierarch that keeps aip for its host sessions says why they get none.
-    expect(report?.note).toMatch(/^0 of \d+ running(, no aip on the host(: its install failed, as aeolus-trierarch status says)?)?$/);
+    expect(report?.note).toMatch(/^0 of \d+ running$/);
     expect(report?.details).toHaveProperty('caps.ships');
     expect(report?.details).toHaveProperty('caps.running');
     expect(report?.details).toHaveProperty('version');
@@ -198,7 +197,7 @@ describe("the trierarch's report as its own ship", () => {
     await aRunningScout();
 
     await expect.poll(async () => (await fleet.reportOfTrierarch())?.state, { timeout: ANSWERED_WITHIN_MS }).toBe('working');
-    expect((await fleet.reportOfTrierarch())?.note).toMatch(/^1 of \d+ running(, no aip on the host(: its install failed, as aeolus-trierarch status says)?)?$/);
+    expect((await fleet.reportOfTrierarch())?.note).toMatch(/^1 of \d+ running$/);
   });
 
   it("reports the login of a ship whose session started", async () => {

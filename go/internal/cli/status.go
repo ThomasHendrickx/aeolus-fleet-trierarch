@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aipcommand"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
@@ -43,8 +42,6 @@ type StatusReport struct {
 	Orphans      []string       `json:"orphans"`
 	// PassFailure is why the last pass failed and since when; none when it succeeded.
 	PassFailure *reconciler.PassFailure `json:"passFailure,omitempty"`
-	// Aip is the aip CLI host sessions run, or why there is none (#314); none where the machine keeps none.
-	Aip *aipcommand.State `json:"aip,omitempty"`
 }
 
 // StatusFleet is the fleet and the trierarch's own lease: valid, ended or unreachable.
@@ -122,10 +119,6 @@ func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
 		PassFailure: saved.PassFailure,
 	}
 	slices.Sort(report.Repositories)
-	if command := machine.aipCommandOf(at); command != nil {
-		state := command.State()
-		report.Aip = &state
-	}
 	plugins := machine.Plugins()
 	for harness := range configuration.Harnesses {
 		if version := plugins.Version(harness); version != "" {
@@ -304,9 +297,6 @@ func describeStatus(report StatusReport, look style.Style) string {
 		line("Entries", or(len(entries) == 0, "none", func() string { return strings.Join(entries, ", ") })),
 		line("Kept worktrees", or(len(keptWorktrees) == 0, "none", func() string { return look.Tone(style.Busy, strings.Join(keptWorktrees, ", ")) })),
 		line("Orphans", or(len(report.Orphans) == 0, "none", func() string { return look.Tone(style.Busy, strings.Join(report.Orphans, ", ")) })),
-	}
-	if report.Aip != nil {
-		lines = append(lines, line("aip", describeAipCommand(*report.Aip)))
 	}
 	return strings.Join(lines, "\n")
 }

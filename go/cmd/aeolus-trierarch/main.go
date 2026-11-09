@@ -27,8 +27,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aip"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/aipcommand"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/attestation"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/claudecode"
@@ -93,11 +91,7 @@ func main() {
 		<-signals
 		close(stop)
 	}()
-	environ := environWithoutAipCommand(os.Environ(), paths.Of(home, ""))
-	if path, ok := os.LookupEnv("PATH"); ok {
-		// The service's own PATH, and so every session's, drops what an upgrade run from a host session carried in (#321).
-		_ = os.Setenv("PATH", aipcommand.PathWithout(path, paths.Of(home, "").AipCommand))
-	}
+	environ := os.Environ()
 	capLog(paths.Of(home, "").Logs)
 	machine := cli.Machine{
 		Environ:               environ,
@@ -144,9 +138,6 @@ func main() {
 		McpConfiguration: heldMcpConfigurationOf,
 		McpFleet: func(kept crew.File) cli.McpFleet {
 			return fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken, Model: "@aeolus-fleet/trierarch@" + cli.Version}
-		},
-		AipCommand: func(at paths.Paths) cli.AipCommand {
-			return aipCommandOf(at)
 		},
 		Sessions: func(at paths.Paths) cli.Sessions {
 			// A configuration that cannot be read runs no session in a container.
@@ -271,18 +262,6 @@ func (p plugins) Version(harness string) string {
 	return ""
 }
 
-// environWithoutAipCommand is the environment with PATH without the aip command's folders, so a service installed or started from a host session with aip does not carry them on (#321).
-func environWithoutAipCommand(environ []string, at paths.Paths) []string {
-	cleaned := make([]string, 0, len(environ))
-	for _, entry := range environ {
-		if path, ok := strings.CutPrefix(entry, "PATH="); ok {
-			entry = "PATH=" + aipcommand.PathWithout(path, at.AipCommand)
-		}
-		cleaned = append(cleaned, entry)
-	}
-	return cleaned
-}
-
 // runTrierarch runs a trierarch file with the words, as the plugin step of an upgrade when isPluginStep: its stdout and its exit status, 127 when it could not run at all.
 func runTrierarch(program string, isPluginStep bool, words ...string) (string, int) {
 	command := exec.Command(program, words...)
@@ -377,25 +356,6 @@ func heldMcpConfigurationOf(at paths.Paths) *mcpconfiguration.File {
 		heldMcpConfiguration = &mcpconfiguration.File{Path: at.McpConfiguration}
 	})
 	return heldMcpConfiguration
-}
-
-// aipCommandOf is the aip CLI the trierarch keeps for its host sessions (#314), installed by uv's build for this machine.
-func aipCommandOf(at paths.Paths) aipcommand.Folder {
-	folder := aipcommand.Folder{Path: at.AipCommand, Outcome: at.AipCommandOutcome, Log: logLine}
-	if uv, ok := aipcommand.UvFor(runtime.GOOS, runtime.GOARCH); ok {
-		folder.Uv = &uv
-	}
-	return folder
-}
-
-// appliedSecrets are the secrets of the MCP configuration applied last, by name.
-type appliedSecrets struct{ file *mcpconfiguration.File }
-
-// Value is the secret's value; false when none is held.
-func (a appliedSecrets) Value(name string) (string, bool) {
-	held, _ := a.file.Current()
-	value, ok := held.Secrets[name]
-	return value, ok
 }
 
 // harnessesThatAddMcpServers are the harnesses a session can be started with crew-time MCP servers (decision M4), on the runtime configured, and which servers each can add: Claude Code, on the host and in a container, every server; Codex, on the host only, as it is offered, every server whose name it can name; Copilot, on the host only, as it is offered, every server, its configuration being JSON. A harness that cannot offers no server, so a request naming one is given back.
@@ -493,18 +453,12 @@ type runningSessions interface {
 // sessionImage is the session image release.yml publishes with each version (decision 0011, 0039).
 const sessionImage = "ghcr.io/thomashendrickx/aeolus-session"
 
-// sessionRuntime is what the configuration's session runtime picks (decision 0039): each session under a hold, the trierarch program run as `hold`, in a systemd scope of its own under the service; in containers, a container per ship that its hold runs, from the image of the trierarch's own version, with the configured binary and caps and the machine's model token. Every session reaches the aip server the configuration names, or else the one the trierarch plugin sent, with the read token the secrets hold (#251, #312); host sessions run the trierarch's aip CLI and get its plugin of aip's skills (#314, #315).
+// sessionRuntime is what the configuration's session runtime picks (decision 0039): each session under a hold, the trierarch program run as `hold`, in a systemd scope of its own under the service; in containers, a container per ship that its hold runs, from the image of the trierarch's own version, with the configured binary and caps and the machine's model token. A session started with MCP servers is bound to the fleet and plugin ship of the MCP configuration applied.
 func sessionRuntime(at paths.Paths, program string, configuration config.Configuration) runningSessions {
 	configured := configuration.Runtime
 	holds := sessions.Runtime{Sessions: at.Sessions, Program: []string{program}, Version: cli.Version, Launch: sessions.Launch(runtime.GOOS, os.Getenv("INVOCATION_ID"), sessions.SystemdVersion()), BootedAt: sessions.BootedAt}
-	holds.Aip = &sessions.Aip{Secrets: appliedSecrets{file: heldMcpConfigurationOf(at)}, Log: logLine}
 	holds.McpIdentity = heldMcpConfigurationOf(at).Identity
-	if own := configuration.Aip; own != nil {
-		holds.Aip.Configured = &aip.Setting{Server: own.Server, TokenSecret: own.TokenSecret}
-	}
 	if !isInContainers(configured) {
-		// A container's image holds its own aip and skills.
-		holds.Aip.Command, holds.Aip.Plugin, holds.Aip.Folder, holds.Aip.Path = aipCommandOf(at).Bin, aipCommandOf(at).Plugin, at.AipCommand, os.Getenv("PATH")
 		return holds
 	}
 	return container.Runtime{Holds: holds, Binary: configured.Binary, Image: sessionImage + ":" + cli.Version, ModelToken: at.ModelToken, ProxyURL: modelproxy.Runtime{Folder: at.Proxy}.URL, Homes: at.Homes, Sockets: at.Sockets, Memory: configured.Memory, Cpus: configured.Cpus}
@@ -742,11 +696,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Input: func() selfreport.Input {
 			offered, detected := offers.current()
 			offered = withTrusted(offered)
-			in := selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Trusted: trust.Of(offered, trustReaders), McpServers: offeredServers(), SealingKey: sealingKey.Public(), Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, Now: time.Now()}
-			if !isInContainers(configured.Runtime) {
-				in.AipMissing = aipCommandOf(at).State().Brief()
-			}
-			return in
+			return selfreport.Input{Configuration: offered, Detected: detected, Harnesses: offeredHarnesses, Trusted: trust.Of(offered, trustReaders), McpServers: offeredServers(), SealingKey: sealingKey.Public(), Logins: logins, Version: cli.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, Now: time.Now()}
 		},
 	}
 	// Each pass ends with the trierarch's own report: the first at start, then only when it changed.

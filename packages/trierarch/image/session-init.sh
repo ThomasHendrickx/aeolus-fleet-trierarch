@@ -43,19 +43,18 @@ link_plugin() {
   printf '%s\n' "$merged" > "$settings.aeolus-session.tmp" && mv "$settings.aeolus-session.tmp" "$settings"
 }
 
-# The aip-runtime skill of the image's aip CLI, into the home's Claude Code
-# skills, linked from the image as the plugin is, so the skill stays at the
-# CLI's version whatever an earlier image left in the home.
-link_skills() {
-  local skills="$HOME/.claude/skills" entry
-  mkdir -p "$skills" || return 1
-  for entry in /opt/aeolus-session/skills/*; do
-    rm -rf "${skills:?}/${entry##*/}"
-    ln -s "$entry" "$skills/${entry##*/}"
+# An earlier image linked skills of its own into the home's Claude Code skills
+# from /opt/aeolus-session/skills; this image has none, so each such link goes,
+# and a skill of the session's own stays.
+unlink_image_skills() {
+  local entry
+  for entry in "$HOME"/.claude/skills/*; do
+    [[ -L $entry && $(readlink "$entry") == /opt/aeolus-session/skills/* ]] || continue
+    rm -f "$entry"
   done
 }
 
 link_plugin || echo "aeolus-session-init: could not link the aeolus-fleet plugin into $HOME" >&2
-link_skills || echo "aeolus-session-init: could not link the aip-runtime skill into $HOME" >&2
+unlink_image_skills || echo "aeolus-session-init: could not remove an earlier image's skills from $HOME" >&2
 run_health_checks &
 exec "$@"

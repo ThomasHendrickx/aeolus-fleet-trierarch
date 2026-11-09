@@ -109,10 +109,9 @@ describe('status', () => {
 
     // How long it runs is read from the process in whole seconds, so `since` may differ between two calls.
     // When the models were confirmed is the time of the machine's detection.
-    // Why the download failed is the HTTP client's own words.
     const lines = (await statusText())
       .split('\n')
-      .map((line) => line.replace(/(?<=^Service: .*since ).+$/, '<since>').replace(/(?<=^Models confirmed: claude-code ).+$/, '<confirmed>').replace(/(?<=^aip: none for host sessions: the install of aip 0\.7\.0 failed: uv 0\.13\.7 could not be downloaded: ).+$/, '<why>'));
+      .map((line) => line.replace(/(?<=^Service: .*since ).+$/, '<since>').replace(/(?<=^Models confirmed: claude-code ).+$/, '<confirmed>'));
 
     expect(lines).toEqual([
       `Version: ${report.version}`,
@@ -127,8 +126,6 @@ describe('status', () => {
       'Entries: running 1',
       'Kept worktrees: none',
       'Orphans: none',
-      // Today's trierarch, kept for existing machines, keeps no aip for its host sessions.
-      ...(isTodaysTrierarch ? [] : ['aip: none for host sessions: the install of aip 0.7.0 failed: uv 0.13.7 could not be downloaded: <why>']),
       '',
     ]);
   });
