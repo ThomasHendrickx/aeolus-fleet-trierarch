@@ -42,8 +42,8 @@ func IsName(name string) bool {
 	return len(name) <= nameMaxLength && namePattern.MatchString(name)
 }
 
-// isValue says whether a value can go into a header as it is.
-func isValue(value []byte) bool {
+// IsValue says whether a value can go into a header as it is.
+func IsValue(value []byte) bool {
 	return len(value) > 0 && len(value) <= valueMaxLength && utf8.Valid(value) && !bytes.ContainsAny(value, "\r\n\x00")
 }
 
@@ -83,7 +83,7 @@ func Read(payload string, key Key) (map[string]string, error) {
 		if !ok {
 			return nil, fmt.Errorf("%s: does not open with this trierarch's key", entry.Name)
 		}
-		if !isValue(value) {
+		if !IsValue(value) {
 			return nil, fmt.Errorf("%s: a value is 1 to %d bytes of UTF-8 with no line break or NUL", entry.Name, valueMaxLength)
 		}
 		opened[entry.Name] = string(value)

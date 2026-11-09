@@ -35,7 +35,7 @@ func (f *File) Load() {
 		return
 	}
 	for name, value := range held.Secrets {
-		if !IsName(name) || !isValue([]byte(value)) {
+		if !IsName(name) || !IsValue([]byte(value)) {
 			return
 		}
 	}
@@ -63,7 +63,7 @@ func (f *File) Accept(secrets map[string]string) error {
 	if err != nil {
 		return err
 	}
-	if err := writePrivate(f.Path, append(text, '\n')); err != nil {
+	if err := WritePrivate(f.Path, append(text, '\n')); err != nil {
 		return fmt.Errorf("keep the secrets: %w", err)
 	}
 	f.mu.Lock()

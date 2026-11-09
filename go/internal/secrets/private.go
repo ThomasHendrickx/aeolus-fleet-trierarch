@@ -11,8 +11,8 @@ import (
 	"syscall"
 )
 
-// readPrivate reads a file only its user may read, refusing a link in its place, and narrows a wider mode back to 600.
-func readPrivate(path string) ([]byte, error) {
+// ReadPrivate reads a file only its user may read, refusing a link in its place, and narrows a wider mode back to 600.
+func ReadPrivate(path string) ([]byte, error) {
 	if err := refuseLink(path); err != nil {
 		return nil, err
 	}
@@ -27,8 +27,8 @@ func readPrivate(path string) ([]byte, error) {
 	return io.ReadAll(file)
 }
 
-// writePrivate replaces the file whole with the text, never through a link. The text goes into a file of mode 600 from its creation, under a name no one else can know beforehand, made by this call alone, then synced and renamed into place, so a stop mid-write leaves what was held.
-func writePrivate(path string, text []byte) error {
+// WritePrivate replaces the file whole with the text, never through a link. The text goes into a file of mode 600 from its creation, under a name no one else can know beforehand, made by this call alone, then synced and renamed into place, so a stop mid-write leaves what was held.
+func WritePrivate(path string, text []byte) error {
 	if err := refuseLink(path); err != nil {
 		return err
 	}
