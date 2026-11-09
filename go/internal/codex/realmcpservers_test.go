@@ -12,7 +12,7 @@ import (
 )
 
 // TestTheInstalledCodexsConfigurationIsListedWithoutStartingOrReachingAServer runs the installed Codex's app server in a throwaway home and
-// Codex home, only with AEOLUS_TEST_CODEX=1: it lists the user's and the project's servers, starts neither stdio server, sends the HTTP one
+// Codex home, only with AEOLUS_TEST_CODEX=1: it lists the user's and the project's servers and the user's enabled plugin, starts neither stdio server, sends the HTTP one
 // no request, and leaves both configuration files as they were.
 func TestTheInstalledCodexsConfigurationIsListedWithoutStartingOrReachingAServer(t *testing.T) {
 	if os.Getenv("AEOLUS_TEST_CODEX") != "1" {
@@ -41,6 +41,9 @@ url = "` + server.URL + `/mcp"
 
 [projects."` + folder + `"]
 trust_level = "trusted"
+
+[plugins."withmcp@probe-market"]
+enabled = true
 `,
 		filepath.Join(folder, ".codex", "config.toml"): `[mcp_servers.projects-own]
 command = "sh"
@@ -56,11 +59,11 @@ args = ["-c", "touch ` + filepath.Join(started, "projects-own") + `"]
 		}
 	}
 
-	names, err := AppServer{Program: "codex", Version: "1.2.3"}.McpServersIn(folder)
+	configured, err := AppServer{Program: "codex", Version: "1.2.3"}.ConfiguredFor(folder)
 
-	slices.Sort(names)
-	if want := []string{"dot.ted", "projects-own", "users-own"}; err != nil || !slices.Equal(names, want) {
-		t.Fatalf("McpServersIn = %q, %v, want %q", names, err, want)
+	slices.Sort(configured.McpServers)
+	if want := []string{"dot.ted", "projects-own", "users-own"}; err != nil || !slices.Equal(configured.McpServers, want) || !slices.Equal(configured.Plugins, []string{"withmcp@probe-market"}) {
+		t.Fatalf("ConfiguredFor = %+v, %v, want the servers %q and the plugin withmcp@probe-market", configured, err, want)
 	}
 	if got := requests.Load(); got != 0 {
 		t.Errorf("the HTTP server got %d requests, want none", got)

@@ -32,14 +32,14 @@ done`
 	return program, said, reached
 }
 
-func TestTheServersCodexsConfigurationNamesForAFolderAreReadThroughItsAppServerReachingNone(t *testing.T) {
-	program, said, reached := anAppServerReadingConfig(t, `{"config":{"mcp_servers":{"dot.ted":{"url":"http://127.0.0.1:2/z","enabled":true},"projects_own":{"command":"echo","enabled":false}}},"origins":{}}`)
+func TestTheServersAndEnabledPluginsCodexsConfigurationNamesForAFolderAreReadThroughItsAppServerReachingNone(t *testing.T) {
+	program, said, reached := anAppServerReadingConfig(t, `{"config":{"mcp_servers":{"dot.ted":{"url":"http://127.0.0.1:2/z","enabled":true},"projects_own":{"command":"echo","enabled":false}},"plugins":{"withmcp@probe-market":{"enabled":true},"old@probe-market":{"enabled":false}}},"origins":{}}`)
 
-	names, err := AppServer{Program: program, Version: "1.2.3"}.McpServersIn("/home/me/worktrees/scout")
+	configured, err := AppServer{Program: program, Version: "1.2.3"}.ConfiguredFor("/home/me/worktrees/scout")
 
-	slices.Sort(names)
-	if err != nil || !slices.Equal(names, []string{"dot.ted", "projects_own"}) {
-		t.Fatalf("McpServersIn = %q, %v, want dot.ted and projects_own", names, err)
+	slices.Sort(configured.McpServers)
+	if err != nil || !slices.Equal(configured.McpServers, []string{"dot.ted", "projects_own"}) || !slices.Equal(configured.Plugins, []string{"withmcp@probe-market"}) {
+		t.Fatalf("ConfiguredFor = %+v, %v, want dot.ted and projects_own, and withmcp@probe-market the one plugin enabled", configured, err)
 	}
 	lines := linesOf(said)
 	if !slices.ContainsFunc(lines, func(line string) bool {
@@ -52,20 +52,20 @@ func TestTheServersCodexsConfigurationNamesForAFolderAreReadThroughItsAppServerR
 	}
 }
 
-func TestAConfigurationNamingNoServerListsNone(t *testing.T) {
+func TestAConfigurationNamingNoServerOrPluginListsNone(t *testing.T) {
 	program, _, _ := anAppServerReadingConfig(t, `{"config":{"model":"gpt-5.6-terra"},"origins":{}}`)
 
-	names, err := AppServer{Program: program}.McpServersIn(t.TempDir())
+	configured, err := AppServer{Program: program}.ConfiguredFor(t.TempDir())
 
-	if err != nil || len(names) != 0 {
-		t.Fatalf("McpServersIn = %q, %v, want none", names, err)
+	if err != nil || len(configured.McpServers) != 0 || len(configured.Plugins) != 0 {
+		t.Fatalf("ConfiguredFor = %+v, %v, want none", configured, err)
 	}
 }
 
 func TestAConfigReadWithoutAConfigurationIsAnError(t *testing.T) {
 	program, _, _ := anAppServerReadingConfig(t, `{}`)
 
-	if names, err := (AppServer{Program: program}).McpServersIn(t.TempDir()); err == nil {
-		t.Fatalf("McpServersIn = %q, want an error", names)
+	if configured, err := (AppServer{Program: program}).ConfiguredFor(t.TempDir()); err == nil {
+		t.Fatalf("ConfiguredFor = %+v, want an error", configured)
 	}
 }

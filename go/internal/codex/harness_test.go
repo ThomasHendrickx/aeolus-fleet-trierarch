@@ -50,16 +50,17 @@ func (h *someHooks) TrustAeolusHooks(folder string) ([]string, error) {
 	return nil, h.err
 }
 
-// someServers are the MCP servers Codex lists in a folder, the user's own, noting each folder it is asked about, or fails with the error given.
+// someServers are the MCP servers and enabled plugins Codex's configuration names for a folder, the user's own, noting each folder it is asked about, or fails with the error given.
 type someServers struct {
 	names     []string
+	plugins   []string
 	askedFrom []string
 	err       error
 }
 
-func (s *someServers) McpServersIn(folder string) ([]string, error) {
+func (s *someServers) ConfiguredFor(folder string) (Configured, error) {
 	s.askedFrom = append(s.askedFrom, folder)
-	return s.names, s.err
+	return Configured{McpServers: s.names, Plugins: s.plugins}, s.err
 }
 
 func aHarness(t *testing.T) (Harness, *aRuntime, *someHooks) {
@@ -79,7 +80,7 @@ func aHarnessListing(t *testing.T) (Harness, *aRuntime, *someHooks, *someServers
 		Runtime:    running,
 		Settings:   config.Harness{Flags: []string{"-m", "gpt-5.6-terra"}, Options: map[string]config.Option{}},
 		Hooks:      hooks,
-		McpServers: servers,
+		Configuration: servers,
 		Events:     func(shipID string) string { return filepath.Join(events, shipID+".jsonl") },
 	}, running, hooks, servers
 }
@@ -367,7 +368,7 @@ func TestASessionWhoseFolderListsNoServerOfItsOwnTurnsNoneOff(t *testing.T) {
 
 func TestASessionWhoseFoldersServersCannotBeListedStartsNothing(t *testing.T) {
 	harness, running, _, listed := aHarnessListing(t)
-	listed.err = errors.New("codex mcp list exited 1")
+	listed.err = errors.New("codex app-server did not answer config/read")
 
 	if err := harness.Launch(anEntry(t), true, "launch-1"); err == nil || len(running.started) != 0 {
 		t.Fatalf("Launch = %v, started %d, want an error and nothing started, since the session would get the user's servers", err, len(running.started))
@@ -389,5 +390,19 @@ func TestASessionWhoseFoldersConfigurationNamesAServerAsItsEntryDoesStartsNothin
 	}
 	if !strings.Contains(err.Error(), "company-graph") || strings.Contains(err.Error(), "gmail") {
 		t.Fatalf("Launch = %v, want the cause to name company-graph and no other server of the user's", err)
+	}
+}
+
+func TestASessionStartsWithEveryPluginCodexsConfigurationEnablesTurnedOffButTheAeolusFleetPlugin(t *testing.T) {
+	harness, running, _, listed := aHarnessListing(t)
+	listed.plugins = []string{"withmcp@probe-market", "aeolus-fleet@aeolus-fleet", "github@openai-curated"}
+
+	if err := harness.Launch(anEntry(t), true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	flags := []string{"-m", "gpt-5.6-terra", "-c", `plugins={"github@openai-curated"={enabled=false},"withmcp@probe-market"={enabled=false}}`}
+	if want := CommandLine(flags, prompt.First("Review PR 12"), true); !slices.Equal(running.started[0].Command, want) {
+		t.Fatalf("started %q, want %q, so no plugin's own MCP server loads and the aeolus-fleet plugin's hooks still run", running.started[0].Command, want)
 	}
 }
