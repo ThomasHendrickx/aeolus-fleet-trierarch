@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// privateWriters are the two files that hold what only the trierarch's user may read, each written by its own call.
+// privateWriters are the files that hold what only the trierarch's user may read: the sealing key, by its own call, and the MCP configuration, through WritePrivate.
 var privateWriters = []struct {
 	label string
 	name  string
@@ -17,8 +17,8 @@ var privateWriters = []struct {
 		_, err := LoadOrMake(path)
 		return err
 	}},
-	{"the secrets", "secrets.json", func(path string) error {
-		return (&File{Path: path}).Accept(map[string]string{"g": "Bearer abc"})
+	{"the MCP configuration", "mcp-configuration.json", func(path string) error {
+		return WritePrivate(path, []byte(`{"secrets":{"g":"Bearer abc"}}`+"\n"))
 	}},
 }
 

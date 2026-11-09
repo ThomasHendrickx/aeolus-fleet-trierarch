@@ -15,8 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 )
 
 // TestMain lets this test binary be the trierarch program the proxy is started as: `<binary> proxy ...`, of the version AEOLUS_TEST_PROXY_VERSION names.
@@ -38,7 +39,7 @@ func aRuntime(t *testing.T) Runtime {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime := Runtime{Folder: filepath.Join(home, "proxy"), Sessions: filepath.Join(home, "sessions"), Keys: filepath.Join(home, "keys"), McpServers: filepath.Join(home, "mcp-servers.json"), Secrets: filepath.Join(home, "secrets.json"), Program: []string{program}, Version: "1.2.3"}
+	runtime := Runtime{Folder: filepath.Join(home, "proxy"), Sessions: filepath.Join(home, "sessions"), Keys: filepath.Join(home, "keys"), McpConfiguration: filepath.Join(home, "mcp-configuration.json"), Program: []string{program}, Version: "1.2.3"}
 	t.Cleanup(func() { _ = runtime.Keep(false) })
 	return runtime
 }
@@ -192,7 +193,7 @@ func TestAProxyNoHarnessNeedsIsStopped(t *testing.T) {
 
 func TestTheProxyCommandRefusesWordsItCannotTake(t *testing.T) {
 	if code := Main([]string{"--folder", t.TempDir()}, "1.2.3"); code != 2 {
-		t.Fatalf("Main without --sessions, --keys and --mcp-servers = %d, want 2", code)
+		t.Fatalf("Main without --sessions, --keys and --mcp-configuration = %d, want 2", code)
 	}
 }
 
@@ -203,10 +204,7 @@ func TestARunningProxyIsTheMCPProxyOfTheServersTheTrierarchPluginSentLast(t *tes
 	}))
 	defer graph.Close()
 	runtime := aRuntime(t)
-	list := `{"servers":[{"name":"company-graph","url":"` + graph.URL + `","tools":["read_neo4j_cypher"]}]}`
-	if err := os.WriteFile(runtime.McpServers, []byte(list), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	applyConfiguration(t, runtime.McpConfiguration, mcpservers.Server{Name: "company-graph", URL: graph.URL, Transport: mcpservers.Transport, Tools: []string{"read_neo4j_cypher"}}, nil)
 	folder := filepath.Join(runtime.Sessions, scout)
 	if err := os.MkdirAll(folder, 0o700); err != nil {
 		t.Fatal(err)
@@ -236,12 +234,26 @@ func TestARunningProxyIsTheMCPProxyOfTheServersTheTrierarchPluginSentLast(t *tes
 	}
 }
 
-func TestTheProxyCommandRefusesWordsWithoutTheSecrets(t *testing.T) {
+// applyConfiguration applies a configuration of the server and secrets at the path, as the trierarch does.
+func applyConfiguration(t *testing.T, path string, server mcpservers.Server, held map[string]string) {
+	t.Helper()
+	if held == nil {
+		held = map[string]string{}
+	}
+	identity := mcpconfiguration.Identity{FleetID: "flt_01m3tb1zgr5h2ffee12xnch8sv", PluginShipID: "shp_01m3tb1zhjs6kthtcs2zvksacv"}
+	file := &mcpconfiguration.File{Path: path}
+	file.Load(identity)
+	if _, err := file.Apply(mcpconfiguration.Configuration{Identity: identity, Version: 1, PublicKey: "key-a", Servers: []mcpservers.Server{server}, Secrets: held}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTheProxyCommandRefusesWordsWithoutTheMcpConfiguration(t *testing.T) {
 	home := t.TempDir()
 	words := []string{"--folder", filepath.Join(home, "proxy"), "--sessions", filepath.Join(home, "sessions"), "--keys", filepath.Join(home, "keys"), "--mcp-servers", filepath.Join(home, "mcp-servers.json")}
 
 	if code := Main(words, "1.2.3"); code != 2 {
-		t.Fatalf("Main without --secrets = %d, want 2", code)
+		t.Fatalf("Main with --mcp-servers in place of --mcp-configuration = %d, want 2", code)
 	}
 }
 
@@ -254,13 +266,7 @@ func TestARunningProxyAddsTheCredentialOfTheSecretsTheTrierarchKeeps(t *testing.
 	}))
 	defer graph.Close()
 	runtime := aRuntime(t)
-	list := `{"servers":[{"name":"company-graph","url":"` + graph.URL + `","tools":["read_neo4j_cypher"],"credential":{"secret":"graph-token","header":"Authorization"}}]}`
-	if err := os.WriteFile(runtime.McpServers, []byte(list), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := (&secrets.File{Path: runtime.Secrets}).Accept(map[string]string{"graph-token": "Bearer s3cr3t"}); err != nil {
-		t.Fatal(err)
-	}
+	applyConfiguration(t, runtime.McpConfiguration, mcpservers.Server{Name: "company-graph", URL: graph.URL, Transport: mcpservers.Transport, Tools: []string{"read_neo4j_cypher"}, Credential: &mcpservers.Credential{Secret: "graph-token", Header: "Authorization"}}, map[string]string{"graph-token": "Bearer s3cr3t"})
 	folder := filepath.Join(runtime.Sessions, scout)
 	if err := os.MkdirAll(folder, 0o700); err != nil {
 		t.Fatal(err)

@@ -33,12 +33,10 @@ type Paths struct {
 	Homes string
 	// TrustedRepositories is the list the trierarch plugin's ship sent last (aeolus-fleet#384), apart from the configuration.
 	TrustedRepositories string
-	// McpServers is the MCP server list the trierarch plugin's ship sent last, apart from the configuration.
-	McpServers string
+	// McpConfiguration is the fleet's MCP configuration the trierarch plugin's ship sent and the trierarch applied last, its secrets opened, mode 600: only the MCP proxy reads a value.
+	McpConfiguration string
 	// Aip is the aip setting the trierarch plugin's ship sent last, apart from the configuration, whose own aip wins.
 	Aip string
-	// Secrets is the secrets the trierarch plugin's ship sent last, opened, mode 600: only the MCP proxy reads them, and a session's start the aip read token.
-	Secrets string
 	// AipCommand is the venv of the aip CLI the trierarch keeps for its host sessions (#314).
 	AipCommand string
 	// AipCommandOutcome is the outcome of the aip CLI's last install: its version, or why there is none.
@@ -74,9 +72,8 @@ func Of(homeDirectory string, config string) Paths {
 		Homes:        filepath.Join(home, "homes"),
 
 		TrustedRepositories: filepath.Join(home, "trusted-repositories.json"),
-		McpServers:          filepath.Join(home, "mcp-servers.json"),
+		McpConfiguration:    filepath.Join(home, "mcp-configuration.json"),
 		Aip:                 filepath.Join(home, "aip.json"),
-		Secrets:             filepath.Join(home, "secrets.json"),
 		AipCommand:          filepath.Join(home, "aip-command"),
 		AipCommandOutcome:   filepath.Join(home, "aip-command.json"),
 		SealingKey:          filepath.Join(home, "sealing-key"),

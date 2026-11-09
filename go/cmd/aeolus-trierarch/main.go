@@ -45,6 +45,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/logfile"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/modelproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
@@ -140,17 +141,12 @@ func main() {
 		Trusted: func(at paths.Paths, configuration config.Configuration) receiving.Keeper {
 			return trustedRepositories(at, configuration, home)
 		},
-		McpServers: func(at paths.Paths) receiving.ServerKeeper {
-			return mcpServerList(at)
-		},
-		Aip: func(at paths.Paths) receiving.AipKeeper {
-			return heldAipOf(at)
+		McpConfiguration: heldMcpConfigurationOf,
+		McpFleet: func(kept crew.File) cli.McpFleet {
+			return fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken, Model: "@aeolus-fleet/trierarch@" + cli.Version}
 		},
 		AipCommand: func(at paths.Paths) cli.AipCommand {
 			return aipCommandOf(at)
-		},
-		Secrets: func(at paths.Paths) receiving.SecretKeeper {
-			return heldSecretsOf(at)
 		},
 		Sessions: func(at paths.Paths) cli.Sessions {
 			// A configuration that cannot be read runs no session in a container.
@@ -369,19 +365,18 @@ func trustedRepositories(at paths.Paths, configuration config.Configuration, hom
 	return held
 }
 
-// heldServers is the MCP servers this process holds, loaded once and shared by the receiving loop that accepts a list and the passes that offer, report and crew from it.
+// heldMcpConfiguration is the fleet's MCP configuration this process holds, made once and shared by the receiving loop that applies it and the passes that offer, report and crew from it; run loads it for its fleet and plugin ship before its first pass.
 var (
-	heldServers     *mcpservers.File
-	holdServersOnce sync.Once
+	heldMcpConfiguration     *mcpconfiguration.File
+	holdMcpConfigurationOnce sync.Once
 )
 
-// mcpServerList is the MCP servers the trierarch plugin sent last.
-func mcpServerList(at paths.Paths) *mcpservers.File {
-	holdServersOnce.Do(func() {
-		heldServers = &mcpservers.File{Path: at.McpServers}
-		heldServers.Load()
+// heldMcpConfigurationOf is the fleet's MCP configuration the trierarch applied last.
+func heldMcpConfigurationOf(at paths.Paths) *mcpconfiguration.File {
+	holdMcpConfigurationOnce.Do(func() {
+		heldMcpConfiguration = &mcpconfiguration.File{Path: at.McpConfiguration}
 	})
-	return heldServers
+	return heldMcpConfiguration
 }
 
 // aipCommandOf is the aip CLI the trierarch keeps for its host sessions (#314), installed by uv's build for this machine.
@@ -393,34 +388,14 @@ func aipCommandOf(at paths.Paths) aipcommand.Folder {
 	return folder
 }
 
-// heldAip is the aip setting this process holds, loaded once and shared by the receiving loop that accepts it and the session starts that read it.
-var (
-	heldAip     *aip.File
-	holdAipOnce sync.Once
-)
+// appliedSecrets are the secrets of the MCP configuration applied last, by name.
+type appliedSecrets struct{ file *mcpconfiguration.File }
 
-// heldAipOf is the aip setting the trierarch plugin sent last.
-func heldAipOf(at paths.Paths) *aip.File {
-	holdAipOnce.Do(func() {
-		heldAip = &aip.File{Path: at.Aip}
-		heldAip.Load()
-	})
-	return heldAip
-}
-
-// heldSecrets is the secrets this process holds, loaded once and shared by the receiving loop that accepts them and the passes that offer the servers they are the credentials of.
-var (
-	heldSecrets     *secrets.File
-	holdSecretsOnce sync.Once
-)
-
-// heldSecretsOf is the secrets the trierarch plugin sent last.
-func heldSecretsOf(at paths.Paths) *secrets.File {
-	holdSecretsOnce.Do(func() {
-		heldSecrets = &secrets.File{Path: at.Secrets}
-		heldSecrets.Load()
-	})
-	return heldSecrets
+// Value is the secret's value; false when none is held.
+func (a appliedSecrets) Value(name string) (string, bool) {
+	held, _ := a.file.Current()
+	value, ok := held.Secrets[name]
+	return value, ok
 }
 
 // harnessesThatAddMcpServers are the harnesses a session can be started with crew-time MCP servers (decision M4), on the runtime configured, and which servers each can add: Claude Code, on the host and in a container, every server; Codex, on the host only, as it is offered, every server whose name it can name; Copilot, on the host only, as it is offered, every server, its configuration being JSON. A harness that cannot offers no server, so a request naming one is given back.
@@ -435,7 +410,7 @@ func harnessesThatAddMcpServers(configured *config.Runtime) map[string]func(name
 
 // modelProxy is the model proxy on this machine (headless H16), started as a hold is.
 func modelProxy(at paths.Paths, program string) modelproxy.Runtime {
-	return modelproxy.Runtime{Folder: at.Proxy, Sessions: at.Sessions, Keys: at.Keys, McpServers: at.McpServers, Secrets: at.Secrets, Program: []string{program}, Version: cli.Version, Launch: sessions.Launch(runtime.GOOS, os.Getenv("INVOCATION_ID"), sessions.SystemdVersion())}
+	return modelproxy.Runtime{Folder: at.Proxy, Sessions: at.Sessions, Keys: at.Keys, McpConfiguration: at.McpConfiguration, Program: []string{program}, Version: cli.Version, Launch: sessions.Launch(runtime.GOOS, os.Getenv("INVOCATION_ID"), sessions.SystemdVersion())}
 }
 
 // readKey is the key piped in, or typed at a terminal, asked on stderr so stdout holds the answer alone, and not shown as typed.
@@ -522,7 +497,7 @@ const sessionImage = "ghcr.io/thomashendrickx/aeolus-session"
 func sessionRuntime(at paths.Paths, program string, configuration config.Configuration) runningSessions {
 	configured := configuration.Runtime
 	holds := sessions.Runtime{Sessions: at.Sessions, Program: []string{program}, Version: cli.Version, Launch: sessions.Launch(runtime.GOOS, os.Getenv("INVOCATION_ID"), sessions.SystemdVersion()), BootedAt: sessions.BootedAt}
-	holds.Aip = &sessions.Aip{Sent: heldAipOf(at).Current, Secrets: heldSecretsOf(at), Log: logLine}
+	holds.Aip = &sessions.Aip{Secrets: appliedSecrets{file: heldMcpConfigurationOf(at)}, Log: logLine}
 	if own := configuration.Aip; own != nil {
 		holds.Aip.Configured = &aip.Setting{Server: own.Server, TokenSecret: own.TokenSecret}
 	}
@@ -631,8 +606,8 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		return ""
 	}}
 	ask := &trusted.Ask{Fleet: client, PluginShipID: kept.PluginShipID, Log: logLine}
-	askServers := &mcpservers.Ask{Fleet: client, PluginShipID: kept.PluginShipID, Log: logLine}
-	askSecrets := &secrets.Ask{Fleet: client, PluginShipID: kept.PluginShipID, Log: logLine}
+	applied := heldMcpConfigurationOf(at)
+	askConfiguration := &mcpconfiguration.Ask{Fleet: client, File: applied, Log: logLine}
 	// run made the key before the first pass: a machine set up before there was one has one now.
 	sealingKey, err := secrets.LoadOrMake(at.SealingKey)
 	if err != nil {
@@ -645,11 +620,10 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		return nil, err
 	}
 
-	servers := mcpServerList(at)
-	secretsHeld := heldSecretsOf(at)
-	// The MCP servers each harness offers, read afresh: the list and the secrets change while the trierarch runs. A server whose credential is not held is offered by none.
+	// The MCP servers each harness offers, read afresh: the configuration changes while the trierarch runs. A server whose credential is not held is offered by none.
 	offeredServers := func() map[string][]string {
-		return mcpservers.OfferedBy(mcpservers.WithCredentialHeld(servers.Current(), secretsHeld.Names()), offeredHarnesses, harnessesThatAddMcpServers(configuration.Runtime))
+		current, _ := applied.Current()
+		return mcpservers.OfferedBy(mcpservers.WithCredentialHeld(current.Servers, current.SecretNames()), offeredHarnesses, harnessesThatAddMcpServers(configuration.Runtime))
 	}
 	root := configuration.WorktreeRoot
 	if root == "" {
@@ -777,8 +751,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	// Each pass ends with the trierarch's own report: the first at start, then only when it changed.
 	return func(isKeyCutOff bool) error {
 		ask.Once()
-		askServers.Once()
-		askSecrets.Once()
+		askConfiguration.Once()
 		current := pass
 		current.Workspace, current.Repositories, current.Folders = placesOf()
 		if err := current.Run(); err != nil {

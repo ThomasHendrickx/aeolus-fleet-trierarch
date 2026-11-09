@@ -28,34 +28,6 @@ func TestEverySessionOnTheHostAndInContainersReachesTheConfiguredAipServerWithTh
 	}
 }
 
-func TestEverySessionOnTheHostAndInContainersOfATrierarchWithNoAipConfiguredReachesTheAipTheTrierarchPluginSent(t *testing.T) {
-	at := paths.Of(t.TempDir(), "")
-	sent := aip.Setting{Server: "https://aip.example.test", TokenSecret: "company-aip"}
-	if err := heldAipOf(at).Accept(&sent); err != nil {
-		t.Fatal(err)
-	}
-
-	onTheHost := sessionRuntime(at, "aeolus-trierarch", config.Configuration{})
-	inContainers := sessionRuntime(at, "aeolus-trierarch", config.Configuration{Runtime: &config.Runtime{Kind: "container", Binary: "podman"}})
-
-	for runtime, held := range map[string]*sessions.Aip{"on the host": onTheHost.(sessions.Runtime).Aip, "in containers": inContainers.(container.Runtime).Holds.Aip} {
-		if held == nil || held.Configured != nil || held.Sent == nil || held.Secrets == nil {
-			t.Fatalf("%s the sessions reach aip %+v, want the one the trierarch plugin sent", runtime, held)
-		}
-		if got, ok := held.Sent(); !ok || got != sent {
-			t.Errorf("%s the sessions reach %+v, %v, want %+v", runtime, got, ok, sent)
-		}
-	}
-}
-
-func TestTheAipSettingTheTrierarchPluginSentIsKeptInAipJsonInTheTrierarchsHome(t *testing.T) {
-	at := paths.Of(t.TempDir(), "")
-
-	if at.Aip != filepath.Join(at.Home, "aip.json") {
-		t.Errorf("the aip file is %s, want aip.json in the trierarch's home", at.Aip)
-	}
-}
-
 // aHeldAipCommand is the trierarch's aip folder as an install of the pin leaves it: aip and its Python in the venv's bin, links to aip and aip-spec alone in bin, and the plugin of aip's skills.
 func aHeldAipCommand(t *testing.T, at paths.Paths) {
 	t.Helper()

@@ -20,10 +20,9 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/activity"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/receiving"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trusted"
 )
 
@@ -271,6 +270,20 @@ func (c Client) Name() (string, error) {
 	return answer.Name, err
 }
 
+// FleetID is the fleet the trierarch's own ship is in, as the fleet knows it.
+func (c Client) FleetID() (string, error) {
+	var answer struct {
+		FleetID string `json:"fleetId"`
+	}
+	if err := call(c.URL, request{path: "/ship/whoami", crewToken: c.CrewToken}, &answer); err != nil {
+		return "", err
+	}
+	if answer.FleetID == "" {
+		return "", errors.New("whoami names no fleet")
+	}
+	return answer.FleetID, nil
+}
+
 // GiveBack gives back a request the trierarch cannot crew, with why. A refusal of the fleet, as when the crew is final, is answered as the refusal, not as a failure.
 func (c Client) GiveBack(shipID string, settingsVersion int, reason string) (*Refusal, error) {
 	body := map[string]any{"shipId": shipID, "settingsVersion": settingsVersion, "reason": reason}
@@ -321,15 +334,19 @@ func (c Client) AskForTrustedRepositories(pluginShipID string) error {
 	return call(c.URL, request{path: "/ship/send", crewToken: c.CrewToken, body: body}, &map[string]any{})
 }
 
-// AskForMcpServers asks the trierarch plugin's ship for the MCP servers again, as the trierarch's own ship.
-func (c Client) AskForMcpServers(pluginShipID string) error {
-	body := map[string]any{"selector": map[string]string{"kind": "ship", "shipId": pluginShipID}, "payload": "{}", "contentType": mcpservers.RequestContentType, "model": c.Model, "idempotencyKey": newKey()}
-	return call(c.URL, request{path: "/ship/send", crewToken: c.CrewToken, body: body}, &map[string]any{})
+// AskForMcpConfiguration asks the trierarch plugin's ship for the current MCP configuration, as the trierarch's own ship.
+func (c Client) AskForMcpConfiguration(pluginShipID string, payload string) error {
+	return c.sendPlugin(pluginShipID, mcpconfiguration.RequestContentType, payload)
 }
 
-// AskForSecrets asks the trierarch plugin's ship for the secrets again, as the trierarch's own ship.
-func (c Client) AskForSecrets(pluginShipID string) error {
-	body := map[string]any{"selector": map[string]string{"kind": "ship", "shipId": pluginShipID}, "payload": "{}", "contentType": secrets.RequestContentType, "model": c.Model, "idempotencyKey": newKey()}
+// ConfirmMcpConfiguration tells the trierarch plugin's ship which MCP configuration is persisted, as the trierarch's own ship.
+func (c Client) ConfirmMcpConfiguration(pluginShipID string, payload string) error {
+	return c.sendPlugin(pluginShipID, mcpconfiguration.AppliedContentType, payload)
+}
+
+// sendPlugin sends the trierarch plugin's ship a message of the content type, with a key of its own.
+func (c Client) sendPlugin(pluginShipID string, contentType string, payload string) error {
+	body := map[string]any{"selector": map[string]string{"kind": "ship", "shipId": pluginShipID}, "payload": payload, "contentType": contentType, "model": c.Model, "idempotencyKey": newKey()}
 	return call(c.URL, request{path: "/ship/send", crewToken: c.CrewToken, body: body}, &map[string]any{})
 }
 

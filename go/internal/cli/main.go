@@ -22,6 +22,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/modelproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/receiving"
@@ -83,15 +84,13 @@ type Machine struct {
 	OwnShip func(kept crew.File) receiving.Ship
 	// Trusted keeps the trusted repositories the trierarch plugin's ship sends (aeolus-fleet#384), with the configuration run read; none when nil.
 	Trusted func(at paths.Paths, configuration config.Configuration) receiving.Keeper
-	// McpServers keeps the MCP servers the trierarch plugin's ship sends; none when nil.
-	McpServers func(at paths.Paths) receiving.ServerKeeper
-	// Aip keeps the aip setting the trierarch plugin's ship sends; none when nil.
-	Aip func(at paths.Paths) receiving.AipKeeper
+	// McpConfiguration is the fleet's MCP configuration the trierarch plugin's ship sends, which run loads for its fleet and plugin ship before its first pass; none when nil.
+	McpConfiguration func(at paths.Paths) *mcpconfiguration.File
+	// McpFleet is the trierarch's own ship as the MCP configuration asks it; none when nil.
+	McpFleet func(kept crew.File) McpFleet
 	// AipCommand is the aip CLI the trierarch keeps for its host sessions (#314); none when nil.
 	AipCommand func(at paths.Paths) AipCommand
-	// Secrets keeps the secrets the trierarch plugin's ship sends, opened with the sealing key; none when nil.
-	Secrets  func(at paths.Paths) receiving.SecretKeeper
-	Sessions func(at paths.Paths) Sessions
+	Sessions   func(at paths.Paths) Sessions
 	// Log writes a line to the trierarch's log.
 	Log func(line string)
 	// ReadKey is the API key the operator types, not shown, or pipes in.
@@ -438,6 +437,11 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 	if err != nil {
 		return answer{}, err
 	}
+	// The configuration of another fleet or plugin ship is cleared before any pass can launch with it.
+	held, err := machine.loadMcpConfiguration(at, kept)
+	if err != nil {
+		return answer{}, err
+	}
 	pass, err := machine.NewPass(at, kept, configuration)
 	if err != nil {
 		return answer{}, err
@@ -467,14 +471,9 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 		if machine.Trusted != nil {
 			loop.Trusted = machine.Trusted(at, configuration)
 		}
-		if machine.McpServers != nil {
-			loop.McpServers = machine.McpServers(at)
-		}
-		if machine.Aip != nil {
-			loop.Aip = machine.Aip(at)
-		}
-		if machine.Secrets != nil {
-			loop.Secrets, loop.SealingKey = machine.Secrets(at), sealingKey
+		if held != nil {
+			identity, _ := held.Identity()
+			loop.McpConfiguration = &receiving.McpConfiguration{File: held, Identity: identity, SealingKey: sealingKey, Confirm: machine.McpFleet(kept)}
 		}
 		loop.Run(stopped)
 	}()
@@ -492,6 +491,26 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 		case <-time.After(machine.PassEvery):
 		}
 	}
+}
+
+// McpFleet is the trierarch's own ship as the MCP configuration asks it: the fleet it is in, and its confirmations to the trierarch plugin's ship.
+type McpFleet interface {
+	FleetID() (string, error)
+	receiving.Confirmer
+}
+
+// loadMcpConfiguration loads the MCP configuration file for the trierarch's fleet, as the fleet names it, and the trierarch plugin's ship; none on a machine that does not know that ship.
+func (m Machine) loadMcpConfiguration(at paths.Paths, kept crew.File) (*mcpconfiguration.File, error) {
+	if m.McpConfiguration == nil || m.McpFleet == nil || kept.PluginShipID == "" {
+		return nil, nil
+	}
+	fleetID, err := m.McpFleet(kept).FleetID()
+	if err != nil {
+		return nil, fmt.Errorf("read the fleet this trierarch is in: %w", err)
+	}
+	held := m.McpConfiguration(at)
+	held.Load(mcpconfiguration.Identity{FleetID: fleetID, PluginShipID: kept.PluginShipID})
+	return held, nil
 }
 
 // aipCommandOf is the aip CLI the trierarch keeps on the machine; none when nil.

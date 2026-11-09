@@ -17,10 +17,10 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/processproof"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/secrets"
 )
 
 const (
@@ -51,10 +51,8 @@ type Runtime struct {
 	Folder   string
 	Sessions string
 	Keys     string
-	// McpServers is the MCP servers file, which the proxy reads at each request to an MCP server.
-	McpServers string
-	// Secrets is the secrets file, which the proxy reads at each request to an MCP server that needs a credential.
-	Secrets string
+	// McpConfiguration is the MCP configuration file, which the proxy reads at each request to an MCP server.
+	McpConfiguration string
 	// Program is the trierarch program, which `proxy` and its words follow.
 	Program []string
 	Version string
@@ -128,7 +126,7 @@ func (r Runtime) stop() error {
 }
 
 func (r Runtime) start() error {
-	words := append(append([]string{}, r.Program...), "proxy", "--folder", r.Folder, "--sessions", r.Sessions, "--keys", r.Keys, "--mcp-servers", r.McpServers, "--secrets", r.Secrets)
+	words := append(append([]string{}, r.Program...), "proxy", "--folder", r.Folder, "--sessions", r.Sessions, "--keys", r.Keys, "--mcp-configuration", r.McpConfiguration)
 	line := append(append(append([]string{}, r.Launch...), "sh", "-c", detached, "sh"), words...)
 	starter := exec.Command(line[0], line[1:]...)
 	starter.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -160,7 +158,7 @@ func (r Runtime) Keep(isNeeded bool) error {
 	return r.start()
 }
 
-const usage = "Usage: aeolus-trierarch proxy --folder <folder> --sessions <folder> --keys <folder> --mcp-servers <file> --secrets <file>"
+const usage = "Usage: aeolus-trierarch proxy --folder <folder> --sessions <folder> --keys <folder> --mcp-configuration <file>"
 
 // Main runs `aeolus-trierarch proxy` with the words after `proxy`, as the trierarch starts it, never a person: the model proxy and the MCP proxy in one process. It listens on loopback, on the port it listened on before when it can, so a running session reaches it where it did; it writes its port and pid in its folder, checks each key out of credit every 15 minutes, and ends on SIGTERM. Answers its exit code, or 2 for words it cannot take.
 func Main(words []string, version string) int {
@@ -168,8 +166,8 @@ func Main(words []string, version string) int {
 	for at := 0; at+1 < len(words); at += 2 {
 		values[words[at]] = words[at+1]
 	}
-	folder, sessions, keysFolder, servers, secretsFile := values["--folder"], values["--sessions"], values["--keys"], values["--mcp-servers"], values["--secrets"]
-	if folder == "" || sessions == "" || keysFolder == "" || servers == "" || secretsFile == "" || len(words) != 10 {
+	folder, sessions, keysFolder, configuration := values["--folder"], values["--sessions"], values["--keys"], values["--mcp-configuration"]
+	if folder == "" || sessions == "" || keysFolder == "" || configuration == "" || len(words) != 8 {
 		fmt.Fprintln(os.Stderr, usage)
 		return 2
 	}
@@ -192,15 +190,14 @@ func Main(words []string, version string) int {
 		return 1
 	}
 	proxy := Proxy{Sessions: sessions, Keys: keys.Files{Folder: keysFolder}, States: keys.States{Keys: keysFolder, File: files.KeyStates}, Version: version, Now: time.Now, MCP: mcpproxy.Proxy{Sessions: sessions, Servers: func() []mcpservers.Server {
-		// Read at each request: the trierarch keeps the list as it arrives.
-		held := mcpservers.File{Path: servers}
-		held.Load()
-		return held.Current()
+		// Read at each request: the trierarch applies the configuration as it arrives.
+		held, _ := mcpconfiguration.ReadFile(configuration)
+		return held.Servers
 	}, Secret: func(name string) (string, bool) {
-		// Read at each request too: the trierarch keeps the secrets as they arrive.
-		held := secrets.File{Path: secretsFile}
-		held.Load()
-		return held.Value(name)
+		// Read at each request too, so a rotated or removed secret takes effect on the next call.
+		held, _ := mcpconfiguration.ReadFile(configuration)
+		value, ok := held.Secrets[name]
+		return value, ok
 	}}}
 	server := &http.Server{Handler: proxy, ReadHeaderTimeout: 30 * time.Second}
 	port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)

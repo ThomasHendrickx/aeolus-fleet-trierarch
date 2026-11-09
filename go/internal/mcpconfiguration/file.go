@@ -76,8 +76,9 @@ func ReadFile(path string) (Configuration, bool) {
 type File struct {
 	Path string
 
-	mu      sync.Mutex
-	current *Configuration
+	mu       sync.Mutex
+	identity *Identity
+	current  *Configuration
 }
 
 // Load reads the file for the configured identity. A file of another fleet or plugin ship is removed, so a version is never taken under another identity and no launch uses it; one that is missing or does not fit holds none.
@@ -85,6 +86,7 @@ func (f *File) Load(configured Identity) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.current = nil
+	f.identity = &configured
 	held, ok := ReadFile(f.Path)
 	if !ok {
 		return
@@ -94,6 +96,16 @@ func (f *File) Load(configured Identity) {
 		return
 	}
 	f.current = &held
+}
+
+// Identity is the fleet and plugin ship the file was loaded for; false before it is loaded.
+func (f *File) Identity() (Identity, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.identity == nil {
+		return Identity{}, false
+	}
+	return *f.identity, true
 }
 
 // Current is the configuration as the trierarch applied it; false when it holds none.
