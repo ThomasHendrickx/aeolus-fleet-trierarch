@@ -119,7 +119,7 @@ func (h Harness) othersOff(entry reconciler.Entry) ([]string, error) {
 	return []string{"-c", "mcp_servers={" + strings.Join(off, ",") + "}"}, nil
 }
 
-// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7), and no other: every other one Codex lists turned off, and each named one at the MCP proxy as a streamable HTTP server of its own on the command line, added to the user's own servers, its bearer token read from a secret variable of the hold, a token of the session's own, fresh for each start, so the command line never holds it; nothing for an entry that names none. Every later turn's exec keeps the flags, and the hold keeps the variable.
+// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7), and no other: every other one Codex lists turned off, and each named one at the MCP proxy as a streamable HTTP server of its own on the command line, its bearer token read from a secret variable of the hold, a token of the session's own, fresh for each start, so the command line never holds it; no server of its own for an entry that names none. Every later turn's exec keeps the flags, and the hold keeps the variable.
 func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) {
 	off, err := h.othersOff(entry)
 	if err != nil {

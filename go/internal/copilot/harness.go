@@ -82,7 +82,7 @@ func (h Harness) othersOff(entry reconciler.Entry) ([]string, error) {
 	return off, nil
 }
 
-// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7, M8), and no other: every other one Copilot lists turned off, and each named one at the MCP proxy with a token of its own, fresh for each start, in an MCP configuration of the shape `copilot mcp add --transport http` writes, kept in the session's folder, which --additional-mcp-config names by its path alone; nothing for an entry that names none. Every tool the proxy lists is allowed: the proxy lists only the server's listed tools.
+// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7, M8), and no other: every other one Copilot lists turned off, and each named one at the MCP proxy with a token of its own, fresh for each start, in an MCP configuration of the shape `copilot mcp add --transport http` writes, kept in the session's folder, which --additional-mcp-config names by its path alone; no configuration for an entry that names none. Every tool the proxy lists is allowed: the proxy lists only the server's listed tools.
 func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) {
 	off, err := h.othersOff(entry)
 	if err != nil {
