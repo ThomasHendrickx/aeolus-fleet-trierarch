@@ -422,9 +422,6 @@ func aRunPass(t *testing.T) *aPass {
 		Trusted: func() map[string]reconciler.Trust {
 			return map[string]reconciler.Trust{"claude-code": {Repositories: []string{"aeolus-fleet"}}}
 		},
-		Configuration: func() map[string]config.Harness {
-			return map[string]config.Harness{"claude-code": {Flags: []string{}, Options: map[string]config.Option{}}}
-		},
 		Offers: func() map[string]map[string][]string {
 			return map[string]map[string][]string{"claude-code": {"model": {"opus", "claude-sonnet-5", "claude-opus-4"}}}
 		},
@@ -432,6 +429,22 @@ func aRunPass(t *testing.T) *aPass {
 			at.refusedModels = append(at.refusedModels, harness+" "+model)
 			return nil
 		},
+	}
+	// The harness's settings give each option value it offers its flag, as the machine's offers do.
+	at.pass.Configuration = func() map[string]config.Harness {
+		configured := map[string]config.Harness{}
+		for harness, offered := range at.pass.Offers() {
+			options := map[string]config.Option{}
+			for name, values := range offered {
+				option := config.Option{Values: map[string][]string{}}
+				for _, value := range values {
+					option.Values[value] = []string{"--" + name, value}
+				}
+				options[name] = option
+			}
+			configured[harness] = config.Harness{Flags: []string{}, Options: options}
+		}
+		return configured
 	}
 	return at
 }

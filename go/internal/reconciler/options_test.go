@@ -8,9 +8,14 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 )
 
-// withModels is the context with Claude Code offering the models given, in their order, and effort high.
+// withModels is the context with Claude Code offering the models given, in their order, and effort high, each with its flag.
 func withModels(context Context, models ...string) Context {
 	context.Options = map[string]map[string][]string{"claude-code": {"model": models, "effort": {"high"}}}
+	model := config.Option{Values: map[string][]string{}}
+	for _, id := range models {
+		model.Values[id] = []string{"--model", id}
+	}
+	context.Configuration = map[string]config.Harness{"claude-code": {Flags: []string{}, Options: map[string]config.Option{"model": model, "effort": {Values: map[string][]string{"high": {"--effort", "high"}}}}}}
 	return context
 }
 

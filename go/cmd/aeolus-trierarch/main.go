@@ -876,6 +876,14 @@ func confirmDue(detect detection.Detection, harnesses []string) func() {
 	}
 }
 
+// settingsOf is the harness's settings as the machine offers them when asked, with what detection last gave: a launch takes its model's flag from them, so a model confirmed after the trierarch started launches with it (#335).
+func settingsOf(offers *offers, harness string) func() config.Harness {
+	return func() config.Harness {
+		offered, _ := offers.current()
+		return offered.Harnesses[harness]
+	}
+}
+
 // offers are what the configured harnesses offer as detected, changed while the trierarch runs as sessions refuse models (#382), and read by each pass.
 type offers struct {
 	configured config.Configuration
@@ -947,10 +955,10 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 	harnesses := map[string]runpass.Harness{}
 	offered := []string{}
 	for _, name := range adapters {
-		settings, ok := configuration.Harnesses[name]
-		if !ok {
+		if _, ok := configuration.Harnesses[name]; !ok {
 			continue
 		}
+		settings := settingsOf(offers, name)
 		switch name {
 		case "claude-code":
 			found, err := plugin.Find(home, env)

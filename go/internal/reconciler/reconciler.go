@@ -610,6 +610,10 @@ func check(settings Settings, shipID string, state State, context Context) (stri
 		}
 		options[name] = settings.Options[name]
 	}
+	// A model the harness lists but gives no flag for would start the harness's own default model instead (#335).
+	if model, isPicked := options[config.ModelOption]; isPicked && len(context.Configuration[harness].Options[config.ModelOption].Values[model]) == 0 {
+		return "", nil, fmt.Sprintf("options.%s: %s gives no flag for the model %s", config.ModelOption, harness, model)
+	}
 	if reason := checkMcpServers(settings.McpServers, harness, context); reason != "" {
 		return "", nil, reason
 	}

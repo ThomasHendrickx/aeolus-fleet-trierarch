@@ -45,9 +45,10 @@ const (
 
 // Harness is Claude Code as the run pass starts and watches its sessions, on the host, each under its hold; its sessions' identities through the aeolus-fleet plugin.
 type Harness struct {
-	Plugin   plugin.Plugin
-	Runtime  Runtime
-	Settings config.Harness
+	Plugin  plugin.Plugin
+	Runtime Runtime
+	// Settings are Claude Code's settings as the machine offers them now, read at each launch: detection confirms its models again while the trierarch runs (#333, #335).
+	Settings func() config.Harness
 	// Projects is Claude Code's projects folder, where it keeps each folder's conversations.
 	Projects   string
 	Onboarding Onboarding
@@ -183,7 +184,7 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if isFirstStart && entry.FirstPrompt != "" {
 		line = prompt.First(entry.FirstPrompt)
 	}
-	flags := h.Settings.EffectiveFlags(entry.Options)
+	flags := h.Settings().EffectiveFlags(entry.Options)
 	var modes []string
 	if h.PermissionModes != nil {
 		modes = h.PermissionModes()

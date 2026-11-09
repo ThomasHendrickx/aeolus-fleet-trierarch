@@ -1180,7 +1180,8 @@ func (p Pass) reconcile(state reconciler.State) (reconciler.State, []reconciler.
 			for _, harness := range harnesses {
 				p.ConfirmModels(harness)
 			}
-			context.Options = p.Offers()
+			// The settings too: a model the confirming found launches with the flag it found (#335).
+			context.Options, context.Configuration = p.Offers(), p.Configuration()
 		}
 	}
 	next, actions := reconciler.Reconcile(state, context)

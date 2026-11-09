@@ -78,9 +78,11 @@ func aHarnessListing(t *testing.T) (Harness, *aRuntime, *someHooks, *someServers
 	running, hooks, servers := &aRuntime{}, &someHooks{}, &someServers{}
 	events := t.TempDir()
 	return Harness{
-		Plugin:        plugin.Plugin{Root: filepath.Join(filepath.Dir(file), "..", "..", "..", "plugins", "aeolus-fleet"), Data: t.TempDir(), Crews: t.TempDir()},
-		Runtime:       running,
-		Settings:      func() config.Harness { return config.Harness{Flags: []string{"-m", "gpt-5.6-terra"}, Options: map[string]config.Option{}} },
+		Plugin:  plugin.Plugin{Root: filepath.Join(filepath.Dir(file), "..", "..", "..", "plugins", "aeolus-fleet"), Data: t.TempDir(), Crews: t.TempDir()},
+		Runtime: running,
+		Settings: func() config.Harness {
+			return config.Harness{Flags: []string{"-m", "gpt-5.6-terra"}, Options: map[string]config.Option{}}
+		},
 		Hooks:         hooks,
 		Configuration: servers,
 		Events:        func(shipID string) string { return filepath.Join(events, shipID+".jsonl") },
@@ -429,7 +431,9 @@ func TestASessionStartsWithEveryPluginCodexsConfigurationEnablesTurnedOffButTheA
 
 func TestTheConfigurationIsReadWithTheLaunchsOwnConfigurationFlags(t *testing.T) {
 	harness, running, _, listed := aHarnessListing(t)
-	harness.Settings.Flags = []string{"-m", "gpt-5.6-terra", "-c", `mcp_servers.from_flag={command="echo"}`, "--config=features.x=true", "--enable", "y", "--disable=z", "--strict-config", "--skip-git-repo-check"}
+	harness.Settings = func() config.Harness {
+		return config.Harness{Flags: []string{"-m", "gpt-5.6-terra", "-c", `mcp_servers.from_flag={command="echo"}`, "--config=features.x=true", "--enable", "y", "--disable=z", "--strict-config", "--skip-git-repo-check"}, Options: map[string]config.Option{}}
+	}
 	entry := anEntry(t)
 
 	if err := harness.Launch(entry, true, "launch-1"); err != nil {
@@ -455,7 +459,7 @@ func TestASessionWhoseFlagsPickAProfileOrAnotherFolderStartsNothing(t *testing.T
 	for name, flags := range cases {
 		t.Run(name, func(t *testing.T) {
 			harness, running, _, _ := aHarnessListing(t)
-			harness.Settings.Flags = flags
+			harness.Settings = func() config.Harness { return config.Harness{Flags: flags, Options: map[string]config.Option{}} }
 
 			// config/read takes neither a profile, whose own file may name servers, nor another folder, whose project configuration may.
 			if err := harness.Launch(anEntry(t), true, "launch-1"); err == nil || len(running.started) != 0 {

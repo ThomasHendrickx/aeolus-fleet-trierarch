@@ -56,8 +56,9 @@ const (
 // Harness is Codex as the run pass starts and watches its sessions, each under its hold; the identity, turn and store through the aeolus-fleet plugin Codex installed.
 type Harness struct {
 	plugin.Plugin
-	Runtime  Runtime
-	Settings config.Harness
+	Runtime Runtime
+	// Settings are Codex's settings as the machine offers them now, read at each launch: detection confirms its models again while the trierarch runs (#333, #335).
+	Settings func() config.Harness
 	Hooks    Hooks
 	// Configuration is what Codex's configuration names for a folder, each server and plugin of it turned off but the aeolus-fleet plugin (#329).
 	Configuration Configuration
@@ -188,7 +189,7 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if err != nil {
 		return err
 	}
-	flags := append(h.Settings.EffectiveFlags(entry.Options), route...)
+	flags := append(h.Settings().EffectiveFlags(entry.Options), route...)
 	servers, mcp, err := h.mcpOf(entry, flags)
 	if err != nil {
 		return err

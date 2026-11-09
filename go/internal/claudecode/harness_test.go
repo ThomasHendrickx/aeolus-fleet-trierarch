@@ -51,9 +51,11 @@ func aHarness(t *testing.T) (Harness, *aRuntime, *anOnboarding) {
 	running, onboarding := &aRuntime{}, &anOnboarding{}
 	events := t.TempDir()
 	return Harness{
-		Plugin:     plugin.Plugin{Root: filepath.Join(filepath.Dir(file), "..", "..", "..", "plugins", "aeolus-fleet"), Data: t.TempDir(), Crews: t.TempDir()},
-		Runtime:    running,
-		Settings:   func() config.Harness { return config.Harness{Flags: []string{"--model", "opus"}, Options: map[string]config.Option{}} },
+		Plugin:  plugin.Plugin{Root: filepath.Join(filepath.Dir(file), "..", "..", "..", "plugins", "aeolus-fleet"), Data: t.TempDir(), Crews: t.TempDir()},
+		Runtime: running,
+		Settings: func() config.Harness {
+			return config.Harness{Flags: []string{"--model", "opus"}, Options: map[string]config.Option{}}
+		},
 		Projects:   t.TempDir(),
 		Onboarding: onboarding,
 		Managed:    t.TempDir(),
@@ -425,7 +427,9 @@ func TestASessionWhoseFlagsNameAModeOrWhoseSettingsMakeNoPlanDefaultGetsNoOverri
 	if err := harness.Launch(entry, true, "launch-1"); err != nil {
 		t.Fatal(err)
 	}
-	harness.Settings.Flags = []string{"--permission-mode", "acceptEdits"}
+	harness.Settings = func() config.Harness {
+		return config.Harness{Flags: []string{"--permission-mode", "acceptEdits"}, Options: map[string]config.Option{}}
+	}
 	write(t, harness.User, planSettings)
 	if err := harness.Launch(entry, true, "launch-2"); err != nil {
 		t.Fatal(err)
