@@ -443,8 +443,8 @@ func TestASessionIsStartedReadingItsReadOnlyCheckouts(t *testing.T) {
 	}
 
 	command := running.started[0].Command
-	if !slices.Equal(command[len(command)-2:], []string{"--add-dir", "/checkouts/shp_scout/governance"}) {
-		t.Fatalf("command %q", command)
+	if at := slices.Index(command, "--add-dir"); at < 0 || at+1 >= len(command) || command[at+1] != "/checkouts/shp_scout/governance" {
+		t.Fatalf("command %q, want --add-dir /checkouts/shp_scout/governance", command)
 	}
 }
 
