@@ -713,11 +713,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		// What the machine offers changes while it runs, as sessions refuse models (#382): each pass reads it afresh.
 		Offers: offers.options,
 		// A harness's models are confirmed again once a day and before a request for a model it does not list is given back (#333): the vendor adds models to a harness without a new version.
-		ConfirmModels: func(harness string) {
-			if _, err := detect.Detect(context.Background(), []string{harness}, detection.ByRequest); err != nil {
-				logLine(fmt.Sprintf("%s could not be detected again for a request: %v", harness, err))
-			}
-		},
+		ConfirmModels:   confirmModelsOf(detect),
 		ModelsConfirmed: map[string]int{},
 		ConfirmDue:      confirmDue(detect, slices.Sorted(maps.Keys(configuration.Harnesses))),
 		RefuseModel: func(harness string, model string) error {
@@ -873,6 +869,15 @@ func confirmDue(detect detection.Detection, harnesses []string) func() {
 				logLine(fmt.Sprintf("%s could not be detected again after a day: %v", strings.Join(due, ", "), err))
 			}
 		}()
+	}
+}
+
+// confirmModelsOf confirms a harness's models again for a request, as detection gives them to the offers each launch reads its settings from (#333, #335).
+func confirmModelsOf(detect detection.Detection) func(harness string) {
+	return func(harness string) {
+		if _, err := detect.Detect(context.Background(), []string{harness}, detection.ByRequest); err != nil {
+			logLine(fmt.Sprintf("%s could not be detected again for a request: %v", harness, err))
+		}
 	}
 }
 

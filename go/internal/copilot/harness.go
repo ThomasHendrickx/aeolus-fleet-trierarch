@@ -124,6 +124,11 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if entry.Login != "" && entry.Login != "subscription" {
 		return errors.New("copilot signs in with this computer's own login (copilot login): it runs on no API key")
 	}
+	// The settings are read once: the flags checked are the flags it starts with, whatever detection gives meanwhile.
+	flags, err := h.Settings().LaunchFlags(entry.Options)
+	if err != nil {
+		return fmt.Errorf("copilot gives %w", err)
+	}
 	mcpFlags, mcp, err := h.mcpOf(entry)
 	if err != nil {
 		return err
@@ -136,7 +141,7 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 		sessionID = LastSessionIn(h.Events(entry.ShipID))
 	}
 	// A later turn keeps every flag of the start but its session and prompt, so the MCP configuration holds for every turn.
-	command := CommandLine(append(h.Settings().EffectiveFlags(entry.Options), mcpFlags...), line, sessionID)
+	command := CommandLine(append(flags, mcpFlags...), line, sessionID)
 	if err := h.ClearLaunch(entry.Folder); err != nil {
 		return err
 	}

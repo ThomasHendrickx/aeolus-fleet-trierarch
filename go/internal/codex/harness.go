@@ -185,11 +185,16 @@ func (h Harness) mcpOf(entry reconciler.Entry, launchFlags []string) ([]string, 
 
 // Launch starts the entry's session in its folder, on the login it is to start on: its first turn with its first prompt on a first start, else the wake on the folder's last conversation.
 func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID string) error {
+	// The settings are read once: the flags checked are the flags it starts with, whatever detection gives meanwhile.
+	launchFlags, err := h.Settings().LaunchFlags(entry.Options)
+	if err != nil {
+		return fmt.Errorf("codex gives %w", err)
+	}
 	route, token, err := h.routeOf(entry.Login)
 	if err != nil {
 		return err
 	}
-	flags := append(h.Settings().EffectiveFlags(entry.Options), route...)
+	flags := append(launchFlags, route...)
 	servers, mcp, err := h.mcpOf(entry, flags)
 	if err != nil {
 		return err
