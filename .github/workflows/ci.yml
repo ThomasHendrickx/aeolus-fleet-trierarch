@@ -58,7 +58,7 @@ jobs:
         working-directory: go
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go/go.mod
           cache-dependency-path: go/go.sum
@@ -85,7 +85,7 @@ jobs:
         working-directory: go
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go/go.mod
           cache-dependency-path: go/go.sum
@@ -155,7 +155,7 @@ jobs:
           node-version: 26
           cache: npm
       # The contract suite's upgrade tests build the Go trierarch of the next version for the suite's own GitHub Release.
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go/go.mod
           cache-dependency-path: go/go.sum
@@ -174,7 +174,7 @@ jobs:
         with:
           node-version: 26
           cache: npm
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go/go.mod
           cache-dependency-path: go/go.sum
