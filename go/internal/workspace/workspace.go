@@ -3,7 +3,8 @@
 // ship, `<root>/<repository>/<ship>`, the repository fetched first and a ref
 // the remote has a branch for taken as that remote branch, and none named the
 // remote's default branch, so a ship starts from current code. A worktree ends with its session: it is removed whatever
-// it holds (worktrees design, items 1 to 3), and what it held is said first.
+// it holds (worktrees design, items 1 to 3), and what it held is said first. A local branch checked out in no worktree whose remote branch is
+// gone is deleted (item 5).
 package workspace
 
 import (
@@ -440,4 +441,78 @@ func (p Places) Prune(repository string) error {
 	}
 	_, err := git("-C", path, "worktree", "prune")
 	return err
+}
+
+// remoteReadLimit is how long reading a remote's branches may take before the pass goes on without deleting a branch.
+const remoteReadLimit = time.Minute
+
+// trackingBranch is a local branch checked out in no worktree, and the remote branch it tracks.
+type trackingBranch struct {
+	branch, remote, remoteRef string
+}
+
+// DeleteBranchesWhoseRemoteBranchIsGone deletes the repository's local branches checked out in no worktree whose remote branch is gone
+// from the remote. A branch whose remote branch exists, or that never had one, stays. Every remote is read before anything is deleted,
+// so a remote that cannot be read fails and takes no branch for gone. A repository the places do not have fails.
+func (p Places) DeleteBranchesWhoseRemoteBranchIsGone(repository string) error {
+	path, ok := p.Repositories[repository]
+	if !ok {
+		return fmt.Errorf("the configuration has no repository %s", repository)
+	}
+	listed, err := git("-C", path, "for-each-ref", "--format=%(refname)%00%(worktreepath)%00%(upstream:remotename)%00%(upstream:remoteref)", "refs/heads")
+	if err != nil {
+		return err
+	}
+	var tracking []trackingBranch
+	for _, line := range strings.Split(listed, "\n") {
+		fields := strings.Split(line, "\x00")
+		if len(fields) != 4 {
+			continue
+		}
+		ref, worktree, remote, remoteRef := fields[0], fields[1], fields[2], fields[3]
+		// A branch with no remote branch, or one a worktree has checked out, stays.
+		if !strings.HasPrefix(ref, "refs/heads/") || worktree != "" || remote == "" || remote == "." || remoteRef == "" {
+			continue
+		}
+		tracking = append(tracking, trackingBranch{branch: strings.TrimPrefix(ref, "refs/heads/"), remote: remote, remoteRef: remoteRef})
+	}
+	remoteRefs := map[string]map[string]bool{}
+	for _, found := range tracking {
+		if _, read := remoteRefs[found.remote]; read {
+			continue
+		}
+		heads, err := remoteBranches(path, found.remote)
+		if err != nil {
+			return err
+		}
+		remoteRefs[found.remote] = heads
+	}
+	for _, found := range tracking {
+		if !remoteRefs[found.remote][found.remoteRef] {
+			if _, err := git("-C", path, "branch", "-D", found.branch); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// remoteBranches are the refs of the branches the remote has, read within remoteReadLimit and never asking for credentials.
+func remoteBranches(repository, remote string) (map[string]bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), remoteReadLimit)
+	defer cancel()
+	args := []string{"-C", repository, "ls-remote", "--heads", remote}
+	command := exec.CommandContext(ctx, "git", args...)
+	command.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	out, err := said(command, args)
+	if err != nil {
+		return nil, err
+	}
+	heads := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		if _, ref, ok := strings.Cut(line, "\t"); ok {
+			heads[ref] = true
+		}
+	}
+	return heads, nil
 }

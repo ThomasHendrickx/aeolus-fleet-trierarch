@@ -106,6 +106,10 @@ type Workspace interface {
 	// Prune drops the git records of the configured repository's worktrees whose folder is gone; a worktree whose folder exists stays,
 	// wherever it is. It fails for a repository the configuration lacks.
 	Prune(repository string) error
+	// DeleteBranchesWhoseRemoteBranchIsGone deletes the configured repository's local branches checked out in no worktree whose remote
+	// branch is gone from the remote; a branch whose remote branch exists, or that never had one, stays. It fails, deleting nothing, when
+	// the remote cannot be read, and for a repository the configuration lacks.
+	DeleteBranchesWhoseRemoteBranchIsGone(repository string) error
 }
 
 // FolderProcesses are the processes running in a folder, whatever started them: a dev server a session left behind (#1041).
@@ -295,9 +299,9 @@ func (p Pass) Run() error {
 			since = next.PassFailure.Since
 		}
 		next.PassFailure = &reconciler.PassFailure{Reason: err.Error(), Since: since}
-		// The prune needs neither the fleet nor the reconcile, so a failed pass prunes too.
+		// The prune and the branch deletion need neither the fleet nor the reconcile, so a failed pass does them too.
 		saved := p.Store.Save(next)
-		p.pruneWorktreeRecords()
+		p.tidyRepositories()
 		return saved
 	}
 	// Every action is carried out, whatever an earlier one did: a failed action is logged and the pass goes on from the saved state.
@@ -320,18 +324,22 @@ func (p Pass) Run() error {
 			p.Log(fmt.Sprintf("%s of %s failed: %v", action.Kind, action.ShipID, err))
 		}
 	}
-	p.pruneWorktreeRecords()
+	p.tidyRepositories()
 	p.emptyTrash()
 	p.writeActivities(next)
 	return nil
 }
 
-// pruneWorktreeRecords drops the git records of worktrees whose folder is gone, in each configured repository; one that fails is logged and
-// fails neither the pass nor the others.
-func (p Pass) pruneWorktreeRecords() {
+// tidyRepositories, in each configured repository, drops the git records of worktrees whose folder is gone, then deletes the local branches
+// checked out nowhere whose remote branch is gone: a branch a removed worktree had is checked out nowhere only once its record is gone. A
+// step that fails is logged and fails neither the pass nor the other steps.
+func (p Pass) tidyRepositories() {
 	for _, repository := range slices.Sorted(slices.Values(p.Repositories)) {
 		if err := p.Workspace.Prune(repository); err != nil {
 			p.Log(fmt.Sprintf("Could not prune the worktree records of %s: %v; the next pass tries again", repository, err))
+		}
+		if err := p.Workspace.DeleteBranchesWhoseRemoteBranchIsGone(repository); err != nil {
+			p.Log(fmt.Sprintf("Could not delete the local branches whose remote branch is gone in %s: %v; the next pass tries again", repository, err))
 		}
 	}
 }
