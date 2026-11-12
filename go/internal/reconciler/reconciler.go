@@ -7,6 +7,7 @@
 package reconciler
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -67,6 +68,22 @@ type Workspace struct {
 	// ship folder; none on a workspace a crew request names.
 	Repository string `json:"repository,omitempty"`
 	Ref        string `json:"ref,omitempty"`
+}
+
+// MarshalJSON writes a ship folder's sub-repositories as a list, an empty one too, as common's crew settings and today's trierarch's
+// state have them; a folder has none.
+func (w Workspace) MarshalJSON() ([]byte, error) {
+	type plain Workspace
+	if w.Kind == "repositories" && w.SubRepositories == nil {
+		w.SubRepositories = []RepositoryAt{}
+	}
+	if w.Kind != "repositories" {
+		return json.Marshal(plain(w))
+	}
+	return json.Marshal(struct {
+		plain
+		SubRepositories []RepositoryAt `json:"subRepositories"`
+	}{plain(w), w.SubRepositories})
 }
 
 // RepositoryAt is a repository a ship folder names, by its name in the configuration, at a ref: origin's default branch without one.
