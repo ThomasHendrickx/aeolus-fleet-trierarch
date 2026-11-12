@@ -776,6 +776,8 @@ func newVersionStep(entry Entry, request Request, state State, context Context) 
 	}
 	fresh := entryOf(request, harness, options, context.Now)
 	fresh.ShipName, fresh.Folder, fresh.ShipFolder, fresh.MadeMain = entry.ShipName, entry.Folder, entry.ShipFolder, entry.MadeMain
+	// Crewed again under the lease it holds (#367).
+	fresh.CrewToken = entry.CrewToken
 	return step{entry: &fresh, actions: []Action{{Kind: Stop, ShipID: entry.ShipID}, {Kind: Crew, ShipID: entry.ShipID, IsResumed: true}}}
 }
 

@@ -632,7 +632,7 @@ func nameOf(entry reconciler.Entry) string {
 	return entry.ShipID
 }
 
-// crew crews the ship (crew:run): once its harness can start a session, makes the workspace, gets its starting prompt and registers with the secret, so the session never sees it; writes the folder's identity and starts the harness, the status crewing, until its session shows activity in its launch window (#382). A ship another session crews before its crew is left; one gone is forgotten; a resumed crew whose ship is crewed holds it by its own lease, or lost its register reply, so the ship is released and crewed again.
+// crew crews the ship (crew:run): once its harness can start a session, makes the workspace, gets its starting prompt and registers with the secret, so the session never sees it; writes the folder's identity and starts the harness, the status crewing, until its session shows activity in its launch window (#382). A ship another session crews before its crew is left; one gone is forgotten; a resumed crew whose ship is crewed holds it by its own lease: with the crew token its entry keeps, as a new settings version's does, it is crewed again under that lease, never released, as core removes the crew request on a release (#367); one that lost its register reply is released and crewed again.
 func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed bool) (reconciler.State, error) {
 	harness, err := p.harnessOf(entry)
 	if err != nil {
@@ -661,11 +661,13 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	case ship.Status == "crewed" && !isResumed:
 		p.Log(fmt.Sprintf("%s (%s): crewed by another session, so the trierarch leaves it", ship.Name, entry.ShipID))
 		return p.remove(state, entry.ShipID)
-	case ship.Status == "crewed":
+	case ship.Status == "crewed" && entry.CrewToken == "":
 		if err := p.Fleet.Release(entry.ShipID); err != nil {
 			return state, err
 		}
 	}
+	// One its entry holds the crew token of, as a new settings version's does, is crewed again under the lease it holds: core removes the crew request on a release (#367).
+	isUnderItsLease := ship.Status == "crewed" && entry.CrewToken != ""
 	if entry.IsReleasedElsewhere {
 		var err error
 		if state, entry, err = p.freshAfterReleaseElsewhere(state, entry); err != nil {
@@ -701,13 +703,11 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	if problem := p.startProblem(entry, login); problem != "" {
 		return p.giveBack(state, entry.ShipID, entry.SettingsVersion, problem, &entry)
 	}
-	secret, err := p.Fleet.StartingSecret(entry.ShipID)
-	if err != nil {
-		return state, err
-	}
-	crewToken, err := p.Fleet.RegisterShip(entry.ShipID, secret, entry.Harness)
-	if err != nil {
-		return state, err
+	crewToken := entry.CrewToken
+	if !isUnderItsLease {
+		if crewToken, err = p.registered(entry); err != nil {
+			return state, err
+		}
 	}
 	// The crew token stays in the state; the session calls over its ship's socket (decision 0026).
 	entry.CrewToken = crewToken
@@ -741,6 +741,15 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	entry = startedOn(entry, login, entry.LaunchedAt)
 	p.Log(fmt.Sprintf("%s (%s): crewed, %s started in %s", ship.Name, entry.ShipID, entry.Harness, folder))
 	return p.put(state, entry)
+}
+
+// registered registers the ship with a new starting prompt's secret, so the session never sees it: the crew token its lease gives.
+func (p Pass) registered(entry reconciler.Entry) (string, error) {
+	secret, err := p.Fleet.StartingSecret(entry.ShipID)
+	if err != nil {
+		return "", err
+	}
+	return p.Fleet.RegisterShip(entry.ShipID, secret, entry.Harness)
 }
 
 // freshAfterReleaseElsewhere removes the workspace of a ship released elsewhere before it is crewed again in a fresh one (row 11, #475). Its session stops first, as a release's does, so nothing reads the worktree while a session works in it, whatever the pass's stop did. The entry is saved without its mark only once that is done, so a failed stop or removal is tried again on the next pass.
