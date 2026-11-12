@@ -2,7 +2,7 @@ import type { ShipId } from '@aeolus-fleet/common';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { aTrierarch, aTrierarchOnLogins, CONFIGURATION, crewSettings, InMemoryCheckouts, InMemoryShipSockets, newId, NOTES_FOLDER, SHIPS_ROOT, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
+import { aTrierarch, aTrierarchOnLogins, CONFIGURATION, crewSettings, InMemoryCheckouts, InMemoryShipSockets, newId, NOTES_FOLDER, SHIPS_ROOT, WORKTREE_ROOT, type Trierarch, inRepositories } from '../../test/support/in-memory.js';
 import { putEntry } from './entry.js';
 import type { LaunchSeen, LeftInTrash } from './ports.js';
 import { ACTIVITY_INTERVAL_SECONDS } from './run-pass.js';
@@ -11,7 +11,12 @@ import { RESTART_BUDGET } from './restart-policy.js';
 
 const SECOND_MS = 1000;
 const MINUTE_MS = 60 * SECOND_MS;
-const SCOUT_FOLDER = `${WORKTREE_ROOT}/aeolus-fleet/scout`;
+/** The ship folder scout's session starts in, in its ship's folder. */
+const scoutFolder = (shipId: ShipId): string => `${SHIPS_ROOT}/${shipId}/repositories`;
+/** A worktree an earlier trierarch kept, under the worktree root of the ships crewed before the ship folders. */
+const KEPT_WORKTREE = `${WORKTREE_ROOT}/aeolus-fleet/scout`;
+/** Scout's main repository, in its ship folder. */
+const scoutMain = (shipId: ShipId): string => `${scoutFolder(shipId)}/main`;
 const WITH_CODEX = { ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: { flags: [], options: {} } } };
 const SKIP = '--dangerously-skip-permissions';
 /** Claude Code skipping permissions, as the operator configured it, or as an option the settings may pick. */
@@ -59,8 +64,8 @@ async function crashForGood(trierarch: Trierarch, shipId: ShipId) {
  */
 async function aKeptWorktree(trierarch: Trierarch) {
   const shipId = trierarch.fleet.commission('scout');
-  trierarch.workspace.folders.set(SCOUT_FOLDER, { shipId, hasChanges: true, unsaved: [' M README.md'] });
-  await trierarch.state.save({ ...trierarch.state.current(), kept: [{ shipId, repository: 'aeolus-fleet', path: SCOUT_FOLDER }] });
+  trierarch.workspace.folders.set(KEPT_WORKTREE, { shipId, hasChanges: true, unsaved: [' M README.md'] });
+  await trierarch.state.save({ ...trierarch.state.current(), kept: [{ shipId, repository: 'aeolus-fleet', path: KEPT_WORKTREE }] });
   return shipId;
 }
 
@@ -170,17 +175,17 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     const shipId = await aCrewedShip(trierarch, { firstPrompt: 'Review the open pull requests.' });
 
     expect(trierarch.fleet.shipOf(shipId).status).toBe('crewed');
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
-    expect(trierarch.harness.identities.get(SCOUT_FOLDER)).toEqual({
+    expect(trierarch.workspace.folders.has(scoutFolder(shipId))).toBe(true);
+    expect(trierarch.harness.identities.get(scoutFolder(shipId))).toEqual({
       fleetUrl: 'https://fleet.example.com',
       shipId,
       shipName: 'scout',
       socket: InMemoryShipSockets.pathOf(shipId),
     });
     expect(trierarch.harness.launches).toEqual([
-      { shipId, shipName: 'scout', folder: SCOUT_FOLDER, workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, isFirstStart: true, firstPrompt: 'Review the open pull requests.' },
+      { shipId, shipName: 'scout', folder: scoutFolder(shipId), workspace: inRepositories('aeolus-fleet'), isFirstStart: true, firstPrompt: 'Review the open pull requests.' },
     ]);
-    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'running', folder: SCOUT_FOLDER, shipName: 'scout', settingsVersion: 1 });
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'running', folder: scoutFolder(shipId), shipName: 'scout', settingsVersion: 1 });
   });
 
   it('row 3: writes status crewing, then running', async () => {
@@ -217,9 +222,9 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
   it('row 3: passes the squadron to the identity, so the member checks in at its flagship', async () => {
     const trierarch = aTrierarch();
 
-    await aCrewedShip(trierarch, { squadron: 'hemma-feature-a1b2c3' });
+    const shipId = await aCrewedShip(trierarch, { squadron: 'hemma-feature-a1b2c3' });
 
-    expect(trierarch.harness.identities.get(SCOUT_FOLDER)?.squadron).toBe('hemma-feature-a1b2c3');
+    expect(trierarch.harness.identities.get(scoutFolder(shipId))?.squadron).toBe('hemma-feature-a1b2c3');
   });
 
   it('row 3: crews with the options the settings pick', async () => {
@@ -258,7 +263,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     trierarch.clock.advance(5 * SECOND_MS);
     await trierarch.pass();
 
-    expect(trierarch.harness.launches.at(-1)).toEqual({ shipId, shipName: 'scout', folder: SCOUT_FOLDER, workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, isFirstStart: false });
+    expect(trierarch.harness.launches.at(-1)).toEqual({ shipId, shipName: 'scout', folder: scoutFolder(shipId), workspace: inRepositories('aeolus-fleet'), isFirstStart: false });
     expect(trierarch.fleet.shipOf(shipId).crewToken).toBe(crewToken);
     expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'running', exits: [expect.any(String)] });
     expect(statusesOf(trierarch, shipId)).toEqual(['crewing', 'running', 'restarting', 'running']);
@@ -311,7 +316,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.processes.sessions.has(shipId)).toBe(false);
     expect(trierarch.fleet.shipOf(shipId).status).toBe('awaitingCrew');
     expect(trierarch.state.current().entries).toEqual({});
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.workspace.folders.has(scoutFolder(shipId))).toBe(false);
     expect(trierarch.fleet.confirmed).toEqual([shipId]);
     expect(trierarch.fleet.requests.has(shipId)).toBe(false);
   });
@@ -319,14 +324,14 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
   it('row 7: removes a worktree with changes too, keeps none, ends the lease and confirms (#450)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.workspace.change(SCOUT_FOLDER);
+    trierarch.workspace.change(scoutMain(shipId));
     trierarch.fleet.removeRequest(shipId);
 
     await trierarch.pass();
 
     expect(trierarch.fleet.shipOf(shipId).status).toBe('awaitingCrew');
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
-    expect(trierarch.harness.identities.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.workspace.folders.has(scoutFolder(shipId))).toBe(false);
+    expect(trierarch.harness.identities.has(scoutFolder(shipId))).toBe(false);
     expect(trierarch.state.current().kept).toEqual([]);
     expect(trierarch.fleet.confirmed).toEqual([shipId]);
   });
@@ -334,13 +339,13 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
   it('row 7: removes a worktree the host would not read unread, logging why it was not read', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.workspace.change(SCOUT_FOLDER, 'refused, its .git is no folder of its own');
+    trierarch.workspace.change(scoutMain(shipId), 'refused, its .git is no folder of its own');
     trierarch.fleet.removeRequest(shipId);
 
     await trierarch.pass();
 
-    expect(trierarch.logger.warnings).toContain(`Discarded from the worktree of scout (${shipId}), ${SCOUT_FOLDER}: refused, its .git is no folder of its own`);
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.logger.warnings).toContain(`Discarded from the worktree of scout (${shipId}), ${scoutMain(shipId)}: refused, its .git is no folder of its own`);
+    expect(trierarch.workspace.folders.has(scoutFolder(shipId))).toBe(false);
     expect(trierarch.fleet.confirmed).toEqual([shipId]);
   });
 
@@ -348,13 +353,13 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     for (let file = 0; file < 7; file += 1) {
-      trierarch.workspace.change(SCOUT_FOLDER, `?? notes/${String(file)}.md`);
+      trierarch.workspace.change(scoutMain(shipId), `?? notes/${String(file)}.md`);
     }
     trierarch.fleet.removeRequest(shipId);
 
     await trierarch.pass();
 
-    expect(trierarch.logger.warnings).toContain(`Discarded from the worktree of scout (${shipId}), ${SCOUT_FOLDER}: ?? notes/0.md; ?? notes/1.md; ?? notes/2.md; ?? notes/3.md; ?? notes/4.md; ?? notes/5.md; ?? notes/6.md`);
+    expect(trierarch.logger.warnings).toContain(`Discarded from the worktree of scout (${shipId}), ${scoutMain(shipId)}: ?? notes/0.md; ?? notes/1.md; ?? notes/2.md; ?? notes/3.md; ?? notes/4.md; ?? notes/5.md; ?? notes/6.md`);
   });
 
   it('row 7: tells argo nothing when the worktree it removes holds nothing unpushed (#450)', async () => {
@@ -369,7 +374,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
   it('row 7: removes the worktree on the next pass when removing it fails, telling argo nothing (#450)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.workspace.change(SCOUT_FOLDER);
+    trierarch.workspace.change(scoutMain(shipId));
     trierarch.fleet.removeRequest(shipId);
     trierarch.workspace.isFailingRemove = true;
     await trierarch.pass();
@@ -377,7 +382,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
 
     await trierarch.pass();
 
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.workspace.folders.has(scoutFolder(shipId))).toBe(false);
     expect(trierarch.fleet.confirmed).toEqual([shipId]);
     expect(trierarch.fleet.toArgo).toEqual([]);
   });
@@ -385,15 +390,15 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
   it('a ship crewed again after its release starts in a fresh worktree, without what the crew before left (#450)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.workspace.change(SCOUT_FOLDER);
+    trierarch.workspace.change(scoutMain(shipId));
     trierarch.fleet.removeRequest(shipId);
     await trierarch.pass();
     trierarch.fleet.request(shipId);
 
     await trierarch.pass();
 
-    expect(trierarch.state.current().entries[shipId]?.folder).toBe(SCOUT_FOLDER);
-    expect(trierarch.workspace.folders.get(SCOUT_FOLDER)).toMatchObject({ hasChanges: false, unsaved: [] });
+    expect(trierarch.state.current().entries[shipId]?.folder).toBe(scoutFolder(shipId));
+    expect(trierarch.workspace.folders.get(scoutMain(shipId))).toMatchObject({ hasChanges: false, unsaved: [] });
   });
 
   it('removes a worktree an earlier trierarch kept with its changes, as no crewed ship uses it, and the state keeps none (gap rule 2)', async () => {
@@ -402,7 +407,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
 
     await trierarch.pass();
 
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.workspace.folders.has(KEPT_WORKTREE)).toBe(false);
     expect(trierarch.state.current().kept).toEqual([]);
   });
 
@@ -435,7 +440,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
 
     await trierarch.pass();
 
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
+    expect(trierarch.workspace.folders.has(scoutFolder(shipId))).toBe(true);
     expect(trierarch.fleet.cleared).toEqual([{ shipId, repository: 'aeolus-fleet', outcome: 'not-kept' }]);
   });
 
@@ -483,11 +488,11 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     const trierarch = aTrierarch();
     const shipId = trierarch.fleet.commission('scout');
     trierarch.fleet.request(shipId);
-    trierarch.workspace.folders.set(SCOUT_FOLDER, { shipId, hasChanges: false, unsaved: [] });
+    trierarch.workspace.folders.set(scoutFolder(shipId), { shipId, hasChanges: false, unsaved: [] });
 
     await trierarch.pass();
 
-    expect(trierarch.state.current().entries[shipId]?.folder).toBe(SCOUT_FOLDER);
+    expect(trierarch.state.current().entries[shipId]?.folder).toBe(scoutFolder(shipId));
     expect(trierarch.state.current().orphans).toEqual([]);
   });
 
@@ -503,20 +508,20 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.fleet.shipOf(shipId).status).toBe('crewed');
     expect(trierarch.fleet.shipOf(shipId).crewToken).not.toBe(firstToken);
     expect(trierarch.state.current().entries[shipId]?.crewToken).toBe(trierarch.fleet.shipOf(shipId).crewToken);
-    expect(trierarch.harness.launches.map((launch) => launch.folder)).toEqual([SCOUT_FOLDER, SCOUT_FOLDER]);
+    expect(trierarch.harness.launches.map((launch) => launch.folder)).toEqual([scoutFolder(shipId), scoutFolder(shipId)]);
     expect(trierarch.state.current().entries[shipId]?.state).toBe('running');
   });
 
   it('row 11: a ship released elsewhere is crewed again in a fresh worktree, without what the crew before left (#475)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.workspace.change(SCOUT_FOLDER);
+    trierarch.workspace.change(scoutMain(shipId));
     trierarch.fleet.releaseElsewhere(shipId);
 
     await trierarch.pass();
 
-    expect(trierarch.state.current().entries[shipId]?.folder).toBe(SCOUT_FOLDER);
-    expect(trierarch.workspace.folders.get(SCOUT_FOLDER)).toMatchObject({ hasChanges: false, unsaved: [] });
+    expect(trierarch.state.current().entries[shipId]?.folder).toBe(scoutFolder(shipId));
+    expect(trierarch.workspace.folders.get(scoutMain(shipId))).toMatchObject({ hasChanges: false, unsaved: [] });
     expect(trierarch.state.current().kept).toEqual([]);
   });
 
@@ -533,7 +538,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
   it('row 11: when removing the worktree of a ship released elsewhere fails, crews it nowhere and the next pass removes it, telling argo nothing (#475)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.workspace.change(SCOUT_FOLDER);
+    trierarch.workspace.change(scoutMain(shipId));
     trierarch.fleet.releaseElsewhere(shipId);
     trierarch.workspace.isFailingRemove = true;
     await trierarch.pass();
@@ -543,7 +548,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     await trierarch.pass();
 
     expect(launchesAfterFailure).toBe(1);
-    expect(trierarch.workspace.folders.get(SCOUT_FOLDER)).toMatchObject({ hasChanges: false, unsaved: [] });
+    expect(trierarch.workspace.folders.get(scoutMain(shipId))).toMatchObject({ hasChanges: false, unsaved: [] });
     expect(trierarch.fleet.shipOf(shipId).status).toBe('crewed');
     expect(trierarch.fleet.toArgo).toEqual([]);
   });
@@ -551,7 +556,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
   it('row 11: a ship released elsewhere whose session does not stop keeps its worktree unread and is crewed nowhere', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.workspace.change(SCOUT_FOLDER, '?? draft.md');
+    trierarch.workspace.change(scoutMain(shipId), '?? draft.md');
     trierarch.fleet.releaseElsewhere(shipId);
     trierarch.processes.notStopping.add(shipId);
     const launches = trierarch.harness.launches.length;
@@ -559,7 +564,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     await trierarch.pass();
     await trierarch.pass();
 
-    expect(trierarch.workspace.folders.get(SCOUT_FOLDER)?.unsaved).toEqual(['?? draft.md']);
+    expect(trierarch.workspace.folders.get(scoutMain(shipId))?.unsaved).toEqual(['?? draft.md']);
     expect(trierarch.fleet.toArgo).toEqual([]);
     expect(trierarch.harness.launches).toHaveLength(launches);
   });
@@ -574,8 +579,8 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.harness.launches.at(-1)).toEqual({
       shipId,
       shipName: 'scout',
-      folder: SCOUT_FOLDER,
-      workspace: { kind: 'worktree', repository: 'aeolus-fleet' },
+      folder: scoutFolder(shipId),
+      workspace: inRepositories('aeolus-fleet'),
       isFirstStart: true,
       firstPrompt: 'Review the open pull requests.',
     });
@@ -584,15 +589,15 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
   it('row 12: a new settings version stops the session and crews it again with that version, keeping the worktree', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.workspace.change(SCOUT_FOLDER);
+    trierarch.workspace.change(scoutMain(shipId));
     trierarch.fleet.requestAgain(shipId, crewSettings({ options: { model: 'sonnet' } }));
 
     await trierarch.pass();
     await trierarch.pass();
 
-    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'running', settingsVersion: 2, options: { model: 'sonnet' }, folder: SCOUT_FOLDER });
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'running', settingsVersion: 2, options: { model: 'sonnet' }, folder: scoutFolder(shipId) });
     expect(trierarch.harness.launches).toHaveLength(2);
-    expect(trierarch.workspace.folders.get(SCOUT_FOLDER)?.hasChanges).toBe(true);
+    expect(trierarch.workspace.folders.get(scoutMain(shipId))?.hasChanges).toBe(true);
     expect(trierarch.fleet.shipOf(shipId).status).toBe('crewed');
     expect(trierarch.state.current().entries[shipId]?.crewToken).toBe(trierarch.fleet.shipOf(shipId).crewToken);
   });
@@ -607,8 +612,8 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.harness.launches.at(-1)).toEqual({
       shipId,
       shipName: 'scout',
-      folder: SCOUT_FOLDER,
-      workspace: { kind: 'worktree', repository: 'aeolus-fleet' },
+      folder: scoutFolder(shipId),
+      workspace: inRepositories('aeolus-fleet'),
       isFirstStart: true,
       firstPrompt: 'Take slice 12.',
     });
@@ -626,7 +631,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     trierarch.clock.advance(5 * SECOND_MS);
     await trierarch.pass();
 
-    expect(trierarch.harness.launches.at(-1)).toEqual({ shipId, shipName: 'scout', folder: SCOUT_FOLDER, workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, isFirstStart: false });
+    expect(trierarch.harness.launches.at(-1)).toEqual({ shipId, shipName: 'scout', folder: scoutFolder(shipId), workspace: inRepositories('aeolus-fleet'), isFirstStart: false });
   });
 
   it('row 12: a crashed request written again starts again with a fresh restart budget', async () => {
@@ -638,7 +643,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     await trierarch.pass();
     await trierarch.pass();
 
-    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'running', exits: [], folder: SCOUT_FOLDER });
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'running', exits: [], folder: scoutFolder(shipId) });
     expect(trierarch.processes.sessions.get(shipId)).toBe('running');
     expect(trierarch.fleet.requestOf(shipId).status).toBe('running');
   });
@@ -680,7 +685,7 @@ describe('the launch window: a crew is final once its session shows activity (#3
     await trierarch.pass();
 
     expect(trierarch.harness.launchIds).toEqual(['launch-1']);
-    expect(trierarch.harness.asked).toEqual([{ shipId, folder: SCOUT_FOLDER, launchId: 'launch-1', model: 'sonnet' }]);
+    expect(trierarch.harness.asked).toEqual([{ shipId, folder: scoutFolder(shipId), launchId: 'launch-1', model: 'sonnet' }]);
   });
 
   it('gives the request back when its session refused the model it launched with, naming the harness, its version and the model: the session stops, its identity and clean worktree go', async () => {
@@ -691,8 +696,8 @@ describe('the launch window: a crew is final once its session shows activity (#3
 
     expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 1, reason: 'mac-studio: claude-code 2.1.295 refused sonnet' }]);
     expect(trierarch.processes.sessions.has(shipId)).toBe(false);
-    expect(trierarch.harness.identities.has(SCOUT_FOLDER)).toBe(false);
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.harness.identities.has(scoutFolder(shipId))).toBe(false);
+    expect(trierarch.workspace.folders.has(scoutFolder(shipId))).toBe(false);
     expect(trierarch.state.current().entries).toEqual({});
     expect(trierarch.fleet.shipOf(shipId).status).toBe('awaitingCrew');
     expect(statusesOf(trierarch, shipId)).toEqual(['crewing']);
@@ -734,7 +739,7 @@ describe('the launch window: a crew is final once its session shows activity (#3
 
     await trierarch.pass();
 
-    expect(trierarch.harness.asked).toEqual([{ shipId, folder: SCOUT_FOLDER, launchId: 'launch-1' }]);
+    expect(trierarch.harness.asked).toEqual([{ shipId, folder: scoutFolder(shipId), launchId: 'launch-1' }]);
     expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 1, reason: 'mac-studio: claude-code 2.1.295 refused claude-opus-5-5' }]);
   });
 
@@ -866,7 +871,7 @@ describe('the restart window: a restarted final crew is checked, never held back
   it('watches the inbox of a restarted session and wakes it while its first minute runs', async () => {
     const trierarch = aTrierarch();
     const shipId = await aRestartedShip(trierarch, { seen: { kind: 'none' } });
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
     trierarch.fleet.deliver(shipId, 1);
 
     await trierarch.pass();
@@ -881,7 +886,7 @@ describe('the restart window: a restarted final crew is checked, never held back
     await trierarch.pass();
 
     expect(trierarch.harness.launchIds).toEqual(['launch-1', 'launch-2']);
-    expect(trierarch.harness.asked.slice(1)).toEqual([{ shipId, folder: SCOUT_FOLDER, launchId: 'launch-2', model: 'sonnet' }]);
+    expect(trierarch.harness.asked.slice(1)).toEqual([{ shipId, folder: scoutFolder(shipId), launchId: 'launch-2', model: 'sonnet' }]);
   });
 
   it('counts no activity within a minute of a restart as a failed start: the session stops and restarts after its wait, nothing given back', async () => {
@@ -1057,10 +1062,10 @@ describe('a final crew crewed again after a release elsewhere follows the restar
     await trierarch.pass();
 
     expect(trierarch.fleet.requestOf(shipId)).toMatchObject({ status: 'crewing', isFinal: true });
-    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'crewing', folder: SCOUT_FOLDER });
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'crewing', folder: scoutFolder(shipId) });
+    expect(trierarch.workspace.folders.has(scoutFolder(shipId))).toBe(true);
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
-      `Cannot crew scout with its settings\n\n- Ship: scout (\`${shipId}\`)\n- Settings version: 1\n- Why: workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it`,
+      `Cannot crew scout with its settings\n\n- Ship: scout (\`${shipId}\`)\n- Settings version: 1\n- Why: workspace.main.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it`,
     ]);
   });
 
@@ -1096,7 +1101,7 @@ describe('a session is watched and woken from the moment it runs, whatever the c
   it('wakes a ship crewed again after a release elsewhere before its session shows activity', async () => {
     const trierarch = aTrierarch();
     const shipId = await aReleasedShip(trierarch, { seen: { kind: 'none' } });
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
     trierarch.fleet.deliver(shipId, 1);
 
     await trierarch.pass();
@@ -1108,7 +1113,7 @@ describe('a session is watched and woken from the moment it runs, whatever the c
   it('wakes a first crew before its session shows activity', async () => {
     const trierarch = aTrierarch();
     const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' } });
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
     trierarch.fleet.deliver(shipId, 1);
 
     await trierarch.pass();
@@ -1120,7 +1125,7 @@ describe('a session is watched and woken from the moment it runs, whatever the c
   it('wakes a session in the pass its activity makes its crew final', async () => {
     const trierarch = aTrierarch();
     const shipId = await aReleasedShip(trierarch, { seen: { kind: 'active' } });
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
     trierarch.fleet.deliver(shipId, 1);
 
     await trierarch.pass();
@@ -1132,7 +1137,7 @@ describe('a session is watched and woken from the moment it runs, whatever the c
   it('wakes a crewing session no more once its start failed', async () => {
     const trierarch = aTrierarch();
     const shipId = await aReleasedShip(trierarch, { seen: { kind: 'none' } });
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
     trierarch.fleet.deliver(shipId, 1);
     trierarch.clock.advance(MINUTE_MS);
 
@@ -1147,7 +1152,7 @@ describe('a session an older trierarch started, after an upgrade (H19)', () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     trierarch.processes.upgrade(shipId);
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
 
     await trierarch.pass();
 
@@ -1161,7 +1166,7 @@ describe('a session an older trierarch started, after an upgrade (H19)', () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     trierarch.processes.upgrade(shipId);
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'busy');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'busy');
     trierarch.fleet.deliver(shipId, 1);
     trierarch.fleet.force(shipId, 1);
 
@@ -1177,7 +1182,7 @@ describe('a session an older trierarch started, after an upgrade (H19)', () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     trierarch.processes.upgrade(shipId);
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
     trierarch.fleet.deliver(shipId, 1);
 
     await trierarch.pass();
@@ -1280,17 +1285,14 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.state.current().passFailure).toBeUndefined();
   });
 
-  it('rule 2: a folder under its root that holds the folder a ship is crewed in stays, and what else it holds goes', async () => {
+  it("rule 2: the ship's folder that holds the folder a ship is crewed in stays, and so does the folder", async () => {
     const trierarch = aTrierarch();
-    await aCrewedShip(trierarch);
-    const holder = `${WORKTREE_ROOT}/aeolus-fleet`;
-    const other = `${WORKTREE_ROOT}/aeolus-fleet/lookout`;
-    trierarch.workspace.folders.set(holder, { hasChanges: false, unsaved: [] });
-    trierarch.workspace.folders.set(other, { hasChanges: false, unsaved: [] });
+    const shipId = await aCrewedShip(trierarch);
+    const holder = `${SHIPS_ROOT}/${shipId}`;
 
     await trierarch.pass();
 
-    expect([trierarch.workspace.folders.has(holder), trierarch.workspace.folders.has(SCOUT_FOLDER), trierarch.workspace.folders.has(other)]).toEqual([true, true, false]);
+    expect([trierarch.workspace.folders.has(holder), trierarch.workspace.folders.has(scoutFolder(shipId))]).toEqual([true, true]);
   });
 
   it('rule 2: a folder under one it removes goes with it, removed once', async () => {
@@ -1360,8 +1362,8 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
 
   it('rule 2: the folder a ship is crewed in keeps every folder in it, with what runs there', async () => {
     const trierarch = aTrierarch();
-    await aCrewedShip(trierarch);
-    const inside = `${SCOUT_FOLDER}/node_modules`;
+    const shipId = await aCrewedShip(trierarch);
+    const inside = `${scoutFolder(shipId)}/node_modules`;
     trierarch.workspace.folders.set(inside, { hasChanges: false, unsaved: [] });
     trierarch.folderProcesses.start(inside, 'astro dev');
 
@@ -1461,52 +1463,52 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     const trierarch = aTrierarch();
     const shipId = trierarch.fleet.commission('scout');
     trierarch.fleet.request(shipId, crewSettings());
-    trierarch.workspace.folders.set(SCOUT_FOLDER, { hasChanges: false, unsaved: [] });
-    trierarch.folderProcesses.start(SCOUT_FOLDER, 'astro dev');
+    trierarch.workspace.folders.set(scoutFolder(shipId), { hasChanges: false, unsaved: [] });
+    trierarch.folderProcesses.start(scoutFolder(shipId), 'astro dev');
 
     await trierarch.pass();
 
-    expect(trierarch.state.current().entries[shipId]?.folder).toBe(SCOUT_FOLDER);
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
+    expect(trierarch.state.current().entries[shipId]?.folder).toBe(scoutFolder(shipId));
+    expect(trierarch.workspace.folders.has(scoutFolder(shipId))).toBe(true);
     expect(trierarch.folderProcesses.stoppedIn).toEqual([]);
   });
 
   it('rule 2: a worktree an entry works in is never cleared as an orphan, nor are the processes in it stopped (#1041)', async () => {
     const trierarch = aTrierarch();
-    await aCrewedShip(trierarch);
-    trierarch.folderProcesses.start(SCOUT_FOLDER, 'astro dev');
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.folderProcesses.start(scoutFolder(shipId), 'astro dev');
 
     await trierarch.pass();
 
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
+    expect(trierarch.workspace.folders.has(scoutFolder(shipId))).toBe(true);
     expect(trierarch.folderProcesses.stoppedIn).toEqual([]);
   });
 
   it('rule 2: a request no longer assigned to it, as when its ship is retired, has its session stopped and its clean worktree removed with what runs in it (#1041)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.folderProcesses.start(SCOUT_FOLDER, 'astro dev');
+    trierarch.folderProcesses.start(scoutFolder(shipId), 'astro dev');
     trierarch.fleet.unassign(shipId);
 
     await trierarch.pass();
 
     expect(trierarch.processes.sessions.has(shipId)).toBe(false);
     expect(trierarch.state.current().entries).toEqual({});
-    expect(trierarch.harness.identities.has(SCOUT_FOLDER)).toBe(false);
-    expect(trierarch.folderProcesses.running.has(SCOUT_FOLDER)).toBe(false);
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.harness.identities.has(scoutFolder(shipId))).toBe(false);
+    expect(trierarch.folderProcesses.running.has(scoutFolder(shipId))).toBe(false);
+    expect(trierarch.workspace.folders.has(scoutFolder(shipId))).toBe(false);
     expect(trierarch.state.current().orphans).toEqual([]);
   });
 
   it('a request no longer assigned to it has its worktree removed with unsaved work too, reported as no orphan (gap rule 1)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.workspace.change(SCOUT_FOLDER);
+    trierarch.workspace.change(scoutMain(shipId));
     trierarch.fleet.unassign(shipId);
 
     await trierarch.pass();
 
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.workspace.folders.has(scoutFolder(shipId))).toBe(false);
     expect(trierarch.state.current().orphans).toEqual([]);
   });
 
@@ -1555,11 +1557,16 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
 
   it.each([
     { label: 'a harness it does not offer', settings: crewSettings({ harness: 'codex' }), reason: 'harness: This trierarch offers no harness codex' },
-    { label: 'a repository it does not offer', settings: crewSettings({ workspace: { kind: 'worktree', repository: 'hemma' } }), reason: 'workspace.repository: This trierarch offers no repository hemma' },
+    { label: 'a repository it does not offer', settings: crewSettings({ workspace: inRepositories('hemma') }), reason: 'workspace.main.repository: This trierarch offers no repository hemma' },
+    {
+      label: 'a sub-repository it does not offer',
+      settings: crewSettings({ workspace: inRepositories('aeolus-fleet', { subRepositories: ['hemma'] }) }),
+      reason: 'workspace.subRepositories.0.repository: This trierarch offers no repository hemma',
+    },
     { label: 'an option value it does not offer', settings: crewSettings({ options: { model: 'haiku' } }), reason: 'options.model: model must be one of opus, sonnet' },
     {
       label: 'no harness and an option value its default harness does not offer',
-      settings: { workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: { model: 'haiku' } },
+      settings: { workspace: inRepositories('aeolus-fleet'), options: { model: 'haiku' } },
       reason: 'options.model: model must be one of opus, sonnet',
     },
     { label: 'settings that are not crew settings', settings: { harness: 'claude-code' }, reason: 'workspace: Invalid input: expected object, received undefined' },
@@ -1634,15 +1641,15 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     const trierarch = aTrierarch();
     trierarch.harness.isFailingLaunch = true;
     const shipId = await aCrewedShip(trierarch);
-    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'crewing', folder: SCOUT_FOLDER });
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'crewing', folder: scoutFolder(shipId) });
     trierarch.fleet.requestAgain(shipId, crewSettings({ harness: 'codex' }));
 
     await trierarch.pass();
 
     expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 2, reason: 'mac-studio: harness: This trierarch offers no harness codex' }]);
     expect(trierarch.state.current().entries).toEqual({});
-    expect(trierarch.harness.identities.has(SCOUT_FOLDER)).toBe(false);
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.harness.identities.has(scoutFolder(shipId))).toBe(false);
+    expect(trierarch.workspace.folders.has(scoutFolder(shipId))).toBe(false);
     expect(trierarch.fleet.shipOf(shipId).status).toBe('awaitingCrew');
     expect(trierarch.fleet.toArgo).toEqual([]);
   });
@@ -1657,8 +1664,8 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.fleet.givenBack).toEqual([{ shipId, settingsVersion: 2, reason: 'mac-studio: harness: This trierarch offers no harness codex' }]);
     expect(trierarch.processes.sessions.has(shipId)).toBe(false);
     expect(trierarch.state.current().entries).toEqual({});
-    expect(trierarch.harness.identities.has(SCOUT_FOLDER)).toBe(false);
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.harness.identities.has(scoutFolder(shipId))).toBe(false);
+    expect(trierarch.workspace.folders.has(scoutFolder(shipId))).toBe(false);
     expect(trierarch.fleet.toArgo).toEqual([]);
   });
 
@@ -1667,7 +1674,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
       label: 'a repository',
       place: { kind: 'repository' as const, name: 'aeolus-fleet' },
       settings: crewSettings(),
-      reason: 'workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it',
+      reason: 'workspace.main.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it',
     },
     {
       label: 'a folder',
@@ -1700,7 +1707,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
 
     expect(trierarch.harness.launches).toEqual([]);
     expect(trierarch.fleet.givenBack).toEqual([
-      { shipId, settingsVersion: 1, reason: 'mac-studio: workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it' },
+      { shipId, settingsVersion: 1, reason: 'mac-studio: workspace.main.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it' },
     ]);
     expect(trierarch.state.current().entries).toEqual({});
   });
@@ -1726,7 +1733,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
 
     expect(trierarch.harness.launches).toHaveLength(1);
     expect(trierarch.fleet.toArgo.map((report) => report.text)).toEqual([
-      `Cannot crew scout with its settings\n\n- Ship: scout (\`${shipId}\`)\n- Settings version: 1\n- Why: workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it`,
+      `Cannot crew scout with its settings\n\n- Ship: scout (\`${shipId}\`)\n- Settings version: 1\n- Why: workspace.main.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it`,
     ]);
   });
 
@@ -1897,7 +1904,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
   it('hands one message over to an idle session while deliveries wait (#756, 2a)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
     trierarch.fleet.deliver(shipId, 1);
 
     await trierarch.pass();
@@ -1908,7 +1915,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
   it('hands nothing more while the hand-over keeps the session busy', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
     trierarch.fleet.deliver(shipId, 2);
 
     await trierarch.pass();
@@ -1920,11 +1927,11 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
   it('hands the next message over once the session is idle again, though the count did not rise', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
     trierarch.fleet.deliver(shipId, 1);
     await trierarch.pass();
 
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
     await trierarch.pass();
 
     expect(trierarch.harness.handOvers).toEqual([shipId, shipId]);
@@ -1933,8 +1940,8 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
   it('hands over what the store holds to an idle session, though nothing waits at the fleet: received, not confirmed or to hand once more (3.2, 3.7, 3.9)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
-    trierarch.harness.holding.add(SCOUT_FOLDER);
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
+    trierarch.harness.holding.add(scoutFolder(shipId));
 
     await trierarch.pass();
 
@@ -1943,8 +1950,8 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
 
   it('hands nothing to an idle session while nothing waits and its store holds nothing', async () => {
     const trierarch = aTrierarch();
-    await aCrewedShip(trierarch);
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
 
     await trierarch.pass();
 
@@ -1954,7 +1961,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
   it('hands a forced message over to a busy session, stopping its turn (decision 0040)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'busy');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'busy');
     trierarch.fleet.deliver(shipId, 1);
     trierarch.fleet.force(shipId, 1);
 
@@ -1967,8 +1974,8 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
   it('hands a forced message to an idle session first, before what its store holds, stopping no turn', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
-    trierarch.harness.holding.add(SCOUT_FOLDER);
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
+    trierarch.harness.holding.add(scoutFolder(shipId));
     trierarch.fleet.deliver(shipId, 2);
     trierarch.fleet.force(shipId, 1);
 
@@ -2025,12 +2032,12 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
   it('hands nothing to a busy session, and hands over once it turns idle', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'busy');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'busy');
     trierarch.fleet.deliver(shipId, 1);
     await trierarch.pass();
     expect(trierarch.harness.handOvers).toEqual([]);
 
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
     await trierarch.pass();
 
     expect(trierarch.harness.handOvers).toEqual([shipId]);
@@ -2052,9 +2059,9 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
   it('crews a ship with the harness its settings name: its identity and its session', async () => {
     const trierarch = aTrierarch(WITH_CODEX);
 
-    await aCrewedShip(trierarch, { harness: 'codex' });
+    const shipId = await aCrewedShip(trierarch, { harness: 'codex' });
 
-    expect(trierarch.codex.identities.has(SCOUT_FOLDER)).toBe(true);
+    expect(trierarch.codex.identities.has(scoutFolder(shipId))).toBe(true);
     expect(trierarch.codex.launches).toHaveLength(1);
     expect(trierarch.harness.launches).toEqual([]);
   });
@@ -2063,7 +2070,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     const codexFirst = { ...CONFIGURATION, harnesses: { codex: { flags: [], options: {} }, ...CONFIGURATION.harnesses } };
     const trierarch = aTrierarch(codexFirst);
     const shipId = trierarch.fleet.commission('scout');
-    trierarch.fleet.request(shipId, { workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} });
+    trierarch.fleet.request(shipId, { workspace: inRepositories('aeolus-fleet'), options: {} });
 
     await trierarch.pass();
 
@@ -2075,7 +2082,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
   it('checks the options of settings without a harness against its default harness (#343)', async () => {
     const trierarch = aTrierarch();
     const shipId = trierarch.fleet.commission('scout');
-    trierarch.fleet.request(shipId, { workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: { model: 'sonnet' } });
+    trierarch.fleet.request(shipId, { workspace: inRepositories('aeolus-fleet'), options: { model: 'sonnet' } });
 
     await trierarch.pass();
 
@@ -2086,7 +2093,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
   it("wakes a ship through the harness its settings name, from that harness's turn", async () => {
     const trierarch = aTrierarch(WITH_CODEX);
     const shipId = await aCrewedShip(trierarch, { harness: 'codex' });
-    trierarch.codex.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.codex.turns.set(scoutFolder(shipId), 'idle');
     trierarch.fleet.deliver(shipId, 1);
 
     await trierarch.pass();
@@ -2103,7 +2110,7 @@ describe('what the loop logs (aeolus-trierarch logs)', () => {
 
     const shipId = await aCrewedShip(trierarch);
 
-    expect(trierarch.logger.actions).toEqual([{ time: trierarch.clock.now(), shipId, shipName: 'scout', action: 'crew', outcome: `crewed, claude-code started in ${SCOUT_FOLDER}` }]);
+    expect(trierarch.logger.actions).toEqual([{ time: trierarch.clock.now(), shipId, shipName: 'scout', action: 'crew', outcome: `crewed, claude-code started in ${scoutFolder(shipId)}` }]);
   });
 
   it('logs the report on its behalf when its session died, and its start again', async () => {
@@ -2115,13 +2122,13 @@ describe('what the loop logs (aeolus-trierarch logs)', () => {
     trierarch.clock.advance(5 * SECOND_MS);
     await trierarch.pass();
 
-    expect(logged(trierarch).slice(1)).toEqual(['report: reported blocked: session crashed, restarting', `launch: started again in ${SCOUT_FOLDER}`]);
+    expect(logged(trierarch).slice(1)).toEqual(['report: reported blocked: session crashed, restarting', `launch: started again in ${scoutFolder(shipId)}`]);
   });
 
   it('logs a hand-over', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
     trierarch.fleet.deliver(shipId, 1);
 
     await trierarch.pass();
@@ -2132,12 +2139,12 @@ describe('what the loop logs (aeolus-trierarch logs)', () => {
   it('logs a forced hand-over, saying when it stopped a busy turn for it', async () => {
     const busy = aTrierarch();
     const busyShip = await aCrewedShip(busy);
-    busy.harness.turns.set(SCOUT_FOLDER, 'busy');
+    busy.harness.turns.set(scoutFolder(busyShip), 'busy');
     busy.fleet.deliver(busyShip, 1);
     busy.fleet.force(busyShip, 1);
     const idle = aTrierarch();
     const idleShip = await aCrewedShip(idle);
-    idle.harness.turns.set(SCOUT_FOLDER, 'idle');
+    idle.harness.turns.set(scoutFolder(idleShip), 'idle');
     idle.fleet.deliver(idleShip, 1);
     idle.fleet.force(idleShip, 1);
 
@@ -2151,7 +2158,7 @@ describe('what the loop logs (aeolus-trierarch logs)', () => {
   it('logs nothing when the plugin had nothing to hand over, as when another ship of its type took the delivery first', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
     trierarch.harness.isHandingNothing = true;
     trierarch.fleet.deliver(shipId, 1);
     const before = logged(trierarch).length;
@@ -2166,7 +2173,7 @@ describe('what the loop logs (aeolus-trierarch logs)', () => {
     clean.fleet.removeRequest(await aCrewedShip(clean));
     const changed = aTrierarch();
     const shipId = await aCrewedShip(changed);
-    changed.workspace.change(SCOUT_FOLDER);
+    changed.workspace.change(scoutMain(shipId));
     changed.fleet.removeRequest(shipId);
 
     await clean.pass();
@@ -2268,7 +2275,7 @@ describe('a running ship whose identity is gone (#659)', () => {
   it('tells argo once and logs it once while its folder holds no identity', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    await trierarch.harness.removeIdentity({ shipId, folder: SCOUT_FOLDER });
+    await trierarch.harness.removeIdentity({ shipId, folder: scoutFolder(shipId) });
 
     await trierarch.pass();
     trierarch.clock.advance(MINUTE_MS);
@@ -2281,15 +2288,15 @@ describe('a running ship whose identity is gone (#659)', () => {
   it('tells argo again when its identity is gone again after it came back', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    const identity = trierarch.harness.identities.get(SCOUT_FOLDER);
-    await trierarch.harness.removeIdentity({ shipId, folder: SCOUT_FOLDER });
+    const identity = trierarch.harness.identities.get(scoutFolder(shipId));
+    await trierarch.harness.removeIdentity({ shipId, folder: scoutFolder(shipId) });
     await trierarch.pass();
     if (identity !== undefined) {
-      await trierarch.harness.prepareIdentity({ folder: SCOUT_FOLDER, identity, crewToken: trierarch.fleet.shipOf(shipId).crewToken ?? '' });
+      await trierarch.harness.prepareIdentity({ folder: scoutFolder(shipId), identity, crewToken: trierarch.fleet.shipOf(shipId).crewToken ?? '' });
     }
     trierarch.clock.advance(MINUTE_MS);
     await trierarch.pass();
-    await trierarch.harness.removeIdentity({ shipId, folder: SCOUT_FOLDER });
+    await trierarch.harness.removeIdentity({ shipId, folder: scoutFolder(shipId) });
     trierarch.clock.advance(MINUTE_MS);
 
     await trierarch.pass();
@@ -2314,7 +2321,7 @@ describe('a ship the trierarch would report as blocked whose identity is gone (#
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     trierarch.processes.exit(shipId);
-    await trierarch.harness.removeIdentity({ shipId, folder: SCOUT_FOLDER });
+    await trierarch.harness.removeIdentity({ shipId, folder: scoutFolder(shipId) });
 
     await trierarch.pass();
     trierarch.clock.advance(5 * SECOND_MS);
@@ -2329,7 +2336,7 @@ describe('a ship the trierarch would report as blocked whose identity is gone (#
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     trierarch.processes.exit(shipId);
-    await trierarch.harness.removeIdentity({ shipId, folder: SCOUT_FOLDER });
+    await trierarch.harness.removeIdentity({ shipId, folder: scoutFolder(shipId) });
 
     await trierarch.pass();
 
@@ -2344,7 +2351,7 @@ describe('a ship the trierarch would report as blocked whose identity is gone (#
     const shipId = await aCrewedShip(trierarch);
     trierarch.processes.exit(shipId);
     await trierarch.pass();
-    await trierarch.harness.removeIdentity({ shipId, folder: SCOUT_FOLDER });
+    await trierarch.harness.removeIdentity({ shipId, folder: scoutFolder(shipId) });
 
     await trierarch.pass();
     trierarch.clock.advance(5 * SECOND_MS);
@@ -2360,7 +2367,7 @@ describe('a ship the trierarch would report as blocked whose identity is gone (#
     const shipId = await aCrewedShip(trierarch);
     await crashForGood(trierarch, shipId);
     const crashed = trierarch.fleet.toArgo.length;
-    await trierarch.harness.removeIdentity({ shipId, folder: SCOUT_FOLDER });
+    await trierarch.harness.removeIdentity({ shipId, folder: scoutFolder(shipId) });
 
     await trierarch.pass();
     trierarch.clock.advance(MINUTE_MS);
@@ -2465,8 +2472,8 @@ describe('contained access: the crew token stays with the trierarch (decision 00
     const shipId = await aCrewedShip(trierarch);
 
     expect(trierarch.state.current().entries[shipId]?.crewToken).toBe(trierarch.fleet.shipOf(shipId).crewToken);
-    expect(trierarch.harness.identities.get(SCOUT_FOLDER)).not.toHaveProperty('crewToken');
-    expect(trierarch.harness.identities.get(SCOUT_FOLDER)?.socket).toBe(InMemoryShipSockets.pathOf(shipId));
+    expect(trierarch.harness.identities.get(scoutFolder(shipId))).not.toHaveProperty('crewToken');
+    expect(trierarch.harness.identities.get(scoutFolder(shipId))?.socket).toBe(InMemoryShipSockets.pathOf(shipId));
   });
 
   it("opens the ship's socket before its session starts", async () => {
@@ -2519,7 +2526,7 @@ describe('contained access: the crew token stays with the trierarch (decision 00
     await trierarch.pass();
 
     expect(trierarch.state.current().entries[shipId]?.crewToken).toBe(trierarch.fleet.shipOf(shipId).crewToken);
-    expect(trierarch.harness.identities.get(SCOUT_FOLDER)?.socket).toBe(InMemoryShipSockets.pathOf(shipId));
+    expect(trierarch.harness.identities.get(scoutFolder(shipId))?.socket).toBe(InMemoryShipSockets.pathOf(shipId));
   });
   /** The ship's entry as a trierarch before decision 0026 kept it: its crew token only in the folder's identity, none in the state. */
   async function withoutCrewTokenInState(trierarch: ReturnType<typeof aTrierarch>, shipId: ShipId): Promise<void> {
@@ -2548,7 +2555,7 @@ describe('contained access: the crew token stays with the trierarch (decision 00
     const crewToken = trierarch.state.current().entries[shipId]?.crewToken;
     expect(crewToken).toBe(trierarch.fleet.shipOf(shipId).crewToken);
     expect(crewToken).not.toBe(first);
-    expect(trierarch.state.current().entries[shipId]?.folder).toBe(SCOUT_FOLDER);
+    expect(trierarch.state.current().entries[shipId]?.folder).toBe(scoutFolder(shipId));
     expect(trierarch.harness.launches).toHaveLength(2);
     expect(trierarch.fleet.toArgo).toEqual([]);
   });
@@ -2641,7 +2648,7 @@ describe('read-only checkouts (#1182)', () => {
 
     const shipId = await aCrewedShip(trierarch);
 
-    expect(trierarch.harness.identities.get(SCOUT_FOLDER)).toEqual({
+    expect(trierarch.harness.identities.get(scoutFolder(shipId))).toEqual({
       fleetUrl: 'https://fleet.example.com',
       shipId,
       shipName: 'scout',
@@ -2830,9 +2837,9 @@ describe("each session's login (api keys K5, K6, K9)", () => {
   it('asks whether a session can start on its login in the folder it starts in, so its folder\'s own settings count (K6)', async () => {
     const trierarch = aTrierarch();
 
-    await aCrewedShip(trierarch);
+    const shipId = await aCrewedShip(trierarch);
 
-    expect(trierarch.modelLogins.asked).toContainEqual({ harness: 'claude-code', login: 'subscription', options: {}, folder: SCOUT_FOLDER });
+    expect(trierarch.modelLogins.asked).toContainEqual({ harness: 'claude-code', login: 'subscription', options: {}, folder: scoutFolder(shipId) });
   });
 
   it("asks with the options the request picked, whose flags may name settings of their own (K6)", async () => {
@@ -2842,14 +2849,14 @@ describe("each session's login (api keys K5, K6, K9)", () => {
 
     await trierarch.pass();
 
-    expect(trierarch.modelLogins.asked).toContainEqual({ harness: 'claude-code', login: 'subscription', options: { model: 'sonnet' }, folder: SCOUT_FOLDER });
+    expect(trierarch.modelLogins.asked).toContainEqual({ harness: 'claude-code', login: 'subscription', options: { model: 'sonnet' }, folder: scoutFolder(shipId) });
   });
 
   it('hands nothing to a running session on a key that is not ready: its deliveries wait in the inbox (K9)', async () => {
     const trierarch = aTrierarchOnLogins(ON_KEY);
     const shipId = await aCrewedShip(trierarch);
     trierarch.modelLogins.states.set('claude-code', { state: 'outOfCredit', at: '2026-10-06T08:00:00.000Z' });
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
     trierarch.fleet.deliver(shipId, 1);
 
     await trierarch.pass();
@@ -2862,7 +2869,7 @@ describe("each session's login (api keys K5, K6, K9)", () => {
     const trierarch = aTrierarchOnLogins(ON_KEY);
     const shipId = await aCrewedShip(trierarch);
     trierarch.modelLogins.states.set('claude-code', { state: 'outOfCredit', at: '2026-10-06T08:00:00.000Z' });
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
     trierarch.fleet.deliver(shipId, 1);
     await trierarch.pass();
 
@@ -2876,7 +2883,7 @@ describe("each session's login (api keys K5, K6, K9)", () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     trierarch.modelLogins.states.set('claude-code', { state: 'refused', at: '2026-10-06T08:00:00.000Z' });
-    trierarch.harness.turns.set(SCOUT_FOLDER, 'idle');
+    trierarch.harness.turns.set(scoutFolder(shipId), 'idle');
     trierarch.fleet.deliver(shipId, 1);
 
     await trierarch.pass();
@@ -2938,7 +2945,7 @@ describe("a released ship's last usage, sent before its worktree goes (the usage
     await trierarch.pass();
 
     expect(sentHours(trierarch)).toEqual([[{ hour: '2026-10-06T07:00:00.000Z', ships: [{ shipId }] }]]);
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.workspace.folders.has(scoutFolder(shipId))).toBe(false);
     expect(trierarch.fleet.confirmed).toEqual([shipId]);
   });
 
@@ -2949,14 +2956,14 @@ describe("a released ship's last usage, sent before its worktree goes (the usage
     trierarch.fleet.removeRequest(shipId);
     trierarch.fleet.isRefusingUsage = true;
     await trierarch.pass();
-    const kept = { hasFolder: trierarch.workspace.folders.has(SCOUT_FOLDER), confirmed: [...trierarch.fleet.confirmed] };
+    const kept = { hasFolder: trierarch.workspace.folders.has(scoutFolder(shipId)), confirmed: [...trierarch.fleet.confirmed] };
     trierarch.fleet.isRefusingUsage = false;
 
     await trierarch.pass();
 
     expect(kept).toEqual({ hasFolder: true, confirmed: [] });
     expect(sentHours(trierarch)).toHaveLength(1);
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
+    expect(trierarch.workspace.folders.has(scoutFolder(shipId))).toBe(false);
     expect(trierarch.fleet.confirmed).toEqual([shipId]);
   });
 
@@ -3022,8 +3029,8 @@ describe('a worktree ends with its session (docs/design/worktrees-end-with-their
   ];
 
   /** Whether the worktree the crew left is gone: a ship released elsewhere is crewed again in a fresh one. */
-  const isGone = (trierarch: Trierarch) => {
-    const folder = trierarch.workspace.folders.get(SCOUT_FOLDER);
+  const isGone = (trierarch: Trierarch, shipId: ShipId) => {
+    const folder = trierarch.workspace.folders.get(scoutMain(shipId));
     return folder === undefined || folder.unsaved.length === 0;
   };
 
@@ -3031,57 +3038,57 @@ describe('a worktree ends with its session (docs/design/worktrees-end-with-their
     const trierarch = aTrierarch();
     const shipId = await crew(trierarch);
     for (const line of HELD) {
-      trierarch.workspace.change(SCOUT_FOLDER, line);
+      trierarch.workspace.change(scoutMain(shipId), line);
     }
     end(trierarch, shipId);
 
     await trierarch.pass();
 
-    expect(isGone(trierarch)).toBe(true);
-    expect(trierarch.logger.warnings).toContain(`Discarded from the worktree of scout (${shipId}), ${SCOUT_FOLDER}: ${HELD.join('; ')}`);
+    expect(isGone(trierarch, shipId)).toBe(true);
+    expect(trierarch.logger.warnings).toContain(`Discarded from the worktree of scout (${shipId}), ${scoutMain(shipId)}: ${HELD.join('; ')}`);
     expect(trierarch.fleet.toArgo).toEqual([]);
   });
 
   it.each(PATHS)('$path stops what runs in the folder before the worktree goes', async ({ crew, end }) => {
     const trierarch = aTrierarch();
     const shipId = await crew(trierarch);
-    trierarch.folderProcesses.start(SCOUT_FOLDER, 'astro dev');
+    trierarch.folderProcesses.start(scoutFolder(shipId), 'astro dev');
     end(trierarch, shipId);
 
     await trierarch.pass();
 
-    expect(trierarch.folderProcesses.stoppedIn).toContain(SCOUT_FOLDER);
+    expect(trierarch.folderProcesses.stoppedIn).toContain(scoutFolder(shipId));
   });
 
   it.each(PATHS)('$path keeps the worktree while the fleet refuses the usage send, and the next pass sends it and removes it', async ({ crew, end }) => {
     const trierarch = aTrierarch();
     const shipId = await crew(trierarch);
     trierarch.usage.tokens.set(shipId, [TOKENS]);
-    trierarch.workspace.change(SCOUT_FOLDER, '?? draft.md');
+    trierarch.workspace.change(scoutMain(shipId), '?? draft.md');
     end(trierarch, shipId);
     trierarch.fleet.isRefusingUsage = true;
     await trierarch.pass();
-    const isKept = trierarch.workspace.folders.get(SCOUT_FOLDER)?.unsaved.includes('?? draft.md');
+    const isKept = trierarch.workspace.folders.get(scoutMain(shipId))?.unsaved.includes('?? draft.md');
     trierarch.fleet.isRefusingUsage = false;
 
     await trierarch.pass();
 
     expect(isKept).toBe(true);
     expect(trierarch.fleet.sentUsage).toHaveLength(1);
-    expect(isGone(trierarch)).toBe(true);
+    expect(isGone(trierarch, shipId)).toBe(true);
   });
 
   it('a crashed ship, its restart budget spent, keeps its lease and its worktree with what it holds', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.workspace.change(SCOUT_FOLDER, '?? draft.md');
+    trierarch.workspace.change(scoutMain(shipId), '?? draft.md');
 
     await crashForGood(trierarch, shipId);
     await trierarch.pass();
 
     expect(trierarch.state.current().entries[shipId]?.state).toBe('crashed');
     expect(trierarch.fleet.shipOf(shipId).status).toBe('crewed');
-    expect(trierarch.workspace.folders.get(SCOUT_FOLDER)?.unsaved).toEqual(['?? draft.md']);
+    expect(trierarch.workspace.folders.get(scoutMain(shipId))?.unsaved).toEqual(['?? draft.md']);
   });
 });
 
@@ -3107,8 +3114,8 @@ describe("a ship's folder, ships/<shipId>, which holds every file of the ship (#
     const shipId = await aCrewedShip(trierarch);
 
     expect(trierarch.state.current().entries[shipId]?.shipFolder).toBe(shipFolderOf(shipId));
-    expect(trierarch.workspace.folders.get(SCOUT_FOLDER)?.shipFolder).toBe(shipFolderOf(shipId));
-    expect([trierarch.sockets.openedIn.get(shipId), trierarch.harness.identities.get(SCOUT_FOLDER)?.socket]).toEqual([shipFolderOf(shipId), `${shipFolderOf(shipId)}/sockets/fleet.sock`]);
+    expect(trierarch.workspace.folders.get(scoutMain(shipId))?.shipFolder).toBe(shipFolderOf(shipId));
+    expect([trierarch.sockets.openedIn.get(shipId), trierarch.harness.identities.get(scoutFolder(shipId))?.socket]).toEqual([shipFolderOf(shipId), `${shipFolderOf(shipId)}/sockets/fleet.sock`]);
     expect(trierarch.harness.launchedShipFolders).toEqual([{ shipId, shipFolder: shipFolderOf(shipId) }]);
   });
 
@@ -3120,7 +3127,7 @@ describe("a ship's folder, ships/<shipId>, which holds every file of the ship (#
     await trierarch.pass();
 
     expect(trierarch.workspace.removedShipFolders).toEqual([shipFolderOf(shipId)]);
-    expect([trierarch.workspace.folders.has(SCOUT_FOLDER), trierarch.workspace.folders.has(shipFolderOf(shipId)), trierarch.processes.sessions.has(shipId)]).toEqual([false, false, false]);
+    expect([trierarch.workspace.folders.has(scoutFolder(shipId)), trierarch.workspace.folders.has(shipFolderOf(shipId)), trierarch.processes.sessions.has(shipId)]).toEqual([false, false, false]);
     expect(trierarch.sockets.closedIn.get(shipId)).toBe(shipFolderOf(shipId));
   });
 
@@ -3171,7 +3178,7 @@ describe("a ship's folder, ships/<shipId>, which holds every file of the ship (#
 
     await trierarch.pass();
 
-    expect([trierarch.sockets.openShips.has(shipId), trierarch.sockets.openedIn.get(shipId), trierarch.state.current().entries[shipId]?.shipFolder, trierarch.state.current().entries[shipId]?.folder]).toEqual([true, undefined, undefined, SCOUT_FOLDER]);
+    expect([trierarch.sockets.openShips.has(shipId), trierarch.sockets.openedIn.get(shipId), trierarch.state.current().entries[shipId]?.shipFolder, trierarch.state.current().entries[shipId]?.folder]).toEqual([true, undefined, undefined, scoutFolder(shipId)]);
   });
 
   it('is none for a ship crewed before the ship folders, which is released on its own paths, its socket closed where it was', async () => {
@@ -3181,7 +3188,7 @@ describe("a ship's folder, ships/<shipId>, which holds every file of the ship (#
 
     await trierarch.pass();
 
-    expect([trierarch.workspace.folders.has(SCOUT_FOLDER), trierarch.workspace.removedShipFolders]).toEqual([false, []]);
+    expect([trierarch.workspace.folders.has(scoutFolder(shipId)), trierarch.workspace.removedShipFolders]).toEqual([false, []]);
     expect([trierarch.sockets.closedIn.has(shipId), trierarch.sockets.closedIn.get(shipId)]).toEqual([true, undefined]);
   });
 
@@ -3217,9 +3224,9 @@ describe("a ship's folder, ships/<shipId>, which holds every file of the ship (#
     const before = await removedByHand(trierarch, shipId);
 
     expect([trierarch.fleet.shipOf(shipId).status, trierarch.fleet.shipOf(shipId).crewToken, trierarch.state.current().entries[shipId]?.crewToken]).toEqual(['crewed', before.crewToken, before.entryToken]);
-    expect(trierarch.harness.launches.slice(before.launches)).toEqual([expect.objectContaining({ shipId, folder: SCOUT_FOLDER, isFirstStart: true })]);
-    expect(trierarch.harness.identities.get(SCOUT_FOLDER)?.socket).toBe(InMemoryShipSockets.pathOf(shipId));
-    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'crewing', shipFolder: shipFolderOf(shipId), folder: SCOUT_FOLDER, hasStarted: true });
+    expect(trierarch.harness.launches.slice(before.launches)).toEqual([expect.objectContaining({ shipId, folder: scoutFolder(shipId), isFirstStart: true })]);
+    expect(trierarch.harness.identities.get(scoutFolder(shipId))?.socket).toBe(InMemoryShipSockets.pathOf(shipId));
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'crewing', shipFolder: shipFolderOf(shipId), folder: scoutFolder(shipId), hasStarted: true });
     expect(trierarch.state.current().entries[shipId]?.isShipFolderGone).toBeUndefined();
     expect([trierarch.workspace.gone.has(shipFolderOf(shipId)), trierarch.sockets.openShips.has(shipId), trierarch.fleet.toArgo.length]).toEqual([false, true, before.told]);
     expect(trierarch.logger.actions.map((logged) => logged.outcome)).toContain(`its ship's folder ${shipFolderOf(shipId)} is gone, so it is crewed again in a fresh one`);
@@ -3255,5 +3262,139 @@ describe("a ship's folder, ships/<shipId>, which holds every file of the ship (#
     expect(trierarch.fleet.shipOf(shipId).crewToken).toBe(before.crewToken);
     expect(trierarch.harness.launches.slice(before.launches)).toEqual([expect.objectContaining({ shipId, isFirstStart: true })]);
     expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'crewing', shipFolder: shipFolderOf(shipId) });
+  });
+});
+
+describe('a ship folder (docs/design/ship-folder.md)', () => {
+  /** A configuration offering a second repository, a ship's sub-repository or another main. */
+  const WITH_TOOLS = { ...CONFIGURATION, repositories: { ...CONFIGURATION.repositories, tools: { path: '/home/thomas/Projects/tools' } } };
+
+  it('has its root files written before its first start, naming the repositories its settings name', async () => {
+    const trierarch = aTrierarch(WITH_TOOLS);
+
+    const shipId = await aCrewedShip(trierarch, { workspace: inRepositories('aeolus-fleet', { subRepositories: ['tools'] }) });
+
+    expect(trierarch.workspace.rootFilesWritten).toEqual([{ folder: scoutFolder(shipId), workspace: inRepositories('aeolus-fleet', { subRepositories: ['tools'] }) }]);
+  });
+
+  it('has its root files written again before every start, a restart too', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.processes.exit(shipId);
+
+    await trierarch.pass();
+    trierarch.clock.advance(5 * SECOND_MS);
+    await trierarch.pass();
+
+    expect(trierarch.workspace.rootFilesWritten.map(({ folder }) => folder)).toEqual([scoutFolder(shipId), scoutFolder(shipId)]);
+  });
+
+  it('keeps its main/ as it is when a new settings version names the same main repository', async () => {
+    const trierarch = aTrierarch(WITH_TOOLS);
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.change(scoutMain(shipId), '?? kept.md');
+
+    trierarch.fleet.requestAgain(shipId, crewSettings({ workspace: inRepositories('aeolus-fleet', { subRepositories: ['tools'] }) }));
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.workspace.folders.get(scoutMain(shipId))?.unsaved).toEqual(['?? kept.md']);
+    expect(trierarch.workspace.folders.has(`${scoutFolder(shipId)}/sub-repos/tools`)).toBe(true);
+  });
+
+  it('has its main/ replaced when a new settings version names another main repository', async () => {
+    const trierarch = aTrierarch(WITH_TOOLS);
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.change(scoutMain(shipId), '?? left.md');
+
+    trierarch.fleet.requestAgain(shipId, crewSettings({ workspace: inRepositories('tools') }));
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.workspace.folders.get(scoutMain(shipId))?.unsaved).toEqual([]);
+    expect(trierarch.workspace.mains.get(scoutFolder(shipId))).toBe('tools');
+    expect(trierarch.state.current().entries[shipId]?.madeMain).toBe('tools');
+  });
+
+  it('is never crewed with a sub-repository its harness does not trust, given back naming its field', async () => {
+    const trierarch = aTrierarch(WITH_TOOLS);
+    trierarch.trust.untrust('claude-code', { kind: 'repository', name: 'tools' });
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, crewSettings({ workspace: inRepositories('aeolus-fleet', { subRepositories: ['tools'] }) }));
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.givenBack).toEqual([
+      { shipId, settingsVersion: 1, reason: 'mac-studio: workspace.subRepositories.0.repository: claude-code does not trust the repository tools: add it with aeolus-trierarch init, which trusts it' },
+    ]);
+    expect(trierarch.harness.launches).toEqual([]);
+  });
+
+  it("fails its crew with git's message when a repository cannot be made, and the third failure in a row gives the request back", async () => {
+    const trierarch = aTrierarch(WITH_TOOLS);
+    trierarch.workspace.failingRepositories.set('tools', 'git worktree add failed: fatal: invalid reference: HEAD');
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, crewSettings({ workspace: inRepositories('aeolus-fleet', { subRepositories: ['tools'] }) }));
+
+    await trierarch.pass();
+    await trierarch.pass();
+    expect(trierarch.workspace.folders.has(scoutMain(shipId))).toBe(true);
+    await trierarch.pass();
+
+    expect(trierarch.logger.actions.map((logged) => logged.outcome)).toContain('failed: git worktree add failed: fatal: invalid reference: HEAD');
+    expect(trierarch.fleet.givenBack.map((each) => [each.shipId, each.reason.includes('git worktree add failed: fatal: invalid reference: HEAD')])).toEqual([[shipId, true]]);
+  });
+
+  it('logs what each of its repositories held as a release removes it, and tells argo nothing', async () => {
+    const trierarch = aTrierarch(WITH_TOOLS);
+    const shipId = await aCrewedShip(trierarch, { workspace: inRepositories('aeolus-fleet', { subRepositories: ['tools'] }) });
+    trierarch.workspace.change(scoutMain(shipId), '?? main.md');
+    trierarch.workspace.change(`${scoutFolder(shipId)}/sub-repos/tools`, '?? tools.md');
+    trierarch.fleet.removeRequest(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.logger.warnings.filter((warning) => warning.startsWith('Discarded'))).toEqual([
+      `Discarded from the worktree of scout (${shipId}), ${scoutMain(shipId)}: ?? main.md`,
+      `Discarded from the worktree of scout (${shipId}), ${scoutFolder(shipId)}/sub-repos/tools: ?? tools.md`,
+    ]);
+    expect(trierarch.workspace.removedShipFolders).toEqual([`${SHIPS_ROOT}/${shipId}`]);
+    expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+});
+
+describe('a ship crewed before the ship folder layout (decision 0013)', () => {
+  /** A running ship whose entry a trierarch saved before the ship folder layout: its worktree in its ship's folder, the main of a ship folder as the state reads it. */
+  async function aShipCrewedBefore(trierarch: Trierarch): Promise<{ shipId: ShipId; worktree: string }> {
+    const shipId = await aCrewedShip(trierarch);
+    const worktree = `${SHIPS_ROOT}/${shipId}/worktree`;
+    trierarch.workspace.folders.set(worktree, { shipId, shipFolder: `${SHIPS_ROOT}/${shipId}`, hasChanges: true, unsaved: ['?? notes.md'] });
+    const crewed = trierarch.state.current();
+    await trierarch.state.save({ ...crewed, entries: Object.fromEntries(Object.entries(crewed.entries).map(([id, entry]) => [id, id === shipId ? { ...entry, folder: worktree, isOldLayout: true as const } : entry])) });
+    return { shipId, worktree };
+  }
+
+  it('is crewed again in a fresh ship folder under the lease it holds, as a first start, telling nobody', async () => {
+    const trierarch = aTrierarch();
+    const { shipId } = await aShipCrewedBefore(trierarch);
+    const { crewToken } = trierarch.fleet.shipOf(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ folder: scoutFolder(shipId), shipFolder: `${SHIPS_ROOT}/${shipId}` });
+    expect(trierarch.state.current().entries[shipId]?.isOldLayout).toBeUndefined();
+    expect(trierarch.harness.launches.at(-1)).toMatchObject({ folder: scoutFolder(shipId), isFirstStart: true });
+    expect(trierarch.fleet.shipOf(shipId).crewToken).toBe(crewToken);
+    expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+
+  it('has its old worktree removed first, what it held logged', async () => {
+    const trierarch = aTrierarch();
+    const { shipId, worktree } = await aShipCrewedBefore(trierarch);
+
+    await trierarch.pass();
+
+    expect(trierarch.workspace.folders.has(worktree)).toBe(false);
+    expect(trierarch.logger.warnings).toContain(`Discarded from the worktree of scout (${shipId}), ${worktree}: ?? notes.md`);
   });
 });

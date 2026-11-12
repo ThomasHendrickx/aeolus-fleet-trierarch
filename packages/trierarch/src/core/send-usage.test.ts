@@ -1,7 +1,7 @@
 import { trierarchUsageMessageSchema } from '@aeolus-fleet/common';
 import { describe, expect, it } from 'vitest';
 
-import { aTrierarch, aTrierarchSetUpBefore, FOLDER_MADE_AT, newId, PLUGIN_SHIP_ID, TRIERARCH_SHIP_ID, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
+import { aTrierarch, aTrierarchSetUpBefore, FOLDER_MADE_AT, newId, PLUGIN_SHIP_ID, TRIERARCH_SHIP_ID, WORKTREE_ROOT, type Trierarch, inRepositories } from '../../test/support/in-memory.js';
 import { putEntry, type Entry } from './entry.js';
 
 // The trierarch sends its usage to the trierarch plugin's ship once an hour
@@ -16,7 +16,7 @@ function aCrewedEntry(name = 'scout'): Entry {
     shipId: newId('ship'),
     shipName: name,
     harness: 'claude-code',
-    workspace: { kind: 'worktree', repository: 'aeolus-fleet' },
+    workspace: inRepositories('aeolus-fleet'),
     options: {},
     settingsVersion: 1,
     state: 'running',

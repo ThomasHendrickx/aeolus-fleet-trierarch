@@ -38,7 +38,7 @@ import { createHandleDelivery } from '../src/core/handle-delivery.js';
 import { createReportSelf } from '../src/core/report-self.js';
 import { TRUSTED_REPOSITORIES_CONTENT_TYPE } from '../src/core/trusted-repositories.js';
 import { createTrustedRepositoriesFile, trustedClonesOf, withTrustedRepositories } from '../src/adapters/trusted-repositories-file.js';
-import { CONFIGURATION } from './support/in-memory.js';
+import { CONFIGURATION, inRepositories } from './support/in-memory.js';
 import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
 
 // The trierarch against a real fleet server on Postgres, over REST: a crew
@@ -245,7 +245,7 @@ describe('the trierarch on a real fleet', () => {
       claudeCode: { keyInReach: () => Promise.resolve(undefined) },
       codex: { loginKind: () => Promise.reject(new Error('no Codex here')) },
     });
-    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } }));
+    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: inRepositories('aeolus-fleet'), options: {} } }));
     unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
     await pass();
     await pass();
@@ -262,7 +262,7 @@ describe('the trierarch on a real fleet', () => {
 
   it('crews an assigned request, its status reads running once its session shows activity, and removing it ends the lease, removes the clean worktree and the request', async () => {
     const { useCases, argo, trierarchShip, scout, pass, leasesOf, worktree } = await aTrierarchOnTheFleet();
-    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } }));
+    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: inRepositories('aeolus-fleet'), options: {} } }));
     unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
     await pass();
     await expect(database.crewRequest.findUniqueOrThrow({ where: { shipId: scout.shipId } })).resolves.toMatchObject({ status: 'crewing' });
@@ -288,7 +288,7 @@ describe('the trierarch on a real fleet', () => {
   it('on a fresh machine, where Claude Code never ran, crews its first session with no person: init answers its first-run screens and bypass permissions, and the session runs (#403)', async () => {
     expect(existsSync(join(home, '.claude.json'))).toBe(false);
     const { useCases, argo, trierarchShip, scout, pass } = await aTrierarchOnTheFleet([SKIP]);
-    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } }));
+    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: inRepositories('aeolus-fleet'), options: {} } }));
     unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
 
     await pass();
@@ -299,7 +299,7 @@ describe('the trierarch on a real fleet', () => {
 
   it('removing the request removes a worktree with changes too and tells argo nothing, so the ship crewed again starts in a fresh worktree (#450, #89)', async () => {
     const { useCases, argo, trierarchShip, scout, pass, worktree } = await aTrierarchOnTheFleet();
-    const settings = { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} };
+    const settings = { harness: 'claude-code', workspace: inRepositories('aeolus-fleet'), options: {} };
     unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings }));
     unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
     await pass();
@@ -319,12 +319,12 @@ describe('the trierarch on a real fleet', () => {
 
   it('removes the worktree with changes of a crew given back before it is final, and confirms a clear request for it not-kept (decision 0032, #89)', async () => {
     const { useCases, argo, trierarchShip, scout, pass, worktree } = await aTrierarchOnTheFleet();
-    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } }));
+    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: inRepositories('aeolus-fleet'), options: {} } }));
     unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
     await pass();
     // Its crew is given back before it is final: settings this trierarch cannot crew come while it crews.
     writeFileSync(join(worktree, 'draft.md'), 'work in progress\n');
-    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'codex', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } }));
+    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'codex', workspace: inRepositories('aeolus-fleet'), options: {} } }));
     await pass();
     expect(existsSync(worktree)).toBe(false);
 
@@ -348,7 +348,7 @@ describe('the trierarch on a real fleet', () => {
 });
 
 describe("contained access on a real fleet (decision 0026): the session calls over its ship's socket, and only the trierarch holds the crew token", () => {
-  const SETTINGS = { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } as const;
+  const SETTINGS = { harness: 'claude-code', workspace: inRepositories('aeolus-fleet'), options: {} } as const;
 
   /** A fleet call of the session in the worktree, through the aeolus-fleet plugin's own script, as Claude Code's Bash tool makes it. */
   const fleetCall = (worktree: string, call: { args: readonly string[]; input?: string }) =>
@@ -558,7 +558,7 @@ describe('the trierarch hands messages over on a real fleet (#756): the plugin k
     const clock = aClock();
     const trierarch = await aTrierarchOnTheFleet(undefined, { sessions: sessions.runtime, clock });
     const { useCases, argo, trierarchShip, scout, pass } = trierarch;
-    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } }));
+    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: inRepositories('aeolus-fleet'), options: {} } }));
     unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
     await pass();
     await pass();
@@ -781,7 +781,7 @@ describe('every session restarted at once, each on a hold of its own (#881, head
       shipIds.push(unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name, type: 'reviewer' })).shipId);
     }
     for (const shipId of shipIds) {
-      unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {} } }));
+      unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness: 'claude-code', workspace: inRepositories('aeolus-fleet'), options: {} } }));
       unwrap(await useCases.assignCrew(argo, { shipId, trierarchShipId: trierarchShip.shipId }));
     }
     await pass();
@@ -936,7 +936,7 @@ describe('the trusted repositories on a real fleet (aeolus-fleet#384)', () => {
 
     const reported = unwrap(await useCases.getShip(argo, { shipId: machine.shipId }));
     expect(reported).toMatchObject({ report: { details: { workspaces: { repositories: ['hemma'] } } } });
-    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'hemma' }, options: {} } }));
+    unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: inRepositories('hemma'), options: {} } }));
     unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: machine.shipId }));
     await pass();
     await pass();

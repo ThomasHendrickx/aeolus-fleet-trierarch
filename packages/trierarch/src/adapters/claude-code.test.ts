@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
+import { CONFIGURATION, newId, inRepositories } from '../../test/support/in-memory.js';
 import { makeUnmovable, makeUnremovable, moveAsRuntime, removeAsRuntime, unremovableReason } from '../../test/support/unremovable.js';
 import { effectiveFlags } from '../core/effective-flags.js';
 import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
@@ -121,7 +121,7 @@ const parsed = (text: string | undefined): unknown => (text === undefined ? unde
 /** The launch id the trierarch started the session with. */
 const LAUNCH_ID = 'launch-1';
 /** The launch of the ship scout in a worktree of aeolus-fleet. */
-const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, checkouts: [], launchId: LAUNCH_ID, login: 'subscription' }) as const;
+const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'claude-code', workspace: inRepositories('aeolus-fleet'), checkouts: [], launchId: LAUNCH_ID, login: 'subscription' }) as const;
 
 describe('Claude Code on its login (api keys K6, K7)', () => {
   const PROXY = 'http://127.0.0.1:41234';

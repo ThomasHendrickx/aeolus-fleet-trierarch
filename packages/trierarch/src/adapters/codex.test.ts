@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { ShipId, TrierarchConfiguration } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
+import { CONFIGURATION, newId, inRepositories } from '../../test/support/in-memory.js';
 import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
 import { CODEX_ADAPTER_FLAGS, codexCommandLine, codexTurnCommand, createCodexHarness } from './codex.js';
 import { runCommand } from './run-command.js';
@@ -39,6 +39,8 @@ let steps: string[];
 let untrustedHooks: Set<string>;
 /** The hooks Codex did not trust when each session started. */
 let untrustedAtStart: (readonly string[])[];
+/** The folders Codex was told to trust, in order. */
+let trustedFolders: string[];
 
 beforeEach(() => {
   data = mkdtempSync(join(tmpdir(), 'trierarch-codex-plugin-data-'));
@@ -50,6 +52,7 @@ beforeEach(() => {
   events = new Map();
   untrustedHooks = new Set(['aeolus-fleet@aeolus-fleet:hooks/hooks.json:stop:0:0']);
   untrustedAtStart = [];
+  trustedFolders = [];
 });
 
 afterEach(() => {
@@ -64,6 +67,10 @@ function harness(at: { pluginRoot?: string; proxyUrl?: string } = {}) {
     configuration: WITH_CODEX,
     plugin: { root: () => Promise.resolve(at.pluginRoot ?? PLUGIN_ROOT), data, crews },
     setup: {
+      trust: (folders) => {
+        trustedFolders.push(...folders);
+        return Promise.resolve();
+      },
       trustAeolusHooks: () => {
         const trusted = [...untrustedHooks];
         untrustedHooks.clear();
@@ -99,7 +106,7 @@ const identity = { fleetUrl: 'https://fleet.example.com', shipId, shipName: 'sco
 /** The launch id the trierarch started the session with. */
 const LAUNCH_ID = 'launch-1';
 /** The launch of the ship scout in a worktree of aeolus-fleet. */
-const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'codex', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, checkouts: [], launchId: LAUNCH_ID, login: 'subscription' }) as const;
+const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'codex', workspace: inRepositories('aeolus-fleet'), checkouts: [], launchId: LAUNCH_ID, login: 'subscription' }) as const;
 
 describe('Codex on its login (api keys K6, K7)', () => {
   const PROXY = 'http://127.0.0.1:41234';
@@ -174,6 +181,13 @@ describe('Codex as a harness', () => {
     expect(started[0]?.command).toEqual(['codex', 'exec', 'resume', '--last', '--dangerously-bypass-approvals-and-sandbox', '-m', 'gpt-5.6-sol', '--json', '--config=tools.experimental_request_user_input.enabled=false', '--', `$aeolus-fleet-wake ${NO_TERMINAL_QUESTIONS}`]);
   });
 
+  it("trusts the session's folder, a ship folder no configured checkout covers, before every start, a restart too", async () => {
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: false });
+
+    expect(trustedFolders).toEqual([folder, folder]);
+  });
+
   it("trusts the aeolus-fleet plugin's new or changed hooks before every start, a restart too, so a session after a plugin update never stops at Codex's hooks review (#581)", async () => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
     untrustedHooks.add('aeolus-fleet@aeolus-fleet:hooks/hooks.json:user_prompt_submit:0:0');
@@ -186,7 +200,7 @@ describe('Codex as a harness', () => {
     const failing = createCodexHarness({
       configuration: WITH_CODEX,
       plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data, crews },
-      setup: { trustAeolusHooks: () => Promise.reject(new Error('codex app-server did not answer hooks/list')) },
+      setup: { trust: () => Promise.resolve(), trustAeolusHooks: () => Promise.reject(new Error('codex app-server did not answer hooks/list')) },
       sessions: {
         start: (session) => {
           started.push(session);
@@ -207,7 +221,7 @@ describe('Codex as a harness', () => {
     const withNoDaemon = createCodexHarness({
       configuration: { ...WITH_CODEX, harnesses: { codex: { flags: ['--no-daemon'], options: {} } } },
       plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data, crews },
-      setup: { trustAeolusHooks: () => Promise.resolve([]) },
+      setup: { trust: () => Promise.resolve(), trustAeolusHooks: () => Promise.resolve([]) },
       sessions: {
         start: (session) => {
           started.push(session);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ServiceStatus } from '../adapters/service.js';
-import { aTrierarch, WORKTREE_ROOT } from '../../test/support/in-memory.js';
+import { aTrierarch, SHIPS_ROOT } from '../../test/support/in-memory.js';
 import { uninstallTrierarch } from './uninstall.js';
 
 class FakeService {
@@ -18,7 +18,8 @@ class FakeService {
 describe('aeolus-trierarch uninstall', () => {
   it('removes the service, stops every session, lists the worktrees it leaves, and deletes nothing', async () => {
     const trierarch = aTrierarch();
-    trierarch.fleet.request(trierarch.fleet.commission('scout'));
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId);
     await trierarch.pass();
     const service = new FakeService();
 
@@ -26,9 +27,9 @@ describe('aeolus-trierarch uninstall', () => {
 
     expect(service.isInstalled).toBe(false);
     expect(trierarch.processes.sessions.size).toBe(0);
-    expect(trierarch.workspace.folders.has(`${WORKTREE_ROOT}/aeolus-fleet/scout`)).toBe(true);
-    expect(report).toMatchObject({ service: '/LaunchAgents/dev.aeolus-fleet.trierarch.plist', worktrees: [`${WORKTREE_ROOT}/aeolus-fleet/scout`] });
-    expect(report.said.join('\n')).toContain(`${WORKTREE_ROOT}/aeolus-fleet/scout`);
+    expect(trierarch.workspace.folders.has(`${SHIPS_ROOT}/${shipId}/repositories`)).toBe(true);
+    expect(report).toMatchObject({ service: '/LaunchAgents/dev.aeolus-fleet.trierarch.plist', worktrees: [`${SHIPS_ROOT}/${shipId}/repositories`] });
+    expect(report.said.join('\n')).toContain(`${SHIPS_ROOT}/${shipId}/repositories`);
     expect(report.said.join('\n')).toContain('/Users/thomas/.aeolus/trierarch');
   });
 

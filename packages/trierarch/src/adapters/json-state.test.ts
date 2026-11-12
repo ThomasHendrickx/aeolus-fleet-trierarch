@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { EMPTY_STATE, type TrierarchState } from '../core/entry.js';
-import { aTrierarch, crewSettings, newId, WORKTREE_ROOT } from '../../test/support/in-memory.js';
+import { aTrierarch, crewSettings, inRepositories, newId, SHIPS_ROOT } from '../../test/support/in-memory.js';
 import { createJsonState } from './json-state.js';
 
 let folder: string;
@@ -26,7 +26,7 @@ const aState = (): TrierarchState => {
         shipId,
         shipName: 'scout',
         harness: 'claude-code',
-        workspace: { kind: 'worktree', repository: 'aeolus-fleet' },
+        workspace: inRepositories('aeolus-fleet'),
         options: { model: 'opus' },
         settingsVersion: 1,
         state: 'running',
@@ -47,7 +47,7 @@ const aState = (): TrierarchState => {
  * a field added to the state but not to this factory fails the typecheck,
  * and one the state file schema does not know then fails the round trip (#543).
  */
-type Populated<T> = T extends readonly (infer Item)[] ? readonly Populated<Item>[] : T extends object ? { readonly [Key in keyof T]-?: Populated<T[Key]> } : T;
+type Populated<T> = T extends (infer Item)[] ? Populated<Item>[] : T extends readonly (infer Item)[] ? readonly Populated<Item>[] : T extends object ? { readonly [Key in keyof T]-?: Populated<T[Key]> } : T;
 
 const aPopulatedState = (): Populated<TrierarchState> => {
   const shipId = newId('ship');
@@ -58,7 +58,7 @@ const aPopulatedState = (): Populated<TrierarchState> => {
         shipName: 'scout',
         settingsVersion: 2,
         harness: 'claude-code',
-        workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'main' },
+        workspace: { kind: 'repositories', main: { repository: 'aeolus-fleet', ref: 'main' }, subRepositories: [{ repository: 'tools', ref: 'v1' }] },
         squadron: 'pathfinders',
         firstPrompt: 'Chart the coast.',
         options: { model: 'opus' },
@@ -66,8 +66,9 @@ const aPopulatedState = (): Populated<TrierarchState> => {
         since: '2026-10-06T08:00:00.000Z',
         exits: ['2026-10-06T07:59:00.000Z'],
         restartAt: '2026-10-06T08:01:00.000Z',
-        folder: '/home/thomas/.aeolus/trierarch/ships/shp_scout/worktree',
+        folder: '/home/thomas/.aeolus/trierarch/ships/shp_scout/repositories',
         shipFolder: '/home/thomas/.aeolus/trierarch/ships/shp_scout',
+        madeMain: 'aeolus-fleet',
         sentUsage: { '2026-10-06T06:30:00.000Z 2026-10-06T07:00:00.000Z': '[]' },
         hasStarted: true,
         launchedAt: '2026-10-06T07:58:30.000Z',
@@ -76,6 +77,7 @@ const aPopulatedState = (): Populated<TrierarchState> => {
         earlierLogins: [{ login: 'subscription', until: '2026-10-06T07:58:30.000Z' }],
         isReleasedElsewhere: true,
         isShipFolderGone: true,
+        isOldLayout: true,
         crewFailures: 2,
         crewToken: 'aeolus_ct_v1_of_the_crew',
         isIdentityGone: true,
@@ -143,15 +145,27 @@ describe('the JSON state store', () => {
     await expect(store.load()).resolves.toEqual(releasedElsewhere);
   });
 
+  it('loads an entry crewed before the ship folder layout, one worktree of a repository, as the main of a ship folder, marked to be crewed again in a fresh one', async () => {
+    const path = join(folder, 'state.json');
+    const store = createJsonState(path);
+    const state = aState();
+    const [shipId = ''] = Object.keys(state.entries);
+    writeFileSync(path, JSON.stringify({ ...state, entries: { [shipId]: { ...state.entries[shipId], workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'main' } } } }));
+
+    const loaded = await store.load();
+
+    expect(loaded.entries[shipId]).toMatchObject({ workspace: inRepositories('aeolus-fleet', { ref: 'main' }), isOldLayout: true });
+  });
+
   it('crews a ship released elsewhere in a fresh worktree on the pass after a failed remove, its state read back from the state file (#532)', async () => {
     const store = createJsonState(join(folder, 'state.json'));
     const trierarch = aTrierarch();
-    const scoutFolder = `${WORKTREE_ROOT}/aeolus-fleet/scout`;
     const shipId = trierarch.fleet.commission('scout');
+    const scoutMain = `${SHIPS_ROOT}/${shipId}/repositories/main`;
     trierarch.fleet.request(shipId, crewSettings({}));
     await trierarch.pass();
     await trierarch.pass();
-    trierarch.workspace.change(scoutFolder);
+    trierarch.workspace.change(scoutMain);
     trierarch.fleet.releaseElsewhere(shipId);
     trierarch.workspace.isFailingRemove = true;
     await trierarch.pass();
@@ -162,7 +176,7 @@ describe('the JSON state store', () => {
 
     await trierarch.pass();
 
-    expect(trierarch.workspace.folders.get(scoutFolder)).toMatchObject({ hasChanges: false, unsaved: [] });
+    expect(trierarch.workspace.folders.get(scoutMain)).toMatchObject({ hasChanges: false, unsaved: [] });
   });
 
   it('loads the kept worktrees and orphans it saved, each with its repository, and an orphan with its name (#325)', async () => {

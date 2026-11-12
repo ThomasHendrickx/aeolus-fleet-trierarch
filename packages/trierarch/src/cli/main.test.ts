@@ -289,7 +289,7 @@ describe('aeolus-trierarch', () => {
     const { output, code } = await main(['list', '--json'], machine({ HOME: home }));
 
     expect(code).toBe(0);
-    expect(JSON.parse(output)).toEqual([expect.objectContaining({ shipId: scout, state: 'running', workspace: 'worktree aeolus-fleet' })]);
+    expect(JSON.parse(output)).toEqual([expect.objectContaining({ shipId: scout, state: 'running', workspace: 'repositories aeolus-fleet' })]);
   });
 
   it('colours a failure on a colour terminal, and answers plain JSON with --json all the same', async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { aTrierarch, WORKTREE_ROOT } from '../../test/support/in-memory.js';
+import { aTrierarch, SHIPS_ROOT } from '../../test/support/in-memory.js';
 
 describe('uninstalling the trierarch (docs/trierarch.md, row 10)', () => {
   it('stops every session first, lists the worktrees it leaves, and deletes nothing', async () => {
@@ -12,7 +12,7 @@ describe('uninstalling the trierarch (docs/trierarch.md, row 10)', () => {
     const { worktrees } = await trierarch.uninstall();
 
     expect(trierarch.processes.sessions.size).toBe(0);
-    expect(worktrees).toEqual([`${WORKTREE_ROOT}/aeolus-fleet/scout`]);
-    expect(trierarch.workspace.folders.has(`${WORKTREE_ROOT}/aeolus-fleet/scout`)).toBe(true);
+    expect(worktrees).toEqual([`${SHIPS_ROOT}/${shipId}/repositories`]);
+    expect(trierarch.workspace.folders.has(`${SHIPS_ROOT}/${shipId}/repositories`)).toBe(true);
   });
 });
