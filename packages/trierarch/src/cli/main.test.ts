@@ -1,5 +1,4 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 
@@ -12,6 +11,7 @@ import { trierarchPaths } from '../adapters/paths.js';
 import { runningVersion } from '../adapters/version.js';
 import { aTrierarch, CONFIGURATION } from '../../test/support/in-memory.js';
 import { main, USAGE } from './main.js';
+import { aShortHome } from '../../test/support/short-home.js';
 
 /** The configuration as an operator writes it now (#382): no model, which comes from detection only, and an effort with its default. */
 const CONFIGURED = {
@@ -26,7 +26,7 @@ let home: string;
 const machine = (env: Readonly<Record<string, string | undefined>>, platform = 'linux') => ({ env, managedSettings: join(home, 'managed'), platform });
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), 'trierarch-main-'));
+  home = aShortHome('trierarch-main');
 });
 
 afterEach(() => {

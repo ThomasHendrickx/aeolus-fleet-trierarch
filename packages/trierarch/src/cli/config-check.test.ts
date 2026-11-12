@@ -1,5 +1,4 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
@@ -8,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CONFIGURATION, InMemoryContainerHost } from '../../test/support/in-memory.js';
 import { TrierarchFileError } from '../adapters/files.js';
 import { trierarchPaths, type TrierarchPaths } from '../adapters/paths.js';
-import { configCheck } from './config-check.js';
+import { checkShipsPlace, configCheck } from './config-check.js';
+import { aShortHome } from '../../test/support/short-home.js';
 
 const CONTAINER = { kind: 'container', binary: 'podman', memory: '4g', cpus: 2 } as const;
 /** What config check reads of Claude Code's own files: nothing makes plan its default mode. */
@@ -19,7 +19,7 @@ let paths: TrierarchPaths;
 let host: InMemoryContainerHost;
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), 'trierarch-config-check-'));
+  home = aShortHome('trierarch-check');
   paths = trierarchPaths({ homeDirectory: home, config: join(home, 'config.json') });
   host = new InMemoryContainerHost();
 });
@@ -85,5 +85,34 @@ describe('config check, with the session runtime (decision 0039)', () => {
       '  the user that runs the trierarch is in the docker group, which is root on the machine: take the user out of it',
       `  the model token file ${join(home, '.aeolus', 'trierarch', 'model-token')} is missing or empty: write the token claude setup-token gives into it, readable by its owner only`,
     ]);
+  });
+});
+
+describe('config check, with the place of ships/', () => {
+  /** A place for ships/ long enough that a ship's socket path in it is over 108 bytes, Linux's limit. */
+  const aLongPlace = (): string => join(home, 'a-place-of-ships-far-too-long-for-a-socket-path-on-any-system-at-all');
+
+  it("refuses a place where a ship's socket path would pass the system's limit, naming the setting to shorten", () => {
+    const at = trierarchPaths({ homeDirectory: '/home/me' });
+    // 106 bytes: past macOS's 104, under Linux's 108.
+    const place = `/home/me/${'p'.repeat(47)}`;
+    const socket = `${place}/shp_00000000000000000000000000/sockets/fleet.sock`;
+
+    const refusals = ['darwin', 'linux'].map((platform) => checkShipsPlace({ paths: at, shipsRoot: place, platform })?.message);
+
+    expect(refusals).toEqual([
+      `The configuration at /home/me/.aeolus/trierarch/config.json keeps the ships' files in ${place}, where a ship's socket path, as ${socket}, is 106 bytes, past the system's limit of 104: name a shorter place in shipsRoot`,
+      undefined,
+    ]);
+  });
+
+  it("takes ships/ in the trierarch's folder of a short home on every system", () => {
+    expect(checkShipsPlace({ paths: trierarchPaths({ homeDirectory: '/home/me' }), platform: 'darwin' })).toBeUndefined();
+  });
+
+  it("refuses the configuration's own place when it is too long", async () => {
+    configured({ ...SESSIONS, shipsRoot: aLongPlace() });
+
+    await expect(configCheck(paths, { files: FILES, host })).rejects.toThrow(`keeps the ships' files in ${aLongPlace()}, where a ship's socket path`);
   });
 });

@@ -359,12 +359,12 @@ describe('aeolus-trierarch init, the whole setup', () => {
     expect(prompter.said).toContain('A cap is a whole number of 1 or more.');
   });
 
-  it('trusts the worktree root for Claude Code, so a session in any worktree starts with no trust question', async () => {
+  it("makes the place of ships/ and trusts it for Claude Code, so a session in any ship's folder starts with no trust question", async () => {
     const report = await init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET, isYes: true });
 
-    await expect(createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).isTrusted(paths.worktrees)).resolves.toBe(true);
-    expect(existsSync(paths.worktrees)).toBe(true);
-    expect(report.trusted).toEqual([paths.worktrees]);
+    await expect(createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).isTrusted(paths.ships)).resolves.toBe(true);
+    expect(existsSync(paths.ships)).toBe(true);
+    expect(report.trusted).toEqual([paths.ships]);
   });
 
   it("completes Claude Code's onboarding without asking, saying so, so a session on a fresh machine shows no first-run screen (#403)", async () => {
@@ -556,7 +556,7 @@ describe('aeolus-trierarch init on a machine set up already', () => {
     const report = await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['repository', ''], ['folder', 'notes'], ['notes', '~/notes'], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));
 
     expect(configuration().folders).toEqual({ notes: { path: notes } });
-    expect(report.trusted).toEqual([paths.worktrees, notes]);
+    expect(report.trusted).toEqual([paths.ships, notes]);
   });
 
   it('asks again for a folder name that is no name, and for a folder that is not there', async () => {
@@ -621,7 +621,7 @@ describe('aeolus-trierarch init on a machine set up already', () => {
     const report = await init({ isYes: true });
 
     await expect(createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).isTrusted(notes)).resolves.toBe(true);
-    expect(report.trusted).toEqual([paths.worktrees, notes]);
+    expect(report.trusted).toEqual([paths.ships, notes]);
   });
 
   it('trusts every configured repository for Claude Code, a repository added since among them, as it asks about the repository of a worktree (#381)', async () => {
@@ -630,7 +630,7 @@ describe('aeolus-trierarch init on a machine set up already', () => {
     const report = await init({ isYes: true });
 
     await expect(createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }).isTrusted(repository)).resolves.toBe(true);
-    expect(report.trusted).toEqual([paths.worktrees, repository]);
+    expect(report.trusted).toEqual([paths.ships, repository]);
   });
 
   it('refuses a ship id or secret given again, saying how to register another ship', async () => {
