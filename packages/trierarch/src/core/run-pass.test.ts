@@ -2968,3 +2968,91 @@ describe("a released ship's last usage, sent before its worktree goes (the usage
     expect(sentHours(trierarch)).toEqual([[{ hour: '2026-10-06T07:00:00.000Z', ships: [{ shipId }] }]]);
   });
 });
+
+describe('a worktree ends with its session (docs/design/worktrees-end-with-their-session.md, #89)', () => {
+  const TOKENS = { model: 'claude-opus-5-5', tokens: { input: 10, output: 20, cacheRead: 30, cacheWrite: 40 } };
+  const HELD = [' M README.md', 'commit 1a2b3c4 work not pushed'];
+
+  /** Each path that leaves a worktree no crew request on this computer names: how its ship is crewed, and how its crew ends. */
+  const PATHS = [
+    { path: 'a release (row 7)', crew: aCrewedShip, end: (trierarch: Trierarch, shipId: ShipId) => { trierarch.fleet.removeRequest(shipId); } },
+    { path: 'a release elsewhere (row 11)', crew: aCrewedShip, end: (trierarch: Trierarch, shipId: ShipId) => { trierarch.fleet.releaseElsewhere(shipId); } },
+    {
+      path: 'a give back',
+      crew: (trierarch: Trierarch) => aLaunchedShip(trierarch, { seen: { kind: 'none' } }),
+      end: (trierarch: Trierarch) => { trierarch.clock.advance(MINUTE_MS); },
+    },
+    {
+      path: 'a retire',
+      crew: aCrewedShip,
+      end: (trierarch: Trierarch, shipId: ShipId) => {
+        trierarch.fleet.retire(shipId);
+        trierarch.fleet.unassign(shipId);
+      },
+    },
+    { path: 'a ship moved to another trierarch', crew: aCrewedShip, end: (trierarch: Trierarch, shipId: ShipId) => { trierarch.fleet.moveToAnotherTrierarch(shipId); } },
+  ];
+
+  /** Whether the worktree the crew left is gone: a ship released elsewhere is crewed again in a fresh one. */
+  const isGone = (trierarch: Trierarch) => {
+    const folder = trierarch.workspace.folders.get(SCOUT_FOLDER);
+    return folder === undefined || folder.unsaved.length === 0;
+  };
+
+  it.each(PATHS)('$path removes the worktree with its changes and commits no remote has, logs what it held and tells argo nothing', async ({ crew, end }) => {
+    const trierarch = aTrierarch();
+    const shipId = await crew(trierarch);
+    for (const line of HELD) {
+      trierarch.workspace.change(SCOUT_FOLDER, line);
+    }
+    end(trierarch, shipId);
+
+    await trierarch.pass();
+
+    expect(isGone(trierarch)).toBe(true);
+    expect(trierarch.logger.warnings).toContain(`Discarded from the worktree of scout (${shipId}), ${SCOUT_FOLDER}: ${HELD.join('; ')}`);
+    expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+
+  it.each(PATHS)('$path stops what runs in the folder before the worktree goes', async ({ crew, end }) => {
+    const trierarch = aTrierarch();
+    const shipId = await crew(trierarch);
+    trierarch.folderProcesses.start(SCOUT_FOLDER, 'astro dev');
+    end(trierarch, shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.folderProcesses.stoppedIn).toContain(SCOUT_FOLDER);
+  });
+
+  it.each(PATHS)('$path keeps the worktree while the fleet refuses the usage send, and the next pass sends it and removes it', async ({ crew, end }) => {
+    const trierarch = aTrierarch();
+    const shipId = await crew(trierarch);
+    trierarch.usage.tokens.set(shipId, [TOKENS]);
+    trierarch.workspace.change(SCOUT_FOLDER, '?? draft.md');
+    end(trierarch, shipId);
+    trierarch.fleet.isRefusingUsage = true;
+    await trierarch.pass();
+    const isKept = trierarch.workspace.folders.get(SCOUT_FOLDER)?.unsaved.includes('?? draft.md');
+    trierarch.fleet.isRefusingUsage = false;
+
+    await trierarch.pass();
+
+    expect(isKept).toBe(true);
+    expect(trierarch.fleet.sentUsage).toHaveLength(1);
+    expect(isGone(trierarch)).toBe(true);
+  });
+
+  it('a crashed ship, its restart budget spent, keeps its lease and its worktree with what it holds', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.change(SCOUT_FOLDER, '?? draft.md');
+
+    await crashForGood(trierarch, shipId);
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]?.state).toBe('crashed');
+    expect(trierarch.fleet.shipOf(shipId).status).toBe('crewed');
+    expect(trierarch.workspace.folders.get(SCOUT_FOLDER)?.unsaved).toEqual(['?? draft.md']);
+  });
+});
