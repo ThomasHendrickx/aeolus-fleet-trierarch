@@ -222,7 +222,9 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
 
   // Every folder under the root no crewed ship uses goes, whether the trierarch made it or not; a configured folder is never one (gap rule 2).
   const inUse = [...Object.values(next.entries).flatMap((entry) => (entry.folder === undefined ? [] : [entry.folder])), ...Object.values(configuration.folders).map((folder) => folder.path)];
-  for (const folder of observed.folders.filter((each) => !inUse.some((used) => used === each || used.startsWith(`${each}/`)))) {
+  const strays = observed.folders.filter((each) => !inUse.some((used) => used === each || used.startsWith(`${each}/`)));
+  // One under a stray goes with it.
+  for (const folder of strays.filter((each) => !strays.some((other) => each.startsWith(`${other}/`)))) {
     actions.push({ kind: 'removeStray', folder });
   }
   // No worktree is kept, so every clear request is confirmed not-kept (decision 0032).

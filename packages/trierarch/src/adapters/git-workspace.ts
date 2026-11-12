@@ -79,6 +79,8 @@ export function createGitWorkspace(options: {
     // A clone whose repository left the trusted repositories still holds the worktrees made from it.
     return configuration.repositories[repository]?.path ?? (await clonedPath(clones, repository));
   };
+  /** Whether the name is a repository it has, whose own folder under the root is the layout's. */
+  const isRepository = async (name: string): Promise<boolean> => configuration.repositories[name] !== undefined || (await clonedPath(clones, name)) !== undefined;
 
   return {
     prepare: async ({ shipName, workspace }) => {
@@ -152,6 +154,6 @@ export function createGitWorkspace(options: {
       }
       await git(['-C', path, 'worktree', 'prune']);
     },
-    foldersUnderRoot: async () => foldersUnderRoot(root),
+    foldersUnderRoot: async () => foldersUnderRoot(root, isRepository),
   };
 }

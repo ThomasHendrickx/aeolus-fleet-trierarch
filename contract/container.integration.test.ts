@@ -424,7 +424,7 @@ exec '${realGit}' "$@"
   it('removes a plain clone and a folder git does not know that no ship works in, with what runs in them stopped first (gap rule 2)', async () => {
     await aCrewedScout();
     const plain = join(machine.trierarchHome, 'worktrees', REPOSITORY, 'own-clone');
-    const unknown = join(machine.trierarchHome, 'worktrees', 'hemma', 'notes');
+    const unknown = join(machine.trierarchHome, 'worktrees', REPOSITORY, 'notes');
     mkdirSync(plain, { recursive: true });
     mkdirSync(unknown, { recursive: true });
     const children = [plain, unknown].map((cwd) => spawn('sleep', ['600'], { cwd, stdio: 'ignore' }));

@@ -9,7 +9,7 @@ import { gitInCloneWithin, gitInFreshClone, type Limits } from './git-in-folder.
 import { createGitWorkspace, REFUSED_PREFIX } from './git-workspace.js';
 import { runCommand } from './run-command.js';
 import { discard, type MoveWithinUserNamespace } from './trash.js';
-import { cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
+import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
 
 /**
  * Workspaces for sessions in containers (decision 0039; trierarch.md, "Session
@@ -57,6 +57,8 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
     return remote.status === 0 ? remote.stdout.trim() : (await git(['-C', repository, 'rev-parse', '--verify', `${ref}^{commit}`])).trim();
   };
   const exists = async (path: string): Promise<boolean> => (await stat(path).catch(() => undefined)) !== undefined;
+  /** Whether the name is a repository it has, whose own folder under the root is the layout's; a clone whose repository left the trusted repositories is still one. */
+  const isRepository = async (name: string): Promise<boolean> => configuration.repositories[name] !== undefined || (await clonedPath(clones, name)) !== undefined;
   return {
     ...worktrees,
     // What a clone holds is not known when any read of it fails, so it is not clean.
@@ -112,6 +114,6 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
       // Aside at once, so its ship's place is free and nothing reads it again; the trash removes it (docs/trierarch.md, "Session runtime").
       await discard(folder, { at: new Date(), ...(options.moveWithinUserNamespace !== undefined && { withinUserNamespace: options.moveWithinUserNamespace }) });
     },
-    foldersUnderRoot: async () => foldersUnderRoot(root),
+    foldersUnderRoot: async () => foldersUnderRoot(root, isRepository),
   };
 }
