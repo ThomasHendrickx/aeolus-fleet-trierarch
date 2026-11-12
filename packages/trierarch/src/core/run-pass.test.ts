@@ -1389,6 +1389,34 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.workspace.pruned).toEqual(['aeolus-fleet', 'hemma']);
   });
 
+  it('deletes, after the prune, the local branches whose remote branch is gone in each configured repository every pass (#92)', async () => {
+    const trierarch = aTrierarch({ ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: '/repos/aeolus-fleet' }, hemma: { path: '/repos/hemma' } } });
+
+    await trierarch.pass();
+
+    expect(trierarch.workspace.gitSteps).toEqual(['prune aeolus-fleet', 'delete branches aeolus-fleet', 'prune hemma', 'delete branches hemma']);
+  });
+
+  it('deletes the local branches whose remote branch is gone on a pass that fails before its actions, as when the fleet cannot be reached (#92)', async () => {
+    const trierarch = aTrierarch({ ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: '/repos/aeolus-fleet' } } });
+    trierarch.fleet.isUnreachable = true;
+
+    await trierarch.pass();
+
+    expect(trierarch.workspace.gitSteps).toContain('delete branches aeolus-fleet');
+  });
+
+  it('logs a repository whose branches cannot be deleted, and goes on with the others without failing the pass (#92)', async () => {
+    const trierarch = aTrierarch({ ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: '/repos/aeolus-fleet' }, hemma: { path: '/repos/hemma' } } });
+    trierarch.workspace.failingBranchDeletion.add('aeolus-fleet');
+
+    await trierarch.pass();
+
+    expect(trierarch.workspace.gitSteps).toContain('delete branches hemma');
+    expect(trierarch.logger.warnings).toContain('Could not delete the local branches whose remote branch is gone in aeolus-fleet: git ls-remote failed in aeolus-fleet; the next pass tries again');
+    expect(trierarch.state.current().passFailure).toBeUndefined();
+  });
+
   it('logs a repository whose prune fails, and prunes the others without failing the pass (#91)', async () => {
     const trierarch = aTrierarch({ ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: '/repos/aeolus-fleet' }, hemma: { path: '/repos/hemma' } } });
     trierarch.workspace.failingPrune.add('aeolus-fleet');

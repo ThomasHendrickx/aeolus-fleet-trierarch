@@ -356,6 +356,8 @@ export interface WorkspacePort {
   foldersUnderRoot(): Promise<readonly string[]>;
   /** Drops the git records of the configured repository's worktrees whose folder is gone; a worktree whose folder exists stays, wherever it is. Fails for a repository the configuration lacks. */
   prune(repository: string): Promise<void>;
+  /** Deletes the configured repository's local branches checked out in no worktree whose remote branch is gone from the remote; a branch whose remote branch exists, or that never had one, stays. Fails, deleting nothing, when the remote cannot be read, and for a repository the configuration lacks. */
+  deleteBranchesWhoseRemoteBranchIsGone(repository: string): Promise<void>;
 }
 
 /** What the trash could not remove: where it is, where it was, when it was discarded, whether this is the first time and whether argo was told, and why. */

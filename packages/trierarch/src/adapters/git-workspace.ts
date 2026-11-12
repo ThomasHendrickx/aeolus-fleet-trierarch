@@ -19,10 +19,15 @@ import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clon
  * that fails (offline, no remote) leaves what the repository has.
  * A trusted repository the machine does not have yet is cloned first
  * (aeolus-fleet#384). Any folder under the root is listed and removed,
- * whatever made it (gap rule 2); nothing outside it.
+ * whatever made it (gap rule 2); nothing outside it. In a configured
+ * repository's checkout, a local branch checked out in no worktree whose
+ * remote branch the remote no longer has is deleted (gap rule 5).
  */
 
 const REMOTE = 'origin';
+
+/** How long reading a remote's branches may take before the pass goes on without deleting a branch. */
+const REMOTE_READ_TIMEOUT_MS = 60_000;
 
 /** What a folder the host does not read holds, as unsaved: not known, so it is told with why, never taken for clean. */
 export const REFUSED_PREFIX = 'refused, ';
@@ -153,6 +158,30 @@ export function createGitWorkspace(options: {
         throw new Error(`The configuration has no repository ${repository}`);
       }
       await git(['-C', path, 'worktree', 'prune']);
+    },
+    deleteBranchesWhoseRemoteBranchIsGone: async (repository) => {
+      const path = configuration.repositories[repository]?.path;
+      if (path === undefined) {
+        throw new Error(`The configuration has no repository ${repository}`);
+      }
+      const listed = await git(['-C', path, 'for-each-ref', '--format=%(refname)%00%(worktreepath)%00%(upstream:remotename)%00%(upstream:remoteref)', 'refs/heads']);
+      // A branch with no remote branch, or one a worktree has checked out, stays.
+      const tracking = listed.split('\n').flatMap((line) => {
+        const [ref = '', worktree = '', remote = '', remoteRef = ''] = line.split('\0');
+        return ref.startsWith('refs/heads/') && worktree === '' && remote !== '' && remote !== '.' && remoteRef !== '' ? [{ branch: ref.slice('refs/heads/'.length), remote, remoteRef }] : [];
+      });
+      const remoteRefs = new Map<string, ReadonlySet<string>>();
+      for (const remote of new Set(tracking.map((found) => found.remote))) {
+        // Every remote is read before anything is deleted: one that cannot be read takes no branch for gone.
+        const args = ['-C', path, 'ls-remote', '--heads', remote];
+        const heads = said(args, await runCommand('git', { args, env: { GIT_TERMINAL_PROMPT: '0' }, timeoutMs: REMOTE_READ_TIMEOUT_MS }));
+        remoteRefs.set(remote, new Set(heads.split('\n').flatMap((line) => line.split('\t').slice(1))));
+      }
+      for (const { branch, remote, remoteRef } of tracking) {
+        if (remoteRefs.get(remote)?.has(remoteRef) === false) {
+          await git(['-C', path, 'branch', '-D', branch]);
+        }
+      }
     },
     foldersUnderRoot: async () => foldersUnderRoot(root, isRepository),
   };
