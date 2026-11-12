@@ -140,6 +140,35 @@ describe("a ship's socket", () => {
     expect(statSync(socket, { throwIfNoEntry: false })).toBeUndefined();
     await expect(callOver(socket, { method: 'GET', path: '/api/v1/ship/whoami' })).resolves.toBe('no answer');
   });
+
+  it("of a ship crewed fresh is in the sockets folder of its ship's folder, for its owner alone, and its file goes on its close", async () => {
+    const shipFolder = join(root, 'ships', shipId);
+
+    const socket = await sockets.open(shipId, shipFolder);
+    const isListening = statSync(socket).isSocket();
+    await sockets.close(shipId, shipFolder);
+
+    expect([socket, isListening, statSync(join(shipFolder, 'sockets')).mode & 0o777]).toEqual([join(shipFolder, 'sockets', 'fleet.sock'), true, 0o700]);
+    expect(statSync(socket, { throwIfNoEntry: false })).toBeUndefined();
+  });
+
+  it('of a ship crewed before the ship folders goes with its folder on its close', async () => {
+    await sockets.open(shipId);
+
+    await sockets.close(shipId);
+
+    expect(existsSync(join(root, shipId))).toBe(false);
+  });
+
+  it('keeps its folder when the trierarch stops, for the socket its session reaches next', async () => {
+    const shipFolder = join(root, 'ships', shipId);
+    await sockets.open(shipId, shipFolder);
+    await sockets.open(newId('ship'));
+
+    await sockets.closeAll();
+
+    expect([existsSync(join(shipFolder, 'sockets')), existsSync(join(shipFolder, 'sockets', 'fleet.sock'))]).toEqual([true, false]);
+  });
 });
 
 describe('a call over the socket', () => {
