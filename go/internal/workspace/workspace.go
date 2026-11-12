@@ -322,9 +322,9 @@ func listed(repository string) ([]string, error) {
 }
 
 // FoldersUnderRoot are every folder under the root a workspace could be (gap rule 2), whatever made it: each
-// `<root>/<repository>/<name>`, and a folder straight under the root with a `.git` of its own, as one folder, none of its files.
-// Never the trash, a file, a link, so nothing a link points at is removed, or a configured folder. By their real paths when the
-// places say so, as their workspaces are.
+// `<root>/<repository>/<name>`, and each folder straight under the root, one with a `.git` of its own as one folder, none of its files.
+// Never the trash, a file, a link, so nothing a link points at is removed, or a configured folder or one that holds it. By their
+// real paths when the places say so, as their workspaces are.
 func (p Places) FoldersUnderRoot() ([]string, error) {
 	found := []string{}
 	for _, top := range foldersIn(p.Root) {
@@ -332,12 +332,21 @@ func (p Places) FoldersUnderRoot() ([]string, error) {
 			found = append(found, top)
 			continue
 		}
+		// A repository's own folder, by its name, or one holding the trash is the layout's: only what it holds is listed. Any other is
+		// listed with each folder in it, so the one a ship is crewed in keeps it and what else it holds goes.
+		_, isRepository := p.repositoryOf(top)
+		if _, err := os.Lstat(filepath.Join(top, trash.FolderName)); err != nil && !isRepository {
+			found = append(found, top)
+		}
 		found = append(found, foldersIn(top)...)
 	}
 	configured := slices.Collect(maps.Values(p.Folders))
 	listed := []string{}
 	for _, folder := range found {
-		if slices.Contains(configured, folder) {
+		// A configured folder, or one that holds it, is never a stray.
+		if slices.ContainsFunc(configured, func(each string) bool {
+			return each == folder || strings.HasPrefix(each, folder+string(filepath.Separator))
+		}) {
 			continue
 		}
 		if p.IsByRealPath {

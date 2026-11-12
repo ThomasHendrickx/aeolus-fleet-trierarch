@@ -496,9 +496,16 @@ func straysOf(state State, next State, observed Observed) []Action {
 			}
 		}
 	}
-	actions := []Action{}
+	strays := []string{}
 	for _, folder := range observed.Folders {
 		if !slices.ContainsFunc(inUse, func(used string) bool { return used == folder || strings.HasPrefix(used, folder+"/") }) {
+			strays = append(strays, folder)
+		}
+	}
+	actions := []Action{}
+	for _, folder := range strays {
+		// One under a stray goes with it.
+		if !slices.ContainsFunc(strays, func(other string) bool { return strings.HasPrefix(folder, other+"/") }) {
 			actions = append(actions, Action{Kind: RemoveStray, Folder: folder})
 		}
 	}

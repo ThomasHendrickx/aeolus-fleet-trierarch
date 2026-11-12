@@ -338,14 +338,14 @@ func TestAConfiguredFolderUnderTheRootIsNotListed(t *testing.T) {
 }
 
 func TestTheFoldersUnderARootReachedThroughALinkAreListedUnderTheRootOrByTheirRealPath(t *testing.T) {
-	_, real := aRepository(t)
+	repository, real := aRepository(t)
 	root := filepath.Join(t.TempDir(), "root")
 	if err := os.Symlink(real, root); err != nil {
 		t.Fatal(err)
 	}
 	mkdir(t, filepath.Join(real, "aeolus-fleet", "scout"))
 	for _, isByRealPath := range []bool{false, true} {
-		places := Places{Root: root, IsByRealPath: isByRealPath}
+		places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}, IsByRealPath: isByRealPath}
 		want := []string{filepath.Join(root, "aeolus-fleet", "scout")}
 		if isByRealPath {
 			want = []string{filepath.Join(real, "aeolus-fleet", "scout")}
