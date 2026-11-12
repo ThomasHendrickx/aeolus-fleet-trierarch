@@ -1,6 +1,6 @@
 # Design: a ship folder with a main repository and sub-repositories (aeolus-fleet#1759)
 
-Status: approved by Thomas on 12 Nov (purpose, Q1 to Q7 each the first option, Q8 his own option 2). Nothing is built.
+Status: approved by Thomas on 12 Nov (purpose, Q1 to Q7 each the first option, Q8 his own option 2; the one-time rewrite of point 2, the name `repositories/` and no limit on sub-repositories). Nothing is built.
 
 This design covers core (the crew settings, their check, placement, the console) and the trierarch (the folder, the harnesses, containers, the aeolus-fleet plugin).
 
@@ -27,7 +27,7 @@ Thomas, 12 Nov, on the lessons below:
 
 ### In core (aeolus-fleet)
 
-1. **The workspace names repositories** (Q2): `{ kind: worktree, repository, ref? }` becomes `{ kind: repositories, main: { repository, ref? }, subRepositories: [{ repository, ref? }] }` in `common`'s crew settings, each a `trierarchNameSchema` name. `{ kind: folder, name }` stays as it is (Q3). Core refuses settings that name a repository twice or the main repository among the sub-repositories, or more sub-repositories than `common` allows (decision 0029); it never checks a name against a machine. Settings still carry no path or flag (decision 0027).
+1. **The workspace names repositories** (Q2): `{ kind: worktree, repository, ref? }` becomes `{ kind: repositories, main: { repository, ref? }, subRepositories: [{ repository, ref? }] }` in `common`'s crew settings, each a `trierarchNameSchema` name. `{ kind: folder, name }` stays as it is (Q3). Core refuses settings that name a repository twice or the main repository among the sub-repositories (decision 0029); the number of sub-repositories has no limit of its own, the 16 KB settings cap bounds it; it never checks a name against a machine. Settings still carry no path or flag (decision 0027).
 2. **No compatibility path** (decision 0013): crew requests and squadrons templates stored with a `worktree` workspace are rewritten in the same release as `repositories` with that repository as main and no sub-repositories, so no standing request becomes settings no trierarch can read.
 3. **The console's crew settings fields** pick the main repository and any sub-repositories from what the machines offer, each with an optional ref, and show them back on the ship and trierarch pages.
 
@@ -37,11 +37,11 @@ Thomas, 12 Nov, on the lessons below:
 
 ### In the trierarch
 
-5. **The ship folder takes the place of `worktree/`** (Q1): `ships/<shipId>/folder/`, beside the ship's `home/`, `tmp/`, `containers/` and sockets of the disk design, which stay out of it.
+5. **The ship folder takes the place of `worktree/`** (Q1): `ships/<shipId>/repositories/`, beside the ship's `home/`, `tmp/`, `containers/` and sockets of the disk design, which stay out of it.
 
 ```
 ships/<shipId>/
-  folder/                     the ship folder: the session starts here
+  repositories/               the ship folder: the session starts here
     AGENTS.md                 written by the trierarch at every start
     CLAUDE.md -> AGENTS.md
     .claude/skills/<skill>    one link per skill, to a repository's own (Q6, Q8)
@@ -70,7 +70,7 @@ flowchart TD
   PL -->|yes| AS[assigned to that trierarch]
   AS --> TC{trierarch: each repository configured or trusted, and trusted by the harness?}
   TC -->|"no, as after its configuration changed"| GB[given back with the field at fault, or the owner told once the crew is final]
-  TC -->|yes| MK["make ships/&lt;shipId&gt;/folder/: main/ and each sub-repos/&lt;repository&gt;/, fetched, at its ref"]
+  TC -->|yes| MK["make ships/&lt;shipId&gt;/repositories/: main/ and each sub-repos/&lt;repository&gt;/, fetched, at its ref"]
   MK -->|"git fails for one repository"| FL[crew fails with git's message; third failure in a row gives it back]
   FL -->|next pass| MK
   MK --> RT[write root AGENTS.md, CLAUDE.md link, one link per skill]
@@ -103,7 +103,7 @@ In build order; each is an issue linked under aeolus-fleet#1759 and states when 
 2. [aeolus-fleet#1760](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1760): a crew request's workspace names a main repository and its sub-repositories (core, `common`, console).
 3. [aeolus-fleet-squadrons#46](https://github.com/ThomasHendrickx/aeolus-fleet-squadrons/issues/46): squadron templates name a main repository and its sub-repositories.
 4. [aeolus-fleet-trierarch-plugin#73](https://github.com/ThomasHendrickx/aeolus-fleet-trierarch-plugin/issues/73): placement places a request only where every repository it names is offered.
-5. [aeolus-fleet-trierarch#360](https://github.com/ThomasHendrickx/aeolus-fleet-trierarch/issues/360): a ship works in `ships/<shipId>/folder/` with `main/` and `sub-repos/<repository>/`; after #346.
+5. [aeolus-fleet-trierarch#360](https://github.com/ThomasHendrickx/aeolus-fleet-trierarch/issues/360): a ship works in `ships/<shipId>/repositories/` with `main/` and `sub-repos/<repository>/`; after #346.
 6. [aeolus-fleet-trierarch#361](https://github.com/ThomasHendrickx/aeolus-fleet-trierarch/issues/361): one link per skill from every repository, and a clash asks the owner.
 7. [aeolus-fleet-trierarch#362](https://github.com/ThomasHendrickx/aeolus-fleet-trierarch/issues/362): read-only checkouts go, and a configuration naming `checkouts` is refused.
 
