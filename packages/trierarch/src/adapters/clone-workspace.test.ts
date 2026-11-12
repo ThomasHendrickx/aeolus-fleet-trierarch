@@ -217,16 +217,6 @@ describe('workspaces as per-ship clones', () => {
     expect(unsaved).toEqual([' M README.md', '?? draft.md', `commit ${done} done.md`]);
   });
 
-  it('recognizes a clone it made after restart, but refuses an unmarked clone', async () => {
-    const { folder: made } = await workspace().prepare(scout);
-    const stray = join(root, 'aeolus-fleet', 'stray');
-    await git(['clone', '-q', repository, stray]);
-
-    expect(await workspace().isMade(made)).toBe(true);
-    expect(await workspace().isMade(stray)).toBe(false);
-    expect(await workspace().isMade(repository)).toBe(false);
-  });
-
   it('removes a clone it made', async () => {
     const { folder: made } = await workspace().prepare(scout);
 
@@ -279,7 +269,7 @@ describe('workspaces as per-ship clones', () => {
   });
 
   it('refuses to remove anything outside its root', async () => {
-    await expect(workspace().remove(notes)).rejects.toThrow('removes only what it made');
+    await expect(workspace().remove(notes)).rejects.toThrow('removes only a folder under the root');
     expect(existsSync(notes)).toBe(true);
   });
 
@@ -287,30 +277,65 @@ describe('workspaces as per-ship clones', () => {
     await expect(workspace().prepare({ ...scout, workspace: { kind: 'folder', name: 'notes' } })).resolves.toEqual({ folder: notes });
   });
 
-  it('lists the clones under its root, each with its repository and name', async () => {
+  it('lists every folder under its root no matter what made it: a clone, a plain clone, a folder git does not know, never the trash (gap rule 2)', async () => {
     await workspace().prepare(scout);
-    await workspace().prepare({ ...scout, shipId: newId('ship'), shipName: 'lookout' });
+    await git(['clone', '-q', repository, join(root, 'aeolus-fleet', 'own-clone')]);
+    mkdirSync(join(root, 'hemma', 'notes'), { recursive: true });
+    mkdirSync(join(root, 'aeolus-fleet', '.trash'));
+    writeFileSync(join(root, 'aeolus-fleet', 'notes.md'), 'a file, no folder\n');
 
-    expect([...(await workspace().worktrees())].sort((first, second) => first.path.localeCompare(second.path))).toEqual([
-      { path: join(root, 'aeolus-fleet', 'lookout'), repository: 'aeolus-fleet', name: 'lookout' },
-      { path: join(root, 'aeolus-fleet', 'scout'), repository: 'aeolus-fleet', name: 'scout' },
-    ]);
+    expect([...(await workspace().foldersUnderRoot())].sort()).toEqual([join(root, 'aeolus-fleet', 'own-clone'), join(root, 'aeolus-fleet', 'scout'), join(root, 'hemma'), join(root, 'hemma', 'notes')].sort());
   });
 
-  it('lists each per-ship clone once and ignores a plain clone in the workspace folder (#1295)', async () => {
+  it('lists a folder straight under its root that is no repository it has as itself and each folder in it, but a repository\'s own folder or one holding the trash only by what it holds (gap rule 2)', async () => {
+    await workspace().prepare(scout);
+    mkdirSync(join(root, 'workbench', 'tools'), { recursive: true });
+    mkdirSync(join(root, 'left-repository', '.trash'), { recursive: true });
+    mkdirSync(join(root, 'left-repository', 'lookout'));
+    symlinkSync(notes, join(root, 'linked'));
+
+    expect([...(await workspace().foldersUnderRoot())].sort()).toEqual(
+      [join(root, 'aeolus-fleet', 'scout'), join(root, 'left-repository', 'lookout'), join(root, 'workbench'), join(root, 'workbench', 'tools')].sort(),
+    );
+  });
+
+  it('removes a folder straight under its root that git does not know', async () => {
+    const workbench = join(root, 'workbench');
+    mkdirSync(join(workbench, 'tools'), { recursive: true });
+
+    await workspace().remove(workbench);
+
+    expect(existsSync(workbench)).toBe(false);
+  });
+
+  it('lists a workspace placed straight under its root as one folder, none of its own files (#1295, gap rule 2)', async () => {
     await workspace().prepare(scout);
     await git(['clone', '-q', repository, join(root, 'aeolus-fleet-designer-release')]);
 
-    expect(await workspace().worktrees()).toEqual([{ path: join(root, 'aeolus-fleet', 'scout'), repository: 'aeolus-fleet', name: 'scout' }]);
+    expect([...(await workspace().foldersUnderRoot())].sort()).toEqual([join(root, 'aeolus-fleet', 'scout'), join(root, 'aeolus-fleet-designer-release')].sort());
   });
 
-  it("lists a per-ship clone once and none of a plain clone's own files in the repository's folder (#1295)", async () => {
-    await workspace().prepare(scout);
-    mkdirSync(join(root, 'aeolus-fleet', '.git'));
-    mkdirSync(join(root, 'aeolus-fleet', 'src'));
-    writeFileSync(join(root, 'aeolus-fleet', 'README.md'), 'a plain clone');
+  it('removes a plain clone and a folder git does not know under its root, each into the trash beside it (gap rule 2)', async () => {
+    const plain = join(root, 'aeolus-fleet', 'own-clone');
+    await git(['clone', '-q', repository, plain]);
+    const unknown = join(root, 'hemma', 'notes');
+    mkdirSync(unknown, { recursive: true });
 
-    expect(await workspace().worktrees()).toEqual([{ path: join(root, 'aeolus-fleet', 'scout'), repository: 'aeolus-fleet', name: 'scout' }]);
+    await workspace().remove(plain);
+    await workspace().remove(unknown);
+
+    expect([existsSync(plain), existsSync(unknown)]).toEqual([false, false]);
+    expect([readdirSync(join(root, 'aeolus-fleet', '.trash')), readdirSync(join(root, 'hemma', '.trash'))].map((trash) => trash.length)).toEqual([1, 1]);
+  });
+
+  it('refuses to remove its root, the trash or a folder deeper than a workspace', async () => {
+    const { folder: made } = await workspace().prepare(scout);
+    mkdirSync(join(root, 'aeolus-fleet', '.trash'));
+
+    for (const kept of [root, join(root, 'aeolus-fleet', '.trash'), join(made, 'src')]) {
+      await expect(workspace().remove(kept)).rejects.toThrow('removes only a folder under the root');
+    }
+    expect(existsSync(join(root, 'aeolus-fleet', '.trash'))).toBe(true);
   });
 });
 

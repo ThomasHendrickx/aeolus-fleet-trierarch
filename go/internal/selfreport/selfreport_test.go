@@ -203,12 +203,12 @@ func TestAnUnknownPlatformIsLeftOutOfTheMachine(t *testing.T) {
 	}
 }
 
-func TestKeptWorktreesAndOrphansAreNamedNeverTheirPaths(t *testing.T) {
+func TestNoKeptWorktreeAndNoOrphanIsReportedWhateverAnEarlierTrierarchsStateHolds(t *testing.T) {
 	in := anInput()
 	in.State.Kept = []any{map[string]any{"shipId": scout, "repository": "aeolus-fleet", "path": "/secret/path"}}
 	in.State.Orphans = []any{map[string]any{"repository": "aeolus-fleet", "name": "lookout", "path": "/secret/path"}}
 	got := detailsJSON(t, in)
-	assertJSON(t, map[string]any{"kept": got["kept"], "orphans": got["orphans"]}, `{"kept": [{"shipId": "`+scout+`", "repository": "aeolus-fleet"}], "orphans": [{"repository": "aeolus-fleet", "name": "lookout"}]}`)
+	assertJSON(t, map[string]any{"kept": got["kept"], "orphans": got["orphans"]}, `{"kept": [], "orphans": []}`)
 }
 
 func TestAShipsLoginIsReportedWithTheOneItsNextStartUses(t *testing.T) {

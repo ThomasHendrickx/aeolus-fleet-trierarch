@@ -2,9 +2,9 @@ import type { CrewStatus, ShipId, TrierarchConfiguration } from '@aeolus-fleet/c
 
 import { checkSettings, launchMarkerRefusal, trustRefusal, unacceptedRefusal, type CheckedSettings, type Refusal } from './check-settings.js';
 import { MODEL_OPTION } from './detected-options.js';
-import { putEntry, withState, type Entry, type KeptWorktree, type Orphan, type TrierarchState } from './entry.js';
+import { putEntry, withState, type Entry, type TrierarchState } from './entry.js';
 import type { StartOutcome } from './failed-starts.js';
-import type { AssignedRequest, ClearRequestToMe, InboxAnswer, LaunchSeen, ObservedSession, ObservedWorktree, TrustedPlaces, Turn, WrittenStatus } from './ports.js';
+import type { AssignedRequest, ClearRequestToMe, InboxAnswer, LaunchSeen, ObservedSession, TrustedPlaces, Turn, WrittenStatus } from './ports.js';
 import { decideRestart, exitsInWindow } from './restart-policy.js';
 
 /**
@@ -18,7 +18,8 @@ import { decideRestart, exitsInWindow } from './restart-policy.js';
 /** What the trierarch saw this pass. */
 export interface Observed {
   readonly sessions: readonly ObservedSession[];
-  readonly worktrees: readonly ObservedWorktree[];
+  /** Every folder under the worktree root a workspace could be, whatever it is (gap rule 2). */
+  readonly folders: readonly string[];
   /** For each entry whose session it watches: its inbox, its turn, and whether its store holds a message to hand (#756). */
   readonly ships: Readonly<Record<string, { readonly inbox: InboxAnswer; readonly turn: Turn; readonly isHolding: boolean; readonly isKeyNotReady?: boolean }>>;
   /** For each entry crewing whose session started: what its screen shows in its launch window (#382). */
@@ -61,10 +62,10 @@ export type Action =
   | { readonly kind: 'identityGone'; readonly shipId: ShipId; readonly shipName?: string }
   /** Its restart budget is spent (#397): its owner told, argo when argo owns it, with why its last start failed when it did. */
   | { readonly kind: 'crashed'; readonly shipId: ShipId; readonly shipName?: string; readonly exits: number; readonly failedStart?: string; readonly idempotencyKey: string }
-  /** A clear request (decision 0032): remove the kept worktree it names, or, when none is kept, confirm alone. */
-  | { readonly kind: 'clear'; readonly shipId: ShipId; readonly repository: string; readonly kept?: KeptWorktree }
-  /** A worktree no entry works in (#1041): stop what runs in it, then remove it unless it holds unsaved work, which keeps it reported. Told once, while it is new. */
-  | { readonly kind: 'clearOrphan'; readonly orphan: Orphan; readonly isNew: boolean };
+  /** A clear request (decision 0032): confirmed not-kept, as no worktree is kept. */
+  | { readonly kind: 'clear'; readonly shipId: ShipId; readonly repository: string }
+  /** A folder under the root no crewed ship uses (gap rule 2): stop what runs in it, then remove it, whatever it is or holds. */
+  | { readonly kind: 'removeStray'; readonly folder: string };
 
 export interface Reconciled {
   readonly state: TrierarchState;
@@ -219,25 +220,19 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
     }
   }
 
-  // A kept worktree stays until it is gone from disk, as when a human removed it (#325). One an entry
-  // works in again is that entry's worktree, no longer kept, so a clear never removes it (decision 0032).
-  const onDisk = new Set(observed.worktrees.map((worktree) => worktree.path));
-  const inUse = new Set(Object.values(next.entries).flatMap((entry) => (entry.folder === undefined ? [] : [entry.folder])));
-  const kept = next.kept.filter((each) => onDisk.has(each.path) && !inUse.has(each.path));
-  const known = new Set([...inUse, ...kept.map((each) => each.path)]);
-  const orphans = observed.worktrees
-    .filter((worktree) => !known.has(worktree.path) && (worktree.shipId === undefined || !(worktree.shipId in next.entries)))
-    .map(({ path, repository, name }) => ({ path, repository, name }));
-  // A clear request removes only a worktree this trierarch kept; for any other it keeps none (decision 0032).
+  // Every folder under the root no crewed ship uses goes, whether the trierarch made it or not; a configured folder is never one (gap rule 2).
+  // A used folder keeps what holds it and everything in it.
+  const inUse = [...Object.values(next.entries).flatMap((entry) => (entry.folder === undefined ? [] : [entry.folder])), ...Object.values(configuration.folders).map((folder) => folder.path)];
+  const strays = observed.folders.filter((each) => !inUse.some((used) => used === each || used.startsWith(`${each}/`) || each.startsWith(`${used}/`)));
+  // One under a stray goes with it.
+  for (const folder of strays.filter((each) => !strays.some((other) => each.startsWith(`${other}/`)))) {
+    actions.push({ kind: 'removeStray', folder });
+  }
+  // No worktree is kept, so every clear request is confirmed not-kept (decision 0032).
   for (const { shipId, repository } of context.clears) {
-    const held = kept.find((each) => each.shipId === shipId && each.repository === repository);
-    actions.push({ kind: 'clear', shipId, repository, ...(held !== undefined && { kept: held }) });
+    actions.push({ kind: 'clear', shipId, repository });
   }
-  const reported = new Set(state.orphans.map((each) => each.path));
-  for (const orphan of orphans) {
-    actions.push({ kind: 'clearOrphan', orphan, isNew: !reported.has(orphan.path) });
-  }
-  return { state: { ...next, kept, orphans }, actions, outcomes };
+  return { state: { ...next, kept: [], orphans: [] }, actions, outcomes };
 }
 
 /**

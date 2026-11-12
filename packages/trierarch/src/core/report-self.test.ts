@@ -50,9 +50,9 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
       ],
       workspaces: { repositories: ['aeolus-fleet'], folders: ['notes'] },
       caps: { ships: 8, running: 4 },
-      // Paths stay on the machine: a kept worktree goes by its ship and repository, an orphan by its repository and name (#325).
-      kept: [{ shipId: kept.shipId, repository: 'aeolus-fleet' }],
-      orphans: [{ repository: 'aeolus-fleet', name: 'stray' }],
+      // Nothing is kept and no folder under the root stays an orphan (gap rule 2): both stay in their shape, empty, whatever an earlier trierarch's state holds.
+      kept: [],
+      orphans: [],
       logins: [],
       machine: { os: 'macos', arch: 'arm64' },
       runtime: 'host',
@@ -226,16 +226,6 @@ describe("the trierarch's own report (docs/trierarch.md, What a trierarch report
     await trierarch.reportSelf();
 
     expect(trierarch.fleet.selfReports).toHaveLength(1);
-  });
-
-  it('reports again when its details change', async () => {
-    const trierarch = aTrierarch();
-    await trierarch.reportSelf();
-
-    await trierarch.state.save({ ...EMPTY_STATE, orphans: [{ path: `${WORKTREE_ROOT}/aeolus-fleet/stray`, repository: 'aeolus-fleet', name: 'stray' }] });
-    await trierarch.reportSelf();
-
-    expect(trierarch.fleet.selfReports.map((report) => report.details.orphans)).toEqual([[], [{ repository: 'aeolus-fleet', name: 'stray' }]]);
   });
 
   it('reports again when how many run changes', async () => {

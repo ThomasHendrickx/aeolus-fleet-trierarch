@@ -297,7 +297,7 @@ func TestNothingOutsideTheRootIsRemovedAsAClone(t *testing.T) {
 
 	err := places.RemoveWorktree(notes)
 
-	if err == nil || !strings.Contains(err.Error(), "removes only what it made") {
+	if err == nil || !strings.Contains(err.Error(), "removes only a folder under the root") {
 		t.Errorf("RemoveWorktree(%s) = %v, want a refusal", notes, err)
 	}
 	if _, err := os.Stat(notes); err != nil {
@@ -316,29 +316,56 @@ func TestAConfiguredFolderIsUsedAsItIsBesideClones(t *testing.T) {
 	}
 }
 
-func TestTheClonesUnderTheRootAreListedByRepositoryAndNameAndNothingElseThere(t *testing.T) {
+func TestEveryFolderUnderTheRootIsListedBesideClonesWhateverMadeItNeverTheTrash(t *testing.T) {
 	repository, root := aRepository(t)
 	places := clonePlaces(repository, root, t.TempDir())
-	prepared(t, places, scoutInAeolusFleet, "scout")
-	prepared(t, places, scoutInAeolusFleet, "lookout")
-	gitIn(t, "clone", "-q", repository, filepath.Join(root, "aeolus-fleet-designer-release"))
-	for _, folder := range []string{filepath.Join(root, "aeolus-fleet", ".git"), filepath.Join(root, "aeolus-fleet", "src")} {
-		if err := os.MkdirAll(folder, 0o755); err != nil {
-			t.Fatal(err)
+	scout := prepared(t, places, scoutInAeolusFleet, "scout")
+	ownClone := filepath.Join(root, "aeolus-fleet", "own-clone")
+	gitIn(t, "clone", "-q", repository, ownClone)
+	unknown := filepath.Join(root, "hemma", "notes")
+	mkdir(t, unknown, filepath.Join(root, "aeolus-fleet", ".trash", "scout.1"))
+
+	got, err := places.FoldersUnderRoot()
+
+	want := []string{ownClone, scout, filepath.Join(root, "hemma"), unknown}
+	slices.Sort(want)
+	if slices.Sort(got); err != nil || !slices.Equal(got, want) {
+		t.Errorf("FoldersUnderRoot() = %v, %v, want %v", got, err, want)
+	}
+}
+
+func TestAPlainCloneAndAFolderGitDoesNotKnowUnderTheRootGoIntoTheTrashBesideThem(t *testing.T) {
+	repository, root := aRepository(t)
+	places := clonePlaces(repository, root, t.TempDir())
+	plain := filepath.Join(root, "aeolus-fleet", "own-clone")
+	gitIn(t, "clone", "-q", repository, plain)
+	unknown := filepath.Join(root, "hemma", "notes")
+	mkdir(t, unknown)
+
+	for _, folder := range []string{plain, unknown} {
+		if err := places.RemoveWorktree(folder); err != nil {
+			t.Errorf("RemoveWorktree(%s) = %v", folder, err)
+		}
+		if _, err := os.Lstat(folder); err == nil {
+			t.Errorf("%s stayed", folder)
+		}
+		if entries, err := os.ReadDir(filepath.Join(filepath.Dir(folder), ".trash")); err != nil || len(entries) != 1 {
+			t.Errorf("the trash beside %s holds %v (%v), want it", folder, entries, err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(root, "aeolus-fleet", "README.md"), []byte("a plain clone"), 0o644); err != nil {
+}
+
+func TestAWorkspaceStraightUnderTheRootIsRemovedBesideClones(t *testing.T) {
+	repository, root := aRepository(t)
+	places := clonePlaces(repository, root, t.TempDir())
+	straight := filepath.Join(root, "aeolus-fleet-designer-release")
+	gitIn(t, "clone", "-q", repository, straight)
+
+	if err := places.RemoveWorktree(straight); err != nil {
 		t.Fatal(err)
 	}
-
-	got, err := places.Worktrees()
-
-	want := []reconciler.Worktree{
-		{Path: filepath.Join(root, "aeolus-fleet", "lookout"), Repository: "aeolus-fleet", Name: "lookout"},
-		{Path: filepath.Join(root, "aeolus-fleet", "scout"), Repository: "aeolus-fleet", Name: "scout"},
-	}
-	if err != nil || !slices.Equal(got, want) {
-		t.Errorf("Worktrees() = %v, %v, want %v", got, err, want)
+	if _, err := os.Lstat(straight); err == nil {
+		t.Error("it stayed")
 	}
 }
 
@@ -369,28 +396,6 @@ func TestTheCloneOfAShipWhoseRepositoryLeftTheListIsRemoved(t *testing.T) {
 	}
 	if _, err := os.Stat(folder); err == nil {
 		t.Error("the clone stayed")
-	}
-}
-
-func TestRecognizesACloneItMadeAfterRestartButRefusesAnUnmarkedClone(t *testing.T) {
-	repository, root := aRepository(t)
-	notes := t.TempDir()
-	folder := prepared(t, clonePlaces(repository, root, notes), scoutInAeolusFleet, "scout")
-	stray := filepath.Join(root, "aeolus-fleet", "stray")
-	gitIn(t, "clone", "-q", repository, stray)
-	places := clonePlaces(repository, root, notes)
-	for _, test := range []struct {
-		name   string
-		folder string
-		want   bool
-	}{
-		{"made clone", folder, true}, {"unmarked clone", stray, false}, {"outside root", repository, false},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if got := places.IsMade(test.folder); got != test.want {
-				t.Errorf("IsMade(%s) = %v, want %v", test.folder, got, test.want)
-			}
-		})
 	}
 }
 

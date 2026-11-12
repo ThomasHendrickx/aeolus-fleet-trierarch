@@ -17,8 +17,8 @@ import (
 	"time"
 )
 
-// folderName is the trash folder beside what goes in it.
-const folderName = ".trash"
+// FolderName is the trash folder beside what goes in it.
+const FolderName = ".trash"
 
 // What the trash holds is named `<name>.<unix milliseconds it was discarded at>`, with a suffix once it could not be removed: its state
 // is in its name, so it holds across a restart.
@@ -36,7 +36,7 @@ func Discard(folder string, at time.Time, withinUserNamespace func(from string, 
 	if !found.IsDir() {
 		return fmt.Errorf("%s is no folder: the trash takes only a folder", folder)
 	}
-	trash := filepath.Join(filepath.Dir(folder), folderName)
+	trash := filepath.Join(filepath.Dir(folder), FolderName)
 	if err := os.Mkdir(trash, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
 		return fmt.Errorf("make the trash %s: %w", trash, err)
 	}
@@ -84,7 +84,7 @@ type Left struct {
 func (t Trash) Empty() []Left {
 	var left []Left
 	for _, beside := range t.Beside() {
-		trash := filepath.Join(beside, folderName)
+		trash := filepath.Join(beside, FolderName)
 		entries, err := os.ReadDir(trash)
 		if err != nil {
 			continue

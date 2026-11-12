@@ -98,7 +98,12 @@ export function runtimeAdaptersOf(at: {
       proxyUrl: at.proxyUrl,
     }),
     // The container mounts the folder at the path it is given, where the plugin inside keys it by `pwd -P` as the host's does: one path for both, the real one.
-    workspace: { ...clones, prepare: async (at) => ({ folder: await realpath((await clones.prepare(at)).folder) }) },
+    workspace: {
+      ...clones,
+      prepare: async (at) => ({ folder: await realpath((await clones.prepare(at)).folder) }),
+      // Listed by the same real paths, so a folder a ship is crewed in is never taken for one no crewed ship uses.
+      foldersUnderRoot: async () => Promise.all((await clones.foldersUnderRoot()).map(async (folder) => realpath(folder).catch(() => folder))),
+    },
     folderProcesses: createContainerFolderProcesses({ binary: runtime.binary, host: createFolderProcesses() }),
     shipHomes: { homes: paths.homes, managedSettings, moveWithinUserNamespace: moveAsRuntime },
     trash: createTrash({ beside: async () => [...(await foldersUnder([root])()), paths.homes], unshare: removeWithinUserNamespace(runtime.binary) }),

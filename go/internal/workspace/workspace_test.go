@@ -246,56 +246,128 @@ func TestInContainersAShipsFolderIsItsRealPathWhichTheContainerMountsAsTheHostKe
 	}
 }
 
-func TestTheWorktreesUnderTheRootAreListedByRepositoryAndName(t *testing.T) {
-	repository, root := aRepository(t)
-	for _, folder := range []string{filepath.Join(root, "aeolus-fleet", "scout"), filepath.Join(root, "aeolus-fleet", "deeper", "lookout"), filepath.Join(t.TempDir(), "elsewhere")} {
-		gitIn(t, "-C", repository, "worktree", "add", "-q", "--detach", folder)
-	}
-	places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}}
-
-	got, err := places.Worktrees()
-
-	want := []reconciler.Worktree{{Path: filepath.Join(root, "aeolus-fleet", "scout"), Repository: "aeolus-fleet", Name: "scout"}}
-	if err != nil || !slices.Equal(got, want) {
-		t.Fatalf("Worktrees() = %v, %v, want %v", got, err, want)
+// mkdir makes each folder with its parents.
+func mkdir(t *testing.T, folders ...string) {
+	t.Helper()
+	for _, folder := range folders {
+		if err := os.MkdirAll(folder, 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
-func TestTheWorktreesUnderARootReachedThroughALinkAreListedUnderTheRoot(t *testing.T) {
+func TestEveryFolderUnderTheRootIsListedWhateverMadeItNeverTheTrashAFileOrALink(t *testing.T) {
+	repository, root := aRepository(t)
+	notes := t.TempDir()
+	scout := filepath.Join(root, "aeolus-fleet", "scout")
+	gitIn(t, "-C", repository, "worktree", "add", "-q", "--detach", scout)
+	ownClone := filepath.Join(root, "aeolus-fleet", "own-clone")
+	gitIn(t, "clone", "-q", repository, ownClone)
+	unknown := filepath.Join(root, "hemma", "notes")
+	foreign := filepath.Join(root, "aeolus-fleet", "aeolus-fleet-gateway")
+	gitIn(t, "-C", anotherRepository(t), "worktree", "add", "-q", "--detach", foreign)
+	straight := filepath.Join(root, "aeolus-fleet-designer-release")
+	gitIn(t, "clone", "-q", repository, straight)
+	mkdir(t, unknown, filepath.Join(root, "aeolus-fleet", ".trash", "scout.1"))
+	if err := os.WriteFile(filepath.Join(root, "aeolus-fleet", "notes.md"), []byte("a file\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(notes, filepath.Join(root, "aeolus-fleet", "linked")); err != nil {
+		t.Fatal(err)
+	}
+	places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}}
+
+	got, err := places.FoldersUnderRoot()
+
+	want := []string{foreign, ownClone, scout, straight, filepath.Join(root, "hemma"), unknown}
+	slices.Sort(want)
+	if slices.Sort(got); err != nil || !slices.Equal(got, want) {
+		t.Fatalf("FoldersUnderRoot() = %v, %v, want %v", got, err, want)
+	}
+}
+
+func TestAFolderStraightUnderTheRootThatIsNoRepositoryIsListedWithItsFoldersButARepositorysOwnOrOneHoldingTheTrashOnlyByWhatItHolds(t *testing.T) {
+	repository, root := aRepository(t)
+	notes := t.TempDir()
+	scout := filepath.Join(root, "aeolus-fleet", "scout")
+	gitIn(t, "-C", repository, "worktree", "add", "-q", "--detach", scout)
+	workbench := filepath.Join(root, "workbench")
+	lookout := filepath.Join(root, "left-repository", "lookout")
+	mkdir(t, filepath.Join(workbench, "tools"), filepath.Join(root, "left-repository", ".trash"), lookout)
+	if err := os.Symlink(notes, filepath.Join(root, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}}
+
+	got, err := places.FoldersUnderRoot()
+
+	want := []string{scout, lookout, workbench, filepath.Join(workbench, "tools")}
+	slices.Sort(want)
+	if slices.Sort(got); err != nil || !slices.Equal(got, want) {
+		t.Fatalf("FoldersUnderRoot() = %v, %v, want %v", got, err, want)
+	}
+}
+
+func TestAFolderStraightUnderTheRootThatGitDoesNotKnowIsRemoved(t *testing.T) {
+	for _, isClone := range []bool{false, true} {
+		repository, root := aRepository(t)
+		workbench := filepath.Join(root, "workbench")
+		mkdir(t, filepath.Join(workbench, "tools"))
+		places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}, IsClone: isClone}
+
+		if err := places.RemoveWorktree(workbench); err != nil {
+			t.Fatalf("beside clones %v: RemoveWorktree(%s) = %v", isClone, workbench, err)
+		}
+		if _, err := os.Lstat(workbench); err == nil {
+			t.Errorf("beside clones %v: %s stayed", isClone, workbench)
+		}
+	}
+}
+
+func TestAConfiguredFolderUnderTheRootIsNotListed(t *testing.T) {
+	repository, root := aRepository(t)
+	notes := filepath.Join(root, "notes", "today")
+	mkdir(t, notes)
+	places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}, Folders: map[string]string{"notes": notes}}
+
+	got, err := places.FoldersUnderRoot()
+
+	if err != nil || len(got) != 0 {
+		t.Fatalf("FoldersUnderRoot() = %v, %v, want none", got, err)
+	}
+}
+
+func TestAConfiguredFolderStraightUnderTheRootIsNotListedNorAnyFolderInItButAStrayBesideItIs(t *testing.T) {
+	repository, root := aRepository(t)
+	notes := filepath.Join(root, "notes")
+	mkdir(t, filepath.Join(notes, "src", "drafts"))
+	workbench := filepath.Join(root, "workbench")
+	mkdir(t, workbench)
+	places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}, Folders: map[string]string{"notes": notes}}
+
+	got, err := places.FoldersUnderRoot()
+
+	if err != nil || !slices.Equal(got, []string{workbench}) {
+		t.Fatalf("FoldersUnderRoot() = %v, %v, want only %s", got, err, workbench)
+	}
+}
+
+func TestTheFoldersUnderARootReachedThroughALinkAreListedUnderTheRootOrByTheirRealPath(t *testing.T) {
 	repository, real := aRepository(t)
 	root := filepath.Join(t.TempDir(), "root")
 	if err := os.Symlink(real, root); err != nil {
 		t.Fatal(err)
 	}
-	gitIn(t, "-C", repository, "worktree", "add", "-q", "--detach", filepath.Join(root, "aeolus-fleet", "scout"))
-	places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}}
-
-	got, err := places.Worktrees()
-
-	want := []reconciler.Worktree{{Path: filepath.Join(root, "aeolus-fleet", "scout"), Repository: "aeolus-fleet", Name: "scout"}}
-	if err != nil || !slices.Equal(got, want) {
-		t.Fatalf("Worktrees() = %v, %v, want %v", got, err, want)
-	}
-}
-
-func TestOnlyAWorktreeGitKnowsOfAConfiguredRepositoryByRepositoryAndShipIsMade(t *testing.T) {
-	repository, root := aRepository(t)
-	made := filepath.Join(root, "aeolus-fleet", "scout")
-	gitIn(t, "-C", repository, "worktree", "add", "-q", "--detach", made)
-	deeper := filepath.Join(root, "aeolus-fleet", "deeper", "lookout")
-	gitIn(t, "-C", repository, "worktree", "add", "-q", "--detach", deeper)
-	plain := filepath.Join(root, "aeolus-fleet", "plain")
-	other := filepath.Join(root, "hemma", "scout")
-	for _, folder := range []string{plain, other} {
-		if err := os.MkdirAll(folder, 0o755); err != nil {
-			t.Fatal(err)
+	mkdir(t, filepath.Join(real, "aeolus-fleet", "scout"))
+	for _, isByRealPath := range []bool{false, true} {
+		places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}, IsByRealPath: isByRealPath}
+		want := []string{filepath.Join(root, "aeolus-fleet", "scout")}
+		if isByRealPath {
+			want = []string{filepath.Join(real, "aeolus-fleet", "scout")}
 		}
-	}
-	places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}}
 
-	for folder, want := range map[string]bool{made: true, deeper: false, plain: false, other: false} {
-		if got := places.IsMade(folder); got != want {
-			t.Errorf("IsMade(%s) = %v, want %v", folder, got, want)
+		if got, err := places.FoldersUnderRoot(); err != nil || !slices.Equal(got, want) {
+			t.Errorf("by its real path %v: FoldersUnderRoot() = %v, %v, want %v", isByRealPath, got, err, want)
 		}
 	}
 }
@@ -312,21 +384,52 @@ func TestAWorktreeIsRemovedByItsPathFromTheRepositoryItsPathNames(t *testing.T) 
 	if _, err := os.Stat(folder); err == nil {
 		t.Error("the worktree stayed")
 	}
+	if listed := gitIn(t, "-C", repository, "worktree", "list"); strings.Contains(listed, "stray") {
+		t.Errorf("git still lists it: %s", listed)
+	}
 }
 
-func TestAFolderNoRepositoryNamesIsNotRemoved(t *testing.T) {
-	_, root := aRepository(t)
-	folder := filepath.Join(root, "hemma", "stray")
-	if err := os.MkdirAll(folder, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	places := Places{Root: root, Repositories: map[string]string{}}
+func TestAPlainCloneAFolderGitDoesNotKnowAndAWorktreeOfAnotherRepositoryUnderTheRootAreRemoved(t *testing.T) {
+	repository, root := aRepository(t)
+	plain := filepath.Join(root, "aeolus-fleet", "own-clone")
+	gitIn(t, "clone", "-q", repository, plain)
+	unknown := filepath.Join(root, "hemma", "notes")
+	mkdir(t, filepath.Join(unknown, "deep"))
+	other := anotherRepository(t)
+	foreign := filepath.Join(root, "aeolus-fleet", "aeolus-fleet-gateway")
+	gitIn(t, "-C", other, "worktree", "add", "-q", "--detach", foreign)
+	straight := filepath.Join(root, "aeolus-fleet-designer-release")
+	gitIn(t, "clone", "-q", repository, straight)
+	places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}}
 
-	if err := places.RemoveWorktree(folder); err == nil {
-		t.Error("RemoveWorktree() = nil, want an error")
+	for _, folder := range []string{plain, unknown, foreign, straight} {
+		if err := places.RemoveWorktree(folder); err != nil {
+			t.Errorf("RemoveWorktree(%s) = %v", folder, err)
+		}
+		if _, err := os.Lstat(folder); err == nil {
+			t.Errorf("%s stayed", folder)
+		}
 	}
-	if _, err := os.Stat(folder); err != nil {
-		t.Errorf("the folder went: %v", err)
+	if _, err := os.Stat(other); err != nil {
+		t.Errorf("the other repository went: %v", err)
+	}
+}
+
+func TestTheRootItsTrashAFolderDeeperThanAWorkspaceAndOneOutsideTheRootAreNotRemoved(t *testing.T) {
+	repository, root := aRepository(t)
+	trash := filepath.Join(root, "aeolus-fleet", ".trash")
+	deeper := filepath.Join(root, "aeolus-fleet", "scout", "src")
+	outside := t.TempDir()
+	mkdir(t, trash, deeper)
+	places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}}
+
+	for _, folder := range []string{root, trash, deeper, outside} {
+		if err := places.RemoveWorktree(folder); err == nil || !strings.Contains(err.Error(), "removes only a folder under the root") {
+			t.Errorf("RemoveWorktree(%s) = %v, want a refusal", folder, err)
+		}
+		if _, err := os.Stat(folder); err != nil {
+			t.Errorf("%s went: %v", folder, err)
+		}
 	}
 }
 

@@ -1,9 +1,10 @@
-import { mkdir, realpath, stat } from 'node:fs/promises';
+import { lstat, mkdir, realpath, rm, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
-import type { ObservedWorktree, WorkspacePort } from '../core/ports.js';
+import type { WorkspacePort } from '../core/ports.js';
+import { foldersUnderRoot, isUnderRoot } from './folders-under-root.js';
 import { gitInFolder, messageOf, RefusedRead } from './git-in-folder.js';
 import { type CommandResult, runCommand } from './run-command.js';
 import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
@@ -17,7 +18,8 @@ import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clon
  * so a ship starts from current code, not from a stale local branch. A fetch
  * that fails (offline, no remote) leaves what the repository has.
  * A trusted repository the machine does not have yet is cloned first
- * (aeolus-fleet#384).
+ * (aeolus-fleet#384). Any folder under the root is listed and removed,
+ * whatever made it (gap rule 2); nothing outside it.
  */
 
 const REMOTE = 'origin';
@@ -60,6 +62,15 @@ export function createGitWorkspace(options: {
     return branch.status === 0 && (await resolve(repository, branch.stdout.trim())).startsWith(`${REMOTE}/`) ? `${REMOTE}/${branch.stdout.trim()}` : undefined;
   };
   const exists = async (path: string): Promise<boolean> => (await stat(path).catch(() => undefined)) !== undefined;
+  /** Whether git lists the folder as a worktree of the repository; it lists real paths, so a root reached over a link is compared by its real path too. */
+  const isWorktreeOf = async (repository: string, folder: string): Promise<boolean> => {
+    const listed = await runCommand('git', { args: ['-C', repository, 'worktree', 'list', '--porcelain'] });
+    if (listed.status !== 0) {
+      return false;
+    }
+    const known = new Set(listed.stdout.split('\n').flatMap((line) => (line.startsWith('worktree ') ? [line.slice('worktree '.length)] : [])));
+    return known.has(folder) || known.has(await realpath(folder).catch(() => folder));
+  };
   const repositoryOf = async (folder: string): Promise<string | undefined> => {
     const [repository] = relative(root, folder).split(sep);
     if (repository === undefined) {
@@ -68,6 +79,8 @@ export function createGitWorkspace(options: {
     // A clone whose repository left the trusted repositories still holds the worktrees made from it.
     return configuration.repositories[repository]?.path ?? (await clonedPath(clones, repository));
   };
+  /** Whether the name is a repository it has, whose own folder under the root is the layout's. */
+  const isRepository = async (name: string): Promise<boolean> => configuration.repositories[name] !== undefined || (await clonedPath(clones, name)) !== undefined;
 
   return {
     prepare: async ({ shipName, workspace }) => {
@@ -115,26 +128,24 @@ export function createGitWorkspace(options: {
         throw error;
       }
     },
-    isMade: async (folder) => {
-      const parts = relative(root, folder).split(sep);
-      const repository = parts.length === 2 ? await repositoryOf(folder) : undefined;
-      if (repository === undefined) {
-        return false;
-      }
-      const listed = await runCommand('git', { args: ['-C', repository, 'worktree', 'list', '--porcelain'] });
-      if (listed.status !== 0) {
-        return false;
-      }
-      // Git writes real paths, so a root reached over a link is compared by its real path too.
-      const known = new Set(listed.stdout.split('\n').flatMap((line) => (line.startsWith('worktree ') ? [line.slice('worktree '.length)] : [])));
-      return known.has(folder) || known.has(await realpath(folder).catch(() => folder));
-    },
     remove: async (folder) => {
-      const repository = await repositoryOf(folder);
-      if (repository === undefined) {
-        throw new Error(`${folder} is no worktree under ${root}: the trierarch removes only what it made`);
+      if (!(await isUnderRoot(root, folder))) {
+        throw new Error(`${folder} is not under ${root}, or is its trash: the trierarch removes only a folder under the root`);
       }
-      await git(['-C', repository, 'worktree', 'remove', '--force', folder]);
+      const repository = await repositoryOf(folder);
+      if (repository !== undefined && (await isWorktreeOf(repository, folder))) {
+        await git(['-C', repository, 'worktree', 'remove', '--force', folder]);
+        return;
+      }
+      // Anything else under the root goes as it is: a plain clone, a worktree of another repository, a folder git does not know.
+      const found = await lstat(folder).catch(() => undefined);
+      if (found === undefined) {
+        return;
+      }
+      if (!found.isDirectory()) {
+        throw new Error(`${folder} is no folder: the trierarch removes only a folder under the root`);
+      }
+      await rm(folder, { recursive: true, force: true });
     },
     prune: async (repository) => {
       const path = configuration.repositories[repository]?.path;
@@ -143,31 +154,6 @@ export function createGitWorkspace(options: {
       }
       await git(['-C', path, 'worktree', 'prune']);
     },
-    worktrees: async () => {
-      const found: ObservedWorktree[] = [];
-      // git lists each worktree by its real path, so a root reached through a symbolic link (macOS's /var) is matched by its own.
-      const realRoot = await realpath(root).catch(() => root);
-      for (const repository of Object.keys(configuration.repositories)) {
-        const source = await repositoryOf(join(root, repository, 'worktree'));
-        if (source === undefined) {
-          continue;
-        }
-        const listed = await runCommand('git', { args: ['-C', source, 'worktree', 'list', '--porcelain'] });
-        if (listed.status !== 0) {
-          continue;
-        }
-        for (const line of listed.stdout.split('\n')) {
-          if (!line.startsWith('worktree ')) {
-            continue;
-          }
-          const parts = relative(realRoot, line.slice('worktree '.length)).split(sep);
-          const [listedRepository, name] = parts;
-          if (listedRepository === repository && name !== undefined && parts.length === 2) {
-            found.push({ path: join(root, repository, name), repository, name });
-          }
-        }
-      }
-      return found;
-    },
+    foldersUnderRoot: async () => foldersUnderRoot(root, isRepository),
   };
 }

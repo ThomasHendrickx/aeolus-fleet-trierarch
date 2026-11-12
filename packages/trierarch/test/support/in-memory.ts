@@ -24,7 +24,6 @@ import type {
   InboxAnswer,
   LoggedAction,
   ObservedSession,
-  ObservedWorktree,
   OwnerReport,
   RefreshedCheckout,
   OwnerReportAnswer,
@@ -638,9 +637,12 @@ export class InMemoryWorkspace implements WorkspacePort {
   /** Folders on disk, with whether they hold changes, and what removing one would discard, as git says it. */
   readonly folders = new Map<string, { shipId?: ShipId; hasChanges: boolean; unsaved: string[] }>([[NOTES_FOLDER, { hasChanges: false, unsaved: [] }]]);
 
+  /** The configured folders a folder workspace names, by name. */
+  constructor(private readonly configured: TrierarchConfiguration['folders'] = CONFIGURATION.folders) {}
+
   prepare(at: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace }): Promise<{ folder: string }> {
     const { shipId, shipName, workspace } = at;
-    const folder = workspace.kind === 'folder' ? NOTES_FOLDER : `${WORKTREE_ROOT}/${workspace.repository}/${shipName}`;
+    const folder = workspace.kind === 'folder' ? (this.configured[workspace.name]?.path ?? NOTES_FOLDER) : `${WORKTREE_ROOT}/${workspace.repository}/${shipName}`;
     if (!this.folders.has(folder)) {
       this.folders.set(folder, { shipId, hasChanges: false, unsaved: [] });
     }
@@ -651,17 +653,7 @@ export class InMemoryWorkspace implements WorkspacePort {
     return Promise.resolve(this.folders.get(folder)?.hasChanges !== true);
   }
 
-  /** Folders under the root the trierarch did not make, or that git does not know: git cannot read or remove them. */
-  readonly notMade = new Set<string>();
-
-  isMade(folder: string): Promise<boolean> {
-    return Promise.resolve(!this.notMade.has(folder));
-  }
-
   unsaved(folder: string): Promise<readonly string[]> {
-    if (this.notMade.has(folder)) {
-      return Promise.reject(new Error(`${folder} is no worktree under ${WORKTREE_ROOT}: the trierarch removes only what it made`));
-    }
     return Promise.resolve([...(this.folders.get(folder)?.unsaved ?? [])]);
   }
 
@@ -669,13 +661,13 @@ export class InMemoryWorkspace implements WorkspacePort {
   isFailingRemove = false;
 
   remove(folder: string): Promise<void> {
-    if (this.notMade.has(folder)) {
-      return Promise.reject(new Error(`${folder} is no worktree under ${WORKTREE_ROOT}: the trierarch removes only what it made`));
-    }
     if (this.isFailingRemove) {
       return Promise.reject(new Error(`git worktree remove ${folder} failed`));
     }
-    this.folders.delete(folder);
+    // What the folder holds goes with it.
+    for (const path of [...this.folders.keys()].filter((each) => each === folder || each.startsWith(`${folder}/`))) {
+      this.folders.delete(path);
+    }
     return Promise.resolve();
   }
 
@@ -690,15 +682,9 @@ export class InMemoryWorkspace implements WorkspacePort {
     return this.failingPrune.has(repository) ? Promise.reject(new Error(`git worktree prune failed in ${repository}`)) : Promise.resolve();
   }
 
-  worktrees(): Promise<readonly ObservedWorktree[]> {
-    return Promise.resolve(
-      [...this.folders]
-        .filter(([path]) => path.startsWith(`${WORKTREE_ROOT}/`))
-        .map(([path, { shipId }]) => {
-          const [repository = '', name = ''] = path.slice(WORKTREE_ROOT.length + 1).split('/');
-          return { path, repository, name, ...(shipId !== undefined && { shipId }) };
-        }),
-    );
+  /** Every folder on disk under the root, whatever it is. */
+  foldersUnderRoot(): Promise<readonly string[]> {
+    return Promise.resolve([...this.folders.keys()].filter((path) => path.startsWith(`${WORKTREE_ROOT}/`)));
   }
 
   /** Someone changes a file in the folder, as git status shows the change. */
@@ -1033,7 +1019,7 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
   const harness = new InMemoryHarness(processes);
   // Each harness keeps its own identities, as the aeolus-fleet plugin does per harness.
   const codex = new InMemoryHarness(processes);
-  const workspace = new InMemoryWorkspace();
+  const workspace = new InMemoryWorkspace(configuration.folders);
   const trust = new InMemoryTrust(configuration);
   const clock = new TestClock();
   const logger = new CollectingLogger();

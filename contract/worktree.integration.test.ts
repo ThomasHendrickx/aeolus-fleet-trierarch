@@ -12,7 +12,7 @@ import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
 
 // A ship's worktree is made from the ref the workspace names as origin has it, never from a clone's local branch, and a worktree that cannot be made says why (docs/trierarch.md, "Workspaces").
-// A worktree under the root that no ship works in is an orphan: what runs in it is stopped, then it is removed, unless it holds unsaved work (#1041).
+// Every folder under the root no crewed ship uses goes, whatever it is or holds, once what runs in it is stopped (gap rule 2).
 // A crew given back removes its worktree whatever it holds, as every path does, so no worktree is kept: a clear request is confirmed not-kept (decision 0032).
 
 /** A pass runs every 5 seconds, and a crew that fails 3 times in a row is given back. */
@@ -103,38 +103,80 @@ describe('a ship in a worktree of a repository', () => {
   });
 });
 
-/** A worktree of the machine's repository under the trierarch's root that no ship works in, with a process already running in it, as a dev server a retired ship's session left: its folder and the process's pid. */
-function anOrphanWithAProcess(name: string): { folder: string; pid: number } {
-  const folder = join(machine.trierarchHome, 'worktrees', REPOSITORY, name);
+/**
+ * A folder under the trierarch's root that no ship works in, at its path below
+ * the root, with a process already running in it, as a dev server a retired
+ * ship's session left: its folder and the process's pid. Made what it is after
+ * the process started, so no pass finds it with nothing running in it.
+ */
+function aStrayWithAProcess(at: { path: readonly string[]; make: (folder: string) => void }): { folder: string; pid: number } {
+  const folder = join(machine.trierarchHome, 'worktrees', ...at.path);
   mkdirSync(folder, { recursive: true });
-  // Started before the folder is a worktree, so no pass finds the orphan with nothing running in it.
   const child = spawn('sleep', ['600'], { cwd: folder, detached: true, stdio: 'ignore' });
   child.unref();
   const pid = child.pid ?? 0;
   started.push(pid);
-  git(machine.repository, 'worktree', 'add', '-q', '--detach', folder);
+  at.make(folder);
   return { folder, pid };
 }
 
-describe('an orphan worktree', () => {
-  it('is removed once what runs in it is stopped', async () => {
-    const { folder, pid } = anOrphanWithAProcess('stray');
+const aWorktreeOfTheRepository = (folder: string): void => {
+  git(machine.repository, 'worktree', 'add', '-q', '--detach', folder);
+};
+const aPlainClone = (folder: string): void => {
+  execFileSync('git', ['clone', '-q', machine.repository, folder]);
+};
+const aFileGitDoesNotKnow = (folder: string): void => {
+  writeFileSync(join(folder, 'notes.md'), 'no repository\n');
+};
 
-    // Said once the worktree is removed and the state saved.
-    await expect.poll(() => machine.serviceLog(), { timeout: CLEARED_WITHIN_MS }).toContain(`Removed the orphan worktree ${folder}, after stopping 1 process in it`);
-    expect(existsSync(folder)).toBe(false);
+describe('a folder under the root no crewed ship uses', () => {
+  it('is removed whatever it is or holds, once what runs in it is stopped, and is no orphan', async () => {
+    const strays = [
+      aStrayWithAProcess({ path: [REPOSITORY, 'orphan'], make: aWorktreeOfTheRepository }),
+      aStrayWithAProcess({
+        path: [REPOSITORY, 'unsaved'],
+        make: (folder) => {
+          aWorktreeOfTheRepository(folder);
+          writeFileSync(join(folder, 'unsaved.txt'), 'unsaved\n');
+        },
+      }),
+      aStrayWithAProcess({ path: [REPOSITORY, 'own-clone'], make: aPlainClone }),
+      aStrayWithAProcess({ path: [REPOSITORY, 'notes'], make: aFileGitDoesNotKnow }),
+      // Straight under the root: a plain clone, and a folder git does not know.
+      aStrayWithAProcess({ path: ['designer-release'], make: aPlainClone }),
+      aStrayWithAProcess({ path: ['workbench'], make: aFileGitDoesNotKnow }),
+    ];
+
+    for (const { folder } of strays) {
+      // Said once the folder is removed.
+      await expect.poll(() => machine.serviceLog(), { timeout: CLEARED_WITHIN_MS }).toContain(`Removed ${folder}, a folder under the root no crewed ship uses, after stopping 1 process in it`);
+    }
+    expect(strays.filter(({ folder }) => existsSync(folder))).toEqual([]);
+    expect(strays.filter(({ pid }) => isRunning(pid))).toEqual([]);
+    const status = await machine.trierarch(['status', '--json']);
+    expect(JSON.parse(status.stdout)).toMatchObject({ kept: [], orphans: [] });
+  });
+
+  it('that is no repository the trierarch has goes whole, with a clone of another repository in it and what runs there', async () => {
+    const unrelated = join(machine.trierarchHome, 'worktrees', 'hemma');
+    const { pid } = aStrayWithAProcess({ path: ['hemma', 'scout'], make: aPlainClone });
+
+    await expect.poll(() => machine.serviceLog(), { timeout: CLEARED_WITHIN_MS }).toContain(`Removed ${unrelated}, a folder under the root no crewed ship uses, after stopping 1 process in it`);
+    expect(existsSync(unrelated)).toBe(false);
     expect(isRunning(pid)).toBe(false);
   });
 
-  it('that holds unsaved work stays, with what runs in it stopped, and status names it', async () => {
-    const { folder, pid } = anOrphanWithAProcess('stray');
-    writeFileSync(join(folder, 'unsaved.txt'), 'unsaved\n');
+  it('that holds the folder a ship is crewed in stays, and so does the trash', async () => {
+    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
+    const { worktree } = sessionOf(machine, 'scout');
+    const trash = join(machine.trierarchHome, 'worktrees', REPOSITORY, '.trash');
+    mkdirSync(trash, { recursive: true });
+    const { folder } = aStrayWithAProcess({ path: [REPOSITORY, 'lookout'], make: aFileGitDoesNotKnow });
 
-    await expect.poll(() => isRunning(pid), { timeout: CLEARED_WITHIN_MS }).toBe(false);
-    await expect.poll(() => machine.serviceLog(), { timeout: CLEARED_WITHIN_MS }).toContain(`Kept the orphan worktree ${folder}, which holds unsaved work: ?? unsaved.txt`);
-    expect(existsSync(folder)).toBe(true);
-    const status = await machine.trierarch(['status', '--json']);
-    expect(JSON.parse(status.stdout)).toMatchObject({ orphans: [folder] });
+    await expect.poll(() => machine.serviceLog(), { timeout: CLEARED_WITHIN_MS }).toContain(`Removed ${folder}, a folder under the root no crewed ship uses`);
+    expect([existsSync(worktree), existsSync(trash)]).toEqual([true, true]);
   });
 });
 

@@ -1,9 +1,10 @@
-import { lstat, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { join, relative, sep } from 'node:path';
+import { lstat, mkdir, realpath, rm, stat } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { WorkspacePort } from '../core/ports.js';
+import { foldersUnderRoot, isUnderRoot } from './folders-under-root.js';
 import { gitInCloneWithin, gitInFreshClone, type Limits } from './git-in-folder.js';
 import { createGitWorkspace, REFUSED_PREFIX } from './git-workspace.js';
 import { runCommand } from './run-command.js';
@@ -27,16 +28,6 @@ import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clon
  */
 
 const REMOTE = 'origin';
-
-/**
- * A clone the trierarch made holds its marker in its `.git`, where git keeps no
- * record of it: an orphan clone is cleared only with it. These two are the
- * marker's one place.
- */
-const markerOf = (folder: string): string => join(folder, '.git', 'aeolus-trierarch-clone');
-const MARKER_CONTENT = '1\n';
-const markMade = (folder: string): Promise<void> => writeFile(markerOf(folder), MARKER_CONTENT);
-const isMarkedMade = async (folder: string): Promise<boolean> => (await readFile(markerOf(folder), 'utf8').catch(() => undefined)) === MARKER_CONTENT;
 
 export function createCloneWorkspace(options: { configuration: TrierarchConfiguration; root: string; clones?: TrustedClones; moveWithinUserNamespace?: MoveWithinUserNamespace } & Limits): WorkspacePort {
   const { configuration, root, clones } = options;
@@ -66,22 +57,14 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
     return remote.status === 0 ? remote.stdout.trim() : (await git(['-C', repository, 'rev-parse', '--verify', `${ref}^{commit}`])).trim();
   };
   const exists = async (path: string): Promise<boolean> => (await stat(path).catch(() => undefined)) !== undefined;
-  const isUnderRoot = async (folder: string): Promise<boolean> => {
-    const [repository, ship, ...rest] = relative(root, folder).split(sep);
-    if (repository === undefined || ship === undefined || rest.length > 0 || ship === '' || ship === '..') {
-      return false;
-    }
-    // A clone whose repository left the trusted repositories is still one the trierarch made.
-    return configuration.repositories[repository] !== undefined || (await clonedPath(clones, repository)) !== undefined;
-  };
-
+  /** Whether the name is a repository it has, whose own folder under the root is the layout's; a clone whose repository left the trusted repositories is still one. */
+  const isRepository = async (name: string): Promise<boolean> => configuration.repositories[name] !== undefined || (await clonedPath(clones, name)) !== undefined;
   return {
     ...worktrees,
     // What a clone holds is not known when any read of it fails, so it is not clean.
     isClean: async (folder) => worktrees.isClean(folder).catch(() => false),
     // What a clone holds is not known when any read of it fails: told with why, as one the host does not read.
     unsaved: async (folder) => worktrees.unsaved(folder).catch((error: unknown) => [`${REFUSED_PREFIX}${error instanceof Error ? error.message : String(error)}`]),
-    isMade: async (folder) => (await isUnderRoot(folder)) && (await isMarkedMade(folder)),
     prepare: async (request) => {
       const { shipName, workspace } = request;
       if (workspace.kind === 'folder') {
@@ -100,8 +83,6 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
         const commit = await resolve(repository, workspace.ref);
         try {
           await git(['clone', '--quiet', '--no-checkout', '--reference', repository, '--dissociate', repository, folder]);
-          // Marked before anything else, so a stop mid-crew leaves an orphan the trierarch knows as its own.
-          await markMade(folder);
           // The clone's origin is the repository's checkout, whose branches are no remote's: dropped with it.
           await gitIn(folder, ['remote', 'remove', REMOTE]);
           const remote = await runCommand('git', { args: ['-C', repository, 'remote', 'get-url', REMOTE] });
@@ -118,28 +99,21 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
       return { folder };
     },
     remove: async (folder) => {
-      if (!(await isUnderRoot(folder))) {
-        throw new Error(`${folder} is no clone under ${root}: the trierarch removes only what it made`);
+      if (!(await isUnderRoot(root, folder))) {
+        throw new Error(`${folder} is not under ${root}, or is its trash: the trierarch removes only a folder under the root`);
       }
       // One already gone is removed already.
       if ((await lstat(folder).catch(() => undefined)) === undefined) {
         return;
       }
+      // A workspace straight under the root has no trash beside it that a pass empties; no session ran in it, so the host removes it.
+      if ([root, await realpath(root).catch(() => root)].includes(dirname(folder))) {
+        await worktrees.remove(folder);
+        return;
+      }
       // Aside at once, so its ship's place is free and nothing reads it again; the trash removes it (docs/trierarch.md, "Session runtime").
       await discard(folder, { at: new Date(), ...(options.moveWithinUserNamespace !== undefined && { withinUserNamespace: options.moveWithinUserNamespace }) });
     },
-    worktrees: async () => {
-      const found = [];
-      for (const repository of Object.keys(configuration.repositories)) {
-        for (const name of await readdir(join(root, repository)).catch(() => [])) {
-          // A clone has a .git of its own; a file or folder without one is part of something else, such as a plain clone.
-          if (!(await exists(join(root, repository, name, '.git')))) {
-            continue;
-          }
-          found.push({ path: join(root, repository, name), repository, name });
-        }
-      }
-      return found;
-    },
+    foldersUnderRoot: async () => foldersUnderRoot(root, isRepository),
   };
 }

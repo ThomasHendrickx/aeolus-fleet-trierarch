@@ -396,13 +396,11 @@ exec '${realGit}' "$@"
   });
 
   for (const hasUnsavedWork of [false, true]) {
-    it(`stops what runs in an orphan clone after restart and ${hasUnsavedWork ? 'keeps unsaved work' : 'removes a clean clone'}`, async () => {
+    it(`stops what runs in an orphan clone after restart and removes it${hasUnsavedWork ? ', unsaved work and all' : ''}`, async () => {
       const folder = await aCrewedScout();
       expect((await machine.trierarch(['stop'])).status).toBe(0);
       const stray = join(machine.trierarchHome, 'worktrees', REPOSITORY, 'stray');
       renameSync(folder, stray);
-      // The stand-in harness writes its observations in the workspace; these are not a ship's unsaved work.
-      writeFileSync(join(stray, '.git', 'info', 'exclude'), 'fake-*.jsonl\n');
       if (hasUnsavedWork) {
         writeFileSync(join(stray, 'unsaved.txt'), 'unsaved\n');
       }
@@ -414,12 +412,7 @@ exec '${realGit}' "$@"
       try {
         expect((await machine.trierarch(['restart'])).status).toBe(0);
         await expect.poll(() => isRunning(pid), { timeout: SAID_WITHIN_MS }).toBe(false);
-        if (hasUnsavedWork) {
-          await expect.poll(() => machine.serviceLog(), { timeout: SAID_WITHIN_MS }).toContain(`Kept the orphan worktree ${stray}, which holds unsaved work: ?? unsaved.txt`);
-          expect(existsSync(stray)).toBe(true);
-        } else {
-          await expect.poll(() => existsSync(stray), { timeout: SAID_WITHIN_MS }).toBe(false);
-        }
+        await expect.poll(() => existsSync(stray), { timeout: SAID_WITHIN_MS }).toBe(false);
       } finally {
         if (isRunning(pid)) {
           process.kill(pid, 'SIGKILL');
@@ -428,12 +421,27 @@ exec '${realGit}' "$@"
     });
   }
 
-  it('that no ship works in and holds no marker of the trierarch is an orphan it says it will not clear, and stays', async () => {
+  it('removes a plain clone and a folder git does not know that no ship works in, with what runs in them stopped first (gap rule 2)', async () => {
     await aCrewedScout();
-    const stray = join(machine.trierarchHome, 'worktrees', REPOSITORY, 'stray');
-    execFileSync('git', ['clone', '-q', machine.repository, stray]);
+    const plain = join(machine.trierarchHome, 'worktrees', REPOSITORY, 'own-clone');
+    const unknown = join(machine.trierarchHome, 'worktrees', REPOSITORY, 'notes');
+    mkdirSync(plain, { recursive: true });
+    mkdirSync(unknown, { recursive: true });
+    const children = [plain, unknown].map((cwd) => spawn('sleep', ['600'], { cwd, stdio: 'ignore' }));
+    const pids = children.flatMap((child) => (child.pid === undefined ? [] : [child.pid]));
+    try {
+      execFileSync('git', ['clone', '-q', machine.repository, plain]);
+      writeFileSync(join(unknown, 'notes.md'), 'no repository\n');
 
-    await expect.poll(() => machine.serviceLog(), { timeout: SAID_WITHIN_MS }).toContain(`Will not clear the orphan ${stray}: the trierarch made no worktree of it, or git no longer knows it; it removes only what it made`);
-    expect(existsSync(stray)).toBe(true);
+      for (const folder of [plain, unknown]) {
+        await expect.poll(() => machine.serviceLog(), { timeout: SAID_WITHIN_MS }).toContain(`Removed ${folder}, a folder under the root no crewed ship uses, after stopping 1 process in it`);
+        expect(existsSync(folder)).toBe(false);
+      }
+      expect(pids.filter(isRunning)).toEqual([]);
+    } finally {
+      for (const pid of pids.filter(isRunning)) {
+        process.kill(pid, 'SIGKILL');
+      }
+    }
   });
 });
