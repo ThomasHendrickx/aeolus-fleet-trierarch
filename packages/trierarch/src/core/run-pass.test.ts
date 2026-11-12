@@ -1326,6 +1326,51 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.workspace.folders.has(notes)).toBe(true);
   });
 
+  it('rule 2: a configured folder straight under its root no ship is crewed in keeps every folder in it, with what runs there', async () => {
+    const notes = `${WORKTREE_ROOT}/notes`;
+    const inside = [`${notes}/src`, `${notes}/src/drafts`];
+    const trierarch = aTrierarch({ ...CONFIGURATION, folders: { notes: { path: notes } } });
+    for (const folder of [notes, ...inside]) {
+      trierarch.workspace.folders.set(folder, { hasChanges: false, unsaved: [] });
+    }
+    trierarch.folderProcesses.start(`${notes}/src`, 'astro dev');
+
+    await trierarch.pass();
+
+    expect([notes, ...inside].filter((folder) => !trierarch.workspace.folders.has(folder))).toEqual([]);
+    expect(trierarch.folderProcesses.stoppedIn).toEqual([]);
+  });
+
+  it('rule 2: a configured folder straight under its root a ship is crewed in keeps every folder in it, with what runs there', async () => {
+    const notes = `${WORKTREE_ROOT}/notes`;
+    const inside = [`${notes}/src`, `${notes}/src/drafts`];
+    const trierarch = aTrierarch({ ...CONFIGURATION, folders: { notes: { path: notes } } });
+    for (const folder of [notes, ...inside]) {
+      trierarch.workspace.folders.set(folder, { hasChanges: false, unsaved: [] });
+    }
+    const shipId = await aCrewedShip(trierarch, { workspace: { kind: 'folder', name: 'notes' } });
+    trierarch.folderProcesses.start(`${notes}/src`, 'astro dev');
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]?.folder).toBe(notes);
+    expect([notes, ...inside].filter((folder) => !trierarch.workspace.folders.has(folder))).toEqual([]);
+    expect(trierarch.folderProcesses.stoppedIn).toEqual([]);
+  });
+
+  it('rule 2: the folder a ship is crewed in keeps every folder in it, with what runs there', async () => {
+    const trierarch = aTrierarch();
+    await aCrewedShip(trierarch);
+    const inside = `${SCOUT_FOLDER}/node_modules`;
+    trierarch.workspace.folders.set(inside, { hasChanges: false, unsaved: [] });
+    trierarch.folderProcesses.start(inside, 'astro dev');
+
+    await trierarch.pass();
+
+    expect(trierarch.workspace.folders.has(inside)).toBe(true);
+    expect(trierarch.folderProcesses.stoppedIn).toEqual([]);
+  });
+
   it('prunes the git worktree records of each configured repository every pass (#91)', async () => {
     const trierarch = aTrierarch({ ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: '/repos/aeolus-fleet' }, hemma: { path: '/repos/hemma' } } });
 

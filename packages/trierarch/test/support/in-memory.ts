@@ -637,9 +637,12 @@ export class InMemoryWorkspace implements WorkspacePort {
   /** Folders on disk, with whether they hold changes, and what removing one would discard, as git says it. */
   readonly folders = new Map<string, { shipId?: ShipId; hasChanges: boolean; unsaved: string[] }>([[NOTES_FOLDER, { hasChanges: false, unsaved: [] }]]);
 
+  /** The configured folders a folder workspace names, by name. */
+  constructor(private readonly configured: TrierarchConfiguration['folders'] = CONFIGURATION.folders) {}
+
   prepare(at: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace }): Promise<{ folder: string }> {
     const { shipId, shipName, workspace } = at;
-    const folder = workspace.kind === 'folder' ? NOTES_FOLDER : `${WORKTREE_ROOT}/${workspace.repository}/${shipName}`;
+    const folder = workspace.kind === 'folder' ? (this.configured[workspace.name]?.path ?? NOTES_FOLDER) : `${WORKTREE_ROOT}/${workspace.repository}/${shipName}`;
     if (!this.folders.has(folder)) {
       this.folders.set(folder, { shipId, hasChanges: false, unsaved: [] });
     }
@@ -1016,7 +1019,7 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
   const harness = new InMemoryHarness(processes);
   // Each harness keeps its own identities, as the aeolus-fleet plugin does per harness.
   const codex = new InMemoryHarness(processes);
-  const workspace = new InMemoryWorkspace();
+  const workspace = new InMemoryWorkspace(configuration.folders);
   const trust = new InMemoryTrust(configuration);
   const clock = new TestClock();
   const logger = new CollectingLogger();
