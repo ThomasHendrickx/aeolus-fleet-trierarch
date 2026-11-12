@@ -260,12 +260,12 @@ describe('a place of ships/ where a socket path would pass the system limit', ()
 
   function configureShipsAt(place: string): void {
     const file = join(machine.trierarchHome, 'config.json');
-    writeFileSync(file, JSON.stringify({ ...z.looseObject({}).parse(JSON.parse(readFileSync(file, 'utf8'))), worktreeRoot: place }));
+    writeFileSync(file, JSON.stringify({ ...z.looseObject({}).parse(JSON.parse(readFileSync(file, 'utf8'))), shipsRoot: place }));
   }
 
   const refusalOf = (place: string): string => {
     const socket = join(place, 'shp_00000000000000000000000000', 'sockets', 'fleet.sock');
-    return `The configuration at ${join(machine.trierarchHome, 'config.json')} keeps the ships' files in ${place}, where a ship's socket path, as ${socket}, is ${String(Buffer.byteLength(socket))} bytes, past the system's limit of 108: name a shorter place in worktreeRoot`;
+    return `The configuration at ${join(machine.trierarchHome, 'config.json')} keeps the ships' files in ${place}, where a ship's socket path, as ${socket}, is ${String(Buffer.byteLength(socket))} bytes, past the system's limit of 108: name a shorter place in shipsRoot`;
   };
 
   it('is what config check refuses, naming the setting to shorten', async () => {
@@ -285,6 +285,26 @@ describe('a place of ships/ where a socket path would pass the system limit', ()
     expect(ran.status).not.toBe(0);
     expect(ran.stdout + ran.stderr).toContain(refusalOf(aLongPlace()));
   });
+});
+
+describe('a configuration that still names worktreeRoot', () => {
+  const refusal = (): string => `The configuration at ${join(machine.trierarchHome, 'config.json')} names worktreeRoot, which is now shipsRoot: rename the line to shipsRoot`;
+
+  function configureWorktreeRoot(): void {
+    const file = join(machine.trierarchHome, 'config.json');
+    writeFileSync(file, JSON.stringify({ ...z.looseObject({}).parse(JSON.parse(readFileSync(file, 'utf8'))), worktreeRoot: join(machine.trierarchHome, 'worktrees') }));
+  }
+
+  for (const words of [['config', 'check'], ['run']]) {
+    it(`is refused by ${words.join(' ')}, naming the line and its new name`, async () => {
+      configureWorktreeRoot();
+
+      const ran = await machine.trierarch(words);
+
+      expect(ran.status).not.toBe(0);
+      expect(ran.stdout + ran.stderr).toContain(refusal());
+    });
+  }
 });
 
 /** Rewrites Claude Code's .claude.json so it trusts no folder: a new settings version of a ship in the repository is given back. */
