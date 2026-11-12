@@ -364,6 +364,11 @@ func (w *aWorkspace) Remove(entry reconciler.Entry) error {
 	if w.failRemove {
 		return errors.New("cannot remove " + entry.Folder)
 	}
+	// A configured folder stays; its ship's folder goes.
+	if entry.Workspace.Kind == "folder" {
+		w.removed = append(w.removed, entry.ShipFolder)
+		return nil
+	}
 	delete(w.made, entry.Folder)
 	w.removed = append(w.removed, entry.Folder)
 	return nil
@@ -963,7 +968,7 @@ func TestTheShipsSocketIsOpenedBeforeItsIdentityNamesIt(t *testing.T) {
 
 	pass.run(t)
 
-	want := []string{"open " + scout, "identity /home/me/.aeolus/trierarch/sockets/" + scout + "/fleet.sock"}
+	want := []string{"open " + scout, "identity /ships/" + scout + "/sockets/fleet.sock"}
 	if !slices.Equal(pass.sockets.events, want) {
 		t.Fatalf("sockets %q, want %q", pass.sockets.events, want)
 	}
@@ -1395,7 +1400,7 @@ func TestAReleaseWhoseWorktreeCannotBeReadLeavesItAndTriesAgainOnTheNextPass(t *
 	}
 }
 
-func TestAReleaseOfAFolderCrewTellsNobodyAndRemovesNothing(t *testing.T) {
+func TestAReleaseOfAFolderCrewTellsNobodyAndRemovesItsShipsFolderAlone(t *testing.T) {
 	pass := aRunPass(t)
 	pass.crewed(t)
 	entry := pass.store.state.Entries[scout]
@@ -1406,7 +1411,7 @@ func TestAReleaseOfAFolderCrewTellsNobodyAndRemovesNothing(t *testing.T) {
 
 	pass.run(t)
 
-	if len(pass.fleet.told) != 0 || len(pass.workspace.removed) != 0 {
+	if len(pass.fleet.told) != 0 || !slices.Equal(pass.workspace.removed, []string{"/ships/" + scout}) {
 		t.Fatalf("told %+v, removed %q", pass.fleet.told, pass.workspace.removed)
 	}
 }
@@ -2378,7 +2383,7 @@ func TestACrewGetsItsReadOnlyCheckoutsMadeBeforeItsIdentityNamesThemAndItsSessio
 	if len(pass.harness.readOnly) != 1 || !slices.Equal(pass.harness.readOnly[0], []string{"/checkouts/" + scout + "/governance", "/checkouts/" + scout + "/skills"}) {
 		t.Fatalf("read-only %v", pass.harness.readOnly)
 	}
-	if !slices.Equal(pass.checkouts.made, []string{scout + " aeolus-fleet"}) || !slices.Equal(pass.sockets.events, []string{"open " + scout, "checkouts " + scout, "identity /home/me/.aeolus/trierarch/sockets/" + scout + "/fleet.sock"}) {
+	if !slices.Equal(pass.checkouts.made, []string{scout + " aeolus-fleet"}) || !slices.Equal(pass.sockets.events, []string{"open " + scout, "checkouts " + scout, "identity /ships/" + scout + "/sockets/fleet.sock"}) {
 		t.Fatalf("made %q, sockets and checkouts %q", pass.checkouts.made, pass.sockets.events)
 	}
 }

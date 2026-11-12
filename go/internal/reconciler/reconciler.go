@@ -84,6 +84,9 @@ type Entry struct {
 	Exits     []string `json:"exits"`
 	RestartAt string   `json:"restartAt,omitempty"`
 	Folder    string   `json:"folder,omitempty"`
+	// ShipFolder is the ship's own folder, `ships/<shipId>/`, which holds every file of the ship: made as it is crewed fresh. One crewed
+	// before the ship folders has none, and keeps its worktree, home and socket where they were until it is crewed fresh.
+	ShipFolder string `json:"shipFolder,omitempty"`
 	// CrewToken is the one its register gave, kept in the state only (decision 0026).
 	CrewToken  string `json:"crewToken,omitempty"`
 	HasStarted bool   `json:"hasStarted"`
@@ -491,8 +494,10 @@ func straysOf(state State, next State, observed Observed) []Action {
 	inUse := []string{}
 	for _, entries := range []map[string]Entry{state.Entries, next.Entries} {
 		for _, entry := range entries {
-			if entry.Folder != "" {
-				inUse = append(inUse, entry.Folder)
+			for _, folder := range []string{entry.Folder, entry.ShipFolder} {
+				if folder != "" {
+					inUse = append(inUse, folder)
+				}
 			}
 		}
 	}

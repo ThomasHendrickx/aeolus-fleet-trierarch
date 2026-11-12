@@ -472,15 +472,30 @@ func folderProcessesOf(configured *config.Runtime) runpass.FolderProcesses {
 	return container.FolderProcesses{Runtime: container.Runtime{Binary: configured.Binary}, Host: folderprocess.Stopper{}}
 }
 
-// trashOf is the trash beside each repository's clones and the ships' homes, emptied every pass: within the runtime's user namespace
-// too in containers, by the host's own removal alone on the host.
-func trashOf(root string, at paths.Paths, configured *config.Runtime) trash.Trash {
+// shipsPlaceOf is the place of every ship's folder: the configuration's worktree root, else `ships/` in the trierarch's folder.
+func shipsPlaceOf(at paths.Paths, configuration config.Configuration) string {
+	if configuration.WorktreeRoot != "" {
+		return configuration.WorktreeRoot
+	}
+	return at.Ships
+}
+
+// trashOf is the trash beside the ships' folders under each root, beside each repository's clones under it and beside the homes of the
+// ships crewed before the ship folders, emptied every pass: within the runtime's user namespace too in containers, by the host's own
+// removal alone on the host.
+func trashOf(roots []string, at paths.Paths, configured *config.Runtime) trash.Trash {
 	beside := func() []string {
 		found := []string{}
-		entries, _ := os.ReadDir(root)
-		for _, entry := range entries {
-			if entry.IsDir() {
-				found = append(found, filepath.Join(root, entry.Name()))
+		for _, root := range roots {
+			if root == "" {
+				continue
+			}
+			found = append(found, root)
+			entries, _ := os.ReadDir(root)
+			for _, entry := range entries {
+				if entry.IsDir() && entry.Name() != trash.FolderName {
+					found = append(found, filepath.Join(root, entry.Name()))
+				}
 			}
 		}
 		if homes := homesOf(at, configured); homes != "" {
@@ -507,7 +522,8 @@ func isInContainers(configured *config.Runtime) bool {
 	return configured != nil && configured.Kind == "container"
 }
 
-// homesOf is where each ship has a home of its own, in containers (decision 0039); none on the host, where every session shares the user's.
+// homesOf is where each ship crewed before the ship folders has a home of its own, in containers (decision 0039); none on the host, where
+// every session shares the user's. A ship crewed fresh has its home in its ship's folder.
 func homesOf(at paths.Paths, configured *config.Runtime) string {
 	if !isInContainers(configured) {
 		return ""
@@ -580,14 +596,20 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		current, _ := applied.Current()
 		return mcpservers.OfferedBy(mcpservers.WithCredentialHeld(current.Servers, current.SecretNames()), offeredHarnesses, harnessesThatAddMcpServers(configuration.Runtime))
 	}
-	root := configuration.WorktreeRoot
-	if root == "" {
-		root = at.Worktrees
+	// Every ship's folder is under the place of ships/; the worktrees of the ships crewed before the ship folders stay under the worktree
+	// root they were made in, the configured one, else today's default beside ships/.
+	root, before := shipsPlaceOf(at, configuration), ""
+	if configuration.WorktreeRoot == "" {
+		before = at.Worktrees
+	}
+	// Made before the first crew, so the disk it is on is read from the first pass (machine load).
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return nil, err
 	}
 	// The places a pass makes workspaces in and offers: the configured ones and the trusted repositories beside them.
 	placesOf := func() (workspace.Places, []string, []string) {
 		offered := withTrusted(configuration)
-		places := workspace.Places{Root: root, Repositories: map[string]string{}, Folders: map[string]string{}, Clone: clones.WhenMissing, ClonedPath: clones.ClonedPath, IsByRealPath: isInContainers(configuration.Runtime), IsClone: isInContainers(configuration.Runtime), MoveWithinUserNamespace: moveWithinUserNamespaceOf(configuration.Runtime)}
+		places := workspace.Places{Root: root, Before: before, Repositories: map[string]string{}, Folders: map[string]string{}, Clone: clones.WhenMissing, ClonedPath: clones.ClonedPath, IsByRealPath: isInContainers(configuration.Runtime), IsClone: isInContainers(configuration.Runtime), MoveWithinUserNamespace: moveWithinUserNamespaceOf(configuration.Runtime)}
 		repositories, folders := []string{}, []string{}
 		for name, repository := range offered.Repositories {
 			places.Repositories[name] = repository.Path
@@ -650,7 +672,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		},
 		// The machine's memory and disk, read each minute; argo is told once when one is low (#400).
 		Load:  load,
-		Trash: trashOf(root, at, configuration.Runtime),
+		Trash: trashOf([]string{root, before}, at, configuration.Runtime),
 	}
 	// What each harness trusts is read from its own files at each report (#381).
 	trustReaders := map[string]func() map[string]bool{

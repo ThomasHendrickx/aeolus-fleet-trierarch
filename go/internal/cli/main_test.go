@@ -55,9 +55,21 @@ func (r *aSessionRuntime) Stop(shipID string) error {
 	return nil
 }
 
+// aShortHome is a home folder as short as a person's, so a ship's socket path under its place of ships/ is within the system's limit,
+// as a test's own temporary folder, named after the test, would not be.
+func aShortHome(t *testing.T) string {
+	t.Helper()
+	home, err := os.MkdirTemp("", "home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
+	return home
+}
+
 func aMain(t *testing.T) (Machine, *anInstalledService, *aFleet) {
 	t.Helper()
-	home := t.TempDir()
+	home := aShortHome(t)
 	at := paths.Of(home, "")
 	installed := &anInstalledService{aServiceManager: aServiceManager{write: func() {
 		_ = os.WriteFile(at.Running, []byte(`{"pid":41,"version":"`+Version+`"}`), 0o644)

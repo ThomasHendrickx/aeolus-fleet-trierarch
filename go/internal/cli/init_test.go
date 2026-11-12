@@ -196,7 +196,7 @@ func TestInitWritesTheInitialConfigurationAndItsSchema(t *testing.T) {
 	}
 }
 
-func TestInitTrustsTheWorktreeRootAndEachPlaceAndCompletesTheOnboarding(t *testing.T) {
+func TestInitTrustsThePlaceOfShipsAndEachPlaceAndCompletesTheOnboarding(t *testing.T) {
 	machine := newMachine(t)
 	configuration := config.Initial()
 	configuration.Repositories["aeolus-fleet"] = config.Repository{Path: "/src/aeolus-fleet"}
@@ -212,15 +212,15 @@ func TestInitTrustsTheWorktreeRootAndEachPlaceAndCompletesTheOnboarding(t *testi
 		t.Fatal(err)
 	}
 
-	want := []string{machine.init.Paths.Worktrees, "/src/aeolus-fleet", "/notes"}
+	want := []string{machine.init.Paths.Ships, "/src/aeolus-fleet", "/notes"}
 	if !slices.Equal(machine.claudeCode.trusted, want) {
 		t.Errorf("trusted %q, want %q", machine.claudeCode.trusted, want)
 	}
 	if !machine.claudeCode.isOnboardingComplete {
 		t.Error("the onboarding is not complete")
 	}
-	if info, err := os.Stat(machine.init.Paths.Worktrees); err != nil || !info.IsDir() {
-		t.Errorf("no worktree root: %v", err)
+	if info, err := os.Stat(machine.init.Paths.Ships); err != nil || !info.IsDir() {
+		t.Errorf("no place of ships/: %v", err)
 	}
 }
 

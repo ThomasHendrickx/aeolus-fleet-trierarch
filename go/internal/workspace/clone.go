@@ -13,7 +13,8 @@ import (
 )
 
 // A clone is the workspace of a session in a container (decision 0039; docs/trierarch.md, "Session runtime"): a per-ship clone of the
-// configured repository in place of a worktree, at the same path (`<root>/<repository>/<ship>`). A worktree points into the
+// configured repository in place of a worktree, at the same path (`<ships>/<shipId>/worktree`, or for a ship crewed before the ship
+// folders `<root>/<repository>/<ship>`). A worktree points into the
 // repository's `.git`, its hooks and every other ship's worktree data; a clone has a `.git` of its own. `--reference` with
 // `--dissociate` borrows the repository's objects only while cloning, so the clone holds its own and no gc of the repository can
 // break it. Its origin is the repository's own remote, so the session pushes without the host, with the remote branches as the
@@ -34,11 +35,11 @@ func resolve(repository string, ref string) (string, error) {
 
 // PrepareClone makes the ship's clone, or takes the one a stop mid-crew left, and answers its folder.
 func PrepareClone(at Worktree) (prepared string, err error) {
-	folder := filepath.Join(at.Root, at.Repository, at.ShipName)
+	folder := at.folder()
 	if _, err := os.Stat(folder); err == nil {
 		return folder, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(folder), 0o755); err != nil {
+	if err := makeParentOf(at); err != nil {
 		return "", err
 	}
 	// A repository with no remote, or one that cannot be reached now, is cloned from as it is.
@@ -76,12 +77,15 @@ func PrepareClone(at Worktree) (prepared string, err error) {
 }
 
 // removeClone removes a folder under the root beside clones: aside into the trash beside it, which a pass empties, as a session in a
-// container may leave in it what the host cannot remove. One straight under the root has no trash beside it a pass empties, and no
-// session ran in it, so the host removes it.
+// container may leave in it what the host cannot remove; a ship's folder too, straight under the place of the ships' folders. One
+// straight under the worktree root of the ships crewed before has no trash beside it a pass empties, and no session ran in it, so the
+// host removes it.
 func (p Places) removeClone(folder string) error {
 	parent := filepath.Dir(folder)
-	if real, err := filepath.EvalSymlinks(p.Root); parent == p.Root || (err == nil && parent == real) {
-		return os.RemoveAll(folder)
+	if p.Before != "" && p.Before != p.Root {
+		if real, err := filepath.EvalSymlinks(p.Before); parent == p.Before || (err == nil && parent == real) {
+			return os.RemoveAll(folder)
+		}
 	}
 	// Aside at once, so its ship's place is free and nothing reads it again; the trash removes it (docs/trierarch.md, "Session runtime").
 	if err := trash.Discard(folder, time.Now(), p.MoveWithinUserNamespace); err != nil {

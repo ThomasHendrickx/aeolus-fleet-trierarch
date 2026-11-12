@@ -1,10 +1,60 @@
 // Package paths is where the trierarch keeps its files (docs/architecture.md,
-// "Files on the machine"): everything under `~/.aeolus/trierarch/`. The
-// configuration's path can be moved with `--config` or
-// AEOLUS_TRIERARCH_CONFIG, and the worktree root by the configuration.
+// "Files on the machine"): everything under `~/.aeolus/trierarch/`. Every
+// ship's files are in its own folder under `ships/`, `ships/<shipId>/`, and no
+// secret is in one: the trierarch's own files, its tokens for its ships among
+// them, sit beside `ships/`. The configuration's path can be moved with
+// `--config` or AEOLUS_TRIERARCH_CONFIG, and the place of `ships/` by the
+// configuration's worktree root.
 package paths
 
-import "path/filepath"
+import (
+	"path/filepath"
+	"strings"
+)
+
+// In a ship's folder, `ships/<shipId>/`: its worktree or clone, its harness's home in a container, and the folder of its sockets, which
+// a container mounts at the same path (a socket mounted alone would be the one the trierarch had open when the container started).
+const (
+	WorktreeFolder = "worktree"
+	HomeFolder     = "home"
+	SocketsFolder  = "sockets"
+	// SocketFile is the ship's fleet socket in its sockets folder (decision 0026).
+	SocketFile = "fleet.sock"
+)
+
+// ShipHome is the ship's own home, for a session in a container: in its ship's folder, or for a ship crewed before the ship folders
+// (no ship's folder), under the homes as it was made.
+func ShipHome(homes string, shipID string, shipFolder string) string {
+	if shipFolder == "" {
+		return filepath.Join(homes, shipID)
+	}
+	return filepath.Join(shipFolder, HomeFolder)
+}
+
+// ShipSockets is the folder of the ship's sockets: in its ship's folder, or for a ship crewed before the ship folders under the
+// sockets folder as it was made.
+func ShipSockets(sockets string, shipID string, shipFolder string) string {
+	if shipFolder == "" {
+		return filepath.Join(sockets, shipID)
+	}
+	return filepath.Join(shipFolder, SocketsFolder)
+}
+
+// longestShipID is as long as a ship id gets: `shp_` and its 26 characters.
+var longestShipID = "shp_" + strings.Repeat("0", 26)
+
+// LongestSocket is the longest socket path a ship's folder under the place of ships holds.
+func LongestSocket(ships string) string {
+	return filepath.Join(ships, longestShipID, SocketsFolder, SocketFile)
+}
+
+// SocketPathLimit is the size of a socket's path the system takes, its ending zero byte with it: 104 bytes on macOS, 108 on Linux.
+func SocketPathLimit(system string) int {
+	if system == "darwin" {
+		return 104
+	}
+	return 108
+}
 
 type Paths struct {
 	Home         string
@@ -13,11 +63,14 @@ type Paths struct {
 	CrewToken    string
 	Running      string
 	Logs         string
-	Worktrees    string
-	State        string
-	// Sessions holds a folder per ship with its hold's files.
+	// Ships holds every ship's folder, `ships/<shipId>/`, unless the configuration's worktree root names another place.
+	Ships string
+	// Worktrees is the worktree root of the ships crewed before the ship folders, `<repository>/<ship>` under it.
+	Worktrees string
+	State     string
+	// Sessions holds a folder per ship with its hold's files, its tokens among them: never in the ship's folder.
 	Sessions string
-	// Sockets holds a folder per ship with its fleet socket.
+	// Sockets holds a folder with its fleet socket per ship crewed before the ship folders.
 	Sockets string
 	// Checkouts holds a folder per ship with its read-only checkouts, one per repository.
 	Checkouts string
@@ -29,7 +82,7 @@ type Paths struct {
 	Detected string
 	// ModelToken is the token sessions in containers run on (decision 0039).
 	ModelToken string
-	// Homes holds a home per ship for sessions in containers, each mounted as its container's home (decision 0039).
+	// Homes holds a home per ship crewed before the ship folders for sessions in containers, each mounted as its container's home (decision 0039).
 	Homes string
 	// TrustedRepositories is the list the trierarch plugin's ship sent last (aeolus-fleet#384), apart from the configuration.
 	TrustedRepositories string
@@ -56,6 +109,7 @@ func Of(homeDirectory string, config string) Paths {
 		CrewToken:    filepath.Join(home, "crew-token"),
 		Running:      filepath.Join(home, "running.json"),
 		Logs:         filepath.Join(home, "logs"),
+		Ships:        filepath.Join(home, "ships"),
 		Worktrees:    filepath.Join(home, "worktrees"),
 		State:        filepath.Join(home, "state.json"),
 		Sessions:     filepath.Join(home, "sessions"),

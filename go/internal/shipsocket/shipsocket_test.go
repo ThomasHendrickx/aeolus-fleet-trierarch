@@ -309,7 +309,7 @@ func TestAClosedSocketAnswersNoMoreAndItsFileIsGone(t *testing.T) {
 	sockets := someSockets(t, fleet.server.URL, &token, false)
 	socket := opened(t, sockets)
 
-	sockets.Close(scout)
+	sockets.Close(scout, "")
 
 	if _, err := os.Stat(socket); err == nil {
 		t.Fatalf("%s is still there", socket)
@@ -512,7 +512,8 @@ func TestACallerTheCheckIsRefusedGetsNoRefreshOfTheCheckouts(t *testing.T) {
 	}
 }
 
-func TestTheSocketOfAShipCrewedFreshIsInItsShipsFolderAndOneCrewedBeforeUnderTheRoot(t *testing.T) {
+// A ship crewed fresh has its socket in its ship's folder, one crewed before the ship folders under the root.
+func TestASocketIsInItsShipsFolder(t *testing.T) {
 	root, shipFolder := t.TempDir(), filepath.Join(t.TempDir(), scout)
 	sockets := New(Options{Root: root, CrewTokenOf: func(string) string { return "" }, MayCall: func(string, int) bool { return true }, Log: func(string) {}})
 	t.Cleanup(sockets.CloseAll)
@@ -531,7 +532,7 @@ func TestTheSocketOfAShipCrewedFreshIsInItsShipsFolderAndOneCrewedBeforeUnderThe
 	}
 }
 
-func TestTheSocketOfAShipCrewedBeforeTheShipFoldersGoesWithItsFolderOnItsClose(t *testing.T) {
+func TestAnOlderShipsSocketFolderGoesOnItsClose(t *testing.T) {
 	root := t.TempDir()
 	sockets := New(Options{Root: root, CrewTokenOf: func(string) string { return "" }, MayCall: func(string, int) bool { return true }, Log: func(string) {}})
 	if _, err := sockets.Open(scout, ""); err != nil {

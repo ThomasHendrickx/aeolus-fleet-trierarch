@@ -55,9 +55,10 @@ type Fleet interface {
 
 // Sockets are the ships' sockets, each session's fleet calls (decision 0026).
 type Sockets interface {
-	// Open opens the ship's socket, or keeps the one open, and answers its path.
-	Open(shipID string) (string, error)
-	Close(shipID string)
+	// Open opens the ship's socket in its ship's folder, or for a ship crewed before the ship folders (none) where it was, or keeps the
+	// one open, and answers its path.
+	Open(shipID string, shipFolder string) (string, error)
+	Close(shipID string, shipFolder string)
 }
 
 // Sessions are the sessions that run, as the passes list and stop them.
@@ -95,6 +96,8 @@ type Harness interface {
 
 // Workspace makes and removes a ship's workspace, and lists every folder under the root.
 type Workspace interface {
+	// ShipFolderOf is the folder a ship crewed fresh keeps every file of its own in.
+	ShipFolderOf(shipID string) string
 	Prepare(entry reconciler.Entry, shipName string) (string, error)
 	Unsaved(folder string) ([]string, error)
 	Remove(entry reconciler.Entry) error
@@ -495,7 +498,7 @@ func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reco
 		if !isWatched {
 			continue
 		}
-		if _, err := p.Sockets.Open(shipID); err != nil {
+		if _, err := p.Sockets.Open(shipID, entry.ShipFolder); err != nil {
 			return observed, versions, err
 		}
 		turn := harness.Turn(entry)
@@ -657,6 +660,14 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	if problem := harness.Problem(); problem != nil {
 		return state, problem
 	}
+	// A ship crewed fresh keeps every file of its own in its ship's folder, kept before anything is made in it; one crewed before the
+	// ship folders keeps its workspace where it was.
+	if entry.Folder == "" && entry.ShipFolder == "" {
+		entry.ShipFolder = p.Workspace.ShipFolderOf(entry.ShipID)
+		if state, err = p.put(state, entry); err != nil {
+			return state, err
+		}
+	}
 	folder, err := p.Workspace.Prepare(entry, ship.Name)
 	if err != nil {
 		return state, err
@@ -684,7 +695,7 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	if state, err = p.put(state, entry); err != nil {
 		return state, err
 	}
-	socket, err := p.Sockets.Open(entry.ShipID)
+	socket, err := p.Sockets.Open(entry.ShipID, entry.ShipFolder)
 	if err != nil {
 		return state, err
 	}
@@ -719,7 +730,8 @@ func (p Pass) freshAfterReleaseElsewhere(state reconciler.State, entry reconcile
 		return state, entry, err
 	}
 	p.Log(fmt.Sprintf("%s (%s): released elsewhere, its worktree removed", nameOf(entry), entry.ShipID))
-	entry.IsReleasedElsewhere = false
+	// Crewed fresh, in a ship's folder of its own, whatever its workspace was.
+	entry.IsReleasedElsewhere, entry.Folder, entry.ShipFolder = false, "", ""
 	state, err := p.put(state, entry)
 	return state, entry, err
 }
@@ -890,7 +902,7 @@ func pathsOf(made []checkouts.Checkout) []string {
 
 // deleteIdentity removes the entry's identity, and with it its ship's socket, as nothing calls over it any more (decision 0026), and its read-only checkouts.
 func (p Pass) deleteIdentity(entry reconciler.Entry) error {
-	p.Sockets.Close(entry.ShipID)
+	p.Sockets.Close(entry.ShipID, entry.ShipFolder)
 	if err := p.Checkouts.Remove(entry.ShipID); err != nil {
 		return err
 	}
@@ -922,7 +934,8 @@ func (p Pass) endWorkspace(entry reconciler.Entry) error {
 		return err
 	}
 	if !isWorktree {
-		return nil
+		// A ship in a configured folder has its own folder too, which goes with it; the configured folder stays.
+		return p.Workspace.Remove(entry)
 	}
 	unsaved, err := p.Workspace.Unsaved(entry.Folder)
 	if err != nil {
@@ -944,8 +957,10 @@ func (p Pass) endWorkspace(entry reconciler.Entry) error {
 func (p Pass) removeStray(state reconciler.State, folder string) error {
 	// An entry crewed earlier in this pass works here now: the reconcile saw it with no folder.
 	for _, entry := range state.Entries {
-		if entry.Folder != "" && (entry.Folder == folder || strings.HasPrefix(entry.Folder, folder+"/") || strings.HasPrefix(folder, entry.Folder+"/")) {
-			return nil
+		for _, used := range []string{entry.Folder, entry.ShipFolder} {
+			if used != "" && (used == folder || strings.HasPrefix(used, folder+"/") || strings.HasPrefix(folder, used+"/")) {
+				return nil
+			}
 		}
 	}
 	stopped, err := p.FolderProcesses.StopIn(folder)

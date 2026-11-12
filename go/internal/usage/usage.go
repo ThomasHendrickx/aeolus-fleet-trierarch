@@ -33,7 +33,9 @@ type Window struct {
 type Ship struct {
 	ShipID string
 	Folder string
-	Logins *Logins
+	// ShipFolder is the ship's own folder, which holds its home in a container; none for a ship crewed before the ship folders.
+	ShipFolder string
+	Logins     *Logins
 }
 
 // Harness is what one harness says of its usage.
@@ -146,7 +148,7 @@ func (r *Reader) readTokens() error {
 		if entry.Folder == "" {
 			continue
 		}
-		ship := Ship{ShipID: entry.ShipID, Folder: entry.Folder}
+		ship := Ship{ShipID: entry.ShipID, Folder: entry.Folder, ShipFolder: entry.ShipFolder}
 		if entry.Login != "" {
 			ship.Logins = &Logins{Login: entry.Login, Earlier: entry.EarlierLogins}
 		}

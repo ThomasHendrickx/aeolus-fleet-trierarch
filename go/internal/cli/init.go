@@ -309,7 +309,7 @@ func (i Init) Run(flags Flags) (Report, error) {
 
 	root := configuration.WorktreeRoot
 	if root == "" {
-		root = i.Paths.Worktrees
+		root = i.Paths.Ships
 	}
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return Report{}, err
