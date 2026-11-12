@@ -1,6 +1,6 @@
 # Design: a trierarch keeps the disk its ships use under control (trierarch#343)
 
-Status: purpose and Q1 to Q6 (each the first option) approved by Thomas on 12 Nov; the design below follows them and Thomas's note on Q6, and takes the pick of Q7 to Q9, open. Nothing is built.
+Status: complete for Thomas's approval. Purpose and Q1 to Q8 (each the first option of the question he answered) approved by Thomas on 12 Nov; Q9 not answered, the design takes its pick. Nothing is built.
 
 ## Purpose
 
@@ -67,7 +67,7 @@ The cache in a container: see Q8.
 
 Thomas asked for pushback where his note is not workable. Four places:
 
-1. **On the host, the variables point a session at its folder; they enforce nothing.** A session runs as the machine's user, and a command that ignores `TMPDIR` or writes a path of its own still writes there. "It can only write there" needs a wall: the container runtime (decision 0039), or a sandbox of the operating system around the session (bubblewrap or Landlock on Linux, Seatbelt on macOS). I propose the harness's own sandbox, not one the trierarch builds: Claude Code's sandbox and Codex's `workspace-write` already use exactly these on both systems, and the trierarch writes their settings to allow writes to the ship's folder and the cache only, with the ship's Podman socket reachable. The ship's Podman service runs outside the sandbox, started by the hold, so test containers still work. A harness without such a sandbox (Copilot, Cursor) is pointed and not held. The container runtime stays the one that holds everything, the harness's own processes included (Q7).
+1. **On the host, the variables point a session at its folder; they enforce nothing.** A session runs as the machine's user, and a command that ignores `TMPDIR` or writes a path of its own still writes there. "It can only write there" needs a wall: the container runtime (decision 0039), or a sandbox of the operating system around the session (bubblewrap or Landlock on Linux, Seatbelt on macOS). Thomas chose no sandbox (Q7): on the host a session is pointed at its folder, not held there, and the container runtime is the one that holds a session to its folder. What a host session writes elsewhere anyway stays the person's (Q6).
 2. **The harness's own files are in the user's home today on the host.** Claude Code keeps its conversations, settings, plugin and login in `~/.claude` (the login in the macOS Keychain on a Mac). `CLAUDE_CONFIG_DIR` moves all of it into the ship's `home`, as a container session has it, and the login comes along as the machine's one long-lived token (`claude setup-token`), as decision 0039 already does for containers; a session on an API key gets its proxy token, as today. Its conversations then go with the ship, after its usage is sent. Codex is different: its ChatGPT login lives in `~/.codex/auth.json` with a refresh token that changes on use, so a copy per ship breaks the login of every other copy. Codex's home stays the user's, with its conversations (`~/.codex/sessions`) outside the ship's folder; only a Codex session on an API key can move. So on the host: Claude Code moves, Codex on a ChatGPT login cannot without losing its login.
 3. **`rm -rf ~/.aeolus/trierarch` also removes the trierarch's configuration, keys, crew token and state**: that is uninstalling the trierarch, not clearing its ships. All ships' files therefore sit in one folder, `ships/`, beside the trierarch's own files: `rm -rf ~/.aeolus/trierarch/ships` clears every ship and the trierarch crews them again from their requests; `rm -rf ~/.aeolus/trierarch` uninstalls it with everything it made. Whether Thomas means the second, the first, or both: Q9.
 4. **A ship's own container storage costs disk, time and a process.** Each ship pulls its own images (about 0.3 GB for Postgres, 1 GB or more for LocalStack), so ten ships hold ten copies, and a fresh ship's first test run waits for its pulls and counts against the registries' pull limits. Its images are kept across its restarts (only containers and volumes are emptied on start), so the cost is once per ship, not per run. Each host ship also runs one idle Podman service. And Podman stores a container's files under ids mapped to the user, which `rm -rf` cannot remove: removal goes through Podman's user namespace (`podman unshare`), as the trash already does for a container's home. A read-only image store shared by all ships, filled by the trierarch, would save the copies but is a part to build and to trim; this design leaves it out.
@@ -137,7 +137,7 @@ After #89 to #92 (row 1), each its own issue, in order:
 2. Each ship's `tmp`: made with the ship, `TMPDIR`, `TMP`, `TEMP` set on the host, mounted as `/tmp` in a container, emptied on every start, removed with the worktree.
 3. Each ship's own container storage and, on the host, its own Podman service on its socket; emptied on every start, removed with the worktree through Podman's user namespace.
 4. The trierarch's cache, the variables pointing at it, and its trim to the configured size.
-5. On the host, Claude Code's home in the ship's folder with the machine's token, and the harness's own sandbox (Q7).
+5. On the host, Claude Code's home in the ship's folder with the machine's token.
 6. The ship's size and its owner told once.
 7. Low disk frees before it tells: trash, old session images, cache.
 8. The tests' own fixes: aeolus-fleet#1581, #345.
@@ -226,16 +226,17 @@ Why 1: the operator chooses the runtime for the hardware (decision 0039), and th
 
 Thomas's note on Q6, verbatim: "An important one: Lets have a format that all file writes need to be put in a dedicated folder. For example .aeolus/trierarch/... each ship get a temp folder in that trierarch folder with <ship_id> as the name. It can only write to that location. It has a tmp sub folder by default as its own tmp folder. Push back if this is not workable. But the idea would be that a rm -rf ~/.aeolus/trierarch would delete all trierarch folders. Making it all easy to remove even by non Aeolus approved practices."
 
-**Q7. Does a session on the host get a sandbox, so it can only write its ship's folder?** (point 1 above)
-1. *(pick)* Yes, the harness's own sandbox where it has one (Claude Code, Codex), allowing writes to the ship's folder and the cache; the container runtime holds everything; a harness without a sandbox is pointed, not held, and the doc says so.
-2. No sandbox: on the host the variables point, and only the container runtime holds.
-3. A sandbox the trierarch builds around the whole session (bubblewrap on Linux, Seatbelt on macOS), the harness's own processes included.
+**Q7. Is one folder per ship workable, and is a host session held to it?** (points 1 to 4 above)
+1. *(Thomas's answer)* One folder per ship, its limits written down as above. A container sees only its ship's folder; on the host the session is pointed there, not held, with no sandbox; test containers go through the trierarch's removal, not `rm -rf`.
+2. As 1, and a host session runs in the harness's own sandbox (Claude Code's sandbox, Codex's `workspace-write`), writing only its ship's folder and the cache.
 
-**Q8. Which cache does a session in a container use?** One cache shared by every session lets one breached session plant a package another session then installs, the very thing a container holds a session away from (decision 0039, Why).
-1. *(pick)* A session in a container keeps its cache in its own home, gone with the ship and counted in its size (Q3); the trierarch's one cache serves host sessions, which share the user anyway.
+Thomas, verbatim: "ok, also makes it clear that the best solution long term is containerized setup"
+
+**Q8. Which cache does a session in a container use?** Thomas: each container ship downloads its packages again; the trierarch's cache serves sessions on the machine itself. One cache shared by every session lets one breached session plant a package another session then installs, the very thing a container holds a session away from (decision 0039, Why).
+1. *(Thomas's answer)* A session in a container keeps its cache in its own home, gone with the ship and counted in its size (Q3); the trierarch's one cache serves host sessions, which share the user anyway.
 2. The trierarch's one cache is mounted into every container, read and write.
 3. It is mounted read-only into every container, and a container's own downloads go to its home.
 
-**Q9. What should `rm -rf` clear?** (point 3 above)
+**Q9. What should `rm -rf` clear?** (point 3 above; not answered, the design takes the pick)
 1. *(pick)* Both, each stated in the trierarch's README: `rm -rf ~/.aeolus/trierarch/ships` clears every ship's files and the trierarch crews them again; `rm -rf ~/.aeolus/trierarch` uninstalls the trierarch with everything it made.
 2. Only `rm -rf ~/.aeolus/trierarch`, the uninstall: ships' files may stay in several parts under it.
