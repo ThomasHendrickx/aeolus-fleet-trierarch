@@ -9,7 +9,7 @@ import { adapterFlagsOf, commandLinesOf, type HarnessFiles } from '../adapters/h
 import { modelOptionsIgnored, withDetectedOptions } from '../core/detected-options.js';
 import { createCheckSessionRuntime } from '../core/check-session-runtime.js';
 import type { AdapterFlag, ContainerHostPort } from '../core/ports.js';
-import type { TrierarchPaths } from '../adapters/paths.js';
+import { longestSocket, socketPathLimit, type TrierarchPaths } from '../adapters/paths.js';
 
 /** `aeolus-trierarch config check`: checks the configuration and gives the effective command per harness. */
 export interface ConfigCheckReport {
@@ -41,6 +41,21 @@ export function runtimeRefused(config: string, refusals: readonly string[]): Tri
   return new TrierarchFileError([`The configuration at ${config} cannot run its sessions in containers:`, ...refusals.map((refusal) => `  ${refusal}`)].join('\n'));
 }
 
+/**
+ * A place of ships/ where a ship's socket path would pass the system's limit,
+ * refused: no socket could be opened there, so the operator names a shorter
+ * place. Config check and the run both say it so.
+ */
+export function checkShipsPlace(at: { paths: TrierarchPaths; shipsRoot?: string; platform: string }): TrierarchFileError | undefined {
+  const place = at.shipsRoot ?? at.paths.ships;
+  const socket = longestSocket(place);
+  const size = Buffer.byteLength(socket);
+  const limit = socketPathLimit(at.platform);
+  return size < limit
+    ? undefined
+    : new TrierarchFileError(`The configuration at ${at.paths.config} keeps the ships' files in ${place}, where a ship's socket path, as ${socket}, is ${String(size)} bytes, past the system's limit of ${String(limit)}: name a shorter place in shipsRoot`);
+}
+
 /** Where the sessions run, in a line. */
 function runtimeLine(runtime: ConfigCheckReport['runtime'], modelTokenFile: string): string {
   return runtime.kind === 'host'
@@ -63,6 +78,10 @@ export async function configCheck(paths: TrierarchPaths, machine: CheckedMachine
     throw new TrierarchFileError(
       `The configuration at ${paths.config} sets a model option for ${[withModel, ...more].join(', ')}: model ids come from detection only (#382), so remove it; aeolus-trierarch detect lists them`,
     );
+  }
+  const shipsPlace = checkShipsPlace({ paths, ...(configured.shipsRoot !== undefined && { shipsRoot: configured.shipsRoot }), platform: process.platform });
+  if (shipsPlace !== undefined) {
+    throw shipsPlace;
   }
   const refusals = await createCheckSessionRuntime({ host, modelTokenFile: paths.modelToken })(configured);
   if (refusals.length > 0) {

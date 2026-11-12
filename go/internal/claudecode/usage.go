@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/usage"
 )
 
@@ -86,7 +87,7 @@ func (u *Usage) TokensOf(ship usage.Ship) ([]usage.HourTokens, error) {
 	}
 	projects := u.Projects
 	if u.Homes != "" {
-		projects = Projects(filepath.Join(u.Homes, ship.ShipID), "")
+		projects = Projects(paths.ShipHome(u.Homes, ship.ShipID, ship.ShipFolder), "")
 	}
 	project := filepath.Join(projects, projectName(ship.Folder))
 	var counted usage.Counter

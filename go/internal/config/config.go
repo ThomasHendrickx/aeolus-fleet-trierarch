@@ -26,8 +26,9 @@ var Schema []byte
 const SchemaReference = "./config.schema.json"
 
 type Configuration struct {
-	Schema       string                `json:"$schema,omitempty"`
-	WorktreeRoot string                `json:"worktreeRoot,omitempty"`
+	Schema string `json:"$schema,omitempty"`
+	// ShipsRoot is the place of every ship's folder, `~/.aeolus/trierarch/ships` when none is named.
+	ShipsRoot    string                `json:"shipsRoot,omitempty"`
 	Runtime      *Runtime              `json:"runtime,omitempty"`
 	Caps         Caps                  `json:"caps"`
 	Repositories map[string]Repository `json:"repositories"`
@@ -39,6 +40,9 @@ type Configuration struct {
 	Logins       *Logins          `json:"logins,omitempty"`
 	// HasLeftoverAip says the file still names an aip, which no session gets any more: a fleet adds aip as an MCP server of its own. It is left out of what is read, so a machine set up before keeps running.
 	HasLeftoverAip bool `json:"-"`
+	// NamesWorktreeRoot says the file still names worktreeRoot, which shipsRoot took the place of: run and config check refuse it
+	// (decision 0013). It is left out of what is read, so every other command still reads the configuration.
+	NamesWorktreeRoot bool `json:"-"`
 }
 
 // Runtime is where the sessions run: on the host, or in a container of the runtime's binary with its caps.
@@ -143,6 +147,9 @@ func Initial() Configuration {
 // leftoverAip is the key a configuration named the aip server by, before a fleet added aip as an MCP server of its own.
 const leftoverAip = "aip"
 
+// oldWorktreeRoot is the key a configuration named the place of the worktrees by, before shipsRoot.
+const oldWorktreeRoot = "worktreeRoot"
+
 // requiredKeys are the keys the schema requires at the top.
 var requiredKeys = []string{"caps", "repositories", "folders", "harnesses"}
 
@@ -162,8 +169,10 @@ func Load(path string) (Configuration, error) {
 		}
 	}
 	_, hasLeftoverAip := keys[leftoverAip]
-	if hasLeftoverAip {
+	_, namesWorktreeRoot := keys[oldWorktreeRoot]
+	if hasLeftoverAip || namesWorktreeRoot {
 		delete(keys, leftoverAip)
+		delete(keys, oldWorktreeRoot)
 		text, err = json.Marshal(keys)
 		if err != nil {
 			return Configuration{}, err
@@ -176,6 +185,7 @@ func Load(path string) (Configuration, error) {
 		return Configuration{}, fmt.Errorf("the configuration at %s does not fit: %v", path, err)
 	}
 	configuration.HasLeftoverAip = hasLeftoverAip
+	configuration.NamesWorktreeRoot = namesWorktreeRoot
 	order, err := keyOrder(keys["harnesses"])
 	if err != nil {
 		return Configuration{}, fmt.Errorf("the configuration at %s does not fit: %v", path, err)

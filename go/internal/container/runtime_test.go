@@ -381,3 +381,28 @@ func TestASessionsSecretVariablesGoInItsEnvFileAloneNeverOnTheCommandLine(t *tes
 		t.Fatalf("held as %q with secret variables %v, want the token in the env file alone", held.Command, held.SecretEnv)
 	}
 }
+
+func TestAShipCrewedFreshHasItsHomeAndItsSocketFolderInItsShipsFolderMadeForItsOwnerAlone(t *testing.T) {
+	r, _ := aContainerRuntime(t)
+	shipFolder := filepath.Join(t.TempDir(), "ships", scout)
+	session := aSession(filepath.Join(shipFolder, "worktree"))
+	session.ShipFolder = shipFolder
+
+	held, err := r.heldAs(session, filesOf(t, r))
+
+	home, sockets := filepath.Join(shipFolder, "home"), filepath.Join(shipFolder, "sockets")
+	words := strings.Join(held.Command, " ")
+	if err != nil || !strings.Contains(words, "--volume "+home+":/home/ubuntu ") || !strings.Contains(words, "--volume "+sockets+":"+sockets+" ") {
+		t.Fatalf("held as %q, %v", held.Command, err)
+	}
+	for _, folder := range []string{home, sockets} {
+		if mode := modeOf(t, folder); mode != 0o700 {
+			t.Errorf("%s has mode %v, want 0700", folder, mode)
+		}
+	}
+	for _, folder := range []string{filepath.Join(r.Homes, scout), filepath.Join(r.Sockets, scout)} {
+		if _, err := os.Lstat(folder); !os.IsNotExist(err) {
+			t.Errorf("%s was made: %v", folder, err)
+		}
+	}
+}

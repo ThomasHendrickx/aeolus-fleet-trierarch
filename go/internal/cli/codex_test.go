@@ -84,7 +84,7 @@ func TestInitTrustsEachPlaceAndTheAeolusPluginsHooksInCodexWhereTheConfiguration
 	if want := []string{"/src/aeolus-fleet", "/notes"}; !slices.Equal(codex.trusted, want) || !slices.Equal(report.CodexTrusted, want) {
 		t.Fatalf("Codex trusted %q, report %q, want %q", codex.trusted, report.CodexTrusted, want)
 	}
-	if want := []string{machine.init.Paths.Worktrees}; !slices.Equal(codex.hooksFrom, want) || !slices.Equal(report.CodexHooksTrusted, []string{"aeolus-fleet@aeolus-fleet:session-start"}) {
+	if want := []string{machine.init.Paths.Ships}; !slices.Equal(codex.hooksFrom, want) || !slices.Equal(report.CodexHooksTrusted, []string{"aeolus-fleet@aeolus-fleet:session-start"}) {
 		t.Fatalf("hooks trusted from %q, report %q, want from %q", codex.hooksFrom, report.CodexHooksTrusted, want)
 	}
 }

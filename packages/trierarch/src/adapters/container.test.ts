@@ -380,7 +380,7 @@ describe('the container a session runs in', () => {
     return readFileSync(`${binary}.words`, 'utf8').replace(/\n$/u, '').split('\n');
   }
 
-  async function started(options: { env?: Record<string, string>; readOnly?: readonly string[]; launch?: readonly string[]; proxyToken?: typeof PROXY_TOKEN } = {}) {
+  async function started(options: { env?: Record<string, string>; readOnly?: readonly string[]; launch?: readonly string[]; proxyToken?: typeof PROXY_TOKEN; shipFolder?: string } = {}) {
     const runner = recordingRunner();
     const runtime = runtimeWith(runner, options.launch === undefined ? {} : { launch: options.launch });
     await runtime.start({
@@ -391,6 +391,7 @@ describe('the container a session runs in', () => {
       ...(options.env !== undefined && { env: options.env }),
       ...(options.readOnly !== undefined && { readOnly: options.readOnly }),
       ...(options.proxyToken !== undefined && { proxyToken: options.proxyToken }),
+      ...(options.shipFolder !== undefined && { shipFolder: options.shipFolder }),
     });
     return { runner, runtime, words: await wordsRun() };
   }
@@ -443,6 +444,16 @@ describe('the container a session runs in', () => {
       home: ['HOME=/home/ubuntu'],
       others: [],
     });
+  });
+
+  it("mounts the home and the socket folder in the ship's folder of a ship crewed fresh, each made for its owner alone, and nothing under the homes or sockets of the ships crewed before", async () => {
+    const shipFolder = join(folder, 'ships', shipId);
+
+    const { words } = await started({ shipFolder });
+
+    const [home, shipSockets] = [join(shipFolder, 'home'), join(shipFolder, 'sockets')];
+    expect(valuesOf(words, '--volume')).toEqual([`${folder}:${folder}`, `${home}:/home/ubuntu`, `${shipSockets}:${shipSockets}`]);
+    expect([statSync(home).mode & 0o777, statSync(shipSockets).mode & 0o777, existsSync(join(homes, shipId)), existsSync(join(sockets, shipId))]).toEqual([0o700, 0o700, false, false]);
   });
 
   it("mounts each of the session's read-only checkouts at its own path, read-only, so the session can change nothing in it (#1182)", async () => {

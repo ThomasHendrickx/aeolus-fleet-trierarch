@@ -1,25 +1,29 @@
 import { lstat, mkdir, realpath, rm, stat } from 'node:fs/promises';
-import { join, relative, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { WorkspacePort } from '../core/ports.js';
 import { foldersUnderRoot, isUnderRoot } from './folders-under-root.js';
 import { gitInFolder, messageOf, RefusedRead } from './git-in-folder.js';
+import { WORKTREE_FOLDER } from './paths.js';
 import { type CommandResult, runCommand } from './run-command.js';
+import { discard, type MoveWithinUserNamespace } from './trash.js';
 import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
 
 /**
  * Workspaces (docs/architecture.md, "First adapters"): a git worktree of a
- * configured repository under the worktree root, one folder per ship
- * (`<root>/<repository>/<ship>`), detached at the settings' ref or the
- * repository's HEAD; or a configured folder used as it is. The repository is
+ * configured repository in the ship's own folder (`<ships>/<shipId>/worktree`),
+ * or for a ship crewed before the ship folders under the worktree root it was
+ * made in (`<root>/<repository>/<ship>`), detached at the settings' ref or the
+ * repository's HEAD; or a configured folder used as it is. A ship's folder goes
+ * whole into the trash beside it, whatever it holds. The repository is
  * fetched first, and a ref the remote has a branch for is that remote branch,
  * so a ship starts from current code, not from a stale local branch. A fetch
  * that fails (offline, no remote) leaves what the repository has.
  * A trusted repository the machine does not have yet is cloned first
- * (aeolus-fleet#384). Any folder under the root is listed and removed,
- * whatever made it (gap rule 2); nothing outside it. In a configured
+ * (aeolus-fleet#384). Any folder under either root is listed and removed,
+ * whatever made it (gap rule 2); nothing outside them. In a configured
  * repository's checkout, a local branch checked out in no worktree whose
  * remote branch the remote no longer has is deleted (gap rule 5).
  */
@@ -32,14 +36,55 @@ const REMOTE_READ_TIMEOUT_MS = 60_000;
 /** What a folder the host does not read holds, as unsaved: not known, so it is told with why, never taken for clean. */
 export const REFUSED_PREFIX = 'refused, ';
 
-export function createGitWorkspace(options: {
-  configuration: TrierarchConfiguration;
-  root: string;
-  clones?: TrustedClones;
-  /** Git in a ship's folder; a worktree's, unless the workspaces are clones. */
-  inFolder?: (folder: string, args: readonly string[]) => Promise<CommandResult>;
-}): WorkspacePort {
+/** A ship's folder's mode: only its owner opens it. */
+const SHIP_FOLDER_MODE = 0o700;
+
+/** Where the places of the workspaces are: the place of ships/, and the worktree root of the ships crewed before the ship folders. */
+export interface WorkspaceRoots {
+  /** The place of every ship's folder, `<root>/<shipId>/`; a configured one holds the worktrees of the ships crewed before the ship folders too. */
+  readonly root: string;
+  /** The worktree root of the ships crewed before the ship folders, where their worktrees stay until they are crewed fresh, when it is not the root. */
+  readonly before?: string;
+}
+
+/** The roots a workspace could be under: the place of ships/, and the worktree root of the ships crewed before. */
+export function rootsOf(at: WorkspaceRoots): readonly string[] {
+  return at.before === undefined || at.before === at.root ? [at.root] : [at.root, at.before];
+}
+
+/** Where the ship's worktree or clone is made: in its ship's folder, or with none under the worktree root of the ships crewed before by its name. */
+export function workspaceFolderOf(at: WorkspaceRoots & { repository: string; shipName: string; shipFolder?: string }): string {
+  return at.shipFolder === undefined ? join(at.before ?? at.root, at.repository, at.shipName) : join(at.shipFolder, WORKTREE_FOLDER);
+}
+
+/** Makes the folder the worktree or clone is made in: the ship's folder for its owner alone, or the repository's under its root. */
+export async function makeParentOf(folder: string, shipFolder: string | undefined): Promise<void> {
+  if (shipFolder === undefined) {
+    await mkdir(dirname(folder), { recursive: true });
+    return;
+  }
+  await mkdir(dirname(shipFolder), { recursive: true });
+  await mkdir(shipFolder, { recursive: true, mode: SHIP_FOLDER_MODE });
+}
+
+/** Moves the ship's folder into the trash beside it, at once, so nothing reads it again; one already gone is removed already. Its worktree's record in its repository goes with the next prune. */
+export async function removeShipFolder(shipFolder: string, withinUserNamespace?: MoveWithinUserNamespace): Promise<void> {
+  if ((await lstat(shipFolder).catch(() => undefined)) === undefined) {
+    return;
+  }
+  await discard(shipFolder, { at: new Date(), ...(withinUserNamespace !== undefined && { withinUserNamespace }) });
+}
+
+export function createGitWorkspace(
+  options: {
+    configuration: TrierarchConfiguration;
+    clones?: TrustedClones;
+    /** Git in a ship's folder; a worktree's, unless the workspaces are clones. */
+    inFolder?: (folder: string, args: readonly string[]) => Promise<CommandResult>;
+  } & WorkspaceRoots,
+): WorkspacePort {
   const { configuration, root, clones, inFolder = gitInFolder } = options;
+  const roots = rootsOf(options);
   const said = (args: readonly string[], result: CommandResult): string => {
     if (result.status !== 0) {
       // Git's message follows the subcommand at once: a reason is cut at a length, and the command's paths would use it up.
@@ -77,7 +122,8 @@ export function createGitWorkspace(options: {
     return known.has(folder) || known.has(await realpath(folder).catch(() => folder));
   };
   const repositoryOf = async (folder: string): Promise<string | undefined> => {
-    const [repository] = relative(root, folder).split(sep);
+    const inRoot = roots.map((each) => relative(each, folder)).find((path) => path !== '' && !path.startsWith('..') && !isAbsolute(path));
+    const [repository] = inRoot?.split(sep) ?? [];
     if (repository === undefined) {
       return undefined;
     }
@@ -88,7 +134,8 @@ export function createGitWorkspace(options: {
   const isRepository = async (name: string): Promise<boolean> => configuration.repositories[name] !== undefined || (await clonedPath(clones, name)) !== undefined;
 
   return {
-    prepare: async ({ shipName, workspace }) => {
+    shipFolderOf: (shipId) => Promise.resolve(join(root, shipId)),
+    prepare: async ({ shipName, workspace, shipFolder }) => {
       if (workspace.kind === 'folder') {
         const folder = configuration.folders[workspace.name]?.path;
         if (folder === undefined) {
@@ -101,10 +148,10 @@ export function createGitWorkspace(options: {
         throw new Error(`The configuration has no repository ${workspace.repository}`);
       }
       await cloneWhenMissing(clones, { repository: workspace.repository, path: repository });
-      const folder = join(root, workspace.repository, shipName);
+      const folder = workspaceFolderOf({ ...options, repository: workspace.repository, shipName, ...(shipFolder !== undefined && { shipFolder }) });
       // A worktree a stop mid-crew left is used as it is.
       if (!(await exists(folder))) {
-        await mkdir(join(root, workspace.repository), { recursive: true });
+        await makeParentOf(folder, shipFolder);
         await runCommand('git', { args: ['-C', repository, 'fetch', '--quiet', REMOTE] });
         const ref = workspace.ref === undefined ? await defaultRef(repository) : await resolve(repository, workspace.ref);
         await git(['-C', repository, 'worktree', 'add', '--detach', folder, ...(ref === undefined ? [] : [ref])]);
@@ -134,15 +181,15 @@ export function createGitWorkspace(options: {
       }
     },
     remove: async (folder) => {
-      if (!(await isUnderRoot(root, folder))) {
-        throw new Error(`${folder} is not under ${root}, or is its trash: the trierarch removes only a folder under the root`);
+      if (!(await isUnderRoot(roots, folder))) {
+        throw new Error(`${folder} is not under ${roots.join(' or ')}, or is its trash: the trierarch removes only a folder under the root`);
       }
       const repository = await repositoryOf(folder);
       if (repository !== undefined && (await isWorktreeOf(repository, folder))) {
         await git(['-C', repository, 'worktree', 'remove', '--force', folder]);
         return;
       }
-      // Anything else under the root goes as it is: a plain clone, a worktree of another repository, a folder git does not know.
+      // Anything else under the root goes whole into the trash beside it: a plain clone, a worktree of another repository, a folder git does not know.
       const found = await lstat(folder).catch(() => undefined);
       if (found === undefined) {
         return;
@@ -150,8 +197,16 @@ export function createGitWorkspace(options: {
       if (!found.isDirectory()) {
         throw new Error(`${folder} is no folder: the trierarch removes only a folder under the root`);
       }
-      await rm(folder, { recursive: true, force: true });
+      // One straight under the worktree root of the ships crewed before has no trash beside it a pass empties, so the host removes it; any other, a stray ship's folder among them, goes into the trash beside it.
+      const { before } = options;
+      if (before !== undefined && before !== root && [before, await realpath(before).catch(() => before)].includes(dirname(folder))) {
+        await rm(folder, { recursive: true, force: true });
+        return;
+      }
+      await discard(folder, { at: new Date() });
     },
+    removeShipFolder: async (shipFolder) => removeShipFolder(shipFolder),
+    hasShipFolder: async (shipFolder) => (await lstat(shipFolder).catch(() => undefined)) !== undefined,
     prune: async (repository) => {
       const path = configuration.repositories[repository]?.path;
       if (path === undefined) {
@@ -183,6 +238,6 @@ export function createGitWorkspace(options: {
         }
       }
     },
-    foldersUnderRoot: async () => foldersUnderRoot(root, isRepository),
+    foldersUnderRoot: async () => foldersUnderRoot(roots, isRepository),
   };
 }

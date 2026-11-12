@@ -70,6 +70,8 @@ export const newId = createIdGenerator();
 /** argo, the owner of every ship a test gives no other. */
 export const ARGO: ShipOwner = { shipId: newId('ship'), name: 'argo' };
 export const WORKTREE_ROOT = '/home/thomas/.aeolus/trierarch/worktrees';
+/** The place of every ship's folder. */
+export const SHIPS_ROOT = '/home/thomas/.aeolus/trierarch/ships';
 export const NOTES_FOLDER = '/home/thomas/notes';
 export const CHECKOUTS_ROOT = '/home/thomas/.aeolus/trierarch/checkouts';
 
@@ -499,6 +501,8 @@ export class InMemoryHarness implements HarnessPort {
   readonly launches: { shipId: ShipId; shipName: string; folder: string; workspace: TrierarchWorkspace; isFirstStart: boolean; firstPrompt?: string }[] = [];
   /** The launch id of each launch, in order (#490). */
   readonly launchIds: string[] = [];
+  /** The ship's folder each launch was given, in order; none for a ship crewed before the ship folders. */
+  readonly launchedShipFolders: { shipId: ShipId; shipFolder?: string }[] = [];
   /** The login each launch started its session on, in order (api keys K6). */
   readonly launchedLogins: { shipId: ShipId; login: Login }[] = [];
   /** The read-only checkouts each launch gave its session, in order (#1182). */
@@ -548,13 +552,14 @@ export class InMemoryHarness implements HarnessPort {
     return Promise.resolve();
   }
 
-  launch(session: { shipId: ShipId; shipName: string; folder: string; workspace: TrierarchWorkspace; checkouts: readonly Checkout[]; isFirstStart: boolean; launchId: string; login: Login; firstPrompt?: string }): Promise<void> {
+  launch(session: { shipId: ShipId; shipName: string; folder: string; shipFolder?: string; workspace: TrierarchWorkspace; checkouts: readonly Checkout[]; isFirstStart: boolean; launchId: string; login: Login; firstPrompt?: string }): Promise<void> {
     if (this.isFailingLaunch) {
       return Promise.reject(new Error(`the harness could not start ${session.shipId}`));
     }
     const { shipId, shipName, folder, workspace, checkouts, isFirstStart, launchId, firstPrompt } = session;
     this.launches.push({ shipId, shipName, folder, workspace, isFirstStart, ...(firstPrompt !== undefined && { firstPrompt }) });
     this.launchIds.push(launchId);
+    this.launchedShipFolders.push({ shipId, ...(session.shipFolder !== undefined && { shipFolder: session.shipFolder }) });
     this.launchedLogins.push({ shipId, login: session.login });
     this.launchedCheckouts.push({ shipId, checkouts });
     this.processes.sessions.set(shipId, 'running');
@@ -628,25 +633,68 @@ export class InMemoryHarness implements HarnessPort {
     if (this.pluginProblem !== undefined) {
       return Promise.reject(new Error(this.pluginProblem));
     }
-    this.asked.push(session);
+    const { shipId, folder, launchId, model } = session;
+    this.asked.push({ shipId, folder, launchId, ...(model !== undefined && { model }) });
     return Promise.resolve(this.seen.get(session.shipId) ?? { kind: 'active' });
   }
 }
 
+/**
+ * The workspaces, each worktree a folder under the root by its ship's name
+ * whatever ship's folder it was made for: the ship's folder it was made for is
+ * kept with it, and goes with it.
+ */
 export class InMemoryWorkspace implements WorkspacePort {
-  /** Folders on disk, with whether they hold changes, and what removing one would discard, as git says it. */
-  readonly folders = new Map<string, { shipId?: ShipId; hasChanges: boolean; unsaved: string[] }>([[NOTES_FOLDER, { hasChanges: false, unsaved: [] }]]);
+  /** Folders on disk, with the ship's folder each was made for, whether they hold changes, and what removing one would discard, as git says it. */
+  readonly folders = new Map<string, { shipId?: ShipId; shipFolder?: string; hasChanges: boolean; unsaved: string[] }>([[NOTES_FOLDER, { hasChanges: false, unsaved: [] }]]);
+  /** The ships' folders removed, in order. */
+  readonly removedShipFolders: string[] = [];
 
   /** The configured folders a folder workspace names, by name. */
   constructor(private readonly configured: TrierarchConfiguration['folders'] = CONFIGURATION.folders) {}
 
-  prepare(at: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace }): Promise<{ folder: string }> {
-    const { shipId, shipName, workspace } = at;
+  shipFolderOf(shipId: ShipId): Promise<string> {
+    return Promise.resolve(`${SHIPS_ROOT}/${shipId}`);
+  }
+
+  /** The ships' folders removed by hand, as when ships/ is removed. */
+  readonly gone = new Set<string>();
+
+  hasShipFolder(shipFolder: string): Promise<boolean> {
+    return Promise.resolve(!this.gone.has(shipFolder));
+  }
+
+  /** Someone removes the ship's folder by hand, and with it the worktree made for it. */
+  removeByHand(shipFolder: string): void {
+    this.gone.add(shipFolder);
+    for (const [path] of [...this.folders.entries()].filter(([each, { shipFolder: madeFor }]) => each === shipFolder || each.startsWith(`${shipFolder}/`) || madeFor === shipFolder)) {
+      this.folders.delete(path);
+    }
+  }
+
+  prepare(at: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace; shipFolder?: string }): Promise<{ folder: string }> {
+    const { shipId, shipName, workspace, shipFolder } = at;
     const folder = workspace.kind === 'folder' ? (this.configured[workspace.name]?.path ?? NOTES_FOLDER) : `${WORKTREE_ROOT}/${workspace.repository}/${shipName}`;
     if (!this.folders.has(folder)) {
-      this.folders.set(folder, { shipId, hasChanges: false, unsaved: [] });
+      this.folders.set(folder, { shipId, ...(shipFolder !== undefined && workspace.kind === 'worktree' && { shipFolder }), hasChanges: false, unsaved: [] });
+    }
+    if (shipFolder !== undefined && !this.folders.has(shipFolder)) {
+      this.folders.set(shipFolder, { shipId, hasChanges: false, unsaved: [] });
+      this.gone.delete(shipFolder);
     }
     return Promise.resolve({ folder });
+  }
+
+  removeShipFolder(shipFolder: string): Promise<void> {
+    if (this.isFailingRemove) {
+      return Promise.reject(new Error(`the trash cannot take ${shipFolder}`));
+    }
+    this.removedShipFolders.push(shipFolder);
+    // What it holds goes with it, the worktree made for it too.
+    for (const [path] of [...this.folders.entries()].filter(([each, { shipFolder: madeFor }]) => each === shipFolder || each.startsWith(`${shipFolder}/`) || madeFor === shipFolder)) {
+      this.folders.delete(path);
+    }
+    return Promise.resolve();
   }
 
   isClean(folder: string): Promise<boolean> {
@@ -696,7 +744,7 @@ export class InMemoryWorkspace implements WorkspacePort {
 
   /** Every folder on disk under the root, whatever it is. */
   foldersUnderRoot(): Promise<readonly string[]> {
-    return Promise.resolve([...this.folders.keys()].filter((path) => path.startsWith(`${WORKTREE_ROOT}/`)));
+    return Promise.resolve([...this.folders.keys()].filter((path) => path.startsWith(`${WORKTREE_ROOT}/`) || path.startsWith(`${SHIPS_ROOT}/`)));
   }
 
   /** Someone changes a file in the folder, as git status shows the change. */
@@ -838,20 +886,27 @@ export class InMemoryShipSockets implements ShipSocketsPort {
   readonly openShips = new Set<ShipId>();
   /** Each open, in order, with how many launches of its ship there had been then. */
   readonly opens: { shipId: ShipId; launchesBefore: number }[] = [];
+  /** The ship's folder each socket was last opened and closed in, by ship; none for a ship crewed before the ship folders. */
+  readonly openedIn = new Map<ShipId, string | undefined>();
+  readonly closedIn = new Map<ShipId, string | undefined>();
   constructor(private readonly harnesses: readonly InMemoryHarness[]) {}
 
+  /** The socket of a ship crewed fresh, in the sockets folder of its ship's folder. */
   static pathOf(shipId: ShipId): string {
-    return `/home/thomas/.aeolus/trierarch/sockets/${shipId}/fleet.sock`;
+    return `${SHIPS_ROOT}/${shipId}/sockets/fleet.sock`;
   }
 
-  open(shipId: ShipId): Promise<string> {
+  open(shipId: ShipId, shipFolder?: string): Promise<string> {
     this.openShips.add(shipId);
+    this.openedIn.set(shipId, shipFolder);
     this.opens.push({ shipId, launchesBefore: this.harnesses.flatMap((harness) => harness.launches).filter((launch) => launch.shipId === shipId).length });
-    return Promise.resolve(InMemoryShipSockets.pathOf(shipId));
+    // One crewed before the ship folders has it under the sockets folder.
+    return Promise.resolve(shipFolder === undefined ? `/home/thomas/.aeolus/trierarch/sockets/${shipId}/fleet.sock` : `${shipFolder}/sockets/fleet.sock`);
   }
 
-  close(shipId: ShipId): Promise<void> {
+  close(shipId: ShipId, shipFolder?: string): Promise<void> {
     this.openShips.delete(shipId);
+    this.closedIn.set(shipId, shipFolder);
     return Promise.resolve();
   }
 
@@ -957,7 +1012,11 @@ export class InMemoryUsage implements UsagePort {
     return Promise.resolve(this.madeAtOf.get(folder) ?? FOLDER_MADE_AT);
   }
 
-  tokensOf(ship: { shipId: ShipId; harness: string; folder: string; logins?: SessionLogins }): Promise<readonly HourTokens[]> {
+  /** The ship's folder each ship's tokens were last read in, by ship; none for a ship crewed before the ship folders. */
+  readonly readIn = new Map<ShipId, string | undefined>();
+
+  tokensOf(ship: { shipId: ShipId; harness: string; folder: string; shipFolder?: string; logins?: SessionLogins }): Promise<readonly HourTokens[]> {
+    this.readIn.set(ship.shipId, ship.shipFolder);
     if (this.unreadable.has(ship.shipId)) {
       return Promise.reject(new Error('EACCES'));
     }

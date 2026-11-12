@@ -7,7 +7,7 @@ import type { HourTokens, SubscriptionWindow, UsagePort } from '../core/ports.js
 
 /** What one harness says of its usage (#353): a ship's tokens from its transcripts, and its subscription's windows. */
 export interface HarnessUsageReader {
-  tokensOf(ship: { shipId: ShipId; folder: string; logins?: SessionLogins }): Promise<readonly HourTokens[]>;
+  tokensOf(ship: { shipId: ShipId; folder: string; shipFolder?: string; logins?: SessionLogins }): Promise<readonly HourTokens[]>;
   subscription(): Promise<readonly SubscriptionWindow[] | undefined>;
 }
 

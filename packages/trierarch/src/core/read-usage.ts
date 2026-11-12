@@ -66,7 +66,7 @@ export function createReadUsage(deps: { usage: UsagePort; state: StatePort; cloc
       }
       // An entry saved before its login was kept says no login, and its tokens none (K8).
       const logins = entry.login === undefined ? undefined : { login: entry.login, ...(entry.earlierLogins !== undefined && { earlierLogins: entry.earlierLogins }) };
-      const models = await deps.usage.tokensOf({ shipId: entry.shipId, harness: entry.harness, folder: entry.folder, ...(logins !== undefined && { logins }) }).catch((error: unknown) => {
+      const models = await deps.usage.tokensOf({ shipId: entry.shipId, harness: entry.harness, folder: entry.folder, ...(entry.shipFolder !== undefined && { shipFolder: entry.shipFolder }), ...(logins !== undefined && { logins }) }).catch((error: unknown) => {
         deps.logger.warn(`Could not read the usage of ${entry.shipId}: ${messageOf(error)}`);
         return undefined;
       });

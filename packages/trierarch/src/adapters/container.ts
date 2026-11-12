@@ -6,7 +6,7 @@ import { idSchema, type ShipId } from '@aeolus-fleet/common';
 import type { ObservedSession, SessionRuntime } from '../core/ports.js';
 import type { SessionRoots } from './caller-check.js';
 import { createHoldRuntime } from './hold-runtime.js';
-import { shipHome } from './paths.js';
+import { shipHome, shipSockets as socketsOf } from './paths.js';
 import { runCommand, type CommandResult } from './run-command.js';
 
 const PREFIX = 'trierarch-';
@@ -50,9 +50,9 @@ export interface ContainerRuntimeOptions {
   readonly image: string;
   /** The file holding the machine's long-lived model token, read at every start. */
   readonly tokenFile: string;
-  /** Where the ships' homes are kept on the host, one folder per ship, each mounted as its container's home. */
+  /** Where the homes of the ships crewed before the ship folders are kept on the host, one folder per ship, each mounted as its container's home; a ship crewed fresh has its home in its ship's folder. */
   readonly homes: string;
-  /** Where the ships' sockets are kept on the host, one folder per ship, each mounted at its own path (decision 0026). */
+  /** Where the sockets of the ships crewed before the ship folders are kept on the host, one folder per ship, each mounted at its own path (decision 0026); a ship crewed fresh has its sockets folder in its ship's folder. */
   readonly sockets: string;
   /** The memory cap of each container, as the runtime takes it (`4g`). */
   readonly memory: string;
@@ -162,12 +162,13 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
     platform: options.platform,
     launch: options.launch ?? [],
     beside: containers,
-    heldAs: async ({ shipId, folder, command, env = {}, readOnly = [], proxyToken }, files) => {
+    heldAs: async ({ shipId, folder, command, env = {}, readOnly = [], proxyToken, shipFolder }, files) => {
       const login: Record<string, string> = proxyToken === undefined ? { [MODEL_TOKEN_VARIABLE]: (await readFile(options.tokenFile, 'utf8')).trim() } : {};
       const content = envFileOf({ ...env, ...login });
       const network = proxyToken === undefined ? [] : ['--network', proxyNetworkOf(await proxyPortOf(options.proxyUrl))];
-      const home = shipHome(options.homes, shipId);
-      const shipSockets = join(options.sockets, shipId);
+      const ship = { shipId, ...(shipFolder !== undefined && { shipFolder }) };
+      const home = shipHome(options.homes, ship);
+      const shipSockets = socketsOf(options.sockets, ship);
       // The runtime mounts only a folder that exists, and the ship's socket may not have made it yet.
       await mkdir(shipSockets, { recursive: true, mode: 0o700 });
       await mkdir(home, { recursive: true, mode: 0o700 });

@@ -1,7 +1,8 @@
 import { realpath } from 'node:fs/promises';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import type { TrierarchConfiguration } from '@aeolus-fleet/common';
+import type { TrierarchConfiguration } from './files.js';
 
 import type { FolderProcessesPort, SessionRuntime, TrashPort, WorkspacePort } from '../core/ports.js';
 import type { SessionRoots } from './caller-check.js';
@@ -40,7 +41,12 @@ export interface RuntimeAdapters {
   readonly folderProcesses: FolderProcessesPort;
   /** The homes of the ships, one each, for sessions in containers; none on the host, where every session shares the user's. */
   readonly shipHomes?: { homes: string; managedSettings: string; moveWithinUserNamespace?: MoveWithinUserNamespace };
-  /** The trash beside each repository's clones and the ships' homes, emptied every pass: within the runtime's user namespace too in containers, by the host's own removal alone on the host. */
+  /**
+   * The trash beside the ships' folders under each root, beside each
+   * repository's clones under it and beside the homes of the ships crewed
+   * before the ship folders, emptied every pass: within the runtime's user
+   * namespace too in containers, by the host's own removal alone on the host.
+   */
   readonly trash: TrashPort;
   /** Where a session reaches the model proxy the trierarch reaches at the url (headless H16): there on the host, on its own loopback in a container, where only the proxy's port is forwarded. */
   readonly modelProxyUrlOf: (url: string) => string;
@@ -67,20 +73,25 @@ export function runtimeAdaptersOf(at: {
   program?: readonly string[];
 }): RuntimeAdapters {
   const { configuration, paths, version, launch, managedSettings, clones: trusted } = at;
-  const root = configuration.worktreeRoot ?? paths.worktrees;
+  // Every ship's folder is under the place of ships/; the worktrees of the ships crewed before the ship folders stay under the root they
+  // were made in: the configured place, else the old default beside ships/.
+  const root = configuration.shipsRoot ?? paths.ships;
+  const before = configuration.shipsRoot === undefined ? paths.worktrees : undefined;
+  const roots = before === undefined ? [root] : [root, before];
+  const beside = async (): Promise<readonly string[]> => [...roots, ...(await foldersUnder(roots)())];
   const { runtime } = configuration;
   if (runtime?.kind !== 'container') {
     return {
       modelProxyUrlOf: (url) => url,
       sessions: hostSessions({ paths, version, launch, ...(at.program !== undefined && { program: at.program }) }),
-      workspace: createGitWorkspace({ configuration, root, ...(trusted !== undefined && { clones: trusted }) }),
+      workspace: createGitWorkspace({ configuration, root, ...(before !== undefined && { before }), ...(trusted !== undefined && { clones: trusted }) }),
       folderProcesses: createFolderProcesses(),
-      trash: createTrash({ beside: foldersUnder([root]) }),
+      trash: createTrash({ beside }),
     };
   }
   // A clone or a ship's home whose own top the host cannot give its write goes to the trash as the runtime moves it.
   const moveAsRuntime = moveWithinUserNamespace(runtime.binary);
-  const clones = createCloneWorkspace({ configuration, root, moveWithinUserNamespace: moveAsRuntime, ...(trusted !== undefined && { clones: trusted }) });
+  const clones = createCloneWorkspace({ configuration, root, ...(before !== undefined && { before }), moveWithinUserNamespace: moveAsRuntime, ...(trusted !== undefined && { clones: trusted }) });
   return {
     sessions: createContainerRuntime({
       binary: runtime.binary,
@@ -100,13 +111,15 @@ export function runtimeAdaptersOf(at: {
     // The container mounts the folder at the path it is given, where the plugin inside keys it by `pwd -P` as the host's does: one path for both, the real one.
     workspace: {
       ...clones,
+      // By the same real path, as its workspace in it is.
+      shipFolderOf: async (shipId) => join(await realpath(root).catch(() => root), shipId),
       prepare: async (at) => ({ folder: await realpath((await clones.prepare(at)).folder) }),
       // Listed by the same real paths, so a folder a ship is crewed in is never taken for one no crewed ship uses.
       foldersUnderRoot: async () => Promise.all((await clones.foldersUnderRoot()).map(async (folder) => realpath(folder).catch(() => folder))),
     },
     folderProcesses: createContainerFolderProcesses({ binary: runtime.binary, host: createFolderProcesses() }),
     shipHomes: { homes: paths.homes, managedSettings, moveWithinUserNamespace: moveAsRuntime },
-    trash: createTrash({ beside: async () => [...(await foldersUnder([root])()), paths.homes], unshare: removeWithinUserNamespace(runtime.binary) }),
+    trash: createTrash({ beside: async () => [...(await beside()), paths.homes], unshare: removeWithinUserNamespace(runtime.binary) }),
     modelProxyUrlOf: containerProxyUrl,
   };
 }

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -223,5 +224,37 @@ func TestRunRefusesARuntimeThatCannotHoldASessionToItsShipBeforeAnyPass(t *testi
 
 	if code == 0 || passes != 0 || !strings.Contains(output, "cannot run its sessions in containers:\n  podman runs rootful") {
 		t.Fatalf("run = %d %q after %d passes, want a refusal before any", code, output, passes)
+	}
+}
+
+func TestAPlaceOfShipsWhereASocketPathPassesTheSystemsLimitIsRefusedNamingTheSettingToShorten(t *testing.T) {
+	at := paths.Of("/home/me", "")
+	// 106 bytes: past macOS's 104, under Linux's 108.
+	place := "/home/me/" + strings.Repeat("p", 47)
+	configuration := config.Configuration{ShipsRoot: place}
+	socket := place + "/shp_00000000000000000000000000/sockets/fleet.sock"
+
+	err := checkShipsPlace(at, configuration, "darwin")
+
+	want := fmt.Sprintf("The configuration at /home/me/.aeolus/trierarch/config.json keeps the ships' files in %s, where a ship's socket path, as %s, is %d bytes, past the system's limit of 104: name a shorter place in shipsRoot", place, socket, len(socket))
+	if err == nil || err.Error() != want {
+		t.Fatalf("checkShipsPlace = %v, want %q", err, want)
+	}
+	if err := checkShipsPlace(at, configuration, "linux"); err != nil {
+		t.Fatalf("on Linux, a %d-byte socket path is under its limit: %v", len(socket), err)
+	}
+	if err := checkShipsPlace(at, config.Configuration{}, "darwin"); err != nil {
+		t.Fatalf("ships/ in the trierarch's folder: %v", err)
+	}
+}
+
+func TestAConfigurationThatStillNamesWorktreeRootIsRefusedNamingItsNewName(t *testing.T) {
+	at := paths.Of("/home/me", "")
+
+	err := checkShipsPlace(at, config.Configuration{NamesWorktreeRoot: true}, "linux")
+
+	want := "The configuration at /home/me/.aeolus/trierarch/config.json names worktreeRoot, which is now shipsRoot: rename the line to shipsRoot"
+	if err == nil || err.Error() != want {
+		t.Fatalf("checkShipsPlace = %v, want %q", err, want)
 	}
 }

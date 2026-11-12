@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { newId } from '../../test/support/in-memory.js';
-import { createClaudeCodeUsage } from './claude-code-usage.js';
+import { claudeCodeProjectsOf, createClaudeCodeUsage } from './claude-code-usage.js';
 import type { CommandResult } from './run-command.js';
 
 // On transcripts of Claude Code 2.1.29x and a print-mode turn of 2.1.306, captured from real sessions, every text elided (#353).
@@ -127,5 +127,19 @@ describe("Claude Code's subscription, from a print-mode turn (#353)", () => {
 
   it('says nothing when the turn says nothing of its windows, as when it is not logged in', async () => {
     expect(await aUsage().subscription()).toBeUndefined();
+  });
+});
+
+describe("a Claude Code ship's projects folder, where its transcripts are", () => {
+  const shipId = newId('ship');
+
+  it("is the user's on the host, for every ship", () => {
+    expect(claudeCodeProjectsOf({ projects: '/home/me/.claude/projects' })({ shipId, shipFolder: `/ships/${shipId}` })).toBe('/home/me/.claude/projects');
+  });
+
+  it("is in the home in its ship's folder in a container, or for a ship crewed before the ship folders in its home under the homes", () => {
+    const projectsOf = claudeCodeProjectsOf({ projects: '/home/me/.claude/projects', homes: '/homes' });
+
+    expect([projectsOf({ shipId, shipFolder: `/ships/${shipId}` }), projectsOf({ shipId })]).toEqual([`/ships/${shipId}/home/.claude/projects`, `/homes/${shipId}/.claude/projects`]);
   });
 });

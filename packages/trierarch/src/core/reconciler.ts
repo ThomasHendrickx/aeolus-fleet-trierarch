@@ -2,7 +2,7 @@ import type { CrewStatus, ShipId, TrierarchConfiguration } from '@aeolus-fleet/c
 
 import { checkSettings, launchMarkerRefusal, trustRefusal, unacceptedRefusal, type CheckedSettings, type Refusal } from './check-settings.js';
 import { MODEL_OPTION } from './detected-options.js';
-import { putEntry, withState, type Entry, type TrierarchState } from './entry.js';
+import { putEntry, withState, type Entry, type EntryState, type TrierarchState } from './entry.js';
 import type { StartOutcome } from './failed-starts.js';
 import type { AssignedRequest, ClearRequestToMe, InboxAnswer, LaunchSeen, ObservedSession, TrustedPlaces, Turn, WrittenStatus } from './ports.js';
 import { decideRestart, exitsInWindow } from './restart-policy.js';
@@ -28,6 +28,8 @@ export interface Observed {
   readonly withoutIdentity: readonly ShipId[];
   /** By ship id, why its session cannot start on its login now, as a key not ready (api keys K9): it waits, restarting, with no restart counted. */
   readonly startProblems?: Readonly<Record<string, string>>;
+  /** The entries crewed here whose ship's folder is gone, as when ships/ was removed by hand: each is crewed again in a fresh one. */
+  readonly shipFoldersGone?: readonly ShipId[];
 }
 
 export type Action =
@@ -106,6 +108,14 @@ const CRASHED_NOTE = 'blocked: session crashed, restart budget spent';
 
 /** The statuses the reconciler writes; crewing and running at the first crew are the crew's own to write. */
 const WRITTEN: ReadonlySet<Entry['state']> = new Set(['running', 'restarting', 'crashed']);
+
+/** The states of a crew whose ship's folder is looked at each pass, a crewing one once its session started: one gone has the ship crewed again in a fresh one. */
+const SHIP_FOLDER_KEPT: ReadonlySet<EntryState> = new Set(['running', 'restarting', 'crashed']);
+
+/** Whether the entry's crew keeps its ship's folder: running, restarting or crashed, or crewing once its session started. */
+export function keepsShipFolder(entry: Entry): boolean {
+  return entry.shipFolder !== undefined && (SHIP_FOLDER_KEPT.has(entry.state) || (entry.state === 'crewing' && entry.launchedAt !== undefined));
+}
 
 /** The states whose folder holds the ship's identity: a crewing one has none until it registers (#664). */
 export const HOLDS_IDENTITY: ReadonlySet<Entry['state']> = new Set(['running', 'restarting', 'crashed']);
@@ -222,7 +232,8 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
 
   // Every folder under the root no crewed ship uses goes, whether the trierarch made it or not; a configured folder is never one (gap rule 2).
   // A used folder keeps what holds it and everything in it.
-  const inUse = [...Object.values(next.entries).flatMap((entry) => (entry.folder === undefined ? [] : [entry.folder])), ...Object.values(configuration.folders).map((folder) => folder.path)];
+  // A ship's folder too, with everything in it, wherever its workspace is.
+  const inUse = [...Object.values(next.entries).flatMap((entry) => [entry.folder, entry.shipFolder].filter((folder) => folder !== undefined)), ...Object.values(configuration.folders).map((folder) => folder.path)];
   const strays = observed.folders.filter((each) => !inUse.some((used) => used === each || used.startsWith(`${each}/`) || each.startsWith(`${used}/`)));
   // One under a stray goes with it.
   for (const folder of strays.filter((each) => !strays.some((other) => each.startsWith(`${other}/`)))) {
@@ -267,7 +278,8 @@ function entryOf(checked: CheckedSettings, at: { shipId: ShipId; settingsVersion
 /**
  * A new settings version of a request it crews (Restart or Edit): the
  * session stops and the ship is crewed again with that version, in its
- * folder, with a fresh restart budget. It is no release: the worktree stays.
+ * folder and its ship's folder, with a fresh restart budget. It is no
+ * release: the worktree stays.
  * It is a first start (#443): a fresh session with the new version's first
  * prompt, never the old conversation continued.
  * Settings this trierarch cannot crew are given back while the crew is not
@@ -288,7 +300,7 @@ function newVersionStep(entry: Entry, at: { request: AssignedRequest; state: Tri
   }
   const fresh = entryOf(checked.value, { shipId: entry.shipId, settingsVersion: request.settingsVersion, now: context.now });
   return {
-    entry: { ...fresh, ...(entry.shipName !== undefined && { shipName: entry.shipName }), ...(entry.folder !== undefined && { folder: entry.folder }) },
+    entry: { ...fresh, ...(entry.shipName !== undefined && { shipName: entry.shipName }), ...(entry.folder !== undefined && { folder: entry.folder }), ...(entry.shipFolder !== undefined && { shipFolder: entry.shipFolder }) },
     actions: [
       { kind: 'stop', shipId: entry.shipId },
       { kind: 'crew', shipId: entry.shipId, isResumed: true },
@@ -327,6 +339,10 @@ function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean; i
   if (seen?.inbox.kind === 'leaseEnded') {
     // Released elsewhere (row 11): its session stops and the ship is crewed again, in a fresh worktree as a first start, with its first prompt and no resume (#475). A final crew stays final in the fleet (#469).
     return { entry: { ...withState(entry, { state: 'crewing', now }), isReleasedElsewhere: true, hasStarted: false }, actions: [{ kind: 'stop', shipId: entry.shipId }, { kind: 'crew', shipId: entry.shipId, isResumed: false }], starts: 0 };
+  }
+  if (keepsShipFolder(entry) && observed.shipFoldersGone?.includes(entry.shipId) === true) {
+    // Its files went with its folder, as when ships/ was removed by hand: it is crewed again in a fresh one as a first start, under the lease it holds.
+    return { entry: { ...withState(entry, { state: 'crewing', now }), isShipFolderGone: true, hasStarted: false }, actions: [{ kind: 'stop', shipId: entry.shipId }, { kind: 'crew', shipId: entry.shipId, isResumed: false }], starts: 0 };
   }
   if ((entry.state === 'running' || entry.state === 'restarting') && entry.crewToken === undefined) {
     // Crewed by a trierarch before the crew token stayed in its state (decision 0026): its session stops and the ship is crewed again in its folder.

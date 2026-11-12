@@ -29,13 +29,12 @@ import (
 	"sync"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/peer"
 )
 
 // MaxBytes is the most a call's body may hold: a 256 KB payload with the JSON around it (aeolus-fleet decision 0006).
 const MaxBytes = 320 * 1024
-
-const socketFile = "fleet.sock"
 
 // protocol is the ship protocol, which a session reads at each start (`aeolus-fleet.sh protocol`).
 const protocol = "/api/v1/openapi.json"
@@ -81,21 +80,22 @@ func New(options Options) *Sockets {
 
 type connectionKey struct{}
 
-// Open opens the ship's socket, or keeps the one open; answers its path.
-func (s *Sockets) Open(shipID string) (string, error) {
+// Open opens the ship's socket in the sockets folder of its ship's folder, or for a ship crewed before the ship folders (none) in its
+// folder under the root, or keeps the one open; answers its path.
+func (s *Sockets) Open(shipID string, shipFolder string) (string, error) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	if opened, ok := s.servers[shipID]; ok {
 		return opened.path, nil
 	}
-	folder := filepath.Join(s.options.Root, shipID)
+	folder := paths.ShipSockets(s.options.Root, shipID, shipFolder)
 	if err := os.MkdirAll(folder, 0o700); err != nil {
 		return "", err
 	}
 	if err := os.Chmod(folder, 0o700); err != nil {
 		return "", err
 	}
-	path := filepath.Join(folder, socketFile)
+	path := filepath.Join(folder, paths.SocketFile)
 	// A socket file left by a trierarch that stopped: nothing listens on it any more.
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", err
@@ -115,8 +115,9 @@ func (s *Sockets) Open(shipID string) (string, error) {
 	return path, nil
 }
 
-// Close closes the ship's socket and removes its file: a call then gets no answer.
-func (s *Sockets) Close(shipID string) {
+// Close closes the ship's socket and removes its file: a call then gets no answer. The folder of a ship crewed before the ship folders
+// goes with it, as nothing else is in it; a ship's folder goes with the ship.
+func (s *Sockets) Close(shipID string, shipFolder string) {
 	s.mutex.Lock()
 	opened, ok := s.servers[shipID]
 	delete(s.servers, shipID)
@@ -124,7 +125,23 @@ func (s *Sockets) Close(shipID string) {
 	if ok {
 		_ = opened.server.Close()
 	}
-	_ = os.Remove(filepath.Join(s.options.Root, shipID, socketFile))
+	folder := paths.ShipSockets(s.options.Root, shipID, shipFolder)
+	_ = os.Remove(filepath.Join(folder, paths.SocketFile))
+	if shipFolder == "" {
+		_ = os.Remove(folder)
+	}
+}
+
+// closeOpen closes the ship's socket if it is open and removes its file, its folder staying for the session's next socket.
+func (s *Sockets) closeOpen(shipID string) {
+	s.mutex.Lock()
+	opened, ok := s.servers[shipID]
+	delete(s.servers, shipID)
+	s.mutex.Unlock()
+	if ok {
+		_ = opened.server.Close()
+		_ = os.Remove(opened.path)
+	}
 }
 
 // CloseAll closes every socket open.
@@ -136,7 +153,7 @@ func (s *Sockets) CloseAll() {
 	}
 	s.mutex.Unlock()
 	for _, shipID := range shipIDs {
-		s.Close(shipID)
+		s.closeOpen(shipID)
 	}
 }
 

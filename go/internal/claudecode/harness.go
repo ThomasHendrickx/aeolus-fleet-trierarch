@@ -14,6 +14,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/prompt"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
@@ -64,7 +65,8 @@ type Harness struct {
 	ProxyURL func() (string, bool)
 	// Sessions is the sessions folder, where each session's MCP configuration is kept in its folder.
 	Sessions string
-	// Homes is where each ship has a home of its own, for sessions in containers, which its container gets as its home (decision 0039); empty on the host, where every session shares the user's.
+	// Homes is where each ship crewed before the ship folders has a home of its own, for sessions in containers, which its container gets
+	// as its home (decision 0039); a ship crewed fresh has it in its ship's folder. Empty on the host, where every session shares the user's.
 	Homes string
 	// MoveWithinUserNamespace moves a ship's home whose own top the host user cannot give its write to the trash within the runtime's user
 	// namespace; nil on the host.
@@ -72,7 +74,9 @@ type Harness struct {
 }
 
 // homeOf is the ship's own home, which holds its identity and Claude Code's files and nothing of another ship.
-func (h Harness) homeOf(entry reconciler.Entry) string { return filepath.Join(h.Homes, entry.ShipID) }
+func (h Harness) homeOf(entry reconciler.Entry) string {
+	return paths.ShipHome(h.Homes, entry.ShipID, entry.ShipFolder)
+}
 
 // pluginOf is the plugin as the entry's session finds its files: in its ship's home in a container, where the image's plugin of the same version finds the identity the host's scripts wrote.
 func (h Harness) pluginOf(entry reconciler.Entry) plugin.Plugin {
@@ -202,7 +206,7 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	}
 	env[launchVariable] = launchID
 	env[claudeAiConnectorsVariable] = "false"
-	if err := h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, Harness: "claude-code", Command: command, Env: env, ProxyToken: token, ReadOnly: entry.ReadOnly, Mcp: mcp}); err != nil {
+	if err := h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, ShipFolder: entry.ShipFolder, Harness: "claude-code", Command: command, Env: env, ProxyToken: token, ReadOnly: entry.ReadOnly, Mcp: mcp}); err != nil {
 		return err
 	}
 	return h.Runtime.Send(entry.ShipID, UserLine(line))

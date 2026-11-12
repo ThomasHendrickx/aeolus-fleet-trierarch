@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -21,10 +21,11 @@ async function git(args: string[]): Promise<string> {
   return result.stdout;
 }
 
-function workspace() {
+function workspace(at: { before?: string } = {}) {
   return createGitWorkspace({
     configuration: { ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: repository } }, folders: { notes: { path: notes } } },
     root,
+    ...at,
   });
 }
 
@@ -223,6 +224,19 @@ describe('workspaces in git', () => {
     expect(existsSync(other)).toBe(true);
   });
 
+  it('moves a stray ship\'s folder on the host whole into the trash beside it, whatever it holds, as every other path does (#346)', async () => {
+    const stray = join(root, newId('ship'));
+    mkdirSync(join(stray, 'worktree', 'src'), { recursive: true });
+    writeFileSync(join(stray, 'worktree', 'src', 'kept.txt'), 'held');
+
+    await workspace().remove(stray);
+
+    expect(existsSync(stray)).toBe(false);
+    const [discarded = ''] = readdirSync(join(root, '.trash'));
+    expect(discarded.startsWith(`${basename(stray)}.`)).toBe(true);
+    expect(readFileSync(join(root, '.trash', discarded, 'worktree', 'src', 'kept.txt'), 'utf8')).toBe('held');
+  });
+
   it('refuses to remove its root, the trash or a folder deeper than a workspace', async () => {
     const { folder: made } = await workspace().prepare(scout);
     mkdirSync(join(root, 'aeolus-fleet', '.trash'));
@@ -239,6 +253,73 @@ describe('workspaces in git', () => {
     await workspace().prepare(scout);
 
     expect(await workspace().foldersUnderRoot()).toEqual([join(root, 'aeolus-fleet', 'scout')]);
+  });
+});
+
+describe("a ship's folder, under the place of ships/", () => {
+  it('is the folder of the ship id under the place of ships/', async () => {
+    await expect(workspace().shipFolderOf(scout.shipId)).resolves.toBe(join(root, scout.shipId));
+  });
+
+  it("holds the worktree of a ship crewed fresh, for its owner alone", async () => {
+    const shipFolder = await workspace().shipFolderOf(scout.shipId);
+
+    const { folder: made } = await workspace().prepare({ ...scout, shipFolder });
+
+    expect([made, existsSync(join(made, 'README.md')), statSync(shipFolder).mode & 0o777]).toEqual([join(shipFolder, 'worktree'), true, 0o700]);
+  });
+
+  it('goes whole into the trash beside it, whatever it holds', async () => {
+    const shipFolder = await workspace().shipFolderOf(scout.shipId);
+    const { folder: made } = await workspace().prepare({ ...scout, shipFolder });
+    mkdirSync(join(shipFolder, 'sockets'));
+    writeFileSync(join(made, 'unsaved.txt'), 'unsaved\n');
+
+    await workspace().removeShipFolder(shipFolder);
+
+    expect(existsSync(shipFolder)).toBe(false);
+    expect(readdirSync(join(root, '.trash')).map((name) => name.startsWith(`${scout.shipId}.`))).toEqual([true]);
+  });
+
+  it('is removed already when it is gone', async () => {
+    await expect(workspace().removeShipFolder(join(root, scout.shipId))).resolves.toBeUndefined();
+  });
+
+  it('of a ship in a configured folder goes, and the configured folder stays', async () => {
+    const shipFolder = await workspace().shipFolderOf(scout.shipId);
+    const { folder: made } = await workspace().prepare({ ...scout, workspace: { kind: 'folder', name: 'notes' }, shipFolder });
+    mkdirSync(join(shipFolder, 'sockets'), { recursive: true });
+
+    await workspace().removeShipFolder(shipFolder);
+
+    expect([made, existsSync(shipFolder), existsSync(notes)]).toEqual([notes, false, true]);
+  });
+});
+
+describe('the worktrees of the ships crewed before the ship folders', () => {
+  it('stay under the root they were made in, and are removed there', async () => {
+    const before = join(folder, 'before');
+
+    const { folder: made } = await workspace({ before }).prepare(scout);
+    await workspace({ before }).remove(made);
+
+    expect([made, existsSync(made)]).toEqual([join(before, 'aeolus-fleet', 'scout'), false]);
+  });
+
+  it("are listed and removed beside the ships' folders, as every folder under either root is", async () => {
+    const before = join(folder, 'before');
+    const orphan = join(before, 'aeolus-fleet', 'orphan');
+    const stray = join(root, newId('ship'));
+    mkdirSync(join(before, 'aeolus-fleet'), { recursive: true });
+    mkdirSync(join(stray, 'sockets'), { recursive: true });
+    await git(['-C', repository, 'worktree', 'add', '-q', '--detach', orphan]);
+
+    const listed = await workspace({ before }).foldersUnderRoot();
+    await workspace({ before }).remove(orphan);
+    await workspace({ before }).remove(stray);
+
+    expect(listed).toEqual(expect.arrayContaining([orphan, stray]));
+    expect([existsSync(orphan), existsSync(stray)]).toEqual([false, false]);
   });
 });
 

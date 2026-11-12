@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -368,11 +369,11 @@ func Main(args []string, machine Machine) (string, int) {
 // upgrade is `upgrade [version]`, with the harnesses the configuration offers; none without a configuration yet. A plugin that could not be updated shows in the exit status.
 func upgrade(at paths.Paths, machine Machine, command parsed) (answer, error) {
 	var harnesses []string
-	hookFolder := at.Worktrees
+	hookFolder := at.Ships
 	if configuration, err := config.Load(at.Config); err == nil {
 		harnesses = slices.Sorted(maps.Keys(configuration.Harnesses))
-		if configuration.WorktreeRoot != "" {
-			hookFolder = configuration.WorktreeRoot
+		if configuration.ShipsRoot != "" {
+			hookFolder = configuration.ShipsRoot
 		}
 	}
 	version := ""
@@ -525,12 +526,32 @@ func (m Machine) removeSuperseded(at paths.Paths) {
 
 // checkRuntime refuses a configuration whose sessions cannot run on the machine, with every reason.
 func checkRuntime(at paths.Paths, configuration config.Configuration, machine Machine) error {
+	if err := checkShipsPlace(at, configuration, runtime.GOOS); err != nil {
+		return err
+	}
 	refusals, err := container.Check(configuration, machine.ContainerHost(at.ModelToken), at.ModelToken)
 	if err != nil {
 		return err
 	}
 	if len(refusals) > 0 {
 		return container.Refusal(at.Config, refusals)
+	}
+	return nil
+}
+
+// checkShipsPlace refuses a configuration that still names worktreeRoot, and a place of ships/ where a ship's socket path would pass the system's limit: no socket could be opened there,
+// so the operator names a shorter place.
+func checkShipsPlace(at paths.Paths, configuration config.Configuration, system string) error {
+	if configuration.NamesWorktreeRoot {
+		return refused(nil, "The configuration at %s names worktreeRoot, which is now shipsRoot: rename the line to shipsRoot", at.Config)
+	}
+	place := configuration.ShipsRoot
+	if place == "" {
+		place = at.Ships
+	}
+	socket := paths.LongestSocket(place)
+	if limit := paths.SocketPathLimit(system); len(socket) >= limit {
+		return refused(nil, "The configuration at %s keeps the ships' files in %s, where a ship's socket path, as %s, is %d bytes, past the system's limit of %d: name a shorter place in shipsRoot", at.Config, place, socket, len(socket), limit)
 	}
 	return nil
 }

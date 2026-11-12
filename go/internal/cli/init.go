@@ -307,9 +307,9 @@ func (i Init) Run(flags Flags) (Report, error) {
 		say("It has no repository or folder yet, so it can crew no request: add one with aeolus-trierarch add.")
 	}
 
-	root := configuration.WorktreeRoot
+	root := configuration.ShipsRoot
 	if root == "" {
-		root = i.Paths.Worktrees
+		root = i.Paths.Ships
 	}
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return Report{}, err
@@ -370,7 +370,7 @@ func (i Init) Run(flags Flags) (Report, error) {
 	return report, nil
 }
 
-// setUpClaudeCode trusts the worktree root and each configured repository and folder, and completes the onboarding, where the configuration offers Claude Code.
+// setUpClaudeCode trusts the place of ships/ and each configured repository and folder, and completes the onboarding, where the configuration offers Claude Code.
 func (i Init) setUpClaudeCode(configuration config.Configuration, root string) ([]string, error) {
 	if _, ok := configuration.Harnesses[claudeCode]; !ok {
 		return []string{}, nil

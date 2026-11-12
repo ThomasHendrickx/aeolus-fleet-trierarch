@@ -1,7 +1,7 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -141,7 +141,7 @@ describe('a session in a container', () => {
   let skills: string;
 
   const container = (): string => `trierarch-${scout}`;
-  const shipHome = (): string => join(machine.trierarchHome, 'homes', scout);
+  const shipHome = (): string => join(machine.trierarchHome, 'ships', scout, 'home');
   const checkout = (): string => join(machine.trierarchHome, 'checkouts', scout, 'skills');
   const run = (): string[] => machine.containerRunOf(container()) ?? [];
 
@@ -185,7 +185,7 @@ describe('a session in a container', () => {
     await aRunningScout();
     const version = z.object({ version: z.string() }).parse(JSON.parse((await machine.trierarch(['--version', '--json'])).stdout)).version;
     const folder = sessionOf(machine, 'scout').worktree;
-    const sockets = join(machine.trierarchHome, 'sockets', scout);
+    const sockets = join(machine.trierarchHome, 'ships', scout, 'sockets');
     const image = `${SESSION_IMAGE}:${version}`;
 
     const words = run();
@@ -263,7 +263,7 @@ describe('a session in a container', () => {
 
   it("calls the fleet over its ship's socket from inside its container, as the ship", async () => {
     await aRunningScout();
-    const socket = join(machine.trierarchHome, 'sockets', scout, 'fleet.sock');
+    const socket = join(machine.trierarchHome, 'ships', scout, 'sockets', 'fleet.sock');
     const calls = join(sessionOf(machine, 'scout').worktree, 'fake-socket-calls.jsonl');
 
     await fleet.send('scout', `socket call: ${Buffer.from(JSON.stringify({ socket, method: 'POST', path: '/api/v1/fleet/list', body: '{}' })).toString('base64url')}`);
@@ -286,12 +286,29 @@ describe('a session in a container', () => {
     expect(run()).toEqual(expect.arrayContaining(['--env', 'ANTHROPIC_AUTH_TOKEN', '--network', `pasta:--no-map-gw,-t,none,-u,none,-T,${port},-U,none`]));
   });
 
-  it("ends with its container, and its ship's home goes, when its crew request is removed", async () => {
+  it("keeps no token in its ship's folder: the model token, the crew token and the env file stay in the trierarch's own files beside ships/", async () => {
+    await aRunningScout();
+    const ships = join(machine.trierarchHome, 'ships');
+    const crewToken = z.object({ entries: z.record(z.string(), z.looseObject({ crewToken: z.string() })) }).parse(JSON.parse(readFileSync(join(machine.trierarchHome, 'state.json'), 'utf8'))).entries[scout]?.crewToken ?? '';
+    const files = readdirSync(ships, { recursive: true, encoding: 'utf8' })
+      .map((name) => join(ships, name))
+      .filter((path) => lstatSync(path).isFile())
+      // The harness's stand-in writes down the environment it was given, the model token in it, as the session's own file.
+      .filter((path) => !basename(path).startsWith('fake-'));
+
+    const holding = files.filter((path) => [MODEL_TOKEN, crewToken].some((token) => readFileSync(path, 'utf8').includes(token)));
+
+    expect(crewToken).not.toBe('');
+    expect(holding).toEqual([]);
+    expect(existsSync(join(machine.trierarchHome, 'sessions', scout, 'session.env'))).toBe(true);
+  });
+
+  it("ends with its container, and its ship's folder goes with its home, when its crew request is removed", async () => {
     await aRunningScout();
 
     await fleet.removeCrewRequest(scout);
 
-    await expect.poll(() => existsSync(shipHome()), { timeout: CREWED_WITHIN_MS }).toBe(false);
+    await expect.poll(() => existsSync(join(machine.trierarchHome, 'ships', scout)), { timeout: CREWED_WITHIN_MS }).toBe(false);
     expect(machine.callsOf('podman')).toEqual(expect.arrayContaining([`kill ${container()}`, `rm --force ${container()}`]));
   });
 });
@@ -328,7 +345,8 @@ describe("a ship's clone in containers", () => {
 
   it.each(['clone', 'remote remove', 'remote add', 'fetch', 'checkout'])('removes a half-made clone when %s fails and makes a complete clone on the next pass', async (step) => {
     anUpstream();
-    const folder = join(machine.trierarchHome, 'worktrees', REPOSITORY, 'scout');
+    scout = await fleet.commission('scout', { scopes: ['fleet:read'] });
+    const folder = join(machine.trierarchHome, 'ships', scout, 'worktree');
     const failed = join(machine.machine, 'clone-failed');
     const wrapper = join(machine.machine, 'bin', 'git');
     const realGit = realpathSync(join(machine.machine, 'tools', 'git'));
@@ -347,7 +365,6 @@ exec '${realGit}' "$@"
     configure((configuration) => ({ ...configuration, runtime: RUNTIME }));
     writeModelToken();
     expect((await machine.trierarch(['restart'])).status).toBe(0);
-    scout = await fleet.commission('scout', { scopes: ['fleet:read'] });
     await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
 
     await expect.poll(() => existsSync(failed), { timeout: CREWED_WITHIN_MS }).toBe(true);
@@ -363,7 +380,7 @@ exec '${realGit}' "$@"
   it("is a clone of its own at the worktree's path, with a .git of its own holding its own objects, detached at the repository's commit, so git works inside", async () => {
     const folder = await aCrewedScout();
 
-    expect(folder).toBe(join(machine.trierarchHome, 'worktrees', REPOSITORY, 'scout'));
+    expect(folder).toBe(join(machine.trierarchHome, 'ships', scout, 'worktree'));
     expect(statSync(join(folder, '.git')).isDirectory()).toBe(true);
     expect(existsSync(join(folder, '.git', 'objects', 'info', 'alternates'))).toBe(false);
     expect(git(folder, 'rev-parse', 'HEAD')).toBe(git(machine.repository, 'rev-parse', 'HEAD'));
@@ -399,7 +416,8 @@ exec '${realGit}' "$@"
     it(`stops what runs in an orphan clone after restart and removes it${hasUnsavedWork ? ', unsaved work and all' : ''}`, async () => {
       const folder = await aCrewedScout();
       expect((await machine.trierarch(['stop'])).status).toBe(0);
-      const stray = join(machine.trierarchHome, 'worktrees', REPOSITORY, 'stray');
+      const stray = join(machine.trierarchHome, 'ships', REPOSITORY, 'stray');
+      mkdirSync(dirname(stray), { recursive: true });
       renameSync(folder, stray);
       if (hasUnsavedWork) {
         writeFileSync(join(stray, 'unsaved.txt'), 'unsaved\n');
@@ -423,8 +441,8 @@ exec '${realGit}' "$@"
 
   it('removes a plain clone and a folder git does not know that no ship works in, with what runs in them stopped first (gap rule 2)', async () => {
     await aCrewedScout();
-    const plain = join(machine.trierarchHome, 'worktrees', REPOSITORY, 'own-clone');
-    const unknown = join(machine.trierarchHome, 'worktrees', REPOSITORY, 'notes');
+    const plain = join(machine.trierarchHome, 'ships', REPOSITORY, 'own-clone');
+    const unknown = join(machine.trierarchHome, 'ships', REPOSITORY, 'notes');
     mkdirSync(plain, { recursive: true });
     mkdirSync(unknown, { recursive: true });
     const children = [plain, unknown].map((cwd) => spawn('sleep', ['600'], { cwd, stdio: 'ignore' }));

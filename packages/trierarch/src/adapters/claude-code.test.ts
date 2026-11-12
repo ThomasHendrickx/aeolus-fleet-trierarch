@@ -27,7 +27,7 @@ let crews: string;
 let folder: string;
 /** Claude Code's projects folder, where it keeps each folder's conversations. */
 let projects: string;
-let started: { shipId: ShipId; folder: string; command: readonly string[]; harness: string; env?: Readonly<Record<string, string>>; readOnly?: readonly string[]; proxyToken?: { harness: string; variable: string; token: string } }[];
+let started: { shipId: ShipId; folder: string; command: readonly string[]; harness: string; env?: Readonly<Record<string, string>>; readOnly?: readonly string[]; proxyToken?: { harness: string; variable: string; token: string }; shipFolder?: string }[];
 /** A prompt as headless Claude Code takes it on stdin: one stream-json user message on one line. */
 const userLineOf = (prompt: string) => JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } });
 /** How many words print mode with streamed JSON takes, after `claude` (headless H11). */
@@ -813,6 +813,27 @@ describe('Claude Code in containers, each ship with a home of its own (decision 
 
     const marker = await runCommand('bash', { args: [`${PLUGIN_ROOT}/scripts/aeolus-identity.sh`, 'launch'], env: inShipHome });
     expect(marker.status).toBe(1);
+  });
+
+  it("keeps the identity of a ship crewed fresh in the home in its ship's folder, with no crew token in it, and tells its session the ship's folder", async () => {
+    const shipFolder = join(homes, 'ships', shipId);
+
+    await inContainers().prepareIdentity({ folder, identity, crewToken: CREW_TOKEN, shipFolder });
+    await inContainers().launch({ ...launchOf(shipId), options: {}, isFirstStart: true, shipFolder });
+
+    const inShipFolder = filesIn(shipFolder);
+    expect([inShipFolder.includes(join('home', identityFile())), existsSync(join(homes, shipId)), started[0]?.shipFolder]).toEqual([true, false, shipFolder]);
+    expect(inShipFolder.filter((file) => readFileSync(join(shipFolder, file), 'utf8').includes(CREW_TOKEN))).toEqual([]);
+    await expect(inContainers().hasIdentity({ shipId, folder, shipFolder })).resolves.toBe(true);
+  });
+
+  it("leaves the home in the ship's folder of a ship crewed fresh as its identity goes: it goes with its ship's folder", async () => {
+    const shipFolder = join(homes, 'ships', shipId);
+    await inContainers().prepareIdentity({ folder, identity, crewToken: CREW_TOKEN, shipFolder });
+
+    await inContainers().removeIdentity({ shipId, folder, shipFolder });
+
+    expect([existsSync(join(shipFolder, 'home')), existsSync(join(shipFolder, 'home', identityFile()))]).toEqual([true, false]);
   });
 
   it("removes the ship's home with its identity, as a release does, and leaves another ship's", async () => {

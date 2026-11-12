@@ -59,7 +59,7 @@ interface SocketCall {
 
 /** Has scout's session make the calls over its ship's socket, all asked in one message it is handed: what the socket answered each, in order. */
 async function scoutCalls(calls: readonly SocketCall[]): Promise<{ path: string; status: number; body: string }[]> {
-  const socket = join(machine.trierarchHome, 'sockets', scout, 'fleet.sock');
+  const socket = join(machine.trierarchHome, 'ships', scout, 'sockets', 'fleet.sock');
   const before = answeredScout().length;
   const asked = calls.map(({ method, path, body = '{}' }) => `socket call: ${Buffer.from(JSON.stringify({ socket, method, path, body })).toString('base64url')}`);
   await fleet.send('scout', asked.join('\n'));

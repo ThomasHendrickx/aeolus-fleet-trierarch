@@ -175,9 +175,9 @@ export interface Identity {
  * state.
  */
 export interface ShipSocketsPort {
-  /** Opens the ship's socket, or keeps the one open; answers its path. */
-  open(shipId: ShipId): Promise<string>;
-  close(shipId: ShipId): Promise<void>;
+  /** Opens the ship's socket in its ship's folder, or for a ship crewed before the ship folders (none) where it was, or keeps the one open; answers its path. */
+  open(shipId: ShipId, shipFolder?: string): Promise<string>;
+  close(shipId: ShipId, shipFolder?: string): Promise<void>;
 }
 
 /** The turn a session is in, from the plugin's turn marker. */
@@ -186,21 +186,30 @@ export type Turn = 'busy' | 'idle' | 'unknown';
 /** What a hand-over came to (#756): a message handed over, its line typed into the session, or nothing to hand. */
 export type HandOver = 'handed' | 'nothing';
 
+/** A ship's session as its harness finds it: in its folder, its files in its ship's folder, none for a ship crewed before the ship folders. */
+export interface HarnessSession {
+  readonly shipId: ShipId;
+  readonly folder: string;
+  readonly shipFolder?: string;
+}
+
 export interface HarnessPort {
   /**
    * Writes the folder's identity with wakeBy=trierarch, as the aeolus-fleet plugin does. The
    * crew token goes to the plugin only for the lease it stands for, never into the folder.
    */
-  prepareIdentity(at: { folder: string; identity: Identity; crewToken: string }): Promise<void>;
+  prepareIdentity(at: { folder: string; identity: Identity; crewToken: string; shipFolder?: string }): Promise<void>;
   /** Whether the session's folder still holds its identity (#659). */
-  hasIdentity(session: { shipId: ShipId; folder: string }): Promise<boolean>;
-  removeIdentity(session: { shipId: ShipId; folder: string }): Promise<void>;
+  hasIdentity(session: HarnessSession): Promise<boolean>;
+  removeIdentity(session: HarnessSession): Promise<void>;
   /** Starts the harness in the folder: the first start with the settings' first prompt, later ones continuing. */
   launch(session: {
     shipId: ShipId;
     /** With the workspace, what the session is named after where the harness names one. */
     shipName: string;
     folder: string;
+    /** The ship's own folder, which holds its home in a container; none for a ship crewed before the ship folders. */
+    shipFolder?: string;
     workspace: TrierarchWorkspace;
     /** The session's read-only checkouts (#1182), which it may read beside its folder. */
     checkouts: readonly Checkout[];
@@ -213,23 +222,23 @@ export interface HarnessPort {
     login: Login;
     firstPrompt?: string;
   }): Promise<void>;
-  turnOf(session: { shipId: ShipId; folder: string }): Promise<Turn>;
+  turnOf(session: HarnessSession): Promise<Turn>;
   /** Hands one message over through the aeolus-fleet plugin, which keeps the store, and types the line it gives into the session (#756, 2a). */
-  handOver(session: { shipId: ShipId; folder: string }): Promise<HandOver>;
+  handOver(session: HarnessSession): Promise<HandOver>;
   /**
    * Hands a forced message over first through the aeolus-fleet plugin (decision
    * 0040), and types the line it gives into the session as a new prompt. A
    * busy turn is stopped for it first: force means act now.
    */
-  forceOver(session: { shipId: ShipId; folder: string; isTurnBusy: boolean }): Promise<HandOver>;
+  forceOver(session: HarnessSession & { isTurnBusy: boolean }): Promise<HandOver>;
   /** Whether the session's store holds a message to hand: received, handed and not confirmed, or to hand once more (#756). */
-  isHolding(session: { shipId: ShipId; folder: string }): Promise<boolean>;
+  isHolding(session: HarnessSession): Promise<boolean>;
   /** Tells the session's store that its session died, before it starts again (#756, 3.5 to 3.7, 3.10). */
-  sessionDied(session: { shipId: ShipId; folder: string }): Promise<void>;
+  sessionDied(session: HarnessSession): Promise<void>;
   /** What the session did in its launch window (#382), as its hooks marked the launch it was started for (#490), for the model it launched with; any model refused when it launched with none. */
-  launchSeen(session: { shipId: ShipId; folder: string; launchId: string; model?: string }): Promise<LaunchSeen>;
+  launchSeen(session: HarnessSession & { launchId: string; model?: string }): Promise<LaunchSeen>;
   /** What the session did last, from its events and when it last wrote one; none while it wrote none that shows activity (monitoring W3b). */
-  activityOf(session: { shipId: ShipId; folder: string }): Promise<SessionActivity | undefined>;
+  activityOf(session: HarnessSession): Promise<SessionActivity | undefined>;
   /** Whether the harness's aeolus-fleet plugin marks launches (#490); one older than the launch marker does not, and its sessions are not crewed. */
   marksLaunches(): Promise<boolean>;
   /** Why the machine does not offer the harness now, as for a build its plugin's hooks are not proven on or a runtime it is not proven in (CC3, CC10); none while it offers it. */
@@ -265,9 +274,10 @@ export interface SessionRuntime {
   stop(shipId: ShipId): Promise<void>;
   /**
    * Starts the command in the folder, with the environment given, in a new session for the ship; an exited one is replaced. `harness` names the harness the command runs, for how its turn is stopped;
-   * `readOnly` names its read-only checkouts (#1182), which a container mounts read-only and the host leaves as they are.
+   * `readOnly` names its read-only checkouts (#1182), which a container mounts read-only and the host leaves as they are;
+   * `shipFolder` the ship's own folder, which holds its home and its sockets in a container, none for a ship crewed before the ship folders.
    */
-  start(session: { shipId: ShipId; folder: string; command: readonly string[]; harness: string; env?: Readonly<Record<string, string>>; readOnly?: readonly string[]; proxyToken?: ProxyToken }): Promise<void>;
+  start(session: { shipId: ShipId; folder: string; command: readonly string[]; harness: string; env?: Readonly<Record<string, string>>; readOnly?: readonly string[]; proxyToken?: ProxyToken; shipFolder?: string }): Promise<void>;
   /** Sends one line to the session's harness as its next input. */
   send(at: { shipId: ShipId; line: string }): Promise<void>;
   /** Stops the session's running turn and waits for its end, within a bound; the session goes on (decision 0040, headless H12). */
@@ -339,8 +349,14 @@ export interface ContainerHostPort {
 }
 
 export interface WorkspacePort {
-  /** Makes the workspace, or finds the one a stop mid-crew left half made: its folder. */
-  prepare(workspace: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace }): Promise<{ folder: string }>;
+  /** The folder a ship crewed fresh keeps every file of its own in, `<ships>/<shipId>`, under the place of ships/. */
+  shipFolderOf(shipId: ShipId): Promise<string>;
+  /**
+   * Makes the workspace, or finds the one a stop mid-crew left half made: its
+   * folder. A worktree is made in the ship's folder when it has one; one
+   * crewed before the ship folders (none) has it under the root it was made in.
+   */
+  prepare(workspace: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace; shipFolder?: string }): Promise<{ folder: string }>;
   /** Whether the worktree holds nothing git would show; never for one the host does not read. */
   isClean(folder: string): Promise<boolean>;
   /**
@@ -352,6 +368,10 @@ export interface WorkspacePort {
   unsaved(folder: string): Promise<readonly string[]>;
   /** Removes a folder under the root, whatever it is: a worktree of any repository, a clone, a folder git does not know. Never one outside the root, nor a configured folder. */
   remove(folder: string): Promise<void>;
+  /** Whether the ship's folder is there; one removed by hand, as with ships/, is not. */
+  hasShipFolder(shipFolder: string): Promise<boolean>;
+  /** Moves the ship's folder whole into the trash beside it, whatever it holds, its worktree or clone with it; one already gone is removed already. */
+  removeShipFolder(shipFolder: string): Promise<void>;
   /** Every folder under the root a workspace could be, whatever it is or whoever made it (gap rule 2); never the trash. */
   foldersUnderRoot(): Promise<readonly string[]>;
   /** Drops the git records of the configured repository's worktrees whose folder is gone; a worktree whose folder exists stays, wherever it is. Fails for a repository the configuration lacks. */
@@ -533,7 +553,7 @@ export interface SubscriptionWindow {
 /** What the harnesses say of their usage (#353), from their own files and CLIs. */
 export interface UsagePort {
   /** The tokens the ship's sessions used since its folder was made, per model and UTC hour, from its harness's transcripts; given its logins, per login too, each counted to the login of the session that wrote it (api keys K8). */
-  tokensOf(ship: { shipId: ShipId; harness: string; folder: string; logins?: SessionLogins }): Promise<readonly HourTokens[]>;
+  tokensOf(ship: { shipId: ShipId; harness: string; folder: string; shipFolder?: string; logins?: SessionLogins }): Promise<readonly HourTokens[]>;
   /** When the folder was made: its usage counts from then, and it tells two folders of one ship apart. */
   madeAt(folder: string): Promise<Date>;
   /** How much of the harness's subscription is used now, per window; none when the harness cannot say. */

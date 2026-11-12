@@ -52,7 +52,7 @@ async function withUpstream(): Promise<string> {
   return upstream;
 }
 
-function workspace(limits: { timeLimitMs?: number; moveWithinUserNamespace?: (from: string, to: string) => Promise<void> } = {}) {
+function workspace(limits: { timeLimitMs?: number; moveWithinUserNamespace?: (from: string, to: string) => Promise<void>; before?: string } = {}) {
   return createCloneWorkspace({
     configuration: { ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: repository } }, folders: { notes: { path: notes } } },
     root,
@@ -336,6 +336,41 @@ describe('workspaces as per-ship clones', () => {
       await expect(workspace().remove(kept)).rejects.toThrow('removes only a folder under the root');
     }
     expect(existsSync(join(root, 'aeolus-fleet', '.trash'))).toBe(true);
+  });
+});
+
+describe("a ship's clone in its ship's folder", () => {
+  it('is made in the folder of a ship crewed fresh, with a .git of its own', async () => {
+    const shipFolder = await workspace().shipFolderOf(scout.shipId);
+
+    const { folder: made } = await workspace().prepare({ ...scout, shipFolder });
+
+    expect([made, statSync(join(made, '.git')).isDirectory()]).toEqual([join(shipFolder, 'worktree'), true]);
+  });
+
+  it("goes whole into the trash beside the ship's folder, as the runtime moves it when the host cannot", async () => {
+    const shipFolder = await workspace().shipFolderOf(scout.shipId);
+    await workspace().prepare({ ...scout, shipFolder });
+    mkdirSync(join(shipFolder, 'home'));
+    chmodSync(join(shipFolder, 'home'), 0o500);
+    const moved: string[] = [];
+
+    await workspace({ moveWithinUserNamespace: (from) => { moved.push(from); return Promise.reject(new Error('not moved')); } }).removeShipFolder(shipFolder);
+
+    expect([existsSync(shipFolder), readdirSync(join(root, '.trash')).length, moved]).toEqual([false, 1, []]);
+  });
+
+  it("goes into the trash when straight under the place of ships/, and is removed at once when straight under the worktree root of the ships crewed before", async () => {
+    const before = join(folder, 'before');
+    const underShips = join(root, 'own-clone');
+    const underBefore = join(before, 'own-clone');
+    await git(['clone', '-q', repository, underShips]);
+    await git(['clone', '-q', repository, underBefore]);
+
+    await workspace({ before }).remove(underShips);
+    await workspace({ before }).remove(underBefore);
+
+    expect([existsSync(underShips), readdirSync(join(root, '.trash')).length, existsSync(underBefore), existsSync(join(before, '.trash'))]).toEqual([false, 1, false, false]);
   });
 });
 

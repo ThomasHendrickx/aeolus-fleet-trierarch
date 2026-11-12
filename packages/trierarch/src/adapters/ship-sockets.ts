@@ -1,4 +1,4 @@
-import { chmod, mkdir, rm } from 'node:fs/promises';
+import { chmod, mkdir, rm, rmdir } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { Socket } from 'node:net';
 import { join } from 'node:path';
@@ -6,12 +6,14 @@ import { join } from 'node:path';
 import type { ShipId } from '@aeolus-fleet/common';
 
 import type { RefreshedCheckout } from '../core/ports.js';
+import { shipSockets, SOCKET_FILE } from './paths.js';
 
 /**
  * The socket of each ship the trierarch crews (decision 0026): a session holds
  * no fleet credential, so its fleet calls come over a Unix socket of its
- * ship's own, `<root>/<ship id>/fleet.sock`, in a folder only the trierarch's
- * user opens (a container mounts that folder). The trierarch adds the ship's
+ * ship's own, `<ship's folder>/sockets/fleet.sock`, or for a ship crewed before
+ * the ship folders `<root>/<ship id>/fleet.sock`, in a folder only the
+ * trierarch's user opens (a container mounts that folder). The trierarch adds the ship's
  * crew token, read at each call so a new crew reaches the same socket, and
  * forwards the call unchanged; the fleet's answer goes back unchanged, a 503
  * included. It answers only a caller of the ship's own session or of the
@@ -27,7 +29,6 @@ import type { RefreshedCheckout } from '../core/ports.js';
 /** The most a call's body may hold: a 256 KB payload with the JSON around it (aeolus-fleet decision 0006). */
 export const SHIP_CALL_MAX_BYTES = 320 * 1024;
 
-const SOCKET_FILE = 'fleet.sock';
 /** A call is one word under the ship API or the fleet API: `/api/v1/ship/send`, `/api/v1/fleet/commission`. */
 const FORWARDED_CALL = /^\/api\/v1\/(?:ship|fleet)\/([A-Za-z]+)$/;
 /** The calls that make or end a crew: only the trierarch makes them, never a session. */
@@ -38,10 +39,15 @@ const PROTOCOL = '/api/v1/openapi.json';
 const REFRESH_CHECKOUTS = '/trierarch/checkouts/refresh';
 
 export interface ShipSockets {
-  /** Opens the ship's socket, or keeps the one open; answers its path. */
-  open(shipId: ShipId): Promise<string>;
-  /** Closes the ship's socket and removes its file: a call then gets no answer. */
-  close(shipId: ShipId): Promise<void>;
+  /** Opens the ship's socket in its ship's folder, or for a ship crewed before the ship folders (none) where it was, or keeps the one open; answers its path. */
+  open(shipId: ShipId, shipFolder?: string): Promise<string>;
+  /**
+   * Closes the ship's socket and removes its file: a call then gets no answer.
+   * The folder of a ship crewed before the ship folders goes with it, as
+   * nothing else is in it; a ship's folder goes with the ship.
+   */
+  close(shipId: ShipId, shipFolder?: string): Promise<void>;
+  /** Closes every socket open, each folder staying for the session's next socket. */
   closeAll(): Promise<void>;
 }
 
@@ -152,23 +158,24 @@ export function createShipSockets(options: {
     said(String(answer.status));
   };
 
-  const close = async (shipId: ShipId): Promise<void> => {
+  /** Closes the ship's socket if it is open and removes its file, its folder staying. */
+  const closeOpen = async (shipId: ShipId): Promise<void> => {
     const open = servers.get(shipId);
     servers.delete(shipId);
     if (open !== undefined) {
       open.server.closeAllConnections();
       await new Promise<void>((resolve) => open.server.close(() => { resolve(); }));
+      await rm(open.path, { force: true });
     }
-    await rm(join(options.root, shipId, SOCKET_FILE), { force: true });
   };
 
   return {
-    open: async (shipId) => {
+    open: async (shipId, shipFolder) => {
       const open = servers.get(shipId);
       if (open !== undefined) {
         return open.path;
       }
-      const folder = join(options.root, shipId);
+      const folder = shipSockets(options.root, { shipId, ...(shipFolder !== undefined && { shipFolder }) });
       await mkdir(folder, { recursive: true, mode: 0o700 });
       await chmod(folder, 0o700);
       const path = join(folder, SOCKET_FILE);
@@ -189,9 +196,17 @@ export function createShipSockets(options: {
       servers.set(shipId, { server, path });
       return path;
     },
-    close,
+    close: async (shipId, shipFolder) => {
+      await closeOpen(shipId);
+      const folder = shipSockets(options.root, { shipId, ...(shipFolder !== undefined && { shipFolder }) });
+      await rm(join(folder, SOCKET_FILE), { force: true });
+      if (shipFolder === undefined) {
+        // Gone only when nothing else is in it.
+        await rmdir(folder).catch(() => undefined);
+      }
+    },
     closeAll: async () => {
-      await Promise.all([...servers.keys()].map(close));
+      await Promise.all([...servers.keys()].map(closeOpen));
     },
   };
 }

@@ -128,7 +128,7 @@ func (s *Sender) shipHoursOf(entry reconciler.Entry) ([]shipHour, error) {
 	if !ok {
 		return nil, nil
 	}
-	ship := Ship{ShipID: entry.ShipID, Folder: entry.Folder}
+	ship := Ship{ShipID: entry.ShipID, Folder: entry.Folder, ShipFolder: entry.ShipFolder}
 	if entry.Login != "" {
 		ship.Logins = &Logins{Login: entry.Login, Earlier: entry.EarlierLogins}
 	}

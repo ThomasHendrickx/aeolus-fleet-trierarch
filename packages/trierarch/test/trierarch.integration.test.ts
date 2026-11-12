@@ -215,7 +215,7 @@ async function aTrierarchOnTheFleet(
     permissionModes: () => undefined,
     ...(at.claudeCodeProgram !== undefined && { command: at.claudeCodeProgram }),
   });
-  const workspace = createGitWorkspace({ configuration, root: paths.worktrees });
+  const workspace = createGitWorkspace({ configuration, root: paths.ships, before: paths.worktrees });
   const state = createJsonState(paths.state);
   const clock = at.clock ?? { now: () => new Date() };
   const logger = { warn: () => undefined, action: () => undefined };
@@ -229,7 +229,7 @@ async function aTrierarchOnTheFleet(
   const aRunPass = () => createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, folderProcesses: { stopIn: () => Promise.resolve(0) }, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }), state, setup, clock, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID, sockets, checkouts, modelLogins: { startProblem: () => Promise.resolve(undefined), keyState: () => Promise.resolve({ state: 'ready' }) }, sendReleasedUsage: () => Promise.resolve() });
   const pass = aRunPass();
   const leasesOf = (shipId: ShipId) => database.lease.count({ where: { shipId, endedAt: null } });
-  const worktree = join(paths.worktrees, 'aeolus-fleet', 'scout');
+  const worktree = join(paths.ships, scout.shipId, 'worktree');
 
   return { useCases, argo, trierarchShip, scout, pass, aRunPass, leasesOf, worktree, sockets, fleet, sessions, state, setup, clock };
 }
@@ -753,9 +753,10 @@ describe('every session restarted at once, each on a hold of its own (#881, head
     return program;
   }
 
-  /** Each prompt the session of the ship took, and what the plugin's hooks added to its turn. */
-  function turnsOf(ship: string): { prompt: string; context: string }[] {
-    const turns = join(paths.worktrees, 'aeolus-fleet', ship, 'fake-turns.jsonl');
+  /** Each prompt the session of the ship took, and what the plugin's hooks added to its turn, in the worktree the trierarch saved for it. */
+  async function turnsOf(ship: string): Promise<{ prompt: string; context: string }[]> {
+    const folder = Object.values((await createJsonState(paths.state).load()).entries).find((entry) => entry.shipName === ship)?.folder ?? join(paths.ships, 'none');
+    const turns = join(folder, 'fake-turns.jsonl');
     return existsSync(turns)
       ? readFileSync(turns, 'utf8')
           .split('\n')
@@ -811,7 +812,7 @@ describe('every session restarted at once, each on a hold of its own (#881, head
       .toEqual(SHIPS.map(() => 'handled'));
 
     for (const name of SHIPS) {
-      const contexts = turnsOf(name).map((turn) => turn.context).join('\n');
+      const contexts = (await turnsOf(name)).map((turn) => turn.context).join('\n');
       expect(contexts, name).toContain(`Only for ${name}`);
       for (const other of SHIPS.filter((each) => each !== name)) {
         expect(contexts, `${name} took ${other}'s`).not.toContain(`Only for ${other}`);
@@ -916,7 +917,7 @@ describe('the trusted repositories on a real fleet (aeolus-fleet#384)', () => {
     const handle = createHandleDelivery({ fleet, logger, trustedRepositories, ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
     const sessions = standInSessions();
     const harness = createClaudeCodeHarness({ configuration: offered, plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data: pluginData, crews: join(home, '.aeolus', 'crews', 'claude-code') }, projects: join(home, '.claude', 'projects'), sessions, setup: claudeCode, permissionModes: () => undefined });
-    const workspace = createGitWorkspace({ configuration: offered, root: paths.worktrees, clones: trustedClonesOf({ configured: configuration, held: trustedRepositories, root: paths.repositories, protocols: 'file' }) });
+    const workspace = createGitWorkspace({ configuration: offered, root: paths.ships, before: paths.worktrees, clones: trustedClonesOf({ configured: configuration, held: trustedRepositories, root: paths.repositories, protocols: 'file' }) });
     const state = createJsonState(paths.state);
     const trust = createTrust({ configuration: offered, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') });
     const setup = { configuration: offered, configured: configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
@@ -942,6 +943,6 @@ describe('the trusted repositories on a real fleet (aeolus-fleet#384)', () => {
 
     await expect(database.crewRequest.findUniqueOrThrow({ where: { shipId: scout.shipId } })).resolves.toMatchObject({ status: 'running' });
     expect(existsSync(join(paths.repositories, 'hemma', '.git'))).toBe(true);
-    expect(existsSync(join(paths.worktrees, 'hemma', 'scout', 'README.md'))).toBe(true);
+    expect(existsSync(join(paths.ships, scout.shipId, 'worktree', 'README.md'))).toBe(true);
   });
 });

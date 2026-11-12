@@ -72,7 +72,7 @@ describe('the running file', () => {
 describe('the configuration file', () => {
   it("takes --remote-control out of a harness's flags, keeping all else the file holds, and names the harness (headless H20)", async () => {
     const path = join(folder, 'config.json');
-    const configured = { ...initialConfiguration(), worktreeRoot: '/worktrees', harnesses: { 'claude-code': { flags: ['--remote-control', '--verbose'], options: {} } } };
+    const configured = { ...initialConfiguration(), shipsRoot: '/ships', harnesses: { 'claude-code': { flags: ['--remote-control', '--verbose'], options: {} } } };
     writeFileSync(path, JSON.stringify(configured));
 
     await expect(removeRemoteControl(path)).resolves.toEqual(['claude-code']);
@@ -115,6 +115,28 @@ describe('the configuration file', () => {
     }
 
     await expect(loadConfiguration(path)).rejects.toThrow(says);
+  });
+
+  describe('the place of ships/', () => {
+    it('loads shipsRoot, the place every ship keeps its own folder in', async () => {
+      const path = join(folder, 'config.json');
+      writeFileSync(path, JSON.stringify({ ...initialConfiguration(), shipsRoot: '/srv/ships' }));
+
+      await expect(loadConfiguration(path)).resolves.toMatchObject({ shipsRoot: '/srv/ships' });
+    });
+
+    it('refuses worktreeRoot, naming its new name', async () => {
+      const path = join(folder, 'config.json');
+      writeFileSync(path, JSON.stringify({ ...initialConfiguration(), worktreeRoot: '/srv/worktrees' }));
+
+      await expect(loadConfiguration(path)).rejects.toThrow(`The configuration at ${path} names worktreeRoot, which is now shipsRoot: rename the line to shipsRoot`);
+    });
+
+    it('states shipsRoot in the schema an editor checks it with, and worktreeRoot no more', () => {
+      const schema = JSON.stringify(configurationJsonSchema());
+
+      expect([schema.includes('"shipsRoot"'), schema.includes('"worktreeRoot"')]).toEqual([true, false]);
+    });
   });
 
   describe("a repository's read-only checkouts (#1182)", () => {

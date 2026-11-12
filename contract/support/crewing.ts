@@ -37,13 +37,30 @@ function linesOf<T>(file: string, schema: z.ZodType<T>): T[] {
     : [];
 }
 
-/** A ship's session in its worktree, as the harness's stand-in writes it down: each start, and for Claude Code each turn with what the plugin's hooks added to it. */
+const savedSchema = z.object({ entries: z.record(z.string(), z.looseObject({ shipName: z.string().optional(), folder: z.string().optional() })) });
+
+/** The folder the trierarch saved for the ship of that name, read afresh: none before it is crewed or after its entry goes. */
+function savedFolderOf(machine: Machine, shipName: string): string | undefined {
+  const file = join(machine.trierarchHome, 'state.json');
+  if (!existsSync(file)) {
+    return undefined;
+  }
+  return Object.values(savedSchema.parse(JSON.parse(readFileSync(file, 'utf8'))).entries).find((entry) => entry.shipName === shipName)?.folder;
+}
+
+/**
+ * A ship's session in its worktree, as the harness's stand-in writes it down: each start, and for Claude Code each turn with what the
+ * plugin's hooks added to it. The worktree is the folder the trierarch saved for the ship, read at each use, so a test reads it before
+ * the ship is crewed too; a path that is not there until then.
+ */
 export function sessionOf(machine: Machine, shipName: string) {
-  const worktree = join(machine.trierarchHome, 'worktrees', REPOSITORY, shipName);
+  const worktreeOf = (): string => savedFolderOf(machine, shipName) ?? join(machine.trierarchHome, 'ships', `no-folder-of-${shipName}`);
   return {
-    worktree,
-    starts: () => linesOf(join(worktree, 'fake-starts.jsonl'), startSchema),
-    turns: () => linesOf(join(worktree, 'fake-turns.jsonl'), turnSchema),
+    get worktree(): string {
+      return worktreeOf();
+    },
+    starts: () => linesOf(join(worktreeOf(), 'fake-starts.jsonl'), startSchema),
+    turns: () => linesOf(join(worktreeOf(), 'fake-turns.jsonl'), turnSchema),
   };
 }
 

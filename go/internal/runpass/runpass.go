@@ -55,9 +55,10 @@ type Fleet interface {
 
 // Sockets are the ships' sockets, each session's fleet calls (decision 0026).
 type Sockets interface {
-	// Open opens the ship's socket, or keeps the one open, and answers its path.
-	Open(shipID string) (string, error)
-	Close(shipID string)
+	// Open opens the ship's socket in its ship's folder, or for a ship crewed before the ship folders (none) where it was, or keeps the
+	// one open, and answers its path.
+	Open(shipID string, shipFolder string) (string, error)
+	Close(shipID string, shipFolder string)
 }
 
 // Sessions are the sessions that run, as the passes list and stop them.
@@ -95,6 +96,10 @@ type Harness interface {
 
 // Workspace makes and removes a ship's workspace, and lists every folder under the root.
 type Workspace interface {
+	// ShipFolderOf is the folder a ship crewed fresh keeps every file of its own in.
+	ShipFolderOf(shipID string) string
+	// HasShipFolder is whether the ship's folder is there; one removed by hand is not.
+	HasShipFolder(folder string) bool
 	Prepare(entry reconciler.Entry, shipName string) (string, error)
 	Unsaved(folder string) ([]string, error)
 	Remove(entry reconciler.Entry) error
@@ -469,6 +474,11 @@ func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reco
 		if !ok || entry.Folder == "" {
 			continue
 		}
+		isCrewed := entry.State == "running" || entry.State == "restarting" || entry.State == "crashed" || (entry.State == "crewing" && hasSession)
+		if isCrewed && entry.ShipFolder != "" && !p.Workspace.HasShipFolder(entry.ShipFolder) {
+			observed.ShipFoldersGone = append(observed.ShipFoldersGone, shipID)
+			continue
+		}
 		if entry.LaunchedAt != "" && status == reconciler.SessionRunning {
 			launch := harness.LaunchSeen(entry)
 			if launch.Kind == reconciler.LaunchRefused {
@@ -495,7 +505,7 @@ func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reco
 		if !isWatched {
 			continue
 		}
-		if _, err := p.Sockets.Open(shipID); err != nil {
+		if _, err := p.Sockets.Open(shipID, entry.ShipFolder); err != nil {
 			return observed, versions, err
 		}
 		turn := harness.Turn(entry)
@@ -622,6 +632,9 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	if err != nil {
 		return state, err
 	}
+	if entry.IsShipFolderGone {
+		return p.crewInAFreshShipFolder(state, entry, harness)
+	}
 	ship, err := p.Fleet.Ship(entry.ShipID)
 	if err != nil {
 		return state, err
@@ -657,6 +670,14 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	if problem := harness.Problem(); problem != nil {
 		return state, problem
 	}
+	// A ship crewed fresh keeps every file of its own in its ship's folder, kept before anything is made in it; one crewed before the
+	// ship folders keeps its workspace where it was.
+	if entry.Folder == "" && entry.ShipFolder == "" {
+		entry.ShipFolder = p.Workspace.ShipFolderOf(entry.ShipID)
+		if state, err = p.put(state, entry); err != nil {
+			return state, err
+		}
+	}
 	folder, err := p.Workspace.Prepare(entry, ship.Name)
 	if err != nil {
 		return state, err
@@ -684,7 +705,7 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	if state, err = p.put(state, entry); err != nil {
 		return state, err
 	}
-	socket, err := p.Sockets.Open(entry.ShipID)
+	socket, err := p.Sockets.Open(entry.ShipID, entry.ShipFolder)
 	if err != nil {
 		return state, err
 	}
@@ -719,9 +740,57 @@ func (p Pass) freshAfterReleaseElsewhere(state reconciler.State, entry reconcile
 		return state, entry, err
 	}
 	p.Log(fmt.Sprintf("%s (%s): released elsewhere, its worktree removed", nameOf(entry), entry.ShipID))
-	entry.IsReleasedElsewhere = false
+	// Crewed fresh, in a ship's folder of its own, whatever its workspace was.
+	entry.IsReleasedElsewhere, entry.Folder, entry.ShipFolder = false, "", ""
 	state, err := p.put(state, entry)
 	return state, entry, err
+}
+
+// crewInAFreshShipFolder crews a ship whose ship's folder is gone, removed by hand, again in a fresh one, under the lease it holds:
+// core removes the crew request on a release, so the ship is never released and registered again. Its session stops and its identity
+// and socket go; then its workspace is made in a new ship's folder, its identity written with the crew token its state keeps, and its
+// session started as a first start. Its usage since the last send went with the folder.
+func (p Pass) crewInAFreshShipFolder(state reconciler.State, entry reconciler.Entry, harness Harness) (reconciler.State, error) {
+	if err := p.Sessions.Stop(entry.ShipID); err != nil {
+		return state, err
+	}
+	if err := p.deleteIdentity(entry); err != nil {
+		return state, err
+	}
+	p.Log(fmt.Sprintf("%s (%s): its ship's folder %s is gone, so it is crewed again in a fresh one", nameOf(entry), entry.ShipID, entry.ShipFolder))
+	entry.ShipFolder = p.Workspace.ShipFolderOf(entry.ShipID)
+	folder, err := p.Workspace.Prepare(entry, entry.ShipName)
+	if err != nil {
+		return state, err
+	}
+	entry.Folder = folder
+	if state, err = p.put(state, entry); err != nil {
+		return state, err
+	}
+	socket, err := p.Sockets.Open(entry.ShipID, entry.ShipFolder)
+	if err != nil {
+		return state, err
+	}
+	made, err := p.checkoutsOf(entry)
+	if err != nil {
+		return state, err
+	}
+	identity := plugin.Identity{FleetURL: p.FleetURL, ShipID: entry.ShipID, ShipName: entry.ShipName, Socket: socket, Squadron: entry.Squadron, Checkouts: made}
+	if err := harness.WriteIdentity(entry, identity, entry.CrewToken); err != nil {
+		return state, err
+	}
+	login := p.loginOf(entry)
+	launchID := p.NewLaunchID()
+	starting := entry
+	starting.Login = login
+	starting.ReadOnly = pathsOf(made)
+	if err := harness.Launch(starting, true, launchID); err != nil {
+		return state, err
+	}
+	entry.IsShipFolderGone, entry.HasStarted, entry.LaunchedAt, entry.LaunchID = false, true, p.Now().Format(time.RFC3339Nano), launchID
+	entry = startedOn(entry, login, entry.LaunchedAt)
+	p.Log(fmt.Sprintf("%s (%s): crewed again, %s started in %s", entry.ShipName, entry.ShipID, entry.Harness, folder))
+	return p.put(state, entry)
 }
 
 // launch starts the entry's session again in its folder, continuing, its first minute checked from now (#397). The session that held its messages is gone: its store marks them for the session started now (#756).
@@ -890,7 +959,7 @@ func pathsOf(made []checkouts.Checkout) []string {
 
 // deleteIdentity removes the entry's identity, and with it its ship's socket, as nothing calls over it any more (decision 0026), and its read-only checkouts.
 func (p Pass) deleteIdentity(entry reconciler.Entry) error {
-	p.Sockets.Close(entry.ShipID)
+	p.Sockets.Close(entry.ShipID, entry.ShipFolder)
 	if err := p.Checkouts.Remove(entry.ShipID); err != nil {
 		return err
 	}
@@ -922,7 +991,8 @@ func (p Pass) endWorkspace(entry reconciler.Entry) error {
 		return err
 	}
 	if !isWorktree {
-		return nil
+		// A ship in a configured folder has its own folder too, which goes with it; the configured folder stays.
+		return p.Workspace.Remove(entry)
 	}
 	unsaved, err := p.Workspace.Unsaved(entry.Folder)
 	if err != nil {
@@ -944,8 +1014,10 @@ func (p Pass) endWorkspace(entry reconciler.Entry) error {
 func (p Pass) removeStray(state reconciler.State, folder string) error {
 	// An entry crewed earlier in this pass works here now: the reconcile saw it with no folder.
 	for _, entry := range state.Entries {
-		if entry.Folder != "" && (entry.Folder == folder || strings.HasPrefix(entry.Folder, folder+"/") || strings.HasPrefix(folder, entry.Folder+"/")) {
-			return nil
+		for _, used := range []string{entry.Folder, entry.ShipFolder} {
+			if used != "" && (used == folder || strings.HasPrefix(used, folder+"/") || strings.HasPrefix(folder, used+"/")) {
+				return nil
+			}
 		}
 	}
 	stopped, err := p.FolderProcesses.StopIn(folder)

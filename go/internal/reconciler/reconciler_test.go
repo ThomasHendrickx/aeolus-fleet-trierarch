@@ -1008,3 +1008,52 @@ func TestEveryClearRequestIsConfirmedNotKeptAsNoWorktreeIsKept(t *testing.T) {
 
 	assertActions(t, actions, Action{Kind: Clear, ShipID: lookout, Repository: "aeolus-fleet"})
 }
+
+func TestAShipsFolderAndEveryFolderInItAreNoStrayWhileItsShipHasAnEntryWhereverItsWorkspaceIs(t *testing.T) {
+	request := aRequest(scout)
+	request.Status = status("running")
+	context := aContext(request)
+	context.Observed.Sessions = running(scout)
+	entry := anEntry(scout, "running")
+	entry.Folder, entry.ShipFolder = "/folders/notes", "/ships/"+scout
+	context.Observed.Folders = []string{"/ships/" + scout, "/ships/" + scout + "/sockets", "/ships/shp_gone"}
+
+	_, actions := Reconcile(withEntries(entry), context)
+
+	assertActions(t, actions, Action{Kind: RemoveStray, Folder: "/ships/shp_gone"})
+}
+
+func TestAShipWhoseShipsFolderIsGoneIsCrewedAgainAsAFirstStartWhateverItsState(t *testing.T) {
+	for _, state := range []string{"running", "restarting", "crashed", "crewing"} {
+		t.Run(state, func(t *testing.T) {
+			entry := anEntry(scout, state)
+			entry.ShipFolder = "/ships/" + scout
+			request := aRequest(scout)
+			request.Status = status("running")
+			context := aContext(request)
+			context.Observed.ShipFoldersGone = []string{scout}
+
+			next, actions := Reconcile(withEntries(entry), context)
+
+			assertActions(t, actions, Action{Kind: Stop, ShipID: scout}, Action{Kind: Crew, ShipID: scout})
+			if again := next.Entries[scout]; !again.IsShipFolderGone || again.HasStarted || again.State != "crewing" {
+				t.Fatalf("entry: %+v", again)
+			}
+		})
+	}
+}
+
+func TestANewSettingsVersionCrewsTheShipAgainInItsOwnShipsFolder(t *testing.T) {
+	entry := anEntry(scout, "running")
+	entry.ShipFolder = "/ships/" + scout
+	request := aRequest(scout)
+	request.SettingsVersion = 2
+	context := aContext(request)
+	context.Observed.Sessions = running(scout)
+
+	next, _ := Reconcile(withEntries(entry), context)
+
+	if got := next.Entries[scout]; got.ShipFolder != entry.ShipFolder || got.Folder != entry.Folder {
+		t.Fatalf("entry: %+v", got)
+	}
+}

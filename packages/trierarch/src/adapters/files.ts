@@ -23,13 +23,18 @@ import { withoutRemoteControl } from '../core/remote-control.js';
  * ship's tokens is estimated by (#353): per model, in US dollars per million
  * tokens of each kind, in place of its list price or for a model with none.
  * And which login each session runs on (api keys K5): a default per harness
- * and a login per ship name, never a key or a path.
+ * and a login per ship name, never a key or a path. And the place of every
+ * ship's own folder, `shipsRoot`, `~/.aeolus/trierarch/ships` when left out,
+ * in place of common's worktree root.
  */
 const priceSchema = z.number().nonnegative();
 const loginSchema = z.enum(LOGINS);
 
 export const trierarchConfigurationSchema = commonConfigurationSchema
+  .omit({ worktreeRoot: true })
   .extend({
+    /** Where each ship keeps its own folder, `<shipsRoot>/<shipId>/`; `~/.aeolus/trierarch/ships` when left out. */
+    shipsRoot: z.string().min(1).optional(),
     repositories: z.record(trierarchNameSchema, z.strictObject({ path: z.string().min(1), checkouts: z.array(trierarchNameSchema).optional() })),
     prices: z.record(z.string().min(1), z.strictObject({ input: priceSchema, output: priceSchema, cacheRead: priceSchema, cacheWrite: priceSchema })).optional(),
     logins: z.strictObject({ default: z.strictObject({ 'claude-code': loginSchema.optional(), codex: loginSchema.optional() }).optional(), ships: z.record(z.string().min(1), loginSchema).optional() }).optional(),
@@ -87,6 +92,10 @@ export async function loadConfiguration(path: string): Promise<TrierarchConfigur
     json = JSON.parse(text);
   } catch (error) {
     throw new TrierarchFileError(`The configuration at ${path} is no JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  // The key the place of ships/ had before the ship folders: said by its new name, not as a field that does not fit.
+  if (typeof json === 'object' && json !== null && Object.hasOwn(json, 'worktreeRoot')) {
+    throw new TrierarchFileError(`The configuration at ${path} names worktreeRoot, which is now shipsRoot: rename the line to shipsRoot`);
   }
   const parsed = trierarchConfigurationSchema.safeParse(json);
   if (!parsed.success) {

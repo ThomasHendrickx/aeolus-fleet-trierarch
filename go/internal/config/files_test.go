@@ -40,7 +40,7 @@ func TestAFreshInitWritesNoRepositoryNoFolderAndClaudeCodeWithNoFlag(t *testing.
 func TestLoadsTheConfigurationItWrote(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	written := Initial()
-	written.WorktreeRoot = "/work"
+	written.ShipsRoot = "/work"
 	written.Repositories["aeolus-fleet"] = Repository{Path: "/src/aeolus-fleet"}
 	if err := Write(path, written); err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestLoadsTheConfigurationItWrote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.WorktreeRoot != "/work" || loaded.Repositories["aeolus-fleet"].Path != "/src/aeolus-fleet" || loaded.Caps != (Caps{Ships: 4, Running: 2}) {
+	if loaded.ShipsRoot != "/work" || loaded.Repositories["aeolus-fleet"].Path != "/src/aeolus-fleet" || loaded.Caps != (Caps{Ships: 4, Running: 2}) {
 		t.Errorf("loaded %+v", loaded)
 	}
 }
@@ -122,5 +122,19 @@ func TestAConfigurationWithoutAipHasNoneLeftOver(t *testing.T) {
 
 	if loaded, err := Load(path); err != nil || loaded.HasLeftoverAip {
 		t.Errorf("Load = %+v, %v, want no aip left over", loaded, err)
+	}
+}
+
+func TestLoadsAConfigurationNamingTheOldWorktreeRootAndSaysSoAndReadsShipsRootAsThePlaceOfShips(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	text := `{"caps":{"ships":4,"running":2},"repositories":{},"folders":{},"harnesses":{},"worktreeRoot":"/srv/worktrees","shipsRoot":"/srv/ships"}`
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Load(path)
+
+	if err != nil || !loaded.NamesWorktreeRoot || loaded.ShipsRoot != "/srv/ships" {
+		t.Errorf("Load = %+v, %v, want worktreeRoot said to be named and shipsRoot read", loaded, err)
 	}
 }

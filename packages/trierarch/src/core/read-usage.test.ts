@@ -33,6 +33,17 @@ const FIVE_HOURS = { windowMinutes: 300, usedPercent: 3, resetsAt: new Date('202
 const SEVEN_DAYS = { windowMinutes: 10_080, usedPercent: 68, resetsAt: new Date('2026-10-09T08:00:00.000Z') };
 
 describe("the harnesses' usage, as the trierarch reads it (#353)", () => {
+  it("reads the tokens of a ship crewed fresh in its ship's folder, which holds its home in a container", async () => {
+    const trierarch = aTrierarch();
+    const entry = aCrewedEntry();
+    const shipFolder = `/home/thomas/.aeolus/trierarch/ships/${entry.shipId}`;
+    await withEntries(trierarch, { ...entry, shipFolder });
+
+    await trierarch.readUsage();
+
+    expect(trierarch.usage.readIn.get(entry.shipId)).toBe(shipFolder);
+  });
+
   it("answers each crewed ship's tokens per model, with their cost estimated from the price table, and none for a model it does not price", async () => {
     const trierarch = aTrierarch();
     const entry = aCrewedEntry();

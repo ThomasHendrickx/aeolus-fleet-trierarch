@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
@@ -64,8 +64,8 @@ function configuration(runtime?: TrierarchConfiguration['runtime']): TrierarchCo
   return { caps: { ships: 2, running: 2 }, repositories: { demo: { path: repository } }, folders: {}, harnesses: { 'claude-code': { flags: [], options: {} } }, ...(runtime !== undefined && { runtime }) };
 }
 
-function adaptersOf(runtime?: TrierarchConfiguration['runtime'], worktreeRoot?: string) {
-  return runtimeAdaptersOf({ configuration: { ...configuration(runtime), ...(worktreeRoot !== undefined && { worktreeRoot }) }, paths, version: '0.25.0', launch: [], managedSettings: join(home, 'managed'), proxyUrl: () => Promise.resolve(undefined), program: TRIERARCH_PROGRAM });
+function adaptersOf(runtime?: TrierarchConfiguration['runtime'], shipsRoot?: string) {
+  return runtimeAdaptersOf({ configuration: { ...configuration(runtime), ...(shipsRoot !== undefined && { shipsRoot }) }, paths, version: '0.25.0', launch: [], managedSettings: join(home, 'managed'), proxyUrl: () => Promise.resolve(undefined), program: TRIERARCH_PROGRAM });
 }
 
 describe('the adapters the session runtime picks (decision 0039)', () => {
@@ -90,6 +90,33 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
     const { folder } = await adaptersOf({ ...CONTAINER, binary }, join(home, 'linked-root')).workspace.prepare({ shipId, shipName: 'scout', workspace: { kind: 'worktree', repository: 'demo' } });
 
     expect(folder).toBe(join(home, 'real-root', 'demo', 'scout'));
+  });
+
+  it("gives a ship crewed fresh its ship's folder under ships/ when the configuration names no place, its worktree in it", async () => {
+    const adapters = adaptersOf();
+    const shipFolder = await adapters.workspace.shipFolderOf(shipId);
+
+    const { folder } = await adapters.workspace.prepare({ shipId, shipName: 'scout', workspace: { kind: 'worktree', repository: 'demo' }, shipFolder });
+
+    expect([shipFolder, folder]).toEqual([join(paths.ships, shipId), join(paths.ships, shipId, 'worktree')]);
+  });
+
+  it("gives a ship crewed fresh in containers its ship's folder by its real path, through a place of ships/ that is a link", async () => {
+    mkdirSync(join(home, 'real-ships'));
+    symlinkSync(join(home, 'real-ships'), join(home, 'linked-ships'));
+
+    await expect(adaptersOf({ ...CONTAINER, binary }, join(home, 'linked-ships')).workspace.shipFolderOf(shipId)).resolves.toBe(join(home, 'real-ships', shipId));
+  });
+
+  it.each([{ runtime: 'the host' }, { runtime: 'containers' }])("empties the trash beside the place of ships/, and beside each repository's folder under the old worktree root, on $runtime", async ({ runtime }) => {
+    const trashed = [join(paths.ships, '.trash', `${shipId}.1793707200000`), join(paths.worktrees, 'demo', '.trash', 'scout.1793707200000')];
+    for (const folder of trashed) {
+      mkdirSync(folder, { recursive: true });
+    }
+
+    await (runtime === 'the host' ? adaptersOf() : adaptersOf({ ...CONTAINER, binary })).trash.empty();
+
+    expect(trashed.filter((folder) => existsSync(folder))).toEqual([]);
   });
 
   it('stops the processes in a folder on the host, and in containers leaves a folder a container works in', async () => {

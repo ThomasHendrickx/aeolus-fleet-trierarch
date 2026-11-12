@@ -1,6 +1,7 @@
 // Package workspace is a session's workspace as git makes it (docs/architecture.md,
-// "First adapters"): a worktree of a configured repository, one folder per
-// ship, `<root>/<repository>/<ship>`, the repository fetched first and a ref
+// "First adapters"): a worktree of a configured repository in the ship's own
+// folder, `<ships>/<shipId>/worktree`, or for a ship crewed before the ship
+// folders `<root>/<repository>/<ship>`, the repository fetched first and a ref
 // the remote has a branch for taken as that remote branch, and none named the
 // remote's default branch, so a ship starts from current code. A worktree ends with its session: it is removed whatever
 // it holds (worktrees design, items 1 to 3), and what it held is said first. A local branch checked out in no worktree whose remote branch is
@@ -20,20 +21,36 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
 )
 
 const remote = "origin"
 
-// Worktree is where a ship's worktree is made: under the root, of the configured repository at its path, by the ship's name, at a ref when one is named.
+// Worktree is where a ship's worktree is made: in its folder, or with none under the root by the ship's name, of the configured
+// repository at its path, at a ref when one is named.
 type Worktree struct {
 	Root       string
 	Repository string
 	Path       string
 	ShipName   string
 	Ref        string
+	// Folder is where the worktree is made, in the ship's folder; none makes it at `<root>/<repository>/<ship>`, as for a ship crewed
+	// before the ship folders.
+	Folder string
 }
+
+// folder is where the worktree is made.
+func (at Worktree) folder() string {
+	if at.Folder != "" {
+		return at.Folder
+	}
+	return filepath.Join(at.Root, at.Repository, at.ShipName)
+}
+
+// shipFolderMode is a ship's folder's mode: only its owner opens it.
+const shipFolderMode = 0o700
 
 func git(args ...string) (string, error) {
 	return said(exec.Command("git", args...), args)
@@ -142,11 +159,11 @@ func defaultRef(path string) string {
 
 // Prepare makes the ship's worktree, or takes the one a stop mid-crew left, and answers its folder.
 func Prepare(at Worktree) (string, error) {
-	folder := filepath.Join(at.Root, at.Repository, at.ShipName)
+	folder := at.folder()
 	if _, err := os.Stat(folder); err == nil {
 		return folder, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(folder), 0o755); err != nil {
+	if err := makeParentOf(at); err != nil {
 		return "", err
 	}
 	// A repository with no remote, or one that cannot be reached now, is made from as it is.
@@ -208,9 +225,23 @@ func Remove(repository string, folder string) error {
 	return err
 }
 
-// Places are the configured repositories and folders by name, and the worktree root, as the run pass makes and removes a ship's workspace.
+// makeParentOf makes the folder the worktree is made in: the ship's folder for its owner alone, or the repository's under the root.
+func makeParentOf(at Worktree) error {
+	if at.Folder != "" {
+		return os.MkdirAll(filepath.Dir(at.Folder), shipFolderMode)
+	}
+	return os.MkdirAll(filepath.Dir(at.folder()), 0o755)
+}
+
+// Places are the configured repositories and folders by name, the place of every ship's folder, and the worktree root of the ships
+// crewed before the ship folders, as the run pass makes and removes a ship's workspace.
 type Places struct {
-	Root         string
+	// Root is the place of the ships' folders, `ships/<shipId>/` by default; a configured place of ships/ holds the worktrees of the ships
+	// crewed before the ship folders too.
+	Root string
+	// Before is the worktree root of the ships crewed before the ship folders, where their worktrees stay until they are crewed fresh,
+	// when it is not the Root; none when it is.
+	Before       string
 	Repositories map[string]string
 	Folders      map[string]string
 	// Clone clones a trusted repository the machine lacks into its path before its first workspace (aeolus-fleet#384); none clones nothing.
@@ -252,7 +283,10 @@ func (p Places) prepare(entry reconciler.Entry, shipName string) (string, error)
 			return "", err
 		}
 	}
-	at := Worktree{Root: p.Root, Repository: entry.Workspace.Repository, Path: repository, ShipName: shipName, Ref: entry.Workspace.Ref}
+	at := Worktree{Root: p.before(), Repository: entry.Workspace.Repository, Path: repository, ShipName: shipName, Ref: entry.Workspace.Ref}
+	if entry.ShipFolder != "" {
+		at.Folder = filepath.Join(entry.ShipFolder, paths.WorktreeFolder)
+	}
 	if p.IsClone {
 		return PrepareClone(at)
 	}
@@ -272,8 +306,46 @@ func (p Places) Unsaved(folder string) ([]string, error) {
 	return unsaved, nil
 }
 
-// Remove removes the ship's worktree, or its clone; a configured folder is never removed.
+// before is the worktree root of the ships crewed before the ship folders.
+func (p Places) before() string {
+	if p.Before != "" {
+		return p.Before
+	}
+	return p.Root
+}
+
+// roots are the places a workspace could be under: the place of the ships' folders, and the worktree root of the ships crewed before.
+func (p Places) roots() []string {
+	if p.Before == "" || p.Before == p.Root {
+		return []string{p.Root}
+	}
+	return []string{p.Root, p.Before}
+}
+
+// ShipFolderOf is the folder a ship crewed fresh keeps every file of its own in, under the place of the ships' folders; by its real
+// path when the places say so, as its workspace is.
+func (p Places) ShipFolderOf(shipID string) string {
+	root := p.Root
+	if p.IsByRealPath {
+		if real, err := filepath.EvalSymlinks(root); err == nil {
+			root = real
+		}
+	}
+	return filepath.Join(root, shipID)
+}
+
+// HasShipFolder is whether the ship's folder is there, as a folder; one removed by hand is not.
+func (p Places) HasShipFolder(folder string) bool {
+	found, err := os.Stat(folder)
+	return err == nil && found.IsDir()
+}
+
+// Remove removes the ship's worktree, or its clone: a ship's folder goes whole into the trash beside it, whatever it holds, and a
+// worktree of a ship crewed before the ship folders goes as git removes it. A configured folder is never removed.
 func (p Places) Remove(entry reconciler.Entry) error {
+	if entry.ShipFolder != "" {
+		return p.removeShipFolder(entry.ShipFolder)
+	}
 	if entry.Workspace.Kind != "worktree" || entry.Folder == "" {
 		return nil
 	}
@@ -291,10 +363,28 @@ func (p Places) Remove(entry reconciler.Entry) error {
 	return Remove(repository, entry.Folder)
 }
 
-// repositoryOf is the repository a folder under the root is a worktree of, by the name its path starts with: a configured one, or the clone of one that left the trusted repositories, which still holds the worktrees made from it.
+// removeShipFolder moves the ship's folder into the trash beside it, at once, so nothing reads it again; one already gone is removed
+// already. Its worktree's record in its repository goes with the next prune.
+func (p Places) removeShipFolder(folder string) error {
+	if _, err := os.Lstat(folder); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err := trash.Discard(folder, time.Now(), p.MoveWithinUserNamespace); err != nil {
+		return fmt.Errorf("remove the ship's folder %s: %w", folder, err)
+	}
+	return nil
+}
+
+// repositoryOf is the repository a folder under a root is a worktree of, by the name its path starts with: a configured one, or the clone of one that left the trusted repositories, which still holds the worktrees made from it.
 func (p Places) repositoryOf(folder string) (string, bool) {
-	relative, err := filepath.Rel(p.Root, folder)
-	if err != nil {
+	relative := ""
+	for _, root := range p.roots() {
+		if inRoot, err := filepath.Rel(root, folder); err == nil && filepath.IsLocal(inRoot) {
+			relative = inRoot
+			break
+		}
+	}
+	if relative == "" {
 		return "", false
 	}
 	name := strings.Split(relative, string(filepath.Separator))[0]
@@ -328,7 +418,11 @@ func listed(repository string) ([]string, error) {
 // real paths when the places say so, as their workspaces are.
 func (p Places) FoldersUnderRoot() ([]string, error) {
 	found := []string{}
-	for _, top := range foldersIn(p.Root) {
+	tops := []string{}
+	for _, root := range p.roots() {
+		tops = append(tops, foldersIn(root)...)
+	}
+	for _, top := range tops {
 		if _, err := os.Lstat(filepath.Join(top, ".git")); err == nil {
 			found = append(found, top)
 			continue
@@ -378,9 +472,12 @@ func foldersIn(parent string) []string {
 // isUnderRoot is whether the folder is one a workspace could be under the root: one or two levels below it, never the root or the
 // trash. A root reached through a link counts by its real path too, as a container's workspace goes by its real one.
 func (p Places) isUnderRoot(folder string) bool {
-	roots := []string{p.Root}
-	if real, err := filepath.EvalSymlinks(p.Root); err == nil {
-		roots = append(roots, real)
+	roots := []string{}
+	for _, root := range p.roots() {
+		roots = append(roots, root)
+		if real, err := filepath.EvalSymlinks(root); err == nil {
+			roots = append(roots, real)
+		}
 	}
 	return slices.ContainsFunc(roots, func(root string) bool {
 		relative, err := filepath.Rel(root, folder)
@@ -407,11 +504,12 @@ func isWorktreeOf(repository string, folder string) bool {
 }
 
 // RemoveWorktree removes a folder under the root, whatever it is (gap rule 2): a worktree of a repository it has by git, a clone into
-// the trash beside it, anything else, such as a plain clone, a worktree of another repository or a folder git does not know, as it is.
+// the trash beside it, anything else, such as a plain clone, a worktree of another repository, a folder git does not know or a stray ship's folder, into the
+// trash beside it too, but one straight under the worktree root of the ships crewed before, which has no trash, as it is.
 // Never one outside the root, the root or its trash.
 func (p Places) RemoveWorktree(folder string) error {
 	if !p.isUnderRoot(folder) {
-		return fmt.Errorf("%s is not under %s, or is its trash: the trierarch removes only a folder under the root", folder, p.Root)
+		return fmt.Errorf("%s is not under %s, or is its trash: the trierarch removes only a folder under the root", folder, strings.Join(p.roots(), " or "))
 	}
 	found, err := os.Lstat(folder)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -429,7 +527,15 @@ func (p Places) RemoveWorktree(folder string) error {
 	if repository, ok := p.repositoryOf(folder); ok && isWorktreeOf(repository, folder) {
 		return Remove(repository, folder)
 	}
-	return os.RemoveAll(folder)
+	// One straight under the worktree root of the ships crewed before has no trash beside it a pass empties, so the host removes it; any
+	// other, a stray ship's folder among them, goes into the trash beside it.
+	if p.Before != "" && p.Before != p.Root {
+		parent := filepath.Dir(folder)
+		if real, err := filepath.EvalSymlinks(p.Before); parent == p.Before || (err == nil && parent == real) {
+			return os.RemoveAll(folder)
+		}
+	}
+	return trash.Discard(folder, time.Now(), p.MoveWithinUserNamespace)
 }
 
 // Prune drops the git records of the repository's worktrees whose folder is gone, wherever the folder was; a worktree whose folder exists

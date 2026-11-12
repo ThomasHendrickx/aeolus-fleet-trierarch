@@ -131,16 +131,32 @@ func (f *aFleet) Inbox(crewToken string) (reconciler.Inbox, error) {
 	return f.inboxes[crewToken], nil
 }
 
-// someSockets are the ships' sockets, each under the root, as their identities name them; what was opened and closed, in order.
+// someSockets are the ships' sockets, each in its ship's folder, or for a ship crewed before the ship folders under the sockets
+// folder, as their identities name them; what was opened and closed, in order, and the ship's folder each was opened and closed in.
 type someSockets struct {
 	events []string
+	opened map[string]string
+	closed map[string]string
 }
 
-func (s *someSockets) Open(shipID string) (string, error) {
+func (s *someSockets) Open(shipID string, shipFolder string) (string, error) {
 	s.events = append(s.events, "open "+shipID)
-	return "/home/me/.aeolus/trierarch/sockets/" + shipID + "/fleet.sock", nil
+	if s.opened == nil {
+		s.opened = map[string]string{}
+	}
+	s.opened[shipID] = shipFolder
+	if shipFolder == "" {
+		return "/home/me/.aeolus/trierarch/sockets/" + shipID + "/fleet.sock", nil
+	}
+	return shipFolder + "/sockets/fleet.sock", nil
 }
-func (s *someSockets) Close(shipID string) { s.events = append(s.events, "close "+shipID) }
+func (s *someSockets) Close(shipID string, shipFolder string) {
+	s.events = append(s.events, "close "+shipID)
+	if s.closed == nil {
+		s.closed = map[string]string{}
+	}
+	s.closed[shipID] = shipFolder
+}
 
 // aSessions holds the sessions that run, as the harness's launches start them.
 type aSessions struct {
@@ -179,6 +195,8 @@ type aHarness struct {
 	died     []string
 	seen     map[string]reconciler.LaunchSeen
 	problem  error
+	// launchFails is an error every launch ends with.
+	launchFails error
 	// marksNoLaunches is a plugin older than the launch marker; pluginMissing one that cannot be found; notOffered why the machine does not offer the harness.
 	marksNoLaunches bool
 	pluginMissing   bool
@@ -201,6 +219,9 @@ func (h *aHarness) Activity(entry reconciler.Entry) (activity.Activity, bool) {
 }
 
 func (h *aHarness) Launch(entry reconciler.Entry, isFirstStart bool, launchID string) error {
+	if h.launchFails != nil {
+		return h.launchFails
+	}
 	h.launches = append(h.launches, launched{shipID: entry.ShipID, folder: entry.Folder, isFirstStart: isFirstStart, launchID: launchID, firstPrompt: entry.FirstPrompt})
 	h.logins = append(h.logins, entry.Login)
 	h.readOnly = append(h.readOnly, entry.ReadOnly)
@@ -258,7 +279,11 @@ func (h *aHarness) NotOfferedReason() string { return h.notOffered }
 
 // aWorkspace makes each worktree as a folder that holds what the test puts in it.
 type aWorkspace struct {
-	made    map[string]bool
+	made map[string]bool
+	// under are folders under the root besides the workspaces made, as a ship's folder holding its socket.
+	under []string
+	// gone are the ships' folders removed by hand.
+	gone    map[string]bool
 	unsaved map[string][]string
 	removed []string
 	// failRemove makes a removal fail, as a worktree that cannot be removed does.
@@ -295,7 +320,9 @@ func (w *aWorkspace) Prune(repository string) error {
 
 // FoldersUnderRoot are the folders made, each `/worktrees/<repository>/<name>`, whatever they are.
 func (w *aWorkspace) FoldersUnderRoot() ([]string, error) {
-	return slices.Sorted(maps.Keys(w.made)), nil
+	folders := append(slices.Collect(maps.Keys(w.made)), w.under...)
+	slices.Sort(folders)
+	return folders, nil
 }
 
 func (w *aWorkspace) RemoveWorktree(folder string) error {
@@ -331,6 +358,12 @@ func (w *aWorkspace) Prepare(entry reconciler.Entry, shipName string) (string, e
 	w.made[folder] = true
 	return folder, nil
 }
+
+// ShipFolderOf is the ship's folder under the place of ships/.
+func (w *aWorkspace) ShipFolderOf(shipID string) string { return "/ships/" + shipID }
+
+// HasShipFolder is whether the ship's folder is there: every one is, but those removed by hand.
+func (w *aWorkspace) HasShipFolder(folder string) bool { return !w.gone[folder] }
 func (w *aWorkspace) Unsaved(folder string) ([]string, error) {
 	if w.failUnsaved {
 		return nil, errors.New("git status failed in " + folder)
@@ -340,6 +373,11 @@ func (w *aWorkspace) Unsaved(folder string) ([]string, error) {
 func (w *aWorkspace) Remove(entry reconciler.Entry) error {
 	if w.failRemove {
 		return errors.New("cannot remove " + entry.Folder)
+	}
+	// A configured folder stays; its ship's folder goes.
+	if entry.Workspace.Kind == "folder" {
+		w.removed = append(w.removed, entry.ShipFolder)
+		return nil
 	}
 	delete(w.made, entry.Folder)
 	w.removed = append(w.removed, entry.Folder)
@@ -508,7 +546,7 @@ func TestACrewIsRegisteredWithTheStartingPromptsSecretAndItsSessionStartsInItsWo
 	}
 	folder := "/worktrees/aeolus-fleet/scout"
 	identity := pass.harness.identities[folder]
-	if identity.ShipID != scout || identity.ShipName != "scout" || identity.FleetURL != "https://fleet.example" || identity.Socket != "/home/me/.aeolus/trierarch/sockets/"+scout+"/fleet.sock" || pass.harness.tokens[folder] != "aeolus_ct_v1_scout" {
+	if identity.ShipID != scout || identity.ShipName != "scout" || identity.FleetURL != "https://fleet.example" || identity.Socket != "/ships/"+scout+"/sockets/fleet.sock" || pass.harness.tokens[folder] != "aeolus_ct_v1_scout" {
 		t.Fatalf("identity %+v, token %q", identity, pass.harness.tokens[folder])
 	}
 	if len(pass.harness.launches) != 1 || pass.harness.launches[0] != (launched{shipID: scout, folder: folder, isFirstStart: true, launchID: "launch-1", firstPrompt: "Review PR 12"}) {
@@ -940,7 +978,7 @@ func TestTheShipsSocketIsOpenedBeforeItsIdentityNamesIt(t *testing.T) {
 
 	pass.run(t)
 
-	want := []string{"open " + scout, "identity /home/me/.aeolus/trierarch/sockets/" + scout + "/fleet.sock"}
+	want := []string{"open " + scout, "identity /ships/" + scout + "/sockets/fleet.sock"}
 	if !slices.Equal(pass.sockets.events, want) {
 		t.Fatalf("sockets %q, want %q", pass.sockets.events, want)
 	}
@@ -1372,7 +1410,7 @@ func TestAReleaseWhoseWorktreeCannotBeReadLeavesItAndTriesAgainOnTheNextPass(t *
 	}
 }
 
-func TestAReleaseOfAFolderCrewTellsNobodyAndRemovesNothing(t *testing.T) {
+func TestAReleaseOfAFolderCrewTellsNobodyAndRemovesItsShipsFolderAlone(t *testing.T) {
 	pass := aRunPass(t)
 	pass.crewed(t)
 	entry := pass.store.state.Entries[scout]
@@ -1383,7 +1421,7 @@ func TestAReleaseOfAFolderCrewTellsNobodyAndRemovesNothing(t *testing.T) {
 
 	pass.run(t)
 
-	if len(pass.fleet.told) != 0 || len(pass.workspace.removed) != 0 {
+	if len(pass.fleet.told) != 0 || !slices.Equal(pass.workspace.removed, []string{"/ships/" + scout}) {
 		t.Fatalf("told %+v, removed %q", pass.fleet.told, pass.workspace.removed)
 	}
 }
@@ -2355,7 +2393,7 @@ func TestACrewGetsItsReadOnlyCheckoutsMadeBeforeItsIdentityNamesThemAndItsSessio
 	if len(pass.harness.readOnly) != 1 || !slices.Equal(pass.harness.readOnly[0], []string{"/checkouts/" + scout + "/governance", "/checkouts/" + scout + "/skills"}) {
 		t.Fatalf("read-only %v", pass.harness.readOnly)
 	}
-	if !slices.Equal(pass.checkouts.made, []string{scout + " aeolus-fleet"}) || !slices.Equal(pass.sockets.events, []string{"open " + scout, "checkouts " + scout, "identity /home/me/.aeolus/trierarch/sockets/" + scout + "/fleet.sock"}) {
+	if !slices.Equal(pass.checkouts.made, []string{scout + " aeolus-fleet"}) || !slices.Equal(pass.sockets.events, []string{"open " + scout, "checkouts " + scout, "identity /ships/" + scout + "/sockets/fleet.sock"}) {
 		t.Fatalf("made %q, sockets and checkouts %q", pass.checkouts.made, pass.sockets.events)
 	}
 }
@@ -2930,5 +2968,145 @@ func TestACrashedShipKeepsItsWorktreeWithWhatItHolds(t *testing.T) {
 
 	if pass.store.state.Entries[scout].State != "crashed" || len(pass.workspace.removed) != 0 {
 		t.Fatalf("entry %+v, removed %q", pass.store.state.Entries[scout], pass.workspace.removed)
+	}
+}
+
+func TestAShipCrewedFreshKeepsItsShipsFolderInTheStateAndOpensItsSocketThere(t *testing.T) {
+	pass := aRunPass(t)
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+
+	pass.run(t)
+
+	if entry := pass.store.state.Entries[scout]; entry.ShipFolder != "/ships/"+scout {
+		t.Fatalf("entry %+v", entry)
+	}
+	if pass.sockets.opened[scout] != "/ships/"+scout {
+		t.Fatalf("opened in %q", pass.sockets.opened[scout])
+	}
+}
+
+// crewedBefore runs passes until scout runs, then makes its entry one a trierarch before the ship folders crewed: no ship's folder.
+func (p *aPass) crewedBefore(t *testing.T) {
+	t.Helper()
+	p.crewed(t)
+	entry := p.store.state.Entries[scout]
+	entry.ShipFolder = ""
+	p.store.state.Entries[scout] = entry
+	p.sockets.opened = nil
+}
+
+func TestAShipCrewedBeforeTheShipFoldersKeepsItsSocketWhereItWasAcrossAPass(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewedBefore(t)
+
+	pass.run(t)
+
+	folder, opened := pass.sockets.opened[scout]
+	if !opened || folder != "" {
+		t.Fatalf("opened %v in %q", opened, folder)
+	}
+	if entry := pass.store.state.Entries[scout]; entry.ShipFolder != "" || entry.Folder != scoutFolder {
+		t.Fatalf("entry %+v", entry)
+	}
+}
+
+func TestAShipCrewedBeforeTheShipFoldersIsReleasedOnItsOwnPathsAndItsSocketClosedWhereItWas(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewedBefore(t)
+	pass.fleet.requests = []reconciler.Request{}
+
+	pass.run(t)
+
+	if !slices.Equal(pass.workspace.removed, []string{scoutFolder}) {
+		t.Fatalf("removed %q", pass.workspace.removed)
+	}
+	if folder, closed := pass.sockets.closed[scout]; !closed || folder != "" {
+		t.Fatalf("closed %v in %q", closed, folder)
+	}
+}
+
+func TestAShipCrewedBeforeTheShipFoldersAndReleasedElsewhereIsCrewedAgainInItsShipsFolder(t *testing.T) {
+	pass := aRunPass(t)
+	pass.releasedElsewhere(t)
+	entry := pass.store.state.Entries[scout]
+	entry.ShipFolder = ""
+	pass.store.state.Entries[scout] = entry
+
+	pass.run(t)
+
+	if entry := pass.store.state.Entries[scout]; entry.ShipFolder != "/ships/"+scout || entry.State != "crewing" {
+		t.Fatalf("entry %+v", entry)
+	}
+	if pass.sockets.opened[scout] != "/ships/"+scout {
+		t.Fatalf("opened in %q", pass.sockets.opened[scout])
+	}
+}
+
+func TestAShipsFolderIsNoStrayWhileItsShipIsCrewedWithItsWorkspaceElsewhere(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	pass.workspace.under = []string{"/ships/" + scout, "/ships/" + scout + "/sockets"}
+
+	pass.run(t)
+
+	if len(pass.workspace.removed) != 0 {
+		t.Fatalf("removed %q", pass.workspace.removed)
+	}
+}
+
+func TestAShipWhoseCrewAgainInAFreshShipsFolderIsInterruptedKeepsItsMarkAndIsCrewedAgainUnderItsLeaseNeverReleased(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	crewToken := pass.store.state.Entries[scout].CrewToken
+	pass.harness.launches = nil
+	pass.workspace.gone = map[string]bool{"/ships/" + scout: true}
+	pass.harness.launchFails = errors.New("the harness could not start")
+
+	_ = pass.pass.Run()
+
+	if !pass.store.state.Entries[scout].IsShipFolderGone {
+		t.Fatalf("entry %+v", pass.store.state.Entries[scout])
+	}
+	pass.harness.launchFails = nil
+	pass.run(t)
+
+	if slices.ContainsFunc(pass.fleet.calls, func(call string) bool {
+		return strings.HasPrefix(call, "release ") || strings.HasPrefix(call, "register ")
+	}) {
+		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+	entry := pass.store.state.Entries[scout]
+	if len(pass.harness.launches) != 1 || !pass.harness.launches[0].isFirstStart || entry.IsShipFolderGone || entry.CrewToken != crewToken {
+		t.Fatalf("launches %+v, entry %+v", pass.harness.launches, entry)
+	}
+}
+
+func TestAShipWhoseShipsFolderWasRemovedIsCrewedAgainInAFreshOneAsAFirstStartUnderItsLease(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	crewToken := pass.store.state.Entries[scout].CrewToken
+	pass.harness.launches = nil
+	pass.workspace.gone = map[string]bool{"/ships/" + scout: true}
+
+	pass.run(t)
+
+	// Core removes the crew request on a release, so its lease is kept, never released and registered again.
+	if slices.ContainsFunc(pass.fleet.calls, func(call string) bool {
+		return strings.HasPrefix(call, "release ") || strings.HasPrefix(call, "register ") || strings.HasPrefix(call, "getStartingPrompt ")
+	}) {
+		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+	if len(pass.harness.launches) != 1 || !pass.harness.launches[0].isFirstStart || pass.harness.launches[0].firstPrompt != "Review PR 12" {
+		t.Fatalf("launches %+v", pass.harness.launches)
+	}
+	if pass.harness.tokens[scoutFolder] != crewToken || pass.harness.identities[scoutFolder].Socket != "/ships/"+scout+"/sockets/fleet.sock" {
+		t.Fatalf("identity %+v, token %q", pass.harness.identities[scoutFolder], pass.harness.tokens[scoutFolder])
+	}
+	entry := pass.store.state.Entries[scout]
+	if entry.IsShipFolderGone || entry.ShipFolder != "/ships/"+scout || entry.State != "crewing" || entry.CrewToken != crewToken {
+		t.Fatalf("entry %+v", entry)
+	}
+	if len(pass.fleet.told) != 0 {
+		t.Fatalf("told %+v", pass.fleet.told)
 	}
 }

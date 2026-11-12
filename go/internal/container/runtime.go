@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 )
 
@@ -80,9 +81,11 @@ type Runtime struct {
 	ModelToken string
 	// ProxyURL is the host proxy listener, read when a session starts.
 	ProxyURL func() (string, bool)
-	// Homes is where the ships' homes are kept on the host, one folder per ship, each mounted as its container's home.
+	// Homes is where the homes of the ships crewed before the ship folders are kept on the host, one folder per ship, each mounted as its
+	// container's home; a ship crewed fresh has its home in its ship's folder.
 	Homes string
-	// Sockets is where the ships' sockets are kept on the host, one folder per ship, each mounted at its own path (decision 0026).
+	// Sockets is where the sockets of the ships crewed before the ship folders are kept on the host, one folder per ship, each mounted at
+	// its own path (decision 0026); a ship crewed fresh has its sockets folder in its ship's folder.
 	Sockets string
 	// Memory is the memory cap of each container, as the runtime takes it (`4g`).
 	Memory string
@@ -92,9 +95,6 @@ type Runtime struct {
 }
 
 func containerName(shipID string) string { return prefix + shipID }
-
-// HomeOf is the ship's own home under the homes folder.
-func HomeOf(homes string, shipID string) string { return filepath.Join(homes, shipID) }
 
 func (r Runtime) run(args ...string) (string, error) {
 	if r.Run != nil {
@@ -256,8 +256,8 @@ func (r Runtime) heldAs(session sessions.Start, files hold.Files) (sessions.Star
 		}
 		content.WriteString(name + "=" + env[name] + "\n")
 	}
-	home := HomeOf(r.Homes, session.ShipID)
-	sockets := filepath.Join(r.Sockets, session.ShipID)
+	home := paths.ShipHome(r.Homes, session.ShipID, session.ShipFolder)
+	sockets := paths.ShipSockets(r.Sockets, session.ShipID, session.ShipFolder)
 	for _, folder := range []string{sockets, home} {
 		if err := os.MkdirAll(folder, 0o700); err != nil {
 			return sessions.Start{}, err

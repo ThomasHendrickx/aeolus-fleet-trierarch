@@ -54,10 +54,12 @@ type Observed struct {
 
 // Start is what a session's start is given.
 type Start struct {
-	ShipID  string
-	Folder  string
-	Harness string
-	Command []string
+	ShipID string
+	Folder string
+	// ShipFolder is the ship's own folder, which holds its home and its sockets; none for a ship crewed before the ship folders.
+	ShipFolder string
+	Harness    string
+	Command    []string
 	// Env is given to the harness on top of the hold's own few variables.
 	Env map[string]string
 	// ProxyToken is the session's model proxy token, none for a session on its subscription (headless H16).

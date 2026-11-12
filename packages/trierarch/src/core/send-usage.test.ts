@@ -42,6 +42,18 @@ function sentMessages(trierarch: Trierarch) {
 }
 
 describe("the trierarch sends its usage to the trierarch plugin's ship (the usage design)", () => {
+  it("sends the tokens of a ship crewed fresh as read in its ship's folder, which holds its home in a container", async () => {
+    const trierarch = aTrierarch();
+    const entry = aCrewedEntry();
+    const shipFolder = `/home/thomas/.aeolus/trierarch/ships/${entry.shipId}`;
+    await withEntries(trierarch, { ...entry, shipFolder });
+    trierarch.usage.tokens.set(entry.shipId, [OPUS_TOKENS]);
+
+    await trierarch.sendUsage();
+
+    expect(trierarch.usage.readIn.get(entry.shipId)).toBe(shipFolder);
+  });
+
   it("sends each ship's tokens per UTC hour with its folder, harness, login and cost per kind, and the subscription readings", async () => {
     const trierarch = aTrierarch();
     const entry = aCrewedEntry();

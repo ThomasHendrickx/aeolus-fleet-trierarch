@@ -59,7 +59,7 @@ async function readShipHours(entry: Entry, deps: ReadShipHoursDeps): Promise<Shi
   }
   const { folder } = entry;
   const logins = entry.login === undefined ? undefined : { login: entry.login, ...(entry.earlierLogins !== undefined && { earlierLogins: entry.earlierLogins }) };
-  const [madeAt, tokens] = await Promise.all([deps.usage.madeAt(folder), deps.usage.tokensOf({ shipId: entry.shipId, harness: entry.harness, folder, ...(logins !== undefined && { logins }) })]);
+  const [madeAt, tokens] = await Promise.all([deps.usage.madeAt(folder), deps.usage.tokensOf({ shipId: entry.shipId, harness: entry.harness, folder, ...(entry.shipFolder !== undefined && { shipFolder: entry.shipFolder }), ...(logins !== undefined && { logins }) })]);
   const byHour = new Map<string, HourTokens[]>();
   for (const used of tokens) {
     const hour = used.hour.toISOString();
