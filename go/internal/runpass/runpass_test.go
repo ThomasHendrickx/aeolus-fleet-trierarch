@@ -269,10 +269,24 @@ type aWorkspace struct {
 	pruned []string
 	// failPrune are the repositories whose prune fails, as when git refuses.
 	failPrune map[string]bool
+	// gitSteps are the prunes and branch deletions of the configured repositories, in order, as `prune <repository>` or
+	// `delete branches <repository>`.
+	gitSteps []string
+	// failBranchDeletion are the repositories whose branches cannot be deleted, as when the remote cannot be reached.
+	failBranchDeletion map[string]bool
+}
+
+func (w *aWorkspace) DeleteBranchesWhoseRemoteBranchIsGone(repository string) error {
+	w.gitSteps = append(w.gitSteps, "delete branches "+repository)
+	if w.failBranchDeletion[repository] {
+		return errors.New("git ls-remote failed in " + repository)
+	}
+	return nil
 }
 
 func (w *aWorkspace) Prune(repository string) error {
 	w.pruned = append(w.pruned, repository)
+	w.gitSteps = append(w.gitSteps, "prune "+repository)
 	if w.failPrune[repository] {
 		return errors.New("git worktree prune failed in " + repository)
 	}
@@ -1960,6 +1974,49 @@ func TestAPassThatCannotReadWhatItReconcilesStillPrunesTheWorktreeRecordsOfEachC
 	want := []string{"aeolus-fleet", "hemma"}
 	if !reflect.DeepEqual(p.workspace.pruned, want) {
 		t.Errorf("pruned = %q, want %q", p.workspace.pruned, want)
+	}
+}
+
+func TestEveryPassDeletesAfterThePruneTheLocalBranchesWhoseRemoteBranchIsGoneInEachConfiguredRepository(t *testing.T) {
+	p := aRunPass(t)
+	p.pass.Repositories = []string{"hemma", "aeolus-fleet"}
+
+	p.run(t)
+
+	want := []string{"prune aeolus-fleet", "delete branches aeolus-fleet", "prune hemma", "delete branches hemma"}
+	if !reflect.DeepEqual(p.workspace.gitSteps, want) {
+		t.Errorf("gitSteps = %q, want %q", p.workspace.gitSteps, want)
+	}
+}
+
+func TestAPassThatCannotReadWhatItReconcilesStillDeletesTheLocalBranchesWhoseRemoteBranchIsGone(t *testing.T) {
+	p := aRunPass(t)
+	p.pass.Repositories = []string{"aeolus-fleet"}
+	p.fleet.cannotRead = errors.New("the fleet cannot be reached")
+
+	p.run(t)
+
+	if !slices.Contains(p.workspace.gitSteps, "delete branches aeolus-fleet") {
+		t.Errorf("gitSteps = %q, want it to hold delete branches aeolus-fleet", p.workspace.gitSteps)
+	}
+}
+
+func TestARepositoryWhoseBranchesCannotBeDeletedIsLoggedAndTheOthersGoOnWithoutFailingThePass(t *testing.T) {
+	p := aRunPass(t)
+	p.pass.Repositories = []string{"aeolus-fleet", "hemma"}
+	p.workspace.failBranchDeletion = map[string]bool{"aeolus-fleet": true}
+
+	p.run(t)
+
+	if !slices.Contains(p.workspace.gitSteps, "delete branches hemma") {
+		t.Errorf("gitSteps = %q, want it to hold delete branches hemma", p.workspace.gitSteps)
+	}
+	wantLog := "Could not delete the local branches whose remote branch is gone in aeolus-fleet: git ls-remote failed in aeolus-fleet; the next pass tries again"
+	if !slices.Contains(p.logged, wantLog) {
+		t.Errorf("logged = %q, want it to hold %q", p.logged, wantLog)
+	}
+	if p.store.state.PassFailure != nil {
+		t.Errorf("passFailure = %+v, want none", p.store.state.PassFailure)
 	}
 }
 

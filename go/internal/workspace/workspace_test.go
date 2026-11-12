@@ -470,3 +470,98 @@ func TestThePruneOfARepositoryTheConfigurationDoesNotHaveFails(t *testing.T) {
 		t.Errorf("Prune() = %v, want an error naming unknown", err)
 	}
 }
+
+// aRepositoryWithARemote is a repository whose main branch tracks a bare remote, and that remote.
+func aRepositoryWithARemote(t *testing.T) (Places, string, string) {
+	t.Helper()
+	repository, root := aRepository(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	gitIn(t, "init", "-q", "--bare", remote)
+	gitIn(t, "-C", repository, "remote", "add", "origin", remote)
+	gitIn(t, "-C", repository, "push", "-q", "-u", "origin", "main")
+	return Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}}, repository, remote
+}
+
+// aPushedBranch is a branch of the repository pushed to its remote, the local branch tracking it.
+func aPushedBranch(t *testing.T, repository, name string) {
+	t.Helper()
+	gitIn(t, "-C", repository, "branch", name)
+	gitIn(t, "-C", repository, "push", "-q", "-u", "origin", name)
+}
+
+func branchesOf(t *testing.T, repository string) []string {
+	t.Helper()
+	return strings.Fields(gitIn(t, "-C", repository, "for-each-ref", "--format=%(refname:short)", "refs/heads"))
+}
+
+func TestALocalBranchCheckedOutNowhereWhoseRemoteBranchIsGoneIsDeletedAndTheOthersAreKept(t *testing.T) {
+	tests := []struct {
+		name      string
+		arrange   func(t *testing.T, repository, remote string)
+		branch    string
+		isDeleted bool
+	}{
+		{"its remote branch gone", func(t *testing.T, repository, remote string) {
+			aPushedBranch(t, repository, "merged")
+			gitIn(t, "-C", remote, "branch", "-D", "merged")
+		}, "merged", true},
+		{"its remote branch there", func(t *testing.T, repository, _ string) {
+			aPushedBranch(t, repository, "open")
+		}, "open", false},
+		{"checked out in a worktree, its remote branch gone", func(t *testing.T, repository, remote string) {
+			aPushedBranch(t, repository, "in-use")
+			gitIn(t, "-C", repository, "worktree", "add", "-q", filepath.Join(t.TempDir(), "in-use"), "in-use")
+			gitIn(t, "-C", remote, "branch", "-D", "in-use")
+		}, "in-use", false},
+		{"never had a remote branch", func(t *testing.T, repository, _ string) {
+			gitIn(t, "-C", repository, "branch", "kept-by-a-person")
+		}, "kept-by-a-person", false},
+		{"checked out in the repository, its remote branch gone", func(t *testing.T, repository, remote string) {
+			gitIn(t, "-C", repository, "switch", "-q", "-c", "current")
+			gitIn(t, "-C", repository, "push", "-q", "-u", "origin", "current")
+			gitIn(t, "-C", remote, "branch", "-D", "current")
+		}, "current", false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			places, repository, remote := aRepositoryWithARemote(t)
+			test.arrange(t, repository, remote)
+
+			if err := places.DeleteBranchesWhoseRemoteBranchIsGone("aeolus-fleet"); err != nil {
+				t.Fatal(err)
+			}
+
+			if got := !slices.Contains(branchesOf(t, repository), test.branch); got != test.isDeleted {
+				t.Errorf("%s deleted = %v, want %v", test.branch, got, test.isDeleted)
+			}
+		})
+	}
+}
+
+func TestARemoteThatCannotBeReadFailsAndDeletesNoBranch(t *testing.T) {
+	places, repository, remote := aRepositoryWithARemote(t)
+	aPushedBranch(t, repository, "merged")
+	if err := os.RemoveAll(remote); err != nil {
+		t.Fatal(err)
+	}
+
+	err := places.DeleteBranchesWhoseRemoteBranchIsGone("aeolus-fleet")
+
+	if err == nil || !strings.Contains(err.Error(), "ls-remote") {
+		t.Errorf("DeleteBranchesWhoseRemoteBranchIsGone() = %v, want an error naming ls-remote", err)
+	}
+	if !slices.Contains(branchesOf(t, repository), "merged") {
+		t.Errorf("merged went: %q", branchesOf(t, repository))
+	}
+}
+
+func TestTheBranchDeletionOfARepositoryTheConfigurationDoesNotHaveFails(t *testing.T) {
+	_, root := aRepository(t)
+	places := Places{Root: root, Repositories: map[string]string{}}
+
+	err := places.DeleteBranchesWhoseRemoteBranchIsGone("unknown")
+
+	if err == nil || !strings.Contains(err.Error(), "unknown") {
+		t.Errorf("DeleteBranchesWhoseRemoteBranchIsGone() = %v, want an error naming unknown", err)
+	}
+}
