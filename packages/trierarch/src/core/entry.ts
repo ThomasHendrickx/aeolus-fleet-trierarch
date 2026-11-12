@@ -73,6 +73,13 @@ export interface Entry {
   /** Where its workspace is, once made. */
   readonly folder?: string;
   /**
+   * The ship's own folder, `<ships>/<shipId>/`, which holds every file of the
+   * ship: kept as it is crewed fresh, before anything is made in it. One
+   * crewed before the ship folders has none, and keeps its worktree, home and
+   * socket where they were until it is crewed fresh.
+   */
+  readonly shipFolder?: string;
+  /**
    * What it last sent the trierarch plugin's ship of each UTC hour of its
    * folder's usage (the usage design), by the folder's made time and the
    * hour: each hour's totals as sent, so an hour is sent again only once they

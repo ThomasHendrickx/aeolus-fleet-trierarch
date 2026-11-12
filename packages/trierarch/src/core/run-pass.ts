@@ -5,7 +5,7 @@ import { crashText, identityGoneText, keyNotReadyText, leftInTrashText, modelRef
 import { MODEL_OPTION } from './detected-options.js';
 import { countStart, PROBE_AFTER_MINUTES, withConfiguration, type StartOutcome } from './failed-starts.js';
 import { loginOf, startedOn, type KeyState, type Login, type Logins } from './login.js';
-import type { Checkout, CheckoutsPort, FleetPort, FolderProcessesPort, HarnessPort, LaunchSeen, LeftInTrash, LoggedAction, Logger, ModelLoginsPort, SessionActivity, SessionRuntime, ShipSocketsPort, StatePort, TrashPort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
+import type { Checkout, CheckoutsPort, FleetPort, FolderProcessesPort, HarnessPort, HarnessSession, LaunchSeen, LeftInTrash, LoggedAction, Logger, ModelLoginsPort, SessionActivity, SessionRuntime, ShipSocketsPort, StatePort, TrashPort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { HOLDS_IDENTITY, reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
 import type { RefuseModel } from './refuse-model.js';
 import type { SendReleasedUsage } from './send-usage.js';
@@ -177,7 +177,7 @@ async function writeActivities(state: TrierarchState, deps: RunPassDeps): Promis
       if (entry.state !== 'running' || folder === undefined || harness === undefined || sessions.find((each) => each.shipId === entry.shipId)?.status !== 'running') {
         continue;
       }
-      const activity = await harness.activityOf({ shipId: entry.shipId, folder });
+      const activity = await harness.activityOf(sessionOf(entry, folder));
       if (activity !== undefined) {
         activities.push({ shipId: entry.shipId, ...activity });
       }
@@ -377,7 +377,7 @@ async function observe(state: TrierarchState, at: { deps: RunPassDeps; missingPl
     const { launchId } = entry;
     if ((entry.state === 'crewing' || entry.state === 'running') && entry.launchedAt !== undefined && launchId !== undefined && folder !== undefined && session !== undefined && harness !== undefined) {
       const model = entry.options[MODEL_OPTION];
-      launches[entry.shipId] = await harness.launchSeen({ shipId: entry.shipId, folder, launchId, ...(model !== undefined && { model }) });
+      launches[entry.shipId] = await harness.launchSeen({ ...sessionOf(entry, folder), launchId, ...(model !== undefined && { model }) });
     }
     const isWatched = (entry.state === 'running' || (entry.state === 'crewing' && session !== undefined)) && session?.status !== 'exited';
     // Its identity is looked at too while the trierarch would report on its behalf, as when its session exits in this pass (#664).
@@ -389,16 +389,16 @@ async function observe(state: TrierarchState, at: { deps: RunPassDeps; missingPl
     if (crewToken === undefined) {
       continue;
     }
-    if (!(await harness.hasIdentity({ shipId: entry.shipId, folder }))) {
+    if (!(await harness.hasIdentity(sessionOf(entry, folder)))) {
       withoutIdentity.push(entry.shipId);
       continue;
     }
     // Opened again after the trierarch stopped: its session keeps running and calls over it (decision 0026).
-    await deps.sockets.open(entry.shipId);
+    await deps.sockets.open(entry.shipId, entry.shipFolder);
     if (isWatched) {
-      const turn = await harness.turnOf({ shipId: entry.shipId, folder });
+      const turn = await harness.turnOf(sessionOf(entry, folder));
       // The store is asked only when a hand-over could follow.
-      const isHolding = turn === 'idle' && (await harness.isHolding({ shipId: entry.shipId, folder }));
+      const isHolding = turn === 'idle' && (await harness.isHolding(sessionOf(entry, folder)));
       const isKeyNotReady = entry.login === 'apiKey' && (await deps.modelLogins.keyState(entry.harness)).state !== 'ready';
       ships[entry.shipId] = { inbox: await deps.fleet.inbox(crewToken), turn, isHolding, ...(isKeyNotReady && { isKeyNotReady }) };
     }
@@ -478,7 +478,7 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
       if (entry.folder !== undefined) {
         const harness = harnessOf(entry, deps);
         // The session that held its messages is gone: its store marks them for the session started now (#756).
-        await harness?.sessionDied({ shipId: entry.shipId, folder: entry.folder });
+        await harness?.sessionDied(sessionOf(entry, entry.folder));
         const launchId = deps.newLaunchId();
         const login = sessionLogin(entry, deps);
         await harness?.launch({
@@ -486,6 +486,7 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
           // An entry saved before the ship's name was kept goes by its id.
           shipName: entry.shipName ?? entry.shipId,
           folder: entry.folder,
+          ...(entry.shipFolder !== undefined && { shipFolder: entry.shipFolder }),
           workspace: entry.workspace,
           checkouts: await checkoutsOf(entry, deps),
           harness: entry.harness,
@@ -503,18 +504,18 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
       }
       return state;
     case 'wake':
-      if (entry.folder !== undefined && (await harnessOf(entry, deps)?.handOver({ shipId: entry.shipId, folder: entry.folder })) === 'handed') {
+      if (entry.folder !== undefined && (await harnessOf(entry, deps)?.handOver(sessionOf(entry, entry.folder))) === 'handed') {
         log(deps, { ...about(state, { shipId: entry.shipId, action: 'wake' }), outcome: 'handed a message over' });
       }
       return state;
     case 'force':
-      if (entry.folder !== undefined && (await harnessOf(entry, deps)?.forceOver({ shipId: entry.shipId, folder: entry.folder, isTurnBusy: action.isTurnBusy })) === 'handed') {
+      if (entry.folder !== undefined && (await harnessOf(entry, deps)?.forceOver({ ...sessionOf(entry, entry.folder), isTurnBusy: action.isTurnBusy })) === 'handed') {
         log(deps, { ...about(state, { shipId: entry.shipId, action: 'wake' }), outcome: action.isTurnBusy ? 'stopped its turn and handed a forced message over' : 'handed a forced message over' });
       }
       return state;
     case 'report': {
       const { crewToken } = entry;
-      if (crewToken === undefined || entry.folder === undefined || !(await harnessOf(entry, deps)?.hasIdentity({ shipId: entry.shipId, folder: entry.folder }))) {
+      if (crewToken === undefined || entry.folder === undefined || !(await harnessOf(entry, deps)?.hasIdentity(sessionOf(entry, entry.folder)))) {
         // Argo is told by the identityGone action (#664).
         log(deps, { ...about(state, { shipId: entry.shipId, action: 'report' }), outcome: `not reported ${action.note}, as its folder holds no identity` });
         return state;
@@ -578,7 +579,15 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   if (problem !== undefined) {
     return crewFailed(state, { entry: crewing, deps, reason: problem });
   }
-  const { folder } = await deps.workspace.prepare({ shipId: crewing.shipId, shipName: ship.name, workspace: crewing.workspace });
+  // A ship crewed fresh keeps every file of its own in its ship's folder, kept before anything is made in it; one crewed before the
+  // ship folders keeps its workspace where it was.
+  if (crewing.folder === undefined && crewing.shipFolder === undefined) {
+    crewing = { ...crewing, shipFolder: await deps.workspace.shipFolderOf(crewing.shipId) };
+    state = putEntry(state, crewing);
+    await deps.state.save(state);
+  }
+  const { shipFolder } = crewing;
+  const { folder } = await deps.workspace.prepare({ shipId: crewing.shipId, shipName: ship.name, workspace: crewing.workspace, ...(shipFolder !== undefined && { shipFolder }) });
   // Kept at once, so an crewing still crewing knows the workspace and identity to remove if it ends (#382).
   state = putEntry(state, { ...crewing, shipName: ship.name, folder });
   await deps.state.save(state);
@@ -594,10 +603,11 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   crewing = { ...crewing, crewToken };
   state = putEntry(state, { ...crewing, shipName: ship.name, folder });
   await deps.state.save(state);
-  const socket = await deps.sockets.open(crewing.shipId);
+  const socket = await deps.sockets.open(crewing.shipId, shipFolder);
   const checkouts = await checkoutsOf(crewing, deps);
   await harness.prepareIdentity({
     folder,
+    ...(shipFolder !== undefined && { shipFolder }),
     identity: {
       fleetUrl: deps.fleet.url,
       shipId: crewing.shipId,
@@ -613,6 +623,7 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
     shipId: crewing.shipId,
     shipName: ship.name,
     folder,
+    ...(shipFolder !== undefined && { shipFolder }),
     workspace: crewing.workspace,
     checkouts,
     harness: crewing.harness,
@@ -633,7 +644,8 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
 
 /**
  * A ship released elsewhere is crewed again in a fresh worktree (row 11,
- * #475): before it registers, its workspace goes as a release's does. Its
+ * #475), in a ship's folder of its own whatever its workspace was: before it
+ * registers, its workspace goes as a release's does. Its
  * session stops first, as a release's does, so nothing reads the worktree
  * while a session works in it, whatever the pass's stop did. The entry is
  * saved without its mark only once that is done, so a failed stop or remove
@@ -644,8 +656,9 @@ async function freshAfterReleaseElsewhere(at: EntryAt): Promise<Entry> {
   await deps.processes.stop(entry.shipId);
   const workspace = await removeWorkspace({ entry, deps });
   log(deps, { ...(entry.shipName !== undefined && { shipName: entry.shipName }), shipId: entry.shipId, action: 'release', outcome: `released elsewhere, ${workspace}` });
-  const { isReleasedElsewhere, ...fresh } = entry;
-  return isReleasedElsewhere === undefined ? entry : fresh;
+  // Crewed fresh, in a ship's folder of its own, whatever its workspace was.
+  const { isReleasedElsewhere, folder, shipFolder, ...fresh } = entry;
+  return isReleasedElsewhere === undefined && folder === undefined && shipFolder === undefined ? entry : fresh;
 }
 
 /**
@@ -679,13 +692,19 @@ async function release(state: TrierarchState, at: { shipId: Entry['shipId']; dep
  * then the worktree is removed whatever it holds, so the next crew starts from
  * a fresh one. What it held is logged, and nobody is told: saving is the
  * session's job. A send the fleet refuses rejects, so the worktree stays and
- * the next pass tries again, as it does after a failed remove. A configured
- * folder is never removed. Answers what became of it, as the log line says it.
+ * the next pass tries again, as it does after a failed remove. A ship's
+ * folder goes whole, its worktree or clone with it; a ship crewed before the
+ * ship folders has its worktree removed as it was made. A configured folder
+ * is never removed; the ship's folder of a ship in one goes. Answers what
+ * became of it, as the log line says it.
  */
 async function removeWorkspace(at: EntryAt): Promise<string> {
   const { entry, deps } = at;
-  const { folder } = entry;
+  const { folder, shipFolder } = entry;
   if (folder === undefined) {
+    if (shipFolder !== undefined) {
+      await deps.workspace.removeShipFolder(shipFolder);
+    }
     return 'its worktree removed';
   }
   if (entry.workspace.kind === 'worktree') {
@@ -694,10 +713,13 @@ async function removeWorkspace(at: EntryAt): Promise<string> {
   await deps.sendReleasedUsage(entry);
   await removeIdentity({ entry, deps, folder });
   if (entry.workspace.kind === 'folder') {
+    if (shipFolder !== undefined) {
+      await deps.workspace.removeShipFolder(shipFolder);
+    }
     return `its folder kept: ${folder}`;
   }
   const held = await deps.workspace.unsaved(folder);
-  await deps.workspace.remove(folder);
+  await (shipFolder === undefined ? deps.workspace.remove(folder) : deps.workspace.removeShipFolder(shipFolder));
   if (held.length === 0) {
     return 'its worktree removed';
   }
@@ -724,7 +746,8 @@ async function clear(state: TrierarchState, at: CarryOut & { action: Extract<Act
 async function removeStray(state: TrierarchState, at: { folder: string; deps: RunPassDeps }): Promise<TrierarchState> {
   const { folder, deps } = at;
   // A crew earlier in this pass may have set a folder that reconcile did not know yet.
-  if (Object.values(state.entries).some((entry) => entry.folder !== undefined && (entry.folder === folder || entry.folder.startsWith(`${folder}/`) || folder.startsWith(`${entry.folder}/`)))) {
+  const used = Object.values(state.entries).flatMap((entry) => [entry.folder, entry.shipFolder].filter((each) => each !== undefined));
+  if (used.some((each) => each === folder || each.startsWith(`${folder}/`) || folder.startsWith(`${each}/`))) {
     return state;
   }
   const stopped = await deps.folderProcesses.stopIn(folder);
@@ -877,9 +900,14 @@ async function reportTrouble(deps: RunPassDeps, trouble: { shipId: ShipId; shipN
 /** The session's identity goes, and with it its ship's socket, as nothing calls over it any more (decision 0026), and its read-only checkouts (#1182). */
 async function removeIdentity(at: EntryAt & { folder: string }): Promise<void> {
   const { entry, deps, folder } = at;
-  await harnessOf(entry, deps)?.removeIdentity({ shipId: entry.shipId, folder });
-  await deps.sockets.close(entry.shipId);
+  await harnessOf(entry, deps)?.removeIdentity(sessionOf(entry, folder));
+  await deps.sockets.close(entry.shipId, entry.shipFolder);
   await deps.checkouts.remove(entry.shipId);
+}
+
+/** The entry's session in its folder, with its ship's folder when it has one. */
+function sessionOf(entry: Entry, folder: string): HarnessSession {
+  return { shipId: entry.shipId, folder, ...(entry.shipFolder !== undefined && { shipFolder: entry.shipFolder }) };
 }
 
 /** The read-only checkouts a session in the entry's repository gets (#1182), made when missing; none in a configured folder. */

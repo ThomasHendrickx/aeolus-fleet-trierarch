@@ -222,7 +222,8 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
 
   // Every folder under the root no crewed ship uses goes, whether the trierarch made it or not; a configured folder is never one (gap rule 2).
   // A used folder keeps what holds it and everything in it.
-  const inUse = [...Object.values(next.entries).flatMap((entry) => (entry.folder === undefined ? [] : [entry.folder])), ...Object.values(configuration.folders).map((folder) => folder.path)];
+  // A ship's folder too, with everything in it, wherever its workspace is.
+  const inUse = [...Object.values(next.entries).flatMap((entry) => [entry.folder, entry.shipFolder].filter((folder) => folder !== undefined)), ...Object.values(configuration.folders).map((folder) => folder.path)];
   const strays = observed.folders.filter((each) => !inUse.some((used) => used === each || used.startsWith(`${each}/`) || each.startsWith(`${used}/`)));
   // One under a stray goes with it.
   for (const folder of strays.filter((each) => !strays.some((other) => each.startsWith(`${other}/`)))) {
@@ -267,7 +268,8 @@ function entryOf(checked: CheckedSettings, at: { shipId: ShipId; settingsVersion
 /**
  * A new settings version of a request it crews (Restart or Edit): the
  * session stops and the ship is crewed again with that version, in its
- * folder, with a fresh restart budget. It is no release: the worktree stays.
+ * folder and its ship's folder, with a fresh restart budget. It is no
+ * release: the worktree stays.
  * It is a first start (#443): a fresh session with the new version's first
  * prompt, never the old conversation continued.
  * Settings this trierarch cannot crew are given back while the crew is not
@@ -288,7 +290,7 @@ function newVersionStep(entry: Entry, at: { request: AssignedRequest; state: Tri
   }
   const fresh = entryOf(checked.value, { shipId: entry.shipId, settingsVersion: request.settingsVersion, now: context.now });
   return {
-    entry: { ...fresh, ...(entry.shipName !== undefined && { shipName: entry.shipName }), ...(entry.folder !== undefined && { folder: entry.folder }) },
+    entry: { ...fresh, ...(entry.shipName !== undefined && { shipName: entry.shipName }), ...(entry.folder !== undefined && { folder: entry.folder }), ...(entry.shipFolder !== undefined && { shipFolder: entry.shipFolder }) },
     actions: [
       { kind: 'stop', shipId: entry.shipId },
       { kind: 'crew', shipId: entry.shipId, isResumed: true },

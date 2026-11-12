@@ -633,7 +633,8 @@ export class InMemoryHarness implements HarnessPort {
     if (this.pluginProblem !== undefined) {
       return Promise.reject(new Error(this.pluginProblem));
     }
-    this.asked.push(session);
+    const { shipId, folder, launchId, model } = session;
+    this.asked.push({ shipId, folder, launchId, ...(model !== undefined && { model }) });
     return Promise.resolve(this.seen.get(session.shipId) ?? { kind: 'active' });
   }
 }

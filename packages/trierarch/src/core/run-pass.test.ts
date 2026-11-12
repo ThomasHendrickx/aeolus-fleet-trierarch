@@ -3094,7 +3094,7 @@ describe("a ship's folder, ships/<shipId>, which holds every file of the ship (#
     const entry = trierarch.state.current().entries[shipId];
     if (entry !== undefined) {
       const { shipFolder, ...before } = entry;
-      void shipFolder;
+      expect(shipFolder).toBe(shipFolderOf(shipId));
       await trierarch.state.save(putEntry(trierarch.state.current(), before));
     }
     trierarch.sockets.stopTrierarch();
