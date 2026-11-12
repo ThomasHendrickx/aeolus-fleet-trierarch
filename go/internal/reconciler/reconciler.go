@@ -103,6 +103,9 @@ type Entry struct {
 	IsIdentityGone bool `json:"isIdentityGone,omitempty"`
 	// IsReleasedElsewhere is set as it goes back to crewing after a release elsewhere (row 11): its worktree goes before it is crewed again (#475).
 	IsReleasedElsewhere bool `json:"isReleasedElsewhere,omitempty"`
+	// IsShipFolderGone is set as it goes back to crewing once its ship's folder is gone, removed by hand: its session stops, its lease
+	// ends and it is crewed again in a fresh ship's folder.
+	IsShipFolderGone bool `json:"isShipFolderGone,omitempty"`
 	// CrewFailures counts the crews of its settings version that failed in a row, until a crew starts its session (#827). The last of CrewFailureBudget gives the request back.
 	CrewFailures int `json:"crewFailures,omitempty"`
 	// ReadOnly are the paths of the ship's read-only checkouts, which its next launch reads beside its folder; made at each launch, never kept.
@@ -200,6 +203,8 @@ type Observed struct {
 	StartProblems map[string]string
 	// WithoutIdentity are the ships whose entry would be watched or reported for, but whose folder holds no identity (#659, #664).
 	WithoutIdentity []string
+	// ShipFoldersGone are the ships running, restarting or crashed whose ship's folder is gone, removed by hand.
+	ShipFoldersGone []string
 	// Folders are every folder under the trierarch's root a workspace could be, whatever it is (gap rule 2).
 	Folders []string
 }
@@ -735,7 +740,7 @@ func newVersionStep(entry Entry, request Request, state State, context Context) 
 		return step{isGivenBack: true, actions: []Action{{Kind: GiveBack, ShipID: entry.ShipID, SettingsVersion: request.SettingsVersion, Reason: reason, Entry: &given}}}
 	}
 	fresh := entryOf(request, harness, options, context.Now)
-	fresh.ShipName, fresh.Folder = entry.ShipName, entry.Folder
+	fresh.ShipName, fresh.Folder, fresh.ShipFolder = entry.ShipName, entry.Folder, entry.ShipFolder
 	return step{entry: &fresh, actions: []Action{{Kind: Stop, ShipID: entry.ShipID}, {Kind: Crew, ShipID: entry.ShipID, IsResumed: true}}}
 }
 
@@ -744,6 +749,12 @@ func stepOf(entry Entry, context Context, canStart bool, isFinal bool) step {
 		// Released elsewhere (row 11): its session stops and the ship is crewed again, in a fresh worktree as a first start, with its first prompt and no resume (#475). A final crew stays final in the fleet (#469).
 		again := withState(entry, "crewing", context.Now)
 		again.IsReleasedElsewhere, again.HasStarted = true, false
+		return step{entry: &again, actions: []Action{{Kind: Stop, ShipID: entry.ShipID}, {Kind: Crew, ShipID: entry.ShipID}}}
+	}
+	if slices.Contains(context.Observed.ShipFoldersGone, entry.ShipID) {
+		// Its files went with its folder: it is crewed again in a fresh one as a first start, under the lease it holds.
+		again := withState(entry, "crewing", context.Now)
+		again.IsShipFolderGone, again.HasStarted = true, false
 		return step{entry: &again, actions: []Action{{Kind: Stop, ShipID: entry.ShipID}, {Kind: Crew, ShipID: entry.ShipID}}}
 	}
 	switch entry.State {

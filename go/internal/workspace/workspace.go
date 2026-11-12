@@ -236,8 +236,8 @@ func makeParentOf(at Worktree) error {
 // Places are the configured repositories and folders by name, the place of every ship's folder, and the worktree root of the ships
 // crewed before the ship folders, as the run pass makes and removes a ship's workspace.
 type Places struct {
-	// Root is the place of the ships' folders, `ships/<shipId>/` by default; a configured worktree root is the place, and holds the
-	// worktrees of the ships crewed before the ship folders too.
+	// Root is the place of the ships' folders, `ships/<shipId>/` by default; a configured place of ships/ holds the worktrees of the ships
+	// crewed before the ship folders too.
 	Root string
 	// Before is the worktree root of the ships crewed before the ship folders, where their worktrees stay until they are crewed fresh,
 	// when it is not the Root; none when it is.
@@ -332,6 +332,12 @@ func (p Places) ShipFolderOf(shipID string) string {
 		}
 	}
 	return filepath.Join(root, shipID)
+}
+
+// HasShipFolder is whether the ship's folder is there, as a folder; one removed by hand is not.
+func (p Places) HasShipFolder(folder string) bool {
+	found, err := os.Stat(folder)
+	return err == nil && found.IsDir()
 }
 
 // Remove removes the ship's worktree, or its clone: a ship's folder goes whole into the trash beside it, whatever it holds, and a
