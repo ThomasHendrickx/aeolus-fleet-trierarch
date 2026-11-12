@@ -54,7 +54,8 @@ async function crashForGood(trierarch: Trierarch, shipId: ShipId) {
 /**
  * A worktree with changes an earlier trierarch kept, as one did when it gave
  * back a crew before it was final (decision 0032): its ship's id. No path
- * keeps one now, but a kept one stays in the state until a human clears it.
+ * keeps one now; one an earlier trierarch's state holds is a folder no crewed
+ * ship uses.
  */
 async function aKeptWorktree(trierarch: Trierarch) {
   const shipId = trierarch.fleet.commission('scout');
@@ -395,67 +396,28 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.workspace.folders.get(SCOUT_FOLDER)).toMatchObject({ hasChanges: false, unsaved: [] });
   });
 
-  it('drops a kept worktree once it is gone from disk, as when a human removed it by hand (#325)', async () => {
+  it('removes a worktree an earlier trierarch kept with its changes, as no crewed ship uses it, and the state keeps none (gap rule 2)', async () => {
     const trierarch = aTrierarch();
     await aKeptWorktree(trierarch);
-    trierarch.workspace.folders.delete(SCOUT_FOLDER);
-
-    await trierarch.pass();
-
-    expect(trierarch.state.current().kept).toEqual([]);
-    expect(trierarch.state.current().orphans).toEqual([]);
-  });
-
-  it('keeps a kept worktree that is still on disk, pass after pass', async () => {
-    const trierarch = aTrierarch();
-    const shipId = await aKeptWorktree(trierarch);
-
-    await trierarch.pass();
-
-    expect(trierarch.state.current().kept).toEqual([{ shipId, repository: 'aeolus-fleet', path: SCOUT_FOLDER }]);
-  });
-
-  it('clears a kept worktree its clear request names: removes it, drops it from kept and confirms it removed (decision 0032)', async () => {
-    const trierarch = aTrierarch();
-    const shipId = await aKeptWorktree(trierarch);
-    trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
 
     await trierarch.pass();
 
     expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(false);
     expect(trierarch.state.current().kept).toEqual([]);
-    expect(trierarch.fleet.clearRequests).toEqual([]);
-    expect(trierarch.fleet.cleared).toEqual([{ shipId, repository: 'aeolus-fleet', outcome: 'removed' }]);
   });
 
-  it('confirms a clear request for a worktree it does not keep as not-kept, and removes nothing (decision 0032)', async () => {
-    const trierarch = aTrierarch();
-    const shipId = trierarch.fleet.commission('scout');
-    trierarch.workspace.folders.set(SCOUT_FOLDER, { hasChanges: true, unsaved: [' M README.md'] });
-    trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
-
-    await trierarch.pass();
-
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
-    expect(trierarch.fleet.cleared).toEqual([{ shipId, repository: 'aeolus-fleet', outcome: 'not-kept' }]);
-  });
-
-  it('drops a kept worktree from kept once a ship is crewed in it again, so a clear request removes nothing in use (decision 0032)', async () => {
+  it('confirms a clear request not-kept, as it keeps no worktree, even for one an earlier trierarch kept (decision 0032)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aKeptWorktree(trierarch);
-    trierarch.fleet.request(shipId);
-    await trierarch.pass();
     trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
 
     await trierarch.pass();
 
-    expect(trierarch.state.current().entries[shipId]?.folder).toBe(SCOUT_FOLDER);
-    expect(trierarch.state.current().kept).toEqual([]);
-    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
+    expect(trierarch.fleet.clearRequests).toEqual([]);
     expect(trierarch.fleet.cleared).toEqual([{ shipId, repository: 'aeolus-fleet', outcome: 'not-kept' }]);
   });
 
-  it('keeps a kept worktree and its clear request when removing it fails, so the next pass tries again', async () => {
+  it('confirms a clear request not-kept when removing the folder it names fails (decision 0032)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aKeptWorktree(trierarch);
     trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
@@ -463,9 +425,18 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
 
     await trierarch.pass();
 
-    expect(trierarch.state.current().kept).toEqual([{ shipId, repository: 'aeolus-fleet', path: SCOUT_FOLDER }]);
-    expect(trierarch.fleet.clearRequests).toHaveLength(1);
-    expect(trierarch.fleet.cleared).toEqual([]);
+    expect(trierarch.fleet.cleared).toEqual([{ shipId, repository: 'aeolus-fleet', outcome: 'not-kept' }]);
+  });
+
+  it('confirms a clear request for the worktree a ship is crewed in not-kept, and removes nothing in use (decision 0032)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
+
+    await trierarch.pass();
+
+    expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
+    expect(trierarch.fleet.cleared).toEqual([{ shipId, repository: 'aeolus-fleet', outcome: 'not-kept' }]);
   });
 
   it('row 7: a configured folder is never removed, only its identity', async () => {
@@ -1287,52 +1258,47 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.processes.sessions.has(stray)).toBe(false);
   });
 
-  it('rule 2: a clean worktree under its root with no assigned request is removed, with what runs in it stopped first (#1041)', async () => {
+  it('rule 2: every folder under its root no crewed ship uses is removed, whatever it is or holds, with what runs in it stopped first', async () => {
     const trierarch = aTrierarch();
-    const orphan = `${WORKTREE_ROOT}/aeolus-fleet/lookout`;
-    trierarch.workspace.folders.set(orphan, { hasChanges: false, unsaved: [] });
-    trierarch.folderProcesses.start(orphan, 'astro dev');
-
-    await trierarch.pass();
-
-    expect(trierarch.folderProcesses.running.has(orphan)).toBe(false);
-    expect(trierarch.workspace.folders.has(orphan)).toBe(false);
-    expect(trierarch.state.current().orphans).toEqual([]);
-  });
-
-  it('rule 2: a worktree with no assigned request that holds unsaved work is kept and reported as an orphan, with what runs in it stopped (#1041)', async () => {
-    const trierarch = aTrierarch();
-    const orphan = `${WORKTREE_ROOT}/aeolus-fleet/lookout`;
-    trierarch.workspace.folders.set(orphan, { hasChanges: true, unsaved: [' M README.md'] });
-    trierarch.folderProcesses.start(orphan, 'wrangler dev');
-
-    await trierarch.pass();
-
-    expect(trierarch.folderProcesses.running.has(orphan)).toBe(false);
-    expect(trierarch.workspace.folders.has(orphan)).toBe(true);
-    expect(trierarch.state.current().orphans).toEqual([{ path: orphan, repository: 'aeolus-fleet', name: 'lookout' }]);
-  });
-
-  it('rule 2: a folder under its root it did not make, and a worktree git no longer knows, are reported once as orphans it will not clear, nothing in them stopped, and fail no pass (#1041)', async () => {
-    const trierarch = aTrierarch();
-    const notMade = `${WORKTREE_ROOT}/aeolus-fleet-gateway-designer-release/app`;
-    const unknown = `${WORKTREE_ROOT}/aeolus-fleet/gone`;
-    for (const folder of [notMade, unknown]) {
-      trierarch.workspace.folders.set(folder, { hasChanges: false, unsaved: [] });
-      trierarch.workspace.notMade.add(folder);
+    const strays = [
+      // An orphan worktree with changes, a session's own clone, a folder git does not know, a worktree of one repository in another's folder.
+      `${WORKTREE_ROOT}/aeolus-fleet/lookout`,
+      `${WORKTREE_ROOT}/aeolus-fleet/own-clone`,
+      `${WORKTREE_ROOT}/hemma/notes`,
+      `${WORKTREE_ROOT}/aeolus-fleet/aeolus-fleet-gateway`,
+    ];
+    for (const folder of strays) {
+      trierarch.workspace.folders.set(folder, { hasChanges: true, unsaved: [' M README.md'] });
       trierarch.folderProcesses.start(folder, 'astro dev');
     }
 
     await trierarch.pass();
-    trierarch.clock.advance(5 * SECOND_MS);
+
+    expect(strays.filter((folder) => trierarch.workspace.folders.has(folder))).toEqual([]);
+    expect(strays.filter((folder) => trierarch.folderProcesses.running.has(folder))).toEqual([]);
+    expect(trierarch.state.current().orphans).toEqual([]);
+    expect(trierarch.state.current().passFailure).toBeUndefined();
+  });
+
+  it('rule 2: logs each folder under its root it removes, with what it held and how many processes it stopped in it', async () => {
+    const trierarch = aTrierarch();
+    const stray = `${WORKTREE_ROOT}/aeolus-fleet/lookout`;
+    trierarch.workspace.folders.set(stray, { hasChanges: true, unsaved: [' M README.md', 'commit 1a2b3c4 wip'] });
+    trierarch.folderProcesses.start(stray, 'astro dev');
+
     await trierarch.pass();
 
-    expect(trierarch.logger.warnings.filter((warning) => warning.startsWith('The pass failed'))).toEqual([]);
-    expect(trierarch.logger.warnings.filter((warning) => warning.startsWith('Will not clear the orphan')).map((warning) => warning.split(' ').slice(0, 6).join(' '))).toHaveLength(2);
-    expect([...trierarch.workspace.folders.keys()]).toEqual(expect.arrayContaining([notMade, unknown]));
-    expect([...trierarch.folderProcesses.running.keys()].sort()).toEqual([unknown, notMade].sort());
-    expect(trierarch.state.current().orphans.map((orphan) => orphan.path).sort()).toEqual([unknown, notMade].sort());
-    expect(trierarch.state.current().passFailure).toBeUndefined();
+    expect(trierarch.logger.warnings).toContain(`Removed ${stray}, a folder under the root no crewed ship uses, after stopping 1 process in it, discarding:  M README.md; commit 1a2b3c4 wip`);
+  });
+
+  it('rule 2: a configured folder under its root is never removed', async () => {
+    const notes = `${WORKTREE_ROOT}/notes/today`;
+    const trierarch = aTrierarch({ ...CONFIGURATION, folders: { notes: { path: notes } } });
+    trierarch.workspace.folders.set(notes, { hasChanges: false, unsaved: [] });
+
+    await trierarch.pass();
+
+    expect(trierarch.workspace.folders.has(notes)).toBe(true);
   });
 
   it('prunes the git worktree records of each configured repository every pass (#91)', async () => {
@@ -1365,34 +1331,32 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.state.current().passFailure).toBeUndefined();
   });
 
-  it('rule 2: an orphan it could not remove is reported and tried again on the next pass (#1041)', async () => {
+  it('rule 2: a folder under its root it could not remove is logged and tried again on the next pass (#1041)', async () => {
     const trierarch = aTrierarch();
-    const orphan = `${WORKTREE_ROOT}/aeolus-fleet/lookout`;
-    trierarch.workspace.folders.set(orphan, { hasChanges: false, unsaved: [] });
+    const stray = `${WORKTREE_ROOT}/aeolus-fleet/lookout`;
+    trierarch.workspace.folders.set(stray, { hasChanges: false, unsaved: [] });
     trierarch.workspace.isFailingRemove = true;
 
     await trierarch.pass();
 
-    expect(trierarch.workspace.folders.has(orphan)).toBe(true);
-    expect(trierarch.state.current().orphans).toEqual([{ path: orphan, repository: 'aeolus-fleet', name: 'lookout' }]);
+    expect(trierarch.workspace.folders.has(stray)).toBe(true);
+    expect(trierarch.logger.warnings.filter((warning) => warning.includes(stray) && warning.includes('failed'))).toHaveLength(1);
 
     trierarch.workspace.isFailingRemove = false;
     await trierarch.pass();
 
-    expect(trierarch.workspace.folders.has(orphan)).toBe(false);
-    expect(trierarch.state.current().orphans).toEqual([]);
+    expect(trierarch.workspace.folders.has(stray)).toBe(false);
   });
 
-  it('rule 2: an orphan whose processes cannot be stopped is not removed (#1041)', async () => {
+  it('rule 2: a folder under its root whose processes cannot be stopped is not removed (#1041)', async () => {
     const trierarch = aTrierarch();
-    const orphan = `${WORKTREE_ROOT}/aeolus-fleet/lookout`;
-    trierarch.workspace.folders.set(orphan, { hasChanges: false, unsaved: [] });
+    const stray = `${WORKTREE_ROOT}/aeolus-fleet/lookout`;
+    trierarch.workspace.folders.set(stray, { hasChanges: false, unsaved: [] });
     trierarch.folderProcesses.isFailingStop = true;
 
     await trierarch.pass();
 
-    expect(trierarch.workspace.folders.has(orphan)).toBe(true);
-    expect(trierarch.state.current().orphans).toEqual([{ path: orphan, repository: 'aeolus-fleet', name: 'lookout' }]);
+    expect(trierarch.workspace.folders.has(stray)).toBe(true);
   });
 
   it('rule 2: a worktree an entry is crewed into in the same pass is never cleared or its processes stopped (#233)', async () => {
@@ -1407,7 +1371,6 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.state.current().entries[shipId]?.folder).toBe(SCOUT_FOLDER);
     expect(trierarch.workspace.folders.has(SCOUT_FOLDER)).toBe(true);
     expect(trierarch.folderProcesses.stoppedIn).toEqual([]);
-    expect(trierarch.state.current().orphans).toEqual([]);
   });
 
   it('rule 2: a worktree an entry works in is never cleared as an orphan, nor are the processes in it stopped (#1041)', async () => {
@@ -2115,16 +2078,14 @@ describe('what the loop logs (aeolus-trierarch logs)', () => {
     expect(logged(changed).at(-1)).toBe('release: released, its worktree removed, discarding 1 unpushed change');
   });
 
-  it('logs a clear, saying whether it removed the kept worktree or kept none', async () => {
+  it('logs a clear, saying it keeps no worktree', async () => {
     const trierarch = aTrierarch();
-    const shipId = await aKeptWorktree(trierarch);
-    trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
-    await trierarch.pass();
+    const shipId = trierarch.fleet.commission('scout');
     trierarch.fleet.clearWorktree({ shipId, repository: 'aeolus-fleet' });
 
     await trierarch.pass();
 
-    expect(logged(trierarch).slice(-2)).toEqual([`clear: its kept worktree removed: ${SCOUT_FOLDER}`, 'clear: no kept aeolus-fleet worktree of it here']);
+    expect(logged(trierarch).at(-1)).toBe('clear: no kept aeolus-fleet worktree of it here');
   });
 
   it('logs a ship it leaves because another session crews it', async () => {
