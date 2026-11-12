@@ -119,7 +119,7 @@ describe('run with the reconciler', () => {
 });
 
 describe('a ship released elsewhere (row 11)', () => {
-  it('is crewed again in a fresh worktree as a first start, and argo is told what the old one held', async () => {
+  it('is crewed again in a fresh worktree as a first start, what the old one held logged and nobody told', async () => {
     await aRunningScout();
     const session = sessionOf(machine, 'scout');
     const first = session.starts()[0];
@@ -133,10 +133,8 @@ describe('a ship released elsewhere (row 11)', () => {
     expect(session.starts()).toHaveLength(1);
     expect(session.starts()[0]?.pid).not.toBe(first?.pid);
     expect(session.starts()[0]?.args).not.toContain('--resume');
-    await expect.poll(async () => (await fleet.toldByTrierarch()).map((told) => told.text.split('\n')[0]), { timeout: CREWED_WITHIN_MS }).toEqual(['scout released elsewhere: unpushed work discarded']);
-    const [told] = await fleet.toldByTrierarch();
-    expect(told?.text).toContain('The trierarch removed its worktree before crewing it again.');
-    expect(told?.text).toContain('- new `notes.txt`');
+    await expect.poll(() => machine.serviceLog(), { timeout: CREWED_WITHIN_MS }).toContain(`Discarded from the worktree of scout (${scout}), ${session.worktree}: `);
+    await expect(fleet.toldByTrierarch()).resolves.toEqual([]);
   });
 });
 

@@ -136,6 +136,13 @@ export function createGitWorkspace(options: {
       }
       await git(['-C', repository, 'worktree', 'remove', '--force', folder]);
     },
+    prune: async (repository) => {
+      const path = configuration.repositories[repository]?.path;
+      if (path === undefined) {
+        throw new Error(`The configuration has no repository ${repository}`);
+      }
+      await git(['-C', path, 'worktree', 'prune']);
+    },
     worktrees: async () => {
       const found: ObservedWorktree[] = [];
       // git lists each worktree by its real path, so a root reached through a symbolic link (macOS's /var) is matched by its own.

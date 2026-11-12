@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
@@ -81,34 +81,21 @@ function crashedAfterSix(shipId: ShipId, at: { tail: string; lastStart?: string 
 }
 
 describe('unpushed work discarded on a release', () => {
-  it('tells argo what the removed worktree held, once, before it goes', async () => {
+  it('logs what the removed worktree held and tells nobody', async () => {
     const scout = await fleet.commission('scout');
     await aRunning(scout);
-    writeFileSync(join(sessionOf(machine, 'scout').worktree, 'notes.txt'), 'unsaved\n');
+    const { worktree } = sessionOf(machine, 'scout');
+    writeFileSync(join(worktree, 'notes.txt'), 'unsaved\n');
 
     await fleet.removeCrewRequest(scout);
 
-    const all = await told(1);
-    expect(all).toEqual([
-      {
-        to: 'argo',
-        text: [
-          'scout released: unpushed work discarded',
-          '',
-          shipFact(scout, 'scout'),
-          `- Worktree: ${REPOSITORY}`,
-          // The stand-in session writes its three files into the worktree it works in.
-          '- Discarded: 4 new',
-          '',
-          '- new `fake-received.jsonl`',
-          '- new `fake-starts.jsonl`',
-          '- new `fake-turns.jsonl`',
-          '- new `notes.txt`',
-        ].join('\n'),
-      },
-    ]);
+    // The stand-in session writes its three files into the worktree it works in.
+    await expect
+      .poll(() => machine.serviceLog(), { timeout: CREWED_WITHIN_MS })
+      .toContain(`Discarded from the worktree of scout (${scout}), ${worktree}: ?? fake-received.jsonl; ?? fake-starts.jsonl; ?? fake-turns.jsonl; ?? notes.txt`);
+    expect(existsSync(worktree)).toBe(false);
     await wait(ANOTHER_PASSES_MS);
-    await expect(fleet.toldByTrierarch()).resolves.toHaveLength(1);
+    await expect(fleet.toldByTrierarch()).resolves.toEqual([]);
   });
 
   it('tells nobody when the worktree held nothing', async () => {

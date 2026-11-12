@@ -385,3 +385,14 @@ func (p Places) RemoveWorktree(folder string) error {
 	}
 	return Remove(repository, folder)
 }
+
+// Prune drops the git records of the repository's worktrees whose folder is gone, wherever the folder was; a worktree whose folder exists
+// stays, outside the root too. A repository the places do not have fails.
+func (p Places) Prune(repository string) error {
+	path, ok := p.Repositories[repository]
+	if !ok {
+		return fmt.Errorf("the configuration has no repository %s", repository)
+	}
+	_, err := git("-C", path, "worktree", "prune")
+	return err
+}

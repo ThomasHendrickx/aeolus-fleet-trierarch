@@ -992,16 +992,15 @@ func TestAKeptWorktreeIsNoOrphan(t *testing.T) {
 	assertOrphans(t, next.Orphans)
 }
 
-func TestTheWorktreeOfAnEntryForgottenIsAnOrphanAfterItsForget(t *testing.T) {
+func TestTheWorktreeOfAnEntryForgottenIsNoOrphanAsItsForgetRemovesIt(t *testing.T) {
 	context := aContext()
-	worktree := aWorktree("scout")
-	context.Observed.Worktrees = []Worktree{worktree}
+	context.Observed.Worktrees = []Worktree{aWorktree("scout")}
 	entry := anEntry(scout, "running")
 
 	next, actions := Reconcile(withEntries(entry), context)
 
-	assertActions(t, actions, Action{Kind: Forget, ShipID: scout, Entry: &entry}, Action{Kind: ClearOrphan, Orphan: &worktree, IsNew: true})
-	assertOrphans(t, next.Orphans, orphan("scout"))
+	assertActions(t, actions, Action{Kind: Forget, ShipID: scout, Entry: &entry})
+	assertOrphans(t, next.Orphans)
 }
 
 func kept(shipID string, name string) any {

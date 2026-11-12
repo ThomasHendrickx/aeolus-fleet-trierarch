@@ -51,42 +51,6 @@ func TestOwnerUnreachableAddsWhyTheReportCameToArgo(t *testing.T) {
 	}
 }
 
-func TestDiscardedCountsEachKindInOrderAndNamesFiveLines(t *testing.T) {
-	unsaved := []string{" D gone.txt", " M changed.txt", "R  old -> new", "?? one", "A  two", "commit abc123 a message", "commit def456 another", " M sixth.txt"}
-	got := Discarded(scout, "aeolus-fleet", unsaved)
-	want := strings.Join([]string{
-		"scout released: unpushed work discarded",
-		"",
-		"- Ship: scout (`shp_1`)",
-		"- Worktree: aeolus-fleet",
-		"- Discarded: 1 deleted, 2 changed, 1 renamed, 2 new, 2 commits",
-		"",
-		"- deleted `gone.txt`",
-		"- changed `changed.txt`",
-		"- renamed `old -> new`",
-		"- new `one`",
-		"- new `two`",
-		"- and 3 more, in this trierarch's log",
-	}, "\n")
-	if got != want {
-		t.Fatalf("got\n%s\nwant\n%s", got, want)
-	}
-}
-
-func TestDiscardedNamesAWorktreeTheHostWouldNotReadWithWhy(t *testing.T) {
-	got := Discarded(scout, "aeolus-fleet", []string{"refused, its .git is no folder of its own"})
-	if !strings.Contains(got, "- Discarded: 1 refused\n") || !strings.Contains(got, "- refused `its .git is no folder of its own`") {
-		t.Fatalf("got %q", got)
-	}
-}
-
-func TestDiscardedCountsOneCommitInTheSingular(t *testing.T) {
-	got := Discarded(scout, "aeolus-fleet", []string{"commit abc one"})
-	if !strings.Contains(got, "- Discarded: 1 commit\n") || !strings.Contains(got, "- commit `abc one`") {
-		t.Fatalf("got %q", got)
-	}
-}
-
 func TestModelRefusedNamesTheHarnessItsVersionAndTheModel(t *testing.T) {
 	got := ModelRefused(scout, "claude-code", "2.1.306", "claude-sonnet-5")
 	want := "claude-code refused the model claude-sonnet-5 for scout\n\n- Ship: scout (`shp_1`)\n- Harness: claude-code 2.1.306\n- Model: claude-sonnet-5\n\nThis machine offers the model no more at this version, until `aeolus-trierarch detect` runs by hand."
@@ -137,14 +101,6 @@ func TestDetectionProblemSaysTheHarnessItsVersionAndWhatDetectionCouldNotFind(t 
 	want := "claude-code 2.1.306: detection found a problem\n\nClaude Code 2.1.306's --help names no model alias, so this machine declares no Claude Code model until an update of Claude Code names one"
 	if got != want {
 		t.Errorf("DetectionProblem() = %q, want %q", got, want)
-	}
-}
-
-func TestDiscardedElsewhereSaysWhyTheWorktreeWentThenTheFacts(t *testing.T) {
-	got := DiscardedElsewhere(scout, "aeolus-fleet", []string{" M README.md", "?? draft.md"})
-	want := "scout released elsewhere: unpushed work discarded\n\nThe trierarch removed its worktree before crewing it again.\n\n- Ship: scout (`shp_1`)\n- Worktree: aeolus-fleet\n- Discarded: 1 changed, 1 new\n\n- changed `README.md`\n- new `draft.md`"
-	if got != want {
-		t.Fatalf("got %q", got)
 	}
 }
 

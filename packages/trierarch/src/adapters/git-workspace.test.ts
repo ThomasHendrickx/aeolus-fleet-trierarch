@@ -261,3 +261,24 @@ describe('workspaces of a trusted repository the machine does not have (aeolus-f
     expect(existsSync(made)).toBe(false);
   });
 });
+
+describe('pruning the worktree records of a configured repository (#91)', () => {
+  it('prunes the record of a worktree whose folder is gone and leaves a live worktree outside its root alone', async () => {
+    const gone = join(folder, 'elsewhere', 'gone');
+    const live = join(folder, 'elsewhere', 'live');
+    await git(['-C', repository, 'worktree', 'add', '--detach', gone]);
+    await git(['-C', repository, 'worktree', 'add', '--detach', live]);
+    rmSync(gone, { recursive: true });
+
+    await workspace().prune('aeolus-fleet');
+
+    const listed = await git(['-C', repository, 'worktree', 'list', '--porcelain']);
+    expect(listed).not.toContain(`worktree ${gone}`);
+    expect(listed).toContain(`worktree ${live}`);
+    expect(existsSync(live)).toBe(true);
+  });
+
+  it('fails the prune of a repository the configuration does not have', async () => {
+    await expect(workspace().prune('unknown')).rejects.toThrow('unknown');
+  });
+});
