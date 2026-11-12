@@ -46,9 +46,21 @@ function isGoing(run: string): boolean {
 /** How the cleanup runs Podman: `runCommand`, or a stand-in that answers as Podman would. */
 type RunPodman = (command: 'podman', options: { args: readonly string[] }) => Promise<CommandResult>;
 
+/** What the cleanup lists and removes, as its failures name them. */
+const NAMED = { ps: 'the containers', images: 'the test images' } as const;
+
+/** Runs a Podman call of the cleanup, and throws, saying why, when it fails: a failed listing would read as nothing left, a failed removal as removed. */
+async function succeeded(podman: RunPodman, call: { doing: string; args: readonly string[] }): Promise<CommandResult> {
+  const result = await podman('podman', { args: call.args });
+  if (result.status !== 0) {
+    throw new Error(`${call.doing} of the test runs failed: ${result.stderr.trim()}`);
+  }
+  return result;
+}
+
 /** The ids and runs of what carries the test run label, as `podman ps` or `podman images` lists them. */
 async function labelled(podman: RunPodman, kind: 'ps' | 'images'): Promise<{ id: string; run: string }[]> {
-  const listed = await podman('podman', { args: [kind, ...(kind === 'ps' ? ['--all'] : []), '--filter', `label=${TEST_RUN_LABEL}`, '--format', `{{.ID}} {{index .Labels "${TEST_RUN_LABEL}"}}`] });
+  const listed = await succeeded(podman, { doing: `listing ${NAMED[kind]}`, args: [kind, ...(kind === 'ps' ? ['--all'] : []), '--filter', `label=${TEST_RUN_LABEL}`, '--format', `{{.ID}} {{index .Labels "${TEST_RUN_LABEL}"}}`] });
   return listed.stdout
     .split('\n')
     .filter((line) => line !== '')
@@ -62,11 +74,11 @@ async function labelled(podman: RunPodman, kind: 'ps' | 'images'): Promise<{ id:
 async function removeRuns(podman: RunPodman, isPicked: (run: string) => boolean): Promise<void> {
   const containers = (await labelled(podman, 'ps')).filter(({ run }) => isPicked(run)).map(({ id }) => id);
   if (containers.length > 0) {
-    await podman('podman', { args: ['rm', '--force', '--volumes', '--time', '0', ...containers] });
+    await succeeded(podman, { doing: `removing ${NAMED.ps}`, args: ['rm', '--force', '--volumes', '--time', '0', ...containers] });
   }
   const images = (await labelled(podman, 'images')).filter(({ run }) => isPicked(run)).map(({ id }) => id);
   if (images.length > 0) {
-    await podman('podman', { args: ['image', 'rm', '--force', ...images] });
+    await succeeded(podman, { doing: `removing ${NAMED.images}`, args: ['image', 'rm', '--force', ...images] });
   }
 }
 
