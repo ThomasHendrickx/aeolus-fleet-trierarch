@@ -1,7 +1,7 @@
 import { realpath } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-import type { TrierarchConfiguration } from '@aeolus-fleet/common';
+import type { TrierarchConfiguration } from './files.js';
 
 import type { FolderProcessesPort, SessionRuntime, TrashPort, WorkspacePort } from '../core/ports.js';
 import type { SessionRoots } from './caller-check.js';
@@ -67,7 +67,7 @@ export function runtimeAdaptersOf(at: {
   program?: readonly string[];
 }): RuntimeAdapters {
   const { configuration, paths, version, launch, managedSettings, clones: trusted } = at;
-  const root = configuration.worktreeRoot ?? paths.worktrees;
+  const root = configuration.shipsRoot ?? paths.worktrees;
   const { runtime } = configuration;
   if (runtime?.kind !== 'container') {
     return {

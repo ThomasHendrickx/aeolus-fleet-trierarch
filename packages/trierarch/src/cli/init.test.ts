@@ -2,12 +2,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { trierarchConfigurationSchema, type ShipId, type TrierarchConfiguration } from '@aeolus-fleet/common';
+import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import type { CodexSetup } from '../adapters/codex-setup.js';
-import { readCrewFile, type RunningFile } from '../adapters/files.js';
+import { readCrewFile, trierarchConfigurationSchema, type RunningFile, type TrierarchConfiguration } from '../adapters/files.js';
 import { trierarchPaths, type TrierarchPaths } from '../adapters/paths.js';
 import { FleetRefusal } from '../adapters/rest-fleet.js';
 import type { Service, ServiceStatus } from '../adapters/service.js';
@@ -603,8 +603,8 @@ describe('aeolus-trierarch init on a machine set up already', () => {
     expect(prompter.isDone).toBe(true);
   });
 
-  it('keeps everything else the configuration holds: folders, options and the worktree root', async () => {
-    const custom = { ...configuration(), worktreeRoot: join(home, 'worktrees'), folders: { notes: { path: '/notes' } }, harnesses: { 'claude-code': { flags: ['--verbose'], options: { model: { values: { opus: ['--model', 'claude-opus-5-5'] }, default: 'opus' } } } } };
+  it('keeps everything else the configuration holds: folders, options and the place of ships/', async () => {
+    const custom = { ...configuration(), shipsRoot: join(home, 'worktrees'), folders: { notes: { path: '/notes' } }, harnesses: { 'claude-code': { flags: ['--verbose'], options: { model: { values: { opus: ['--model', 'claude-opus-5-5'] }, default: 'opus' } } } } };
     writeFileSync(paths.config, JSON.stringify(custom));
 
     await init({}, new ScriptedPrompter([['Change the configuration', true], ['--dangerously-skip-permissions', false], ['repository', ''], ['Keep the folder notes', true], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false]]));

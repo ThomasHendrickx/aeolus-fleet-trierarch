@@ -165,7 +165,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     codex: createCodexSetup(),
   });
   // The machine's load (#400) and the harnesses' usage (#353), each read on its own interval for the report.
-  const readLoad = createReadLoad({ machine: createMachine({ worktreeRoot: configuration.worktreeRoot ?? paths.worktrees }), fleet, state, clock, logger });
+  const readLoad = createReadLoad({ machine: createMachine({ worktreeRoot: configured.shipsRoot ?? paths.worktrees }), fleet, state, clock, logger });
   const usage = createUsage({
     'claude-code': createClaudeCodeUsage({
       // In containers each ship's conversations are in its own home (decision 0039).

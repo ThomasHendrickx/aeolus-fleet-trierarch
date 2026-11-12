@@ -1,9 +1,9 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { idSchema, type ShipId, type TrierarchConfiguration } from '@aeolus-fleet/common';
+import { idSchema, type ShipId } from '@aeolus-fleet/common';
 
 import type { ClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import type { CodexSetup } from '../adapters/codex-setup.js';
-import { initialConfiguration, loadConfiguration, readCrewFile, TrierarchFileError, writeConfigurationJsonSchema, writeCrewFile, type RunningFile } from '../adapters/files.js';
+import { initialConfiguration, loadConfiguration, readCrewFile, TrierarchFileError, writeConfigurationJsonSchema, writeCrewFile, type RunningFile, type TrierarchConfiguration } from '../adapters/files.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
 import { FleetRefusal, type RestFleet } from '../adapters/rest-fleet.js';
 import type { Service } from '../adapters/service.js';
@@ -436,7 +436,7 @@ export async function initTrierarch(input: {
     }
   }
 
-  const root = configuration.worktreeRoot ?? paths.worktrees;
+  const root = configuration.shipsRoot ?? paths.worktrees;
   await mkdir(root, { recursive: true });
   const claude = await setUpClaudeCode({ configuration, claudeCode, prompter, root });
   said.push(...claude.said);

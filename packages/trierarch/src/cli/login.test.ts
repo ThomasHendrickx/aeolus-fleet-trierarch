@@ -30,7 +30,7 @@ beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'trierarch-login-'));
   config = join(home, 'config.json');
   checkedStates = new Map();
-  writeFileSync(config, JSON.stringify({ ...initialConfiguration(), worktreeRoot: '/kept/as/written' }));
+  writeFileSync(config, JSON.stringify({ ...initialConfiguration(), shipsRoot: '/kept/as/written' }));
   keys = createKeyFiles(join(home, 'keys'));
   checked = [];
   answer = { kind: 'taken' };
@@ -164,7 +164,7 @@ describe('aeolus-trierarch login, choosing the login (api keys K5, K11)', () => 
     const report = await run({ kind: 'setDefault', harness: 'claude-code', login: 'apiKey' });
 
     expect(logins()).toEqual({ default: { 'claude-code': 'apiKey' } });
-    expect(JSON.parse(readFileSync(config, 'utf8'))).toMatchObject({ worktreeRoot: '/kept/as/written', $schema: './config.schema.json' });
+    expect(JSON.parse(readFileSync(config, 'utf8'))).toMatchObject({ shipsRoot: '/kept/as/written', $schema: './config.schema.json' });
     expect(restarts).toBe(1);
     expect(report.said).toEqual(['Claude Code runs on API key by default, from each session\'s next start.', 'The trierarch restarted; its sessions kept running.']);
   });
