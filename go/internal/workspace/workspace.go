@@ -504,7 +504,8 @@ func isWorktreeOf(repository string, folder string) bool {
 }
 
 // RemoveWorktree removes a folder under the root, whatever it is (gap rule 2): a worktree of a repository it has by git, a clone into
-// the trash beside it, anything else, such as a plain clone, a worktree of another repository or a folder git does not know, as it is.
+// the trash beside it, anything else, such as a plain clone, a worktree of another repository, a folder git does not know or a stray ship's folder, into the
+// trash beside it too, but one straight under the worktree root of the ships crewed before, which has no trash, as it is.
 // Never one outside the root, the root or its trash.
 func (p Places) RemoveWorktree(folder string) error {
 	if !p.isUnderRoot(folder) {
@@ -526,7 +527,15 @@ func (p Places) RemoveWorktree(folder string) error {
 	if repository, ok := p.repositoryOf(folder); ok && isWorktreeOf(repository, folder) {
 		return Remove(repository, folder)
 	}
-	return os.RemoveAll(folder)
+	// One straight under the worktree root of the ships crewed before has no trash beside it a pass empties, so the host removes it; any
+	// other, a stray ship's folder among them, goes into the trash beside it.
+	if p.Before != "" && p.Before != p.Root {
+		parent := filepath.Dir(folder)
+		if real, err := filepath.EvalSymlinks(p.Before); parent == p.Before || (err == nil && parent == real) {
+			return os.RemoveAll(folder)
+		}
+	}
+	return trash.Discard(folder, time.Now(), p.MoveWithinUserNamespace)
 }
 
 // Prune drops the git records of the repository's worktrees whose folder is gone, wherever the folder was; a worktree whose folder exists

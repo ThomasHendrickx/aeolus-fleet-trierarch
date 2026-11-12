@@ -195,6 +195,8 @@ type aHarness struct {
 	died     []string
 	seen     map[string]reconciler.LaunchSeen
 	problem  error
+	// launchFails is an error every launch ends with.
+	launchFails error
 	// marksNoLaunches is a plugin older than the launch marker; pluginMissing one that cannot be found; notOffered why the machine does not offer the harness.
 	marksNoLaunches bool
 	pluginMissing   bool
@@ -217,6 +219,9 @@ func (h *aHarness) Activity(entry reconciler.Entry) (activity.Activity, bool) {
 }
 
 func (h *aHarness) Launch(entry reconciler.Entry, isFirstStart bool, launchID string) error {
+	if h.launchFails != nil {
+		return h.launchFails
+	}
 	h.launches = append(h.launches, launched{shipID: entry.ShipID, folder: entry.Folder, isFirstStart: isFirstStart, launchID: launchID, firstPrompt: entry.FirstPrompt})
 	h.logins = append(h.logins, entry.Login)
 	h.readOnly = append(h.readOnly, entry.ReadOnly)
@@ -3046,6 +3051,33 @@ func TestAShipsFolderIsNoStrayWhileItsShipIsCrewedWithItsWorkspaceElsewhere(t *t
 
 	if len(pass.workspace.removed) != 0 {
 		t.Fatalf("removed %q", pass.workspace.removed)
+	}
+}
+
+func TestAShipWhoseCrewAgainInAFreshShipsFolderIsInterruptedKeepsItsMarkAndIsCrewedAgainUnderItsLeaseNeverReleased(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	crewToken := pass.store.state.Entries[scout].CrewToken
+	pass.harness.launches = nil
+	pass.workspace.gone = map[string]bool{"/ships/" + scout: true}
+	pass.harness.launchFails = errors.New("the harness could not start")
+
+	_ = pass.pass.Run()
+
+	if !pass.store.state.Entries[scout].IsShipFolderGone {
+		t.Fatalf("entry %+v", pass.store.state.Entries[scout])
+	}
+	pass.harness.launchFails = nil
+	pass.run(t)
+
+	if slices.ContainsFunc(pass.fleet.calls, func(call string) bool {
+		return strings.HasPrefix(call, "release ") || strings.HasPrefix(call, "register ")
+	}) {
+		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+	entry := pass.store.state.Entries[scout]
+	if len(pass.harness.launches) != 1 || !pass.harness.launches[0].isFirstStart || entry.IsShipFolderGone || entry.CrewToken != crewToken {
+		t.Fatalf("launches %+v, entry %+v", pass.harness.launches, entry)
 	}
 }
 

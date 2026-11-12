@@ -3225,6 +3225,26 @@ describe("a ship's folder, ships/<shipId>, which holds every file of the ship (#
     expect(trierarch.logger.actions.map((logged) => logged.outcome)).toContain(`its ship's folder ${shipFolderOf(shipId)} is gone, so it is crewed again in a fresh one`);
   });
 
+  it('removed by hand from a ship whose crew again is interrupted keeps the mark until it is crewed again: the next pass crews it under the lease it holds, never releasing it', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    const before = { crewToken: trierarch.fleet.shipOf(shipId).crewToken, launches: trierarch.harness.launches.length };
+    trierarch.workspace.removeByHand(shipFolderOf(shipId));
+    trierarch.harness.isFailingLaunch = true;
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]?.isShipFolderGone).toBe(true);
+    expect([trierarch.fleet.shipOf(shipId).status, trierarch.fleet.requests.has(shipId)]).toEqual(['crewed', true]);
+    trierarch.harness.isFailingLaunch = false;
+
+    await trierarch.pass();
+
+    expect([trierarch.fleet.shipOf(shipId).status, trierarch.fleet.shipOf(shipId).crewToken, trierarch.fleet.requests.has(shipId)]).toEqual(['crewed', before.crewToken, true]);
+    expect(trierarch.harness.launches.slice(before.launches)).toEqual([expect.objectContaining({ shipId, isFirstStart: true })]);
+    expect(trierarch.state.current().entries[shipId]?.isShipFolderGone).toBeUndefined();
+  });
+
   it('removed by hand from a ship crewing here, its session started, has the ship crewed again in a fresh one under the lease it holds, as a first start', async () => {
     const trierarch = aTrierarch();
     const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' } });

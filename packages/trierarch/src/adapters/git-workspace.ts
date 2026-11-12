@@ -189,7 +189,7 @@ export function createGitWorkspace(
         await git(['-C', repository, 'worktree', 'remove', '--force', folder]);
         return;
       }
-      // Anything else under the root goes as it is: a plain clone, a worktree of another repository, a folder git does not know.
+      // Anything else under the root goes whole into the trash beside it: a plain clone, a worktree of another repository, a folder git does not know.
       const found = await lstat(folder).catch(() => undefined);
       if (found === undefined) {
         return;
@@ -197,7 +197,13 @@ export function createGitWorkspace(
       if (!found.isDirectory()) {
         throw new Error(`${folder} is no folder: the trierarch removes only a folder under the root`);
       }
-      await rm(folder, { recursive: true, force: true });
+      // One straight under the worktree root of the ships crewed before has no trash beside it a pass empties, so the host removes it; any other, a stray ship's folder among them, goes into the trash beside it.
+      const { before } = options;
+      if (before !== undefined && before !== root && [before, await realpath(before).catch(() => before)].includes(dirname(folder))) {
+        await rm(folder, { recursive: true, force: true });
+        return;
+      }
+      await discard(folder, { at: new Date() });
     },
     removeShipFolder: async (shipFolder) => removeShipFolder(shipFolder),
     hasShipFolder: async (shipFolder) => (await lstat(shipFolder).catch(() => undefined)) !== undefined,

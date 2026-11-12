@@ -691,8 +691,8 @@ async function crewInAFreshShipFolder(state: TrierarchState, at: EntryAt & { har
   log(deps, { ...about(state, { shipId: entry.shipId, action: 'crew' }), outcome: `its ship's folder ${entry.shipFolder ?? ''} is gone, so it is crewed again in a fresh one` });
   const shipFolder = await deps.workspace.shipFolderOf(entry.shipId);
   const { folder } = await deps.workspace.prepare({ shipId: entry.shipId, shipName, workspace: entry.workspace, shipFolder });
-  const { isShipFolderGone, ...fresh } = entry;
-  const crewing: Entry = isShipFolderGone === undefined ? { ...entry, folder, shipFolder } : { ...fresh, folder, shipFolder };
+  // The mark stays until the ship is crewed again, so an interruption crews it again here, never releasing it.
+  const crewing: Entry = { ...entry, folder, shipFolder };
   state = putEntry(state, crewing);
   await deps.state.save(state);
   const socket = await deps.sockets.open(entry.shipId, shipFolder);
@@ -720,7 +720,8 @@ async function crewInAFreshShipFolder(state: TrierarchState, at: EntryAt & { har
     ...(entry.firstPrompt !== undefined && { firstPrompt: entry.firstPrompt }),
   });
   const launchedAt = deps.clock.now().toISOString();
-  const next = putEntry(state, { ...crewing, hasStarted: true, launchedAt, launchId, ...startedOn(crewing, { login, at: launchedAt }) });
+  const { isShipFolderGone, ...crewed } = crewing;
+  const next = putEntry(state, { ...(isShipFolderGone === undefined ? crewing : crewed), hasStarted: true, launchedAt, launchId, ...startedOn(crewing, { login, at: launchedAt }) });
   await deps.state.save(next);
   log(deps, { shipId: entry.shipId, shipName, action: 'crew', outcome: `crewed again, ${entry.harness} started in ${folder}` });
   return next;
