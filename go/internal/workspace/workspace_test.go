@@ -329,3 +329,41 @@ func TestAFolderNoRepositoryNamesIsNotRemoved(t *testing.T) {
 		t.Errorf("the folder went: %v", err)
 	}
 }
+
+func TestAPruneDropsTheRecordOfAWorktreeWhoseFolderIsGoneAndLeavesALiveWorktreeOutsideTheRootAlone(t *testing.T) {
+	repository, root := aRepository(t)
+	elsewhere := t.TempDir()
+	gone, live := filepath.Join(elsewhere, "gone"), filepath.Join(elsewhere, "live")
+	gitIn(t, "-C", repository, "worktree", "add", "-q", "--detach", gone)
+	gitIn(t, "-C", repository, "worktree", "add", "-q", "--detach", live)
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatal(err)
+	}
+	places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}}
+
+	if err := places.Prune("aeolus-fleet"); err != nil {
+		t.Fatal(err)
+	}
+
+	listed := gitIn(t, "-C", repository, "worktree", "list", "--porcelain")
+	if strings.Contains(listed, "worktree "+gone+"\n") {
+		t.Errorf("the record of %s stayed: %s", gone, listed)
+	}
+	if !strings.Contains(listed, "worktree "+live+"\n") {
+		t.Errorf("the record of %s went: %s", live, listed)
+	}
+	if _, err := os.Stat(live); err != nil {
+		t.Errorf("the live worktree went: %v", err)
+	}
+}
+
+func TestThePruneOfARepositoryTheConfigurationDoesNotHaveFails(t *testing.T) {
+	_, root := aRepository(t)
+	places := Places{Root: root, Repositories: map[string]string{}}
+
+	err := places.Prune("unknown")
+
+	if err == nil || !strings.Contains(err.Error(), "unknown") {
+		t.Errorf("Prune() = %v, want an error naming unknown", err)
+	}
+}

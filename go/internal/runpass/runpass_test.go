@@ -267,6 +267,18 @@ type aWorkspace struct {
 	failUnsaved bool
 	// notMade are the worktrees under the root the trierarch did not make, or git no longer knows.
 	notMade map[string]bool
+	// pruned are the repositories whose worktree records were pruned, in order.
+	pruned []string
+	// failPrune are the repositories whose prune fails, as when git refuses.
+	failPrune map[string]bool
+}
+
+func (w *aWorkspace) Prune(repository string) error {
+	w.pruned = append(w.pruned, repository)
+	if w.failPrune[repository] {
+		return errors.New("git worktree prune failed in " + repository)
+	}
+	return nil
 }
 
 // Worktrees are the folders made, each `/worktrees/<repository>/<name>`.
@@ -1929,6 +1941,51 @@ func TestAPassThatCannotReadWhatItReconcilesKeepsItsReasonAndSinceWhenInTheState
 	wantLog := "The pass failed: the fleet cannot be reached; the next pass tries again; aeolus-trierarch status and list show where it stands"
 	if !slices.Contains(p.logged, wantLog) {
 		t.Errorf("logged = %q, want it to hold %q", p.logged, wantLog)
+	}
+}
+
+func TestEveryPassPrunesTheWorktreeRecordsOfEachConfiguredRepository(t *testing.T) {
+	p := aRunPass(t)
+	p.pass.Repositories = []string{"hemma", "aeolus-fleet"}
+
+	p.run(t)
+	p.run(t)
+
+	want := []string{"aeolus-fleet", "hemma", "aeolus-fleet", "hemma"}
+	if !reflect.DeepEqual(p.workspace.pruned, want) {
+		t.Errorf("pruned = %q, want %q", p.workspace.pruned, want)
+	}
+}
+
+func TestAPassThatCannotReadWhatItReconcilesStillPrunesTheWorktreeRecordsOfEachConfiguredRepository(t *testing.T) {
+	p := aRunPass(t)
+	p.pass.Repositories = []string{"aeolus-fleet", "hemma"}
+	p.fleet.cannotRead = errors.New("the fleet cannot be reached")
+
+	p.run(t)
+
+	want := []string{"aeolus-fleet", "hemma"}
+	if !reflect.DeepEqual(p.workspace.pruned, want) {
+		t.Errorf("pruned = %q, want %q", p.workspace.pruned, want)
+	}
+}
+
+func TestARepositoryWhosePruneFailsIsLoggedAndTheOthersArePrunedWithoutFailingThePass(t *testing.T) {
+	p := aRunPass(t)
+	p.pass.Repositories = []string{"aeolus-fleet", "hemma"}
+	p.workspace.failPrune = map[string]bool{"aeolus-fleet": true}
+
+	p.run(t)
+
+	if !slices.Contains(p.workspace.pruned, "hemma") {
+		t.Errorf("pruned = %q, want it to hold hemma", p.workspace.pruned)
+	}
+	wantLog := "Could not prune the worktree records of aeolus-fleet: git worktree prune failed in aeolus-fleet; the next pass tries again"
+	if !slices.Contains(p.logged, wantLog) {
+		t.Errorf("logged = %q, want it to hold %q", p.logged, wantLog)
+	}
+	if p.store.state.PassFailure != nil {
+		t.Errorf("passFailure = %+v, want none", p.store.state.PassFailure)
 	}
 }
 

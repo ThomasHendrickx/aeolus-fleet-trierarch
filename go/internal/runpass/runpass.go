@@ -103,6 +103,9 @@ type Workspace interface {
 	// under its root is not its to clear.
 	IsMade(folder string) bool
 	RemoveWorktree(folder string) error
+	// Prune drops the git records of the configured repository's worktrees whose folder is gone; a worktree whose folder exists stays,
+	// wherever it is. It fails for a repository the configuration lacks.
+	Prune(repository string) error
 }
 
 // FolderProcesses are the processes running in a folder, whatever started them: a dev server a session left behind (#1041).
@@ -292,7 +295,10 @@ func (p Pass) Run() error {
 			since = next.PassFailure.Since
 		}
 		next.PassFailure = &reconciler.PassFailure{Reason: err.Error(), Since: since}
-		return p.Store.Save(next)
+		// The prune needs neither the fleet nor the reconcile, so a failed pass prunes too.
+		saved := p.Store.Save(next)
+		p.pruneWorktreeRecords()
+		return saved
 	}
 	// Every action is carried out, whatever an earlier one did: a failed action is logged and the pass goes on from the saved state.
 	for _, action := range actions {
@@ -314,9 +320,20 @@ func (p Pass) Run() error {
 			p.Log(fmt.Sprintf("%s of %s failed: %v", action.Kind, action.ShipID, err))
 		}
 	}
+	p.pruneWorktreeRecords()
 	p.emptyTrash()
 	p.writeActivities(next)
 	return nil
+}
+
+// pruneWorktreeRecords drops the git records of worktrees whose folder is gone, in each configured repository; one that fails is logged and
+// fails neither the pass nor the others.
+func (p Pass) pruneWorktreeRecords() {
+	for _, repository := range slices.Sorted(slices.Values(p.Repositories)) {
+		if err := p.Workspace.Prune(repository); err != nil {
+			p.Log(fmt.Sprintf("Could not prune the worktree records of %s: %v; the next pass tries again", repository, err))
+		}
+	}
 }
 
 // trashToldAfter is how long the trash tries to remove a folder before argo is told it cannot.
