@@ -5,7 +5,7 @@ import { createServer as createNetServer, type Server as NetServer, type Socket 
 import { join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 
 import { TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
 import { newId } from '../../test/support/in-memory.js';
@@ -84,7 +84,7 @@ describe('the session runtime contract, on rootless Podman under holds', { timeo
 
   beforeAll(async () => {
     if (podman.isUsable) {
-      image = await buildTestSessionImage(`localhost/aeolus-trierarch-test:${newId('ship').slice(-8)}`);
+      image = await buildTestSessionImage(`localhost/aeolus-trierarch-test:${newId('ship').slice(-8)}`, { run: inject('testRun') });
     }
   }, 60_000);
 

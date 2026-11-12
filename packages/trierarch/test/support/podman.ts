@@ -1,4 +1,5 @@
 import { runCommand, type CommandResult } from '../../src/adapters/run-command.js';
+import { TEST_RUN_LABEL } from './test-run.js';
 
 /**
  * Whether the tests that run containers on the real rootless Podman can run on
@@ -29,9 +30,11 @@ export async function rootlessPodman(machine: { platform: NodeJS.Platform; info:
  * and the libraries they load, so a test pulls nothing from a registry (#464):
  * the shell and sleep stand in for a harness, and nc, which connects to a Unix
  * socket, for the fleet client a session calls its ship's socket with.
+ * It carries the run's test run label when given one, so every container
+ * started from it carries it too and an interrupted run's are found (#345).
  * Answers its name; the caller removes it.
  */
-export async function buildTestSessionImage(name: string): Promise<string> {
+export async function buildTestSessionImage(name: string, of: { run?: string } = {}): Promise<string> {
   const script = `
     set -eu
     root=$(mktemp -d)
@@ -43,9 +46,9 @@ export async function buildTestSessionImage(name: string): Promise<string> {
     done
     mkdir -p "$root/tmp"
     chmod 1777 "$root/tmp"
-    tar -C "$root" -c . | podman import --quiet - "$1" > /dev/null
+    tar -C "$root" -c . | podman import --quiet \${2:+--change "LABEL $2"} - "$1" > /dev/null
   `;
-  const built = await runCommand('sh', { args: ['-c', script, 'sh', name] });
+  const built = await runCommand('sh', { args: ['-c', script, 'sh', name, of.run === undefined ? '' : `${TEST_RUN_LABEL}=${of.run}`] });
   if (built.status !== 0) {
     throw new Error(`building the test session image failed: ${built.stderr.trim()}`);
   }

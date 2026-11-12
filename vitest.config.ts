@@ -67,6 +67,8 @@ export default defineConfig({
           root: 'packages/trierarch',
           include: ['src/**/*.test.ts', 'test/**/*.test.ts'],
           exclude: [...configDefaults.exclude, '**/*.integration.test.ts'],
+          // Removes the containers and test images an earlier run left, and this run's after it (#345).
+          globalSetup: ['test/support/test-run.global-setup.ts'],
         },
       },
       {
