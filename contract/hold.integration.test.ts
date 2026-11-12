@@ -40,7 +40,7 @@ afterEach(async ({ task }) => {
 /** Commissions the ship, crews it in a worktree and waits until the trierarch lists it running and its first turn ended. */
 async function aRunningShip(name: string): Promise<ShipId> {
   const shipId = await fleet.commission(name);
-  await fleet.crewInWorktree(shipId, { repository: REPOSITORY, harness: 'claude-code' });
+  await fleet.crewInRepositories(shipId, { main: REPOSITORY, harness: 'claude-code' });
   await expect.poll(async () => (await listedEntryOf(machine, shipId))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
   await expect.poll(() => sessionOf(machine, name).turns().length, { timeout: CREWED_WITHIN_MS }).toBeGreaterThan(0);
   return shipId;

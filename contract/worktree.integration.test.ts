@@ -68,10 +68,10 @@ describe('a ship in a worktree of a repository', () => {
   it("starts on origin's main when the clone's main is behind", async () => {
     const ahead = anOriginAhead();
 
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
 
     await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
-    expect(git(sessionOf(machine, 'scout').worktree, 'rev-parse', 'HEAD')).toBe(ahead);
+    expect(git(sessionOf(machine, 'scout').main, 'rev-parse', 'HEAD')).toBe(ahead);
   });
 
   it("is crewed when the clone has no local main, starting on origin's main", async () => {
@@ -79,16 +79,16 @@ describe('a ship in a worktree of a repository', () => {
     git(machine.repository, 'fetch', '-q', 'origin');
     git(machine.repository, 'update-ref', '-d', 'refs/heads/main');
 
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
 
     await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
-    expect(git(sessionOf(machine, 'scout').worktree, 'rev-parse', 'HEAD')).toBe(ahead);
+    expect(git(sessionOf(machine, 'scout').main, 'rev-parse', 'HEAD')).toBe(ahead);
   });
 
   it("says git's message when no worktree can be made", async () => {
     git(machine.repository, 'update-ref', '-d', 'refs/heads/main');
 
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
 
     await expect.poll(() => machine.serviceLog(), { timeout: CREWED_WITHIN_MS }).toContain('git worktree add failed: fatal: invalid reference: HEAD');
   });
@@ -96,7 +96,7 @@ describe('a ship in a worktree of a repository', () => {
   it("gives the request back with git's message when no worktree can be made", async () => {
     git(machine.repository, 'update-ref', '-d', 'refs/heads/main');
 
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
 
     await expect.poll(() => fleet.givenBackReasonOf(scout), { timeout: GIVEN_BACK_WITHIN_MS }).toContain('git worktree add failed: fatal: invalid reference: HEAD');
     expect((await fleet.givenBackReasonOf(scout))?.length).toBeLessThanOrEqual(200);
@@ -168,9 +168,9 @@ describe('a folder under the root no crewed ship uses', () => {
   });
 
   it('that holds the folder a ship is crewed in stays, and so does the trash', async () => {
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
     await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
-    const { worktree } = sessionOf(machine, 'scout');
+    const { folder: worktree } = sessionOf(machine, 'scout');
     const trash = join(machine.trierarchHome, 'ships', '.trash');
     mkdirSync(trash, { recursive: true });
     const { folder } = aStrayWithAProcess({ path: [REPOSITORY, 'lookout'], make: aFileGitDoesNotKnow });
@@ -219,18 +219,18 @@ function filesUnder(folder: string): string[] {
 const savedSchema = z.object({ entries: z.record(z.string(), z.object({ crewToken: z.string().optional() }).loose()) });
 
 describe("a ship's folder", () => {
-  it('is made when a ship is crewed fresh, ships/<shipId>/, holding its worktree and its fleet socket, which its identity names', async () => {
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+  it('is made when a ship is crewed fresh, ships/<shipId>/, holding its ship folder and its fleet socket, which its identity names', async () => {
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
 
     await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
-    expect(sessionOf(machine, 'scout').worktree).toBe(join(shipFolderOf(scout), 'worktree'));
+    expect(sessionOf(machine, 'scout').folder).toBe(join(shipFolderOf(scout), 'repositories'));
     expect(lstatSync(socketOf(scout)).isSocket()).toBe(true);
     const identities = filesUnder(join(machine.home, '.aeolus', 'crews', 'claude-code')).map((path) => readFileSync(path, 'utf8'));
     expect(identities.filter((identity) => identity.includes(`socket=${socketOf(scout)}\n`))).toHaveLength(1);
   });
 
   it("holds no token: the ship's crew token and the trierarch's stay in the trierarch's own files beside ships/, and the hold's files too", async () => {
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
     await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
     const crewToken = savedSchema.parse(JSON.parse(readFileSync(join(machine.trierarchHome, 'state.json'), 'utf8'))).entries[scout]?.crewToken ?? '';
     const tokens = [crewToken, readFileSync(join(machine.trierarchHome, 'crew-token'), 'utf8').trim()];
@@ -243,7 +243,7 @@ describe("a ship's folder", () => {
   });
 
   it('goes whole when its crew request is removed, once its session stopped', async () => {
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
     await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
     const pid = sessionOf(machine, 'scout').starts()[0]?.pid ?? 0;
 
@@ -256,14 +256,14 @@ describe("a ship's folder", () => {
 
 describe('ships/ removed by hand', () => {
   it('has every ship crewed here crewed again in a fresh ship folder, as a first start', async () => {
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
     await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
     const pid = sessionOf(machine, 'scout').starts()[0]?.pid ?? 0;
 
     rmSync(join(machine.trierarchHome, 'ships'), { recursive: true, force: true });
 
     await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CLEARED_WITHIN_MS }).toBe(1);
-    expect(sessionOf(machine, 'scout').worktree).toBe(join(shipFolderOf(scout), 'worktree'));
+    expect(sessionOf(machine, 'scout').folder).toBe(join(shipFolderOf(scout), 'repositories'));
     expect(sessionOf(machine, 'scout').starts()[0]?.pid).not.toBe(pid);
     expect(isRunning(pid)).toBe(false);
     expect(lstatSync(socketOf(scout)).isSocket()).toBe(true);
@@ -340,16 +340,16 @@ async function keptPaths(): Promise<readonly string[]> {
 
 describe('a crew given back before it is final', () => {
   it('removes its worktree with changes too and keeps none', async () => {
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
     await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
-    const { worktree } = sessionOf(machine, 'scout');
-    writeFileSync(join(worktree, 'unsaved.txt'), 'unsaved\n');
+    const { main } = sessionOf(machine, 'scout');
+    writeFileSync(join(main, 'unsaved.txt'), 'unsaved\n');
     claudeTrustsNothing();
 
-    await fleet.requestCrewAgainInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.requestCrewAgainInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
 
-    await expect.poll(() => existsSync(worktree), { timeout: GIVEN_BACK_WITHIN_MS }).toBe(false);
-    await expect.poll(() => machine.serviceLog(), { timeout: GIVEN_BACK_WITHIN_MS }).toContain(`Discarded from the worktree of scout (${scout}), ${worktree}: `);
+    await expect.poll(() => existsSync(main), { timeout: GIVEN_BACK_WITHIN_MS }).toBe(false);
+    await expect.poll(() => machine.serviceLog(), { timeout: GIVEN_BACK_WITHIN_MS }).toContain(`Discarded from the worktree of scout (${scout}), ${main}: ?? unsaved.txt`);
     expect(await keptPaths()).toEqual([]);
   });
 });
@@ -365,7 +365,7 @@ describe('a clear request for a worktree the trierarch keeps none of', () => {
 describe('a clear request for a ship whose crew fails in the same pass', () => {
   it('is carried out in that pass, before the crew is given back', async () => {
     git(machine.repository, 'update-ref', '-d', 'refs/heads/main');
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
     await fleet.requestWorktreeClear(scout, REPOSITORY);
 
     await expect.poll(() => fleet.clearedOutcomeOf(scout, REPOSITORY), { timeout: CLEARED_WITHIN_MS }).toBe('not-kept');

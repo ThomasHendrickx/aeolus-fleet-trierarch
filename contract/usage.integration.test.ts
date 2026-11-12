@@ -37,7 +37,7 @@ async function aMachineWith(others: readonly OtherHarness[], before: (machine: M
 /** Crews scout with the harness and waits until the trierarch lists it running. */
 async function aRunningScoutOn(harness: string): Promise<ShipId> {
   const scout = await fleet.commission('scout');
-  await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness });
+  await fleet.crewInRepositories(scout, { main: REPOSITORY, harness });
   await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
   return scout;
 }
@@ -80,7 +80,7 @@ describe("a ship's tokens", () => {
     await aMachineWith([]);
     const scout = await aRunningScoutOn('claude-code');
     const now = new Date().toISOString();
-    const project = join(machine.home, '.claude', 'projects', sessionOf(machine, 'scout').worktree.replace(/[^a-zA-Z0-9]/gu, '-'));
+    const project = join(machine.home, '.claude', 'projects', sessionOf(machine, 'scout').folder.replace(/[^a-zA-Z0-9]/gu, '-'));
 
     await whileStopped(() => {
       const opus = { input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 10_000, cache_creation_input_tokens: 3000 };
@@ -118,7 +118,7 @@ describe("a ship's tokens", () => {
 
     await whileStopped(() => {
       writeLines(join(machine.home, '.codex', 'sessions', '2026', '11', '05', 'rollout-2026-11-05T10-00-00-scout.jsonl'), [
-        { timestamp: now, type: 'session_meta', payload: { timestamp: now, cwd: sessionOf(machine, 'scout').worktree } },
+        { timestamp: now, type: 'session_meta', payload: { timestamp: now, cwd: sessionOf(machine, 'scout').folder } },
         { timestamp: now, type: 'turn_context', payload: { model: 'gpt-5.6-terra' } },
         { timestamp: now, type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 5000, cached_input_tokens: 3000, output_tokens: 400 } }, rate_limits: rateLimits } },
         { timestamp: now, type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 9000, cached_input_tokens: 6000, output_tokens: 900 } }, rate_limits: rateLimits } },
@@ -174,7 +174,7 @@ describe("a ship's usage sent to the trierarch plugin's ship", () => {
     await aMachineWith([]);
     const scout = await aRunningScoutOn('claude-code');
     const now = new Date().toISOString();
-    const project = join(machine.home, '.claude', 'projects', sessionOf(machine, 'scout').worktree.replace(/[^a-zA-Z0-9]/gu, '-'));
+    const project = join(machine.home, '.claude', 'projects', sessionOf(machine, 'scout').folder.replace(/[^a-zA-Z0-9]/gu, '-'));
 
     await whileStopped(() => {
       writeLines(join(project, 'conversation.jsonl'), [anAssistantLine({ id: 'msg_1', model: 'claude-opus-5-5', timestamp: now, usage: { input_tokens: 1000, output_tokens: 2000, cache_read_input_tokens: 10_000, cache_creation_input_tokens: 3000 } })]);
@@ -191,7 +191,7 @@ describe("a ship's usage sent to the trierarch plugin's ship", () => {
     await aMachineWith([]);
     const scout = await aRunningScoutOn('claude-code');
     const now = new Date().toISOString();
-    const worktree = sessionOf(machine, 'scout').worktree;
+    const worktree = sessionOf(machine, 'scout').folder;
     const transcript = join(machine.home, '.claude', 'projects', worktree.replace(/[^a-zA-Z0-9]/gu, '-'), 'conversation.jsonl');
     await whileStopped(() => {
       writeLines(transcript, [anAssistantLine({ id: 'msg_1', model: 'claude-opus-5-5', timestamp: now, usage: { input_tokens: 10, output_tokens: 2000 } })]);

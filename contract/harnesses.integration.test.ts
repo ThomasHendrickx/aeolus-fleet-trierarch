@@ -32,7 +32,7 @@ async function aMachineWith(other: OtherHarness): Promise<void> {
 /** Crews scout with the harness and waits until the trierarch lists it running: its session's starts. */
 async function aRunningScoutOn(harness: string) {
   const scout = await fleet.commission('scout');
-  await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness });
+  await fleet.crewInRepositories(scout, { main: REPOSITORY, harness });
   await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
   return { scout, starts: sessionOf(machine, 'scout').starts() };
 }

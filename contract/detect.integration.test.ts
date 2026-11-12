@@ -206,7 +206,7 @@ describe('a crewed session', () => {
     await aCrewing();
     const scout = await fleet.commission('scout');
 
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code', options: { model: 'claude-opus-5' } });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code', options: { model: 'claude-opus-5' } });
 
     await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
     expect(sessionOf(machine, 'scout').starts()[0]?.args.join(' ')).toContain('--model claude-opus-5');
@@ -218,7 +218,7 @@ describe('a model a session refused', () => {
   async function aRefused(model: string): Promise<void> {
     machine.refuseModel(model);
     const scout = await fleet.commission('scout');
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code', options: { model } });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code', options: { model } });
     await expect.poll(() => detected()['claude-code']?.refused?.map(({ id }) => id), { timeout: CREWED_WITHIN_MS }).toEqual([model]);
   }
 
@@ -236,7 +236,7 @@ describe('a model a session refused', () => {
     await aRefused('claude-sonnet-5');
     const second = await fleet.commission('second');
 
-    await fleet.crewInWorktree(second, { repository: REPOSITORY, harness: 'claude-code', options: { model: 'claude-sonnet-5' } });
+    await fleet.crewInRepositories(second, { main: REPOSITORY, harness: 'claude-code', options: { model: 'claude-sonnet-5' } });
 
     await expect.poll(() => fleet.givenBackReasonOf(second), { timeout: CREWED_WITHIN_MS }).toContain('options.model: model must be one of claude-opus-5');
   });

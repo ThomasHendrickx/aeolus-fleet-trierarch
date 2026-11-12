@@ -39,7 +39,7 @@ afterEach(async ({ task }) => {
 
 /** Crews the ship in a worktree and waits until the trierarch lists it running. */
 async function aRunning(shipId: ShipId, at: { options?: Record<string, string> } = {}): Promise<void> {
-  await fleet.crewInWorktree(shipId, { repository: REPOSITORY, harness: 'claude-code', ...at });
+  await fleet.crewInRepositories(shipId, { main: REPOSITORY, harness: 'claude-code', ...at });
   await expect.poll(async () => (await listedEntryOf(machine, shipId))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
 }
 
@@ -84,16 +84,14 @@ describe('unpushed work discarded on a release', () => {
   it('logs what the removed worktree held and tells nobody', async () => {
     const scout = await fleet.commission('scout');
     await aRunning(scout);
-    const { worktree } = sessionOf(machine, 'scout');
-    writeFileSync(join(worktree, 'notes.txt'), 'unsaved\n');
+    const { folder, main } = sessionOf(machine, 'scout');
+    writeFileSync(join(main, 'notes.txt'), 'unsaved\n');
 
     await fleet.removeCrewRequest(scout);
 
-    // The stand-in session writes its three files into the worktree it works in.
-    await expect
-      .poll(() => machine.serviceLog(), { timeout: CREWED_WITHIN_MS })
-      .toContain(`Discarded from the worktree of scout (${scout}), ${worktree}: ?? fake-received.jsonl; ?? fake-starts.jsonl; ?? fake-turns.jsonl; ?? notes.txt`);
-    expect(existsSync(worktree)).toBe(false);
+    // The stand-in session writes its own files into its ship folder, which is no repository: only the main repository's change is told.
+    await expect.poll(() => machine.serviceLog(), { timeout: CREWED_WITHIN_MS }).toContain(`Discarded from the worktree of scout (${scout}), ${main}: ?? notes.txt`);
+    expect(existsSync(folder)).toBe(false);
     await wait(ANOTHER_PASSES_MS);
     await expect(fleet.toldByTrierarch()).resolves.toEqual([]);
   });
@@ -104,7 +102,7 @@ describe('unpushed work discarded on a release', () => {
     const session = sessionOf(machine, 'scout');
     await machine.trierarch(['stop']);
     for (const name of ['fake-received.jsonl', 'fake-starts.jsonl', 'fake-turns.jsonl']) {
-      rmSync(join(session.worktree, name), { force: true });
+      rmSync(join(session.folder, name), { force: true });
     }
     await machine.trierarch(['start']);
 
@@ -184,7 +182,7 @@ describe('a ship whose folder holds no identity', () => {
     const scout = await fleet.commission('scout');
     await aRunning(scout);
 
-    await machine.removeIdentity(sessionOf(machine, 'scout').worktree);
+    await machine.removeIdentity(sessionOf(machine, 'scout').folder);
 
     await expect(told(1)).resolves.toEqual([
       {
@@ -208,7 +206,7 @@ describe('a session refused the model it launched with', () => {
     const scout = await fleet.commission('scout');
     machine.refuseModel('claude-sonnet-5');
 
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code', options: { model: 'claude-sonnet-5' } });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code', options: { model: 'claude-sonnet-5' } });
 
     await expect(told(1)).resolves.toEqual([
       {

@@ -75,7 +75,7 @@ async function takenOver(from: readonly string[], to: readonly string[]): Promis
   expect(toVersion, 'the two trierarchs must say different versions, as two releases do, for one to take over the other').not.toBe(fromVersion);
   await aCrewingMachine({ fleet, machine, as: from });
   const shipId = await fleet.commission('scout');
-  await fleet.crewInWorktree(shipId, { repository: REPOSITORY, harness: 'claude-code' });
+  await fleet.crewInRepositories(shipId, { main: REPOSITORY, harness: 'claude-code' });
   await expect.poll(async () => (await listedEntryOf(machine, shipId))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
   await expect.poll(() => holdVersionOf(shipId), { timeout: CREWED_WITHIN_MS }).toBe(fromVersion);
   await expect.poll(() => sessionOf(machine, 'scout').turns().length, { timeout: CREWED_WITHIN_MS }).toBeGreaterThan(0);
