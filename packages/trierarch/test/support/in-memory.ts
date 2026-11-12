@@ -996,7 +996,11 @@ export class InMemoryUsage implements UsagePort {
     return Promise.resolve(this.madeAtOf.get(folder) ?? FOLDER_MADE_AT);
   }
 
-  tokensOf(ship: { shipId: ShipId; harness: string; folder: string; logins?: SessionLogins }): Promise<readonly HourTokens[]> {
+  /** The ship's folder each ship's tokens were last read in, by ship; none for a ship crewed before the ship folders. */
+  readonly readIn = new Map<ShipId, string | undefined>();
+
+  tokensOf(ship: { shipId: ShipId; harness: string; folder: string; shipFolder?: string; logins?: SessionLogins }): Promise<readonly HourTokens[]> {
+    this.readIn.set(ship.shipId, ship.shipFolder);
     if (this.unreadable.has(ship.shipId)) {
       return Promise.reject(new Error('EACCES'));
     }
