@@ -715,7 +715,7 @@ async function clear(state: TrierarchState, at: CarryOut & { action: Extract<Act
 async function removeStray(state: TrierarchState, at: { folder: string; deps: RunPassDeps }): Promise<TrierarchState> {
   const { folder, deps } = at;
   // A crew earlier in this pass may have set a folder that reconcile did not know yet.
-  if (Object.values(state.entries).some((entry) => entry.folder === folder || entry.folder?.startsWith(`${folder}/`) === true)) {
+  if (Object.values(state.entries).some((entry) => entry.folder !== undefined && (entry.folder === folder || entry.folder.startsWith(`${folder}/`) || folder.startsWith(`${entry.folder}/`)))) {
     return state;
   }
   const stopped = await deps.folderProcesses.stopIn(folder);
