@@ -1,6 +1,6 @@
 import { CREW_REQUEST_REASON_MAX_LENGTH, type ShipId } from '@aeolus-fleet/common';
 
-import { putEntry, removeEntry, withState, type Entry, type Orphan, type TrierarchState } from './entry.js';
+import { putEntry, removeEntry, withState, type Entry, type TrierarchState } from './entry.js';
 import { crashText, identityGoneText, keyNotReadyText, leftInTrashText, modelRefusedText, ownerUnreachableText, settingsRefusedText, stoppedOfferingText } from './argo-reports.js';
 import { MODEL_OPTION } from './detected-options.js';
 import { countStart, PROBE_AFTER_MINUTES, withConfiguration, type StartOutcome } from './failed-starts.js';
@@ -297,7 +297,11 @@ async function failed(at: { action: Action; deps: RunPassDeps; reason: string })
   const { action, deps, reason } = at;
   try {
     const state = await deps.state.load();
-    if (action.kind === 'status' || action.kind === 'refuse' || action.kind === 'clearOrphan') {
+    if (action.kind === 'removeStray') {
+      deps.logger.warn(`Could not remove ${action.folder}, a folder under the root no crewed ship uses: ${reason}; ${NEXT_AFTER_FAILURE}`);
+      return state;
+    }
+    if (action.kind === 'status' || action.kind === 'refuse') {
       deps.logger.warn(`The pass failed at ${action.kind}: ${reason}; ${NEXT_AFTER_FAILURE}`);
       return state;
     }
@@ -336,7 +340,7 @@ async function crewFailed(state: TrierarchState, at: EntryAt & { reason: string 
 }
 
 /**
- * What runs: the sessions, the worktrees under the root, and for each entry
+ * What runs: the sessions, every folder under the root, and for each entry
  * whose session runs (or should, after a restart of the machine) its inbox and
  * turn. An inbox is watched only while its session runs, so last seen still
  * means the session is alive; a crewing one from the moment its session runs (#473).
@@ -344,7 +348,7 @@ async function crewFailed(state: TrierarchState, at: EntryAt & { reason: string 
 async function observe(state: TrierarchState, at: { deps: RunPassDeps; missingPlugins: ReadonlySet<string> }): Promise<Observed> {
   const { deps, missingPlugins } = at;
   const sessions = await deps.processes.list();
-  const worktrees = await deps.workspace.worktrees();
+  const folders = await deps.workspace.foldersUnderRoot();
   const ships: Record<string, Observed['ships'][string]> = {};
   const launches: Record<string, LaunchSeen> = {};
   const withoutIdentity: ShipId[] = [];
@@ -390,7 +394,7 @@ async function observe(state: TrierarchState, at: { deps: RunPassDeps; missingPl
       ships[entry.shipId] = { inbox: await deps.fleet.inbox(crewToken), turn, isHolding, ...(isKeyNotReady && { isKeyNotReady }) };
     }
   }
-  return { sessions, worktrees, ships, launches, withoutIdentity, startProblems };
+  return { sessions, folders, ships, launches, withoutIdentity, startProblems };
 }
 
 function log(deps: RunPassDeps, logged: Omit<LoggedAction, 'time'>): void {
@@ -441,8 +445,8 @@ async function carryOut(state: TrierarchState, at: CarryOut): Promise<TrierarchS
       return release(state, { shipId: action.shipId, deps });
     case 'clear':
       return clear(state, { action, deps });
-    case 'clearOrphan':
-      return clearOrphan(state, { orphan: action.orphan, isNew: action.isNew, deps });
+    case 'removeStray':
+      return removeStray(state, { folder: action.folder, deps });
     case 'crew':
     case 'launch':
     case 'wake':
@@ -692,64 +696,35 @@ async function removeWorkspace(at: EntryAt): Promise<string> {
   return `its worktree removed, discarding ${String(held.length)} unpushed ${held.length === 1 ? 'change' : 'changes'}`;
 }
 
-/**
- * A clear request (decision 0032): the kept worktree it names is removed
- * (the workspace removes only one under the root) and dropped from the state,
- * saved, then the request is confirmed removed. With none kept, it is
- * confirmed not-kept. A failed remove leaves both for the next pass; a lost
- * confirmation is confirmed not-kept on the next one.
- */
+/** A clear request (decision 0032): no worktree is kept, so it is confirmed not-kept, and the request goes. */
 async function clear(state: TrierarchState, at: CarryOut & { action: Extract<Action, { kind: 'clear' }> }): Promise<TrierarchState> {
   const { action, deps } = at;
-  const { shipId, repository, kept } = action;
-  if (kept === undefined) {
-    await deps.fleet.confirmCleared({ shipId, repository, outcome: 'not-kept' });
-    log(deps, { shipId, action: 'clear', outcome: `no kept ${repository} worktree of it here` });
-    return state;
-  }
-  await deps.workspace.remove(kept.path);
-  const next = { ...state, kept: state.kept.filter((each) => each.path !== kept.path) };
-  await deps.state.save(next);
-  await deps.fleet.confirmCleared({ shipId, repository, outcome: 'removed' });
-  log(deps, { shipId, action: 'clear', outcome: `its kept worktree removed: ${kept.path}` });
-  return next;
+  const { shipId, repository } = action;
+  await deps.fleet.confirmCleared({ shipId, repository, outcome: 'not-kept' });
+  log(deps, { shipId, action: 'clear', outcome: `no kept ${repository} worktree of it here` });
+  return state;
 }
 
 /**
- * A worktree under the root no entry works in, as after its ship is retired
- * (gap rule 2, #1041): what runs in it stops first, as it would be left
- * running from a folder that is gone. Then it is removed, unless it holds
- * unsaved work: that stays, reported as an orphan, for a human. A failure
- * leaves it reported and tried again on the next pass.
+ * A folder under the root no crewed ship uses (gap rule 2): an orphan
+ * worktree, a session's own clone, a folder git does not know. What runs in it
+ * stops first, as it would be left running from a folder that is gone; then it
+ * is removed, whatever it holds, and what it held is logged. A failure is
+ * logged and tried again on the next pass.
  */
-async function clearOrphan(state: TrierarchState, at: { orphan: Orphan; isNew: boolean; deps: RunPassDeps }): Promise<TrierarchState> {
-  const { orphan, isNew, deps } = at;
+async function removeStray(state: TrierarchState, at: { folder: string; deps: RunPassDeps }): Promise<TrierarchState> {
+  const { folder, deps } = at;
   // A crew earlier in this pass may have set a folder that reconcile did not know yet.
-  if (Object.values(state.entries).some((entry) => entry.folder === orphan.path)) {
-    const next = { ...state, orphans: state.orphans.filter((each) => each.path !== orphan.path) };
-    await deps.state.save(next);
-    return next;
-  }
-  // Checked first: nothing is stopped or removed in a folder the trierarch did not make, and it is no failure to leave one (it stays in the state, reported once).
-  if (!(await deps.workspace.isMade(orphan.path))) {
-    if (isNew) {
-      deps.logger.warn(`Will not clear the orphan ${orphan.path}: the trierarch made no worktree of it, or git no longer knows it; it removes only what it made`);
-    }
+  if (Object.values(state.entries).some((entry) => entry.folder === folder || entry.folder?.startsWith(`${folder}/`) === true)) {
     return state;
   }
-  const stopped = await deps.folderProcesses.stopIn(orphan.path);
-  const unsaved = await deps.workspace.unsaved(orphan.path);
-  if (unsaved.length > 0) {
-    if (isNew) {
-      deps.logger.warn(`Kept the orphan worktree ${orphan.path}, which holds unsaved work: ${unsaved.join('; ')}`);
-    }
-    return state;
-  }
-  await deps.workspace.remove(orphan.path);
-  const next = { ...state, orphans: state.orphans.filter((each) => each.path !== orphan.path) };
-  await deps.state.save(next);
-  deps.logger.warn(`Removed the orphan worktree ${orphan.path}${stopped === 0 ? '' : `, after stopping ${String(stopped)} ${stopped === 1 ? 'process' : 'processes'} in it`}`);
-  return next;
+  const stopped = await deps.folderProcesses.stopIn(folder);
+  // What a folder git does not read held is not known; it goes all the same.
+  const held = await deps.workspace.unsaved(folder).catch(() => []);
+  await deps.workspace.remove(folder);
+  const processes = stopped === 0 ? '' : `, after stopping ${String(stopped)} ${stopped === 1 ? 'process' : 'processes'} in it`;
+  deps.logger.warn(`Removed ${folder}, a folder under the root no crewed ship uses${processes}${held.length === 0 ? '' : `, discarding: ${held.join('; ')}`}`);
+  return state;
 }
 
 /**

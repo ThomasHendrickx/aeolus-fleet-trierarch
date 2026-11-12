@@ -24,7 +24,6 @@ import type {
   InboxAnswer,
   LoggedAction,
   ObservedSession,
-  ObservedWorktree,
   OwnerReport,
   RefreshedCheckout,
   OwnerReportAnswer,
@@ -651,10 +650,6 @@ export class InMemoryWorkspace implements WorkspacePort {
     return Promise.resolve(this.folders.get(folder)?.hasChanges !== true);
   }
 
-  isMade(): Promise<boolean> {
-    return Promise.resolve(true);
-  }
-
   unsaved(folder: string): Promise<readonly string[]> {
     return Promise.resolve([...(this.folders.get(folder)?.unsaved ?? [])]);
   }
@@ -684,17 +679,6 @@ export class InMemoryWorkspace implements WorkspacePort {
   /** Every folder on disk under the root, whatever it is. */
   foldersUnderRoot(): Promise<readonly string[]> {
     return Promise.resolve([...this.folders.keys()].filter((path) => path.startsWith(`${WORKTREE_ROOT}/`)));
-  }
-
-  worktrees(): Promise<readonly ObservedWorktree[]> {
-    return Promise.resolve(
-      [...this.folders]
-        .filter(([path]) => path.startsWith(`${WORKTREE_ROOT}/`))
-        .map(([path, { shipId }]) => {
-          const [repository = '', name = ''] = path.slice(WORKTREE_ROOT.length + 1).split('/');
-          return { path, repository, name, ...(shipId !== undefined && { shipId }) };
-        }),
-    );
   }
 
   /** Someone changes a file in the folder, as git status shows the change. */

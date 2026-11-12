@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
@@ -27,16 +27,6 @@ import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clon
  */
 
 const REMOTE = 'origin';
-
-/**
- * A clone the trierarch made holds its marker in its `.git`, where git keeps no
- * record of it: an orphan clone is cleared only with it. These two are the
- * marker's one place.
- */
-const markerOf = (folder: string): string => join(folder, '.git', 'aeolus-trierarch-clone');
-const MARKER_CONTENT = '1\n';
-const markMade = (folder: string): Promise<void> => writeFile(markerOf(folder), MARKER_CONTENT);
-const isMarkedMade = async (folder: string): Promise<boolean> => (await readFile(markerOf(folder), 'utf8').catch(() => undefined)) === MARKER_CONTENT;
 
 export function createCloneWorkspace(options: { configuration: TrierarchConfiguration; root: string; clones?: TrustedClones; moveWithinUserNamespace?: MoveWithinUserNamespace } & Limits): WorkspacePort {
   const { configuration, root, clones } = options;
@@ -81,7 +71,6 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
     isClean: async (folder) => worktrees.isClean(folder).catch(() => false),
     // What a clone holds is not known when any read of it fails: told with why, as one the host does not read.
     unsaved: async (folder) => worktrees.unsaved(folder).catch((error: unknown) => [`${REFUSED_PREFIX}${error instanceof Error ? error.message : String(error)}`]),
-    isMade: async (folder) => (await isUnderRoot(folder)) && (await isMarkedMade(folder)),
     prepare: async (request) => {
       const { shipName, workspace } = request;
       if (workspace.kind === 'folder') {
@@ -100,8 +89,6 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
         const commit = await resolve(repository, workspace.ref);
         try {
           await git(['clone', '--quiet', '--no-checkout', '--reference', repository, '--dissociate', repository, folder]);
-          // Marked before anything else, so a stop mid-crew leaves an orphan the trierarch knows as its own.
-          await markMade(folder);
           // The clone's origin is the repository's checkout, whose branches are no remote's: dropped with it.
           await gitIn(folder, ['remote', 'remove', REMOTE]);
           const remote = await runCommand('git', { args: ['-C', repository, 'remote', 'get-url', REMOTE] });
@@ -128,15 +115,15 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
       // Aside at once, so its ship's place is free and nothing reads it again; the trash removes it (docs/trierarch.md, "Session runtime").
       await discard(folder, { at: new Date(), ...(options.moveWithinUserNamespace !== undefined && { withinUserNamespace: options.moveWithinUserNamespace }) });
     },
-    worktrees: async () => {
-      const found = [];
+    foldersUnderRoot: async () => {
+      const found: string[] = [];
       for (const repository of Object.keys(configuration.repositories)) {
         for (const name of await readdir(join(root, repository)).catch(() => [])) {
           // A clone has a .git of its own; a file or folder without one is part of something else, such as a plain clone.
           if (!(await exists(join(root, repository, name, '.git')))) {
             continue;
           }
-          found.push({ path: join(root, repository, name), repository, name });
+          found.push(join(root, repository, name));
         }
       }
       return found;

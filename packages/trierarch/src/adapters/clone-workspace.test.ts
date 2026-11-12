@@ -217,16 +217,6 @@ describe('workspaces as per-ship clones', () => {
     expect(unsaved).toEqual([' M README.md', '?? draft.md', `commit ${done} done.md`]);
   });
 
-  it('recognizes a clone it made after restart, but refuses an unmarked clone', async () => {
-    const { folder: made } = await workspace().prepare(scout);
-    const stray = join(root, 'aeolus-fleet', 'stray');
-    await git(['clone', '-q', repository, stray]);
-
-    expect(await workspace().isMade(made)).toBe(true);
-    expect(await workspace().isMade(stray)).toBe(false);
-    expect(await workspace().isMade(repository)).toBe(false);
-  });
-
   it('removes a clone it made', async () => {
     const { folder: made } = await workspace().prepare(scout);
 
@@ -291,9 +281,9 @@ describe('workspaces as per-ship clones', () => {
     await workspace().prepare(scout);
     await workspace().prepare({ ...scout, shipId: newId('ship'), shipName: 'lookout' });
 
-    expect([...(await workspace().worktrees())].sort((first, second) => first.path.localeCompare(second.path))).toEqual([
-      { path: join(root, 'aeolus-fleet', 'lookout'), repository: 'aeolus-fleet', name: 'lookout' },
-      { path: join(root, 'aeolus-fleet', 'scout'), repository: 'aeolus-fleet', name: 'scout' },
+    expect([...(await workspace().foldersUnderRoot())].sort()).toEqual([
+      join(root, 'aeolus-fleet', 'lookout'),
+      join(root, 'aeolus-fleet', 'scout'),
     ]);
   });
 
@@ -301,7 +291,7 @@ describe('workspaces as per-ship clones', () => {
     await workspace().prepare(scout);
     await git(['clone', '-q', repository, join(root, 'aeolus-fleet-designer-release')]);
 
-    expect(await workspace().worktrees()).toEqual([{ path: join(root, 'aeolus-fleet', 'scout'), repository: 'aeolus-fleet', name: 'scout' }]);
+    expect(await workspace().foldersUnderRoot()).toEqual([join(root, 'aeolus-fleet', 'scout')]);
   });
 
   it("lists a per-ship clone once and none of a plain clone's own files in the repository's folder (#1295)", async () => {
@@ -310,7 +300,7 @@ describe('workspaces as per-ship clones', () => {
     mkdirSync(join(root, 'aeolus-fleet', 'src'));
     writeFileSync(join(root, 'aeolus-fleet', 'README.md'), 'a plain clone');
 
-    expect(await workspace().worktrees()).toEqual([{ path: join(root, 'aeolus-fleet', 'scout'), repository: 'aeolus-fleet', name: 'scout' }]);
+    expect(await workspace().foldersUnderRoot()).toEqual([join(root, 'aeolus-fleet', 'scout')]);
   });
 });
 

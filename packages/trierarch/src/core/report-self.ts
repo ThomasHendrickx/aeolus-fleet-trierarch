@@ -123,7 +123,7 @@ function shipLoginsOf(state: TrierarchState, logins: LoginsNow): NonNullable<Tri
 
 /**
  * The trierarch's report details: what it offers from its configuration and
- * what its harnesses trust, the worktrees it kept and found, its version. A
+ * what its harnesses trust, its version. A
  * machine that stopped offering itself (#853) offers no harness, and so no
  * place, naming each harness with why; in its probe it has room for one
  * start only.
@@ -164,8 +164,9 @@ function detailsOf(setup: TrierarchSetup, at: { state: TrierarchState; trusted: 
     ...(notOffered.length > 0 && { notOffered }),
     caps: isProbe ? { ...configuration.caps, ships: probeShipsCap(Object.values(state.entries), configuration.caps.ships) } : configuration.caps,
     // Paths stay on the machine: names only (decision 0032).
-    kept: state.kept.map(({ shipId, repository }) => ({ shipId, repository })),
-    orphans: state.orphans.map(({ repository, name }) => ({ repository, name })),
+    // Nothing is kept and no folder under the root stays an orphan (gap rule 2): both in their shape, empty.
+    kept: [],
+    orphans: [],
     logins: shipLoginsOf(state, logins),
     ...(setup.machine === undefined || Object.keys(setup.machine).length === 0 ? {} : { machine: setup.machine }),
     // A fact for the console, never a label: placement does not read it (decision 0039).

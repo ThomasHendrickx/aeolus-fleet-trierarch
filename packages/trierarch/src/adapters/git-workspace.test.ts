@@ -149,16 +149,6 @@ describe('workspaces in git', () => {
     expect(existsSync(notes)).toBe(true);
   });
 
-  it('says a worktree it made is made by it, and a folder under its root it did not make, or a worktree git does not know, is not (#1041)', async () => {
-    const { folder: made } = await workspace().prepare(scout);
-    const stranger = join(root, 'aeolus-fleet-gateway-designer-release', 'app');
-    const unknown = join(root, 'aeolus-fleet', 'gone');
-    mkdirSync(stranger, { recursive: true });
-    mkdirSync(unknown, { recursive: true });
-
-    expect([await workspace().isMade(made), await workspace().isMade(stranger), await workspace().isMade(unknown), await workspace().isMade(notes)]).toEqual([true, false, false, false]);
-  });
-
   it('uses a configured folder as it is', async () => {
     await expect(workspace().prepare({ ...scout, workspace: { kind: 'folder', name: 'notes' } })).resolves.toEqual({ folder: notes });
   });
@@ -167,9 +157,9 @@ describe('workspaces in git', () => {
     await workspace().prepare(scout);
     await workspace().prepare({ ...scout, shipId: newId('ship'), shipName: 'lookout' });
 
-    expect([...(await workspace().worktrees())].sort((first, second) => first.path.localeCompare(second.path))).toEqual([
-      { path: join(root, 'aeolus-fleet', 'lookout'), repository: 'aeolus-fleet', name: 'lookout' },
-      { path: join(root, 'aeolus-fleet', 'scout'), repository: 'aeolus-fleet', name: 'scout' },
+    expect([...(await workspace().foldersUnderRoot())].sort()).toEqual([
+      join(root, 'aeolus-fleet', 'lookout'),
+      join(root, 'aeolus-fleet', 'scout'),
     ]);
   });
 
@@ -177,7 +167,7 @@ describe('workspaces in git', () => {
     await workspace().prepare(scout);
     await git(['clone', '-q', repository, join(root, 'aeolus-fleet-designer-release')]);
 
-    expect(await workspace().worktrees()).toEqual([{ path: join(root, 'aeolus-fleet', 'scout'), repository: 'aeolus-fleet', name: 'scout' }]);
+    expect(await workspace().foldersUnderRoot()).toEqual([join(root, 'aeolus-fleet', 'scout')]);
   });
 
   it('lists the worktrees under a root reached through a symbolic link, as macOS reaches /var through /private/var (aeolus-fleet#1340)', async () => {
@@ -185,7 +175,7 @@ describe('workspaces in git', () => {
     symlinkSync(join(folder, 'real-worktrees'), root);
     await workspace().prepare(scout);
 
-    expect(await workspace().worktrees()).toEqual([{ path: join(root, 'aeolus-fleet', 'scout'), repository: 'aeolus-fleet', name: 'scout' }]);
+    expect(await workspace().foldersUnderRoot()).toEqual([join(root, 'aeolus-fleet', 'scout')]);
   });
 });
 

@@ -3,7 +3,7 @@ import { join, relative, sep } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
-import type { ObservedWorktree, WorkspacePort } from '../core/ports.js';
+import type { WorkspacePort } from '../core/ports.js';
 import { gitInFolder, messageOf, RefusedRead } from './git-in-folder.js';
 import { type CommandResult, runCommand } from './run-command.js';
 import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
@@ -115,20 +115,6 @@ export function createGitWorkspace(options: {
         throw error;
       }
     },
-    isMade: async (folder) => {
-      const parts = relative(root, folder).split(sep);
-      const repository = parts.length === 2 ? await repositoryOf(folder) : undefined;
-      if (repository === undefined) {
-        return false;
-      }
-      const listed = await runCommand('git', { args: ['-C', repository, 'worktree', 'list', '--porcelain'] });
-      if (listed.status !== 0) {
-        return false;
-      }
-      // Git writes real paths, so a root reached over a link is compared by its real path too.
-      const known = new Set(listed.stdout.split('\n').flatMap((line) => (line.startsWith('worktree ') ? [line.slice('worktree '.length)] : [])));
-      return known.has(folder) || known.has(await realpath(folder).catch(() => folder));
-    },
     remove: async (folder) => {
       const repository = await repositoryOf(folder);
       if (repository === undefined) {
@@ -143,8 +129,8 @@ export function createGitWorkspace(options: {
       }
       await git(['-C', path, 'worktree', 'prune']);
     },
-    worktrees: async () => {
-      const found: ObservedWorktree[] = [];
+    foldersUnderRoot: async () => {
+      const found: string[] = [];
       // git lists each worktree by its real path, so a root reached through a symbolic link (macOS's /var) is matched by its own.
       const realRoot = await realpath(root).catch(() => root);
       for (const repository of Object.keys(configuration.repositories)) {
@@ -163,7 +149,7 @@ export function createGitWorkspace(options: {
           const parts = relative(realRoot, line.slice('worktree '.length)).split(sep);
           const [listedRepository, name] = parts;
           if (listedRepository === repository && name !== undefined && parts.length === 2) {
-            found.push({ path: join(root, repository, name), repository, name });
+            found.push(join(root, repository, name));
           }
         }
       }

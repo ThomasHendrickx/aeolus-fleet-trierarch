@@ -308,13 +308,6 @@ export interface FolderProcessesPort {
 }
 
 /** A worktree under the trierarch's root (`<root>/<repository>/<name>`), with the ship it is named after when it is one. */
-export interface ObservedWorktree {
-  readonly path: string;
-  readonly repository: string;
-  readonly name: string;
-  readonly shipId?: ShipId;
-}
-
 /**
  * The configured repositories and folders each configured harness trusts, by
  * name (#381), and its flags whose one-time question is not accepted yet: a
@@ -357,11 +350,10 @@ export interface WorkspacePort {
    * worktree the host does not read is one line, `refused, <why>`.
    */
   unsaved(folder: string): Promise<readonly string[]>;
-  /** Whether the folder is a worktree the trierarch made: one `<root>/<repository>/<ship>` of a repository it has, which git knows. Anything else under its root is not its to clear. */
-  isMade(folder: string): Promise<boolean>;
-  /** Removes a worktree the trierarch made; never a configured folder. */
+  /** Removes a folder under the root, whatever it is: a worktree of any repository, a clone, a folder git does not know. Never one outside the root, nor a configured folder. */
   remove(folder: string): Promise<void>;
-  worktrees(): Promise<readonly ObservedWorktree[]>;
+  /** Every folder under the root a workspace could be, whatever it is or whoever made it (gap rule 2); never the trash. */
+  foldersUnderRoot(): Promise<readonly string[]>;
   /** Drops the git records of the configured repository's worktrees whose folder is gone; a worktree whose folder exists stays, wherever it is. Fails for a repository the configuration lacks. */
   prune(repository: string): Promise<void>;
 }

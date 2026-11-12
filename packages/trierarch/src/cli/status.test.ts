@@ -116,9 +116,9 @@ describe('aeolus-trierarch status', () => {
     expect(describeStatus(await inspect(trierarch))).toContain('Last pass: failing since 2026-10-06T08:00:00.000Z: the fleet cannot be reached');
   });
 
-  it('lists kept worktrees and orphans', async () => {
+  it('lists no kept worktree and no orphan once a pass removed every folder under the root no crewed ship uses (gap rule 2)', async () => {
     const trierarch = aTrierarch();
-    // No path keeps a worktree now; one a state still holds is listed until a human clears it (decision 0032).
+    // No path keeps a worktree now; one an earlier trierarch's state holds goes on the next pass, as a stray does.
     const scout = trierarch.fleet.commission('scout');
     trierarch.workspace.folders.set(`${WORKTREE_ROOT}/aeolus-fleet/scout`, { shipId: scout, hasChanges: true, unsaved: [' M README.md'] });
     await trierarch.state.save({ ...trierarch.state.current(), kept: [{ shipId: scout, repository: 'aeolus-fleet', path: `${WORKTREE_ROOT}/aeolus-fleet/scout` }] });
@@ -127,9 +127,8 @@ describe('aeolus-trierarch status', () => {
 
     const text = describeStatus(await inspect(trierarch));
 
-    expect(text).toContain(`Kept worktrees: ${WORKTREE_ROOT}/aeolus-fleet/scout (${scout})`);
-    expect(text).toContain(`Orphans: ${WORKTREE_ROOT}/aeolus-fleet/stray`);
-    expect(text).toContain('Entries: none');
+    expect(text).toContain('Kept worktrees: none');
+    expect(text).toContain('Orphans: none');
   });
 
   it('says when the service is not installed, or installed and not running', async () => {
