@@ -175,9 +175,9 @@ export interface Identity {
  * state.
  */
 export interface ShipSocketsPort {
-  /** Opens the ship's socket, or keeps the one open; answers its path. */
-  open(shipId: ShipId): Promise<string>;
-  close(shipId: ShipId): Promise<void>;
+  /** Opens the ship's socket in its ship's folder, or for a ship crewed before the ship folders (none) where it was, or keeps the one open; answers its path. */
+  open(shipId: ShipId, shipFolder?: string): Promise<string>;
+  close(shipId: ShipId, shipFolder?: string): Promise<void>;
 }
 
 /** The turn a session is in, from the plugin's turn marker. */
