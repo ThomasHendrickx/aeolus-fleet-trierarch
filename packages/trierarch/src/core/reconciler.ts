@@ -306,6 +306,8 @@ function newVersionStep(entry: Entry, at: { request: AssignedRequest; state: Tri
       ...(entry.folder !== undefined && { folder: entry.folder }),
       ...(entry.shipFolder !== undefined && { shipFolder: entry.shipFolder }),
       ...(entry.madeMain !== undefined && { madeMain: entry.madeMain }),
+      // One saved before the ship folder layout is crewed again in a fresh ship folder, its old worktree removed with what it held logged (decision 0013).
+      ...(entry.isOldLayout !== undefined && { isOldLayout: entry.isOldLayout }),
       // Crewed again under the lease it holds (#367).
       ...(entry.crewToken !== undefined && { crewToken: entry.crewToken }),
     },
