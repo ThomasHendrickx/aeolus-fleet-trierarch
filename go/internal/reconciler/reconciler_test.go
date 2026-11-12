@@ -1008,3 +1008,17 @@ func TestEveryClearRequestIsConfirmedNotKeptAsNoWorktreeIsKept(t *testing.T) {
 
 	assertActions(t, actions, Action{Kind: Clear, ShipID: lookout, Repository: "aeolus-fleet"})
 }
+
+func TestAShipsFolderAndEveryFolderInItAreNoStrayWhileItsShipHasAnEntryWhereverItsWorkspaceIs(t *testing.T) {
+	request := aRequest(scout)
+	request.Status = status("running")
+	context := aContext(request)
+	context.Observed.Sessions = running(scout)
+	entry := anEntry(scout, "running")
+	entry.Folder, entry.ShipFolder = "/folders/notes", "/ships/"+scout
+	context.Observed.Folders = []string{"/ships/" + scout, "/ships/" + scout + "/sockets", "/ships/shp_gone"}
+
+	_, actions := Reconcile(withEntries(entry), context)
+
+	assertActions(t, actions, Action{Kind: RemoveStray, Folder: "/ships/shp_gone"})
+}

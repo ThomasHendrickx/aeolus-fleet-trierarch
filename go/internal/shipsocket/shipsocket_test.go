@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -81,7 +83,7 @@ func over(socket string) *http.Client {
 
 func opened(t *testing.T, sockets *Sockets) string {
 	t.Helper()
-	path, err := sockets.Open(scout)
+	path, err := sockets.Open(scout, "")
 	if err != nil {
 		t.Fatalf("Open(%s): %v", scout, err)
 	}
@@ -507,5 +509,38 @@ func TestACallerTheCheckIsRefusedGetsNoRefreshOfTheCheckouts(t *testing.T) {
 
 	if response.StatusCode != 403 || isRefreshed {
 		t.Fatalf("status %d, refreshed %v", response.StatusCode, isRefreshed)
+	}
+}
+
+func TestTheSocketOfAShipCrewedFreshIsInItsShipsFolderAndOneCrewedBeforeUnderTheRoot(t *testing.T) {
+	root, shipFolder := t.TempDir(), filepath.Join(t.TempDir(), scout)
+	sockets := New(Options{Root: root, CrewTokenOf: func(string) string { return "" }, MayCall: func(string, int) bool { return true }, Log: func(string) {}})
+	t.Cleanup(sockets.CloseAll)
+
+	fresh, err := sockets.Open(scout, shipFolder)
+	if err != nil || fresh != filepath.Join(shipFolder, "sockets", "fleet.sock") {
+		t.Fatalf("Open(%s, %s) = %q, %v", scout, shipFolder, fresh, err)
+	}
+	sockets.Close(scout, shipFolder)
+	if _, err := os.Lstat(fresh); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("the socket stayed after its close: %v", err)
+	}
+	before, err := sockets.Open(scout, "")
+	if err != nil || before != filepath.Join(root, scout, "fleet.sock") {
+		t.Fatalf("Open(%s, \"\") = %q, %v", scout, before, err)
+	}
+}
+
+func TestTheSocketOfAShipCrewedBeforeTheShipFoldersGoesWithItsFolderOnItsClose(t *testing.T) {
+	root := t.TempDir()
+	sockets := New(Options{Root: root, CrewTokenOf: func(string) string { return "" }, MayCall: func(string, int) bool { return true }, Log: func(string) {}})
+	if _, err := sockets.Open(scout, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	sockets.Close(scout, "")
+
+	if _, err := os.Lstat(filepath.Join(root, scout)); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("its folder stayed: %v", err)
 	}
 }

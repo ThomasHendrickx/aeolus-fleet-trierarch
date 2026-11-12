@@ -248,3 +248,16 @@ func TestInContainersAClaudeCodeShipsTokensAreReadFromItsOwnHome(t *testing.T) {
 		t.Fatalf("tokens = %+v, want %+v", got, want)
 	}
 }
+
+func TestInContainersAClaudeCodeShipCrewedFreshHasItsTokensReadFromTheHomeInItsShipsFolder(t *testing.T) {
+	shipFolder := filepath.Join(t.TempDir(), "shp_scout")
+	withConversations(t, filepath.Join(shipFolder, "home", ".claude", "projects"))
+	reader := aUsage(t.TempDir(), "2026-10-09T00:00:00Z", notLoggedIn)
+	reader.Homes = t.TempDir()
+
+	got := perModel(mustTokensOf(t, reader, usage.Ship{ShipID: "shp_scout", Folder: usageFolder, ShipFolder: shipFolder}))
+
+	if want := []usage.HourTokens{opus, sonnet}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("tokens = %+v, want %+v", got, want)
+	}
+}

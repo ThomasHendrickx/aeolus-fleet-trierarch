@@ -131,16 +131,32 @@ func (f *aFleet) Inbox(crewToken string) (reconciler.Inbox, error) {
 	return f.inboxes[crewToken], nil
 }
 
-// someSockets are the ships' sockets, each under the root, as their identities name them; what was opened and closed, in order.
+// someSockets are the ships' sockets, each in its ship's folder, or for a ship crewed before the ship folders under the sockets
+// folder, as their identities name them; what was opened and closed, in order, and the ship's folder each was opened and closed in.
 type someSockets struct {
 	events []string
+	opened map[string]string
+	closed map[string]string
 }
 
-func (s *someSockets) Open(shipID string) (string, error) {
+func (s *someSockets) Open(shipID string, shipFolder string) (string, error) {
 	s.events = append(s.events, "open "+shipID)
-	return "/home/me/.aeolus/trierarch/sockets/" + shipID + "/fleet.sock", nil
+	if s.opened == nil {
+		s.opened = map[string]string{}
+	}
+	s.opened[shipID] = shipFolder
+	if shipFolder == "" {
+		return "/home/me/.aeolus/trierarch/sockets/" + shipID + "/fleet.sock", nil
+	}
+	return shipFolder + "/sockets/fleet.sock", nil
 }
-func (s *someSockets) Close(shipID string) { s.events = append(s.events, "close "+shipID) }
+func (s *someSockets) Close(shipID string, shipFolder string) {
+	s.events = append(s.events, "close "+shipID)
+	if s.closed == nil {
+		s.closed = map[string]string{}
+	}
+	s.closed[shipID] = shipFolder
+}
 
 // aSessions holds the sessions that run, as the harness's launches start them.
 type aSessions struct {
@@ -258,7 +274,9 @@ func (h *aHarness) NotOfferedReason() string { return h.notOffered }
 
 // aWorkspace makes each worktree as a folder that holds what the test puts in it.
 type aWorkspace struct {
-	made    map[string]bool
+	made map[string]bool
+	// under are folders under the root besides the workspaces made, as a ship's folder holding its socket.
+	under   []string
 	unsaved map[string][]string
 	removed []string
 	// failRemove makes a removal fail, as a worktree that cannot be removed does.
@@ -295,7 +313,9 @@ func (w *aWorkspace) Prune(repository string) error {
 
 // FoldersUnderRoot are the folders made, each `/worktrees/<repository>/<name>`, whatever they are.
 func (w *aWorkspace) FoldersUnderRoot() ([]string, error) {
-	return slices.Sorted(maps.Keys(w.made)), nil
+	folders := append(slices.Collect(maps.Keys(w.made)), w.under...)
+	slices.Sort(folders)
+	return folders, nil
 }
 
 func (w *aWorkspace) RemoveWorktree(folder string) error {
@@ -331,6 +351,9 @@ func (w *aWorkspace) Prepare(entry reconciler.Entry, shipName string) (string, e
 	w.made[folder] = true
 	return folder, nil
 }
+
+// ShipFolderOf is the ship's folder under the place of ships/.
+func (w *aWorkspace) ShipFolderOf(shipID string) string { return "/ships/" + shipID }
 func (w *aWorkspace) Unsaved(folder string) ([]string, error) {
 	if w.failUnsaved {
 		return nil, errors.New("git status failed in " + folder)
@@ -508,7 +531,7 @@ func TestACrewIsRegisteredWithTheStartingPromptsSecretAndItsSessionStartsInItsWo
 	}
 	folder := "/worktrees/aeolus-fleet/scout"
 	identity := pass.harness.identities[folder]
-	if identity.ShipID != scout || identity.ShipName != "scout" || identity.FleetURL != "https://fleet.example" || identity.Socket != "/home/me/.aeolus/trierarch/sockets/"+scout+"/fleet.sock" || pass.harness.tokens[folder] != "aeolus_ct_v1_scout" {
+	if identity.ShipID != scout || identity.ShipName != "scout" || identity.FleetURL != "https://fleet.example" || identity.Socket != "/ships/"+scout+"/sockets/fleet.sock" || pass.harness.tokens[folder] != "aeolus_ct_v1_scout" {
 		t.Fatalf("identity %+v, token %q", identity, pass.harness.tokens[folder])
 	}
 	if len(pass.harness.launches) != 1 || pass.harness.launches[0] != (launched{shipID: scout, folder: folder, isFirstStart: true, launchID: "launch-1", firstPrompt: "Review PR 12"}) {
@@ -2930,5 +2953,88 @@ func TestACrashedShipKeepsItsWorktreeWithWhatItHolds(t *testing.T) {
 
 	if pass.store.state.Entries[scout].State != "crashed" || len(pass.workspace.removed) != 0 {
 		t.Fatalf("entry %+v, removed %q", pass.store.state.Entries[scout], pass.workspace.removed)
+	}
+}
+
+func TestAShipCrewedFreshKeepsItsShipsFolderInTheStateAndOpensItsSocketThere(t *testing.T) {
+	pass := aRunPass(t)
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+
+	pass.run(t)
+
+	if entry := pass.store.state.Entries[scout]; entry.ShipFolder != "/ships/"+scout {
+		t.Fatalf("entry %+v", entry)
+	}
+	if pass.sockets.opened[scout] != "/ships/"+scout {
+		t.Fatalf("opened in %q", pass.sockets.opened[scout])
+	}
+}
+
+// crewedBefore runs passes until scout runs, then makes its entry one a trierarch before the ship folders crewed: no ship's folder.
+func (p *aPass) crewedBefore(t *testing.T) {
+	t.Helper()
+	p.crewed(t)
+	entry := p.store.state.Entries[scout]
+	entry.ShipFolder = ""
+	p.store.state.Entries[scout] = entry
+	p.sockets.opened = nil
+}
+
+func TestAShipCrewedBeforeTheShipFoldersKeepsItsSocketWhereItWasAcrossAPass(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewedBefore(t)
+
+	pass.run(t)
+
+	folder, opened := pass.sockets.opened[scout]
+	if !opened || folder != "" {
+		t.Fatalf("opened %v in %q", opened, folder)
+	}
+	if entry := pass.store.state.Entries[scout]; entry.ShipFolder != "" || entry.Folder != scoutFolder {
+		t.Fatalf("entry %+v", entry)
+	}
+}
+
+func TestAShipCrewedBeforeTheShipFoldersIsReleasedOnItsOwnPathsAndItsSocketClosedWhereItWas(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewedBefore(t)
+	pass.fleet.requests = []reconciler.Request{}
+
+	pass.run(t)
+
+	if !slices.Equal(pass.workspace.removed, []string{scoutFolder}) {
+		t.Fatalf("removed %q", pass.workspace.removed)
+	}
+	if folder, closed := pass.sockets.closed[scout]; !closed || folder != "" {
+		t.Fatalf("closed %v in %q", closed, folder)
+	}
+}
+
+func TestAShipCrewedBeforeTheShipFoldersAndReleasedElsewhereIsCrewedAgainInItsShipsFolder(t *testing.T) {
+	pass := aRunPass(t)
+	pass.releasedElsewhere(t)
+	entry := pass.store.state.Entries[scout]
+	entry.ShipFolder = ""
+	pass.store.state.Entries[scout] = entry
+
+	pass.run(t)
+
+	if entry := pass.store.state.Entries[scout]; entry.ShipFolder != "/ships/"+scout || entry.State != "crewing" {
+		t.Fatalf("entry %+v", entry)
+	}
+	if pass.sockets.opened[scout] != "/ships/"+scout {
+		t.Fatalf("opened in %q", pass.sockets.opened[scout])
+	}
+}
+
+func TestAShipsFolderIsNoStrayWhileItsShipIsCrewedWithItsWorkspaceElsewhere(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	pass.workspace.under = []string{"/ships/" + scout, "/ships/" + scout + "/sockets"}
+
+	pass.run(t)
+
+	if len(pass.workspace.removed) != 0 {
+		t.Fatalf("removed %q", pass.workspace.removed)
 	}
 }

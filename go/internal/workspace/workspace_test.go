@@ -602,3 +602,150 @@ func TestTheBranchDeletionOfARepositoryTheConfigurationDoesNotHaveFails(t *testi
 		t.Errorf("DeleteBranchesWhoseRemoteBranchIsGone() = %v, want an error naming unknown", err)
 	}
 }
+
+// aShipCrewedFresh is an entry of a ship crewed fresh in a worktree of the repository, its ship's folder under the place of ships/.
+func aShipCrewedFresh(places Places) reconciler.Entry {
+	return reconciler.Entry{ShipID: "shp_scout", ShipFolder: places.ShipFolderOf("shp_scout"), Workspace: reconciler.Workspace{Kind: "worktree", Repository: "aeolus-fleet"}}
+}
+
+func TestAShipCrewedFreshHasItsWorktreeInItsShipsFolder(t *testing.T) {
+	repository, ships := aRepository(t)
+	places := Places{Root: ships, Repositories: map[string]string{"aeolus-fleet": repository}}
+
+	folder, err := places.Prepare(aShipCrewedFresh(places), "scout")
+
+	if err != nil || folder != filepath.Join(ships, "shp_scout", "worktree") {
+		t.Fatalf("Prepare = %q, %v; want %q", folder, err, filepath.Join(ships, "shp_scout", "worktree"))
+	}
+	if _, err := os.Stat(filepath.Join(folder, "README.md")); err != nil {
+		t.Fatalf("the worktree holds no checkout: %v", err)
+	}
+}
+
+func TestInContainersAShipCrewedFreshHasItsCloneInItsShipsFolder(t *testing.T) {
+	repository, ships := aRepository(t)
+	places := Places{Root: ships, Repositories: map[string]string{"aeolus-fleet": repository}, IsClone: true}
+
+	folder, err := places.Prepare(aShipCrewedFresh(places), "scout")
+
+	if err != nil || folder != filepath.Join(ships, "shp_scout", "worktree") {
+		t.Fatalf("Prepare = %q, %v", folder, err)
+	}
+	if found, err := os.Stat(filepath.Join(folder, ".git")); err != nil || !found.IsDir() {
+		t.Fatalf("the clone has no .git of its own: %v", err)
+	}
+}
+
+func TestAShipsFolderIsUnderThePlaceOfShipsByItsRealPathWhenThePlacesSaySo(t *testing.T) {
+	ships := t.TempDir()
+	linked := filepath.Join(t.TempDir(), "ships")
+	if err := os.Symlink(ships, linked); err != nil {
+		t.Fatal(err)
+	}
+	real, err := filepath.EvalSymlinks(ships)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, isByRealPath := range []bool{false, true} {
+		want := filepath.Join(linked, "shp_scout")
+		if isByRealPath {
+			want = filepath.Join(real, "shp_scout")
+		}
+		if got := (Places{Root: linked, IsByRealPath: isByRealPath}).ShipFolderOf("shp_scout"); got != want {
+			t.Errorf("by its real path %v: ShipFolderOf = %q, want %q", isByRealPath, got, want)
+		}
+	}
+}
+
+func TestAShipsFolderGoesWholeThroughTheTrashWhenItsWorkspaceIsRemovedWhateverItHolds(t *testing.T) {
+	for _, isClone := range []bool{false, true} {
+		repository, ships := aRepository(t)
+		places := Places{Root: ships, Repositories: map[string]string{"aeolus-fleet": repository}, IsClone: isClone}
+		entry := aShipCrewedFresh(places)
+		folder, err := places.Prepare(entry, "scout")
+		if err != nil {
+			t.Fatal(err)
+		}
+		entry.Folder = folder
+		mkdir(t, filepath.Join(entry.ShipFolder, "sockets"))
+		if err := os.WriteFile(filepath.Join(folder, "unsaved.txt"), []byte("unsaved\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := places.Remove(entry); err != nil {
+			t.Fatalf("as a clone %v: Remove: %v", isClone, err)
+		}
+
+		if _, err := os.Lstat(entry.ShipFolder); !os.IsNotExist(err) {
+			t.Errorf("as a clone %v: the ship's folder stayed: %v", isClone, err)
+		}
+		if trashed, _ := os.ReadDir(filepath.Join(ships, ".trash")); len(trashed) != 1 || !strings.HasPrefix(trashed[0].Name(), "shp_scout.") {
+			t.Errorf("as a clone %v: the trash holds %v", isClone, trashed)
+		}
+	}
+}
+
+func TestTheShipsFolderOfAShipInAConfiguredFolderGoesAndTheConfiguredFolderStays(t *testing.T) {
+	configured, ships := t.TempDir(), t.TempDir()
+	places := Places{Root: ships, Repositories: map[string]string{}, Folders: map[string]string{"notes": configured}}
+	entry := reconciler.Entry{ShipID: "shp_scout", ShipFolder: places.ShipFolderOf("shp_scout"), Workspace: reconciler.Workspace{Kind: "folder", Name: "notes"}, Folder: configured}
+	mkdir(t, filepath.Join(entry.ShipFolder, "sockets"))
+
+	if err := places.Remove(entry); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Lstat(entry.ShipFolder); !os.IsNotExist(err) {
+		t.Errorf("the ship's folder stayed: %v", err)
+	}
+	if _, err := os.Stat(configured); err != nil {
+		t.Errorf("the configured folder went: %v", err)
+	}
+}
+
+func TestAShipCrewedBeforeTheShipFoldersKeepsItsWorktreeUnderTheRootItWasMadeIn(t *testing.T) {
+	repository, ships := aRepository(t)
+	before := t.TempDir()
+	places := Places{Root: ships, Before: before, Repositories: map[string]string{"aeolus-fleet": repository}}
+	entry := reconciler.Entry{ShipID: "shp_scout", Workspace: reconciler.Workspace{Kind: "worktree", Repository: "aeolus-fleet"}}
+
+	folder, err := places.Prepare(entry, "scout")
+	if err != nil || folder != filepath.Join(before, "aeolus-fleet", "scout") {
+		t.Fatalf("Prepare = %q, %v", folder, err)
+	}
+	entry.Folder = folder
+	if err := places.Remove(entry); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(folder); !os.IsNotExist(err) {
+		t.Fatalf("the worktree stayed: %v", err)
+	}
+}
+
+func TestTheFoldersUnderTheRootOfTheShipsCrewedBeforeAreListedAndRemovedBesideTheShipsFolders(t *testing.T) {
+	repository, ships := aRepository(t)
+	before := t.TempDir()
+	places := Places{Root: ships, Before: before, Repositories: map[string]string{"aeolus-fleet": repository}}
+	orphan, stray := filepath.Join(before, "aeolus-fleet", "orphan"), filepath.Join(ships, "shp_gone")
+	mkdir(t, filepath.Join(before, "aeolus-fleet"), filepath.Join(stray, "sockets"))
+	gitIn(t, "-C", repository, "worktree", "add", "-q", "--detach", orphan)
+
+	listed, err := places.FoldersUnderRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{orphan, stray} {
+		if !slices.Contains(listed, want) {
+			t.Errorf("FoldersUnderRoot = %q, missing %q", listed, want)
+		}
+	}
+	for _, folder := range []string{orphan, stray} {
+		if err := places.RemoveWorktree(folder); err != nil {
+			t.Errorf("RemoveWorktree(%s): %v", folder, err)
+		}
+		if _, err := os.Lstat(folder); !os.IsNotExist(err) {
+			t.Errorf("%s stayed: %v", folder, err)
+		}
+	}
+}

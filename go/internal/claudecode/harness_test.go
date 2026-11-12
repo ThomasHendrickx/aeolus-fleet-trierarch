@@ -787,3 +787,23 @@ func readText(t *testing.T, path string) string {
 	}
 	return string(text)
 }
+
+func TestInContainersAShipCrewedFreshKeepsItsIdentityInTheHomeInItsShipsFolderAndItsSessionIsToldTheFolder(t *testing.T) {
+	harness, running, _, homeBefore := inContainers(t)
+	entry := anEntry(t)
+	entry.ShipFolder = filepath.Join(t.TempDir(), scout)
+
+	if err := harness.WriteIdentity(entry, anIdentity(), "crew-token"); err != nil {
+		t.Fatal(err)
+	}
+	if err := harness.Launch(entry, true, "launch-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(filesUnder(t, filepath.Join(entry.ShipFolder, "home", ".aeolus", "crews", "claude-code"))) == 0 || len(filesUnder(t, homeBefore)) != 0 {
+		t.Fatalf("the ship's folder holds %q, the homes %q", filesUnder(t, entry.ShipFolder), filesUnder(t, homeBefore))
+	}
+	if got := running.started[0].ShipFolder; got != entry.ShipFolder {
+		t.Fatalf("started with the ship's folder %q, want %q", got, entry.ShipFolder)
+	}
+}
