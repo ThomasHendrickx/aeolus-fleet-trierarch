@@ -339,8 +339,14 @@ export interface ContainerHostPort {
 }
 
 export interface WorkspacePort {
-  /** Makes the workspace, or finds the one a stop mid-crew left half made: its folder. */
-  prepare(workspace: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace }): Promise<{ folder: string }>;
+  /** The folder a ship crewed fresh keeps every file of its own in, `<ships>/<shipId>`, under the place of ships/. */
+  shipFolderOf(shipId: ShipId): Promise<string>;
+  /**
+   * Makes the workspace, or finds the one a stop mid-crew left half made: its
+   * folder. A worktree is made in the ship's folder when it has one; one
+   * crewed before the ship folders (none) has it under the root it was made in.
+   */
+  prepare(workspace: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace; shipFolder?: string }): Promise<{ folder: string }>;
   /** Whether the worktree holds nothing git would show; never for one the host does not read. */
   isClean(folder: string): Promise<boolean>;
   /**
@@ -352,6 +358,8 @@ export interface WorkspacePort {
   unsaved(folder: string): Promise<readonly string[]>;
   /** Removes a folder under the root, whatever it is: a worktree of any repository, a clone, a folder git does not know. Never one outside the root, nor a configured folder. */
   remove(folder: string): Promise<void>;
+  /** Moves the ship's folder whole into the trash beside it, whatever it holds, its worktree or clone with it; one already gone is removed already. */
+  removeShipFolder(shipFolder: string): Promise<void>;
   /** Every folder under the root a workspace could be, whatever it is or whoever made it (gap rule 2); never the trash. */
   foldersUnderRoot(): Promise<readonly string[]>;
   /** Drops the git records of the configured repository's worktrees whose folder is gone; a worktree whose folder exists stays, wherever it is. Fails for a repository the configuration lacks. */

@@ -70,6 +70,8 @@ export const newId = createIdGenerator();
 /** argo, the owner of every ship a test gives no other. */
 export const ARGO: ShipOwner = { shipId: newId('ship'), name: 'argo' };
 export const WORKTREE_ROOT = '/home/thomas/.aeolus/trierarch/worktrees';
+/** The place of every ship's folder. */
+export const SHIPS_ROOT = '/home/thomas/.aeolus/trierarch/ships';
 export const NOTES_FOLDER = '/home/thomas/notes';
 export const CHECKOUTS_ROOT = '/home/thomas/.aeolus/trierarch/checkouts';
 
@@ -633,20 +635,46 @@ export class InMemoryHarness implements HarnessPort {
   }
 }
 
+/**
+ * The workspaces, each worktree a folder under the root by its ship's name
+ * whatever ship's folder it was made for: the ship's folder it was made for is
+ * kept with it, and goes with it.
+ */
 export class InMemoryWorkspace implements WorkspacePort {
-  /** Folders on disk, with whether they hold changes, and what removing one would discard, as git says it. */
-  readonly folders = new Map<string, { shipId?: ShipId; hasChanges: boolean; unsaved: string[] }>([[NOTES_FOLDER, { hasChanges: false, unsaved: [] }]]);
+  /** Folders on disk, with the ship's folder each was made for, whether they hold changes, and what removing one would discard, as git says it. */
+  readonly folders = new Map<string, { shipId?: ShipId; shipFolder?: string; hasChanges: boolean; unsaved: string[] }>([[NOTES_FOLDER, { hasChanges: false, unsaved: [] }]]);
+  /** The ships' folders removed, in order. */
+  readonly removedShipFolders: string[] = [];
 
   /** The configured folders a folder workspace names, by name. */
   constructor(private readonly configured: TrierarchConfiguration['folders'] = CONFIGURATION.folders) {}
 
-  prepare(at: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace }): Promise<{ folder: string }> {
-    const { shipId, shipName, workspace } = at;
+  shipFolderOf(shipId: ShipId): Promise<string> {
+    return Promise.resolve(`${SHIPS_ROOT}/${shipId}`);
+  }
+
+  prepare(at: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace; shipFolder?: string }): Promise<{ folder: string }> {
+    const { shipId, shipName, workspace, shipFolder } = at;
     const folder = workspace.kind === 'folder' ? (this.configured[workspace.name]?.path ?? NOTES_FOLDER) : `${WORKTREE_ROOT}/${workspace.repository}/${shipName}`;
     if (!this.folders.has(folder)) {
-      this.folders.set(folder, { shipId, hasChanges: false, unsaved: [] });
+      this.folders.set(folder, { shipId, ...(shipFolder !== undefined && workspace.kind === 'worktree' && { shipFolder }), hasChanges: false, unsaved: [] });
+    }
+    if (shipFolder !== undefined && !this.folders.has(shipFolder)) {
+      this.folders.set(shipFolder, { shipId, hasChanges: false, unsaved: [] });
     }
     return Promise.resolve({ folder });
+  }
+
+  removeShipFolder(shipFolder: string): Promise<void> {
+    if (this.isFailingRemove) {
+      return Promise.reject(new Error(`the trash cannot take ${shipFolder}`));
+    }
+    this.removedShipFolders.push(shipFolder);
+    // What it holds goes with it, the worktree made for it too.
+    for (const [path] of [...this.folders.entries()].filter(([each, { shipFolder: madeFor }]) => each === shipFolder || each.startsWith(`${shipFolder}/`) || madeFor === shipFolder)) {
+      this.folders.delete(path);
+    }
+    return Promise.resolve();
   }
 
   isClean(folder: string): Promise<boolean> {
@@ -696,7 +724,7 @@ export class InMemoryWorkspace implements WorkspacePort {
 
   /** Every folder on disk under the root, whatever it is. */
   foldersUnderRoot(): Promise<readonly string[]> {
-    return Promise.resolve([...this.folders.keys()].filter((path) => path.startsWith(`${WORKTREE_ROOT}/`)));
+    return Promise.resolve([...this.folders.keys()].filter((path) => path.startsWith(`${WORKTREE_ROOT}/`) || path.startsWith(`${SHIPS_ROOT}/`)));
   }
 
   /** Someone changes a file in the folder, as git status shows the change. */
