@@ -936,7 +936,7 @@ func (p Pass) endWorkspace(entry reconciler.Entry) error {
 func (p Pass) removeStray(state reconciler.State, folder string) error {
 	// An entry crewed earlier in this pass works here now: the reconcile saw it with no folder.
 	for _, entry := range state.Entries {
-		if entry.Folder == folder || strings.HasPrefix(entry.Folder, folder+"/") {
+		if entry.Folder != "" && (entry.Folder == folder || strings.HasPrefix(entry.Folder, folder+"/") || strings.HasPrefix(folder, entry.Folder+"/")) {
 			return nil
 		}
 	}

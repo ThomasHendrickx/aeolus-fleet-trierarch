@@ -343,9 +343,9 @@ func (p Places) FoldersUnderRoot() ([]string, error) {
 	configured := slices.Collect(maps.Values(p.Folders))
 	listed := []string{}
 	for _, folder := range found {
-		// A configured folder, or one that holds it, is never a stray.
+		// A configured folder, one that holds it, or one in it, is never a stray.
 		if slices.ContainsFunc(configured, func(each string) bool {
-			return each == folder || strings.HasPrefix(each, folder+string(filepath.Separator))
+			return each == folder || strings.HasPrefix(each, folder+string(filepath.Separator)) || strings.HasPrefix(folder, each+string(filepath.Separator))
 		}) {
 			continue
 		}

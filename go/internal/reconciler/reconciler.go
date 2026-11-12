@@ -498,7 +498,10 @@ func straysOf(state State, next State, observed Observed) []Action {
 	}
 	strays := []string{}
 	for _, folder := range observed.Folders {
-		if !slices.ContainsFunc(inUse, func(used string) bool { return used == folder || strings.HasPrefix(used, folder+"/") }) {
+		// A used folder keeps what holds it and everything in it.
+		if !slices.ContainsFunc(inUse, func(used string) bool {
+			return used == folder || strings.HasPrefix(used, folder+"/") || strings.HasPrefix(folder, used+"/")
+		}) {
 			strays = append(strays, folder)
 		}
 	}
