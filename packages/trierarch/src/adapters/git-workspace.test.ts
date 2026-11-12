@@ -145,7 +145,7 @@ describe('workspaces in git', () => {
   });
 
   it('refuses to remove anything outside its root', async () => {
-    await expect(workspace().remove(notes)).rejects.toThrow('removes only what it made');
+    await expect(workspace().remove(notes)).rejects.toThrow('removes only a folder under the root');
     expect(existsSync(notes)).toBe(true);
   });
 
@@ -153,21 +153,63 @@ describe('workspaces in git', () => {
     await expect(workspace().prepare({ ...scout, workspace: { kind: 'folder', name: 'notes' } })).resolves.toEqual({ folder: notes });
   });
 
-  it('lists the worktrees under its root, each with its repository and name', async () => {
+  it('lists every folder under its root no matter what made it: a worktree, a plain clone, a folder git does not know, a worktree of another repository in its folder, never the trash (gap rule 2)', async () => {
     await workspace().prepare(scout);
-    await workspace().prepare({ ...scout, shipId: newId('ship'), shipName: 'lookout' });
+    await git(['clone', '-q', repository, join(root, 'aeolus-fleet', 'own-clone')]);
+    mkdirSync(join(root, 'hemma', 'notes'), { recursive: true });
+    const other = join(folder, 'aeolus-fleet-gateway');
+    await git(['init', '-q', '-b', 'main', other]);
+    await git(['-C', other, 'commit', '-q', '--allow-empty', '-m', 'init']);
+    await git(['-C', other, 'worktree', 'add', '-q', '--detach', join(root, 'aeolus-fleet', 'aeolus-fleet-gateway')]);
+    mkdirSync(join(root, 'aeolus-fleet', '.trash'));
+    writeFileSync(join(root, 'aeolus-fleet', 'notes.md'), 'a file, no folder\n');
 
-    expect([...(await workspace().foldersUnderRoot())].sort()).toEqual([
-      join(root, 'aeolus-fleet', 'lookout'),
-      join(root, 'aeolus-fleet', 'scout'),
-    ]);
+    expect([...(await workspace().foldersUnderRoot())].sort()).toEqual(
+      [join(root, 'aeolus-fleet', 'aeolus-fleet-gateway'), join(root, 'aeolus-fleet', 'own-clone'), join(root, 'aeolus-fleet', 'scout'), join(root, 'hemma', 'notes')].sort(),
+    );
   });
 
-  it('lists each known worktree once and ignores a plain clone in the workspace folder (#1295)', async () => {
+  it('lists a workspace placed straight under its root as one folder, none of its own files (#1295, gap rule 2)', async () => {
     await workspace().prepare(scout);
     await git(['clone', '-q', repository, join(root, 'aeolus-fleet-designer-release')]);
 
-    expect(await workspace().foldersUnderRoot()).toEqual([join(root, 'aeolus-fleet', 'scout')]);
+    expect([...(await workspace().foldersUnderRoot())].sort()).toEqual([join(root, 'aeolus-fleet', 'scout'), join(root, 'aeolus-fleet-designer-release')].sort());
+  });
+
+  it('lists no link under its root, so nothing it points at is removed', async () => {
+    mkdirSync(join(root, 'aeolus-fleet'), { recursive: true });
+    symlinkSync(notes, join(root, 'aeolus-fleet', 'notes'));
+
+    expect(await workspace().foldersUnderRoot()).toEqual([]);
+  });
+
+  it('removes a plain clone, a folder git does not know and a worktree of another repository under its root (gap rule 2)', async () => {
+    const plain = join(root, 'aeolus-fleet', 'own-clone');
+    await git(['clone', '-q', repository, plain]);
+    const unknown = join(root, 'hemma', 'notes');
+    mkdirSync(join(unknown, 'deep'), { recursive: true });
+    const other = join(folder, 'aeolus-fleet-gateway');
+    await git(['init', '-q', '-b', 'main', other]);
+    await git(['-C', other, 'commit', '-q', '--allow-empty', '-m', 'init']);
+    const foreign = join(root, 'aeolus-fleet', 'aeolus-fleet-gateway');
+    await git(['-C', other, 'worktree', 'add', '-q', '--detach', foreign]);
+
+    for (const stray of [plain, unknown, foreign]) {
+      await workspace().remove(stray);
+    }
+
+    expect([plain, unknown, foreign].filter((stray) => existsSync(stray))).toEqual([]);
+    expect(existsSync(other)).toBe(true);
+  });
+
+  it('refuses to remove its root, the trash or a folder deeper than a workspace', async () => {
+    const { folder: made } = await workspace().prepare(scout);
+    mkdirSync(join(root, 'aeolus-fleet', '.trash'));
+
+    for (const kept of [root, join(root, 'aeolus-fleet', '.trash'), join(made, 'src')]) {
+      await expect(workspace().remove(kept)).rejects.toThrow('removes only a folder under the root');
+    }
+    expect(existsSync(join(root, 'aeolus-fleet', '.trash'))).toBe(true);
   });
 
   it('lists the worktrees under a root reached through a symbolic link, as macOS reaches /var through /private/var (aeolus-fleet#1340)', async () => {
