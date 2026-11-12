@@ -281,6 +281,11 @@ func (w *aWorkspace) Prune(repository string) error {
 	return nil
 }
 
+// FoldersUnderRoot are the folders made, each `/worktrees/<repository>/<name>`, whatever they are.
+func (w *aWorkspace) FoldersUnderRoot() ([]string, error) {
+	return slices.Sorted(maps.Keys(w.made)), nil
+}
+
 // Worktrees are the folders made, each `/worktrees/<repository>/<name>`.
 func (w *aWorkspace) Worktrees() ([]reconciler.Worktree, error) {
 	found := []reconciler.Worktree{}
@@ -2408,14 +2413,13 @@ func TestARequestNoLongerAssignedHereRemovesTheShipsReadOnlyCheckoutsWithItsIden
 
 const stray = "/worktrees/aeolus-fleet/stray"
 
-// orphanAt is an orphan of aeolus-fleet as the state holds it.
-func orphanAt(path string) any {
-	return map[string]any{"path": path, "repository": "aeolus-fleet", "name": path[strings.LastIndex(path, "/")+1:]}
-}
+// strayLine is what the pass logs of a folder under the root no crewed ship uses that it removed.
+const strayLine = "Removed " + stray + ", a folder under the root no crewed ship uses"
 
-func TestACleanOrphanIsRemovedWithWhatRunsInItStoppedFirst(t *testing.T) {
+func TestEveryFolderUnderTheRootNoCrewedShipUsesIsRemovedWhateverItHoldsWithWhatRunsInItStoppedFirst(t *testing.T) {
 	pass := aRunPass(t)
 	pass.workspace.made[stray] = true
+	pass.workspace.unsaved[stray] = []string{" M README.md", "commit 1a2b3c4 wip"}
 	pass.processes.running[stray] = "astro dev"
 
 	pass.run(t)
@@ -2423,75 +2427,43 @@ func TestACleanOrphanIsRemovedWithWhatRunsInItStoppedFirst(t *testing.T) {
 	if !slices.Equal(pass.processes.stoppedIn, []string{stray}) || !slices.Equal(pass.workspace.removed, []string{stray}) || len(pass.store.state.Orphans) != 0 {
 		t.Fatalf("stopped in %q, removed %q, orphans %+v", pass.processes.stoppedIn, pass.workspace.removed, pass.store.state.Orphans)
 	}
-	if !slices.Contains(pass.logged, "Removed the orphan worktree "+stray+", after stopping 1 process in it") {
+	if want := strayLine + ", after stopping 1 process in it, discarding:  M README.md; commit 1a2b3c4 wip"; !slices.Contains(pass.logged, want) {
+		t.Fatalf("logged %q, want %q", pass.logged, want)
+	}
+}
+
+func TestAFolderUnderTheRootWithNothingRunningInItIsRemovedSayingNoProcess(t *testing.T) {
+	pass := aRunPass(t)
+	pass.workspace.made[stray] = true
+
+	pass.run(t)
+
+	if !slices.Contains(pass.logged, strayLine) {
 		t.Fatalf("logged %q", pass.logged)
 	}
 }
 
-func TestAnOrphanWithNothingRunningInItIsRemovedSayingNoProcess(t *testing.T) {
+func TestAFolderUnderTheRootWhoseContentCannotBeReadIsRemovedAllTheSame(t *testing.T) {
 	pass := aRunPass(t)
 	pass.workspace.made[stray] = true
+	pass.workspace.failUnsaved = true
 
 	pass.run(t)
 
-	if !slices.Contains(pass.logged, "Removed the orphan worktree "+stray) {
-		t.Fatalf("logged %q", pass.logged)
+	if !slices.Equal(pass.workspace.removed, []string{stray}) || !slices.Contains(pass.logged, strayLine) {
+		t.Fatalf("removed %q, logged %q", pass.workspace.removed, pass.logged)
 	}
 }
 
-func TestAnOrphanHoldingUnsavedWorkIsKeptAndHeldWithWhatRunsInItStoppedAndSaidOnce(t *testing.T) {
-	pass := aRunPass(t)
-	pass.workspace.made[stray] = true
-	pass.workspace.unsaved[stray] = []string{" M README.md", "?? notes.txt"}
-	pass.processes.running[stray] = "wrangler dev"
-
-	pass.run(t)
-	pass.run(t)
-
-	if len(pass.processes.running) != 0 || len(pass.workspace.removed) != 0 || !reflect.DeepEqual(pass.store.state.Orphans, []any{orphanAt(stray)}) {
-		t.Fatalf("running %v, removed %q, orphans %+v", pass.processes.running, pass.workspace.removed, pass.store.state.Orphans)
-	}
-	said := 0
-	for _, line := range pass.logged {
-		if line == "Kept the orphan worktree "+stray+", which holds unsaved work:  M README.md; ?? notes.txt" {
-			said++
-		}
-	}
-	if said != 1 {
-		t.Fatalf("said %d times, want once: %q", said, pass.logged)
-	}
-}
-
-func TestAnOrphanTheTrierarchDidNotMakeIsHeldAndSaidOnceWithNothingInItStoppedAndFailsNoPass(t *testing.T) {
-	pass := aRunPass(t)
-	pass.workspace.made[stray] = true
-	pass.workspace.notMade[stray] = true
-	pass.processes.running[stray] = "astro dev"
-
-	pass.run(t)
-	pass.run(t)
-
-	if len(pass.processes.stoppedIn) != 0 || len(pass.workspace.removed) != 0 || !reflect.DeepEqual(pass.store.state.Orphans, []any{orphanAt(stray)}) || pass.store.state.PassFailure != nil {
-		t.Fatalf("stopped in %q, removed %q, orphans %+v, pass failure %+v", pass.processes.stoppedIn, pass.workspace.removed, pass.store.state.Orphans, pass.store.state.PassFailure)
-	}
-	want := "Will not clear the orphan " + stray + ": the trierarch made no worktree of it, or git no longer knows it; it removes only what it made"
-	if said := slices.DeleteFunc(slices.Clone(pass.logged), func(line string) bool { return line != want }); len(said) != 1 {
-		t.Fatalf("said %d times, want once: %q", len(said), pass.logged)
-	}
-}
-
-func TestAnOrphanThatCannotBeRemovedIsHeldAndTriedAgainOnTheNextPass(t *testing.T) {
+func TestAFolderUnderTheRootThatCannotBeRemovedIsLoggedAndTriedAgainOnTheNextPass(t *testing.T) {
 	pass := aRunPass(t)
 	pass.workspace.made[stray] = true
 	pass.workspace.failRemove = true
 
 	pass.run(t)
 
-	if !reflect.DeepEqual(pass.store.state.Orphans, []any{orphanAt(stray)}) {
-		t.Fatalf("orphans %+v", pass.store.state.Orphans)
-	}
-	if !slices.Contains(pass.logged, "The pass failed at clearOrphan: cannot remove "+stray+"; "+nextAfterFailure) {
-		t.Fatalf("logged %q", pass.logged)
+	if want := "Could not remove " + stray + ", a folder under the root no crewed ship uses: cannot remove " + stray + "; " + nextAfterFailure; !slices.Contains(pass.logged, want) {
+		t.Fatalf("logged %q, want %q", pass.logged, want)
 	}
 
 	pass.workspace.failRemove = false
@@ -2502,7 +2474,7 @@ func TestAnOrphanThatCannotBeRemovedIsHeldAndTriedAgainOnTheNextPass(t *testing.
 	}
 }
 
-func TestAnOrphanWhoseProcessesCannotBeStoppedIsNotRemovedNorHoldsBackTheNext(t *testing.T) {
+func TestAFolderUnderTheRootWhoseProcessesCannotBeStoppedIsNotRemovedNorHoldsBackTheNext(t *testing.T) {
 	pass := aRunPass(t)
 	other := "/worktrees/aeolus-fleet/lookout"
 	pass.workspace.made[stray] = true
@@ -2511,17 +2483,17 @@ func TestAnOrphanWhoseProcessesCannotBeStoppedIsNotRemovedNorHoldsBackTheNext(t 
 
 	pass.run(t)
 
-	if len(pass.workspace.removed) != 0 || !reflect.DeepEqual(pass.store.state.Orphans, []any{orphanAt(other), orphanAt(stray)}) {
-		t.Fatalf("removed %q, orphans %+v", pass.workspace.removed, pass.store.state.Orphans)
+	if len(pass.workspace.removed) != 0 {
+		t.Fatalf("removed %q", pass.workspace.removed)
 	}
 	tried := 0
 	for _, line := range pass.logged {
-		if strings.HasPrefix(line, "The pass failed at clearOrphan: cannot stop what runs in") {
+		if strings.HasPrefix(line, "Could not remove ") && strings.Contains(line, ": cannot stop what runs in") {
 			tried++
 		}
 	}
 	if tried != 2 {
-		t.Fatalf("tried %d orphans, want 2: %q", tried, pass.logged)
+		t.Fatalf("tried %d folders, want 2: %q", tried, pass.logged)
 	}
 }
 
@@ -2654,36 +2626,30 @@ func (p *aPass) aKeptWorktree() {
 	p.store.state.Kept = []any{map[string]any{"shipId": lookout, "repository": "aeolus-fleet", "path": keptPath}}
 }
 
-func TestAClearRequestRemovesTheKeptWorktreeItNamesAndConfirmsItRemoved(t *testing.T) {
+func TestAWorktreeAnEarlierTrierarchKeptIsRemovedAsNoCrewedShipUsesItAndTheStateKeepsNone(t *testing.T) {
 	pass := aRunPass(t)
 	pass.aKeptWorktree()
-	pass.fleet.clears = []reconciler.ClearRequest{{ShipID: lookout, Repository: "aeolus-fleet"}}
 
 	pass.run(t)
 
 	if !slices.Equal(pass.workspace.removed, []string{keptPath}) || len(pass.store.state.Kept) != 0 {
 		t.Fatalf("removed %q, kept %+v", pass.workspace.removed, pass.store.state.Kept)
 	}
-	if !slices.Contains(pass.fleet.calls, "confirmCleared "+lookout+" aeolus-fleet removed") {
-		t.Fatalf("calls %q", pass.fleet.calls)
-	}
 }
 
-func TestAClearRequestForAWorktreeKeptOfNoneIsConfirmedNotKeptRemovingNothing(t *testing.T) {
+func TestAClearRequestIsConfirmedNotKeptAsNoWorktreeIsKeptEvenOneAnEarlierTrierarchKept(t *testing.T) {
 	pass := aRunPass(t)
+	pass.aKeptWorktree()
 	pass.fleet.clears = []reconciler.ClearRequest{{ShipID: lookout, Repository: "aeolus-fleet"}}
 
 	pass.run(t)
 
-	if len(pass.workspace.removed) != 0 {
-		t.Fatalf("removed %q", pass.workspace.removed)
-	}
 	if !slices.Contains(pass.fleet.calls, "confirmCleared "+lookout+" aeolus-fleet not-kept") {
 		t.Fatalf("calls %q", pass.fleet.calls)
 	}
 }
 
-func TestAKeptWorktreeThatCannotBeRemovedStaysKeptUnconfirmedAndIsClearedOnTheNextPass(t *testing.T) {
+func TestAClearRequestIsConfirmedNotKeptWhenRemovingTheFolderItNamesFails(t *testing.T) {
 	pass := aRunPass(t)
 	pass.aKeptWorktree()
 	pass.fleet.clears = []reconciler.ClearRequest{{ShipID: lookout, Repository: "aeolus-fleet"}}
@@ -2691,15 +2657,8 @@ func TestAKeptWorktreeThatCannotBeRemovedStaysKeptUnconfirmedAndIsClearedOnTheNe
 
 	pass.run(t)
 
-	if len(pass.store.state.Kept) != 1 || slices.ContainsFunc(pass.fleet.calls, func(call string) bool { return strings.HasPrefix(call, "confirmCleared") }) {
-		t.Fatalf("kept %+v, calls %q", pass.store.state.Kept, pass.fleet.calls)
-	}
-
-	pass.workspace.failRemove = false
-	pass.run(t)
-
-	if len(pass.store.state.Kept) != 0 || !slices.Contains(pass.fleet.calls, "confirmCleared "+lookout+" aeolus-fleet removed") {
-		t.Fatalf("kept %+v, calls %q", pass.store.state.Kept, pass.fleet.calls)
+	if !slices.Contains(pass.fleet.calls, "confirmCleared "+lookout+" aeolus-fleet not-kept") {
+		t.Fatalf("calls %q", pass.fleet.calls)
 	}
 }
 
