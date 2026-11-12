@@ -3195,4 +3195,27 @@ describe("a ship's folder, ships/<shipId>, which holds every file of the ship (#
     expect(trierarch.state.current().entries[shipId]?.shipFolder).toBe(shipFolderOf(shipId));
     expect(trierarch.sockets.openedIn.get(shipId)).toBe(shipFolderOf(shipId));
   });
+
+  it.each([
+    { state: 'running', to: () => Promise.resolve() },
+    { state: 'restarting', to: async (trierarch: Trierarch, shipId: ShipId) => { trierarch.processes.exit(shipId); await trierarch.pass(); } },
+    { state: 'crashed', to: async (trierarch: Trierarch, shipId: ShipId) => crashForGood(trierarch, shipId) },
+  ])('removed by hand from a ship $state here has the ship released and crewed again in a fresh one, as a first start, telling nobody', async ({ state, to }) => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    await to(trierarch, shipId);
+    expect(trierarch.state.current().entries[shipId]?.state).toBe(state);
+    const crewToken = trierarch.fleet.shipOf(shipId).crewToken;
+    const told = trierarch.fleet.toArgo.length;
+    const launches = trierarch.harness.launches.length;
+    trierarch.workspace.removeByHand(shipFolderOf(shipId));
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.shipOf(shipId).crewToken).not.toBe(crewToken);
+    expect(trierarch.harness.launches.slice(launches)).toEqual([expect.objectContaining({ shipId, folder: SCOUT_FOLDER, isFirstStart: true })]);
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'crewing', shipFolder: shipFolderOf(shipId), folder: SCOUT_FOLDER });
+    expect(trierarch.state.current().entries[shipId]?.isShipFolderGone).toBeUndefined();
+    expect([trierarch.workspace.gone.has(shipFolderOf(shipId)), trierarch.sockets.openShips.has(shipId), trierarch.fleet.toArgo.length]).toEqual([false, true, told]);
+  });
 });

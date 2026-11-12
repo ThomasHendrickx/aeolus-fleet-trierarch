@@ -657,6 +657,21 @@ export class InMemoryWorkspace implements WorkspacePort {
     return Promise.resolve(`${SHIPS_ROOT}/${shipId}`);
   }
 
+  /** The ships' folders removed by hand, as when ships/ is removed. */
+  readonly gone = new Set<string>();
+
+  hasShipFolder(shipFolder: string): Promise<boolean> {
+    return Promise.resolve(!this.gone.has(shipFolder));
+  }
+
+  /** Someone removes the ship's folder by hand, and with it the worktree made for it. */
+  removeByHand(shipFolder: string): void {
+    this.gone.add(shipFolder);
+    for (const [path] of [...this.folders.entries()].filter(([each, { shipFolder: madeFor }]) => each === shipFolder || each.startsWith(`${shipFolder}/`) || madeFor === shipFolder)) {
+      this.folders.delete(path);
+    }
+  }
+
   prepare(at: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace; shipFolder?: string }): Promise<{ folder: string }> {
     const { shipId, shipName, workspace, shipFolder } = at;
     const folder = workspace.kind === 'folder' ? (this.configured[workspace.name]?.path ?? NOTES_FOLDER) : `${WORKTREE_ROOT}/${workspace.repository}/${shipName}`;
@@ -665,6 +680,7 @@ export class InMemoryWorkspace implements WorkspacePort {
     }
     if (shipFolder !== undefined && !this.folders.has(shipFolder)) {
       this.folders.set(shipFolder, { shipId, hasChanges: false, unsaved: [] });
+      this.gone.delete(shipFolder);
     }
     return Promise.resolve({ folder });
   }
