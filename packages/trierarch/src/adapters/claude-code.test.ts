@@ -815,6 +815,27 @@ describe('Claude Code in containers, each ship with a home of its own (decision 
     expect(marker.status).toBe(1);
   });
 
+  it("keeps the identity of a ship crewed fresh in the home in its ship's folder, with no crew token in it, and tells its session the ship's folder", async () => {
+    const shipFolder = join(homes, 'ships', shipId);
+
+    await inContainers().prepareIdentity({ folder, identity, crewToken: CREW_TOKEN, shipFolder });
+    await inContainers().launch({ ...launchOf(shipId), options: {}, isFirstStart: true, shipFolder });
+
+    const inShipFolder = filesIn(shipFolder);
+    expect([inShipFolder.includes(join('home', identityFile())), existsSync(join(homes, shipId)), started[0]?.shipFolder]).toEqual([true, false, shipFolder]);
+    expect(inShipFolder.filter((file) => readFileSync(join(shipFolder, file), 'utf8').includes(CREW_TOKEN))).toEqual([]);
+    await expect(inContainers().hasIdentity({ shipId, folder, shipFolder })).resolves.toBe(true);
+  });
+
+  it("leaves the home in the ship's folder of a ship crewed fresh as its identity goes: it goes with its ship's folder", async () => {
+    const shipFolder = join(homes, 'ships', shipId);
+    await inContainers().prepareIdentity({ folder, identity, crewToken: CREW_TOKEN, shipFolder });
+
+    await inContainers().removeIdentity({ shipId, folder, shipFolder });
+
+    expect([existsSync(join(shipFolder, 'home')), existsSync(join(shipFolder, 'home', identityFile()))]).toEqual([true, false]);
+  });
+
   it("removes the ship's home with its identity, as a release does, and leaves another ship's", async () => {
     await inContainers().prepareIdentity({ folder, identity, crewToken: CREW_TOKEN });
     await inContainers().prepareIdentity({ folder, identity: otherIdentity, crewToken: CREW_TOKEN });
