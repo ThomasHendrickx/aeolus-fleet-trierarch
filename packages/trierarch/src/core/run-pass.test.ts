@@ -602,6 +602,19 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.state.current().entries[shipId]?.crewToken).toBe(trierarch.fleet.shipOf(shipId).crewToken);
   });
 
+  it('row 12: a new settings version is crewed again under the lease it holds, never released and registered again (#367)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    const { crewToken } = trierarch.fleet.shipOf(shipId);
+    trierarch.fleet.requestAgain(shipId, crewSettings({ options: { model: 'sonnet' } }));
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'running', settingsVersion: 2, crewToken });
+    expect(trierarch.fleet.shipOf(shipId)).toMatchObject({ status: 'crewed', crewToken });
+  });
+
   it('row 12: a new settings version starts a fresh session with its first prompt, never continuing the old conversation (#443)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch, { firstPrompt: 'Review the open pull requests.' });
