@@ -362,6 +362,8 @@ export interface WorkspacePort {
   /** Removes a worktree the trierarch made; never a configured folder. */
   remove(folder: string): Promise<void>;
   worktrees(): Promise<readonly ObservedWorktree[]>;
+  /** Drops the git records of the configured repository's worktrees whose folder is gone; a worktree whose folder exists stays, wherever it is. Fails for a repository the configuration lacks. */
+  prune(repository: string): Promise<void>;
 }
 
 /** What the trash could not remove: where it is, where it was, when it was discarded, whether this is the first time and whether argo was told, and why. */

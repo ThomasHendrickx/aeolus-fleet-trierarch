@@ -1396,6 +1396,36 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.state.current().passFailure).toBeUndefined();
   });
 
+  it('prunes the git worktree records of each configured repository every pass (#91)', async () => {
+    const trierarch = aTrierarch({ ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: '/repos/aeolus-fleet' }, hemma: { path: '/repos/hemma' } } });
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.workspace.pruned).toEqual(['aeolus-fleet', 'hemma', 'aeolus-fleet', 'hemma']);
+  });
+
+  it('prunes the git worktree records of each configured repository on a pass that fails before its actions, as when the fleet cannot be reached (#91)', async () => {
+    const trierarch = aTrierarch({ ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: '/repos/aeolus-fleet' }, hemma: { path: '/repos/hemma' } } });
+    trierarch.fleet.isUnreachable = true;
+
+    await trierarch.pass();
+
+    expect(trierarch.workspace.pruned).toEqual(['aeolus-fleet', 'hemma']);
+  });
+
+  it('logs a repository whose prune fails, and prunes the others without failing the pass (#91)', async () => {
+    const trierarch = aTrierarch({ ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: '/repos/aeolus-fleet' }, hemma: { path: '/repos/hemma' } } });
+    trierarch.workspace.failingPrune.add('aeolus-fleet');
+
+    await trierarch.pass();
+
+    expect(trierarch.workspace.pruned).toContain('hemma');
+    expect(trierarch.logger.warnings.filter((warning) => warning.includes('aeolus-fleet') && warning.includes('prune'))).toHaveLength(1);
+    expect(trierarch.logger.warnings.filter((warning) => warning.startsWith('The pass failed'))).toEqual([]);
+    expect(trierarch.state.current().passFailure).toBeUndefined();
+  });
+
   it('rule 2: an orphan it could not remove is reported and tried again on the next pass (#1041)', async () => {
     const trierarch = aTrierarch();
     const orphan = `${WORKTREE_ROOT}/aeolus-fleet/lookout`;
