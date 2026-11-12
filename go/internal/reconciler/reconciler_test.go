@@ -1024,7 +1024,7 @@ func TestAShipsFolderAndEveryFolderInItAreNoStrayWhileItsShipHasAnEntryWhereverI
 }
 
 func TestAShipWhoseShipsFolderIsGoneIsCrewedAgainAsAFirstStartWhateverItsState(t *testing.T) {
-	for _, state := range []string{"running", "restarting", "crashed"} {
+	for _, state := range []string{"running", "restarting", "crashed", "crewing"} {
 		t.Run(state, func(t *testing.T) {
 			entry := anEntry(scout, state)
 			entry.ShipFolder = "/ships/" + scout
@@ -1035,10 +1035,25 @@ func TestAShipWhoseShipsFolderIsGoneIsCrewedAgainAsAFirstStartWhateverItsState(t
 
 			next, actions := Reconcile(withEntries(entry), context)
 
-			assertActions(t, actions, Action{Kind: Stop, ShipID: scout}, Action{Kind: Crew, ShipID: scout, IsResumed: true})
+			assertActions(t, actions, Action{Kind: Stop, ShipID: scout}, Action{Kind: Crew, ShipID: scout})
 			if again := next.Entries[scout]; !again.IsShipFolderGone || again.HasStarted || again.State != "crewing" {
 				t.Fatalf("entry: %+v", again)
 			}
 		})
+	}
+}
+
+func TestANewSettingsVersionCrewsTheShipAgainInItsOwnShipsFolder(t *testing.T) {
+	entry := anEntry(scout, "running")
+	entry.ShipFolder = "/ships/" + scout
+	request := aRequest(scout)
+	request.SettingsVersion = 2
+	context := aContext(request)
+	context.Observed.Sessions = running(scout)
+
+	next, _ := Reconcile(withEntries(entry), context)
+
+	if got := next.Entries[scout]; got.ShipFolder != entry.ShipFolder || got.Folder != entry.Folder {
+		t.Fatalf("entry: %+v", got)
 	}
 }

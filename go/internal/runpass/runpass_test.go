@@ -278,7 +278,7 @@ type aWorkspace struct {
 	// under are folders under the root besides the workspaces made, as a ship's folder holding its socket.
 	under []string
 	// gone are the ships' folders removed by hand.
-	gone map[string]bool
+	gone    map[string]bool
 	unsaved map[string][]string
 	removed []string
 	// failRemove makes a removal fail, as a worktree that cannot be removed does.
@@ -3049,21 +3049,29 @@ func TestAShipsFolderIsNoStrayWhileItsShipIsCrewedWithItsWorkspaceElsewhere(t *t
 	}
 }
 
-func TestAShipWhoseShipsFolderWasRemovedIsReleasedAndCrewedAgainInAFreshOneAsAFirstStart(t *testing.T) {
+func TestAShipWhoseShipsFolderWasRemovedIsCrewedAgainInAFreshOneAsAFirstStartUnderItsLease(t *testing.T) {
 	pass := aRunPass(t)
 	pass.crewed(t)
+	crewToken := pass.store.state.Entries[scout].CrewToken
 	pass.harness.launches = nil
 	pass.workspace.gone = map[string]bool{"/ships/" + scout: true}
 
 	pass.run(t)
 
-	if !slices.Contains(pass.fleet.calls, "release "+scout) || !slices.ContainsFunc(pass.fleet.calls, func(call string) bool { return strings.HasPrefix(call, "register "+scout) }) {
+	// Core removes the crew request on a release, so its lease is kept, never released and registered again.
+	if slices.ContainsFunc(pass.fleet.calls, func(call string) bool {
+		return strings.HasPrefix(call, "release ") || strings.HasPrefix(call, "register ") || strings.HasPrefix(call, "getStartingPrompt ")
+	}) {
 		t.Fatalf("calls %q", pass.fleet.calls)
 	}
-	if len(pass.harness.launches) != 1 || !pass.harness.launches[0].isFirstStart {
+	if len(pass.harness.launches) != 1 || !pass.harness.launches[0].isFirstStart || pass.harness.launches[0].firstPrompt != "Review PR 12" {
 		t.Fatalf("launches %+v", pass.harness.launches)
 	}
-	if entry := pass.store.state.Entries[scout]; entry.IsShipFolderGone || entry.ShipFolder != "/ships/"+scout || entry.State != "crewing" {
+	if pass.harness.tokens[scoutFolder] != crewToken || pass.harness.identities[scoutFolder].Socket != "/ships/"+scout+"/sockets/fleet.sock" {
+		t.Fatalf("identity %+v, token %q", pass.harness.identities[scoutFolder], pass.harness.tokens[scoutFolder])
+	}
+	entry := pass.store.state.Entries[scout]
+	if entry.IsShipFolderGone || entry.ShipFolder != "/ships/"+scout || entry.State != "crewing" || entry.CrewToken != crewToken {
 		t.Fatalf("entry %+v", entry)
 	}
 	if len(pass.fleet.told) != 0 {
