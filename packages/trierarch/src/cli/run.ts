@@ -6,7 +6,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 
 import { createClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import { createCodexSetup } from '../adapters/codex-setup.js';
-import { createClaudeCodeUsage } from '../adapters/claude-code-usage.js';
+import { claudeCodeProjectsOf, createClaudeCodeUsage } from '../adapters/claude-code-usage.js';
 import { createCodexUsage } from '../adapters/codex-usage.js';
 import { createContainerHost } from '../adapters/container-host.js';
 import { requireCoreVersion } from '../adapters/core-version.js';
@@ -22,7 +22,7 @@ import { createKeyStates } from '../adapters/key-states.js';
 import { keyStatesFileOf } from '../adapters/proxy-runtime.js';
 import { claudeCodeKeyInReach } from '../adapters/claude-code.js';
 import { createMachine } from '../adapters/machine.js';
-import { shipHome, type TrierarchPaths } from '../adapters/paths.js';
+import type { TrierarchPaths } from '../adapters/paths.js';
 import { runCommand } from '../adapters/run-command.js';
 import { createRestFleet, FleetRefusal } from '../adapters/rest-fleet.js';
 import { modelProxy, runtimeAdaptersOf } from '../adapters/runtime-adapters.js';
@@ -169,7 +169,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const usage = createUsage({
     'claude-code': createClaudeCodeUsage({
       // In containers each ship's conversations are in its own home (decision 0039).
-      projectsOf: (shipId) => (shipHomes === undefined ? join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects') : join(shipHome(shipHomes.homes, { shipId }), '.claude', 'projects')),
+      projectsOf: claudeCodeProjectsOf({ projects: join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects'), ...(shipHomes !== undefined && { homes: shipHomes.homes }) }),
       madeAt: folderMadeAt,
       run: runCommand,
       neutralFolder: () => mkdtemp(join(tmpdir(), 'aeolus-trierarch-probe-')),

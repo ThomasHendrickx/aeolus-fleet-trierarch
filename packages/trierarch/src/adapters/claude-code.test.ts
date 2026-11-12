@@ -27,7 +27,7 @@ let crews: string;
 let folder: string;
 /** Claude Code's projects folder, where it keeps each folder's conversations. */
 let projects: string;
-let started: { shipId: ShipId; folder: string; command: readonly string[]; harness: string; env?: Readonly<Record<string, string>>; readOnly?: readonly string[]; proxyToken?: { harness: string; variable: string; token: string } }[];
+let started: { shipId: ShipId; folder: string; command: readonly string[]; harness: string; env?: Readonly<Record<string, string>>; readOnly?: readonly string[]; proxyToken?: { harness: string; variable: string; token: string }; shipFolder?: string }[];
 /** A prompt as headless Claude Code takes it on stdin: one stream-json user message on one line. */
 const userLineOf = (prompt: string) => JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } });
 /** How many words print mode with streamed JSON takes, after `claude` (headless H11). */

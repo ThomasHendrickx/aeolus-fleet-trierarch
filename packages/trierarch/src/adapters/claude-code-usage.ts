@@ -8,6 +8,7 @@ import { loginAt, type SessionLogins } from '../core/login.js';
 import type { HourTokens, SubscriptionWindow } from '../core/ports.js';
 import { createAppendedLines } from './appended-lines.js';
 import { CLAUDE_CODE_PROBE_TIMEOUT_MS } from './claude-code-detector.js';
+import { shipHome, type ShipFiles } from './paths.js';
 import type { CommandResult } from './run-command.js';
 import { createTokensPerLogin, hourOf, type TokensPerLogin } from './tokens-per-login.js';
 
@@ -97,9 +98,15 @@ function windowsIn(stream: string): SubscriptionWindow[] | undefined {
   return windows.length === 0 ? undefined : windows;
 }
 
+/** Claude Code's projects folder of each ship: the user's on the host, the one in the ship's own home with homes, for containers (decision 0039). */
+export function claudeCodeProjectsOf(at: { projects: string; homes?: string }): (ship: ShipFiles) => string {
+  const { homes } = at;
+  return (ship) => (homes === undefined ? at.projects : join(shipHome(homes, ship), '.claude', 'projects'));
+}
+
 export function createClaudeCodeUsage(deps: {
   /** Claude Code's projects folder of the ship: the user's on the host, the ship's own home's in a container. */
-  projectsOf: (shipId: ShipId) => string;
+  projectsOf: (ship: ShipFiles) => string;
   /** When the ship's folder was made: what came before was another crew's. */
   madeAt: (folder: string) => Promise<Date>;
   run: (command: string, options: { args: readonly string[]; cwd?: string; timeoutMs?: number }) => Promise<CommandResult>;
@@ -131,9 +138,9 @@ export function createClaudeCodeUsage(deps: {
   };
 
   return {
-    tokensOf: async (ship: { shipId: ShipId; folder: string; logins?: SessionLogins }): Promise<HourTokens[]> => {
+    tokensOf: async (ship: { shipId: ShipId; folder: string; shipFolder?: string; logins?: SessionLogins }): Promise<HourTokens[]> => {
       const since = await deps.madeAt(ship.folder);
-      const project = join(deps.projectsOf(ship.shipId), ship.folder.replace(/[^a-zA-Z0-9]/gu, '-'));
+      const project = join(deps.projectsOf({ shipId: ship.shipId, ...(ship.shipFolder !== undefined && { shipFolder: ship.shipFolder }) }), ship.folder.replace(/[^a-zA-Z0-9]/gu, '-'));
       const counted = createTokensPerLogin();
       for (const path of await transcriptsIn(project)) {
         (await readTranscript(path, { since, logins: ship.logins })).counted.list().forEach((used) => {
