@@ -1,6 +1,6 @@
 # Design: a trierarch keeps the disk its ships use under control (trierarch#343)
 
-Status: purpose approved by Thomas on 12 Nov. Questions open. Nothing is built.
+Status: purpose and Q1 to Q6 (each the first option) approved by Thomas on 12 Nov. Q7, from his note on Q6, open. Nothing is built.
 
 ## Purpose
 
@@ -58,34 +58,47 @@ Rows 2 to 6 (`/tmp`, containers and their volumes, shared caches, worktrees outs
 
 ## Questions
 
-Each with its options, the pick first.
+Each with its options; Thomas's answer is marked.
 
 **Q1. Where may a session write?** Today a session on the host writes anywhere its user can: the trierarch removes its worktree, and nobody removes the rest.
-1. *(pick)* On both runtimes, everything a session writes besides its work goes to places the trierarch gave that ship: its scratch, its test containers and their volumes. They go when the ship's worktree goes. A session in a container has this already; a session on the host gets the same.
+1. *(Thomas's answer)* On both runtimes, everything a session writes besides its work goes to places the trierarch gave that ship: its scratch, its test containers and their volumes. They go when the ship's worktree goes. A session in a container has this already; a session on the host gets the same.
 2. Only the container runtime is kept under control; the host runtime stays as it is, and the trierarch says so when it starts.
 3. The container runtime becomes the default, and the host runtime is kept for machines that cannot run it.
 
 Why 1: the operator chooses the runtime for the hardware (decision 0039), and the purpose holds on both.
 
 **Q2. What does bounded mean for the shared caches** (npm, Go, Playwright)? They make every session's installs and builds fast, and they are the user's as much as the sessions'.
-1. *(pick)* The trierarch keeps one cache per machine for its sessions, apart from the user's own, and trims it to a size the machine's configuration names, least recently used first. The user's own caches are not the trierarch's.
+1. *(Thomas's answer)* The trierarch keeps one cache per machine for its sessions, apart from the user's own, and trims it to a size the machine's configuration names, least recently used first. The user's own caches are not the trierarch's.
 2. Each ship gets its own cache, gone with the ship: nothing to trim, but each new ship downloads and builds everything again.
 3. The caches stay shared with the user and unbounded.
 
 **Q3. What does bounded mean for a ship that stays crewed for weeks?** Its worktree, scratch and test containers grow while it works.
-1. *(pick)* A ship's scratch and test containers are removed whenever its session starts again (a restart, Restart, Edit, a machine restart), never under a running turn. When the ship's folders pass a size the machine's configuration names, its owner is told once, and the trierarch stops nothing.
+1. *(Thomas's answer)* A ship's scratch and test containers are removed whenever its session starts again (a restart, Restart, Edit, a machine restart), never under a running turn. When the ship's folders pass a size the machine's configuration names, its owner is told once, and the trierarch stops nothing.
 2. Over that size the trierarch stops the session and starts it again with empty scratch.
 3. No bound while a ship is crewed; only its end frees the disk.
 
 **Q4. When the disk runs low (below 5 % free), what does the trierarch do?** Today it tells argo and stops nothing.
-1. *(pick)* It first removes what no session uses (leftovers a removal could not finish, old session images, the cache down to its size), then tells argo only if the disk is still low, naming the ships that hold the most.
+1. *(Thomas's answer)* It first removes what no session uses (leftovers a removal could not finish, old session images, the cache down to its size), then tells argo only if the disk is still low, naming the ships that hold the most.
 2. As today: it tells argo and frees nothing more.
 
 **Q5. What is fixed in the tests themselves?** Testcontainers on rootless Podman runs with its reaper off, so a test run that is killed or times out leaves its containers and volumes behind.
-1. *(pick)* Both: each repository's tests stop their own containers even when a run is killed, and the trierarch's removal of a ship's test containers (Q1) catches what they still leave. In aeolus-fleet (the Postgres and LocalStack test runs that hold most of the 64 GB, to be confirmed there) and in this repository (its e2e containers, label `aeolus.trierarch`), an issue each.
+1. *(Thomas's answer)* Both: each repository's tests stop their own containers even when a run is killed, and the trierarch's removal of a ship's test containers (Q1) catches what they still leave. In aeolus-fleet (the Postgres and LocalStack test runs that hold most of the 64 GB, to be confirmed there) and in this repository (its e2e containers, label `aeolus.trierarch`), an issue each.
 2. Only the trierarch: the tests stay as they are.
 3. Only the tests: the trierarch removes no containers.
 
 **Q6. What about what is already on a machine when it upgrades?** Thomas asks for the permanent control, not a one-off cleanup.
-1. *(pick)* The same rules apply on the first pass after the upgrade to whatever they cover: worktrees under the root (#89, #90), old session images, the trierarch's cache. Worktrees outside the root and the user's own `/tmp`, caches and containers stay the person's, as #84 point 4 says.
+1. *(Thomas's answer)* The same rules apply on the first pass after the upgrade to whatever they cover: worktrees under the root (#89, #90), old session images, the trierarch's cache. Worktrees outside the root and the user's own `/tmp`, caches and containers stay the person's, as #84 point 4 says.
 2. The first pass after the upgrade also removes, once, what sessions left in `/tmp` and the user's container runtime before.
+
+Thomas's note on Q6, verbatim: "An important one: Lets have a format that all file writes need to be put in a dedicated folder. For example .aeolus/trierarch/... each ship get a temp folder in that trierarch folder with <ship_id> as the name. It can only write to that location. It has a tmp sub folder by default as its own tmp folder. Push back if this is not workable. But the idea would be that a rm -rf ~/.aeolus/trierarch would delete all trierarch folders. Making it all easy to remove even by non Aeolus approved practices."
+
+**Q7. Is the one folder per ship workable?** Mostly, with four limits:
+
+- **"It can only write there" holds in a container, not on the host.** A container sees only what is mounted (decision 0039). A session on the host runs as the machine's user: the trierarch can point its tools at the ship's folder (its temp folder, the cache, its own container storage), and well-behaved tools follow, but nothing stops a command from writing elsewhere unless the host session runs in a sandbox of the operating system.
+- **`rm -rf` cannot remove a session's test containers.** Rootless Podman stores a container's files under ids mapped to the user, which the user cannot remove directly; the trierarch already removes a ship's home through Podman's user namespace for this reason. So `rm -rf ~/.aeolus/trierarch` leaves those files, and only the trierarch's own removal, or `podman unshare rm -rf`, takes them. A session's own container storage on the host has the same limit.
+- **Some writes are outside by nature:** the session images live in the user's container runtime; on the host, the harness keeps its conversations and plugin files in the user's home (`~/.claude`, `~/.codex`); a configured worktree root may be elsewhere; each worktree leaves a record in its repository's `.git`, which #91's prune removes.
+- **Today's per-ship places are spread out** under `~/.aeolus/trierarch` (worktrees, homes, sockets, sessions): all already under that folder by default, but in several parts.
+
+1. *(pick)* One folder per ship under `~/.aeolus/trierarch`, named by its ship id, holding its `tmp` and, on the host, its own container storage; the trierarch's cache beside them. A container sees only its ship's folder; on the host the trierarch points the session's tools at it. The doc states the four limits as they are: a host session is directed, not held, and test containers are removed by the trierarch (or `podman unshare`), not by `rm -rf`.
+2. As 1, and a host session runs in a sandbox of the operating system that lets it write only its ship's folder and its worktree, so "it can only write there" holds on the host too.
+3. As 1, and the trierarch's root may no longer be configured outside `~/.aeolus/trierarch`, so `rm -rf` reaches every worktree.
