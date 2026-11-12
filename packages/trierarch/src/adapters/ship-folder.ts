@@ -79,13 +79,15 @@ export async function writeRootFiles(folder: string, workspace: RepositoriesWork
  * sub-repository no longer named into the trash, then the main repository and
  * each sub-repository made where it is not there yet, in the request's order.
  * One git cannot make fails it with git's message, and those made stay for
- * the next try. Answers the ship folder.
+ * the next try: `onMainMade` is told once `main/` is made, before any
+ * sub-repository. Answers the ship folder.
  */
 export async function prepareShipFolder(at: {
   shipFolder: string;
   workspace: RepositoriesWorkspace;
   /** The repository `main/` was made of, when the entry knows it. */
   madeMain?: string;
+  onMainMade?: (repository: string) => Promise<void>;
   make: MakeRepository;
   withinUserNamespace?: MoveWithinUserNamespace;
 }): Promise<string> {
@@ -109,6 +111,7 @@ export async function prepareShipFolder(at: {
     }
   }
   await make(workspace.main, join(folder, MAIN_FOLDER));
+  await at.onMainMade?.(workspace.main.repository);
   for (const subRepository of workspace.subRepositories) {
     await make(subRepository, join(folder, SUB_REPOSITORIES_FOLDER, subRepository.repository));
   }

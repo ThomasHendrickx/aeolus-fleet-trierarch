@@ -111,8 +111,9 @@ describe('a ship folder on the host', () => {
       workspace().prepare({
         ...crew('tools', ['skills']),
         madeMain: 'aeolus-fleet',
-        onMainMade: async (repository) => {
+        onMainMade: (repository) => {
           made.push(repository);
+          return Promise.resolve();
         },
       }),
     ).rejects.toThrow('git worktree add failed');

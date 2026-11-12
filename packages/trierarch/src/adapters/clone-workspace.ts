@@ -69,7 +69,7 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
     // What a clone holds is not known when any read of it fails: told with why, as one the host does not read.
     unsaved: async (folder) => worktrees.unsaved(folder).catch((error: unknown) => [`${REFUSED_PREFIX}${error instanceof Error ? error.message : String(error)}`]),
     prepare: async (request) => {
-      const { workspace, shipFolder, madeMain } = request;
+      const { workspace, shipFolder, madeMain, onMainMade } = request;
       if (workspace.kind === 'folder') {
         return worktrees.prepare(request);
       }
@@ -104,7 +104,7 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
         }
       };
       const { moveWithinUserNamespace } = options;
-      return { folder: await prepareShipFolder({ shipFolder, workspace, make, ...(madeMain !== undefined && { madeMain }), ...(moveWithinUserNamespace !== undefined && { withinUserNamespace: moveWithinUserNamespace }) }) };
+      return { folder: await prepareShipFolder({ shipFolder, workspace, make, ...(madeMain !== undefined && { madeMain }), ...(onMainMade !== undefined && { onMainMade }), ...(moveWithinUserNamespace !== undefined && { withinUserNamespace: moveWithinUserNamespace }) }) };
     },
     unsavedInShipFolder: async (folder) => unsavedIn(folder, async (each) => worktrees.unsaved(each).catch((error: unknown) => [`${REFUSED_PREFIX}${error instanceof Error ? error.message : String(error)}`])),
     remove: async (folder) => {

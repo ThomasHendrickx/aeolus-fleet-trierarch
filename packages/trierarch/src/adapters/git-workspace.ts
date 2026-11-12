@@ -131,7 +131,7 @@ export function createGitWorkspace(
 
   return {
     shipFolderOf: (shipId) => Promise.resolve(join(root, shipId)),
-    prepare: async ({ workspace, shipFolder, madeMain }) => {
+    prepare: async ({ workspace, shipFolder, madeMain, onMainMade }) => {
       if (workspace.kind === 'folder') {
         const folder = configuration.folders[workspace.name]?.path;
         if (folder === undefined) {
@@ -156,7 +156,7 @@ export function createGitWorkspace(
         const resolved = ref === undefined ? await defaultRef(repository) : await resolve(repository, ref);
         await git(['-C', repository, 'worktree', 'add', '--detach', folder, ...(resolved === undefined ? [] : [resolved])]);
       };
-      return { folder: await prepareShipFolder({ shipFolder, workspace, make, ...(madeMain !== undefined && { madeMain }) }) };
+      return { folder: await prepareShipFolder({ shipFolder, workspace, make, ...(madeMain !== undefined && { madeMain }), ...(onMainMade !== undefined && { onMainMade }) }) };
     },
     writeRootFiles: async ({ folder, workspace }) => {
       if (workspace.kind === 'repositories') {

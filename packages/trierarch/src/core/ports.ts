@@ -356,9 +356,11 @@ export interface WorkspacePort {
    * brings the ship folder to a new settings version's repositories: its
    * folder. A ship folder is made in the ship's folder, `main/` replaced
    * when it was made of another repository (`madeMain`); a configured folder
-   * is used as it is.
+   * is used as it is. `onMainMade` is told the repository `main/` is made of
+   * once it is, before any sub-repository is made, so a sub-repository git
+   * cannot make leaves it known for the next try.
    */
-  prepare(workspace: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace; shipFolder?: string; madeMain?: string }): Promise<{ folder: string }>;
+  prepare(workspace: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace; shipFolder?: string; madeMain?: string; onMainMade?: (repository: string) => Promise<void> }): Promise<{ folder: string }>;
   /** Writes the ship folder's root files again, as at every start; nothing for a configured folder. */
   writeRootFiles(at: { folder: string; workspace: TrierarchWorkspace }): Promise<void>;
   /** What removing each repository the ship folder holds would discard, as unsaved says it, by the repository's folder. */

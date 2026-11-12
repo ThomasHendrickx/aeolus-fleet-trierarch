@@ -610,6 +610,12 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
     workspace: crewing.workspace,
     ...(shipFolder !== undefined && { shipFolder }),
     ...(crewing.madeMain !== undefined && { madeMain: crewing.madeMain }),
+    // Kept as soon as main/ is made, so a sub-repository git cannot make leaves a new main/ known, never trashed on the next try.
+    onMainMade: async (madeMain) => {
+      crewing = { ...crewing, madeMain };
+      state = putEntry(state, crewing);
+      await deps.state.save(state);
+    },
   });
   crewing = { ...crewing, ...madeOf(crewing.workspace) };
   // Kept at once, so an crewing still crewing knows the workspace and identity to remove if it ends (#382).

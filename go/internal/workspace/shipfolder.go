@@ -79,13 +79,25 @@ func WriteRootFiles(folder string, workspace reconciler.Workspace) error {
 	return nil
 }
 
+// MainMadeError is a sub-repository git cannot make after `main/` was made: it says the repository `main/` is made of now, so the next
+// try knows it and never trashes it.
+type MainMadeError struct {
+	// Repository is the repository `main/` is made of.
+	Repository string
+	Err        error
+}
+
+func (e *MainMadeError) Error() string { return e.Err.Error() }
+
+func (e *MainMadeError) Unwrap() error { return e.Err }
+
 // makeRepository makes a repository's workspace at the folder when it is not there, as the places make one: a worktree, or a clone.
 type makeRepository func(repository reconciler.RepositoryAt, folder string) error
 
 // prepareShipFolder makes the ship folder in the ship's folder, or brings the one it has to the workspace: `main/` replaced when it was
 // made of another repository, each sub-repository no longer named into the trash beside the ships' folders, then the main repository
 // and each sub-repository made where it is not there yet, in the request's order. One git cannot make fails it with git's message, and
-// those made stay for the next try. Answers the ship folder.
+// those made stay for the next try: a sub-repository's failure is a MainMadeError. Answers the ship folder.
 func prepareShipFolder(shipFolder string, workspace reconciler.Workspace, madeMain string, makeOne makeRepository, withinUserNamespace func(from string, to string) error) (string, error) {
 	folder := filepath.Join(shipFolder, ShipFolderName)
 	if err := os.MkdirAll(filepath.Join(folder, SubRepositoriesFolder), shipFolderMode); err != nil {
@@ -119,7 +131,7 @@ func prepareShipFolder(shipFolder string, workspace reconciler.Workspace, madeMa
 	}
 	for _, sub := range workspace.SubRepositories {
 		if err := makeOne(sub, filepath.Join(folder, SubRepositoriesFolder, sub.Repository)); err != nil {
-			return "", err
+			return "", &MainMadeError{Repository: workspace.Main.Repository, Err: err}
 		}
 	}
 	return folder, nil

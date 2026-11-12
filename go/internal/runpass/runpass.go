@@ -6,6 +6,7 @@
 package runpass
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -415,6 +416,21 @@ func (p Pass) writeActivities(state reconciler.State) {
 }
 
 // crewFailed counts a failed crew against its settings version, from the state the crew saved before it failed: the last of the budget gives the request back with the last failure as the reason (#827). What fails here is logged and left to the next pass.
+// keptMainMade answers a Prepare that failed: when main/ was made before a sub-repository failed, the entry keeps what main/ is made of,
+// so the next try never trashes it.
+func (p Pass) keptMainMade(state reconciler.State, entry reconciler.Entry, failure error) (reconciler.State, error) {
+	var made *workspace.MainMadeError
+	if !errors.As(failure, &made) {
+		return state, failure
+	}
+	entry.MadeMain = made.Repository
+	next, err := p.put(state, entry)
+	if err != nil {
+		return next, fmt.Errorf("%w; keeping main/ made of %s: %w", failure, made.Repository, err)
+	}
+	return next, failure
+}
+
 func (p Pass) crewFailed(held reconciler.State, shipID string, failure error) reconciler.State {
 	state, err := p.Store.Load()
 	if err != nil {
@@ -691,7 +707,7 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	}
 	folder, err := p.Workspace.Prepare(entry, ship.Name)
 	if err != nil {
-		return state, err
+		return p.keptMainMade(state, entry, err)
 	}
 	// Kept at once, so a crew that stops here knows the workspace to remove.
 	entry.ShipName, entry.Folder, entry.MadeMain = ship.Name, folder, madeMainOf(entry.Workspace)
