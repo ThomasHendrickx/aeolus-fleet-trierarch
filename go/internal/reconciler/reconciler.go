@@ -538,13 +538,10 @@ func keptWorktreeOf(held any) KeptWorktree {
 	return KeptWorktree{ShipID: shipID, Repository: repository, Path: pathOf(held)}
 }
 
-// orphansOf are the worktrees under the root that no entry works in and the trierarch did not keep, as after their ship was retired (gap rule 2, #1041), as the state holds them, and their clears. A forgotten entry works in its worktree no more.
+// orphansOf are the worktrees under the root that no entry works in and the trierarch did not keep (gap rule 2, #1041), as the state holds them, and their clears. A forgotten entry's worktree is no orphan: its forget removes it (gap rule 1).
 func orphansOf(state State, next State, context Context) ([]any, []Action) {
 	known := map[string]bool{}
-	for shipID, entry := range next.Entries {
-		if _, ok := state.Entries[shipID]; ok && !isAssigned(shipID, context.Requests) {
-			continue
-		}
+	for _, entry := range next.Entries {
 		if entry.Folder != "" {
 			known[entry.Folder] = true
 		}
@@ -567,10 +564,6 @@ func orphansOf(state State, next State, context Context) ([]any, []Action) {
 		actions = append(actions, Action{Kind: ClearOrphan, Orphan: &cleared, IsNew: !reported[worktree.Path]})
 	}
 	return orphans, actions
-}
-
-func isAssigned(shipID string, requests []Request) bool {
-	return slices.ContainsFunc(requests, func(request Request) bool { return request.ShipID == shipID })
 }
 
 // pathOf is the path of a kept worktree or an orphan as the state holds it; empty when it names none.

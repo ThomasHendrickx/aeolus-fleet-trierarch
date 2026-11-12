@@ -852,19 +852,6 @@ func TestARequestNoLongerAssignedHereEndsItsSessionAndIdentityAndRemovesItsClean
 	}
 }
 
-func TestARequestNoLongerAssignedHereKeepsItsWorktreeAsAnOrphanWhileItHoldsUnsavedWork(t *testing.T) {
-	pass := aRunPass(t)
-	pass.crewed(t)
-	pass.workspace.unsaved[folder] = []string{" M README.md"}
-	pass.fleet.requests = nil
-
-	pass.run(t)
-
-	if len(pass.workspace.removed) != 0 || !reflect.DeepEqual(pass.store.state.Orphans, []any{orphanAt(folder)}) {
-		t.Fatalf("removed %q, orphans %+v", pass.workspace.removed, pass.store.state.Orphans)
-	}
-}
-
 func TestAForgottenEntryStaysUntilItsSessionStoppedSoTheNextPassTriesAgain(t *testing.T) {
 	pass := aRunPass(t)
 	pass.crewed(t)
@@ -920,18 +907,6 @@ func TestARequestGivenBackRemovesItsCleanWorktree(t *testing.T) {
 
 	if !slices.Equal(pass.workspace.removed, []string{"/worktrees/aeolus-fleet/scout"}) || len(pass.store.state.Kept) != 0 || !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 mac-mini: no activity within a minute of its start") {
 		t.Fatalf("removed %q, kept %+v, calls %q", pass.workspace.removed, pass.store.state.Kept, pass.fleet.calls)
-	}
-}
-
-func TestARequestGivenBackKeepsAWorktreeWithChanges(t *testing.T) {
-	pass := aRunPass(t)
-	pass.workspace.unsaved["/worktrees/aeolus-fleet/scout"] = []string{"?? notes.md"}
-
-	pass.givenBack(t)
-
-	want := []any{map[string]any{"shipId": scout, "repository": "aeolus-fleet", "path": "/worktrees/aeolus-fleet/scout"}}
-	if len(pass.workspace.removed) != 0 || !reflect.DeepEqual(pass.store.state.Kept, want) || len(pass.store.state.Entries) != 0 {
-		t.Fatalf("removed %q, kept %+v, entries %+v", pass.workspace.removed, pass.store.state.Kept, pass.store.state.Entries)
 	}
 }
 
@@ -1363,20 +1338,6 @@ func (p *aPass) released(t *testing.T, unsaved ...string) {
 	p.run(t)
 }
 
-func TestAReleaseTellsArgoWhatItsWorktreeHeldOncePerReleaseBeforeTheWorktreeGoes(t *testing.T) {
-	pass := aRunPass(t)
-
-	pass.released(t, "?? notes.md", "commit abc1234 unpushed work")
-
-	want := []told{{to: "argo", key: "trierarch:discarded:" + scout + ":" + now.Format(time.RFC3339Nano), text: notices.Discarded(notices.Ship{ID: scout, Name: "scout"}, "aeolus-fleet", []string{"?? notes.md", "commit abc1234 unpushed work"})}}
-	if !reflect.DeepEqual(pass.fleet.told, want) {
-		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
-	}
-	if told, removed := slices.Index(pass.fleet.calls, "tellArgo "+want[0].key), len(pass.workspace.removed); told < 0 || removed != 1 {
-		t.Fatalf("calls %q, removed %q", pass.fleet.calls, pass.workspace.removed)
-	}
-}
-
 func TestAReleaseOfAWorktreeThatHeldNothingTellsNobody(t *testing.T) {
 	pass := aRunPass(t)
 
@@ -1384,23 +1345,6 @@ func TestAReleaseOfAWorktreeThatHeldNothingTellsNobody(t *testing.T) {
 
 	if len(pass.fleet.told) != 0 {
 		t.Fatalf("told %+v", pass.fleet.told)
-	}
-}
-
-func TestAReleaseThatCannotTellArgoLeavesTheWorktreeAndTellsAgainOnTheNextPass(t *testing.T) {
-	pass := aRunPass(t)
-	pass.fleet.refuse = "tellArgo"
-
-	pass.released(t, "?? notes.md")
-
-	if len(pass.workspace.removed) != 0 || slices.Contains(pass.fleet.calls, "confirm "+scout) {
-		t.Fatalf("removed %q, calls %q", pass.workspace.removed, pass.fleet.calls)
-	}
-	pass.fleet.refuse = ""
-	pass.run(t)
-
-	if len(pass.workspace.removed) != 1 || !slices.Contains(pass.fleet.calls, "confirm "+scout) || len(pass.fleet.told) != 2 || pass.fleet.told[0].key != pass.fleet.told[1].key {
-		t.Fatalf("removed %q, calls %q, told %+v", pass.workspace.removed, pass.fleet.calls, pass.fleet.told)
 	}
 }
 
@@ -1416,7 +1360,7 @@ func TestAReleaseWhoseWorktreeCannotBeReadLeavesItAndTriesAgainOnTheNextPass(t *
 	pass.workspace.failUnsaved = false
 	pass.run(t)
 
-	if len(pass.workspace.removed) != 1 || !slices.Contains(pass.fleet.calls, "confirm "+scout) || len(pass.fleet.told) != 1 {
+	if len(pass.workspace.removed) != 1 || !slices.Contains(pass.fleet.calls, "confirm "+scout) || len(pass.fleet.told) != 0 {
 		t.Fatalf("removed %q, calls %q, told %+v", pass.workspace.removed, pass.fleet.calls, pass.fleet.told)
 	}
 }
@@ -1925,19 +1869,6 @@ func TestAShipReleasedElsewhereHasItsSessionStoppedAndIsCrewedAgainInAFreshWorkt
 		return strings.Contains(line, "scout ("+scout+"): released elsewhere, its worktree removed")
 	}) {
 		t.Fatalf("logged %q", pass.logged)
-	}
-}
-
-func TestAShipReleasedElsewhereTellsArgoWhatItsRemovedWorktreeHeldOnce(t *testing.T) {
-	pass := aRunPass(t)
-	pass.releasedElsewhere(t)
-	pass.workspace.unsaved[scoutFolder] = []string{" M README.md", "?? draft.md"}
-
-	pass.run(t)
-
-	want := []told{{to: "argo", key: "trierarch:discarded:" + scout + ":" + now.Format(time.RFC3339Nano), text: notices.DiscardedElsewhere(notices.Ship{ID: scout, Name: "scout"}, "aeolus-fleet", []string{" M README.md", "?? draft.md"})}}
-	if !slices.Equal(pass.fleet.told, want) {
-		t.Fatalf("told %+v", pass.fleet.told)
 	}
 }
 
@@ -2898,5 +2829,102 @@ func TestArgoIsNotToldOfWhatTheTrashCouldNotRemoveForLessThanADay(t *testing.T) 
 
 	if got := toldOfTheTrash(pass.fleet.told); len(got) != 0 {
 		t.Errorf("told %+v, want nobody a millisecond short of a day", got)
+	}
+}
+
+// endedPaths are the paths that leave a worktree no crew request on this computer names (docs/design/worktrees-end-with-their-session.md), each ending scout's crew with what its worktree holds, up to and with the pass that removes it.
+var endedPaths = []struct {
+	name string
+	end  func(p *aPass, t *testing.T, held []string)
+}{
+	{"a release", func(p *aPass, t *testing.T, held []string) { p.released(t, held...) }},
+	{"a release elsewhere", func(p *aPass, t *testing.T, held []string) {
+		p.releasedElsewhere(t)
+		p.workspace.unsaved[scoutFolder] = held
+		p.run(t)
+	}},
+	{"a give back", func(p *aPass, t *testing.T, held []string) {
+		p.workspace.unsaved[scoutFolder] = held
+		p.givenBack(t)
+	}},
+	{"a retire or a ship moved to another trierarch", func(p *aPass, t *testing.T, held []string) {
+		p.crewed(t)
+		p.workspace.unsaved[scoutFolder] = held
+		p.fleet.requests = nil
+		p.run(t)
+	}},
+}
+
+func TestEveryPathRemovesTheWorktreeWhateverItHoldsLogsWhatItHeldAndTellsArgoNothing(t *testing.T) {
+	for _, path := range endedPaths {
+		t.Run(path.name, func(t *testing.T) {
+			pass := aRunPass(t)
+
+			path.end(pass, t, []string{" M README.md", "commit abc1234 unpushed work"})
+
+			if !slices.Contains(pass.workspace.removed, scoutFolder) || len(pass.store.state.Kept) != 0 || len(pass.store.state.Orphans) != 0 {
+				t.Fatalf("removed %q, kept %+v, orphans %+v", pass.workspace.removed, pass.store.state.Kept, pass.store.state.Orphans)
+			}
+			if !slices.ContainsFunc(pass.logged, func(line string) bool {
+				return strings.Contains(line, "Discarded from the worktree of scout ("+scout+"), "+scoutFolder+":  M README.md; commit abc1234 unpushed work")
+			}) {
+				t.Fatalf("logged %q", pass.logged)
+			}
+			if len(pass.fleet.told) != 0 {
+				t.Fatalf("told %+v, want nothing", pass.fleet.told)
+			}
+		})
+	}
+}
+
+func TestEveryPathStopsWhatRunsInTheFolderBeforeTheWorktreeGoes(t *testing.T) {
+	for _, path := range endedPaths {
+		t.Run(path.name, func(t *testing.T) {
+			pass := aRunPass(t)
+			pass.processes.running[scoutFolder] = "astro dev"
+
+			path.end(pass, t, nil)
+
+			if !slices.Contains(pass.processes.stoppedIn, scoutFolder) {
+				t.Fatalf("stopped in %q, want %s", pass.processes.stoppedIn, scoutFolder)
+			}
+		})
+	}
+}
+
+func TestEveryPathKeepsTheWorktreeWhileTheFleetRefusesTheUsageSendAndTheNextPassRemovesIt(t *testing.T) {
+	for _, path := range endedPaths {
+		t.Run(path.name, func(t *testing.T) {
+			pass := aRunPass(t)
+			sending := pass.sendingReleasedUsage()
+			sending.failWith = errors.New("refused")
+
+			path.end(pass, t, []string{"?? draft.md"})
+			if len(pass.workspace.removed) != 0 {
+				t.Fatalf("removed %q while the usage send was refused", pass.workspace.removed)
+			}
+			if slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 mac-mini: no activity within a minute of its start") {
+				// The fleet took the request back: it is no longer assigned here.
+				pass.fleet.requests = nil
+			}
+			sending.failWith = nil
+			pass.run(t)
+
+			if !slices.Equal(sending.sent, []string{scout}) || !slices.Contains(pass.workspace.removed, scoutFolder) {
+				t.Fatalf("sent %q, removed %q", sending.sent, pass.workspace.removed)
+			}
+		})
+	}
+}
+
+func TestACrashedShipKeepsItsWorktreeWithWhatItHolds(t *testing.T) {
+	pass := aRunPass(t)
+	pass.workspace.unsaved[scoutFolder] = []string{"?? draft.md"}
+	pass.exitedASixthTime(t)
+
+	pass.run(t)
+
+	if pass.store.state.Entries[scout].State != "crashed" || len(pass.workspace.removed) != 0 {
+		t.Fatalf("entry %+v, removed %q", pass.store.state.Entries[scout], pass.workspace.removed)
 	}
 }

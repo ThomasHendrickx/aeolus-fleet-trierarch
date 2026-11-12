@@ -230,6 +230,11 @@ export class InMemoryFleet implements FleetPort {
     this.requests.delete(shipId);
   }
 
+  /** The request is assigned to another trierarch now: this one no longer sees it. */
+  moveToAnotherTrierarch(shipId: ShipId): void {
+    this.requests.delete(shipId);
+  }
+
   requestOf(shipId: ShipId): HeldRequest {
     const held = this.requests.get(shipId);
     if (held === undefined) {

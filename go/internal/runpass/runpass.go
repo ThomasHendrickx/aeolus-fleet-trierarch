@@ -556,14 +556,14 @@ func (p Pass) carryOut(state reconciler.State, action reconciler.Action) (reconc
 	case reconciler.Confirm:
 		return state, p.Fleet.ConfirmRelease(action.ShipID)
 	case reconciler.Forget:
-		// Its worktree stays, an orphan its clear removes unless it holds unsaved work.
+		// Its request is no longer assigned here, as when its ship is retired or moved to another trierarch: its workspace goes as a release's does (gap rule 1).
 		if err := p.Sessions.Stop(action.ShipID); err != nil {
 			return state, err
 		}
-		if err := p.deleteIdentity(*action.Entry); err != nil {
+		if err := p.endWorkspace(*action.Entry); err != nil {
 			return state, err
 		}
-		p.Log(fmt.Sprintf("%s (%s): its request is no longer assigned here, so its session and identity ended", nameOf(*action.Entry), action.ShipID))
+		p.Log(fmt.Sprintf("%s (%s): its request is no longer assigned here, so its session ended and its worktree was removed", nameOf(*action.Entry), action.ShipID))
 		return p.remove(state, action.ShipID)
 	case reconciler.WriteStatus:
 		return state, p.Fleet.WriteStatus(action.ShipID, action.Status.Status, action.Status.Attempt, fleetTime(action.Status.StartedAt))
@@ -702,12 +702,12 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	return p.put(state, entry)
 }
 
-// freshAfterReleaseElsewhere removes the workspace of a ship released elsewhere before it is crewed again in a fresh one (row 11, #475), argo told first what that discards. Its session stops first, as a release's does, so nothing reads the worktree while a session works in it, whatever the pass's stop did. The entry is saved without its mark only once that is done, so a failed stop or removal is tried again on the next pass.
+// freshAfterReleaseElsewhere removes the workspace of a ship released elsewhere before it is crewed again in a fresh one (row 11, #475). Its session stops first, as a release's does, so nothing reads the worktree while a session works in it, whatever the pass's stop did. The entry is saved without its mark only once that is done, so a failed stop or removal is tried again on the next pass.
 func (p Pass) freshAfterReleaseElsewhere(state reconciler.State, entry reconciler.Entry) (reconciler.State, reconciler.Entry, error) {
 	if err := p.Sessions.Stop(entry.ShipID); err != nil {
 		return state, entry, err
 	}
-	if err := p.endWorkspace(entry, notices.DiscardedElsewhere); err != nil {
+	if err := p.endWorkspace(entry); err != nil {
 		return state, entry, err
 	}
 	p.Log(fmt.Sprintf("%s (%s): released elsewhere, its worktree removed", nameOf(entry), entry.ShipID))
@@ -757,7 +757,7 @@ func (p Pass) release(state reconciler.State, entry reconciler.Entry) (reconcile
 			return state, err
 		}
 	}
-	if err := p.endWorkspace(entry, notices.Discarded); err != nil {
+	if err := p.endWorkspace(entry); err != nil {
 		return state, err
 	}
 	if state, err = p.remove(state, entry.ShipID); err != nil {
@@ -770,32 +770,10 @@ func (p Pass) release(state reconciler.State, entry reconciler.Entry) (reconcile
 	return state, nil
 }
 
-// giveBack gives back a request it cannot crew, with why; the entry it crewed with ends first.
+// giveBack gives back a request it cannot crew, with why. The session of the entry it crewed with stops first; then, given back or refused, its workspace goes as a release's does, and the entry only after it, so a failed removal is tried again on the next pass, the request then no longer assigned here.
 func (p Pass) giveBack(state reconciler.State, shipID string, settingsVersion int, reason string, entry *reconciler.Entry) (reconciler.State, error) {
 	if entry != nil {
 		if err := p.Sessions.Stop(shipID); err != nil {
-			return state, err
-		}
-		if err := p.deleteIdentity(*entry); err != nil {
-			return state, err
-		}
-		// A worktree with changes is kept, reported by the state's kept worktrees, as today's trierarch keeps it.
-		if entry.Folder != "" && entry.Workspace.Kind == "worktree" {
-			unsaved, err := p.Workspace.Unsaved(entry.Folder)
-			if err != nil {
-				return state, err
-			}
-			if len(unsaved) == 0 {
-				if err := p.Workspace.Remove(*entry); err != nil {
-					return state, err
-				}
-			} else {
-				p.Log(fmt.Sprintf("Kept the worktree of %s, which has changes: %s", shipID, entry.Folder))
-				state.Kept = append(state.Kept, map[string]any{"shipId": shipID, "repository": entry.Workspace.Repository, "path": entry.Folder})
-			}
-		}
-		var err error
-		if state, err = p.remove(state, shipID); err != nil {
 			return state, err
 		}
 	}
@@ -810,9 +788,21 @@ func (p Pass) giveBack(state reconciler.State, shipID string, settingsVersion in
 	}
 	if refusal != nil {
 		p.Log(fmt.Sprintf("The fleet refused to take back the crew request of %s: %s: %s", shipID, refusal.Code, refusal.Message))
-		return p.refuse(state, shipID, settingsVersion, reason)
+		if state, err = p.refuse(state, shipID, settingsVersion, reason); err != nil {
+			return state, err
+		}
 	}
-	p.Log(fmt.Sprintf("%s: given back, %s", shipID, given))
+	if entry != nil {
+		if err := p.endWorkspace(*entry); err != nil {
+			return state, err
+		}
+		if state, err = p.remove(state, shipID); err != nil {
+			return state, err
+		}
+	}
+	if refusal == nil {
+		p.Log(fmt.Sprintf("%s: given back, %s", shipID, given))
+	}
 	return state, nil
 }
 
@@ -906,9 +896,15 @@ func (p Pass) deleteIdentity(entry reconciler.Entry) error {
 	return nil
 }
 
-// endWorkspace sends a released entry's last usage, removes its identity, and a worktree it made, whatever that holds, logged first, as a release does (#450). A configured folder is never removed.
-func (p Pass) endWorkspace(entry reconciler.Entry, told func(notices.Ship, string, []string) string) error {
-	// Its usage goes first: what it used since the last send would be lost with the folder.
+// endWorkspace ends the workspace of an entry whose crew ended here (gap rule 1): what runs in its worktree stops, its last usage is sent, its identity goes, then a worktree it made is removed whatever it holds. What it held is logged, and nobody is told: saving is the session's job. A usage send that fails leaves it all for the next pass. A configured folder is never removed.
+func (p Pass) endWorkspace(entry reconciler.Entry) error {
+	isWorktree := entry.Folder != "" && entry.Workspace.Kind == "worktree"
+	if isWorktree && p.FolderProcesses != nil {
+		if _, err := p.FolderProcesses.StopIn(entry.Folder); err != nil {
+			return err
+		}
+	}
+	// Its usage goes before its folder: what it used since the last send would be lost with it.
 	if entry.Folder != "" && p.SendReleasedUsage != nil {
 		if err := p.SendReleasedUsage(entry); err != nil {
 			return err
@@ -917,23 +913,21 @@ func (p Pass) endWorkspace(entry reconciler.Entry, told func(notices.Ship, strin
 	if err := p.deleteIdentity(entry); err != nil {
 		return err
 	}
-	if entry.Folder == "" || entry.Workspace.Kind != "worktree" {
+	if !isWorktree {
 		return nil
 	}
 	unsaved, err := p.Workspace.Unsaved(entry.Folder)
 	if err != nil {
-		// What it holds is not known, so it is not removed untold: the next pass reads it again.
+		// What it holds is not known, so it is not removed unlogged: the next pass reads it again.
+		return err
+	}
+	if err := p.Workspace.Remove(entry); err != nil {
 		return err
 	}
 	if len(unsaved) > 0 {
 		p.Log(fmt.Sprintf("Discarded from the worktree of %s (%s), %s: %s", nameOf(entry), entry.ShipID, entry.Folder, strings.Join(unsaved, "; ")))
-		// Told before the worktree goes, once per release; a failure to tell leaves the worktree for the next pass.
-		text := told(notices.Ship{ID: entry.ShipID, Name: entry.ShipName}, entry.Workspace.Repository, unsaved)
-		if err := p.Fleet.ReportToArgo(text, "trierarch:discarded:"+entry.ShipID+":"+entry.Since); err != nil {
-			return err
-		}
 	}
-	return p.Workspace.Remove(entry)
+	return nil
 }
 
 // clearOrphan clears a worktree under the root no entry works in, as after its ship is retired (gap rule 2, #1041): what runs in it stops first, as it would be left running from a folder that is gone. Then it is removed, unless it holds unsaved work: that stays, held as an orphan, for a human. A failure leaves it held and tried again on the next pass.
