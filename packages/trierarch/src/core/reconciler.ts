@@ -300,7 +300,13 @@ function newVersionStep(entry: Entry, at: { request: AssignedRequest; state: Tri
   }
   const fresh = entryOf(checked.value, { shipId: entry.shipId, settingsVersion: request.settingsVersion, now: context.now });
   return {
-    entry: { ...fresh, ...(entry.shipName !== undefined && { shipName: entry.shipName }), ...(entry.folder !== undefined && { folder: entry.folder }), ...(entry.shipFolder !== undefined && { shipFolder: entry.shipFolder }) },
+    entry: {
+      ...fresh,
+      ...(entry.shipName !== undefined && { shipName: entry.shipName }),
+      ...(entry.folder !== undefined && { folder: entry.folder }),
+      ...(entry.shipFolder !== undefined && { shipFolder: entry.shipFolder }),
+      ...(entry.madeMain !== undefined && { madeMain: entry.madeMain }),
+    },
     actions: [
       { kind: 'stop', shipId: entry.shipId },
       { kind: 'crew', shipId: entry.shipId, isResumed: true },
@@ -343,6 +349,10 @@ function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean; i
   if (keepsShipFolder(entry) && observed.shipFoldersGone?.includes(entry.shipId) === true) {
     // Its files went with its folder, as when ships/ was removed by hand: it is crewed again in a fresh one as a first start, under the lease it holds.
     return { entry: { ...withState(entry, { state: 'crewing', now }), isShipFolderGone: true, hasStarted: false }, actions: [{ kind: 'stop', shipId: entry.shipId }, { kind: 'crew', shipId: entry.shipId, isResumed: false }], starts: 0 };
+  }
+  if (entry.isOldLayout === true && entry.crewToken !== undefined && entry.hasStarted) {
+    // Crewed before the ship folder layout (decision 0013): its session stops and it is crewed again in a fresh ship folder as a first start, under the lease it holds.
+    return { entry: { ...withState(entry, { state: 'crewing', now }), hasStarted: false }, actions: [{ kind: 'stop', shipId: entry.shipId }, { kind: 'crew', shipId: entry.shipId, isResumed: false }], starts: 0 };
   }
   if ((entry.state === 'running' || entry.state === 'restarting') && entry.crewToken === undefined) {
     // Crewed by a trierarch before the crew token stayed in its state (decision 0026): its session stops and the ship is crewed again in its folder.

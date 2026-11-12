@@ -72,6 +72,8 @@ export interface Entry {
   readonly restartAt?: string;
   /** Where its workspace is, once made. */
   readonly folder?: string;
+  /** The repository its ship folder's `main/` was made of: a new settings version naming another replaces it. */
+  readonly madeMain?: string;
   /**
    * The ship's own folder, `<ships>/<shipId>/`, which holds every file of the
    * ship: kept as it is crewed fresh, before anything is made in it. One
@@ -101,6 +103,8 @@ export interface Entry {
   readonly isReleasedElsewhere?: true;
   /** Set as it goes back to crewing once its ship's folder is gone, as when ships/ was removed by hand: it is crewed again in a fresh one. */
   readonly isShipFolderGone?: true;
+  /** Set on an entry crewed before the ship folder layout, its workspace one worktree: it is crewed again in a fresh ship folder. */
+  readonly isOldLayout?: true;
   /** How many crews of its settings version failed in a row (#827); none once one starts. */
   readonly crewFailures?: number;
   /** Set once argo is told its running session's folder holds no identity (#659), so it is told once; cleared when the identity is back. */

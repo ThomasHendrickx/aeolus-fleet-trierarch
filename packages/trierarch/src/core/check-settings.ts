@@ -26,11 +26,19 @@ export interface CheckedSettings {
  */
 export function trustRefusal(at: { harness: string; workspace: CrewSettings['workspace']; trusted: TrustedPlaces }): Refusal | undefined {
   const { harness, workspace, trusted } = at;
-  const [field, kind, name, places] =
-    workspace.kind === 'worktree'
-      ? (['workspace.repository', 'repository', workspace.repository, trusted[harness]?.repositories ?? []] as const)
-      : (['workspace.name', 'folder', workspace.name, trusted[harness]?.folders ?? []] as const);
-  return places.includes(name) ? undefined : { field, reason: `${harness} does not trust the ${kind} ${name}: add it with aeolus-trierarch init, which trusts it` };
+  if (workspace.kind === 'folder') {
+    return (trusted[harness]?.folders ?? []).includes(workspace.name) ? undefined : { field: 'workspace.name', reason: `${harness} does not trust the folder ${workspace.name}: add it with aeolus-trierarch init, which trusts it` };
+  }
+  const untrusted = repositoryFieldsOf(workspace).find(({ repository }) => !(trusted[harness]?.repositories ?? []).includes(repository));
+  return untrusted === undefined ? undefined : { field: untrusted.field, reason: `${harness} does not trust the repository ${untrusted.repository}: add it with aeolus-trierarch init, which trusts it` };
+}
+
+/** Each repository a ship folder names, main first, with the settings field that names it. */
+function repositoryFieldsOf(workspace: Extract<CrewSettings['workspace'], { kind: 'repositories' }>): readonly { field: string; repository: string }[] {
+  return [
+    { field: 'workspace.main.repository', repository: workspace.main.repository },
+    ...workspace.subRepositories.map(({ repository }, index) => ({ field: `workspace.subRepositories.${String(index)}.repository`, repository })),
+  ];
 }
 
 /**
@@ -72,8 +80,9 @@ function fieldOf(path: readonly PropertyKey[]): { field?: string } {
 /**
  * Checks a crew request's settings again before crewing (decision 0027):
  * the crew settings schema, then what this trierarch's configuration offers
- * (harness, repository or folder, each option and its value), that the
- * harness trusts the repository or folder (#381), and one folder per ship,
+ * (harness, each repository of a ship folder or the folder, each option and
+ * its value), that the harness trusts each repository or the folder (#381),
+ * naming the field of the first it does not, and one folder per ship,
  * and that no flag it launches with waits on a question (#403). The trierarch plugin checked them already; this machine's
  * configuration may have changed since.
  */
@@ -94,8 +103,11 @@ export function checkSettings(
     return err({ field: 'harness', reason: settings.harness === undefined ? 'This trierarch offers no harness' : `This trierarch offers no harness ${settings.harness}` });
   }
   const { workspace } = settings;
-  if (workspace.kind === 'worktree' && !(workspace.repository in configuration.repositories)) {
-    return err({ field: 'workspace.repository', reason: `This trierarch offers no repository ${workspace.repository}` });
+  if (workspace.kind === 'repositories') {
+    const missing = repositoryFieldsOf(workspace).find(({ repository }) => !(repository in configuration.repositories));
+    if (missing !== undefined) {
+      return err({ field: missing.field, reason: `This trierarch offers no repository ${missing.repository}` });
+    }
   }
   if (workspace.kind === 'folder') {
     if (!(workspace.name in configuration.folders)) {

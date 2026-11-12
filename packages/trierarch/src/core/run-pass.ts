@@ -485,6 +485,7 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
         await harness?.sessionDied(sessionOf(entry, entry.folder));
         const launchId = deps.newLaunchId();
         const login = sessionLogin(entry, deps);
+        await deps.workspace.writeRootFiles({ folder: entry.folder, workspace: entry.workspace });
         await harness?.launch({
           shipId: entry.shipId,
           // An entry saved before the ship's name was kept goes by its id.
@@ -559,6 +560,9 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
     return state;
   }
   const { crewToken: heldToken } = entry;
+  if (entry.isOldLayout === true && heldToken !== undefined) {
+    return crewInTheShipFolderLayout(state, { entry, harness, crewToken: heldToken, deps });
+  }
   if (entry.isShipFolderGone === true && heldToken !== undefined) {
     return crewInAFreshShipFolder(state, { entry, harness, crewToken: heldToken, deps });
   }
@@ -595,7 +599,14 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
     await deps.state.save(state);
   }
   const { shipFolder } = crewing;
-  const { folder } = await deps.workspace.prepare({ shipId: crewing.shipId, shipName: ship.name, workspace: crewing.workspace, ...(shipFolder !== undefined && { shipFolder }) });
+  const { folder } = await deps.workspace.prepare({
+    shipId: crewing.shipId,
+    shipName: ship.name,
+    workspace: crewing.workspace,
+    ...(shipFolder !== undefined && { shipFolder }),
+    ...(crewing.madeMain !== undefined && { madeMain: crewing.madeMain }),
+  });
+  crewing = { ...crewing, ...madeOf(crewing.workspace) };
   // Kept at once, so an crewing still crewing knows the workspace and identity to remove if it ends (#382).
   state = putEntry(state, { ...crewing, shipName: ship.name, folder });
   await deps.state.save(state);
@@ -627,6 +638,7 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
     crewToken,
   });
   const launchId = deps.newLaunchId();
+  await deps.workspace.writeRootFiles({ folder, workspace: crewing.workspace });
   await harness.launch({
     shipId: crewing.shipId,
     shipName: ship.name,
@@ -670,6 +682,27 @@ async function freshAfterReleaseElsewhere(at: EntryAt): Promise<Entry> {
 }
 
 /**
+ * A ship crewed before the ship folder layout (decision 0013) is crewed again
+ * in a fresh ship folder under the lease it holds: its session stops, its
+ * workspace goes as a release's does, what it held unsaved logged, and it is
+ * crewed as a ship whose ship's folder is gone is, a first start telling
+ * nobody. The entry is saved without its mark once its workspace is gone, so
+ * an interruption crews it again in a fresh ship folder.
+ */
+async function crewInTheShipFolderLayout(state: TrierarchState, at: EntryAt & { harness: HarnessPort; crewToken: string }): Promise<TrierarchState> {
+  const { entry, deps } = at;
+  await deps.processes.stop(entry.shipId);
+  const workspace = await removeWorkspace({ entry, deps });
+  log(deps, { ...about(state, { shipId: entry.shipId, action: 'crew' }), outcome: `crewed before the ship folder layout, ${workspace}, so it is crewed again in a fresh ship folder` });
+  const { isOldLayout, folder, shipFolder, ...rest } = entry;
+  // Crewed in a fresh ship's folder, as one whose folder is gone, whatever its workspace was.
+  const fresh: Entry = { ...(isOldLayout === undefined && folder === undefined && shipFolder === undefined ? entry : rest), isShipFolderGone: true };
+  const next = putEntry(state, fresh);
+  await deps.state.save(next);
+  return crewInAFreshShipFolder(next, { ...at, entry: fresh });
+}
+
+/**
  * A ship whose ship's folder is gone, as when ships/ was removed by hand, is
  * crewed again in a fresh one under the lease it holds: core removes the crew
  * request on a release, so the ship is never released and registered again.
@@ -692,7 +725,7 @@ async function crewInAFreshShipFolder(state: TrierarchState, at: EntryAt & { har
   const shipFolder = await deps.workspace.shipFolderOf(entry.shipId);
   const { folder } = await deps.workspace.prepare({ shipId: entry.shipId, shipName, workspace: entry.workspace, shipFolder });
   // The mark stays until the ship is crewed again, so an interruption crews it again here, never releasing it.
-  const crewing: Entry = { ...entry, folder, shipFolder };
+  const crewing: Entry = { ...entry, folder, shipFolder, ...madeOf(entry.workspace) };
   state = putEntry(state, crewing);
   await deps.state.save(state);
   const socket = await deps.sockets.open(entry.shipId, shipFolder);
@@ -705,6 +738,7 @@ async function crewInAFreshShipFolder(state: TrierarchState, at: EntryAt & { har
   });
   const login = sessionLogin(crewing, deps);
   const launchId = deps.newLaunchId();
+  await deps.workspace.writeRootFiles({ folder, workspace: entry.workspace });
   await harness.launch({
     shipId: entry.shipId,
     shipName,
@@ -773,7 +807,7 @@ async function removeWorkspace(at: EntryAt): Promise<string> {
     }
     return 'its worktree removed';
   }
-  if (entry.workspace.kind === 'worktree') {
+  if (entry.workspace.kind === 'repositories') {
     await deps.folderProcesses.stopIn(folder);
   }
   await deps.sendReleasedUsage(entry);
@@ -784,13 +818,22 @@ async function removeWorkspace(at: EntryAt): Promise<string> {
     }
     return `its folder kept: ${folder}`;
   }
-  const held = await deps.workspace.unsaved(folder);
+  const held = await heldIn({ entry, deps, folder });
   await (shipFolder === undefined ? deps.workspace.remove(folder) : deps.workspace.removeShipFolder(shipFolder));
-  if (held.length === 0) {
+  const discarded = held.flatMap(({ unsaved }) => unsaved).length;
+  if (discarded === 0) {
     return 'its worktree removed';
   }
-  deps.logger.warn(`Discarded from the worktree of ${entry.shipName ?? entry.shipId} (${entry.shipId}), ${folder}: ${held.join('; ')}`);
-  return `its worktree removed, discarding ${String(held.length)} unpushed ${held.length === 1 ? 'change' : 'changes'}`;
+  for (const repository of held.filter(({ unsaved }) => unsaved.length > 0)) {
+    deps.logger.warn(`Discarded from the worktree of ${entry.shipName ?? entry.shipId} (${entry.shipId}), ${repository.folder}: ${repository.unsaved.join('; ')}`);
+  }
+  return `its worktree removed, discarding ${String(discarded)} unpushed ${discarded === 1 ? 'change' : 'changes'}`;
+}
+
+/** What removing the entry's workspace would discard, by each repository's folder: each repository of its ship folder, or the one worktree of a ship crewed before the ship folder layout. */
+async function heldIn(at: EntryAt & { folder: string }): Promise<readonly { readonly folder: string; readonly unsaved: readonly string[] }[]> {
+  const { entry, deps, folder } = at;
+  return entry.isOldLayout === true ? [{ folder, unsaved: await deps.workspace.unsaved(folder) }] : deps.workspace.unsavedInShipFolder(folder);
 }
 
 /** A clear request (decision 0032): no worktree is kept, so it is confirmed not-kept, and the request goes. */
@@ -972,13 +1015,18 @@ async function removeIdentity(at: EntryAt & { folder: string }): Promise<void> {
 }
 
 /** The entry's session in its folder, with its ship's folder when it has one. */
+/** What a ship folder was made of, kept with its entry so a new settings version naming another main repository replaces `main/`. */
+function madeOf(workspace: Entry['workspace']): Pick<Entry, 'madeMain'> {
+  return workspace.kind === 'repositories' ? { madeMain: workspace.main.repository } : {};
+}
+
 function sessionOf(entry: Entry, folder: string): HarnessSession {
   return { shipId: entry.shipId, folder, ...(entry.shipFolder !== undefined && { shipFolder: entry.shipFolder }) };
 }
 
 /** The read-only checkouts a session in the entry's repository gets (#1182), made when missing; none in a configured folder. */
 async function checkoutsOf(entry: Entry, deps: RunPassDeps): Promise<readonly Checkout[]> {
-  return entry.workspace.kind === 'worktree' ? deps.checkouts.prepare({ shipId: entry.shipId, repository: entry.workspace.repository }) : [];
+  return entry.workspace.kind === 'repositories' ? deps.checkouts.prepare({ shipId: entry.shipId, repository: entry.workspace.main.repository }) : [];
 }
 
 /**

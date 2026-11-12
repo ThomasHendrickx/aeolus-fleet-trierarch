@@ -42,15 +42,17 @@ export type MoveWithinUserNamespace = (from: string, to: string) => Promise<void
  * given its owner's read, write and search first. One the host cannot give
  * them, or move, is moved within the runtime's user namespace
  * (`withinUserNamespace`, none on the host). A link is refused, so nothing it
- * points at is changed.
+ * points at is changed. A folder deeper than the places a pass empties the
+ * trash beside goes into the trash of the place given (`into`), as a
+ * repository of a ship folder goes into the one beside the ships' folders.
  */
-export async function discard(folder: string, options: { at: Date; withinUserNamespace?: MoveWithinUserNamespace }): Promise<void> {
+export async function discard(folder: string, options: { at: Date; withinUserNamespace?: MoveWithinUserNamespace; into?: string }): Promise<void> {
   const { at, withinUserNamespace } = options;
   const found = await lstat(folder);
   if (!found.isDirectory()) {
     throw new Error(`${folder} is no folder: the trash takes only a folder`);
   }
-  const trash = join(dirname(folder), TRASH_FOLDER_NAME);
+  const trash = join(options.into ?? dirname(folder), TRASH_FOLDER_NAME);
   await mkdir(trash, { mode: PRIVATE_FOLDER_MODE }).catch((error: unknown) => {
     if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) {
       throw error;
