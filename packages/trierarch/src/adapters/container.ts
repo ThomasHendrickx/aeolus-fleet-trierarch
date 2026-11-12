@@ -166,7 +166,7 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
       const login: Record<string, string> = proxyToken === undefined ? { [MODEL_TOKEN_VARIABLE]: (await readFile(options.tokenFile, 'utf8')).trim() } : {};
       const content = envFileOf({ ...env, ...login });
       const network = proxyToken === undefined ? [] : ['--network', proxyNetworkOf(await proxyPortOf(options.proxyUrl))];
-      const home = shipHome(options.homes, shipId);
+      const home = shipHome(options.homes, { shipId });
       const shipSockets = join(options.sockets, shipId);
       // The runtime mounts only a folder that exists, and the ship's socket may not have made it yet.
       await mkdir(shipSockets, { recursive: true, mode: 0o700 });

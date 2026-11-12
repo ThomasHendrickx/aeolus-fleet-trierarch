@@ -169,7 +169,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const usage = createUsage({
     'claude-code': createClaudeCodeUsage({
       // In containers each ship's conversations are in its own home (decision 0039).
-      projectsOf: (shipId) => (shipHomes === undefined ? join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects') : join(shipHome(shipHomes.homes, shipId), '.claude', 'projects')),
+      projectsOf: (shipId) => (shipHomes === undefined ? join(env.CLAUDE_CONFIG_DIR ?? join(homeDirectory, '.claude'), 'projects') : join(shipHome(shipHomes.homes, { shipId }), '.claude', 'projects')),
       madeAt: folderMadeAt,
       run: runCommand,
       neutralFolder: () => mkdtemp(join(tmpdir(), 'aeolus-trierarch-probe-')),

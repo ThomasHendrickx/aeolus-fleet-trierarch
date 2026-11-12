@@ -53,11 +53,11 @@ const PRIVATE_FOLDER_MODE = 0o700;
  * with the ship's identity, as on a release, through the trash beside it.
  */
 export function createShipClaudeCodeHomes(at: { homes: string; managedSettings: string; moveWithinUserNamespace?: MoveWithinUserNamespace; pluginRoot: AeolusPlugin['root']; host: Pick<ClaudeCodeSetup, 'isSkipPermissionsAccepted'> }): ClaudeCodeHomes {
-  const setupOf = (shipId: ShipId): ClaudeCodeSetup => createClaudeCodeSetup({ homeDirectory: shipHome(at.homes, shipId), managedSettings: at.managedSettings });
+  const setupOf = (shipId: ShipId): ClaudeCodeSetup => createClaudeCodeSetup({ homeDirectory: shipHome(at.homes, { shipId }), managedSettings: at.managedSettings });
 
   return {
     of: (shipId) => {
-      const home = shipHome(at.homes, shipId);
+      const home = shipHome(at.homes, { shipId });
       return {
         plugin: { root: at.pluginRoot, data: join(home, '.claude', 'plugins', 'data', PLUGIN_DATA_FOLDER), crews: join(home, '.aeolus', 'crews', 'claude-code') },
         projects: join(home, '.claude', 'projects'),
@@ -65,7 +65,7 @@ export function createShipClaudeCodeHomes(at: { homes: string; managedSettings: 
       };
     },
     prepare: async ({ shipId, folder }) => {
-      await mkdir(shipHome(at.homes, shipId), { recursive: true, mode: PRIVATE_FOLDER_MODE });
+      await mkdir(shipHome(at.homes, { shipId }), { recursive: true, mode: PRIVATE_FOLDER_MODE });
       const setup = setupOf(shipId);
       await setup.completeOnboarding();
       await setup.trust(folder);
@@ -74,7 +74,7 @@ export function createShipClaudeCodeHomes(at: { homes: string; managedSettings: 
       }
     },
     remove: async (shipId) => {
-      const home = shipHome(at.homes, shipId);
+      const home = shipHome(at.homes, { shipId });
       // One already gone is removed already.
       if ((await lstat(home).catch(() => undefined)) === undefined) {
         return;
