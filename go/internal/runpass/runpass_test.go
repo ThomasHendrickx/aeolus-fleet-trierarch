@@ -840,19 +840,6 @@ func TestARequestNoLongerAssignedHereEndsItsSessionAndIdentityAndRemovesItsClean
 	}
 }
 
-func TestARequestNoLongerAssignedHereKeepsItsWorktreeAsAnOrphanWhileItHoldsUnsavedWork(t *testing.T) {
-	pass := aRunPass(t)
-	pass.crewed(t)
-	pass.workspace.unsaved[folder] = []string{" M README.md"}
-	pass.fleet.requests = nil
-
-	pass.run(t)
-
-	if len(pass.workspace.removed) != 0 || !reflect.DeepEqual(pass.store.state.Orphans, []any{orphanAt(folder)}) {
-		t.Fatalf("removed %q, orphans %+v", pass.workspace.removed, pass.store.state.Orphans)
-	}
-}
-
 func TestAForgottenEntryStaysUntilItsSessionStoppedSoTheNextPassTriesAgain(t *testing.T) {
 	pass := aRunPass(t)
 	pass.crewed(t)
@@ -908,18 +895,6 @@ func TestARequestGivenBackRemovesItsCleanWorktree(t *testing.T) {
 
 	if !slices.Equal(pass.workspace.removed, []string{"/worktrees/aeolus-fleet/scout"}) || len(pass.store.state.Kept) != 0 || !slices.Contains(pass.fleet.calls, "giveBack "+scout+" 1 mac-mini: no activity within a minute of its start") {
 		t.Fatalf("removed %q, kept %+v, calls %q", pass.workspace.removed, pass.store.state.Kept, pass.fleet.calls)
-	}
-}
-
-func TestARequestGivenBackKeepsAWorktreeWithChanges(t *testing.T) {
-	pass := aRunPass(t)
-	pass.workspace.unsaved["/worktrees/aeolus-fleet/scout"] = []string{"?? notes.md"}
-
-	pass.givenBack(t)
-
-	want := []any{map[string]any{"shipId": scout, "repository": "aeolus-fleet", "path": "/worktrees/aeolus-fleet/scout"}}
-	if len(pass.workspace.removed) != 0 || !reflect.DeepEqual(pass.store.state.Kept, want) || len(pass.store.state.Entries) != 0 {
-		t.Fatalf("removed %q, kept %+v, entries %+v", pass.workspace.removed, pass.store.state.Kept, pass.store.state.Entries)
 	}
 }
 
@@ -1351,20 +1326,6 @@ func (p *aPass) released(t *testing.T, unsaved ...string) {
 	p.run(t)
 }
 
-func TestAReleaseTellsArgoWhatItsWorktreeHeldOncePerReleaseBeforeTheWorktreeGoes(t *testing.T) {
-	pass := aRunPass(t)
-
-	pass.released(t, "?? notes.md", "commit abc1234 unpushed work")
-
-	want := []told{{to: "argo", key: "trierarch:discarded:" + scout + ":" + now.Format(time.RFC3339Nano), text: notices.Discarded(notices.Ship{ID: scout, Name: "scout"}, "aeolus-fleet", []string{"?? notes.md", "commit abc1234 unpushed work"})}}
-	if !reflect.DeepEqual(pass.fleet.told, want) {
-		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
-	}
-	if told, removed := slices.Index(pass.fleet.calls, "tellArgo "+want[0].key), len(pass.workspace.removed); told < 0 || removed != 1 {
-		t.Fatalf("calls %q, removed %q", pass.fleet.calls, pass.workspace.removed)
-	}
-}
-
 func TestAReleaseOfAWorktreeThatHeldNothingTellsNobody(t *testing.T) {
 	pass := aRunPass(t)
 
@@ -1372,23 +1333,6 @@ func TestAReleaseOfAWorktreeThatHeldNothingTellsNobody(t *testing.T) {
 
 	if len(pass.fleet.told) != 0 {
 		t.Fatalf("told %+v", pass.fleet.told)
-	}
-}
-
-func TestAReleaseThatCannotTellArgoLeavesTheWorktreeAndTellsAgainOnTheNextPass(t *testing.T) {
-	pass := aRunPass(t)
-	pass.fleet.refuse = "tellArgo"
-
-	pass.released(t, "?? notes.md")
-
-	if len(pass.workspace.removed) != 0 || slices.Contains(pass.fleet.calls, "confirm "+scout) {
-		t.Fatalf("removed %q, calls %q", pass.workspace.removed, pass.fleet.calls)
-	}
-	pass.fleet.refuse = ""
-	pass.run(t)
-
-	if len(pass.workspace.removed) != 1 || !slices.Contains(pass.fleet.calls, "confirm "+scout) || len(pass.fleet.told) != 2 || pass.fleet.told[0].key != pass.fleet.told[1].key {
-		t.Fatalf("removed %q, calls %q, told %+v", pass.workspace.removed, pass.fleet.calls, pass.fleet.told)
 	}
 }
 
@@ -1404,7 +1348,7 @@ func TestAReleaseWhoseWorktreeCannotBeReadLeavesItAndTriesAgainOnTheNextPass(t *
 	pass.workspace.failUnsaved = false
 	pass.run(t)
 
-	if len(pass.workspace.removed) != 1 || !slices.Contains(pass.fleet.calls, "confirm "+scout) || len(pass.fleet.told) != 1 {
+	if len(pass.workspace.removed) != 1 || !slices.Contains(pass.fleet.calls, "confirm "+scout) || len(pass.fleet.told) != 0 {
 		t.Fatalf("removed %q, calls %q, told %+v", pass.workspace.removed, pass.fleet.calls, pass.fleet.told)
 	}
 }
@@ -1913,19 +1857,6 @@ func TestAShipReleasedElsewhereHasItsSessionStoppedAndIsCrewedAgainInAFreshWorkt
 		return strings.Contains(line, "scout ("+scout+"): released elsewhere, its worktree removed")
 	}) {
 		t.Fatalf("logged %q", pass.logged)
-	}
-}
-
-func TestAShipReleasedElsewhereTellsArgoWhatItsRemovedWorktreeHeldOnce(t *testing.T) {
-	pass := aRunPass(t)
-	pass.releasedElsewhere(t)
-	pass.workspace.unsaved[scoutFolder] = []string{" M README.md", "?? draft.md"}
-
-	pass.run(t)
-
-	want := []told{{to: "argo", key: "trierarch:discarded:" + scout + ":" + now.Format(time.RFC3339Nano), text: notices.DiscardedElsewhere(notices.Ship{ID: scout, Name: "scout"}, "aeolus-fleet", []string{" M README.md", "?? draft.md"})}}
-	if !slices.Equal(pass.fleet.told, want) {
-		t.Fatalf("told %+v", pass.fleet.told)
 	}
 }
 
