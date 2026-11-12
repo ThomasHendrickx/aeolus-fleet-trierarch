@@ -472,10 +472,10 @@ func folderProcessesOf(configured *config.Runtime) runpass.FolderProcesses {
 	return container.FolderProcesses{Runtime: container.Runtime{Binary: configured.Binary}, Host: folderprocess.Stopper{}}
 }
 
-// shipsPlaceOf is the place of every ship's folder: the configuration's worktree root, else `ships/` in the trierarch's folder.
+// shipsPlaceOf is the place of every ship's folder: the configuration's shipsRoot, else `ships/` in the trierarch's folder.
 func shipsPlaceOf(at paths.Paths, configuration config.Configuration) string {
-	if configuration.WorktreeRoot != "" {
-		return configuration.WorktreeRoot
+	if configuration.ShipsRoot != "" {
+		return configuration.ShipsRoot
 	}
 	return at.Ships
 }
@@ -597,9 +597,9 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		return mcpservers.OfferedBy(mcpservers.WithCredentialHeld(current.Servers, current.SecretNames()), offeredHarnesses, harnessesThatAddMcpServers(configuration.Runtime))
 	}
 	// Every ship's folder is under the place of ships/; the worktrees of the ships crewed before the ship folders stay under the worktree
-	// root they were made in, the configured one, else today's default beside ships/.
+	// root they were made in: under a configured place of ships/, else the old default beside ships/.
 	root, before := shipsPlaceOf(at, configuration), ""
-	if configuration.WorktreeRoot == "" {
+	if configuration.ShipsRoot == "" {
 		before = at.Worktrees
 	}
 	// Made before the first crew, so the disk it is on is read from the first pass (machine load).

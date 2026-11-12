@@ -67,7 +67,7 @@ func TestWithoutRemoteControlNamesNoHarnessForAConfigurationWithoutIt(t *testing
 func TestRemoveRemoteControlRewritesTheFileKeepingAllElseAndNamesTheHarness(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	configured := Initial()
-	configured.WorktreeRoot = "/worktrees"
+	configured.ShipsRoot = "/ships"
 	configured.Harnesses["claude-code"] = harness("--remote-control", "--verbose")
 	if err := Write(path, configured); err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestRemoveRemoteControlRewritesTheFileKeepingAllElseAndNamesTheHarness(t *t
 	if err != nil || !reflect.DeepEqual(loaded, want) {
 		t.Errorf("loaded %+v, %v; want %+v", loaded, err, want)
 	}
-	if text, _ := os.ReadFile(path); !strings.HasSuffix(string(text), "}\n") || !strings.Contains(string(text), "  \"worktreeRoot\"") {
+	if text, _ := os.ReadFile(path); !strings.HasSuffix(string(text), "}\n") || !strings.Contains(string(text), "  \"shipsRoot\"") {
 		t.Errorf("wrote %s", text)
 	}
 }

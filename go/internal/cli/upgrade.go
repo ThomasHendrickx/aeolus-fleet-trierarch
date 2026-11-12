@@ -66,7 +66,7 @@ type Upgrade struct {
 	Plugins   Plugins
 	// Codex trusts the aeolus-fleet plugin's new or changed hooks once Codex's plugin is updated.
 	Codex Codex
-	// HookFolder is the folder Codex sees the plugin's hooks from: the configuration's worktree root.
+	// HookFolder is the folder Codex sees the plugin's hooks from: the place of ships/.
 	HookFolder string
 	// Trierarch runs a trierarch file with the words, as the plugin step of an upgrade when isPluginStep: what it says on stdout and its exit status.
 	Trierarch func(program string, isPluginStep bool, words ...string) (string, int)

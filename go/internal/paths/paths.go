@@ -4,7 +4,7 @@
 // secret is in one: the trierarch's own files, its tokens for its ships among
 // them, sit beside `ships/`. The configuration's path can be moved with
 // `--config` or AEOLUS_TRIERARCH_CONFIG, and the place of `ships/` by the
-// configuration's worktree root.
+// configuration's shipsRoot.
 package paths
 
 import (
@@ -63,7 +63,7 @@ type Paths struct {
 	CrewToken    string
 	Running      string
 	Logs         string
-	// Ships holds every ship's folder, `ships/<shipId>/`, unless the configuration's worktree root names another place.
+	// Ships holds every ship's folder, `ships/<shipId>/`, unless the configuration's shipsRoot names another place.
 	Ships string
 	// Worktrees is the worktree root of the ships crewed before the ship folders, `<repository>/<ship>` under it.
 	Worktrees string

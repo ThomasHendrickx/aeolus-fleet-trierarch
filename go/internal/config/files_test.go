@@ -40,7 +40,7 @@ func TestAFreshInitWritesNoRepositoryNoFolderAndClaudeCodeWithNoFlag(t *testing.
 func TestLoadsTheConfigurationItWrote(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	written := Initial()
-	written.WorktreeRoot = "/work"
+	written.ShipsRoot = "/work"
 	written.Repositories["aeolus-fleet"] = Repository{Path: "/src/aeolus-fleet"}
 	if err := Write(path, written); err != nil {
 		t.Fatal(err)
@@ -51,7 +51,7 @@ func TestLoadsTheConfigurationItWrote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.WorktreeRoot != "/work" || loaded.Repositories["aeolus-fleet"].Path != "/src/aeolus-fleet" || loaded.Caps != (Caps{Ships: 4, Running: 2}) {
+	if loaded.ShipsRoot != "/work" || loaded.Repositories["aeolus-fleet"].Path != "/src/aeolus-fleet" || loaded.Caps != (Caps{Ships: 4, Running: 2}) {
 		t.Errorf("loaded %+v", loaded)
 	}
 }
