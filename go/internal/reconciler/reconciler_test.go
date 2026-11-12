@@ -953,6 +953,20 @@ func TestTheFolderAnEntryWorksInOrOneThatHoldsItIsNotRemoved(t *testing.T) {
 	assertActions(t, actions, Action{Kind: RemoveStray, Folder: underRoot("scout")})
 }
 
+func TestEveryFolderInTheFolderAnEntryWorksInIsNotRemovedAndAStrayBesideItIs(t *testing.T) {
+	request := aRequest(scout)
+	request.Status = status("running")
+	context := aContext(request)
+	context.Observed.Sessions = running(scout)
+	entry := anEntry(scout, "running")
+	entry.Folder = "/worktrees/notes"
+	context.Observed.Folders = []string{"/worktrees/notes", "/worktrees/notes/src", "/worktrees/notes/src/drafts", "/worktrees/workbench"}
+
+	_, actions := Reconcile(withEntries(entry), context)
+
+	assertActions(t, actions, Action{Kind: RemoveStray, Folder: "/worktrees/workbench"})
+}
+
 func TestAFolderUnderOneRemovedGoesWithItRemovedOnce(t *testing.T) {
 	context := aContext()
 	context.Observed.Folders = []string{"/worktrees/workbench", "/worktrees/workbench/tools"}

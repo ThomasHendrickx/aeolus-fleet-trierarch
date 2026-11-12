@@ -337,6 +337,21 @@ func TestAConfiguredFolderUnderTheRootIsNotListed(t *testing.T) {
 	}
 }
 
+func TestAConfiguredFolderStraightUnderTheRootIsNotListedNorAnyFolderInItButAStrayBesideItIs(t *testing.T) {
+	repository, root := aRepository(t)
+	notes := filepath.Join(root, "notes")
+	mkdir(t, filepath.Join(notes, "src", "drafts"))
+	workbench := filepath.Join(root, "workbench")
+	mkdir(t, workbench)
+	places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}, Folders: map[string]string{"notes": notes}}
+
+	got, err := places.FoldersUnderRoot()
+
+	if err != nil || !slices.Equal(got, []string{workbench}) {
+		t.Fatalf("FoldersUnderRoot() = %v, %v, want only %s", got, err, workbench)
+	}
+}
+
 func TestTheFoldersUnderARootReachedThroughALinkAreListedUnderTheRootOrByTheirRealPath(t *testing.T) {
 	repository, real := aRepository(t)
 	root := filepath.Join(t.TempDir(), "root")
