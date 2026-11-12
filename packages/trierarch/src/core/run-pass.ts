@@ -99,9 +99,21 @@ export function createRunPass(deps: RunPassDeps): RunPass {
         state = await failed({ action, deps, reason: reasonOf(error) });
       }
     }
+    await pruneWorktreeRecords(deps);
     await emptyTrash(deps);
     await writeActivities(state, deps);
   };
+}
+
+/** Drops the git records of worktrees whose folder is gone, in each configured repository; one that fails is logged and fails neither the pass nor the others. */
+async function pruneWorktreeRecords(deps: RunPassDeps): Promise<void> {
+  for (const repository of Object.keys(deps.setup.configuration.repositories)) {
+    try {
+      await deps.workspace.prune(repository);
+    } catch (error) {
+      deps.logger.warn(`Could not prune the worktree records of ${repository}: ${reasonOf(error)}; the next pass tries again`);
+    }
+  }
 }
 
 /** How long the trash tries to remove a folder before argo is told it cannot. */
