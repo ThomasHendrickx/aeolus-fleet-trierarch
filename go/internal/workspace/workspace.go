@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"os/exec"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
 )
 
 const remote = "origin"
@@ -275,7 +277,7 @@ func (p Places) Remove(entry reconciler.Entry) error {
 		return nil
 	}
 	if p.IsClone {
-		return p.removeClone(entry.Folder)
+		return p.RemoveWorktree(entry.Folder)
 	}
 	repository, ok := p.Repositories[entry.Workspace.Repository]
 	if !ok && p.ClonedPath != nil {
@@ -319,50 +321,70 @@ func listed(repository string) ([]string, error) {
 	return paths, nil
 }
 
-// Worktrees are the worktrees of the configured repositories under the root, `<root>/<repository>/<name>`, or their clones; a repository git cannot list has none.
-func (p Places) Worktrees() ([]reconciler.Worktree, error) {
-	if p.IsClone {
-		return p.clones(), nil
-	}
-	// Git lists each worktree by its real path, so a root reached through a link is matched by its own.
-	realRoot, err := filepath.EvalSymlinks(p.Root)
-	if err != nil {
-		realRoot = p.Root
-	}
-	found := []reconciler.Worktree{}
-	for _, name := range slices.Sorted(maps.Keys(p.Repositories)) {
-		paths, err := listed(p.Repositories[name])
-		if err != nil {
+// FoldersUnderRoot are every folder under the root a workspace could be (gap rule 2), whatever made it: each
+// `<root>/<repository>/<name>`, and a folder straight under the root with a `.git` of its own, as one folder, none of its files.
+// Never the trash, a file, a link, so nothing a link points at is removed, or a configured folder. By their real paths when the
+// places say so, as their workspaces are.
+func (p Places) FoldersUnderRoot() ([]string, error) {
+	found := []string{}
+	for _, top := range foldersIn(p.Root) {
+		if _, err := os.Lstat(filepath.Join(top, ".git")); err == nil {
+			found = append(found, top)
 			continue
 		}
-		for _, path := range paths {
-			relative, err := filepath.Rel(realRoot, path)
-			if err != nil {
-				continue
-			}
-			parts := strings.Split(relative, string(filepath.Separator))
-			if len(parts) == 2 && parts[0] == name {
-				found = append(found, reconciler.Worktree{Path: filepath.Join(p.Root, name, parts[1]), Repository: name, Name: parts[1]})
+		found = append(found, foldersIn(top)...)
+	}
+	configured := slices.Collect(maps.Values(p.Folders))
+	listed := []string{}
+	for _, folder := range found {
+		if slices.Contains(configured, folder) {
+			continue
+		}
+		if p.IsByRealPath {
+			if real, err := filepath.EvalSymlinks(folder); err == nil {
+				folder = real
 			}
 		}
+		listed = append(listed, folder)
 	}
-	return found, nil
+	return listed, nil
 }
 
-// IsMade is whether the folder is a workspace the trierarch made: one `<root>/<repository>/<ship>` of a repository it has, a worktree
-// git knows or a clone holding its marker. Anything else under its root is not its to clear.
-func (p Places) IsMade(folder string) bool {
-	relative, err := filepath.Rel(p.Root, folder)
-	if err != nil || len(strings.Split(relative, string(filepath.Separator))) != 2 {
-		return false
+// foldersIn are the folders in the parent, never the trash or a link; none when it cannot be read.
+func foldersIn(parent string) []string {
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return nil
 	}
-	repository, ok := p.repositoryOf(folder)
-	if !ok {
-		return false
+	folders := []string{}
+	for _, entry := range entries {
+		if entry.IsDir() && entry.Name() != trash.FolderName {
+			folders = append(folders, filepath.Join(parent, entry.Name()))
+		}
 	}
-	if p.IsClone {
-		return isMarkedMade(folder)
+	return folders
+}
+
+// isUnderRoot is whether the folder is one a workspace could be under the root: one or two levels below it, never the root or the
+// trash. A root reached through a link counts by its real path too, as a container's workspace goes by its real one.
+func (p Places) isUnderRoot(folder string) bool {
+	roots := []string{p.Root}
+	if real, err := filepath.EvalSymlinks(p.Root); err == nil {
+		roots = append(roots, real)
 	}
+	return slices.ContainsFunc(roots, func(root string) bool {
+		relative, err := filepath.Rel(root, folder)
+		if err != nil {
+			return false
+		}
+		parts := strings.Split(relative, string(filepath.Separator))
+		return len(parts) <= 2 && !slices.ContainsFunc(parts, func(part string) bool { return part == "" || part == "." || part == ".." || part == trash.FolderName })
+	})
+}
+
+// isWorktreeOf is whether git lists the folder as a worktree of the repository; it lists real paths, so a root reached over a link is
+// compared by its real path too.
+func isWorktreeOf(repository string, folder string) bool {
 	paths, err := listed(repository)
 	if err != nil {
 		return false
@@ -374,16 +396,30 @@ func (p Places) IsMade(folder string) bool {
 	return slices.Contains(paths, folder) || slices.Contains(paths, real)
 }
 
-// RemoveWorktree removes a worktree or a clone under the root by its path, from the repository its path names; a folder of no repository it has is never removed.
+// RemoveWorktree removes a folder under the root, whatever it is (gap rule 2): a worktree of a repository it has by git, a clone into
+// the trash beside it, anything else, such as a plain clone, a worktree of another repository or a folder git does not know, as it is.
+// Never one outside the root, the root or its trash.
 func (p Places) RemoveWorktree(folder string) error {
+	if !p.isUnderRoot(folder) {
+		return fmt.Errorf("%s is not under %s, or is its trash: the trierarch removes only a folder under the root", folder, p.Root)
+	}
+	found, err := os.Lstat(folder)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !found.IsDir() {
+		return fmt.Errorf("%s is no folder: the trierarch removes only a folder under the root", folder)
+	}
 	if p.IsClone {
 		return p.removeClone(folder)
 	}
-	repository, ok := p.repositoryOf(folder)
-	if !ok {
-		return fmt.Errorf("%s is no worktree under %s: the trierarch removes only what it made", folder, p.Root)
+	if repository, ok := p.repositoryOf(folder); ok && isWorktreeOf(repository, folder) {
+		return Remove(repository, folder)
 	}
-	return Remove(repository, folder)
+	return os.RemoveAll(folder)
 }
 
 // Prune drops the git records of the repository's worktrees whose folder is gone, wherever the folder was; a worktree whose folder exists

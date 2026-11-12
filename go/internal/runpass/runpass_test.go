@@ -265,8 +265,6 @@ type aWorkspace struct {
 	failRemove bool
 	// failUnsaved makes reading what a worktree holds fail, as git failing does.
 	failUnsaved bool
-	// notMade are the worktrees under the root the trierarch did not make, or git no longer knows.
-	notMade map[string]bool
 	// pruned are the repositories whose worktree records were pruned, in order.
 	pruned []string
 	// failPrune are the repositories whose prune fails, as when git refuses.
@@ -286,16 +284,6 @@ func (w *aWorkspace) FoldersUnderRoot() ([]string, error) {
 	return slices.Sorted(maps.Keys(w.made)), nil
 }
 
-// Worktrees are the folders made, each `/worktrees/<repository>/<name>`.
-func (w *aWorkspace) Worktrees() ([]reconciler.Worktree, error) {
-	found := []reconciler.Worktree{}
-	for _, path := range slices.Sorted(maps.Keys(w.made)) {
-		parts := strings.Split(strings.TrimPrefix(path, "/worktrees/"), "/")
-		found = append(found, reconciler.Worktree{Path: path, Repository: parts[0], Name: parts[1]})
-	}
-	return found, nil
-}
-func (w *aWorkspace) IsMade(folder string) bool { return w.made[folder] && !w.notMade[folder] }
 func (w *aWorkspace) RemoveWorktree(folder string) error {
 	return w.Remove(reconciler.Entry{Folder: folder})
 }
@@ -413,7 +401,7 @@ func aRunPass(t *testing.T) *aPass {
 		fleet:     &aFleet{ships: map[string]fleet.Ship{scout: {Name: "scout", Status: "awaitingCrew"}}, inboxes: map[string]reconciler.Inbox{}},
 		sessions:  running,
 		harness:   &aHarness{sessions: running, identities: map[string]plugin.Identity{}, kept: map[string]bool{}, tokens: map[string]string{}, seen: map[string]reconciler.LaunchSeen{}, turns: map[string]string{}, holding: map[string]bool{}, sockets: sockets},
-		workspace: &aWorkspace{made: map[string]bool{}, unsaved: map[string][]string{}, notMade: map[string]bool{}},
+		workspace: &aWorkspace{made: map[string]bool{}, unsaved: map[string][]string{}},
 		checkouts: &someCheckouts{},
 		store:     &aStore{state: reconciler.Empty()},
 	}

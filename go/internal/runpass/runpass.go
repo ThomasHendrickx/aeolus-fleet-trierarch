@@ -93,15 +93,15 @@ type Harness interface {
 	NotOfferedReason() string
 }
 
-// Workspace makes and removes a ship's workspace, and lists the worktrees under the root.
+// Workspace makes and removes a ship's workspace, and lists every folder under the root.
 type Workspace interface {
 	Prepare(entry reconciler.Entry, shipName string) (string, error)
 	Unsaved(folder string) ([]string, error)
 	Remove(entry reconciler.Entry) error
-	Worktrees() ([]reconciler.Worktree, error)
-	// IsMade is whether the folder is a workspace the trierarch made, a worktree git knows or a clone holding its marker: anything else
-	// under its root is not its to clear.
-	IsMade(folder string) bool
+	// FoldersUnderRoot are every folder under the root a workspace could be, whatever made it (gap rule 2); never the trash, a link or a
+	// configured folder.
+	FoldersUnderRoot() ([]string, error)
+	// RemoveWorktree removes a folder under the root, whatever it is; never one outside it, the root or its trash.
 	RemoveWorktree(folder string) error
 	// Prune drops the git records of the configured repository's worktrees whose folder is gone; a worktree whose folder exists stays,
 	// wherever it is. It fails for a repository the configuration lacks.
@@ -303,9 +303,9 @@ func (p Pass) Run() error {
 	// Every action is carried out, whatever an earlier one did: a failed action is logged and the pass goes on from the saved state.
 	for _, action := range actions {
 		if next, err = p.carryOut(next, action); err != nil {
-			if action.Kind == reconciler.ClearOrphan {
-				// An orphan is no ship's: the next orphan is cleared all the same.
-				p.Log(fmt.Sprintf("The pass failed at %s: %v; %s", action.Kind, err, nextAfterFailure))
+			if action.Kind == reconciler.RemoveStray {
+				// A stray is no ship's: the next stray is removed all the same.
+				p.Log(fmt.Sprintf("Could not remove %s, a folder under the root no crewed ship uses: %v; %s", action.Folder, err, nextAfterFailure))
 				continue
 			}
 			if action.Kind == reconciler.Clear {
@@ -593,8 +593,8 @@ func (p Pass) carryOut(state reconciler.State, action reconciler.Action) (reconc
 			return state, nil
 		}
 		return state, p.handOver(entry, action)
-	case reconciler.ClearOrphan:
-		return p.clearOrphan(state, *action.Orphan, action.IsNew)
+	case reconciler.RemoveStray:
+		return state, p.removeStray(state, action.Folder)
 	case reconciler.Clear:
 		return p.clear(state, action)
 	}
@@ -930,92 +930,48 @@ func (p Pass) endWorkspace(entry reconciler.Entry) error {
 	return nil
 }
 
-// clearOrphan clears a worktree under the root no entry works in, as after its ship is retired (gap rule 2, #1041): what runs in it stops first, as it would be left running from a folder that is gone. Then it is removed, unless it holds unsaved work: that stays, held as an orphan, for a human. A failure leaves it held and tried again on the next pass.
-func (p Pass) clearOrphan(state reconciler.State, orphan reconciler.Worktree, isNew bool) (reconciler.State, error) {
-	// Checked first: nothing is stopped or removed in a folder the trierarch did not make, and it is no failure to leave one (it stays held, said once).
-	if !p.Workspace.IsMade(orphan.Path) {
-		if isNew {
-			p.Log(fmt.Sprintf("Will not clear the orphan %s: the trierarch made no worktree of it, or git no longer knows it; it removes only what it made", orphan.Path))
-		}
-		return state, nil
-	}
+// removeStray removes a folder under the root no crewed ship uses (gap rule 2): an orphan worktree, a session's own clone, a folder git
+// does not know. What runs in it stops first, as it would be left running from a folder that is gone; then it is removed, whatever it
+// holds, and what it held is logged. A failure leaves it to the next pass.
+func (p Pass) removeStray(state reconciler.State, folder string) error {
 	// An entry crewed earlier in this pass works here now: the reconcile saw it with no folder.
 	for _, entry := range state.Entries {
-		if entry.Folder == orphan.Path {
-			return p.dropOrphan(state, orphan)
+		if entry.Folder == folder || strings.HasPrefix(entry.Folder, folder+"/") {
+			return nil
 		}
 	}
-	stopped, err := p.FolderProcesses.StopIn(orphan.Path)
+	stopped, err := p.FolderProcesses.StopIn(folder)
 	if err != nil {
-		return state, err
+		return err
 	}
-	unsaved, err := p.Workspace.Unsaved(orphan.Path)
+	// What a folder git does not read held is not known; it goes all the same.
+	held, err := p.Workspace.Unsaved(folder)
 	if err != nil {
-		return state, err
+		held = nil
 	}
-	if len(unsaved) > 0 {
-		if isNew {
-			p.Log(fmt.Sprintf("Kept the orphan worktree %s, which holds unsaved work: %s", orphan.Path, strings.Join(unsaved, "; ")))
-		}
-		return state, nil
+	if err := p.Workspace.RemoveWorktree(folder); err != nil {
+		return err
 	}
-	if err := p.Workspace.RemoveWorktree(orphan.Path); err != nil {
-		return state, err
+	line := "Removed " + folder + ", a folder under the root no crewed ship uses"
+	if stopped == 1 {
+		line += ", after stopping 1 process in it"
+	} else if stopped > 1 {
+		line += fmt.Sprintf(", after stopping %d processes in it", stopped)
 	}
-	state, err = p.dropOrphan(state, orphan)
-	if err != nil {
-		return state, err
+	if len(held) > 0 {
+		line += ", discarding: " + strings.Join(held, "; ")
 	}
-	switch stopped {
-	case 0:
-		p.Log(fmt.Sprintf("Removed the orphan worktree %s", orphan.Path))
-	case 1:
-		p.Log(fmt.Sprintf("Removed the orphan worktree %s, after stopping 1 process in it", orphan.Path))
-	default:
-		p.Log(fmt.Sprintf("Removed the orphan worktree %s, after stopping %d processes in it", orphan.Path, stopped))
-	}
-	return state, nil
+	p.Log(line)
+	return nil
 }
 
-// clear carries out a clear request (decision 0032): the kept worktree it names is removed (only one under the root) and dropped from the state, saved, then the request is confirmed removed. With none kept, it is confirmed not-kept. A failed remove leaves both for the next pass; a lost confirmation is confirmed not-kept on the next one.
+// clear carries out a clear request (decision 0032): no worktree is kept, so it is confirmed not-kept.
 func (p Pass) clear(state reconciler.State, action reconciler.Action) (reconciler.State, error) {
-	if action.Kept == nil {
-		if err := p.Fleet.ConfirmCleared(action.ShipID, action.Repository, "not-kept"); err != nil {
-			return state, err
-		}
-		p.Log(fmt.Sprintf("%s: cleared, no kept %s worktree of it here", action.ShipID, action.Repository))
-		return state, nil
-	}
-	if err := p.Workspace.RemoveWorktree(action.Kept.Path); err != nil {
+	if err := p.Fleet.ConfirmCleared(action.ShipID, action.Repository, "not-kept"); err != nil {
 		return state, err
 	}
-	kept := []any{}
-	for _, each := range state.Kept {
-		if fields, ok := each.(map[string]any); !ok || fields["path"] != action.Kept.Path {
-			kept = append(kept, each)
-		}
-	}
-	state.Kept = kept
-	if err := p.Store.Save(state); err != nil {
-		return state, err
-	}
-	if err := p.Fleet.ConfirmCleared(action.ShipID, action.Repository, "removed"); err != nil {
-		return state, err
-	}
-	p.Log(fmt.Sprintf("%s: cleared, its kept worktree removed: %s", action.ShipID, action.Kept.Path))
+	p.Log(fmt.Sprintf("%s: cleared, no kept %s worktree of it here", action.ShipID, action.Repository))
 	return state, nil
-}
-
-// dropOrphan holds the orphan no more.
-func (p Pass) dropOrphan(state reconciler.State, orphan reconciler.Worktree) (reconciler.State, error) {
-	held := []any{}
-	for _, each := range state.Orphans {
-		if fields, ok := each.(map[string]any); !ok || fields["path"] != orphan.Path {
-			held = append(held, each)
-		}
-	}
-	state.Orphans = held
-	return state, p.Store.Save(state)
 }
 
 // modelRefused keeps the model a session refused as refused at its harness's version, so this machine offers it no more, and tells argo once per harness, version and model (#382).
@@ -1179,7 +1135,7 @@ func (p Pass) reconcile(state reconciler.State) (reconciler.State, []reconciler.
 	if err != nil {
 		return state, nil, err
 	}
-	if observed.Worktrees, err = p.Workspace.Worktrees(); err != nil {
+	if observed.Folders, err = p.Workspace.FoldersUnderRoot(); err != nil {
 		return state, nil, err
 	}
 	now := p.Now()

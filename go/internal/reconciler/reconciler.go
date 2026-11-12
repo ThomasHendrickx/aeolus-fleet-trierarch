@@ -197,28 +197,14 @@ type Observed struct {
 	StartProblems map[string]string
 	// WithoutIdentity are the ships whose entry would be watched or reported for, but whose folder holds no identity (#659, #664).
 	WithoutIdentity []string
-	// Worktrees are the worktrees under the trierarch's root.
-	Worktrees []Worktree
-}
-
-// Worktree is a worktree under the trierarch's root, `<root>/<repository>/<name>`.
-type Worktree struct {
-	Path       string
-	Repository string
-	Name       string
+	// Folders are every folder under the trierarch's root a workspace could be, whatever it is (gap rule 2).
+	Folders []string
 }
 
 // ClearRequest is a pending request to the trierarch's ship that it clear the worktree it kept for a ship in a repository (decision 0032).
 type ClearRequest struct {
 	ShipID     string
 	Repository string
-}
-
-// KeptWorktree is a worktree kept because it had changes, until a human clears it, as the state holds it.
-type KeptWorktree struct {
-	ShipID     string
-	Repository string
-	Path       string
 }
 
 // Context is what reconciling needs beside the state.
@@ -289,9 +275,9 @@ const (
 	IdentityGone ActionKind = "identityGone"
 	// Crashed tells the ship's owner its restart budget is spent (#397).
 	Crashed ActionKind = "crashed"
-	// ClearOrphan stops what runs in a worktree no entry works in, then removes it unless it holds unsaved work (#1041).
-	ClearOrphan ActionKind = "clearOrphan"
-	// Clear removes the kept worktree a clear request names, or, when none is kept, confirms it alone (decision 0032).
+	// RemoveStray stops what runs in a folder under the root no crewed ship uses, then removes it, whatever it is or holds (gap rule 2).
+	RemoveStray ActionKind = "removeStray"
+	// Clear confirms a clear request not-kept, as no worktree is kept (decision 0032).
 	Clear ActionKind = "clear"
 	// StoppedOffering tells argo the machine stopped offering itself after the starts of 3 ships failed in a row (#853).
 	StoppedOffering ActionKind = "stoppedOffering"
@@ -316,12 +302,10 @@ type Action struct {
 	Reason          string
 	// Entry is the entry that ends with a forget or a give back.
 	Entry *Entry
-	// Orphan is the worktree a clear orphan clears, new when the state did not hold it yet, so what is left of it is logged once.
-	Orphan *Worktree
-	IsNew  bool
-	// Repository and Kept are what a clear names: the repository of the ship's worktree, and the worktree kept for them, none when none is.
+	// Folder is the folder a remove stray removes.
+	Folder string
+	// Repository is what a clear names beside its ship: the repository of the ship's worktree.
 	Repository string
-	Kept       *KeptWorktree
 	// ShipName, Harness, Version, Model, Exits, FailedStart and Key are what a notice names: the ship, the harness at its version and the model it refused, how often the session exited and why its last start failed, and the key that makes the notice told once.
 	ShipName    string
 	Harness     string
@@ -486,94 +470,39 @@ func Reconcile(state State, context Context) (State, []Action) {
 	if isNewlyStopped {
 		actions = append(actions, Action{Kind: StoppedOffering, FailedStarts: failed})
 	}
-	next.Kept = keptOf(next, context.Observed)
-	actions = append(actions, clearsOf(next, context.Clears)...)
-	orphans, cleared := orphansOf(state, next, context)
-	next.Orphans = orphans
-	return next, append(actions, cleared...)
+	// No worktree is kept and no folder under the root stays an orphan: every folder no crewed ship uses goes (gap rule 2).
+	next.Kept, next.Orphans = []any{}, []any{}
+	actions = append(actions, clearsOf(context.Clears)...)
+	return next, append(actions, straysOf(state, next, context.Observed)...)
 }
 
-// keptOf are the kept worktrees still kept: one stays until it is gone from disk, as when a human removed it (#325). One an entry works in again is that entry's worktree, no longer kept, so a clear never removes it (decision 0032).
-func keptOf(next State, observed Observed) []any {
-	onDisk := map[string]bool{}
-	for _, worktree := range observed.Worktrees {
-		onDisk[worktree.Path] = true
-	}
-	inUse := map[string]bool{}
-	for _, entry := range next.Entries {
-		if entry.Folder != "" {
-			inUse[entry.Folder] = true
-		}
-	}
-	kept := []any{}
-	for _, each := range next.Kept {
-		if path := pathOf(each); onDisk[path] && !inUse[path] {
-			kept = append(kept, each)
-		}
-	}
-	return kept
-}
-
-// clearsOf are the clears of the clear requests: each removes only a worktree this trierarch kept for its ship and repository; for any other it keeps none (decision 0032).
-func clearsOf(next State, clears []ClearRequest) []Action {
+// clearsOf are the clears of the clear requests: no worktree is kept, so each is confirmed not-kept (decision 0032).
+func clearsOf(clears []ClearRequest) []Action {
 	actions := []Action{}
 	for _, request := range clears {
-		action := Action{Kind: Clear, ShipID: request.ShipID, Repository: request.Repository}
-		for _, each := range next.Kept {
-			if held := keptWorktreeOf(each); held.ShipID == request.ShipID && held.Repository == request.Repository {
-				action.Kept = &held
-				break
-			}
-		}
-		actions = append(actions, action)
+		actions = append(actions, Action{Kind: Clear, ShipID: request.ShipID, Repository: request.Repository})
 	}
 	return actions
 }
 
-// keptWorktreeOf is a kept worktree as the state holds it.
-func keptWorktreeOf(held any) KeptWorktree {
-	fields, _ := held.(map[string]any)
-	shipID, _ := fields["shipId"].(string)
-	repository, _ := fields["repository"].(string)
-	return KeptWorktree{ShipID: shipID, Repository: repository, Path: pathOf(held)}
-}
-
-// orphansOf are the worktrees under the root that no entry works in and the trierarch did not keep (gap rule 2, #1041), as the state holds them, and their clears. A forgotten entry's worktree is no orphan: its forget removes it (gap rule 1).
-func orphansOf(state State, next State, context Context) ([]any, []Action) {
-	known := map[string]bool{}
-	for _, entry := range next.Entries {
-		if entry.Folder != "" {
-			known[entry.Folder] = true
+// straysOf are the removals of the folders under the root that no entry works in or holds (gap rule 2), whatever made them. A
+// forgotten entry's folder is no stray: its forget removes it (gap rule 1).
+func straysOf(state State, next State, observed Observed) []Action {
+	inUse := []string{}
+	for _, entries := range []map[string]Entry{state.Entries, next.Entries} {
+		for _, entry := range entries {
+			if entry.Folder != "" {
+				inUse = append(inUse, entry.Folder)
+			}
 		}
 	}
-	for _, kept := range next.Kept {
-		known[pathOf(kept)] = true
-	}
-	reported := map[string]bool{}
-	for _, held := range state.Orphans {
-		reported[pathOf(held)] = true
-	}
-	orphans := []any{}
 	actions := []Action{}
-	for _, worktree := range context.Observed.Worktrees {
-		if known[worktree.Path] {
-			continue
+	for _, folder := range observed.Folders {
+		if !slices.ContainsFunc(inUse, func(used string) bool { return used == folder || strings.HasPrefix(used, folder+"/") }) {
+			actions = append(actions, Action{Kind: RemoveStray, Folder: folder})
 		}
-		orphans = append(orphans, map[string]any{"path": worktree.Path, "repository": worktree.Repository, "name": worktree.Name})
-		cleared := worktree
-		actions = append(actions, Action{Kind: ClearOrphan, Orphan: &cleared, IsNew: !reported[worktree.Path]})
 	}
-	return orphans, actions
-}
-
-// pathOf is the path of a kept worktree or an orphan as the state holds it; empty when it names none.
-func pathOf(held any) string {
-	fields, ok := held.(map[string]any)
-	if !ok {
-		return ""
-	}
-	path, _ := fields["path"].(string)
-	return path
+	return actions
 }
 
 func sortedKeys(entries map[string]Entry) []string {
