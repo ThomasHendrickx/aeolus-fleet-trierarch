@@ -127,3 +127,10 @@ Pick 1: the same skills at start for every harness, the purpose's "told the same
 2. Accepted and ignored, with a warning in the log.
 3. None of these.
 Pick 1: a setting that does nothing should not look as if it does.
+
+**Q8. How do a sub-repository's instructions and skills reach the session?** A build ship's product repository is a sub-repository, and its own CLAUDE.md or AGENTS.md calls its skills mandatory. Verified: started in the ship folder, Codex never loads `sub-repos/<repo>/AGENTS.md` nor `sub-repos/<repo>/.agents/skills`; Claude Code loads `sub-repos/<repo>/CLAUDE.md` and its `.claude/skills` only once the session reads or writes a file there. Each harness then follows its own path, which the agreed purpose ("told the same") rules out leaving as it is.
+1. Both: the root AGENTS.md names each sub-repository and says to read its AGENTS.md (its CLAUDE.md where it has none) before working in it; and the root's `.claude/skills` and `.agents/skills` hold one link per skill, to the main repository's skills and every sub-repository's, so both harnesses load them all at start. A skill name two repositories share keeps the main repository's, else the first sub-repository's in the request's order, and the root AGENTS.md names each one left out and where it is. This turns Q6 option 1 into links per skill rather than per folder, and the same test proves both.
+2. Words only: the root AGENTS.md names each sub-repository, its instruction file and its skills folder, and says to read them before working there; no links. Same for both harnesses, but a skill loads only when the session reads it as a file.
+3. Links only: per-skill links as in option 1, and nothing in the root file about the sub-repositories' instruction files.
+4. None of these.
+Pick 1: the skills a repository calls mandatory are loaded at start by both harnesses, and its instructions are read by the same words for both; a clash is said, never silent.
