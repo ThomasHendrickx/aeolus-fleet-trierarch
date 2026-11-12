@@ -501,6 +501,8 @@ export class InMemoryHarness implements HarnessPort {
   readonly launches: { shipId: ShipId; shipName: string; folder: string; workspace: TrierarchWorkspace; isFirstStart: boolean; firstPrompt?: string }[] = [];
   /** The launch id of each launch, in order (#490). */
   readonly launchIds: string[] = [];
+  /** The ship's folder each launch was given, in order; none for a ship crewed before the ship folders. */
+  readonly launchedShipFolders: { shipId: ShipId; shipFolder?: string }[] = [];
   /** The login each launch started its session on, in order (api keys K6). */
   readonly launchedLogins: { shipId: ShipId; login: Login }[] = [];
   /** The read-only checkouts each launch gave its session, in order (#1182). */
@@ -550,13 +552,14 @@ export class InMemoryHarness implements HarnessPort {
     return Promise.resolve();
   }
 
-  launch(session: { shipId: ShipId; shipName: string; folder: string; workspace: TrierarchWorkspace; checkouts: readonly Checkout[]; isFirstStart: boolean; launchId: string; login: Login; firstPrompt?: string }): Promise<void> {
+  launch(session: { shipId: ShipId; shipName: string; folder: string; shipFolder?: string; workspace: TrierarchWorkspace; checkouts: readonly Checkout[]; isFirstStart: boolean; launchId: string; login: Login; firstPrompt?: string }): Promise<void> {
     if (this.isFailingLaunch) {
       return Promise.reject(new Error(`the harness could not start ${session.shipId}`));
     }
     const { shipId, shipName, folder, workspace, checkouts, isFirstStart, launchId, firstPrompt } = session;
     this.launches.push({ shipId, shipName, folder, workspace, isFirstStart, ...(firstPrompt !== undefined && { firstPrompt }) });
     this.launchIds.push(launchId);
+    this.launchedShipFolders.push({ shipId, ...(session.shipFolder !== undefined && { shipFolder: session.shipFolder }) });
     this.launchedLogins.push({ shipId, login: session.login });
     this.launchedCheckouts.push({ shipId, checkouts });
     this.processes.sessions.set(shipId, 'running');
@@ -866,20 +869,27 @@ export class InMemoryShipSockets implements ShipSocketsPort {
   readonly openShips = new Set<ShipId>();
   /** Each open, in order, with how many launches of its ship there had been then. */
   readonly opens: { shipId: ShipId; launchesBefore: number }[] = [];
+  /** The ship's folder each socket was last opened and closed in, by ship; none for a ship crewed before the ship folders. */
+  readonly openedIn = new Map<ShipId, string | undefined>();
+  readonly closedIn = new Map<ShipId, string | undefined>();
   constructor(private readonly harnesses: readonly InMemoryHarness[]) {}
 
+  /** The socket of a ship crewed fresh, in the sockets folder of its ship's folder. */
   static pathOf(shipId: ShipId): string {
-    return `/home/thomas/.aeolus/trierarch/sockets/${shipId}/fleet.sock`;
+    return `${SHIPS_ROOT}/${shipId}/sockets/fleet.sock`;
   }
 
-  open(shipId: ShipId): Promise<string> {
+  open(shipId: ShipId, shipFolder?: string): Promise<string> {
     this.openShips.add(shipId);
+    this.openedIn.set(shipId, shipFolder);
     this.opens.push({ shipId, launchesBefore: this.harnesses.flatMap((harness) => harness.launches).filter((launch) => launch.shipId === shipId).length });
-    return Promise.resolve(InMemoryShipSockets.pathOf(shipId));
+    // One crewed before the ship folders has it under the sockets folder.
+    return Promise.resolve(shipFolder === undefined ? `/home/thomas/.aeolus/trierarch/sockets/${shipId}/fleet.sock` : `${shipFolder}/sockets/fleet.sock`);
   }
 
-  close(shipId: ShipId): Promise<void> {
+  close(shipId: ShipId, shipFolder?: string): Promise<void> {
     this.openShips.delete(shipId);
+    this.closedIn.set(shipId, shipFolder);
     return Promise.resolve();
   }
 

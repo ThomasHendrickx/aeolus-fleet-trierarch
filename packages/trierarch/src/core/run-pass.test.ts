@@ -2,7 +2,7 @@ import type { ShipId } from '@aeolus-fleet/common';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { aTrierarch, aTrierarchOnLogins, CONFIGURATION, crewSettings, InMemoryCheckouts, InMemoryShipSockets, newId, NOTES_FOLDER, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
+import { aTrierarch, aTrierarchOnLogins, CONFIGURATION, crewSettings, InMemoryCheckouts, InMemoryShipSockets, newId, NOTES_FOLDER, SHIPS_ROOT, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
 import { putEntry } from './entry.js';
 import type { LaunchSeen, LeftInTrash } from './ports.js';
 import { ACTIVITY_INTERVAL_SECONDS } from './run-pass.js';
@@ -3082,5 +3082,117 @@ describe('a worktree ends with its session (docs/design/worktrees-end-with-their
     expect(trierarch.state.current().entries[shipId]?.state).toBe('crashed');
     expect(trierarch.fleet.shipOf(shipId).status).toBe('crewed');
     expect(trierarch.workspace.folders.get(SCOUT_FOLDER)?.unsaved).toEqual(['?? draft.md']);
+  });
+});
+
+describe("a ship's folder, ships/<shipId>, which holds every file of the ship (#346)", () => {
+  const shipFolderOf = (shipId: ShipId): string => `${SHIPS_ROOT}/${shipId}`;
+
+  /** A crewed ship as a trierarch before the ship folders crewed it: no ship's folder in its entry, its socket closed as the trierarch stopped. */
+  async function aShipCrewedBefore(trierarch: Trierarch, settings: Record<string, unknown> = {}): Promise<ShipId> {
+    const shipId = await aCrewedShip(trierarch, settings);
+    const entry = trierarch.state.current().entries[shipId];
+    if (entry !== undefined) {
+      const { shipFolder, ...before } = entry;
+      void shipFolder;
+      await trierarch.state.save(putEntry(trierarch.state.current(), before));
+    }
+    trierarch.sockets.stopTrierarch();
+    return shipId;
+  }
+
+  it('is kept in the entry of a ship crewed fresh, its workspace made for it, its socket opened and its session started in it', async () => {
+    const trierarch = aTrierarch();
+
+    const shipId = await aCrewedShip(trierarch);
+
+    expect(trierarch.state.current().entries[shipId]?.shipFolder).toBe(shipFolderOf(shipId));
+    expect(trierarch.workspace.folders.get(SCOUT_FOLDER)?.shipFolder).toBe(shipFolderOf(shipId));
+    expect([trierarch.sockets.openedIn.get(shipId), trierarch.harness.identities.get(SCOUT_FOLDER)?.socket]).toEqual([shipFolderOf(shipId), `${shipFolderOf(shipId)}/sockets/fleet.sock`]);
+    expect(trierarch.harness.launchedShipFolders).toEqual([{ shipId, shipFolder: shipFolderOf(shipId) }]);
+  });
+
+  it('goes whole when its request is removed, after its session stopped and its usage was sent', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.fleet.removeRequest(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.workspace.removedShipFolders).toEqual([shipFolderOf(shipId)]);
+    expect([trierarch.workspace.folders.has(SCOUT_FOLDER), trierarch.workspace.folders.has(shipFolderOf(shipId)), trierarch.processes.sessions.has(shipId)]).toEqual([false, false, false]);
+    expect(trierarch.sockets.closedIn.get(shipId)).toBe(shipFolderOf(shipId));
+  });
+
+  it('of a ship in a configured folder goes when its request is removed, and the configured folder stays', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch, { workspace: { kind: 'folder', name: 'notes' } });
+    trierarch.fleet.removeRequest(shipId);
+
+    await trierarch.pass();
+
+    expect([trierarch.workspace.removedShipFolders, trierarch.workspace.folders.has(NOTES_FOLDER)]).toEqual([[shipFolderOf(shipId)], true]);
+  });
+
+  it('is no stray while its ship has an entry, with every folder in it, wherever its workspace is', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch, { workspace: { kind: 'folder', name: 'notes' } });
+    trierarch.workspace.folders.set(`${shipFolderOf(shipId)}/sockets`, { hasChanges: false, unsaved: [] });
+
+    await trierarch.pass();
+
+    expect([trierarch.workspace.folders.has(shipFolderOf(shipId)), trierarch.workspace.folders.has(`${shipFolderOf(shipId)}/sockets`), trierarch.workspace.removedShipFolders]).toEqual([true, true, []]);
+  });
+
+  it('of a ship no longer crewed here is a stray, and goes', async () => {
+    const trierarch = aTrierarch();
+    const gone = shipFolderOf(newId('ship'));
+    trierarch.workspace.folders.set(gone, { hasChanges: false, unsaved: [] });
+
+    await trierarch.pass();
+
+    expect(trierarch.workspace.folders.has(gone)).toBe(false);
+  });
+
+  it('stays the ship\'s as it is crewed again with a new settings version', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.fleet.requestAgain(shipId, crewSettings({ options: { model: 'sonnet' } }));
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ settingsVersion: 2, shipFolder: shipFolderOf(shipId) });
+    expect(trierarch.sockets.openedIn.get(shipId)).toBe(shipFolderOf(shipId));
+  });
+
+  it('is none for a ship crewed before the ship folders, which keeps its socket where it was across a pass', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aShipCrewedBefore(trierarch);
+
+    await trierarch.pass();
+
+    expect([trierarch.sockets.openShips.has(shipId), trierarch.sockets.openedIn.get(shipId), trierarch.state.current().entries[shipId]?.shipFolder, trierarch.state.current().entries[shipId]?.folder]).toEqual([true, undefined, undefined, SCOUT_FOLDER]);
+  });
+
+  it('is none for a ship crewed before the ship folders, which is released on its own paths, its socket closed where it was', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aShipCrewedBefore(trierarch);
+    trierarch.fleet.removeRequest(shipId);
+
+    await trierarch.pass();
+
+    expect([trierarch.workspace.folders.has(SCOUT_FOLDER), trierarch.workspace.removedShipFolders]).toEqual([false, []]);
+    expect([trierarch.sockets.closedIn.has(shipId), trierarch.sockets.closedIn.get(shipId)]).toEqual([true, undefined]);
+  });
+
+  it('is made for a ship crewed before the ship folders as it is crewed again after a release elsewhere', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aShipCrewedBefore(trierarch);
+    trierarch.fleet.releaseElsewhere(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]?.shipFolder).toBe(shipFolderOf(shipId));
+    expect(trierarch.sockets.openedIn.get(shipId)).toBe(shipFolderOf(shipId));
   });
 });
