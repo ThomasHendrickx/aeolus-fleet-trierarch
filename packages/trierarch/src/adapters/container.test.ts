@@ -84,7 +84,7 @@ describe('the session runtime contract, on rootless Podman under holds', { timeo
 
   beforeAll(async () => {
     if (podman.isUsable) {
-      image = await buildTestSessionImage(`localhost/aeolus-trierarch-test:${newId('ship').slice(-8)}`, { run: inject('testRun') });
+      image = await buildTestSessionImage(`localhost/aeolus-trierarch-test:${newId('ship').slice(-8)}`, { run: inject('trierarchTestRun') });
     }
   }, 60_000);
 

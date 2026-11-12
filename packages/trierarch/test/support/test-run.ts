@@ -15,7 +15,7 @@ export const TEST_RUN_LABEL = 'aeolus.trierarch.test-run';
 declare module 'vitest' {
   export interface ProvidedContext {
     /** This run's value of the test run label. */
-    testRun: string;
+    trierarchTestRun: string;
   }
 }
 

@@ -12,7 +12,7 @@ import { removeEarlierRuns, removeRun, runOf } from './test-run.js';
  */
 export async function setup(project: TestProject): Promise<(() => Promise<void>) | undefined> {
   const run = runOf(process.pid);
-  project.provide('testRun', run);
+  project.provide('trierarchTestRun', run);
   const podman = await rootlessPodman({ platform: process.platform, info: () => runCommand('podman', { args: ['info', '--format', '{{.Host.Security.Rootless}}'] }) });
   if (!podman.isUsable) {
     return undefined;

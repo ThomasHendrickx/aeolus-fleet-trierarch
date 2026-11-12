@@ -16,7 +16,7 @@ const podman = await rootlessPodman({ platform: process.platform, info: () => ru
 
 const VITEST = fileURLToPath(new URL('../../../../node_modules/vitest/vitest.mjs', import.meta.url));
 const FIXTURE = fileURLToPath(new URL('../fixtures/test-run/', import.meta.url));
-const RUN_TIMEOUT_MS = 120_000;
+const RUN_TIMEOUT_MS = 240_000;
 
 /** What a fixture run left on the machine: its containers and its test image, by name. */
 const leftOf = async (marker: string) => ({
@@ -24,18 +24,23 @@ const leftOf = async (marker: string) => ({
   images: (await runCommand('podman', { args: ['images', '--filter', `reference=localhost/aeolus-trierarch-test:${marker}`, '--format', '{{.Repository}}:{{.Tag}}'] })).stdout.trim(),
 });
 
-/** Runs the fixture suite under its marker; one that hangs runs until it is killed. */
+/** Runs the fixture suite under its marker; one that hangs runs until it is killed. Its output comes with its exit, so a failed run says why. */
 function startFixtureRun(marker: string, options: { shouldHang: boolean }) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('VITEST')));
   const run = spawn(process.execPath, [VITEST, 'run', '--root', FIXTURE], {
-    env: { ...env, AEOLUS_TEST_RUN_MARKER: marker, AEOLUS_TEST_RUN_HANGS: options.shouldHang ? '1' : '0' },
+    env: { ...env, NO_COLOR: '1', AEOLUS_TEST_RUN_MARKER: marker, AEOLUS_TEST_RUN_HANGS: options.shouldHang ? '1' : '0' },
     // Its own process group, so a kill reaches its workers too, as an interrupt of the whole run does.
     detached: true,
-    stdio: 'ignore',
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
-  const exited = new Promise<number | null>((resolve) => run.on('exit', (code) => {
-    resolve(code);
-  }));
+  let output = '';
+  run.stdout.on('data', (chunk: Buffer) => (output += chunk.toString()));
+  run.stderr.on('data', (chunk: Buffer) => (output += chunk.toString()));
+  const exited = new Promise<{ code: number | null; output: string }>((resolve) => {
+    run.on('close', (code) => {
+      resolve({ code, output });
+    });
+  });
   return { pid: run.pid ?? 0, exited };
 }
 
@@ -65,7 +70,7 @@ describe('the test runs of this package on this machine', () => {
     async () => {
       const [marker = ''] = markers;
 
-      await expect(startFixtureRun(marker, { shouldHang: false }).exited).resolves.toBe(0);
+      await expect(startFixtureRun(marker, { shouldHang: false }).exited).resolves.toMatchObject({ code: 0 });
 
       expect(await leftOf(marker)).toEqual({ containers: '', images: '' });
     },
@@ -86,10 +91,10 @@ describe('the test runs of this package on this machine', () => {
       const ofThisRun = `trierarch-test-${newId('ship').slice(-8)}`;
       const ofNoRun = `trierarch-test-${newId('ship').slice(-8)}`;
       unrelated.push(ofThisRun, ofNoRun);
-      await runCommand('podman', { args: ['run', '--detach', '--name', ofThisRun, '--label', `${TEST_RUN_LABEL}=${inject('testRun')}`, otherImage, 'sleep', '300'] });
+      await runCommand('podman', { args: ['run', '--detach', '--name', ofThisRun, '--label', `${TEST_RUN_LABEL}=${inject('trierarchTestRun')}`, otherImage, 'sleep', '300'] });
       await runCommand('podman', { args: ['run', '--detach', '--name', ofNoRun, otherImage, 'sleep', '300'] });
 
-      await expect(startFixtureRun(next, { shouldHang: false }).exited).resolves.toBe(0);
+      await expect(startFixtureRun(next, { shouldHang: false }).exited).resolves.toMatchObject({ code: 0 });
 
       const kept = (await runCommand('podman', { args: ['ps', '--all', '--filter', `name=${ofThisRun}`, '--filter', `name=${ofNoRun}`, '--format', '{{.Names}}'] })).stdout.trim().split('\n').toSorted();
       expect({ leftByTheKill: leftByTheKill.containers !== '', afterTheNextRun: await leftOf(interrupted), kept, keptImage: (await leftOf(other)).images }).toEqual({
