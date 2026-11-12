@@ -1405,6 +1405,15 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.workspace.pruned).toEqual(['aeolus-fleet', 'hemma', 'aeolus-fleet', 'hemma']);
   });
 
+  it('prunes the git worktree records of each configured repository on a pass that fails before its actions, as when the fleet cannot be reached (#91)', async () => {
+    const trierarch = aTrierarch({ ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: '/repos/aeolus-fleet' }, hemma: { path: '/repos/hemma' } } });
+    trierarch.fleet.isUnreachable = true;
+
+    await trierarch.pass();
+
+    expect(trierarch.workspace.pruned).toEqual(['aeolus-fleet', 'hemma']);
+  });
+
   it('logs a repository whose prune fails, and prunes the others without failing the pass (#91)', async () => {
     const trierarch = aTrierarch({ ...CONFIGURATION, repositories: { 'aeolus-fleet': { path: '/repos/aeolus-fleet' }, hemma: { path: '/repos/hemma' } } });
     trierarch.workspace.failingPrune.add('aeolus-fleet');
