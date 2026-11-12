@@ -3290,3 +3290,23 @@ func TestAShipSavedBeforeTheShipFolderLayoutIsCrewedAgainInAFreshShipFolderUnder
 		}
 	}
 }
+
+func TestAShipSavedBeforeTheShipFolderLayoutWithANewSettingsVersionHasItsOldWorktreeRemovedWhatItHeldLogged(t *testing.T) {
+	pass := aRunPass(t)
+	worktree := pass.crewedInTheOldLayout(t)
+	again := aRequest("running")
+	again.SettingsVersion = 2
+	pass.fleet.requests = []reconciler.Request{again}
+
+	pass.run(t)
+
+	if !slices.Contains(pass.workspace.removed, worktree) {
+		t.Errorf("removed %q, want its old worktree", pass.workspace.removed)
+	}
+	if !slices.Contains(pass.logged, "Discarded from the worktree of scout ("+scout+"), "+worktree+": ?? notes.md") {
+		t.Errorf("logged %q, want what its old worktree held", pass.logged)
+	}
+	if entry := pass.store.state.Entries[scout]; entry.IsOldLayout || entry.Folder != scoutFolder || entry.SettingsVersion != 2 {
+		t.Errorf("entry %+v, want crewed with settings version 2 in a fresh ship folder", entry)
+	}
+}

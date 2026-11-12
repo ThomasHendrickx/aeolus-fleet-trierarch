@@ -275,6 +275,22 @@ func TestAShipSavedBeforeTheShipFolderLayoutIsStoppedAndCrewedAgain(t *testing.T
 	}
 }
 
+func TestANewSettingsVersionOfAShipSavedBeforeTheShipFolderLayoutKeepsItOfTheOldLayout(t *testing.T) {
+	crewed := anEntry(scout, "running")
+	crewed.IsOldLayout = true
+	state := Empty()
+	state.Entries[scout] = crewed
+	request := aRequest(scout)
+	request.SettingsVersion = 2
+
+	next, actions := Reconcile(state, aContext(request))
+
+	assertActions(t, actions, Action{Kind: Stop, ShipID: scout}, Action{Kind: Crew, ShipID: scout, IsResumed: true})
+	if entry := next.Entries[scout]; entry.SettingsVersion != 2 || !entry.IsOldLayout {
+		t.Errorf("entry: %+v, want settings version 2, still of the old layout", entry)
+	}
+}
+
 func TestARequestWithoutAHarnessTakesTheFirstOffered(t *testing.T) {
 	request := aRequest(scout)
 	request.Settings.Harness = ""

@@ -3410,4 +3410,16 @@ describe('a ship crewed before the ship folder layout (decision 0013)', () => {
     expect(trierarch.workspace.folders.has(worktree)).toBe(false);
     expect(trierarch.logger.warnings).toContain(`Discarded from the worktree of scout (${shipId}), ${worktree}: ?? notes.md`);
   });
+
+  it('has its old worktree removed, what it held logged, when a new settings version comes with it', async () => {
+    const trierarch = aTrierarch();
+    const { shipId, worktree } = await aShipCrewedBefore(trierarch);
+
+    trierarch.fleet.requestAgain(shipId, crewSettings());
+    await trierarch.pass();
+
+    expect(trierarch.workspace.folders.has(worktree)).toBe(false);
+    expect(trierarch.logger.warnings).toContain(`Discarded from the worktree of scout (${shipId}), ${worktree}: ?? notes.md`);
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ folder: scoutFolder(shipId), settingsVersion: 2 });
+  });
 });
