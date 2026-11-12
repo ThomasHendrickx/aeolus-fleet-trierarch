@@ -6,7 +6,7 @@ import { MODEL_OPTION } from './detected-options.js';
 import { countStart, PROBE_AFTER_MINUTES, withConfiguration, type StartOutcome } from './failed-starts.js';
 import { loginOf, startedOn, type KeyState, type Login, type Logins } from './login.js';
 import type { Checkout, CheckoutsPort, FleetPort, FolderProcessesPort, HarnessPort, HarnessSession, LaunchSeen, LeftInTrash, LoggedAction, Logger, ModelLoginsPort, SessionActivity, SessionRuntime, ShipSocketsPort, StatePort, TrashPort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
-import { HOLDS_IDENTITY, reconcile, SHIP_FOLDER_KEPT, writtenStatusOf, type Action, type Observed } from './reconciler.js';
+import { HOLDS_IDENTITY, keepsShipFolder, reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
 import type { RefuseModel } from './refuse-model.js';
 import type { SendReleasedUsage } from './send-usage.js';
 import type { Clock } from './shared/clock.js';
@@ -364,7 +364,7 @@ async function observe(state: TrierarchState, at: { deps: RunPassDeps; missingPl
   const startProblems: Record<string, string> = {};
   const shipFoldersGone: ShipId[] = [];
   for (const entry of Object.values(state.entries)) {
-    if (entry.shipFolder !== undefined && SHIP_FOLDER_KEPT.has(entry.state) && !(await deps.workspace.hasShipFolder(entry.shipFolder))) {
+    if (entry.shipFolder !== undefined && keepsShipFolder(entry) && !(await deps.workspace.hasShipFolder(entry.shipFolder))) {
       shipFoldersGone.push(entry.shipId);
     }
     const session = sessions.find((each) => each.shipId === entry.shipId);

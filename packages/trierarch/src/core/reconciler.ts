@@ -109,8 +109,13 @@ const CRASHED_NOTE = 'blocked: session crashed, restart budget spent';
 /** The statuses the reconciler writes; crewing and running at the first crew are the crew's own to write. */
 const WRITTEN: ReadonlySet<Entry['state']> = new Set(['running', 'restarting', 'crashed']);
 
-/** The states of a crew whose ship's folder is looked at each pass: one gone has the ship crewed again in a fresh one. */
-export const SHIP_FOLDER_KEPT: ReadonlySet<EntryState> = new Set(['running', 'restarting', 'crashed']);
+/** The states of a crew whose ship's folder is looked at each pass, a crewing one once its session started: one gone has the ship crewed again in a fresh one. */
+const SHIP_FOLDER_KEPT: ReadonlySet<EntryState> = new Set(['running', 'restarting', 'crashed']);
+
+/** Whether the entry's crew keeps its ship's folder: running, restarting or crashed, or crewing once its session started. */
+export function keepsShipFolder(entry: Entry): boolean {
+  return entry.shipFolder !== undefined && (SHIP_FOLDER_KEPT.has(entry.state) || (entry.state === 'crewing' && entry.launchedAt !== undefined));
+}
 
 /** The states whose folder holds the ship's identity: a crewing one has none until it registers (#664). */
 export const HOLDS_IDENTITY: ReadonlySet<Entry['state']> = new Set(['running', 'restarting', 'crashed']);
@@ -335,9 +340,9 @@ function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean; i
     // Released elsewhere (row 11): its session stops and the ship is crewed again, in a fresh worktree as a first start, with its first prompt and no resume (#475). A final crew stays final in the fleet (#469).
     return { entry: { ...withState(entry, { state: 'crewing', now }), isReleasedElsewhere: true, hasStarted: false }, actions: [{ kind: 'stop', shipId: entry.shipId }, { kind: 'crew', shipId: entry.shipId, isResumed: false }], starts: 0 };
   }
-  if (SHIP_FOLDER_KEPT.has(entry.state) && observed.shipFoldersGone?.includes(entry.shipId) === true) {
+  if (keepsShipFolder(entry) && observed.shipFoldersGone?.includes(entry.shipId) === true) {
     // Its ship's folder is gone, as when ships/ was removed by hand: its session stops and the ship is crewed again in a fresh one, as a first start.
-    return { entry: { ...withState(entry, { state: 'crewing', now }), isShipFolderGone: true, hasStarted: false }, actions: [{ kind: 'stop', shipId: entry.shipId }, { kind: 'crew', shipId: entry.shipId, isResumed: true }], starts: 0 };
+    return { entry: { ...withState(withoutLaunch(entry), { state: 'crewing', now }), isShipFolderGone: true, hasStarted: false }, actions: [{ kind: 'stop', shipId: entry.shipId }, { kind: 'crew', shipId: entry.shipId, isResumed: true }], starts: 0 };
   }
   if ((entry.state === 'running' || entry.state === 'restarting') && entry.crewToken === undefined) {
     // Crewed by a trierarch before the crew token stayed in its state (decision 0026): its session stops and the ship is crewed again in its folder.
