@@ -341,8 +341,8 @@ function stepOf(entry: Entry, context: ReconcileContext & { canStart: boolean; i
     return { entry: { ...withState(entry, { state: 'crewing', now }), isReleasedElsewhere: true, hasStarted: false }, actions: [{ kind: 'stop', shipId: entry.shipId }, { kind: 'crew', shipId: entry.shipId, isResumed: false }], starts: 0 };
   }
   if (keepsShipFolder(entry) && observed.shipFoldersGone?.includes(entry.shipId) === true) {
-    // Its ship's folder is gone, as when ships/ was removed by hand: its session stops and the ship is crewed again in a fresh one, as a first start.
-    return { entry: { ...withState(withoutLaunch(entry), { state: 'crewing', now }), isShipFolderGone: true, hasStarted: false }, actions: [{ kind: 'stop', shipId: entry.shipId }, { kind: 'crew', shipId: entry.shipId, isResumed: true }], starts: 0 };
+    // Its files went with its folder, as when ships/ was removed by hand: it is crewed again in a fresh one as a first start, under the lease it holds.
+    return { entry: { ...withState(entry, { state: 'crewing', now }), isShipFolderGone: true, hasStarted: false }, actions: [{ kind: 'stop', shipId: entry.shipId }, { kind: 'crew', shipId: entry.shipId, isResumed: false }], starts: 0 };
   }
   if ((entry.state === 'running' || entry.state === 'restarting') && entry.crewToken === undefined) {
     // Crewed by a trierarch before the crew token stayed in its state (decision 0026): its session stops and the ship is crewed again in its folder.

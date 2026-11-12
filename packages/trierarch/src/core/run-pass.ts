@@ -558,6 +558,10 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   if (harness === undefined) {
     return state;
   }
+  const { crewToken: heldToken } = entry;
+  if (entry.isShipFolderGone === true && heldToken !== undefined) {
+    return crewInAFreshShipFolder(state, { entry, harness, crewToken: heldToken, deps });
+  }
   const ship = await deps.fleet.ship(entry.shipId);
   if (ship.kind === 'notFound' || ship.kind === 'retired') {
     return forget(state, { entry, deps });
@@ -572,11 +576,6 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
     await deps.fleet.release(entry.shipId);
   }
   let crewing = entry;
-  if (entry.isShipFolderGone === true) {
-    crewing = await freshAfterShipFolderGone({ entry, deps });
-    state = putEntry(state, crewing);
-    await deps.state.save(state);
-  }
   if (entry.isReleasedElsewhere === true) {
     crewing = await freshAfterReleaseElsewhere({ entry, deps });
     state = putEntry(state, crewing);
@@ -672,20 +671,59 @@ async function freshAfterReleaseElsewhere(at: EntryAt): Promise<Entry> {
 
 /**
  * A ship whose ship's folder is gone, as when ships/ was removed by hand, is
- * crewed again in a fresh one: its session stops, its identity and socket go,
- * and the entry is crewed fresh, telling nobody. Nothing of its workspace is
- * left to remove or read, its usage since the last send among it. Answers the
- * entry it is crewed with.
+ * crewed again in a fresh one under the lease it holds: core removes the crew
+ * request on a release, so the ship is never released and registered again.
+ * Its session stops and its identity and socket go; then its workspace is made
+ * in a new ship's folder, its identity written with the crew token its state
+ * keeps, and its session started as a first start, telling nobody. Its usage
+ * since the last send went with the folder.
  */
-async function freshAfterShipFolderGone(at: EntryAt): Promise<Entry> {
-  const { entry, deps } = at;
+async function crewInAFreshShipFolder(state: TrierarchState, at: EntryAt & { harness: HarnessPort; crewToken: string }): Promise<TrierarchState> {
+  const { entry, harness, crewToken, deps } = at;
   await deps.processes.stop(entry.shipId);
-  if (entry.folder !== undefined) {
+  if (entry.folder === undefined) {
+    await deps.sockets.close(entry.shipId, entry.shipFolder);
+    await deps.checkouts.remove(entry.shipId);
+  } else {
     await removeIdentity({ entry, deps, folder: entry.folder });
   }
-  log(deps, { ...(entry.shipName !== undefined && { shipName: entry.shipName }), shipId: entry.shipId, action: 'crew', outcome: "its ship's folder is gone, so it is crewed again in a fresh one" });
-  const { isShipFolderGone, folder, shipFolder, ...fresh } = entry;
-  return isShipFolderGone === undefined && folder === undefined && shipFolder === undefined ? entry : fresh;
+  const shipName = entry.shipName ?? entry.shipId;
+  log(deps, { ...about(state, { shipId: entry.shipId, action: 'crew' }), outcome: `its ship's folder ${entry.shipFolder ?? ''} is gone, so it is crewed again in a fresh one` });
+  const shipFolder = await deps.workspace.shipFolderOf(entry.shipId);
+  const { folder } = await deps.workspace.prepare({ shipId: entry.shipId, shipName, workspace: entry.workspace, shipFolder });
+  const { isShipFolderGone, ...fresh } = entry;
+  const crewing: Entry = isShipFolderGone === undefined ? { ...entry, folder, shipFolder } : { ...fresh, folder, shipFolder };
+  state = putEntry(state, crewing);
+  await deps.state.save(state);
+  const socket = await deps.sockets.open(entry.shipId, shipFolder);
+  const checkouts = await checkoutsOf(crewing, deps);
+  await harness.prepareIdentity({
+    folder,
+    shipFolder,
+    identity: { fleetUrl: deps.fleet.url, shipId: entry.shipId, shipName, socket, ...(entry.squadron !== undefined && { squadron: entry.squadron }), ...(checkouts.length > 0 && { checkouts }) },
+    crewToken,
+  });
+  const login = sessionLogin(crewing, deps);
+  const launchId = deps.newLaunchId();
+  await harness.launch({
+    shipId: entry.shipId,
+    shipName,
+    folder,
+    shipFolder,
+    workspace: entry.workspace,
+    checkouts,
+    harness: entry.harness,
+    options: entry.options,
+    isFirstStart: true,
+    launchId,
+    login,
+    ...(entry.firstPrompt !== undefined && { firstPrompt: entry.firstPrompt }),
+  });
+  const launchedAt = deps.clock.now().toISOString();
+  const next = putEntry(state, { ...crewing, hasStarted: true, launchedAt, launchId, ...startedOn(crewing, { login, at: launchedAt }) });
+  await deps.state.save(next);
+  log(deps, { shipId: entry.shipId, shipName, action: 'crew', outcome: `crewed again, ${entry.harness} started in ${folder}` });
+  return next;
 }
 
 /**
