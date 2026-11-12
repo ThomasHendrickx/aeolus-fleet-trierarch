@@ -276,7 +276,9 @@ func (h *aHarness) NotOfferedReason() string { return h.notOffered }
 type aWorkspace struct {
 	made map[string]bool
 	// under are folders under the root besides the workspaces made, as a ship's folder holding its socket.
-	under   []string
+	under []string
+	// gone are the ships' folders removed by hand.
+	gone map[string]bool
 	unsaved map[string][]string
 	removed []string
 	// failRemove makes a removal fail, as a worktree that cannot be removed does.
@@ -354,6 +356,9 @@ func (w *aWorkspace) Prepare(entry reconciler.Entry, shipName string) (string, e
 
 // ShipFolderOf is the ship's folder under the place of ships/.
 func (w *aWorkspace) ShipFolderOf(shipID string) string { return "/ships/" + shipID }
+
+// HasShipFolder is whether the ship's folder is there: every one is, but those removed by hand.
+func (w *aWorkspace) HasShipFolder(folder string) bool { return !w.gone[folder] }
 func (w *aWorkspace) Unsaved(folder string) ([]string, error) {
 	if w.failUnsaved {
 		return nil, errors.New("git status failed in " + folder)
@@ -3041,5 +3046,27 @@ func TestAShipsFolderIsNoStrayWhileItsShipIsCrewedWithItsWorkspaceElsewhere(t *t
 
 	if len(pass.workspace.removed) != 0 {
 		t.Fatalf("removed %q", pass.workspace.removed)
+	}
+}
+
+func TestAShipWhoseShipsFolderWasRemovedIsReleasedAndCrewedAgainInAFreshOneAsAFirstStart(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	pass.harness.launches = nil
+	pass.workspace.gone = map[string]bool{"/ships/" + scout: true}
+
+	pass.run(t)
+
+	if !slices.Contains(pass.fleet.calls, "release "+scout) || !slices.ContainsFunc(pass.fleet.calls, func(call string) bool { return strings.HasPrefix(call, "register "+scout) }) {
+		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+	if len(pass.harness.launches) != 1 || !pass.harness.launches[0].isFirstStart {
+		t.Fatalf("launches %+v", pass.harness.launches)
+	}
+	if entry := pass.store.state.Entries[scout]; entry.IsShipFolderGone || entry.ShipFolder != "/ships/"+scout || entry.State != "crewing" {
+		t.Fatalf("entry %+v", entry)
+	}
+	if len(pass.fleet.told) != 0 {
+		t.Fatalf("told %+v", pass.fleet.told)
 	}
 }

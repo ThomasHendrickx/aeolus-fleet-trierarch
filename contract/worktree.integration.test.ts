@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -251,6 +251,23 @@ describe("a ship's folder", () => {
 
     await expect.poll(() => existsSync(shipFolderOf(scout)), { timeout: CLEARED_WITHIN_MS }).toBe(false);
     expect(isRunning(pid)).toBe(false);
+  });
+});
+
+describe('ships/ removed by hand', () => {
+  it('has every ship crewed here crewed again in a fresh ship folder, as a first start', async () => {
+    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
+    const pid = sessionOf(machine, 'scout').starts()[0]?.pid ?? 0;
+
+    rmSync(join(machine.trierarchHome, 'ships'), { recursive: true, force: true });
+
+    await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CLEARED_WITHIN_MS }).toBe(1);
+    expect(sessionOf(machine, 'scout').worktree).toBe(join(shipFolderOf(scout), 'worktree'));
+    expect(sessionOf(machine, 'scout').starts()[0]?.pid).not.toBe(pid);
+    expect(isRunning(pid)).toBe(false);
+    expect(lstatSync(socketOf(scout)).isSocket()).toBe(true);
+    await expect(fleet.toldByTrierarch()).resolves.toEqual([]);
   });
 });
 

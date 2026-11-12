@@ -1022,3 +1022,23 @@ func TestAShipsFolderAndEveryFolderInItAreNoStrayWhileItsShipHasAnEntryWhereverI
 
 	assertActions(t, actions, Action{Kind: RemoveStray, Folder: "/ships/shp_gone"})
 }
+
+func TestAShipWhoseShipsFolderIsGoneIsCrewedAgainAsAFirstStartWhateverItsState(t *testing.T) {
+	for _, state := range []string{"running", "restarting", "crashed"} {
+		t.Run(state, func(t *testing.T) {
+			entry := anEntry(scout, state)
+			entry.ShipFolder = "/ships/" + scout
+			request := aRequest(scout)
+			request.Status = status("running")
+			context := aContext(request)
+			context.Observed.ShipFoldersGone = []string{scout}
+
+			next, actions := Reconcile(withEntries(entry), context)
+
+			assertActions(t, actions, Action{Kind: Stop, ShipID: scout}, Action{Kind: Crew, ShipID: scout, IsResumed: true})
+			if again := next.Entries[scout]; !again.IsShipFolderGone || again.HasStarted || again.State != "crewing" {
+				t.Fatalf("entry: %+v", again)
+			}
+		})
+	}
+}
