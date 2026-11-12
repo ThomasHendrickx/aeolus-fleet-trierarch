@@ -1,12 +1,12 @@
 # Design: a ship folder with a main repository and sub-repositories (aeolus-fleet#1759)
 
-Status: purpose and lessons for agreement. No question is asked and nothing is decided or built.
+Status: revised purpose for agreement, with Thomas's notes on the lessons. No question is asked and nothing is decided or built.
 
 This design covers core (the crew settings, their check, placement, the console) and the trierarch (the folder, the harnesses, containers, the aeolus-fleet plugin).
 
 ## Purpose
 
-A ship works in one folder of its own that holds its main repository, which says how it works, and the repositories it works on beside it, so its session starts with the main repository's instructions and skills and works in every repository it needs without one ever sitting inside another.
+A ship works in one folder of its own that holds its main repository, which says how it works, and the repositories it works on beside it, so its session, whatever its harness, is told the same at its start to work from the main repository, and works in every repository it needs without one ever sitting inside another.
 
 Thomas, 12 Nov, settled (aeolus-fleet#1759):
 
@@ -16,6 +16,12 @@ Thomas, 12 Nov, settled (aeolus-fleet#1759):
 4. Container sessions mount the ship folder, same layout inside.
 5. It replaces today's per-repository read-only checkouts: "No use in patching it, it reads like a fundamental difference so no use in reusing code it feels like." Before 1.0 there is no compatibility work (decision 0013).
 6. It builds on the per-ship folder of the disk design (#343, slices #346 to #352).
+
+Thomas, 12 Nov, on the lessons below:
+
+7. On the harnesses (lesson 15): "AGENTS.md and a sim linked CLAUDE.md (points to AGENTS.md) both are written in root. Behaviour is the same across all session types. No difference. CLAUDE.md is simlinked to have minimal differences." The root holds one AGENTS.md and CLAUDE.md as a symlink to it, for every harness; no harness gets an import or a file of its own.
+8. On placement (lesson 3): "indeed all need to be available or it is refused." A crew request naming a repository a machine lacks is refused there.
+9. Lessons 12 (two levels) and 7 (a container gets clones, decision 0039): agreed.
 
 ## Lessons to check against
 
@@ -71,7 +77,7 @@ Not verified: whether Codex loads a sub-folder's AGENTS.md once the session read
 
 Sources: https://code.claude.com/docs/en/memory, https://code.claude.com/docs/en/skills, https://developers.openai.com/codex/guides/agents-md, https://developers.openai.com/codex/skills.
 
-So a root file that only points into `main/` reaches Codex as words alone: Codex then reads `main/AGENTS.md` only if the session follows them, and loads `main/`'s skills never. Claude Code can load `main/CLAUDE.md` at start through an import, and `main/`'s skills only once the session reads a file in `main/`.
+So with one root AGENTS.md and CLAUDE.md a symlink to it (Thomas, point 7), both harnesses load the same root file at start, and what it says is all either is given at start: neither loads `main/`'s own instruction file at start, and Codex never loads `main/`'s skills.
 
 ## Questions
 
