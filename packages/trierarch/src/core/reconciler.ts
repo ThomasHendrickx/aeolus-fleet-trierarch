@@ -306,6 +306,8 @@ function newVersionStep(entry: Entry, at: { request: AssignedRequest; state: Tri
       ...(entry.folder !== undefined && { folder: entry.folder }),
       ...(entry.shipFolder !== undefined && { shipFolder: entry.shipFolder }),
       ...(entry.madeMain !== undefined && { madeMain: entry.madeMain }),
+      // Crewed again under the lease it holds (#367).
+      ...(entry.crewToken !== undefined && { crewToken: entry.crewToken }),
     },
     actions: [
       { kind: 'stop', shipId: entry.shipId },

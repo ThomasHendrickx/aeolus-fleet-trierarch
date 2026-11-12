@@ -549,9 +549,12 @@ interface EntryAt {
  * folder's identity (with its squadron) and starts the harness, writing
  * status crewing: it runs once its session shows activity
  * in its launch window (#382). A resumed crew whose ship is
- * crewed holds the ship by its own lease, or lost its register reply: the
- * trierarch releases the ship and crews it again. A ship another session
- * crews before its crew is left; a ship gone is forgotten.
+ * crewed holds the ship by its own lease: with the crew token its entry
+ * keeps, as a new settings version's does, it is crewed again under that
+ * lease, never released, as core removes the crew request on a release
+ * (#367); one that lost its register reply is released and crewed again. A
+ * ship another session crews before its crew is left; a ship gone is
+ * forgotten.
  */
 async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean }): Promise<TrierarchState> {
   const { entry, isResumed, deps } = at;
@@ -576,7 +579,9 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
     log(deps, { shipId: entry.shipId, shipName: ship.name, action: 'leave', outcome: 'crewed by another session, so the trierarch leaves it' });
     return next;
   }
-  if (ship.kind === 'crewed') {
+  // One its entry holds the crew token of, as a new settings version's does, is crewed again under the lease it holds: core removes the crew request on a release (#367).
+  const isUnderItsLease = ship.kind === 'crewed' && heldToken !== undefined;
+  if (ship.kind === 'crewed' && !isUnderItsLease) {
     await deps.fleet.release(entry.shipId);
   }
   let crewing = entry;
@@ -616,8 +621,7 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   if (loginProblem !== undefined) {
     return giveBack(state, { action: { kind: 'giveBack', shipId: crewing.shipId, settingsVersion: crewing.settingsVersion, reason: loginProblem, entry: { ...crewing, shipName: ship.name, folder } }, deps });
   }
-  const { secret } = await deps.fleet.getStartingPrompt(crewing.shipId);
-  const { crewToken } = await deps.fleet.register({ shipId: crewing.shipId, secret, harness: crewing.harness });
+  const crewToken = isUnderItsLease ? heldToken : await registered(crewing, deps);
   // The crew token stays in the state; the session calls over its ship's socket, opened before it starts (decision 0026).
   crewing = { ...crewing, crewToken };
   state = putEntry(state, { ...crewing, shipName: ship.name, folder });
@@ -1014,12 +1018,19 @@ async function removeIdentity(at: EntryAt & { folder: string }): Promise<void> {
   await deps.checkouts.remove(entry.shipId);
 }
 
-/** The entry's session in its folder, with its ship's folder when it has one. */
+/** Registers the ship with a new starting prompt's secret, so the session never sees it: the crew token its lease gives. */
+async function registered(entry: Entry, deps: RunPassDeps): Promise<string> {
+  const { secret } = await deps.fleet.getStartingPrompt(entry.shipId);
+  const { crewToken } = await deps.fleet.register({ shipId: entry.shipId, secret, harness: entry.harness });
+  return crewToken;
+}
+
 /** What a ship folder was made of, kept with its entry so a new settings version naming another main repository replaces `main/`. */
 function madeOf(workspace: Entry['workspace']): Pick<Entry, 'madeMain'> {
   return workspace.kind === 'repositories' ? { madeMain: workspace.main.repository } : {};
 }
 
+/** The entry's session in its folder, with its ship's folder when it has one. */
 function sessionOf(entry: Entry, folder: string): HarnessSession {
   return { shipId: entry.shipId, folder, ...(entry.shipFolder !== undefined && { shipFolder: entry.shipFolder }) };
 }
