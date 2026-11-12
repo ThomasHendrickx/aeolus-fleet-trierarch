@@ -200,6 +200,7 @@ export function createGitWorkspace(
       await rm(folder, { recursive: true, force: true });
     },
     removeShipFolder: async (shipFolder) => removeShipFolder(shipFolder),
+    hasShipFolder: async (shipFolder) => (await lstat(shipFolder).catch(() => undefined)) !== undefined,
     prune: async (repository) => {
       const path = configuration.repositories[repository]?.path;
       if (path === undefined) {

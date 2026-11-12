@@ -6,7 +6,7 @@ import { MODEL_OPTION } from './detected-options.js';
 import { countStart, PROBE_AFTER_MINUTES, withConfiguration, type StartOutcome } from './failed-starts.js';
 import { loginOf, startedOn, type KeyState, type Login, type Logins } from './login.js';
 import type { Checkout, CheckoutsPort, FleetPort, FolderProcessesPort, HarnessPort, HarnessSession, LaunchSeen, LeftInTrash, LoggedAction, Logger, ModelLoginsPort, SessionActivity, SessionRuntime, ShipSocketsPort, StatePort, TrashPort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
-import { HOLDS_IDENTITY, reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
+import { HOLDS_IDENTITY, reconcile, SHIP_FOLDER_KEPT, writtenStatusOf, type Action, type Observed } from './reconciler.js';
 import type { RefuseModel } from './refuse-model.js';
 import type { SendReleasedUsage } from './send-usage.js';
 import type { Clock } from './shared/clock.js';
@@ -362,7 +362,11 @@ async function observe(state: TrierarchState, at: { deps: RunPassDeps; missingPl
   const launches: Record<string, LaunchSeen> = {};
   const withoutIdentity: ShipId[] = [];
   const startProblems: Record<string, string> = {};
+  const shipFoldersGone: ShipId[] = [];
   for (const entry of Object.values(state.entries)) {
+    if (entry.shipFolder !== undefined && SHIP_FOLDER_KEPT.has(entry.state) && !(await deps.workspace.hasShipFolder(entry.shipFolder))) {
+      shipFoldersGone.push(entry.shipId);
+    }
     const session = sessions.find((each) => each.shipId === entry.shipId);
     // Asked only of an entry whose session would start: a running session keeps the login it started with (K3).
     if (entry.state === 'restarting' || (entry.state === 'running' && session === undefined)) {
@@ -403,7 +407,7 @@ async function observe(state: TrierarchState, at: { deps: RunPassDeps; missingPl
       ships[entry.shipId] = { inbox: await deps.fleet.inbox(crewToken), turn, isHolding, ...(isKeyNotReady && { isKeyNotReady }) };
     }
   }
-  return { sessions, folders, ships, launches, withoutIdentity, startProblems };
+  return { sessions, folders, ships, launches, withoutIdentity, startProblems, shipFoldersGone };
 }
 
 function log(deps: RunPassDeps, logged: Omit<LoggedAction, 'time'>): void {
@@ -568,6 +572,11 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
     await deps.fleet.release(entry.shipId);
   }
   let crewing = entry;
+  if (entry.isShipFolderGone === true) {
+    crewing = await freshAfterShipFolderGone({ entry, deps });
+    state = putEntry(state, crewing);
+    await deps.state.save(state);
+  }
   if (entry.isReleasedElsewhere === true) {
     crewing = await freshAfterReleaseElsewhere({ entry, deps });
     state = putEntry(state, crewing);
@@ -659,6 +668,24 @@ async function freshAfterReleaseElsewhere(at: EntryAt): Promise<Entry> {
   // Crewed fresh, in a ship's folder of its own, whatever its workspace was.
   const { isReleasedElsewhere, folder, shipFolder, ...fresh } = entry;
   return isReleasedElsewhere === undefined && folder === undefined && shipFolder === undefined ? entry : fresh;
+}
+
+/**
+ * A ship whose ship's folder is gone, as when ships/ was removed by hand, is
+ * crewed again in a fresh one: its session stops, its identity and socket go,
+ * and the entry is crewed fresh, telling nobody. Nothing of its workspace is
+ * left to remove or read, its usage since the last send among it. Answers the
+ * entry it is crewed with.
+ */
+async function freshAfterShipFolderGone(at: EntryAt): Promise<Entry> {
+  const { entry, deps } = at;
+  await deps.processes.stop(entry.shipId);
+  if (entry.folder !== undefined) {
+    await removeIdentity({ entry, deps, folder: entry.folder });
+  }
+  log(deps, { ...(entry.shipName !== undefined && { shipName: entry.shipName }), shipId: entry.shipId, action: 'crew', outcome: "its ship's folder is gone, so it is crewed again in a fresh one" });
+  const { isShipFolderGone, folder, shipFolder, ...fresh } = entry;
+  return isShipFolderGone === undefined && folder === undefined && shipFolder === undefined ? entry : fresh;
 }
 
 /**

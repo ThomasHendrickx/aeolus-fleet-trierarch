@@ -368,6 +368,8 @@ export interface WorkspacePort {
   unsaved(folder: string): Promise<readonly string[]>;
   /** Removes a folder under the root, whatever it is: a worktree of any repository, a clone, a folder git does not know. Never one outside the root, nor a configured folder. */
   remove(folder: string): Promise<void>;
+  /** Whether the ship's folder is there; one removed by hand, as with ships/, is not. */
+  hasShipFolder(shipFolder: string): Promise<boolean>;
   /** Moves the ship's folder whole into the trash beside it, whatever it holds, its worktree or clone with it; one already gone is removed already. */
   removeShipFolder(shipFolder: string): Promise<void>;
   /** Every folder under the root a workspace could be, whatever it is or whoever made it (gap rule 2); never the trash. */

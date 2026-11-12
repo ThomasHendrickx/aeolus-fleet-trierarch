@@ -75,6 +75,7 @@ const aPopulatedState = (): Populated<TrierarchState> => {
         login: 'apiKey',
         earlierLogins: [{ login: 'subscription', until: '2026-10-06T07:58:30.000Z' }],
         isReleasedElsewhere: true,
+        isShipFolderGone: true,
         crewFailures: 2,
         crewToken: 'aeolus_ct_v1_of_the_crew',
         isIdentityGone: true,
