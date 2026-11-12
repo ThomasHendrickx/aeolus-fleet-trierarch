@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import { runCommand } from '../../src/adapters/run-command.js';
+import { type CommandResult, runCommand } from '../../src/adapters/run-command.js';
 
 /**
  * Each test run's containers carry a label of their run, so a run that is
@@ -43,9 +43,12 @@ function isGoing(run: string): boolean {
   return Number.isInteger(pid) && pid > 0 && runOf(pid) === run;
 }
 
+/** How the cleanup runs Podman: `runCommand`, or a stand-in that answers as Podman would. */
+type RunPodman = (command: 'podman', options: { args: readonly string[] }) => Promise<CommandResult>;
+
 /** The ids and runs of what carries the test run label, as `podman ps` or `podman images` lists them. */
-async function labelled(kind: 'ps' | 'images'): Promise<{ id: string; run: string }[]> {
-  const listed = await runCommand('podman', { args: [kind, ...(kind === 'ps' ? ['--all'] : []), '--filter', `label=${TEST_RUN_LABEL}`, '--format', `{{.ID}} {{index .Labels "${TEST_RUN_LABEL}"}}`] });
+async function labelled(podman: RunPodman, kind: 'ps' | 'images'): Promise<{ id: string; run: string }[]> {
+  const listed = await podman('podman', { args: [kind, ...(kind === 'ps' ? ['--all'] : []), '--filter', `label=${TEST_RUN_LABEL}`, '--format', `{{.ID}} {{index .Labels "${TEST_RUN_LABEL}"}}`] });
   return listed.stdout
     .split('\n')
     .filter((line) => line !== '')
@@ -56,23 +59,23 @@ async function labelled(kind: 'ps' | 'images'): Promise<{ id: string; run: strin
 }
 
 /** Removes the containers, with their volumes, and the test images of the runs the predicate picks. */
-async function removeRuns(isPicked: (run: string) => boolean): Promise<void> {
-  const containers = (await labelled('ps')).filter(({ run }) => isPicked(run)).map(({ id }) => id);
+async function removeRuns(podman: RunPodman, isPicked: (run: string) => boolean): Promise<void> {
+  const containers = (await labelled(podman, 'ps')).filter(({ run }) => isPicked(run)).map(({ id }) => id);
   if (containers.length > 0) {
-    await runCommand('podman', { args: ['rm', '--force', '--volumes', '--time', '0', ...containers] });
+    await podman('podman', { args: ['rm', '--force', '--volumes', '--time', '0', ...containers] });
   }
-  const images = (await labelled('images')).filter(({ run }) => isPicked(run)).map(({ id }) => id);
+  const images = (await labelled(podman, 'images')).filter(({ run }) => isPicked(run)).map(({ id }) => id);
   if (images.length > 0) {
-    await runCommand('podman', { args: ['image', 'rm', '--force', ...images] });
+    await podman('podman', { args: ['image', 'rm', '--force', ...images] });
   }
 }
 
 /** Before a run starts: removes what every earlier run left, keeping what runs still going hold. */
-export async function removeEarlierRuns(): Promise<void> {
-  await removeRuns((run) => !isGoing(run));
+export async function removeEarlierRuns(podman: RunPodman = runCommand): Promise<void> {
+  await removeRuns(podman, (run) => !isGoing(run));
 }
 
 /** After a run ends: removes what it left, also of a test that failed. */
-export async function removeRun(run: string): Promise<void> {
-  await removeRuns((labelledRun) => labelledRun === run);
+export async function removeRun(run: string, podman: RunPodman = runCommand): Promise<void> {
+  await removeRuns(podman, (labelledRun) => labelledRun === run);
 }
