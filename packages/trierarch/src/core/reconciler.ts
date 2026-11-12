@@ -2,7 +2,7 @@ import type { CrewStatus, ShipId, TrierarchConfiguration } from '@aeolus-fleet/c
 
 import { checkSettings, launchMarkerRefusal, trustRefusal, unacceptedRefusal, type CheckedSettings, type Refusal } from './check-settings.js';
 import { MODEL_OPTION } from './detected-options.js';
-import { putEntry, removeEntry, withState, type Entry, type KeptWorktree, type Orphan, type TrierarchState } from './entry.js';
+import { putEntry, withState, type Entry, type KeptWorktree, type Orphan, type TrierarchState } from './entry.js';
 import type { StartOutcome } from './failed-starts.js';
 import type { AssignedRequest, ClearRequestToMe, InboxAnswer, LaunchSeen, ObservedSession, ObservedWorktree, TrustedPlaces, Turn, WrittenStatus } from './ports.js';
 import { decideRestart, exitsInWindow } from './restart-policy.js';
@@ -42,7 +42,7 @@ export type Action =
   | { readonly kind: 'release'; readonly shipId: ShipId }
   /** A removed request it does not crew: confirm alone. */
   | { readonly kind: 'confirm'; readonly shipId: ShipId }
-  /** Its request is no longer assigned here: stop, remove the identity of the entry it was; the worktree stays as an orphan. */
+  /** Its request is no longer assigned here, as when its ship is retired or moved to another trierarch: stop, then remove its workspace as a release does. */
   | { readonly kind: 'forget'; readonly shipId: ShipId; readonly entry: Entry }
   | { readonly kind: 'status'; readonly shipId: ShipId; readonly written: WrittenStatus }
   /** Report on the ship's behalf, with its session's crew token. */
@@ -52,7 +52,7 @@ export type Action =
   /**
    * Give back a request it cannot crew while its crew is not final (#382), with
    * why, without the machine's name, which the run pass adds. With the entry it
-   * crewed with, which ends first: session, identity and clean worktree.
+   * crewed with, which ends after: its session stops first, and its workspace goes as a release's does.
    */
   | { readonly kind: 'giveBack'; readonly shipId: ShipId; readonly settingsVersion: number; readonly reason: string; readonly entry?: Entry }
   /** A session refused the model it launched with (#382): kept refused at its harness's version, and argo told once. */
@@ -153,8 +153,8 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
 
   for (const entry of Object.values(state.entries)) {
     const request = requested.get(entry.shipId);
+    // An entry that ends stays in the state until its worktree is gone, so a removal that fails goes on the next pass.
     if (request === undefined) {
-      next = removeEntry(next, entry.shipId);
       actions.push({ kind: 'forget', shipId: entry.shipId, entry });
       continue;
     }
@@ -168,7 +168,6 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
       const uncrewed = uncrewable({ request, refusal, state: next, entry });
       actions.push(...uncrewed);
       if (uncrewed.some((action) => action.kind === 'giveBack')) {
-        next = removeEntry(next, entry.shipId);
         continue;
       }
     }
@@ -180,7 +179,6 @@ export function reconcile(state: TrierarchState, context: ReconcileContext): Rec
       outcomes.push(step.outcome);
     }
     if (step.isGivenBack === true) {
-      next = removeEntry(next, entry.shipId);
       actions.push(...step.actions);
       continue;
     }

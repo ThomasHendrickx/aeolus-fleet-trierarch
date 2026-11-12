@@ -17,9 +17,6 @@ interface ShipNamed {
   readonly shipName?: string | undefined;
 }
 
-/** At most this many of the discarded lines are named; the trierarch's log holds them all. */
-const DISCARDED_NAMED_MAX = 5;
-
 const nameOf = (ship: ShipNamed): string => ship.shipName ?? ship.shipId;
 
 const shipFact = (ship: ShipNamed): string => (ship.shipName === undefined ? `- Ship: \`${ship.shipId}\`` : `- Ship: ${ship.shipName} (\`${ship.shipId}\`)`);
@@ -41,19 +38,6 @@ export function crashText(ship: ShipNamed, at: { exits: number; failedStart?: st
 /** What argo is told after the fleet refused a report to the ship's owner: the report, then why it came to argo. */
 export function ownerUnreachableText(report: string, at: { ownerName: string; code: string; message: string }): string {
   return paragraphs(report, `Its owner ${at.ownerName} could not be reached: ${at.code}: ${at.message}.`);
-}
-
-export function discardedText(ship: ShipNamed, at: { isReleasedElsewhere: boolean; repository: string; unsaved: readonly string[] }): string {
-  const lines = at.unsaved.map(discardedLine);
-  const named = lines.slice(0, DISCARDED_NAMED_MAX).map(({ kind, what }) => `- ${kind} \`${what}\``);
-  const more = lines.length - named.length;
-  const list = [...named, ...(more > 0 ? [`- and ${String(more)} more, in this trierarch's log`] : [])].join('\n');
-  const facts = [shipFact(ship), `- Worktree: ${at.repository}`, `- Discarded: ${countsOf(lines)}`].join('\n');
-  const parts = at.isReleasedElsewhere ? ['The trierarch removed its worktree before crewing it again.', facts, list] : [facts, list];
-  return argoMessage({
-    headline: `${nameOf(ship)} released${at.isReleasedElsewhere ? ' elsewhere' : ''}: unpushed work discarded`,
-    body: paragraphs(...parts),
-  });
 }
 
 export function modelRefusedText(ship: ShipNamed, at: { harness: string; version: string; model: string }): string {
@@ -106,45 +90,6 @@ export function lowResourceText(resource: LowResource, load: MachineLoad): strin
     headline,
     body: paragraphs([`- Memory: ${gibOf(memory.availableBytes)} of ${gibOf(memory.totalBytes)} GiB available`, `- Disk: ${gbOf(disk.freeBytes)} of ${gbOf(disk.totalBytes)} GB free`].join('\n'), 'The trierarch stops no session for it.'),
   });
-}
-
-/** The kinds of discarded lines, in the order the counts name them. */
-const KINDS = ['refused', 'deleted', 'changed', 'renamed', 'new', 'commit'] as const;
-type DiscardedKind = (typeof KINDS)[number];
-
-const COMMIT_PREFIX = 'commit ';
-/** A worktree the host did not read, with why: what it held is not known. */
-const REFUSED_PREFIX = 'refused, ';
-/** A git status line: two status letters and a space before the path. */
-const STATUS_WIDTH = 3;
-
-/** One line of what removing a worktree discards (git status, an unkept commit, or why the host did not read it), in words. */
-function discardedLine(line: string): { kind: DiscardedKind; what: string } {
-  if (line.startsWith(COMMIT_PREFIX)) {
-    return { kind: 'commit', what: line.slice(COMMIT_PREFIX.length) };
-  }
-  if (line.startsWith(REFUSED_PREFIX)) {
-    return { kind: 'refused', what: line.slice(REFUSED_PREFIX.length) };
-  }
-  const status = line.slice(0, 2);
-  const what = line.slice(STATUS_WIDTH);
-  if (status === '??' || status.includes('A')) {
-    return { kind: 'new', what };
-  }
-  if (status.includes('D')) {
-    return { kind: 'deleted', what };
-  }
-  if (status.includes('R')) {
-    return { kind: 'renamed', what };
-  }
-  return { kind: 'changed', what };
-}
-
-function countsOf(lines: readonly { kind: DiscardedKind }[]): string {
-  return KINDS.map((kind) => ({ kind, count: lines.filter((line) => line.kind === kind).length }))
-    .filter(({ count }) => count > 0)
-    .map(({ kind, count }) => (kind === 'commit' ? `${String(count)} ${count === 1 ? 'commit' : 'commits'}` : `${String(count)} ${kind}`))
-    .join(', ');
 }
 
 /** The machine stopped offering itself after failed starts (#853): told once, with the first reason and how it offers itself again. */

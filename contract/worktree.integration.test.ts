@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -13,7 +13,7 @@ import { aMachine, type Machine } from './support/machine.js';
 
 // A ship's worktree is made from the ref the workspace names as origin has it, never from a clone's local branch, and a worktree that cannot be made says why (docs/trierarch.md, "Workspaces").
 // A worktree under the root that no ship works in is an orphan: what runs in it is stopped, then it is removed, unless it holds unsaved work (#1041).
-// A worktree kept because it had changes stays until a clear request removes it, and the clear is confirmed to the fleet; a clear for a worktree it keeps none of is confirmed not-kept (decision 0032).
+// A crew given back removes its worktree whatever it holds, as every path does, so no worktree is kept: a clear request is confirmed not-kept (decision 0032).
 
 /** A pass runs every 5 seconds, and a crew that fails 3 times in a row is given back. */
 const CREWED_WITHIN_MS = 30_000;
@@ -145,18 +145,6 @@ function claudeTrustsNothing(): void {
   writeFileSync(file, JSON.stringify({ ...claude, projects: {} }));
 }
 
-/** Crews scout in a worktree, leaves a change in it, then gives its request back with a new settings version: the worktree is kept. */
-async function aKeptWorktree(): Promise<string> {
-  await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
-  await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
-  const { worktree } = sessionOf(machine, 'scout');
-  writeFileSync(join(worktree, 'unsaved.txt'), 'unsaved\n');
-  claudeTrustsNothing();
-  await fleet.requestCrewAgainInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
-  await expect.poll(() => machine.serviceLog(), { timeout: GIVEN_BACK_WITHIN_MS }).toContain(`Kept the worktree of ${scout}, which has changes: ${worktree}`);
-  return worktree;
-}
-
 const statusSchema = z.object({ kept: z.array(z.object({ path: z.string() })) });
 
 async function keptPaths(): Promise<readonly string[]> {
@@ -164,31 +152,19 @@ async function keptPaths(): Promise<readonly string[]> {
   return statusSchema.parse(JSON.parse(status.stdout)).kept.map(({ path }) => path);
 }
 
-describe('a kept worktree', () => {
-  it('is removed on a clear request, and the clear is confirmed removed', async () => {
-    const worktree = await aKeptWorktree();
+describe('a crew given back before it is final', () => {
+  it('removes its worktree with changes too and keeps none', async () => {
+    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
+    const { worktree } = sessionOf(machine, 'scout');
+    writeFileSync(join(worktree, 'unsaved.txt'), 'unsaved\n');
+    claudeTrustsNothing();
 
-    await fleet.requestWorktreeClear(scout, REPOSITORY);
+    await fleet.requestCrewAgainInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
 
-    await expect.poll(() => fleet.clearedOutcomeOf(scout, REPOSITORY), { timeout: CLEARED_WITHIN_MS }).toBe('removed');
-    expect(existsSync(worktree)).toBe(false);
+    await expect.poll(() => existsSync(worktree), { timeout: GIVEN_BACK_WITHIN_MS }).toBe(false);
+    expect(machine.serviceLog()).toContain(`Discarded from the worktree of scout (${scout}), ${worktree}: `);
     expect(await keptPaths()).toEqual([]);
-  });
-
-  it('stays, and status names it, while no clear request names it', async () => {
-    const worktree = await aKeptWorktree();
-
-    expect(await keptPaths()).toEqual([worktree]);
-    expect(existsSync(worktree)).toBe(true);
-  });
-
-  it('a human removed is held no more', async () => {
-    const worktree = await aKeptWorktree();
-
-    git(machine.repository, 'worktree', 'remove', '--force', worktree);
-    rmSync(worktree, { recursive: true, force: true });
-
-    await expect.poll(keptPaths, { timeout: CLEARED_WITHIN_MS }).toEqual([]);
   });
 });
 

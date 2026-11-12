@@ -1,7 +1,7 @@
 import { CREW_REQUEST_REASON_MAX_LENGTH, type ShipId } from '@aeolus-fleet/common';
 
 import { putEntry, removeEntry, withState, type Entry, type Orphan, type TrierarchState } from './entry.js';
-import { crashText, discardedText, identityGoneText, keyNotReadyText, leftInTrashText, modelRefusedText, ownerUnreachableText, settingsRefusedText, stoppedOfferingText } from './argo-reports.js';
+import { crashText, identityGoneText, keyNotReadyText, leftInTrashText, modelRefusedText, ownerUnreachableText, settingsRefusedText, stoppedOfferingText } from './argo-reports.js';
 import { MODEL_OPTION } from './detected-options.js';
 import { countStart, PROBE_AFTER_MINUTES, withConfiguration, type StartOutcome } from './failed-starts.js';
 import { loginOf, startedOn, type KeyState, type Login, type Logins } from './login.js';
@@ -29,7 +29,7 @@ export interface RunPassDeps {
   /** One adapter per harness the configuration offers, by its name. */
   harnesses: Readonly<Record<string, HarnessPort>>;
   processes: Pick<SessionRuntime, 'list' | 'stop'>;
-  /** What still runs in an orphan worktree, stopped before it is removed (#1041). */
+  /** What still runs in a worktree, stopped before it is removed: an orphan's (#1041), and one whose crew ended (gap rule 1). */
   folderProcesses: FolderProcessesPort;
   workspace: WorkspacePort;
   /** Each ship's read-only checkouts (#1182), made before its session starts and removed with its identity. */
@@ -606,17 +606,16 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
 
 /**
  * A ship released elsewhere is crewed again in a fresh worktree (row 11,
- * #475): before it registers, its workspace goes as a release's does, argo
- * told first what that discards. Its session stops first, as a release's
- * does, so nothing reads the worktree while a session works in it, whatever
- * the pass's stop did. The entry is saved without its mark only once that is
- * done, so a failed stop or remove tries again on the next pass. Answers the
- * entry it is crewed with.
+ * #475): before it registers, its workspace goes as a release's does. Its
+ * session stops first, as a release's does, so nothing reads the worktree
+ * while a session works in it, whatever the pass's stop did. The entry is
+ * saved without its mark only once that is done, so a failed stop or remove
+ * tries again on the next pass. Answers the entry it is crewed with.
  */
 async function freshAfterReleaseElsewhere(at: EntryAt): Promise<Entry> {
   const { entry, deps } = at;
   await deps.processes.stop(entry.shipId);
-  const workspace = await releaseWorkspace({ entry, deps, cause: 'releasedElsewhere' });
+  const workspace = await removeWorkspace({ entry, deps });
   log(deps, { ...(entry.shipName !== undefined && { shipName: entry.shipName }), shipId: entry.shipId, action: 'release', outcome: `released elsewhere, ${workspace}` });
   const { isReleasedElsewhere, ...fresh } = entry;
   return isReleasedElsewhere === undefined ? entry : fresh;
@@ -637,7 +636,7 @@ async function release(state: TrierarchState, at: { shipId: Entry['shipId']; dep
   if ((await deps.fleet.ship(shipId)).kind === 'crewed') {
     await deps.fleet.release(shipId);
   }
-  const workspace = await releaseWorkspace({ entry, deps, cause: 'release' });
+  const workspace = await removeWorkspace({ entry, deps });
   const next = removeEntry(state, shipId);
   await deps.state.save(next);
   await deps.fleet.confirmRelease(shipId);
@@ -646,37 +645,37 @@ async function release(state: TrierarchState, at: { shipId: Entry['shipId']; dep
 }
 
 /**
- * The workspace of a released entry (row 7, #450): its identity goes, and a
- * worktree the trierarch made is removed whatever it holds, so the next crew
- * starts from a fresh one. What that discards is told to argo first, once per
- * release; a failed remove tries again on the next pass. A configured folder
- * is never removed. Answers what became of it, as the log line says it.
+ * The workspace of an entry whose crew ended here (gap rule 1): a release, a
+ * release elsewhere, a give back, a retire or a ship moved to another
+ * trierarch. What runs in its worktree stops, its last usage is sent (what it
+ * used since the last send would be lost with the folder), its identity goes,
+ * then the worktree is removed whatever it holds, so the next crew starts from
+ * a fresh one. What it held is logged, and nobody is told: saving is the
+ * session's job. A send the fleet refuses rejects, so the worktree stays and
+ * the next pass tries again, as it does after a failed remove. A configured
+ * folder is never removed. Answers what became of it, as the log line says it.
  */
-async function releaseWorkspace(at: EntryAt & { cause: ReleaseCause }): Promise<string> {
-  const { entry, deps, cause } = at;
+async function removeWorkspace(at: EntryAt): Promise<string> {
+  const { entry, deps } = at;
   const { folder } = entry;
   if (folder === undefined) {
     return 'its worktree removed';
   }
-  // Its usage goes first: what it used since the last send would be lost with the folder.
+  if (entry.workspace.kind === 'worktree') {
+    await deps.folderProcesses.stopIn(folder);
+  }
   await deps.sendReleasedUsage(entry);
   await removeIdentity({ entry, deps, folder });
   if (entry.workspace.kind === 'folder') {
     return `its folder kept: ${folder}`;
   }
-  const unsaved = await deps.workspace.unsaved(folder);
-  if (unsaved.length > 0) {
-    deps.logger.warn(`Discarded from the worktree of ${entry.shipName ?? entry.shipId} (${entry.shipId}), ${folder}: ${unsaved.join('; ')}`);
-    await deps.fleet.reportToArgo({
-      text: discardedText(entry, { isReleasedElsewhere: cause === 'releasedElsewhere', repository: entry.workspace.repository, unsaved }),
-      idempotencyKey: `trierarch:discarded:${entry.shipId}:${entry.since}`,
-    });
-  }
+  const held = await deps.workspace.unsaved(folder);
   await deps.workspace.remove(folder);
-  if (unsaved.length === 0) {
+  if (held.length === 0) {
     return 'its worktree removed';
   }
-  return `its worktree removed, discarding ${String(unsaved.length)} unpushed ${unsaved.length === 1 ? 'change' : 'changes'}, told to argo`;
+  deps.logger.warn(`Discarded from the worktree of ${entry.shipName ?? entry.shipId} (${entry.shipId}), ${folder}: ${held.join('; ')}`);
+  return `its worktree removed, discarding ${String(held.length)} unpushed ${held.length === 1 ? 'change' : 'changes'}`;
 }
 
 /**
@@ -740,47 +739,53 @@ async function clearOrphan(state: TrierarchState, at: { orphan: Orphan; isNew: b
 }
 
 /**
- * Its request is no longer assigned here, as when its ship is retired (gap
- * rule 2): the session stops and its identity goes, but nothing the trierarch
- * cannot tell is clean goes: its worktree stays, reported as an orphan.
+ * Its request is no longer assigned here, as when its ship is retired or
+ * moved to another trierarch (gap rule 1): the session stops and its
+ * workspace goes as a release's does. The entry goes only then, so a failed
+ * removal tries again on the next pass.
  */
 async function forget(state: TrierarchState, at: EntryAt): Promise<TrierarchState> {
   const { entry, deps } = at;
   await deps.processes.stop(entry.shipId);
-  if (entry.folder !== undefined) {
-    await removeIdentity({ entry, deps, folder: entry.folder });
-  }
+  const workspace = await removeWorkspace({ entry, deps });
   const next = removeEntry(state, entry.shipId);
   await deps.state.save(next);
-  log(deps, { shipId: entry.shipId, ...(entry.shipName !== undefined && { shipName: entry.shipName }), action: 'forget', outcome: 'its request is no longer assigned here, so its session stopped' });
+  log(deps, { shipId: entry.shipId, ...(entry.shipName !== undefined && { shipName: entry.shipName }), action: 'forget', outcome: `its request is no longer assigned here, so its session stopped, ${workspace}` });
   return next;
 }
 
 /**
  * Gives back a request whose settings this trierarch cannot crew while its
- * crew is not final (#382): an entry it crewed with ends first (its session
- * stops, its identity goes, its worktree too when clean), then the fleet
- * takes the request back, with the reason after this machine's name, cut to
- * 200 characters, and ends the lease. When the fleet refuses, the ship's
- * owner is told instead, once per settings version.
+ * crew is not final (#382): the session of an entry it crewed with stops
+ * first, then the fleet takes the request back, with the reason after this
+ * machine's name, cut to 200 characters, and ends the lease. When the fleet
+ * refuses, the ship's owner is told instead, once per settings version. Either
+ * way the entry's workspace then goes as a release's does, and the entry only
+ * after it, so a failed removal tries again on the next pass, the request
+ * then no longer assigned here.
  */
 async function giveBack(state: TrierarchState, at: CarryOut & { action: Extract<Action, { kind: 'giveBack' }> }): Promise<TrierarchState> {
   const { action, deps } = at;
   const { shipId, settingsVersion, entry } = action;
-  let next = state;
   if (entry !== undefined) {
     await deps.processes.stop(shipId);
-    next = removeEntry(await finishWorkspace(state, { entry, deps }), shipId);
-    await deps.state.save(next);
   }
   const machine = await deps.fleet.whoami();
   const reason = `${machine.name}: ${action.reason}`.slice(0, CREW_REQUEST_REASON_MAX_LENGTH);
   const answer = await deps.fleet.giveBack(shipId, { settingsVersion, reason });
+  let next = state;
   if (answer.kind === 'refused') {
     deps.logger.warn(`The fleet refused to take back the crew request of ${shipId}: ${answer.code}: ${answer.message}`);
-    return refuse(next, { action: { kind: 'refuse', shipId, settingsVersion, refusal: { reason: action.reason } }, deps });
+    next = await refuse(state, { action: { kind: 'refuse', shipId, settingsVersion, refusal: { reason: action.reason } }, deps });
   }
-  log(deps, { shipId, ...(entry?.shipName !== undefined && { shipName: entry.shipName }), action: 'giveBack', outcome: `given back: ${reason}` });
+  const workspace = entry === undefined ? undefined : await removeWorkspace({ entry, deps });
+  if (entry !== undefined) {
+    next = removeEntry(next, shipId);
+    await deps.state.save(next);
+  }
+  if (answer.kind === 'givenBack') {
+    log(deps, { shipId, ...(entry?.shipName !== undefined && { shipName: entry.shipName }), action: 'giveBack', outcome: `given back: ${reason}${workspace === undefined ? '' : `, ${workspace}`}` });
+  }
   return next;
 }
 
@@ -883,33 +888,6 @@ async function removeIdentity(at: EntryAt & { folder: string }): Promise<void> {
 async function checkoutsOf(entry: Entry, deps: RunPassDeps): Promise<readonly Checkout[]> {
   return entry.workspace.kind === 'worktree' ? deps.checkouts.prepare({ shipId: entry.shipId, repository: entry.workspace.repository }) : [];
 }
-
-/** Why a worktree is removed whatever it holds: its request was removed (row 7), or its ship released elsewhere is crewed again (row 11). */
-type ReleaseCause = 'release' | 'releasedElsewhere';
-
-/**
- * The workspace of an entry given back while its crew is not final: a
- * worktree the trierarch made is removed when clean, and kept and reported
- * when not; a configured folder is never removed. The identity goes either way.
- */
-async function finishWorkspace(state: TrierarchState, at: EntryAt): Promise<TrierarchState> {
-  const { entry, deps } = at;
-  const { folder } = entry;
-  if (folder === undefined) {
-    return state;
-  }
-  await removeIdentity({ entry, deps, folder });
-  if (entry.workspace.kind === 'folder') {
-    return state;
-  }
-  if (await deps.workspace.isClean(folder)) {
-    await deps.workspace.remove(folder);
-    return state;
-  }
-  deps.logger.warn(`Kept the worktree of ${entry.shipId}, which has changes: ${folder}`);
-  return { ...state, kept: [...state.kept, { shipId: entry.shipId, repository: entry.workspace.repository, path: folder }] };
-}
-
 
 /**
  * The adapter of the entry's harness. Settings name only a harness the
