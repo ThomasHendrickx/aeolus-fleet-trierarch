@@ -1,7 +1,7 @@
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -292,7 +292,9 @@ describe('a session in a container', () => {
     const crewToken = z.object({ entries: z.record(z.string(), z.looseObject({ crewToken: z.string() })) }).parse(JSON.parse(readFileSync(join(machine.trierarchHome, 'state.json'), 'utf8'))).entries[scout]?.crewToken ?? '';
     const files = readdirSync(ships, { recursive: true, encoding: 'utf8' })
       .map((name) => join(ships, name))
-      .filter((path) => lstatSync(path).isFile());
+      .filter((path) => lstatSync(path).isFile())
+      // The harness's stand-in writes down the environment it was given, the model token in it, as the session's own file.
+      .filter((path) => !basename(path).startsWith('fake-'));
 
     const holding = files.filter((path) => [MODEL_TOKEN, crewToken].some((token) => readFileSync(path, 'utf8').includes(token)));
 
@@ -415,6 +417,7 @@ exec '${realGit}' "$@"
       const folder = await aCrewedScout();
       expect((await machine.trierarch(['stop'])).status).toBe(0);
       const stray = join(machine.trierarchHome, 'ships', REPOSITORY, 'stray');
+      mkdirSync(dirname(stray), { recursive: true });
       renameSync(folder, stray);
       if (hasUnsavedWork) {
         writeFileSync(join(stray, 'unsaved.txt'), 'unsaved\n');
