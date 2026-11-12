@@ -1,14 +1,15 @@
-import { lstat, mkdir, readdir, rm, stat } from 'node:fs/promises';
-import { join, relative, sep } from 'node:path';
+import { lstat, mkdir, realpath, rm, stat } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 
 import type { WorkspacePort } from '../core/ports.js';
+import { foldersUnderRoot, isUnderRoot } from './folders-under-root.js';
 import { gitInCloneWithin, gitInFreshClone, type Limits } from './git-in-folder.js';
 import { createGitWorkspace, REFUSED_PREFIX } from './git-workspace.js';
 import { runCommand } from './run-command.js';
 import { discard, type MoveWithinUserNamespace } from './trash.js';
-import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
+import { cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
 
 /**
  * Workspaces for sessions in containers (decision 0039; trierarch.md, "Session
@@ -56,15 +57,6 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
     return remote.status === 0 ? remote.stdout.trim() : (await git(['-C', repository, 'rev-parse', '--verify', `${ref}^{commit}`])).trim();
   };
   const exists = async (path: string): Promise<boolean> => (await stat(path).catch(() => undefined)) !== undefined;
-  const isUnderRoot = async (folder: string): Promise<boolean> => {
-    const [repository, ship, ...rest] = relative(root, folder).split(sep);
-    if (repository === undefined || ship === undefined || rest.length > 0 || ship === '' || ship === '..') {
-      return false;
-    }
-    // A clone whose repository left the trusted repositories is still one the trierarch made.
-    return configuration.repositories[repository] !== undefined || (await clonedPath(clones, repository)) !== undefined;
-  };
-
   return {
     ...worktrees,
     // What a clone holds is not known when any read of it fails, so it is not clean.
@@ -105,28 +97,21 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
       return { folder };
     },
     remove: async (folder) => {
-      if (!(await isUnderRoot(folder))) {
-        throw new Error(`${folder} is no clone under ${root}: the trierarch removes only what it made`);
+      if (!(await isUnderRoot(root, folder))) {
+        throw new Error(`${folder} is not under ${root}, or is its trash: the trierarch removes only a folder under the root`);
       }
       // One already gone is removed already.
       if ((await lstat(folder).catch(() => undefined)) === undefined) {
         return;
       }
+      // A workspace straight under the root has no trash beside it that a pass empties; no session ran in it, so the host removes it.
+      if ([root, await realpath(root).catch(() => root)].includes(dirname(folder))) {
+        await worktrees.remove(folder);
+        return;
+      }
       // Aside at once, so its ship's place is free and nothing reads it again; the trash removes it (docs/trierarch.md, "Session runtime").
       await discard(folder, { at: new Date(), ...(options.moveWithinUserNamespace !== undefined && { withinUserNamespace: options.moveWithinUserNamespace }) });
     },
-    foldersUnderRoot: async () => {
-      const found: string[] = [];
-      for (const repository of Object.keys(configuration.repositories)) {
-        for (const name of await readdir(join(root, repository)).catch(() => [])) {
-          // A clone has a .git of its own; a file or folder without one is part of something else, such as a plain clone.
-          if (!(await exists(join(root, repository, name, '.git')))) {
-            continue;
-          }
-          found.push(join(root, repository, name));
-        }
-      }
-      return found;
-    },
+    foldersUnderRoot: async () => foldersUnderRoot(root),
   };
 }

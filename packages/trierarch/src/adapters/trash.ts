@@ -16,7 +16,7 @@ import { runCommand, type CommandResult } from './run-command.js';
  */
 
 /** The trash folder beside what goes in it. */
-const FOLDER_NAME = '.trash';
+export const TRASH_FOLDER_NAME = '.trash';
 
 /**
  * What the trash holds is named `<name>.<unix milliseconds it was discarded
@@ -50,7 +50,7 @@ export async function discard(folder: string, options: { at: Date; withinUserNam
   if (!found.isDirectory()) {
     throw new Error(`${folder} is no folder: the trash takes only a folder`);
   }
-  const trash = join(dirname(folder), FOLDER_NAME);
+  const trash = join(dirname(folder), TRASH_FOLDER_NAME);
   await mkdir(trash, { mode: PRIVATE_FOLDER_MODE }).catch((error: unknown) => {
     if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) {
       throw error;
@@ -138,7 +138,7 @@ export function createTrash(options: { beside: () => Promise<readonly string[]>;
     empty: async () => {
       const left: LeftInTrash[] = [];
       for (const beside of await options.beside()) {
-        const trash = join(beside, FOLDER_NAME);
+        const trash = join(beside, TRASH_FOLDER_NAME);
         for (const entry of await readdir(trash).catch(() => [])) {
           const parsed = parse(entry);
           if (parsed === undefined) {

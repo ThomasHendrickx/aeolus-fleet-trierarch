@@ -133,7 +133,7 @@ describe('a folder under the root no crewed ship uses', () => {
         },
       }),
       aStrayWithAProcess({ repository: REPOSITORY, name: 'own-clone', make: (folder) => execFileSync('git', ['clone', '-q', machine.repository, folder]) }),
-      aStrayWithAProcess({ repository: 'hemma', name: 'notes', make: (folder) => writeFileSync(join(folder, 'notes.md'), 'no repository\n') }),
+      aStrayWithAProcess({ repository: 'hemma', name: 'notes', make: (folder) => { writeFileSync(join(folder, 'notes.md'), 'no repository\n'); } }),
     ];
 
     for (const { folder } of strays) {
