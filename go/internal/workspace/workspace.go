@@ -305,8 +305,12 @@ func (p Places) WriteRootFiles(entry reconciler.Entry) error {
 
 // UnsavedInShipFolder is what removing each repository the ship folder holds would discard, as Unsaved says it, by the repository's folder.
 func (p Places) UnsavedInShipFolder(folder string) ([]Held, error) {
+	folders, err := repositoryFoldersIn(folder)
+	if err != nil {
+		return nil, fmt.Errorf("read what the ship folder %s holds: %w", folder, err)
+	}
 	held := []Held{}
-	for _, each := range repositoryFoldersIn(folder) {
+	for _, each := range folders {
 		unsaved, err := p.Unsaved(each)
 		if err != nil {
 			return nil, err

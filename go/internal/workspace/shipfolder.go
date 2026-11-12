@@ -137,19 +137,27 @@ func prepareShipFolder(shipFolder string, workspace reconciler.Workspace, madeMa
 	return folder, nil
 }
 
-// repositoryFoldersIn are the folders of the repositories the ship folder holds now: `main/`, then each sub-repository by its name.
-func repositoryFoldersIn(folder string) []string {
+// repositoryFoldersIn are the folders of the repositories the ship folder holds now: `main/`, then each sub-repository by its name. Only
+// a folder that is not there is none: one that cannot be read fails it, so no repository is left out of what its removal would discard.
+func repositoryFoldersIn(folder string) ([]string, error) {
 	found := []string{}
-	if main, err := os.Stat(filepath.Join(folder, MainFolder)); err == nil && main.IsDir() {
+	main, err := os.Stat(filepath.Join(folder, MainFolder))
+	switch {
+	case err == nil && main.IsDir():
 		found = append(found, filepath.Join(folder, MainFolder))
+	case err != nil && !errors.Is(err, fs.ErrNotExist):
+		return nil, err
 	}
-	subs, _ := os.ReadDir(filepath.Join(folder, SubRepositoriesFolder))
+	subs, err := os.ReadDir(filepath.Join(folder, SubRepositoriesFolder))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
 	for _, each := range subs {
 		if each.IsDir() {
 			found = append(found, filepath.Join(folder, SubRepositoriesFolder, each.Name()))
 		}
 	}
-	return found
+	return found, nil
 }
 
 // Held is what removing one repository of a ship folder would discard, by its folder.

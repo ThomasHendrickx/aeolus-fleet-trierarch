@@ -118,15 +118,30 @@ export async function prepareShipFolder(at: {
   return folder;
 }
 
-/** The folders of the repositories the ship folder holds now: `main/`, then each sub-repository by its name. */
+/**
+ * The folders of the repositories the ship folder holds now: `main/`, then
+ * each sub-repository by its name. Only a folder that is not there is none: one
+ * that cannot be read fails it, so no repository is left out of what its
+ * removal would discard.
+ */
 export async function repositoryFoldersIn(folder: string): Promise<readonly string[]> {
   const main = join(folder, MAIN_FOLDER);
-  const subRepositories = await readdir(join(folder, SUB_REPOSITORIES_FOLDER), { withFileTypes: true }).catch(() => []);
+  const subRepositories = await readdir(join(folder, SUB_REPOSITORIES_FOLDER), { withFileTypes: true }).catch(noneWhenMissing([]));
   return [
-    ...((await lstat(main).catch(() => undefined))?.isDirectory() === true ? [main] : []),
+    ...((await lstat(main).catch(noneWhenMissing(undefined)))?.isDirectory() === true ? [main] : []),
     ...subRepositories
       .filter((entry) => entry.isDirectory())
       .map((entry) => join(folder, SUB_REPOSITORIES_FOLDER, entry.name))
       .sort(),
   ];
+}
+
+/** Answers none for a path that is not there, and fails for any other error. */
+function noneWhenMissing<T>(none: T): (error: unknown) => T {
+  return (error) => {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      return none;
+    }
+    throw error;
+  };
 }
