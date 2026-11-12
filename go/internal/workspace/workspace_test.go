@@ -538,6 +538,43 @@ func TestALocalBranchCheckedOutNowhereWhoseRemoteBranchIsGoneIsDeletedAndTheOthe
 	}
 }
 
+func TestABranchIsJudgedByTheRemoteAndRemoteBranchItsUpstreamNamesWhateverTheirNames(t *testing.T) {
+	places, repository, _ := aRepositoryWithARemote(t)
+	other := filepath.Join(t.TempDir(), "other.git")
+	gitIn(t, "init", "-q", "--bare", other)
+	gitIn(t, "-C", repository, "remote", "add", "upstream", other)
+	gitIn(t, "-C", repository, "branch", "mine-merged")
+	gitIn(t, "-C", repository, "push", "-q", "-u", "upstream", "mine-merged:theirs-merged")
+	gitIn(t, "-C", repository, "branch", "mine-open")
+	gitIn(t, "-C", repository, "push", "-q", "-u", "upstream", "mine-open:theirs-open")
+	gitIn(t, "-C", other, "branch", "-D", "theirs-merged")
+
+	if err := places.DeleteBranchesWhoseRemoteBranchIsGone("aeolus-fleet"); err != nil {
+		t.Fatal(err)
+	}
+
+	branches := branchesOf(t, repository)
+	if slices.Contains(branches, "mine-merged") {
+		t.Errorf("branches = %q, want mine-merged gone", branches)
+	}
+	if !slices.Contains(branches, "mine-open") {
+		t.Errorf("branches = %q, want mine-open kept", branches)
+	}
+}
+
+func TestABranchWhoseUpstreamIsALocalBranchIsKept(t *testing.T) {
+	places, repository, _ := aRepositoryWithARemote(t)
+	gitIn(t, "-C", repository, "branch", "--track", "follows-main", "main")
+
+	if err := places.DeleteBranchesWhoseRemoteBranchIsGone("aeolus-fleet"); err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Contains(branchesOf(t, repository), "follows-main") {
+		t.Errorf("branches = %q, want follows-main kept", branchesOf(t, repository))
+	}
+}
+
 func TestARemoteThatCannotBeReadFailsAndDeletesNoBranch(t *testing.T) {
 	places, repository, remote := aRepositoryWithARemote(t)
 	aPushedBranch(t, repository, "merged")

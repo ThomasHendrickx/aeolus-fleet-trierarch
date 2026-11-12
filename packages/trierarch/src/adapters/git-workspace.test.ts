@@ -401,6 +401,30 @@ describe('deleting the local branches of a configured repository whose remote br
     expect(await branches()).toContain('current');
   });
 
+  it('judges a branch by the remote and remote branch its upstream names, whatever their names', async () => {
+    const other = join(folder, 'other.git');
+    await git(['init', '-q', '--bare', other]);
+    await git(['-C', repository, 'remote', 'add', 'upstream', other]);
+    await git(['-C', repository, 'branch', 'mine-merged']);
+    await git(['-C', repository, 'push', '-q', '-u', 'upstream', 'mine-merged:theirs-merged']);
+    await git(['-C', repository, 'branch', 'mine-open']);
+    await git(['-C', repository, 'push', '-q', '-u', 'upstream', 'mine-open:theirs-open']);
+    await git(['-C', other, 'branch', '-D', 'theirs-merged']);
+
+    await workspace().deleteBranchesWhoseRemoteBranchIsGone('aeolus-fleet');
+
+    expect(await branches()).not.toContain('mine-merged');
+    expect(await branches()).toContain('mine-open');
+  });
+
+  it('keeps a branch whose upstream is a local branch, the repository itself its remote', async () => {
+    await git(['-C', repository, 'branch', '--track', 'follows-main', 'main']);
+
+    await workspace().deleteBranchesWhoseRemoteBranchIsGone('aeolus-fleet');
+
+    expect(await branches()).toContain('follows-main');
+  });
+
   it('fails and deletes nothing when the remote cannot be read, so a branch is never taken for gone', async () => {
     await aPushedBranch('merged');
     rmSync(remote, { recursive: true });
