@@ -133,7 +133,7 @@ describe('a ship released elsewhere (row 11)', () => {
     expect(session.starts()).toHaveLength(1);
     expect(session.starts()[0]?.pid).not.toBe(first?.pid);
     expect(session.starts()[0]?.args).not.toContain('--resume');
-    expect(machine.serviceLog()).toContain(`Discarded from the worktree of scout (${scout}), ${session.worktree}: `);
+    await expect.poll(() => machine.serviceLog(), { timeout: CREWED_WITHIN_MS }).toContain(`Discarded from the worktree of scout (${scout}), ${session.worktree}: `);
     await expect(fleet.toldByTrierarch()).resolves.toEqual([]);
   });
 });

@@ -163,7 +163,7 @@ describe('a crew given back before it is final', () => {
     await fleet.requestCrewAgainInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
 
     await expect.poll(() => existsSync(worktree), { timeout: GIVEN_BACK_WITHIN_MS }).toBe(false);
-    expect(machine.serviceLog()).toContain(`Discarded from the worktree of scout (${scout}), ${worktree}: `);
+    await expect.poll(() => machine.serviceLog(), { timeout: GIVEN_BACK_WITHIN_MS }).toContain(`Discarded from the worktree of scout (${scout}), ${worktree}: `);
     expect(await keptPaths()).toEqual([]);
   });
 });
