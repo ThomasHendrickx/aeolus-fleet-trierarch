@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -55,7 +55,8 @@ const keptSchema = z.object({ repositories: z.array(z.object({ name: z.string(),
 const keptFile = (): string => join(machine.trierarchHome, 'trusted-repositories.json');
 const keptList = (): unknown => (existsSync(keptFile()) ? JSON.parse(readFileSync(keptFile(), 'utf8')) : undefined);
 const cloneOf = (name: string): string => join(machine.trierarchHome, 'repositories', name);
-const worktreeOf = (repository: string, shipName: string): string => join(machine.trierarchHome, 'worktrees', repository, shipName);
+/** A ship's worktree, in its ship's folder whatever repository it is of. */
+const worktreeOf = (shipId: ShipId): string => join(machine.trierarchHome, 'ships', shipId, 'worktree');
 
 /** The repositories the trierarch reports it offers. */
 async function offeredRepositories(): Promise<readonly string[]> {
@@ -132,7 +133,7 @@ describe('the trusted repositories', () => {
 
     await fleet.crewInWorktree(scout, { repository: TOOLS, harness: 'claude-code' });
 
-    await expect.poll(() => existsSync(join(worktreeOf(TOOLS, 'scout'), 'fake-starts.jsonl')), { timeout: ANSWERED_WITHIN_MS }).toBe(true);
+    await expect.poll(() => existsSync(join(worktreeOf(scout), 'fake-starts.jsonl')), { timeout: ANSWERED_WITHIN_MS }).toBe(true);
     expect(existsSync(join(cloneOf(TOOLS), 'README.md'))).toBe(true);
     expect(existsSync(`${cloneOf(TOOLS)}.partial`)).toBe(false);
   });
@@ -145,7 +146,7 @@ describe('the trusted repositories', () => {
 
     await fleet.crewInWorktree(scout, { repository: TOOLS, harness: 'claude-code' });
 
-    await expect.poll(() => existsSync(join(worktreeOf(TOOLS, 'scout'), 'fake-starts.jsonl')), { timeout: ANSWERED_WITHIN_MS }).toBe(true);
+    await expect.poll(() => existsSync(join(worktreeOf(scout), 'fake-starts.jsonl')), { timeout: ANSWERED_WITHIN_MS }).toBe(true);
   });
 
   it('says why a clone failed and leaves no half clone', async () => {
@@ -166,7 +167,8 @@ describe('the trusted repositories', () => {
 
     await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
 
-    await expect.poll(() => existsSync(join(worktreeOf(REPOSITORY, 'scout'), 'fake-starts.jsonl')), { timeout: ANSWERED_WITHIN_MS }).toBe(true);
+    await expect.poll(() => existsSync(join(worktreeOf(scout), 'fake-starts.jsonl')), { timeout: ANSWERED_WITHIN_MS }).toBe(true);
     expect(existsSync(cloneOf(REPOSITORY))).toBe(false);
+    expect(execFileSync('git', ['-C', worktreeOf(scout), 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' }).trim()).toBe(join(realpathSync(machine.repository), '.git'));
   });
 });

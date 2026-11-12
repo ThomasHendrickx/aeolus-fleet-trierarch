@@ -86,7 +86,7 @@ function answeredScout(): z.infer<typeof answeredSchema>[] {
 
 /** Has scout's session call its ship's socket: what the socket answered. */
 async function scoutCalls(method: string, path: string): Promise<z.infer<typeof answeredSchema>> {
-  const socket = join(machine.trierarchHome, 'sockets', scout, 'fleet.sock');
+  const socket = join(machine.trierarchHome, 'ships', scout, 'sockets', 'fleet.sock');
   const before = answeredScout().length;
   await fleet.send('scout', `socket call: ${Buffer.from(JSON.stringify({ socket, method, path, body: '{}' })).toString('base64url')}`);
   await expect.poll(() => answeredScout().length, { timeout: ANSWERED_WITHIN_MS }).toBe(before + 1);

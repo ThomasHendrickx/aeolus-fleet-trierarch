@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -104,13 +104,13 @@ describe('a ship in a worktree of a repository', () => {
 });
 
 /**
- * A folder under the trierarch's root that no ship works in, at its path below
- * the root, with a process already running in it, as a dev server a retired
+ * A folder under the trierarch's root, `ships/` unless another is given, that no
+ * ship works in, at its path below the root, with a process already running in it, as a dev server a retired
  * ship's session left: its folder and the process's pid. Made what it is after
  * the process started, so no pass finds it with nothing running in it.
  */
-function aStrayWithAProcess(at: { path: readonly string[]; make: (folder: string) => void }): { folder: string; pid: number } {
-  const folder = join(machine.trierarchHome, 'worktrees', ...at.path);
+function aStrayWithAProcess(at: { path: readonly string[]; make: (folder: string) => void; root?: string }): { folder: string; pid: number } {
+  const folder = join(at.root ?? join(machine.trierarchHome, 'ships'), ...at.path);
   mkdirSync(folder, { recursive: true });
   const child = spawn('sleep', ['600'], { cwd: folder, detached: true, stdio: 'ignore' });
   child.unref();
@@ -159,7 +159,7 @@ describe('a folder under the root no crewed ship uses', () => {
   });
 
   it('that is no repository the trierarch has goes whole, with a clone of another repository in it and what runs there', async () => {
-    const unrelated = join(machine.trierarchHome, 'worktrees', 'hemma');
+    const unrelated = join(machine.trierarchHome, 'ships', 'hemma');
     const { pid } = aStrayWithAProcess({ path: ['hemma', 'scout'], make: aPlainClone });
 
     await expect.poll(() => machine.serviceLog(), { timeout: CLEARED_WITHIN_MS }).toContain(`Removed ${unrelated}, a folder under the root no crewed ship uses, after stopping 1 process in it`);
@@ -171,12 +171,119 @@ describe('a folder under the root no crewed ship uses', () => {
     await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
     await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
     const { worktree } = sessionOf(machine, 'scout');
-    const trash = join(machine.trierarchHome, 'worktrees', REPOSITORY, '.trash');
+    const trash = join(machine.trierarchHome, 'ships', '.trash');
     mkdirSync(trash, { recursive: true });
     const { folder } = aStrayWithAProcess({ path: [REPOSITORY, 'lookout'], make: aFileGitDoesNotKnow });
 
     await expect.poll(() => machine.serviceLog(), { timeout: CLEARED_WITHIN_MS }).toContain(`Removed ${folder}, a folder under the root no crewed ship uses`);
-    expect([existsSync(worktree), existsSync(trash)]).toEqual([true, true]);
+    expect([existsSync(worktree), existsSync(socketOf(scout)), existsSync(trash)]).toEqual([true, true, true]);
+  });
+
+  it("that is the folder of a ship no longer crewed here goes whole, its worktree and all it holds", async () => {
+    const gone = 'shp_01m000000000000000000gone0';
+    const { pid } = aStrayWithAProcess({
+      path: [gone, 'worktree'],
+      make: (folder) => {
+        aWorktreeOfTheRepository(folder);
+        mkdirSync(join(shipFolderOf(gone), 'sockets'));
+      },
+    });
+
+    await expect.poll(() => machine.serviceLog(), { timeout: CLEARED_WITHIN_MS }).toContain(`Removed ${shipFolderOf(gone)}, a folder under the root no crewed ship uses, after stopping 1 process in it`);
+    expect(existsSync(shipFolderOf(gone))).toBe(false);
+    expect(isRunning(pid)).toBe(false);
+  });
+
+  it('under the worktree root of the ships crewed before the ship folders, ~/.aeolus/trierarch/worktrees, goes too', async () => {
+    const before = join(machine.trierarchHome, 'worktrees');
+    const { folder, pid } = aStrayWithAProcess({ root: before, path: [REPOSITORY, 'orphan'], make: aWorktreeOfTheRepository });
+
+    await expect.poll(() => machine.serviceLog(), { timeout: CLEARED_WITHIN_MS }).toContain(`Removed ${folder}, a folder under the root no crewed ship uses, after stopping 1 process in it`);
+    expect(existsSync(folder)).toBe(false);
+    expect(isRunning(pid)).toBe(false);
+  });
+});
+
+/** A ship's own folder, which holds every file of the ship, and no secret. */
+const shipFolderOf = (shipId: string): string => join(machine.trierarchHome, 'ships', shipId);
+/** A ship's fleet socket, in its ship's folder. */
+const socketOf = (shipId: string): string => join(shipFolderOf(shipId), 'sockets', 'fleet.sock');
+
+/** Every file under the folder, by its path; a socket or a link is no file. */
+function filesUnder(folder: string): string[] {
+  return readdirSync(folder, { recursive: true, encoding: 'utf8' })
+    .map((name) => join(folder, name))
+    .filter((path) => lstatSync(path).isFile());
+}
+
+const savedSchema = z.object({ entries: z.record(z.string(), z.object({ crewToken: z.string().optional() }).loose()) });
+
+describe("a ship's folder", () => {
+  it('is made when a ship is crewed fresh, ships/<shipId>/, holding its worktree and its fleet socket, which its identity names', async () => {
+    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+
+    await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
+    expect(sessionOf(machine, 'scout').worktree).toBe(join(shipFolderOf(scout), 'worktree'));
+    expect(lstatSync(socketOf(scout)).isSocket()).toBe(true);
+    const identities = filesUnder(join(machine.home, '.aeolus', 'crews', 'claude-code')).map((path) => readFileSync(path, 'utf8'));
+    expect(identities.filter((identity) => identity.includes(`socket=${socketOf(scout)}\n`))).toHaveLength(1);
+  });
+
+  it("holds no token: the ship's crew token and the trierarch's stay in the trierarch's own files beside ships/, and the hold's files too", async () => {
+    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
+    const crewToken = savedSchema.parse(JSON.parse(readFileSync(join(machine.trierarchHome, 'state.json'), 'utf8'))).entries[scout]?.crewToken ?? '';
+    const tokens = [crewToken, readFileSync(join(machine.trierarchHome, 'crew-token'), 'utf8').trim()];
+    expect(tokens.filter((token) => token.length < 20)).toEqual([]);
+
+    const holding = filesUnder(join(machine.trierarchHome, 'ships')).filter((path) => tokens.some((token) => readFileSync(path, 'utf8').includes(token)));
+
+    expect(holding).toEqual([]);
+    expect(existsSync(join(machine.trierarchHome, 'sessions', scout, 'hold.pid'))).toBe(true);
+  });
+
+  it('goes whole when its crew request is removed, once its session stopped', async () => {
+    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
+    const pid = sessionOf(machine, 'scout').starts()[0]?.pid ?? 0;
+
+    await fleet.removeCrewRequest(scout);
+
+    await expect.poll(() => existsSync(shipFolderOf(scout)), { timeout: CLEARED_WITHIN_MS }).toBe(false);
+    expect(isRunning(pid)).toBe(false);
+  });
+});
+
+describe('a place of ships/ where a socket path would pass the system limit', () => {
+  /** A place for ships/ long enough that a ship's socket path in it is over 108 bytes, Linux's limit. */
+  const aLongPlace = (): string => join(machine.trierarchHome, 'a-place-of-ships-far-too-long-for-a-socket-path-on-any-system-at-all');
+
+  function configureShipsAt(place: string): void {
+    const file = join(machine.trierarchHome, 'config.json');
+    writeFileSync(file, JSON.stringify({ ...z.looseObject({}).parse(JSON.parse(readFileSync(file, 'utf8'))), worktreeRoot: place }));
+  }
+
+  const refusalOf = (place: string): string => {
+    const socket = join(place, 'shp_00000000000000000000000000', 'sockets', 'fleet.sock');
+    return `The configuration at ${join(machine.trierarchHome, 'config.json')} keeps the ships' files in ${place}, where a ship's socket path, as ${socket}, is ${String(Buffer.byteLength(socket))} bytes, past the system's limit of 108: name a shorter place in worktreeRoot`;
+  };
+
+  it('is what config check refuses, naming the setting to shorten', async () => {
+    configureShipsAt(aLongPlace());
+
+    const ran = await machine.trierarch(['config', 'check']);
+
+    expect(ran.status).not.toBe(0);
+    expect(ran.stdout + ran.stderr).toContain(refusalOf(aLongPlace()));
+  });
+
+  it('is what run refuses too', async () => {
+    configureShipsAt(aLongPlace());
+
+    const ran = await machine.trierarch(['run']);
+
+    expect(ran.status).not.toBe(0);
+    expect(ran.stdout + ran.stderr).toContain(refusalOf(aLongPlace()));
   });
 });
 
