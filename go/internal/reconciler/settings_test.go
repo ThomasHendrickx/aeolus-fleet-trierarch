@@ -66,7 +66,7 @@ func TestARequestInARepositoryTheHarnessDoesNotTrustIsGivenBackNamingHowToTrustI
 
 	_, actions := Reconcile(Empty(), context)
 
-	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it"})
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "workspace.main.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it"})
 }
 
 func TestARequestInAFolderTheHarnessDoesNotTrustIsGivenBackNamingHowToTrustIt(t *testing.T) {
@@ -84,7 +84,7 @@ func TestAHarnessWithNothingReadOfItTrustsNothing(t *testing.T) {
 
 	_, actions := Reconcile(Empty(), context)
 
-	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it"})
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "workspace.main.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it"})
 }
 
 func TestARequestWhoseFlagWaitsOnAOneTimeQuestionIsGivenBackNamingHowToAcceptIt(t *testing.T) {
@@ -127,7 +127,7 @@ func TestANewSettingsVersionInAPlaceNoLongerTrustedIsGivenBack(t *testing.T) {
 	_, actions := Reconcile(withEntries(entry), context)
 
 	given := entry
-	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 2, Reason: "workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it", Entry: &given})
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 2, Reason: "workspace.main.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it", Entry: &given})
 }
 
 func TestARequestNamingAServerTheHarnessOffersIsCrewed(t *testing.T) {

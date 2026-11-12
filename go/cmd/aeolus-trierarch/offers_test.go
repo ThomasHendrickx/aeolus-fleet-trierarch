@@ -46,6 +46,7 @@ func (c *codexListing) Detect(ctx context.Context, version string, previous *det
 // codexConfiguration is Codex's configuration and hooks for a folder with nothing of the user's: what the codex program answers in place of it.
 type codexConfiguration struct{}
 
+func (codexConfiguration) Trust(folders []string) error                     { return nil }
 func (codexConfiguration) TrustAeolusHooks(folder string) ([]string, error) { return nil, nil }
 func (codexConfiguration) ConfiguredFor(folder string, overrides []string) (codex.Configured, error) {
 	return codex.Configured{}, nil

@@ -3,6 +3,7 @@ package state
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -60,5 +61,21 @@ func TestTodaysTrierarchsStateIsRead(t *testing.T) {
 	entry := loaded.Entries[scout]
 	if err != nil || entry.ShipName != "scout" || len(entry.Exits) != 1 || entry.Folder != "/w/aeolus-fleet/scout" || !entry.HasStarted {
 		t.Fatalf("entry %+v, %v", entry, err)
+	}
+}
+
+func TestAnEntrySavedBeforeTheShipFolderLayoutIsReadAsTheMainOfAShipFolderMarkedToBeCrewedAgain(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	written := `{"entries":{"` + scout + `":{"shipId":"` + scout + `","settingsVersion":1,"harness":"claude-code","workspace":{"kind":"worktree","repository":"aeolus-fleet","ref":"main"},"options":{},"state":"running","since":"2026-11-04T10:00:00.000Z","exits":[],"folder":"/ships/` + scout + `/worktree","hasStarted":true}},"kept":[],"orphans":[],"refused":{}}`
+	if err := os.WriteFile(path, []byte(written), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := File{Path: path}.Load()
+
+	entry := loaded.Entries[scout]
+	want := reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: "aeolus-fleet", Ref: "main"}}
+	if err != nil || !reflect.DeepEqual(entry.Workspace, want) || !entry.IsOldLayout {
+		t.Fatalf("entry %+v, %v, want the main of a ship folder of the old layout", entry, err)
 	}
 }

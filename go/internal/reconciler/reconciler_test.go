@@ -22,12 +22,12 @@ func status(text string) *string {
 
 // aRequest is a crew request for the ship with Claude Code in a worktree of aeolus-fleet, version 1, not final.
 func aRequest(shipID string) Request {
-	return Request{ShipID: shipID, SettingsVersion: 1, Settings: Settings{Harness: "claude-code", Workspace: Workspace{Kind: "worktree", Repository: "aeolus-fleet"}, Options: map[string]string{}}}
+	return Request{ShipID: shipID, SettingsVersion: 1, Settings: Settings{Harness: "claude-code", Workspace: Workspace{Kind: "repositories", Main: RepositoryAt{Repository: "aeolus-fleet"}}, Options: map[string]string{}}}
 }
 
 // anEntry is the ship's entry in the state given, crewed from aRequest, its session started in its worktree.
 func anEntry(shipID string, state string) Entry {
-	return Entry{ShipID: shipID, ShipName: "scout", SettingsVersion: 1, Harness: "claude-code", Workspace: Workspace{Kind: "worktree", Repository: "aeolus-fleet"}, Options: map[string]string{}, State: state, Since: ago(time.Hour), Exits: []string{}, Folder: "/worktrees/aeolus-fleet/scout", CrewToken: "aeolus_ct_v1_scout", HasStarted: true}
+	return Entry{ShipID: shipID, ShipName: "scout", SettingsVersion: 1, Harness: "claude-code", Workspace: Workspace{Kind: "repositories", Main: RepositoryAt{Repository: "aeolus-fleet"}}, Options: map[string]string{}, State: state, Since: ago(time.Hour), Exits: []string{}, Folder: "/worktrees/aeolus-fleet/scout", CrewToken: "aeolus_ct_v1_scout", HasStarted: true}
 }
 
 func aContext(requests ...Request) Context {
@@ -78,7 +78,7 @@ func TestANewRequestIsSavedCrewingAndCrewed(t *testing.T) {
 
 	assertActions(t, actions, Action{Kind: Crew, ShipID: scout})
 	entry := next.Entries[scout]
-	if entry.State != "crewing" || entry.Since != now.Format(time.RFC3339Nano) || entry.Harness != "claude-code" || entry.Workspace.Repository != "aeolus-fleet" || entry.HasStarted {
+	if entry.State != "crewing" || entry.Since != now.Format(time.RFC3339Nano) || entry.Harness != "claude-code" || entry.Workspace.Main.Repository != "aeolus-fleet" || entry.HasStarted {
 		t.Fatalf("entry: %+v", entry)
 	}
 }
@@ -230,11 +230,49 @@ func TestARefusalIsForgottenOnceTheRequestIsNoLongerAssigned(t *testing.T) {
 
 func TestARequestInARepositoryNotConfiguredIsGivenBackWithWhy(t *testing.T) {
 	request := aRequest(scout)
-	request.Settings.Workspace.Repository = "website"
+	request.Settings.Workspace.Main.Repository = "website"
 
 	_, actions := Reconcile(Empty(), aContext(request))
 
-	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "workspace.repository: This trierarch offers no repository website"})
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "workspace.main.repository: This trierarch offers no repository website"})
+}
+
+func TestARequestWithASubRepositoryNotConfiguredIsGivenBackNamingItsField(t *testing.T) {
+	request := aRequest(scout)
+	request.Settings.Workspace.SubRepositories = []RepositoryAt{{Repository: "website"}}
+
+	_, actions := Reconcile(Empty(), aContext(request))
+
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "workspace.subRepositories.0.repository: This trierarch offers no repository website"})
+}
+
+func TestANewSettingsVersionKeepsTheRepositoryItsShipFolderMainWasMadeOf(t *testing.T) {
+	crewed := anEntry(scout, "running")
+	crewed.MadeMain = "aeolus-fleet"
+	state := Empty()
+	state.Entries[scout] = crewed
+	request := aRequest(scout)
+	request.SettingsVersion = 2
+
+	next, _ := Reconcile(state, aContext(request))
+
+	if got := next.Entries[scout].MadeMain; got != "aeolus-fleet" {
+		t.Errorf("MadeMain = %q, want aeolus-fleet", got)
+	}
+}
+
+func TestAShipSavedBeforeTheShipFolderLayoutIsStoppedAndCrewedAgain(t *testing.T) {
+	crewed := anEntry(scout, "running")
+	crewed.IsOldLayout = true
+	state := Empty()
+	state.Entries[scout] = crewed
+
+	next, actions := Reconcile(state, aContext(aRequest(scout)))
+
+	assertActions(t, actions, Action{Kind: Stop, ShipID: scout}, Action{Kind: Crew, ShipID: scout})
+	if entry := next.Entries[scout]; entry.State != "crewing" || entry.HasStarted || !entry.IsOldLayout {
+		t.Errorf("entry: %+v, want crewing, not started, still of the old layout", entry)
+	}
 }
 
 func TestARequestWithoutAHarnessTakesTheFirstOffered(t *testing.T) {

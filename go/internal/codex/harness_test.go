@@ -42,7 +42,14 @@ func (r *aRuntime) Interrupt(shipID string) error {
 // someHooks trusts the aeolus-fleet plugin's hooks as Codex's app server would, noting each folder, or fails with the error given.
 type someHooks struct {
 	trustedFrom []string
-	err         error
+	// trustedFolders are the folders Codex was told to trust, in order.
+	trustedFolders []string
+	err            error
+}
+
+func (h *someHooks) Trust(folders []string) error {
+	h.trustedFolders = append(h.trustedFolders, folders...)
+	return nil
 }
 
 func (h *someHooks) TrustAeolusHooks(folder string) ([]string, error) {
@@ -164,6 +171,21 @@ func TestAStartAgainWakesTheFoldersLastConversation(t *testing.T) {
 
 	if want := CommandLine([]string{"-m", "gpt-5.6-terra"}, "$aeolus-fleet-wake "+prompt.NoTerminalQuestions, false); !slices.Equal(running.started[0].Command, want) {
 		t.Fatalf("started %q, want %q", running.started[0].Command, want)
+	}
+}
+
+func TestEveryLaunchTrustsTheSessionsFolderAShipFolderNoConfiguredCheckoutCovers(t *testing.T) {
+	harness, _, hooks := aHarness(t)
+	entry := anEntry(t)
+
+	for _, isFirstStart := range []bool{true, false} {
+		if err := harness.Launch(entry, isFirstStart, "launch-1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if !slices.Equal(hooks.trustedFolders, []string{entry.Folder, entry.Folder}) {
+		t.Errorf("trusted %q, want the session's folder before each start", hooks.trustedFolders)
 	}
 }
 

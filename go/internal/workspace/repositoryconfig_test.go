@@ -107,7 +107,7 @@ func TestTheHostsGitCallsInASessionsCloneIgnoreTheClonesOwnConfig(t *testing.T) 
 			repository, root := aRepository(t)
 			withUpstream(t, repository)
 			places := clonePlaces(repository, root, t.TempDir())
-			entry := reconciler.Entry{Workspace: reconciler.Workspace{Kind: "worktree", Repository: "aeolus-fleet"}}
+			entry := reconciler.Entry{ShipFolder: places.ShipFolderOf("shp_scout"), Workspace: reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: "aeolus-fleet"}}}
 			folder := prepared(t, places, entry, "scout")
 			// One script under every hook's name, so any hook git runs leaves the marker.
 			hooks := t.TempDir()

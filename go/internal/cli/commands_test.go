@@ -91,14 +91,14 @@ func TestAFailedPassIsLoggedAndTheLoopGoesOn(t *testing.T) {
 func TestListSaysEachShipItCrewsFromItsState(t *testing.T) {
 	machine, _, _ := aMain(t)
 	saved := reconciler.Empty()
-	saved.Entries[scout] = reconciler.Entry{ShipID: scout, State: "running", Harness: "claude-code", Workspace: reconciler.Workspace{Kind: "worktree", Repository: "aeolus-fleet"}, Folder: "/w/aeolus-fleet/scout", Since: "2026-11-04T10:00:00Z", Exits: []string{"2026-11-04T09:59:00Z"}, Options: map[string]string{}}
+	saved.Entries[scout] = reconciler.Entry{ShipID: scout, State: "running", Harness: "claude-code", Workspace: reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: "aeolus-fleet"}}, Folder: "/w/aeolus-fleet/scout", Since: "2026-11-04T10:00:00Z", Exits: []string{"2026-11-04T09:59:00Z"}, Options: map[string]string{}}
 	if err := (state.File{Path: trierarchHome(machine).State}).Save(saved); err != nil {
 		t.Fatal(err)
 	}
 
 	output, code := Main([]string{"list", "--json"}, machine)
 
-	if code != 0 || strings.ReplaceAll(strings.ReplaceAll(output, " ", ""), "\n", "") != `[{"shipId":"`+scout+`","state":"running","harness":"claude-code","workspace":"worktreeaeolus-fleet","folder":"/w/aeolus-fleet/scout","since":"2026-11-04T10:00:00Z","restarts":1}]` {
+	if code != 0 || strings.ReplaceAll(strings.ReplaceAll(output, " ", ""), "\n", "") != `[{"shipId":"`+scout+`","state":"running","harness":"claude-code","workspace":"repositoriesaeolus-fleet","folder":"/w/aeolus-fleet/scout","since":"2026-11-04T10:00:00Z","restarts":1}]` {
 		t.Fatalf("answered %s, %d", output, code)
 	}
 }
