@@ -22,11 +22,20 @@ const VITEST = fileURLToPath(new URL('../../../../node_modules/vitest/vitest.mjs
 const FIXTURE = fileURLToPath(new URL('../fixtures/test-run/', import.meta.url));
 const RUN_TIMEOUT_MS = 240_000;
 
+/** What a Podman call printed, trimmed; a call that fails throws, so a failed listing never reads as nothing left. */
+async function podmanPrinted(args: readonly string[]): Promise<string> {
+  const answer = await runCommand('podman', { args });
+  if (answer.status !== 0) {
+    throw new Error(`podman ${args.join(' ')} failed: ${answer.stderr.trim()}`);
+  }
+  return answer.stdout.trim();
+}
+
 /** What a fixture run left on the machine: its containers, its volume and its test image, by name. */
 const leftOf = async (marker: string, volume: string) => ({
-  containers: (await runCommand('podman', { args: ['ps', '--all', '--filter', `name=trierarch-test-${marker}`, '--format', '{{.Names}}'] })).stdout.trim(),
-  volumes: (await runCommand('podman', { args: ['volume', 'ls', '--filter', `name=${volume}`, '--format', '{{.Name}}'] })).stdout.trim(),
-  images: (await runCommand('podman', { args: ['images', '--filter', `reference=localhost/aeolus-trierarch-test:${marker}`, '--format', '{{.Repository}}:{{.Tag}}'] })).stdout.trim(),
+  containers: await podmanPrinted(['ps', '--all', '--filter', `name=trierarch-test-${marker}`, '--format', '{{.Names}}']),
+  volumes: await podmanPrinted(['volume', 'ls', '--filter', `name=${volume}`, '--format', '{{.Name}}']),
+  images: await podmanPrinted(['images', '--filter', `reference=localhost/aeolus-trierarch-test:${marker}`, '--format', '{{.Repository}}:{{.Tag}}']),
 });
 
 /** How a fixture run's test ends: it passes, it fails, or it hangs until the run is killed. */
@@ -113,7 +122,7 @@ describe('the test runs of this package on this machine', () => {
       const [interrupted = '', next = '', other = ''] = markers;
       const interruptedRun = startFixtureRun(interrupted, 'hangs');
       await expect.poll(async () => (await leftOf(interrupted, '')).containers, { timeout: RUN_TIMEOUT_MS / 2 }).not.toBe('');
-      const volume = (await runCommand('podman', { args: ['inspect', `trierarch-test-${interrupted}`, '--format', '{{range .Mounts}}{{.Name}}{{end}}'] })).stdout.trim();
+      const volume = await podmanPrinted(['inspect', `trierarch-test-${interrupted}`, '--format', '{{range .Mounts}}{{.Name}}{{end}}']);
       volumes.push(volume);
       process.kill(-interruptedRun.pid, 'SIGKILL');
       await interruptedRun.exited;
@@ -123,14 +132,14 @@ describe('the test runs of this package on this machine', () => {
       const ofThisRun = `trierarch-test-${newId('ship').slice(-8)}`;
       const ofNoRun = `trierarch-test-${newId('ship').slice(-8)}`;
       unrelated.push(ofThisRun, ofNoRun);
-      await runCommand('podman', { args: ['run', '--detach', '--name', ofThisRun, '--label', `${TEST_RUN_LABEL}=${inject('trierarchTestRun')}`, otherImage, 'sleep', '300'] });
-      await runCommand('podman', { args: ['run', '--detach', '--name', ofNoRun, otherImage, 'sleep', '300'] });
+      await podmanPrinted(['run', '--detach', '--name', ofThisRun, '--label', `${TEST_RUN_LABEL}=${inject('trierarchTestRun')}`, otherImage, 'sleep', '300']);
+      await podmanPrinted(['run', '--detach', '--name', ofNoRun, otherImage, 'sleep', '300']);
 
       const nextRun = await startFixtureRun(next, 'passes').exited;
       volumes.push(nextRun.volume);
       expect(nextRun).toMatchObject({ code: 0 });
 
-      const kept = (await runCommand('podman', { args: ['ps', '--all', '--filter', `name=${ofThisRun}`, '--filter', `name=${ofNoRun}`, '--format', '{{.Names}}'] })).stdout.trim().split('\n').toSorted();
+      const kept = (await podmanPrinted(['ps', '--all', '--filter', `name=${ofThisRun}`, '--filter', `name=${ofNoRun}`, '--format', '{{.Names}}'])).split('\n').toSorted();
       expect({ leftByTheKill: { container: leftByTheKill.containers !== '', volume: volume !== '' && leftByTheKill.volumes === volume }, afterTheNextRun: await leftOf(interrupted, volume), kept, keptImage: (await leftOf(other, '')).images }).toEqual({
         leftByTheKill: { container: true, volume: true },
         afterTheNextRun: { containers: '', volumes: '', images: '' },

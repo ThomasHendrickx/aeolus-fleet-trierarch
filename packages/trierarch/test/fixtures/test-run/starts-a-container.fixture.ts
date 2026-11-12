@@ -17,6 +17,9 @@ it('starts a container of the test session image, with a volume, and leaves it r
   }
   // The volume's name, for the test that runs this suite to look for after it.
   const mounted = await runCommand('podman', { args: ['inspect', name, '--format', '{{range .Mounts}}{{.Name}}{{end}}'] });
+  if (mounted.status !== 0) {
+    throw new Error(`inspecting the container failed: ${mounted.stderr.trim()}`);
+  }
   writeFileSync(process.env.AEOLUS_TEST_RUN_VOLUME_FILE ?? '', mounted.stdout.trim());
   if (process.env.AEOLUS_TEST_RUN_ENDS === 'hangs') {
     // Until it is killed, as a run is interrupted.
