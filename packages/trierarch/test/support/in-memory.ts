@@ -677,9 +677,21 @@ export class InMemoryWorkspace implements WorkspacePort {
   /** Repositories whose prune fails, as when git refuses. */
   readonly failingPrune = new Set<string>();
 
+  /** The prunes and branch deletions of the configured repositories, in order, as `prune <repository>` or `delete branches <repository>`. */
+  readonly gitSteps: string[] = [];
+
+  /** Repositories whose branches cannot be deleted, as when the remote cannot be reached. */
+  readonly failingBranchDeletion = new Set<string>();
+
   prune(repository: string): Promise<void> {
     this.pruned.push(repository);
+    this.gitSteps.push(`prune ${repository}`);
     return this.failingPrune.has(repository) ? Promise.reject(new Error(`git worktree prune failed in ${repository}`)) : Promise.resolve();
+  }
+
+  deleteBranchesWhoseRemoteBranchIsGone(repository: string): Promise<void> {
+    this.gitSteps.push(`delete branches ${repository}`);
+    return this.failingBranchDeletion.has(repository) ? Promise.reject(new Error(`git ls-remote failed in ${repository}`)) : Promise.resolve();
   }
 
   /** Every folder on disk under the root, whatever it is. */
