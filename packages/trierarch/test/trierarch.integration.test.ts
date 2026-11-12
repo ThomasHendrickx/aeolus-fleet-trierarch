@@ -229,9 +229,10 @@ async function aTrierarchOnTheFleet(
   const aRunPass = () => createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, folderProcesses: { stopIn: () => Promise.resolve(0) }, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }), state, setup, clock, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID, sockets, checkouts, modelLogins: { startProblem: () => Promise.resolve(undefined), keyState: () => Promise.resolve({ state: 'ready' }) }, sendReleasedUsage: () => Promise.resolve() });
   const pass = aRunPass();
   const leasesOf = (shipId: ShipId) => database.lease.count({ where: { shipId, endedAt: null } });
-  const worktree = join(paths.ships, scout.shipId, 'worktree');
+  const folder = join(paths.ships, scout.shipId, 'repositories');
+  const main = join(folder, 'main');
 
-  return { useCases, argo, trierarchShip, scout, pass, aRunPass, leasesOf, worktree, sockets, fleet, sessions, state, setup, clock };
+  return { useCases, argo, trierarchShip, scout, pass, aRunPass, leasesOf, folder, main, sockets, fleet, sessions, state, setup, clock };
 }
 
 describe('the trierarch on a real fleet', () => {
@@ -261,7 +262,7 @@ describe('the trierarch on a real fleet', () => {
   });
 
   it('crews an assigned request, its status reads running once its session shows activity, and removing it ends the lease, removes the clean worktree and the request', async () => {
-    const { useCases, argo, trierarchShip, scout, pass, leasesOf, worktree } = await aTrierarchOnTheFleet();
+    const { useCases, argo, trierarchShip, scout, pass, leasesOf, folder, main } = await aTrierarchOnTheFleet();
     unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: inRepositories('aeolus-fleet'), options: {} } }));
     unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
     await pass();
@@ -270,8 +271,8 @@ describe('the trierarch on a real fleet', () => {
 
     await expect(leasesOf(scout.shipId)).resolves.toBe(1);
     await expect(database.crewRequest.findUniqueOrThrow({ where: { shipId: scout.shipId } })).resolves.toMatchObject({ status: 'running' });
-    expect(existsSync(join(worktree, 'README.md'))).toBe(true);
-    const identityPath = await runCommand('bash', { args: [`${PLUGIN_ROOT}/scripts/aeolus-identity.sh`, 'path'], env: { AEOLUS_FOLDER: worktree, AEOLUS_DATA: pluginData, AEOLUS_CREWS: join(home, '.aeolus', 'crews', 'claude-code') } });
+    expect(existsSync(join(main, 'README.md'))).toBe(true);
+    const identityPath = await runCommand('bash', { args: [`${PLUGIN_ROOT}/scripts/aeolus-identity.sh`, 'path'], env: { AEOLUS_FOLDER: folder, AEOLUS_DATA: pluginData, AEOLUS_CREWS: join(home, '.aeolus', 'crews', 'claude-code') } });
     const identity = readFileSync(identityPath.stdout.trim(), 'utf8');
     expect(identity).toContain(`shipId=${scout.shipId}\n`);
     expect(identity).toContain('wakeBy=trierarch\n');
@@ -281,7 +282,7 @@ describe('the trierarch on a real fleet', () => {
     await pass();
 
     await expect(leasesOf(scout.shipId)).resolves.toBe(0);
-    expect(existsSync(worktree)).toBe(false);
+    expect(existsSync(folder)).toBe(false);
     await expect(database.crewRequest.findUnique({ where: { shipId: scout.shipId } })).resolves.toBeNull();
   });
 
@@ -298,35 +299,35 @@ describe('the trierarch on a real fleet', () => {
   });
 
   it('removing the request removes a worktree with changes too and tells argo nothing, so the ship crewed again starts in a fresh worktree (#450, #89)', async () => {
-    const { useCases, argo, trierarchShip, scout, pass, worktree } = await aTrierarchOnTheFleet();
+    const { useCases, argo, trierarchShip, scout, pass, folder, main } = await aTrierarchOnTheFleet();
     const settings = { harness: 'claude-code', workspace: inRepositories('aeolus-fleet'), options: {} };
     unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings }));
     unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
     await pass();
-    writeFileSync(join(worktree, 'draft.md'), 'work in progress\n');
+    writeFileSync(join(main, 'draft.md'), 'work in progress\n');
     unwrap(await useCases.removeCrewRequest(argo, { shipId: scout.shipId }));
     await pass();
-    expect(existsSync(worktree)).toBe(false);
+    expect(existsSync(folder)).toBe(false);
     await expect(database.message.findMany({ where: { senderShipId: trierarchShip.shipId }, select: { payload: true } })).resolves.toEqual([]);
 
     unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings }));
     unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
     await pass();
 
-    expect(existsSync(join(worktree, 'README.md'))).toBe(true);
-    expect(existsSync(join(worktree, 'draft.md'))).toBe(false);
+    expect(existsSync(join(main, 'README.md'))).toBe(true);
+    expect(existsSync(join(main, 'draft.md'))).toBe(false);
   });
 
   it('removes the worktree with changes of a crew given back before it is final, and confirms a clear request for it not-kept (decision 0032, #89)', async () => {
-    const { useCases, argo, trierarchShip, scout, pass, worktree } = await aTrierarchOnTheFleet();
+    const { useCases, argo, trierarchShip, scout, pass, folder, main } = await aTrierarchOnTheFleet();
     unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'claude-code', workspace: inRepositories('aeolus-fleet'), options: {} } }));
     unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
     await pass();
     // Its crew is given back before it is final: settings this trierarch cannot crew come while it crews.
-    writeFileSync(join(worktree, 'draft.md'), 'work in progress\n');
+    writeFileSync(join(main, 'draft.md'), 'work in progress\n');
     unwrap(await useCases.requestCrew(argo, { shipId: scout.shipId, settings: { harness: 'codex', workspace: inRepositories('aeolus-fleet'), options: {} } }));
     await pass();
-    expect(existsSync(worktree)).toBe(false);
+    expect(existsSync(folder)).toBe(false);
 
     unwrap(await useCases.requestWorktreeClear(argo, { trierarchShipId: trierarchShip.shipId, shipId: scout.shipId, repository: 'aeolus-fleet' }));
     await pass();
@@ -350,11 +351,11 @@ describe('the trierarch on a real fleet', () => {
 describe("contained access on a real fleet (decision 0026): the session calls over its ship's socket, and only the trierarch holds the crew token", () => {
   const SETTINGS = { harness: 'claude-code', workspace: inRepositories('aeolus-fleet'), options: {} } as const;
 
-  /** A fleet call of the session in the worktree, through the aeolus-fleet plugin's own script, as Claude Code's Bash tool makes it. */
-  const fleetCall = (worktree: string, call: { args: readonly string[]; input?: string }) =>
+  /** A fleet call of the session in its ship folder, through the aeolus-fleet plugin's own script, as Claude Code's Bash tool makes it. */
+  const fleetCall = (folder: string, call: { args: readonly string[]; input?: string }) =>
     runCommand('bash', {
       args: [`${PLUGIN_ROOT}/scripts/aeolus-fleet.sh`, ...call.args],
-      env: { HOME: home, AEOLUS_FOLDER: worktree, AEOLUS_DATA: pluginData, AEOLUS_CREWS: join(home, '.aeolus', 'crews', 'claude-code'), AEOLUS_BUSY_WAITS: '' },
+      env: { HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: pluginData, AEOLUS_CREWS: join(home, '.aeolus', 'crews', 'claude-code'), AEOLUS_BUSY_WAITS: '' },
       ...(call.input !== undefined && { input: call.input }),
     });
 
@@ -391,15 +392,15 @@ describe("contained access on a real fleet (decision 0026): the session calls ov
   const eventsOf = async (shipId: ShipId) => (await database.event.findMany({ where: { shipId }, select: { type: true } })).map(({ type }) => type);
 
   it('sends, acks and reports over the socket, with no crew token in what the session keeps', async () => {
-    const { useCases, argo, scout, worktree } = await aCrewedScout();
+    const { useCases, argo, scout, folder } = await aCrewedScout();
     const crewToken = crewTokenOf(scout.shipId);
     unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', name: 'scout' }, payload: 'chart the coast', idempotencyKey: newKey() }));
 
-    const sent = await fleetCall(worktree, { args: ['send', '-'], input: JSON.stringify({ selector: { kind: 'ship', name: 'argo' }, payload: 'on it', idempotencyKey: newKey(), model: 'claude-opus-5-5' }) });
-    const received = await fleetCall(worktree, { args: ['receive'] });
+    const sent = await fleetCall(folder, { args: ['send', '-'], input: JSON.stringify({ selector: { kind: 'ship', name: 'argo' }, payload: 'on it', idempotencyKey: newKey(), model: 'claude-opus-5-5' }) });
+    const received = await fleetCall(folder, { args: ['receive'] });
     const [delivery] = z.object({ deliveries: z.array(z.object({ deliveryId: z.string() })) }).parse(JSON.parse(received.stdout)).deliveries;
-    const acked = await fleetCall(worktree, { args: ['ack', delivery?.deliveryId ?? 'no delivery'] });
-    const reported = await fleetCall(worktree, { args: ['report', '{"state":"working","note":"charting"}'] });
+    const acked = await fleetCall(folder, { args: ['ack', delivery?.deliveryId ?? 'no delivery'] });
+    const reported = await fleetCall(folder, { args: ['report', '{"state":"working","note":"charting"}'] });
 
     expect([sent, received, acked, reported].map((call) => call.status)).toEqual([0, 0, 0, 0]);
     await expect(eventsOf(scout.shipId)).resolves.toEqual(expect.arrayContaining(['MessageAccepted', 'DeliveryAcknowledged', 'ShipReported']));
@@ -408,17 +409,17 @@ describe("contained access on a real fleet (decision 0026): the session calls ov
   });
 
   it('gives a call no answer while the trierarch is down, and the fleet stores nothing', async () => {
-    const { scout, worktree, sockets } = await aCrewedScout();
+    const { scout, folder, sockets } = await aCrewedScout();
     await sockets.closeAll();
 
-    const sent = await fleetCall(worktree, { args: ['send', '-'], input: JSON.stringify({ selector: { kind: 'ship', name: 'argo' }, payload: 'on it', idempotencyKey: newKey(), model: 'claude-opus-5-5' }) });
+    const sent = await fleetCall(folder, { args: ['send', '-'], input: JSON.stringify({ selector: { kind: 'ship', name: 'argo' }, payload: 'on it', idempotencyKey: newKey(), model: 'claude-opus-5-5' }) });
 
     expect(sent.status).toBe(6);
     await expect(database.message.count({ where: { senderShipId: scout.shipId } })).resolves.toBe(0);
   });
 
   it("gives the ship's new crew token to its same socket once the ship is crewed again", async () => {
-    const { useCases, argo, trierarchShip, scout, pass, worktree } = await aCrewedScout();
+    const { useCases, argo, trierarchShip, scout, pass, folder } = await aCrewedScout();
     const first = crewTokenOf(scout.shipId);
     const socketOf = () => /^socket=(.*)$/m.exec(sessionFiles().join('\n'))?.[1];
     const socket = socketOf();
@@ -428,7 +429,7 @@ describe("contained access on a real fleet (decision 0026): the session calls ov
     unwrap(await useCases.assignCrew(argo, { shipId: scout.shipId, trierarchShipId: trierarchShip.shipId }));
     await pass();
 
-    const whoami = await fleetCall(worktree, { args: ['whoami'] });
+    const whoami = await fleetCall(folder, { args: ['whoami'] });
 
     expect(whoami.status, whoami.stdout).toBe(0);
     expect(socketOf()).toBe(socket);
@@ -943,6 +944,6 @@ describe('the trusted repositories on a real fleet (aeolus-fleet#384)', () => {
 
     await expect(database.crewRequest.findUniqueOrThrow({ where: { shipId: scout.shipId } })).resolves.toMatchObject({ status: 'running' });
     expect(existsSync(join(paths.repositories, 'hemma', '.git'))).toBe(true);
-    expect(existsSync(join(paths.ships, scout.shipId, 'worktree', 'README.md'))).toBe(true);
+    expect(existsSync(join(paths.ships, scout.shipId, 'repositories', 'main', 'README.md'))).toBe(true);
   });
 });
