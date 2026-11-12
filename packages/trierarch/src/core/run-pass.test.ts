@@ -3329,6 +3329,22 @@ describe('a ship folder (docs/design/ship-folder.md)', () => {
     expect(trierarch.state.current().entries[shipId]?.madeMain).toBe('tools');
   });
 
+  it('keeps the main/ a new settings version made when a sub-repository after it fails, never trashing it on the next try', async () => {
+    const trierarch = aTrierarch(WITH_TOOLS);
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.workspace.failingRepositories.set('aeolus-fleet', 'git worktree add failed: fatal: invalid reference: HEAD');
+    trierarch.fleet.requestAgain(shipId, crewSettings({ workspace: inRepositories('tools', { subRepositories: ['aeolus-fleet'] }) }));
+    await trierarch.pass();
+    trierarch.workspace.change(scoutMain(shipId), '?? made.md');
+    trierarch.workspace.failingRepositories.clear();
+
+    trierarch.clock.advance(5 * SECOND_MS);
+    await trierarch.pass();
+
+    expect(trierarch.workspace.folders.get(scoutMain(shipId))?.unsaved).toEqual(['?? made.md']);
+    expect(trierarch.state.current().entries[shipId]?.madeMain).toBe('tools');
+  });
+
   it('is never crewed with a sub-repository its harness does not trust, given back naming its field', async () => {
     const trierarch = aTrierarch(WITH_TOOLS);
     trierarch.trust.untrust('claude-code', { kind: 'repository', name: 'tools' });

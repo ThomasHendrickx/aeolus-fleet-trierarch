@@ -686,7 +686,7 @@ export class InMemoryWorkspace implements WorkspacePort {
   /** Repositories git cannot make, with git's message. */
   readonly failingRepositories = new Map<string, string>();
 
-  prepare(at: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace; shipFolder?: string; madeMain?: string }): Promise<{ folder: string }> {
+  async prepare(at: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace; shipFolder?: string; madeMain?: string; onMainMade?: (repository: string) => Promise<void> }): Promise<{ folder: string }> {
     const { shipId, workspace, shipFolder } = at;
     if (workspace.kind === 'folder') {
       const folder = this.configured[workspace.name]?.path ?? NOTES_FOLDER;
@@ -694,10 +694,10 @@ export class InMemoryWorkspace implements WorkspacePort {
         this.folders.set(folder, { shipId, hasChanges: false, unsaved: [] });
       }
       this.keep(shipId, shipFolder);
-      return Promise.resolve({ folder });
+      return { folder };
     }
     if (shipFolder === undefined) {
-      return Promise.reject(new Error("A ship folder is made only in its ship's folder"));
+      throw new Error("A ship folder is made only in its ship's folder");
     }
     this.keep(shipId, shipFolder);
     const folder = `${shipFolder}/repositories`;
@@ -715,14 +715,17 @@ export class InMemoryWorkspace implements WorkspacePort {
     for (const [repository, path] of [[workspace.main.repository, main] as const, ...workspace.subRepositories.map(({ repository: name }) => [name, `${folder}/sub-repos/${name}`] as const)]) {
       const failure = this.failingRepositories.get(repository);
       if (failure !== undefined) {
-        return Promise.reject(new Error(failure));
+        throw new Error(failure);
       }
       if (!this.folders.has(path)) {
         this.folders.set(path, { shipId, shipFolder, hasChanges: false, unsaved: [] });
       }
+      if (path === main) {
+        this.mains.set(folder, repository);
+        await at.onMainMade?.(repository);
+      }
     }
-    this.mains.set(folder, workspace.main.repository);
-    return Promise.resolve({ folder });
+    return { folder };
   }
 
   private keep(shipId: ShipId, shipFolder: string | undefined): void {

@@ -361,12 +361,17 @@ func (f *someFolderProcesses) StopIn(folder string) (int, error) {
 }
 
 // Prepare makes the folder of the ship's main repository and its name, `/worktrees/<main>/<ship>`, writing down the repository its
-// main/ was made of as the entry gave it; a repository in failRepositories fails with git's message.
+// main/ was made of as the entry gave it; a repository in failRepositories fails with git's message, a sub-repository saying main/ was
+// made first.
 func (w *aWorkspace) Prepare(entry reconciler.Entry, shipName string) (string, error) {
 	w.prepared = append(w.prepared, entry)
 	for _, each := range entry.Workspace.Repositories() {
-		if message, ok := w.failRepositories[each.Repository]; ok {
+		message, ok := w.failRepositories[each.Repository]
+		switch {
+		case ok && each.Repository == entry.Workspace.Main.Repository:
 			return "", errors.New(message)
+		case ok:
+			return "", &workspace.MainMadeError{Repository: entry.Workspace.Main.Repository, Err: errors.New(message)}
 		}
 	}
 	folder := "/worktrees/" + entry.Workspace.Main.Repository + "/" + shipName
@@ -3202,6 +3207,33 @@ func TestAShipFolderKeepsTheRepositoryItsMainWasMadeOfSoANewMainReplacesIt(t *te
 	prepared := pass.workspace.prepared[len(pass.workspace.prepared)-1]
 	if prepared.Workspace.Main.Repository != "tools" || prepared.MadeMain != "aeolus-fleet" {
 		t.Fatalf("prepared %+v, want tools named and aeolus-fleet as what main/ was made of", prepared)
+	}
+	if entry := pass.store.state.Entries[scout]; entry.MadeMain != "tools" {
+		t.Fatalf("entry %+v, want main/ made of tools", entry)
+	}
+}
+
+func TestANewMainIsKeptAcrossASubRepositoryGitCannotMakeNeverTrashedOnTheNextTry(t *testing.T) {
+	pass := aRunPass(t)
+	pass.pass.Repositories = []string{"aeolus-fleet", "tools"}
+	pass.pass.Trusted = func() map[string]reconciler.Trust {
+		return map[string]reconciler.Trust{"claude-code": {Repositories: []string{"aeolus-fleet", "tools"}}}
+	}
+	pass.crewed(t)
+	pass.workspace.failRepositories = map[string]string{"aeolus-fleet": "git worktree add failed: fatal: invalid reference: HEAD"}
+	again := aRequest("running")
+	again.SettingsVersion = 2
+	again.Settings.Workspace.Main.Repository = "tools"
+	again.Settings.Workspace.SubRepositories = []reconciler.RepositoryAt{{Repository: "aeolus-fleet"}}
+	pass.fleet.requests = []reconciler.Request{again}
+	pass.run(t)
+	pass.workspace.failRepositories = nil
+
+	pass.run(t)
+
+	prepared := pass.workspace.prepared[len(pass.workspace.prepared)-1]
+	if prepared.MadeMain != "tools" {
+		t.Fatalf("prepared %+v, want main/ known as made of tools on the next try", prepared)
 	}
 	if entry := pass.store.state.Entries[scout]; entry.MadeMain != "tools" {
 		t.Fatalf("entry %+v, want main/ made of tools", entry)

@@ -102,6 +102,24 @@ describe('a ship folder on the host', () => {
     expect(existsSync(join(shipFolder, 'repositories', 'sub-repos', 'tools'))).toBe(false);
   });
 
+  it('tells the main repository it made before a sub-repository git cannot make fails it, so the next try keeps it', async () => {
+    await workspace().prepare(crew('aeolus-fleet'));
+    await git(['-C', repositories.skills?.path ?? '', 'update-ref', '-d', 'refs/heads/main']);
+    const made: string[] = [];
+
+    await expect(
+      workspace().prepare({
+        ...crew('tools', ['skills']),
+        madeMain: 'aeolus-fleet',
+        onMainMade: async (repository) => {
+          made.push(repository);
+        },
+      }),
+    ).rejects.toThrow('git worktree add failed');
+
+    expect(made).toEqual(['tools']);
+  });
+
   it('says what removing each repository it holds would discard, by its folder', async () => {
     const { folder: made } = await workspace().prepare(crew('aeolus-fleet', ['tools']));
     writeFileSync(join(made, 'sub-repos', 'tools', 'draft.md'), 'draft\n');

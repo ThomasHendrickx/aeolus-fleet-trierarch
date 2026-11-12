@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -118,6 +119,23 @@ func TestARepositoryGitCannotMakeFailsWithGitsMessageKeepingThoseMade(t *testing
 	}
 	if _, err := os.Stat(filepath.Join(places.ShipFolderOf("shp_scout"), ShipFolderName, MainFolder, "aeolus-fleet.md")); err != nil {
 		t.Errorf("the main repository made went: %v", err)
+	}
+}
+
+func TestANewMainMadeBeforeASubRepositoryGitCannotMakeIsSaidWithGitsMessageSoTheNextTryKeepsIt(t *testing.T) {
+	places, repositories := shipFolderPlaces(t)
+	if _, err := places.Prepare(aShipFolderOf(places, "aeolus-fleet"), "scout"); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, "-C", repositories["skills"], "update-ref", "-d", "refs/heads/main")
+	again := aShipFolderOf(places, "tools", "skills")
+	again.MadeMain = "aeolus-fleet"
+
+	_, err := places.Prepare(again, "scout")
+
+	var made *MainMadeError
+	if !errors.As(err, &made) || made.Repository != "tools" || !strings.Contains(err.Error(), "git worktree add failed") {
+		t.Errorf("Prepare = %v, want git's message, saying main/ is made of tools", err)
 	}
 }
 

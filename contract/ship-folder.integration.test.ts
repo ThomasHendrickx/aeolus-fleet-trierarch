@@ -218,6 +218,22 @@ describe('a new settings version', () => {
     await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(2);
     expect(commonGitFolderOf(join(shipFolderOf(scout), 'main'))).toBe(join(realpathSync(tools), '.git'));
   });
+
+  it('naming another main repository keeps the main/ it made when a sub-repository after it fails, never trashing it on the next try', async () => {
+    await aMachineCrewing();
+    await aRunningScout();
+    const main = join(shipFolderOf(scout), 'main');
+    git(machine.repository, 'update-ref', '-d', 'refs/heads/main');
+
+    await fleet.requestCrewAgainInRepositories(scout, { main: TOOLS, subRepositories: [REPOSITORY], harness: 'claude-code' });
+
+    const failures = (): number => machine.serviceLog().split('invalid reference: HEAD').length - 1;
+    await expect.poll(failures, { timeout: CREWED_WITHIN_MS }).toBe(1);
+    expect(existsSync(join(main, 'TOOLS.md'))).toBe(true);
+    writeFileSync(join(main, 'made.txt'), 'made\n');
+    await expect.poll(failures, { timeout: CREWED_WITHIN_MS }).toBe(2);
+    expect(readFileSync(join(main, 'made.txt'), 'utf8')).toBe('made\n');
+  });
 });
 
 describe("a ship folder's end", () => {
