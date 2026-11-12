@@ -36,11 +36,16 @@ func list(at paths.Paths, look style.Style) (answer, error) {
 	listed := []Listed{}
 	for _, entry := range saved.Entries {
 		workspace := "folder " + entry.Workspace.Name
-		if entry.Workspace.Kind == "worktree" {
-			workspace = "worktree " + entry.Workspace.Repository
-			if entry.Workspace.Ref != "" {
-				workspace += " at " + entry.Workspace.Ref
+		if entry.Workspace.Kind == "repositories" {
+			named := []string{}
+			for _, each := range entry.Workspace.Repositories() {
+				at := each.Repository
+				if each.Ref != "" {
+					at += " at " + each.Ref
+				}
+				named = append(named, at)
 			}
+			workspace = "repositories " + strings.Join(named, ", ")
 		}
 		listed = append(listed, Listed{ShipID: entry.ShipID, State: entry.State, Harness: entry.Harness, Workspace: workspace, Folder: entry.Folder, Since: entry.Since, Restarts: len(entry.Exits)})
 	}

@@ -29,6 +29,13 @@ const leftSuffix, toldSuffix = ".left", ".told"
 // first. One the host cannot give them, or move, is moved within the runtime's user namespace, where the ids a session mapped are its
 // own (withinUserNamespace, nil on the host). A link is refused, so nothing it points at is changed.
 func Discard(folder string, at time.Time, withinUserNamespace func(from string, to string) error) error {
+	return DiscardInto(folder, filepath.Dir(folder), at, withinUserNamespace)
+}
+
+// DiscardInto renames the folder into the trash of the place given, as Discard does beside it: a folder deeper than the places a pass
+// empties the trash beside goes into the trash of one of them, as a repository of a ship folder goes into the one beside the ships'
+// folders.
+func DiscardInto(folder string, into string, at time.Time, withinUserNamespace func(from string, to string) error) error {
 	found, err := os.Lstat(folder)
 	if err != nil {
 		return err
@@ -36,7 +43,7 @@ func Discard(folder string, at time.Time, withinUserNamespace func(from string, 
 	if !found.IsDir() {
 		return fmt.Errorf("%s is no folder: the trash takes only a folder", folder)
 	}
-	trash := filepath.Join(filepath.Dir(folder), FolderName)
+	trash := filepath.Join(into, FolderName)
 	if err := os.Mkdir(trash, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
 		return fmt.Errorf("make the trash %s: %w", trash, err)
 	}

@@ -31,8 +31,10 @@ type Runtime interface {
 	Interrupt(shipID string) error
 }
 
-// Hooks trusts the aeolus-fleet plugin's new or changed hooks, as Codex sees them from the folder, and answers their keys.
+// Hooks trusts what Codex asks about before a launch: the session's folder, a ship folder no configured checkout covers, and the
+// aeolus-fleet plugin's new or changed hooks, as Codex sees them from the folder, answering their keys.
 type Hooks interface {
+	Trust(folders []string) error
 	TrustAeolusHooks(folder string) ([]string, error)
 }
 
@@ -204,6 +206,9 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 		line = prompt.First(entry.FirstPrompt)
 	}
 	command := CommandLine(append(flags, servers...), line, isFirstStart)
+	if err := h.Hooks.Trust([]string{entry.Folder}); err != nil {
+		return err
+	}
 	if _, err := h.Hooks.TrustAeolusHooks(entry.Folder); err != nil {
 		return err
 	}

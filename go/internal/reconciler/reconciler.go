@@ -56,12 +56,38 @@ func Empty() State {
 	return State{Entries: map[string]Entry{}, Kept: []any{}, Orphans: []any{}, Refused: map[string]int{}}
 }
 
-// Workspace is where a crew request's session works: a worktree of a configured repository, or a configured folder.
+// Workspace is where a crew request's session works: a ship folder of a main repository and its sub-repositories, each a configured
+// repository, or a configured folder (docs/design/ship-folder.md).
 type Workspace struct {
-	Kind       string `json:"kind"`
+	Kind            string         `json:"kind"`
+	Main            RepositoryAt   `json:"main,omitzero"`
+	SubRepositories []RepositoryAt `json:"subRepositories,omitempty"`
+	Name            string         `json:"name,omitempty"`
+	// Repository and Ref are the one worktree of an entry saved before the ship folder layout, which the state reads as the main of a
+	// ship folder; none on a workspace a crew request names.
 	Repository string `json:"repository,omitempty"`
 	Ref        string `json:"ref,omitempty"`
-	Name       string `json:"name,omitempty"`
+}
+
+// RepositoryAt is a repository a ship folder names, by its name in the configuration, at a ref: origin's default branch without one.
+type RepositoryAt struct {
+	Repository string `json:"repository"`
+	Ref        string `json:"ref,omitempty"`
+}
+
+// Repositories are the repositories a ship folder names, its main repository first, each with the settings field that names it.
+func (w Workspace) Repositories() []NamedRepository {
+	named := []NamedRepository{{Field: "workspace.main.repository", RepositoryAt: w.Main}}
+	for index, sub := range w.SubRepositories {
+		named = append(named, NamedRepository{Field: fmt.Sprintf("workspace.subRepositories.%d.repository", index), RepositoryAt: sub})
+	}
+	return named
+}
+
+// NamedRepository is a repository a ship folder names, with the settings field that names it.
+type NamedRepository struct {
+	Field string
+	RepositoryAt
 }
 
 // Entry is one ship the trierarch crews, from the crew request assigned to it, with the settings of the version it crewed.
@@ -87,6 +113,8 @@ type Entry struct {
 	// ShipFolder is the ship's own folder, `ships/<shipId>/`, which holds every file of the ship: made as it is crewed fresh. One crewed
 	// before the ship folders has none, and keeps its worktree, home and socket where they were until it is crewed fresh.
 	ShipFolder string `json:"shipFolder,omitempty"`
+	// MadeMain is the repository its ship folder's `main/` was made of: a new settings version naming another replaces it.
+	MadeMain string `json:"madeMain,omitempty"`
 	// CrewToken is the one its register gave, kept in the state only (decision 0026).
 	CrewToken  string `json:"crewToken,omitempty"`
 	HasStarted bool   `json:"hasStarted"`
@@ -106,6 +134,9 @@ type Entry struct {
 	// IsShipFolderGone is set as it goes back to crewing once its ship's folder is gone, removed by hand: its session stops, its lease
 	// ends and it is crewed again in a fresh ship's folder.
 	IsShipFolderGone bool `json:"isShipFolderGone,omitempty"`
+	// IsOldLayout is set on an entry saved before the ship folder layout, its workspace one worktree: it is crewed again in a fresh
+	// ship folder under the lease it holds (decision 0013).
+	IsOldLayout bool `json:"isOldLayout,omitempty"`
 	// CrewFailures counts the crews of its settings version that failed in a row, until a crew starts its session (#827). The last of CrewFailureBudget gives the request back.
 	CrewFailures int `json:"crewFailures,omitempty"`
 	// ReadOnly are the paths of the ship's read-only checkouts, which its next launch reads beside its folder; made at each launch, never kept.
@@ -654,13 +685,17 @@ func checkPlace(settings Settings, shipID string, state State, context Context) 
 	}
 	trust := context.Trusted[harness]
 	switch settings.Workspace.Kind {
-	case "worktree":
-		name := settings.Workspace.Repository
-		if !slices.Contains(context.Repositories, name) {
-			return "", fmt.Sprintf("workspace.repository: This trierarch offers no repository %s", name)
+	case "repositories":
+		named := settings.Workspace.Repositories()
+		for _, each := range named {
+			if !slices.Contains(context.Repositories, each.Repository) {
+				return "", fmt.Sprintf("%s: This trierarch offers no repository %s", each.Field, each.Repository)
+			}
 		}
-		if !slices.Contains(trust.Repositories, name) {
-			return "", fmt.Sprintf("workspace.repository: %s does not trust the repository %s: add it with aeolus-trierarch init, which trusts it", harness, name)
+		for _, each := range named {
+			if !slices.Contains(trust.Repositories, each.Repository) {
+				return "", fmt.Sprintf("%s: %s does not trust the repository %s: add it with aeolus-trierarch init, which trusts it", each.Field, harness, each.Repository)
+			}
 		}
 	case "folder":
 		name := settings.Workspace.Name
@@ -740,7 +775,7 @@ func newVersionStep(entry Entry, request Request, state State, context Context) 
 		return step{isGivenBack: true, actions: []Action{{Kind: GiveBack, ShipID: entry.ShipID, SettingsVersion: request.SettingsVersion, Reason: reason, Entry: &given}}}
 	}
 	fresh := entryOf(request, harness, options, context.Now)
-	fresh.ShipName, fresh.Folder, fresh.ShipFolder = entry.ShipName, entry.Folder, entry.ShipFolder
+	fresh.ShipName, fresh.Folder, fresh.ShipFolder, fresh.MadeMain = entry.ShipName, entry.Folder, entry.ShipFolder, entry.MadeMain
 	return step{entry: &fresh, actions: []Action{{Kind: Stop, ShipID: entry.ShipID}, {Kind: Crew, ShipID: entry.ShipID, IsResumed: true}}}
 }
 
@@ -749,6 +784,12 @@ func stepOf(entry Entry, context Context, canStart bool, isFinal bool) step {
 		// Released elsewhere (row 11): its session stops and the ship is crewed again, in a fresh worktree as a first start, with its first prompt and no resume (#475). A final crew stays final in the fleet (#469).
 		again := withState(entry, "crewing", context.Now)
 		again.IsReleasedElsewhere, again.HasStarted = true, false
+		return step{entry: &again, actions: []Action{{Kind: Stop, ShipID: entry.ShipID}, {Kind: Crew, ShipID: entry.ShipID}}}
+	}
+	if entry.IsOldLayout && entry.CrewToken != "" && entry.HasStarted {
+		// Crewed before the ship folder layout (decision 0013): its session stops and it is crewed again in a fresh ship folder as a first start, under the lease it holds.
+		again := withState(entry, "crewing", context.Now)
+		again.HasStarted = false
 		return step{entry: &again, actions: []Action{{Kind: Stop, ShipID: entry.ShipID}, {Kind: Crew, ShipID: entry.ShipID}}}
 	}
 	if slices.Contains(context.Observed.ShipFoldersGone, entry.ShipID) {
