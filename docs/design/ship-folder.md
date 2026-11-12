@@ -54,7 +54,24 @@ Thomas, 12 Nov, settled (aeolus-fleet#1759):
 
 ## What Claude Code and Codex load
 
-TO BE FILLED
+Verified on 12 Nov with Claude Code 2.1.312 and Codex 0.163.0: a test folder holding a CLAUDE.md, an AGENTS.md and a skill each at its root, in `main/` and in `sub-repos/foo/` (both git repositories, the root not one, then one), each with its own marker word; each harness run headless from each level and asked for the markers and skills it holds without reading a file; then checked against the harness docs, quoted below. Each cell is one run and the model's own report of what it holds.
+
+| Started in the ship folder (no git repository), it loads | Claude Code | Codex |
+| --- | --- | --- |
+| The root CLAUDE.md | At start | Never: it reads no CLAUDE.md |
+| The root AGENTS.md | Never while a CLAUDE.md is there ("Your CLAUDE.md files only") | At start: "If Codex cannot find a project root, it only checks the current directory" |
+| The root's skills | `.claude/skills` at start; never `.agents/skills` | `.agents/skills` at start; never `.claude/skills` |
+| `main/CLAUDE.md`, `main/AGENTS.md` | `main/CLAUDE.md` once the session reads or writes a file in `main/`, not at start ("Files in subdirectories load on demand") | Never: "Codex stops searching once it reaches your current directory" |
+| `main/`'s skills | `.claude/skills` once the session reads a file in `main/` ("Skills in a `.claude/skills/` directory below where you started don't load at startup") | Never |
+| An import in the root file | `@main/CLAUDE.md` loads it at start, up to four hops | None: no import syntax, `@main/AGENTS.md` is plain text |
+
+Started in `main/` instead (a git repository in a folder that is none), Claude Code loads `main/CLAUDE.md` and the root CLAUDE.md above it, and `main/`'s skills but not the root's; Codex loads `main/AGENTS.md` and `main/`'s skills only, its walk stopping at `main/`'s git root. Claude Code's `--add-dir <folder>` loads that folder's skills, and its CLAUDE.md only with `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`; Codex has no such flag (not tested).
+
+Not verified: whether Codex loads a sub-folder's AGENTS.md once the session reads a file there; where Claude Code's skill climb ends above a start folder that is no git repository.
+
+Sources: https://code.claude.com/docs/en/memory, https://code.claude.com/docs/en/skills, https://developers.openai.com/codex/guides/agents-md, https://developers.openai.com/codex/skills.
+
+So a root file that only points into `main/` reaches Codex as words alone: Codex then reads `main/AGENTS.md` only if the session follows them, and loads `main/`'s skills never. Claude Code can load `main/CLAUDE.md` at start through an import, and `main/`'s skills only once the session reads a file in `main/`.
 
 ## Questions
 
