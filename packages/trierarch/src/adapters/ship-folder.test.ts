@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -16,6 +16,8 @@ let folder: string;
 let root: string;
 let shipFolder: string;
 let repositories: Record<string, { path: string }>;
+/** A folder a test made unreadable, readable again before the temporary folder goes. */
+let unreadable: string | undefined;
 
 async function git(args: string[]): Promise<string> {
   const result = await runCommand('git', { args, env: { GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 't@example.com' } });
@@ -48,6 +50,10 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  if (unreadable !== undefined) {
+    chmodSync(unreadable, 0o700);
+    unreadable = undefined;
+  }
   rmSync(folder, { recursive: true, force: true });
 });
 
@@ -119,6 +125,18 @@ describe('a ship folder on the host', () => {
     ).rejects.toThrow('git worktree add failed');
 
     expect(made).toEqual(['tools']);
+  });
+
+  it('fails to say what removing it would discard when a folder in it cannot be read, rather than leaving a repository out', async () => {
+    const { folder: made } = await workspace().prepare(crew('aeolus-fleet', ['tools']));
+    unreadable = join(made, 'sub-repos');
+    chmodSync(unreadable, 0o000);
+
+    await expect(workspace().unsavedInShipFolder(made)).rejects.toThrow('EACCES');
+  });
+
+  it('says nothing would be discarded from a ship folder that is gone', async () => {
+    await expect(workspace().unsavedInShipFolder(join(shipFolder, 'repositories'))).resolves.toEqual([]);
   });
 
   it('says what removing each repository it holds would discard, by its folder', async () => {

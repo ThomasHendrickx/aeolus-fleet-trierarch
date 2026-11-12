@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
@@ -30,6 +30,8 @@ let machine: Machine;
 let scout: ShipId;
 /** The tools repository's checkout on the machine. */
 let tools: string;
+/** A folder a test made unreadable, readable again before the machine goes. */
+let unreadable: string | undefined;
 
 async function aMachineCrewing(at: { others?: OtherHarness[] } = {}): Promise<void> {
   fleet = await aFleet();
@@ -48,6 +50,10 @@ async function aMachineCrewing(at: { others?: OtherHarness[] } = {}): Promise<vo
 afterEach(async ({ task }) => {
   if (task.result?.state === 'fail') {
     console.log(`The service's log:\n${machine.serviceLog()}`);
+  }
+  if (unreadable !== undefined) {
+    chmodSync(unreadable, 0o700);
+    unreadable = undefined;
   }
   await machine.remove();
   await fleet.close();
@@ -247,5 +253,17 @@ describe("a ship folder's end", () => {
     await expect.poll(() => existsSync(shipsFolderOf(scout)), { timeout: CREWED_WITHIN_MS }).toBe(false);
     expect(isRunning(pid)).toBe(false);
     await expect.poll(() => [worktreesOf(machine.repository), worktreesOf(tools)], { timeout: CREWED_WITHIN_MS }).toEqual([[realpathSync(machine.repository)], [realpathSync(tools)]]);
+  });
+
+  it("keeps ships/<shipId>/ and logs why when a folder in it cannot be read, so no repository's unsaved work goes unlogged", async () => {
+    await aMachineCrewing();
+    await aRunningScout({ subRepositories: [TOOLS] });
+    unreadable = join(shipFolderOf(scout), 'sub-repos');
+    chmodSync(unreadable, 0o000);
+
+    await fleet.removeCrewRequest(scout);
+
+    await expect.poll(() => machine.serviceLog(), { timeout: CREWED_WITHIN_MS }).toContain('permission denied');
+    expect(existsSync(join(shipFolderOf(scout), 'main'))).toBe(true);
   });
 });

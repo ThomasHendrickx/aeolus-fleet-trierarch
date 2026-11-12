@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -136,6 +137,35 @@ func TestANewMainMadeBeforeASubRepositoryGitCannotMakeIsSaidWithGitsMessageSoThe
 	var made *MainMadeError
 	if !errors.As(err, &made) || made.Repository != "tools" || !strings.Contains(err.Error(), "git worktree add failed") {
 		t.Errorf("Prepare = %v, want git's message, saying main/ is made of tools", err)
+	}
+}
+
+func TestWhatAShipFolderHoldsUnsavedFailsWhenAFolderInItCannotBeReadRatherThanLeavingARepositoryOut(t *testing.T) {
+	places, _ := shipFolderPlaces(t)
+	folder, err := places.Prepare(aShipFolderOf(places, "aeolus-fleet", "tools"), "scout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unreadable := filepath.Join(folder, SubRepositoriesFolder)
+	if err := os.Chmod(unreadable, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(unreadable, 0o700) })
+
+	held, err := places.UnsavedInShipFolder(folder)
+
+	if !errors.Is(err, fs.ErrPermission) {
+		t.Errorf("UnsavedInShipFolder = %v, %v, want it refused", held, err)
+	}
+}
+
+func TestNothingIsHeldInAShipFolderThatIsGone(t *testing.T) {
+	places, _ := shipFolderPlaces(t)
+
+	held, err := places.UnsavedInShipFolder(filepath.Join(places.ShipFolderOf("shp_scout"), ShipFolderName))
+
+	if err != nil || len(held) != 0 {
+		t.Errorf("UnsavedInShipFolder = %v, %v, want nothing", held, err)
 	}
 }
 
