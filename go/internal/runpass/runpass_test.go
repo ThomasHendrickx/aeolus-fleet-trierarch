@@ -782,6 +782,29 @@ func TestAGivenBackReasonIsCutToWhatTheFleetTakes(t *testing.T) {
 	}
 }
 
+func TestANewSettingsVersionIsCrewedAgainUnderTheLeaseItHoldsNeverReleasedAndRegisteredAgain(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	crewToken := pass.store.state.Entries[scout].CrewToken
+	pass.harness.launches = nil
+	again := aRequest("running")
+	again.SettingsVersion = 2
+	pass.fleet.requests = []reconciler.Request{again}
+
+	pass.run(t)
+
+	// Core removes the crew request on a release (#367), so the lease is kept.
+	if slices.ContainsFunc(pass.fleet.calls, func(call string) bool {
+		return strings.HasPrefix(call, "release ") || strings.HasPrefix(call, "register ") || strings.HasPrefix(call, "getStartingPrompt ")
+	}) {
+		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+	entry := pass.store.state.Entries[scout]
+	if len(pass.harness.launches) != 1 || entry.SettingsVersion != 2 || entry.CrewToken != crewToken || pass.harness.tokens[scoutFolder] != crewToken {
+		t.Fatalf("launches %+v, entry %+v, token %q", pass.harness.launches, entry, pass.harness.tokens[scoutFolder])
+	}
+}
+
 func TestACrewThatFailedForOneSettingsVersionCountsAfreshForTheNext(t *testing.T) {
 	pass := aRunPass(t)
 	pass.crewFails(t, 2)
