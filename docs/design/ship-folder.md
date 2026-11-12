@@ -1,6 +1,6 @@
 # Design: a ship folder with a main repository and sub-repositories (aeolus-fleet#1759)
 
-Status: revised purpose for agreement, with Thomas's notes on the lessons. No question is asked and nothing is decided or built.
+Status: purpose agreed by Thomas on 12 Nov; questions open. Nothing is built.
 
 This design covers core (the crew settings, their check, placement, the console) and the trierarch (the folder, the harnesses, containers, the aeolus-fleet plugin).
 
@@ -81,4 +81,49 @@ So with one root AGENTS.md and CLAUDE.md a symlink to it (Thomas, point 7), both
 
 ## Questions
 
-Held until the purpose is agreed.
+Each for Thomas, the pick being this design's recommendation.
+
+**Q1. Which folder is the ship folder?** The disk design (#343) gives each ship `ships/<shipId>/`, holding its `worktree/` (where the session starts today), its harness `home/`, `tmp/`, `containers/` and its sockets. The ship folder of #1759 (root AGENTS.md and CLAUDE.md, `main/`, `sub-repos/<repo>/`) has to sit at one of these two levels.
+1. The ship folder takes the place of `worktree/` inside `ships/<shipId>/`: the session starts there and sees only the root files, `main/` and `sub-repos/`; its home, scratch, container storage and sockets stay beside it, out of its start folder, as the disk design has them. The whole of `ships/<shipId>/` still goes as one.
+2. `ships/<shipId>/` itself is the ship folder: the session starts there, and its home, `tmp/`, `containers/` and sockets sit beside `main/` and `sub-repos/` in its start folder.
+3. None of these.
+Pick 1: the session's start folder holds only its repositories and the root files, and the disk design's removal stays as approved.
+
+**Q2. How does a crew request name its repositories?** Today `workspace` is `{ kind: worktree, repository, ref? }` or `{ kind: folder, name }`, names only (decision 0027).
+1. The worktree workspace becomes `{ kind: repositories, main: { repository, ref? }, subRepositories: [{ repository, ref? }] }`: each a name with an optional ref, as today's worktree has; no repository named twice, `main` never among the sub-repositories, at most a fixed number of sub-repositories; core refuses anything else (decision 0029).
+2. `workspace` stays as it is, naming the main repository, and a new optional setting `subRepositories: [names]` sits beside it, each at its origin's default branch, no ref.
+3. One list of repositories, the first being the main one.
+4. None of these.
+Pick 1: one place says everything the ship folder holds, every repository can start at a branch, and nothing of the old shape stays (decision 0013).
+
+**Q3. What happens to the folder workspace?** Today `{ kind: folder, name }` uses a configured folder as it is, shared by every ship in it, with no worktree.
+1. It stays as it is, outside the ship folder: no sub-repositories, no root files, no change.
+2. It goes: every ship gets a ship folder of repositories.
+3. A configured folder can be the main of a ship folder, beside sub-repositories.
+4. None of these.
+Pick 1: a shared folder cannot be one folder per ship, and nothing in #1759 asks to change it; keeping it is the smallest design.
+
+**Q4. Can a session change, commit and push in its sub-repositories?** Today's read-only checkouts (#1182) have no remote and no write bits, and the company bootstrap checks its copies are on `main` with no local change (#1449). #1759 says "nothing can be committed into the wrong one", and calls them the repositories the ship works on.
+1. Every repository in the ship folder, main and sub-repositories alike, is a working one: on the host its own worktree, in a container its own clone (decision 0039), each with its origin, so the session branches, commits and pushes in each. Staying on `main` is the main repository's own rule where it wants that, as the company's bootstrap is.
+2. Sub-repositories are read-only, as checkouts are today; only `main/` is a working one.
+3. The crew request says per sub-repository whether it is read-only.
+4. None of these.
+Pick 1: they are the repositories the ship works on, and one kind of repository keeps the build to one path.
+
+**Q5. What replaces the checkouts' refresh?** Today `aeolus-checkouts.sh refresh` brings each read-only checkout to the latest main over the ship's socket.
+1. It goes with the checkouts: each repository has its origin, and the session fetches and moves on with git itself. The script, the socket call and the plugin's start-context lines about checkouts go too.
+2. A refresh stays, bringing each repository the session has not changed to the latest default branch.
+3. None of these.
+Pick 1, if Q4 is 1: with an origin in each repository, the trierarch adds nothing git does not.
+
+**Q6. How do the main repository's skills reach the session?** Verified: started in the ship folder, Claude Code loads `main/.claude/skills` only once the session reads a file in `main/`, and Codex never loads `main/.agents/skills`. The root AGENTS.md (CLAUDE.md a symlink to it) is the same for both harnesses.
+1. The trierarch links the root's `.claude/skills` and `.agents/skills` to `main/`'s own, as it links CLAUDE.md to AGENTS.md, so both harnesses load the main repository's skills at start. That both harnesses follow a linked skills folder is not verified yet: the first slice proves it with a test of each harness, and falls back to option 2 if one does not.
+2. The root AGENTS.md says where the main repository's skills are, and the session reads them as files when it needs one.
+3. None of these.
+Pick 1: the same skills at start for every harness, the purpose's "told the same", with no copy that can go stale.
+
+**Q7. A machine's configuration that still names `checkouts`.**
+1. Refused at start and by `config check`, saying the line to remove and that sub-repositories now come from the crew request (decision 0013, no compatibility).
+2. Accepted and ignored, with a warning in the log.
+3. None of these.
+Pick 1: a setting that does nothing should not look as if it does.
