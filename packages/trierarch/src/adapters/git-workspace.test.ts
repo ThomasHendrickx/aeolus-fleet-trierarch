@@ -335,3 +335,81 @@ describe('pruning the worktree records of a configured repository (#91)', () => 
     await expect(workspace().prune('unknown')).rejects.toThrow('unknown');
   });
 });
+
+describe('deleting the local branches of a configured repository whose remote branch is gone (#92)', () => {
+  let remote: string;
+
+  /** A branch of the repository pushed to the remote, the local branch tracking it. */
+  async function aPushedBranch(name: string): Promise<void> {
+    await git(['-C', repository, 'branch', name]);
+    await git(['-C', repository, 'push', '-q', '-u', 'origin', name]);
+  }
+
+  async function branches(): Promise<string[]> {
+    return (await git(['-C', repository, 'for-each-ref', '--format=%(refname:short)', 'refs/heads'])).split('\n').filter((line) => line !== '');
+  }
+
+  beforeEach(async () => {
+    remote = join(folder, 'remote.git');
+    await git(['init', '-q', '--bare', remote]);
+    await git(['-C', repository, 'remote', 'add', 'origin', remote]);
+    await git(['-C', repository, 'push', '-q', '-u', 'origin', 'main']);
+  });
+
+  it('deletes a local branch checked out nowhere whose remote branch is gone from the remote', async () => {
+    await aPushedBranch('merged');
+    await git(['-C', remote, 'branch', '-D', 'merged']);
+
+    await workspace().deleteBranchesWhoseRemoteBranchIsGone('aeolus-fleet');
+
+    expect(await branches()).not.toContain('merged');
+  });
+
+  it('keeps a local branch whose remote branch exists', async () => {
+    await aPushedBranch('open');
+
+    await workspace().deleteBranchesWhoseRemoteBranchIsGone('aeolus-fleet');
+
+    expect(await branches()).toContain('open');
+  });
+
+  it('keeps a local branch whose remote branch is gone while a worktree has it checked out', async () => {
+    await aPushedBranch('in-use');
+    await git(['-C', repository, 'worktree', 'add', '-q', join(folder, 'elsewhere', 'in-use'), 'in-use']);
+    await git(['-C', remote, 'branch', '-D', 'in-use']);
+
+    await workspace().deleteBranchesWhoseRemoteBranchIsGone('aeolus-fleet');
+
+    expect(await branches()).toContain('in-use');
+  });
+
+  it('keeps a local branch that never had a remote branch', async () => {
+    await git(['-C', repository, 'branch', 'kept-by-a-person']);
+
+    await workspace().deleteBranchesWhoseRemoteBranchIsGone('aeolus-fleet');
+
+    expect(await branches()).toContain('kept-by-a-person');
+  });
+
+  it('keeps the branch the repository has checked out, its remote branch gone too', async () => {
+    await git(['-C', repository, 'switch', '-q', '-c', 'current']);
+    await git(['-C', repository, 'push', '-q', '-u', 'origin', 'current']);
+    await git(['-C', remote, 'branch', '-D', 'current']);
+
+    await workspace().deleteBranchesWhoseRemoteBranchIsGone('aeolus-fleet');
+
+    expect(await branches()).toContain('current');
+  });
+
+  it('fails and deletes nothing when the remote cannot be read, so a branch is never taken for gone', async () => {
+    await aPushedBranch('merged');
+    rmSync(remote, { recursive: true });
+
+    await expect(workspace().deleteBranchesWhoseRemoteBranchIsGone('aeolus-fleet')).rejects.toThrow('ls-remote');
+    expect(await branches()).toContain('merged');
+  });
+
+  it('fails for a repository the configuration does not have', async () => {
+    await expect(workspace().deleteBranchesWhoseRemoteBranchIsGone('unknown')).rejects.toThrow('unknown');
+  });
+});
