@@ -1,6 +1,6 @@
 # Design: a trierarch keeps the disk its ships use under control (trierarch#343)
 
-Status: complete for Thomas's approval. Purpose and Q1 to Q9 (each the first option of the question he answered) approved by Thomas on 12 Nov. Nothing is built.
+Status: approved by Thomas on 12 Nov (purpose, and Q1 to Q9 each the first option of the question he answered). Nothing is built.
 
 ## Purpose
 
@@ -133,16 +133,16 @@ Unhappy paths:
 
 ## Build slices
 
-After #89 to #92 (row 1), each its own issue, in order:
+The slices are GitHub issues in this repository, after #89 to #92 (row 1), in order; each states when it is done.
 
-1. The ship's folder: `ships/<shipId>/` holds its worktree, home and fleet socket, and no secret; ships crewed before keep theirs until crewed fresh.
-2. Each ship's `tmp`: made with the ship, `TMPDIR`, `TMP`, `TEMP` set on the host, mounted as `/tmp` in a container, emptied on every start, removed with the worktree.
-3. Each ship's own container storage and, on the host, its own Podman service on its socket; emptied on every start, removed with the worktree through Podman's user namespace.
-4. The trierarch's cache, the variables pointing at it, and its trim to the configured size.
-5. On the host, Claude Code's home in the ship's folder with the machine's token.
-6. The ship's size and its owner told once.
-7. Low disk frees before it tells: trash, old session images, cache.
-8. The tests' own fixes: aeolus-fleet#1581, #345.
+1. [#346](https://github.com/ThomasHendrickx/aeolus-fleet-trierarch/issues/346): The ship's folder: `ships/<shipId>/` holds its worktree, home and fleet socket, and no secret; ships crewed before keep theirs until crewed fresh.
+2. [#347](https://github.com/ThomasHendrickx/aeolus-fleet-trierarch/issues/347): Each ship's `tmp`: made with the ship, `TMPDIR`, `TMP`, `TEMP` set on the host, mounted as `/tmp` in a container, emptied on every start, removed with the worktree.
+3. [#348](https://github.com/ThomasHendrickx/aeolus-fleet-trierarch/issues/348): Each ship's own container storage and, on the host, its own Podman service on its socket; emptied on every start, removed with the worktree through Podman's user namespace.
+4. [#349](https://github.com/ThomasHendrickx/aeolus-fleet-trierarch/issues/349): The trierarch's cache, the variables pointing at it, and its trim to the configured size.
+5. [#350](https://github.com/ThomasHendrickx/aeolus-fleet-trierarch/issues/350): On the host, Claude Code's home in the ship's folder with the machine's token.
+6. [#351](https://github.com/ThomasHendrickx/aeolus-fleet-trierarch/issues/351): The ship's size and its owner told once.
+7. [#352](https://github.com/ThomasHendrickx/aeolus-fleet-trierarch/issues/352): Low disk frees before it tells: trash, old session images, cache.
+8. The tests' own fixes: [aeolus-fleet#1581](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1581) and [#345](https://github.com/ThomasHendrickx/aeolus-fleet-trierarch/issues/345).
 
 ## What a machine holds today
 
