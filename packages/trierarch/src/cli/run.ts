@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -49,7 +49,7 @@ import type { Delivery, Logger, TrierarchSetup } from '../core/ports.js';
 import { createReportSelf } from '../core/report-self.js';
 import { createRunPass } from '../core/run-pass.js';
 import { createAskForTrustedRepositories } from '../core/ask-for-trusted-repositories.js';
-import { runtimeRefused } from './config-check.js';
+import { checkShipsPlace, runtimeRefused } from './config-check.js';
 
 /** How often the loop runs a pass: restarts, wakes and releases wait at most this long. */
 export const PASS_INTERVAL_MS = 5000;
@@ -63,6 +63,11 @@ export const PASS_INTERVAL_MS = 5000;
 export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory: string; env: Readonly<Record<string, string | undefined>>; managedSettings: string; signal: AbortSignal; logger: Logger & { info(message: string): void } }): Promise<void> {
   const { paths, homeDirectory, env, managedSettings, signal, logger } = input;
   const configured = await loadConfiguration(paths.config);
+  // No ship's socket could be opened under a place whose socket path passes the system's limit.
+  const shipsPlace = checkShipsPlace({ paths, ...(configured.shipsRoot !== undefined && { shipsRoot: configured.shipsRoot }), platform: process.platform });
+  if (shipsPlace !== undefined) {
+    throw shipsPlace;
+  }
   // A session in a container is held to its ship only on a runtime config check takes (decision 0039): none starts otherwise.
   const refusals = await createCheckSessionRuntime({ host: createContainerHost({ modelTokenFile: paths.modelToken }), modelTokenFile: paths.modelToken })(configured);
   if (refusals.length > 0) {
@@ -114,6 +119,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   // The model proxy runs while any harness holds an API key (headless H16); a pass starts it again when it is gone.
   const keys = createKeyFiles(paths.keys);
   const proxy = modelProxy({ paths, version, launch });
+  const shipsRoot = configured.shipsRoot ?? paths.ships;
   const { sessions, workspace, folderProcesses, shipHomes, modelProxyUrlOf, trash } = runtimeAdaptersOf({ configuration, paths, version, launch, managedSettings, clones, proxyUrl: async () => proxy.url() });
   const { harnesses, plugins } = await createHarnesses({ configuration, homeDirectory, env, managedSettings, detected: () => offered.detected, sessions, proxyUrl: async () => {
       const url = await proxy.url();
@@ -165,7 +171,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     codex: createCodexSetup(),
   });
   // The machine's load (#400) and the harnesses' usage (#353), each read on its own interval for the report.
-  const readLoad = createReadLoad({ machine: createMachine({ worktreeRoot: configured.shipsRoot ?? paths.worktrees }), fleet, state, clock, logger });
+  const readLoad = createReadLoad({ machine: createMachine({ worktreeRoot: shipsRoot }), fleet, state, clock, logger });
   const usage = createUsage({
     'claude-code': createClaudeCodeUsage({
       // In containers each ship's conversations are in its own home (decision 0039).
@@ -199,6 +205,8 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     await sendUsage();
   };
 
+  // Made before the first crew, so the disk it is on is read from the first pass (machine load).
+  await mkdir(shipsRoot, { recursive: true });
   await writeRunningFile(paths.running, { pid: process.pid, version: setup.version });
   const found = await Promise.all(Object.entries(plugins).map(async ([harness, plugin]) => `${harness} at ${await plugin.root()}`));
   logger.info(`aeolus-trierarch ${setup.version} runs for ${crew.fleetUrl}, with the aeolus-fleet plugin for ${found.join(' and ') || 'no harness'}`);

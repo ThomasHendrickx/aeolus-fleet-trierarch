@@ -436,7 +436,7 @@ export async function initTrierarch(input: {
     }
   }
 
-  const root = configuration.shipsRoot ?? paths.worktrees;
+  const root = configuration.shipsRoot ?? paths.ships;
   await mkdir(root, { recursive: true });
   const claude = await setUpClaudeCode({ configuration, claudeCode, prompter, root });
   said.push(...claude.said);

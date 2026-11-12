@@ -379,7 +379,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
           harnesses: PLUGIN_HARNESSES.filter((harness) => configuration?.harnesses[harness] !== undefined),
           update: (harness, tag) => pluginUpdate.update(harness, tag),
           version: (harness) => aeolusPluginVersion({ homeDirectory, env, harness }),
-          trustCodexHooks: () => createCodexSetup().trustAeolusHooks(configuration?.shipsRoot ?? paths.worktrees),
+          trustCodexHooks: () => createCodexSetup().trustAeolusHooks(configuration?.shipsRoot ?? paths.ships),
         },
       });
       // A plugin that could not be updated is said, and shows in the exit code (#581).

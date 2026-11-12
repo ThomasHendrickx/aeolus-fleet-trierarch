@@ -1,11 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { CONFIGURATION, InMemoryContainerHost } from '../../test/support/in-memory.js';
-import { TrierarchFileError } from '../adapters/files.js';
+import { TrierarchFileError, type TrierarchConfiguration } from '../adapters/files.js';
 import { trierarchPaths, type TrierarchPaths } from '../adapters/paths.js';
 import { checkShipsPlace, configCheck } from './config-check.js';
 import { aShortHome } from '../../test/support/short-home.js';
