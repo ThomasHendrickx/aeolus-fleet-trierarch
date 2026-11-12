@@ -279,10 +279,48 @@ func TestEveryFolderUnderTheRootIsListedWhateverMadeItNeverTheTrashAFileOrALink(
 
 	got, err := places.FoldersUnderRoot()
 
-	want := []string{foreign, ownClone, scout, straight, unknown}
+	want := []string{foreign, ownClone, scout, straight, filepath.Join(root, "hemma"), unknown}
 	slices.Sort(want)
 	if slices.Sort(got); err != nil || !slices.Equal(got, want) {
 		t.Fatalf("FoldersUnderRoot() = %v, %v, want %v", got, err, want)
+	}
+}
+
+func TestAFolderStraightUnderTheRootThatIsNoRepositoryIsListedWithItsFoldersButARepositorysOwnOrOneHoldingTheTrashOnlyByWhatItHolds(t *testing.T) {
+	repository, root := aRepository(t)
+	notes := t.TempDir()
+	scout := filepath.Join(root, "aeolus-fleet", "scout")
+	gitIn(t, "-C", repository, "worktree", "add", "-q", "--detach", scout)
+	workbench := filepath.Join(root, "workbench")
+	lookout := filepath.Join(root, "left-repository", "lookout")
+	mkdir(t, filepath.Join(workbench, "tools"), filepath.Join(root, "left-repository", ".trash"), lookout)
+	if err := os.Symlink(notes, filepath.Join(root, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}}
+
+	got, err := places.FoldersUnderRoot()
+
+	want := []string{scout, lookout, workbench, filepath.Join(workbench, "tools")}
+	slices.Sort(want)
+	if slices.Sort(got); err != nil || !slices.Equal(got, want) {
+		t.Fatalf("FoldersUnderRoot() = %v, %v, want %v", got, err, want)
+	}
+}
+
+func TestAFolderStraightUnderTheRootThatGitDoesNotKnowIsRemoved(t *testing.T) {
+	for _, isClone := range []bool{false, true} {
+		repository, root := aRepository(t)
+		workbench := filepath.Join(root, "workbench")
+		mkdir(t, filepath.Join(workbench, "tools"))
+		places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}, IsClone: isClone}
+
+		if err := places.RemoveWorktree(workbench); err != nil {
+			t.Fatalf("beside clones %v: RemoveWorktree(%s) = %v", isClone, workbench, err)
+		}
+		if _, err := os.Lstat(workbench); err == nil {
+			t.Errorf("beside clones %v: %s stayed", isClone, workbench)
+		}
 	}
 }
 

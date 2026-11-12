@@ -327,7 +327,7 @@ func TestEveryFolderUnderTheRootIsListedBesideClonesWhateverMadeItNeverTheTrash(
 
 	got, err := places.FoldersUnderRoot()
 
-	want := []string{ownClone, scout, unknown}
+	want := []string{ownClone, scout, filepath.Join(root, "hemma"), unknown}
 	slices.Sort(want)
 	if slices.Sort(got); err != nil || !slices.Equal(got, want) {
 		t.Errorf("FoldersUnderRoot() = %v, %v, want %v", got, err, want)
