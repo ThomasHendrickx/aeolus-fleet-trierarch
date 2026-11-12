@@ -165,8 +165,29 @@ describe('workspaces in git', () => {
     writeFileSync(join(root, 'aeolus-fleet', 'notes.md'), 'a file, no folder\n');
 
     expect([...(await workspace().foldersUnderRoot())].sort()).toEqual(
-      [join(root, 'aeolus-fleet', 'aeolus-fleet-gateway'), join(root, 'aeolus-fleet', 'own-clone'), join(root, 'aeolus-fleet', 'scout'), join(root, 'hemma', 'notes')].sort(),
+      [join(root, 'aeolus-fleet', 'aeolus-fleet-gateway'), join(root, 'aeolus-fleet', 'own-clone'), join(root, 'aeolus-fleet', 'scout'), join(root, 'hemma'), join(root, 'hemma', 'notes')].sort(),
     );
+  });
+
+  it('lists a folder straight under its root that is no repository it has as itself and each folder in it, but a repository\'s own folder or one holding the trash only by what it holds (gap rule 2)', async () => {
+    await workspace().prepare(scout);
+    mkdirSync(join(root, 'workbench', 'tools'), { recursive: true });
+    mkdirSync(join(root, 'left-repository', '.trash'), { recursive: true });
+    mkdirSync(join(root, 'left-repository', 'lookout'));
+    symlinkSync(notes, join(root, 'linked'));
+
+    expect([...(await workspace().foldersUnderRoot())].sort()).toEqual(
+      [join(root, 'aeolus-fleet', 'scout'), join(root, 'left-repository', 'lookout'), join(root, 'workbench'), join(root, 'workbench', 'tools')].sort(),
+    );
+  });
+
+  it('removes a folder straight under its root that git does not know', async () => {
+    const workbench = join(root, 'workbench');
+    mkdirSync(join(workbench, 'tools'), { recursive: true });
+
+    await workspace().remove(workbench);
+
+    expect(existsSync(workbench)).toBe(false);
   });
 
   it('lists a workspace placed straight under its root as one folder, none of its own files (#1295, gap rule 2)', async () => {

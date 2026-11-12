@@ -661,7 +661,10 @@ export class InMemoryWorkspace implements WorkspacePort {
     if (this.isFailingRemove) {
       return Promise.reject(new Error(`git worktree remove ${folder} failed`));
     }
-    this.folders.delete(folder);
+    // What the folder holds goes with it.
+    for (const path of [...this.folders.keys()].filter((each) => each === folder || each.startsWith(`${folder}/`))) {
+      this.folders.delete(path);
+    }
     return Promise.resolve();
   }
 

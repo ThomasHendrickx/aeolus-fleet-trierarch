@@ -1280,6 +1280,31 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.state.current().passFailure).toBeUndefined();
   });
 
+  it('rule 2: a folder under its root that holds the folder a ship is crewed in stays, and what else it holds goes', async () => {
+    const trierarch = aTrierarch();
+    await aCrewedShip(trierarch);
+    const holder = `${WORKTREE_ROOT}/aeolus-fleet`;
+    const other = `${WORKTREE_ROOT}/aeolus-fleet/lookout`;
+    trierarch.workspace.folders.set(holder, { hasChanges: false, unsaved: [] });
+    trierarch.workspace.folders.set(other, { hasChanges: false, unsaved: [] });
+
+    await trierarch.pass();
+
+    expect([trierarch.workspace.folders.has(holder), trierarch.workspace.folders.has(SCOUT_FOLDER), trierarch.workspace.folders.has(other)]).toEqual([true, true, false]);
+  });
+
+  it('rule 2: a folder under one it removes goes with it, removed once', async () => {
+    const trierarch = aTrierarch();
+    const workbench = `${WORKTREE_ROOT}/workbench`;
+    trierarch.workspace.folders.set(workbench, { hasChanges: false, unsaved: [] });
+    trierarch.workspace.folders.set(`${workbench}/tools`, { hasChanges: false, unsaved: [] });
+
+    await trierarch.pass();
+
+    expect([...trierarch.workspace.folders.keys()].filter((folder) => folder.startsWith(workbench))).toEqual([]);
+    expect(trierarch.logger.warnings.filter((warning) => warning.startsWith('Removed '))).toEqual([`Removed ${workbench}, a folder under the root no crewed ship uses`]);
+  });
+
   it('rule 2: logs each folder under its root it removes, with what it held and how many processes it stopped in it', async () => {
     const trierarch = aTrierarch();
     const stray = `${WORKTREE_ROOT}/aeolus-fleet/lookout`;
