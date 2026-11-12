@@ -389,6 +389,31 @@ func TestAWorktreeIsRemovedByItsPathFromTheRepositoryItsPathNames(t *testing.T) 
 	}
 }
 
+func TestAStrayShipsFolderOnTheHostGoesWholeIntoTheTrashBesideItWhateverItHolds(t *testing.T) {
+	_, root := aRepository(t)
+	stray := filepath.Join(root, "shp_01m78kesv477q4shegenmx6rz6")
+	mkdir(t, filepath.Join(stray, "worktree", "src"))
+	if err := os.WriteFile(filepath.Join(stray, "worktree", "src", "kept.txt"), []byte("held"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	places := Places{Root: root}
+
+	if err := places.RemoveWorktree(stray); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Lstat(stray); err == nil {
+		t.Error("the stray stayed")
+	}
+	discarded, err := os.ReadDir(filepath.Join(root, ".trash"))
+	if err != nil || len(discarded) != 1 || !strings.HasPrefix(discarded[0].Name(), "shp_01m78kesv477q4shegenmx6rz6.") {
+		t.Fatalf("the trash holds %v, %v", discarded, err)
+	}
+	if held, err := os.ReadFile(filepath.Join(root, ".trash", discarded[0].Name(), "worktree", "src", "kept.txt")); err != nil || string(held) != "held" {
+		t.Errorf("what it held: %q, %v", held, err)
+	}
+}
+
 func TestAPlainCloneAFolderGitDoesNotKnowAndAWorktreeOfAnotherRepositoryUnderTheRootAreRemoved(t *testing.T) {
 	repository, root := aRepository(t)
 	plain := filepath.Join(root, "aeolus-fleet", "own-clone")

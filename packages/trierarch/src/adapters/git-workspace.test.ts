@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -222,6 +222,19 @@ describe('workspaces in git', () => {
 
     expect([plain, unknown, foreign].filter((stray) => existsSync(stray))).toEqual([]);
     expect(existsSync(other)).toBe(true);
+  });
+
+  it('moves a stray ship\'s folder on the host whole into the trash beside it, whatever it holds, as every other path does (#346)', async () => {
+    const stray = join(root, newId('ship'));
+    mkdirSync(join(stray, 'worktree', 'src'), { recursive: true });
+    writeFileSync(join(stray, 'worktree', 'src', 'kept.txt'), 'held');
+
+    await workspace().remove(stray);
+
+    expect(existsSync(stray)).toBe(false);
+    const [discarded = ''] = readdirSync(join(root, '.trash'));
+    expect(discarded.startsWith(`${basename(stray)}.`)).toBe(true);
+    expect(readFileSync(join(root, '.trash', discarded, 'worktree', 'src', 'kept.txt'), 'utf8')).toBe('held');
   });
 
   it('refuses to remove its root, the trash or a folder deeper than a workspace', async () => {
