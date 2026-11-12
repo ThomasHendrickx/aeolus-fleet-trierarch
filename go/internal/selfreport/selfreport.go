@@ -187,9 +187,9 @@ func detailsOf(in Input) map[string]any {
 			"folders":      offeredPlaces(named, slices.Sorted(maps.Keys(in.Configuration.Folders)), func(places trust.Places) []string { return places.Folders }),
 		},
 		"caps": capsOf(in),
-		// Paths stay on the machine: names only (decision 0032).
-		"kept":    pickedFrom(in.State.Kept, "shipId", "repository"),
-		"orphans": pickedFrom(in.State.Orphans, "repository", "name"),
+		// Nothing is kept and no folder under the root stays an orphan (gap rule 2): both in their shape, empty.
+		"kept":    []any{},
+		"orphans": []any{},
 		"logins":  shipLoginsOf(in),
 		// A fact for the console, never a label: placement does not read it (decision 0039).
 		"runtime": runtimeOf(in.Configuration),
@@ -324,23 +324,6 @@ func shipLoginsOf(in Input) []map[string]string {
 		logins = append(logins, login)
 	}
 	return logins
-}
-
-// pickedFrom keeps only the named fields of each saved item, so nothing else of the state is carried.
-func pickedFrom(items []any, fields ...string) []map[string]any {
-	picked := []map[string]any{}
-	for _, item := range items {
-		fromItem, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		one := map[string]any{}
-		for _, field := range fields {
-			one[field] = fromItem[field]
-		}
-		picked = append(picked, one)
-	}
-	return picked
 }
 
 // Fleet takes the report of the trierarch's own ship.
