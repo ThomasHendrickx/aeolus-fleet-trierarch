@@ -6,10 +6,10 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, inject, it } from 'vitest';
 
-import { runCommand } from '../../src/adapters/run-command.js';
+import { type CommandResult, runCommand } from '../../src/adapters/run-command.js';
 import { newId } from './in-memory.js';
 import { buildTestSessionImage, rootlessPodman } from './podman.js';
-import { TEST_RUN_LABEL } from './test-run.js';
+import { TEST_RUN_LABEL, removeEarlierRuns, removeRun } from './test-run.js';
 
 // A suite that starts the test session image's container, with a volume, and
 // leaves it, run under this package's own global setup as a program: as a run
@@ -140,4 +140,42 @@ describe('the test runs of this package on this machine', () => {
     },
     RUN_TIMEOUT_MS,
   );
+});
+
+/** The Podman calls of the cleanup, by their first arguments. */
+type PodmanCall = 'ps' | 'images' | 'rm' | 'image rm';
+
+/** A stand-in Podman that lists a container and a test image of an ended run, and fails the one call it is told to, as Podman does: a nonzero exit, saying why. */
+function podmanFailingAt(failing: PodmanCall) {
+  return (_command: 'podman', options: { args: readonly string[] }): Promise<CommandResult> => {
+    const [first = '', second = ''] = options.args;
+    const call = first === 'image' ? `${first} ${second}` : first;
+    if (call === failing) {
+      return Promise.resolve({ status: 125, stdout: '', stderr: `Error: ${call} cannot reach the Podman service\n` });
+    }
+    const listed = call === 'ps' ? 'c0ffee of-an-ended-run\n' : call === 'images' ? 'beef00 of-an-ended-run\n' : '';
+    return Promise.resolve({ status: 0, stdout: listed, stderr: '' });
+  };
+}
+
+describe('the cleanup of the test runs when Podman fails', () => {
+  it('fails, saying why, when Podman cannot list the containers of the test runs', async () => {
+    await expect(removeEarlierRuns(podmanFailingAt('ps'))).rejects.toThrow('listing the containers of the test runs failed: Error: ps cannot reach the Podman service');
+  });
+
+  it('fails, saying why, when Podman cannot list the test images of the test runs', async () => {
+    await expect(removeEarlierRuns(podmanFailingAt('images'))).rejects.toThrow('listing the test images of the test runs failed: Error: images cannot reach the Podman service');
+  });
+
+  it('fails, saying why, when Podman cannot remove the containers of the test runs', async () => {
+    await expect(removeEarlierRuns(podmanFailingAt('rm'))).rejects.toThrow('removing the containers of the test runs failed: Error: rm cannot reach the Podman service');
+  });
+
+  it('fails, saying why, when Podman cannot remove the test images of the test runs', async () => {
+    await expect(removeEarlierRuns(podmanFailingAt('image rm'))).rejects.toThrow('removing the test images of the test runs failed: Error: image rm cannot reach the Podman service');
+  });
+
+  it('fails after a run, saying why, when Podman cannot remove what the run left', async () => {
+    await expect(removeRun('of-an-ended-run', podmanFailingAt('rm'))).rejects.toThrow('removing the containers of the test runs failed: Error: rm cannot reach the Podman service');
+  });
 });
