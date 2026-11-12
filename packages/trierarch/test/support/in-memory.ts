@@ -674,6 +674,17 @@ export class InMemoryWorkspace implements WorkspacePort {
     return Promise.resolve();
   }
 
+  /** The repositories pruned, in order. */
+  readonly pruned: string[] = [];
+
+  /** Repositories whose prune fails, as when git refuses. */
+  readonly failingPrune = new Set<string>();
+
+  prune(repository: string): Promise<void> {
+    this.pruned.push(repository);
+    return this.failingPrune.has(repository) ? Promise.reject(new Error(`git worktree prune failed in ${repository}`)) : Promise.resolve();
+  }
+
   worktrees(): Promise<readonly ObservedWorktree[]> {
     return Promise.resolve(
       [...this.folders]
