@@ -3218,4 +3218,19 @@ describe("a ship's folder, ships/<shipId>, which holds every file of the ship (#
     expect(trierarch.state.current().entries[shipId]?.isShipFolderGone).toBeUndefined();
     expect([trierarch.workspace.gone.has(shipFolderOf(shipId)), trierarch.sockets.openShips.has(shipId), trierarch.fleet.toArgo.length]).toEqual([false, true, told]);
   });
+
+  it('removed by hand from a ship crewing here, its session started, has the ship released and crewed again in a fresh one, as a first start', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aLaunchedShip(trierarch, { seen: { kind: 'none' } });
+    expect([trierarch.state.current().entries[shipId]?.state, trierarch.state.current().entries[shipId]?.launchedAt !== undefined]).toEqual(['crewing', true]);
+    const crewToken = trierarch.fleet.shipOf(shipId).crewToken;
+    const launches = trierarch.harness.launches.length;
+    trierarch.workspace.removeByHand(shipFolderOf(shipId));
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.shipOf(shipId).crewToken).not.toBe(crewToken);
+    expect(trierarch.harness.launches.slice(launches)).toEqual([expect.objectContaining({ shipId, isFirstStart: true })]);
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'crewing', shipFolder: shipFolderOf(shipId) });
+  });
 });
