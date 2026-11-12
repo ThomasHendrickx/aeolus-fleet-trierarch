@@ -1,6 +1,6 @@
 # Design: a trierarch keeps the disk its ships use under control (trierarch#343)
 
-Status: purpose proposed, not agreed. Questions are held until the purpose is agreed. Nothing is built.
+Status: purpose approved by Thomas on 12 Nov. Questions open. Nothing is built.
 
 ## Purpose
 
@@ -58,4 +58,34 @@ Rows 2 to 6 (`/tmp`, containers and their volumes, shared caches, worktrees outs
 
 ## Questions
 
-Held until the purpose is agreed.
+Each with its options, the pick first.
+
+**Q1. Where may a session write?** Today a session on the host writes anywhere its user can: the trierarch removes its worktree, and nobody removes the rest.
+1. *(pick)* On both runtimes, everything a session writes besides its work goes to places the trierarch gave that ship: its scratch, its test containers and their volumes. They go when the ship's worktree goes. A session in a container has this already; a session on the host gets the same.
+2. Only the container runtime is kept under control; the host runtime stays as it is, and the trierarch says so when it starts.
+3. The container runtime becomes the default, and the host runtime is kept for machines that cannot run it.
+
+Why 1: the operator chooses the runtime for the hardware (decision 0039), and the purpose holds on both.
+
+**Q2. What does bounded mean for the shared caches** (npm, Go, Playwright)? They make every session's installs and builds fast, and they are the user's as much as the sessions'.
+1. *(pick)* The trierarch keeps one cache per machine for its sessions, apart from the user's own, and trims it to a size the machine's configuration names, least recently used first. The user's own caches are not the trierarch's.
+2. Each ship gets its own cache, gone with the ship: nothing to trim, but each new ship downloads and builds everything again.
+3. The caches stay shared with the user and unbounded.
+
+**Q3. What does bounded mean for a ship that stays crewed for weeks?** Its worktree, scratch and test containers grow while it works.
+1. *(pick)* A ship's scratch and test containers are removed whenever its session starts again (a restart, Restart, Edit, a machine restart), never under a running turn. When the ship's folders pass a size the machine's configuration names, its owner is told once, and the trierarch stops nothing.
+2. Over that size the trierarch stops the session and starts it again with empty scratch.
+3. No bound while a ship is crewed; only its end frees the disk.
+
+**Q4. When the disk runs low (below 5 % free), what does the trierarch do?** Today it tells argo and stops nothing.
+1. *(pick)* It first removes what no session uses (leftovers a removal could not finish, old session images, the cache down to its size), then tells argo only if the disk is still low, naming the ships that hold the most.
+2. As today: it tells argo and frees nothing more.
+
+**Q5. What is fixed in the tests themselves?** Testcontainers on rootless Podman runs with its reaper off, so a test run that is killed or times out leaves its containers and volumes behind.
+1. *(pick)* Both: each repository's tests stop their own containers even when a run is killed, and the trierarch's removal of a ship's test containers (Q1) catches what they still leave. In aeolus-fleet (the Postgres and LocalStack test runs that hold most of the 64 GB, to be confirmed there) and in this repository (its e2e containers, label `aeolus.trierarch`), an issue each.
+2. Only the trierarch: the tests stay as they are.
+3. Only the tests: the trierarch removes no containers.
+
+**Q6. What about what is already on a machine when it upgrades?** Thomas asks for the permanent control, not a one-off cleanup.
+1. *(pick)* The same rules apply on the first pass after the upgrade to whatever they cover: worktrees under the root (#89, #90), old session images, the trierarch's cache. Worktrees outside the root and the user's own `/tmp`, caches and containers stay the person's, as #84 point 4 says.
+2. The first pass after the upgrade also removes, once, what sessions left in `/tmp` and the user's container runtime before.
