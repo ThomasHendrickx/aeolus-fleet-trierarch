@@ -90,6 +90,8 @@ export function createRunPass(deps: RunPassDeps): RunPass {
     } catch (error) {
       deps.logger.warn(`The pass failed: ${reasonOf(error)}; ${NEXT_AFTER_FAILURE}`);
       await deps.state.save({ ...state, passFailure: { reason: reasonOf(error), since: state.passFailure?.since ?? deps.clock.now().toISOString() } });
+      // The prune needs neither the fleet nor the reconcile, so a failed pass prunes too.
+      await pruneWorktreeRecords(deps);
       return;
     }
     for (const action of actions) {
