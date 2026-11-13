@@ -258,3 +258,17 @@ func TestAConfigurationThatStillNamesWorktreeRootIsRefusedNamingItsNewName(t *te
 		t.Fatalf("checkShipsPlace = %v, want %q", err, want)
 	}
 }
+
+func TestAConfigurationThatStillNamesCheckoutsIsRefusedNamingTheLineAndWhereSubRepositoriesComeFrom(t *testing.T) {
+	at := paths.Of("/home/me", "")
+
+	err := checkNoCheckouts(at, config.Configuration{NamesCheckouts: []string{"aeolus-company", "other"}})
+
+	want := "The configuration at /home/me/.aeolus/trierarch/config.json names checkouts in repository aeolus-company: remove that line; a ship's sub-repositories come from its crew request"
+	if err == nil || err.Error() != want {
+		t.Fatalf("checkNoCheckouts = %v, want %q", err, want)
+	}
+	if err := checkNoCheckouts(at, config.Configuration{}); err != nil {
+		t.Fatalf("a configuration naming none: %v", err)
+	}
+}

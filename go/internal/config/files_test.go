@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -136,5 +137,19 @@ func TestLoadsAConfigurationNamingTheOldWorktreeRootAndSaysSoAndReadsShipsRootAs
 
 	if err != nil || !loaded.NamesWorktreeRoot || loaded.ShipsRoot != "/srv/ships" {
 		t.Errorf("Load = %+v, %v, want worktreeRoot said to be named and shipsRoot read", loaded, err)
+	}
+}
+
+func TestLoadsAConfigurationNamingCheckoutsAndSaysWhichRepositoriesNameThem(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	text := `{"caps":{"ships":4,"running":2},"repositories":{"zeta":{"path":"/srv/zeta","checkouts":["skills"]},"skills":{"path":"/srv/skills"},"alpha":{"path":"/srv/alpha","checkouts":["skills"]}},"folders":{},"harnesses":{}}`
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Load(path)
+
+	if err != nil || !reflect.DeepEqual(loaded.NamesCheckouts, []string{"alpha", "zeta"}) || loaded.Repositories["alpha"].Path != "/srv/alpha" {
+		t.Errorf("Load = %+v, %v, want the repositories naming checkouts, in order, and their paths read", loaded, err)
 	}
 }
