@@ -2407,13 +2407,6 @@ func TestAnActivityThatCannotBeWrittenIsToldAndNeverFailsThePass(t *testing.T) {
 	}
 }
 
-// aFolders prepare a configured folder as it is.
-type aFolders struct{ *aWorkspace }
-
-func (f *aFolders) Prepare(entry reconciler.Entry, shipName string) (string, error) {
-	return "/folders/" + entry.Workspace.Name, nil
-}
-
 func TestARequestNoLongerAssignedHereRemovesWhatTheHarnessKeepsForTheShipEvenWhenItsIdentityIsAlreadyGone(t *testing.T) {
 	pass := aRunPass(t)
 	pass.crewed(t)

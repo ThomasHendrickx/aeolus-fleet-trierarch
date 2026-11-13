@@ -157,7 +157,7 @@ func add(at paths.Paths, machine Machine, words []string) (answer, error) {
 	held, isRepository := configuration.Repositories[name]
 	heldFolder, isFolder := configuration.Folders[name]
 	if isFolder {
-		held = config.Repository{Path: heldFolder.Path}
+		held = config.Repository(heldFolder)
 	}
 	if (isRepository || isFolder) && (held.Path != path || (kind == "repository") != isRepository) {
 		return answer{}, fmt.Errorf("%s names %s already: pick another name", name, held.Path)
