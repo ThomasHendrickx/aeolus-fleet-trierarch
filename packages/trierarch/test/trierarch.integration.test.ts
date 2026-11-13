@@ -16,7 +16,6 @@ import { adapterFlagsOf, riskyFlagsOf } from '../src/adapters/harnesses.js';
 import { createClaudeCodeSetup } from '../src/adapters/claude-code-setup.js';
 import { readCrewFile } from '../src/adapters/files.js';
 import { runCommand } from '../src/adapters/run-command.js';
-import { createGitCheckouts } from '../src/adapters/git-checkouts.js';
 import { createGitWorkspace } from '../src/adapters/git-workspace.js';
 import { createJsonState } from '../src/adapters/json-state.js';
 import { trierarchPaths, type TrierarchPaths } from '../src/adapters/paths.js';
@@ -222,11 +221,10 @@ async function aTrierarchOnTheFleet(
   const setup = { configuration, configured: configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
   // The real caller check: the plugin's scripts run as children of this process, as aeolus-push.sh does of the trierarch, or of a session's hold.
   const mayCall = createCallerCheck({ platform: process.platform, sessionRootOf: (shipId) => sessions.sessionRootOf?.(shipId) ?? Promise.resolve(undefined) });
-  const checkouts = createGitCheckouts({ configuration, root: paths.checkouts });
-  const sockets = createShipSockets({ root: paths.sockets, fleetUrl: address, crewTokenOf: async (shipId) => (await state.load()).entries[shipId]?.crewToken, mayCall, log: () => undefined, refreshCheckouts: (shipId) => checkouts.refresh(shipId) });
+  const sockets = createShipSockets({ root: paths.sockets, fleetUrl: address, crewTokenOf: async (shipId) => (await state.load()).entries[shipId]?.crewToken, mayCall, log: () => undefined });
   openSockets = sockets;
   // A new run pass over the same files is the trierarch started again.
-  const aRunPass = () => createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, folderProcesses: { stopIn: () => Promise.resolve(0) }, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }), state, setup, clock, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID, sockets, checkouts, modelLogins: { startProblem: () => Promise.resolve(undefined), keyState: () => Promise.resolve({ state: 'ready' }) }, sendReleasedUsage: () => Promise.resolve() });
+  const aRunPass = () => createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, folderProcesses: { stopIn: () => Promise.resolve(0) }, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }), state, setup, clock, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID, sockets, modelLogins: { startProblem: () => Promise.resolve(undefined), keyState: () => Promise.resolve({ state: 'ready' }) }, sendReleasedUsage: () => Promise.resolve() });
   const pass = aRunPass();
   const leasesOf = (shipId: ShipId) => database.lease.count({ where: { shipId, endedAt: null } });
   const folder = join(paths.ships, scout.shipId, 'repositories');
@@ -922,11 +920,10 @@ describe('the trusted repositories on a real fleet (aeolus-fleet#384)', () => {
     const state = createJsonState(paths.state);
     const trust = createTrust({ configuration: offered, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') });
     const setup = { configuration: offered, configured: configuration, version: '0.0.0', adapterFlags: adapterFlagsOf(configuration), riskyFlags: riskyFlagsOf(configuration) };
-    const checkouts = createGitCheckouts({ configuration, root: paths.checkouts });
     const mayCall = createCallerCheck({ platform: process.platform, sessionRootOf: () => Promise.resolve(undefined) });
-    const sockets = createShipSockets({ root: paths.sockets, fleetUrl: address, crewTokenOf: async (shipId) => (await state.load()).entries[shipId]?.crewToken, mayCall, log: () => undefined, refreshCheckouts: (shipId) => checkouts.refresh(shipId) });
+    const sockets = createShipSockets({ root: paths.sockets, fleetUrl: address, crewTokenOf: async (shipId) => (await state.load()).entries[shipId]?.crewToken, mayCall, log: () => undefined });
     openSockets = sockets;
-    const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, folderProcesses: { stopIn: () => Promise.resolve(0) }, workspace, trust, state, setup, clock: { now: () => new Date() }, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID, sockets, checkouts, modelLogins: { startProblem: () => Promise.resolve(undefined), keyState: () => Promise.resolve({ state: 'ready' }) }, sendReleasedUsage: () => Promise.resolve() });
+    const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, folderProcesses: { stopIn: () => Promise.resolve(0) }, workspace, trust, state, setup, clock: { now: () => new Date() }, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID, sockets, modelLogins: { startProblem: () => Promise.resolve(undefined), keyState: () => Promise.resolve({ state: 'ready' }) }, sendReleasedUsage: () => Promise.resolve() });
     const reportSelf = createReportSelf({ fleetKey: { isCutOff: () => false }, fleet, processes: sessions, trust, state, setup, readLoad: () => Promise.resolve(undefined), readUsage: () => Promise.resolve({ subscriptions: [], ships: [] }), clock: { now: () => new Date() }, modelLogins: { keyState: () => Promise.resolve({ state: 'ready' }) } });
 
     await sendTrusted([{ name: 'hemma', url }]);

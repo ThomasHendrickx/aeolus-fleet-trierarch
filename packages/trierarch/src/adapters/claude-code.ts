@@ -54,8 +54,6 @@ export const LAUNCH_VARIABLE = 'AEOLUS_LAUNCH';
 /** Print mode, taking and giving stream-json: one long-lived process, one user message per stdin line (headless H11). */
 const HEADLESS = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'];
 const CONTINUE = '--continue';
-/** Lets the session read a folder beside its own without asking: each of its read-only checkouts (#1182). */
-const ADD_DIR = '--add-dir';
 const NO_PANE_PROMPTS = '--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode';
 const PERMISSION_MODE = '--permission-mode';
 const PLAN_MODE = 'plan';
@@ -144,8 +142,6 @@ export function claudeCodeCommandLine(at: {
   defaultPermissionMode?: SettingsDefaultMode;
   permissionModes?: readonly string[] | undefined;
   program?: string;
-  /** The session's read-only checkouts (#1182), which it reads beside its folder without asking. */
-  readOnly?: readonly string[];
 }): CommandPart[] {
   const flags = withoutPlanMode(at.flags);
   return partsWithWords([
@@ -155,7 +151,6 @@ export function claudeCodeCommandLine(at: {
     planOverride(flags, { defaultMode: at.defaultPermissionMode, permissionModes: at.permissionModes }),
     { words: [NO_PANE_PROMPTS], source: 'adapter' },
     { words: at.isFirstStart ? [] : [CONTINUE], source: 'adapter' },
-    { words: (at.readOnly ?? []).flatMap((path) => [ADD_DIR, path]), source: 'adapter' },
   ]);
 }
 
@@ -242,7 +237,7 @@ export function createClaudeCodeHarness(options: {
     },
     turnOf: (session) => identityOf(filesOf(session)).turnOf(session),
     startProblem: () => createPluginIdentity(plugin).startProblem(),
-    launch: async ({ shipId, folder, shipFolder, checkouts, harness, options: picked, isFirstStart, launchId, login, firstPrompt }) => {
+    launch: async ({ shipId, folder, shipFolder, harness, options: picked, isFirstStart, launchId, login, firstPrompt }) => {
       const settings = configuration.harnesses[harness];
       if (settings === undefined) {
         throw new Error(`The configuration has no harness ${harness}`);
@@ -259,11 +254,10 @@ export function createClaudeCodeHarness(options: {
         defaultPermissionMode: await claudeCodeSettingsDefaultMode(home.setup, { flags, folder }),
         permissionModes: options.permissionModes(),
         ...(options.command !== undefined && { program: options.command }),
-        readOnly: checkouts.map((checkout) => checkout.path),
       });
       const marks = marksOf(ship);
       await marks.clear(folder);
-      await sessions.start({ shipId, folder, command: wordsOf(command), harness, env: { [LAUNCH_VARIABLE]: launchId, ...route.env }, ...(route.proxyToken !== undefined && { proxyToken: route.proxyToken }), ...(checkouts.length > 0 && { readOnly: checkouts.map((checkout) => checkout.path) }), ...(shipFolder !== undefined && { shipFolder }) });
+      await sessions.start({ shipId, folder, command: wordsOf(command), harness, env: { [LAUNCH_VARIABLE]: launchId, ...route.env }, ...(route.proxyToken !== undefined && { proxyToken: route.proxyToken }), ...(shipFolder !== undefined && { shipFolder }) });
       await sessions.send({ shipId, line: userLine(prompt) });
     },
     handOver: async (session) => {

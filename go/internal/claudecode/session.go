@@ -49,8 +49,8 @@ func withoutPlanMode(flags []string) []string {
 	return kept
 }
 
-// CommandParts are `claude` in parts, each marked by its source: headless, the flags with plan mode left out, the override of a plan default mode (no words for none), AskUserQuestion and plan mode disallowed, `--continue` when told, and `--add-dir` for each read-only checkout, which lets the session read it beside its folder without asking.
-func CommandParts(flags []string, override commandline.Part, isContinued bool, readOnly []string) []commandline.Part {
+// CommandParts are `claude` in parts, each marked by its source: headless, the flags with plan mode left out, the override of a plan default mode (no words for none), AskUserQuestion and plan mode disallowed, `--continue` when told.
+func CommandParts(flags []string, override commandline.Part, isContinued bool) []commandline.Part {
 	parts := []commandline.Part{
 		{Words: []string{"claude"}},
 		{Words: headless, Source: commandline.Adapter},
@@ -61,15 +61,12 @@ func CommandParts(flags []string, override commandline.Part, isContinued bool, r
 	if isContinued {
 		parts = append(parts, commandline.Part{Words: []string{"--continue"}, Source: commandline.Adapter})
 	}
-	for _, path := range readOnly {
-		parts = append(parts, commandline.Part{Words: []string{"--add-dir", path}, Source: commandline.Adapter})
-	}
 	return commandline.WithWords(parts)
 }
 
 // CommandLine is `claude` with the flags given, plan mode left out and a plan default mode overridden, continuing the folder's conversation when told.
-func CommandLine(flags []string, override commandline.Part, isContinued bool, readOnly []string) []string {
-	return commandline.Words(CommandParts(flags, override, isContinued, readOnly))
+func CommandLine(flags []string, override commandline.Part, isContinued bool) []string {
+	return commandline.Words(CommandParts(flags, override, isContinued))
 }
 
 var notLetterOrDigit = regexp.MustCompile(`[^a-zA-Z0-9]`)

@@ -14,12 +14,7 @@ import { withoutRemoteControl } from '../core/remote-control.js';
  */
 
 /**
- * The configuration as common states it, with each repository's read-only
- * checkouts (#1182): the configured repositories a session in that repository
- * gets beside its working folder, at the latest main. They are named, never a
- * path, so only a repository the machine already trusts is checked out. Kept
- * here rather than in common: only the trierarch reads its configuration, and
- * a crew request never names them. With them, the price table the cost of a
+ * The configuration as common states it, with the price table the cost of a
  * ship's tokens is estimated by (#353): per model, in US dollars per million
  * tokens of each kind, in place of its list price or for a model with none.
  * And which login each session runs on (api keys K5): a default per harness
@@ -35,23 +30,9 @@ export const trierarchConfigurationSchema = commonConfigurationSchema
   .extend({
     /** Where each ship keeps its own folder, `<shipsRoot>/<shipId>/`; `~/.aeolus/trierarch/ships` when left out. */
     shipsRoot: z.string().min(1).optional(),
-    repositories: z.record(trierarchNameSchema, z.strictObject({ path: z.string().min(1), checkouts: z.array(trierarchNameSchema).optional() })),
+    repositories: z.record(trierarchNameSchema, z.strictObject({ path: z.string().min(1) })),
     prices: z.record(z.string().min(1), z.strictObject({ input: priceSchema, output: priceSchema, cacheRead: priceSchema, cacheWrite: priceSchema })).optional(),
     logins: z.strictObject({ default: z.strictObject({ 'claude-code': loginSchema.optional(), codex: loginSchema.optional() }).optional(), ships: z.record(z.string().min(1), loginSchema).optional() }).optional(),
-  })
-  .superRefine((configuration, context) => {
-    for (const [repository, { checkouts = [] }] of Object.entries(configuration.repositories)) {
-      checkouts.forEach((checkout, index) => {
-        const path = ['repositories', repository, 'checkouts', index];
-        if (checkout === repository) {
-          context.addIssue({ code: 'custom', path, message: `${checkout} is the repository itself, the session's working folder` });
-        } else if (!(checkout in configuration.repositories)) {
-          context.addIssue({ code: 'custom', path, message: `${checkout} is no repository of this configuration` });
-        } else if (checkouts.indexOf(checkout) !== index) {
-          context.addIssue({ code: 'custom', path, message: `${checkout} is named twice` });
-        }
-      });
-    }
   });
 export type TrierarchConfiguration = z.infer<typeof trierarchConfigurationSchema>;
 
@@ -80,6 +61,12 @@ export async function writeConfigurationJsonSchema(path: string): Promise<void> 
   await writeFile(path, `${JSON.stringify(configurationJsonSchema(), null, 2)}\n`);
 }
 
+/** The first repository, in the order the file names them, that still names checkouts, which a crew request's sub-repositories took the place of. */
+function repositoryNamingCheckouts(json: unknown): string | undefined {
+  const repositories = z.object({ repositories: z.record(z.string(), z.unknown()) }).safeParse(json).data?.repositories ?? {};
+  return Object.keys(repositories).find((name) => z.object({ checkouts: z.unknown() }).safeParse(repositories[name]).data?.checkouts !== undefined);
+}
+
 export async function loadConfiguration(path: string): Promise<TrierarchConfiguration> {
   let text: string;
   try {
@@ -96,6 +83,10 @@ export async function loadConfiguration(path: string): Promise<TrierarchConfigur
   // The key the place of ships/ had before the ship folders: said by its new name, not as a field that does not fit.
   if (typeof json === 'object' && json !== null && Object.hasOwn(json, 'worktreeRoot')) {
     throw new TrierarchFileError(`The configuration at ${path} names worktreeRoot, which is now shipsRoot: rename the line to shipsRoot`);
+  }
+  const checkoutsOf = repositoryNamingCheckouts(json);
+  if (checkoutsOf !== undefined) {
+    throw new TrierarchFileError(`The configuration at ${path} names checkouts in repository ${checkoutsOf}: remove that line; a ship's sub-repositories come from its crew request`);
   }
   const parsed = trierarchConfigurationSchema.safeParse(json);
   if (!parsed.success) {

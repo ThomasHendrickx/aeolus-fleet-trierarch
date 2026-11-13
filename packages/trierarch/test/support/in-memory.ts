@@ -8,8 +8,6 @@ import { loginAt, type KeyStateAt, type Login, type Logins, type SessionLogins }
 import type {
   ArgoReport,
   AssignedRequest,
-  Checkout,
-  CheckoutsPort,
   ContainerHostPort,
   Detected,
   Delivery,
@@ -25,7 +23,6 @@ import type {
   LoggedAction,
   ObservedSession,
   OwnerReport,
-  RefreshedCheckout,
   OwnerReportAnswer,
   RuntimeMode,
   SelfReport,
@@ -73,7 +70,6 @@ export const WORKTREE_ROOT = '/home/thomas/.aeolus/trierarch/worktrees';
 /** The place of every ship's folder. */
 export const SHIPS_ROOT = '/home/thomas/.aeolus/trierarch/ships';
 export const NOTES_FOLDER = '/home/thomas/notes';
-export const CHECKOUTS_ROOT = '/home/thomas/.aeolus/trierarch/checkouts';
 
 export const CONFIGURATION: TrierarchConfiguration = {
   caps: { ships: 8, running: 4 },
@@ -510,8 +506,6 @@ export class InMemoryHarness implements HarnessPort {
   readonly launchedShipFolders: { shipId: ShipId; shipFolder?: string }[] = [];
   /** The login each launch started its session on, in order (api keys K6). */
   readonly launchedLogins: { shipId: ShipId; login: Login }[] = [];
-  /** The read-only checkouts each launch gave its session, in order (#1182). */
-  readonly launchedCheckouts: { shipId: ShipId; checkouts: readonly Checkout[] }[] = [];
   /** Each hand-over the trierarch made, by ship (#756). */
   readonly handOvers: ShipId[] = [];
   /** Each forced hand-over the trierarch made, by ship, and whether it stopped a busy turn for it (decision 0040). */
@@ -557,16 +551,15 @@ export class InMemoryHarness implements HarnessPort {
     return Promise.resolve();
   }
 
-  launch(session: { shipId: ShipId; shipName: string; folder: string; shipFolder?: string; workspace: TrierarchWorkspace; checkouts: readonly Checkout[]; isFirstStart: boolean; launchId: string; login: Login; firstPrompt?: string }): Promise<void> {
+  launch(session: { shipId: ShipId; shipName: string; folder: string; shipFolder?: string; workspace: TrierarchWorkspace; isFirstStart: boolean; launchId: string; login: Login; firstPrompt?: string }): Promise<void> {
     if (this.isFailingLaunch) {
       return Promise.reject(new Error(`the harness could not start ${session.shipId}`));
     }
-    const { shipId, shipName, folder, workspace, checkouts, isFirstStart, launchId, firstPrompt } = session;
+    const { shipId, shipName, folder, workspace, isFirstStart, launchId, firstPrompt } = session;
     this.launches.push({ shipId, shipName, folder, workspace, isFirstStart, ...(firstPrompt !== undefined && { firstPrompt }) });
     this.launchIds.push(launchId);
     this.launchedShipFolders.push({ shipId, ...(session.shipFolder !== undefined && { shipFolder: session.shipFolder }) });
     this.launchedLogins.push({ shipId, login: session.login });
-    this.launchedCheckouts.push({ shipId, checkouts });
     this.processes.sessions.set(shipId, 'running');
     this.processes.otherVersion.delete(shipId);
     return Promise.resolve();
@@ -816,36 +809,6 @@ export class InMemoryWorkspace implements WorkspacePort {
       found.hasChanges = true;
       found.unsaved.push(status);
     }
-  }
-}
-
-/** Each ship's read-only checkouts (#1182), as the configuration names them for its working repository, under the checkouts root. */
-export class InMemoryCheckouts implements CheckoutsPort {
-  readonly made = new Map<ShipId, readonly Checkout[]>();
-  /** The ships whose checkouts were removed, in order. */
-  readonly removed: ShipId[] = [];
-
-  constructor(private readonly configuration: TrierarchConfiguration) {}
-
-  static pathOf(shipId: ShipId, repository: string): string {
-    return `${CHECKOUTS_ROOT}/${shipId}/${repository}`;
-  }
-
-  prepare(at: { shipId: ShipId; repository: string }): Promise<readonly Checkout[]> {
-    const made = this.made.get(at.shipId) ?? (this.configuration.repositories[at.repository]?.checkouts ?? []).map((repository) => ({ repository, path: InMemoryCheckouts.pathOf(at.shipId, repository) }));
-    this.made.set(at.shipId, made);
-    return Promise.resolve(made);
-  }
-
-  refresh(shipId: ShipId): Promise<readonly RefreshedCheckout[]> {
-    return Promise.resolve((this.made.get(shipId) ?? []).map(({ repository }) => ({ repository, revision: `${repository}-main` })));
-  }
-
-  remove(shipId: ShipId): Promise<void> {
-    if (this.made.delete(shipId)) {
-      this.removed.push(shipId);
-    }
-    return Promise.resolve();
   }
 }
 
@@ -1186,12 +1149,11 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
     return `launch-${String(launches)}`;
   };
   const sockets = new InMemoryShipSockets([harness, codex]);
-  const checkouts = new InMemoryCheckouts(configuration);
   const folderProcesses = new InMemoryFolderProcesses();
   const usage = new InMemoryUsage();
   const sendReleasedUsage = createSendReleasedUsage({ fleet, usage, clock, logger, prices: priceTableOf(undefined), trierarchShipId: TRIERARCH_SHIP_ID, ...(pluginShipId !== undefined && { pluginShipId }) });
   const trash = new InMemoryTrash();
-  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, folderProcesses, workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId, sockets, modelLogins, sendReleasedUsage, trash, ...(logins !== undefined && { logins }) });
+  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, folderProcesses, workspace, trust, state, setup, clock, logger, refuseModel, newLaunchId, sockets, modelLogins, sendReleasedUsage, trash, ...(logins !== undefined && { logins }) });
   const uninstall = createUninstall({ processes, state });
   const machine = new InMemoryMachine();
   const readLoad = createReadLoad({ machine, fleet, state, clock, logger });
@@ -1207,7 +1169,7 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
     return delivery;
   }
 
-  return { fleetKey, fleet, processes, folderProcesses, harness, codex, modelLogins, workspace, checkouts, trust, state, clock, logger, handle, pass, trash, uninstall, reportSelf, deliver, refusals, sockets, trustedRepositories, machine, usage, readLoad, readUsage, sendUsage };
+  return { fleetKey, fleet, processes, folderProcesses, harness, codex, modelLogins, workspace, trust, state, clock, logger, handle, pass, trash, uninstall, reportSelf, deliver, refusals, sockets, trustedRepositories, machine, usage, readLoad, readUsage, sendUsage };
 }
 
 export type Trierarch = ReturnType<typeof aTrierarch>;

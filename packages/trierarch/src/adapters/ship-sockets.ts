@@ -5,7 +5,6 @@ import { join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
 
-import type { RefreshedCheckout } from '../core/ports.js';
 import { shipSockets, SOCKET_FILE } from './paths.js';
 
 /**
@@ -21,9 +20,7 @@ import { shipSockets, SOCKET_FILE } from './paths.js';
  * fleet API and the ship protocol, never register or deregister) and the
  * size: core decides each fleet call by the ship's scopes and reach
  * (decision 0057). It logs one line per call without the body. It queues nothing: when the fleet gives no answer, the
- * session gets none either. One call it answers itself, never the fleet's: a
- * refresh of its ship's read-only checkouts (#1182), which answers the
- * revision each now holds, or why it could not.
+ * session gets none either.
  */
 
 /** The most a call's body may hold: a 256 KB payload with the JSON around it (aeolus-fleet decision 0006). */
@@ -35,8 +32,6 @@ const FORWARDED_CALL = /^\/api\/v1\/(?:ship|fleet)\/([A-Za-z]+)$/;
 const CREW_CALLS = new Set(['register', 'deregister']);
 /** The ship protocol, which a session reads at each start (`aeolus-fleet.sh protocol`). */
 const PROTOCOL = '/api/v1/openapi.json';
-/** A refresh of the ship's read-only checkouts (`aeolus-checkouts.sh refresh`), which the trierarch answers itself (#1182). */
-const REFRESH_CHECKOUTS = '/trierarch/checkouts/refresh';
 
 export interface ShipSockets {
   /** Opens the ship's socket in its ship's folder, or for a ship crewed before the ship folders (none) where it was, or keeps the one open; answers its path. */
@@ -96,8 +91,6 @@ export function createShipSockets(options: {
   /** Whether the process at the other end of the connection may call the ship's socket. */
   mayCall: (shipId: ShipId, connection: Socket) => Promise<boolean>;
   log: (line: string) => void;
-  /** Brings the ship's read-only checkouts to the latest main (#1182). */
-  refreshCheckouts: (shipId: ShipId) => Promise<readonly RefreshedCheckout[]>;
 }): ShipSockets {
   const servers = new Map<ShipId, { server: Server; path: string }>();
 
@@ -111,18 +104,6 @@ export function createShipSockets(options: {
     if (!(await options.mayCall(shipId, incoming.socket))) {
       refuse(response, { status: 403, message: "This socket answers only its ship's own session" });
       said('403');
-      return;
-    }
-    if (method === 'POST' && path === REFRESH_CHECKOUTS) {
-      try {
-        const checkouts = await options.refreshCheckouts(shipId);
-        response.writeHead(200, { 'content-type': 'application/json' });
-        response.end(JSON.stringify({ checkouts }));
-        said('200');
-      } catch (error) {
-        refuse(response, { status: 500, message: error instanceof Error ? error.message : String(error) });
-        said('500');
-      }
       return;
     }
     if (!isForwarded(method, path)) {

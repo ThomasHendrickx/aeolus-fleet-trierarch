@@ -35,7 +35,7 @@ afterEach(async ({ task }) => {
   if (task.result?.state === 'fail') {
     console.log(`The service's log:\n${machine.serviceLog()}`);
   }
-  // Read-only checkouts a test left are made writable again so the machine can go; a workspace that goes meanwhile is no matter.
+  // A folder a test's session made read-only is made writable again so the machine can go; a workspace that goes meanwhile is no matter.
   spawnSync('chmod', ['-R', 'u+w', machine.trierarchHome]);
   await machine.remove();
   await fleet.close();
@@ -137,27 +137,13 @@ describe('the container runtime check', () => {
 
 describe('a session in a container', () => {
   let scout: ShipId;
-  /** The repository the working repository names as its read-only checkout. */
-  let skills: string;
-
   const container = (): string => `trierarch-${scout}`;
   const shipHome = (): string => join(machine.trierarchHome, 'ships', scout, 'home');
-  const checkout = (): string => join(machine.trierarchHome, 'checkouts', scout, 'skills');
   const run = (): string[] => machine.containerRunOf(container()) ?? [];
 
-  /** Configures the container runtime, with a read-only checkout of skills for the working repository, and crews scout in it. */
+  /** Configures the container runtime, and crews scout in it. */
   async function aRunningScout(at: { login?: 'api-key' } = {}): Promise<void> {
-    skills = mkdtempSync(join(tmpdir(), 'trierarch-skills-'));
-    execFileSync('git', ['init', '-q', '-b', 'main', skills]);
-    writeFileSync(join(skills, 'README.md'), 'skills\n');
-    git(skills, 'add', '.');
-    git(skills, 'commit', '-q', '-m', 'init');
-    const added = await machine.trierarch(['add', 'repository', 'skills', skills]);
-    expect(added.status, added.stdout + added.stderr).toBe(0);
-    configure((configuration) => {
-      const working = configuration.repositories[REPOSITORY];
-      return { ...configuration, runtime: RUNTIME, repositories: { ...configuration.repositories, [REPOSITORY]: { ...working, checkouts: ['skills'] } } };
-    });
+    configure((configuration) => ({ ...configuration, runtime: RUNTIME }));
     writeModelToken();
     if (at.login === 'api-key') {
       // The key as `login claude-code --api-key` keeps it once the vendor took it: login itself asks Anthropic, which a test does not reach.
@@ -181,7 +167,7 @@ describe('a session in a container', () => {
     await aCrewingMachine({ fleet, machine });
   });
 
-  it("runs in a container of the session image of the trierarch's version, run by its hold, capped, seeing only its folder, its own home, its socket and its read-only checkouts", async () => {
+  it("runs in a container of the session image of the trierarch's version, run by its hold, capped, seeing only its folder, its own home, and its socket", async () => {
     await aRunningScout();
     const version = z.object({ version: z.string() }).parse(JSON.parse((await machine.trierarch(['--version', '--json'])).stdout)).version;
     const folder = sessionOf(machine, 'scout').folder;
@@ -221,8 +207,6 @@ describe('a session in a container', () => {
       `${shipHome()}:/home/ubuntu`,
       '--volume',
       `${sockets}:${sockets}`,
-      '--volume',
-      `${checkout()}:${checkout()}:ro`,
       '--env',
       'HOME=/home/ubuntu',
       '--workdir',
@@ -255,7 +239,7 @@ describe('a session in a container', () => {
       .join('\n');
     const claude = z.looseObject({ hasCompletedOnboarding: z.boolean(), projects: z.record(z.string(), z.looseObject({ hasTrustDialogAccepted: z.boolean() })) }).parse(JSON.parse(readFileSync(join(shipHome(), '.claude.json'), 'utf8')));
 
-    expect(identities).toContain(`checkout=skills=${checkout()}`);
+    expect(identities).toContain('shipName=scout');
     expect(existsSync(join(machine.home, '.aeolus', 'crews', 'claude-code')) ? readdirSync(join(machine.home, '.aeolus', 'crews', 'claude-code')) : []).toEqual([]);
     expect(claude.hasCompletedOnboarding).toBe(true);
     expect(claude.projects[folder]?.hasTrustDialogAccepted).toBe(true);

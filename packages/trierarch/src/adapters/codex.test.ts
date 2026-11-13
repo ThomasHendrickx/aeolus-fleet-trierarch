@@ -106,7 +106,7 @@ const identity = { fleetUrl: 'https://fleet.example.com', shipId, shipName: 'sco
 /** The launch id the trierarch started the session with. */
 const LAUNCH_ID = 'launch-1';
 /** The launch of the ship scout in a worktree of aeolus-fleet. */
-const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'codex', workspace: inRepositories('aeolus-fleet'), checkouts: [], launchId: LAUNCH_ID, login: 'subscription' }) as const;
+const launchOf = (shipId: ShipId) => ({ shipId, shipName: 'scout', folder, harness: 'codex', workspace: inRepositories('aeolus-fleet'), launchId: LAUNCH_ID, login: 'subscription' }) as const;
 
 describe('Codex on its login (api keys K6, K7)', () => {
   const PROXY = 'http://127.0.0.1:41234';
@@ -159,14 +159,6 @@ describe('Codex as a harness', () => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true, firstPrompt: '--dangerously-bypass-approvals-and-sandbox' });
 
     expect(started[0]?.command.slice(-2)).toEqual(['--', `--dangerously-bypass-approvals-and-sandbox\n\n${NO_TERMINAL_QUESTIONS}`]);
-  });
-
-  it('starts codex with its read-only checkouts read-only (#1182)', async () => {
-    const checkout = `/home/thomas/.aeolus/trierarch/checkouts/${shipId}/governance`;
-
-    await harness().launch({ ...launchOf(shipId), checkouts: [{ repository: 'governance', path: checkout }], options: {}, isFirstStart: true });
-
-    expect(started[0]?.readOnly).toEqual([checkout]);
   });
 
   it('starts codex with $aeolus-fleet-wake on a first start without a first prompt, the line that no human reads its terminal after it (#585)', async () => {

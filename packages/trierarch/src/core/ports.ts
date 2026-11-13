@@ -165,8 +165,6 @@ export interface Identity {
   readonly shipName: string;
   readonly socket: string;
   readonly squadron?: string;
-  /** The session's read-only checkouts (#1182), which its start context names; none when it has none. */
-  readonly checkouts?: readonly Checkout[];
 }
 
 /**
@@ -211,8 +209,6 @@ export interface HarnessPort {
     /** The ship's own folder, which holds its home in a container; none for a ship crewed before the ship folders. */
     shipFolder?: string;
     workspace: TrierarchWorkspace;
-    /** The session's read-only checkouts (#1182), which it may read beside its folder. */
-    checkouts: readonly Checkout[];
     harness: string;
     options: Readonly<Record<string, string>>;
     isFirstStart: boolean;
@@ -274,10 +270,9 @@ export interface SessionRuntime {
   stop(shipId: ShipId): Promise<void>;
   /**
    * Starts the command in the folder, with the environment given, in a new session for the ship; an exited one is replaced. `harness` names the harness the command runs, for how its turn is stopped;
-   * `readOnly` names its read-only checkouts (#1182), which a container mounts read-only and the host leaves as they are;
    * `shipFolder` the ship's own folder, which holds its home and its sockets in a container, none for a ship crewed before the ship folders.
    */
-  start(session: { shipId: ShipId; folder: string; command: readonly string[]; harness: string; env?: Readonly<Record<string, string>>; readOnly?: readonly string[]; proxyToken?: ProxyToken; shipFolder?: string }): Promise<void>;
+  start(session: { shipId: ShipId; folder: string; command: readonly string[]; harness: string; env?: Readonly<Record<string, string>>; proxyToken?: ProxyToken; shipFolder?: string }): Promise<void>;
   /** Sends one line to the session's harness as its next input. */
   send(at: { shipId: ShipId; line: string }): Promise<void>;
   /** Stops the session's running turn and waits for its end, within a bound; the session goes on (decision 0040, headless H12). */
@@ -409,29 +404,6 @@ export interface TrashPort {
   empty(): Promise<readonly LeftInTrash[]>;
   /** Marks what was left as told to argo. */
   markTold(path: string): Promise<void>;
-}
-
-/** A read-only checkout a session gets beside its working folder (#1182): the configured repository it is of, and where it is. */
-export interface Checkout {
-  readonly repository: string;
-  readonly path: string;
-}
-
-/** What refreshing a checkout came to: the revision it now holds, or why it could not, as one line. */
-export type RefreshedCheckout = { readonly repository: string; readonly revision: string } | { readonly repository: string; readonly problem: string };
-
-/**
- * The read-only checkouts of each ship (#1182): the repositories the
- * configuration names for its working repository, at the latest main, one
- * folder per ship. The session can change, commit and push nothing in them.
- */
-export interface CheckoutsPort {
-  /** Makes the ship's checkouts its working repository names, keeping those it has; answers each, none for a repository that names none. */
-  prepare(at: { shipId: ShipId; repository: string }): Promise<readonly Checkout[]>;
-  /** Brings each of the ship's checkouts to the latest main of its repository; one that cannot be refreshed says why and holds what it held. */
-  refresh(shipId: ShipId): Promise<readonly RefreshedCheckout[]>;
-  /** Removes every checkout of the ship. */
-  remove(shipId: ShipId): Promise<void>;
 }
 
 export interface StatePort {

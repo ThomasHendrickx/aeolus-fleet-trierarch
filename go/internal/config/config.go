@@ -43,6 +43,9 @@ type Configuration struct {
 	// NamesWorktreeRoot says the file still names worktreeRoot, which shipsRoot took the place of: run and config check refuse it
 	// (decision 0013). It is left out of what is read, so every other command still reads the configuration.
 	NamesWorktreeRoot bool `json:"-"`
+	// NamesCheckouts is the repositories, sorted, whose entry still names checkouts, which a crew request's sub-repositories took the place of: run and config check refuse it
+	// (decision 0013). The line is left out of what is read, so every other command still reads the configuration.
+	NamesCheckouts []string `json:"-"`
 }
 
 // Runtime is where the sessions run: on the host, or in a container of the runtime's binary with its caps.
@@ -59,8 +62,7 @@ type Caps struct {
 }
 
 type Repository struct {
-	Path      string   `json:"path"`
-	Checkouts []string `json:"checkouts,omitempty"`
+	Path string `json:"path"`
 }
 
 type Folder struct {
@@ -178,6 +180,10 @@ func Load(path string) (Configuration, error) {
 			return Configuration{}, err
 		}
 	}
+	namesCheckouts, text, err := withoutCheckouts(keys, text)
+	if err != nil {
+		return Configuration{}, fmt.Errorf("the configuration at %s does not fit: %v", path, err)
+	}
 	decoder := json.NewDecoder(bytes.NewReader(text))
 	decoder.DisallowUnknownFields()
 	var configuration Configuration
@@ -186,12 +192,40 @@ func Load(path string) (Configuration, error) {
 	}
 	configuration.HasLeftoverAip = hasLeftoverAip
 	configuration.NamesWorktreeRoot = namesWorktreeRoot
+	configuration.NamesCheckouts = namesCheckouts
 	order, err := keyOrder(keys["harnesses"])
 	if err != nil {
 		return Configuration{}, fmt.Errorf("the configuration at %s does not fit: %v", path, err)
 	}
 	configuration.HarnessOrder = order
 	return configuration, nil
+}
+
+// withoutCheckouts is the repositories whose entry names checkouts, sorted, and the file's text without those lines.
+func withoutCheckouts(keys map[string]json.RawMessage, text []byte) ([]string, []byte, error) {
+	var repositories map[string]map[string]json.RawMessage
+	if err := json.Unmarshal(keys["repositories"], &repositories); err != nil {
+		// A shape that is no map of objects is left to the strict decode, which says what does not fit.
+		return nil, text, nil
+	}
+	var names []string
+	for name, entry := range repositories {
+		if _, ok := entry["checkouts"]; ok {
+			names = append(names, name)
+			delete(entry, "checkouts")
+		}
+	}
+	if len(names) == 0 {
+		return nil, text, nil
+	}
+	slices.Sort(names)
+	stripped, err := json.Marshal(repositories)
+	if err != nil {
+		return nil, nil, err
+	}
+	keys["repositories"] = stripped
+	text, err = json.Marshal(keys)
+	return names, text, err
 }
 
 // keyOrder is the keys of a JSON object in the order it names them.

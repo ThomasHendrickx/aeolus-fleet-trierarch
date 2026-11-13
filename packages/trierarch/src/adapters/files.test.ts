@@ -117,6 +117,17 @@ describe('the configuration file', () => {
     await expect(loadConfiguration(path)).rejects.toThrow(says);
   });
 
+  it('refuses a repository naming checkouts, naming the line to remove and where sub-repositories come from', async () => {
+    const path = join(folder, 'config.json');
+    writeFileSync(path, JSON.stringify({ ...initialConfiguration(), repositories: { 'aeolus-company': { path: '/srv/company', checkouts: ['skills'] }, skills: { path: '/srv/skills' } } }));
+
+    await expect(loadConfiguration(path)).rejects.toThrow(`The configuration at ${path} names checkouts in repository aeolus-company: remove that line; a ship's sub-repositories come from its crew request`);
+  });
+
+  it('states no checkouts in the schema an editor checks the configuration with', () => {
+    expect(JSON.stringify(configurationJsonSchema())).not.toContain('"checkouts"');
+  });
+
   describe('the place of ships/', () => {
     it('loads shipsRoot, the place every ship keeps its own folder in', async () => {
       const path = join(folder, 'config.json');
@@ -136,35 +147,6 @@ describe('the configuration file', () => {
       const schema = JSON.stringify(configurationJsonSchema());
 
       expect([schema.includes('"shipsRoot"'), schema.includes('"worktreeRoot"')]).toEqual([true, false]);
-    });
-  });
-
-  describe("a repository's read-only checkouts (#1182)", () => {
-    const withCheckouts = (checkouts: readonly string[]) => ({
-      ...initialConfiguration(),
-      repositories: { 'aeolus-company': { path: '/code/aeolus-company', checkouts }, governance: { path: '/code/governance' }, skills: { path: '/code/skills' } },
-    });
-
-    it('loads the configured repositories a session in a repository gets as read-only checkouts', async () => {
-      const path = join(folder, 'config.json');
-      writeFileSync(path, JSON.stringify(withCheckouts(['governance', 'skills'])));
-
-      await expect(loadConfiguration(path)).resolves.toMatchObject({ repositories: { 'aeolus-company': { checkouts: ['governance', 'skills'] } } });
-    });
-
-    it.each([
-      { label: 'a repository the configuration does not have', checkouts: ['hemma'], says: 'hemma is no repository of this configuration' },
-      { label: 'the repository itself, which is the working folder', checkouts: ['aeolus-company'], says: 'aeolus-company is the repository itself' },
-      { label: 'the same repository twice', checkouts: ['skills', 'skills'], says: 'skills is named twice' },
-    ])('refuses a checkout of $label', async ({ checkouts, says }) => {
-      const path = join(folder, 'config.json');
-      writeFileSync(path, JSON.stringify(withCheckouts(checkouts)));
-
-      await expect(loadConfiguration(path)).rejects.toThrow(says);
-    });
-
-    it('states the checkouts in the schema an editor checks it with', () => {
-      expect(JSON.stringify(configurationJsonSchema())).toContain('"checkouts"');
     });
   });
 

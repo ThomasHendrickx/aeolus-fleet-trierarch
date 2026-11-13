@@ -481,35 +481,6 @@ func TestASessionLaunchedBeforeDetectionFoundPermissionModesStartsInDefaultMode(
 	}
 }
 
-func TestASessionIsStartedReadingItsReadOnlyCheckouts(t *testing.T) {
-	harness, running, _ := aHarness(t)
-	entry := anEntry(t)
-	entry.ReadOnly = []string{"/checkouts/shp_scout/governance"}
-
-	if err := harness.Launch(entry, true, "launch-1"); err != nil {
-		t.Fatal(err)
-	}
-
-	command := running.started[0].Command
-	if at := slices.Index(command, "--add-dir"); at < 0 || at+1 >= len(command) || command[at+1] != "/checkouts/shp_scout/governance" {
-		t.Fatalf("command %q, want --add-dir /checkouts/shp_scout/governance", command)
-	}
-}
-
-func TestASessionsReadOnlyCheckoutsAreNamedToItsRuntime(t *testing.T) {
-	harness, running, _ := aHarness(t)
-	entry := anEntry(t)
-	entry.ReadOnly = []string{"/checkouts/shp_scout/governance"}
-
-	if err := harness.Launch(entry, true, "launch-1"); err != nil {
-		t.Fatal(err)
-	}
-
-	if got := running.started[0].ReadOnly; !slices.Equal(got, []string{"/checkouts/shp_scout/governance"}) {
-		t.Fatalf("read-only %q", got)
-	}
-}
-
 // inContainers is the harness with a home of each ship's own under homes, as sessions in containers have them, the host's user settings in hostSettings.
 func inContainers(t *testing.T) (Harness, *aRuntime, *anOnboarding, string) {
 	t.Helper()

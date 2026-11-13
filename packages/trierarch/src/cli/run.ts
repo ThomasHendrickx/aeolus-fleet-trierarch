@@ -14,7 +14,6 @@ import { loadConfiguration, readCrewFile, writeRunningFile, type TrierarchConfig
 import { createDetectedFile } from '../adapters/detected-file.js';
 import { createDetectors } from '../adapters/detectors.js';
 import { adapterFlagsOf, createHarnesses, riskyFlagsOf } from '../adapters/harnesses.js';
-import { createGitCheckouts } from '../adapters/git-checkouts.js';
 import { createJsonState } from '../adapters/json-state.js';
 import { createKeyFiles } from '../adapters/key-files.js';
 import { createModelLogins } from '../adapters/model-logins.js';
@@ -151,7 +150,6 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     logger,
   });
   const handle = createHandleDelivery({ fleet, logger, trustedRepositories, ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
-  const checkouts = createGitCheckouts({ configuration: configured, root: paths.checkouts });
   // Each session's fleet calls, with the crew token from the state at each call (decision 0026).
   const sockets = createShipSockets({
     root: paths.sockets,
@@ -161,7 +159,6 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     log: (line) => {
       logger.info(`fleet call ${line}`);
     },
-    refreshCheckouts: (shipId) => checkouts.refresh(shipId),
   });
   const claudeCodeSetup = createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) });
   const modelLogins = createModelLogins({
@@ -184,7 +181,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   });
   const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configured.harnesses), prices: priceTableOf(configured.prices) });
   const sendReleasedUsage = createSendReleasedUsage({ fleet, usage, clock, logger, prices: priceTableOf(configured.prices), ...(crew.shipId !== undefined && { trierarchShipId: crew.shipId }), ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
-  const runPass = createRunPass({ fleet, harnesses, processes: sessions, folderProcesses, workspace, checkouts, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets, modelLogins, sendReleasedUsage, trash, ...(configured.logins !== undefined && { logins: configured.logins }) });
+  const runPass = createRunPass({ fleet, harnesses, processes: sessions, folderProcesses, workspace, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets, modelLogins, sendReleasedUsage, trash, ...(configured.logins !== undefined && { logins: configured.logins }) });
   // Set by the receive loop, read by each report of the trierarch's own ship.
   let isFleetKeyCutOff = false;
   const reportSelf = createReportSelf({ fleetKey: { isCutOff: () => isFleetKeyCutOff }, fleet, processes: sessions, trust, state, setup, readLoad, readUsage, clock, modelLogins, ...(configured.logins !== undefined && { logins: configured.logins }) });

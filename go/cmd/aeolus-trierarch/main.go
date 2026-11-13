@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/attestation"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/claudecode"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/cli"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/codex"
@@ -287,7 +286,7 @@ func runTrierarch(program string, isPluginStep bool, words ...string) (string, i
 var opened *shipsocket.Sockets
 
 // shipSockets are each ship's socket for its session's fleet calls, with its crew token from the state at each call (decision 0026). A caller is allowed only under the ship's own hold, or under the trierarch itself, as its aeolus-push.sh.
-func shipSockets(at paths.Paths, fleetURL string, running runningSessions, checked checkouts.Git) *shipsocket.Sockets {
+func shipSockets(at paths.Paths, fleetURL string, running runningSessions) *shipsocket.Sockets {
 	store := state.File{Path: at.State}
 	trierarch := os.Getpid()
 	return shipsocket.New(shipsocket.Options{
@@ -307,8 +306,7 @@ func shipSockets(at paths.Paths, fleetURL string, running runningSessions, check
 			}
 			return pid > 0 && peer.IsUnder(pid, roots)
 		},
-		Log:              logLine,
-		RefreshCheckouts: checked.Refresh,
+		Log: logLine,
 	})
 }
 
@@ -627,9 +625,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		"claude-code": claudecode.Subscription{Settings: configuration.Harnesses["claude-code"], Managed: claudecode.ManagedSettings(), User: claudecode.UserSettings(home, env["CLAUDE_CONFIG_DIR"])},
 		"codex":       codex.Subscription{},
 	}}
-	// Read-only checkouts only of the configured repositories, never the trusted ones beside them (docs/trierarch.md, "Read-only checkouts").
-	checked := checkouts.Git{Root: at.Checkouts, Repositories: configured.Repositories}
-	opened = shipSockets(at, kept.FleetURL, running, checked)
+	opened = shipSockets(at, kept.FleetURL, running)
 	load := &machineload.Reader{Source: machineload.System{WorktreeRoot: root}, Now: time.Now, Log: logLine}
 	saved := state.File{Path: at.State}
 	// The configuration as its file gives it, as the failed starts keep it: another one than the machine stopped offering itself with offers it again (#853).
@@ -643,7 +639,6 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		Harnesses:         harnesses,
 		Workspace:         places,
 		FolderProcesses:   folderProcessesOf(configuration.Runtime),
-		Checkouts:         checked,
 		Store:             saved,
 		Log:               logLine,
 		Now:               time.Now,

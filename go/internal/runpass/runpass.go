@@ -15,7 +15,6 @@ import (
 	"unicode/utf16"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/activity"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/failedstarts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
@@ -130,13 +129,6 @@ type FolderProcesses interface {
 	StopIn(folder string) (int, error)
 }
 
-// Checkouts are each ship's read-only checkouts, made before its session starts and removed with its identity.
-type Checkouts interface {
-	// Prepare makes the checkouts the working repository names, those the ship has already staying as they are.
-	Prepare(shipID string, repository string) ([]checkouts.Checkout, error)
-	Remove(shipID string) error
-}
-
 // Trash is where a released clone and ship's home go aside, emptied every pass; what it cannot remove holds back no release.
 type Trash interface {
 	Empty() []trash.Left
@@ -179,7 +171,6 @@ type Pass struct {
 	Workspace Workspace
 	// FolderProcesses are stopped in an orphan worktree before it is removed.
 	FolderProcesses FolderProcesses
-	Checkouts       Checkouts
 	Store           Store
 	Log             func(line string)
 	Now             func() time.Time
@@ -734,18 +725,13 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	if err != nil {
 		return state, err
 	}
-	made, err := p.checkoutsOf(entry)
-	if err != nil {
-		return state, err
-	}
-	identity := plugin.Identity{FleetURL: p.FleetURL, ShipID: entry.ShipID, ShipName: ship.Name, Socket: socket, Squadron: entry.Squadron, Checkouts: made}
+	identity := plugin.Identity{FleetURL: p.FleetURL, ShipID: entry.ShipID, ShipName: ship.Name, Socket: socket, Squadron: entry.Squadron}
 	if err := harness.WriteIdentity(entry, identity, crewToken); err != nil {
 		return state, err
 	}
 	launchID := p.NewLaunchID()
 	starting := entry
 	starting.Login = login
-	starting.ReadOnly = pathsOf(made)
 	if err := p.Workspace.WriteRootFiles(starting); err != nil {
 		return state, err
 	}
@@ -837,11 +823,7 @@ func (p Pass) crewInAFreshShipFolder(state reconciler.State, entry reconciler.En
 	if err != nil {
 		return state, err
 	}
-	made, err := p.checkoutsOf(entry)
-	if err != nil {
-		return state, err
-	}
-	identity := plugin.Identity{FleetURL: p.FleetURL, ShipID: entry.ShipID, ShipName: entry.ShipName, Socket: socket, Squadron: entry.Squadron, Checkouts: made}
+	identity := plugin.Identity{FleetURL: p.FleetURL, ShipID: entry.ShipID, ShipName: entry.ShipName, Socket: socket, Squadron: entry.Squadron}
 	if err := harness.WriteIdentity(entry, identity, entry.CrewToken); err != nil {
 		return state, err
 	}
@@ -849,7 +831,6 @@ func (p Pass) crewInAFreshShipFolder(state reconciler.State, entry reconciler.En
 	launchID := p.NewLaunchID()
 	starting := entry
 	starting.Login = login
-	starting.ReadOnly = pathsOf(made)
 	if err := p.Workspace.WriteRootFiles(starting); err != nil {
 		return state, err
 	}
@@ -871,15 +852,10 @@ func (p Pass) launch(state reconciler.State, entry reconciler.Entry) (reconciler
 	if err := harness.SessionDied(entry); err != nil {
 		return state, err
 	}
-	made, err := p.checkoutsOf(entry)
-	if err != nil {
-		return state, err
-	}
 	launchID := p.NewLaunchID()
 	login := p.loginOf(entry)
 	starting := entry
 	starting.Login = login
-	starting.ReadOnly = pathsOf(made)
 	if err := p.Workspace.WriteRootFiles(starting); err != nil {
 		return state, err
 	}
@@ -1013,28 +989,9 @@ func (p Pass) handOver(entry reconciler.Entry, action reconciler.Action) error {
 	return nil
 }
 
-// checkoutsOf is the read-only checkouts a session in the entry's repository gets, made when missing; none in a configured folder.
-func (p Pass) checkoutsOf(entry reconciler.Entry) ([]checkouts.Checkout, error) {
-	if entry.Workspace.Kind != "repositories" {
-		return nil, nil
-	}
-	return p.Checkouts.Prepare(entry.ShipID, entry.Workspace.Main.Repository)
-}
-
-func pathsOf(made []checkouts.Checkout) []string {
-	paths := make([]string, 0, len(made))
-	for _, checkout := range made {
-		paths = append(paths, checkout.Path)
-	}
-	return paths
-}
-
-// deleteIdentity removes the entry's identity, and with it its ship's socket, as nothing calls over it any more (decision 0026), and its read-only checkouts.
+// deleteIdentity removes the entry's identity, and with it its ship's socket, as nothing calls over it any more (decision 0026).
 func (p Pass) deleteIdentity(entry reconciler.Entry) error {
 	p.Sockets.Close(entry.ShipID, entry.ShipFolder)
-	if err := p.Checkouts.Remove(entry.ShipID); err != nil {
-		return err
-	}
 	if entry.Folder == "" {
 		return nil
 	}

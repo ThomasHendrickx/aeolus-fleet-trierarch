@@ -10,7 +10,7 @@ import (
 )
 
 func TestASessionRunsHeadlessWithItsFlagsAndNoQuestionForm(t *testing.T) {
-	got := CommandLine([]string{"--model", "opus"}, commandline.Part{}, false, nil)
+	got := CommandLine([]string{"--model", "opus"}, commandline.Part{}, false)
 
 	want := []string{"claude", "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--model", "opus", "--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode"}
 	if !slices.Equal(got, want) {
@@ -19,7 +19,7 @@ func TestASessionRunsHeadlessWithItsFlagsAndNoQuestionForm(t *testing.T) {
 }
 
 func TestASessionStartedAgainContinuesItsConversation(t *testing.T) {
-	got := CommandLine([]string{}, commandline.Part{}, true, nil)
+	got := CommandLine([]string{}, commandline.Part{}, true)
 
 	if got[len(got)-1] != "--continue" {
 		t.Fatalf("command %q", got)
@@ -27,7 +27,7 @@ func TestASessionStartedAgainContinuesItsConversation(t *testing.T) {
 }
 
 func TestAConfiguredPlanModeIsLeftOutInEitherSpelling(t *testing.T) {
-	got := CommandLine([]string{"--permission-mode", "plan", "--permission-mode=plan", "--verbose"}, commandline.Part{}, false, nil)
+	got := CommandLine([]string{"--permission-mode", "plan", "--permission-mode=plan", "--verbose"}, commandline.Part{}, false)
 
 	if slices.Contains(got, "plan") || slices.Contains(got, "--permission-mode=plan") || slices.Contains(got, "--permission-mode") {
 		t.Fatalf("command %q", got)
@@ -59,14 +59,5 @@ func TestAPromptIsOneStreamJSONUserMessageWithTheLineThatNoHumanReads(t *testing
 	want := `{"type":"user","message":{"role":"user","content":"/aeolus-fleet:wake No human reads this terminal. Never ask here; ask over the fleet. A question only a human can answer goes to your ship's owner (argo when argo owns your ship)."}}`
 	if got != want {
 		t.Fatalf("line %s", got)
-	}
-}
-
-func TestASessionReadsEachOfItsReadOnlyCheckoutsBesideItsFolderWithoutAsking(t *testing.T) {
-	got := CommandLine([]string{"--model", "opus"}, commandline.Part{}, true, []string{"/checkouts/shp_scout/governance", "/checkouts/shp_scout/skills"})
-
-	want := []string{"claude", "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--model", "opus", "--disallowedTools=AskUserQuestion,EnterPlanMode,ExitPlanMode", "--continue", "--add-dir", "/checkouts/shp_scout/governance", "--add-dir", "/checkouts/shp_scout/skills"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("command %q", got)
 	}
 }

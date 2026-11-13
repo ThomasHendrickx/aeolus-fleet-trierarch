@@ -61,9 +61,8 @@ func ProxyURL(address string) string {
 // are the hold's, as on the host, and the container lives as long as the
 // hold. Rootless only, with hard memory and cpu caps and no restart policy:
 // the trierarch starts a dead session again itself. The container sees its
-// folder, its ship's own home as its home, its ship's socket folder and its
-// read-only checkouts, at their own paths, and nothing else of the host,
-// never the runtime's socket.
+// folder, its ship's own home as its home and its ship's socket folder, and
+// nothing else of the host, never the runtime's socket.
 //
 // The model token and the session's environment reach the container through
 // an env file in the session's own folder, for its owner alone, never a
@@ -286,10 +285,6 @@ func (r Runtime) heldAs(session sessions.Start, files hold.Files) (sessions.Star
 		"--volume", home + ":" + SessionHome,
 		// The session calls the fleet over its ship's socket, at the path its identity names.
 		"--volume", sockets + ":" + sockets,
-	}
-	// Its read-only checkouts, at their own paths as its identity names them: read-only in the mount, which the session cannot undo.
-	for _, path := range session.ReadOnly {
-		command = append(command, "--volume", path+":"+path+":ro")
 	}
 	// Its MCP configuration, read-only at its own path: the one file of the session's folder it sees, kept where it cannot plant a link the trierarch would write through.
 	if session.Mcp != nil {

@@ -72,8 +72,6 @@ type Paths struct {
 	Sessions string
 	// Sockets holds a folder with its fleet socket per ship crewed before the ship folders.
 	Sockets string
-	// Checkouts holds a folder per ship with its read-only checkouts, one per repository.
-	Checkouts string
 	// Keys holds each harness's API key, one file per harness (api keys K5); only login writes it, never the configuration.
 	Keys string
 	// Proxy holds the model proxy's files: its pid, its port and the key states (headless H16).
@@ -114,7 +112,6 @@ func Of(homeDirectory string, config string) Paths {
 		State:        filepath.Join(home, "state.json"),
 		Sessions:     filepath.Join(home, "sessions"),
 		Sockets:      filepath.Join(home, "sockets"),
-		Checkouts:    filepath.Join(home, "checkouts"),
 		Keys:         filepath.Join(home, "keys"),
 		Proxy:        filepath.Join(home, "proxy"),
 		Detected:     filepath.Join(home, "detected.json"),

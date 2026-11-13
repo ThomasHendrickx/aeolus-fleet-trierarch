@@ -162,7 +162,7 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
     platform: options.platform,
     launch: options.launch ?? [],
     beside: containers,
-    heldAs: async ({ shipId, folder, command, env = {}, readOnly = [], proxyToken, shipFolder }, files) => {
+    heldAs: async ({ shipId, folder, command, env = {}, proxyToken, shipFolder }, files) => {
       const login: Record<string, string> = proxyToken === undefined ? { [MODEL_TOKEN_VARIABLE]: (await readFile(options.tokenFile, 'utf8')).trim() } : {};
       const content = envFileOf({ ...env, ...login });
       const network = proxyToken === undefined ? [] : ['--network', proxyNetworkOf(await proxyPortOf(options.proxyUrl))];
@@ -210,8 +210,6 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
           // The session calls the fleet over its ship's socket, at the path its identity names.
           '--volume',
           `${shipSockets}:${shipSockets}`,
-          // Its read-only checkouts (#1182), at their own paths as its identity names them: read-only in the mount, which the session cannot undo.
-          ...readOnly.flatMap((path) => ['--volume', `${path}:${path}:ro`]),
           '--env',
           `HOME=${SESSION_HOME}`,
           ...(proxyToken === undefined ? [] : ['--env', proxyToken.variable]),

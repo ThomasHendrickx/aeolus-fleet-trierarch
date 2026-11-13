@@ -456,14 +456,6 @@ describe('the container a session runs in', () => {
     expect([statSync(home).mode & 0o777, statSync(shipSockets).mode & 0o777, existsSync(join(homes, shipId)), existsSync(join(sockets, shipId))]).toEqual([0o700, 0o700, false, false]);
   });
 
-  it("mounts each of the session's read-only checkouts at its own path, read-only, so the session can change nothing in it (#1182)", async () => {
-    const governance = `/home/thomas/.aeolus/trierarch/checkouts/${shipId}/governance`;
-
-    const { words } = await started({ readOnly: [governance] });
-
-    expect(valuesOf(words, '--volume')).toContain(`${governance}:${governance}:ro`);
-  });
-
   it('gives the container no restart policy: the trierarch starts a dead one again itself', async () => {
     const { words } = await started();
 
