@@ -92,6 +92,8 @@ type Paths struct {
 	SealingKey string
 	// Repositories holds the clones of the trusted repositories, one folder per repository.
 	Repositories string
+	// SkipPermissionsSeen says the trierarch saw the operator accept Claude Code's bypass permissions mode, which it then keeps accepted (#393).
+	SkipPermissionsSeen string
 }
 
 // Of the user's home folder, with the configuration at config when it is not empty.
@@ -130,5 +132,7 @@ func Of(homeDirectory string, config string) Paths {
 		},
 		SealingKey:   filepath.Join(home, "sealing-key"),
 		Repositories: filepath.Join(home, "repositories"),
+
+		SkipPermissionsSeen: filepath.Join(home, "claude-code-bypass-accepted"),
 	}
 }
