@@ -78,12 +78,13 @@ async function aRunningScout(at: { subRepositories?: readonly string[]; harness?
   await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
 }
 
-/** Commits a skill to a repository: `<at>/SKILL.md` holding the content. */
-function aSkillIn(repository: string, at: string, content: string): void {
-  mkdirSync(join(repository, at), { recursive: true });
-  writeFileSync(join(repository, at, 'SKILL.md'), content);
+/** Commits a skill to a repository: `<skill>/SKILL.md` holding the content. */
+function aSkillIn(at: { repository: string; skill: string }, content: string): void {
+  const { repository, skill } = at;
+  mkdirSync(join(repository, skill), { recursive: true });
+  writeFileSync(join(repository, skill, 'SKILL.md'), content);
   git(repository, 'add', '.');
-  git(repository, 'commit', '-q', '-m', `skill ${at}`);
+  git(repository, 'commit', '-q', '-m', `skill ${skill}`);
 }
 
 /** The root AGENTS.md of a ship folder whose sub-repositories are those given. */
@@ -157,10 +158,10 @@ describe('a ship folder', () => {
 
   it('has the root link each skill of main/ and of every sub-repository, for both harnesses, and name a clash of two with different content in the root AGENTS.md instead', async () => {
     await aMachineCrewing();
-    aSkillIn(machine.repository, '.claude/skills/build', 'build\n');
-    aSkillIn(machine.repository, '.agents/skills/review', 'one way\n');
-    aSkillIn(tools, '.agents/skills/review', 'another way\n');
-    aSkillIn(tools, '.claude/skills/lint', 'lint\n');
+    aSkillIn({ repository: machine.repository, skill: '.claude/skills/build' }, 'build\n');
+    aSkillIn({ repository: machine.repository, skill: '.agents/skills/review' }, 'one way\n');
+    aSkillIn({ repository: tools, skill: '.agents/skills/review' }, 'another way\n');
+    aSkillIn({ repository: tools, skill: '.claude/skills/lint' }, 'lint\n');
 
     await aRunningScout({ subRepositories: [TOOLS] });
 
