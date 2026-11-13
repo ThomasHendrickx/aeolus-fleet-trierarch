@@ -35,13 +35,13 @@ A person copies one line from the console's Join a machine and runs it on a fres
 3. **A picked harness not installed or not signed in stops the install** before anything is registered, naming the vendor's install or sign-in command. The installer installs no vendor CLI. An API key alone stays with #371.
 4. **Only the picked harnesses are written to the configuration**, and no harness is a default. Each harness's plugin is looked up per crew, as Copilot's is: a missing one is named in the report's `notOffered`, never a failed start.
 5. **The plugins are installed before registering**, for each picked harness at tag `v<this version>`: Claude Code and Codex by upgrade's plugin step, Copilot by `copilot plugin install`. Any failure stops the install with nothing registered.
-6. **Repositories**: `--repositories <list>` (comma or semicolon separated, each a local path or a git URL), `--repositories-in <folder>` (every git repository directly in the folder, none deeper), `--no-repositories` to skip. Each is named by its folder's or URL's last part; two of one name make the wizard ask again, or with flags only stop the install. A URL is cloned into `--clone-into <folder>`, `~/repositories` by default.
+6. **Repositories**: `--repositories <list>` (comma or semicolon separated, each a local path or a git URL), `--repositories-in <folder>` (every git repository directly in the folder, none deeper), `--no-repositories` to skip. Each is named by its folder's or URL's last part; two of one name make the wizard ask again, or with flags only stop the install. A git URL is cloned into `~/repositories` on the machine, or into another folder given with `--clone-into <folder>` on the command line.
 7. **No terminal and an option left out stops the install**, naming every missing flag, with nothing registered. `--yes` takes every default except the harnesses, which are always picked.
 8. **PATH**: a marked block, written once, in the login file of the person's `$SHELL` (`~/.zprofile` or `~/.bash_profile`) and in `~/.profile`. The report says the current shell needs a new terminal.
 9. **Running and joined means**: the service keeps one pid for 10 seconds, running.json says this version, the lease is valid and the first report was accepted. Otherwise the line says what failed, with the last log line, and exits 1. `status` reads the same: a restart loop with its count and its last error.
 10. **Per picked harness the wizard asks "run without permission questions?"**, no by default, as `--unattended <harness,...>`. Caps are flags only (`--max-ships`, `--max-running`, 4 and 2 by default) and the report shows them.
 11. **The closing report** is one aligned line per part, marked ✓, ✗ or !, in the style's tones (below). `--json` keeps its shape and gains a `checks` list.
-12. **The dialog**: its name step gains optional Harnesses and Repositories fields; each one filled becomes a flag, so a dialog filled in full builds a line that asks nothing. Once joined it shows only the one line. The trierarch plugin's join takes the options and builds the whole line; the console builds none.
+12. **The dialog**: its name step gains optional Harnesses and Repositories fields; each one filled becomes a flag, so a dialog filled in full builds a line that asks nothing. Repositories given as paths or git URLs are one field each, added with Add field and each removable; the comma separated list is the command line's only. Ticking a harness's "without asking" ticks that harness, and unticking the harness unticks it. The dialog has no clone folder: a git URL is cloned into `~/repositories` on the machine, and only `--clone-into` picks another. Once joined it shows only the one line. The trierarch plugin's join takes the options and builds the whole line; the console builds none.
 
 ### Flags
 
@@ -50,8 +50,8 @@ A person copies one line from the console's Join a machine and runs it on a fres
 | `--fleet-url`, `--ship-id`, `--secret`, `--plugin-ship-id` | none, from the setup line | stops, as today |
 | `--harnesses <list>` of `claude-code`, `codex`, `copilot` | Harnesses | stops |
 | `--unattended <list>`, a subset of the harnesses | Harnesses, per harness | none run without permission questions |
-| `--repositories <list>`, `--repositories-in <folder>`, `--no-repositories` | Repositories | stops |
-| `--clone-into <folder>` | Repositories, when a URL is given | `~/repositories` |
+| `--repositories <list>`, `--repositories-in <folder>`, `--no-repositories` | Repositories; the list comma or semicolon separated on the command line only, one field per path or git URL in the dialog | stops |
+| `--clone-into <folder>`, command line only | Repositories, when a URL is given | `~/repositories`, where the dialog's git URLs always go |
 | `--max-ships <n>`, `--max-running <n>` | none | 4 and 2 |
 | `--yes` | every step with a default | |
 
