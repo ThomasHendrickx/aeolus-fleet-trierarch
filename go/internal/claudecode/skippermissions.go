@@ -2,9 +2,7 @@ package claudecode
 
 import (
 	"encoding/json"
-	"errors"
 	"os"
-	"path/filepath"
 	"slices"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
@@ -22,47 +20,21 @@ func IsSkipPermissionsAccepted(userSettings string) bool {
 	return json.Unmarshal(text, &settings) == nil && settings.Accepted
 }
 
-// SkipPermissions keeps bypass permissions mode accepted once the operator
-// accepted it: a plugin install that rewrote the user settings dropped the
-// acceptance, and every new launch was given back (#393). Only the operator
-// accepts it; the trierarch remembers that it saw the acceptance, and writes
-// it again, keeping all else the settings hold, where the key is gone and the
-// configuration launches with `--dangerously-skip-permissions`. A key the
-// operator set to false, or settings that are no JSON, are left alone.
-type SkipPermissions struct {
-	// Settings is Claude Code's user settings file.
-	Settings string
-	// Seen is the trierarch's own file that says it saw the acceptance in Settings.
-	Seen string
-}
-
-// Keep says whether the settings accept bypass permissions mode, after writing the acceptance again where it is kept.
-func (s SkipPermissions) Keep(harness config.Harness) bool {
-	if IsSkipPermissionsAccepted(s.Settings) {
-		if _, err := os.Stat(s.Seen); errors.Is(err, os.ErrNotExist) {
-			_ = os.MkdirAll(filepath.Dir(s.Seen), 0o700)
-			_ = os.WriteFile(s.Seen, nil, 0o600)
-		}
+// KeepSkipPermissionsAccepted accepts bypass permissions mode in the user's
+// settings file, keeping all else it holds, where the harness's configuration
+// launches with `--dangerously-skip-permissions`, in its flags or an option,
+// and says whether the file accepts it. The flag the operator configured is
+// the consent, so neither a plugin install that rewrote the settings without
+// the acceptance nor one never recorded hands a ship back (#393). Settings
+// that are no JSON are left alone.
+func KeepSkipPermissionsAccepted(userSettings string, harness config.Harness) bool {
+	if IsSkipPermissionsAccepted(userSettings) {
 		return true
 	}
-	if _, err := os.Stat(s.Seen); err != nil || !launchesWithSkipPermissions(harness) || !isAcceptanceGone(s.Settings) {
+	if !launchesWithSkipPermissions(harness) {
 		return false
 	}
-	return AcceptSkipPermissions(s.Settings) == nil
-}
-
-// isAcceptanceGone says whether the settings name no acceptance at all: missing, or a JSON object without the key.
-func isAcceptanceGone(settings string) bool {
-	text, err := os.ReadFile(settings)
-	if errors.Is(err, os.ErrNotExist) {
-		return true
-	}
-	var values map[string]json.RawMessage
-	if err != nil || json.Unmarshal(text, &values) != nil || values == nil {
-		return false
-	}
-	_, isNamed := values[skipPermissionsAccepted]
-	return !isNamed
+	return AcceptSkipPermissions(userSettings) == nil
 }
 
 // launchesWithSkipPermissions says whether the flags, or a value of an option, hold `--dangerously-skip-permissions`.

@@ -675,7 +675,6 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		"codex":       func() map[string]bool { return codex.TrustedFolders(codex.HomeOf(home, env["CODEX_HOME"])) },
 		"copilot":     func() map[string]bool { return trust.Everything(withTrusted(configuration))() },
 	}
-	skipPermissions := claudecode.SkipPermissions{Settings: claudecode.UserSettings(home, env["CLAUDE_CONFIG_DIR"]), Seen: at.SkipPermissionsSeen}
 	// The harnesses as offered now, and what each trusts and still asks to accept, are read at each pass (#381, #403).
 	pass.Configuration = func() map[string]config.Harness {
 		offered, _ := offers.current()
@@ -688,8 +687,8 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		for harness, places := range trust.Of(withTrusted(offered), trustReaders) {
 			trusted[harness] = reconciler.Trust{Repositories: places.Repositories, Folders: places.Folders}
 		}
-		// An acceptance the operator gave and a plugin install dropped is written again before the pass launches (#393).
-		if claudeCode, ok := trusted["claude-code"]; ok && !skipPermissions.Keep(offered.Harnesses["claude-code"]) {
+		// The skip-permissions flag is the operator's consent: bypass permissions mode is accepted before the pass launches (#393).
+		if claudeCode, ok := trusted["claude-code"]; ok && !claudecode.KeepSkipPermissionsAccepted(claudecode.UserSettings(home, env["CLAUDE_CONFIG_DIR"]), offered.Harnesses["claude-code"]) {
 			claudeCode.UnacceptedFlags = []string{"--dangerously-skip-permissions"}
 			trusted["claude-code"] = claudeCode
 		}
