@@ -207,7 +207,6 @@ describe('a session in a container', () => {
       `${shipHome()}:/home/ubuntu`,
       '--volume',
       `${sockets}:${sockets}`,
-      '--volume',
       '--env',
       'HOME=/home/ubuntu',
       '--workdir',
