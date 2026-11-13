@@ -94,22 +94,25 @@ case ":$PATH:" in
       "$HOME"/*) folder="\$HOME/${bin_dir#"$HOME"/}" ;;
       *) folder=$bin_dir ;;
     esac
-    case ${SHELL:-} in
-      */zsh) login_files="$HOME/.zprofile $HOME/.profile" ;;
-      */bash) login_files="$HOME/.bash_profile $HOME/.profile" ;;
-      *) login_files="$HOME/.profile" ;;
-    esac
-    for login_file in $login_files; do
+    add_block() {
+      login_file=$1
       if [ -f "$login_file" ] && grep -q '^# >>> aeolus-trierarch >>>$' "$login_file"; then
-        continue
+        return
       fi
       {
+        # A blank line first ends a last line that has no newline, so the marker starts its own line.
+        if [ -s "$login_file" ]; then echo; fi
         echo '# >>> aeolus-trierarch >>>'
         echo "case \":\$PATH:\" in *\":$folder:\"*) ;; *) export PATH=\"$folder:\$PATH\" ;; esac"
         echo '# <<< aeolus-trierarch <<<'
       } >> "$login_file"
       echo "Added $bin_dir to PATH in $login_file: open a new terminal to use aeolus-trierarch there"
-    done
+    }
+    case ${SHELL:-} in
+      */zsh) add_block "$HOME/.zprofile" ;;
+      */bash) add_block "$HOME/.bash_profile" ;;
+    esac
+    add_block "$HOME/.profile"
     ;;
 esac
 
