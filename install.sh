@@ -6,7 +6,8 @@
 # It takes the binary for this system and chip from the GitHub Release, checks
 # it against the release's SHA256SUMS, and with gh against its GitHub artifact
 # attestation, signed by the release workflow, puts it in ~/.local/bin and runs
-# `aeolus-trierarch init` with the arguments it was given. A binary that fails
+# `aeolus-trierarch init` with the arguments it was given, after a marked
+# block in the login files has put the folder on PATH for new terminals. A binary that fails
 # a check is installed nowhere. Without gh the checksum alone is checked, the
 # script says so and shows the command that verifies the attestation by hand.
 #
@@ -83,9 +84,33 @@ if [ "$checked" = "its checksum only" ]; then
   echo "  gh attestation verify $bin_dir/aeolus-trierarch $verify_args" >&2
 fi
 
+# A marked block puts the folder on PATH in every new login shell: in the login
+# file of the person's $SHELL and in ~/.profile. A folder PATH holds already
+# gets none, and a block already there is left as it is.
 case ":$PATH:" in
   *":$bin_dir:"*) ;;
-  *) echo "Note: $bin_dir is not in your PATH" >&2 ;;
+  *)
+    case $bin_dir in
+      "$HOME"/*) folder="\$HOME/${bin_dir#"$HOME"/}" ;;
+      *) folder=$bin_dir ;;
+    esac
+    case ${SHELL:-} in
+      */zsh) login_files="$HOME/.zprofile $HOME/.profile" ;;
+      */bash) login_files="$HOME/.bash_profile $HOME/.profile" ;;
+      *) login_files="$HOME/.profile" ;;
+    esac
+    for login_file in $login_files; do
+      if [ -f "$login_file" ] && grep -q '^# >>> aeolus-trierarch >>>$' "$login_file"; then
+        continue
+      fi
+      {
+        echo '# >>> aeolus-trierarch >>>'
+        echo "case \":\$PATH:\" in *\":$folder:\"*) ;; *) export PATH=\"$folder:\$PATH\" ;; esac"
+        echo '# <<< aeolus-trierarch <<<'
+      } >> "$login_file"
+      echo "Added $bin_dir to PATH in $login_file: open a new terminal to use aeolus-trierarch there"
+    done
+    ;;
 esac
 
 "$bin_dir/aeolus-trierarch" init "$@"
