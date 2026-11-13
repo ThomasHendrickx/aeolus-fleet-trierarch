@@ -435,6 +435,60 @@ func TestAHarnessFolderIsJudgedAloneSoAClashUnderClaudeLeavesAgentsLinked(t *tes
 	}
 }
 
+func TestASkillNameTwoRepositoriesShareIsOneLinkWhenOneHoldsAnExtraEmptyFolder(t *testing.T) {
+	places, repositories := shipFolderPlaces(t)
+	aSkill(t, repositories["aeolus-fleet"], ".claude/skills/review", "review\n")
+	aSkill(t, repositories["tools"], ".claude/skills/review", "review\n")
+	entry := aShipFolderOf(places, "aeolus-fleet", "tools")
+	folder, err := places.Prepare(entry, "scout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mkdir(t, filepath.Join(folder, "sub-repos/tools/.claude/skills/review/drafts"))
+	entry.Folder = folder
+	if err := places.WriteRootFiles(entry); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := linkOf(t, filepath.Join(folder, ".claude/skills/review")); got != "../../main/.claude/skills/review" {
+		t.Errorf("review links to %q", got)
+	}
+	if agents, _ := os.ReadFile(filepath.Join(folder, "AGENTS.md")); strings.Contains(string(agents), "disagree") {
+		t.Errorf("AGENTS.md names a clash: %q", agents)
+	}
+}
+
+func TestTheRootHarnessFolderTheSessionLeftAsALinkIntoARepositoryIsReplacedAndNothingInTheRepositoryIsDeleted(t *testing.T) {
+	places, repositories := shipFolderPlaces(t)
+	aSkill(t, repositories["aeolus-fleet"], ".claude/skills/build", "build\n")
+	entry := aShipFolderOf(places, "aeolus-fleet")
+	folder, err := places.Prepare(entry, "scout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry.Folder = folder
+	if err := places.WriteRootFiles(entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(folder, ".claude")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("main/.claude", filepath.Join(folder, ".claude")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := places.WriteRootFiles(entry); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, err := os.ReadFile(filepath.Join(folder, "main/.claude/skills/build/SKILL.md")); err != nil || string(got) != "build\n" {
+		t.Errorf("the repository's skill reads %q, %v", got, err)
+	}
+	if got := linkOf(t, filepath.Join(folder, ".claude/skills/build")); got != "../../main/.claude/skills/build" {
+		t.Errorf("build links to %q", got)
+	}
+}
+
 func TestTheContentOfASkillIsEveryFileInItNotItsSkillMdAlone(t *testing.T) {
 	places, repositories := shipFolderPlaces(t)
 	aSkill(t, repositories["aeolus-fleet"], ".claude/skills/review", "same\n")

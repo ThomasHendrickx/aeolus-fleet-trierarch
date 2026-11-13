@@ -306,6 +306,33 @@ describe('the skills at the root of a ship folder', () => {
     expect(readFileSync(join(made, 'AGENTS.md'), 'utf8')).toContain('Skills the repositories disagree on');
   });
 
+  it('are one link, and nothing said, for a skill name two repositories share when one holds an extra empty folder', async () => {
+    await aSkill({ repository: 'aeolus-fleet', at: '.claude/skills/review' }, 'review\n');
+    await aSkill({ repository: 'tools', at: '.claude/skills/review' }, 'review\n');
+    const at = crew('aeolus-fleet', ['tools']);
+    const { folder: made } = await workspace().prepare(at);
+    mkdirSync(join(made, 'sub-repos', 'tools', '.claude', 'skills', 'review', 'drafts'));
+    await workspace().writeRootFiles({ folder: made, workspace: at.workspace });
+
+    expect(readlinkSync(join(made, '.claude', 'skills', 'review'))).toBe('../../main/.claude/skills/review');
+    expect(readFileSync(join(made, 'AGENTS.md'), 'utf8')).not.toContain('disagree');
+  });
+
+  it('are linked again without deleting anything in a repository when the session left the root .claude as a link into one', async () => {
+    await aSkill({ repository: 'aeolus-fleet', at: '.claude/skills/build' }, 'build\n');
+    const at = crew('aeolus-fleet');
+    const { folder: made } = await workspace().prepare(at);
+    await workspace().writeRootFiles({ folder: made, workspace: at.workspace });
+    rmSync(join(made, '.claude'), { recursive: true });
+    symlinkSync('main/.claude', join(made, '.claude'));
+
+    await workspace().writeRootFiles({ folder: made, workspace: at.workspace });
+
+    expect(readFileSync(join(made, 'main', '.claude', 'skills', 'build', 'SKILL.md'), 'utf8')).toBe('build\n');
+    expect(lstatSync(join(made, '.claude')).isSymbolicLink()).toBe(false);
+    expect(readlinkSync(join(made, '.claude', 'skills', 'build'))).toBe('../../main/.claude/skills/build');
+  });
+
   it('are linked again at every start, over what the session left and for the repositories as they are now', async () => {
     await aSkill({ repository: 'aeolus-fleet', at: '.claude/skills/build' }, 'build\n');
     const at = crew('aeolus-fleet');
