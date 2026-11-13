@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -201,6 +201,141 @@ describe('the root files of a ship folder', () => {
     await workspace().writeRootFiles({ folder: notes, workspace: { kind: 'folder', name: 'notes' } });
 
     expect(readdirSync(notes)).toEqual([]);
+  });
+});
+
+/** Commits a skill to a repository: `<harnessFolder>/<skill>/SKILL.md` holding the content. */
+async function aSkill(repository: string, harnessFolder: '.claude/skills' | '.agents/skills', skill: string, content: string): Promise<void> {
+  const path = repositories[repository]?.path ?? '';
+  mkdirSync(join(path, harnessFolder, skill), { recursive: true });
+  writeFileSync(join(path, harnessFolder, skill, 'SKILL.md'), content);
+  await git(['-C', path, 'add', '.']);
+  await git(['-C', path, 'commit', '-q', '-m', `skill ${skill}`]);
+}
+
+async function rootFilesOf(main: string, subRepositories: readonly string[] = []): Promise<string> {
+  const at = crew(main, subRepositories);
+  const { folder: made } = await workspace().prepare(at);
+  await workspace().writeRootFiles({ folder: made, workspace: at.workspace });
+  return made;
+}
+
+describe('the skills at the root of a ship folder', () => {
+  it('are one link per skill of main/ and of every sub-repository, under .claude/skills and .agents/skills, each to the skill in its repository', async () => {
+    await aSkill('aeolus-fleet', '.claude/skills', 'build', 'build\n');
+    await aSkill('aeolus-fleet', '.agents/skills', 'build', 'build\n');
+    await aSkill('tools', '.claude/skills', 'lint', 'lint\n');
+    await aSkill('skills', '.agents/skills', 'review', 'review\n');
+
+    const made = await rootFilesOf('aeolus-fleet', ['tools', 'skills']);
+
+    expect(readlinkSync(join(made, '.claude', 'skills', 'build'))).toBe('../../main/.claude/skills/build');
+    expect(readlinkSync(join(made, '.agents', 'skills', 'build'))).toBe('../../main/.agents/skills/build');
+    expect(readlinkSync(join(made, '.claude', 'skills', 'lint'))).toBe('../../sub-repos/tools/.claude/skills/lint');
+    expect(readlinkSync(join(made, '.agents', 'skills', 'review'))).toBe('../../sub-repos/skills/.agents/skills/review');
+    expect(readFileSync(join(made, '.claude', 'skills', 'lint', 'SKILL.md'), 'utf8')).toBe('lint\n');
+    expect(readdirSync(join(made, '.claude', 'skills')).sort()).toEqual(['build', 'lint']);
+    expect(readdirSync(join(made, '.agents', 'skills')).sort()).toEqual(['build', 'review']);
+  });
+
+  it('are one link, and nothing said, for a skill name two repositories share with the same content', async () => {
+    await aSkill('aeolus-fleet', '.claude/skills', 'review', 'review\n');
+    await aSkill('tools', '.claude/skills', 'review', 'review\n');
+
+    const made = await rootFilesOf('aeolus-fleet', ['tools']);
+
+    expect(readlinkSync(join(made, '.claude', 'skills', 'review'))).toBe('../../main/.claude/skills/review');
+    expect(readFileSync(join(made, 'AGENTS.md'), 'utf8')).toBe(rootInstructionsOf({ kind: 'repositories', main: { repository: 'aeolus-fleet' }, subRepositories: [{ repository: 'tools' }] }));
+  });
+
+  it('are no link for a skill name two repositories share with different content, and the root AGENTS.md names both and where they are and says to ask the ship\'s owner before using either', async () => {
+    await aSkill('aeolus-fleet', '.claude/skills', 'review', 'one way\n');
+    await aSkill('tools', '.claude/skills', 'review', 'another way\n');
+    await aSkill('tools', '.claude/skills', 'lint', 'lint\n');
+
+    const made = await rootFilesOf('aeolus-fleet', ['tools']);
+
+    expect(readdirSync(join(made, '.claude', 'skills'))).toEqual(['lint']);
+    const agents = readFileSync(join(made, 'AGENTS.md'), 'utf8');
+    expect(agents).toContain(
+      [
+        '## Skills the repositories disagree on',
+        '',
+        "- `review`: `main/.claude/skills/review` and `sub-repos/tools/.claude/skills/review` differ. Ask the ship's owner for guidance before using either.",
+        '',
+      ].join('\n'),
+    );
+    expect(agents).not.toContain('`lint`');
+  });
+
+  it('name every repository of a clash among three, and link none of them', async () => {
+    await aSkill('aeolus-fleet', '.agents/skills', 'review', 'same\n');
+    await aSkill('tools', '.agents/skills', 'review', 'same\n');
+    await aSkill('skills', '.agents/skills', 'review', 'different\n');
+
+    const made = await rootFilesOf('aeolus-fleet', ['tools', 'skills']);
+
+    expect(existsSync(join(made, '.agents', 'skills', 'review'))).toBe(false);
+    expect(readFileSync(join(made, 'AGENTS.md'), 'utf8')).toContain(
+      "- `review`: `main/.agents/skills/review`, `sub-repos/tools/.agents/skills/review` and `sub-repos/skills/.agents/skills/review` differ. Ask the ship's owner for guidance before using any of them.",
+    );
+  });
+
+  it('judge a skill name by each harness folder alone, so a clash under .claude/skills leaves .agents/skills linked', async () => {
+    await aSkill('aeolus-fleet', '.claude/skills', 'review', 'one way\n');
+    await aSkill('tools', '.claude/skills', 'review', 'another way\n');
+    await aSkill('tools', '.agents/skills', 'review', 'only here\n');
+
+    const made = await rootFilesOf('aeolus-fleet', ['tools']);
+
+    expect(existsSync(join(made, '.claude', 'skills', 'review'))).toBe(false);
+    expect(readlinkSync(join(made, '.agents', 'skills', 'review'))).toBe('../../sub-repos/tools/.agents/skills/review');
+  });
+
+  it('judge the content of a skill by every file in it, not its SKILL.md alone', async () => {
+    await aSkill('aeolus-fleet', '.claude/skills', 'review', 'same\n');
+    await aSkill('tools', '.claude/skills', 'review', 'same\n');
+    writeFileSync(join(repositories.tools?.path ?? '', '.claude', 'skills', 'review', 'checklist.md'), 'extra\n');
+    await git(['-C', repositories.tools?.path ?? '', 'add', '.']);
+    await git(['-C', repositories.tools?.path ?? '', 'commit', '-q', '-m', 'checklist']);
+
+    const made = await rootFilesOf('aeolus-fleet', ['tools']);
+
+    expect(existsSync(join(made, '.claude', 'skills', 'review'))).toBe(false);
+    expect(readFileSync(join(made, 'AGENTS.md'), 'utf8')).toContain('Skills the repositories disagree on');
+  });
+
+  it('are linked again at every start, over what the session left and for the repositories as they are now', async () => {
+    await aSkill('aeolus-fleet', '.claude/skills', 'build', 'build\n');
+    const at = crew('aeolus-fleet');
+    const { folder: made } = await workspace().prepare(at);
+    await workspace().writeRootFiles({ folder: made, workspace: at.workspace });
+    rmSync(join(made, 'main', '.claude', 'skills', 'build'), { recursive: true });
+    mkdirSync(join(made, '.agents', 'skills'), { recursive: true });
+    writeFileSync(join(made, '.agents', 'skills', 'mine'), 'left by the session\n');
+
+    await workspace().writeRootFiles({ folder: made, workspace: at.workspace });
+
+    expect(existsSync(join(made, '.claude'))).toBe(false);
+    expect(existsSync(join(made, '.agents'))).toBe(false);
+  });
+
+  it('are none, with no .claude or .agents folder, for repositories that hold no skill', async () => {
+    const made = await rootFilesOf('aeolus-fleet', ['tools']);
+
+    expect(readdirSync(made).sort()).toEqual(['AGENTS.md', 'CLAUDE.md', 'main', 'sub-repos']);
+  });
+
+  it('follow a skill that is itself a link in its repository', async () => {
+    await aSkill('aeolus-fleet', '.agents/skills', 'build', 'build\n');
+    mkdirSync(join(repositories['aeolus-fleet']?.path ?? '', '.claude', 'skills'), { recursive: true });
+    symlinkSync('../../.agents/skills/build', join(repositories['aeolus-fleet']?.path ?? '', '.claude', 'skills', 'build'));
+    await git(['-C', repositories['aeolus-fleet']?.path ?? '', 'add', '.']);
+    await git(['-C', repositories['aeolus-fleet']?.path ?? '', 'commit', '-q', '-m', 'linked skill']);
+
+    const made = await rootFilesOf('aeolus-fleet');
+
+    expect(readFileSync(join(made, '.claude', 'skills', 'build', 'SKILL.md'), 'utf8')).toBe('build\n');
   });
 });
 
