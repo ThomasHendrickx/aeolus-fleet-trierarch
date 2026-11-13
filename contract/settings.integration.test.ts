@@ -8,10 +8,12 @@ import { z } from 'zod';
 import { aCrewingMachine, REPOSITORY, sessionOf } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
+import { isTodaysTrierarch } from './support/trierarch-under-test.js';
 
 // A crew request's settings are checked again before crewing (docs/trierarch.md): the harness must trust the repository or folder (#381), and no flag the session launches with may wait on a one-time question (#403); one folder crews one ship.
 
 const GIVEN_BACK_WITHIN_MS = 30_000;
+const CREWED_WITHIN_MS = 30_000;
 const SKIP_PERMISSIONS = '--dangerously-skip-permissions';
 
 let fleet: Fleet;
@@ -46,14 +48,14 @@ async function aFolder(name: string): Promise<void> {
 }
 
 /** Gives Claude Code the skip-permissions flag, and takes back its acceptance of bypass permissions mode. */
-async function claudeLaunchesSkippingPermissions(): Promise<void> {
+async function claudeLaunchesSkippingPermissions(at: { isAccepted: boolean } = { isAccepted: false }): Promise<void> {
   const file = join(machine.trierarchHome, 'config.json');
   const configuration = z.looseObject({ harnesses: z.record(z.string(), z.looseObject({})) }).parse(JSON.parse(readFileSync(file, 'utf8')));
   const claudeCode = { ...configuration.harnesses['claude-code'], flags: [SKIP_PERMISSIONS] };
   writeFileSync(file, JSON.stringify({ ...configuration, harnesses: { ...configuration.harnesses, 'claude-code': claudeCode } }));
   const settings = join(machine.home, '.claude', 'settings.json');
   mkdirSync(join(machine.home, '.claude'), { recursive: true });
-  writeFileSync(settings, JSON.stringify({}));
+  writeFileSync(settings, JSON.stringify(at.isAccepted ? { skipDangerousModePermissionPrompt: true } : {}));
   const restarted = await machine.trierarch(['restart']);
   expect(restarted.status, restarted.stdout + restarted.stderr).toBe(0);
 }
@@ -101,5 +103,24 @@ describe('a crew request the harness may not start a session for', () => {
     await fleet.crewInFolder(scout, { folder: 'notes', harness: 'claude-code' });
 
     await expect.poll(() => fleet.givenBackReasonOf(scout), { timeout: GIVEN_BACK_WITHIN_MS }).toContain(`workspace.name: The folder notes crews ${lookout} already: one folder crews one ship`);
+  });
+});
+
+// The TypeScript trierarch is kept for existing machines only, which upgrade to the Go one.
+describe.skipIf(isTodaysTrierarch)('bypass permissions mode the operator accepted', () => {
+  it('is accepted again after a plugin install rewrote the settings without it, so a new ship is crewed (#393)', async () => {
+    await claudeLaunchesSkippingPermissions({ isAccepted: true });
+    const lookout = await fleet.commission('lookout');
+    await fleet.crewInRepositories(lookout, { main: REPOSITORY, harness: 'claude-code' });
+    await expect.poll(() => sessionOf(machine, 'lookout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
+    const settings = join(machine.home, '.claude', 'settings.json');
+    const plugin = { extraKnownMarketplaces: { 'aeolus-fleet': { source: { source: 'github', repo: 'ThomasHendrickx/aeolus-fleet-trierarch' } } }, enabledPlugins: { 'aeolus-fleet@aeolus-fleet': true } };
+    writeFileSync(settings, JSON.stringify(plugin));
+
+    const scout = await fleet.commission('scout');
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
+
+    await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
+    expect(JSON.parse(readFileSync(settings, 'utf8'))).toEqual({ ...plugin, skipDangerousModePermissionPrompt: true });
   });
 });
