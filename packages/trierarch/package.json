@@ -41,7 +41,7 @@
     "postpack": "rm LICENSE"
   },
   "dependencies": {
-    "@aeolus-fleet/common": "^0.38.0",
+    "@aeolus-fleet/common": "^0.39.0",
     "@sigstore/bundle": "^5.0.0",
     "@sigstore/protobuf-specs": "^0.5.2",
     "@sigstore/tuf": "^5.0.0",
@@ -49,6 +49,6 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@aeolus-fleet/core": "^0.38.0"
+    "@aeolus-fleet/core": "^0.39.0"
   }
 }
