@@ -455,9 +455,21 @@ func TestAStreamedAnswerReachesTheShipAsItArrivesAndHasNoWholeCallTimeout(t *tes
 	}
 }
 
+// aShortFolder is a folder under /tmp, not under TMPDIR or named after the test: the release's runner points TMPDIR at a folder so long
+// that a socket path in it passes the system's limit.
+func aShortFolder(t *testing.T) string {
+	t.Helper()
+	folder, err := os.MkdirTemp("/tmp", "sockets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(folder) })
+	return folder
+}
+
 // A ship crewed fresh has its socket in its ship's folder, one crewed before the ship folders under the root.
 func TestASocketIsInItsShipsFolder(t *testing.T) {
-	root, shipFolder := t.TempDir(), filepath.Join(t.TempDir(), scout)
+	root, shipFolder := aShortFolder(t), filepath.Join(aShortFolder(t), scout)
 	sockets := New(Options{Root: root, CrewTokenOf: func(string) string { return "" }, MayCall: func(string, int) bool { return true }, Log: func(string) {}})
 	t.Cleanup(sockets.CloseAll)
 
@@ -476,7 +488,7 @@ func TestASocketIsInItsShipsFolder(t *testing.T) {
 }
 
 func TestAnOlderShipsSocketFolderGoesOnItsClose(t *testing.T) {
-	root := t.TempDir()
+	root := aShortFolder(t)
 	sockets := New(Options{Root: root, CrewTokenOf: func(string) string { return "" }, MayCall: func(string, int) bool { return true }, Log: func(string) {}})
 	if _, err := sockets.Open(scout, ""); err != nil {
 		t.Fatal(err)
