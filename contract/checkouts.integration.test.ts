@@ -4,19 +4,24 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { REPOSITORY } from './support/crewing.js';
+import { aCrewingMachine, REPOSITORY } from './support/crewing.js';
+import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
 
 // A configuration that still names checkouts (docs/trierarch.md, "Ship folder"): refused, since a ship's sub-repositories come from its crew request.
 
+let fleet: Fleet;
 let machine: Machine;
 
 beforeEach(async () => {
+  fleet = await aFleet();
   machine = await aMachine();
+  await aCrewingMachine({ fleet, machine });
 });
 
 afterEach(async () => {
   await machine.remove();
+  await fleet.close();
 });
 
 describe('a configuration that still names checkouts', () => {
