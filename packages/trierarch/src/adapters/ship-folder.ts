@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 
 import type { TrierarchWorkspace } from '@aeolus-fleet/common';
 
+import { linkSkills, type SkillClash } from './ship-skills.js';
 import { discard, type MoveWithinUserNamespace } from './trash.js';
 
 /**
@@ -41,7 +42,7 @@ export type NamedRepository = RepositoriesWorkspace['main'];
 export type MakeRepository = (repository: NamedRepository, folder: string) => Promise<void>;
 
 /** The root AGENTS.md of a ship folder: where to work from, each sub-repository, and the layout's facts every ship shares. */
-export function rootInstructionsOf(workspace: RepositoriesWorkspace): string {
+export function rootInstructionsOf(workspace: RepositoriesWorkspace, clashes: readonly SkillClash[] = []): string {
   const named =
     workspace.subRepositories.length === 0
       ? ['None: this ship works in its main repository alone.']
@@ -55,6 +56,7 @@ export function rootInstructionsOf(workspace: RepositoriesWorkspace): string {
     '',
     ...named,
     '',
+    ...clashesText(clashes),
     '## The layout',
     '',
     '- Each repository commits, branches and pushes on its own: run git inside the one you work in.',
@@ -64,11 +66,32 @@ export function rootInstructionsOf(workspace: RepositoriesWorkspace): string {
   ].join('\n');
 }
 
-/** Writes the ship folder's root AGENTS.md and CLAUDE.md, a link to it, again, whatever the session left there. */
+/** The root AGENTS.md's words on skills that repositories hold with different content, none when there is no clash. */
+function clashesText(clashes: readonly SkillClash[]): string[] {
+  if (clashes.length === 0) {
+    return [];
+  }
+  const where = (paths: readonly string[]): string => {
+    const quoted = paths.map((path) => `\`${path}\``);
+    return `${quoted.slice(0, -1).join(', ')} and ${quoted.at(-1) ?? ''}`;
+  };
+  return [
+    '## Skills the repositories disagree on',
+    '',
+    ...clashes.map(({ skill, paths }) => `- \`${skill}\`: ${where(paths)} differ. Ask the ship's owner for guidance before using ${paths.length === 2 ? 'either' : 'any of them'}.`),
+    '',
+  ];
+}
+
+/**
+ * Writes the ship folder's root AGENTS.md and CLAUDE.md, a link to it, and
+ * its skill links again, whatever the session left there.
+ */
 export async function writeRootFiles(folder: string, workspace: RepositoriesWorkspace): Promise<void> {
+  const clashes = await linkSkills(folder, [MAIN_FOLDER, ...workspace.subRepositories.map(({ repository }) => `${SUB_REPOSITORIES_FOLDER}/${repository}`)]);
   const link = join(folder, ROOT_LINK);
   await rm(join(folder, ROOT_INSTRUCTIONS), { recursive: true, force: true });
-  await writeFile(join(folder, ROOT_INSTRUCTIONS), rootInstructionsOf(workspace));
+  await writeFile(join(folder, ROOT_INSTRUCTIONS), rootInstructionsOf(workspace, clashes));
   await rm(link, { recursive: true, force: true });
   await symlink(ROOT_INSTRUCTIONS, link);
 }

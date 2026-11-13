@@ -244,6 +244,8 @@ A ship whose workspace names repositories works in its ship folder, `ships/<ship
 ships/<shipId>/repositories/
   AGENTS.md                 written by the trierarch at every start
   CLAUDE.md -> AGENTS.md
+  .claude/skills/<skill>    one link per skill, to a repository's own
+  .agents/skills/<skill>    the same for Codex
   main/                     the main repository
   sub-repos/<repository>/   each sub-repository
 ```
@@ -251,6 +253,7 @@ ships/<shipId>/repositories/
 - **Every repository is a working one**: on the host each is its own git worktree of its configured or trusted repository, in a container its own clone (Session runtime below); each fetched first, at its ref or origin's default branch, as the workspace above says, with its origin to push to. The ship folder itself is no git repository, so nothing is committed outside one.
 - **The session starts in the ship folder**, trusted for its harness before every launch (see Trust below). A container mounts it at its own path.
 - **The root files are written again at every start**, a restart too, over whatever the session left there: one AGENTS.md for every harness, and CLAUDE.md a link to it. It says to work from `main/` and read `main/AGENTS.md` first, or `main/CLAUDE.md` where it has none; names each sub-repository and says to read its AGENTS.md, or its CLAUDE.md, before working in it; and gives the facts of the layout every ship shares: each repository commits, branches and pushes on its own, the ship folder holds no repository of its own, and the files and links at its root are the trierarch's.
+- **Skills by one link each**, again at every start: the root's `.claude/skills/<skill>` links to the skill of that name in `.claude/skills/` of `main/` and of every sub-repository, and `.agents/skills/<skill>` the same for Codex, so both harnesses load them all at start; each harness's folder is judged alone, and a harness folder no repository has a skill in is not made. A name two repositories share with the same content (every file in it) is one link and nothing is said. With different content neither is linked, and the root AGENTS.md has a section naming both (every one, among three or more) and where they are, and says to ask the ship's owner for guidance before using either.
 - **A new settings version** crews the ship again in the same ship folder (Crashed and Restart below): a repository still named stays as it is, one newly named is made, one no longer named is moved into `ships/.trash`, and a main naming another repository replaces `main/`.
 - **What a removal discards** is logged per repository, by its folder, as a worktree's is.
 

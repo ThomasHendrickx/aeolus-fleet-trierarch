@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
@@ -78,6 +78,15 @@ async function aRunningScout(at: { subRepositories?: readonly string[]; harness?
   await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
 }
 
+/** Commits a skill to a repository: `<skill>/SKILL.md` holding the content. */
+function aSkillIn(at: { repository: string; skill: string }, content: string): void {
+  const { repository, skill } = at;
+  mkdirSync(join(repository, skill), { recursive: true });
+  writeFileSync(join(repository, skill, 'SKILL.md'), content);
+  git(repository, 'add', '.');
+  git(repository, 'commit', '-q', '-m', `skill ${skill}`);
+}
+
 /** The root AGENTS.md of a ship folder whose sub-repositories are those given. */
 function rootInstructionsOf(subRepositories: readonly string[]): string {
   const named =
@@ -145,6 +154,26 @@ describe('a ship folder', () => {
     expect(readFileSync(join(folder, 'AGENTS.md'), 'utf8')).toBe(rootInstructionsOf([TOOLS]));
     expect(lstatSync(join(folder, 'CLAUDE.md')).isSymbolicLink()).toBe(true);
     expect(readlinkSync(join(folder, 'CLAUDE.md'))).toBe('AGENTS.md');
+  });
+
+  it('has the root link each skill of main/ and of every sub-repository, for both harnesses, and name a clash of two with different content in the root AGENTS.md instead', async () => {
+    await aMachineCrewing();
+    aSkillIn({ repository: machine.repository, skill: '.claude/skills/build' }, 'build\n');
+    aSkillIn({ repository: machine.repository, skill: '.agents/skills/review' }, 'one way\n');
+    aSkillIn({ repository: tools, skill: '.agents/skills/review' }, 'another way\n');
+    aSkillIn({ repository: tools, skill: '.claude/skills/lint' }, 'lint\n');
+
+    await aRunningScout({ subRepositories: [TOOLS] });
+
+    const folder = shipFolderOf(scout);
+    expect(readlinkSync(join(folder, '.claude', 'skills', 'build'))).toBe('../../main/.claude/skills/build');
+    expect(readlinkSync(join(folder, '.claude', 'skills', 'lint'))).toBe('../../sub-repos/tools/.claude/skills/lint');
+    expect(readFileSync(join(folder, '.claude', 'skills', 'lint', 'SKILL.md'), 'utf8')).toBe('lint\n');
+    expect(existsSync(join(folder, '.agents'))).toBe(false);
+    expect(readdirSync(join(folder, '.claude', 'skills')).sort()).toEqual(['build', 'lint']);
+    expect(readFileSync(join(folder, 'AGENTS.md'), 'utf8')).toContain(
+      "- `review`: `main/.agents/skills/review` and `sub-repos/tools/.agents/skills/review` differ. Ask the ship's owner for guidance before using either.",
+    );
   });
 
   it('has its root files written again when its session starts again', async () => {
