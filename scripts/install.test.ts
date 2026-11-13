@@ -61,7 +61,7 @@ function release(
 }
 
 /** What the script runs besides uname and gh, found on the machine running the test. */
-const TOOLS = ['awk', 'chmod', 'cp', 'curl', 'cut', 'head', 'mkdir', 'mktemp', 'mv', 'rm', 'sed', 'sha256sum', 'shasum'];
+const TOOLS = ['awk', 'chmod', 'cp', 'curl', 'cut', 'grep', 'head', 'mkdir', 'mktemp', 'mv', 'rm', 'sed', 'sha256sum', 'shasum'];
 
 function whereIs(tool: string): string | undefined {
   const found = spawnSync('sh', ['-c', `command -v ${tool}`], {
@@ -98,6 +98,7 @@ function install(bin: string, options: { args?: string[]; env?: Record<string, s
     env: {
       PATH: bin,
       HOME: home,
+      SHELL: '/bin/bash',
       AEOLUS_TRIERARCH_RELEASES_URL: `file://${join(root, 'api')}`,
       AEOLUS_TRIERARCH_DOWNLOAD_URL: `file://${join(root, 'download')}`,
       ...env,
@@ -229,5 +230,81 @@ describe('the install script', () => {
     install(machine({ system: 'Linux', chip: 'x86_64', attestation: 'holds' }));
 
     expect(readFileSync(installed(), 'utf8')).toBe('old binary');
+  });
+
+  describe('the PATH block', () => {
+    const MARK = '# >>> aeolus-trierarch >>>';
+    const home = (file: string): string => join(root, 'home', file);
+    const shellOf = (name: string): string | undefined => whereIs(name);
+
+    function run(shell: string, extra: { env?: Record<string, string> } = {}) {
+      release('1.2.3');
+      return install(machine({ system: 'Linux', chip: 'x86_64', attestation: 'holds' }), { env: { SHELL: shell, ...extra.env } });
+    }
+
+    it.each([
+      { shell: '/bin/zsh', own: '.zprofile', other: '.bash_profile' },
+      { shell: '/bin/bash', own: '.bash_profile', other: '.zprofile' },
+    ])('writes one marked block in $own and ~/.profile for $shell, and in no other login file', ({ shell, own, other }) => {
+      const result = run(shell);
+
+      expect(result.status, result.stderr).toBe(0);
+      for (const file of [own, '.profile']) {
+        const text = readFileSync(home(file), 'utf8');
+        expect(text.split(MARK)).toHaveLength(2);
+        expect(text).toContain('# <<< aeolus-trierarch <<<');
+        expect(text).toContain('$HOME/.local/bin');
+      }
+      expect(existsSync(home(other))).toBe(false);
+    });
+
+    it('for another shell writes ~/.profile only', () => {
+      const result = run('/usr/bin/fish');
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(readFileSync(home('.profile'), 'utf8')).toContain(MARK);
+      expect(existsSync(home('.zprofile'))).toBe(false);
+      expect(existsSync(home('.bash_profile'))).toBe(false);
+    });
+
+    it('keeps what a login file held and changes nothing when run a second time', () => {
+      write(home('.bash_profile'), 'export EDITOR=vi\n');
+      write(home('.profile'), '# mine\n');
+      run('/bin/bash');
+      const first = { bash: readFileSync(home('.bash_profile'), 'utf8'), profile: readFileSync(home('.profile'), 'utf8') };
+      const second = run('/bin/bash');
+
+      expect(second.status, second.stderr).toBe(0);
+      expect(first.bash.startsWith('export EDITOR=vi\n')).toBe(true);
+      expect(first.profile.startsWith('# mine\n')).toBe(true);
+      expect(readFileSync(home('.bash_profile'), 'utf8')).toBe(first.bash);
+      expect(readFileSync(home('.profile'), 'utf8')).toBe(first.profile);
+    });
+
+    it('writes no block when PATH already holds the folder', () => {
+      const result = run('/bin/bash', { env: { PATH: `${join(root, 'bin')}:${join(root, 'home', '.local', 'bin')}` } });
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(existsSync(home('.bash_profile'))).toBe(false);
+      expect(existsSync(home('.profile'))).toBe(false);
+    });
+
+    it('says the current shell needs a new terminal', () => {
+      const result = run('/bin/bash');
+
+      expect(result.stdout + result.stderr).toContain('open a new terminal');
+    });
+
+    it.each(['bash', 'zsh'])('lets a new %s login shell find aeolus-trierarch', (name) => {
+      const shell = shellOf(name);
+      if (shell === undefined) return;
+      run(shell);
+      const found = spawnSync(shell, ['-l', '-c', 'command -v aeolus-trierarch'], {
+        encoding: 'utf8',
+        env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home') },
+      });
+
+      expect(found.stdout.trim()).toBe(installed());
+    });
   });
 });
