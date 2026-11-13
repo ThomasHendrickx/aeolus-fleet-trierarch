@@ -44,14 +44,16 @@ function repositoryFieldsOf(workspace: Extract<CrewSettings['workspace'], { kind
 /**
  * Why a harness may not start a session with its flags: one of them waits on
  * a one-time question it still asks, as Claude Code's bypass permissions
- * (#403). Init is where the operator accepts it, so the reason says to do that.
+ * (#403). The trierarch accepts it where the flags ask for it, the operator's
+ * consent, so it is still asked only where the settings could not take the
+ * acceptance (#393), and the reason says to fix them.
  */
 export function unacceptedRefusal(at: { harness: string; configuration: TrierarchConfiguration; options: Readonly<Record<string, string>>; trusted: TrustedPlaces }): Refusal | undefined {
   const { harness, configuration, options, trusted } = at;
   const settings = configuration.harnesses[harness];
   const unaccepted = trusted[harness]?.unacceptedFlags ?? [];
   const flag = settings === undefined ? undefined : effectiveFlags(settings, options).find((each) => unaccepted.includes(each));
-  return flag === undefined ? undefined : { field: 'harness', reason: `${harness} still asks to accept ${flag}: accept it with aeolus-trierarch init` };
+  return flag === undefined ? undefined : { field: 'harness', reason: `${harness} still asks to accept ${flag}: its settings could not take the acceptance, make them a JSON object the trierarch can write` };
 }
 
 /**
