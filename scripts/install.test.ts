@@ -89,9 +89,8 @@ function machine({ system, chip, attestation }: { system: string; chip: string; 
   return bin;
 }
 
-function install(bin: string, options: { args?: string[]; env?: Record<string, string> } = {}) {
-  const { args = [], env = {} } = options;
-  const home = join(root, 'home');
+function install(bin: string, options: { args?: string[]; env?: Record<string, string>; home?: string } = {}) {
+  const { args = [], env = {}, home = join(root, 'home') } = options;
   mkdirSync(home, { recursive: true });
   return spawnSync('/bin/sh', [installScript, ...args], {
     encoding: 'utf8',
@@ -237,10 +236,34 @@ describe('the install script', () => {
     const home = (file: string): string => join(root, 'home', file);
     const shellOf = (name: string): string | undefined => whereIs(name);
 
-    function run(shell: string, extra: { env?: Record<string, string> } = {}) {
+    function run(shell: string, extra: { env?: Record<string, string>; home?: string } = {}) {
       release('1.2.3');
-      return install(machine({ system: 'Linux', chip: 'x86_64', attestation: 'holds' }), { env: { SHELL: shell, ...extra.env } });
+      return install(machine({ system: 'Linux', chip: 'x86_64', attestation: 'holds' }), {
+        env: { SHELL: shell, ...extra.env },
+        home: extra.home,
+      });
     }
+
+    it('writes the block in the login files of a home path with spaces', () => {
+      const spaced = join(root, 'my home');
+      const result = run('/bin/bash', { home: spaced });
+
+      expect(result.status, result.stderr).toBe(0);
+      for (const file of ['.bash_profile', '.profile']) {
+        expect(readFileSync(join(spaced, file), 'utf8').split(MARK)).toHaveLength(2);
+      }
+    });
+
+    it('writes the block once in a login file with no final newline, also when run a second time', () => {
+      write(home('.profile'), 'export EDITOR=vi');
+      run('/bin/bash');
+      const first = readFileSync(home('.profile'), 'utf8');
+      run('/bin/bash');
+
+      expect(first.startsWith('export EDITOR=vi\n')).toBe(true);
+      expect(first.split(MARK)).toHaveLength(2);
+      expect(readFileSync(home('.profile'), 'utf8')).toBe(first);
+    });
 
     it.each([
       { shell: '/bin/zsh', own: '.zprofile', other: '.bash_profile' },
