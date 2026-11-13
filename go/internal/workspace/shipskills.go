@@ -38,6 +38,12 @@ func linkSkills(folder string, repositories []string) ([]SkillClash, error) {
 	clashes := []SkillClash{}
 	for _, skillFolder := range skillFolders {
 		root := filepath.Join(folder, skillFolder)
+		// A harness folder the session left as a link (into a repository) goes as the link only; removing through it would delete the repository's skills.
+		if info, err := os.Lstat(filepath.Dir(root)); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			if err := os.Remove(filepath.Dir(root)); err != nil {
+				return nil, err
+			}
+		}
 		if err := os.RemoveAll(root); err != nil {
 			return nil, err
 		}
@@ -111,7 +117,7 @@ func skillsIn(skillFolder string) ([]skillIn, error) {
 		if info, err := os.Stat(path); err != nil || !info.IsDir() {
 			continue
 		}
-		digest, err := digestOf(path, map[string]bool{})
+		digest, _, err := digestOf(path, map[string]bool{})
 		if err != nil {
 			return nil, err
 		}
@@ -121,19 +127,19 @@ func skillsIn(skillFolder string) ([]skillIn, error) {
 }
 
 // digestOf is a digest of every file under a folder, by its path in it and its content, following links; a folder reached twice on the
-// way down is left out.
-func digestOf(folder string, above map[string]bool) (string, error) {
+// way down is left out, and a folder with no file below it counts for nothing (hasFile false).
+func digestOf(folder string, above map[string]bool) (string, bool, error) {
 	here, err := filepath.EvalSymlinks(folder)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	hash := sha256.New()
 	if above[here] {
-		return hex.EncodeToString(hash.Sum(nil)), nil
+		return hex.EncodeToString(hash.Sum(nil)), false, nil
 	}
 	entries, err := os.ReadDir(folder)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	names := []string{}
 	for _, entry := range entries {
@@ -144,6 +150,7 @@ func digestOf(folder string, above map[string]bool) (string, error) {
 	for path := range above {
 		below[path] = true
 	}
+	hasFile := false
 	for _, name := range names {
 		path := filepath.Join(folder, name)
 		info, err := os.Stat(path)
@@ -151,22 +158,26 @@ func digestOf(folder string, above map[string]bool) (string, error) {
 		case err != nil:
 			continue
 		case info.IsDir():
-			inner, err := digestOf(path, below)
+			inner, innerHasFile, err := digestOf(path, below)
 			if err != nil {
-				return "", err
+				return "", false, err
 			}
-			fmt.Fprintf(hash, "dir %s\x00%s\x00", name, inner)
+			if innerHasFile {
+				fmt.Fprintf(hash, "dir %s\x00%s\x00", name, inner)
+				hasFile = true
+			}
 		case info.Mode().IsRegular():
 			content, err := os.ReadFile(path)
 			if err != nil {
-				return "", err
+				return "", false, err
 			}
 			fmt.Fprintf(hash, "file %s\x00", name)
 			hash.Write(content)
 			hash.Write([]byte{0})
+			hasFile = true
 		}
 	}
-	return hex.EncodeToString(hash.Sum(nil)), nil
+	return hex.EncodeToString(hash.Sum(nil)), hasFile, nil
 }
 
 // clashesText is the root AGENTS.md's words on skills that repositories hold with different content; none when there is no clash.

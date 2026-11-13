@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readdir, readFile, realpath, rm, rmdir, stat, symlink } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, realpath, rm, rmdir, stat, symlink, unlink } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 
 /**
@@ -33,6 +33,10 @@ export async function linkSkills(folder: string, repositories: readonly Reposito
   const clashes: SkillClash[] = [];
   for (const skillFolder of SKILL_FOLDERS) {
     const root = join(folder, skillFolder);
+    // A harness folder the session left as a link (into a repository) goes as the link only; removing through it would delete the repository's skills.
+    if ((await lstat(dirname(root)).catch(() => undefined))?.isSymbolicLink() === true) {
+      await unlink(dirname(root));
+    }
     await rm(root, { recursive: true, force: true });
     // The harness's folder goes too when that leaves it empty, and stays when the session keeps its own files in it.
     await rmdir(dirname(root)).catch(() => undefined);
@@ -65,27 +69,33 @@ async function skillsIn(skillFolder: string): Promise<{ name: string; digest: st
   for (const entry of (await readdir(skillFolder).catch(() => [])).sort()) {
     const path = join(skillFolder, entry);
     if ((await stat(path).catch(() => undefined))?.isDirectory() === true) {
-      found.push({ name: entry, digest: (await digestOf(path, new Set())).digest('hex') });
+      found.push({ name: entry, digest: (await digestOf(path, new Set())).digest });
     }
   }
   return found;
 }
 
-/** A digest of every file under a folder, by its path in it and its content, following links; a folder reached twice on the way down is left out. */
-async function digestOf(folder: string, above: ReadonlySet<string>): Promise<ReturnType<typeof createHash>> {
+/** A digest of every file under a folder, by its path in it and its content, following links; a folder reached twice on the way down is left out, and a folder with no file below it counts for nothing. */
+async function digestOf(folder: string, above: ReadonlySet<string>): Promise<{ digest: string; hasFile: boolean }> {
   const digest = createHash('sha256');
+  let hasFile = false;
   const here = await realpath(folder);
   if (above.has(here)) {
-    return digest;
+    return { digest: digest.digest('hex'), hasFile };
   }
   for (const entry of (await readdir(folder)).sort()) {
     const path = join(folder, entry);
     const found = await stat(path).catch(() => undefined);
     if (found?.isDirectory() === true) {
-      digest.update(`dir ${entry}\0${(await digestOf(path, new Set([...above, here]))).digest('hex')}\0`);
+      const inner = await digestOf(path, new Set([...above, here]));
+      if (inner.hasFile) {
+        digest.update(`dir ${entry}\0${inner.digest}\0`);
+        hasFile = true;
+      }
     } else if (found?.isFile() === true) {
       digest.update(`file ${entry}\0`).update(await readFile(path)).update('\0');
+      hasFile = true;
     }
   }
-  return digest;
+  return { digest: digest.digest('hex'), hasFile };
 }
