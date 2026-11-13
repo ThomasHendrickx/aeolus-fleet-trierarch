@@ -281,3 +281,228 @@ func TestAConfiguredFolderGetsNoRootFiles(t *testing.T) {
 		t.Errorf("the configured folder holds %v (%v), want nothing", found, err)
 	}
 }
+
+// aSkill commits a skill to a repository: `<at>/SKILL.md`, `at` such as `.claude/skills/review`, holding the content.
+func aSkill(t *testing.T, repository string, at string, content string) {
+	t.Helper()
+	file := filepath.Join(at, "SKILL.md")
+	if filepath.Ext(at) != "" {
+		file = at
+	}
+	mkdir(t, filepath.Join(repository, filepath.Dir(file)))
+	writeIn(t, repository, file, content)
+	gitIn(t, "-C", repository, "add", ".")
+	gitIn(t, "-C", repository, "commit", "-q", "-m", "skill "+at)
+}
+
+// rootFilesOf prepares a ship folder and writes its root files: the folder.
+func rootFilesOf(t *testing.T, places Places, main string, subRepositories ...string) string {
+	t.Helper()
+	entry := aShipFolderOf(places, main, subRepositories...)
+	folder, err := places.Prepare(entry, "scout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry.Folder = folder
+	if err := places.WriteRootFiles(entry); err != nil {
+		t.Fatal(err)
+	}
+	return folder
+}
+
+func linkOf(t *testing.T, path string) string {
+	t.Helper()
+	target, err := os.Readlink(path)
+	if err != nil {
+		t.Fatalf("%s is no link: %v", path, err)
+	}
+	return target
+}
+
+func namesIn(t *testing.T, folder string) []string {
+	t.Helper()
+	found, err := os.ReadDir(folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := []string{}
+	for _, each := range found {
+		names = append(names, each.Name())
+	}
+	return names
+}
+
+func TestTheRootHoldsOneLinkPerSkillOfMainAndOfEverySubRepositoryUnderEachHarnessFolderEachToTheSkillInItsRepository(t *testing.T) {
+	places, repositories := shipFolderPlaces(t)
+	aSkill(t, repositories["aeolus-fleet"], ".claude/skills/build", "build\n")
+	aSkill(t, repositories["aeolus-fleet"], ".agents/skills/build", "build\n")
+	aSkill(t, repositories["tools"], ".claude/skills/lint", "lint\n")
+	aSkill(t, repositories["skills"], ".agents/skills/review", "review\n")
+
+	folder := rootFilesOf(t, places, "aeolus-fleet", "tools", "skills")
+
+	for link, want := range map[string]string{
+		".claude/skills/build":  "../../main/.claude/skills/build",
+		".agents/skills/build":  "../../main/.agents/skills/build",
+		".claude/skills/lint":   "../../sub-repos/tools/.claude/skills/lint",
+		".agents/skills/review": "../../sub-repos/skills/.agents/skills/review",
+	} {
+		if got := linkOf(t, filepath.Join(folder, link)); got != want {
+			t.Errorf("%s links to %q, want %q", link, got, want)
+		}
+	}
+	if got, err := os.ReadFile(filepath.Join(folder, ".claude/skills/lint/SKILL.md")); err != nil || string(got) != "lint\n" {
+		t.Errorf("the linked skill reads %q, %v", got, err)
+	}
+	if got := namesIn(t, filepath.Join(folder, ".claude/skills")); !slices.Equal(got, []string{"build", "lint"}) {
+		t.Errorf(".claude/skills holds %v", got)
+	}
+}
+
+func TestASkillNameTwoRepositoriesShareWithTheSameContentIsOneLinkAndNothingIsSaid(t *testing.T) {
+	places, repositories := shipFolderPlaces(t)
+	aSkill(t, repositories["aeolus-fleet"], ".claude/skills/review", "review\n")
+	aSkill(t, repositories["tools"], ".claude/skills/review", "review\n")
+
+	folder := rootFilesOf(t, places, "aeolus-fleet", "tools")
+
+	if got := linkOf(t, filepath.Join(folder, ".claude/skills/review")); got != "../../main/.claude/skills/review" {
+		t.Errorf("review links to %q", got)
+	}
+	want := RootInstructions(aShipFolderOf(places, "aeolus-fleet", "tools").Workspace)
+	if got, err := os.ReadFile(filepath.Join(folder, "AGENTS.md")); err != nil || string(got) != want {
+		t.Errorf("AGENTS.md = %q, %v, want it to say nothing of skills", got, err)
+	}
+}
+
+func TestASkillNameTwoRepositoriesShareWithDifferentContentIsLinkedNowhereAndTheRootAgentsMdNamesBothAndSaysToAskTheShipsOwner(t *testing.T) {
+	places, repositories := shipFolderPlaces(t)
+	aSkill(t, repositories["aeolus-fleet"], ".claude/skills/review", "one way\n")
+	aSkill(t, repositories["tools"], ".claude/skills/review", "another way\n")
+	aSkill(t, repositories["tools"], ".claude/skills/lint", "lint\n")
+
+	folder := rootFilesOf(t, places, "aeolus-fleet", "tools")
+
+	if got := namesIn(t, filepath.Join(folder, ".claude/skills")); !slices.Equal(got, []string{"lint"}) {
+		t.Errorf(".claude/skills holds %v, want lint alone", got)
+	}
+	agents, _ := os.ReadFile(filepath.Join(folder, "AGENTS.md"))
+	want := strings.Join([]string{
+		"## Skills the repositories disagree on",
+		"",
+		"- `review`: `main/.claude/skills/review` and `sub-repos/tools/.claude/skills/review` differ. Ask the ship's owner for guidance before using either.",
+		"",
+	}, "\n")
+	if !strings.Contains(string(agents), want) {
+		t.Errorf("AGENTS.md = %q, want it to hold %q", agents, want)
+	}
+	if strings.Contains(string(agents), "`lint`") {
+		t.Errorf("AGENTS.md names lint, which is no clash: %q", agents)
+	}
+}
+
+func TestAClashAmongThreeRepositoriesNamesEveryOneAndLinksNone(t *testing.T) {
+	places, repositories := shipFolderPlaces(t)
+	aSkill(t, repositories["aeolus-fleet"], ".agents/skills/review", "same\n")
+	aSkill(t, repositories["tools"], ".agents/skills/review", "same\n")
+	aSkill(t, repositories["skills"], ".agents/skills/review", "different\n")
+
+	folder := rootFilesOf(t, places, "aeolus-fleet", "tools", "skills")
+
+	if _, err := os.Lstat(filepath.Join(folder, ".agents/skills/review")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("review is linked: %v", err)
+	}
+	agents, _ := os.ReadFile(filepath.Join(folder, "AGENTS.md"))
+	want := "- `review`: `main/.agents/skills/review`, `sub-repos/tools/.agents/skills/review` and `sub-repos/skills/.agents/skills/review` differ. Ask the ship's owner for guidance before using any of them."
+	if !strings.Contains(string(agents), want) {
+		t.Errorf("AGENTS.md = %q, want it to hold %q", agents, want)
+	}
+}
+
+func TestAHarnessFolderIsJudgedAloneSoAClashUnderClaudeLeavesAgentsLinked(t *testing.T) {
+	places, repositories := shipFolderPlaces(t)
+	aSkill(t, repositories["aeolus-fleet"], ".claude/skills/review", "one way\n")
+	aSkill(t, repositories["tools"], ".claude/skills/review", "another way\n")
+	aSkill(t, repositories["tools"], ".agents/skills/review", "only here\n")
+
+	folder := rootFilesOf(t, places, "aeolus-fleet", "tools")
+
+	if _, err := os.Lstat(filepath.Join(folder, ".claude/skills/review")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the clashing review is linked: %v", err)
+	}
+	if got := linkOf(t, filepath.Join(folder, ".agents/skills/review")); got != "../../sub-repos/tools/.agents/skills/review" {
+		t.Errorf("review under .agents links to %q", got)
+	}
+}
+
+func TestTheContentOfASkillIsEveryFileInItNotItsSkillMdAlone(t *testing.T) {
+	places, repositories := shipFolderPlaces(t)
+	aSkill(t, repositories["aeolus-fleet"], ".claude/skills/review", "same\n")
+	aSkill(t, repositories["tools"], ".claude/skills/review", "same\n")
+	aSkill(t, repositories["tools"], ".claude/skills/review/checklist.md", "extra\n")
+
+	folder := rootFilesOf(t, places, "aeolus-fleet", "tools")
+
+	if _, err := os.Lstat(filepath.Join(folder, ".claude/skills/review")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("review is linked: %v", err)
+	}
+	if agents, _ := os.ReadFile(filepath.Join(folder, "AGENTS.md")); !strings.Contains(string(agents), "Skills the repositories disagree on") {
+		t.Errorf("AGENTS.md names no clash: %q", agents)
+	}
+}
+
+func TestTheSkillLinksAreMadeAgainAtEveryStartOverWhatTheSessionLeft(t *testing.T) {
+	places, repositories := shipFolderPlaces(t)
+	aSkill(t, repositories["aeolus-fleet"], ".claude/skills/build", "build\n")
+	entry := aShipFolderOf(places, "aeolus-fleet")
+	folder, err := places.Prepare(entry, "scout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry.Folder = folder
+	if err := places.WriteRootFiles(entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(folder, "main/.claude/skills/build")); err != nil {
+		t.Fatal(err)
+	}
+	mkdir(t, filepath.Join(folder, ".agents/skills"))
+	writeIn(t, folder, ".agents/skills/mine", "left by the session\n")
+
+	if err := places.WriteRootFiles(entry); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, gone := range []string{".claude", ".agents"} {
+		if _, err := os.Lstat(filepath.Join(folder, gone)); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s is still there: %v", gone, err)
+		}
+	}
+}
+
+func TestRepositoriesThatHoldNoSkillGetNoHarnessFolder(t *testing.T) {
+	places, _ := shipFolderPlaces(t)
+
+	folder := rootFilesOf(t, places, "aeolus-fleet", "tools")
+
+	if got := namesIn(t, folder); !slices.Equal(got, []string{"AGENTS.md", "CLAUDE.md", "main", "sub-repos"}) {
+		t.Errorf("the root holds %v", got)
+	}
+}
+
+func TestASkillThatIsItselfALinkInItsRepositoryIsFollowed(t *testing.T) {
+	places, repositories := shipFolderPlaces(t)
+	aSkill(t, repositories["aeolus-fleet"], ".agents/skills/build", "build\n")
+	mkdir(t, filepath.Join(repositories["aeolus-fleet"], ".claude/skills"))
+	if err := os.Symlink("../../.agents/skills/build", filepath.Join(repositories["aeolus-fleet"], ".claude/skills/build")); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, "-C", repositories["aeolus-fleet"], "add", ".")
+	gitIn(t, "-C", repositories["aeolus-fleet"], "commit", "-q", "-m", "linked skill")
+
+	folder := rootFilesOf(t, places, "aeolus-fleet")
+
+	if got, err := os.ReadFile(filepath.Join(folder, ".claude/skills/build/SKILL.md")); err != nil || string(got) != "build\n" {
+		t.Errorf("the linked skill reads %q, %v", got, err)
+	}
+}
