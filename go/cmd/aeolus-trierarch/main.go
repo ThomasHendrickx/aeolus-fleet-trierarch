@@ -687,7 +687,8 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		for harness, places := range trust.Of(withTrusted(offered), trustReaders) {
 			trusted[harness] = reconciler.Trust{Repositories: places.Repositories, Folders: places.Folders}
 		}
-		if claudeCode, ok := trusted["claude-code"]; ok && !claudecode.IsSkipPermissionsAccepted(claudecode.UserSettings(home, env["CLAUDE_CONFIG_DIR"])) {
+		// The skip-permissions flag is the operator's consent: bypass permissions mode is accepted before the pass launches (#393).
+		if claudeCode, ok := trusted["claude-code"]; ok && !claudecode.KeepSkipPermissionsAccepted(claudecode.UserSettings(home, env["CLAUDE_CONFIG_DIR"]), offered.Harnesses["claude-code"]) {
 			claudeCode.UnacceptedFlags = []string{"--dangerously-skip-permissions"}
 			trusted["claude-code"] = claudeCode
 		}

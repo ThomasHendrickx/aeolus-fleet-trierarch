@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -98,6 +98,42 @@ describe("each harness's trust, read from its own files (#381)", () => {
     const trusted = await createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }).trusted();
 
     expect(trusted['claude-code']?.unacceptedFlags).toEqual([]);
+  });
+
+  describe("where Claude Code's configuration launches with the skip-permissions flag, the operator's consent (#393)", () => {
+    const pluginInstall = { extraKnownMarketplaces: { 'aeolus-fleet': { source: { source: 'github', repo: 'ThomasHendrickx/aeolus-fleet-trierarch' } } }, enabledPlugins: { 'aeolus-fleet@aeolus-fleet': true } };
+    const settings = (): string => join(home, '.claude', 'settings.json');
+    const skipping = (harness: TrierarchConfiguration['harnesses'][string]): TrierarchConfiguration => ({ ...configuration, harnesses: { 'claude-code': harness } });
+
+    it.each([
+      ['its flags', { flags: [SKIP], options: {} }],
+      ['an option', { flags: [], options: { permissions: { values: { ask: [], skip: [SKIP] }, default: 'ask' } } }],
+    ])('accepts bypass permissions mode in settings a plugin install rewrote, keeping what they hold, with the flag in %s', async (_where, harness) => {
+      mkdirSync(join(home, '.claude'));
+      writeFileSync(settings(), JSON.stringify(pluginInstall));
+
+      const trusted = await createTrust({ configuration: skipping(harness), homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }).trusted();
+
+      expect(trusted['claude-code']?.unacceptedFlags).toEqual([]);
+      expect(JSON.parse(readFileSync(settings(), 'utf8'))).toEqual({ ...pluginInstall, skipDangerousModePermissionPrompt: true });
+    });
+
+    it('accepts it where there are no settings yet', async () => {
+      const trusted = await createTrust({ configuration: skipping({ flags: [SKIP], options: {} }), homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }).trusted();
+
+      expect(trusted['claude-code']?.unacceptedFlags).toEqual([]);
+      expect(JSON.parse(readFileSync(settings(), 'utf8'))).toEqual({ skipDangerousModePermissionPrompt: true });
+    });
+
+    it('leaves settings that are no JSON as they are, the flag unaccepted', async () => {
+      mkdirSync(join(home, '.claude'));
+      writeFileSync(settings(), 'nope');
+
+      const trusted = await createTrust({ configuration: skipping({ flags: [SKIP], options: {} }), homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }).trusted();
+
+      expect(trusted['claude-code']?.unacceptedFlags).toEqual([SKIP]);
+      expect(readFileSync(settings(), 'utf8')).toBe('nope');
+    });
   });
 
   it('answers every configured place as trusted by Copilot, which asks about no folder in copilot -p', async () => {

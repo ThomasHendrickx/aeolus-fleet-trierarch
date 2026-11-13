@@ -209,7 +209,7 @@ Nobody sits at a session. Anything a harness asks stops it. The trierarch answer
 }
 ```
 
-- **The permission flags.** Without them, a session stops at the first tool it would ask about, and waits forever. With them, a session can run any command as the trierarch's user. That is why it has a user of its own. The trierarch never adds these flags: writing them here is your consent.
+- **The permission flags.** Without them, a session stops at the first tool it would ask about, and waits forever. With them, a session can run any command as the trierarch's user. That is why it has a user of its own. The trierarch never adds these flags: writing them here is your consent. With `--dangerously-skip-permissions`, it also accepts Claude Code's bypass permissions warning for you before every launch, in `~/.claude/settings.json`, keeping all else that file holds, so a plugin install that rewrites the file never stops new ships.
 - **`caps.ships`** is how many ships this computer takes, **`caps.running`** how many sessions run at once. Set them to what the computer can carry, with `running` no higher than `ships`.
 
 After every change, check and restart:

@@ -11,8 +11,11 @@ import { codexTrustedFolders } from './codex-setup.js';
  * trusted when its own checkout is, as both ask about a worktree's
  * repository; a folder when its path is. A harness with no reader trusts
  * nothing. Claude Code's skip-permissions flag is unaccepted until bypass
- * permissions mode is accepted in its settings (#403); Codex asks about no
- * flag. Copilot asks about no folder in `copilot -p`, so it trusts every
+ * permissions mode is accepted in its settings (#403): where its flags or an
+ * option hold the flag, the operator's consent, it is accepted first, merged
+ * into the settings, so a plugin install that rewrote them without it hands no
+ * ship back (#393); settings that are no JSON are left as they are. Codex asks
+ * about no flag. Copilot asks about no folder in `copilot -p`, so it trusts every
  * configured place (Copilot CLI 1.0.105, in a new folder it never saw).
  */
 export function createTrust(at: { configuration: TrierarchConfiguration; homeDirectory: string; env: Readonly<Record<string, string | undefined>>; managedSettings: string }): TrustPort {
@@ -25,7 +28,19 @@ export function createTrust(at: { configuration: TrierarchConfiguration; homeDir
     copilot: () => Promise.resolve(configured),
   };
   const unaccepted: Readonly<Record<string, (() => Promise<readonly string[]>) | undefined>> = {
-    'claude-code': async () => ((await claudeCode.isSkipPermissionsAccepted()) ? [] : [SKIP_PERMISSIONS]),
+    'claude-code': async () => {
+      const harness = configuration.harnesses['claude-code'];
+      const isAsked = harness !== undefined && [harness.flags, ...Object.values(harness.options).flatMap((option) => Object.values(option.values))].some((flags) => flags.includes(SKIP_PERMISSIONS));
+      try {
+        if (isAsked && !(await claudeCode.isSkipPermissionsAccepted())) {
+          await claudeCode.acceptSkipPermissions();
+        }
+        return (await claudeCode.isSkipPermissionsAccepted()) ? [] : [SKIP_PERMISSIONS];
+      } catch {
+        // Settings that are no JSON object take no acceptance: the reason the request is given back names them.
+        return [SKIP_PERMISSIONS];
+      }
+    },
   };
   const namesIn = (places: TrierarchConfiguration['repositories'], trusted: ReadonlySet<string>): string[] =>
     Object.entries(places)

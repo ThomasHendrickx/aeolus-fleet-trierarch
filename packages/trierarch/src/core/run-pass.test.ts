@@ -22,7 +22,7 @@ const SKIP = '--dangerously-skip-permissions';
 /** Claude Code skipping permissions, as the operator configured it, or as an option the settings may pick. */
 const SKIPPING = { ...CONFIGURATION, harnesses: { 'claude-code': { flags: [SKIP], options: {} } } };
 const SKIPPING_AS_OPTION = { ...CONFIGURATION, harnesses: { 'claude-code': { flags: [], options: { permissions: { values: { ask: [], skip: [SKIP] }, default: 'ask' } } } } };
-const UNACCEPTED = `harness: claude-code still asks to accept ${SKIP}: accept it with aeolus-trierarch init`;
+const UNACCEPTED = `harness: claude-code still asks to accept ${SKIP}: its settings could not take the acceptance, make them a JSON object the trierarch can write`;
 const UNMARKED = "harness: claude-code's aeolus-fleet plugin marks no launches: run aeolus-trierarch upgrade";
 
 /** A ship whose crew request is assigned to the trierarch, crewed by one pass and running from the next, once its session shows activity: its id. */
@@ -1750,7 +1750,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     ]);
   });
 
-  it('never crews settings whose flags wait on a question its harness still asks, and gives the request back saying to accept it with init (#403)', async () => {
+  it('never crews settings whose flags wait on a question its harness still asks, and gives the request back saying its settings could not take the acceptance (#403)', async () => {
     const trierarch = aTrierarch(SKIPPING);
     trierarch.trust.unaccept('claude-code', SKIP);
     const shipId = trierarch.fleet.commission('scout');

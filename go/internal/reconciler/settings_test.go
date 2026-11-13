@@ -87,14 +87,14 @@ func TestAHarnessWithNothingReadOfItTrustsNothing(t *testing.T) {
 	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "workspace.main.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it"})
 }
 
-func TestARequestWhoseFlagWaitsOnAOneTimeQuestionIsGivenBackNamingHowToAcceptIt(t *testing.T) {
+func TestARequestWhoseFlagWaitsOnAOneTimeQuestionIsGivenBackSayingTheSettingsCouldNotTakeTheAcceptance(t *testing.T) {
 	context := aContext(aRequest(scout))
 	context.Configuration["claude-code"] = config.Harness{Flags: []string{skipPermissions}, Options: map[string]config.Option{}}
 	context.Trusted["claude-code"] = Trust{Repositories: []string{"aeolus-fleet"}, UnacceptedFlags: []string{skipPermissions}}
 
 	_, actions := Reconcile(Empty(), context)
 
-	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "harness: claude-code still asks to accept " + skipPermissions + ": accept it with aeolus-trierarch init"})
+	assertActions(t, actions, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "harness: claude-code still asks to accept " + skipPermissions + ": its settings could not take the acceptance, make them a JSON object the trierarch can write"})
 }
 
 func TestAnUnacceptedFlagOfAnOptionValueThatIsPickedOrDefaultedRefusesButNotOneNotLaunched(t *testing.T) {
@@ -114,7 +114,7 @@ func TestAnUnacceptedFlagOfAnOptionValueThatIsPickedOrDefaultedRefusesButNotOneN
 
 	_, picked := Reconcile(Empty(), context)
 
-	assertActions(t, picked, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "harness: claude-code still asks to accept " + skipPermissions + ": accept it with aeolus-trierarch init"})
+	assertActions(t, picked, Action{Kind: GiveBack, ShipID: scout, SettingsVersion: 1, Reason: "harness: claude-code still asks to accept " + skipPermissions + ": its settings could not take the acceptance, make them a JSON object the trierarch can write"})
 }
 
 func TestANewSettingsVersionInAPlaceNoLongerTrustedIsGivenBack(t *testing.T) {

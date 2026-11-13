@@ -606,7 +606,7 @@ func check(settings Settings, shipID string, state State, context Context) (stri
 		return "", nil, reason
 	}
 	if flag := unacceptedFlag(harness, options, context); flag != "" {
-		return "", nil, fmt.Sprintf("harness: %s still asks to accept %s: accept it with aeolus-trierarch init", harness, flag)
+		return "", nil, fmt.Sprintf("harness: %s still asks to accept %s: its settings could not take the acceptance, make them a JSON object the trierarch can write", harness, flag)
 	}
 	if reason := launchMarkerRefusal(harness, context); reason != "" {
 		return "", nil, reason
