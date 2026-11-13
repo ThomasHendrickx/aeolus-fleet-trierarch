@@ -64,8 +64,6 @@ type Start struct {
 	Env map[string]string
 	// ProxyToken is the session's model proxy token, none for a session on its subscription (headless H16).
 	ProxyToken *ProxyToken
-	// ReadOnly are the paths of the ship's read-only checkouts, which a container mounts read-only.
-	ReadOnly []string
 	// Mcp is the session's way to its crew-time MCP servers at the MCP proxy, none for a session that names none.
 	Mcp *Mcp
 	// SecretEnv is given to the harness as Env is, its values secrets: kept in the session's folder for its user only, never on a command line.

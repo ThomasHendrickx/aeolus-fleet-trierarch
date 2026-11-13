@@ -5,7 +5,7 @@ import { crashText, identityGoneText, keyNotReadyText, leftInTrashText, modelRef
 import { MODEL_OPTION } from './detected-options.js';
 import { countStart, PROBE_AFTER_MINUTES, withConfiguration, type StartOutcome } from './failed-starts.js';
 import { loginOf, startedOn, type KeyState, type Login, type Logins } from './login.js';
-import type { Checkout, CheckoutsPort, FleetPort, FolderProcessesPort, HarnessPort, HarnessSession, LaunchSeen, LeftInTrash, LoggedAction, Logger, ModelLoginsPort, SessionActivity, SessionRuntime, ShipSocketsPort, StatePort, TrashPort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
+import type { FleetPort, FolderProcessesPort, HarnessPort, HarnessSession, LaunchSeen, LeftInTrash, LoggedAction, Logger, ModelLoginsPort, SessionActivity, SessionRuntime, ShipSocketsPort, StatePort, TrashPort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { HOLDS_IDENTITY, keepsShipFolder, reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
 import type { RefuseModel } from './refuse-model.js';
 import type { SendReleasedUsage } from './send-usage.js';
@@ -32,8 +32,6 @@ export interface RunPassDeps {
   /** What still runs in a worktree, stopped before it is removed: an orphan's (#1041), and one whose crew ended (gap rule 1). */
   folderProcesses: FolderProcessesPort;
   workspace: WorkspacePort;
-  /** Each ship's read-only checkouts (#1182), made before its session starts and removed with its identity. */
-  checkouts: CheckoutsPort;
   /** What each harness trusts, read each pass so it is checked before every launch (#381). */
   trust: TrustPort;
   state: StatePort;
@@ -493,7 +491,6 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
           folder: entry.folder,
           ...(entry.shipFolder !== undefined && { shipFolder: entry.shipFolder }),
           workspace: entry.workspace,
-          checkouts: await checkoutsOf(entry, deps),
           harness: entry.harness,
           options: entry.options,
           isFirstStart: false,
@@ -633,7 +630,6 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
   state = putEntry(state, { ...crewing, shipName: ship.name, folder });
   await deps.state.save(state);
   const socket = await deps.sockets.open(crewing.shipId, shipFolder);
-  const checkouts = await checkoutsOf(crewing, deps);
   await harness.prepareIdentity({
     folder,
     ...(shipFolder !== undefined && { shipFolder }),
@@ -643,7 +639,6 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
       shipName: ship.name,
       socket,
       ...(crewing.squadron !== undefined && { squadron: crewing.squadron }),
-      ...(checkouts.length > 0 && { checkouts }),
     },
     crewToken,
   });
@@ -655,7 +650,6 @@ async function crew(state: TrierarchState, at: EntryAt & { isResumed: boolean })
     folder,
     ...(shipFolder !== undefined && { shipFolder }),
     workspace: crewing.workspace,
-    checkouts,
     harness: crewing.harness,
     options: crewing.options,
     isFirstStart: !crewing.hasStarted,
@@ -726,7 +720,6 @@ async function crewInAFreshShipFolder(state: TrierarchState, at: EntryAt & { har
   await deps.processes.stop(entry.shipId);
   if (entry.folder === undefined) {
     await deps.sockets.close(entry.shipId, entry.shipFolder);
-    await deps.checkouts.remove(entry.shipId);
   } else {
     await removeIdentity({ entry, deps, folder: entry.folder });
   }
@@ -739,11 +732,10 @@ async function crewInAFreshShipFolder(state: TrierarchState, at: EntryAt & { har
   state = putEntry(state, crewing);
   await deps.state.save(state);
   const socket = await deps.sockets.open(entry.shipId, shipFolder);
-  const checkouts = await checkoutsOf(crewing, deps);
   await harness.prepareIdentity({
     folder,
     shipFolder,
-    identity: { fleetUrl: deps.fleet.url, shipId: entry.shipId, shipName, socket, ...(entry.squadron !== undefined && { squadron: entry.squadron }), ...(checkouts.length > 0 && { checkouts }) },
+    identity: { fleetUrl: deps.fleet.url, shipId: entry.shipId, shipName, socket, ...(entry.squadron !== undefined && { squadron: entry.squadron }) },
     crewToken,
   });
   const login = sessionLogin(crewing, deps);
@@ -755,7 +747,6 @@ async function crewInAFreshShipFolder(state: TrierarchState, at: EntryAt & { har
     folder,
     shipFolder,
     workspace: entry.workspace,
-    checkouts,
     harness: entry.harness,
     options: entry.options,
     isFirstStart: true,
@@ -1016,12 +1007,11 @@ async function reportTrouble(deps: RunPassDeps, trouble: { shipId: ShipId; shipN
   return OPERATOR_SHIP_NAME;
 }
 
-/** The session's identity goes, and with it its ship's socket, as nothing calls over it any more (decision 0026), and its read-only checkouts (#1182). */
+/** The session's identity goes, and with it its ship's socket, as nothing calls over it any more (decision 0026). */
 async function removeIdentity(at: EntryAt & { folder: string }): Promise<void> {
   const { entry, deps, folder } = at;
   await harnessOf(entry, deps)?.removeIdentity(sessionOf(entry, folder));
   await deps.sockets.close(entry.shipId, entry.shipFolder);
-  await deps.checkouts.remove(entry.shipId);
 }
 
 /** Registers the ship with a new starting prompt's secret, so the session never sees it: the crew token its lease gives. */
@@ -1039,11 +1029,6 @@ function madeOf(workspace: Entry['workspace']): Pick<Entry, 'madeMain'> {
 /** The entry's session in its folder, with its ship's folder when it has one. */
 function sessionOf(entry: Entry, folder: string): HarnessSession {
   return { shipId: entry.shipId, folder, ...(entry.shipFolder !== undefined && { shipFolder: entry.shipFolder }) };
-}
-
-/** The read-only checkouts a session in the entry's repository gets (#1182), made when missing; none in a configured folder. */
-async function checkoutsOf(entry: Entry, deps: RunPassDeps): Promise<readonly Checkout[]> {
-  return entry.workspace.kind === 'repositories' ? deps.checkouts.prepare({ shipId: entry.shipId, repository: entry.workspace.main.repository }) : [];
 }
 
 /**

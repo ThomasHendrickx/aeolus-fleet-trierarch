@@ -16,8 +16,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/checkouts"
 )
 
 const scout = "shp_01m6jyczpnpp5c0vxh54c966cy"
@@ -454,61 +452,6 @@ func TestAStreamedAnswerReachesTheShipAsItArrivesAndHasNoWholeCallTimeout(t *tes
 	rest, err := io.ReadAll(reader)
 	if err != nil || !strings.Contains(string(rest), "event: end") {
 		t.Fatalf("rest = %q, err = %v, want the end event after the stream stayed open", rest, err)
-	}
-}
-
-// someSocketsRefreshing are the sockets of a root of their own, every caller allowed unless refused, whose checkouts refresh as the function says.
-func someSocketsRefreshing(t *testing.T, fleetURL string, isRefused bool, refresh func(shipID string) []checkouts.Refreshed) *Sockets {
-	t.Helper()
-	root, err := os.MkdirTemp("", "sockets")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(root) })
-	sockets := New(Options{Root: root, FleetURL: fleetURL, CrewTokenOf: func(string) string { return "token" }, MayCall: func(string, int) bool { return !isRefused }, Log: func(string) {}, RefreshCheckouts: refresh})
-	t.Cleanup(sockets.CloseAll)
-	return sockets
-}
-
-func TestARefreshOfTheShipsCheckoutsIsAnsweredByTheTrierarchForThatShipAloneAndGoesNowhereElse(t *testing.T) {
-	fleet := aFleetAnswering(t, 200, "application/json", `{}`)
-	refreshed := []string{}
-	socket := opened(t, someSocketsRefreshing(t, fleet.server.URL, false, func(shipID string) []checkouts.Refreshed {
-		refreshed = append(refreshed, shipID)
-		return []checkouts.Refreshed{{Repository: "governance", Revision: "abc"}, {Repository: "skills", Problem: "git fetch failed"}}
-	}))
-
-	response, body := post(t, socket, "/trierarch/checkouts/refresh", "")
-
-	if response.StatusCode != 200 || response.Header.Get("Content-Type") != "application/json" {
-		t.Fatalf("answer = %d %s", response.StatusCode, response.Header.Get("Content-Type"))
-	}
-	if want := `{"checkouts":[{"repository":"governance","revision":"abc"},{"repository":"skills","problem":"git fetch failed"}]}`; body != want {
-		t.Fatalf("body %s, want %s", body, want)
-	}
-	if len(refreshed) != 1 || refreshed[0] != scout || len(fleet.called()) != 0 {
-		t.Fatalf("refreshed %v, the fleet was called with %v", refreshed, fleet.called())
-	}
-}
-
-func TestARefreshOfAShipWithNoCheckoutsAnswersAnEmptyList(t *testing.T) {
-	socket := opened(t, someSocketsRefreshing(t, "http://unused", false, func(string) []checkouts.Refreshed { return []checkouts.Refreshed{} }))
-
-	_, body := post(t, socket, "/trierarch/checkouts/refresh", "")
-
-	if body != `{"checkouts":[]}` {
-		t.Fatalf("body %s", body)
-	}
-}
-
-func TestACallerTheCheckIsRefusedGetsNoRefreshOfTheCheckouts(t *testing.T) {
-	isRefreshed := false
-	socket := opened(t, someSocketsRefreshing(t, "http://unused", true, func(string) []checkouts.Refreshed { isRefreshed = true; return nil }))
-
-	response, _ := post(t, socket, "/trierarch/checkouts/refresh", "")
-
-	if response.StatusCode != 403 || isRefreshed {
-		t.Fatalf("status %d, refreshed %v", response.StatusCode, isRefreshed)
 	}
 }
 

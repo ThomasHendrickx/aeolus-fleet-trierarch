@@ -37,8 +37,6 @@ export interface TrierarchPaths {
   readonly sessions: string;
   /** The socket of each ship crewed before the ship folders, in a folder of its own: its session's fleet calls come over it (decision 0026). */
   readonly sockets: string;
-  /** Each crewed ship's read-only checkouts, in a folder of its own (#1182). */
-  readonly checkouts: string;
   /** The trusted repositories the trierarch plugin sent last (aeolus-fleet#384), apart from the configuration. */
   readonly trustedRepositories: string;
   /** The clones of the trusted repositories, one folder per repository (aeolus-fleet#384). */
@@ -64,7 +62,6 @@ export function trierarchPaths(at: { homeDirectory: string; config?: string }): 
     homes: join(home, 'homes'),
     sessions: join(home, 'sessions'),
     sockets: join(home, 'sockets'),
-    checkouts: join(home, 'checkouts'),
     trustedRepositories: join(home, 'trusted-repositories.json'),
     repositories: join(home, 'repositories'),
   };

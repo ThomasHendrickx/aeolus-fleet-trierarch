@@ -63,8 +63,6 @@ export function createPluginIdentity(plugin: AeolusPlugin): Pick<HarnessPort, 'p
           'trierarch',
           '--socket',
           crew.socket,
-          // Each read-only checkout, which the session's start context names (#1182).
-          ...(crew.checkouts ?? []).flatMap((checkout) => ['--checkout', `${checkout.repository}=${checkout.path}`]),
           crew.fleetUrl,
           crew.shipId,
           crew.shipName,

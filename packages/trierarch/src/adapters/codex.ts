@@ -167,7 +167,7 @@ export function createCodexHarness(options: {
 
   return {
     ...identity,
-    launch: async ({ shipId, folder, checkouts, harness, options: picked, isFirstStart, launchId, login, firstPrompt }) => {
+    launch: async ({ shipId, folder, harness, options: picked, isFirstStart, launchId, login, firstPrompt }) => {
       const settings = configuration.harnesses[harness];
       if (settings === undefined) {
         throw new Error(`The configuration has no harness ${harness}`);
@@ -179,8 +179,7 @@ export function createCodexHarness(options: {
       await options.setup.trust([folder]);
       await options.setup.trustAeolusHooks(folder);
       await marks.clear(folder);
-      // Codex reads outside its folder as it is: its read-only checkouts need no flag (#1182).
-      await sessions.start({ shipId, folder, command: wordsOf(command), harness, env: { [LAUNCH_VARIABLE]: launchId }, ...(route.proxyToken !== undefined && { proxyToken: route.proxyToken }), ...(checkouts.length > 0 && { readOnly: checkouts.map((checkout) => checkout.path) }) });
+      await sessions.start({ shipId, folder, command: wordsOf(command), harness, env: { [LAUNCH_VARIABLE]: launchId }, ...(route.proxyToken !== undefined && { proxyToken: route.proxyToken }), });
     },
     handOver: async (session) => {
       const line = await handOverLine(session);

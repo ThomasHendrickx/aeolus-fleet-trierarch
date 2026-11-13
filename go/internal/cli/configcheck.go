@@ -31,7 +31,7 @@ var adapters = map[string]launched{
 	"claude-code": {claudecode.AdapterFlags, func(flags []string, machine Machine, detected detection.Harness) ([]commandline.Part, []commandline.Part) {
 		// Without a folder the settings may decide per folder: the override is shown with when it applies.
 		override := claudecode.PlanOverride(flags, claudecode.DefaultModeOf(machine.ManagedSettings, claudecode.UserSettings(machine.HomeDirectory, variable(machine.Environ, "CLAUDE_CONFIG_DIR")), flags, ""), detected.PermissionModes)
-		return claudecode.CommandParts(flags, override, false, nil), claudecode.CommandParts(flags, override, true, nil)
+		return claudecode.CommandParts(flags, override, false), claudecode.CommandParts(flags, override, true)
 	}},
 	"codex": {codexharness.AdapterFlags, func(flags []string, machine Machine, detected detection.Harness) ([]commandline.Part, []commandline.Part) {
 		return codexharness.CommandParts(flags, prompt.First(firstPrompt), true), codexharness.CommandParts(flags, prompt.Wake(codexharness.WakeCommand), false)

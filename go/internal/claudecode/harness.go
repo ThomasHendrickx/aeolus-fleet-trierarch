@@ -200,13 +200,13 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	}
 	override := PlanOverride(flags, DefaultModeOf(h.Managed, h.userOf(entry), flags, entry.Folder), modes)
 	// --mcp-config takes every word up to the next flag, so it comes last.
-	command := append(CommandLine(flags, override, !isFirstStart && HasConversation(h.projectsOf(entry), entry.Folder), entry.ReadOnly), mcpFlags...)
+	command := append(CommandLine(flags, override, !isFirstStart && HasConversation(h.projectsOf(entry), entry.Folder)), mcpFlags...)
 	if err := h.pluginOf(entry).ClearLaunch(entry.Folder); err != nil {
 		return err
 	}
 	env[launchVariable] = launchID
 	env[claudeAiConnectorsVariable] = "false"
-	if err := h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, ShipFolder: entry.ShipFolder, Harness: "claude-code", Command: command, Env: env, ProxyToken: token, ReadOnly: entry.ReadOnly, Mcp: mcp}); err != nil {
+	if err := h.Runtime.Start(sessions.Start{ShipID: entry.ShipID, Folder: entry.Folder, ShipFolder: entry.ShipFolder, Harness: "claude-code", Command: command, Env: env, ProxyToken: token, Mcp: mcp}); err != nil {
 		return err
 	}
 	return h.Runtime.Send(entry.ShipID, UserLine(line))

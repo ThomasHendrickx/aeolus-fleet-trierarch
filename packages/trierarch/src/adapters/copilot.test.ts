@@ -87,7 +87,7 @@ function harness(at: { pluginRoot?: string | (() => Promise<string>); version?: 
 
 const shipId = newId('ship');
 const LAUNCH_ID = 'launch-1';
-const launchOf = (ship: ShipId) => ({ shipId: ship, shipName: 'scout', folder, harness: 'copilot', workspace: inRepositories('aeolus-fleet'), checkouts: [], launchId: LAUNCH_ID, login: 'subscription' }) as const;
+const launchOf = (ship: ShipId) => ({ shipId: ship, shipName: 'scout', folder, harness: 'copilot', workspace: inRepositories('aeolus-fleet'), launchId: LAUNCH_ID, login: 'subscription' }) as const;
 const ADAPTER_WORDS = ['--output-format=json', '--allow-all-tools', '--no-ask-user'];
 
 describe('Copilot as a harness: a turn per process (CC4)', () => {

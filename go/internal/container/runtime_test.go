@@ -76,11 +76,10 @@ func modeOf(t *testing.T, path string) os.FileMode {
 	return info.Mode().Perm()
 }
 
-func TestTheHoldRunsTheSessionInAContainerOfItsOwnSeeingOnlyItsFolderHomeSocketAndReadOnlyCheckouts(t *testing.T) {
+func TestTheHoldRunsTheSessionInAContainerOfItsOwnSeeingOnlyItsFolderHomeAndSocket(t *testing.T) {
 	r, _ := aContainerRuntime(t)
 	files := filesOf(t, r)
 	session := aSession("/worktrees/aeolus-fleet/scout")
-	session.ReadOnly = []string{"/checkouts/" + scout + "/skills"}
 
 	held, err := r.heldAs(session, files)
 
@@ -90,7 +89,6 @@ func TestTheHoldRunsTheSessionInAContainerOfItsOwnSeeingOnlyItsFolderHomeSocketA
 		"--memory-swap", "4g", "--memory", "4g", "--cpus", "2", "--pids-limit", "4096", "--userns=keep-id:uid=1000,gid=1000",
 		"--device", "/dev/fuse", "--device", "/dev/net/tun", "--cap-add", "SYS_ADMIN", "--security-opt", "unmask=ALL",
 		"--volume", "/worktrees/aeolus-fleet/scout:/worktrees/aeolus-fleet/scout", "--volume", home + ":/home/ubuntu", "--volume", sockets + ":" + sockets,
-		"--volume", "/checkouts/" + scout + "/skills:/checkouts/" + scout + "/skills:ro",
 		"--env", "HOME=/home/ubuntu", "--workdir", "/worktrees/aeolus-fleet/scout", "--env-file", filepath.Join(files.Folder, "session.env"),
 		"ghcr.io/thomashendrickx/aeolus-session:1.2.3", "claude", "-p",
 	}

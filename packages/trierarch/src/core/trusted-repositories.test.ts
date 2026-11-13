@@ -58,12 +58,12 @@ describe('the trusted repositories a trierarch receives', () => {
 });
 
 describe('the repositories a trierarch offers with the trusted repositories', () => {
-  const configured = { 'aeolus-fleet': { path: '/home/me/aeolus-fleet', checkouts: ['skills'] } };
+  const configured = { 'aeolus-fleet': { path: '/home/me/aeolus-fleet' } };
   const cloneOf = (name: string) => `/home/me/.aeolus/trierarch/repositories/${name}`;
 
   it('offers each trusted repository beside the configured ones, at its clone', () => {
     expect(offeredRepositories(configured, { trusted: [{ name: 'hemma', url: 'git@github.com:ThomasHendrickx/hemma.git' }], cloneOf })).toEqual({
-      'aeolus-fleet': { path: '/home/me/aeolus-fleet', checkouts: ['skills'] },
+      'aeolus-fleet': { path: '/home/me/aeolus-fleet' },
       hemma: { path: '/home/me/.aeolus/trierarch/repositories/hemma' },
     });
   });

@@ -529,6 +529,9 @@ func checkRuntime(at paths.Paths, configuration config.Configuration, machine Ma
 	if err := checkShipsPlace(at, configuration, runtime.GOOS); err != nil {
 		return err
 	}
+	if err := checkNoCheckouts(at, configuration); err != nil {
+		return err
+	}
 	refusals, err := container.Check(configuration, machine.ContainerHost(at.ModelToken), at.ModelToken)
 	if err != nil {
 		return err
@@ -537,6 +540,14 @@ func checkRuntime(at paths.Paths, configuration config.Configuration, machine Ma
 		return container.Refusal(at.Config, refusals)
 	}
 	return nil
+}
+
+// checkNoCheckouts refuses a configuration that still names checkouts: a ship's sub-repositories come from its crew request.
+func checkNoCheckouts(at paths.Paths, configuration config.Configuration) error {
+	if len(configuration.NamesCheckouts) == 0 {
+		return nil
+	}
+	return refused(nil, "The configuration at %s names checkouts in repository %s: remove that line; a ship's sub-repositories come from its crew request", at.Config, configuration.NamesCheckouts[0])
 }
 
 // checkShipsPlace refuses a configuration that still names worktreeRoot, and a place of ships/ where a ship's socket path would pass the system's limit: no socket could be opened there,

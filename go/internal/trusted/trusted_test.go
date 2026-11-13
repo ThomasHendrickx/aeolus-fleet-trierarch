@@ -107,7 +107,7 @@ func TestReadNamesTheRepositoryWhoseURLItRefuses(t *testing.T) {
 }
 
 func TestWithRepositoriesOffersEachTrustedRepositoryAtItsCloneBesideTheConfiguredOnes(t *testing.T) {
-	configured := config.Configuration{Repositories: map[string]config.Repository{"aeolus-fleet": {Path: "/home/me/aeolus-fleet", Checkouts: []string{"skills"}}}}
+	configured := config.Configuration{Repositories: map[string]config.Repository{"aeolus-fleet": {Path: "/home/me/aeolus-fleet"}}}
 	cloneOf := func(name string) string { return "/clones/" + name }
 
 	got := WithRepositories(configured, []Repository{{Name: "hemma", URL: "git@github.com:a/hemma.git"}}, cloneOf)
@@ -121,11 +121,11 @@ func TestWithRepositoriesOffersEachTrustedRepositoryAtItsCloneBesideTheConfigure
 }
 
 func TestWithRepositoriesKeepsAConfiguredRepositoryOfTheSameNameAsConfigured(t *testing.T) {
-	configured := config.Configuration{Repositories: map[string]config.Repository{"aeolus-fleet": {Path: "/home/me/aeolus-fleet", Checkouts: []string{"skills"}}}}
+	configured := config.Configuration{Repositories: map[string]config.Repository{"aeolus-fleet": {Path: "/home/me/aeolus-fleet"}}}
 
 	got := WithRepositories(configured, []Repository{{Name: "aeolus-fleet", URL: "https://github.com/a/b.git"}}, func(name string) string { return "/clones/" + name })
 
-	if repository := got.Repositories["aeolus-fleet"]; repository.Path != "/home/me/aeolus-fleet" || len(repository.Checkouts) != 1 {
+	if repository := got.Repositories["aeolus-fleet"]; repository.Path != "/home/me/aeolus-fleet" {
 		t.Errorf("aeolus-fleet = %v, want it as configured", repository)
 	}
 }
