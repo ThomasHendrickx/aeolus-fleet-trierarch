@@ -205,12 +205,13 @@ describe('the root files of a ship folder', () => {
 });
 
 /** Commits a skill to a repository: `<harnessFolder>/<skill>/SKILL.md` holding the content. */
-async function aSkill(repository: string, harnessFolder: '.claude/skills' | '.agents/skills', skill: string, content: string): Promise<void> {
+async function aSkill(of: { repository: string; at: `${'.claude' | '.agents'}/skills/${string}` }, content: string): Promise<void> {
+  const { repository, at } = of;
   const path = repositories[repository]?.path ?? '';
-  mkdirSync(join(path, harnessFolder, skill), { recursive: true });
-  writeFileSync(join(path, harnessFolder, skill, 'SKILL.md'), content);
+  mkdirSync(join(path, at), { recursive: true });
+  writeFileSync(join(path, at, 'SKILL.md'), content);
   await git(['-C', path, 'add', '.']);
-  await git(['-C', path, 'commit', '-q', '-m', `skill ${skill}`]);
+  await git(['-C', path, 'commit', '-q', '-m', `skill ${at}`]);
 }
 
 async function rootFilesOf(main: string, subRepositories: readonly string[] = []): Promise<string> {
@@ -222,10 +223,10 @@ async function rootFilesOf(main: string, subRepositories: readonly string[] = []
 
 describe('the skills at the root of a ship folder', () => {
   it('are one link per skill of main/ and of every sub-repository, under .claude/skills and .agents/skills, each to the skill in its repository', async () => {
-    await aSkill('aeolus-fleet', '.claude/skills', 'build', 'build\n');
-    await aSkill('aeolus-fleet', '.agents/skills', 'build', 'build\n');
-    await aSkill('tools', '.claude/skills', 'lint', 'lint\n');
-    await aSkill('skills', '.agents/skills', 'review', 'review\n');
+    await aSkill({ repository: 'aeolus-fleet', at: '.claude/skills/build' }, 'build\n');
+    await aSkill({ repository: 'aeolus-fleet', at: '.agents/skills/build' }, 'build\n');
+    await aSkill({ repository: 'tools', at: '.claude/skills/lint' }, 'lint\n');
+    await aSkill({ repository: 'skills', at: '.agents/skills/review' }, 'review\n');
 
     const made = await rootFilesOf('aeolus-fleet', ['tools', 'skills']);
 
@@ -239,8 +240,8 @@ describe('the skills at the root of a ship folder', () => {
   });
 
   it('are one link, and nothing said, for a skill name two repositories share with the same content', async () => {
-    await aSkill('aeolus-fleet', '.claude/skills', 'review', 'review\n');
-    await aSkill('tools', '.claude/skills', 'review', 'review\n');
+    await aSkill({ repository: 'aeolus-fleet', at: '.claude/skills/review' }, 'review\n');
+    await aSkill({ repository: 'tools', at: '.claude/skills/review' }, 'review\n');
 
     const made = await rootFilesOf('aeolus-fleet', ['tools']);
 
@@ -249,9 +250,9 @@ describe('the skills at the root of a ship folder', () => {
   });
 
   it('are no link for a skill name two repositories share with different content, and the root AGENTS.md names both and where they are and says to ask the ship\'s owner before using either', async () => {
-    await aSkill('aeolus-fleet', '.claude/skills', 'review', 'one way\n');
-    await aSkill('tools', '.claude/skills', 'review', 'another way\n');
-    await aSkill('tools', '.claude/skills', 'lint', 'lint\n');
+    await aSkill({ repository: 'aeolus-fleet', at: '.claude/skills/review' }, 'one way\n');
+    await aSkill({ repository: 'tools', at: '.claude/skills/review' }, 'another way\n');
+    await aSkill({ repository: 'tools', at: '.claude/skills/lint' }, 'lint\n');
 
     const made = await rootFilesOf('aeolus-fleet', ['tools']);
 
@@ -269,9 +270,9 @@ describe('the skills at the root of a ship folder', () => {
   });
 
   it('name every repository of a clash among three, and link none of them', async () => {
-    await aSkill('aeolus-fleet', '.agents/skills', 'review', 'same\n');
-    await aSkill('tools', '.agents/skills', 'review', 'same\n');
-    await aSkill('skills', '.agents/skills', 'review', 'different\n');
+    await aSkill({ repository: 'aeolus-fleet', at: '.agents/skills/review' }, 'same\n');
+    await aSkill({ repository: 'tools', at: '.agents/skills/review' }, 'same\n');
+    await aSkill({ repository: 'skills', at: '.agents/skills/review' }, 'different\n');
 
     const made = await rootFilesOf('aeolus-fleet', ['tools', 'skills']);
 
@@ -282,9 +283,9 @@ describe('the skills at the root of a ship folder', () => {
   });
 
   it('judge a skill name by each harness folder alone, so a clash under .claude/skills leaves .agents/skills linked', async () => {
-    await aSkill('aeolus-fleet', '.claude/skills', 'review', 'one way\n');
-    await aSkill('tools', '.claude/skills', 'review', 'another way\n');
-    await aSkill('tools', '.agents/skills', 'review', 'only here\n');
+    await aSkill({ repository: 'aeolus-fleet', at: '.claude/skills/review' }, 'one way\n');
+    await aSkill({ repository: 'tools', at: '.claude/skills/review' }, 'another way\n');
+    await aSkill({ repository: 'tools', at: '.agents/skills/review' }, 'only here\n');
 
     const made = await rootFilesOf('aeolus-fleet', ['tools']);
 
@@ -293,8 +294,8 @@ describe('the skills at the root of a ship folder', () => {
   });
 
   it('judge the content of a skill by every file in it, not its SKILL.md alone', async () => {
-    await aSkill('aeolus-fleet', '.claude/skills', 'review', 'same\n');
-    await aSkill('tools', '.claude/skills', 'review', 'same\n');
+    await aSkill({ repository: 'aeolus-fleet', at: '.claude/skills/review' }, 'same\n');
+    await aSkill({ repository: 'tools', at: '.claude/skills/review' }, 'same\n');
     writeFileSync(join(repositories.tools?.path ?? '', '.claude', 'skills', 'review', 'checklist.md'), 'extra\n');
     await git(['-C', repositories.tools?.path ?? '', 'add', '.']);
     await git(['-C', repositories.tools?.path ?? '', 'commit', '-q', '-m', 'checklist']);
@@ -306,7 +307,7 @@ describe('the skills at the root of a ship folder', () => {
   });
 
   it('are linked again at every start, over what the session left and for the repositories as they are now', async () => {
-    await aSkill('aeolus-fleet', '.claude/skills', 'build', 'build\n');
+    await aSkill({ repository: 'aeolus-fleet', at: '.claude/skills/build' }, 'build\n');
     const at = crew('aeolus-fleet');
     const { folder: made } = await workspace().prepare(at);
     await workspace().writeRootFiles({ folder: made, workspace: at.workspace });
@@ -327,7 +328,7 @@ describe('the skills at the root of a ship folder', () => {
   });
 
   it('follow a skill that is itself a link in its repository', async () => {
-    await aSkill('aeolus-fleet', '.agents/skills', 'build', 'build\n');
+    await aSkill({ repository: 'aeolus-fleet', at: '.agents/skills/build' }, 'build\n');
     mkdirSync(join(repositories['aeolus-fleet']?.path ?? '', '.claude', 'skills'), { recursive: true });
     symlinkSync('../../.agents/skills/build', join(repositories['aeolus-fleet']?.path ?? '', '.claude', 'skills', 'build'));
     await git(['-C', repositories['aeolus-fleet']?.path ?? '', 'add', '.']);
