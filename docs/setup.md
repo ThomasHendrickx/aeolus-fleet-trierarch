@@ -19,7 +19,7 @@ You need first:
 
 - the fleet's console and the trierarch plugin, which gives you the setup line (section 4);
 - a GitHub account that can read the repositories your ships work on;
-- a Claude Code or Codex login (a subscription or an API key) for each harness you offer.
+- a Claude Code or Codex subscription login for each harness you offer: `init` refuses a computer where no installed harness is signed in (section 3).
 
 Run everything as the user that will own the trierarch and its sessions. Every session runs as that user and can read what that user can, so give it a user of its own, not your daily one, and keep nothing on the computer that the sessions must not read.
 
@@ -72,7 +72,7 @@ gh auth setup-git
 
 A computer with no browser prints a link and a code to approve on another device. Run the sign-in inside `tmux` so it survives your connection dropping while you approve it.
 
-A session can run on the harness's subscription or on an API key. The subscription is what you signed in with. To use an API key, section 6 shows `aeolus-trierarch login`, once the trierarch is installed.
+`init` (section 4) runs `claude auth status` and `codex login status` and needs at least one installed harness to answer as signed in, so sign in with the harness's own login first. A session can then run on that login or on an API key; an API key is added after the install, with `aeolus-trierarch login` (section 6), and does not replace the sign-in `init` needs.
 
 You end with each harness answering a prompt as the trierarch's user, and `gh auth status` showing a login.
 
@@ -84,14 +84,14 @@ A trierarch never registers itself. In the console, ask the trierarch plugin for
 curl -fsSL https://raw.githubusercontent.com/ThomasHendrickx/aeolus-fleet-trierarch/main/install.sh | sh -s -- --fleet-url <url> --ship-id <id> --plugin-ship-id <ship> --secret <secret>
 ```
 
-Run it on the computer, as the trierarch's user. It:
+The line carries the flags `init` needs: `--fleet-url`, `--ship-id` and `--secret` are all required, and `--plugin-ship-id` is what lets the trierarch take the fleet's trusted repositories (section 5). `init` prompts for none of them. Run the line on the computer, as the trierarch's user. It:
 
 1. takes the binary for the computer's system and chip from the GitHub Release, checks it against the release's checksums and, when `gh` is installed, its attestation, and puts it in `~/.local/bin`;
 2. runs `aeolus-trierarch init`, which registers the ship, writes the configuration, answers the harnesses' one-time questions ahead of time, and installs and starts the service.
 
-The secret is on the setup line and in your shell history. To keep it out, run the install script with no flags and let `init` ask for the fleet URL, the ship id and the secret, without echoing the secret. Put `~/.local/bin` on the `PATH`. The other routes (a bare binary checked by hand, Homebrew) are in [trierarch.md](trierarch.md#a-machine-joins).
+`init` writes the secret nowhere: it keeps the ship's crew token in a file only the user reads. The secret is still on the setup line, so it is in your shell history; the setup line is the only route that carries it. Put `~/.local/bin` on the `PATH`. The other routes (a bare binary checked by hand, Homebrew) are in [trierarch.md](trierarch.md#a-machine-joins).
 
-`init` asks, in a short flow, for the repositories and folders ships may work in, whether each harness launches with its permission-skipping flag, and the caps. Section 5 and section 6 say what to answer. Run `aeolus-trierarch init` again any time to change them; it never registers a second time.
+`init` asks nothing else. When there is no configuration it writes one with the defaults: `caps` of 4 ships and 2 running, Claude Code with no flags, Codex too with no flags where it is installed, and no repository or folder. Section 5 adds the places and section 6 sets the flags and caps. Run with no flags, `aeolus-trierarch init` again goes on with a setup that did not finish and keeps the configuration as it is; it never registers a second time.
 
 Check it:
 
@@ -136,7 +136,7 @@ You end with the repositories a crew request can name, cloned, trusted and offer
 
 ## 6. Make sessions run unattended
 
-Nobody watches a session. Anything the harness asks before its first prompt stops it, so the configuration must answer those questions ahead of time. `init` does the harness's one-time questions (Claude Code's onboarding, trust for each place, Codex's hook review). The rest is the configuration in `~/.aeolus/trierarch/config.json`:
+Nobody watches a session. Anything the harness asks before its first prompt stops it, so the configuration must answer those questions ahead of time. `init` answers the harness's one-time questions (Claude Code's onboarding and trust for each place, Codex's trust and hook review). The rest is the configuration in `~/.aeolus/trierarch/config.json`, which `init` wrote with no flags: add the flags and set the caps there. A harness's entry reads:
 
 ```json
 {
@@ -150,7 +150,7 @@ Nobody watches a session. Anything the harness asks before its first prompt stop
 
 The advised defaults, and the risk of each:
 
-- **`--dangerously-skip-permissions` (Claude Code) and `--dangerously-bypass-approvals-and-sandbox` (Codex).** Without them, a session stops at the first tool it needs to ask about, and nobody answers. With them, a session can run any command as the trierarch's user, so everything that user can read, it can. This is why section 1 says to give the trierarch a user of its own. `init` asks about these flags and about accepting bypass permissions mode for Claude Code; answering yes is your consent.
+- **`--dangerously-skip-permissions` (Claude Code) and `--dangerously-bypass-approvals-and-sandbox` (Codex).** Without them, a session stops at the first tool it needs to ask about, and nobody answers. With them, a session can run any command as the trierarch's user, so everything that user can read, it can. This is why section 1 says to give the trierarch a user of its own. `init` adds neither flag: putting them in `config.json` is your consent.
 - **`caps.ships`** is how many ships the computer takes, **`caps.running`** how many sessions run at once. A session uses memory, CPU and model usage. Set them to what the computer carries, and keep `running` at or below `ships`.
 - **`--remote-control` is refused**, on every runtime. `config check` says so.
 
@@ -177,8 +177,17 @@ The key stays on the computer, in a file only the user reads; it is never in the
 
 By default a session runs on the computer as the trierarch's user. A computer can run each session in a container of its own instead, with its own home and only its ship folder mounted, so a session reaches nothing else of the computer. Containers need a rootless runtime: Podman on Linux, Colima on macOS. A user in the `docker` group is never used.
 
-1. Install Podman (with `passt`, the network that gives a container the model proxy's port and nothing else of the host) on Linux, or Colima on macOS.
-2. Point the user's tools at the runtime's socket. On Linux:
+1. Install the runtime. On Linux, Podman with `passt`, the network that gives a container the model proxy's port and nothing else of the host. On macOS, Colima and the Docker command-line client, which the trierarch calls as `docker`:
+
+   ```sh
+   brew install colima docker
+   colima start
+   docker context use colima
+   docker info
+   ```
+
+   `docker info` must answer. The trierarch asks the runtime with `docker info` and refuses one that does not answer or runs rootful, so `config check` (step 5) is the judge of your Colima.
+2. On Linux, point the user's tools at Podman's socket. On macOS skip this step: the Colima context is the pointer.
 
    ```sh
    systemctl --user enable --now podman.socket
@@ -187,7 +196,7 @@ By default a session runs on the computer as the trierarch's user. A computer ca
 
    Put the `export` in `~/.profile`, and in `~/.config/environment.d/60-podman.conf` as `DOCKER_HOST=unix:///run/user/<uid>/podman/podman.sock` with the number in place of `<uid>`, so the service and its sessions see it too, from the next start of the user's service manager.
 3. Create the computer's long-lived model token with `claude setup-token` and keep it in `~/.aeolus/trierarch/model-token`, mode 600. It is never in `config.json`.
-4. Set the runtime in `config.json`:
+4. Set the runtime in `config.json`, `"binary": "podman"` on Linux and `"binary": "docker"` on macOS:
 
    ```json
    { "runtime": { "kind": "container", "binary": "podman", "memory": "4g", "cpus": 2 } }
