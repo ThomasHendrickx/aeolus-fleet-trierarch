@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { NO_TERMINAL_QUESTIONS, type ShipId, type TrierarchConfiguration } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
+import { CONFIGURATION, newId, inRepositories } from '../../test/support/in-memory.js';
 import { COPILOT_ADAPTER_FLAGS, copilotSessionIdOf, copilotTurnCommand, createCopilotHarness } from './copilot.js';
 import { runCommand } from './run-command.js';
 
@@ -87,7 +87,7 @@ function harness(at: { pluginRoot?: string | (() => Promise<string>); version?: 
 
 const shipId = newId('ship');
 const LAUNCH_ID = 'launch-1';
-const launchOf = (ship: ShipId) => ({ shipId: ship, shipName: 'scout', folder, harness: 'copilot', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, checkouts: [], launchId: LAUNCH_ID, login: 'subscription' }) as const;
+const launchOf = (ship: ShipId) => ({ shipId: ship, shipName: 'scout', folder, harness: 'copilot', workspace: inRepositories('aeolus-fleet'), checkouts: [], launchId: LAUNCH_ID, login: 'subscription' }) as const;
 const ADAPTER_WORDS = ['--output-format=json', '--allow-all-tools', '--no-ask-user'];
 
 describe('Copilot as a harness: a turn per process (CC4)', () => {

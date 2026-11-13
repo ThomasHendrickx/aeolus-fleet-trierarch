@@ -21,7 +21,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
 )
@@ -274,23 +273,51 @@ func (p Places) prepare(entry reconciler.Entry, shipName string) (string, error)
 		}
 		return folder, nil
 	}
-	repository, ok := p.Repositories[entry.Workspace.Repository]
-	if !ok {
-		return "", fmt.Errorf("the configuration has no repository %s", entry.Workspace.Repository)
+	if entry.ShipFolder == "" {
+		return "", errors.New("a ship folder is made only in its ship's folder")
 	}
-	if p.Clone != nil {
-		if err := p.Clone(entry.Workspace.Repository, repository); err != nil {
-			return "", err
+	makeOne := func(named reconciler.RepositoryAt, folder string) error {
+		repository, ok := p.Repositories[named.Repository]
+		if !ok {
+			return fmt.Errorf("the configuration has no repository %s", named.Repository)
 		}
+		if p.Clone != nil {
+			if err := p.Clone(named.Repository, repository); err != nil {
+				return err
+			}
+		}
+		at := Worktree{Root: p.before(), Repository: named.Repository, Path: repository, ShipName: shipName, Ref: named.Ref, Folder: folder}
+		var err error
+		if p.IsClone {
+			_, err = PrepareClone(at)
+		} else {
+			_, err = Prepare(at)
+		}
+		return err
 	}
-	at := Worktree{Root: p.before(), Repository: entry.Workspace.Repository, Path: repository, ShipName: shipName, Ref: entry.Workspace.Ref}
-	if entry.ShipFolder != "" {
-		at.Folder = filepath.Join(entry.ShipFolder, paths.WorktreeFolder)
+	return prepareShipFolder(entry.ShipFolder, entry.Workspace, entry.MadeMain, makeOne, p.MoveWithinUserNamespace)
+}
+
+// WriteRootFiles writes the ship folder's root files again, as at every start; nothing for a configured folder.
+func (p Places) WriteRootFiles(entry reconciler.Entry) error {
+	return WriteRootFiles(entry.Folder, entry.Workspace)
+}
+
+// UnsavedInShipFolder is what removing each repository the ship folder holds would discard, as Unsaved says it, by the repository's folder.
+func (p Places) UnsavedInShipFolder(folder string) ([]Held, error) {
+	folders, err := repositoryFoldersIn(folder)
+	if err != nil {
+		return nil, fmt.Errorf("read what the ship folder %s holds: %w", folder, err)
 	}
-	if p.IsClone {
-		return PrepareClone(at)
+	held := []Held{}
+	for _, each := range folders {
+		unsaved, err := p.Unsaved(each)
+		if err != nil {
+			return nil, err
+		}
+		held = append(held, Held{Folder: each, Unsaved: unsaved})
 	}
-	return Prepare(at)
+	return held, nil
 }
 
 // Unsaved is what the ship's worktree, or its clone, holds that no remote, branch or tag has. What a clone holds is not known when
@@ -346,19 +373,20 @@ func (p Places) Remove(entry reconciler.Entry) error {
 	if entry.ShipFolder != "" {
 		return p.removeShipFolder(entry.ShipFolder)
 	}
-	if entry.Workspace.Kind != "worktree" || entry.Folder == "" {
+	if entry.Workspace.Kind != "repositories" || entry.Folder == "" {
 		return nil
 	}
 	if p.IsClone {
 		return p.RemoveWorktree(entry.Folder)
 	}
-	repository, ok := p.Repositories[entry.Workspace.Repository]
+	name := entry.Workspace.Main.Repository
+	repository, ok := p.Repositories[name]
 	if !ok && p.ClonedPath != nil {
 		// A clone whose repository left the trusted repositories still holds the worktrees made from it.
-		repository, ok = p.ClonedPath(entry.Workspace.Repository)
+		repository, ok = p.ClonedPath(name)
 	}
 	if !ok {
-		return fmt.Errorf("the configuration has no repository %s to remove %s from", entry.Workspace.Repository, entry.Folder)
+		return fmt.Errorf("the configuration has no repository %s to remove %s from", name, entry.Folder)
 	}
 	return Remove(repository, entry.Folder)
 }

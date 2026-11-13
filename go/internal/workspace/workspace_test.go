@@ -122,14 +122,17 @@ func TestAWorktreeIsRemovedWhateverItHolds(t *testing.T) {
 	}
 }
 
-func TestAShipsWorktreeIsMadeFromItsConfiguredRepository(t *testing.T) {
+func TestAShipsMainRepositoryIsAWorktreeOfItsConfiguredRepositoryAndGoesWithItsShipsFolder(t *testing.T) {
 	repository, root := aRepository(t)
 	places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}, Folders: map[string]string{}}
-	entry := reconciler.Entry{Workspace: reconciler.Workspace{Kind: "worktree", Repository: "aeolus-fleet"}}
+	entry := reconciler.Entry{ShipFolder: places.ShipFolderOf("shp_scout"), Workspace: reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: "aeolus-fleet"}}}
 
 	folder, err := places.Prepare(entry, "scout")
-	if err != nil || folder != filepath.Join(root, "aeolus-fleet", "scout") {
+	if err != nil || folder != filepath.Join(root, "shp_scout", ShipFolderName) {
 		t.Fatalf("folder %s, %v", folder, err)
+	}
+	if listed := gitIn(t, "-C", repository, "worktree", "list"); !strings.Contains(listed, filepath.Join(folder, MainFolder)) {
+		t.Fatalf("git lists %s, want main/ a worktree of the repository", listed)
 	}
 	entry.Folder = folder
 	if err := places.Remove(entry); err != nil {
@@ -161,7 +164,7 @@ func TestAConfiguredFolderIsUsedAsItIsAndNeverRemoved(t *testing.T) {
 func TestARepositoryNotConfiguredIsSaid(t *testing.T) {
 	places := Places{Root: t.TempDir(), Repositories: map[string]string{}, Folders: map[string]string{}}
 
-	if _, err := places.Prepare(reconciler.Entry{Workspace: reconciler.Workspace{Kind: "worktree", Repository: "website"}}, "scout"); err == nil {
+	if _, err := places.Prepare(reconciler.Entry{Workspace: reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: "website"}}}, "scout"); err == nil {
 		t.Fatalf("a worktree of a repository not configured")
 	}
 }
@@ -175,11 +178,11 @@ func TestATrustedRepositoryIsClonedBeforeItsFirstWorktreeIsMade(t *testing.T) {
 		gitIn(t, "clone", "-q", source, path)
 		return nil
 	}}
-	entry := reconciler.Entry{Workspace: reconciler.Workspace{Kind: "worktree", Repository: "hemma"}}
+	entry := reconciler.Entry{ShipFolder: places.ShipFolderOf("shp_scout"), Workspace: reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: "hemma"}}}
 
 	folder, err := places.Prepare(entry, "scout")
 
-	if err != nil || folder != filepath.Join(root, "hemma", "scout") {
+	if err != nil || folder != filepath.Join(root, "shp_scout", ShipFolderName) {
 		t.Fatalf("folder %s, %v", folder, err)
 	}
 	if !slices.Equal(cloned, []string{"hemma at " + clone}) {
@@ -193,12 +196,12 @@ func TestACloneThatFailsFailsTheWorkspaceWithItsReasonAndMakesNoWorktree(t *test
 		return os.ErrPermission
 	}}
 
-	_, err := places.Prepare(reconciler.Entry{Workspace: reconciler.Workspace{Kind: "worktree", Repository: "hemma"}}, "scout")
+	_, err := places.Prepare(reconciler.Entry{ShipFolder: places.ShipFolderOf("shp_scout"), Workspace: reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: "hemma"}}}, "scout")
 
 	if err == nil || err.Error() != os.ErrPermission.Error() {
 		t.Errorf("Prepare = %v, want the clone's failure", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "hemma", "scout")); err == nil {
+	if _, err := os.Stat(filepath.Join(root, "shp_scout", ShipFolderName, MainFolder)); err == nil {
 		t.Error("a worktree was made though the clone failed")
 	}
 }
@@ -211,7 +214,7 @@ func TestAWorktreeOfARepositoryThatLeftTheListIsRemovedFromItsClone(t *testing.T
 		return clone, repository == "hemma"
 	}}
 
-	err := places.Remove(reconciler.Entry{Workspace: reconciler.Workspace{Kind: "worktree", Repository: "hemma"}, Folder: folder})
+	err := places.Remove(reconciler.Entry{Workspace: reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: "hemma"}}, Folder: folder})
 
 	if err != nil {
 		t.Fatal(err)
@@ -231,13 +234,13 @@ func TestInContainersAShipsFolderIsItsRealPathWhichTheContainerMountsAsTheHostKe
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := reconciler.Entry{Workspace: reconciler.Workspace{Kind: "worktree", Repository: "aeolus-fleet"}}
+	entry := reconciler.Entry{ShipFolder: filepath.Join(linked, "shp_scout"), Workspace: reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: "aeolus-fleet"}}}
 
 	for _, isByRealPath := range []bool{false, true} {
 		places := Places{Root: linked, Repositories: map[string]string{"aeolus-fleet": repository}, IsByRealPath: isByRealPath}
-		want := filepath.Join(linked, "aeolus-fleet", "scout")
+		want := filepath.Join(linked, "shp_scout", ShipFolderName)
 		if isByRealPath {
-			want = filepath.Join(real, "aeolus-fleet", "scout")
+			want = filepath.Join(real, "shp_scout", ShipFolderName)
 		}
 
 		if folder, err := places.Prepare(entry, "scout"); err != nil || folder != want {
@@ -630,19 +633,19 @@ func TestTheBranchDeletionOfARepositoryTheConfigurationDoesNotHaveFails(t *testi
 
 // aShipCrewedFresh is an entry of a ship crewed fresh in a worktree of the repository, its ship's folder under the place of ships/.
 func aShipCrewedFresh(places Places) reconciler.Entry {
-	return reconciler.Entry{ShipID: "shp_scout", ShipFolder: places.ShipFolderOf("shp_scout"), Workspace: reconciler.Workspace{Kind: "worktree", Repository: "aeolus-fleet"}}
+	return reconciler.Entry{ShipID: "shp_scout", ShipFolder: places.ShipFolderOf("shp_scout"), Workspace: reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: "aeolus-fleet"}}}
 }
 
-func TestAShipCrewedFreshHasItsWorktreeInItsShipsFolder(t *testing.T) {
+func TestAShipCrewedFreshHasItsShipFolderInItsShipsFolder(t *testing.T) {
 	repository, ships := aRepository(t)
 	places := Places{Root: ships, Repositories: map[string]string{"aeolus-fleet": repository}}
 
 	folder, err := places.Prepare(aShipCrewedFresh(places), "scout")
 
-	if err != nil || folder != filepath.Join(ships, "shp_scout", "worktree") {
-		t.Fatalf("Prepare = %q, %v; want %q", folder, err, filepath.Join(ships, "shp_scout", "worktree"))
+	if err != nil || folder != filepath.Join(ships, "shp_scout", ShipFolderName) {
+		t.Fatalf("Prepare = %q, %v; want %q", folder, err, filepath.Join(ships, "shp_scout", ShipFolderName))
 	}
-	if _, err := os.Stat(filepath.Join(folder, "README.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(folder, MainFolder, "README.md")); err != nil {
 		t.Fatalf("the worktree holds no checkout: %v", err)
 	}
 }
@@ -653,10 +656,10 @@ func TestInContainersAShipCrewedFreshHasItsCloneInItsShipsFolder(t *testing.T) {
 
 	folder, err := places.Prepare(aShipCrewedFresh(places), "scout")
 
-	if err != nil || folder != filepath.Join(ships, "shp_scout", "worktree") {
+	if err != nil || folder != filepath.Join(ships, "shp_scout", ShipFolderName) {
 		t.Fatalf("Prepare = %q, %v", folder, err)
 	}
-	if found, err := os.Stat(filepath.Join(folder, ".git")); err != nil || !found.IsDir() {
+	if found, err := os.Stat(filepath.Join(folder, MainFolder, ".git")); err != nil || !found.IsDir() {
 		t.Fatalf("the clone has no .git of its own: %v", err)
 	}
 }
@@ -729,16 +732,24 @@ func TestTheShipsFolderOfAShipInAConfiguredFolderGoesAndTheConfiguredFolderStays
 	}
 }
 
-func TestAShipCrewedBeforeTheShipFoldersKeepsItsWorktreeUnderTheRootItWasMadeIn(t *testing.T) {
+func TestAShipFolderIsMadeOnlyInAShipsFolder(t *testing.T) {
 	repository, ships := aRepository(t)
 	before := t.TempDir()
 	places := Places{Root: ships, Before: before, Repositories: map[string]string{"aeolus-fleet": repository}}
-	entry := reconciler.Entry{ShipID: "shp_scout", Workspace: reconciler.Workspace{Kind: "worktree", Repository: "aeolus-fleet"}}
+	entry := reconciler.Entry{ShipID: "shp_scout", Workspace: reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: "aeolus-fleet"}}}
 
-	folder, err := places.Prepare(entry, "scout")
-	if err != nil || folder != filepath.Join(before, "aeolus-fleet", "scout") {
-		t.Fatalf("Prepare = %q, %v", folder, err)
+	if folder, err := places.Prepare(entry, "scout"); err == nil {
+		t.Fatalf("Prepare = %q, want a ship folder made only in a ship's folder", folder)
 	}
+}
+
+func TestTheWorktreeOfAShipCrewedBeforeTheShipFoldersIsRemovedUnderTheRootItWasMadeIn(t *testing.T) {
+	repository, ships := aRepository(t)
+	before := t.TempDir()
+	places := Places{Root: ships, Before: before, Repositories: map[string]string{"aeolus-fleet": repository}}
+	folder := filepath.Join(before, "aeolus-fleet", "scout")
+	gitIn(t, "-C", repository, "worktree", "add", "-q", "--detach", folder)
+	entry := reconciler.Entry{ShipID: "shp_scout", Workspace: reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: "aeolus-fleet"}}, IsOldLayout: true}
 	entry.Folder = folder
 	if err := places.Remove(entry); err != nil {
 		t.Fatal(err)

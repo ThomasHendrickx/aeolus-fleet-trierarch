@@ -56,7 +56,8 @@ const keptFile = (): string => join(machine.trierarchHome, 'trusted-repositories
 const keptList = (): unknown => (existsSync(keptFile()) ? JSON.parse(readFileSync(keptFile(), 'utf8')) : undefined);
 const cloneOf = (name: string): string => join(machine.trierarchHome, 'repositories', name);
 /** A ship's worktree, in its ship's folder whatever repository it is of. */
-const worktreeOf = (shipId: ShipId): string => join(machine.trierarchHome, 'ships', shipId, 'worktree');
+/** The ship folder its session starts in. */
+const shipFolderOf = (shipId: ShipId): string => join(machine.trierarchHome, 'ships', shipId, 'repositories');
 
 /** The repositories the trierarch reports it offers. */
 async function offeredRepositories(): Promise<readonly string[]> {
@@ -131,9 +132,9 @@ describe('the trusted repositories', () => {
     await aListWaitingOffered(anSshRepository());
     const scout = await fleet.commission('scout');
 
-    await fleet.crewInWorktree(scout, { repository: TOOLS, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: TOOLS, harness: 'claude-code' });
 
-    await expect.poll(() => existsSync(join(worktreeOf(scout), 'fake-starts.jsonl')), { timeout: ANSWERED_WITHIN_MS }).toBe(true);
+    await expect.poll(() => existsSync(join(shipFolderOf(scout), 'fake-starts.jsonl')), { timeout: ANSWERED_WITHIN_MS }).toBe(true);
     expect(existsSync(join(cloneOf(TOOLS), 'README.md'))).toBe(true);
     expect(existsSync(`${cloneOf(TOOLS)}.partial`)).toBe(false);
   });
@@ -144,16 +145,16 @@ describe('the trusted repositories', () => {
     expect(restarted.status, restarted.stdout + restarted.stderr).toBe(0);
     const scout = await fleet.commission('scout');
 
-    await fleet.crewInWorktree(scout, { repository: TOOLS, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: TOOLS, harness: 'claude-code' });
 
-    await expect.poll(() => existsSync(join(worktreeOf(scout), 'fake-starts.jsonl')), { timeout: ANSWERED_WITHIN_MS }).toBe(true);
+    await expect.poll(() => existsSync(join(shipFolderOf(scout), 'fake-starts.jsonl')), { timeout: ANSWERED_WITHIN_MS }).toBe(true);
   });
 
   it('says why a clone failed and leaves no half clone', async () => {
     await aListWaitingOffered('ssh://git@origin.example.test/nowhere/at/all.git');
     const scout = await fleet.commission('scout');
 
-    await fleet.crewInWorktree(scout, { repository: TOOLS, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: TOOLS, harness: 'claude-code' });
 
     await expect.poll(() => machine.serviceLog(), { timeout: ANSWERED_WITHIN_MS }).toContain('git clone of tools failed');
     expect(existsSync(cloneOf(TOOLS))).toBe(false);
@@ -165,10 +166,10 @@ describe('the trusted repositories', () => {
     await expect.poll(keptList, { timeout: ANSWERED_WITHIN_MS }).toBeDefined();
     const scout = await fleet.commission('scout');
 
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
 
-    await expect.poll(() => existsSync(join(worktreeOf(scout), 'fake-starts.jsonl')), { timeout: ANSWERED_WITHIN_MS }).toBe(true);
+    await expect.poll(() => existsSync(join(shipFolderOf(scout), 'fake-starts.jsonl')), { timeout: ANSWERED_WITHIN_MS }).toBe(true);
     expect(existsSync(cloneOf(REPOSITORY))).toBe(false);
-    expect(execFileSync('git', ['-C', worktreeOf(scout), 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' }).trim()).toBe(join(realpathSync(machine.repository), '.git'));
+    expect(execFileSync('git', ['-C', join(shipFolderOf(scout), 'main'), 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' }).trim()).toBe(join(realpathSync(machine.repository), '.git'));
   });
 });

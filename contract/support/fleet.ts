@@ -8,6 +8,16 @@ import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, 
  * it crews, and reads what core keeps. Only core is in process; the
  * trierarch under test reaches it at `url`, as any other program does.
  */
+/** A ship folder's repositories, by their names in the configuration, and the harness to crew it with. */
+export interface RepositoriesAt {
+  readonly main: string;
+  readonly subRepositories?: readonly string[];
+  readonly harness: string;
+}
+
+/** The workspace a crew request names for a ship folder of the repositories. */
+const repositoriesOf = (at: RepositoriesAt) => ({ kind: 'repositories' as const, main: { repository: at.main }, subRepositories: (at.subRepositories ?? []).map((repository) => ({ repository })) });
+
 export interface Fleet {
   readonly url: string;
   readonly useCases: UseCases;
@@ -17,12 +27,12 @@ export interface Fleet {
   readonly trierarchShip: { readonly shipId: ShipId; readonly secret: string };
   /** Commissions a ship argo can request a crew for; with `owner`, a ship of that name answers for it instead of argo; with `scopes`, the ship holds them. */
   commission(name: string, at?: { owner?: ShipId; scopes?: readonly string[] }): Promise<ShipId>;
-  /** Requests a crew for the ship in a worktree of the repository, with the harness and the options given, and assigns it to the machine's trierarch. */
-  crewInWorktree(shipId: ShipId, at: { repository: string; harness: string; options?: Readonly<Record<string, string>> }): Promise<void>;
+  /** Requests a crew for the ship in a ship folder of the main repository and the sub-repositories given, none without, with the harness and the options given, and assigns it to the machine's trierarch. */
+  crewInRepositories(shipId: ShipId, at: RepositoriesAt & { options?: Readonly<Record<string, string>> }): Promise<void>;
   /** Requests a crew for the ship in the configured folder, with the harness given, and assigns it to the machine's trierarch. */
   crewInFolder(shipId: ShipId, at: { folder: string; harness: string }): Promise<void>;
-  /** Requests the ship's crew again in a worktree of the repository, with the harness given: a new settings version, its assignment kept. */
-  requestCrewAgainInWorktree(shipId: ShipId, at: { repository: string; harness: string }): Promise<void>;
+  /** Requests the ship's crew again in a ship folder of the main repository and the sub-repositories given, with the harness given: a new settings version, its assignment kept. */
+  requestCrewAgainInRepositories(shipId: ShipId, at: RepositoriesAt): Promise<void>;
   /** Removes the ship's crew request: its lease ends. */
   removeCrewRequest(shipId: ShipId): Promise<void>;
   /** Ends the ship's lease under its session while its crew request stands, as the console's Re-crew does. */
@@ -106,16 +116,16 @@ export async function aFleet(): Promise<Fleet> {
       }
       return shipId;
     },
-    crewInWorktree: async (shipId, { repository, harness, options = {} }) => {
-      unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness, workspace: { kind: 'worktree', repository }, options } }));
+    crewInRepositories: async (shipId, { options = {}, ...at }) => {
+      unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness: at.harness, workspace: repositoriesOf(at), options } }));
       unwrap(await useCases.assignCrew(argo, { shipId, trierarchShipId: trierarchShip.shipId }));
     },
     crewInFolder: async (shipId, { folder, harness }) => {
       unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness, workspace: { kind: 'folder', name: folder }, options: {} } }));
       unwrap(await useCases.assignCrew(argo, { shipId, trierarchShipId: trierarchShip.shipId }));
     },
-    requestCrewAgainInWorktree: async (shipId, { repository, harness }) => {
-      unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness, workspace: { kind: 'worktree', repository }, options: {} } }));
+    requestCrewAgainInRepositories: async (shipId, at) => {
+      unwrap(await useCases.requestCrew(argo, { shipId, settings: { harness: at.harness, workspace: repositoriesOf(at), options: {} } }));
     },
     removeCrewRequest: async (shipId) => {
       unwrap(await useCases.removeCrewRequest(argo, { shipId }));

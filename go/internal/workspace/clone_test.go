@@ -16,7 +16,7 @@ func clonePlaces(repository string, root string, notes string) Places {
 	return Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}, Folders: map[string]string{"notes": notes}, IsClone: true}
 }
 
-var scoutInAeolusFleet = reconciler.Entry{Workspace: reconciler.Workspace{Kind: "worktree", Repository: "aeolus-fleet"}}
+var scoutInAeolusFleet = reconciler.Entry{Workspace: reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: "aeolus-fleet"}}}
 
 // withUpstream gives the repository an upstream as its origin, fetched, and answers its path.
 func withUpstream(t *testing.T, repository string) string {
@@ -37,12 +37,27 @@ func commitIn(t *testing.T, folder string, file string) {
 	gitIn(t, "-C", folder, "commit", "-q", "-m", file)
 }
 
+// prepared is the main repository of the ship folder the places make for the entry, in the ship's folder of `shp_<shipName>` when the
+// entry names none; a configured folder as it is.
 func prepared(t *testing.T, places Places, entry reconciler.Entry, shipName string) string {
 	t.Helper()
+	if entry.ShipFolder == "" {
+		entry.ShipFolder = places.ShipFolderOf("shp_" + shipName)
+	}
 	folder, err := places.Prepare(entry, shipName)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if entry.Workspace.Kind != "repositories" {
+		return folder
+	}
+	return filepath.Join(folder, MainFolder)
+}
+
+// aCloneAt is a clone of the repository at the folder, as one a trierarch made under its root before the ship folders.
+func aCloneAt(t *testing.T, repository string, folder string) string {
+	t.Helper()
+	gitIn(t, "clone", "-q", repository, folder)
 	return folder
 }
 
@@ -51,12 +66,12 @@ func revision(t *testing.T, folder string, ref string) string {
 	return strings.TrimSpace(gitIn(t, "-C", folder, "rev-parse", ref))
 }
 
-func TestACloneIsMadeUnderTheRootOneFolderPerShipDetachedAtHead(t *testing.T) {
+func TestACloneIsMadeAsTheMainOfTheShipFolderInItsShipsFolderDetachedAtHead(t *testing.T) {
 	repository, root := aRepository(t)
 
 	folder := prepared(t, clonePlaces(repository, root, t.TempDir()), scoutInAeolusFleet, "scout")
 
-	if want := filepath.Join(root, "aeolus-fleet", "scout"); folder != want {
+	if want := filepath.Join(root, "shp_scout", ShipFolderName, MainFolder); folder != want {
 		t.Errorf("Prepare = %s, want %s", folder, want)
 	}
 	if got := strings.TrimSpace(gitIn(t, "-C", folder, "rev-parse", "--abbrev-ref", "HEAD")); got != "HEAD" {
@@ -128,7 +143,7 @@ func TestACloneIsMadeAtTheRefItsRequestNames(t *testing.T) {
 	repository, root := aRepository(t)
 	gitIn(t, "-C", repository, "tag", "v1")
 	commitIn(t, repository, "later.md")
-	entry := reconciler.Entry{Workspace: reconciler.Workspace{Kind: "worktree", Repository: "aeolus-fleet", Ref: "v1"}}
+	entry := reconciler.Entry{Workspace: reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: "aeolus-fleet", Ref: "v1"}}}
 
 	folder := prepared(t, clonePlaces(repository, root, t.TempDir()), entry, "scout")
 
@@ -144,7 +159,7 @@ func TestACloneIsMadeFromTheRemoteBranchForARefFetchedFirst(t *testing.T) {
 	gitIn(t, "clone", "-q", upstream, current)
 	commitIn(t, current, "current.md")
 	gitIn(t, "-C", current, "push", "-q", "origin", "main")
-	entry := reconciler.Entry{Workspace: reconciler.Workspace{Kind: "worktree", Repository: "aeolus-fleet", Ref: "main"}}
+	entry := reconciler.Entry{Workspace: reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: "aeolus-fleet", Ref: "main"}}}
 
 	folder := prepared(t, clonePlaces(repository, root, t.TempDir()), entry, "scout")
 
@@ -156,7 +171,7 @@ func TestACloneIsMadeFromTheRemoteBranchForARefFetchedFirst(t *testing.T) {
 func TestACloneIsMadeFromWhatTheRepositoryHasWhenItsRemoteCannotBeFetched(t *testing.T) {
 	repository, root := aRepository(t)
 	gitIn(t, "-C", repository, "remote", "add", "origin", filepath.Join(t.TempDir(), "gone"))
-	entry := reconciler.Entry{Workspace: reconciler.Workspace{Kind: "worktree", Repository: "aeolus-fleet", Ref: "main"}}
+	entry := reconciler.Entry{Workspace: reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: "aeolus-fleet", Ref: "main"}}}
 
 	folder := prepared(t, clonePlaces(repository, root, t.TempDir()), entry, "scout")
 
@@ -185,7 +200,7 @@ func TestWhatACloneHoldsUnsavedIsItsChangesAndItsCommitsNoBranchTagOrRemoteBranc
 	repository, root := aRepository(t)
 	withUpstream(t, repository)
 	places := clonePlaces(repository, root, t.TempDir())
-	folder := prepared(t, places, reconciler.Entry{Workspace: reconciler.Workspace{Kind: "worktree", Repository: "aeolus-fleet", Ref: "main"}}, "scout")
+	folder := prepared(t, places, reconciler.Entry{Workspace: reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: "aeolus-fleet", Ref: "main"}}}, "scout")
 	if unsaved, err := places.Unsaved(folder); err != nil || len(unsaved) != 0 {
 		t.Fatalf("a fresh clone holds unsaved %v, %v", unsaved, err)
 	}
@@ -211,6 +226,7 @@ func TestAShipsCloneIsRemovedWithItsEntry(t *testing.T) {
 	repository, root := aRepository(t)
 	places := clonePlaces(repository, root, t.TempDir())
 	entry := scoutInAeolusFleet
+	entry.ShipFolder = places.ShipFolderOf("shp_scout")
 	entry.Folder = prepared(t, places, entry, "scout")
 
 	if err := places.Remove(entry); err != nil {
@@ -224,7 +240,7 @@ func TestAShipsCloneIsRemovedWithItsEntry(t *testing.T) {
 func TestACloneIsRemovedByItsPath(t *testing.T) {
 	repository, root := aRepository(t)
 	places := clonePlaces(repository, root, t.TempDir())
-	folder := prepared(t, places, scoutInAeolusFleet, "scout")
+	folder := aCloneAt(t, repository, filepath.Join(root, "aeolus-fleet", "scout"))
 
 	if err := places.RemoveWorktree(folder); err != nil {
 		t.Fatal(err)
@@ -237,7 +253,7 @@ func TestACloneIsRemovedByItsPath(t *testing.T) {
 func TestACloneHoldingWhatTheHostCannotRemoveLeavesItsShipsPlaceForTheTrash(t *testing.T) {
 	repository, root := aRepository(t)
 	places := clonePlaces(repository, root, t.TempDir())
-	folder := prepared(t, places, scoutInAeolusFleet, "scout")
+	folder := aCloneAt(t, repository, filepath.Join(root, "aeolus-fleet", "scout"))
 	trashtest.Unremovable(t, root, folder)
 
 	if err := places.RemoveWorktree(folder); err != nil {
@@ -254,7 +270,7 @@ func TestACloneHoldingWhatTheHostCannotRemoveLeavesItsShipsPlaceForTheTrash(t *t
 func TestACloneWhoseOwnTopFolderItsSessionMadeReadOnlyLeavesItsShipsPlaceForTheTrash(t *testing.T) {
 	repository, root := aRepository(t)
 	places := clonePlaces(repository, root, t.TempDir())
-	folder := prepared(t, places, scoutInAeolusFleet, "scout")
+	folder := aCloneAt(t, repository, filepath.Join(root, "aeolus-fleet", "scout"))
 	if err := os.Chmod(folder, 0o555); err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +292,7 @@ func TestACloneWhoseOwnTopFolderTheHostCannotMoveIsMovedToTheTrashWithinTheRunti
 	repository, root := aRepository(t)
 	places := clonePlaces(repository, root, t.TempDir())
 	places.MoveWithinUserNamespace = trashtest.MoveAsRuntime
-	folder := prepared(t, places, scoutInAeolusFleet, "scout")
+	folder := aCloneAt(t, repository, filepath.Join(root, "aeolus-fleet", "scout"))
 	trashtest.Unmovable(t, root, folder)
 
 	if err := places.RemoveWorktree(folder); err != nil {
@@ -319,7 +335,7 @@ func TestAConfiguredFolderIsUsedAsItIsBesideClones(t *testing.T) {
 func TestEveryFolderUnderTheRootIsListedBesideClonesWhateverMadeItNeverTheTrash(t *testing.T) {
 	repository, root := aRepository(t)
 	places := clonePlaces(repository, root, t.TempDir())
-	scout := prepared(t, places, scoutInAeolusFleet, "scout")
+	scout := aCloneAt(t, repository, filepath.Join(root, "aeolus-fleet", "scout"))
 	ownClone := filepath.Join(root, "aeolus-fleet", "own-clone")
 	gitIn(t, "clone", "-q", repository, ownClone)
 	unknown := filepath.Join(root, "hemma", "notes")
@@ -377,16 +393,16 @@ func TestATrustedRepositoryIsClonedBeforeTheShipsOwnClone(t *testing.T) {
 		return nil
 	}}
 
-	folder := prepared(t, places, reconciler.Entry{Workspace: reconciler.Workspace{Kind: "worktree", Repository: "hemma"}}, "scout")
+	folder := prepared(t, places, reconciler.Entry{Workspace: reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: "hemma"}}}, "scout")
 
-	if got, want := revision(t, folder, "HEAD"), revision(t, source, "HEAD"); folder != filepath.Join(root, "hemma", "scout") || got != want {
-		t.Errorf("Prepare = %s at %s, want %s at %s", folder, got, filepath.Join(root, "hemma", "scout"), want)
+	if got, want := revision(t, folder, "HEAD"), revision(t, source, "HEAD"); folder != filepath.Join(root, "shp_scout", ShipFolderName, MainFolder) || got != want {
+		t.Errorf("Prepare = %s at %s, want %s at %s", folder, got, filepath.Join(root, "shp_scout", ShipFolderName, MainFolder), want)
 	}
 }
 
 func TestTheCloneOfAShipWhoseRepositoryLeftTheListIsRemoved(t *testing.T) {
 	source, root := aRepository(t)
-	folder := prepared(t, clonePlaces(source, root, t.TempDir()), scoutInAeolusFleet, "scout")
+	folder := aCloneAt(t, source, filepath.Join(root, "aeolus-fleet", "scout"))
 	places := Places{Root: root, Repositories: map[string]string{}, IsClone: true, ClonedPath: func(repository string) (string, bool) {
 		return source, repository == "aeolus-fleet"
 	}}

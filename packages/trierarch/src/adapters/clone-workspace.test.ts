@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
+import { CONFIGURATION, newId, inRepositories } from '../../test/support/in-memory.js';
 import { makeUnmovable, makeUnremovable, moveAsRuntime, removeAsRuntime, unremovableReason } from '../../test/support/unremovable.js';
 import { createCloneWorkspace } from './clone-workspace.js';
 import { runCommand } from './run-command.js';
@@ -86,20 +86,31 @@ afterEach(() => {
   rmSync(folder, { recursive: true, force: true });
 });
 
-const scout = { shipId: newId('ship'), shipName: 'scout', workspace: { kind: 'worktree', repository: 'aeolus-fleet' } } as const;
+const scoutId = newId('ship');
+
+/** A clone of the repository at the folder, as one a trierarch made under its root before the ship folders. */
+async function aCloneAt(at: string): Promise<string> {
+  mkdirSync(dirname(at), { recursive: true });
+  await git(['clone', '-q', repository, at]);
+  return at;
+}
+/** Scout's crew in a ship folder of aeolus-fleet, in its ship's folder under the root. */
+const scout = () => ({ shipId: scoutId, shipName: 'scout', workspace: inRepositories('aeolus-fleet'), shipFolder: join(root, scoutId) });
+/** The main repository of the ship folder made. */
+const mainOf = ({ folder: made }: { folder: string }): string => join(made, 'main');
 
 describe('workspaces as per-ship clones', () => {
   it('makes a clone of the repository under the root, one folder per ship, detached at HEAD', async () => {
-    const { folder: made } = await workspace().prepare(scout);
+    const made = mainOf(await workspace().prepare(scout()));
 
-    expect(made).toBe(join(root, 'aeolus-fleet', 'scout'));
+    expect(made).toBe(join(root, scoutId, 'repositories', 'main'));
     expect(existsSync(join(made, 'README.md'))).toBe(true);
     expect((await git(['-C', made, 'rev-parse', '--abbrev-ref', 'HEAD'])).trim()).toBe('HEAD');
     expect((await git(['-C', made, 'rev-parse', 'HEAD'])).trim()).toBe((await git(['-C', repository, 'rev-parse', 'HEAD'])).trim());
   });
 
   it("holds its own objects, so it works with the repository's objects gone", async () => {
-    const { folder: made } = await workspace().prepare(scout);
+    const made = mainOf(await workspace().prepare(scout()));
 
     rmSync(repository, { recursive: true, force: true });
 
@@ -109,7 +120,7 @@ describe('workspaces as per-ship clones', () => {
   });
 
   it("has a .git of its own, so a hook written in the clone never reaches the repository's .git", async () => {
-    const { folder: made } = await workspace().prepare(scout);
+    const made = mainOf(await workspace().prepare(scout()));
     expect(statSync(join(made, '.git')).isDirectory()).toBe(true);
     const marker = join(folder, 'hook-ran');
     const hook = join(made, '.git', 'hooks', 'post-commit');
@@ -125,14 +136,14 @@ describe('workspaces as per-ship clones', () => {
   it("sets its origin to the repository's own remote, so the session pushes without the host", async () => {
     const upstream = await withUpstream();
 
-    const { folder: made } = await workspace().prepare(scout);
+    const made = mainOf(await workspace().prepare(scout()));
 
     expect((await git(['-C', made, 'remote', 'get-url', 'origin'])).trim()).toBe(upstream);
     expect((await git(['-C', made, 'remote'])).trim()).toBe('origin');
   });
 
   it('has no remote when the repository has none, never the repository itself', async () => {
-    const { folder: made } = await workspace().prepare(scout);
+    const made = mainOf(await workspace().prepare(scout()));
 
     expect((await git(['-C', made, 'remote'])).trim()).toBe('');
   });
@@ -141,7 +152,7 @@ describe('workspaces as per-ship clones', () => {
     await git(['-C', repository, 'tag', 'v1']);
     await commit(repository, 'later.md');
 
-    const { folder: made } = await workspace().prepare({ ...scout, workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'v1' } });
+    const made = mainOf(await workspace().prepare({ ...scout(), workspace: inRepositories('aeolus-fleet', { ref: 'v1' }) }));
 
     expect(existsSync(join(made, 'later.md'))).toBe(false);
   });
@@ -153,7 +164,7 @@ describe('workspaces as per-ship clones', () => {
     await commit(current, 'current.md');
     await git(['-C', current, 'push', '-q', 'origin', 'main']);
 
-    const { folder: made } = await workspace().prepare({ ...scout, workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'main' } });
+    const made = mainOf(await workspace().prepare({ ...scout(), workspace: inRepositories('aeolus-fleet', { ref: 'main' }) }));
 
     expect(existsSync(join(made, 'current.md'))).toBe(true);
     expect((await git(['-C', made, 'rev-parse', 'HEAD'])).trim()).toBe((await git(['-C', current, 'rev-parse', 'HEAD'])).trim());
@@ -166,7 +177,7 @@ describe('workspaces as per-ship clones', () => {
     await git(['-C', repository, 'commit', '-q', '-m', 'hello.txt']);
     await git(['config', '--file', aThrowawayHome(), 'filter.upper.smudge', 'tr a-z A-Z']);
 
-    const { folder: made } = await workspace().prepare(scout);
+    const made = mainOf(await workspace().prepare(scout()));
 
     expect(readFileSync(join(made, 'hello.txt'), 'utf8')).toBe('HELLO\n');
   });
@@ -174,19 +185,19 @@ describe('workspaces as per-ship clones', () => {
   it('crews from what it has when the remote cannot be fetched', async () => {
     await git(['-C', repository, 'remote', 'add', 'origin', join(folder, 'gone')]);
 
-    const { folder: made } = await workspace().prepare({ ...scout, workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'main' } });
+    const made = mainOf(await workspace().prepare({ ...scout(), workspace: inRepositories('aeolus-fleet', { ref: 'main' }) }));
 
     expect(existsSync(join(made, 'README.md'))).toBe(true);
   });
 
   it('uses a clone a stop mid-crew left', async () => {
-    const first = await workspace().prepare(scout);
+    const first = await workspace().prepare(scout());
 
-    await expect(workspace().prepare(scout)).resolves.toEqual(first);
+    await expect(workspace().prepare(scout())).resolves.toEqual(first);
   });
 
   it('says a fresh clone is clean, and one with a change or a new file is not', async () => {
-    const { folder: made } = await workspace().prepare(scout);
+    const made = mainOf(await workspace().prepare(scout()));
     expect(await workspace().isClean(made)).toBe(true);
 
     writeFileSync(join(made, 'notes.md'), 'draft\n');
@@ -197,14 +208,14 @@ describe('workspaces as per-ship clones', () => {
   it('says what removing a clone discards: nothing for a fresh one', async () => {
     await withUpstream();
 
-    const { folder: made } = await workspace().prepare({ ...scout, workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'main' } });
+    const made = mainOf(await workspace().prepare({ ...scout(), workspace: inRepositories('aeolus-fleet', { ref: 'main' }) }));
 
     expect(await workspace().unsaved(made)).toEqual([]);
   });
 
   it('says what removing a clone discards: each change not committed and each commit no branch, tag or remote branch keeps, and nothing it pushed (#450)', async () => {
     await withUpstream();
-    const { folder: made } = await workspace().prepare({ ...scout, workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'main' } });
+    const made = mainOf(await workspace().prepare({ ...scout(), workspace: inRepositories('aeolus-fleet', { ref: 'main' }) }));
     await commit(made, 'pushed.md');
     await git(['-C', made, 'push', '-q', 'origin', 'HEAD:refs/heads/pushed']);
     await commit(made, 'done.md');
@@ -217,8 +228,8 @@ describe('workspaces as per-ship clones', () => {
     expect(unsaved).toEqual([' M README.md', '?? draft.md', `commit ${done} done.md`]);
   });
 
-  it('removes a clone it made', async () => {
-    const { folder: made } = await workspace().prepare(scout);
+  it('removes a clone under its root', async () => {
+    const made = await aCloneAt(join(root, 'aeolus-fleet', 'scout'));
 
     await workspace().remove(made);
 
@@ -226,7 +237,7 @@ describe('workspaces as per-ship clones', () => {
   });
 
   it.skipIf(unremovableReason !== undefined)('frees its ship\'s place for the trash beside it when the clone holds what the host cannot remove', async () => {
-    const { folder: made } = await workspace().prepare(scout);
+    const made = await aCloneAt(join(root, 'aeolus-fleet', 'scout'));
     makeUnremovable(made);
 
     try {
@@ -240,7 +251,7 @@ describe('workspaces as per-ship clones', () => {
   });
 
   it('frees its ship\'s place for the trash beside it when its session made the clone\'s own top read-only', async () => {
-    const { folder: made } = await workspace().prepare(scout);
+    const made = await aCloneAt(join(root, 'aeolus-fleet', 'scout'));
     chmodSync(made, 0o555);
 
     try {
@@ -255,7 +266,7 @@ describe('workspaces as per-ship clones', () => {
   });
 
   it.skipIf(unremovableReason !== undefined)('frees its ship\'s place for the trash beside it within the runtime\'s user namespace when the host cannot move the clone', async () => {
-    const { folder: made } = await workspace().prepare(scout);
+    const made = await aCloneAt(join(root, 'aeolus-fleet', 'scout'));
     makeUnmovable(made);
 
     try {
@@ -274,11 +285,11 @@ describe('workspaces as per-ship clones', () => {
   });
 
   it('uses a configured folder as it is', async () => {
-    await expect(workspace().prepare({ ...scout, workspace: { kind: 'folder', name: 'notes' } })).resolves.toEqual({ folder: notes });
+    await expect(workspace().prepare({ ...scout(), workspace: { kind: 'folder', name: 'notes' } })).resolves.toEqual({ folder: notes });
   });
 
   it('lists every folder under its root no matter what made it: a clone, a plain clone, a folder git does not know, never the trash (gap rule 2)', async () => {
-    await workspace().prepare(scout);
+    await aCloneAt(join(root, 'aeolus-fleet', 'scout'));
     await git(['clone', '-q', repository, join(root, 'aeolus-fleet', 'own-clone')]);
     mkdirSync(join(root, 'hemma', 'notes'), { recursive: true });
     mkdirSync(join(root, 'aeolus-fleet', '.trash'));
@@ -288,7 +299,7 @@ describe('workspaces as per-ship clones', () => {
   });
 
   it('lists a folder straight under its root that is no repository it has as itself and each folder in it, but a repository\'s own folder or one holding the trash only by what it holds (gap rule 2)', async () => {
-    await workspace().prepare(scout);
+    await aCloneAt(join(root, 'aeolus-fleet', 'scout'));
     mkdirSync(join(root, 'workbench', 'tools'), { recursive: true });
     mkdirSync(join(root, 'left-repository', '.trash'), { recursive: true });
     mkdirSync(join(root, 'left-repository', 'lookout'));
@@ -309,7 +320,7 @@ describe('workspaces as per-ship clones', () => {
   });
 
   it('lists a workspace placed straight under its root as one folder, none of its own files (#1295, gap rule 2)', async () => {
-    await workspace().prepare(scout);
+    await aCloneAt(join(root, 'aeolus-fleet', 'scout'));
     await git(['clone', '-q', repository, join(root, 'aeolus-fleet-designer-release')]);
 
     expect([...(await workspace().foldersUnderRoot())].sort()).toEqual([join(root, 'aeolus-fleet', 'scout'), join(root, 'aeolus-fleet-designer-release')].sort());
@@ -329,7 +340,7 @@ describe('workspaces as per-ship clones', () => {
   });
 
   it('refuses to remove its root, the trash or a folder deeper than a workspace', async () => {
-    const { folder: made } = await workspace().prepare(scout);
+    const made = await aCloneAt(join(root, 'aeolus-fleet', 'scout'));
     mkdirSync(join(root, 'aeolus-fleet', '.trash'));
 
     for (const kept of [root, join(root, 'aeolus-fleet', '.trash'), join(made, 'src')]) {
@@ -341,16 +352,16 @@ describe('workspaces as per-ship clones', () => {
 
 describe("a ship's clone in its ship's folder", () => {
   it('is made in the folder of a ship crewed fresh, with a .git of its own', async () => {
-    const shipFolder = await workspace().shipFolderOf(scout.shipId);
+    const shipFolder = await workspace().shipFolderOf(scoutId);
 
-    const { folder: made } = await workspace().prepare({ ...scout, shipFolder });
+    const made = mainOf(await workspace().prepare({ ...scout(), shipFolder }));
 
-    expect([made, statSync(join(made, '.git')).isDirectory()]).toEqual([join(shipFolder, 'worktree'), true]);
+    expect([made, statSync(join(made, '.git')).isDirectory()]).toEqual([join(shipFolder, 'repositories', 'main'), true]);
   });
 
   it("goes whole into the trash beside the ship's folder, as the runtime moves it when the host cannot", async () => {
-    const shipFolder = await workspace().shipFolderOf(scout.shipId);
-    await workspace().prepare({ ...scout, shipFolder });
+    const shipFolder = await workspace().shipFolderOf(scoutId);
+    await workspace().prepare({ ...scout(), shipFolder });
     mkdirSync(join(shipFolder, 'home'));
     chmodSync(join(shipFolder, 'home'), 0o500);
     const moved: string[] = [];
@@ -383,17 +394,19 @@ describe('per-ship clones of a trusted repository the machine does not have (aeo
       clones: { root: clones, urlOf: (name) => (at.isListed && name === 'hemma' ? `file://${repository}` : undefined), protocols: 'file' },
     });
   }
-  const crew = { shipId: newId('ship'), shipName: 'scout', workspace: { kind: 'worktree', repository: 'hemma' } } as const;
+  const crewId = newId('ship');
+  const crew = () => ({ shipId: crewId, shipName: 'scout', workspace: inRepositories('hemma'), shipFolder: join(root, crewId) });
 
   it("clones the repository first, then the ship's own clone from it", async () => {
-    const { folder: made } = await trustedWorkspace({ isListed: true }).prepare(crew);
+    const made = mainOf(await trustedWorkspace({ isListed: true }).prepare(crew()));
 
-    expect(made).toBe(join(root, 'hemma', 'scout'));
+    expect(made).toBe(join(root, crewId, 'repositories', 'main'));
     expect((await git(['-C', made, 'rev-parse', 'HEAD'])).trim()).toBe((await git(['-C', repository, 'rev-parse', 'HEAD'])).trim());
   });
 
   it('removes the clone of a ship whose repository left the trusted repositories', async () => {
-    const { folder: made } = await trustedWorkspace({ isListed: true }).prepare(crew);
+    await trustedWorkspace({ isListed: true }).prepare(crew());
+    const made = await aCloneAt(join(root, 'hemma', 'scout'));
 
     await trustedWorkspace({ isListed: false }).remove(made);
 
@@ -477,7 +490,7 @@ describe("the host's git calls in a session's clone, with a program named in the
 
   it.each(plants)('runs nothing $name names', async ({ plant }) => {
     await withUpstream();
-    const { folder: made } = await workspace().prepare(scout);
+    const made = mainOf(await workspace().prepare(scout()));
     const { program, marker } = aMarkingScript();
     await plant(made, program);
     // The same size as before, so git must read the file through its filter to tell whether it changed.
@@ -485,14 +498,14 @@ describe("the host's git calls in a session's clone, with a program named in the
 
     const isClean = await workspace().isClean(made);
     const unsaved = await workspace().unsaved(made);
-    await workspace().prepare(scout);
+    await workspace().prepare(scout());
 
     expect({ isClean, isUnsaved: unsaved.length > 0, hasRun: existsSync(marker) }).toEqual({ isClean: false, isUnsaved: true, hasRun: false });
   });
 
   it('reads a clone whose config has a section named as a property every object has', async () => {
     await withUpstream();
-    const { folder: made } = await workspace().prepare(scout);
+    const made = mainOf(await workspace().prepare(scout()));
     await git(['-C', made, 'config', 'constructor.planted', 'value']);
     writeFileSync(join(made, 'README.md'), 'README.MD\n');
 
@@ -526,7 +539,7 @@ describe("the host's git calls in a session's clone, with a signed commit and th
   }
 
   it("lists the commit as unsaved and checks no commit's signature", async () => {
-    const { folder: made } = await workspace().prepare(scout);
+    const made = mainOf(await workspace().prepare(scout()));
     const subject = await aSignedCommit(made);
     await git(['-C', made, 'config', 'log.showSignature', 'true']);
     const marker = signatureProgramsOnPath();
@@ -636,7 +649,7 @@ describe("the host's git calls in a session's clone, with the clone's git pointe
   ];
 
   it.each(pointings)('reads a clone with $name as unsaved and not clean, refused, saying why', async ({ point, reason }) => {
-    const { folder: made } = await workspace().prepare(scout);
+    const made = mainOf(await workspace().prepare(scout()));
     await point(made, await anotherRepository());
 
     expect({ unsaved: await workspace().unsaved(made), isClean: await workspace().isClean(made) }).toEqual({ unsaved: [`refused, ${reason}`], isClean: false });
@@ -645,7 +658,7 @@ describe("the host's git calls in a session's clone, with the clone's git pointe
 
 describe("the host's git calls in a session's clone, with a file in its work tree git waits on", () => {
   it('reads a clone whose git call does not end within its time limit as unsaved and not clean, refused, saying why', async () => {
-    const { folder: made } = await workspace().prepare(scout);
+    const made = mainOf(await workspace().prepare(scout()));
     aPipe(join(made, '.gitignore'));
     const limited = workspace({ timeLimitMs: 2000 });
 
@@ -655,7 +668,7 @@ describe("the host's git calls in a session's clone, with a file in its work tre
 
 describe("the host's reads of a session's clone, with a file the clone's config names for git", () => {
   it.each(['core.excludesFile', 'core.attributesFile', 'mailmap.file'])('reads no file %s names', async (name) => {
-    const { folder: made } = await workspace().prepare(scout);
+    const made = mainOf(await workspace().prepare(scout()));
     const planted = join(folder, 'planted');
     aPipe(planted);
     await git(['-C', made, 'config', name, planted]);
@@ -666,7 +679,7 @@ describe("the host's reads of a session's clone, with a file the clone's config 
   });
 
   it('reads no mailmap in the clone when it reads its log', async () => {
-    const { folder: made } = await workspace().prepare(scout);
+    const made = mainOf(await workspace().prepare(scout()));
     await commit(made, 'notes.md');
     aPipe(join(made, '.mailmap'));
 
@@ -678,7 +691,7 @@ describe("the host's reads of a session's clone, with a file the clone's config 
 
 describe("the host's git calls in a session's clone, with a config git cannot read", () => {
   it('reads the clone as unsaved and not clean, refused, saying what git said', async () => {
-    const { folder: made } = await workspace().prepare(scout);
+    const made = mainOf(await workspace().prepare(scout()));
     writeFileSync(join(made, '.git', 'config'), '[core]\n\trepositoryformatversion = 0\n=garbage\n');
 
     expect({ unsaved: await workspace().unsaved(made), isClean: await workspace().isClean(made) }).toEqual({

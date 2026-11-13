@@ -5,7 +5,7 @@ import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
-import { newId } from '../../test/support/in-memory.js';
+import { newId, inRepositories } from '../../test/support/in-memory.js';
 import { trierarchPaths, type TrierarchPaths } from './paths.js';
 import { runCommand } from './run-command.js';
 import { runtimeAdaptersOf } from './runtime-adapters.js';
@@ -72,33 +72,35 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
   it('gives sessions on the host a worktree and the host home', async () => {
     const adapters = adaptersOf();
 
-    const { folder } = await adapters.workspace.prepare({ shipId, shipName: 'scout', workspace: { kind: 'worktree', repository: 'demo' } });
+    const { folder } = await adapters.workspace.prepare({ shipId, shipName: 'scout', workspace: inRepositories('demo'), shipFolder: await adapters.workspace.shipFolderOf(shipId) });
 
-    expect({ isWorktree: statSync(join(folder, '.git')).isFile(), shipHomes: adapters.shipHomes }).toEqual({ isWorktree: true, shipHomes: undefined });
+    expect({ isWorktree: statSync(join(folder, 'main', '.git')).isFile(), shipHomes: adapters.shipHomes }).toEqual({ isWorktree: true, shipHomes: undefined });
   });
 
   it('gives sessions in containers a clone of their own, at the same path', async () => {
-    const { folder } = await adaptersOf({ ...CONTAINER, binary }).workspace.prepare({ shipId, shipName: 'scout', workspace: { kind: 'worktree', repository: 'demo' } });
+    const { workspace } = adaptersOf({ ...CONTAINER, binary });
+    const { folder } = await workspace.prepare({ shipId, shipName: 'scout', workspace: inRepositories('demo'), shipFolder: await workspace.shipFolderOf(shipId) });
 
-    expect({ folder, isClone: statSync(join(folder, '.git')).isDirectory() }).toEqual({ folder: join(paths.worktrees, 'demo', 'scout'), isClone: true });
+    expect({ folder, isClone: statSync(join(folder, 'main', '.git')).isDirectory() }).toEqual({ folder: join(paths.ships, shipId, 'repositories'), isClone: true });
   });
 
   it('gives sessions in containers their folder by its real path, as the aeolus-fleet plugin in the container and on the host both key it (pwd -P), through a worktree root that is a link', async () => {
     mkdirSync(join(home, 'real-root'));
     symlinkSync(join(home, 'real-root'), join(home, 'linked-root'));
 
-    const { folder } = await adaptersOf({ ...CONTAINER, binary }, join(home, 'linked-root')).workspace.prepare({ shipId, shipName: 'scout', workspace: { kind: 'worktree', repository: 'demo' } });
+    const { workspace } = adaptersOf({ ...CONTAINER, binary }, join(home, 'linked-root'));
+    const { folder } = await workspace.prepare({ shipId, shipName: 'scout', workspace: inRepositories('demo'), shipFolder: await workspace.shipFolderOf(shipId) });
 
-    expect(folder).toBe(join(home, 'real-root', 'demo', 'scout'));
+    expect(folder).toBe(join(home, 'real-root', shipId, 'repositories'));
   });
 
-  it("gives a ship crewed fresh its ship's folder under ships/ when the configuration names no place, its worktree in it", async () => {
+  it("gives a ship crewed fresh its ship's folder under ships/ when the configuration names no place, its ship folder in it", async () => {
     const adapters = adaptersOf();
     const shipFolder = await adapters.workspace.shipFolderOf(shipId);
 
-    const { folder } = await adapters.workspace.prepare({ shipId, shipName: 'scout', workspace: { kind: 'worktree', repository: 'demo' }, shipFolder });
+    const { folder } = await adapters.workspace.prepare({ shipId, shipName: 'scout', workspace: inRepositories('demo'), shipFolder });
 
-    expect([shipFolder, folder]).toEqual([join(paths.ships, shipId), join(paths.ships, shipId, 'worktree')]);
+    expect([shipFolder, folder]).toEqual([join(paths.ships, shipId), join(paths.ships, shipId, 'repositories')]);
   });
 
   it("gives a ship crewed fresh in containers its ship's folder by its real path, through a place of ships/ that is a link", async () => {

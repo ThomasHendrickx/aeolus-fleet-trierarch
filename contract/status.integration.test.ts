@@ -67,7 +67,7 @@ const configuration = () => z.object({ caps: z.object({ ships: z.number(), runni
 const stateFile = () => join(machine.trierarchHome, 'state.json');
 
 async function aRunningScout(): Promise<void> {
-  await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+  await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
   await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
 }
 

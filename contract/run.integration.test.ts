@@ -18,7 +18,7 @@ const jsonObjectSchema = z.record(z.string(), z.unknown());
 const CREWED_WITHIN_MS = 30_000;
 /** Crews scout and waits until the trierarch lists it running. */
 async function aRunningScout(): Promise<void> {
-  await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+  await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
   await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
 }
 
@@ -51,7 +51,7 @@ describe('run with the reconciler', () => {
   it("crews an assigned request: the ship's lease is held and its session starts in a worktree of the repository", async () => {
     const session = sessionOf(machine, 'scout');
 
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
 
     await expect.poll(() => fleet.leasesOf(scout), { timeout: CREWED_WITHIN_MS }).toBe(1);
     await expect.poll(() => session.starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
@@ -63,7 +63,7 @@ describe('run with the reconciler', () => {
     writeFileSync(join(machine.home, '.claude', 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'plan' } }));
     const session = sessionOf(machine, 'scout');
 
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
 
     await expect.poll(() => session.starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
     expect(session.starts()[0]?.args).toEqual(expect.arrayContaining(['--permission-mode', 'default']));
@@ -87,7 +87,7 @@ describe('run with the reconciler', () => {
 
     await expect.poll(() => fleet.leasesOf(scout), { timeout: CREWED_WITHIN_MS }).toBe(0);
     await expect.poll(() => isRunning(pid), { timeout: CREWED_WITHIN_MS }).toBe(false);
-    await expect.poll(() => existsSync(session.worktree), { timeout: CREWED_WITHIN_MS }).toBe(false);
+    await expect.poll(() => existsSync(session.folder), { timeout: CREWED_WITHIN_MS }).toBe(false);
   });
 
   it('starts a running session that ended again, in the same worktree', async () => {
@@ -123,17 +123,17 @@ describe('a ship released elsewhere (row 11)', () => {
     await aRunningScout();
     const session = sessionOf(machine, 'scout');
     const first = session.starts()[0];
-    writeFileSync(join(session.worktree, 'notes.txt'), 'unsaved\n');
+    writeFileSync(join(session.main, 'notes.txt'), 'unsaved\n');
 
     await fleet.releaseElsewhere(scout);
 
     await expect.poll(() => fleet.leasesOf(scout), { timeout: CREWED_WITHIN_MS }).toBe(1);
-    await expect.poll(() => existsSync(join(session.worktree, 'notes.txt')) || session.starts().length !== 1, { timeout: CREWED_WITHIN_MS }).toBe(false);
+    await expect.poll(() => existsSync(join(session.main, 'notes.txt')) || session.starts().length !== 1, { timeout: CREWED_WITHIN_MS }).toBe(false);
     await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
     expect(session.starts()).toHaveLength(1);
     expect(session.starts()[0]?.pid).not.toBe(first?.pid);
     expect(session.starts()[0]?.args).not.toContain('--resume');
-    await expect.poll(() => machine.serviceLog(), { timeout: CREWED_WITHIN_MS }).toContain(`Discarded from the worktree of scout (${scout}), ${session.worktree}: `);
+    await expect.poll(() => machine.serviceLog(), { timeout: CREWED_WITHIN_MS }).toContain(`Discarded from the worktree of scout (${scout}), ${session.main}: ?? notes.txt`);
     await expect(fleet.toldByTrierarch()).resolves.toEqual([]);
   });
 });

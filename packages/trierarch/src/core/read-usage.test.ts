@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { aTrierarch, newId, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
+import { aTrierarch, newId, WORKTREE_ROOT, type Trierarch, inRepositories } from '../../test/support/in-memory.js';
 import { putEntry, type Entry } from './entry.js';
 
 const MINUTE_MS = 60_000;
@@ -12,7 +12,7 @@ function aCrewedEntry(at: { isWorkspaceMade?: boolean } = {}): Entry {
     shipId,
     shipName: 'scout',
     harness: 'claude-code',
-    workspace: { kind: 'worktree', repository: 'aeolus-fleet' },
+    workspace: inRepositories('aeolus-fleet'),
     options: {},
     settingsVersion: 1,
     state: 'running',

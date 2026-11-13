@@ -6,16 +6,17 @@ import type { TrierarchConfiguration } from '@aeolus-fleet/common';
 import type { WorkspacePort } from '../core/ports.js';
 import { foldersUnderRoot, isUnderRoot } from './folders-under-root.js';
 import { gitInCloneWithin, gitInFreshClone, type Limits } from './git-in-folder.js';
-import { createGitWorkspace, makeParentOf, REFUSED_PREFIX, removeShipFolder, rootsOf, workspaceFolderOf, type WorkspaceRoots } from './git-workspace.js';
+import { createGitWorkspace, REFUSED_PREFIX, removeShipFolder, rootsOf, unsavedIn, type WorkspaceRoots } from './git-workspace.js';
 import { runCommand } from './run-command.js';
+import { type MakeRepository, prepareShipFolder } from './ship-folder.js';
 import { discard, type MoveWithinUserNamespace } from './trash.js';
 import { clonedPath, cloneWhenMissing, type TrustedClones } from './trusted-clones.js';
 
 /**
  * Workspaces for sessions in containers (decision 0039; trierarch.md, "Session
  * runtime"): a per-ship clone of a configured repository in place of a
- * worktree, at the same path (`<ships>/<shipId>/worktree`, or for a ship
- * crewed before the ship folders `<root>/<repository>/<ship>`). A worktree points
+ * worktree, at the same path in the ship folder (`main/`, or
+ * `sub-repos/<repository>/`). A worktree points
  * into the repository's `.git`, its hooks and every other ship's worktree data;
  * a clone has a `.git` of its own. `--reference` with `--dissociate` borrows
  * the repository's objects only while cloning, so the clone holds its own and
@@ -68,21 +69,25 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
     // What a clone holds is not known when any read of it fails: told with why, as one the host does not read.
     unsaved: async (folder) => worktrees.unsaved(folder).catch((error: unknown) => [`${REFUSED_PREFIX}${error instanceof Error ? error.message : String(error)}`]),
     prepare: async (request) => {
-      const { shipName, workspace, shipFolder } = request;
+      const { workspace, shipFolder, madeMain, onMainMade } = request;
       if (workspace.kind === 'folder') {
         return worktrees.prepare(request);
       }
-      const repository = configuration.repositories[workspace.repository]?.path;
-      if (repository === undefined) {
-        throw new Error(`The configuration has no repository ${workspace.repository}`);
+      if (shipFolder === undefined) {
+        throw new Error("A ship folder is made only in its ship's folder");
       }
-      await cloneWhenMissing(clones, { repository: workspace.repository, path: repository });
-      const folder = workspaceFolderOf({ ...options, repository: workspace.repository, shipName, ...(shipFolder !== undefined && { shipFolder }) });
-      // A clone a stop mid-crew left is used as it is.
-      if (!(await exists(folder))) {
-        await makeParentOf(folder, shipFolder);
+      const make: MakeRepository = async ({ repository: name, ref }, folder) => {
+        const repository = configuration.repositories[name]?.path;
+        if (repository === undefined) {
+          throw new Error(`The configuration has no repository ${name}`);
+        }
+        await cloneWhenMissing(clones, { repository: name, path: repository });
+        // A clone a stop mid-crew left is used as it is.
+        if (await exists(folder)) {
+          return;
+        }
         await runCommand('git', { args: ['-C', repository, 'fetch', '--quiet', REMOTE] });
-        const commit = await resolve(repository, workspace.ref);
+        const commit = await resolve(repository, ref);
         try {
           await git(['clone', '--quiet', '--no-checkout', '--reference', repository, '--dissociate', repository, folder]);
           // The clone's origin is the repository's checkout, whose branches are no remote's: dropped with it.
@@ -97,9 +102,11 @@ export function createCloneWorkspace(options: { configuration: TrierarchConfigur
           await rm(folder, { recursive: true, force: true });
           throw error;
         }
-      }
-      return { folder };
+      };
+      const { moveWithinUserNamespace } = options;
+      return { folder: await prepareShipFolder({ shipFolder, workspace, make, ...(madeMain !== undefined && { madeMain }), ...(onMainMade !== undefined && { onMainMade }), ...(moveWithinUserNamespace !== undefined && { withinUserNamespace: moveWithinUserNamespace }) }) };
     },
+    unsavedInShipFolder: async (folder) => unsavedIn(folder, async (each) => worktrees.unsaved(each).catch((error: unknown) => [`${REFUSED_PREFIX}${error instanceof Error ? error.message : String(error)}`])),
     remove: async (folder) => {
       if (!(await isUnderRoot(roots, folder))) {
         throw new Error(`${folder} is not under ${roots.join(' or ')}, or is its trash: the trierarch removes only a folder under the root`);

@@ -68,9 +68,9 @@ describe('a crew request the harness may not start a session for', () => {
   it('in a repository it does not trust is given back, saying to add it with init', async () => {
     claudeTrusts();
 
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
 
-    await expect.poll(() => fleet.givenBackReasonOf(scout), { timeout: GIVEN_BACK_WITHIN_MS }).toContain(`workspace.repository: claude-code does not trust the repository ${REPOSITORY}: add it with aeolus-trierarch init, which trusts it`);
+    await expect.poll(() => fleet.givenBackReasonOf(scout), { timeout: GIVEN_BACK_WITHIN_MS }).toContain(`workspace.main.repository: claude-code does not trust the repository ${REPOSITORY}: add it with aeolus-trierarch init, which trusts it`);
     expect(sessionOf(machine, 'scout').starts()).toEqual([]);
   });
 
@@ -86,7 +86,7 @@ describe('a crew request the harness may not start a session for', () => {
   it('with a flag that waits on a one-time question is given back, saying to accept it with init', async () => {
     await claudeLaunchesSkippingPermissions();
 
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
 
     await expect.poll(() => fleet.givenBackReasonOf(scout), { timeout: GIVEN_BACK_WITHIN_MS }).toContain(`harness: claude-code still asks to accept ${SKIP_PERMISSIONS}: accept it with aeolus-trierarch init`);
     expect(sessionOf(machine, 'scout').starts()).toEqual([]);

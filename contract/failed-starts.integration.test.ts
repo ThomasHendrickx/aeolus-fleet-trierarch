@@ -53,7 +53,7 @@ async function failedStarts(names: readonly string[]): Promise<void> {
   const shipIds: ShipId[] = [];
   for (const name of names) {
     const shipId = await fleet.commission(name);
-    await fleet.crewInWorktree(shipId, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(shipId, { main: REPOSITORY, harness: 'claude-code' });
     shipIds.push(shipId);
   }
   for (const shipId of shipIds) {

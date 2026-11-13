@@ -54,7 +54,7 @@ describe('a session on its subscription', () => {
   it("is never started while Claude Code's settings hold an apiKeyHelper: the request is given back, naming it and where, never its value", async () => {
     aKeyHelperInUserSettings();
 
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
 
     await expect.poll(() => fleet.givenBackReasonOf(scout), { timeout: CREWED_WITHIN_MS }).toBe(`mac-mini: claude-code would reach an API key on its subscription (apiKeyHelper in ${userSettings()}): remove it, or run the ship on its API key`);
     expect(await fleet.givenBackReasonOf(scout)).not.toContain(HELPER);
@@ -64,7 +64,7 @@ describe('a session on its subscription', () => {
 
   it('of a final crew waits, restarting with no restart counted, once an apiKeyHelper is in reach', async () => {
     const session = sessionOf(machine, 'scout');
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
     await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
     aKeyHelperInUserSettings();
 

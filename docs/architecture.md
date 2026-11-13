@@ -46,7 +46,7 @@ Everything of the trierarch lives under `~/.aeolus/trierarch/`.
 | Logs | `~/.aeolus/trierarch/logs/` on macOS; the user journal on Linux (`journalctl --user -u aeolus-trierarch`) | The trierarch's service |
 | A session's hold, one folder per ship: `hold.pid`, `hold.sock`, the harness's `session-id`, `harness-sessions`, the pid of each harness process the hold started, whose process session it leads, `events.jsonl`, every line the harness wrote (for Copilot its stderr lines too, as `aeolus.stderr`), for a session on an API key its `proxy-token` (mode 600), the token the model proxy takes from it while its hold runs, for a session crewed with MCP servers its `mcp-access` (mode 600), its token at the MCP proxy, the servers it may reach and the fleet and plugin ship of the MCP configuration it started under, and for Claude Code and Copilot on the host its `mcp-config.json` (mode 600), the configuration `--mcp-config` or Copilot's `--additional-mcp-config` names (a container sees it read-only at the same path, the one file of that folder it sees), for a session given secret variables (Codex's token at the MCP proxy) on the host its `secret-env.json` (mode 600), whose values its hold hands the harness, and for a session in a container its `session.env` (mode 600), the model token and the session's environment, its secret variables too, its container is run with | `~/.aeolus/trierarch/sessions/<shipId>/` | The hold of that session |
 | The model proxy's `proxy.pid` and `port`: it listens on loopback on the same port across its starts (headless H16), the MCP proxy on the same port; and `key-states.json`, each harness's key state the vendor's answers set, for the key file it was said of (api keys K8), never a key | `~/.aeolus/trierarch/proxy/` | The model proxy |
-| Every ship's files, one folder per ship, mode 700, holding no secret (trierarch.md, "The ship's folder"): `<shipId>/worktree/`, its worktree or its clone; `<shipId>/home/`, with the container runtime its home, mounted as its container's home: its identity, Claude Code's files and its conversations (decision 0039); `<shipId>/sockets/fleet.sock`, its fleet socket, the folder mounted at its own path into its container. Kept in its entry as it is crewed fresh, and removed whole through the trash beside it on every path its worktree goes | `~/.aeolus/trierarch/ships/` (the configuration's `shipsRoot` overrides it) | The trierarch, and the ship's session |
+| Every ship's files, one folder per ship, mode 700, holding no secret (trierarch.md, "The ship's folder"): `<shipId>/repositories/`, its ship folder, where its session starts: the root AGENTS.md and CLAUDE.md a link to it, written at every start, `main/` and each `sub-repos/<repository>/`, each a worktree, or a clone with the container runtime, mounted at its own path into its container; `<shipId>/home/`, with the container runtime its home, mounted as its container's home: its identity, Claude Code's files and its conversations (decision 0039); `<shipId>/sockets/fleet.sock`, its fleet socket, the folder mounted at its own path into its container. Kept in its entry as it is crewed fresh, and removed whole through the trash beside it on every path its workspace goes; a repository a new settings version no longer names goes into that trash alone | `~/.aeolus/trierarch/ships/` (the configuration's `shipsRoot` overrides it) | The trierarch, and the ship's session |
 | The worktrees of the ships crewed before the ship folders, one folder per ship: `<root>/<repository>/<ship>`; removed on the same paths, the root swept for strays beside `ships/` | `~/.aeolus/trierarch/worktrees/`, or under a configured `shipsRoot` | The trierarch |
 | Read-only checkouts, one folder per ship and repository (#1182): `<shipId>/<repository>`; removed with the ship's identity | `~/.aeolus/trierarch/checkouts/` | The trierarch |
 | With the container runtime, the home of a ship crewed before the ship folders, mode 700, mounted as its container's home; removed with its identity, as on a release, through the trash beside it (decision 0039) | `~/.aeolus/trierarch/homes/<shipId>/` | The trierarch, and the ship's session in its container |
@@ -82,7 +82,7 @@ sequenceDiagram
   participant F as Fleet server
   participant P as Trierarch plugin
   participant T as Trierarch
-  participant W as Worktree
+  participant W as Ship folder
   participant X as hold and harness
   R->>F: commission ship (fleet:commission), request crew {settings} (fleet:manage)
   P->>F: read unassigned requests, oldest first, and trierarch reports
@@ -93,8 +93,9 @@ sequenceDiagram
   T->>F: status crewing
   T->>F: getStartingPrompt(shipId) (crew:run)
   T->>F: register with the secret, gets the crew token
-  T->>W: git worktree add, write identity (wakeBy=trierarch, squadron?)
-  T->>X: start the harness in the folder, first prompt /aeolus-fleet:wake
+  T->>W: git worktree add main/ and each sub-repos/<repository>/, write identity (wakeBy=trierarch, squadron?)
+  T->>W: write the root AGENTS.md and CLAUDE.md, trust the ship folder
+  T->>X: start the harness in the ship folder, first prompt /aeolus-fleet:wake
   T->>F: status running
   X->>F: whoami, receive, report (its crew token)
 ```
@@ -137,7 +138,7 @@ sequenceDiagram
   participant T as Trierarch
   participant X as Session
   participant H as Plugin hooks
-  participant W as Worktree
+  participant W as Ship folder
   S->>F: send to ship
   T->>F: inbox wait with the ship's crew token
   F-->>T: waiting 1
@@ -159,7 +160,7 @@ sequenceDiagram
   T->>F: release(shipId) (crew:run)
   T->>W: stop what runs in it
   T->>F: the ship's last usage, to the plugin's ship
-  T->>W: remove the identity, then the worktree whatever it holds, what it held logged
+  T->>W: remove the identity, then the ship's folder whatever it holds, what each repository held logged
   T->>F: confirm: the request is gone
 ```
 

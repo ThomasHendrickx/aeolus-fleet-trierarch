@@ -1,7 +1,7 @@
 import { trierarchReportDetailsSchema } from '@aeolus-fleet/common';
 import { describe, expect, it } from 'vitest';
 
-import { aMachineLoad, aTrierarch, aTrierarchOnLogins, CONFIGURATION, newId, WORKTREE_ROOT, type Trierarch } from '../../test/support/in-memory.js';
+import { aMachineLoad, aTrierarch, aTrierarchOnLogins, CONFIGURATION, newId, WORKTREE_ROOT, type Trierarch, inRepositories } from '../../test/support/in-memory.js';
 import { EMPTY_STATE, putEntry, type Entry } from './entry.js';
 
 const WITH_CODEX = { ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: { flags: [], options: {} } } };
@@ -19,7 +19,7 @@ function aCrashedEntry(): Entry {
   return {
     shipId: newId('ship'),
     harness: 'claude-code',
-    workspace: { kind: 'worktree', repository: 'aeolus-fleet' },
+    workspace: inRepositories('aeolus-fleet'),
     options: {},
     settingsVersion: 1,
     state: 'crashed',

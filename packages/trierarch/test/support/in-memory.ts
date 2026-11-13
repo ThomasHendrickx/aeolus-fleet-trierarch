@@ -113,9 +113,14 @@ interface HeldRequest {
 /** The statuses at which the fleet holds a crew final (decision 0029). */
 const FINAL_STATUSES: ReadonlySet<CrewStatus> = new Set(['running', 'restarting', 'crashed']);
 
-/** The settings most tests request: a worktree of aeolus-fleet on Claude Code. */
+/** A ship folder of the main repository and the sub-repositories given, none without. */
+export function inRepositories(main: string, at: { ref?: string; subRepositories?: readonly string[] } = {}): TrierarchWorkspace {
+  return { kind: 'repositories', main: { repository: main, ...(at.ref !== undefined && { ref: at.ref }) }, subRepositories: (at.subRepositories ?? []).map((repository) => ({ repository })) };
+}
+
+/** The settings most tests request: a ship folder of aeolus-fleet on Claude Code. */
 export function crewSettings(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return { harness: 'claude-code', workspace: { kind: 'worktree', repository: 'aeolus-fleet' }, options: {}, ...overrides };
+  return { harness: 'claude-code', workspace: inRepositories('aeolus-fleet'), options: {}, ...overrides };
 }
 
 export class InMemoryFleet implements FleetPort {
@@ -640,9 +645,9 @@ export class InMemoryHarness implements HarnessPort {
 }
 
 /**
- * The workspaces, each worktree a folder under the root by its ship's name
- * whatever ship's folder it was made for: the ship's folder it was made for is
- * kept with it, and goes with it.
+ * The workspaces: each ship folder in its ship's folder, its main/ and each
+ * sub-repository a folder in it, going with the ship's folder; a configured
+ * folder as it is.
  */
 export class InMemoryWorkspace implements WorkspacePort {
   /** Folders on disk, with the ship's folder each was made for, whether they hold changes, and what removing one would discard, as git says it. */
@@ -672,17 +677,74 @@ export class InMemoryWorkspace implements WorkspacePort {
     }
   }
 
-  prepare(at: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace; shipFolder?: string }): Promise<{ folder: string }> {
-    const { shipId, shipName, workspace, shipFolder } = at;
-    const folder = workspace.kind === 'folder' ? (this.configured[workspace.name]?.path ?? NOTES_FOLDER) : `${WORKTREE_ROOT}/${workspace.repository}/${shipName}`;
-    if (!this.folders.has(folder)) {
-      this.folders.set(folder, { shipId, ...(shipFolder !== undefined && workspace.kind === 'worktree' && { shipFolder }), hasChanges: false, unsaved: [] });
+  /** The root files written, in order: the ship folder and the workspace they name. */
+  readonly rootFilesWritten: { folder: string; workspace: TrierarchWorkspace }[] = [];
+
+  /** The repositories each ship folder's main/ was made of, as prepare last made them. */
+  readonly mains = new Map<string, string>();
+
+  /** Repositories git cannot make, with git's message. */
+  readonly failingRepositories = new Map<string, string>();
+
+  async prepare(at: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace; shipFolder?: string; madeMain?: string; onMainMade?: (repository: string) => Promise<void> }): Promise<{ folder: string }> {
+    const { shipId, workspace, shipFolder } = at;
+    if (workspace.kind === 'folder') {
+      const folder = this.configured[workspace.name]?.path ?? NOTES_FOLDER;
+      if (!this.folders.has(folder)) {
+        this.folders.set(folder, { shipId, hasChanges: false, unsaved: [] });
+      }
+      this.keep(shipId, shipFolder);
+      return { folder };
     }
+    if (shipFolder === undefined) {
+      throw new Error("A ship folder is made only in its ship's folder");
+    }
+    this.keep(shipId, shipFolder);
+    const folder = `${shipFolder}/repositories`;
+    const main = `${folder}/main`;
+    if (at.madeMain !== undefined && at.madeMain !== workspace.main.repository) {
+      this.folders.delete(main);
+    }
+    const named = new Set(workspace.subRepositories.map(({ repository }) => `${folder}/sub-repos/${repository}`));
+    for (const path of [...this.folders.keys()].filter((each) => each.startsWith(`${folder}/sub-repos/`) && !named.has(each))) {
+      this.folders.delete(path);
+    }
+    if (!this.folders.has(folder)) {
+      this.folders.set(folder, { shipId, shipFolder, hasChanges: false, unsaved: [] });
+    }
+    for (const [repository, path] of [[workspace.main.repository, main] as const, ...workspace.subRepositories.map(({ repository: name }) => [name, `${folder}/sub-repos/${name}`] as const)]) {
+      const failure = this.failingRepositories.get(repository);
+      if (failure !== undefined) {
+        throw new Error(failure);
+      }
+      if (!this.folders.has(path)) {
+        this.folders.set(path, { shipId, shipFolder, hasChanges: false, unsaved: [] });
+      }
+      if (path === main) {
+        this.mains.set(folder, repository);
+        await at.onMainMade?.(repository);
+      }
+    }
+    return { folder };
+  }
+
+  private keep(shipId: ShipId, shipFolder: string | undefined): void {
     if (shipFolder !== undefined && !this.folders.has(shipFolder)) {
       this.folders.set(shipFolder, { shipId, hasChanges: false, unsaved: [] });
       this.gone.delete(shipFolder);
     }
-    return Promise.resolve({ folder });
+  }
+
+  writeRootFiles(at: { folder: string; workspace: TrierarchWorkspace }): Promise<void> {
+    if (at.workspace.kind === 'repositories') {
+      this.rootFilesWritten.push({ ...at });
+    }
+    return Promise.resolve();
+  }
+
+  unsavedInShipFolder(folder: string): Promise<readonly { folder: string; unsaved: readonly string[] }[]> {
+    const repositories = [...this.folders.entries()].filter(([path]) => path === `${folder}/main` || path.startsWith(`${folder}/sub-repos/`));
+    return Promise.resolve(repositories.map(([path, { unsaved }]) => ({ folder: path, unsaved: [...unsaved] })));
   }
 
   removeShipFolder(shipFolder: string): Promise<void> {

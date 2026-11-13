@@ -21,15 +21,19 @@ import type { StatePort } from '../core/ports.js';
 /** Where a 0.17 state file is moved, beside the new one. */
 export const OLD_STATE_FILE = 'state.0.17.json';
 
+/** The workspace of an entry crewed before the ship folder layout: one worktree of a repository. */
+const oldLayoutWorkspaceSchema = z.object({ kind: z.literal('worktree'), repository: z.string(), ref: z.string().optional() });
+
 const stateSchema = z.object({
   entries: z.record(
     z.string(),
-    z.object({
+    z
+      .object({
       shipId: idSchema('ship'),
       shipName: z.string().optional(),
       settingsVersion: z.int().positive(),
       harness: z.string(),
-      workspace: trierarchWorkspaceSchema,
+      workspace: z.union([trierarchWorkspaceSchema, oldLayoutWorkspaceSchema]),
       squadron: z.string().optional(),
       firstPrompt: z.string().optional(),
       options: z.record(z.string(), z.string()),
@@ -39,6 +43,7 @@ const stateSchema = z.object({
       restartAt: z.string().optional(),
       folder: z.string().optional(),
       shipFolder: z.string().optional(),
+      madeMain: z.string().optional(),
       sentUsage: z.record(z.string(), z.string()).optional(),
       crewToken: z.string().optional(),
       hasStarted: z.boolean(),
@@ -48,9 +53,11 @@ const stateSchema = z.object({
       earlierLogins: z.array(z.object({ login: z.enum(LOGINS), until: z.string() })).optional(),
       isReleasedElsewhere: z.literal(true).optional(),
       isShipFolderGone: z.literal(true).optional(),
+      isOldLayout: z.literal(true).optional(),
       crewFailures: z.int().min(1).optional(),
       isIdentityGone: z.literal(true).optional(),
-    }),
+    })
+      .transform(fromOldLayout),
   ),
   kept: z.array(z.object({ shipId: idSchema('ship'), repository: z.string(), path: z.string() })),
   orphans: z.array(z.object({ path: z.string(), repository: z.string(), name: z.string() })),
@@ -69,6 +76,20 @@ const stateSchema = z.object({
     })
     .optional(),
 });
+
+/**
+ * An entry as this trierarch crews it: one crewed before the ship folder
+ * layout names its repository as the main of a ship folder, as core rewrote
+ * its crew request, and is marked to be crewed again in a fresh one
+ * (decision 0013: no second layout kept).
+ */
+function fromOldLayout<T extends { workspace: z.infer<typeof trierarchWorkspaceSchema> | z.infer<typeof oldLayoutWorkspaceSchema> }>(entry: T): Omit<T, 'workspace'> & { workspace: z.infer<typeof trierarchWorkspaceSchema>; isOldLayout?: true } {
+  const { workspace } = entry;
+  if (workspace.kind !== 'worktree') {
+    return { ...entry, workspace };
+  }
+  return { ...entry, workspace: { kind: 'repositories', main: { repository: workspace.repository, ...(workspace.ref !== undefined && { ref: workspace.ref }) }, subRepositories: [] }, isOldLayout: true };
+}
 
 /** The 0.17 state file: it alone kept the messages it applied. */
 const oldStateSchema = z.looseObject({ applied: z.unknown() });

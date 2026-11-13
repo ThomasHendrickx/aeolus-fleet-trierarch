@@ -49,18 +49,21 @@ function savedFolderOf(machine: Machine, shipName: string): string | undefined {
 }
 
 /**
- * A ship's session in its worktree, as the harness's stand-in writes it down: each start, and for Claude Code each turn with what the
- * plugin's hooks added to it. The worktree is the folder the trierarch saved for the ship, read at each use, so a test reads it before
- * the ship is crewed too; a path that is not there until then.
+ * A ship's session in its folder, as the harness's stand-in writes it down: each start, and for Claude Code each turn with what the
+ * plugin's hooks added to it. The folder is the one the trierarch saved for the ship, read at each use, so a test reads it before
+ * the ship is crewed too; a path that is not there until then. In a ship folder, its main repository is `main/` in it.
  */
 export function sessionOf(machine: Machine, shipName: string) {
-  const worktreeOf = (): string => savedFolderOf(machine, shipName) ?? join(machine.trierarchHome, 'ships', `no-folder-of-${shipName}`);
+  const folderOf = (): string => savedFolderOf(machine, shipName) ?? join(machine.trierarchHome, 'ships', `no-folder-of-${shipName}`);
   return {
-    get worktree(): string {
-      return worktreeOf();
+    get folder(): string {
+      return folderOf();
     },
-    starts: () => linesOf(join(worktreeOf(), 'fake-starts.jsonl'), startSchema),
-    turns: () => linesOf(join(worktreeOf(), 'fake-turns.jsonl'), turnSchema),
+    get main(): string {
+      return join(folderOf(), 'main');
+    },
+    starts: () => linesOf(join(folderOf(), 'fake-starts.jsonl'), startSchema),
+    turns: () => linesOf(join(folderOf(), 'fake-turns.jsonl'), turnSchema),
   };
 }
 

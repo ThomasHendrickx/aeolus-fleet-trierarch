@@ -352,11 +352,19 @@ export interface WorkspacePort {
   /** The folder a ship crewed fresh keeps every file of its own in, `<ships>/<shipId>`, under the place of ships/. */
   shipFolderOf(shipId: ShipId): Promise<string>;
   /**
-   * Makes the workspace, or finds the one a stop mid-crew left half made: its
-   * folder. A worktree is made in the ship's folder when it has one; one
-   * crewed before the ship folders (none) has it under the root it was made in.
+   * Makes the workspace, or finds the one a stop mid-crew left half made, or
+   * brings the ship folder to a new settings version's repositories: its
+   * folder. A ship folder is made in the ship's folder, `main/` replaced
+   * when it was made of another repository (`madeMain`); a configured folder
+   * is used as it is. `onMainMade` is told the repository `main/` is made of
+   * once it is, before any sub-repository is made, so a sub-repository git
+   * cannot make leaves it known for the next try.
    */
-  prepare(workspace: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace; shipFolder?: string }): Promise<{ folder: string }>;
+  prepare(workspace: { shipId: ShipId; shipName: string; workspace: TrierarchWorkspace; shipFolder?: string; madeMain?: string; onMainMade?: (repository: string) => Promise<void> }): Promise<{ folder: string }>;
+  /** Writes the ship folder's root files again, as at every start; nothing for a configured folder. */
+  writeRootFiles(at: { folder: string; workspace: TrierarchWorkspace }): Promise<void>;
+  /** What removing each repository the ship folder holds would discard, as unsaved says it, by the repository's folder. */
+  unsavedInShipFolder(folder: string): Promise<readonly { readonly folder: string; readonly unsaved: readonly string[] }[]>;
   /** Whether the worktree holds nothing git would show; never for one the host does not read. */
   isClean(folder: string): Promise<boolean>;
   /**

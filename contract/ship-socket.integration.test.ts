@@ -25,7 +25,7 @@ beforeEach(async () => {
   await aCrewingMachine({ fleet, machine });
   // fleet:read lets scout list the fleet; it holds no fleet:commission.
   scout = await fleet.commission('scout', { scopes: ['fleet:read'] });
-  await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+  await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
   await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
   await expect.poll(() => sessionOf(machine, 'scout').turns().length, { timeout: CREWED_WITHIN_MS }).toBeGreaterThan(0);
 });
@@ -42,7 +42,7 @@ const answeredSchema = z.object({ path: z.string(), status: z.number(), body: z.
 
 /** What the socket answered scout's session, each call in order. */
 function answeredScout(): z.infer<typeof answeredSchema>[] {
-  const file = join(sessionOf(machine, 'scout').worktree, 'fake-socket-calls.jsonl');
+  const file = join(sessionOf(machine, 'scout').folder, 'fake-socket-calls.jsonl');
   return existsSync(file)
     ? readFileSync(file, 'utf8')
         .split('\n')

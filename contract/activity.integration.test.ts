@@ -29,7 +29,7 @@ afterEach(async ({ task }) => {
 describe("a running session's activity", () => {
   it('is written with the interval 30 seconds, as its latest event says: a turn that ended well is a result', async () => {
     const scout = await fleet.commission('scout');
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
     await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
 
     await expect.poll(() => fleet.activityOf(scout), { timeout: WRITTEN_WITHIN_MS }).toEqual({ kind: 'result', tool: null, intervalSeconds: 30 });

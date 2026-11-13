@@ -2,7 +2,7 @@ import { stripVTControlCharacters } from 'node:util';
 
 import { describe, expect, it } from 'vitest';
 
-import { aTrierarch, crewSettings, NOTES_FOLDER, WORKTREE_ROOT } from '../../test/support/in-memory.js';
+import { aTrierarch, crewSettings, inRepositories, NOTES_FOLDER, SHIPS_ROOT } from '../../test/support/in-memory.js';
 import { describeList, inspectList } from './list.js';
 import { createStyle } from '../adapters/style.js';
 
@@ -11,7 +11,7 @@ describe('aeolus-trierarch list', () => {
     const trierarch = aTrierarch();
     const scout = trierarch.fleet.commission('scout');
     const notes = trierarch.fleet.commission('notes');
-    trierarch.fleet.request(scout, crewSettings({ workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'main' } }));
+    trierarch.fleet.request(scout, crewSettings({ workspace: inRepositories('aeolus-fleet', { ref: 'main' }) }));
     trierarch.fleet.request(notes, crewSettings({ workspace: { kind: 'folder', name: 'notes' } }));
     await trierarch.pass();
     await trierarch.pass();
@@ -21,14 +21,14 @@ describe('aeolus-trierarch list', () => {
     const entries = await inspectList(trierarch.state);
 
     expect(entries).toEqual([
-      { shipId: scout, state: 'restarting', harness: 'claude-code', workspace: 'worktree aeolus-fleet at main', folder: `${WORKTREE_ROOT}/aeolus-fleet/scout`, since: '2026-10-06T08:00:00.000Z', restarts: 1 },
+      { shipId: scout, state: 'restarting', harness: 'claude-code', workspace: 'repositories aeolus-fleet at main', folder: `${SHIPS_ROOT}/${scout}/repositories`, since: '2026-10-06T08:00:00.000Z', restarts: 1 },
       { shipId: notes, state: 'running', harness: 'claude-code', workspace: 'folder notes', folder: NOTES_FOLDER, since: '2026-10-06T08:00:00.000Z', restarts: 0 },
     ]);
     expect(describeList(entries)).toBe(
       [
-        'SHIP                            STATE       HARNESS      WORKSPACE                      SINCE                     RESTARTS',
-        `${scout}  restarting  claude-code  worktree aeolus-fleet at main  2026-10-06T08:00:00.000Z  1`,
-        `${notes}  running     claude-code  folder notes                   2026-10-06T08:00:00.000Z  0`,
+        'SHIP                            STATE       HARNESS      WORKSPACE                          SINCE                     RESTARTS',
+        `${scout}  restarting  claude-code  repositories aeolus-fleet at main  2026-10-06T08:00:00.000Z  1`,
+        `${notes}  running     claude-code  folder notes                       2026-10-06T08:00:00.000Z  0`,
       ].join('\n'),
     );
   });

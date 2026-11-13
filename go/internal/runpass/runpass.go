@@ -6,6 +6,7 @@
 package runpass
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -24,6 +25,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/workspace"
 )
 
 // Fleet is the fleet as a pass calls it: the trierarch's crew:run calls, and a report with a session's crew token.
@@ -100,8 +102,13 @@ type Workspace interface {
 	ShipFolderOf(shipID string) string
 	// HasShipFolder is whether the ship's folder is there; one removed by hand is not.
 	HasShipFolder(folder string) bool
+	// Prepare makes the ship folder, or brings the one the entry has to its settings' repositories, or takes the configured folder.
 	Prepare(entry reconciler.Entry, shipName string) (string, error)
+	// WriteRootFiles writes the ship folder's root files again, as at every start; nothing for a configured folder.
+	WriteRootFiles(entry reconciler.Entry) error
 	Unsaved(folder string) ([]string, error)
+	// UnsavedInShipFolder is what removing each repository the ship folder holds would discard, by the repository's folder.
+	UnsavedInShipFolder(folder string) ([]workspace.Held, error)
 	Remove(entry reconciler.Entry) error
 	// FoldersUnderRoot are every folder under the root a workspace could be, whatever made it (gap rule 2); never the trash, a link or a
 	// configured folder.
@@ -409,6 +416,21 @@ func (p Pass) writeActivities(state reconciler.State) {
 }
 
 // crewFailed counts a failed crew against its settings version, from the state the crew saved before it failed: the last of the budget gives the request back with the last failure as the reason (#827). What fails here is logged and left to the next pass.
+// keptMainMade answers a Prepare that failed: when main/ was made before a sub-repository failed, the entry keeps what main/ is made of,
+// so the next try never trashes it.
+func (p Pass) keptMainMade(state reconciler.State, entry reconciler.Entry, failure error) (reconciler.State, error) {
+	var made *workspace.MainMadeError
+	if !errors.As(failure, &made) {
+		return state, failure
+	}
+	entry.MadeMain = made.Repository
+	next, err := p.put(state, entry)
+	if err != nil {
+		return next, fmt.Errorf("%w; keeping main/ made of %s: %w", failure, made.Repository, err)
+	}
+	return next, failure
+}
+
 func (p Pass) crewFailed(held reconciler.State, shipID string, failure error) reconciler.State {
 	state, err := p.Store.Load()
 	if err != nil {
@@ -626,11 +648,14 @@ func nameOf(entry reconciler.Entry) string {
 	return entry.ShipID
 }
 
-// crew crews the ship (crew:run): once its harness can start a session, makes the workspace, gets its starting prompt and registers with the secret, so the session never sees it; writes the folder's identity and starts the harness, the status crewing, until its session shows activity in its launch window (#382). A ship another session crews before its crew is left; one gone is forgotten; a resumed crew whose ship is crewed holds it by its own lease, or lost its register reply, so the ship is released and crewed again.
+// crew crews the ship (crew:run): once its harness can start a session, makes the workspace, gets its starting prompt and registers with the secret, so the session never sees it; writes the folder's identity and starts the harness, the status crewing, until its session shows activity in its launch window (#382). A ship another session crews before its crew is left; one gone is forgotten; a resumed crew whose ship is crewed holds it by its own lease: with the crew token its entry keeps, as a new settings version's does, it is crewed again under that lease, never released, as core removes the crew request on a release (#367); one that lost its register reply is released and crewed again.
 func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed bool) (reconciler.State, error) {
 	harness, err := p.harnessOf(entry)
 	if err != nil {
 		return state, err
+	}
+	if entry.IsOldLayout && entry.CrewToken != "" {
+		return p.crewInTheShipFolderLayout(state, entry, harness)
 	}
 	if entry.IsShipFolderGone {
 		return p.crewInAFreshShipFolder(state, entry, harness)
@@ -652,11 +677,13 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	case ship.Status == "crewed" && !isResumed:
 		p.Log(fmt.Sprintf("%s (%s): crewed by another session, so the trierarch leaves it", ship.Name, entry.ShipID))
 		return p.remove(state, entry.ShipID)
-	case ship.Status == "crewed":
+	case ship.Status == "crewed" && entry.CrewToken == "":
 		if err := p.Fleet.Release(entry.ShipID); err != nil {
 			return state, err
 		}
 	}
+	// One its entry holds the crew token of, as a new settings version's does, is crewed again under the lease it holds: core removes the crew request on a release (#367).
+	isUnderItsLease := ship.Status == "crewed" && entry.CrewToken != ""
 	if entry.IsReleasedElsewhere {
 		var err error
 		if state, entry, err = p.freshAfterReleaseElsewhere(state, entry); err != nil {
@@ -680,10 +707,10 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	}
 	folder, err := p.Workspace.Prepare(entry, ship.Name)
 	if err != nil {
-		return state, err
+		return p.keptMainMade(state, entry, err)
 	}
 	// Kept at once, so a crew that stops here knows the workspace to remove.
-	entry.ShipName, entry.Folder = ship.Name, folder
+	entry.ShipName, entry.Folder, entry.MadeMain = ship.Name, folder, madeMainOf(entry.Workspace)
 	if state, err = p.put(state, entry); err != nil {
 		return state, err
 	}
@@ -692,13 +719,11 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	if problem := p.startProblem(entry, login); problem != "" {
 		return p.giveBack(state, entry.ShipID, entry.SettingsVersion, problem, &entry)
 	}
-	secret, err := p.Fleet.StartingSecret(entry.ShipID)
-	if err != nil {
-		return state, err
-	}
-	crewToken, err := p.Fleet.RegisterShip(entry.ShipID, secret, entry.Harness)
-	if err != nil {
-		return state, err
+	crewToken := entry.CrewToken
+	if !isUnderItsLease {
+		if crewToken, err = p.registered(entry); err != nil {
+			return state, err
+		}
 	}
 	// The crew token stays in the state; the session calls over its ship's socket (decision 0026).
 	entry.CrewToken = crewToken
@@ -721,6 +746,9 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	starting := entry
 	starting.Login = login
 	starting.ReadOnly = pathsOf(made)
+	if err := p.Workspace.WriteRootFiles(starting); err != nil {
+		return state, err
+	}
 	if err := harness.Launch(starting, !entry.HasStarted, launchID); err != nil {
 		return state, err
 	}
@@ -729,6 +757,15 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	entry = startedOn(entry, login, entry.LaunchedAt)
 	p.Log(fmt.Sprintf("%s (%s): crewed, %s started in %s", ship.Name, entry.ShipID, entry.Harness, folder))
 	return p.put(state, entry)
+}
+
+// registered registers the ship with a new starting prompt's secret, so the session never sees it: the crew token its lease gives.
+func (p Pass) registered(entry reconciler.Entry) (string, error) {
+	secret, err := p.Fleet.StartingSecret(entry.ShipID)
+	if err != nil {
+		return "", err
+	}
+	return p.Fleet.RegisterShip(entry.ShipID, secret, entry.Harness)
 }
 
 // freshAfterReleaseElsewhere removes the workspace of a ship released elsewhere before it is crewed again in a fresh one (row 11, #475). Its session stops first, as a release's does, so nothing reads the worktree while a session works in it, whatever the pass's stop did. The entry is saved without its mark only once that is done, so a failed stop or removal is tried again on the next pass.
@@ -744,6 +781,35 @@ func (p Pass) freshAfterReleaseElsewhere(state reconciler.State, entry reconcile
 	entry.IsReleasedElsewhere, entry.Folder, entry.ShipFolder = false, "", ""
 	state, err := p.put(state, entry)
 	return state, entry, err
+}
+
+// crewInTheShipFolderLayout crews a ship saved before the ship folder layout (decision 0013) again in a fresh ship folder under the lease
+// it holds: its session stops, its workspace goes as a release's does, what it held unsaved logged, and it is crewed as a ship whose
+// ship's folder is gone is, a first start telling nobody. The entry is saved without its mark once its workspace is gone, so an
+// interruption crews it again in a fresh ship folder.
+func (p Pass) crewInTheShipFolderLayout(state reconciler.State, entry reconciler.Entry, harness Harness) (reconciler.State, error) {
+	if err := p.Sessions.Stop(entry.ShipID); err != nil {
+		return state, err
+	}
+	if err := p.endWorkspace(entry); err != nil {
+		return state, err
+	}
+	p.Log(fmt.Sprintf("%s (%s): crewed before the ship folder layout, its worktree removed, so it is crewed again in a fresh ship folder", nameOf(entry), entry.ShipID))
+	entry.IsOldLayout, entry.Folder, entry.ShipFolder, entry.IsShipFolderGone = false, "", "", true
+	state, err := p.put(state, entry)
+	if err != nil {
+		return state, err
+	}
+	return p.crewInAFreshShipFolder(state, entry, harness)
+}
+
+// madeMainOf is the repository a ship folder's `main/` is made of, kept with its entry so a new settings version naming another
+// repository replaces it; none for a configured folder.
+func madeMainOf(workspace reconciler.Workspace) string {
+	if workspace.Kind != "repositories" {
+		return ""
+	}
+	return workspace.Main.Repository
 }
 
 // crewInAFreshShipFolder crews a ship whose ship's folder is gone, removed by hand, again in a fresh one, under the lease it holds:
@@ -763,7 +829,7 @@ func (p Pass) crewInAFreshShipFolder(state reconciler.State, entry reconciler.En
 	if err != nil {
 		return state, err
 	}
-	entry.Folder = folder
+	entry.Folder, entry.MadeMain = folder, madeMainOf(entry.Workspace)
 	if state, err = p.put(state, entry); err != nil {
 		return state, err
 	}
@@ -784,6 +850,9 @@ func (p Pass) crewInAFreshShipFolder(state reconciler.State, entry reconciler.En
 	starting := entry
 	starting.Login = login
 	starting.ReadOnly = pathsOf(made)
+	if err := p.Workspace.WriteRootFiles(starting); err != nil {
+		return state, err
+	}
 	if err := harness.Launch(starting, true, launchID); err != nil {
 		return state, err
 	}
@@ -811,6 +880,9 @@ func (p Pass) launch(state reconciler.State, entry reconciler.Entry) (reconciler
 	starting := entry
 	starting.Login = login
 	starting.ReadOnly = pathsOf(made)
+	if err := p.Workspace.WriteRootFiles(starting); err != nil {
+		return state, err
+	}
 	if err := harness.Launch(starting, false, launchID); err != nil {
 		return state, err
 	}
@@ -943,10 +1015,10 @@ func (p Pass) handOver(entry reconciler.Entry, action reconciler.Action) error {
 
 // checkoutsOf is the read-only checkouts a session in the entry's repository gets, made when missing; none in a configured folder.
 func (p Pass) checkoutsOf(entry reconciler.Entry) ([]checkouts.Checkout, error) {
-	if entry.Workspace.Kind != "worktree" {
+	if entry.Workspace.Kind != "repositories" {
 		return nil, nil
 	}
-	return p.Checkouts.Prepare(entry.ShipID, entry.Workspace.Repository)
+	return p.Checkouts.Prepare(entry.ShipID, entry.Workspace.Main.Repository)
 }
 
 func pathsOf(made []checkouts.Checkout) []string {
@@ -975,7 +1047,7 @@ func (p Pass) deleteIdentity(entry reconciler.Entry) error {
 
 // endWorkspace ends the workspace of an entry whose crew ended here (gap rule 1): what runs in its worktree stops, its last usage is sent, its identity goes, then a worktree it made is removed whatever it holds. What it held is logged, and nobody is told: saving is the session's job. A usage send that fails leaves it all for the next pass. A configured folder is never removed.
 func (p Pass) endWorkspace(entry reconciler.Entry) error {
-	isWorktree := entry.Folder != "" && entry.Workspace.Kind == "worktree"
+	isWorktree := entry.Folder != "" && entry.Workspace.Kind == "repositories"
 	if isWorktree && p.FolderProcesses != nil {
 		if _, err := p.FolderProcesses.StopIn(entry.Folder); err != nil {
 			return err
@@ -994,7 +1066,7 @@ func (p Pass) endWorkspace(entry reconciler.Entry) error {
 		// A ship in a configured folder has its own folder too, which goes with it; the configured folder stays.
 		return p.Workspace.Remove(entry)
 	}
-	unsaved, err := p.Workspace.Unsaved(entry.Folder)
+	held, err := p.heldIn(entry)
 	if err != nil {
 		// What it holds is not known, so it is not removed unlogged: the next pass reads it again.
 		return err
@@ -1002,10 +1074,25 @@ func (p Pass) endWorkspace(entry reconciler.Entry) error {
 	if err := p.Workspace.Remove(entry); err != nil {
 		return err
 	}
-	if len(unsaved) > 0 {
-		p.Log(fmt.Sprintf("Discarded from the worktree of %s (%s), %s: %s", nameOf(entry), entry.ShipID, entry.Folder, strings.Join(unsaved, "; ")))
+	for _, each := range held {
+		if len(each.Unsaved) > 0 {
+			p.Log(fmt.Sprintf("Discarded from the worktree of %s (%s), %s: %s", nameOf(entry), entry.ShipID, each.Folder, strings.Join(each.Unsaved, "; ")))
+		}
 	}
 	return nil
+}
+
+// heldIn is what removing the entry's workspace would discard, by each repository's folder: each repository of its ship folder, or the
+// one worktree of a ship saved before the ship folder layout.
+func (p Pass) heldIn(entry reconciler.Entry) ([]workspace.Held, error) {
+	if !entry.IsOldLayout {
+		return p.Workspace.UnsavedInShipFolder(entry.Folder)
+	}
+	unsaved, err := p.Workspace.Unsaved(entry.Folder)
+	if err != nil {
+		return nil, err
+	}
+	return []workspace.Held{{Folder: entry.Folder, Unsaved: unsaved}}, nil
 }
 
 // removeStray removes a folder under the root no crewed ship uses (gap rule 2): an orphan worktree, a session's own clone, a folder git

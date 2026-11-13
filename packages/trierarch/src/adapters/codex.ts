@@ -24,9 +24,10 @@ import { codexActivityIn, sessionActivityOf } from './session-activity.js';
  * `$aeolus-fleet-wake` sent to wake an idle session, each prompt with the line that
  * no human reads its terminal (#585). The identity and the turn marker go
  * through the aeolus-fleet plugin for Codex, in Codex's own plugin data folder,
- * whose hooks run in `codex exec` as in a terminal. The plugin's new or
- * changed hooks are trusted before every launch: a plugin update changes them,
- * and Codex runs none it does not trust (#581).
+ * whose hooks run in `codex exec` as in a terminal. The session's folder, a
+ * ship folder no configured checkout covers, and the plugin's new or changed
+ * hooks are trusted before every launch: a plugin update changes them, and
+ * Codex runs none it does not trust (#581).
  */
 
 export const WAKE_PROMPT = '$aeolus-fleet-wake';
@@ -133,8 +134,8 @@ export function createCodexHarness(options: {
   configuration: TrierarchConfiguration;
   plugin: AeolusPlugin;
   sessions: Pick<SessionRuntime, 'start' | 'send' | 'interrupt' | 'events' | 'lastEventAt'>;
-  /** Codex's own answers, where the aeolus-fleet plugin's hooks are trusted before each launch (#581). */
-  setup: Pick<CodexSetup, 'trustAeolusHooks'>;
+  /** Codex's own answers, where the session's folder and the aeolus-fleet plugin's hooks are trusted before each launch (#581). */
+  setup: Pick<CodexSetup, 'trust' | 'trustAeolusHooks'>;
   /** The program to run; `codex` unless a test runs another. */
   command?: string;
   /** Where sessions on an API key reach the model proxy (headless H16); none before it first listened, or on a machine with no proxy. */
@@ -174,6 +175,8 @@ export function createCodexHarness(options: {
       const route = await routeOf(login);
       const prompt = isFirstStart && firstPrompt !== undefined ? firstPromptOf(firstPrompt) : wakePromptOf(WAKE_PROMPT);
       const command = codexCommandLine({ flags: [...effectiveFlags(settings, picked), ...route.flags], prompt, isFirstStart, ...(options.command !== undefined && { program: options.command }) });
+      // A ship folder is no repository Codex trusts through its configured checkout, so the folder itself is trusted.
+      await options.setup.trust([folder]);
       await options.setup.trustAeolusHooks(folder);
       await marks.clear(folder);
       // Codex reads outside its folder as it is: its read-only checkouts need no flag (#1182).

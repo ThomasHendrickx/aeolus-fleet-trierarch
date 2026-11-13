@@ -21,6 +21,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/workspace"
 )
 
 const scout = "shp_01m6jyczpnpp5c0vxh54c966cy"
@@ -299,6 +300,12 @@ type aWorkspace struct {
 	gitSteps []string
 	// failBranchDeletion are the repositories whose branches cannot be deleted, as when the remote cannot be reached.
 	failBranchDeletion map[string]bool
+	// prepared are the entries each Prepare was given, in order.
+	prepared []reconciler.Entry
+	// failRepositories are the repositories git cannot make, with git's message.
+	failRepositories map[string]string
+	// rootFilesWritten are the folders whose root files were written, in order.
+	rootFilesWritten []string
 }
 
 func (w *aWorkspace) DeleteBranchesWhoseRemoteBranchIsGone(repository string) error {
@@ -353,10 +360,43 @@ func (f *someFolderProcesses) StopIn(folder string) (int, error) {
 	return 1, nil
 }
 
+// Prepare makes the folder of the ship's main repository and its name, `/worktrees/<main>/<ship>`, writing down the repository its
+// main/ was made of as the entry gave it; a repository in failRepositories fails with git's message, a sub-repository saying main/ was
+// made first.
 func (w *aWorkspace) Prepare(entry reconciler.Entry, shipName string) (string, error) {
-	folder := "/worktrees/" + entry.Workspace.Repository + "/" + shipName
+	w.prepared = append(w.prepared, entry)
+	for _, each := range entry.Workspace.Repositories() {
+		message, ok := w.failRepositories[each.Repository]
+		switch {
+		case ok && each.Repository == entry.Workspace.Main.Repository:
+			return "", errors.New(message)
+		case ok:
+			return "", &workspace.MainMadeError{Repository: entry.Workspace.Main.Repository, Err: errors.New(message)}
+		}
+	}
+	folder := "/worktrees/" + entry.Workspace.Main.Repository + "/" + shipName
 	w.made[folder] = true
 	return folder, nil
+}
+
+// WriteRootFiles writes down the folder whose root files were written, in order.
+func (w *aWorkspace) WriteRootFiles(entry reconciler.Entry) error {
+	w.rootFilesWritten = append(w.rootFilesWritten, entry.Folder)
+	return nil
+}
+
+// UnsavedInShipFolder is what the folder itself holds, then each folder in it the test names, by its path.
+func (w *aWorkspace) UnsavedInShipFolder(folder string) ([]workspace.Held, error) {
+	if w.failUnsaved {
+		return nil, errors.New("git status failed in " + folder)
+	}
+	held := []workspace.Held{}
+	for _, path := range slices.Sorted(maps.Keys(w.unsaved)) {
+		if path == folder || strings.HasPrefix(path, folder+"/") {
+			held = append(held, workspace.Held{Folder: path, Unsaved: w.unsaved[path]})
+		}
+	}
+	return held, nil
 }
 
 // ShipFolderOf is the ship's folder under the place of ships/.
@@ -507,7 +547,7 @@ func aRunPass(t *testing.T) *aPass {
 }
 
 func aRequest(status string) reconciler.Request {
-	request := reconciler.Request{ShipID: scout, SettingsVersion: 1, Settings: reconciler.Settings{Harness: "claude-code", Workspace: reconciler.Workspace{Kind: "worktree", Repository: "aeolus-fleet"}, FirstPrompt: "Review PR 12"}}
+	request := reconciler.Request{ShipID: scout, SettingsVersion: 1, Settings: reconciler.Settings{Harness: "claude-code", Workspace: reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: "aeolus-fleet"}}, FirstPrompt: "Review PR 12"}}
 	if status != "" {
 		request.Status = &status
 	}
@@ -744,6 +784,29 @@ func TestAGivenBackReasonIsCutToWhatTheFleetTakes(t *testing.T) {
 	want := "giveBack " + scout + " 1 " + ("mac-mini: crew failed 3 times: " + strings.Repeat("x", 300))[:200]
 	if !slices.Contains(pass.fleet.calls, want) {
 		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+}
+
+func TestANewSettingsVersionIsCrewedAgainUnderTheLeaseItHoldsNeverReleasedAndRegisteredAgain(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	crewToken := pass.store.state.Entries[scout].CrewToken
+	pass.harness.launches = nil
+	again := aRequest("running")
+	again.SettingsVersion = 2
+	pass.fleet.requests = []reconciler.Request{again}
+
+	pass.run(t)
+
+	// Core removes the crew request on a release (#367), so the lease is kept.
+	if slices.ContainsFunc(pass.fleet.calls, func(call string) bool {
+		return strings.HasPrefix(call, "release ") || strings.HasPrefix(call, "register ") || strings.HasPrefix(call, "getStartingPrompt ")
+	}) {
+		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+	entry := pass.store.state.Entries[scout]
+	if len(pass.harness.launches) != 1 || entry.SettingsVersion != 2 || entry.CrewToken != crewToken || pass.harness.tokens[scoutFolder] != crewToken {
+		t.Fatalf("launches %+v, entry %+v, token %q", pass.harness.launches, entry, pass.harness.tokens[scoutFolder])
 	}
 }
 
@@ -1722,7 +1785,7 @@ func TestARequestInARepositoryTheHarnessDoesNotTrustIsGivenBack(t *testing.T) {
 
 	pass.run(t)
 
-	want := "giveBack " + scout + " 1 mac-mini: workspace.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it"
+	want := "giveBack " + scout + " 1 mac-mini: workspace.main.repository: claude-code does not trust the repository aeolus-fleet: add it with aeolus-trierarch init, which trusts it"
 	if !slices.Contains(pass.fleet.calls, want) {
 		t.Fatalf("calls %q, want %q", pass.fleet.calls, want)
 	}
@@ -3108,5 +3171,174 @@ func TestAShipWhoseShipsFolderWasRemovedIsCrewedAgainInAFreshOneAsAFirstStartUnd
 	}
 	if len(pass.fleet.told) != 0 {
 		t.Fatalf("told %+v", pass.fleet.told)
+	}
+}
+
+func TestAShipFolderHasItsRootFilesWrittenBeforeItsFirstStartAndBeforeEveryStartAgain(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	pass.sessions.observed = []sessions.Observed{{ShipID: scout, Status: "exited"}}
+	pass.run(t)
+	now = now.Add(5 * time.Second)
+	t.Cleanup(func() { now = now.Add(-5 * time.Second) })
+
+	pass.run(t)
+
+	if !slices.Equal(pass.workspace.rootFilesWritten, []string{scoutFolder, scoutFolder}) || len(pass.harness.launches) != 2 {
+		t.Fatalf("root files written in %q for %d starts, want before each start", pass.workspace.rootFilesWritten, len(pass.harness.launches))
+	}
+}
+
+func TestAShipFolderKeepsTheRepositoryItsMainWasMadeOfSoANewMainReplacesIt(t *testing.T) {
+	pass := aRunPass(t)
+	pass.pass.Repositories = []string{"aeolus-fleet", "tools"}
+	pass.pass.Trusted = func() map[string]reconciler.Trust {
+		return map[string]reconciler.Trust{"claude-code": {Repositories: []string{"aeolus-fleet", "tools"}}}
+	}
+	pass.crewed(t)
+	again := aRequest("running")
+	again.SettingsVersion = 2
+	again.Settings.Workspace.Main.Repository = "tools"
+	pass.fleet.requests = []reconciler.Request{again}
+
+	pass.run(t)
+	pass.run(t)
+
+	prepared := pass.workspace.prepared[len(pass.workspace.prepared)-1]
+	if prepared.Workspace.Main.Repository != "tools" || prepared.MadeMain != "aeolus-fleet" {
+		t.Fatalf("prepared %+v, want tools named and aeolus-fleet as what main/ was made of", prepared)
+	}
+	if entry := pass.store.state.Entries[scout]; entry.MadeMain != "tools" {
+		t.Fatalf("entry %+v, want main/ made of tools", entry)
+	}
+}
+
+func TestANewMainIsKeptAcrossASubRepositoryGitCannotMakeNeverTrashedOnTheNextTry(t *testing.T) {
+	pass := aRunPass(t)
+	pass.pass.Repositories = []string{"aeolus-fleet", "tools"}
+	pass.pass.Trusted = func() map[string]reconciler.Trust {
+		return map[string]reconciler.Trust{"claude-code": {Repositories: []string{"aeolus-fleet", "tools"}}}
+	}
+	pass.crewed(t)
+	pass.workspace.failRepositories = map[string]string{"aeolus-fleet": "git worktree add failed: fatal: invalid reference: HEAD"}
+	again := aRequest("running")
+	again.SettingsVersion = 2
+	again.Settings.Workspace.Main.Repository = "tools"
+	again.Settings.Workspace.SubRepositories = []reconciler.RepositoryAt{{Repository: "aeolus-fleet"}}
+	pass.fleet.requests = []reconciler.Request{again}
+	pass.run(t)
+	pass.workspace.failRepositories = nil
+
+	pass.run(t)
+
+	prepared := pass.workspace.prepared[len(pass.workspace.prepared)-1]
+	if prepared.MadeMain != "tools" {
+		t.Fatalf("prepared %+v, want main/ known as made of tools on the next try", prepared)
+	}
+	if entry := pass.store.state.Entries[scout]; entry.MadeMain != "tools" {
+		t.Fatalf("entry %+v, want main/ made of tools", entry)
+	}
+}
+
+func TestASubRepositoryGitCannotMakeFailsTheCrewWithGitsMessageAndTheThirdFailureGivesItBack(t *testing.T) {
+	pass := aRunPass(t)
+	pass.pass.Repositories = []string{"aeolus-fleet", "tools"}
+	pass.pass.Trusted = func() map[string]reconciler.Trust {
+		return map[string]reconciler.Trust{"claude-code": {Repositories: []string{"aeolus-fleet", "tools"}}}
+	}
+	pass.workspace.failRepositories = map[string]string{"tools": "git worktree add failed: fatal: invalid reference: HEAD"}
+	request := aRequest("")
+	request.Settings.Workspace.SubRepositories = []reconciler.RepositoryAt{{Repository: "tools"}}
+	pass.fleet.requests = []reconciler.Request{request}
+
+	for range reconciler.CrewFailureBudget {
+		pass.run(t)
+	}
+
+	given := slices.ContainsFunc(pass.fleet.calls, func(call string) bool {
+		return strings.HasPrefix(call, "giveBack "+scout+" 1 ") && strings.Contains(call, "git worktree add failed: fatal: invalid reference: HEAD")
+	})
+	if !given || len(pass.harness.launches) != 0 {
+		t.Fatalf("calls %q, launches %d, want the request given back with git's message and nothing started", pass.fleet.calls, len(pass.harness.launches))
+	}
+}
+
+func TestAReleaseLogsWhatEachRepositoryOfTheShipFolderHeld(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	pass.workspace.unsaved[scoutFolder+"/main"] = []string{"?? main.md"}
+	pass.workspace.unsaved[scoutFolder+"/sub-repos/tools"] = []string{"?? tools.md"}
+	pass.fleet.requests = []reconciler.Request{aRequest("releasing")}
+
+	pass.run(t)
+
+	for _, want := range []string{
+		"Discarded from the worktree of scout (" + scout + "), " + scoutFolder + "/main: ?? main.md",
+		"Discarded from the worktree of scout (" + scout + "), " + scoutFolder + "/sub-repos/tools: ?? tools.md",
+	} {
+		if !slices.Contains(pass.logged, want) {
+			t.Errorf("logged %q, want %q", pass.logged, want)
+		}
+	}
+}
+
+// crewedInTheOldLayout runs passes until scout runs, then makes its entry one saved before the ship folder layout, as the state reads it:
+// its worktree in its ship's folder, holding what it holds.
+func (p *aPass) crewedInTheOldLayout(t *testing.T) string {
+	t.Helper()
+	p.crewed(t)
+	entry := p.store.state.Entries[scout]
+	worktree := entry.ShipFolder + "/worktree"
+	entry.Folder, entry.IsOldLayout, entry.MadeMain = worktree, true, ""
+	p.store.state.Entries[scout] = entry
+	p.workspace.made[worktree] = true
+	p.workspace.unsaved[worktree] = []string{"?? notes.md"}
+	return worktree
+}
+
+func TestAShipSavedBeforeTheShipFolderLayoutIsCrewedAgainInAFreshShipFolderUnderItsLeaseTellingNobody(t *testing.T) {
+	pass := aRunPass(t)
+	worktree := pass.crewedInTheOldLayout(t)
+	pass.fleet.calls = nil
+
+	pass.run(t)
+
+	entry := pass.store.state.Entries[scout]
+	if entry.IsOldLayout || entry.ShipFolder != "/ships/"+scout || entry.Folder != scoutFolder || entry.CrewToken != "aeolus_ct_v1_scout" {
+		t.Fatalf("entry %+v, want crewed in a fresh ship folder under its crew token", entry)
+	}
+	if last := pass.harness.launches[len(pass.harness.launches)-1]; !last.isFirstStart || last.folder != scoutFolder {
+		t.Fatalf("launched %+v, want a first start in the fresh ship folder", last)
+	}
+	if !slices.Contains(pass.workspace.removed, worktree) {
+		t.Errorf("removed %q, want its old worktree", pass.workspace.removed)
+	}
+	if !slices.Contains(pass.logged, "Discarded from the worktree of scout ("+scout+"), "+worktree+": ?? notes.md") {
+		t.Errorf("logged %q, want what its old worktree held", pass.logged)
+	}
+	for _, call := range pass.fleet.calls {
+		if strings.HasPrefix(call, "register") || strings.HasPrefix(call, "release") || strings.HasPrefix(call, "tell") {
+			t.Errorf("called %q, want the ship kept under its lease and nobody told", call)
+		}
+	}
+}
+
+func TestAShipSavedBeforeTheShipFolderLayoutWithANewSettingsVersionHasItsOldWorktreeRemovedWhatItHeldLogged(t *testing.T) {
+	pass := aRunPass(t)
+	worktree := pass.crewedInTheOldLayout(t)
+	again := aRequest("running")
+	again.SettingsVersion = 2
+	pass.fleet.requests = []reconciler.Request{again}
+
+	pass.run(t)
+
+	if !slices.Contains(pass.workspace.removed, worktree) {
+		t.Errorf("removed %q, want its old worktree", pass.workspace.removed)
+	}
+	if !slices.Contains(pass.logged, "Discarded from the worktree of scout ("+scout+"), "+worktree+": ?? notes.md") {
+		t.Errorf("logged %q, want what its old worktree held", pass.logged)
+	}
+	if entry := pass.store.state.Entries[scout]; entry.IsOldLayout || entry.Folder != scoutFolder || entry.SettingsVersion != 2 {
+		t.Errorf("entry %+v, want crewed with settings version 2 in a fresh ship folder", entry)
 	}
 }

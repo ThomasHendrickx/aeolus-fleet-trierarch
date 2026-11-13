@@ -170,7 +170,7 @@ describe('a session in a container', () => {
     const restart = await machine.trierarch(['restart']);
     expect(restart.status, restart.stdout + restart.stderr).toBe(0);
     scout = await fleet.commission('scout', { scopes: ['fleet:read'] });
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
     await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
     await expect.poll(() => sessionOf(machine, 'scout').turns().length, { timeout: CREWED_WITHIN_MS }).toBeGreaterThan(0);
   }
@@ -184,7 +184,7 @@ describe('a session in a container', () => {
   it("runs in a container of the session image of the trierarch's version, run by its hold, capped, seeing only its folder, its own home, its socket and its read-only checkouts", async () => {
     await aRunningScout();
     const version = z.object({ version: z.string() }).parse(JSON.parse((await machine.trierarch(['--version', '--json'])).stdout)).version;
-    const folder = sessionOf(machine, 'scout').worktree;
+    const folder = sessionOf(machine, 'scout').folder;
     const sockets = join(machine.trierarchHome, 'ships', scout, 'sockets');
     const image = `${SESSION_IMAGE}:${version}`;
 
@@ -245,7 +245,7 @@ describe('a session in a container', () => {
 
   it("keeps its identity in its ship's own home, never the user's, with Claude Code's questions answered there", async () => {
     await aRunningScout();
-    const folder = sessionOf(machine, 'scout').worktree;
+    const folder = sessionOf(machine, 'scout').folder;
     const crews = join(shipHome(), '.aeolus', 'crews');
 
     const identities = readdirSync(crews, { recursive: true, encoding: 'utf8' })
@@ -264,7 +264,7 @@ describe('a session in a container', () => {
   it("calls the fleet over its ship's socket from inside its container, as the ship", async () => {
     await aRunningScout();
     const socket = join(machine.trierarchHome, 'ships', scout, 'sockets', 'fleet.sock');
-    const calls = join(sessionOf(machine, 'scout').worktree, 'fake-socket-calls.jsonl');
+    const calls = join(sessionOf(machine, 'scout').folder, 'fake-socket-calls.jsonl');
 
     await fleet.send('scout', `socket call: ${Buffer.from(JSON.stringify({ socket, method: 'POST', path: '/api/v1/fleet/list', body: '{}' })).toString('base64url')}`);
 
@@ -323,9 +323,9 @@ describe("a ship's clone in containers", () => {
     const restart = await machine.trierarch(['restart']);
     expect(restart.status, restart.stdout + restart.stderr).toBe(0);
     scout = await fleet.commission('scout', { scopes: ['fleet:read'] });
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
     await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: CREWED_WITHIN_MS }).toBe('running');
-    return sessionOf(machine, 'scout').worktree;
+    return sessionOf(machine, 'scout').main;
   }
 
   /** An upstream the machine's repository has as its origin, fetched: its URL. */
@@ -346,7 +346,7 @@ describe("a ship's clone in containers", () => {
   it.each(['clone', 'remote remove', 'remote add', 'fetch', 'checkout'])('removes a half-made clone when %s fails and makes a complete clone on the next pass', async (step) => {
     anUpstream();
     scout = await fleet.commission('scout', { scopes: ['fleet:read'] });
-    const folder = join(machine.trierarchHome, 'ships', scout, 'worktree');
+    const folder = join(machine.trierarchHome, 'ships', scout, 'repositories', 'main');
     const failed = join(machine.machine, 'clone-failed');
     const wrapper = join(machine.machine, 'bin', 'git');
     const realGit = realpathSync(join(machine.machine, 'tools', 'git'));
@@ -365,7 +365,7 @@ exec '${realGit}' "$@"
     configure((configuration) => ({ ...configuration, runtime: RUNTIME }));
     writeModelToken();
     expect((await machine.trierarch(['restart'])).status).toBe(0);
-    await fleet.crewInWorktree(scout, { repository: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
 
     await expect.poll(() => existsSync(failed), { timeout: CREWED_WITHIN_MS }).toBe(true);
     await expect.poll(() => existsSync(folder)).toBe(false);
@@ -377,10 +377,10 @@ exec '${realGit}' "$@"
     expect(readFileSync(join(folder, 'README.md'), 'utf8')).toBe('hello\n');
   });
 
-  it("is a clone of its own at the worktree's path, with a .git of its own holding its own objects, detached at the repository's commit, so git works inside", async () => {
+  it("is a clone of its own as the ship folder's main/, with a .git of its own holding its own objects, detached at the repository's commit, so git works inside", async () => {
     const folder = await aCrewedScout();
 
-    expect(folder).toBe(join(machine.trierarchHome, 'ships', scout, 'worktree'));
+    expect(folder).toBe(join(machine.trierarchHome, 'ships', scout, 'repositories', 'main'));
     expect(statSync(join(folder, '.git')).isDirectory()).toBe(true);
     expect(existsSync(join(folder, '.git', 'objects', 'info', 'alternates'))).toBe(false);
     expect(git(folder, 'rev-parse', 'HEAD')).toBe(git(machine.repository, 'rev-parse', 'HEAD'));

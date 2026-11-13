@@ -20,8 +20,10 @@ export interface ListedEntry {
 
 function describeWorkspace(workspace: TrierarchWorkspace): string {
   switch (workspace.kind) {
-    case 'worktree':
-      return `worktree ${workspace.repository}${workspace.ref === undefined ? '' : ` at ${workspace.ref}`}`;
+    case 'repositories': {
+      const named = [workspace.main, ...workspace.subRepositories].map(({ repository, ref }) => `${repository}${ref === undefined ? '' : ` at ${ref}`}`);
+      return `repositories ${named.join(', ')}`;
+    }
     case 'folder':
       return `folder ${workspace.name}`;
   }

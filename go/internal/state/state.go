@@ -34,6 +34,9 @@ func (f File) Load() (reconciler.State, error) {
 	if state.Entries == nil {
 		state.Entries = map[string]reconciler.Entry{}
 	}
+	for shipID, entry := range state.Entries {
+		state.Entries[shipID] = fromOldLayout(entry)
+	}
 	if state.Kept == nil {
 		state.Kept = []any{}
 	}
@@ -44,6 +47,18 @@ func (f File) Load() (reconciler.State, error) {
 		state.Refused = map[string]int{}
 	}
 	return state, nil
+}
+
+// fromOldLayout is the entry as this trierarch crews it: one saved before the ship folder layout, its workspace one worktree, names its
+// repository as the main of a ship folder, as core rewrote its crew request, and is marked to be crewed again in a fresh one
+// (decision 0013: no second layout kept).
+func fromOldLayout(entry reconciler.Entry) reconciler.Entry {
+	if entry.Workspace.Kind != "worktree" {
+		return entry
+	}
+	entry.Workspace = reconciler.Workspace{Kind: "repositories", Main: reconciler.RepositoryAt{Repository: entry.Workspace.Repository, Ref: entry.Workspace.Ref}}
+	entry.IsOldLayout = true
+	return entry
 }
 
 // Save writes the state whole: to a file beside it, then moved over it.

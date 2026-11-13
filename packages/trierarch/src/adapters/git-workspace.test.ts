@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { CONFIGURATION, newId } from '../../test/support/in-memory.js';
+import { CONFIGURATION, newId, inRepositories } from '../../test/support/in-memory.js';
 import { createGitWorkspace } from './git-workspace.js';
 import { runCommand } from './run-command.js';
 
@@ -45,13 +45,24 @@ afterEach(() => {
   rmSync(folder, { recursive: true, force: true });
 });
 
-const scout = { shipId: newId('ship'), shipName: 'scout', workspace: { kind: 'worktree', repository: 'aeolus-fleet' } } as const;
+const scoutId = newId('ship');
+
+/** A worktree of the repository at the folder, as one a trierarch made under its root before the ship folders. */
+async function aWorktreeAt(at: string): Promise<string> {
+  mkdirSync(dirname(at), { recursive: true });
+  await git(['-C', repository, 'worktree', 'add', '-q', '--detach', at]);
+  return at;
+}
+/** Scout's crew in a ship folder of aeolus-fleet, in its ship's folder under the root. */
+const scout = () => ({ shipId: scoutId, shipName: 'scout', workspace: inRepositories('aeolus-fleet'), shipFolder: join(root, scoutId) });
+/** The main repository of the ship folder made. */
+const mainOf = ({ folder: made }: { folder: string }): string => join(made, 'main');
 
 describe('workspaces in git', () => {
-  it('makes a worktree of the repository under the root, one folder per ship, detached at HEAD', async () => {
-    const { folder: made } = await workspace().prepare(scout);
+  it("makes the ship folder in the ship's folder, its main repository a worktree of the repository detached at HEAD", async () => {
+    const made = mainOf(await workspace().prepare(scout()));
 
-    expect(made).toBe(join(root, 'aeolus-fleet', 'scout'));
+    expect(made).toBe(join(root, scoutId, 'repositories', 'main'));
     expect(existsSync(join(made, 'README.md'))).toBe(true);
     expect((await git(['-C', made, 'rev-parse', '--abbrev-ref', 'HEAD'])).trim()).toBe('HEAD');
   });
@@ -62,7 +73,7 @@ describe('workspaces in git', () => {
     await git(['-C', repository, 'add', '.']);
     await git(['-C', repository, 'commit', '-q', '-m', 'later']);
 
-    const { folder: made } = await workspace().prepare({ ...scout, workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'v1' } });
+    const made = mainOf(await workspace().prepare({ ...scout(), workspace: inRepositories('aeolus-fleet', { ref: 'v1' }) }));
 
     expect(existsSync(join(made, 'later.md'))).toBe(false);
   });
@@ -76,7 +87,7 @@ describe('workspaces in git', () => {
     await git(['-C', upstream, 'add', '.']);
     await git(['-C', upstream, 'commit', '-q', '-m', 'current']);
 
-    const { folder: made } = await workspace().prepare({ ...scout, workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'main' } });
+    const made = mainOf(await workspace().prepare({ ...scout(), workspace: inRepositories('aeolus-fleet', { ref: 'main' }) }));
 
     expect(existsSync(join(made, 'current.md'))).toBe(true);
     expect((await git(['-C', made, 'rev-parse', 'HEAD'])).trim()).toBe((await git(['-C', upstream, 'rev-parse', 'HEAD'])).trim());
@@ -85,7 +96,7 @@ describe('workspaces in git', () => {
   it('checks out a ref the remote has no branch for as it is, and crews a repository with no remote', async () => {
     await git(['-C', repository, 'tag', 'v1']);
 
-    const { folder: made } = await workspace().prepare({ ...scout, workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'v1' } });
+    const made = mainOf(await workspace().prepare({ ...scout(), workspace: inRepositories('aeolus-fleet', { ref: 'v1' }) }));
 
     expect((await git(['-C', made, 'rev-parse', 'HEAD'])).trim()).toBe((await git(['-C', repository, 'rev-parse', 'v1'])).trim());
   });
@@ -93,19 +104,19 @@ describe('workspaces in git', () => {
   it('crews from what it has when the remote cannot be fetched', async () => {
     await git(['-C', repository, 'remote', 'add', 'origin', join(folder, 'gone')]);
 
-    const { folder: made } = await workspace().prepare({ ...scout, workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'main' } });
+    const made = mainOf(await workspace().prepare({ ...scout(), workspace: inRepositories('aeolus-fleet', { ref: 'main' }) }));
 
     expect(existsSync(join(made, 'README.md'))).toBe(true);
   });
 
   it('uses a worktree a stop mid-crew left', async () => {
-    const first = await workspace().prepare(scout);
+    const first = await workspace().prepare(scout());
 
-    await expect(workspace().prepare(scout)).resolves.toEqual(first);
+    await expect(workspace().prepare(scout())).resolves.toEqual(first);
   });
 
   it('says a fresh worktree is clean, and one with a change or a new file is not', async () => {
-    const { folder: made } = await workspace().prepare(scout);
+    const made = mainOf(await workspace().prepare(scout()));
     expect(await workspace().isClean(made)).toBe(true);
 
     writeFileSync(join(made, 'notes.md'), 'draft\n');
@@ -114,7 +125,7 @@ describe('workspaces in git', () => {
   });
 
   it('says what removing a worktree discards: nothing for a fresh one', async () => {
-    const { folder: made } = await workspace().prepare(scout);
+    const made = mainOf(await workspace().prepare(scout()));
 
     expect(await workspace().unsaved(made)).toEqual([]);
   });
@@ -123,7 +134,7 @@ describe('workspaces in git', () => {
     const upstream = join(folder, 'upstream');
     await git(['clone', '-q', repository, upstream]);
     await git(['-C', repository, 'remote', 'add', 'origin', upstream]);
-    const { folder: made } = await workspace().prepare({ ...scout, workspace: { kind: 'worktree', repository: 'aeolus-fleet', ref: 'main' } });
+    const made = mainOf(await workspace().prepare({ ...scout(), workspace: inRepositories('aeolus-fleet', { ref: 'main' }) }));
     writeFileSync(join(made, 'done.md'), 'done\n');
     await git(['-C', made, 'add', '.']);
     await git(['-C', made, 'commit', '-q', '-m', 'work not pushed']);
@@ -136,8 +147,8 @@ describe('workspaces in git', () => {
     expect(unsaved).toEqual([' M README.md', '?? draft.md', `commit ${commit} work not pushed`]);
   });
 
-  it('removes a worktree it made', async () => {
-    const { folder: made } = await workspace().prepare(scout);
+  it('removes a worktree of a configured repository under its root', async () => {
+    const made = await aWorktreeAt(join(root, 'aeolus-fleet', 'scout'));
 
     await workspace().remove(made);
 
@@ -151,11 +162,11 @@ describe('workspaces in git', () => {
   });
 
   it('uses a configured folder as it is', async () => {
-    await expect(workspace().prepare({ ...scout, workspace: { kind: 'folder', name: 'notes' } })).resolves.toEqual({ folder: notes });
+    await expect(workspace().prepare({ ...scout(), workspace: { kind: 'folder', name: 'notes' } })).resolves.toEqual({ folder: notes });
   });
 
   it('lists every folder under its root no matter what made it: a worktree, a plain clone, a folder git does not know, a worktree of another repository in its folder, never the trash (gap rule 2)', async () => {
-    await workspace().prepare(scout);
+    await aWorktreeAt(join(root, 'aeolus-fleet', 'scout'));
     await git(['clone', '-q', repository, join(root, 'aeolus-fleet', 'own-clone')]);
     mkdirSync(join(root, 'hemma', 'notes'), { recursive: true });
     const other = join(folder, 'aeolus-fleet-gateway');
@@ -171,7 +182,7 @@ describe('workspaces in git', () => {
   });
 
   it('lists a folder straight under its root that is no repository it has as itself and each folder in it, but a repository\'s own folder or one holding the trash only by what it holds (gap rule 2)', async () => {
-    await workspace().prepare(scout);
+    await aWorktreeAt(join(root, 'aeolus-fleet', 'scout'));
     mkdirSync(join(root, 'workbench', 'tools'), { recursive: true });
     mkdirSync(join(root, 'left-repository', '.trash'), { recursive: true });
     mkdirSync(join(root, 'left-repository', 'lookout'));
@@ -192,7 +203,7 @@ describe('workspaces in git', () => {
   });
 
   it('lists a workspace placed straight under its root as one folder, none of its own files (#1295, gap rule 2)', async () => {
-    await workspace().prepare(scout);
+    await aWorktreeAt(join(root, 'aeolus-fleet', 'scout'));
     await git(['clone', '-q', repository, join(root, 'aeolus-fleet-designer-release')]);
 
     expect([...(await workspace().foldersUnderRoot())].sort()).toEqual([join(root, 'aeolus-fleet', 'scout'), join(root, 'aeolus-fleet-designer-release')].sort());
@@ -238,7 +249,7 @@ describe('workspaces in git', () => {
   });
 
   it('refuses to remove its root, the trash or a folder deeper than a workspace', async () => {
-    const { folder: made } = await workspace().prepare(scout);
+    const made = await aWorktreeAt(join(root, 'aeolus-fleet', 'scout'));
     mkdirSync(join(root, 'aeolus-fleet', '.trash'));
 
     for (const kept of [root, join(root, 'aeolus-fleet', '.trash'), join(made, 'src')]) {
@@ -250,7 +261,7 @@ describe('workspaces in git', () => {
   it('lists the worktrees under a root reached through a symbolic link, as macOS reaches /var through /private/var (aeolus-fleet#1340)', async () => {
     mkdirSync(join(folder, 'real-worktrees'));
     symlinkSync(join(folder, 'real-worktrees'), root);
-    await workspace().prepare(scout);
+    await aWorktreeAt(join(root, 'aeolus-fleet', 'scout'));
 
     expect(await workspace().foldersUnderRoot()).toEqual([join(root, 'aeolus-fleet', 'scout')]);
   });
@@ -258,36 +269,36 @@ describe('workspaces in git', () => {
 
 describe("a ship's folder, under the place of ships/", () => {
   it('is the folder of the ship id under the place of ships/', async () => {
-    await expect(workspace().shipFolderOf(scout.shipId)).resolves.toBe(join(root, scout.shipId));
+    await expect(workspace().shipFolderOf(scoutId)).resolves.toBe(join(root, scoutId));
   });
 
-  it("holds the worktree of a ship crewed fresh, for its owner alone", async () => {
-    const shipFolder = await workspace().shipFolderOf(scout.shipId);
+  it("holds the ship folder of a ship crewed fresh, for its owner alone", async () => {
+    const shipFolder = await workspace().shipFolderOf(scoutId);
 
-    const { folder: made } = await workspace().prepare({ ...scout, shipFolder });
+    const made = mainOf(await workspace().prepare({ ...scout(), shipFolder }));
 
-    expect([made, existsSync(join(made, 'README.md')), statSync(shipFolder).mode & 0o777]).toEqual([join(shipFolder, 'worktree'), true, 0o700]);
+    expect([made, existsSync(join(made, 'README.md')), statSync(shipFolder).mode & 0o777]).toEqual([join(shipFolder, 'repositories', 'main'), true, 0o700]);
   });
 
   it('goes whole into the trash beside it, whatever it holds', async () => {
-    const shipFolder = await workspace().shipFolderOf(scout.shipId);
-    const { folder: made } = await workspace().prepare({ ...scout, shipFolder });
+    const shipFolder = await workspace().shipFolderOf(scoutId);
+    const made = mainOf(await workspace().prepare({ ...scout(), shipFolder }));
     mkdirSync(join(shipFolder, 'sockets'));
     writeFileSync(join(made, 'unsaved.txt'), 'unsaved\n');
 
     await workspace().removeShipFolder(shipFolder);
 
     expect(existsSync(shipFolder)).toBe(false);
-    expect(readdirSync(join(root, '.trash')).map((name) => name.startsWith(`${scout.shipId}.`))).toEqual([true]);
+    expect(readdirSync(join(root, '.trash')).map((name) => name.startsWith(`${scoutId}.`))).toEqual([true]);
   });
 
   it('is removed already when it is gone', async () => {
-    await expect(workspace().removeShipFolder(join(root, scout.shipId))).resolves.toBeUndefined();
+    await expect(workspace().removeShipFolder(join(root, scoutId))).resolves.toBeUndefined();
   });
 
   it('of a ship in a configured folder goes, and the configured folder stays', async () => {
-    const shipFolder = await workspace().shipFolderOf(scout.shipId);
-    const { folder: made } = await workspace().prepare({ ...scout, workspace: { kind: 'folder', name: 'notes' }, shipFolder });
+    const shipFolder = await workspace().shipFolderOf(scoutId);
+    const { folder: made } = await workspace().prepare({ ...scout(), workspace: { kind: 'folder', name: 'notes' }, shipFolder });
     mkdirSync(join(shipFolder, 'sockets'), { recursive: true });
 
     await workspace().removeShipFolder(shipFolder);
@@ -297,13 +308,12 @@ describe("a ship's folder, under the place of ships/", () => {
 });
 
 describe('the worktrees of the ships crewed before the ship folders', () => {
-  it('stay under the root they were made in, and are removed there', async () => {
+  it("are never made again: a ship folder is made only in a ship's folder", async () => {
     const before = join(folder, 'before');
+    const { shipId, shipName, workspace: crewedIn } = scout();
 
-    const { folder: made } = await workspace({ before }).prepare(scout);
-    await workspace({ before }).remove(made);
-
-    expect([made, existsSync(made)]).toEqual([join(before, 'aeolus-fleet', 'scout'), false]);
+    await expect(workspace({ before }).prepare({ shipId, shipName, workspace: crewedIn })).rejects.toThrow("A ship folder is made only in its ship's folder");
+    expect(existsSync(join(before, 'aeolus-fleet'))).toBe(false);
   });
 
   it("are listed and removed beside the ships' folders, as every folder under either root is", async () => {
@@ -342,24 +352,25 @@ describe('workspaces of a trusted repository the machine does not have (aeolus-f
     });
   }
   const remote = () => `file://${repository}`;
-  const crew = { shipId: newId('ship'), shipName: 'scout', workspace: { kind: 'worktree', repository: 'hemma' } } as const;
+  const crewId = newId('ship');
+  const crew = () => ({ shipId: crewId, shipName: 'scout', workspace: inRepositories('hemma'), shipFolder: join(root, crewId) });
 
   it('clones it first, with the machine\'s own access, then makes the worktree from the clone', async () => {
-    const { folder: made } = await trustedWorkspace({ url: remote(), protocols: 'file' }).prepare(crew);
+    const made = mainOf(await trustedWorkspace({ url: remote(), protocols: 'file' }).prepare(crew()));
 
-    expect(made).toBe(join(root, 'hemma', 'scout'));
+    expect(made).toBe(join(root, crewId, 'repositories', 'main'));
     expect(existsSync(join(made, 'README.md'))).toBe(true);
     expect((await git(['-C', hemma, 'remote', 'get-url', 'origin'])).trim()).toBe(remote());
   });
 
   it('clones it once: a second ship gets a worktree of the same clone, fetched first', async () => {
     const workspace = trustedWorkspace({ url: remote(), protocols: 'file' });
-    await workspace.prepare(crew);
+    await workspace.prepare(crew());
     writeFileSync(join(repository, 'later.md'), 'later\n');
     await git(['-C', repository, 'add', '.']);
     await git(['-C', repository, 'commit', '-q', '-m', 'later']);
 
-    const { folder: second } = await workspace.prepare({ ...crew, shipName: 'second', workspace: { kind: 'worktree', repository: 'hemma', ref: 'main' } });
+    const second = mainOf(await workspace.prepare({ ...crew(), shipName: 'second', workspace: inRepositories('hemma', { ref: 'main' }), shipFolder: join(root, newId('ship')) }));
 
     expect(existsSync(join(second, 'later.md'))).toBe(true);
   });
@@ -368,27 +379,29 @@ describe('workspaces of a trusted repository the machine does not have (aeolus-f
     mkdirSync(`${hemma}.partial`, { recursive: true });
     writeFileSync(join(`${hemma}.partial`, 'half'), '');
 
-    const { folder: made } = await trustedWorkspace({ url: remote(), protocols: 'file' }).prepare(crew);
+    const made = mainOf(await trustedWorkspace({ url: remote(), protocols: 'file' }).prepare(crew()));
 
     expect(existsSync(join(made, 'README.md'))).toBe(true);
     expect(existsSync(`${hemma}.partial`)).toBe(false);
   });
 
   it('clones over https or ssh only, whatever URL reached it', async () => {
-    await expect(trustedWorkspace({ url: remote() }).prepare(crew)).rejects.toThrow(/git clone of hemma failed/);
+    await expect(trustedWorkspace({ url: remote() }).prepare(crew())).rejects.toThrow(/git clone of hemma failed/);
 
     expect(existsSync(hemma)).toBe(false);
   });
 
   it('fails with git\'s reason and leaves no clone when the machine cannot clone it', async () => {
-    await expect(trustedWorkspace({ url: `file://${join(folder, 'gone')}`, protocols: 'file' }).prepare(crew)).rejects.toThrow(/git clone of hemma failed: .+/);
+    await expect(trustedWorkspace({ url: `file://${join(folder, 'gone')}`, protocols: 'file' }).prepare(crew())).rejects.toThrow(/git clone of hemma failed: .+/);
 
     expect(existsSync(hemma)).toBe(false);
     expect(existsSync(`${hemma}.partial`)).toBe(false);
   });
 
   it('removes a worktree of a clone whose repository left the trusted repositories', async () => {
-    const { folder: made } = await trustedWorkspace({ url: remote(), protocols: 'file' }).prepare(crew);
+    await trustedWorkspace({ url: remote(), protocols: 'file' }).prepare(crew());
+    const made = join(root, 'hemma', 'scout');
+    await git(['-C', hemma, 'worktree', 'add', '-q', '--detach', made]);
 
     await trustedWorkspace({ url: undefined, isListed: false }).remove(made);
 

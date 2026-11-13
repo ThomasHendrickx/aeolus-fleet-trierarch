@@ -12,12 +12,12 @@ import (
 	"strings"
 )
 
-// In a ship's folder, `ships/<shipId>/`: its worktree or clone, its harness's home in a container, and the folder of its sockets, which
-// a container mounts at the same path (a socket mounted alone would be the one the trierarch had open when the container started).
+// In a ship's folder, `ships/<shipId>/`: its ship folder (workspace.ShipFolderName), its harness's home in a container, and the folder of
+// its sockets, which a container mounts at the same path (a socket mounted alone would be the one the trierarch had open when the
+// container started).
 const (
-	WorktreeFolder = "worktree"
-	HomeFolder     = "home"
-	SocketsFolder  = "sockets"
+	HomeFolder    = "home"
+	SocketsFolder = "sockets"
 	// SocketFile is the ship's fleet socket in its sockets folder (decision 0026).
 	SocketFile = "fleet.sock"
 )
