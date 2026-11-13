@@ -30,7 +30,7 @@ const (
 )
 
 // RootInstructions is the root AGENTS.md of a ship folder: where to work from, each sub-repository, and the layout's facts every ship shares.
-func RootInstructions(workspace reconciler.Workspace) string {
+func RootInstructions(workspace reconciler.Workspace, clashes ...SkillClash) string {
 	named := []string{"None: this ship works in its main repository alone."}
 	if len(workspace.SubRepositories) > 0 {
 		named = named[:0]
@@ -47,8 +47,9 @@ func RootInstructions(workspace reconciler.Workspace) string {
 		"",
 	}
 	lines = append(lines, named...)
+	lines = append(lines, "")
+	lines = append(lines, clashesText(clashes)...)
 	lines = append(lines,
-		"",
 		"## The layout",
 		"",
 		"- Each repository commits, branches and pushes on its own: run git inside the one you work in.",
@@ -59,18 +60,26 @@ func RootInstructions(workspace reconciler.Workspace) string {
 	return strings.Join(lines, "\n")
 }
 
-// WriteRootFiles writes the ship folder's root AGENTS.md and CLAUDE.md, a link to it, again, whatever the session left there; nothing
-// for a configured folder.
+// WriteRootFiles writes the ship folder's root AGENTS.md and CLAUDE.md, a link to it, and its skill links again, whatever the session
+// left there; nothing for a configured folder.
 func WriteRootFiles(folder string, workspace reconciler.Workspace) error {
 	if workspace.Kind != "repositories" {
 		return nil
+	}
+	repositories := []string{MainFolder}
+	for _, sub := range workspace.SubRepositories {
+		repositories = append(repositories, SubRepositoriesFolder+"/"+sub.Repository)
+	}
+	clashes, err := linkSkills(folder, repositories)
+	if err != nil {
+		return fmt.Errorf("link the skills of %s: %w", folder, err)
 	}
 	for _, name := range []string{rootInstructions, rootLink} {
 		if err := os.RemoveAll(filepath.Join(folder, name)); err != nil {
 			return fmt.Errorf("write the root files of %s: %w", folder, err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(folder, rootInstructions), []byte(RootInstructions(workspace)), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(folder, rootInstructions), []byte(RootInstructions(workspace, clashes...)), 0o644); err != nil {
 		return fmt.Errorf("write the root files of %s: %w", folder, err)
 	}
 	if err := os.Symlink(rootInstructions, filepath.Join(folder, rootLink)); err != nil {
