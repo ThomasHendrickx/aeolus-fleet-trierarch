@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
@@ -419,9 +419,11 @@ describe('pruning the worktree records of a configured repository (#91)', () => 
 
     await workspace().prune('aeolus-fleet');
 
+    // git lists real paths: on macOS the temporary folder sits behind the /var link to /private/var.
+    const realElsewhere = realpathSync(join(folder, 'elsewhere'));
     const listed = await git(['-C', repository, 'worktree', 'list', '--porcelain']);
-    expect(listed).not.toContain(`worktree ${gone}`);
-    expect(listed).toContain(`worktree ${live}`);
+    expect(listed).not.toContain(`worktree ${join(realElsewhere, 'gone')}`);
+    expect(listed).toContain(`worktree ${join(realElsewhere, 'live')}`);
     expect(existsSync(live)).toBe(true);
   });
 
