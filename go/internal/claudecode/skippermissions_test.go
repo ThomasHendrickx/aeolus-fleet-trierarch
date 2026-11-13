@@ -3,7 +3,6 @@ package claudecode
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
@@ -41,29 +40,21 @@ const rewrittenByAPluginInstall = `{"extraKnownMarketplaces":{"aeolus-fleet":{"s
 
 var launchesSkippingPermissions = config.Harness{Flags: []string{"--dangerously-skip-permissions"}}
 
-// keptOnce is a keeper that saw the operator's acceptance in the user settings, which were then written as text says.
-func keptOnce(t *testing.T, harness config.Harness, text string) (SkipPermissions, aMachine) {
-	t.Helper()
-	machine := aMachineOf(t)
-	keeper := SkipPermissions{Settings: machine.user, Seen: filepath.Join(t.TempDir(), "claude-code-bypass-accepted")}
-	machine.write(t, machine.user, `{"skipDangerousModePermissionPrompt":true}`)
-	if !keeper.Keep(harness) {
-		t.Fatal("Keep(accepted settings) = false, want true")
-	}
-	machine.write(t, machine.user, text)
-	return keeper, machine
-}
-
-func TestBypassPermissionsModeTheOperatorAcceptedIsAcceptedAgainWhereTheSettingsLostIt(t *testing.T) {
-	for name, harness := range map[string]config.Harness{
-		"skip-permissions in its flags": launchesSkippingPermissions,
-		"skip-permissions in an option": {Flags: []string{}, Options: map[string]config.Option{"permissions": {Values: map[string][]string{"skip": {"--dangerously-skip-permissions"}}}}},
+func TestBypassPermissionsModeIsAcceptedWhereTheConfigurationLaunchesWithSkipPermissions(t *testing.T) {
+	for name, at := range map[string]struct {
+		harness config.Harness
+		text    string
+	}{
+		"in its flags, settings a plugin install rewrote": {launchesSkippingPermissions, rewrittenByAPluginInstall},
+		"in an option, settings a plugin install rewrote": {config.Harness{Flags: []string{}, Options: map[string]config.Option{"permissions": {Values: map[string][]string{"skip": {"--dangerously-skip-permissions"}}}}}, rewrittenByAPluginInstall},
+		"in its flags, settings that turn it off":         {launchesSkippingPermissions, `{"skipDangerousModePermissionPrompt":false,"extraKnownMarketplaces":{},"enabledPlugins":{}}`},
 	} {
 		t.Run(name, func(t *testing.T) {
-			keeper, machine := keptOnce(t, harness, rewrittenByAPluginInstall)
+			machine := aMachineOf(t)
+			machine.write(t, machine.user, at.text)
 
-			if !keeper.Keep(harness) {
-				t.Fatalf("Keep(%v) = false, want true", harness)
+			if !KeepSkipPermissionsAccepted(machine.user, at.harness) {
+				t.Fatalf("KeepSkipPermissionsAccepted(%v) = false, want true", at.harness)
 			}
 			var settings map[string]any
 			text, _ := os.ReadFile(machine.user)
@@ -77,37 +68,32 @@ func TestBypassPermissionsModeTheOperatorAcceptedIsAcceptedAgainWhereTheSettings
 	}
 }
 
-func TestBypassPermissionsModeIsLeftAsTheSettingsSayWhereItIsNotKeptAgain(t *testing.T) {
+func TestBypassPermissionsModeIsAcceptedWhereTheConfigurationLaunchesWithSkipPermissionsAndThereAreNoUserSettings(t *testing.T) {
+	machine := aMachineOf(t)
+
+	if !KeepSkipPermissionsAccepted(machine.user, launchesSkippingPermissions) || !IsSkipPermissionsAccepted(machine.user) {
+		t.Error("KeepSkipPermissionsAccepted(missing file) left bypass permissions mode unaccepted")
+	}
+}
+
+func TestBypassPermissionsModeIsLeftAsTheSettingsSayWhereItIsNotAccepted(t *testing.T) {
 	for name, at := range map[string]struct {
 		harness config.Harness
 		text    string
 	}{
 		"the flags launch without skip-permissions": {config.Harness{Flags: []string{"--model", "opus"}}, rewrittenByAPluginInstall},
-		"the operator turned it off":                {launchesSkippingPermissions, `{"skipDangerousModePermissionPrompt":false}`},
 		"the settings are no JSON":                  {launchesSkippingPermissions, "nope"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			keeper, machine := keptOnce(t, at.harness, at.text)
+			machine := aMachineOf(t)
+			machine.write(t, machine.user, at.text)
 
-			if keeper.Keep(at.harness) {
-				t.Errorf("Keep(%v) after the settings became %s = true, want false", at.harness, at.text)
+			if KeepSkipPermissionsAccepted(machine.user, at.harness) {
+				t.Errorf("KeepSkipPermissionsAccepted(%v) with settings %s = true, want false", at.harness, at.text)
 			}
 			if text, _ := os.ReadFile(machine.user); string(text) != at.text {
 				t.Errorf("settings.json:\n%s\nwant it untouched", text)
 			}
 		})
-	}
-}
-
-func TestBypassPermissionsModeTheOperatorNeverAcceptedIsNotAccepted(t *testing.T) {
-	machine := aMachineOf(t)
-	machine.write(t, machine.user, rewrittenByAPluginInstall)
-	keeper := SkipPermissions{Settings: machine.user, Seen: filepath.Join(t.TempDir(), "claude-code-bypass-accepted")}
-
-	if keeper.Keep(launchesSkippingPermissions) {
-		t.Error("Keep(never accepted) = true, want false: only the operator accepts bypass permissions mode")
-	}
-	if text, _ := os.ReadFile(machine.user); string(text) != rewrittenByAPluginInstall {
-		t.Errorf("settings.json:\n%s\nwant it untouched", text)
 	}
 }
