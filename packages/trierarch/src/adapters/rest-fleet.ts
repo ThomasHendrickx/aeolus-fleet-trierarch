@@ -43,6 +43,11 @@ export class FleetRefusal extends Error {
   }
 }
 
+/** Whether the fleet says the crew token holds no lease: released (LEASE_ENDED), refused, or never known to it, as after a restore (UNKNOWN_CREW_TOKEN). */
+export function isLeaseEnded(error: unknown): boolean {
+  return error instanceof FleetRefusal && (error.code === 'LEASE_ENDED' || error.code === 'UNAUTHORIZED' || error.code === 'UNKNOWN_CREW_TOKEN');
+}
+
 /** One call to the fleet: a call with no body is a GET, as whoami is. */
 interface FleetCall<T> {
   path: string;
@@ -229,7 +234,7 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string; 
         const { waiting, forced } = await call({ path: '/ship/inbox', crewToken, body: {}, answers: inboxOutputSchema });
         return { kind: 'waiting', count: waiting, forced };
       } catch (error) {
-        if (error instanceof FleetRefusal && (error.code === 'LEASE_ENDED' || error.code === 'UNAUTHORIZED')) {
+        if (isLeaseEnded(error)) {
           return { kind: 'leaseEnded' };
         }
         throw error;

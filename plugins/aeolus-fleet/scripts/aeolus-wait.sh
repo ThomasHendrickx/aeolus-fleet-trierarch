@@ -120,7 +120,7 @@ on_refusal() {
   local current
   case "$status" in
     401)
-      if printf '%s' "$body" | grep -q 'LEASE_ENDED'; then
+      if printf '%s' "$body" | grep -q 'LEASE_ENDED\|UNKNOWN_CREW_TOKEN'; then
         current="$(aeolus_identity_token "$identity")"
         if [ -n "$current" ] && [ "$current" != "$crew_token" ]; then
           fleet_url="$(aeolus_identity_get "$identity" fleetUrl)"

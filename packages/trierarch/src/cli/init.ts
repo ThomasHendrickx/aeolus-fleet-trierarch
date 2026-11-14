@@ -5,7 +5,7 @@ import type { ClaudeCodeSetup } from '../adapters/claude-code-setup.js';
 import type { CodexSetup } from '../adapters/codex-setup.js';
 import { initialConfiguration, loadConfiguration, readCrewFile, TrierarchFileError, writeConfigurationJsonSchema, writeCrewFile, type RunningFile, type TrierarchConfiguration } from '../adapters/files.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
-import { FleetRefusal, type RestFleet } from '../adapters/rest-fleet.js';
+import { FleetRefusal, isLeaseEnded, type RestFleet } from '../adapters/rest-fleet.js';
 import type { Service } from '../adapters/service.js';
 import type { DetectHarnesses } from '../core/detect-harnesses.js';
 import { withoutRemoteControl } from '../core/remote-control.js';
@@ -174,7 +174,7 @@ async function isLeaseHeld(fleet: Pick<RestFleet, 'whoami'>): Promise<boolean> {
     await fleet.whoami();
     return true;
   } catch (error) {
-    if (error instanceof FleetRefusal && (error.code === 'LEASE_ENDED' || error.code === 'UNAUTHORIZED')) {
+    if (isLeaseEnded(error)) {
       return false;
     }
     throw error;
