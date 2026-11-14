@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -190,19 +191,19 @@ func TestReportFailuresAreLoggedAndKeepThePermissionWaitUntilItsLimitOrCancel(t 
 }
 
 type questions struct {
-	asked, withdrawn int
+	asked, withdrawn atomic.Int32
 	err              error
 }
 
 func (q *questions) Ask(context.Context, string, Request) (string, error) {
-	q.asked++
+	q.asked.Add(1)
 	return "question-1", q.err
 }
 func (q *questions) Withdraw(ctx context.Context, ship, id string) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	q.withdrawn++
+	q.withdrawn.Add(1)
 	return nil
 }
 func TestQuestionsAreWithdrawnAtTheLimitAndOnCancellation(t *testing.T) {
@@ -216,7 +217,7 @@ func TestQuestionsAreWithdrawnAtTheLimitAndOnCancellation(t *testing.T) {
 				done := make(chan Decision, 1)
 				go func() { done <- service.Await(ctx, "scout", "Run `npm install`") }()
 				synctest.Wait()
-				if q.asked != 1 || q.withdrawn != 0 {
+				if q.asked.Load() != 1 || q.withdrawn.Load() != 0 {
 					t.Fatalf("questions before end = %+v", q)
 				}
 				if end == "limit" {
@@ -225,8 +226,8 @@ func TestQuestionsAreWithdrawnAtTheLimitAndOnCancellation(t *testing.T) {
 					cancel()
 				}
 				<-done
-				if q.withdrawn != 1 {
-					t.Fatalf("withdrawals = %d, want 1", q.withdrawn)
+				if q.withdrawn.Load() != 1 {
+					t.Fatalf("withdrawals = %d, want 1", q.withdrawn.Load())
 				}
 			})
 		})
@@ -237,7 +238,7 @@ func TestARefusedQuestionDeniesAndLogsWithoutWaiting(t *testing.T) {
 	var logs []string
 	service := Service{Owners: &owners{person: true}, Reports: &reports{}, Questions: q, Clock: SystemClock{}, Log: func(line string) { logs = append(logs, line) }}
 	got := service.Await(context.Background(), "scout", "Run `npm install`")
-	if got.Behavior != "deny" || got.Message != "could not ask" || len(logs) != 1 || q.withdrawn != 0 {
+	if got.Behavior != "deny" || got.Message != "could not ask" || len(logs) != 1 || q.withdrawn.Load() != 0 {
 		t.Fatalf("decision %+v, logs %v, questions %+v", got, logs, q)
 	}
 }
