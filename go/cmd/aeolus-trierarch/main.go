@@ -253,8 +253,7 @@ func (p plugins) Update(harness string, tag string) error {
 		running := paths.Of(p.home, "").Running
 		return codex.PluginUpdateOf(p.home, p.env["CODEX_HOME"], func() int { return cli.RunningPID(running) }).Update(tag)
 	case "copilot":
-		// Copilot's plugin is only installed here, at the tag its marketplace names; upgrade updates the other two.
-		return copilot.PluginInstall{Program: "copilot", Home: p.env["COPILOT_HOME"], Version: func() string { return p.Version("copilot") }}.Install(tag)
+		return copilot.PluginInstall{Program: "copilot", Home: p.env["COPILOT_HOME"]}.Install(tag)
 	}
 	return fmt.Errorf("the plugin for %s is not updated by upgrade", harness)
 }
