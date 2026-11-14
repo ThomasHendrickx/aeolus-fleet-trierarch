@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"io"
 	"os"
@@ -201,5 +202,48 @@ func TestInitRepeatedRepositorySelection(t *testing.T) {
 				t.Fatalf("repositories = %+v", got.Repositories)
 			}
 		})
+	}
+}
+
+func TestInitNamesEveryMissingFlagAfterHarnessesAreGiven(t *testing.T) {
+	m := newMachine(t)
+	_, err := m.init.Run(Flags{Harnesses: []string{"claude-code"}})
+	for _, flag := range []string{"--fleet-url", "--ship-id", "--secret", "--repositories", "--repositories-in", "--no-repositories"} {
+		if err == nil || !strings.Contains(err.Error(), flag) {
+			t.Errorf("error = %v, want missing %s", err, flag)
+		}
+	}
+	if len(m.fleet.registered) != 0 {
+		t.Fatal("registered without complete options")
+	}
+}
+
+type interruptedRepositoryTerminal struct {
+	scriptedTerminal
+	err error
+}
+
+func (s *interruptedRepositoryTerminal) Read(p []byte) (int, error) {
+	if s.err != nil {
+		err := s.err
+		s.err = nil
+		return 0, err
+	}
+	return s.scriptedTerminal.Read(p)
+}
+
+func TestInitRepositoryWizardStopsWhenTheTerminalCannotBeRead(t *testing.T) {
+	machine, _, fleet := aMain(t)
+	interrupted := errors.New("terminal disconnected")
+	terminal := &interruptedRepositoryTerminal{scriptedTerminal: scriptedTerminal{input: strings.NewReader("3\n")}, err: interrupted}
+	machine.OpenTerminal = func() (io.ReadWriteCloser, error) { return terminal, nil }
+	words := setupWords()
+	words = append(words[:len(words)-1], "--unattended=")
+	output, code := Main(words, machine)
+	if code != 1 || !strings.Contains(output, interrupted.Error()) {
+		t.Fatalf("init = %d, %s, want terminal error", code, output)
+	}
+	if len(fleet.registered) != 0 {
+		t.Fatal("registered after a terminal read failure")
 	}
 }
