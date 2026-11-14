@@ -1093,6 +1093,13 @@ aeolus_store_died_turn() {
 # the ship. <identity file> <deliveryId> [once-more]
 aeolus_report_handed() {
   local identity="$1" id="$2" output status outcome
+  # A permission reply was acknowledged before ordinary hand-over. Core's
+  # hand-over endpoint correctly refuses it as already acknowledged; only
+  # its local hand-over remains, unless a confirmed turn later died.
+  if [ -z "${3:-}" ] && [ -e "$(aeolus_store_dir)/$id.permission-seen" ]; then
+    aeolus_store_mark "$id" handed
+    return
+  fi
   output="$(AEOLUS_CALL_MAX_SECONDS="${AEOLUS_CONFIRM_SECONDS:-3}" "$(dirname "${BASH_SOURCE[0]}")/aeolus-fleet.sh" handed "$(aeolus_store_handing "$id" "${3:-}")" 2>/dev/null)"
   status=$?
   case "$status" in

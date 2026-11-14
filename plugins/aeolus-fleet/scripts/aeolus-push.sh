@@ -98,12 +98,13 @@ hand() {
 # One push receive: sets id to the entry of what the fleet answers first, a
 # forced delivery before any other. Exits 1 when it answers nothing.
 push_receive() {
-  local output wait
+  local output wait input="${1:-}"
+ [ -n "$input" ] || input='{"max":1}'
   # The fleet's key is cut off (decision 0068): not asked again within the wait.
   if aeolus_key_wait_active; then
     exit 1
   fi
-  output="$(AEOLUS_CALL_MAX_SECONDS="$PUSH_RECEIVE_SECONDS" "$(dirname "$0")/aeolus-fleet.sh" pushReceive '{"max":1}' 2>/dev/null)"
+  output="$(AEOLUS_CALL_MAX_SECONDS="$PUSH_RECEIVE_SECONDS" "$(dirname "$0")/aeolus-fleet.sh" pushReceive "$input" 2>/dev/null)"
   case $? in
     0) ;;
     3)
@@ -167,8 +168,18 @@ permission_candidate() {
 
 permission_receive() {
   permission_candidate && return 0
+  # Leave locally held messages out of the next receive, so one plain
+  # message cannot keep the owner's later answer behind it indefinitely.
+  local dir file held='' separator=''
+  dir="$(aeolus_store_dir)" || return 1
+  for file in "$dir"/*.state; do
+    [ -f "$file" ] || continue
+    id="${file##*/}"; id="${id%.state}"
+    aeolus_is_delivery_id "$id" || continue
+    held="${held}${separator}\"${id}\""; separator=','
+  done
   # push_receive's exit on an empty inbox belongs to this subshell only.
-  (push_receive) >/dev/null
+  (push_receive "{\"max\":1,\"excluding\":[${held}]}") >/dev/null
   permission_candidate && return 0
   printf '{}\n'
 }
