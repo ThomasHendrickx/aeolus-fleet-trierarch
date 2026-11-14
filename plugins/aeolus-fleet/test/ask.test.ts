@@ -127,6 +127,14 @@ const aQuestion = [
 ];
 
 describe('aeolus-ask.sh ask', () => {
+  it('reads the permission context from stdin without putting it in an argument', async () => {
+    fleet = await crewedAt([sent]);
+    const context = 'Ship scout\nTool input: {"command":"npm install"}\n';
+    const result = await runWith('aeolus-ask.sh', { args: ['ask', '--title', 'Run npm install', '--context-stdin', '--option', 'Deny', 'Refuse', '--pick', '1', 'nothing runs without your yes', '--model', 'claude-opus-5-5'], stdin: context });
+    expect(result.status).toBe(0);
+    expect(questionSchema.parse(theSend(fleet).payload).context).toBe(context);
+  });
+
   it("sends the ship's owner, as whoami names it, the question as the question content type, with a uuid of its own and the options numbered from 1, and says its uuid and message", async () => {
     fleet = await crewedAt([sent]);
 
