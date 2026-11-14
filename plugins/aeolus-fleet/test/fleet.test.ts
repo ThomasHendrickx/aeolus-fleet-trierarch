@@ -351,6 +351,16 @@ describe('aeolus-fleet calls', () => {
     expectNoToken(result);
   });
 
+  it('treats UNKNOWN_CREW_TOKEN as LEASE_ENDED: exits 3 and forgets the ship, as a crew token the fleet never knew (aeolus-fleet#1793)', async () => {
+    fleet = await crewedAt([{ status: 401, body: { code: 'UNKNOWN_CREW_TOKEN', message: 'No such crew token' } }]);
+
+    const result = await run('aeolus-fleet.sh', { args: ['receive'] });
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toContain('LEASE_ENDED');
+    expect(statSync(await identityFile(), { throwIfNoEntry: false })).toBeUndefined();
+  });
+
   it('forgets the ship on LEASE_ENDED with the crew token the identity file still holds', async () => {
     fleet = await crewedAt([{ status: 401, body: { code: 'LEASE_ENDED', message: 'This ship was released' } }]);
 

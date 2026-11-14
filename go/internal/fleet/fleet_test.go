@@ -65,6 +65,10 @@ func TestWhoamiPassesTheCrewTokenAndSaysAnEndedLease(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusUnauthorized)
+		if r.Header.Get("Authorization") == "Bearer aeolus_ct_v1_unknown" {
+			_, _ = w.Write([]byte(`{"code":"UNKNOWN_CREW_TOKEN","message":"no such crew token"}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"code":"LEASE_ENDED","message":"released"}`))
 	}))
 	defer server.Close()
@@ -74,6 +78,9 @@ func TestWhoamiPassesTheCrewTokenAndSaysAnEndedLease(t *testing.T) {
 	}
 	if held, err := IsLeaseHeld(server.URL, "aeolus_ct_v1_ended"); err != nil || held {
 		t.Errorf("held %v, err %v, want ended", held, err)
+	}
+	if held, err := IsLeaseHeld(server.URL, "aeolus_ct_v1_unknown"); err != nil || held {
+		t.Errorf("held %v, err %v, want ended for a crew token the fleet never knew", held, err)
 	}
 }
 

@@ -150,6 +150,12 @@ describe('the fleet over REST', () => {
     );
   });
 
+  it("treats a session's crew token the fleet never knew as its lease ended, so it is crewed again (aeolus-fleet#1793)", async () => {
+    await aFleetAnswering([{ status: 401, body: { code: 'UNKNOWN_CREW_TOKEN', message: 'no such crew token' } }], async (fleetUrl) => {
+      await expect(createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_x' }).inbox('aeolus_ct_v1_session')).resolves.toEqual({ kind: 'leaseEnded' });
+    });
+  });
+
   it('registers a session with its own harness, as the fleet then lists its ship (aeolus-fleet#1408)', async () => {
     await aFleetAnswering([{ status: 200, body: { crewToken: 'aeolus_ct_v1_session' } }], async (fleetUrl, asked) => {
       const shipId = newId('ship');

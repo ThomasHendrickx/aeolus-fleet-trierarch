@@ -476,6 +476,16 @@ describe('aeolus-wait', () => {
     });
   });
 
+  it('treats UNKNOWN_CREW_TOKEN as LEASE_ENDED: exits 3 and forgets the ship (aeolus-fleet#1793)', async () => {
+    fleet = await startStubFleet([{ status: 401, body: { code: 'UNKNOWN_CREW_TOKEN', message: 'No such crew token' } }]);
+    crew(fleet.url);
+
+    const result = await start('aeolus-wait.sh').exited;
+
+    expect(result.status).toBe(3);
+    expect(result.stdout).toBe('aeolus: LEASE_ENDED: the operator released scout; this session no longer crews it, and the plugin forgot it\n');
+  });
+
   it('forgets the ship on LEASE_ENDED with the crew token the identity file still holds', async () => {
     fleet = await startStubFleet([{ status: 401, body: { code: 'LEASE_ENDED', message: 'This ship was released' } }]);
     crew(fleet.url);

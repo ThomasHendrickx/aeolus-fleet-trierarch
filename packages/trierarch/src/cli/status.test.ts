@@ -176,6 +176,7 @@ describe('the lease, from whoami', () => {
     await expect(leaseFrom(() => Promise.resolve({}))()).resolves.toBe('valid');
     await expect(leaseFrom(() => Promise.reject(new FleetRefusal('LEASE_ENDED', 'released')))()).resolves.toBe('ended');
     await expect(leaseFrom(() => Promise.reject(new FleetRefusal('UNAUTHORIZED', 'no such token')))()).resolves.toBe('ended');
+    await expect(leaseFrom(() => Promise.reject(new FleetRefusal('UNKNOWN_CREW_TOKEN', 'the fleet never knew it')))()).resolves.toBe('ended');
     await expect(leaseFrom(() => Promise.reject(new TypeError('fetch failed')))()).resolves.toBe('unreachable');
   });
 });
