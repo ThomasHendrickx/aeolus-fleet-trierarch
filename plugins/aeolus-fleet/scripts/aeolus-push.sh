@@ -73,7 +73,16 @@ handed_over() {
 hand_entry() {
   aeolus_report_handed "$identity" "$1"
   case $? in
-    0) handed_over "$2" ;;
+    0)
+      local delivery sender sender_id
+      delivery="$(cat "$(aeolus_store_dir)/$1.json" 2>/dev/null)"
+      if [ "$(aeolus_json_string "$delivery" contentType)" = application/vnd.aeolus.answer+json ]; then
+        sender="$(aeolus_json_string "$delivery" senderName)"
+        sender_id="$(aeolus_json_string "$delivery" senderShipId)"
+        aeolus_log "$identity" permission "answer from ${sender} (${sender_id}): ordinary hand-over"
+      fi
+      handed_over "$2"
+      ;;
     1)
       [ -d "$(aeolus_store_dir)" ] || exit 3
       exit 1

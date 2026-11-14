@@ -1,6 +1,9 @@
 package permissions
 
-import "path/filepath"
+import (
+	"path/filepath"
+	"strings"
+)
 
 // Answer is the owner's choice in a question reply.
 type Answer struct {
@@ -42,7 +45,11 @@ func (r Request) decision(answer Answer) Decision {
 // settings-relative rule (/path). Never turn an exact path into a glob.
 func (r Request) sessionRule() string {
 	action := r.action()
-	if r.Tool != "Bash" && filepath.IsAbs(action) {
+	if r.Tool == "Bash" {
+		return action
+	}
+	action = strings.NewReplacer("\\", "\\\\", "[", "\\[", "]", "\\]", "*", "\\*", "?", "[\\x3f]", "(", "\\(", ")", "\\)", "|", "\\|", "+", "\\+", "^", "\\^", "$", "\\$").Replace(action)
+	if filepath.IsAbs(action) {
 		return "/" + action
 	}
 	return action

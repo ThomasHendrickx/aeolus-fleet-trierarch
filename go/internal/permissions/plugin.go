@@ -122,8 +122,8 @@ func (r Request) ActionTitle() string {
 	return "Permission"
 }
 func (r Request) rule() string {
-	if action := r.action(); action != "" {
-		return r.Tool + "(" + action + ")"
+	if action := r.sessionRule(); action != "" {
+		return r.ruleTool() + "(" + action + ")"
 	}
 	return strings.TrimSpace(r.Tool)
 }

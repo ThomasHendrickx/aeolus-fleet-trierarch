@@ -247,7 +247,9 @@ handing a line. The reply must name both the question UUID and its message in
 out before hand-over. Other replies stay for ordinary hand-over after the busy
 turn and are logged with their sender. Locally held deliveries are excluded
 from the next push receive, so a plain message cannot block a later answer.
-An answer to a withdrawn question is an ordinary message too.
+An answer to a withdrawn question is an ordinary message too. Replies to other
+open asks stay with those waits; plugin script access is serialized per ship,
+so separate ships never wait on the same store lock.
 
 When the former owner answers after the owner changed, that answer stays for
 ordinary hand-over. The trierarch withdraws the old ask and asks the current
@@ -261,7 +263,10 @@ A filesystem-absolute path uses `//`: the rule for Write, Edit, MultiEdit and
 NotebookEdit is `Edit(//absolute/path)`, and a Read rule is
 `Read(//absolute/path)`. `Write(path)` does not match file writes; `/path`
 anchors at the settings source rather than the filesystem root. The test
-proves same-file reuse and a new ask for a different file. Rules use
+proves same-file reuse and a new ask for a different file. Pattern characters
+in file names stay literal; `?` uses `[\x3f]`, because an unescaped question
+mark also matches another character and `\?` does not match the literal path
+in the tried harness. The question names the same native rule as the result. Rules use
 `addRules`, behavior `allow`, destination `session`; no rule is saved to settings.
 A process restarted with `--continue` asks again. A Bash rule carries the exact
 command, but a command with redirection (`echo test > a.txt`) still asks again
