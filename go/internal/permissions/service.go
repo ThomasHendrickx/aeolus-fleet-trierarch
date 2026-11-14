@@ -65,13 +65,19 @@ func (s Service) Ask(ctx context.Context, ship string, request Request) Decision
 	if ctx.Err() != nil {
 		return Decision{Behavior: "deny", Message: "permission call cancelled"}
 	}
+	var question string
+	answered := false
 	if s.Questions != nil {
 		// Finish this bounded script call even if the public stream closes, so its
 		// question id is available to withdraw an ask that reached the fleet.
 		id, err := s.Questions.Ask(context.WithoutCancel(ctx), ship, request)
+		question = id
 		if id != "" {
 			defer func() {
-				if err := s.Questions.Withdraw(context.WithoutCancel(ctx), ship, id); err != nil {
+				if answered {
+					return
+				}
+				if err := s.Questions.Withdraw(context.WithoutCancel(ctx), ship, question); err != nil {
 					s.logFailure(err)
 				}
 			}()
@@ -82,10 +88,17 @@ func (s Service) Ask(ctx context.Context, ship string, request Request) Decision
 		}
 	}
 
+	wait := func() Decision {
+		if answers, ok := s.Questions.(Answers); ok && question != "" {
+			return s.waitAnswer(ctx, ship, request, answers, owner, &question, &answered)
+		}
+		return Wait(ctx, s.Clock)
+	}
+
 	before, err := s.Reports.ReadReport(ctx, ship)
 	if err != nil {
 		s.logFailure(err)
-		return Wait(ctx, s.Clock)
+		return wait()
 	}
 	waiting := Report{State: "working", Note: waitNote(title)}
 	if ctx.Err() != nil {
@@ -93,12 +106,12 @@ func (s Service) Ask(ctx context.Context, ship string, request Request) Decision
 	}
 	if err = s.Reports.WriteReport(context.WithoutCancel(ctx), ship, waiting); err != nil {
 		s.logFailure(err)
-		return Wait(ctx, s.Clock)
+		return wait()
 	}
 	current, err := s.Reports.ReadReport(context.WithoutCancel(ctx), ship)
 	if err != nil {
 		s.logFailure(err)
-		return Wait(ctx, s.Clock)
+		return wait()
 	}
 	if current.State == waiting.State && current.Note == waiting.Note {
 		defer func() {
@@ -117,7 +130,7 @@ func (s Service) Ask(ctx context.Context, ship string, request Request) Decision
 			}
 		}()
 	}
-	return Wait(ctx, s.Clock)
+	return wait()
 }
 
 func (s Service) logFailure(err error) {
