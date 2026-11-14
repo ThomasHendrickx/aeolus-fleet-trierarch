@@ -150,7 +150,7 @@ force() {
 # Permission replies stay received until the trierarch checks the current owner.
 # No hand-over or busy marker is produced while the permission call waits.
 permission_candidate() {
-  local dir file state
+  local dir file state delivery question
   dir="$(aeolus_store_dir)" || return 1
   for file in "$dir"/*.state; do
     [ -f "$file" ] || continue
@@ -158,8 +158,13 @@ permission_candidate() {
     state="$(aeolus_store_state "$id")"
     [ "$state" = received ] || continue
     [ ! -e "$dir/$id.permission-seen" ] || continue
-    if [ "$(aeolus_json_string "$(cat "$dir/$id.json")" contentType)" = application/vnd.aeolus.answer+json ]; then
-      cat "$dir/$id.json"
+    delivery="$(cat "$dir/$id.json")"
+    if [ "$(aeolus_json_string "$delivery" contentType)" = application/vnd.aeolus.answer+json ]; then
+      question="$(aeolus_json_string "$(aeolus_json_string "$delivery" payload)" questionId)"
+      # An answer to another open ask belongs to that wait, even when this
+      # ask's poll received it first. Never mark it ordinary or consume it.
+      case " $* " in *" ${question} "*) continue ;; esac
+      printf '%s\n' "$delivery"
       return 0
     fi
   done
@@ -167,7 +172,7 @@ permission_candidate() {
 }
 
 permission_receive() {
-  permission_candidate && return 0
+  permission_candidate "$@" && return 0
   # Leave locally held messages out of the next receive, so one plain
   # message cannot keep the owner's later answer behind it indefinitely.
   local dir file held='' separator=''
@@ -180,7 +185,7 @@ permission_receive() {
   done
   # push_receive's exit on an empty inbox belongs to this subshell only.
   (push_receive "{\"max\":1,\"excluding\":[${held}]}") >/dev/null
-  permission_candidate && return 0
+  permission_candidate "$@" && return 0
   printf '{}\n'
 }
 
@@ -205,7 +210,7 @@ permission_finish() {
 }
 
 case "${1:-}" in
-  permission-receive) permission_receive ;;
+  permission-receive) shift; permission_receive "$@" ;;
   permission-finish) permission_finish "$@" ;;
   permission-context)
     if id="$(aeolus_store_first confirmed handed onceMore)"; then

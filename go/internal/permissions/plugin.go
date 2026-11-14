@@ -21,10 +21,14 @@ type QuestionSession struct {
 type PluginQuestions struct {
 	Session func(string) (QuestionSession, error)
 	pending sync.Map
+	locksMu sync.Mutex
+	locks   map[string]*sync.Mutex
 }
 
 // Ask includes the handed task and the tool's whole input up to 4 KB.
 func (p *PluginQuestions) Ask(ctx context.Context, ship string, request Request) (string, error) {
+	unlock := p.lock(ship)
+	defer unlock()
 	session, err := p.Session(ship)
 	if err != nil {
 		return "", err
@@ -57,6 +61,8 @@ func (p *PluginQuestions) Ask(ctx context.Context, ship string, request Request)
 
 // Withdraw addresses the original question through the plugin's remembered recipient.
 func (p *PluginQuestions) Withdraw(ctx context.Context, ship, id string) error {
+	unlock := p.lock(ship)
+	defer unlock()
 	value, ok := p.pending.LoadAndDelete(id)
 	if !ok {
 		return fmt.Errorf("permission question is not open")
@@ -138,7 +144,7 @@ func (p *PluginQuestions) Receive(ctx context.Context, ship, id string) (Reply, 
 		return Reply{}, fmt.Errorf("permission question has no session")
 	}
 	for {
-		text, err := question.Plugin.PermissionReply(ctx, question.Folder)
+		text, err := p.receive(ctx, ship, id, question)
 		if ctx.Err() != nil {
 			return Reply{}, ctx.Err()
 		}
@@ -165,6 +171,8 @@ func (p *PluginQuestions) Receive(ctx context.Context, ship, id string) (Reply, 
 
 // Finish acknowledges every answer, consuming only the current owner's matching reply.
 func (p *PluginQuestions) Finish(ctx context.Context, ship string, reply Reply, take bool) error {
+	unlock := p.lock(ship)
+	defer unlock()
 	session, err := p.Session(ship)
 	if err != nil {
 		return err
@@ -176,4 +184,38 @@ func (p *PluginQuestions) Finish(ctx context.Context, ship string, reply Reply, 
 		p.pending.Delete(reply.QuestionID)
 	}
 	return nil
+}
+
+// Script calls for one ship share its store; different ships never share a lock.
+func (p *PluginQuestions) lock(ship string) func() {
+	p.locksMu.Lock()
+	if p.locks == nil {
+		p.locks = make(map[string]*sync.Mutex)
+	}
+	lock := p.locks[ship]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		p.locks[ship] = lock
+	}
+	p.locksMu.Unlock()
+	lock.Lock()
+	return lock.Unlock
+}
+
+func (p *PluginQuestions) receive(ctx context.Context, ship, id string, question pendingQuestion) (string, error) {
+	unlock := p.lock(ship)
+	defer unlock()
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	var others []string
+	p.pending.Range(func(key, value any) bool {
+		other, ok := value.(pendingQuestion)
+		otherID, isID := key.(string)
+		if ok && isID && otherID != id && other.Folder == question.Folder {
+			others = append(others, otherID)
+		}
+		return true
+	})
+	return question.Plugin.PermissionReply(ctx, question.Folder, others...)
 }

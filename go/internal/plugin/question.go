@@ -66,8 +66,8 @@ func (p Plugin) permissionScript(ctx context.Context, folder, script, input stri
 }
 
 // PermissionReply receives into the plugin's store without handing a prompt.
-func (p Plugin) PermissionReply(ctx context.Context, folder string) (string, error) {
-	return p.permissionScript(ctx, folder, "aeolus-push.sh", "", "permission-receive")
+func (p Plugin) PermissionReply(ctx context.Context, folder string, otherQuestions ...string) (string, error) {
+	return p.permissionScript(ctx, folder, "aeolus-push.sh", "", append([]string{"permission-receive"}, otherQuestions...)...)
 }
 
 // FinishPermissionReply acknowledges a reply and consumes it or leaves it for hand-over.
