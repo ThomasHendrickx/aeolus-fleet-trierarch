@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -642,5 +643,39 @@ func TestInitRestartsAnInstalledServiceThatRunsAnotherVersion(t *testing.T) {
 	}
 	if !slices.Contains(machine.service.calls, "restart") {
 		t.Errorf("service calls = %v, want a restart so the service runs this version", machine.service.calls)
+	}
+}
+
+func TestInitReportsEachPartAndChecksAsJSON(t *testing.T) {
+	machine := newMachine(t)
+	report, err := machine.init.Run(setupLine())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Join(report.Said, "\n")
+	for _, want := range []string{"Installed", "On PATH", "Fleet", "Claude Code", "Repositories", "Service", "Caps", "Ready. Check it any time with: aeolus-trierarch status"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("report = %q, want %q", text, want)
+		}
+	}
+	data, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]json.RawMessage
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	var checks []map[string]any
+	if err := json.Unmarshal(result["checks"], &checks); err != nil {
+		t.Fatalf("checks = %s: %v", result["checks"], err)
+	}
+	if len(checks) != 7 {
+		t.Fatalf("checks = %v, want seven parts", checks)
+	}
+	for _, check := range checks {
+		if check["part"] == nil || check["name"] == nil || check["status"] == nil || check["detail"] == nil {
+			t.Errorf("incomplete check: %v", check)
+		}
 	}
 }
