@@ -619,3 +619,30 @@ func TestStatusSaysTheRestartCountAndLastError(t *testing.T) {
 		t.Errorf("status = %q, %d; want restart count and last error", output, code)
 	}
 }
+
+func TestStatusShowsWhenTheFirstReportHasNotBeenAccepted(t *testing.T) {
+	machine, _, _ := aMain(t)
+	if output, code := Main(setupWords(), machine); code != 0 {
+		t.Fatalf("init = %q, %d", output, code)
+	}
+	at := paths.Of(machine.HomeDirectory, "")
+	if err := os.WriteFile(at.Running, []byte(`{"pid":41,"version":"0.0.0"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output, code := Main([]string{"status"}, machine)
+	if code != 0 || !strings.Contains(output, "first report") {
+		t.Errorf("status = %q, %d; want the missing first report", output, code)
+	}
+}
+
+func TestStatusShowsWhenTheProcessHasNotRunForTenSeconds(t *testing.T) {
+	machine, _, _ := aMain(t)
+	if output, code := Main(setupWords(), machine); code != 0 {
+		t.Fatalf("init = %q, %d", output, code)
+	}
+	machine.StartedAt = func(int) string { return time.Now().UTC().Format(time.RFC3339) }
+	output, code := Main([]string{"status"}, machine)
+	if code != 0 || !strings.Contains(output, "10 seconds") {
+		t.Errorf("status = %q, %d; want the ten-second wait", output, code)
+	}
+}
