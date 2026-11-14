@@ -271,3 +271,35 @@ func TestInitFlagsOnlySelectsHarnessesThroughTheCommand(t *testing.T) {
 		t.Fatalf("configuration = %+v", got)
 	}
 }
+
+func TestInitCapsStayWithinTheConfigurationSchemaBeforeRegistration(t *testing.T) {
+	for _, tc := range []struct {
+		name, value string
+		isAccepted  bool
+	}{
+		{"largest schema integer", "9007199254740991", true},
+		{"one above schema integer", "9007199254740992", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newMachine(t)
+			f := setupLine()
+			f.MaxShips = tc.value
+			f.MaxRunning = tc.value
+			_, err := m.init.Run(f)
+			if tc.isAccepted {
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, err := config.Load(m.init.Paths.Config)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got.Caps != (config.Caps{Ships: 9007199254740991, Running: 9007199254740991}) {
+					t.Fatalf("caps = %+v", got.Caps)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "--max-ships") || len(m.fleet.registered) != 0 {
+				t.Fatalf("error = %v, registered = %v", err, m.fleet.registered)
+			}
+		})
+	}
+}
