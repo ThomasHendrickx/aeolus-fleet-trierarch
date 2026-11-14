@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/modelproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/prompt"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
@@ -83,5 +86,65 @@ func TestARequestForAModelCodexListsOnlyOnceConfirmedAgainAfterTheTrierarchStart
 
 	if want := codex.CommandLine([]string{"-m", "gpt-6.1-terra"}, prompt.First("Review PR 12"), true); len(running.started) != 1 || !slices.Equal(running.started[0].Command, want) {
 		t.Fatalf("started %+v, want %q", running.started, want)
+	}
+}
+
+func TestConfiguredHarnessesStartWithoutPluginsAndFindEachInstallationAtCrewTime(t *testing.T) {
+	for _, names := range [][]string{{"codex"}, {"claude-code"}, {"claude-code", "codex"}, {}} {
+		t.Run(strings.Join(names, "+"), func(t *testing.T) {
+			home := t.TempDir()
+			configuration := config.Configuration{Harnesses: map[string]config.Harness{}}
+			for _, name := range names {
+				configuration.Harnesses[name] = config.Harness{}
+			}
+			held := &offers{configured: configuration}
+			wired, offered, err := harnessesOf(configuration, paths.Paths{Sessions: t.TempDir()}, map[string]string{}, home, &startedSessions{}, modelproxy.Runtime{}, held)
+			if err != nil {
+				t.Fatalf("harnessesOf without plugins: %v", err)
+			}
+			if !slices.Equal(offered, names) || len(wired) != len(names) {
+				t.Fatalf("offered %q with %d adapters, want %q", offered, len(wired), names)
+			}
+			for _, name := range names {
+				harness := wired[name]
+				if _, err := harness.MarksLaunches(); err == nil {
+					t.Fatalf("%s marks launches before its plugin is installed", name)
+				}
+				folder := ".claude"
+				if name == "codex" {
+					folder = ".codex"
+				}
+				cache := filepath.Join(home, folder, "plugins", "cache", "aeolus-fleet", "aeolus-fleet")
+				for _, version := range []string{"0.39.0", "0.40.0"} {
+					root := filepath.Join(cache, version)
+					if err := os.MkdirAll(filepath.Join(root, "scripts"), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					// The installed plugin answers launch and writes identities through its script boundary.
+					script := "#!/bin/sh\nif [ \"$1\" = write ]; then printf '%s' '" + version + "' > \"$AEOLUS_FOLDER/found-version\"; fi\n"
+					if err := os.WriteFile(filepath.Join(root, "scripts", "aeolus-identity.sh"), []byte(script), 0o755); err != nil {
+						t.Fatal(err)
+					}
+					marks, err := harness.MarksLaunches()
+					if err != nil || !marks {
+						t.Fatalf("%s MarksLaunches after installing %s = %v, %v", name, version, marks, err)
+					}
+					entry := reconciler.Entry{Folder: t.TempDir()}
+					if err := harness.WriteIdentity(entry, plugin.Identity{}, "test-token"); err != nil {
+						t.Fatal(err)
+					}
+					got, err := os.ReadFile(filepath.Join(entry.Folder, "found-version"))
+					if err != nil || string(got) != version {
+						t.Fatalf("%s used plugin %q, %v, want %s", name, got, err, version)
+					}
+				}
+				if err := os.RemoveAll(cache); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := harness.MarksLaunches(); err == nil {
+					t.Fatalf("%s marks launches after its plugin is removed", name)
+				}
+			}
+		})
 	}
 }
