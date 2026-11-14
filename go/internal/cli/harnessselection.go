@@ -37,13 +37,16 @@ func (i Init) harnessStates() []harnessState {
 	}
 }
 
+// maximumCap is the largest integer the shared configuration schema accepts.
+const maximumCap = 9007199254740991
+
 func positiveCap(text string, fallback int, flag string) (int, error) {
 	if text == "" {
 		return fallback, nil
 	}
 	n, err := strconv.Atoi(text)
-	if err != nil || n <= 0 {
-		return 0, fmt.Errorf("%s needs a positive integer", flag)
+	if err != nil || n <= 0 || n > maximumCap {
+		return 0, fmt.Errorf("%s needs a positive integer no greater than %d", flag, maximumCap)
 	}
 	return n, nil
 }
