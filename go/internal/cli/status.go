@@ -32,14 +32,15 @@ type StatusReport struct {
 	// ModelsConfirmedAt is, per configured harness, when its models were last confirmed; null where none were (docs/trierarch.md, "Detected options").
 	ModelsConfirmedAt map[string]*string `json:"modelsConfirmedAt"`
 	// HarnessOrder is the configured harnesses in the configuration file's order, as the text says them.
-	HarnessOrder []string       `json:"-"`
-	Repositories []string       `json:"repositories"`
-	Service      service.Status `json:"service"`
-	Fleet        StatusFleet    `json:"fleet"`
-	Caps         StatusCaps     `json:"caps"`
-	Entries      map[string]int `json:"entries"`
-	Kept         []StatusKept   `json:"kept"`
-	Orphans      []string       `json:"orphans"`
+	HarnessOrder     []string       `json:"-"`
+	Repositories     []string       `json:"repositories"`
+	Service          service.Status `json:"service"`
+	ServiceLastError string         `json:"serviceLastError,omitempty"`
+	Fleet            StatusFleet    `json:"fleet"`
+	Caps             StatusCaps     `json:"caps"`
+	Entries          map[string]int `json:"entries"`
+	Kept             []StatusKept   `json:"kept"`
+	Orphans          []string       `json:"orphans"`
 	// PassFailure is why the last pass failed and since when; none when it succeeded.
 	PassFailure *reconciler.PassFailure `json:"passFailure,omitempty"`
 }
@@ -118,6 +119,12 @@ func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
 		Orphans:     orphansOf(saved.Orphans),
 		PassFailure: saved.PassFailure,
 	}
+	if manager.IsRestarting && machine.ServiceLog != nil {
+		lines, err := machine.ServiceLog(at).Tail(1)
+		if err == nil && len(lines) > 0 {
+			report.ServiceLastError = lines[len(lines)-1]
+		}
+	}
 	slices.Sort(report.Repositories)
 	plugins := machine.Plugins()
 	for harness := range configuration.Harnesses {
@@ -186,9 +193,16 @@ func reencode(value any, into any) bool {
 	return err == nil && json.Unmarshal(text, into) == nil
 }
 
-func describeService(manager service.Status, look style.Style) string {
+func describeService(manager service.Status, lastError string, look style.Style) string {
 	if !manager.IsInstalled {
 		return look.Tone(style.Bad, "not installed (aeolus-trierarch install)")
+	}
+	if manager.IsRestarting {
+		text := fmt.Sprintf("restarted %d times", manager.Restarts)
+		if lastError != "" {
+			text += ", last error: " + lastError
+		}
+		return look.Tone(style.Bad, text)
 	}
 	if !manager.IsRunning {
 		return look.Tone(style.Busy, "installed, not running (aeolus-trierarch start)")
@@ -290,7 +304,7 @@ func describeStatus(report StatusReport, look style.Style) string {
 		line("Aeolus Fleet plugin", describePlugins(report.Plugins, report.HarnessOrder, look)),
 		line("Models confirmed", describeModels(report.ModelsConfirmedAt, report.HarnessOrder)),
 		line("Repositories", or(len(report.Repositories) == 0, "none", func() string { return strings.Join(report.Repositories, ", ") })),
-		line("Service", describeService(report.Service, look)),
+		line("Service", describeService(report.Service, report.ServiceLastError, look)),
 		line("Fleet", describeFleet(report.Fleet, look)),
 		line("Caps", fmt.Sprintf("%d of %d ships crewed here, %d of %d sessions running", report.Caps.Ships.Used, report.Caps.Ships.Cap, report.Caps.Running.Used, report.Caps.Running.Cap)),
 		line("Last pass", lastPass),
