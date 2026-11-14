@@ -744,3 +744,31 @@ func TestInitReportsInstallerVerificationAndPathBlock(t *testing.T) {
 		t.Errorf("PATH = %+v", got)
 	}
 }
+
+func TestInitUsesTheShipNameOrFallsBackToItsID(t *testing.T) {
+	for _, tc := range []struct {
+		name, shipName string
+		err            error
+		want           string
+	}{
+		{"name", "trierarch-mac", nil, "trierarch-mac"},
+		{"whoami failed", "", errors.New("unavailable"), shipID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := newMachine(t)
+			machine.init.ShipName = func(url, token string) (string, error) {
+				if url != fleetURL || token == "" {
+					t.Errorf("whoami URL %q or token missing", url)
+				}
+				return tc.shipName, tc.err
+			}
+			report, err := machine.init.Run(setupLine())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(report.Said[0], tc.want+" joined ") || !strings.Contains(report.Checks[2].Detail, tc.want+" registered") {
+				t.Errorf("report = %+v", report)
+			}
+		})
+	}
+}
