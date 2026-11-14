@@ -253,8 +253,7 @@ func (p plugins) Update(harness string, tag string) error {
 		running := paths.Of(p.home, "").Running
 		return codex.PluginUpdateOf(p.home, p.env["CODEX_HOME"], func() int { return cli.RunningPID(running) }).Update(tag)
 	case "copilot":
-		// Copilot's plugin is only installed here, at the tag its marketplace names; upgrade updates the other two.
-		return copilot.PluginInstall{Program: "copilot", Home: p.env["COPILOT_HOME"], Version: func() string { return p.Version("copilot") }}.Install(tag)
+		return copilot.PluginInstall{Program: "copilot", Home: p.env["COPILOT_HOME"]}.Install(tag)
 	}
 	return fmt.Errorf("the plugin for %s is not updated by upgrade", harness)
 }
@@ -647,7 +646,21 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	opened = shipSockets(at, kept.FleetURL, running)
 	load := &machineload.Reader{Source: machineload.System{WorktreeRoot: root}, Now: time.Now, Log: logLine}
 	saved := state.File{Path: at.State}
-	permissionChannel, err := permissions.Listen(filepath.Join(at.Proxy, permissions.Socket), func(ship, token string) bool { return mcpproxy.AuthorizesPermission(at.Sessions, ship, token) }, permissions.Fleet{URL: kept.FleetURL, TokenOf: func(ship string) string {
+	permissionChannel, err := permissions.Listen(filepath.Join(at.Proxy, permissions.Socket), func(ship, token string) bool { return mcpproxy.AuthorizesPermission(at.Sessions, ship, token) }, permissions.Fleet{URL: kept.FleetURL, Log: logLine, Questions: &permissions.PluginQuestions{Session: func(ship string) (permissions.QuestionSession, error) {
+		current, err := saved.Load()
+		if err != nil {
+			return permissions.QuestionSession{}, err
+		}
+		entry, ok := current.Entries[ship]
+		if !ok {
+			return permissions.QuestionSession{}, errors.New("permission session is no longer crewed")
+		}
+		harness, ok := harnesses[entry.Harness].(claudecode.Harness)
+		if !ok {
+			return permissions.QuestionSession{}, errors.New("permission session is not Claude Code")
+		}
+		return harness.PermissionSession(entry), nil
+	}}, TokenOf: func(ship string) string {
 		state, err := saved.Load()
 		if err != nil {
 			return ""
@@ -664,6 +677,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		return nil, err
 	}
 	pass := runpass.Pass{
+		EndPermissions:    func(ship string) { permissionChannel.End(ship, logLine) },
 		Fleet:             client,
 		Sessions:          running,
 		Harnesses:         harnesses,

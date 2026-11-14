@@ -16,6 +16,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/permissions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/prompt"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
@@ -347,3 +348,19 @@ func (h Harness) NotOfferedReason() string { return "" }
 
 // MarksLaunches is whether the aeolus-fleet plugin keeps launch markers (#490).
 func (h Harness) MarksLaunches() (bool, error) { return h.Plugin.MarksLaunches() }
+
+// PermissionSession locates the plugin identity this entry's session uses and
+// states the configured launch model, without reading its conversation.
+func (h Harness) PermissionSession(entry reconciler.Entry) permissions.QuestionSession {
+	model := "default"
+	flags := h.Settings().EffectiveFlags(entry.Options)
+	for index, flag := range flags {
+		if flag == "--model" && index+1 < len(flags) {
+			model = flags[index+1]
+		}
+		if value, ok := strings.CutPrefix(flag, "--model="); ok {
+			model = value
+		}
+	}
+	return permissions.QuestionSession{Plugin: h.pluginOf(entry), Folder: entry.Folder, Name: entry.ShipName, Model: model}
+}

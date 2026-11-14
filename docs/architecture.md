@@ -208,22 +208,35 @@ are rejected. Claude Code keeps the permission tool out of the model's tool list
 
 The MCP proxy is detached, so it cannot use the ship's fleet socket: it is
 neither the session nor a descendant of the current trierarch. It hands each
-owner read to the trierarch through `proxy/permissions.sock`, a private Unix
+permission call to the trierarch through `proxy/permissions.sock`, a private Unix
 socket (mode 600), outside the folders mounted into sessions. The channel
 checks the ship's running hold and its session's MCP token and permission-server
 access. The trierarch reads the ship's current crew token from its state and
-calls `/api/v1/ship/whoami` as that ship. The proxy receives only whether the
-owner is a person, never a crew token. No owner result is cached. While the
+calls `/api/v1/ship/whoami` as that ship. The proxy receives the denial, never a crew token. No owner result is cached. While the
 trierarch is down, the call is denied.
 
 Each `ask` result is one text content containing the JSON
 `{ "behavior": "deny", "message": "..." }`:
 
 - Argo owner: `this ship's owner is argo: nobody is asked`.
-- Person owner: `permission questions for person-owned ships are not available yet`.
+- Person owner: a streamed wait of at most 30 minutes, then
+  `not answered in 30 minutes; the question was withdrawn`.
 - An unreadable owner, including a failed private-channel call:
   `could not read this ship's owner: nobody is asked`.
 
-Claude Code lists a refused action in `permission_denials`. Sending a question,
-waiting for an answer and taking it from the plugin's store belong to the later
+The proxy streams server-sent events with `notifications/progress` every 20
+seconds on the call's `progressToken`. The trierarch owns the injected-clock
+30-minute limit. A cancellation notification or connection close cancels the
+private call and stops its timers; no wait survives a proxy restart. The turn
+stays busy while the tool runs.
+
+While waiting, the report is working with `waiting for its owner: <title>`.
+The title names the tool and command or path, flattened and cut to the report
+note's limit. On every end the entry report's state and note return, unless a
+newer report replaced the waiting report. A crew with no report returns to
+working with an empty note. Task, step and details stay untouched. Reporting
+is best effort: failures are logged and leave the wait and its outcome intact.
+
+Claude Code lists a refused action in `permission_denials`. Creating a
+question, taking its answer and withdrawing it belong to the later
 permission-question slices in `docs/design/permission-asks.md`.

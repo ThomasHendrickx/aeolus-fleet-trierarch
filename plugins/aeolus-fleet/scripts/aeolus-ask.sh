@@ -36,7 +36,9 @@ usage() {
 
 # A JSON string's contents: aeolus_json_escape, and tabs and carriage returns too.
 json() {
-  aeolus_json_escape "$1" | sed -e "s/$(printf '\t')/\\\\t/g" -e "s/$(printf '\r')/\\\\r/g"
+  local escaped
+  escaped="$(aeolus_json_escape "${1}x")"
+  printf '%s' "${escaped%x}" | sed -e "s/$(printf '\t')/\\\\t/g" -e "s/$(printf '\r')/\\\\r/g"
 }
 
 new_uuid() {
@@ -64,6 +66,7 @@ read_question() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --title) [ "$#" -ge 2 ] || usage "--title takes the title"; title="$2"; shift 2 ;;
+      --context-stdin) context="$(cat; printf x)"; context="${context%x}"; shift ;;
       --context) [ "$#" -ge 2 ] || usage "--context takes the context"; context="$2"; shift 2 ;;
       --option)
         [ "$#" -ge 3 ] || usage "--option takes a label and a detail"
@@ -152,8 +155,11 @@ case "$command" in
   ask)
     read_question "$@"
     read_owner
-    send_to "$owner" "$QUESTION_CONTENT_TYPE" "$question" "question-${id}"
+    # Keep the recipient and expose the uuid before sending: a lost response
+    # must still let the permission tool withdraw what may have reached it.
     keep_asked "$id" "$owner"
+    echo "aeolus: question ${id}"
+    send_to "$owner" "$QUESTION_CONTENT_TYPE" "$question" "question-${id}"
     echo "aeolus: asked your ship's owner question ${id} (message ${sent}); its answer arrives as a reply to that message. Withdraw or replace the question by its uuid ${id}."
     ;;
   withdraw)

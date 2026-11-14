@@ -411,13 +411,16 @@ func (i Init) Run(flags Flags) (Report, error) {
 		return Report{}, err
 	}
 	report.Service = "unchanged"
+	running, hasRunning := readRunning(i.Paths.Running)
+	// A service another trierarch started, as on a machine moving to this one by its setup line, runs this one only once restarted.
+	isAnotherVersion := status.IsRunning && hasRunning && running.Version != Version
 	switch {
 	case !status.IsInstalled:
 		if err := i.Service.Install(); err != nil {
 			return report, i.serviceError(err)
 		}
 		report.Service = "installed"
-	case report.Configuration != "kept" || isPluginShipNew || isRegisteredAgain || (!status.IsRunning && !status.IsRestarting):
+	case report.Configuration != "kept" || isPluginShipNew || isRegisteredAgain || isAnotherVersion || (!status.IsRunning && !status.IsRestarting):
 		if err := i.Service.Rewrite(); err != nil {
 			return Report{}, err
 		}
