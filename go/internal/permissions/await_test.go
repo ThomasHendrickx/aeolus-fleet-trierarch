@@ -125,3 +125,46 @@ func TestAnAbsentReportReturnsToWorkingWithAnEmptyNote(t *testing.T) {
 		t.Fatalf("ReadReport = %+v, %v", got, err)
 	}
 }
+
+type closingQuestion struct{ started, cancelled, cleanup chan struct{} }
+
+func (q closingQuestion) Owner(context.Context, string) (Owner, error) {
+	return Owner{IsPerson: true}, nil
+}
+func (q closingQuestion) Ask(ctx context.Context, _ string, _ Request) Decision {
+	close(q.started)
+	<-ctx.Done()
+	close(q.cancelled)
+	<-q.cleanup
+	return Decision{Behavior: "deny", Message: "permission call cancelled"}
+}
+func TestClosingThePrivateChannelWaitsForQuestionWithdrawalBeforeReturning(t *testing.T) {
+	folder, err := os.MkdirTemp("", "permission-close-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(folder)
+	q := closingQuestion{started: make(chan struct{}), cancelled: make(chan struct{}), cleanup: make(chan struct{})}
+	channel, err := Listen(filepath.Join(folder, "p.sock"), func(string, string) bool { return true }, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan Decision, 1)
+	go func() {
+		done <- (Client{Socket: filepath.Join(folder, "p.sock"), Token: "test-session"}).Ask(context.Background(), "scout", Request{Title: "Run `npm install`"})
+	}()
+	<-q.started
+	closed := make(chan struct{})
+	go func() { _ = channel.Close(); close(closed) }()
+	<-q.cancelled
+	select {
+	case <-closed:
+		close(q.cleanup)
+		<-done
+		t.Fatal("channel closed before the question's withdrawal finished")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(q.cleanup)
+	<-closed
+	<-done
+}
