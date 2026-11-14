@@ -465,8 +465,11 @@ func (i Init) waitForService() error {
 		}
 	}
 	running, ok := readRunning(i.Paths.Running)
-	if !ok || running.PID != pid || running.Version != Version {
-		return fmt.Errorf("service version does not match %s", Version)
+	if !ok || running.PID != pid {
+		return errors.New("running.json does not name the service process")
+	}
+	if running.Version != Version {
+		return fmt.Errorf("service version %s does not match %s", running.Version, Version)
 	}
 	if !running.FirstReportAccepted {
 		return errors.New("the first report was not accepted")
