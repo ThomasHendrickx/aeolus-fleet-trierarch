@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 )
 
 // harnessSelection is resolved before init can register anything.
@@ -79,7 +78,7 @@ func askYes(reader *bufio.Reader, terminal io.Writer, question string, isDefault
 	}
 }
 
-func (i Init) selectHarnesses(flags Flags, current config.Configuration) (harnessSelection, error) {
+func (i Init) selectHarnesses(flags Flags, current config.Configuration, terminal io.ReadWriteCloser, reader *bufio.Reader) (harnessSelection, error) {
 	selection := harnessSelection{harnesses: map[string]config.Harness{}}
 	var err error
 	selection.caps.Ships, err = positiveCap(flags.MaxShips, current.Caps.Ships, "--max-ships")
@@ -93,25 +92,9 @@ func (i Init) selectHarnesses(flags Flags, current config.Configuration) (harnes
 	states := i.harnessStates()
 	picked := slices.Clone(flags.Harnesses)
 	unattended := slices.Clone(flags.Unattended)
-	var terminal io.ReadWriteCloser
-	var reader *bufio.Reader
-	if (picked == nil || (unattended == nil && !flags.IsYes)) && i.OpenTerminal != nil {
-		terminal, err = i.OpenTerminal()
-		if err == nil {
-			defer terminal.Close()
-			reader = bufio.NewReader(terminal)
-		}
-	}
 	if picked == nil {
 		if terminal == nil {
-			missing := []string{"--harnesses"}
-			if _, err := crew.Read(i.Paths.CrewToken); err != nil {
-				for _, flag := range []struct{ name, value string }{{"--fleet-url", flags.FleetURL}, {"--ship-id", flags.ShipID}, {"--secret", flags.Secret}} {
-					if flag.value == "" {
-						missing = append(missing, flag.name)
-					}
-				}
-			}
+			missing := i.missingInitFlags(flags)
 			return selection, fmt.Errorf("no terminal: init needs %s; no harness is a default", strings.Join(missing, ", "))
 		}
 		if i.IsCursorInstalled {

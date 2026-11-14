@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,9 +34,13 @@ type Flags struct {
 	// Harnesses is nil when the wizard must ask, empty when none were picked.
 	Harnesses []string
 	// Unattended is nil when unanswered; an empty list explicitly keeps permission questions.
-	Unattended []string
-	MaxShips   string
-	MaxRunning string
+	Unattended       []string
+	MaxShips         string
+	MaxRunning       string
+	Repositories     []string
+	RepositoriesIn   string
+	IsNoRepositories bool
+	CloneInto        string
 }
 
 // Report is what init did, for the operator and for --json.
@@ -83,6 +89,7 @@ type Service interface {
 // on with a setup that did not finish, registering its ship again only once it
 // was released. Options left out are asked on the controlling terminal.
 type Init struct {
+	HomeDirectory         string
 	Paths                 paths.Paths
 	Platform              string
 	IsSsMissing           bool
@@ -165,6 +172,25 @@ func askedCrew(flags Flags) (fleetURL string, shipID string, err error) {
 	return fleetURL, shipID, nil
 }
 
+// missingInitFlags names all unanswered choices when no terminal is available.
+func (i Init) missingInitFlags(flags Flags) []string {
+	var missing []string
+	if flags.Harnesses == nil {
+		missing = append(missing, "--harnesses")
+	}
+	if !hasRepositoryChoice(flags) && !flags.IsYes {
+		missing = append(missing, "--repositories, --repositories-in or --no-repositories")
+	}
+	if _, err := crew.Read(i.Paths.CrewToken); err != nil {
+		for _, flag := range []struct{ name, value string }{{"--fleet-url", flags.FleetURL}, {"--ship-id", flags.ShipID}, {"--secret", flags.Secret}} {
+			if flag.value == "" {
+				missing = append(missing, flag.name)
+			}
+		}
+	}
+	return missing
+}
+
 // register registers the trierarch's ship; a ship crewed already was registered by its setup line run elsewhere, and the refusal says how to go on.
 func (i Init) register(fleetURL string, shipID string, secret string, pluginShipID string) (string, error) {
 	crewToken, err := i.Register(fleetURL, shipID, secret)
@@ -193,7 +219,21 @@ func (i Init) Run(flags Flags) (Report, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return Report{}, err
 	}
-	selection, err := i.selectHarnesses(flags, current)
+	var terminal io.ReadWriteCloser
+	var reader *bufio.Reader
+	if (flags.Harnesses == nil || (!flags.IsYes && (flags.Unattended == nil || !hasRepositoryChoice(flags)))) && i.OpenTerminal != nil {
+		opened, err := i.OpenTerminal()
+		if err == nil {
+			terminal = opened
+			defer terminal.Close()
+			reader = bufio.NewReader(terminal)
+		}
+	}
+	selection, err := i.selectHarnesses(flags, current, terminal, reader)
+	if err != nil {
+		return Report{}, err
+	}
+	repositories, err := i.selectRepositories(context.Background(), flags, current, reader, terminal)
 	if err != nil {
 		return Report{}, err
 	}
@@ -300,6 +340,7 @@ func (i Init) Run(flags Flags) (Report, error) {
 		configuration = config.Initial()
 		configuration.Harnesses = selection.harnesses
 		configuration.Caps = selection.caps
+		configuration.Repositories = repositories
 		if err := config.Write(i.Paths.Config, configuration); err != nil {
 			return Report{}, err
 		}
@@ -312,9 +353,10 @@ func (i Init) Run(flags Flags) (Report, error) {
 		}
 		configuration = loaded
 		report.Configuration = "kept"
-		if !reflect.DeepEqual(loaded.Harnesses, selection.harnesses) || loaded.Caps != selection.caps {
+		if !reflect.DeepEqual(loaded.Harnesses, selection.harnesses) || loaded.Caps != selection.caps || !reflect.DeepEqual(loaded.Repositories, repositories) {
 			configuration.Harnesses = selection.harnesses
 			configuration.Caps = selection.caps
+			configuration.Repositories = repositories
 			if err := config.Write(i.Paths.Config, configuration); err != nil {
 				return Report{}, err
 			}

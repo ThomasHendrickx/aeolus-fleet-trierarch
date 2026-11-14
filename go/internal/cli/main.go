@@ -124,7 +124,7 @@ type Machine struct {
 
 const usage = `Usage: aeolus-trierarch <command>
 
-  init --fleet-url <url> --ship-id <id> --secret <secret> [--plugin-ship-id <id>] [--harnesses <list>] [--unattended <list>] [--max-ships <n>] [--max-running <n>] [--yes]
+  init --fleet-url <url> --ship-id <id> --secret <secret> [--plugin-ship-id <id>] [--harnesses <list>] [--unattended <list>] [--repositories <list> | --repositories-in <folder> | --no-repositories] [--clone-into <folder>] [--max-ships <n>] [--max-running <n>] [--yes]
                  set this machine up from the trierarch plugin's setup line
   status         how the trierarch stands on this machine
   list           the ships it crews
@@ -160,8 +160,8 @@ const usage = `Usage: aeolus-trierarch <command>
   --json         answer as JSON
   --config <path> the configuration (AEOLUS_TRIERARCH_CONFIG)`
 
-var valueFlags = []string{"--fleet-url", "--ship-id", "--secret", "--plugin-ship-id", "--config", "--default", "--ship", "--lines", "--harnesses", "--unattended", "--max-ships", "--max-running"}
-var switchFlags = []string{"--json", "--yes", "--version", "--api-key", "--remove-key", "--check", "--no-load", "--follow"}
+var valueFlags = []string{"--fleet-url", "--ship-id", "--secret", "--plugin-ship-id", "--config", "--default", "--ship", "--lines", "--harnesses", "--unattended", "--max-ships", "--max-running", "--repositories", "--repositories-in", "--clone-into"}
+var switchFlags = []string{"--json", "--yes", "--version", "--api-key", "--remove-key", "--check", "--no-load", "--follow", "--no-repositories"}
 
 type parsed struct {
 	words    []string
@@ -243,6 +243,7 @@ func Main(args []string, machine Machine) (string, int) {
 	commands := map[string]func() (answer, error){
 		"init": func() (answer, error) {
 			report, err := Init{
+				HomeDirectory:         machine.HomeDirectory,
 				Paths:                 at,
 				Platform:              machine.Platform,
 				IsSsMissing:           machine.IsSsMissing(),
@@ -263,15 +264,19 @@ func Main(args []string, machine Machine) (string, int) {
 					return machine.Detect(at, harnesses, by)
 				},
 			}.Run(Flags{
-				FleetURL:     command.values["--fleet-url"],
-				ShipID:       command.values["--ship-id"],
-				Secret:       command.values["--secret"],
-				PluginShipID: command.values["--plugin-ship-id"],
-				IsYes:        command.switches["--yes"],
-				Harnesses:    listFlag(command.values, "--harnesses"),
-				Unattended:   listFlag(command.values, "--unattended"),
-				MaxShips:     command.values["--max-ships"],
-				MaxRunning:   command.values["--max-running"],
+				FleetURL:         command.values["--fleet-url"],
+				ShipID:           command.values["--ship-id"],
+				Secret:           command.values["--secret"],
+				PluginShipID:     command.values["--plugin-ship-id"],
+				IsYes:            command.switches["--yes"],
+				Harnesses:        listFlag(command.values, "--harnesses"),
+				Unattended:       listFlag(command.values, "--unattended"),
+				MaxShips:         command.values["--max-ships"],
+				MaxRunning:       command.values["--max-running"],
+				Repositories:     repositoryListFlag(command.values),
+				RepositoriesIn:   command.values["--repositories-in"],
+				CloneInto:        command.values["--clone-into"],
+				IsNoRepositories: command.switches["--no-repositories"],
 			})
 			return answer{data: report, text: strings.Join(report.Said, "\n")}, err
 		},
