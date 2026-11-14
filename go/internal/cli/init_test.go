@@ -772,3 +772,31 @@ func TestInitUsesTheShipNameOrFallsBackToItsID(t *testing.T) {
 		})
 	}
 }
+
+func TestInitNamesTheAttestationVerificationCommand(t *testing.T) {
+	machine := newMachine(t)
+	machine.init.Program = "/opt/bin/aeolus-trierarch"
+	machine.init.InstallVerification = "checksum"
+	report, err := machine.init.Run(setupLine())
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := report.Checks[0]
+	if check.Status != "warning" || !strings.Contains(check.Fix, "gh attestation verify /opt/bin/aeolus-trierarch --repo ThomasHendrickx/aeolus-fleet-trierarch --signer-workflow ThomasHendrickx/aeolus-fleet-trierarch/.github/workflows/release.yml") {
+		t.Errorf("installed check = %+v", check)
+	}
+}
+
+func TestInitServiceFailureNamesStatusAsTheNextStep(t *testing.T) {
+	machine := newMachine(t)
+	machine.service.write = func() {}
+	report, err := machine.init.Run(setupLine())
+	if err == nil {
+		t.Fatal("wanted service failure")
+	}
+	for _, check := range report.Checks {
+		if check.Status == "failed" && !strings.Contains(check.Fix, "aeolus-trierarch status") {
+			t.Errorf("failed check = %+v", check)
+		}
+	}
+}
