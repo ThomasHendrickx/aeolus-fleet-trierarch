@@ -55,7 +55,7 @@ func (f Fleet) Ask(ctx context.Context, ship string, request Request) Decision {
 	if clock == nil {
 		clock = SystemClock{}
 	}
-	return (Service{Owners: f, Questions: f.Questions, Reports: f, Clock: clock, Log: f.Log}).Ask(ctx, ship, request)
+	return (Service{Owners: f, Questions: f.Questions, Reports: f, Clock: clock, Log: f.Log, Waits: f.Waits}).Ask(ctx, ship, request)
 }
 
 func (f Fleet) call(ctx context.Context, ship, method, path string, body any, output any) error {

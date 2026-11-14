@@ -201,6 +201,7 @@ type Fleet struct {
 	TokenOf   func(string) string
 	Clock     Clock
 	Log       func(string)
+	Waits     *ReportWaits
 }
 
 // Owner calls whoami with the current crew token and validates its owner.

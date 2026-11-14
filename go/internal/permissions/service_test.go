@@ -3,6 +3,7 @@ package permissions
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -257,4 +258,91 @@ func TestAQuestionWhoseSendDidNotAnswerIsWithdrawnBeforeDenying(t *testing.T) {
 	if got.Message != "could not ask" || q.withdrawn.Load() != 1 {
 		t.Fatalf("decision %+v, withdrawals %d", got, q.withdrawn.Load())
 	}
+}
+
+type overlappingAsk struct {
+	title  string
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+func beginOverlappingAsk(t *testing.T, service Service, title string) *overlappingAsk {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ask := &overlappingAsk{title: title, cancel: cancel, done: make(chan struct{})}
+	go func() { defer close(ask.done); service.Await(ctx, "scout", title) }()
+	synctest.Wait()
+	return ask
+}
+
+func (a *overlappingAsk) end() { a.cancel(); <-a.done }
+
+func TestOverlappingAsksRestoreTheReportFromBeforeTheFirstWhenTheLastEnds(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		before := Report{State: "working", Note: "building issue 419", Revision: "before"}
+		stored := &reports{current: before}
+		service := Service{Owners: &owners{person: true}, Reports: stored, Clock: SystemClock{}, Waits: &ReportWaits{}}
+		a := beginOverlappingAsk(t, service, "A")
+		b := beginOverlappingAsk(t, service, "B")
+		a.end()
+		if stored.current.Note != "waiting for its owner: B" {
+			t.Fatalf("after A ends, report = %+v", stored.current)
+		}
+		b.end()
+		if stored.current.State != before.State || stored.current.Note != before.Note {
+			t.Fatalf("after both end, report = %+v", stored.current)
+		}
+	})
+}
+
+func TestThreeOverlappingAsksShowTheMostRecentOpenAskInEveryEndOrder(t *testing.T) {
+	for _, order := range [][]int{{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}} {
+		t.Run(fmt.Sprint(order), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				before := Report{State: "blocked", Note: "building issue 419", Revision: "before"}
+				stored := &reports{current: before}
+				service := Service{Owners: &owners{person: true}, Reports: stored, Clock: SystemClock{}, Waits: &ReportWaits{}}
+				asks := []*overlappingAsk{beginOverlappingAsk(t, service, "A"), beginOverlappingAsk(t, service, "B"), beginOverlappingAsk(t, service, "C")}
+				if stored.current.Note != "waiting for its owner: C" {
+					t.Fatalf("with all open, report = %+v", stored.current)
+				}
+				ended := map[int]bool{}
+				for _, index := range order {
+					asks[index].end()
+					ended[index] = true
+					latest := -1
+					for open := range asks {
+						if !ended[open] {
+							latest = open
+						}
+					}
+					if latest >= 0 {
+						if want := "waiting for its owner: " + asks[latest].title; stored.current.State != "working" || stored.current.Note != want {
+							t.Fatalf("after ending %v, report = %+v, want %q", order[:len(ended)], stored.current, want)
+						}
+						continue
+					}
+					if stored.current.State != before.State || stored.current.Note != before.Note {
+						t.Fatalf("after all end, report = %+v", stored.current)
+					}
+				}
+			})
+		})
+	}
+}
+
+func TestOverlappingAsksLeaveANewerReportInPlace(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		stored := &reports{current: Report{State: "working", Note: "before", Revision: "before"}}
+		service := Service{Owners: &owners{person: true}, Reports: stored, Clock: SystemClock{}, Waits: &ReportWaits{}}
+		a := beginOverlappingAsk(t, service, "A")
+		b := beginOverlappingAsk(t, service, "B")
+		_ = stored.WriteReport(context.Background(), "scout", Report{State: "blocked", Note: "newer report"})
+		a.end()
+		b.end()
+		if stored.current.Note != "newer report" {
+			t.Fatalf("report = %+v", stored.current)
+		}
+	})
 }
