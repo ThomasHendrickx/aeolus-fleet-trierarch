@@ -173,7 +173,11 @@ describe('a session in a container', () => {
     const folder = sessionOf(machine, 'scout').folder;
     const sockets = join(machine.trierarchHome, 'ships', scout, 'sockets');
     const mcpConfig = join(machine.trierarchHome, 'sessions', scout, 'mcp-config.json');
-    const port = readFileSync(join(machine.trierarchHome, 'proxy', 'port'), 'utf8').trim();
+    // A subscription needs no model proxy. A permission MCP channel, when configured, does.
+    const mcpMount = existsSync(mcpConfig) ? ['--volume', `${mcpConfig}:${mcpConfig}:ro`] : [];
+    const network = existsSync(mcpConfig)
+      ? ['--network', `pasta:--no-map-gw,-t,none,-u,none,-T,${readFileSync(join(machine.trierarchHome, 'proxy', 'port'), 'utf8').trim()},-U,none`]
+      : [];
     const image = `${SESSION_IMAGE}:${version}`;
 
     const words = run();
@@ -209,12 +213,10 @@ describe('a session in a container', () => {
       `${shipHome()}:/home/ubuntu`,
       '--volume',
       `${sockets}:${sockets}`,
-      '--volume',
-      `${mcpConfig}:${mcpConfig}:ro`,
+      ...mcpMount,
       '--env',
       'HOME=/home/ubuntu',
-      '--network',
-      `pasta:--no-map-gw,-t,none,-u,none,-T,${port},-U,none`,
+      ...network,
       '--workdir',
       folder,
       '--env-file',
