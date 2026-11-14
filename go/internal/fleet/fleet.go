@@ -121,6 +121,11 @@ func Register(fleetURL string, shipID string, secret string) (string, error) {
 	return answer.CrewToken, nil
 }
 
+// isLeaseEnded says whether the fleet holds no lease for the crew token: released (LEASE_ENDED), refused, or never known to it, as after a restore (UNKNOWN_CREW_TOKEN).
+func isLeaseEnded(refusal *Refusal) bool {
+	return refusal.Code == "LEASE_ENDED" || refusal.Code == "UNAUTHORIZED" || refusal.Code == "UNKNOWN_CREW_TOKEN"
+}
+
 // IsLeaseHeld says whether the crew token still holds its lease: it no longer does once the ship was released.
 func IsLeaseHeld(fleetURL string, crewToken string) (bool, error) {
 	var answer struct {
@@ -128,7 +133,7 @@ func IsLeaseHeld(fleetURL string, crewToken string) (bool, error) {
 	}
 	err := call(fleetURL, request{path: "/ship/whoami", crewToken: crewToken}, &answer)
 	var refusal *Refusal
-	if errors.As(err, &refusal) && (refusal.Code == "LEASE_ENDED" || refusal.Code == "UNAUTHORIZED") {
+	if errors.As(err, &refusal) && isLeaseEnded(refusal) {
 		return false, nil
 	}
 	return err == nil, err
@@ -303,7 +308,7 @@ func (c Client) Inbox(crewToken string) (reconciler.Inbox, error) {
 	}
 	err := call(c.URL, request{path: "/ship/inbox", crewToken: crewToken, body: map[string]any{}}, &answer)
 	var refusal *Refusal
-	if errors.As(err, &refusal) && (refusal.Code == "LEASE_ENDED" || refusal.Code == "UNAUTHORIZED") {
+	if errors.As(err, &refusal) && isLeaseEnded(refusal) {
 		return reconciler.Inbox{IsLeaseEnded: true}, nil
 	}
 	if err != nil {

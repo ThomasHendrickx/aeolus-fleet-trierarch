@@ -97,8 +97,14 @@ call_fleet_once() {
   fi
 }
 
+# LEASE_ENDED, or UNKNOWN_CREW_TOKEN: a crew token the fleet never knew, as after
+# a restore of the fleet, which holds no lease for it just the same.
 lease_ended() {
-  [ "$status" = 401 ] && [ "$(aeolus_json_string "$body" code)" = LEASE_ENDED ]
+  [ "$status" = 401 ] && is_lease_ended_code "$(aeolus_json_string "$body" code)"
+}
+
+is_lease_ended_code() {
+  [ "$1" = LEASE_ENDED ] || [ "$1" = UNKNOWN_CREW_TOKEN ]
 }
 
 # A refusal, as the fleet states it: LEASE_ENDED exits 3, any other 1.
@@ -107,7 +113,7 @@ lease_ended() {
 refused() {
   local call="$1" token="${2:-}" code
   code="$(aeolus_json_string "$body" code)"
-  if [ "$code" = LEASE_ENDED ]; then
+  if is_lease_ended_code "$code"; then
     if [ -n "$token" ] && [ "$(aeolus_identity_token "$identity")" = "$token" ]; then
       "$(dirname "$0")/aeolus-identity.sh" delete >/dev/null
       echo "aeolus: LEASE_ENDED: the operator released the ship; this session no longer crews it, and the plugin forgot it"

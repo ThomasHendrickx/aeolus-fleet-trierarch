@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { ENTRY_STATES, type EntryState } from '../core/entry.js';
 
 import type { CrewFile, RunningFile } from '../adapters/files.js';
-import { FleetRefusal } from '../adapters/rest-fleet.js';
+import { isLeaseEnded } from '../adapters/rest-fleet.js';
 import type { Service, ServiceStatus } from '../adapters/service.js';
 import type { KeptWorktree, PassFailure } from '../core/entry.js';
 import type { SessionRuntime, StatePort } from '../core/ports.js';
@@ -46,7 +46,7 @@ export function leaseFrom(whoami: () => Promise<unknown>): () => Promise<Lease> 
       await whoami();
       return 'valid';
     } catch (error) {
-      if (error instanceof FleetRefusal && (error.code === 'LEASE_ENDED' || error.code === 'UNAUTHORIZED')) {
+      if (isLeaseEnded(error)) {
         return 'ended';
       }
       return 'unreachable';

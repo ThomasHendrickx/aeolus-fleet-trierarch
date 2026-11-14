@@ -269,7 +269,7 @@ func TestASessionsInboxIsAskedWithItsCrewToken(t *testing.T) {
 }
 
 func TestAnInboxWhoseLeaseEndedSaysSo(t *testing.T) {
-	for _, code := range []string{"LEASE_ENDED", "UNAUTHORIZED"} {
+	for _, code := range []string{"LEASE_ENDED", "UNAUTHORIZED", "UNKNOWN_CREW_TOKEN"} {
 		t.Run(code, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusUnauthorized)
