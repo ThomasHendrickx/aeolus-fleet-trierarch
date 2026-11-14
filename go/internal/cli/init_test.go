@@ -455,3 +455,37 @@ func TestInitFailsWhenTheServiceRunsAnotherVersion(t *testing.T) {
 		t.Errorf("Run() error = %v, want a version mismatch", err)
 	}
 }
+
+func TestInitWaitsForOneProcessForTenSeconds(t *testing.T) {
+	machine := newMachine(t)
+	waits := 0
+	machine.init.Sleep = func() { waits++ }
+	if _, err := machine.init.Run(setupLine()); err != nil {
+		t.Fatal(err)
+	}
+	if waits != 10 {
+		t.Errorf("waited %d seconds, want 10", waits)
+	}
+}
+
+func TestInitFailsWhenTheServiceCrashesDuringTheWait(t *testing.T) {
+	machine := newMachine(t)
+	machine.init.Sleep = func() { machine.service.running = false }
+	_, err := machine.init.Run(setupLine())
+	if err == nil {
+		t.Error("Run() succeeded after the service crashed")
+	}
+}
+
+func TestInitFailsWhenTheLeaseEndsDuringTheWait(t *testing.T) {
+	machine := newMachine(t)
+	machine.init.Sleep = func() {
+		for token := range machine.fleet.held {
+			machine.fleet.held[token] = false
+		}
+	}
+	_, err := machine.init.Run(setupLine())
+	if err == nil || !strings.Contains(err.Error(), "lease") {
+		t.Errorf("Run() error = %v, want an invalid lease", err)
+	}
+}
