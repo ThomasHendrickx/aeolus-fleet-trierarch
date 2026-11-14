@@ -40,16 +40,40 @@ func TestARealClaudeCodeSessionRuleNamesTheExactPathAndEndsWithTheProcess(t *tes
 	realSessionRule(t, "Write", 2)
 }
 func TestARealClaudeCodeBashRedirectionAsksAgainDespiteTheSessionRule(t *testing.T) {
-	realSessionRule(t, "Bash", 3)
+	realBashRule(t, 3, "echo test > a.txt", "echo other > b.txt", "b.txt")
+}
+
+// Claude Code reads a raw * in a Bash rule as a wildcard and asks again for
+// every command holding one, so each of the three commands asks.
+func TestARealClaudeCodeBashSessionRuleWithAStarAllowsNoOtherCommand(t *testing.T) {
+	realBashRule(t, 3, "touch x*y.txt", "touch xOTHERy.txt", "xOTHERy.txt")
+}
+
+// Claude Code reads \\* in a rule as a literal backslash and then a wildcard.
+func TestARealClaudeCodeBashSessionRuleWithABackslashBeforeAStarAllowsNoOtherCommand(t *testing.T) {
+	realBashRule(t, 3, `touch x\*y.txt`, `touch x\OTHERy.txt`, "xOTHERy.txt")
+}
+
+func realBashRule(t *testing.T, wantAsks int32, command, otherCommand, otherName string) {
+	t.Helper()
+	realRule(t, "Bash", wantAsks, map[string]any{"command": command}, map[string]any{"command": otherCommand}, otherName)
 }
 
 func realSessionRule(t *testing.T, tool string, wantAsks int32, names ...string) {
+	t.Helper()
 	name := "a.txt"
 	otherName := "b.txt"
 	if len(names) > 0 {
 		name = names[0]
 		otherName = strings.Replace(name, "?", "Q", 1)
 	}
+	realRule(t, tool, wantAsks, map[string]any{"file_path": name}, map[string]any{"file_path": otherName}, otherName)
+}
+
+// realRule runs the first action twice and the other action once, in a session
+// and again after a restart. A file_path is relative to the throwaway folder.
+func realRule(t *testing.T, tool string, wantAsks int32, first, other map[string]any, otherName string) {
+	t.Helper()
 	if os.Getenv("AEOLUS_TEST_CLAUDE_CODE") != "1" {
 		t.Skip("runs the installed Claude Code: AEOLUS_TEST_CLAUDE_CODE=1")
 	}
@@ -76,16 +100,17 @@ func realSessionRule(t *testing.T, tool string, wantAsks int32, names ...string)
 			ruleModelReply(w, call, "", nil)
 			return
 		}
-		path := filepath.Join(root, name)
+		action := first
 		if call == 3 {
-			path = filepath.Join(root, otherName)
+			action = other
 		}
-		input := map[string]any{"file_path": path, "content": fmt.Sprint(call)}
-		if tool == "Bash" {
-			input = map[string]any{"command": "echo test > a.txt"}
-			if call == 3 {
-				input["command"] = "echo other > b.txt"
-			}
+		input := map[string]any{}
+		for key, value := range action {
+			input[key] = value
+		}
+		if path, ok := input["file_path"].(string); ok {
+			input["file_path"] = filepath.Join(root, path)
+			input["content"] = fmt.Sprint(call)
 		}
 		ruleModelReply(w, call, tool, input)
 	}))
