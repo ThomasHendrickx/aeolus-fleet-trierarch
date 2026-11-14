@@ -68,9 +68,9 @@ expected=$(awk -v name="$asset" '$2 == name { print $1 }' "$work/SHA256SUMS" | h
 
 if command -v gh > /dev/null 2>&1; then
   gh attestation verify "$work/$asset" $verify_args > /dev/null || fail "the attestation of $asset does not hold: not installed"
-  checked="its checksum and its attestation"
+  checked="attested"
 else
-  checked="its checksum only"
+  checked="checksum"
 fi
 
 mkdir -p "$bin_dir"
@@ -78,11 +78,6 @@ chmod +x "$work/$asset"
 # Moved from the same folder, so the file is replaced whole.
 cp "$work/$asset" "$bin_dir/.aeolus-trierarch.$$"
 mv -f "$bin_dir/.aeolus-trierarch.$$" "$bin_dir/aeolus-trierarch"
-echo "Installed $bin_dir/aeolus-trierarch, having checked $checked"
-if [ "$checked" = "its checksum only" ]; then
-  echo "gh is not installed, so the attestation was not checked. To check it by hand (https://cli.github.com):" >&2
-  echo "  gh attestation verify $bin_dir/aeolus-trierarch $verify_args" >&2
-fi
 
 # A marked block puts the folder on PATH in every new login shell: in the login
 # file of the person's $SHELL and in ~/.profile. A folder PATH holds already
@@ -106,7 +101,7 @@ case ":$PATH:" in
         echo "case \":\$PATH:\" in *\":$folder:\"*) ;; *) export PATH=\"$folder:\$PATH\" ;; esac"
         echo '# <<< aeolus-trierarch <<<'
       } >> "$login_file"
-      echo "Added $bin_dir to PATH in $login_file: open a new terminal to use aeolus-trierarch there"
+
     }
     case ${SHELL:-} in
       */zsh) add_block "$HOME/.zprofile" ;;
@@ -116,4 +111,4 @@ case ":$PATH:" in
     ;;
 esac
 
-"$bin_dir/aeolus-trierarch" init "$@"
+AEOLUS_TRIERARCH_INSTALL_VERIFICATION=$checked "$bin_dir/aeolus-trierarch" init "$@"

@@ -525,7 +525,7 @@ func TestInitSaysTheServiceStayedUpAfterTheChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := strings.Join(report.Said, "\n")
-	if !strings.Contains(text, "10 seconds") || strings.Contains(text, "The trierarch runs, and starts again") {
+	if !strings.Contains(text, "10 s") || strings.Contains(text, "The trierarch runs, and starts again") {
 		t.Errorf("report = %q, want the checked service", text)
 	}
 }
@@ -677,5 +677,70 @@ func TestInitReportsEachPartAndChecksAsJSON(t *testing.T) {
 		if check["part"] == nil || check["name"] == nil || check["status"] == nil || check["detail"] == nil {
 			t.Errorf("incomplete check: %v", check)
 		}
+	}
+}
+
+func TestInitReportsDirectInstallationAndPath(t *testing.T) {
+	for _, tc := range []struct{ name, path, status, fix string }{
+		{"on PATH", "/opt/bin:/usr/bin", "ok", ""},
+		{"not on PATH", "/usr/bin", "warning", "add /opt/bin to PATH, then open a new terminal"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := newMachine(t)
+			machine.init.Program = "/opt/bin/aeolus-trierarch"
+			machine.init.Path = tc.path
+			report, err := machine.init.Run(setupLine())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := report.Checks[0]; got.Detail != "/opt/bin/aeolus-trierarch" || got.Status != "ok" {
+				t.Errorf("installed = %+v", got)
+			}
+			if got := report.Checks[1]; got.Status != tc.status || got.Fix != tc.fix {
+				t.Errorf("PATH = %+v, want %s %q", got, tc.status, tc.fix)
+			}
+		})
+	}
+}
+
+func TestInitReportsAServiceFailureWithItsFix(t *testing.T) {
+	machine := newMachine(t)
+	machine.service.write = func() {}
+	machine.init.LastLog = func() string { return "service failed" }
+	report, err := machine.init.Run(setupLine())
+	if err == nil {
+		t.Fatal("wanted service failure")
+	}
+	var found bool
+	for _, check := range report.Checks {
+		if check.Part == "service" {
+			found = true
+			if check.Status != "failed" || !strings.Contains(check.Detail, "service failed") || check.Fix == "" {
+				t.Errorf("service check = %+v", check)
+			}
+		}
+	}
+	if !found || !strings.Contains(strings.Join(report.Said, "\n"), "Not ready: fix the line marked ✗") {
+		t.Errorf("report = %+v", report)
+	}
+}
+
+func TestInitReportsInstallerVerificationAndPathBlock(t *testing.T) {
+	machine := newMachine(t)
+	machine.init.Program = filepath.Join(machine.init.Paths.Home, "bin", "aeolus-trierarch")
+	machine.init.HomeDirectory = t.TempDir()
+	machine.init.InstallVerification = "attested"
+	if err := os.WriteFile(filepath.Join(machine.init.HomeDirectory, ".profile"), []byte("# >>> aeolus-trierarch >>>\nexport PATH=\""+filepath.Dir(machine.init.Program)+":$PATH\"\n# <<< aeolus-trierarch <<<\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := machine.init.Run(setupLine())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(report.Checks[0].Detail, "checksum and attestation checked") {
+		t.Errorf("installed = %+v", report.Checks[0])
+	}
+	if got := report.Checks[1]; got.Status != "ok" || !strings.Contains(got.Detail, ".profile") || !strings.Contains(got.Detail, "new") {
+		t.Errorf("PATH = %+v", got)
 	}
 }

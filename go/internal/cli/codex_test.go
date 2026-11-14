@@ -101,7 +101,7 @@ func TestInitGoesOnAndSaysSoWhenCodexCannotBeSetUp(t *testing.T) {
 		t.Fatalf("init = %v, want it to go on", err)
 	}
 	want := "Codex is not set up: codex app-server ended before it answered initialize. A Codex session waits on its trust questions until you run aeolus-trierarch init again."
-	if !slices.Contains(report.Said, want) || len(report.CodexTrusted) != 0 {
+	if !strings.Contains(strings.Join(report.Said, "\n"), want) || len(report.CodexTrusted) != 0 {
 		t.Fatalf("said %q, Codex trusted %q, want %q said", report.Said, report.CodexTrusted, want)
 	}
 }

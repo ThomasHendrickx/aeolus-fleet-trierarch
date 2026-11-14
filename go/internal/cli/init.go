@@ -60,6 +60,16 @@ type Report struct {
 	// Service is installed, restarted or unchanged.
 	Service string   `json:"service"`
 	Said    []string `json:"said"`
+	Checks  []Check  `json:"checks"`
+}
+
+// Check is one line of the closing report.
+type Check struct {
+	Part   string `json:"part"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Detail string `json:"detail"`
+	Fix    string `json:"fix,omitempty"`
 }
 
 // ClaudeCode answers Claude Code's one-time questions ahead.
@@ -92,6 +102,9 @@ type Service interface {
 // was released. Options left out are asked on the controlling terminal.
 type Init struct {
 	HomeDirectory         string
+	Program               string
+	Path                  string
+	InstallVerification   string
 	Paths                 paths.Paths
 	Platform              string
 	IsSsMissing           bool
@@ -417,7 +430,9 @@ func (i Init) Run(flags Flags) (Report, error) {
 	switch {
 	case !status.IsInstalled:
 		if err := i.Service.Install(); err != nil {
-			return report, i.serviceError(err)
+			err = i.serviceError(err)
+			i.closingReport(&report, configuration, detected, 0, err)
+			return report, err
 		}
 		report.Service = "installed"
 	case report.Configuration != "kept" || isPluginShipNew || isRegisteredAgain || isAnotherVersion || (!status.IsRunning && !status.IsRestarting):
@@ -425,7 +440,9 @@ func (i Init) Run(flags Flags) (Report, error) {
 			return Report{}, err
 		}
 		if err := i.Service.Restart(); err != nil {
-			return report, i.serviceError(err)
+			err = i.serviceError(err)
+			i.closingReport(&report, configuration, detected, 0, err)
+			return report, err
 		}
 		report.Service = "restarted"
 	default:
@@ -434,9 +451,12 @@ func (i Init) Run(flags Flags) (Report, error) {
 		}
 	}
 	if err := i.waitForService(); err != nil {
-		return report, i.serviceError(err)
+		err = i.serviceError(err)
+		i.closingReport(&report, configuration, detected, 0, err)
+		return report, err
 	}
-	say(fmt.Sprintf("The service stayed up for 10 seconds and starts again at every login (%s). See it with aeolus-trierarch status.", status.File))
+	status, _ = i.Service.Status()
+	i.closingReport(&report, configuration, detected, status.PID, nil)
 	return report, nil
 }
 

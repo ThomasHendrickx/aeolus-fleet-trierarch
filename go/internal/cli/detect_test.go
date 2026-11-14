@@ -63,7 +63,7 @@ func TestInitSaysWhatEachHarnessOffersAsDetectedOncePerHarnessVersion(t *testing
 
 	output, code := Main(setupWords(), machine)
 
-	if want := "claude-code 2.1.306: model claude-sonnet-5, claude-opus-5; models confirmed " + detectedAt; code != 0 || !strings.Contains(output, want) {
+	if want := "Claude Code   2.1.306, signed in"; code != 0 || !strings.Contains(output, want) {
 		t.Errorf("init said %q, %d, want a line %q", output, code, want)
 	}
 	if !slices.Equal(found.asked, []string{"start claude-code"}) {

@@ -245,6 +245,9 @@ func Main(args []string, machine Machine) (string, int) {
 		"init": func() (answer, error) {
 			report, err := Init{
 				HomeDirectory:         machine.HomeDirectory,
+				Program:               machine.Program,
+				Path:                  variable(machine.Environ, "PATH"),
+				InstallVerification:   variable(machine.Environ, "AEOLUS_TRIERARCH_INSTALL_VERIFICATION"),
 				Paths:                 at,
 				Platform:              machine.Platform,
 				IsSsMissing:           machine.IsSsMissing(),
@@ -291,6 +294,9 @@ func Main(args []string, machine Machine) (string, int) {
 				CloneInto:        command.values["--clone-into"],
 				IsNoRepositories: command.switches["--no-repositories"],
 			})
+			if err != nil && len(report.Checks) > 0 {
+				return answer{data: report, text: strings.Join(report.Said, "\n"), code: 1}, nil
+			}
 			return answer{data: report, text: strings.Join(report.Said, "\n")}, err
 		},
 		"status": func() (answer, error) {
