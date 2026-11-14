@@ -452,6 +452,9 @@ func (i Init) waitForService() error {
 	if !ok || running.PID != pid || running.Version != Version {
 		return fmt.Errorf("service version does not match %s", Version)
 	}
+	if !running.FirstReportAccepted {
+		return errors.New("the first report was not accepted")
+	}
 	kept, err := crew.Read(i.Paths.CrewToken)
 	if err != nil {
 		return err
@@ -539,8 +542,9 @@ func hasSaidItsVersion(service interface {
 
 // Running is what the running trierarch says of itself in running.json: its pid and its version, as it started.
 type Running struct {
-	PID     int    `json:"pid"`
-	Version string `json:"version"`
+	PID                 int    `json:"pid"`
+	Version             string `json:"version"`
+	FirstReportAccepted bool   `json:"firstReportAccepted,omitempty"`
 }
 
 // RunningPID is the pid of the trierarch running.json at the path names, 0 when it names none.
@@ -559,4 +563,21 @@ func readRunning(path string) (Running, bool) {
 		return Running{}, false
 	}
 	return running, true
+}
+
+// ReportAccepted records that this process's first report reached the fleet.
+func ReportAccepted(path string, pid int) error {
+	running, ok := readRunning(path)
+	if !ok || running.PID != pid {
+		return errors.New("running file does not name this process")
+	}
+	if running.FirstReportAccepted {
+		return nil
+	}
+	running.FirstReportAccepted = true
+	text, err := json.Marshal(running)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(text, '\n'), 0o644)
 }
