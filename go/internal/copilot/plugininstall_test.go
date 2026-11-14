@@ -9,18 +9,16 @@ import (
 	"testing"
 )
 
-// aCopilot is a `copilot` that keeps each command line it is given, lists the marketplaces named in its marketplaces file, and installs the version named in its installs file. A file `fails` makes every command fail.
+// aCopilot is a `copilot` that keeps each command line it is given and lists the marketplaces named in its marketplaces file. A file `fails` makes every command fail.
 type aCopilot struct {
 	folder string
 }
 
-func aCopilotWith(t *testing.T, marketplaces string, installs string) aCopilot {
+func aCopilotWith(t *testing.T, marketplaces string) aCopilot {
 	t.Helper()
 	folder := t.TempDir()
-	for name, text := range map[string]string{"marketplaces": marketplaces, "installs": installs} {
-		if err := os.WriteFile(filepath.Join(folder, name), []byte(text), 0o644); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.WriteFile(filepath.Join(folder, "marketplaces"), []byte(marketplaces), 0o644); err != nil {
+		t.Fatal(err)
 	}
 	script := `#!/bin/sh
 echo "$*" >> '` + folder + `/calls.txt'
@@ -44,17 +42,11 @@ func (c aCopilot) calls(t *testing.T) []string {
 }
 
 func (c aCopilot) install(tag string) error {
-	return PluginInstall{
-		Program: filepath.Join(c.folder, "copilot"),
-		Version: func() string {
-			text, _ := os.ReadFile(filepath.Join(c.folder, "installs"))
-			return strings.TrimSpace(string(text))
-		},
-	}.Install(tag)
+	return PluginInstall{Program: filepath.Join(c.folder, "copilot")}.Install(tag)
 }
 
-func TestInstallAddsTheMarketplaceItLacksBeforeInstallingThePlugin(t *testing.T) {
-	copilot := aCopilotWith(t, "Registered marketplaces:\n  github (GitHub)\n", "0.41.0")
+func TestInstallAddsTheMarketplaceItLacksAtTheTagBeforeInstallingThePlugin(t *testing.T) {
+	copilot := aCopilotWith(t, "Registered marketplaces:\n  github (GitHub)\n")
 
 	if err := copilot.install("v0.41.0"); err != nil {
 		t.Fatal(err)
@@ -62,7 +54,7 @@ func TestInstallAddsTheMarketplaceItLacksBeforeInstallingThePlugin(t *testing.T)
 
 	want := []string{
 		"plugin marketplace list",
-		"plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch",
+		"plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch#v0.41.0",
 		"plugin install aeolus-fleet@aeolus-fleet",
 	}
 	if got := copilot.calls(t); !reflect.DeepEqual(got, want) {
@@ -70,36 +62,27 @@ func TestInstallAddsTheMarketplaceItLacksBeforeInstallingThePlugin(t *testing.T)
 	}
 }
 
-func TestInstallLeavesTheMarketplaceItHas(t *testing.T) {
-	copilot := aCopilotWith(t, "Registered marketplaces:\n  aeolus-fleet (ThomasHendrickx/aeolus-fleet-trierarch)\n", "0.41.0")
+// Copilot lists no marketplace's ref and refuses to add a marketplace it has, so the one it has is removed, with the plugin it installed from it, and added again at the tag.
+func TestInstallAddsTheMarketplaceItHasAgainAtTheTag(t *testing.T) {
+	copilot := aCopilotWith(t, "Registered marketplaces:\n  aeolus-fleet (ThomasHendrickx/aeolus-fleet-trierarch)\n")
 
 	if err := copilot.install("v0.41.0"); err != nil {
 		t.Fatal(err)
 	}
 
-	want := []string{"plugin marketplace list", "plugin install aeolus-fleet@aeolus-fleet"}
+	want := []string{
+		"plugin marketplace list",
+		"plugin marketplace remove --force aeolus-fleet",
+		"plugin marketplace add ThomasHendrickx/aeolus-fleet-trierarch#v0.41.0",
+		"plugin install aeolus-fleet@aeolus-fleet",
+	}
 	if got := copilot.calls(t); !reflect.DeepEqual(got, want) {
 		t.Errorf("ran %q, want %q", got, want)
 	}
 }
 
-func TestInstallStopsNamingCopilotAndTheMismatchWhenThePluginIsNotAtTheTag(t *testing.T) {
-	copilot := aCopilotWith(t, "aeolus-fleet\n", "0.40.0")
-
-	err := copilot.install("v0.41.0")
-
-	if err == nil {
-		t.Fatal("installed a plugin at 0.40.0 for the tag v0.41.0 without an error")
-	}
-	for _, want := range []string{"Copilot", "0.40.0", "v0.41.0"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q lacks %q", err, want)
-		}
-	}
-}
-
 func TestInstallKeepsWhatCopilotSaidWhenACommandFails(t *testing.T) {
-	copilot := aCopilotWith(t, "", "")
+	copilot := aCopilotWith(t, "")
 	if err := os.WriteFile(filepath.Join(copilot.folder, "fails"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
