@@ -83,6 +83,7 @@ func (s *aServiceManager) Rewrite() error {
 
 func (s *aServiceManager) Restart() error {
 	s.calls = append(s.calls, "restart")
+	s.running = true
 	s.write()
 	return nil
 }
@@ -569,5 +570,19 @@ func TestInitStopsAfterThirtySecondsOfRestarts(t *testing.T) {
 	_, err := machine.init.Run(setupLine())
 	if waits != 30 || err == nil || !strings.Contains(err.Error(), "restarted 6") || !strings.Contains(err.Error(), "plugin missing") {
 		t.Errorf("Run() waited %d seconds, error %v; want six restarts in 30 seconds and the last log", waits, err)
+	}
+}
+
+func TestInitStartsTheInstalledServiceWhenItIsStopped(t *testing.T) {
+	machine := newMachine(t)
+	if _, err := machine.init.Run(setupLine()); err != nil {
+		t.Fatal(err)
+	}
+	machine.service.running = false
+	if _, err := machine.init.Run(setupLine()); err != nil {
+		t.Fatalf("init on a stopped service: %v", err)
+	}
+	if !machine.service.running {
+		t.Error("the service is not running")
 	}
 }
