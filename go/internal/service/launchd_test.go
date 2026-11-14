@@ -364,3 +364,39 @@ func TestTheAgentReportsRestartsAcrossItsProcesses(t *testing.T) {
 		t.Errorf("Status() = %+v, want six restarts and restarting", status)
 	}
 }
+
+func TestARestartTheAgentWasToldToMakeIsNoRestartLoop(t *testing.T) {
+	for name, drive := range map[string]func(Launchd) error{
+		"Start":   func(agent Launchd) error { return agent.Start() },
+		"Restart": func(agent Launchd) error { return agent.Restart() },
+		"Install": func(agent Launchd) error { return agent.Install() },
+	} {
+		t.Run(name, func(t *testing.T) {
+			launchctl := &aLaunchctl{}
+			agent := installed(t, launchctl)
+			launchctl.answers["launchctl bootstrap gui/501 "+plistOf(agent)] = ""
+			launchctl.answers["launchctl kickstart "+target] = ""
+			launchctl.answers["launchctl print "+target] = target + " = {\n\tstate = running\n\tpid = 41\n\truns = 7\n}"
+
+			if err := drive(agent); err != nil {
+				t.Fatal(err)
+			}
+			status, err := agent.Status()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status.Restarts != 0 || status.IsRestarting {
+				t.Errorf("Status() = %+v, want no restarts after a deliberate one", status)
+			}
+
+			launchctl.answers["launchctl print "+target] = target + " = {\n\tstate = waiting\n\truns = 9\n}"
+			status, err = agent.Status()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status.Restarts != 2 || !status.IsRestarting {
+				t.Errorf("Status() = %+v, want the two exits since counted", status)
+			}
+		})
+	}
+}
