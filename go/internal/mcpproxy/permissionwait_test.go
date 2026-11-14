@@ -2,6 +2,7 @@ package mcpproxy
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,9 +20,9 @@ func TestPermissionWaitStreamsProgressPastASilentCallsLimitAndDeniesAtThirtyMinu
 		sessions := t.TempDir()
 		aSession(t, sessions, scout, os.Getpid(), Access{Token: "permission-token", Servers: []string{permissions.Server}})
 		calls := NewPermissionCalls()
-		proxy := Proxy{Sessions: sessions, PermissionCalls: calls, PermissionWait: func(ctx context.Context, ship, token, title string) permissions.Decision {
-			if title != "Run `npm install`" {
-				t.Errorf("title = %q", title)
+		proxy := Proxy{Sessions: sessions, PermissionCalls: calls, PermissionWait: func(ctx context.Context, ship, token string, request permissions.Request) permissions.Decision {
+			if request.Title != "Run `npm install`" {
+				t.Errorf("title = %q", request.Title)
 			}
 			return permissions.Wait(ctx, permissions.SystemClock{})
 		}}
@@ -72,7 +73,7 @@ func TestPermissionWaitEndsOnCancelOrConnectionCloseAndLeavesNoWait(t *testing.T
 				aSession(t, sessions, scout, os.Getpid(), Access{Token: "permission-token", Servers: []string{permissions.Server}})
 				calls := NewPermissionCalls()
 				ended := make(chan struct{})
-				proxy := Proxy{Sessions: sessions, PermissionCalls: calls, PermissionWait: func(ctx context.Context, _, _, _ string) permissions.Decision {
+				proxy := Proxy{Sessions: sessions, PermissionCalls: calls, PermissionWait: func(ctx context.Context, _, _ string, _ permissions.Request) permissions.Decision {
 					defer close(ended)
 					return permissions.Wait(ctx, permissions.SystemClock{})
 				}}
@@ -117,3 +118,20 @@ func (w *waitRecorder) Write(text []byte) (int, error) {
 	return w.ResponseRecorder.Write(text)
 }
 func (w *waitRecorder) body() string { w.mu.Lock(); defer w.mu.Unlock(); return w.Body.String() }
+
+func TestPermissionCallCarriesTheWholeToolInputToThePrivateChannel(t *testing.T) {
+	sessions := t.TempDir()
+	aSession(t, sessions, scout, os.Getpid(), Access{Token: "permission-token", Servers: []string{permissions.Server}})
+	var got permissions.Request
+	proxy := Proxy{Sessions: sessions, PermissionCalls: NewPermissionCalls(), PermissionWait: func(_ context.Context, _, _ string, request permissions.Request) permissions.Decision {
+		got = request
+		return permissions.Decision{Behavior: "deny", Message: "could not ask"}
+	}}
+	request := httptest.NewRequest(http.MethodPost, PathOf(scout, permissions.Server), strings.NewReader(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"ask","arguments":{"tool_name":"Edit","input":{"file_path":"src/a.ts","old_string":"before","new_string":"after"}}}}`))
+	request.Header.Set("Authorization", "Bearer permission-token")
+	proxy.ServeHTTP(httptest.NewRecorder(), request)
+	if got.Tool != "Edit" || got.Title != "Edit `src/a.ts`" || string(got.Input) != `{"file_path":"src/a.ts","old_string":"before","new_string":"after"}` {
+		text, _ := json.Marshal(got)
+		t.Fatalf("request = %s", text)
+	}
+}

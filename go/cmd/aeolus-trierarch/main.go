@@ -644,7 +644,21 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	opened = shipSockets(at, kept.FleetURL, running)
 	load := &machineload.Reader{Source: machineload.System{WorktreeRoot: root}, Now: time.Now, Log: logLine}
 	saved := state.File{Path: at.State}
-	permissionChannel, err := permissions.Listen(filepath.Join(at.Proxy, permissions.Socket), func(ship, token string) bool { return mcpproxy.AuthorizesPermission(at.Sessions, ship, token) }, permissions.Fleet{URL: kept.FleetURL, Log: logLine, TokenOf: func(ship string) string {
+	permissionChannel, err := permissions.Listen(filepath.Join(at.Proxy, permissions.Socket), func(ship, token string) bool { return mcpproxy.AuthorizesPermission(at.Sessions, ship, token) }, permissions.Fleet{URL: kept.FleetURL, Log: logLine, Questions: &permissions.PluginQuestions{Session: func(ship string) (permissions.QuestionSession, error) {
+		current, err := saved.Load()
+		if err != nil {
+			return permissions.QuestionSession{}, err
+		}
+		entry, ok := current.Entries[ship]
+		if !ok {
+			return permissions.QuestionSession{}, errors.New("permission session is no longer crewed")
+		}
+		harness, ok := harnesses[entry.Harness].(claudecode.Harness)
+		if !ok {
+			return permissions.QuestionSession{}, errors.New("permission session is not Claude Code")
+		}
+		return harness.PermissionSession(entry), nil
+	}}, TokenOf: func(ship string) string {
 		state, err := saved.Load()
 		if err != nil {
 			return ""
@@ -661,6 +675,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		return nil, err
 	}
 	pass := runpass.Pass{
+		EndPermissions:    func(ship string) { permissionChannel.End(ship, logLine) },
 		Fleet:             client,
 		Sessions:          running,
 		Harnesses:         harnesses,

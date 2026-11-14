@@ -13,11 +13,16 @@ import (
 // Await keeps the private channel open until the limit or cancellation. Its
 // transport has no whole-call timeout; closing the public stream cancels it.
 func (c Client) Await(ctx context.Context, ship, title string) Decision {
+	return c.Ask(ctx, ship, Request{Title: title})
+}
+
+// Ask carries the complete action over the private channel.
+func (c Client) Ask(ctx context.Context, ship string, input Request) Decision {
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", c.Socket)
 	}}
 	defer transport.CloseIdleConnections()
-	text, _ := json.Marshal(map[string]string{"title": title})
+	text, _ := json.Marshal(input)
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://trierarch/"+ship, bytes.NewReader(text))
 	failure := Decision{Behavior: "deny", Message: "could not read this ship's owner: nobody is asked"}
 	if err != nil {
@@ -41,11 +46,16 @@ func (c Client) Await(ctx context.Context, ship, title string) Decision {
 
 // Await runs the wait inside the trierarch, where the report's crew token stays.
 func (f Fleet) Await(ctx context.Context, ship, title string) Decision {
+	return f.Ask(ctx, ship, Request{Title: title})
+}
+
+// Ask runs the plugin question and wait inside the trierarch.
+func (f Fleet) Ask(ctx context.Context, ship string, request Request) Decision {
 	clock := f.Clock
 	if clock == nil {
 		clock = SystemClock{}
 	}
-	return (Service{Owners: f, Reports: f, Clock: clock, Log: f.Log}).Await(ctx, ship, title)
+	return (Service{Owners: f, Questions: f.Questions, Reports: f, Clock: clock, Log: f.Log}).Ask(ctx, ship, request)
 }
 
 func (f Fleet) call(ctx context.Context, ship, method, path string, body any, output any) error {

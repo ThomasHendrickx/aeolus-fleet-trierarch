@@ -51,29 +51,6 @@ func permissionKey(ship, token string, id json.RawMessage) string {
 	return ship + "/" + token + "/" + string(id)
 }
 
-func permissionTitle(arguments json.RawMessage) string {
-	var input struct {
-		Tool  string `json:"tool_name"`
-		Input struct {
-			Command string `json:"command"`
-			Path    string `json:"file_path"`
-		} `json:"input"`
-	}
-	if json.Unmarshal(arguments, &input) != nil {
-		return "Permission"
-	}
-	if input.Tool == "Bash" && input.Input.Command != "" {
-		return "Run `" + input.Input.Command + "`"
-	}
-	if input.Input.Path != "" {
-		return "Edit `" + input.Input.Path + "`"
-	}
-	if input.Tool != "" {
-		return input.Tool
-	}
-	return "Permission"
-}
-
 func streamMessage(w http.ResponseWriter, value any) error {
 	text, err := json.Marshal(value)
 	if err != nil {
@@ -101,7 +78,13 @@ func (p Proxy) waitPermission(w http.ResponseWriter, r *http.Request, ship, toke
 	}
 	result := make(chan permissions.Decision, 1)
 	done := make(chan struct{})
-	go func() { defer close(done); result <- p.PermissionWait(ctx, ship, token, permissionTitle(arguments)) }()
+	go func() {
+		defer close(done)
+		var request permissions.Request
+		_ = json.Unmarshal(arguments, &request)
+		request.Title = request.ActionTitle()
+		result <- p.PermissionWait(ctx, ship, token, request)
+	}()
 	// Cancellation propagates through the private channel before this call ends.
 	defer func() { cancel(); <-done }()
 	clock := p.PermissionClock
