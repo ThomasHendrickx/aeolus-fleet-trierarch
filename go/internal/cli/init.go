@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net/url"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -28,10 +29,12 @@ type Flags struct {
 	// PluginShipID is the trierarch plugin's ship: the one ship the trusted repositories are taken from.
 	PluginShipID string
 	IsYes        bool
-	Harnesses    []string
-	Unattended   []string
-	MaxShips     string
-	MaxRunning   string
+	// Harnesses is nil when the wizard must ask, empty when none were picked.
+	Harnesses []string
+	// Unattended is nil when unanswered; an empty list explicitly keeps permission questions.
+	Unattended []string
+	MaxShips   string
+	MaxRunning string
 }
 
 // Report is what init did, for the operator and for --json.
@@ -74,11 +77,11 @@ type Service interface {
 // Init is `aeolus-trierarch init`, the setup of a machine from the trierarch
 // plugin's setup line (docs/trierarch.md, "A machine joins"): it registers the
 // trierarch's own ship and keeps its crew token, never the secret; writes the
-// configuration, offering Codex too where it is installed; makes Claude Code
-// and Codex ready to run unattended; and installs the
+// configuration with the picked harnesses; makes Claude Code
+// and Codex ready to run; and installs the
 // service. Run again with the same setup line, it registers nothing and goes
 // on with a setup that did not finish, registering its ship again only once it
-// was released. It asks nothing: every default is taken.
+// was released. Options left out are asked on the controlling terminal.
 type Init struct {
 	Paths                 paths.Paths
 	Platform              string
@@ -89,13 +92,13 @@ type Init struct {
 	IsCodexInstalled      bool
 	IsCodexSignedIn       bool
 	IsCopilotInstalled    bool
-	IsCopilotSignedIn     bool
 	IsCursorInstalled     bool
-	OpenTerminal          func() (io.ReadWriteCloser, error)
-	Codex                 Codex
-	Service               Service
-	Register              func(fleetURL string, shipID string, secret string) (string, error)
-	IsLeaseHeld           func(fleetURL string, crewToken string) (bool, error)
+	// OpenTerminal reads the controlling terminal, independently of stdin under curl | sh.
+	OpenTerminal func() (io.ReadWriteCloser, error)
+	Codex        Codex
+	Service      Service
+	Register     func(fleetURL string, shipID string, secret string) (string, error)
+	IsLeaseHeld  func(fleetURL string, crewToken string) (bool, error)
 	// Sleep waits between reads of running.json; a test passes one that does not wait.
 	Sleep func()
 	// Detect detects what the harnesses given offer, as by says, and keeps it in detected.json (#365).
@@ -180,7 +183,17 @@ func (i Init) Run(flags Flags) (Report, error) {
 	if err := i.checkMachine(); err != nil {
 		return Report{}, err
 	}
-	selection, err := i.selectHarnesses(flags)
+	current := config.Initial()
+	if _, err := os.Stat(i.Paths.Config); err == nil {
+		loaded, err := config.Load(i.Paths.Config)
+		if err != nil {
+			return Report{}, err
+		}
+		current = loaded
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Report{}, err
+	}
+	selection, err := i.selectHarnesses(flags, current)
 	if err != nil {
 		return Report{}, err
 	}
@@ -192,6 +205,9 @@ func (i Init) Run(flags Flags) (Report, error) {
 	}
 	report := Report{Trusted: []string{}, CodexTrusted: []string{}, CodexHooksTrusted: []string{}, Said: []string{}}
 	say := func(line string) { report.Said = append(report.Said, line) }
+	if _, ok := selection.harnesses["copilot"]; ok {
+		say("! Copilot: sign-in cannot be checked; run copilot login if not done. Copilot always runs without asking, headless.")
+	}
 
 	// The ship: registered once per machine, never again.
 	kept, keptErr := crew.Read(i.Paths.CrewToken)
@@ -278,7 +294,7 @@ func (i Init) Run(flags Flags) (Report, error) {
 		return Report{}, err
 	}
 
-	// The configuration: written when there is none, else kept.
+	// Keep repositories and harness options; save the answers that changed.
 	var configuration config.Configuration
 	if _, err := os.Stat(i.Paths.Config); errors.Is(err, os.ErrNotExist) {
 		configuration = config.Initial()
@@ -296,6 +312,15 @@ func (i Init) Run(flags Flags) (Report, error) {
 		}
 		configuration = loaded
 		report.Configuration = "kept"
+		if !reflect.DeepEqual(loaded.Harnesses, selection.harnesses) || loaded.Caps != selection.caps {
+			configuration.Harnesses = selection.harnesses
+			configuration.Caps = selection.caps
+			if err := config.Write(i.Paths.Config, configuration); err != nil {
+				return Report{}, err
+			}
+			report.Configuration = "written"
+			say(fmt.Sprintf("Configuration written at %s.", i.Paths.Config))
+		}
 	}
 	if len(configuration.Repositories) == 0 && len(configuration.Folders) == 0 {
 		say("It has no repository or folder yet, so it can crew no request: add one with aeolus-trierarch add.")

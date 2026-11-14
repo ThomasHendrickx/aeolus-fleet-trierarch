@@ -3,12 +3,13 @@ package cli
 import (
 	"bytes"
 	"errors"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"io"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 )
 
 type scriptedTerminal struct {

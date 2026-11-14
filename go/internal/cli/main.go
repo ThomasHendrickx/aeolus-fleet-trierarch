@@ -68,7 +68,6 @@ type Machine struct {
 	IsCodexInstalled   func() bool
 	IsCodexSignedIn    func() bool
 	IsCopilotInstalled func() bool
-	IsCopilotSignedIn  func() bool
 	IsCursorInstalled  func() bool
 	OpenTerminal       func() (io.ReadWriteCloser, error)
 	// Codex is Codex's setup, through its app server.
@@ -253,7 +252,6 @@ func Main(args []string, machine Machine) (string, int) {
 				IsCodexInstalled:      machine.IsCodexInstalled(),
 				IsCodexSignedIn:       machine.IsCodexSignedIn(),
 				IsCopilotInstalled:    optionalCheck(machine.IsCopilotInstalled),
-				IsCopilotSignedIn:     optionalCheck(machine.IsCopilotSignedIn),
 				IsCursorInstalled:     optionalCheck(machine.IsCursorInstalled),
 				OpenTerminal:          machine.OpenTerminal,
 				Codex:                 machine.Codex(),

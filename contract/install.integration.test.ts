@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { setupLineOf } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
 
@@ -47,7 +48,7 @@ describe('install --no-load', () => {
 
 describe('install', () => {
   it('loads the service and starts it: the new trierarch runs and the answer is its status', async () => {
-    await machine.trierarch(['init', '--fleet-url', fleet.url, '--ship-id', fleet.trierarchShip.shipId, '--secret', fleet.trierarchShip.secret, '--yes']);
+    await machine.trierarch(setupLineOf(fleet));
     const before = machine.servicePid();
 
     const install = await machine.trierarch(['install', '--json']);
@@ -58,7 +59,7 @@ describe('install', () => {
   });
 
   it('says where the file and the logs are', async () => {
-    await machine.trierarch(['init', '--fleet-url', fleet.url, '--ship-id', fleet.trierarchShip.shipId, '--secret', fleet.trierarchShip.secret, '--yes']);
+    await machine.trierarch(setupLineOf(fleet));
 
     const install = await machine.trierarch(['install']);
 
