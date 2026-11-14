@@ -30,7 +30,7 @@ func (i Init) closingReport(report *Report, configuration config.Configuration, 
 	}
 	status, fix := "ok", ""
 	if i.InstallVerification == "checksum" {
-		status, fix = "warning", "install gh and verify the attestation with gh attestation verify "+program
+		status, fix = "warning", "install gh and run gh attestation verify "+program+" --repo ThomasHendrickx/aeolus-fleet-trierarch --signer-workflow ThomasHendrickx/aeolus-fleet-trierarch/.github/workflows/release.yml"
 	}
 	add("installed", "Installed", status, installed, fix)
 	status, fix = "warning", "add "+filepath.Dir(program)+" to PATH, then open a new terminal"
@@ -117,7 +117,7 @@ func (i Init) closingReport(report *Report, configuration config.Configuration, 
 	add("repositories", "Repositories", status, strings.Join(repositories, ", "), fix)
 	status, detail, fix = "ok", fmt.Sprintf("running for 10 s, pid %d, starts again at every login", pid), ""
 	if serviceErr != nil {
-		status, detail, fix = "failed", serviceErr.Error(), "fix the service error, then run the same line again"
+		status, detail, fix = "failed", serviceErr.Error(), "check aeolus-trierarch status, fix the service error, then run the same line again"
 	}
 	add("service", "Service", status, detail, fix)
 	add("caps", "Caps", "ok", fmt.Sprintf("%d ships, %d running", configuration.Caps.Ships, configuration.Caps.Running), "")
