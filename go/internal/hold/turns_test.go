@@ -2,6 +2,7 @@ package hold
 
 import (
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -130,6 +131,37 @@ exit 1`
 	case <-time.After(5 * time.Second):
 		t.Fatalf("the hold did not end with the failed turn")
 	}
+}
+
+func TestACodexTurnWithANonzeroExitEndsTheHoldWithoutAFailedEvent(t *testing.T) {
+	for _, status := range []int{1, 2} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			script := `echo '{"type":"thread.started","thread_id":"thread-1"}'; sleep 0.5; exit ` + strconv.Itoa(status)
+			hold := aHoldOf(t, Options{Harness: "codex", Command: []string{"sh", "-c", script}})
+			select {
+			case code := <-hold.ended:
+				hold.ended <- code
+				if code != status {
+					t.Fatalf("exit code = %d, want %d", code, status)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the hold did not end with the nonzero Codex exit")
+			}
+		})
+	}
+}
+
+func TestACodexFailedEventWithAZeroExitKeepsTheHoldForTheNextTurn(t *testing.T) {
+	script := `echo '{"type":"thread.started","thread_id":"thread-1"}'
+sleep 0.1
+echo '{"type":"turn.failed","error":{"message":"refused"}}'`
+	hold := aHoldOf(t, Options{Harness: "codex", Command: []string{"sh", "-c", script, "sh", "exec", "--json", "--", "first"}})
+	eventually(t, "the failed event kept", func() bool { return strings.Contains(read(hold.files.Events), "turn.failed") })
+	answer, err := Call(hold.files.Socket, Request{Call: "send", Line: "carry on"}, 15*time.Second)
+	if err != nil || !answer.IsOK {
+		t.Fatalf("send after exit 0 = %+v %v, want ok", answer, err)
+	}
+	eventually(t, "the next turn ran", func() bool { return strings.Count(read(hold.files.Events), "turn.failed") == 2 })
 }
 
 // aCopilotHold is a hold of a harness that answers as `copilot -p` behind its npm launcher does, one process per turn: each start noted with its words, reading its stdin to its end first, a line on stderr, the native process writing the result naming the session after the launcher exited, a failing turn exiting 1, a slow one running until SIGINT ends its group: a SIGINT to the launcher alone waits for its child.
