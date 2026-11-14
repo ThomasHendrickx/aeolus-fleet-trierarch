@@ -46,7 +46,13 @@ func (r Request) decision(answer Answer) Decision {
 func (r Request) sessionRule() string {
 	action := r.action()
 	if r.Tool == "Bash" {
-		return action
+		// Claude Code reads a * in a Bash rule as a wildcard and \* as a
+		// literal star, and treats a backslash as an escape only in a rule
+		// with a star; a rule without one is matched exactly.
+		if !strings.Contains(action, "*") {
+			return action
+		}
+		return strings.NewReplacer("\\", "\\\\", "*", "\\*").Replace(action)
 	}
 	action = strings.NewReplacer("\\", "\\\\", "[", "\\[", "]", "\\]", "*", "\\*", "?", "[\\x3f]", "(", "\\(", ")", "\\)", "|", "\\|", "+", "\\+", "^", "\\^", "$", "\\$").Replace(action)
 	if filepath.IsAbs(action) {
