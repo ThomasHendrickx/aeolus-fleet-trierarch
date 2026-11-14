@@ -36,7 +36,7 @@ let unreadable: string | undefined;
 async function aMachineCrewing(at: { others?: OtherHarness[] } = {}): Promise<void> {
   fleet = await aFleet();
   machine = await aMachine(at.others === undefined ? {} : { others: at.others });
-  await aCrewingMachine({ fleet, machine });
+  await aCrewingMachine({ fleet, machine, harnesses: ['claude-code', ...(at.others ?? [])] });
   tools = join(machine.home, TOOLS);
   execFileSync('git', ['init', '-q', '-b', 'main', tools]);
   writeFileSync(join(tools, 'TOOLS.md'), 'tools\n');
