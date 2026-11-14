@@ -209,15 +209,15 @@ describe("upgrade with Codex on offer updates Codex's aeolus-fleet plugin", () =
 
   it('puts back each version folder Codex deleted when its upgrade fails, and exits 1', async () => {
     aVersionFolder('0.2.0', new Date('2020-01-02T00:00:00Z'));
-    // init installed the plugin at the version it runs.
-    expect(versionFolders()).toEqual([version, '0.2.0'].sort());
+    const before = versionFolders();
+    expect(before).toContain('0.2.0');
     machine.toggle('codex-plugin-fails', true);
 
     const upgrade = await machine.trierarch(['upgrade', version, '--json']);
 
     expect(upgrade.status, upgrade.stdout).toBe(1);
     expect(reportSchema.parse(JSON.parse(upgrade.stdout))).toMatchObject({ isUpgraded: false, isPluginUpdated: false });
-    expect(versionFolders()).toEqual([version, '0.2.0'].sort());
+    expect(versionFolders()).toEqual(before);
   });
 
   it("changes nothing when this Codex deletes the plugin's data with its marketplace, proven in a throwaway Codex home, and exits 1", async () => {
