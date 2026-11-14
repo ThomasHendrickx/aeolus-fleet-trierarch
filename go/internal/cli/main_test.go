@@ -662,3 +662,15 @@ func TestStatusShowsTheLoopWhileItsLatestProcessIsRunning(t *testing.T) {
 		t.Errorf("status = %q, %d; want the loop and last error", output, code)
 	}
 }
+
+func TestInitSaysTheLastLogLineWhenTheServiceFailsToStart(t *testing.T) {
+	machine, manager, _ := aMain(t)
+	manager.installErr = errors.New("service start failed")
+	machine.ServiceLog = func(paths.Paths) servicelog.Log {
+		return servicelog.Log{Tail: func(int) ([]string, error) { return []string{"plugin missing"}, nil }}
+	}
+	output, code := Main(setupWords(), machine)
+	if code != 1 || !strings.Contains(output, "service start failed") || !strings.Contains(output, "plugin missing") {
+		t.Errorf("init = %q, %d; want the failure and last log line", output, code)
+	}
+}

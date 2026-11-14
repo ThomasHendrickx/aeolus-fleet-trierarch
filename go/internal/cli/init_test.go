@@ -51,15 +51,19 @@ func (f *aFleet) isLeaseHeld(_ string, token string) (bool, error) {
 
 // aServiceManager installs and runs the service at once, its process saying its version as it starts.
 type aServiceManager struct {
-	calls     []string
-	installed bool
-	running   bool
-	write     func()
-	override  *service.Status
+	calls      []string
+	installed  bool
+	running    bool
+	write      func()
+	override   *service.Status
+	installErr error
 }
 
 func (s *aServiceManager) Install() error {
 	s.calls = append(s.calls, "install")
+	if s.installErr != nil {
+		return s.installErr
+	}
 	s.installed, s.running = true, true
 	s.write()
 	return nil
