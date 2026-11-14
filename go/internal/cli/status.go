@@ -75,6 +75,10 @@ type StatusKept struct {
 
 // status is how the trierarch stands on this machine, from what is on it.
 func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
+	now := machine.Now
+	if now == nil {
+		now = time.Now
+	}
 	kept, err := crew.Read(at.CrewToken)
 	if err != nil {
 		return answer{}, err
@@ -93,7 +97,7 @@ func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
 	}
 	if manager.IsRunning && manager.PID > 0 && machine.StartedAt != nil {
 		manager.Since = machine.StartedAt(manager.PID)
-		if started, err := time.Parse(time.RFC3339, manager.Since); err == nil && manager.Restarts > 0 && time.Since(started) < 10*time.Second {
+		if started, err := time.Parse(time.RFC3339, manager.Since); err == nil && manager.Restarts > 0 && now().Sub(started) < 10*time.Second {
 			manager.IsRestarting = true
 		}
 	}
@@ -156,7 +160,7 @@ func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
 			report.ServiceReadiness = "first report not accepted"
 		} else if started, err := time.Parse(time.RFC3339, manager.Since); err != nil {
 			report.ServiceReadiness = "cannot determine how long the process has run"
-		} else if time.Since(started) < 10*time.Second {
+		} else if now().Sub(started) < 10*time.Second {
 			report.ServiceReadiness = "waiting for one process to run for 10 seconds"
 		}
 	}
