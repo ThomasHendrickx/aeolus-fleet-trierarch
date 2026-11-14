@@ -479,7 +479,7 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 	if err := os.MkdirAll(at.Home, 0o700); err != nil {
 		return answer{}, err
 	}
-	if err := os.WriteFile(at.Running, []byte(mustJSON(Running{PID: machine.PID, Version: Version})+"\n"), 0o644); err != nil {
+	if err := writeRunning(at.Running, Running{PID: machine.PID, Version: Version}); err != nil {
 		return answer{}, err
 	}
 	machine.Log(fmt.Sprintf("aeolus-trierarch %s runs as pid %d", Version, machine.PID))

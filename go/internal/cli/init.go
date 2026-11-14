@@ -10,6 +10,7 @@ import (
 	"maps"
 	"net/url"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -454,7 +455,7 @@ func (i Init) waitForService() error {
 	var stableSince time.Time
 	var pid, lastPID, changes, baseline int
 	first := true
-	var reason error = errors.New("service is not running")
+	var reason error
 	for {
 		status, err := i.Service.Status()
 		if err != nil {
@@ -580,11 +581,6 @@ func (i Init) setUpCodex(configuration config.Configuration, root string, say fu
 	return places, hooks
 }
 
-// hasSaidItsVersion waits until the process the service runs has said its version in running.json, 30 seconds at most.
-func (i Init) hasSaidItsVersion() bool {
-	return hasSaidItsVersion(i.Service, i.Paths.Running, i.Sleep)
-}
-
 func hasSaidItsVersion(service interface {
 	Status() (service.Status, error)
 }, runningFile string, sleep func()) bool {
@@ -628,17 +624,29 @@ func readRunning(path string) (Running, bool) {
 
 // ReportAccepted records that this process's first report reached the fleet.
 func ReportAccepted(path string, pid int) error {
-	running, ok := readRunning(path)
-	if !ok || running.PID != pid {
-		return errors.New("running file does not name this process")
-	}
-	if running.FirstReportAccepted {
-		return nil
-	}
-	running.FirstReportAccepted = true
+	return writeRunning(path, Running{PID: pid, Version: Version, FirstReportAccepted: true})
+}
+
+func writeRunning(path string, running Running) error {
 	text, err := json.Marshal(running)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(text, '\n'), 0o644)
+	file, err := os.CreateTemp(filepath.Dir(path), ".running-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	if err := file.Chmod(0o644); err != nil {
+		file.Close()
+		return err
+	}
+	if _, err := file.Write(append(text, '\n')); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(file.Name(), path)
 }

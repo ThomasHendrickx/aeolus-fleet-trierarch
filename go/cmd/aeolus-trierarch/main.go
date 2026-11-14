@@ -756,7 +756,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 			return err
 		}
 		if err := cli.ReportAccepted(at.Running, os.Getpid()); err != nil {
-			return err
+			logLine(fmt.Sprintf("record accepted report: %v", err))
 		}
 		return sender.Send()
 	}, nil
