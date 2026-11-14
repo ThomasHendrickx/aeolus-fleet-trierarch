@@ -27,19 +27,11 @@ func (s Service) waitAnswer(ctx context.Context, ship string, request Request, a
 		if end != nil {
 			return *end
 		}
-		owner, err := s.Owners.Owner(ctx, ship)
-		take := err == nil && owner.IsPerson && owner.ID != "" && owner.ID == reply.SenderID && reply.Matches
-		if err != nil {
-			s.logFailure(err)
+		owner, end := s.readOwner(ctx, timer, ship)
+		if end != nil {
+			return *end
 		}
-		// An owner lookup may have waited past the limit or a cancellation.
-		select {
-		case <-ctx.Done():
-			return Decision{Behavior: "deny", Message: "permission call cancelled"}
-		case <-timer.Done():
-			return Decision{Behavior: "deny", Message: "not answered in 30 minutes; the question was withdrawn"}
-		default:
-		}
+		take := owner.IsPerson && owner.ID != "" && owner.ID == reply.SenderID && reply.Matches
 		if err := answers.Finish(ctx, ship, reply, take); err != nil {
 			s.logFailure(err)
 			continue
@@ -49,7 +41,7 @@ func (s Service) waitAnswer(ctx context.Context, ship string, request Request, a
 			return request.decision(reply.Answer)
 		}
 		s.logFailure(fmt.Errorf("answer from %s (%s) left for ordinary hand-over", reply.SenderName, reply.SenderID))
-		if reply.Matches && reply.SenderID == asked.ID && err == nil && owner.ID != asked.ID {
+		if reply.Matches && reply.SenderID == asked.ID && owner.ID != asked.ID {
 			if !owner.IsPerson {
 				return Decision{Behavior: "deny", Message: "this ship's owner is argo: nobody is asked"}
 			}
@@ -63,6 +55,38 @@ func (s Service) waitAnswer(ctx context.Context, ship string, request Request, a
 				return Decision{Behavior: "deny", Message: "could not ask"}
 			}
 			asked = owner
+		}
+	}
+}
+
+// readOwner reads the ship's owner again until it succeeds, leaving the reply
+// unacknowledged meanwhile: a failed read never decides an answer.
+func (s Service) readOwner(ctx context.Context, timer Timer, ship string) (Owner, *Decision) {
+	for {
+		owner, err := s.Owners.Owner(ctx, ship)
+		if err != nil {
+			s.logFailure(err)
+		}
+		// An owner lookup may have waited past the limit or a cancellation.
+		select {
+		case <-ctx.Done():
+			return Owner{}, &Decision{Behavior: "deny", Message: "permission call cancelled"}
+		case <-timer.Done():
+			return Owner{}, &Decision{Behavior: "deny", Message: "not answered in 30 minutes; the question was withdrawn"}
+		default:
+		}
+		if err == nil {
+			return owner, nil
+		}
+		retry := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			retry.Stop()
+			return Owner{}, &Decision{Behavior: "deny", Message: "permission call cancelled"}
+		case <-timer.Done():
+			retry.Stop()
+			return Owner{}, &Decision{Behavior: "deny", Message: "not answered in 30 minutes; the question was withdrawn"}
+		case <-retry.C:
 		}
 	}
 }
