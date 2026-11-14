@@ -89,3 +89,60 @@ func TestAFormerOwnersAnswerAfterArgoTakesOwnershipIsKeptAndDeniesWithoutAskingA
 		}
 	})
 }
+
+type unreachableOwner struct{ isDown atomic.Bool }
+
+func (o *unreachableOwner) Owner(context.Context, string) (Owner, error) {
+	if o.isDown.Load() {
+		return Owner{}, errors.New("whoami is unreachable")
+	}
+	return Owner{ID: "owner", IsPerson: true}, nil
+}
+
+func TestAnOwnersAnswerWaitsUnacknowledgedWhileTheOwnerCannotBeRead(t *testing.T) {
+	for _, end := range []string{"owner read again", "limit"} {
+		t.Run(end, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				q := &answerQuestions{incoming: make(chan Reply, 1)}
+				owner := &unreachableOwner{}
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				var logs []string
+				service := Service{Owners: owner, Questions: q, Reports: &reports{}, Clock: SystemClock{}, Log: func(s string) { logs = append(logs, s) }}
+				result := make(chan Decision, 1)
+				go func() { result <- service.Ask(ctx, "scout", Request{Tool: "Bash"}) }()
+				synctest.Wait()
+				owner.isDown.Store(true)
+				q.incoming <- Reply{Answer: Answer{Option: 1}, Matches: true, SenderID: "owner", SenderName: "person"}
+				synctest.Wait()
+				select {
+				case got := <-result:
+					t.Fatalf("failed owner read ended wait: %+v", got)
+				default:
+				}
+				if len(q.kept) != 0 || len(q.taken) != 0 || len(logs) == 0 || !strings.Contains(logs[0], "whoami is unreachable") {
+					t.Fatalf("after failed owner read: kept %d, taken %d, logs %v", len(q.kept), len(q.taken), logs)
+				}
+				if end == "owner read again" {
+					owner.isDown.Store(false)
+					time.Sleep(time.Minute)
+					synctest.Wait()
+					select {
+					case got := <-result:
+						if got.Behavior != "allow" || len(q.taken) != 1 || len(q.kept) != 0 {
+							t.Fatalf("decision %+v, taken %d, kept %d", got, len(q.taken), len(q.kept))
+						}
+					default:
+						t.Fatal("answer was not taken once the owner could be read again")
+					}
+				} else {
+					time.Sleep(30 * time.Minute)
+					got := <-result
+					if got.Message != "not answered in 30 minutes; the question was withdrawn" || len(q.taken) != 0 || len(q.kept) != 0 {
+						t.Fatalf("decision %+v, taken %d, kept %d", got, len(q.taken), len(q.kept))
+					}
+				}
+			})
+		})
+	}
+}
