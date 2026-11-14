@@ -53,11 +53,11 @@ func aConfigurationOfferingCodex(t *testing.T, machine *aMachine) {
 	}
 }
 
-func TestInitOffersCodexWhereCodexIsInstalled(t *testing.T) {
+func TestInitOffersCodexWhenBothHarnessesArePicked(t *testing.T) {
 	machine := newMachine(t)
 	withCodex(machine, true)
 
-	if _, err := machine.init.Run(setupLine()); err != nil {
+	if _, err := machine.init.Run(codexSetupLine()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -76,7 +76,7 @@ func TestInitTrustsEachPlaceAndTheAeolusPluginsHooksInCodexWhereTheConfiguration
 	codex := withCodex(machine, true)
 	aConfigurationOfferingCodex(t, machine)
 
-	report, err := machine.init.Run(setupLine())
+	report, err := machine.init.Run(codexSetupLine())
 
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +95,7 @@ func TestInitGoesOnAndSaysSoWhenCodexCannotBeSetUp(t *testing.T) {
 	codex.err = errors.New("codex app-server ended before it answered initialize")
 	aConfigurationOfferingCodex(t, machine)
 
-	report, err := machine.init.Run(setupLine())
+	report, err := machine.init.Run(codexSetupLine())
 
 	if err != nil {
 		t.Fatalf("init = %v, want it to go on", err)
@@ -111,7 +111,7 @@ func TestInitTakesAMachineWhereCodexAloneIsInstalledAndSignedIn(t *testing.T) {
 	machine.init.IsClaudeCodeInstalled, machine.init.IsClaudeCodeSignedIn = false, false
 	withCodex(machine, true)
 
-	if _, err := machine.init.Run(setupLine()); err != nil {
+	if _, err := machine.init.Run(onlyCodexSetupLine()); err != nil {
 		t.Fatalf("init = %v, want a machine with Codex alone taken", err)
 	}
 	configured, err := config.Load(machine.init.Paths.Config)
@@ -128,9 +128,9 @@ func TestInitRefusesBeforeItRegistersAnythingWhereNeitherHarnessIsSignedIn(t *te
 	machine.init.IsClaudeCodeSignedIn = false
 	withCodex(machine, false)
 
-	_, err := machine.init.Run(setupLine())
+	_, err := machine.init.Run(codexSetupLine())
 
-	want := "Claude Code (run `claude` and sign in) and Codex (run `codex login`) are installed but not signed in"
+	want := "Claude Code is installed but not signed in"
 	if err == nil || !strings.Contains(err.Error(), want) || len(machine.fleet.registered) != 0 {
 		t.Fatalf("init = %v, registered %q, want refused with %q", err, machine.fleet.registered, want)
 	}
@@ -141,7 +141,7 @@ func TestAddRepositoryTrustsItInCodexWhereTheConfigurationOffersCodex(t *testing
 	codex := &aCodex{}
 	machine.IsCodexInstalled, machine.IsCodexSignedIn = func() bool { return true }, func() bool { return true }
 	machine.Codex = func() Codex { return codex }
-	Main(setupWords(), machine)
+	Main(append(setupWords(), "--harnesses", "claude-code,codex"), machine)
 	repository := aCheckout(t)
 
 	output, code := Main([]string{"add", "repository", "aeolus-fleet", repository, "--json"}, machine)
@@ -156,7 +156,7 @@ func TestAddRepositorySaysWhenCodexDoesNotTrustIt(t *testing.T) {
 	codex := &aCodex{err: errors.New("codex is not installed, or codex does not run")}
 	machine.IsCodexInstalled, machine.IsCodexSignedIn = func() bool { return true }, func() bool { return true }
 	machine.Codex = func() Codex { return codex }
-	Main(setupWords(), machine)
+	Main(append(setupWords(), "--harnesses", "claude-code,codex"), machine)
 
 	output, code := Main([]string{"add", "repository", "aeolus-fleet", aCheckout(t)}, machine)
 
@@ -164,3 +164,10 @@ func TestAddRepositorySaysWhenCodexDoesNotTrustIt(t *testing.T) {
 		t.Fatalf("answered %q, %d, want %q", output, code, want)
 	}
 }
+
+func codexSetupLine() Flags {
+	f := setupLine()
+	f.Harnesses = []string{"claude-code", "codex"}
+	return f
+}
+func onlyCodexSetupLine() Flags { f := setupLine(); f.Harnesses = []string{"codex"}; return f }

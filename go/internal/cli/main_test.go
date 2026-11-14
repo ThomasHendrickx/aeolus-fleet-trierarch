@@ -120,7 +120,7 @@ func decoded(t *testing.T, output string) map[string]any {
 }
 
 func setupWords() []string {
-	return []string{"init", "--fleet-url", fleetURL, "--ship-id", shipID, "--secret", secret, "--plugin-ship-id", pluginShipID, "--yes"}
+	return []string{"init", "--fleet-url", fleetURL, "--ship-id", shipID, "--secret", secret, "--plugin-ship-id", pluginShipID, "--harnesses", "claude-code", "--yes"}
 }
 
 func TestSaysItsVersion(t *testing.T) {

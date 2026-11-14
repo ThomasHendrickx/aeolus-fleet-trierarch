@@ -151,7 +151,7 @@ func newMachine(t *testing.T) *aMachine {
 }
 
 func setupLine() Flags {
-	return Flags{FleetURL: fleetURL, ShipID: shipID, Secret: secret, PluginShipID: pluginShipID, IsYes: true}
+	return Flags{FleetURL: fleetURL, ShipID: shipID, Secret: secret, PluginShipID: pluginShipID, IsYes: true, Harnesses: []string{"claude-code"}}
 }
 
 func TestInitRegistersTheShipAndKeepsItsCrewTokenNeverTheSecret(t *testing.T) {
@@ -299,7 +299,7 @@ func TestInitRefusesBeforeItRegistersAnythingOnASystemWithNeitherLaunchdNorSyste
 func TestInitNamesTheFlagsItLacks(t *testing.T) {
 	machine := newMachine(t)
 
-	_, err := machine.init.Run(Flags{FleetURL: fleetURL, IsYes: true})
+	_, err := machine.init.Run(Flags{FleetURL: fleetURL, IsYes: true, Harnesses: []string{"claude-code"}})
 
 	if err == nil || !strings.Contains(err.Error(), "--ship-id and --secret are missing") {
 		t.Errorf("err %v", err)
@@ -400,7 +400,7 @@ func TestInitKeepsTheTrierarchPluginsShipOnAMachineSetUpBeforeAndRestartsTheTrie
 	}
 	machine.service.calls = nil
 
-	report, err := machine.init.Run(Flags{PluginShipID: pluginShipID, IsYes: true})
+	report, err := machine.init.Run(Flags{PluginShipID: pluginShipID, IsYes: true, Harnesses: []string{"claude-code"}})
 
 	if err != nil {
 		t.Fatal(err)

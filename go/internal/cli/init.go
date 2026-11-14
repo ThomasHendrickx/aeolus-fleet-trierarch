@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/url"
 	"os"
@@ -27,6 +28,10 @@ type Flags struct {
 	// PluginShipID is the trierarch plugin's ship: the one ship the trusted repositories are taken from.
 	PluginShipID string
 	IsYes        bool
+	Harnesses    []string
+	Unattended   []string
+	MaxShips     string
+	MaxRunning   string
 }
 
 // Report is what init did, for the operator and for --json.
@@ -83,6 +88,10 @@ type Init struct {
 	ClaudeCode            ClaudeCode
 	IsCodexInstalled      bool
 	IsCodexSignedIn       bool
+	IsCopilotInstalled    bool
+	IsCopilotSignedIn     bool
+	IsCursorInstalled     bool
+	OpenTerminal          func() (io.ReadWriteCloser, error)
 	Codex                 Codex
 	Service               Service
 	Register              func(fleetURL string, shipID string, secret string) (string, error)
@@ -111,24 +120,7 @@ func (i Init) checkMachine() error {
 	if i.IsSsMissing {
 		return errors.New("`ss` is not installed, and the trierarch needs it to tell which process calls a ship socket: without it no session starts. Install iproute2 (Debian and Ubuntu: sudo apt-get install iproute2), then run the setup line again")
 	}
-	if !i.IsClaudeCodeInstalled && !i.IsCodexInstalled {
-		return errors.New("neither Claude Code nor Codex runs on this machine, so it could crew nothing. Install Claude Code (https://code.claude.com/docs/en/setup) or Codex (npm install -g @openai/codex) and be signed in to it, then run the setup line again")
-	}
-	if (i.IsClaudeCodeInstalled && i.IsClaudeCodeSignedIn) || (i.IsCodexInstalled && i.IsCodexSignedIn) {
-		return nil
-	}
-	var steps []string
-	if i.IsClaudeCodeInstalled {
-		steps = append(steps, "Claude Code (run `claude` and sign in)")
-	}
-	if i.IsCodexInstalled {
-		steps = append(steps, "Codex (run `codex login`)")
-	}
-	verb := "is"
-	if len(steps) > 1 {
-		verb = "are"
-	}
-	return fmt.Errorf("%s %s installed but not signed in, so no session could answer. Sign in: %s, then run the setup line again", strings.Join(steps, " and "), verb, strings.Join(steps, "; "))
+	return nil
 }
 
 func asFleetURL(text string) (string, error) {
@@ -186,6 +178,10 @@ func (i Init) register(fleetURL string, shipID string, secret string, pluginShip
 
 func (i Init) Run(flags Flags) (Report, error) {
 	if err := i.checkMachine(); err != nil {
+		return Report{}, err
+	}
+	selection, err := i.selectHarnesses(flags)
+	if err != nil {
 		return Report{}, err
 	}
 	pluginShipID := strings.TrimSpace(flags.PluginShipID)
@@ -286,14 +282,8 @@ func (i Init) Run(flags Flags) (Report, error) {
 	var configuration config.Configuration
 	if _, err := os.Stat(i.Paths.Config); errors.Is(err, os.ErrNotExist) {
 		configuration = config.Initial()
-		// Init offers installed harnesses explicitly; a fresh configuration has no default harness.
-		if i.IsClaudeCodeInstalled {
-			configuration.Harnesses[claudeCode] = config.Harness{Flags: []string{}, Options: map[string]config.Option{}}
-		}
-		// Offering Codex is the default answer where it is installed; launching it without approvals is not.
-		if i.IsCodexInstalled {
-			configuration.Harnesses[codex] = config.Harness{Flags: []string{}, Options: map[string]config.Option{}}
-		}
+		configuration.Harnesses = selection.harnesses
+		configuration.Caps = selection.caps
 		if err := config.Write(i.Paths.Config, configuration); err != nil {
 			return Report{}, err
 		}
