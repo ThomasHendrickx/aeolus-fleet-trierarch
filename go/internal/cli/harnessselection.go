@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 )
 
 // harnessSelection is resolved before init can register anything.
@@ -95,17 +94,7 @@ func (i Init) selectHarnesses(flags Flags, current config.Configuration, termina
 	unattended := slices.Clone(flags.Unattended)
 	if picked == nil {
 		if terminal == nil {
-			missing := []string{"--harnesses"}
-			if !hasRepositoryChoice(flags) && !flags.IsYes {
-				missing = append(missing, "--repositories, --repositories-in or --no-repositories")
-			}
-			if _, err := crew.Read(i.Paths.CrewToken); err != nil {
-				for _, flag := range []struct{ name, value string }{{"--fleet-url", flags.FleetURL}, {"--ship-id", flags.ShipID}, {"--secret", flags.Secret}} {
-					if flag.value == "" {
-						missing = append(missing, flag.name)
-					}
-				}
-			}
+			missing := i.missingInitFlags(flags)
 			return selection, fmt.Errorf("no terminal: init needs %s; no harness is a default", strings.Join(missing, ", "))
 		}
 		if i.IsCursorInstalled {

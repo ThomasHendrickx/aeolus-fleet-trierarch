@@ -173,6 +173,8 @@ func cloneRepository(ctx context.Context, choice repositoryChoice) error {
 	return nil
 }
 
+var errRepositoryAnswer = errors.New("invalid repositories answer")
+
 func askRepositories(reader *bufio.Reader, terminal io.Writer, flags Flags) (Flags, error) {
 	if _, err := fmt.Fprintln(terminal, "Repositories: 1) a list of local paths or git URLs, 2) a folder of repositories, 3) skip [3]"); err != nil {
 		return flags, err
@@ -202,11 +204,11 @@ func askRepositories(reader *bufio.Reader, terminal io.Writer, flags Flags) (Fla
 		} else {
 			flags.RepositoriesIn = strings.TrimSpace(value)
 			if flags.RepositoriesIn == "" {
-				return flags, errors.New("a folder of repositories needs a path")
+				return flags, fmt.Errorf("%w: a folder of repositories needs a path", errRepositoryAnswer)
 			}
 		}
 	default:
-		return flags, errors.New("choose 1, 2 or 3")
+		return flags, fmt.Errorf("%w: choose 1, 2 or 3", errRepositoryAnswer)
 	}
 	return flags, nil
 }
@@ -214,7 +216,7 @@ func askRepositories(reader *bufio.Reader, terminal io.Writer, flags Flags) (Fla
 func (i Init) selectRepositories(ctx context.Context, flags Flags, current config.Configuration, reader *bufio.Reader, terminal io.Writer) (map[string]config.Repository, error) {
 	isWizard := !hasRepositoryChoice(flags) && !flags.IsYes
 	if isWizard && reader == nil {
-		return nil, errors.New("no terminal: init needs --repositories, --repositories-in or --no-repositories")
+		return nil, fmt.Errorf("no terminal: init needs %s", strings.Join(i.missingInitFlags(flags), ", "))
 	}
 	home := i.HomeDirectory
 	if home == "" {
@@ -225,6 +227,9 @@ func (i Init) selectRepositories(ctx context.Context, flags Flags, current confi
 		var err error
 		if isWizard {
 			flags, err = askRepositories(reader, terminal, flags)
+			if err != nil && !errors.Is(err, errRepositoryAnswer) {
+				return nil, err
+			}
 		}
 		if err == nil {
 			choices, err = repositoryChoices(ctx, flags, current, home)
@@ -237,10 +242,6 @@ func (i Init) selectRepositories(ctx context.Context, flags Flags, current confi
 		}
 		if _, writeErr := fmt.Fprintln(terminal, err); writeErr != nil {
 			return nil, writeErr
-		}
-		// An exhausted terminal cannot supply a new answer.
-		if errors.Is(err, io.EOF) {
-			return nil, err
 		}
 	}
 	repositories := maps.Clone(current.Repositories)

@@ -172,6 +172,25 @@ func askedCrew(flags Flags) (fleetURL string, shipID string, err error) {
 	return fleetURL, shipID, nil
 }
 
+// missingInitFlags names all unanswered choices when no terminal is available.
+func (i Init) missingInitFlags(flags Flags) []string {
+	var missing []string
+	if flags.Harnesses == nil {
+		missing = append(missing, "--harnesses")
+	}
+	if !hasRepositoryChoice(flags) && !flags.IsYes {
+		missing = append(missing, "--repositories, --repositories-in or --no-repositories")
+	}
+	if _, err := crew.Read(i.Paths.CrewToken); err != nil {
+		for _, flag := range []struct{ name, value string }{{"--fleet-url", flags.FleetURL}, {"--ship-id", flags.ShipID}, {"--secret", flags.Secret}} {
+			if flag.value == "" {
+				missing = append(missing, flag.name)
+			}
+		}
+	}
+	return missing
+}
+
 // register registers the trierarch's ship; a ship crewed already was registered by its setup line run elsewhere, and the refusal says how to go on.
 func (i Init) register(fleetURL string, shipID string, secret string, pluginShipID string) (string, error) {
 	crewToken, err := i.Register(fleetURL, shipID, secret)
