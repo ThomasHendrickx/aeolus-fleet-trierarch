@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -250,5 +252,62 @@ func TestEndingAShipLogsEachWithdrawalStillUnfinishedAfterTenSeconds(t *testing.
 	<-done
 	if elapsed < 10*time.Second || len(logs) != 1 || logs[0] != "permission withdrawal for scout (tool-7) did not finish within 10 seconds; release continues" {
 		t.Fatalf("release took %s, logs %v", elapsed, logs)
+	}
+}
+
+type immediateQuestion struct {
+	owners
+	asked atomic.Int32
+}
+
+func (q *immediateQuestion) Ask(context.Context, string, Request) Decision {
+	q.asked.Add(1)
+	return Decision{Behavior: "deny", Message: "unexpected ask"}
+}
+func TestARequestStillReadingItsInputCannotOpenAQuestionAfterItsSessionStops(t *testing.T) {
+	folder, err := os.MkdirTemp("", "permission-late-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(folder)
+	var isRunning atomic.Bool
+	isRunning.Store(true)
+	checked := make(chan struct{})
+	var once sync.Once
+	q := &immediateQuestion{}
+	channel, err := Listen(filepath.Join(folder, "p.sock"), func(string, string) bool { once.Do(func() { close(checked) }); return isRunning.Load() }, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer channel.Close()
+	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(folder, "p.sock"))
+	}}
+	defer transport.CloseIdleConnections()
+	body, writer := io.Pipe()
+	request, err := http.NewRequest(http.MethodPost, "http://trierarch/scout", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer test-session")
+	result := make(chan int, 1)
+	go func() {
+		response, err := (&http.Client{Transport: transport}).Do(request)
+		if err != nil {
+			result <- 0
+			return
+		}
+		defer response.Body.Close()
+		result <- response.StatusCode
+	}()
+	<-checked
+	isRunning.Store(false)
+	if unfinished := channel.Drain(context.Background(), "scout"); len(unfinished) != 0 {
+		t.Fatal(unfinished)
+	}
+	_, _ = writer.Write([]byte(`{"tool_name":"Bash","input":{"command":"npm install"}}`))
+	_ = writer.Close()
+	if status := <-result; status != http.StatusForbidden || q.asked.Load() != 0 {
+		t.Fatalf("status %d, questions %d", status, q.asked.Load())
 	}
 }
