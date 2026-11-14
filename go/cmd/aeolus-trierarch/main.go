@@ -43,11 +43,13 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/logfile"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/modelproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/peer"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/permissions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/receiving"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
@@ -181,6 +183,9 @@ func main() {
 	if opened != nil {
 		opened.CloseAll()
 	}
+	if permissionCloser != nil {
+		_ = permissionCloser.Close()
+	}
 	if output != "" {
 		fmt.Fprintln(stdout, output)
 	}
@@ -294,6 +299,7 @@ func runTrierarch(program string, isPluginStep bool, words ...string) (string, i
 
 // opened are the ships' sockets run opened, closed once it ends.
 var opened *shipsocket.Sockets
+var permissionCloser io.Closer
 
 // shipSockets are each ship's socket for its session's fleet calls, with its crew token from the state at each call (decision 0026). A caller is allowed only under the ship's own hold, or under the trierarch itself, as its aeolus-push.sh.
 func shipSockets(at paths.Paths, fleetURL string, running runningSessions) *shipsocket.Sockets {
@@ -638,6 +644,17 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	opened = shipSockets(at, kept.FleetURL, running)
 	load := &machineload.Reader{Source: machineload.System{WorktreeRoot: root}, Now: time.Now, Log: logLine}
 	saved := state.File{Path: at.State}
+	permissionChannel, err := permissions.Listen(filepath.Join(at.Proxy, permissions.Socket), func(ship, token string) bool { return mcpproxy.AuthorizesPermission(at.Sessions, ship, token) }, permissions.Fleet{URL: kept.FleetURL, TokenOf: func(ship string) string {
+		state, err := saved.Load()
+		if err != nil {
+			return ""
+		}
+		return state.Entries[ship].CrewToken
+	}})
+	if err != nil {
+		return nil, fmt.Errorf("open permission channel: %w", err)
+	}
+	permissionCloser = permissionChannel
 	// The configuration as its file gives it, as the failed starts keep it: another one than the machine stopped offering itself with offers it again (#853).
 	configurationText, err := json.Marshal(configured)
 	if err != nil {

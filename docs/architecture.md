@@ -194,3 +194,36 @@ Every arrow is code or an API call: no fleet message carries crew state. The tri
 ### What the aeolus-fleet plugin does for it
 
 The identity file of a folder a trierarch crews says `wakeBy=trierarch` and names the trierarch's socket instead of a crew token: `aeolus-fleet.sh` makes the same REST calls over that socket with no bearer (decision 0026). It keeps the key of the lease, a hash of the crew token, so the plugin's store and reports still tell the folder's crews apart. The plugin then asks for no watcher of its own: the SessionStart and Stop hooks and the watcher guard leave waking to the trierarch. A turn marker (busy or idle, with when), written by the plugin's UserPromptSubmit and Stop hooks in every crewed folder, tells the trierarch when a message may be handed over, in Claude Code and Codex alike. The trierarch hands it over through the plugin's `aeolus-push.sh`, which keeps the store and makes the fleet calls (push receive, handed with its number), and sends the line it prints; the plugin's hooks acknowledge the message before they put it into the turn and, on the lease the push receive made pushed, report the turn, handled, handed once more after a died turn and not handled, as for a session crewed by hand. Before it starts a session again it calls `aeolus-push.sh died`, which marks the store as SessionStart does for a session a person starts again. A launch marker beside it, written by the plugin's SessionStart, PreToolUse and StopFailure hooks only for a session started with a launch id (`AEOLUS_LAUNCH`), says what the session did in that launch: started (with its transcript), active at its first tool call, or its model refused (#490); Codex has no hook for a failed turn, so the trierarch reads its refusal from that transcript, Codex's session log. Without the line, the plugin's own watcher reads the same marker: in Claude Code, in Copilot as a detached background shell whose completion starts a turn (design harnesses/cursor-copilot, CC12), and run by the Codex wake bridge, it takes one message with a push receive whenever deliveries wait while the session is idle, which makes the lease pushed, and reports it handed with its hand-over number; the plugin's hooks acknowledge it before they put it into the turn, and on that pushed lease the hooks and the watcher report the turn, handled, handed once more after a died turn and not handled (decision 0040, #756, the plugin README); the Codex wake bridge then queues a prompt, which the UserPromptSubmit hook confirms, and Codex's Interrupt hook is a died turn. `/aeolus-fleet:wake` (Codex: `$aeolus-fleet-wake`) is the first prompt; on a pushed lease it receives nothing. In Codex the plugin arms no wake bridge of its own for such a folder.
+
+
+## Claude Code permission tool
+
+Every Claude Code session without `--dangerously-skip-permissions` or
+`--permission-mode bypassPermissions` (including the equals form) gets the
+`aeolus-permissions` server in its session's `mcp-config.json` and
+`--permission-prompt-tool mcp__aeolus-permissions__ask`. The MCP proxy runs
+whenever Claude Code is offered, including sessions on subscriptions with no
+remote MCP servers. The server name is reserved: remote definitions using it
+are rejected. Claude Code keeps the permission tool out of the model's tool list.
+
+The MCP proxy is detached, so it cannot use the ship's fleet socket: it is
+neither the session nor a descendant of the current trierarch. It hands each
+owner read to the trierarch through `proxy/permissions.sock`, a private Unix
+socket (mode 600), outside the folders mounted into sessions. The channel
+checks the ship's running hold and its session's MCP token and permission-server
+access. The trierarch reads the ship's current crew token from its state and
+calls `/api/v1/ship/whoami` as that ship. The proxy receives only whether the
+owner is a person, never a crew token. No owner result is cached. While the
+trierarch is down, the call is denied.
+
+Each `ask` result is one text content containing the JSON
+`{ "behavior": "deny", "message": "..." }`:
+
+- Argo owner: `this ship's owner is argo: nobody is asked`.
+- Person owner: `permission questions for person-owned ships are not available yet`.
+- An unreadable owner, including a failed private-channel call:
+  `could not read this ship's owner: nobody is asked`.
+
+Claude Code lists a refused action in `permission_denials`. Sending a question,
+waiting for an answer and taking it from the plugin's store belong to the later
+permission-question slices in `docs/design/permission-asks.md`.

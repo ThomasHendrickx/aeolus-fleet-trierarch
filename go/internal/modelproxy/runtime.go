@@ -19,6 +19,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/permissions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/processproof"
 )
 
@@ -188,7 +189,9 @@ func Main(words []string, version string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	proxy := Proxy{Sessions: sessions, Keys: keys.Files{Folder: keysFolder}, States: keys.States{Keys: keysFolder, File: files.KeyStates}, Version: version, Now: time.Now, MCP: mcpproxy.Proxy{Sessions: sessions, Configuration: func() (mcpconfiguration.Configuration, bool) {
+	proxy := Proxy{Sessions: sessions, Keys: keys.Files{Folder: keysFolder}, States: keys.States{Keys: keysFolder, File: files.KeyStates}, Version: version, Now: time.Now, MCP: mcpproxy.Proxy{Sessions: sessions, Permissions: func(ctx context.Context, ship, token string) permissions.Decision {
+		return permissions.Deny(ctx, ship, permissions.Client{Socket: filepath.Join(folder, permissions.Socket), Token: token})
+	}, Configuration: func() (mcpconfiguration.Configuration, bool) {
 		// Read at each request: the trierarch applies the configuration as it arrives.
 		return mcpconfiguration.ReadFile(configuration)
 	}}}

@@ -258,14 +258,17 @@ func (p Pass) startProblem(entry reconciler.Entry, login string) string {
 
 // keepProxy runs the proxy while any harness holds a key or offers an MCP server, which its sessions reach through it; a failure is logged, and the next pass tries again.
 func (p Pass) keepProxy() {
-	if p.Proxy == nil || p.Keys == nil {
+	if p.Proxy == nil {
 		return
 	}
 	isOffering := false
 	for _, names := range p.mcpServers() {
 		isOffering = isOffering || len(names) > 0
 	}
-	isNeeded := isOffering || slices.ContainsFunc(keyHarnesses, p.Keys.Has)
+	isNeeded := isOffering || slices.Contains(p.Offered, "claude-code")
+	if p.Keys != nil {
+		isNeeded = isNeeded || slices.ContainsFunc(keyHarnesses, p.Keys.Has)
+	}
 	if err := p.Proxy.Keep(isNeeded); err != nil {
 		p.Log("the model proxy: " + err.Error())
 	}

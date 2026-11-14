@@ -404,3 +404,24 @@ In a container:
 - **The model login** on the subscription is one long-lived token per machine (`claude setup-token`), kept on the host in `~/.aeolus/trierarch/model-token`, readable by its owner only and never in `config.json`, which the trierarch reads at every start of a container and hands to it through an env file, never a command line (#445). The env file is kept in the session's own folder, `~/.aeolus/trierarch/sessions/<ship id>/session.env`, readable by its owner only, while the session runs, since the hold runs the container again when it starts Claude Code again, and goes with that folder when the session stops. The session reaches the fleet through the aeolus-fleet plugin over REST, never a claude.ai connector. Container mode offers Claude Code only; Codex follows once it is proven in a container.
 - **Keys per repository**: the configuration may give a repository a key (a deploy key, a GitHub token). Every ship crewed on that repository gets that key in its container, and no other ship does. Crew settings never carry a key or a path (decision 0027).
 - **The image** is published by `release.yml` with the release's version (decision 0011): Ubuntu, Node, the harness, the aeolus-fleet plugin, which the image keeps outside the home and links into the home at every start, Playwright's browser dependencies and Podman, and no aip (aip, above): at every start the image's init removes each link an earlier image made into the home's `~/.claude/skills`, leaving a skill of the session's own, so a session runs its repository's tests, Testcontainers included, through a rootless Podman inside its container. The trierarch starts each container from the image of its own version; a running container keeps its image until its next start, as a running session keeps its plugin. The configuration may name another image for a repository, built on the published one.
+
+
+## Claude Code permission requests
+
+A Claude Code session without a bypass flag gets the `aeolus-permissions`
+server and `--permission-prompt-tool mcp__aeolus-permissions__ask`. Both are
+absent with `--dangerously-skip-permissions` or `--permission-mode
+bypassPermissions`, including the equals form. The permission tool is hidden
+from the model. The MCP proxy runs for Claude Code even without an API key or
+remote MCP servers; `aeolus-permissions` is reserved for this tool.
+
+On every permission call, the proxy hands an owner read to the trierarch over
+a private local channel. The trierarch calls whoami as the session's ship.
+The action is denied with `this ship's owner is argo: nobody is asked` for an
+argo-owned ship, `permission questions for person-owned ships are not available
+yet` for a person-owned ship, or `could not read this ship's owner: nobody is
+asked` when the owner cannot be read, including while the trierarch is down.
+No question waits in a terminal. The result is one text content holding the
+JSON denial, and Claude Code records the action in `permission_denials`.
+The private channel and its authentication are described in
+[architecture.md](architecture.md#claude-code-permission-tool).

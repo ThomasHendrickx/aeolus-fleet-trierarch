@@ -520,3 +520,52 @@ func TestAnAccessKeepsTheIdentityItsSessionWasStartedUnderAcrossARestartOfThePro
 		t.Errorf("readAccess = %+v, %v, want the fleet and plugin ship it was written with", read, ok)
 	}
 }
+
+func TestThePermissionServerNeedsNoRemoteConfigurationAndReturnsOneTextDenial(t *testing.T) {
+	sessions := t.TempDir()
+	aSession(t, sessions, scout, os.Getpid(), Access{Token: "permission-token", Servers: []string{"aeolus-permissions"}})
+	proxy := Proxy{Sessions: sessions}
+	request := httptest.NewRequest(http.MethodPost, PathOf(scout, "aeolus-permissions"), strings.NewReader(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"ask","arguments":{"tool_name":"Bash","input":{"command":"touch denied"},"tool_use_id":"use-1"}}}`))
+	request.Header.Set("Authorization", "Bearer permission-token")
+	answer := httptest.NewRecorder()
+	proxy.ServeHTTP(answer, request)
+	var got struct {
+		Result struct {
+			Content []struct {
+				Type string
+				Text string
+			}
+		}
+	}
+	if err := json.Unmarshal(answer.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if answer.Code != 200 || len(got.Result.Content) != 1 || got.Result.Content[0].Type != "text" || got.Result.Content[0].Text != `{"behavior":"deny","message":"could not read this ship's owner: nobody is asked"}` {
+		t.Fatalf("answer = %d %s, want one JSON text denial", answer.Code, answer.Body.String())
+	}
+}
+
+func TestThePermissionServerRefusesAnotherShipStoppedSessionsAndBypassSessions(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		pid     int
+		servers []string
+		token   string
+	}{
+		{"another token", os.Getpid(), []string{"aeolus-permissions"}, "another-session"},
+		{"stopped session", stoppedPID, []string{"aeolus-permissions"}, "permission-token"},
+		{"bypass session", os.Getpid(), nil, "permission-token"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sessions := t.TempDir()
+			aSession(t, sessions, scout, test.pid, Access{Token: "permission-token", Servers: test.servers})
+			request := httptest.NewRequest(http.MethodPost, PathOf(scout, "aeolus-permissions"), strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ask"}}`))
+			request.Header.Set("Authorization", "Bearer "+test.token)
+			answer := httptest.NewRecorder()
+			(Proxy{Sessions: sessions}).ServeHTTP(answer, request)
+			if answer.Code != http.StatusUnauthorized || AuthorizesPermission(sessions, scout, test.token) {
+				t.Fatalf("access = %d, want unauthorized", answer.Code)
+			}
+		})
+	}
+}

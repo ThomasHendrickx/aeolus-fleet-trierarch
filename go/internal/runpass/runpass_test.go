@@ -1191,6 +1191,7 @@ func onKey(pass *aPass) *someLogins {
 
 func TestEachPassKeepsTheProxyRunningWhileAHarnessHoldsAKey(t *testing.T) {
 	pass := aRunPass(t)
+	pass.pass.Offered = []string{"codex"}
 	proxy := &aProxy{}
 	keys := someKeys{}
 	pass.pass.Proxy, pass.pass.Keys = proxy, keys
@@ -1206,6 +1207,7 @@ func TestEachPassKeepsTheProxyRunningWhileAHarnessHoldsAKey(t *testing.T) {
 
 func TestEachPassKeepsTheProxyRunningWhileAHarnessOffersAnMCPServer(t *testing.T) {
 	pass := aRunPass(t)
+	pass.pass.Offered = []string{"codex"}
 	proxy := &aProxy{}
 	offered := map[string][]string{"claude-code": {}, "codex": {}}
 	pass.pass.Proxy, pass.pass.Keys = proxy, someKeys{}
@@ -3203,5 +3205,15 @@ func TestAShipSavedBeforeTheShipFolderLayoutWithANewSettingsVersionHasItsOldWork
 	}
 	if entry := pass.store.state.Entries[scout]; entry.IsOldLayout || entry.Folder != scoutFolder || entry.SettingsVersion != 2 {
 		t.Errorf("entry %+v, want crewed with settings version 2 in a fresh ship folder", entry)
+	}
+}
+
+func TestClaudeCodeKeepsThePermissionProxyRunningWithoutKeysOrRemoteServers(t *testing.T) {
+	pass := aRunPass(t)
+	proxy := &aProxy{}
+	pass.pass.Proxy, pass.pass.Keys = proxy, nil
+	pass.run(t)
+	if !slices.Equal(proxy.kept, []bool{true}) {
+		t.Fatalf("kept = %v, want permission proxy running", proxy.kept)
 	}
 }
