@@ -778,3 +778,60 @@ func TestInContainersAShipCrewedFreshKeepsItsIdentityInTheHomeInItsShipsFolderAn
 		t.Fatalf("started with the ship's folder %q, want %q", got, entry.ShipFolder)
 	}
 }
+
+func TestASessionWithoutBypassGetsThePermissionToolAtTheProxy(t *testing.T) {
+	for _, flags := range [][]string{nil, {"--permission-mode", "default"}, {"--permission-mode=acceptEdits"}} {
+		t.Run(strings.Join(flags, " "), func(t *testing.T) {
+			harness, running, _ := aHarness(t)
+			harness.Settings = func() config.Harness { return config.Harness{Flags: flags} }
+			harness.ProxyURL = func() (string, bool) { return "http://127.0.0.1:41000", true }
+			harness.Sessions = t.TempDir()
+			if err := harness.Launch(anEntry(t), true, "launch-1"); err != nil {
+				t.Fatal(err)
+			}
+			started := running.started[0]
+			at := slices.Index(started.Command, "--permission-prompt-tool")
+			if at < 0 || at+1 >= len(started.Command) || started.Command[at+1] != "mcp__aeolus-permissions__ask" {
+				t.Fatalf("command %q, want the permission prompt tool", started.Command)
+			}
+			if started.Mcp == nil {
+				t.Fatal("no MCP configuration for the permission tool")
+			}
+			var configuration mcpConfig
+			if err := json.Unmarshal(started.Mcp.Config, &configuration); err != nil {
+				t.Fatal(err)
+			}
+			server, ok := configuration.McpServers["aeolus-permissions"]
+			if !ok || server.Type != "http" || server.URL != "http://127.0.0.1:41000/mcp/"+scout+"/aeolus-permissions" || server.Headers["Authorization"] != "Bearer "+started.Mcp.Access.Token {
+				t.Fatalf("permission server %+v, want authenticated server at the ship's proxy path", server)
+			}
+			if !slices.Contains(started.Mcp.Access.Servers, "aeolus-permissions") {
+				t.Fatal("permission server missing from access")
+			}
+		})
+	}
+}
+
+func TestABypassSessionGetsNeitherThePermissionServerNorThePromptFlag(t *testing.T) {
+	for _, flags := range [][]string{{"--dangerously-skip-permissions"}, {"--permission-mode", "bypassPermissions"}, {"--permission-mode=bypassPermissions"}} {
+		t.Run(strings.Join(flags, " "), func(t *testing.T) {
+			harness, running, _ := aHarness(t)
+			harness.Settings = func() config.Harness { return config.Harness{Flags: flags} }
+			harness.ProxyURL = func() (string, bool) { return "http://127.0.0.1:41000", true }
+			for _, servers := range [][]string{nil, {"company-graph"}} {
+				entry := anEntry(t)
+				entry.McpServers = servers
+				if err := harness.Launch(entry, true, "launch-1"); err != nil {
+					t.Fatal(err)
+				}
+				started := running.started[len(running.started)-1]
+				if slices.Contains(started.Command, "--permission-prompt-tool") {
+					t.Fatalf("bypass command %q names a permission tool", started.Command)
+				}
+				if started.Mcp != nil && slices.Contains(started.Mcp.Access.Servers, "aeolus-permissions") {
+					t.Fatal("bypass session gets the permission server")
+				}
+			}
+		})
+	}
+}
