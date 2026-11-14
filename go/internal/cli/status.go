@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
@@ -36,6 +37,7 @@ type StatusReport struct {
 	Repositories     []string       `json:"repositories"`
 	Service          service.Status `json:"service"`
 	ServiceLastError string         `json:"serviceLastError,omitempty"`
+	ServiceReadiness string         `json:"serviceReadiness,omitempty"`
 	Fleet            StatusFleet    `json:"fleet"`
 	Caps             StatusCaps     `json:"caps"`
 	Entries          map[string]int `json:"entries"`
@@ -147,6 +149,11 @@ func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
 	// Only the service's own process counts: a file left by an earlier process, or by a run outside the service, says nothing of it.
 	if running, isRead := readRunning(at.Running); manager.IsRunning && isRead && running.PID == manager.PID {
 		report.RunningVersion = running.Version
+		if !running.FirstReportAccepted {
+			report.ServiceReadiness = "first report not accepted"
+		} else if started, err := time.Parse(time.RFC3339, manager.Since); err == nil && time.Since(started) < 10*time.Second {
+			report.ServiceReadiness = "waiting for one process to run for 10 seconds"
+		}
 	}
 	return answer{data: report, text: describeStatus(report, look)}, nil
 }
@@ -193,7 +200,7 @@ func reencode(value any, into any) bool {
 	return err == nil && json.Unmarshal(text, into) == nil
 }
 
-func describeService(manager service.Status, lastError string, look style.Style) string {
+func describeService(manager service.Status, lastError, readiness string, look style.Style) string {
 	if !manager.IsInstalled {
 		return look.Tone(style.Bad, "not installed (aeolus-trierarch install)")
 	}
@@ -213,6 +220,9 @@ func describeService(manager service.Status, lastError string, look style.Style)
 	}
 	if manager.Since != "" {
 		parts = append(parts, "since "+manager.Since)
+	}
+	if readiness != "" {
+		parts = append(parts, look.Tone(style.Busy, readiness))
 	}
 	return strings.Join(parts, ", ")
 }
@@ -304,7 +314,7 @@ func describeStatus(report StatusReport, look style.Style) string {
 		line("Aeolus Fleet plugin", describePlugins(report.Plugins, report.HarnessOrder, look)),
 		line("Models confirmed", describeModels(report.ModelsConfirmedAt, report.HarnessOrder)),
 		line("Repositories", or(len(report.Repositories) == 0, "none", func() string { return strings.Join(report.Repositories, ", ") })),
-		line("Service", describeService(report.Service, report.ServiceLastError, look)),
+		line("Service", describeService(report.Service, report.ServiceLastError, report.ServiceReadiness, look)),
 		line("Fleet", describeFleet(report.Fleet, look)),
 		line("Caps", fmt.Sprintf("%d of %d ships crewed here, %d of %d sessions running", report.Caps.Ships.Used, report.Caps.Ships.Cap, report.Caps.Running.Used, report.Caps.Running.Cap)),
 		line("Last pass", lastPass),
