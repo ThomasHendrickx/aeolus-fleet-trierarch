@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
@@ -126,6 +127,7 @@ func (c *aClaudeCode) CompleteOnboarding() error {
 }
 
 type aMachine struct {
+	elapsed    int
 	init       Init
 	fleet      *aFleet
 	service    *aServiceManager
@@ -152,7 +154,8 @@ func newMachine(t *testing.T) *aMachine {
 		Plugins:               machine.plugins,
 		Register:              machine.fleet.register,
 		IsLeaseHeld:           machine.fleet.isLeaseHeld,
-		Sleep:                 func() {},
+		Sleep:                 func() { machine.elapsed++ },
+		Now:                   func() time.Time { return time.Unix(int64(machine.elapsed), 0) },
 		Detect: func([]string, detection.By) (detection.Detected, error) {
 			return detection.Detected{}, nil
 		},
@@ -469,7 +472,7 @@ func TestInitFailsWhenTheServiceRunsAnotherVersion(t *testing.T) {
 func TestInitWaitsForOneProcessForTenSeconds(t *testing.T) {
 	machine := newMachine(t)
 	waits := 0
-	machine.init.Sleep = func() { waits++ }
+	machine.init.Sleep = func() { waits++; machine.elapsed++ }
 	if _, err := machine.init.Run(setupLine()); err != nil {
 		t.Fatal(err)
 	}
@@ -480,7 +483,7 @@ func TestInitWaitsForOneProcessForTenSeconds(t *testing.T) {
 
 func TestInitFailsWhenTheServiceCrashesDuringTheWait(t *testing.T) {
 	machine := newMachine(t)
-	machine.init.Sleep = func() { machine.service.running = false }
+	machine.init.Sleep = func() { machine.elapsed++; machine.service.running = false }
 	_, err := machine.init.Run(setupLine())
 	if err == nil {
 		t.Error("Run() succeeded after the service crashed")
@@ -490,6 +493,7 @@ func TestInitFailsWhenTheServiceCrashesDuringTheWait(t *testing.T) {
 func TestInitFailsWhenTheLeaseEndsDuringTheWait(t *testing.T) {
 	machine := newMachine(t)
 	machine.init.Sleep = func() {
+		machine.elapsed++
 		for token := range machine.fleet.held {
 			machine.fleet.held[token] = false
 		}
@@ -537,6 +541,7 @@ func TestInitRestartsTheTenSecondWaitForANewProcess(t *testing.T) {
 	machine := newMachine(t)
 	waits := 0
 	machine.init.Sleep = func() {
+		machine.elapsed++
 		waits++
 		if waits == 5 {
 			machine.service.override = &service.Status{File: "/unit", IsInstalled: true, IsRunning: true, PID: 42, Restarts: 1}
@@ -555,6 +560,7 @@ func TestInitStopsAfterThirtySecondsOfRestarts(t *testing.T) {
 	machine := newMachine(t)
 	waits := 0
 	machine.init.Sleep = func() {
+		machine.elapsed++
 		waits++
 		pid := 41 + waits/5
 		machine.service.override = &service.Status{File: "/unit", IsInstalled: true, IsRunning: true, PID: pid, Restarts: waits / 5}

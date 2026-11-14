@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
@@ -110,6 +111,7 @@ type Init struct {
 	IsLeaseHeld func(fleetURL string, crewToken string) (bool, error)
 	// Sleep waits between reads of running.json; a test passes one that does not wait.
 	Sleep   func()
+	Now     func() time.Time
 	LastLog func() string
 	// Detect detects what the harnesses given offer, as by says, and keeps it in detected.json (#365).
 	Detect func(harnesses []string, by detection.By) (detection.Detected, error)
@@ -444,48 +446,69 @@ func (i Init) serviceError(err error) error {
 }
 
 func (i Init) waitForService() error {
-	status, err := i.Service.Status()
-	if err != nil {
-		return err
+	now := i.Now
+	if now == nil {
+		now = time.Now
 	}
-	if !status.IsRunning || status.PID <= 0 {
-		return errors.New("service is not running")
-	}
-	pid := status.PID
-	for second := 0; second <= 10; second++ {
-		if second > 0 {
-			i.Sleep()
-		}
-		status, err = i.Service.Status()
+	start := now()
+	var stableSince time.Time
+	var pid, lastPID, changes, baseline int
+	first := true
+	var reason error = errors.New("service is not running")
+	for {
+		status, err := i.Service.Status()
 		if err != nil {
 			return err
 		}
-		if !status.IsRunning || status.PID != pid {
-			return errors.New("service did not keep one process for 10 seconds")
+		at := now()
+		if first {
+			baseline = status.Restarts
+			first = false
 		}
+		if !status.IsRunning || status.PID <= 0 {
+			pid = 0
+			reason = errors.New("service is not running")
+		} else {
+			if status.PID != pid {
+				if lastPID != 0 && status.PID != lastPID {
+					changes++
+				}
+				pid, lastPID, stableSince = status.PID, status.PID, at
+			}
+			running, ok := readRunning(i.Paths.Running)
+			switch {
+			case !ok || running.PID != pid:
+				reason = errors.New("running.json does not name the service process")
+			case running.Version != Version:
+				reason = fmt.Errorf("service version %s does not match %s", running.Version, Version)
+			case !running.FirstReportAccepted:
+				reason = errors.New("the first report was not accepted")
+			case at.Sub(stableSince) < 10*time.Second:
+				reason = errors.New("service did not keep one process for 10 seconds")
+			default:
+				kept, err := crew.Read(i.Paths.CrewToken)
+				if err != nil {
+					return err
+				}
+				held, err := i.IsLeaseHeld(kept.FleetURL, kept.CrewToken)
+				if err != nil {
+					return fmt.Errorf("check lease: %w", err)
+				}
+				if !held {
+					return errors.New("lease is not valid")
+				}
+				return nil
+			}
+		}
+		if at.Sub(start) >= 30*time.Second {
+			restarts := max(changes, status.Restarts-baseline)
+			if restarts > 0 {
+				return fmt.Errorf("service restarted %d times in 30 seconds: %w", restarts, reason)
+			}
+			return reason
+		}
+		i.Sleep()
 	}
-	running, ok := readRunning(i.Paths.Running)
-	if !ok || running.PID != pid {
-		return errors.New("running.json does not name the service process")
-	}
-	if running.Version != Version {
-		return fmt.Errorf("service version %s does not match %s", running.Version, Version)
-	}
-	if !running.FirstReportAccepted {
-		return errors.New("the first report was not accepted")
-	}
-	kept, err := crew.Read(i.Paths.CrewToken)
-	if err != nil {
-		return err
-	}
-	held, err := i.IsLeaseHeld(kept.FleetURL, kept.CrewToken)
-	if err != nil {
-		return fmt.Errorf("check lease: %w", err)
-	}
-	if !held {
-		return errors.New("lease is not valid")
-	}
-	return nil
 }
 
 // installPlugins installs the aeolus-fleet plugin of each picked harness at the tag of this version, leaving one already at it as it is. It runs before anything is registered, so a failure leaves the fleet as it was.

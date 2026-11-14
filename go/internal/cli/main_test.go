@@ -78,6 +78,7 @@ func aMain(t *testing.T) (Machine, *anInstalledService, *aFleet) {
 		_ = os.WriteFile(at.Running, []byte(`{"pid":41,"version":"`+Version+`","firstReportAccepted":true}`), 0o644)
 	}}}
 	fleet := &aFleet{held: map[string]bool{}}
+	elapsed := 0
 	return Machine{
 		Environ:               []string{"HOME=" + home},
 		HomeDirectory:         home,
@@ -94,7 +95,8 @@ func aMain(t *testing.T) (Machine, *anInstalledService, *aFleet) {
 		Service:               func(paths.Paths) ServiceManager { return installed },
 		Register:              fleet.register,
 		IsLeaseHeld:           fleet.isLeaseHeld,
-		Sleep:                 func() {},
+		Sleep:                 func() { elapsed++ },
+		Now:                   func() time.Time { return time.Unix(int64(elapsed), 0) },
 		Stop:                  make(chan struct{}),
 		CoreVersionRefusal:    func(string) string { return "" },
 		ContainerHost:         func(string) container.Host { return aRuntime{} },
@@ -595,7 +597,8 @@ func TestUpgradeAnswersItsReportAndExitsOneWhenThePluginIsNotUpdated(t *testing.
 
 func TestInitSaysTheLastLogLineWhenTheServiceCrashes(t *testing.T) {
 	machine, manager, _ := aMain(t)
-	machine.Sleep = func() { manager.running = false }
+	sleep := machine.Sleep
+	machine.Sleep = func() { sleep(); manager.running = false }
 	machine.ServiceLog = func(paths.Paths) servicelog.Log {
 		return servicelog.Log{Tail: func(int) ([]string, error) { return []string{"plugin missing"}, nil }}
 	}
