@@ -3,6 +3,7 @@ package permissions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"unicode/utf16"
 )
@@ -43,10 +44,14 @@ type Service struct {
 	Reports   Reports
 	Clock     Clock
 	Log       func(string)
+	// Waits is shared by every ask of this process, so overlapping asks on one
+	// ship restore one report; nil coordinates this call alone.
+	Waits *ReportWaits
 }
 
-// Await reads the owner for this call, reports its wait and restores the report
-// on every end, unless another report has replaced it meanwhile.
+// Await reads the owner for this call, reports its wait and, when the ship's
+// last open ask ends, restores the report from before the first, unless
+// another report has replaced the waiting one meanwhile.
 func (s Service) Await(ctx context.Context, ship, title string) Decision {
 	return s.Ask(ctx, ship, Request{Title: title})
 }
@@ -95,38 +100,24 @@ func (s Service) Ask(ctx context.Context, ship string, request Request) Decision
 		return Wait(ctx, s.Clock)
 	}
 
-	before, err := s.Reports.ReadReport(ctx, ship)
-	if err != nil {
-		s.logFailure(err)
-		return wait()
+	waits := s.Waits
+	if waits == nil {
+		waits = &ReportWaits{}
 	}
-	waiting := Report{State: "working", Note: waitNote(title)}
-	if ctx.Err() != nil {
+	endWait, err := waits.begin(ctx, s.Reports, ship, Report{State: "working", Note: waitNote(title)})
+	if errors.Is(err, errAskCancelled) {
 		return Decision{Behavior: "deny", Message: "permission call cancelled"}
 	}
-	if err = s.Reports.WriteReport(context.WithoutCancel(ctx), ship, waiting); err != nil {
-		s.logFailure(err)
-		return wait()
-	}
-	current, err := s.Reports.ReadReport(context.WithoutCancel(ctx), ship)
 	if err != nil {
 		s.logFailure(err)
 		return wait()
 	}
-	if current.State == waiting.State && current.Note == waiting.Note {
+	if endWait != nil {
 		defer func() {
 			// The stream can already be gone; restoration still has a bounded adapter
 			// request and never inherits the cancelled tool request.
-			restore := context.WithoutCancel(ctx)
-			last, err := s.Reports.ReadReport(restore, ship)
-			if err != nil {
+			if err := endWait(context.WithoutCancel(ctx)); err != nil {
 				s.logFailure(err)
-				return
-			}
-			if last == current {
-				if err = s.Reports.WriteReport(restore, ship, before); err != nil {
-					s.logFailure(err)
-				}
 			}
 		}()
 	}
