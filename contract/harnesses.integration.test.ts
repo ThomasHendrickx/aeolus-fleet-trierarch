@@ -26,7 +26,7 @@ afterEach(async ({ task }) => {
 async function aMachineWith(other: OtherHarness): Promise<void> {
   fleet = await aFleet();
   machine = await aMachine({ others: [other] });
-  await aCrewingMachine({ fleet, machine });
+  await aCrewingMachine({ fleet, machine, harnesses: ['claude-code', other] });
 }
 
 /** Crews scout with the harness and waits until the trierarch lists it running: its session's starts. */
@@ -40,7 +40,7 @@ async function aRunningScoutOn(harness: string) {
 const configurationSchema = z.looseObject({ harnesses: z.record(z.string(), z.unknown()) });
 
 describe('Codex', () => {
-  it('is offered by init where Codex is installed and signed in', async () => {
+  it('is offered by init when picked, installed and signed in', async () => {
     await aMachineWith('codex');
 
     const configuration = configurationSchema.parse(JSON.parse(readFileSync(join(machine.trierarchHome, 'config.json'), 'utf8')));

@@ -107,9 +107,19 @@ func main() {
 		ClaudeCode: func(homeDirectory string, configDirectory string) cli.ClaudeCode {
 			return claudecode.Of(homeDirectory, configDirectory)
 		},
-		IsCodexInstalled: codex.IsInstalled,
-		IsCodexSignedIn:  codex.IsSignedIn,
-		Codex:            func() cli.Codex { return codex.AppServer{Program: "codex", Version: cli.Version} },
+		IsCodexInstalled:   codex.IsInstalled,
+		IsCodexSignedIn:    codex.IsSignedIn,
+		IsCopilotInstalled: func() bool { _, err := exec.LookPath("copilot"); return err == nil },
+		IsCursorInstalled: func() bool {
+			_, err := exec.LookPath("cursor-agent")
+			if err == nil {
+				return true
+			}
+			_, err = exec.LookPath("agent")
+			return err == nil
+		},
+		OpenTerminal: func() (io.ReadWriteCloser, error) { return os.OpenFile("/dev/tty", os.O_RDWR, 0) },
+		Codex:        func() cli.Codex { return codex.AppServer{Program: "codex", Version: cli.Version} },
 		Service: func(at paths.Paths) cli.ServiceManager {
 			if runtime.GOOS == "darwin" {
 				return service.Launchd{HomeDirectory: home, Logs: at.Logs, Program: program, Environment: service.Environment(environ), UID: os.Getuid(), Exec: service.Run, Sleep: func() { time.Sleep(time.Second) }}

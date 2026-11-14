@@ -31,7 +31,7 @@ async function aMachineWith(others: readonly OtherHarness[], before: (machine: M
   machine = await aMachine({ others });
   before(machine);
   plugin = await fleet.commission('trierarch-plugin');
-  await aCrewingMachine({ fleet, machine, pluginShip: plugin });
+  await aCrewingMachine({ fleet, machine, pluginShip: plugin, harnesses: ['claude-code', ...others] });
 }
 
 /** Crews scout with the harness and waits until the trierarch lists it running. */

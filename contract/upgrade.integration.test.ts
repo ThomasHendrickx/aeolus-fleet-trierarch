@@ -24,7 +24,7 @@ function onACrewingMachine(others: readonly OtherHarness[] = []): void {
   beforeEach(async () => {
     fleet = await aFleet();
     machine = await aMachine({ others });
-    await aCrewingMachine({ fleet, machine });
+    await aCrewingMachine({ fleet, machine, harnesses: ['claude-code', ...others] });
     version = z.object({ version: z.string() }).parse(JSON.parse((await machine.trierarch(['--version', '--json'])).stdout)).version;
   });
 }

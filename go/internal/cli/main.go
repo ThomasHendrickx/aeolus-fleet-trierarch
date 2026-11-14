@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"runtime"
@@ -63,9 +64,12 @@ type Machine struct {
 	IsClaudeCodeSignedIn  func() bool
 	IsSsMissing           func() bool
 	// ClaudeCode is Claude Code's setup for the home folder and CLAUDE_CONFIG_DIR.
-	ClaudeCode       func(homeDirectory string, configDirectory string) ClaudeCode
-	IsCodexInstalled func() bool
-	IsCodexSignedIn  func() bool
+	ClaudeCode         func(homeDirectory string, configDirectory string) ClaudeCode
+	IsCodexInstalled   func() bool
+	IsCodexSignedIn    func() bool
+	IsCopilotInstalled func() bool
+	IsCursorInstalled  func() bool
+	OpenTerminal       func() (io.ReadWriteCloser, error)
 	// Codex is Codex's setup, through its app server.
 	Codex       func() Codex
 	Service     func(at paths.Paths) ServiceManager
@@ -120,7 +124,7 @@ type Machine struct {
 
 const usage = `Usage: aeolus-trierarch <command>
 
-  init --fleet-url <url> --ship-id <id> --secret <secret> [--plugin-ship-id <id>] [--yes]
+  init --fleet-url <url> --ship-id <id> --secret <secret> [--plugin-ship-id <id>] [--harnesses <list>] [--unattended <list>] [--max-ships <n>] [--max-running <n>] [--yes]
                  set this machine up from the trierarch plugin's setup line
   status         how the trierarch stands on this machine
   list           the ships it crews
@@ -156,7 +160,7 @@ const usage = `Usage: aeolus-trierarch <command>
   --json         answer as JSON
   --config <path> the configuration (AEOLUS_TRIERARCH_CONFIG)`
 
-var valueFlags = []string{"--fleet-url", "--ship-id", "--secret", "--plugin-ship-id", "--config", "--default", "--ship", "--lines"}
+var valueFlags = []string{"--fleet-url", "--ship-id", "--secret", "--plugin-ship-id", "--config", "--default", "--ship", "--lines", "--harnesses", "--unattended", "--max-ships", "--max-running"}
 var switchFlags = []string{"--json", "--yes", "--version", "--api-key", "--remove-key", "--check", "--no-load", "--follow"}
 
 type parsed struct {
@@ -247,6 +251,9 @@ func Main(args []string, machine Machine) (string, int) {
 				ClaudeCode:            machine.ClaudeCode(machine.HomeDirectory, variable(machine.Environ, "CLAUDE_CONFIG_DIR")),
 				IsCodexInstalled:      machine.IsCodexInstalled(),
 				IsCodexSignedIn:       machine.IsCodexSignedIn(),
+				IsCopilotInstalled:    optionalCheck(machine.IsCopilotInstalled),
+				IsCursorInstalled:     optionalCheck(machine.IsCursorInstalled),
+				OpenTerminal:          machine.OpenTerminal,
 				Codex:                 machine.Codex(),
 				Service:               machine.Service(at),
 				Register:              machine.Register,
@@ -261,6 +268,10 @@ func Main(args []string, machine Machine) (string, int) {
 				Secret:       command.values["--secret"],
 				PluginShipID: command.values["--plugin-ship-id"],
 				IsYes:        command.switches["--yes"],
+				Harnesses:    listFlag(command.values, "--harnesses"),
+				Unattended:   listFlag(command.values, "--unattended"),
+				MaxShips:     command.values["--max-ships"],
+				MaxRunning:   command.values["--max-running"],
 			})
 			return answer{data: report, text: strings.Join(report.Said, "\n")}, err
 		},
@@ -576,4 +587,21 @@ func pause(ctx context.Context, wait time.Duration) {
 	case <-ctx.Done():
 	case <-time.After(wait):
 	}
+}
+
+func optionalCheck(check func() bool) bool { return check != nil && check() }
+
+func listFlag(values map[string]string, name string) []string {
+	text, ok := values[name]
+	if !ok {
+		return nil
+	}
+	if strings.TrimSpace(text) == "" {
+		return []string{}
+	}
+	names := strings.Split(text, ",")
+	for index := range names {
+		names[index] = strings.TrimSpace(names[index])
+	}
+	return names
 }

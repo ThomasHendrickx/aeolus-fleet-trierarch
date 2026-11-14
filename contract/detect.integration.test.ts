@@ -5,7 +5,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
-import { aCrewingMachine, listedEntryOf, REPOSITORY, sessionOf } from './support/crewing.js';
+import { aCrewingMachine, setupLineOf, listedEntryOf, REPOSITORY, sessionOf } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, CLAUDE_CODE_VERSION, type Machine, type OtherHarness } from './support/machine.js';
 
@@ -35,7 +35,7 @@ afterEach(async ({ task }) => {
 async function aCrewing(at: { others?: readonly OtherHarness[] } = {}): Promise<void> {
   fleet = await aFleet();
   machine = await aMachine(at);
-  await aCrewingMachine({ fleet, machine });
+  await aCrewingMachine({ fleet, machine, harnesses: ['claude-code', ...(at.others ?? []).filter((harness) => harness === 'codex')] });
 }
 
 const detectedFile = () => join(machine.trierarchHome, 'detected.json');
@@ -116,7 +116,7 @@ describe('init', () => {
     fleet = await aFleet();
     machine = await aMachine();
 
-    const init = await machine.trierarch(['init', '--fleet-url', fleet.url, '--ship-id', fleet.trierarchShip.shipId, '--secret', fleet.trierarchShip.secret, '--yes']);
+    const init = await machine.trierarch(setupLineOf(fleet));
 
     expect(init.status, init.stdout + init.stderr).toBe(0);
     expect(init.stdout).toMatch(new RegExp(`claude-code ${CLAUDE_CODE_VERSION}: model claude-sonnet-5, claude-opus-5; effort low, medium, high; models confirmed \\d{4}-\\d{2}-\\d{2}T`));

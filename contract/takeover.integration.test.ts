@@ -81,7 +81,7 @@ async function takenOver(from: readonly string[], to: readonly string[]): Promis
   await expect.poll(() => sessionOf(machine, 'scout').turns().length, { timeout: CREWED_WITHIN_MS }).toBeGreaterThan(0);
   const before = holdPidOf(shipId);
 
-  const moved = await machine.trierarch(setupLineOf(fleet), { as: to });
+  const moved = await machine.trierarch(setupLineOf(fleet, { as: to }), { as: to });
   const restarted = await machine.trierarch(['restart'], { as: to });
 
   expect(moved.status, moved.stdout + moved.stderr).toBe(0);

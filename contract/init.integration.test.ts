@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
+import { setupLineOf } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
 
@@ -27,7 +28,7 @@ afterEach(async ({ task }) => {
 
 /** The setup line the trierarch plugin gives, with --yes: it asks nothing. */
 function setupLine(): string[] {
-  return ['init', '--fleet-url', fleet.url, '--ship-id', fleet.trierarchShip.shipId, '--secret', fleet.trierarchShip.secret, '--yes'];
+  return setupLineOf(fleet);
 }
 
 const OWNER_ONLY = 0o600;
