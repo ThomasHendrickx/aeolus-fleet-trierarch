@@ -93,6 +93,7 @@ func TestInitWizardUsesTerminalAndNeverDefaultsAHarness(t *testing.T) {
 	f := setupLine()
 	f.Harnesses = nil
 	f.IsYes = false
+	f.IsNoRepositories = true
 	if _, err := m.init.Run(f); err != nil {
 		t.Fatal(err)
 	}
@@ -146,6 +147,7 @@ func TestInitCopilotNeedsOnlyInstallationAndReportsUncheckedSignIn(t *testing.T)
 	f := setupLine()
 	f.Harnesses = []string{"copilot"}
 	f.IsYes = false
+	f.IsNoRepositories = true
 	report, err := m.init.Run(f)
 	if err != nil {
 		t.Fatal(err)
@@ -185,6 +187,7 @@ func TestInitRerunStartsWithCurrentAnswersAndSavesOnlyChanges(t *testing.T) {
 	f = setupLine()
 	f.Harnesses = nil
 	f.IsYes = false
+	f.IsNoRepositories = true
 	report, err := m.init.Run(f)
 	if err != nil {
 		t.Fatal(err)
@@ -216,6 +219,7 @@ func TestInitRerunBlankAnswersKeepCurrentHarnessOptions(t *testing.T) {
 	f.Harnesses = nil
 	f.Unattended = nil
 	f.IsYes = false
+	f.IsNoRepositories = true
 	report, err := m.init.Run(f)
 	if err != nil {
 		t.Fatal(err)
