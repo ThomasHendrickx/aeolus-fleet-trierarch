@@ -646,3 +646,19 @@ func TestStatusShowsWhenTheProcessHasNotRunForTenSeconds(t *testing.T) {
 		t.Errorf("status = %q, %d; want the ten-second wait", output, code)
 	}
 }
+
+func TestStatusShowsTheLoopWhileItsLatestProcessIsRunning(t *testing.T) {
+	machine, manager, _ := aMain(t)
+	if output, code := Main(setupWords(), machine); code != 0 {
+		t.Fatalf("init = %q, %d", output, code)
+	}
+	manager.override = &service.Status{File: "/unit", IsInstalled: true, IsRunning: true, PID: 41, Restarts: 6}
+	machine.StartedAt = func(int) string { return time.Now().UTC().Format(time.RFC3339) }
+	machine.ServiceLog = func(paths.Paths) servicelog.Log {
+		return servicelog.Log{Tail: func(int) ([]string, error) { return []string{"plugin missing"}, nil }}
+	}
+	output, code := Main([]string{"status"}, machine)
+	if code != 0 || !strings.Contains(output, "restarted 6") || !strings.Contains(output, "plugin missing") {
+		t.Errorf("status = %q, %d; want the loop and last error", output, code)
+	}
+}
