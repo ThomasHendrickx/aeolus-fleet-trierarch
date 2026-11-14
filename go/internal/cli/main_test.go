@@ -674,3 +674,15 @@ func TestInitSaysTheLastLogLineWhenTheServiceFailsToStart(t *testing.T) {
 		t.Errorf("init = %q, %d; want the failure and last log line", output, code)
 	}
 }
+
+func TestStatusShowsWhenTheProcessAgeIsUnknown(t *testing.T) {
+	machine, _, _ := aMain(t)
+	if output, code := Main(setupWords(), machine); code != 0 {
+		t.Fatalf("init = %q, %d", output, code)
+	}
+	machine.StartedAt = func(int) string { return "" }
+	output, code := Main([]string{"status"}, machine)
+	if code != 0 || !strings.Contains(output, "cannot determine") {
+		t.Errorf("status = %q, %d; want the unknown process age", output, code)
+	}
+}
