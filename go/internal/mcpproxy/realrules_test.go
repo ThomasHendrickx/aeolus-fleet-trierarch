@@ -45,8 +45,10 @@ func TestARealClaudeCodeBashRedirectionAsksAgainDespiteTheSessionRule(t *testing
 
 func realSessionRule(t *testing.T, tool string, wantAsks int32, names ...string) {
 	name := "a.txt"
+	otherName := "b.txt"
 	if len(names) > 0 {
 		name = names[0]
+		otherName = strings.Replace(name, "?", "Q", 1)
 	}
 	if os.Getenv("AEOLUS_TEST_CLAUDE_CODE") != "1" {
 		t.Skip("runs the installed Claude Code: AEOLUS_TEST_CLAUDE_CODE=1")
@@ -76,7 +78,7 @@ func realSessionRule(t *testing.T, tool string, wantAsks int32, names ...string)
 		}
 		path := filepath.Join(root, name)
 		if call == 3 {
-			path = filepath.Join(root, "b.txt")
+			path = filepath.Join(root, otherName)
 		}
 		input := map[string]any{"file_path": path, "content": fmt.Sprint(call)}
 		if tool == "Bash" {
@@ -126,7 +128,7 @@ func realSessionRule(t *testing.T, tool string, wantAsks int32, names ...string)
 		if got := owner.asks.Load() - before; got != wantAsks {
 			t.Fatalf("permission asks tool=%s restart=%v: got %d want %d\n%s", tool, restart, got, wantAsks, output)
 		}
-		if _, err := os.Stat(filepath.Join(root, "b.txt")); err != nil {
+		if _, err := os.Stat(filepath.Join(root, otherName)); err != nil {
 			t.Fatalf("last allowed action did not run: %v\n%s", err, output)
 		}
 	}
