@@ -80,8 +80,8 @@ func TestWhoamiIsReadAsTheShipAndUnreadableOwnersFailClosed(t *testing.T) {
 		status         int
 		person, failed bool
 	}{
-		{"argo", `{"ownerShipId":null}`, 200, false, false},
-		{"person", `{"ownerShipId":"shp_01m6jyczpnpp5c0vxh54c966cz"}`, 200, true, false},
+		{"argo", `{"ownerShipId":"shp_01m6jyczpnpp5c0vxh54c966cz","ownerName":"argo"}`, 200, false, false},
+		{"person", `{"ownerShipId":"shp_01m6jyczpnpp5c0vxh54c966cz","ownerName":"thomas"}`, 200, true, false},
 		{"missing owner", `{}`, 200, false, true},
 		{"invalid owner", `{"ownerShipId":"not-a-ship"}`, 200, false, true},
 		{"malformed", `{`, 200, false, true},

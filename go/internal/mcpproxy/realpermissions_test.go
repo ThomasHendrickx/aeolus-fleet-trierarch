@@ -34,7 +34,7 @@ func TestARealClaudeCodeSessionHidesThePermissionToolAndListsTheArgoDenial(t *te
 		}
 		reads.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"ownerShipId":null,"ownerName":null}`)
+		fmt.Fprint(w, `{"ownerShipId":"shp_01m6jyczpnpp5c0vxh54c966cz","ownerName":"argo"}`)
 	}))
 	defer fleet.Close()
 	channelFolder, err := os.MkdirTemp("", "permissions-")
