@@ -123,6 +123,7 @@ type Init struct {
 	Plugins     Plugins
 	Register    func(fleetURL string, shipID string, secret string) (string, error)
 	IsLeaseHeld func(fleetURL string, crewToken string) (bool, error)
+	ShipName    func(fleetURL string, crewToken string) (string, error)
 	// Sleep waits between reads of running.json; a test passes one that does not wait.
 	Sleep   func()
 	Now     func() time.Time
@@ -252,7 +253,7 @@ func (i Init) Run(flags Flags) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	repositories, err := i.selectRepositories(context.Background(), flags, current, reader, terminal)
+	repositories, cloned, err := i.selectRepositories(context.Background(), flags, current, reader, terminal)
 	if err != nil {
 		return Report{}, err
 	}
@@ -431,7 +432,7 @@ func (i Init) Run(flags Flags) (Report, error) {
 	case !status.IsInstalled:
 		if err := i.Service.Install(); err != nil {
 			err = i.serviceError(err)
-			i.closingReport(&report, configuration, detected, 0, err)
+			i.closingReport(&report, configuration, detected, cloned, 0, err)
 			return report, err
 		}
 		report.Service = "installed"
@@ -441,7 +442,7 @@ func (i Init) Run(flags Flags) (Report, error) {
 		}
 		if err := i.Service.Restart(); err != nil {
 			err = i.serviceError(err)
-			i.closingReport(&report, configuration, detected, 0, err)
+			i.closingReport(&report, configuration, detected, cloned, 0, err)
 			return report, err
 		}
 		report.Service = "restarted"
@@ -452,11 +453,11 @@ func (i Init) Run(flags Flags) (Report, error) {
 	}
 	if err := i.waitForService(); err != nil {
 		err = i.serviceError(err)
-		i.closingReport(&report, configuration, detected, 0, err)
+		i.closingReport(&report, configuration, detected, cloned, 0, err)
 		return report, err
 	}
 	status, _ = i.Service.Status()
-	i.closingReport(&report, configuration, detected, status.PID, nil)
+	i.closingReport(&report, configuration, detected, cloned, status.PID, nil)
 	return report, nil
 }
 

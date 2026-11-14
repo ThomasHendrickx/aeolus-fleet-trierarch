@@ -132,6 +132,7 @@ func main() {
 		IsLeaseHeld: fleet.IsLeaseHeld,
 		Sleep:       func() { time.Sleep(time.Second) },
 		Stop:        stop,
+		ShipName:    func(url, token string) (string, error) { return (fleet.Client{URL: url, CrewToken: token}).Name() },
 		CoreVersionRefusal: func(fleetURL string) string {
 			return fleet.CoreVersionRefusal(fleetURL, cli.Version, fleet.MinimumCoreVersion)
 		},

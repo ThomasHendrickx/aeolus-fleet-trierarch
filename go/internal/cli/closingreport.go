@@ -9,10 +9,11 @@ import (
 	"strings"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
 )
 
-func (i Init) closingReport(report *Report, configuration config.Configuration, detected detection.Detected, pid int, serviceErr error) {
+func (i Init) closingReport(report *Report, configuration config.Configuration, detected detection.Detected, cloned map[string]bool, pid int, serviceErr error) {
 	add := func(part, name, status, detail, fix string) {
 		report.Checks = append(report.Checks, Check{part, name, status, detail, fix})
 	}
@@ -58,10 +59,18 @@ func (i Init) closingReport(report *Report, configuration config.Configuration, 
 		detail = "added to " + strings.Join(loginFiles, " and ") + " (this terminal: open a new one)"
 	}
 	add("onPath", "On PATH", status, detail, fix)
+	shipName := report.ShipID
+	if i.ShipName != nil {
+		if kept, err := crew.Read(i.Paths.CrewToken); err == nil {
+			if name, err := i.ShipName(kept.FleetURL, kept.CrewToken); err == nil && name != "" {
+				shipName = name
+			}
+		}
+	}
 	if serviceErr == nil {
-		add("fleet", "Fleet", "ok", report.ShipID+" registered, lease valid, first report accepted", "")
+		add("fleet", "Fleet", "ok", shipName+" registered, lease valid, first report accepted", "")
 	} else {
-		add("fleet", "Fleet", "warning", report.ShipID+" registered; lease and first report not confirmed", "fix the service, then run the same line again")
+		add("fleet", "Fleet", "warning", shipName+" registered; lease and first report not confirmed", "fix the service, then run the same line again")
 	}
 	for _, state := range i.harnessStates() {
 		harness, ok := configuration.Harnesses[state.name]
@@ -93,7 +102,12 @@ func (i Init) closingReport(report *Report, configuration config.Configuration, 
 	}
 	var repositories []string
 	for _, name := range slices.Sorted(maps.Keys(configuration.Repositories)) {
-		repositories = append(repositories, fmt.Sprintf("%s (%s)", name, configuration.Repositories[name].Path))
+		path := configuration.Repositories[name].Path
+		if cloned[name] {
+			repositories = append(repositories, fmt.Sprintf("%s (cloned to %s)", name, path))
+		} else {
+			repositories = append(repositories, fmt.Sprintf("%s (%s)", name, path))
+		}
 	}
 	status, fix = "ok", ""
 	if len(repositories) == 0 {
@@ -107,7 +121,7 @@ func (i Init) closingReport(report *Report, configuration config.Configuration, 
 	}
 	add("service", "Service", status, detail, fix)
 	add("caps", "Caps", "ok", fmt.Sprintf("%d ships, %d running", configuration.Caps.Ships, configuration.Caps.Running), "")
-	report.Said = []string{fmt.Sprintf("aeolus-trierarch %s: %s joined %s", Version, report.ShipID, report.FleetURL), ""}
+	report.Said = []string{fmt.Sprintf("aeolus-trierarch %s: %s joined %s", Version, shipName, report.FleetURL), ""}
 	for _, c := range report.Checks {
 		mark := "✓"
 		if c.Status == "warning" {

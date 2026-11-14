@@ -75,6 +75,7 @@ type Machine struct {
 	Service     func(at paths.Paths) ServiceManager
 	Register    func(fleetURL string, shipID string, secret string) (string, error)
 	IsLeaseHeld func(fleetURL string, crewToken string) (bool, error)
+	ShipName    func(fleetURL string, crewToken string) (string, error)
 	Sleep       func()
 	Now         func() time.Time
 	// Stop is closed when the process is told to stop (SIGTERM, SIGINT).
@@ -264,6 +265,7 @@ func Main(args []string, machine Machine) (string, int) {
 				Plugins:               machine.Plugins(),
 				Register:              machine.Register,
 				IsLeaseHeld:           machine.IsLeaseHeld,
+				ShipName:              machine.ShipName,
 				Sleep:                 machine.Sleep,
 				Now:                   machine.Now,
 				LastLog: func() string {
