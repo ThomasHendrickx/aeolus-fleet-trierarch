@@ -974,7 +974,7 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 			found := plugin.ForCodex(home, env)
 			harnesses[name] = codex.Harness{Plugin: found, Runtime: running, Settings: settings, Hooks: codex.AppServer{Program: "codex", Version: cli.Version}, Configuration: codex.AppServer{Program: "codex", Version: cli.Version}, Events: events, ProxyURL: proxy.URL}
 		case "copilot":
-			harnesses[name] = copilot.Harness{Plugin: plugin.FindCopilot(home, env), Runtime: running, Settings: settings, Events: events, Version: func() (string, bool) {
+			harnesses[name] = copilot.Harness{Plugin: plugin.FindCopilot(home, env), Runtime: running, Settings: settings, Events: events, ProxyURL: proxy.URL, Sessions: at.Sessions, Version: func() (string, bool) {
 				// As detection last found it: a Copilot not detected yet is not offered.
 				version := offers.version("copilot")
 				return version, version != ""
