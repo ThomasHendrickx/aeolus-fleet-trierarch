@@ -93,6 +93,9 @@ func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
 	}
 	if manager.IsRunning && manager.PID > 0 && machine.StartedAt != nil {
 		manager.Since = machine.StartedAt(manager.PID)
+		if started, err := time.Parse(time.RFC3339, manager.Since); err == nil && manager.Restarts > 0 && time.Since(started) < 10*time.Second {
+			manager.IsRestarting = true
+		}
 	}
 	observed, err := machine.Sessions(at).List()
 	if err != nil {
