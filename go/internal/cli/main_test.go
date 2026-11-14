@@ -20,6 +20,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/service"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/servicelog"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
@@ -601,5 +602,20 @@ func TestInitSaysTheLastLogLineWhenTheServiceCrashes(t *testing.T) {
 	output, code := Main(setupWords(), machine)
 	if code != 1 || !strings.Contains(output, "plugin missing") {
 		t.Errorf("init = %q, %d; want the last log line and exit 1", output, code)
+	}
+}
+
+func TestStatusSaysTheRestartCountAndLastError(t *testing.T) {
+	machine, manager, _ := aMain(t)
+	if output, code := Main(setupWords(), machine); code != 0 {
+		t.Fatalf("init = %q, %d", output, code)
+	}
+	manager.override = &service.Status{File: "/unit", IsInstalled: true, IsRestarting: true, Restarts: 6}
+	machine.ServiceLog = func(paths.Paths) servicelog.Log {
+		return servicelog.Log{Tail: func(int) ([]string, error) { return []string{"plugin missing"}, nil }}
+	}
+	output, code := Main([]string{"status"}, machine)
+	if code != 0 || !strings.Contains(output, "restarted 6") || !strings.Contains(output, "plugin missing") {
+		t.Errorf("status = %q, %d; want restart count and last error", output, code)
 	}
 }

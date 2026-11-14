@@ -55,6 +55,7 @@ type aServiceManager struct {
 	installed bool
 	running   bool
 	write     func()
+	override  *service.Status
 }
 
 func (s *aServiceManager) Install() error {
@@ -95,6 +96,9 @@ func (s *aServiceManager) Stop() error {
 }
 
 func (s *aServiceManager) Status() (service.Status, error) {
+	if s.override != nil {
+		return *s.override, nil
+	}
 	if !s.running {
 		return service.Status{File: "/unit", IsInstalled: s.installed}, nil
 	}
