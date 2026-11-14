@@ -438,7 +438,9 @@ func (i Init) Run(flags Flags) (Report, error) {
 		report.Service = "installed"
 	case report.Configuration != "kept" || isPluginShipNew || isRegisteredAgain || isAnotherVersion || (!status.IsRunning && !status.IsRestarting):
 		if err := i.Service.Rewrite(); err != nil {
-			return Report{}, err
+			err = i.serviceError(err)
+			i.closingReport(&report, configuration, detected, cloned, 0, err)
+			return report, err
 		}
 		if err := i.Service.Restart(); err != nil {
 			err = i.serviceError(err)
@@ -448,7 +450,9 @@ func (i Init) Run(flags Flags) (Report, error) {
 		report.Service = "restarted"
 	default:
 		if err := i.Service.Rewrite(); err != nil {
-			return Report{}, err
+			err = i.serviceError(err)
+			i.closingReport(&report, configuration, detected, cloned, 0, err)
+			return report, err
 		}
 	}
 	if err := i.waitForService(); err != nil {
