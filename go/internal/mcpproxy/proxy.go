@@ -99,6 +99,10 @@ func PathOf(shipID string, server string) string { return Prefix + shipID + "/" 
 type Proxy struct {
 	// Sessions is the sessions folder, where each session keeps its access.
 	Sessions string
+	// PermissionWait serves cancellable permission waits through the private channel.
+	PermissionWait  func(context.Context, string, string, string) permissions.Decision
+	PermissionCalls *PermissionCalls
+	PermissionClock permissions.Clock
 	// Permissions hands a permission request to the trierarch over its private channel.
 	Permissions func(context.Context, string, string) permissions.Decision
 	// Configuration is the MCP configuration the trierarch applied last, read once at each request, so a changed URL, allowlist or credential takes effect on the next call; false when none is applied.
@@ -492,13 +496,21 @@ func (p Proxy) permission(w http.ResponseWriter, r *http.Request, ship, token st
 		ID     json.RawMessage `json:"id"`
 		Method string          `json:"method"`
 		Params struct {
-			Name            string `json:"name"`
-			ProtocolVersion string `json:"protocolVersion"`
+			Name            string          `json:"name"`
+			ProtocolVersion string          `json:"protocolVersion"`
+			Arguments       json.RawMessage `json:"arguments"`
+			RequestID       json.RawMessage `json:"requestId"`
+			Meta            struct {
+				ProgressToken json.RawMessage `json:"progressToken"`
+			} `json:"_meta"`
 		} `json:"params"`
 	}
 	if json.NewDecoder(io.LimitReader(r.Body, requestRead)).Decode(&message) != nil {
 		writeJSON(w, http.StatusOK, errorAnswer(nil, invalidRequest, "invalid permission request"))
 		return
+	}
+	if message.Method == "notifications/cancelled" {
+		p.PermissionCalls.cancel(permissionKey(ship, token, message.Params.RequestID))
 	}
 	if len(message.ID) == 0 {
 		w.WriteHeader(http.StatusAccepted)
@@ -513,6 +525,10 @@ func (p Proxy) permission(w http.ResponseWriter, r *http.Request, ship, token st
 	case "tools/call":
 		if message.Params.Name != "ask" {
 			writeJSON(w, http.StatusOK, errorAnswer(message.ID, invalidParams, "unknown permission tool"))
+			return
+		}
+		if p.PermissionWait != nil {
+			p.waitPermission(w, r, ship, token, message.ID, message.Params.Arguments, message.Params.Meta.ProgressToken)
 			return
 		}
 		decision := permissions.Decision{Behavior: "deny", Message: "could not read this ship's owner: nobody is asked"}
