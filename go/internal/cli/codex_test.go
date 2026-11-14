@@ -114,6 +114,13 @@ func TestInitTakesAMachineWhereCodexAloneIsInstalledAndSignedIn(t *testing.T) {
 	if _, err := machine.init.Run(setupLine()); err != nil {
 		t.Fatalf("init = %v, want a machine with Codex alone taken", err)
 	}
+	configured, err := config.Load(machine.init.Paths.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, hasCodex := configured.Harnesses["codex"]; !hasCodex || len(configured.Harnesses) != 1 {
+		t.Fatalf("harnesses = %+v, want Codex alone", configured.Harnesses)
+	}
 }
 
 func TestInitRefusesBeforeItRegistersAnythingWhereNeitherHarnessIsSignedIn(t *testing.T) {
