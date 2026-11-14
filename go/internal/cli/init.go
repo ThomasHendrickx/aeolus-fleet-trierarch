@@ -430,7 +430,7 @@ func (i Init) Run(flags Flags) (Report, error) {
 	if err := i.waitForService(); err != nil {
 		return report, i.serviceError(err)
 	}
-	say(fmt.Sprintf("The trierarch runs, and starts again at every login (%s). See it with aeolus-trierarch status.", status.File))
+	say(fmt.Sprintf("The service stayed up for 10 seconds and starts again at every login (%s). See it with aeolus-trierarch status.", status.File))
 	return report, nil
 }
 
