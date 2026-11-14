@@ -689,3 +689,16 @@ func TestStatusShowsWhenTheProcessAgeIsUnknown(t *testing.T) {
 		t.Errorf("status = %q, %d; want the unknown process age", output, code)
 	}
 }
+
+func TestStatusUsesTheMachineClockToCheckTheProcessAge(t *testing.T) {
+	machine, _, _ := aMain(t)
+	if output, code := Main(setupWords(), machine); code != 0 {
+		t.Fatalf("init = %q, %d", output, code)
+	}
+	machine.Now = func() time.Time { return time.Date(2020, 1, 1, 0, 0, 9, 0, time.UTC) }
+	machine.StartedAt = func(int) string { return "2020-01-01T00:00:00Z" }
+	output, code := Main([]string{"status"}, machine)
+	if code != 0 || !strings.Contains(output, "10 seconds") {
+		t.Errorf("status = %q, %d; want the ten-second wait", output, code)
+	}
+}
