@@ -91,10 +91,12 @@ describe('upgrade on the version it runs', () => {
   });
 
   it('refuses a word that is no version, and changes nothing', async () => {
+    const pluginCalls = machine.callsOf('claude').filter((call) => call.startsWith('plugin '));
+
     const upgrade = await machine.trierarch(['upgrade', 'newest']);
 
     expect(upgrade.status).toBe(1);
-    expect(machine.callsOf('claude').filter((call) => call.startsWith('plugin '))).toEqual([]);
+    expect(machine.callsOf('claude').filter((call) => call.startsWith('plugin '))).toEqual(pluginCalls);
   });
 });
 
@@ -207,13 +209,15 @@ describe("upgrade with Codex on offer updates Codex's aeolus-fleet plugin", () =
 
   it('puts back each version folder Codex deleted when its upgrade fails, and exits 1', async () => {
     aVersionFolder('0.2.0', new Date('2020-01-02T00:00:00Z'));
+    // init installed the plugin at the version it runs.
+    expect(versionFolders()).toEqual([version, '0.2.0'].sort());
     machine.toggle('codex-plugin-fails', true);
 
     const upgrade = await machine.trierarch(['upgrade', version, '--json']);
 
     expect(upgrade.status, upgrade.stdout).toBe(1);
     expect(reportSchema.parse(JSON.parse(upgrade.stdout))).toMatchObject({ isUpgraded: false, isPluginUpdated: false });
-    expect(versionFolders()).toEqual(['0.2.0']);
+    expect(versionFolders()).toEqual([version, '0.2.0'].sort());
   });
 
   it("changes nothing when this Codex deletes the plugin's data with its marketplace, proven in a throwaway Codex home, and exits 1", async () => {
@@ -221,12 +225,14 @@ describe("upgrade with Codex on offer updates Codex's aeolus-fleet plugin", () =
     mkdirSync(data, { recursive: true });
     writeFileSync(join(data, 'mark'), 'kept\n');
     machine.toggle('codex-deletes-plugin-data', true);
+    const marketplaceCalls = () => machine.callsOf('codex').filter((call) => call.startsWith(CODEX_MARKETPLACE) || call === 'plugin marketplace upgrade aeolus-fleet');
+    const before = marketplaceCalls();
 
     const upgrade = await machine.trierarch(['upgrade', version, '--json']);
 
     expect(upgrade.status, upgrade.stdout).toBe(1);
     expect(reportSchema.parse(JSON.parse(upgrade.stdout))).toMatchObject({ isPluginUpdated: false });
-    expect(machine.callsOf('codex').filter((call) => call.startsWith(CODEX_MARKETPLACE) || call === 'plugin marketplace upgrade aeolus-fleet')).toEqual([]);
+    expect(marketplaceCalls()).toEqual(before);
     expect(readFileSync(join(data, 'mark'), 'utf8')).toBe('kept\n');
   });
 
