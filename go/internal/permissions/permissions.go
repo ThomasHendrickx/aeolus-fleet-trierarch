@@ -1,4 +1,4 @@
-// Package permissions denies permission requests that cannot reach a person.
+// Package permissions waits for person-owned ships and denies permission requests.
 // The owner is read for every call; no approval or owner is cached.
 package permissions
 

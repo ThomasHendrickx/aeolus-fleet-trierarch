@@ -644,7 +644,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	opened = shipSockets(at, kept.FleetURL, running)
 	load := &machineload.Reader{Source: machineload.System{WorktreeRoot: root}, Now: time.Now, Log: logLine}
 	saved := state.File{Path: at.State}
-	permissionChannel, err := permissions.Listen(filepath.Join(at.Proxy, permissions.Socket), func(ship, token string) bool { return mcpproxy.AuthorizesPermission(at.Sessions, ship, token) }, permissions.Fleet{URL: kept.FleetURL, TokenOf: func(ship string) string {
+	permissionChannel, err := permissions.Listen(filepath.Join(at.Proxy, permissions.Socket), func(ship, token string) bool { return mcpproxy.AuthorizesPermission(at.Sessions, ship, token) }, permissions.Fleet{URL: kept.FleetURL, Log: logLine, TokenOf: func(ship string) string {
 		state, err := saved.Load()
 		if err != nil {
 			return ""

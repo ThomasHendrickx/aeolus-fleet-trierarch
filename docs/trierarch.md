@@ -418,9 +418,13 @@ remote MCP servers; `aeolus-permissions` is reserved for this tool.
 On every permission call, the proxy hands an owner read to the trierarch over
 a private local channel. The trierarch calls whoami as the session's ship.
 The action is denied with `this ship's owner is argo: nobody is asked` for an
-argo-owned ship, `permission questions for person-owned ships are not available
-yet` for a person-owned ship, or `could not read this ship's owner: nobody is
-asked` when the owner cannot be read, including while the trierarch is down.
+argo-owned ship, or `could not read this ship's owner: nobody is asked` when
+the owner cannot be read, including while the trierarch is down. For a person
+owner, the call waits up to 30 minutes, streamed with progress every 20 seconds.
+At the limit it denies with `not answered in 30 minutes; the question was
+withdrawn`. Cancellation or a closed connection ends the wait. Its report says
+`waiting for its owner: <title>` during the wait, then returns to its entry
+state and note unless a newer report replaced it. No question is sent yet.
 No question waits in a terminal. The result is one text content holding the
 JSON denial, and Claude Code records the action in `permission_denials`.
 The private channel and its authentication are described in
