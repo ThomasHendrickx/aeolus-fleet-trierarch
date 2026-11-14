@@ -22,6 +22,10 @@ type Plugin struct {
 	Root  string
 	Data  string
 	Crews string
+	// plugins, harness and rootVariable defer cache lookup until the crew uses the plugin.
+	plugins      string
+	harness      string
+	rootVariable string
 }
 
 // DataFolder is the plugin's data folder in Claude Code's and Codex's plugins folders, as both name it.
@@ -40,23 +44,33 @@ func versionParts(version string) []int {
 
 // Find is Claude Code's aeolus-fleet plugin: where AEOLUS_PLUGIN_ROOT and AEOLUS_PLUGIN_DATA name it, else the newest version in its plugin cache, following CLAUDE_CONFIG_DIR as Claude Code does.
 func Find(homeDirectory string, env map[string]string) (Plugin, error) {
+	return ForClaudeCode(homeDirectory, env).resolve()
+}
+
+// ForClaudeCode locates Claude Code's plugin at each use, so installing or upgrading it needs no trierarch restart.
+func ForClaudeCode(homeDirectory string, env map[string]string) Plugin {
 	plugins := filepath.Join(homeDirectory, ".claude", "plugins")
 	if directory := env["CLAUDE_CONFIG_DIR"]; directory != "" {
 		plugins = filepath.Join(directory, "plugins")
 	}
-	return newestIn(plugins, Plugin{Root: env["AEOLUS_PLUGIN_ROOT"], Data: env["AEOLUS_PLUGIN_DATA"], Crews: crewsOf(homeDirectory, "claude-code")}, "Claude Code", "AEOLUS_PLUGIN_ROOT")
+	return deferredIn(plugins, Plugin{Root: env["AEOLUS_PLUGIN_ROOT"], Data: env["AEOLUS_PLUGIN_DATA"], Crews: crewsOf(homeDirectory, "claude-code")}, "Claude Code", "AEOLUS_PLUGIN_ROOT")
 }
 
 // FindCodex is Codex's aeolus-fleet plugin: where AEOLUS_CODEX_PLUGIN_ROOT and AEOLUS_CODEX_PLUGIN_DATA name it, else the newest version in its plugin cache, following CODEX_HOME as Codex does.
 func FindCodex(homeDirectory string, env map[string]string) (Plugin, error) {
+	return ForCodex(homeDirectory, env).resolve()
+}
+
+// ForCodex locates Codex's plugin at each use, so installing or upgrading it needs no trierarch restart.
+func ForCodex(homeDirectory string, env map[string]string) Plugin {
 	codexHome := env["CODEX_HOME"]
 	if codexHome == "" {
 		codexHome = filepath.Join(homeDirectory, ".codex")
 	}
-	return newestIn(filepath.Join(codexHome, "plugins"), Plugin{Root: env["AEOLUS_CODEX_PLUGIN_ROOT"], Data: env["AEOLUS_CODEX_PLUGIN_DATA"], Crews: crewsOf(homeDirectory, "codex")}, "Codex", "AEOLUS_CODEX_PLUGIN_ROOT")
+	return deferredIn(filepath.Join(codexHome, "plugins"), Plugin{Root: env["AEOLUS_CODEX_PLUGIN_ROOT"], Data: env["AEOLUS_CODEX_PLUGIN_DATA"], Crews: crewsOf(homeDirectory, "codex")}, "Codex", "AEOLUS_CODEX_PLUGIN_ROOT")
 }
 
-// FindCopilot is Copilot's aeolus-fleet plugin: one folder in its installed-plugins folder, with no version in the path, and the data folder Copilot gives its hooks, both in COPILOT_HOME or ~/.copilot, unless AEOLUS_COPILOT_PLUGIN_ROOT and AEOLUS_COPILOT_PLUGIN_DATA name others. Unlike Claude Code's and Codex's, a missing one does not stop the trierarch at start: IsInstalled says so at each use, and the machine offers Copilot once it is installed (#1212).
+// FindCopilot is Copilot's aeolus-fleet plugin: one folder in its installed-plugins folder, with no version in the path, and the data folder Copilot gives its hooks, both in COPILOT_HOME or ~/.copilot, unless AEOLUS_COPILOT_PLUGIN_ROOT and AEOLUS_COPILOT_PLUGIN_DATA name others. A missing one does not stop the trierarch at start: IsInstalled says so at each use, and the machine offers Copilot once it is installed (#1212).
 func FindCopilot(homeDirectory string, env map[string]string) Plugin {
 	copilotHome := env["COPILOT_HOME"]
 	if copilotHome == "" {
@@ -75,6 +89,23 @@ func FindCopilot(homeDirectory string, env map[string]string) Plugin {
 // crewsOf is where the plugin keeps the identities of the harness's sessions (decision 0015).
 func crewsOf(homeDirectory string, harness string) string {
 	return filepath.Join(homeDirectory, ".aeolus", "crews", harness)
+}
+
+// deferredIn keeps the harness's lookup paths without reading its cache at start.
+func deferredIn(plugins string, plugin Plugin, harness string, rootVariable string) Plugin {
+	if plugin.Data == "" {
+		plugin.Data = filepath.Join(plugins, "data", DataFolder)
+	}
+	plugin.plugins, plugin.harness, plugin.rootVariable = plugins, harness, rootVariable
+	return plugin
+}
+
+// resolve reads the cache anew at each use; explicit roots and fixed plugin paths stay fixed.
+func (p Plugin) resolve() (Plugin, error) {
+	if p.plugins == "" {
+		return p, nil
+	}
+	return newestIn(p.plugins, Plugin{Root: p.Root, Data: p.Data, Crews: p.Crews}, p.harness, p.rootVariable)
 }
 
 // newestIn is the plugin as given, its data folder in the harness's plugins folder when none is given, and its root the newest version in that folder's cache when none is given.
@@ -102,6 +133,10 @@ func newestIn(plugins string, plugin Plugin, harness string, rootVariable string
 }
 
 func (p Plugin) run(script string, folder string, input string, args ...string) (string, error) {
+	p, err := p.resolve()
+	if err != nil {
+		return "", err
+	}
 	command := exec.Command("bash", append([]string{filepath.Join(p.Root, "scripts", script)}, args...)...)
 	command.Env = append(os.Environ(), "AEOLUS_FOLDER="+folder, "AEOLUS_DATA="+p.Data, "AEOLUS_CREWS="+p.Crews)
 	command.Stdin = strings.NewReader(input)
@@ -239,6 +274,10 @@ func (p Plugin) SessionDied(folder string) error {
 
 // IsInstalled says whether the plugin's scripts are where it was found: a session cannot start without them (#827).
 func (p Plugin) IsInstalled() error {
+	p, err := p.resolve()
+	if err != nil {
+		return err
+	}
 	if _, err := os.Stat(filepath.Join(p.Root, "scripts", "aeolus-identity.sh")); errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("the aeolus-fleet plugin's scripts are not at %s", filepath.Join(p.Root, "scripts"))
 	}
@@ -250,12 +289,16 @@ const usageExit = 2
 
 // MarksLaunches is whether the plugin keeps launch markers (#490): one older than them answers `launch` with its usage. It is asked for the crews folder itself, which no session crews, so the answer is only whether the command is known. It fails when the plugin cannot be found at all (#1212), when it is not known what it marks.
 func (p Plugin) MarksLaunches() (bool, error) {
+	p, err := p.resolve()
+	if err != nil {
+		return false, err
+	}
 	if err := p.IsInstalled(); err != nil {
 		return false, err
 	}
 	command := exec.Command("bash", filepath.Join(p.Root, "scripts", "aeolus-identity.sh"), "launch")
 	command.Env = append(os.Environ(), "AEOLUS_FOLDER="+p.Crews, "AEOLUS_DATA="+p.Data, "AEOLUS_CREWS="+p.Crews)
-	err := command.Run()
+	err = command.Run()
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
 		return exit.ExitCode() != usageExit, nil
