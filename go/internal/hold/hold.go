@@ -149,6 +149,8 @@ const (
 type harness struct {
 	command *exec.Cmd
 	stdin   io.WriteCloser
+	// isInterrupted records a turn the hold stopped, even when its signal handler exits nonzero.
+	isInterrupted bool
 }
 
 // isTurnPerProcess is whether the harness runs one process per turn, with none between turns (H11, CC4).
@@ -167,8 +169,6 @@ type held struct {
 	isBusy       bool
 	isRestarting bool
 	isStopping   bool
-	// isTurnFailed is whether the running Codex turn wrote turn.failed.
-	isTurnFailed bool
 	controls     int
 	// turns takes the lines of a harness with a process per turn one at a time, so two never start a turn on one session.
 	turns    sync.Mutex
@@ -295,7 +295,6 @@ func (h *held) start(command []string) (*harness, error) {
 	}
 	started := &harness{command: run, stdin: stdin}
 	h.child = started
-	h.isTurnFailed = false
 	if h.isTurnPerProcess() {
 		h.isBusy = true
 	}
@@ -376,9 +375,6 @@ func (h *held) onLine(line string) {
 		h.sessionID = id
 		_ = os.WriteFile(h.options.Files.SessionID, []byte(id), 0o600)
 	}
-	if h.options.Harness == codex && said.Type == "turn.failed" {
-		h.isTurnFailed = true
-	}
 	if said.Type == "result" {
 		h.isBusy = false
 		h.tell(event{kind: resultEvent})
@@ -388,7 +384,7 @@ func (h *held) onLine(line string) {
 	}
 }
 
-// wait waits for the run to end, its last lines kept, and ends the hold with it unless the hold starts its harness again or runs a process per turn. Copilot's turn ends once its native process closed the output it inherited from the launcher, which may exit first; a Copilot turn that failed died, and so did a Codex turn that wrote turn.failed and exited with a failure status (#340): either ends the hold with its status, so the session is seen exited, restarted and reported as one that died. A turn the hold stopped by a signal does not, nor a Codex turn interrupted, which writes turn.aborted.
+// wait waits for the run to end, its last lines kept, and ends the hold with it unless the hold starts its harness again or runs a process per turn. Copilot's turn ends once its native process closed the output it inherited from the launcher, which may exit first; a Copilot or Codex turn that exited with a failure status died, with or without a failure event: either ends the hold with its status, so the session is seen exited, restarted and reported as one that died. A turn the hold stopped by a signal does not, nor a Codex turn interrupted, which writes turn.aborted.
 func (h *held) wait(run *harness, outputs []*os.File, read <-chan struct{}) {
 	err := run.command.Wait()
 	if h.options.Harness == copilot {
@@ -419,7 +415,7 @@ func (h *held) wait(run *harness, outputs []*os.File, read <-chan struct{}) {
 		h.child = nil
 	}
 	h.tell(event{kind: exitEvent})
-	isDiedTurn := isExited && code != 0 && (h.options.Harness == copilot || (h.options.Harness == codex && h.isTurnFailed))
+	isDiedTurn := isExited && code != 0 && isTurnPerProcess && !run.isInterrupted
 	if h.isStopping || isDiedTurn || (!h.isRestarting && !isTurnPerProcess) {
 		select {
 		case h.ended <- code:
@@ -631,6 +627,9 @@ func (h *held) sendTurn(line string) Answer {
 func (h *held) endTurn(watcher <-chan event, signal syscall.Signal) {
 	h.mutex.Lock()
 	running := h.child
+	if running != nil {
+		running.isInterrupted = true
+	}
 	h.mutex.Unlock()
 	if running == nil {
 		return
