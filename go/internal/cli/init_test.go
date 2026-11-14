@@ -523,3 +523,12 @@ func TestInitSaysTheServiceStayedUpAfterTheChecks(t *testing.T) {
 		t.Errorf("report = %q, want the checked service", text)
 	}
 }
+
+func TestInitSaysWhenTheServiceHasNotWrittenItsRunningFile(t *testing.T) {
+	machine := newMachine(t)
+	machine.service.write = func() {}
+	_, err := machine.init.Run(setupLine())
+	if err == nil || !strings.Contains(err.Error(), "running.json") {
+		t.Errorf("Run() error = %v, want the missing running.json", err)
+	}
+}
