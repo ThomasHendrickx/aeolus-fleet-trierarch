@@ -102,7 +102,42 @@ func (l Launchd) isLoaded() bool {
 
 func (l Launchd) bootstrap() error {
 	_, err := l.Exec("launchctl", "bootstrap", l.domain(), l.File())
+	if err == nil {
+		l.markDeliberate()
+	}
 	return err
+}
+
+// deliberateFile marks that the trierarch itself started or restarted the agent (restart, upgrade, init): launchd counts that run in `runs` as it counts a crash's.
+func (l Launchd) deliberateFile() string {
+	return filepath.Join(l.Logs, "deliberate-restart")
+}
+
+// markDeliberate is best effort: without the mark, status may show a restart loop for a few seconds.
+func (l Launchd) markDeliberate() {
+	if os.MkdirAll(l.Logs, 0o755) == nil {
+		_ = os.WriteFile(l.deliberateFile(), nil, 0o644)
+	}
+}
+
+func (l Launchd) baselineFile() string {
+	return filepath.Join(l.Logs, "deliberate-runs")
+}
+
+// restartsOf is how often the agent ran again without the trierarch's own doing: the first status after a deliberate start keeps the runs then as the baseline, which later runs count from.
+func (l Launchd) restartsOf(runs int) int {
+	if _, err := os.Stat(l.deliberateFile()); err == nil {
+		if os.WriteFile(l.baselineFile(), []byte(strconv.Itoa(runs)), 0o644) == nil {
+			_ = os.Remove(l.deliberateFile())
+		}
+	}
+	baseline := 1
+	if kept, err := os.ReadFile(l.baselineFile()); err == nil {
+		if value, err := strconv.Atoi(strings.TrimSpace(string(kept))); err == nil && value >= 1 && value <= runs {
+			baseline = value
+		}
+	}
+	return max(0, runs-baseline)
 }
 
 // bootout unloads the agent, not kills it: KeepAlive would start a killed one again. It loads again at the next login.
@@ -148,6 +183,9 @@ func (l Launchd) Start() error {
 		return l.bootstrap()
 	}
 	_, err := l.Exec("launchctl", "kickstart", l.target())
+	if err == nil {
+		l.markDeliberate()
+	}
 	return err
 }
 
@@ -191,7 +229,7 @@ func (l Launchd) Status() (Status, error) {
 	status := Status{File: file, IsInstalled: true}
 	if match := launchdRunsPattern.FindStringSubmatch(printed); match != nil {
 		runs, _ := strconv.Atoi(match[1])
-		status.Restarts = max(0, runs-1)
+		status.Restarts = l.restartsOf(runs)
 	}
 	if match := launchdPIDPattern.FindStringSubmatch(printed); match != nil {
 		status.PID, _ = strconv.Atoi(match[1])
