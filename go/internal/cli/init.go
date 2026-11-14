@@ -407,12 +407,6 @@ func (i Init) Run(flags Flags) (Report, error) {
 			return Report{}, err
 		}
 		report.Service = "installed"
-		say(fmt.Sprintf("The trierarch runs, and starts again at every login (%s). See it with aeolus-trierarch status.", status.File))
-		if !i.hasSaidItsVersion() {
-			say(notSaidYet)
-		} else if running, _ := readRunning(i.Paths.Running); running.Version != Version {
-			return report, fmt.Errorf("service runs version %s, expected %s", running.Version, Version)
-		}
 	case report.Configuration != "kept" || isPluginShipNew || isRegisteredAgain:
 		if err := i.Service.Rewrite(); err != nil {
 			return Report{}, err
@@ -421,18 +415,55 @@ func (i Init) Run(flags Flags) (Report, error) {
 			return Report{}, err
 		}
 		report.Service = "restarted"
-		say("The trierarch restarted with the new configuration.")
-		if !i.hasSaidItsVersion() {
-			say(notSaidYet)
-		} else if running, _ := readRunning(i.Paths.Running); running.Version != Version {
-			return report, fmt.Errorf("service runs version %s, expected %s", running.Version, Version)
-		}
 	default:
 		if err := i.Service.Rewrite(); err != nil {
 			return Report{}, err
 		}
 	}
+	if err := i.waitForService(); err != nil {
+		return report, err
+	}
+	say(fmt.Sprintf("The trierarch runs, and starts again at every login (%s). See it with aeolus-trierarch status.", status.File))
 	return report, nil
+}
+
+func (i Init) waitForService() error {
+	status, err := i.Service.Status()
+	if err != nil {
+		return err
+	}
+	if !status.IsRunning || status.PID <= 0 {
+		return errors.New("service is not running")
+	}
+	pid := status.PID
+	for second := 0; second <= 10; second++ {
+		if second > 0 {
+			i.Sleep()
+		}
+		status, err = i.Service.Status()
+		if err != nil {
+			return err
+		}
+		if !status.IsRunning || status.PID != pid {
+			return errors.New("service did not keep one process for 10 seconds")
+		}
+	}
+	running, ok := readRunning(i.Paths.Running)
+	if !ok || running.PID != pid || running.Version != Version {
+		return fmt.Errorf("service version does not match %s", Version)
+	}
+	kept, err := crew.Read(i.Paths.CrewToken)
+	if err != nil {
+		return err
+	}
+	held, err := i.IsLeaseHeld(kept.FleetURL, kept.CrewToken)
+	if err != nil {
+		return fmt.Errorf("check lease: %w", err)
+	}
+	if !held {
+		return errors.New("lease is not valid")
+	}
+	return nil
 }
 
 // setUpClaudeCode trusts the place of ships/ and each configured repository and folder, and completes the onboarding, where the configuration offers Claude Code.
