@@ -442,3 +442,16 @@ func TestInitRunAgainKeepsTheSealingKey(t *testing.T) {
 		t.Errorf("the sealing key changed on init again (%v): the secrets sealed to it would no longer open", err)
 	}
 }
+
+func TestInitFailsWhenTheServiceRunsAnotherVersion(t *testing.T) {
+	machine := newMachine(t)
+	machine.service.write = func() {
+		_ = os.MkdirAll(machine.init.Paths.Home, 0o700)
+		_ = os.WriteFile(machine.init.Paths.Running, []byte(`{"pid":41,"version":"different"}`), 0o644)
+	}
+
+	_, err := machine.init.Run(setupLine())
+	if err == nil || !strings.Contains(err.Error(), "version") {
+		t.Errorf("Run() error = %v, want a version mismatch", err)
+	}
+}
