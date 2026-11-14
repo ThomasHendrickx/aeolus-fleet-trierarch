@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -107,8 +108,19 @@ func TestAnOwnersAnswerWaitsUnacknowledgedWhileTheOwnerCannotBeRead(t *testing.T
 				owner := &unreachableOwner{}
 				ctx, cancel := context.WithCancel(context.Background())
 				defer cancel()
-				var logs []string
-				service := Service{Owners: owner, Questions: q, Reports: &reports{}, Clock: SystemClock{}, Log: func(s string) { logs = append(logs, s) }}
+				var logMu sync.Mutex
+				var logged []string
+				// The service goroutine keeps logging each retry while the test reads.
+				snapshot := func() []string {
+					logMu.Lock()
+					defer logMu.Unlock()
+					return append([]string(nil), logged...)
+				}
+				service := Service{Owners: owner, Questions: q, Reports: &reports{}, Clock: SystemClock{}, Log: func(s string) {
+					logMu.Lock()
+					defer logMu.Unlock()
+					logged = append(logged, s)
+				}}
 				result := make(chan Decision, 1)
 				go func() { result <- service.Ask(ctx, "scout", Request{Tool: "Bash"}) }()
 				synctest.Wait()
@@ -120,6 +132,7 @@ func TestAnOwnersAnswerWaitsUnacknowledgedWhileTheOwnerCannotBeRead(t *testing.T
 					t.Fatalf("failed owner read ended wait: %+v", got)
 				default:
 				}
+				logs := snapshot()
 				if len(q.kept) != 0 || len(q.taken) != 0 || len(logs) == 0 || !strings.Contains(logs[0], "whoami is unreachable") {
 					t.Fatalf("after failed owner read: kept %d, taken %d, logs %v", len(q.kept), len(q.taken), logs)
 				}
