@@ -351,3 +351,16 @@ func TestWriteWritesTheAgentAndLoadsNothing(t *testing.T) {
 		t.Errorf("ran %q, want nothing", launchctl.calls)
 	}
 }
+
+func TestTheAgentReportsRestartsAcrossItsProcesses(t *testing.T) {
+	launchctl := &aLaunchctl{}
+	agent := installed(t, launchctl)
+	launchctl.answers["launchctl print "+target] = target + " = {\n\tstate = waiting\n\truns = 7\n\tlast exit code = 1\n}"
+	status, err := agent.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.IsRestarting || status.Restarts != 6 {
+		t.Errorf("Status() = %+v, want six restarts and restarting", status)
+	}
+}
