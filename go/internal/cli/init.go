@@ -410,6 +410,8 @@ func (i Init) Run(flags Flags) (Report, error) {
 		say(fmt.Sprintf("The trierarch runs, and starts again at every login (%s). See it with aeolus-trierarch status.", status.File))
 		if !i.hasSaidItsVersion() {
 			say(notSaidYet)
+		} else if running, _ := readRunning(i.Paths.Running); running.Version != Version {
+			return report, fmt.Errorf("service runs version %s, expected %s", running.Version, Version)
 		}
 	case report.Configuration != "kept" || isPluginShipNew || isRegisteredAgain:
 		if err := i.Service.Rewrite(); err != nil {
@@ -422,6 +424,8 @@ func (i Init) Run(flags Flags) (Report, error) {
 		say("The trierarch restarted with the new configuration.")
 		if !i.hasSaidItsVersion() {
 			say(notSaidYet)
+		} else if running, _ := readRunning(i.Paths.Running); running.Version != Version {
+			return report, fmt.Errorf("service runs version %s, expected %s", running.Version, Version)
 		}
 	default:
 		if err := i.Service.Rewrite(); err != nil {
