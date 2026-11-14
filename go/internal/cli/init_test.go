@@ -532,3 +532,36 @@ func TestInitSaysWhenTheServiceHasNotWrittenItsRunningFile(t *testing.T) {
 		t.Errorf("Run() error = %v, want the missing running.json", err)
 	}
 }
+
+func TestInitRestartsTheTenSecondWaitForANewProcess(t *testing.T) {
+	machine := newMachine(t)
+	waits := 0
+	machine.init.Sleep = func() {
+		waits++
+		if waits == 5 {
+			machine.service.override = &service.Status{File: "/unit", IsInstalled: true, IsRunning: true, PID: 42, Restarts: 1}
+			_ = os.WriteFile(machine.init.Paths.Running, []byte(`{"pid":42,"version":"0.0.0","firstReportAccepted":true}`), 0o644)
+		}
+	}
+	if _, err := machine.init.Run(setupLine()); err != nil {
+		t.Fatal(err)
+	}
+	if waits != 15 {
+		t.Errorf("waited %d seconds, want 15", waits)
+	}
+}
+
+func TestInitStopsAfterThirtySecondsOfRestarts(t *testing.T) {
+	machine := newMachine(t)
+	waits := 0
+	machine.init.Sleep = func() {
+		waits++
+		pid := 41 + waits/5
+		machine.service.override = &service.Status{File: "/unit", IsInstalled: true, IsRunning: true, PID: pid, Restarts: waits / 5}
+	}
+	machine.init.LastLog = func() string { return "plugin missing" }
+	_, err := machine.init.Run(setupLine())
+	if waits != 30 || err == nil || !strings.Contains(err.Error(), "restarted 6") || !strings.Contains(err.Error(), "plugin missing") {
+		t.Errorf("Run() waited %d seconds, error %v; want six restarts in 30 seconds and the last log", waits, err)
+	}
+}
