@@ -56,13 +56,18 @@ func TestPluginQuestionsNameTheActionRuleInputShipAndModel(t *testing.T) {
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("write identity: %v: %s", err, out)
 			}
+			isCrewed := true
 			questions := PluginQuestions{Session: func(string) (QuestionSession, error) {
+				if !isCrewed {
+					return QuestionSession{}, fmt.Errorf("session released")
+				}
 				return QuestionSession{Plugin: p, Folder: folder, Name: "scout", Model: "claude-opus-5-5"}, nil
 			}}
 			id, err := questions.Ask(context.Background(), "shp_01m6jyczpnpp5c0vxh54c966cy", Request{Tool: test.tool, Input: json.RawMessage(test.input)})
 			if err != nil {
 				t.Fatal(err)
 			}
+			isCrewed = false
 			if err := questions.Withdraw(context.Background(), "shp_01m6jyczpnpp5c0vxh54c966cy", id); err != nil {
 				t.Fatal(err)
 			}
@@ -95,7 +100,7 @@ func TestPluginQuestionsNameTheActionRuleInputShipAndModel(t *testing.T) {
 				t.Fatalf("context = %q", question.Context)
 			}
 			if test.name == "5 KB input" {
-				if !strings.Contains(question.Context, "1060 bytes cut") || strings.Contains(question.Context, strings.Repeat("x", 4096)) {
+				if !strings.Contains(question.Context, "1059 bytes cut") || strings.Contains(question.Context, strings.Repeat("x", 4096)) {
 					t.Fatalf("context not cut at 4096 bytes: %q", question.Context)
 				}
 			} else if !strings.Contains(question.Context, test.input) {

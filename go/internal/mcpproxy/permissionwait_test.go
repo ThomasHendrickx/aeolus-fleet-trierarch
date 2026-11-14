@@ -20,9 +20,9 @@ func TestPermissionWaitStreamsProgressPastASilentCallsLimitAndDeniesAtThirtyMinu
 		sessions := t.TempDir()
 		aSession(t, sessions, scout, os.Getpid(), Access{Token: "permission-token", Servers: []string{permissions.Server}})
 		calls := NewPermissionCalls()
-		proxy := Proxy{Sessions: sessions, PermissionCalls: calls, PermissionWait: func(ctx context.Context, ship, token, title string) permissions.Decision {
-			if title != "Run `npm install`" {
-				t.Errorf("title = %q", title)
+		proxy := Proxy{Sessions: sessions, PermissionCalls: calls, PermissionWait: func(ctx context.Context, ship, token string, request permissions.Request) permissions.Decision {
+			if request.Title != "Run `npm install`" {
+				t.Errorf("title = %q", request.Title)
 			}
 			return permissions.Wait(ctx, permissions.SystemClock{})
 		}}
@@ -73,7 +73,7 @@ func TestPermissionWaitEndsOnCancelOrConnectionCloseAndLeavesNoWait(t *testing.T
 				aSession(t, sessions, scout, os.Getpid(), Access{Token: "permission-token", Servers: []string{permissions.Server}})
 				calls := NewPermissionCalls()
 				ended := make(chan struct{})
-				proxy := Proxy{Sessions: sessions, PermissionCalls: calls, PermissionWait: func(ctx context.Context, _, _, _ string) permissions.Decision {
+				proxy := Proxy{Sessions: sessions, PermissionCalls: calls, PermissionWait: func(ctx context.Context, _, _ string, _ permissions.Request) permissions.Decision {
 					defer close(ended)
 					return permissions.Wait(ctx, permissions.SystemClock{})
 				}}

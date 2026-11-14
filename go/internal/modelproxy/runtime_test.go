@@ -336,7 +336,7 @@ type waitingOwner struct {
 func (w waitingOwner) Owner(context.Context, string) (permissions.Owner, error) {
 	return permissions.Owner{IsPerson: true}, nil
 }
-func (w waitingOwner) Await(ctx context.Context, _, _ string) permissions.Decision {
+func (w waitingOwner) Ask(ctx context.Context, _ string, _ permissions.Request) permissions.Decision {
 	close(w.started)
 	<-ctx.Done()
 	close(w.ended)

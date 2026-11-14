@@ -233,6 +233,7 @@ describe('aeolus-ask.sh ask', () => {
 
     expect(result.status).toBe(1);
     expect(result.stdout).toContain('VALIDATION');
+    expect(result.stdout).toMatch(/aeolus: question [0-9a-f-]{36}/);
   });
 });
 

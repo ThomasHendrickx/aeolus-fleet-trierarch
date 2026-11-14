@@ -87,8 +87,8 @@ func realPermissionCall(t *testing.T, isPerson bool) {
 		t.Fatal(err)
 	}
 	defer channel.Close()
-	proxy := httptest.NewServer(Proxy{Sessions: sessions, PermissionCalls: NewPermissionCalls(), PermissionWait: func(ctx context.Context, ship, token, title string) permissions.Decision {
-		return (permissions.Client{Socket: socket, Token: token}).Await(ctx, ship, title)
+	proxy := httptest.NewServer(Proxy{Sessions: sessions, PermissionCalls: NewPermissionCalls(), PermissionWait: func(ctx context.Context, ship, token string, request permissions.Request) permissions.Decision {
+		return (permissions.Client{Socket: socket, Token: token}).Ask(ctx, ship, request)
 	}})
 	defer proxy.Close()
 	var messages atomic.Int32

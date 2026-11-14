@@ -197,7 +197,10 @@ type questions struct {
 
 func (q *questions) Ask(context.Context, string, Request) (string, error) {
 	q.asked.Add(1)
-	return "question-1", q.err
+	if q.err != nil {
+		return "", q.err
+	}
+	return "question-1", nil
 }
 func (q *questions) Withdraw(ctx context.Context, ship, id string) error {
 	if ctx.Err() != nil {
@@ -240,5 +243,18 @@ func TestARefusedQuestionDeniesAndLogsWithoutWaiting(t *testing.T) {
 	got := service.Await(context.Background(), "scout", "Run `npm install`")
 	if got.Behavior != "deny" || got.Message != "could not ask" || len(logs) != 1 || q.withdrawn.Load() != 0 {
 		t.Fatalf("decision %+v, logs %v, questions %+v", got, logs, q)
+	}
+}
+
+type unansweredQuestion struct{ questions }
+
+func (q *unansweredQuestion) Ask(context.Context, string, Request) (string, error) {
+	return "question-1", errors.New("send did not answer")
+}
+func TestAQuestionWhoseSendDidNotAnswerIsWithdrawnBeforeDenying(t *testing.T) {
+	q := &unansweredQuestion{}
+	got := (Service{Owners: &owners{person: true}, Reports: &reports{}, Questions: q, Clock: SystemClock{}}).Await(context.Background(), "scout", "Run `npm install`")
+	if got.Message != "could not ask" || q.withdrawn.Load() != 1 {
+		t.Fatalf("decision %+v, withdrawals %d", got, q.withdrawn.Load())
 	}
 }
