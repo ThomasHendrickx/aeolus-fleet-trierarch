@@ -81,8 +81,9 @@ func TestARealClaudeCodeSessionListsOnlyTheCrewedMCPServerNoneOfTheUsersOrTheFol
 			}
 		}
 	}
-	if !slices.Equal(servers, []string{"company-graph"}) {
-		t.Errorf("the session lists the MCP servers %q, want company-graph alone", servers)
+	slices.Sort(servers)
+	if !slices.Equal(servers, []string{"aeolus-permissions", "company-graph"}) {
+		t.Errorf("the session lists the MCP servers %q, want aeolus-permissions and company-graph", servers)
 	}
 	_ = held.Stop(scout)
 	if names, _ := os.ReadDir(started); len(names) != 0 {

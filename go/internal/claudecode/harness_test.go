@@ -56,6 +56,8 @@ func aHarness(t *testing.T) (Harness, *aRuntime, *anOnboarding) {
 		Settings: func() config.Harness {
 			return config.Harness{Flags: []string{"--model", "opus"}, Options: map[string]config.Option{}}
 		},
+		ProxyURL:   func() (string, bool) { return "http://127.0.0.1:41000", true },
+		Sessions:   t.TempDir(),
 		Projects:   t.TempDir(),
 		Onboarding: onboarding,
 		Managed:    t.TempDir(),
@@ -331,7 +333,7 @@ func TestASessionNamingMCPServersStartsWithEachAtTheMCPProxyWithAFreshTokenOfIts
 	if at := slices.Index(first.Command, "--mcp-config"); at < 0 || at+1 >= len(first.Command) || first.Command[at+1] != path {
 		t.Fatalf("command %q, want --mcp-config %s", first.Command, path)
 	}
-	if first.Mcp == nil || first.Mcp.Access.Token == "" || !slices.Equal(first.Mcp.Access.Servers, []string{"company-graph", "notes"}) {
+	if first.Mcp == nil || first.Mcp.Access.Token == "" || !slices.Equal(first.Mcp.Access.Servers, []string{"company-graph", "notes", "aeolus-permissions"}) {
 		t.Fatalf("started with MCP %+v, want a token for company-graph and notes", first.Mcp)
 	}
 	if second.Mcp == nil || second.Mcp.Access.Token == first.Mcp.Access.Token {
@@ -341,7 +343,7 @@ func TestASessionNamingMCPServersStartsWithEachAtTheMCPProxyWithAFreshTokenOfIts
 	if err := json.Unmarshal(first.Mcp.Config, &config); err != nil {
 		t.Fatalf("the MCP configuration %s: %v", first.Mcp.Config, err)
 	}
-	if len(config.McpServers) != 2 {
+	if len(config.McpServers) != 3 {
 		t.Fatalf("the MCP configuration names %v, want company-graph and notes", config.McpServers)
 	}
 	for _, name := range []string{"company-graph", "notes"} {
@@ -355,10 +357,11 @@ func TestASessionNamingMCPServersStartsWithEachAtTheMCPProxyWithAFreshTokenOfIts
 	}
 }
 
-func TestASessionNamingNoMCPServerStartsWithoutAnMCPConfiguration(t *testing.T) {
+func TestABypassSessionNamingNoMCPServerStartsWithoutAnMCPConfiguration(t *testing.T) {
 	harness, running, _ := aHarness(t)
 	harness.ProxyURL = func() (string, bool) { return "http://127.0.0.1:41000", true }
 	harness.Sessions = t.TempDir()
+	harness.Settings = func() config.Harness { return config.Harness{Flags: []string{"--dangerously-skip-permissions"}} }
 
 	if err := harness.Launch(anEntry(t), true, "launch-1"); err != nil {
 		t.Fatal(err)

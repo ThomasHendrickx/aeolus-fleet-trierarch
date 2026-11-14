@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -143,9 +144,32 @@ func (h Harness) routeOf(login string) (map[string]string, *sessions.ProxyToken,
 	return map[string]string{"ANTHROPIC_BASE_URL": address + "/anthropic"}, &sessions.ProxyToken{Harness: "claude-code", Variable: "ANTHROPIC_AUTH_TOKEN", Token: proxytoken.New()}, nil
 }
 
-// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7), and no other (#329): --strict-mcp-config, so no server of the user's, the folder's or a plugin's configuration loads, and each named server at the MCP proxy with a token of its own, fresh for each start, in an MCP configuration kept in the session's folder, which the command line names by its path alone; no configuration for an entry that names none. A container sees that one file read-only at the same path, never the folder it is in, so a session cannot plant a link the trierarch would write through.
-func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) {
-	if len(entry.McpServers) == 0 {
+// bypassesPermissions reads the effective launch flags, including a picked option.
+func bypassesPermissions(flags []string) bool {
+	if slices.Contains(flags, "--dangerously-skip-permissions") {
+		return true
+	}
+	mode := ""
+	for at, flag := range flags {
+		if flag == "--permission-mode" && at+1 < len(flags) {
+			mode = flags[at+1]
+		}
+		if value, ok := strings.CutPrefix(flag, "--permission-mode="); ok {
+			mode = value
+		}
+	}
+	return mode == "bypassPermissions"
+}
+
+// mcpOf is how a session reaches the crew-time MCP servers its entry names (decisions M6, M7), and no other (#329): --strict-mcp-config, so no server of the user's, the folder's or a plugin's configuration loads, and each named server at the MCP proxy with a token of its own, fresh for each start, in an MCP configuration kept in the session's folder, which the command line names by its path alone; the permission server too unless the effective flags bypass permissions. A container sees that one file read-only at the same path, never the folder it is in, so a session cannot plant a link the trierarch would write through.
+func (h Harness) mcpOf(entry reconciler.Entry, flags []string) ([]string, *sessions.Mcp, error) {
+	names := append([]string{}, entry.McpServers...)
+	permissionFlags := []string{}
+	if !bypassesPermissions(flags) {
+		names = append(names, "aeolus-permissions")
+		permissionFlags = []string{"--permission-prompt-tool", "mcp__aeolus-permissions__ask"}
+	}
+	if len(names) == 0 {
 		return []string{strictMcpConfig}, nil, nil
 	}
 	address, ok := "", false
@@ -162,14 +186,14 @@ func (h Harness) mcpOf(entry reconciler.Entry) ([]string, *sessions.Mcp, error) 
 		Headers map[string]string `json:"headers"`
 	}
 	servers := map[string]server{}
-	for _, name := range entry.McpServers {
+	for _, name := range names {
 		servers[name] = server{Type: "http", URL: address + mcpproxy.PathOf(entry.ShipID, name), Headers: map[string]string{"Authorization": "Bearer " + token}}
 	}
 	config, err := json.Marshal(map[string]any{"mcpServers": servers})
 	if err != nil {
 		return nil, nil, err
 	}
-	return []string{strictMcpConfig, "--mcp-config", hold.FilesOf(h.Sessions, entry.ShipID).McpConfig}, &sessions.Mcp{Access: mcpproxy.Access{Token: token, Servers: entry.McpServers}, Config: config}, nil
+	return append(permissionFlags, strictMcpConfig, "--mcp-config", hold.FilesOf(h.Sessions, entry.ShipID).McpConfig), &sessions.Mcp{Access: mcpproxy.Access{Token: token, Servers: names}, Config: config}, nil
 }
 
 // Launch starts the entry's session in its folder, on the login it is to start on: its first prompt on a first start, the wake otherwise, continuing the folder's conversation when Claude Code keeps one.
@@ -183,7 +207,7 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	if err != nil {
 		return err
 	}
-	mcpFlags, mcp, err := h.mcpOf(entry)
+	mcpFlags, mcp, err := h.mcpOf(entry, flags)
 	if err != nil {
 		return err
 	}
