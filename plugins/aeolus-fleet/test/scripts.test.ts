@@ -1784,6 +1784,23 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       return fleet;
     }
 
+    it('reads the handed task for a permission question without taking or handing another message', async () => {
+      const stub = await aTrierarchHandOver({ '/api/v1/ship/ack': [acknowledged] });
+      await aPrompt();
+      const before = store();
+      const calls = stub.calls.length;
+      const result = run('aeolus-push.sh', { args: ['permission-context'] });
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual(aDelivery());
+      expect(store()).toEqual(before);
+      expect(stub.calls).toHaveLength(calls);
+    });
+
+    it('reports no handed task for a permission question before hand-over', () => {
+      crewedByATrierarch('https://fleet.example');
+      expect(run('aeolus-push.sh', { args: ['permission-context'] })).toMatchObject({ status: 0, stdout: '{}\n' });
+    });
+
     describe('with the fleet key cut off (decision 0068)', () => {
       const KEY_WAIT = { ...NO_WAITS, AEOLUS_KEY_WAIT_SECONDS: '2' };
       const handWithKey = () => start('aeolus-push.sh', { args: ['hand'], env: KEY_WAIT }).done;
