@@ -167,6 +167,8 @@ type held struct {
 	isBusy       bool
 	isRestarting bool
 	isStopping   bool
+	// isTurnFailed is whether the running Codex turn wrote turn.failed.
+	isTurnFailed bool
 	controls     int
 	// turns takes the lines of a harness with a process per turn one at a time, so two never start a turn on one session.
 	turns    sync.Mutex
@@ -293,6 +295,7 @@ func (h *held) start(command []string) (*harness, error) {
 	}
 	started := &harness{command: run, stdin: stdin}
 	h.child = started
+	h.isTurnFailed = false
 	if h.isTurnPerProcess() {
 		h.isBusy = true
 	}
@@ -373,6 +376,9 @@ func (h *held) onLine(line string) {
 		h.sessionID = id
 		_ = os.WriteFile(h.options.Files.SessionID, []byte(id), 0o600)
 	}
+	if h.options.Harness == codex && said.Type == "turn.failed" {
+		h.isTurnFailed = true
+	}
 	if said.Type == "result" {
 		h.isBusy = false
 		h.tell(event{kind: resultEvent})
@@ -382,7 +388,7 @@ func (h *held) onLine(line string) {
 	}
 }
 
-// wait waits for the run to end, its last lines kept, and ends the hold with it unless the hold starts its harness again or runs a process per turn. Copilot's turn ends once its native process closed the output it inherited from the launcher, which may exit first; a Copilot turn that failed died, and ends the hold with its status, one the hold stopped by a signal not.
+// wait waits for the run to end, its last lines kept, and ends the hold with it unless the hold starts its harness again or runs a process per turn. Copilot's turn ends once its native process closed the output it inherited from the launcher, which may exit first; a Copilot turn that failed died, and so did a Codex turn that wrote turn.failed and exited with a failure status (#340): either ends the hold with its status, so the session is seen exited, restarted and reported as one that died. A turn the hold stopped by a signal does not, nor a Codex turn interrupted, which writes turn.aborted.
 func (h *held) wait(run *harness, outputs []*os.File, read <-chan struct{}) {
 	err := run.command.Wait()
 	if h.options.Harness == copilot {
@@ -413,7 +419,7 @@ func (h *held) wait(run *harness, outputs []*os.File, read <-chan struct{}) {
 		h.child = nil
 	}
 	h.tell(event{kind: exitEvent})
-	isDiedTurn := h.options.Harness == copilot && isExited && code != 0
+	isDiedTurn := isExited && code != 0 && (h.options.Harness == copilot || (h.options.Harness == codex && h.isTurnFailed))
 	if h.isStopping || isDiedTurn || (!h.isRestarting && !isTurnPerProcess) {
 		select {
 		case h.ended <- code:
