@@ -20,6 +20,8 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/service"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/servicelog"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
 )
@@ -73,9 +75,10 @@ func aMain(t *testing.T) (Machine, *anInstalledService, *aFleet) {
 	home := aShortHome(t)
 	at := paths.Of(home, "")
 	installed := &anInstalledService{aServiceManager: aServiceManager{write: func() {
-		_ = os.WriteFile(at.Running, []byte(`{"pid":41,"version":"`+Version+`"}`), 0o644)
+		_ = os.WriteFile(at.Running, []byte(`{"pid":41,"version":"`+Version+`","firstReportAccepted":true}`), 0o644)
 	}}}
 	fleet := &aFleet{held: map[string]bool{}}
+	elapsed := 0
 	return Machine{
 		Environ:               []string{"HOME=" + home},
 		HomeDirectory:         home,
@@ -92,7 +95,8 @@ func aMain(t *testing.T) (Machine, *anInstalledService, *aFleet) {
 		Service:               func(paths.Paths) ServiceManager { return installed },
 		Register:              fleet.register,
 		IsLeaseHeld:           fleet.isLeaseHeld,
-		Sleep:                 func() {},
+		Sleep:                 func() { elapsed++ },
+		Now:                   func() time.Time { return time.Date(2026, 10, 6, 7, 0, 20+elapsed, 0, time.UTC) },
 		Stop:                  make(chan struct{}),
 		CoreVersionRefusal:    func(string) string { return "" },
 		ContainerHost:         func(string) container.Host { return aRuntime{} },
@@ -588,5 +592,113 @@ func TestUpgradeAnswersItsReportAndExitsOneWhenThePluginIsNotUpdated(t *testing.
 	plugins.failing = errors.New("claude plugin marketplace update aeolus-fleet failed: Failed to reach the marketplace")
 	if output, code := Main([]string{"upgrade", "--json"}, machine); code != 1 || decoded(t, output)["isPluginUpdated"] != false {
 		t.Errorf("upgrade with the plugin failing answered %q, %d, want exit 1", output, code)
+	}
+}
+
+func TestInitSaysTheLastLogLineWhenTheServiceCrashes(t *testing.T) {
+	machine, manager, _ := aMain(t)
+	sleep := machine.Sleep
+	machine.Sleep = func() { sleep(); manager.running = false }
+	machine.ServiceLog = func(paths.Paths) servicelog.Log {
+		return servicelog.Log{Tail: func(int) ([]string, error) { return []string{"plugin missing"}, nil }}
+	}
+	output, code := Main(setupWords(), machine)
+	if code != 1 || !strings.Contains(output, "plugin missing") {
+		t.Errorf("init = %q, %d; want the last log line and exit 1", output, code)
+	}
+}
+
+func TestStatusSaysTheRestartCountAndLastError(t *testing.T) {
+	machine, manager, _ := aMain(t)
+	if output, code := Main(setupWords(), machine); code != 0 {
+		t.Fatalf("init = %q, %d", output, code)
+	}
+	manager.override = &service.Status{File: "/unit", IsInstalled: true, IsRestarting: true, Restarts: 6}
+	machine.ServiceLog = func(paths.Paths) servicelog.Log {
+		return servicelog.Log{Tail: func(int) ([]string, error) { return []string{"plugin missing"}, nil }}
+	}
+	output, code := Main([]string{"status"}, machine)
+	if code != 0 || !strings.Contains(output, "restarted 6") || !strings.Contains(output, "plugin missing") {
+		t.Errorf("status = %q, %d; want restart count and last error", output, code)
+	}
+}
+
+func TestStatusShowsWhenTheFirstReportHasNotBeenAccepted(t *testing.T) {
+	machine, _, _ := aMain(t)
+	if output, code := Main(setupWords(), machine); code != 0 {
+		t.Fatalf("init = %q, %d", output, code)
+	}
+	at := paths.Of(machine.HomeDirectory, "")
+	if err := os.WriteFile(at.Running, []byte(`{"pid":41,"version":"0.0.0"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output, code := Main([]string{"status"}, machine)
+	if code != 0 || !strings.Contains(output, "first report") {
+		t.Errorf("status = %q, %d; want the missing first report", output, code)
+	}
+}
+
+func TestStatusShowsWhenTheProcessHasNotRunForTenSeconds(t *testing.T) {
+	machine, _, _ := aMain(t)
+	if output, code := Main(setupWords(), machine); code != 0 {
+		t.Fatalf("init = %q, %d", output, code)
+	}
+	machine.StartedAt = func(int) string { return machine.Now().UTC().Format(time.RFC3339) }
+	output, code := Main([]string{"status"}, machine)
+	if code != 0 || !strings.Contains(output, "10 seconds") {
+		t.Errorf("status = %q, %d; want the ten-second wait", output, code)
+	}
+}
+
+func TestStatusShowsTheLoopWhileItsLatestProcessIsRunning(t *testing.T) {
+	machine, manager, _ := aMain(t)
+	if output, code := Main(setupWords(), machine); code != 0 {
+		t.Fatalf("init = %q, %d", output, code)
+	}
+	manager.override = &service.Status{File: "/unit", IsInstalled: true, IsRunning: true, PID: 41, Restarts: 6}
+	machine.StartedAt = func(int) string { return machine.Now().UTC().Format(time.RFC3339) }
+	machine.ServiceLog = func(paths.Paths) servicelog.Log {
+		return servicelog.Log{Tail: func(int) ([]string, error) { return []string{"plugin missing"}, nil }}
+	}
+	output, code := Main([]string{"status"}, machine)
+	if code != 0 || !strings.Contains(output, "restarted 6") || !strings.Contains(output, "plugin missing") {
+		t.Errorf("status = %q, %d; want the loop and last error", output, code)
+	}
+}
+
+func TestInitSaysTheLastLogLineWhenTheServiceFailsToStart(t *testing.T) {
+	machine, manager, _ := aMain(t)
+	manager.installErr = errors.New("service start failed")
+	machine.ServiceLog = func(paths.Paths) servicelog.Log {
+		return servicelog.Log{Tail: func(int) ([]string, error) { return []string{"plugin missing"}, nil }}
+	}
+	output, code := Main(setupWords(), machine)
+	if code != 1 || !strings.Contains(output, "service start failed") || !strings.Contains(output, "plugin missing") {
+		t.Errorf("init = %q, %d; want the failure and last log line", output, code)
+	}
+}
+
+func TestStatusShowsWhenTheProcessAgeIsUnknown(t *testing.T) {
+	machine, _, _ := aMain(t)
+	if output, code := Main(setupWords(), machine); code != 0 {
+		t.Fatalf("init = %q, %d", output, code)
+	}
+	machine.StartedAt = func(int) string { return "" }
+	output, code := Main([]string{"status"}, machine)
+	if code != 0 || !strings.Contains(output, "cannot determine") {
+		t.Errorf("status = %q, %d; want the unknown process age", output, code)
+	}
+}
+
+func TestStatusUsesTheMachineClockToCheckTheProcessAge(t *testing.T) {
+	machine, _, _ := aMain(t)
+	if output, code := Main(setupWords(), machine); code != 0 {
+		t.Fatalf("init = %q, %d", output, code)
+	}
+	machine.Now = func() time.Time { return time.Date(2020, 1, 1, 0, 0, 9, 0, time.UTC) }
+	machine.StartedAt = func(int) string { return "2020-01-01T00:00:00Z" }
+	output, code := Main([]string{"status"}, machine)
+	if code != 0 || !strings.Contains(output, "10 seconds") {
+		t.Errorf("status = %q, %d; want the ten-second wait", output, code)
 	}
 }

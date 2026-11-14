@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
@@ -32,14 +33,16 @@ type StatusReport struct {
 	// ModelsConfirmedAt is, per configured harness, when its models were last confirmed; null where none were (docs/trierarch.md, "Detected options").
 	ModelsConfirmedAt map[string]*string `json:"modelsConfirmedAt"`
 	// HarnessOrder is the configured harnesses in the configuration file's order, as the text says them.
-	HarnessOrder []string       `json:"-"`
-	Repositories []string       `json:"repositories"`
-	Service      service.Status `json:"service"`
-	Fleet        StatusFleet    `json:"fleet"`
-	Caps         StatusCaps     `json:"caps"`
-	Entries      map[string]int `json:"entries"`
-	Kept         []StatusKept   `json:"kept"`
-	Orphans      []string       `json:"orphans"`
+	HarnessOrder     []string       `json:"-"`
+	Repositories     []string       `json:"repositories"`
+	Service          service.Status `json:"service"`
+	ServiceLastError string         `json:"serviceLastError,omitempty"`
+	ServiceReadiness string         `json:"serviceReadiness,omitempty"`
+	Fleet            StatusFleet    `json:"fleet"`
+	Caps             StatusCaps     `json:"caps"`
+	Entries          map[string]int `json:"entries"`
+	Kept             []StatusKept   `json:"kept"`
+	Orphans          []string       `json:"orphans"`
 	// PassFailure is why the last pass failed and since when; none when it succeeded.
 	PassFailure *reconciler.PassFailure `json:"passFailure,omitempty"`
 }
@@ -72,6 +75,10 @@ type StatusKept struct {
 
 // status is how the trierarch stands on this machine, from what is on it.
 func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
+	now := machine.Now
+	if now == nil {
+		now = time.Now
+	}
 	kept, err := crew.Read(at.CrewToken)
 	if err != nil {
 		return answer{}, err
@@ -90,6 +97,9 @@ func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
 	}
 	if manager.IsRunning && manager.PID > 0 && machine.StartedAt != nil {
 		manager.Since = machine.StartedAt(manager.PID)
+		if started, err := time.Parse(time.RFC3339, manager.Since); err == nil && manager.Restarts > 0 && now().Sub(started) < 10*time.Second {
+			manager.IsRestarting = true
+		}
 	}
 	observed, err := machine.Sessions(at).List()
 	if err != nil {
@@ -118,6 +128,12 @@ func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
 		Orphans:     orphansOf(saved.Orphans),
 		PassFailure: saved.PassFailure,
 	}
+	if manager.IsRestarting && machine.ServiceLog != nil {
+		lines, err := machine.ServiceLog(at).Tail(1)
+		if err == nil && len(lines) > 0 {
+			report.ServiceLastError = lines[len(lines)-1]
+		}
+	}
 	slices.Sort(report.Repositories)
 	plugins := machine.Plugins()
 	for harness := range configuration.Harnesses {
@@ -140,6 +156,13 @@ func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
 	// Only the service's own process counts: a file left by an earlier process, or by a run outside the service, says nothing of it.
 	if running, isRead := readRunning(at.Running); manager.IsRunning && isRead && running.PID == manager.PID {
 		report.RunningVersion = running.Version
+		if !running.FirstReportAccepted {
+			report.ServiceReadiness = "first report not accepted"
+		} else if started, err := time.Parse(time.RFC3339, manager.Since); err != nil {
+			report.ServiceReadiness = "cannot determine how long the process has run"
+		} else if now().Sub(started) < 10*time.Second {
+			report.ServiceReadiness = "waiting for one process to run for 10 seconds"
+		}
 	}
 	return answer{data: report, text: describeStatus(report, look)}, nil
 }
@@ -186,9 +209,16 @@ func reencode(value any, into any) bool {
 	return err == nil && json.Unmarshal(text, into) == nil
 }
 
-func describeService(manager service.Status, look style.Style) string {
+func describeService(manager service.Status, lastError, readiness string, look style.Style) string {
 	if !manager.IsInstalled {
 		return look.Tone(style.Bad, "not installed (aeolus-trierarch install)")
+	}
+	if manager.IsRestarting {
+		text := fmt.Sprintf("restarted %d times", manager.Restarts)
+		if lastError != "" {
+			text += ", last error: " + lastError
+		}
+		return look.Tone(style.Bad, text)
 	}
 	if !manager.IsRunning {
 		return look.Tone(style.Busy, "installed, not running (aeolus-trierarch start)")
@@ -199,6 +229,9 @@ func describeService(manager service.Status, look style.Style) string {
 	}
 	if manager.Since != "" {
 		parts = append(parts, "since "+manager.Since)
+	}
+	if readiness != "" {
+		parts = append(parts, look.Tone(style.Busy, readiness))
 	}
 	return strings.Join(parts, ", ")
 }
@@ -290,7 +323,7 @@ func describeStatus(report StatusReport, look style.Style) string {
 		line("Aeolus Fleet plugin", describePlugins(report.Plugins, report.HarnessOrder, look)),
 		line("Models confirmed", describeModels(report.ModelsConfirmedAt, report.HarnessOrder)),
 		line("Repositories", or(len(report.Repositories) == 0, "none", func() string { return strings.Join(report.Repositories, ", ") })),
-		line("Service", describeService(report.Service, look)),
+		line("Service", describeService(report.Service, report.ServiceLastError, report.ServiceReadiness, look)),
 		line("Fleet", describeFleet(report.Fleet, look)),
 		line("Caps", fmt.Sprintf("%d of %d ships crewed here, %d of %d sessions running", report.Caps.Ships.Used, report.Caps.Ships.Cap, report.Caps.Running.Used, report.Caps.Running.Cap)),
 		line("Last pass", lastPass),

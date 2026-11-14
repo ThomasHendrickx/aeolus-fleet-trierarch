@@ -177,6 +177,7 @@ func (l Launchd) Uninstall() error {
 }
 
 var launchdPIDPattern = regexp.MustCompile(`(?m)^\s*pid = (\d+)$`)
+var launchdRunsPattern = regexp.MustCompile(`(?m)^\s*runs = (\d+)$`)
 
 func (l Launchd) Status() (Status, error) {
 	file := l.File()
@@ -187,10 +188,16 @@ func (l Launchd) Status() (Status, error) {
 	if err != nil {
 		return Status{File: file, IsInstalled: true}, nil
 	}
-	match := launchdPIDPattern.FindStringSubmatch(printed)
-	if match == nil {
-		return Status{File: file, IsInstalled: true}, nil
+	status := Status{File: file, IsInstalled: true}
+	if match := launchdRunsPattern.FindStringSubmatch(printed); match != nil {
+		runs, _ := strconv.Atoi(match[1])
+		status.Restarts = max(0, runs-1)
 	}
-	pid, _ := strconv.Atoi(match[1])
-	return Status{File: file, IsInstalled: true, IsRunning: true, PID: pid}, nil
+	if match := launchdPIDPattern.FindStringSubmatch(printed); match != nil {
+		status.PID, _ = strconv.Atoi(match[1])
+		status.IsRunning = status.PID > 0
+	} else if status.Restarts > 0 {
+		status.IsRestarting = true
+	}
+	return status, nil
 }

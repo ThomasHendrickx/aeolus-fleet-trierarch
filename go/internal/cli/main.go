@@ -76,6 +76,7 @@ type Machine struct {
 	Register    func(fleetURL string, shipID string, secret string) (string, error)
 	IsLeaseHeld func(fleetURL string, crewToken string) (bool, error)
 	Sleep       func()
+	Now         func() time.Time
 	// Stop is closed when the process is told to stop (SIGTERM, SIGINT).
 	Stop <-chan struct{}
 	// CoreVersionRefusal is why the trierarch may not run against the fleet's core, empty when it may.
@@ -261,6 +262,17 @@ func Main(args []string, machine Machine) (string, int) {
 				Register:              machine.Register,
 				IsLeaseHeld:           machine.IsLeaseHeld,
 				Sleep:                 machine.Sleep,
+				Now:                   machine.Now,
+				LastLog: func() string {
+					if machine.ServiceLog == nil {
+						return ""
+					}
+					lines, err := machine.ServiceLog(at).Tail(1)
+					if err != nil || len(lines) == 0 {
+						return ""
+					}
+					return lines[len(lines)-1]
+				},
 				Detect: func(harnesses []string, by detection.By) (detection.Detected, error) {
 					return machine.Detect(at, harnesses, by)
 				},
@@ -467,7 +479,7 @@ func run(at paths.Paths, machine Machine) (answer, error) {
 	if err := os.MkdirAll(at.Home, 0o700); err != nil {
 		return answer{}, err
 	}
-	if err := os.WriteFile(at.Running, []byte(mustJSON(Running{PID: machine.PID, Version: Version})+"\n"), 0o644); err != nil {
+	if err := writeRunning(at.Running, Running{PID: machine.PID, Version: Version}); err != nil {
 		return answer{}, err
 	}
 	machine.Log(fmt.Sprintf("aeolus-trierarch %s runs as pid %d", Version, machine.PID))
