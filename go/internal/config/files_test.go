@@ -155,7 +155,7 @@ func TestAConfigurationKeepsExactlyTheHarnessesWrittenToIt(t *testing.T) {
 			configured := Initial()
 			want := map[string]Harness{}
 			for _, name := range names {
-				given := Harness{Flags: []string{"--verbose"}, Options: map[string]Option{"model": {Values: map[string][]string{"a-model": {"-m", "a-model"}}, Default: "a-model"}}}
+				given := Harness{Flags: []string{"--verbose"}, Options: map[string]Option{"model": {Values: map[string][]string{"a-model": {"-m", "a-model"}}, Default: "a-model", Order: []string{"a-model"}}}}
 				configured.Harnesses[name] = given
 				want[name] = given
 			}
