@@ -416,7 +416,7 @@ func (i Init) Run(flags Flags) (Report, error) {
 			return report, i.serviceError(err)
 		}
 		report.Service = "installed"
-	case report.Configuration != "kept" || isPluginShipNew || isRegisteredAgain:
+	case report.Configuration != "kept" || isPluginShipNew || isRegisteredAgain || (!status.IsRunning && !status.IsRestarting):
 		if err := i.Service.Rewrite(); err != nil {
 			return Report{}, err
 		}
