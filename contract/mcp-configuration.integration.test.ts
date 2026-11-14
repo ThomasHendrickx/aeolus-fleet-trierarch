@@ -1,13 +1,14 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { questionSchema, type ShipId } from '@aeolus-fleet/common';
+import { idSchema, questionSchema, type ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import { newKey, unwrap, type ShipCaller } from '@aeolus-fleet/core/testing';
 
-import { aCrewingMachine, listedEntryOf, REPOSITORY } from './support/crewing.js';
+import { aCrewingMachine, listedEntryOf, REPOSITORY, sessionOf } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
-import { aMachine, type Machine } from './support/machine.js';
+import { aMachine, runProgram, PLUGIN_ROOT, type Machine } from './support/machine.js';
 import { isTodaysTrierarch } from './support/trierarch-under-test.js';
 
 // The fleet's MCP configuration from the trierarch plugin's ship: asked for, applied, confirmed and offered (docs/trierarch.md, "Crew-time MCP servers").
@@ -163,6 +164,62 @@ describe.skipIf(isTodaysTrierarch)('permission questions for the owner', () => {
     } finally {
       cancellation.abort();
       await result;
+    }
+  });
+});
+
+
+describe.skipIf(isTodaysTrierarch)('permission answer hand-over', () => {
+  it('takes the owner answer before hand-over while other messages and rejected answers wait for the next turn', async () => {
+    const owner = await fleet.commission('person');
+    await fleet.database.ship.update({ where: { id: owner }, data: { kind: 'person' } });
+    const stranger = await fleet.commission('stranger');
+    const scout = await fleet.commission('scout', { owner });
+    const config = join(machine.trierarchHome, 'config.json');
+    const configuration = z.looseObject({ harnesses: z.record(z.string(), z.unknown()) }).parse(JSON.parse(readFileSync(config, 'utf8')));
+    writeFileSync(config, JSON.stringify({ ...configuration, harnesses: { ...configuration.harnesses, 'claude-code': { flags: [], options: {} } } }));
+    expect((await machine.trierarch(['restart'])).status).toBe(0);
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code', options: { model: 'claude-opus-5' } });
+    await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: ANSWERED_WITHIN_MS }).toBe('running');
+    const session = sessionOf(machine, 'scout');
+    const task = await fleet.send('scout', 'work on the permission test');
+    await expect.poll(() => fleet.deliveryStateOf(task), { timeout: ANSWERED_WITHIN_MS }).toBe('handled');
+    // A tool call runs inside a busy turn. Drive the real hook because this
+    // contract's stand-in does not itself call the private permission tool.
+    const hook = await runProgram(['bash', join(PLUGIN_ROOT, 'scripts', 'aeolus-turn.sh')], { cwd: session.folder, env: { ...session.starts()[0]?.env, CLAUDE_PLUGIN_ROOT: PLUGIN_ROOT, CLAUDE_PLUGIN_DATA: machine.pluginData, CLAUDE_PROJECT_DIR: session.folder }, input: JSON.stringify({ cwd: session.folder, hook_event_name: 'UserPromptSubmit', prompt: 'permission test' }) });
+    expect(hook.status).toBe(0);
+    const servers = z.object({ mcpServers: z.record(z.string(), z.object({ url: z.string(), headers: z.record(z.string(), z.string()) })) }).parse(JSON.parse(readFileSync(join(machine.trierarchHome, 'sessions', scout, 'mcp-config.json'), 'utf8')));
+    const permission = servers.mcpServers['aeolus-permissions'];
+    if (permission === undefined) throw new Error('permission server is missing');
+    const cancellation = new AbortController();
+    const response = await fetch(permission.url, { method: 'POST', headers: { ...permission.headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 8, method: 'tools/call', params: { name: 'ask', arguments: { tool_name: 'Bash', tool_use_id: 'permission-8', input: { command: 'npm ci' } } } }), signal: cancellation.signal });
+    const result = response.text();
+    void result.catch(() => undefined);
+    try {
+      const questions = () => fleet.database.message.findMany({ where: { senderShipId: scout, selectorShipId: owner, contentType: 'application/vnd.aeolus.question+json' } });
+      await expect.poll(async () => (await questions()).length, { timeout: ANSWERED_WITHIN_MS }).toBe(1);
+      const question = (await questions())[0];
+      if (question === undefined) throw new Error('question is missing');
+      const payload = questionSchema.parse(JSON.parse(question.payload ?? '{}'));
+      const answer = async (sender: ShipId, kind: ShipCaller['kind']) => {
+        const caller: ShipCaller = { shipId: sender, fleetId: fleet.argo.fleetId, kind, scopes: fleet.argo.scopes };
+        return unwrap(await fleet.useCases.sendMessage(caller, { selector: { kind: 'ship', shipId: scout }, contentType: 'application/vnd.aeolus.answer+json', payload: JSON.stringify({ questionId: payload.id, option: 1, note: sender === stranger ? 'stranger answer' : 'owner answer' }), inReplyTo: idSchema('message').parse(question.id), ...(kind === 'agent' ? { model: 'test-agent' } : {}), idempotencyKey: newKey() })).messageId;
+      };
+      await fleet.send('scout', 'ordinary message while busy');
+      const rejected = await answer(stranger, 'agent');
+      await expect.poll(() => fleet.deliveryStateOf(rejected), { timeout: ANSWERED_WITHIN_MS }).toBe('acknowledged');
+      const accepted = await answer(owner, 'person');
+      await expect.poll(() => fleet.deliveryStateOf(accepted), { timeout: ANSWERED_WITHIN_MS }).toBe('handled');
+      const text = await result;
+      expect(text).toContain(String.raw`\"behavior\":\"allow\"`);
+      expect(session.turns().some(({ context }) => context.includes('owner answer'))).toBe(false);
+      unwrap(await fleet.useCases.sendMessage(fleet.argo, { selector: { kind: 'ship', shipId: scout }, payload: 'end the prior turn', isForced: true, idempotencyKey: newKey() }));
+      await expect.poll(() => session.turns().some(({ context }) => context.includes('stranger answer')), { timeout: ANSWERED_WITHIN_MS }).toBe(true);
+      await expect.poll(() => session.turns().some(({ context }) => context.includes('ordinary message while busy')), { timeout: ANSWERED_WITHIN_MS }).toBe(true);
+      expect(session.turns().some(({ context }) => context.includes('owner answer'))).toBe(false);
+    } finally {
+      cancellation.abort();
+      await result.catch(() => undefined);
     }
   });
 });
