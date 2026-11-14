@@ -19,16 +19,11 @@ type Answers interface {
 	Finish(context.Context, string, Reply, bool) error
 }
 
-type receivedAnswer struct {
-	reply Reply
-	err   error
-}
-
 func (s Service) waitAnswer(ctx context.Context, ship string, request Request, answers Answers, asked Owner, question *string, answered *bool) Decision {
 	timer := s.Clock.NewTimer(waitLimit)
 	defer timer.Stop()
 	for {
-		reply, end := receiveAnswer(ctx, timer, answers, ship, *question)
+		reply, end := s.receiveAnswer(ctx, timer, answers, ship, *question)
 		if end != nil {
 			return *end
 		}
@@ -54,7 +49,10 @@ func (s Service) waitAnswer(ctx context.Context, ship string, request Request, a
 			return request.decision(reply.Answer)
 		}
 		s.logFailure(fmt.Errorf("answer from %s (%s) left for ordinary hand-over", reply.SenderName, reply.SenderID))
-		if reply.Matches && reply.SenderID == asked.ID && err == nil && owner.ID != asked.ID && owner.IsPerson {
+		if reply.Matches && reply.SenderID == asked.ID && err == nil && owner.ID != asked.ID {
+			if !owner.IsPerson {
+				return Decision{Behavior: "deny", Message: "this ship's owner is argo: nobody is asked"}
+			}
 			if err := s.Questions.Withdraw(context.WithoutCancel(ctx), ship, *question); err != nil {
 				s.logFailure(err)
 			}
@@ -69,14 +67,27 @@ func (s Service) waitAnswer(ctx context.Context, ship string, request Request, a
 	}
 }
 
-func receiveAnswer(ctx context.Context, timer Timer, answers Answers, ship, question string) (Reply, *Decision) {
+func (s Service) receiveAnswer(ctx context.Context, timer Timer, answers Answers, ship, question string) (Reply, *Decision) {
 	ctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
-	result := make(chan receivedAnswer, 1)
+	result := make(chan Reply, 1)
 	go func() {
 		defer close(done)
-		reply, err := answers.Receive(ctx, ship, question)
-		result <- receivedAnswer{reply, err}
+		for {
+			reply, err := answers.Receive(ctx, ship, question)
+			if ctx.Err() != nil {
+				return
+			}
+			if err != nil {
+				s.logFailure(err)
+				if waitForReply(ctx) != nil {
+					return
+				}
+				continue
+			}
+			result <- reply
+			return
+		}
 	}()
 	defer func() { cancel(); <-done }()
 	for {
@@ -85,13 +96,8 @@ func receiveAnswer(ctx context.Context, timer Timer, answers Answers, ship, ques
 			return Reply{}, &Decision{Behavior: "deny", Message: "permission call cancelled"}
 		case <-timer.Done():
 			return Reply{}, &Decision{Behavior: "deny", Message: "not answered in 30 minutes; the question was withdrawn"}
-		case got := <-result:
-			if got.err == nil {
-				return got.reply, nil
-			}
-			// The adapter retries transient fleet failures within Receive. Other
-			// failures cannot safely identify an answer and must fail closed.
-			return Reply{}, &Decision{Behavior: "deny", Message: "could not read the permission answer"}
+		case reply := <-result:
+			return reply, nil
 		}
 	}
 }
