@@ -3312,6 +3312,7 @@ describe('a ship crewed before the ship folder layout (decision 0013)', () => {
     await trierarch.pass();
 
     expect(trierarch.harness.launches.at(-1)).toMatchObject({
+      shipId,
       isFirstStart: true,
       firstPrompt: 'This is a continuation of an existing crew request in a fresh session. Your previous conversation is unavailable. Recover the current task and progress from the fleet before acting; do not repeat completed work.',
     });

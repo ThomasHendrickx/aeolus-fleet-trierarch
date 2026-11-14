@@ -712,7 +712,7 @@ async function crewInTheShipFolderLayout(state: TrierarchState, at: EntryAt & { 
  * request on a release, so the ship is never released and registered again.
  * Its session stops and its identity and socket go; then its workspace is made
  * in a new ship's folder, its identity written with the crew token its state
- * keeps, and its session started as a first start, telling nobody. Its usage
+ * keeps, and a fresh session given a continuation prompt, telling nobody. Its usage
  * since the last send went with the folder.
  */
 async function crewInAFreshShipFolder(state: TrierarchState, at: EntryAt & { harness: HarnessPort; crewToken: string }): Promise<TrierarchState> {
@@ -752,7 +752,7 @@ async function crewInAFreshShipFolder(state: TrierarchState, at: EntryAt & { har
     isFirstStart: true,
     launchId,
     login,
-    ...(entry.firstPrompt !== undefined && { firstPrompt: entry.firstPrompt }),
+    firstPrompt: 'This is a continuation of an existing crew request in a fresh session. Your previous conversation is unavailable. Recover the current task and progress from the fleet before acting; do not repeat completed work.',
   });
   const launchedAt = deps.clock.now().toISOString();
   const { isShipFolderGone, ...crewed } = crewing;
