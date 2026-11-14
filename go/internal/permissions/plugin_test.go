@@ -21,6 +21,10 @@ func TestPluginQuestionsNameTheActionRuleInputShipAndModel(t *testing.T) {
 	for _, test := range []struct{ name, tool, input, title, rule string }{
 		{"Bash", "Bash", `{"command":"npm install"}`, "Run `npm install`", "npm install"},
 		{"Edit", "Edit", `{"file_path":"src/a.ts","old_string":"before","new_string":"after"}`, "Edit `src/a.ts`", "src/a.ts"},
+		{"Read", "Read", `{"file_path":"src/a.ts"}`, "Read `src/a.ts`", "src/a.ts"},
+		{"NotebookEdit", "NotebookEdit", `{"notebook_path":"notes.ipynb"}`, "NotebookEdit `notes.ipynb`", "notes.ipynb"},
+		{"4 KB input", "Bash", `{"command":"echo","description":"` + strings.Repeat("x", 4061) + `"}`, "Run `echo`", "echo"},
+		{"one over 4 KB", "Bash", `{"command":"echo","description":"` + strings.Repeat("x", 4062) + `"}`, "Run `echo`", "echo"},
 		{"other tool", "Search", `{"query":"ships"}`, "Search", "Search"},
 		{"5 KB input", "Bash", `{"command":"echo","description":"` + strings.Repeat("x", 5*1024) + `"}`, "Run `echo`", "echo"},
 	} {
@@ -102,6 +106,10 @@ func TestPluginQuestionsNameTheActionRuleInputShipAndModel(t *testing.T) {
 			if test.name == "5 KB input" {
 				if !strings.Contains(question.Context, "1059 bytes cut") || strings.Contains(question.Context, strings.Repeat("x", 4096)) {
 					t.Fatalf("context not cut at 4096 bytes: %q", question.Context)
+				}
+			} else if test.name == "one over 4 KB" {
+				if !strings.Contains(question.Context, "[1 bytes cut]") {
+					t.Fatalf("context: %q", question.Context)
 				}
 			} else if !strings.Contains(question.Context, test.input) {
 				t.Fatalf("missing whole input: %q", question.Context)

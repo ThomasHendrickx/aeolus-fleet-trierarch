@@ -132,7 +132,7 @@ describe.skipIf(isTodaysTrierarch)('permission questions for the owner', () => {
     const configuration = z.looseObject({ harnesses: z.record(z.string(), z.unknown()) }).parse(JSON.parse(readFileSync(config, 'utf8')));
     writeFileSync(config, JSON.stringify({ ...configuration, harnesses: { ...configuration.harnesses, 'claude-code': { flags: [], options: { model: { values: { opus: ['--model', 'opus'] }, default: 'opus' } } } } }));
     expect((await machine.trierarch(['restart'])).status).toBe(0);
-    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code', options: { model: 'opus' } });
     await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: ANSWERED_WITHIN_MS }).toBe('running');
     const servers = z.object({ mcpServers: z.record(z.string(), z.object({ url: z.string(), headers: z.record(z.string(), z.string()) })) }).parse(JSON.parse(readFileSync(join(machine.trierarchHome, 'sessions', scout, 'mcp-config.json'), 'utf8')));
     const permission = servers.mcpServers['aeolus-permissions'];
