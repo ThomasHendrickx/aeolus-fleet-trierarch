@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -169,5 +170,26 @@ func TestWriteWritesTheUnitAndRunsNothing(t *testing.T) {
 	}
 	if len(systemctl.calls) != 0 {
 		t.Errorf("ran %q, want nothing", systemctl.calls)
+	}
+}
+
+func TestStatusSaysTheRestartCountWhileTheServiceIsRestarting(t *testing.T) {
+	manager := aService(t, &aSystemctl{})
+	if err := manager.Write(); err != nil {
+		t.Fatal(err)
+	}
+	manager.Exec = func(string, ...string) (string, error) {
+		return "ActiveState=activating\nMainPID=0\nNRestarts=6\n", nil
+	}
+	status, err := manager.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, err := json.Marshal(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(text), `"restarts":6`) {
+		t.Errorf("status = %s, want six restarts", text)
 	}
 }

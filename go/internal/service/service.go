@@ -40,10 +40,12 @@ func Environment(environ []string) map[string]string {
 
 // Status is how the service stands: its file, whether it is installed and running, and the running process.
 type Status struct {
-	File        string `json:"file"`
-	IsInstalled bool   `json:"isInstalled"`
-	IsRunning   bool   `json:"isRunning"`
-	PID         int    `json:"pid,omitempty"`
+	File         string `json:"file"`
+	IsInstalled  bool   `json:"isInstalled"`
+	IsRunning    bool   `json:"isRunning"`
+	PID          int    `json:"pid,omitempty"`
+	Restarts     int    `json:"restarts,omitempty"`
+	IsRestarting bool   `json:"isRestarting,omitempty"`
 	// Since is when the running process started, ISO 8601; none when it is not known.
 	Since string `json:"since,omitempty"`
 }
@@ -162,8 +164,10 @@ func (s Systemd) Uninstall() error {
 }
 
 var (
-	activePattern = regexp.MustCompile(`(?m)^ActiveState=active$`)
-	pidPattern    = regexp.MustCompile(`(?m)^MainPID=(\d+)$`)
+	activePattern     = regexp.MustCompile(`(?m)^ActiveState=active$`)
+	pidPattern        = regexp.MustCompile(`(?m)^MainPID=(\d+)$`)
+	restartsPattern   = regexp.MustCompile(`(?m)^NRestarts=(\d+)$`)
+	restartingPattern = regexp.MustCompile(`(?m)^ActiveState=activating$`)
 )
 
 func (s Systemd) Status() (Status, error) {
@@ -171,7 +175,7 @@ func (s Systemd) Status() (Status, error) {
 	if _, err := os.Stat(file); err != nil {
 		return Status{File: file}, nil
 	}
-	shown, err := s.systemctl("show", Unit, "-p", "ActiveState", "-p", "MainPID")
+	shown, err := s.systemctl("show", Unit, "-p", "ActiveState", "-p", "MainPID", "-p", "NRestarts")
 	if err != nil {
 		return Status{}, err
 	}
@@ -179,8 +183,13 @@ func (s Systemd) Status() (Status, error) {
 	if match := pidPattern.FindStringSubmatch(shown); match != nil {
 		pid, _ = strconv.Atoi(match[1])
 	}
-	if !activePattern.MatchString(shown) || pid <= 0 {
-		return Status{File: file, IsInstalled: true}, nil
+	restarts := 0
+	if match := restartsPattern.FindStringSubmatch(shown); match != nil {
+		restarts, _ = strconv.Atoi(match[1])
 	}
-	return Status{File: file, IsInstalled: true, IsRunning: true, PID: pid}, nil
+	status := Status{File: file, IsInstalled: true, Restarts: restarts, IsRestarting: restartingPattern.MatchString(shown) && restarts > 0}
+	if activePattern.MatchString(shown) && pid > 0 {
+		status.IsRunning, status.PID = true, pid
+	}
+	return status, nil
 }

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
@@ -51,14 +52,19 @@ func (f *aFleet) isLeaseHeld(_ string, token string) (bool, error) {
 
 // aServiceManager installs and runs the service at once, its process saying its version as it starts.
 type aServiceManager struct {
-	calls     []string
-	installed bool
-	running   bool
-	write     func()
+	calls      []string
+	installed  bool
+	running    bool
+	write      func()
+	override   *service.Status
+	installErr error
 }
 
 func (s *aServiceManager) Install() error {
 	s.calls = append(s.calls, "install")
+	if s.installErr != nil {
+		return s.installErr
+	}
 	s.installed, s.running = true, true
 	s.write()
 	return nil
@@ -77,6 +83,7 @@ func (s *aServiceManager) Rewrite() error {
 
 func (s *aServiceManager) Restart() error {
 	s.calls = append(s.calls, "restart")
+	s.running = true
 	s.write()
 	return nil
 }
@@ -95,6 +102,9 @@ func (s *aServiceManager) Stop() error {
 }
 
 func (s *aServiceManager) Status() (service.Status, error) {
+	if s.override != nil {
+		return *s.override, nil
+	}
 	if !s.running {
 		return service.Status{File: "/unit", IsInstalled: s.installed}, nil
 	}
@@ -118,6 +128,7 @@ func (c *aClaudeCode) CompleteOnboarding() error {
 }
 
 type aMachine struct {
+	elapsed    int
 	init       Init
 	fleet      *aFleet
 	service    *aServiceManager
@@ -132,7 +143,7 @@ func newMachine(t *testing.T) *aMachine {
 	machine := &aMachine{fleet: &aFleet{held: map[string]bool{}}, claudeCode: &aClaudeCode{}, plugins: &somePlugins{versions: map[string]string{}}}
 	machine.service = &aServiceManager{write: func() {
 		_ = os.MkdirAll(at.Home, 0o700)
-		_ = os.WriteFile(at.Running, []byte(`{"pid":41,"version":"0.0.0"}`), 0o644)
+		_ = os.WriteFile(at.Running, []byte(`{"pid":41,"version":"0.0.0","firstReportAccepted":true}`), 0o644)
 	}}
 	machine.init = Init{
 		Paths:                 at,
@@ -144,7 +155,8 @@ func newMachine(t *testing.T) *aMachine {
 		Plugins:               machine.plugins,
 		Register:              machine.fleet.register,
 		IsLeaseHeld:           machine.fleet.isLeaseHeld,
-		Sleep:                 func() {},
+		Sleep:                 func() { machine.elapsed++ },
+		Now:                   func() time.Time { return time.Unix(int64(machine.elapsed), 0) },
 		Detect: func([]string, detection.By) (detection.Detected, error) {
 			return detection.Detected{}, nil
 		},
@@ -442,5 +454,174 @@ func TestInitRunAgainKeepsTheSealingKey(t *testing.T) {
 
 	if again, err := os.ReadFile(machine.init.Paths.SealingKey); err != nil || string(again) != string(first) {
 		t.Errorf("the sealing key changed on init again (%v): the secrets sealed to it would no longer open", err)
+	}
+}
+
+func TestInitFailsWhenTheServiceRunsAnotherVersion(t *testing.T) {
+	machine := newMachine(t)
+	machine.service.write = func() {
+		_ = os.MkdirAll(machine.init.Paths.Home, 0o700)
+		_ = os.WriteFile(machine.init.Paths.Running, []byte(`{"pid":41,"version":"different"}`), 0o644)
+	}
+
+	_, err := machine.init.Run(setupLine())
+	if err == nil || !strings.Contains(err.Error(), "version") {
+		t.Errorf("Run() error = %v, want a version mismatch", err)
+	}
+}
+
+func TestInitWaitsForOneProcessForTenSeconds(t *testing.T) {
+	machine := newMachine(t)
+	waits := 0
+	machine.init.Sleep = func() { waits++; machine.elapsed++ }
+	if _, err := machine.init.Run(setupLine()); err != nil {
+		t.Fatal(err)
+	}
+	if waits != 10 {
+		t.Errorf("waited %d seconds, want 10", waits)
+	}
+}
+
+func TestInitFailsWhenTheServiceCrashesDuringTheWait(t *testing.T) {
+	machine := newMachine(t)
+	machine.init.Sleep = func() { machine.elapsed++; machine.service.running = false }
+	_, err := machine.init.Run(setupLine())
+	if err == nil {
+		t.Error("Run() succeeded after the service crashed")
+	}
+}
+
+func TestInitFailsWhenTheLeaseEndsDuringTheWait(t *testing.T) {
+	machine := newMachine(t)
+	machine.init.Sleep = func() {
+		machine.elapsed++
+		for token := range machine.fleet.held {
+			machine.fleet.held[token] = false
+		}
+	}
+	_, err := machine.init.Run(setupLine())
+	if err == nil || !strings.Contains(err.Error(), "lease") {
+		t.Errorf("Run() error = %v, want an invalid lease", err)
+	}
+}
+
+func TestInitFailsWhenTheFirstReportWasNotAccepted(t *testing.T) {
+	machine := newMachine(t)
+	machine.service.write = func() {
+		_ = os.MkdirAll(machine.init.Paths.Home, 0o700)
+		_ = os.WriteFile(machine.init.Paths.Running, []byte(`{"pid":41,"version":"0.0.0"}`), 0o644)
+	}
+	_, err := machine.init.Run(setupLine())
+	if err == nil || !strings.Contains(err.Error(), "report") {
+		t.Errorf("Run() error = %v, want the missing report", err)
+	}
+}
+
+func TestInitSaysTheServiceStayedUpAfterTheChecks(t *testing.T) {
+	machine := newMachine(t)
+	report, err := machine.init.Run(setupLine())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Join(report.Said, "\n")
+	if !strings.Contains(text, "10 seconds") || strings.Contains(text, "The trierarch runs, and starts again") {
+		t.Errorf("report = %q, want the checked service", text)
+	}
+}
+
+func TestInitSaysWhenTheServiceHasNotWrittenItsRunningFile(t *testing.T) {
+	machine := newMachine(t)
+	machine.service.write = func() {}
+	_, err := machine.init.Run(setupLine())
+	if err == nil || !strings.Contains(err.Error(), "running.json") {
+		t.Errorf("Run() error = %v, want the missing running.json", err)
+	}
+}
+
+func TestInitRestartsTheTenSecondWaitForANewProcess(t *testing.T) {
+	machine := newMachine(t)
+	waits := 0
+	machine.init.Sleep = func() {
+		machine.elapsed++
+		waits++
+		if waits == 5 {
+			machine.service.override = &service.Status{File: "/unit", IsInstalled: true, IsRunning: true, PID: 42, Restarts: 1}
+			_ = os.WriteFile(machine.init.Paths.Running, []byte(`{"pid":42,"version":"0.0.0","firstReportAccepted":true}`), 0o644)
+		}
+	}
+	if _, err := machine.init.Run(setupLine()); err != nil {
+		t.Fatal(err)
+	}
+	if waits != 15 {
+		t.Errorf("waited %d seconds, want 15", waits)
+	}
+}
+
+func TestInitStopsAfterThirtySecondsOfRestarts(t *testing.T) {
+	machine := newMachine(t)
+	waits := 0
+	machine.init.Sleep = func() {
+		machine.elapsed++
+		waits++
+		pid := 41 + waits/5
+		machine.service.override = &service.Status{File: "/unit", IsInstalled: true, IsRunning: true, PID: pid, Restarts: waits / 5}
+	}
+	machine.init.LastLog = func() string { return "plugin missing" }
+	_, err := machine.init.Run(setupLine())
+	if waits != 30 || err == nil || !strings.Contains(err.Error(), "restarted 6") || !strings.Contains(err.Error(), "plugin missing") {
+		t.Errorf("Run() waited %d seconds, error %v; want six restarts in 30 seconds and the last log", waits, err)
+	}
+}
+
+func TestInitStartsTheInstalledServiceWhenItIsStopped(t *testing.T) {
+	machine := newMachine(t)
+	if _, err := machine.init.Run(setupLine()); err != nil {
+		t.Fatal(err)
+	}
+	machine.service.running = false
+	if _, err := machine.init.Run(setupLine()); err != nil {
+		t.Fatalf("init on a stopped service: %v", err)
+	}
+	if !machine.service.running {
+		t.Error("the service is not running")
+	}
+}
+
+func TestReportAcceptedWithoutMatchingRunningFile(t *testing.T) {
+	for _, contents := range []string{"", `{"pid":42,"version":"old"}`} {
+		t.Run(contents, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "running.json")
+			if contents != "" {
+				if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := ReportAccepted(path, 41); err != nil {
+				t.Fatalf("ReportAccepted: %v", err)
+			}
+			got, ok := readRunning(path)
+			if !ok || got.PID != 41 || got.Version != Version || !got.FirstReportAccepted {
+				t.Errorf("running = %+v, want accepted process 41", got)
+			}
+		})
+	}
+}
+
+func TestReportAcceptedReplacesRunningFileAtomically(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "old")
+	path := filepath.Join(dir, "running.json")
+	if err := os.WriteFile(target, []byte(`{"pid":41,"version":"old"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReportAccepted(path, 41); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || string(got) != `{"pid":41,"version":"old"}` {
+		t.Errorf("old file = %q, %v; want unchanged", got, err)
 	}
 }

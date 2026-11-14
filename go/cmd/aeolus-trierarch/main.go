@@ -754,6 +754,9 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 		if err := reporter.Report(isKeyCutOff); err != nil {
 			return err
 		}
+		if err := cli.ReportAccepted(at.Running, os.Getpid()); err != nil {
+			logLine(fmt.Sprintf("record accepted report: %v", err))
+		}
 		return sender.Send()
 	}, nil
 }

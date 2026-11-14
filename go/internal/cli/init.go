@@ -10,9 +10,11 @@ import (
 	"maps"
 	"net/url"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
@@ -109,7 +111,9 @@ type Init struct {
 	Register    func(fleetURL string, shipID string, secret string) (string, error)
 	IsLeaseHeld func(fleetURL string, crewToken string) (bool, error)
 	// Sleep waits between reads of running.json; a test passes one that does not wait.
-	Sleep func()
+	Sleep   func()
+	Now     func() time.Time
+	LastLog func() string
 	// Detect detects what the harnesses given offer, as by says, and keeps it in detected.json (#365).
 	Detect func(harnesses []string, by detection.By) (detection.Detected, error)
 }
@@ -410,31 +414,102 @@ func (i Init) Run(flags Flags) (Report, error) {
 	switch {
 	case !status.IsInstalled:
 		if err := i.Service.Install(); err != nil {
-			return Report{}, err
+			return report, i.serviceError(err)
 		}
 		report.Service = "installed"
-		say(fmt.Sprintf("The trierarch runs, and starts again at every login (%s). See it with aeolus-trierarch status.", status.File))
-		if !i.hasSaidItsVersion() {
-			say(notSaidYet)
-		}
-	case report.Configuration != "kept" || isPluginShipNew || isRegisteredAgain:
+	case report.Configuration != "kept" || isPluginShipNew || isRegisteredAgain || (!status.IsRunning && !status.IsRestarting):
 		if err := i.Service.Rewrite(); err != nil {
 			return Report{}, err
 		}
 		if err := i.Service.Restart(); err != nil {
-			return Report{}, err
+			return report, i.serviceError(err)
 		}
 		report.Service = "restarted"
-		say("The trierarch restarted with the new configuration.")
-		if !i.hasSaidItsVersion() {
-			say(notSaidYet)
-		}
 	default:
 		if err := i.Service.Rewrite(); err != nil {
 			return Report{}, err
 		}
 	}
+	if err := i.waitForService(); err != nil {
+		return report, i.serviceError(err)
+	}
+	say(fmt.Sprintf("The service stayed up for 10 seconds and starts again at every login (%s). See it with aeolus-trierarch status.", status.File))
 	return report, nil
+}
+
+func (i Init) serviceError(err error) error {
+	if i.LastLog != nil {
+		if last := i.LastLog(); last != "" {
+			return fmt.Errorf("%w: last log line: %s", err, last)
+		}
+	}
+	return err
+}
+
+func (i Init) waitForService() error {
+	now := i.Now
+	if now == nil {
+		now = time.Now
+	}
+	start := now()
+	var stableSince time.Time
+	var pid, lastPID, changes, baseline int
+	first := true
+	var reason error
+	for {
+		status, err := i.Service.Status()
+		if err != nil {
+			return err
+		}
+		at := now()
+		if first {
+			baseline = status.Restarts
+			first = false
+		}
+		if !status.IsRunning || status.PID <= 0 {
+			pid = 0
+			reason = errors.New("service is not running")
+		} else {
+			if status.PID != pid {
+				if lastPID != 0 && status.PID != lastPID {
+					changes++
+				}
+				pid, lastPID, stableSince = status.PID, status.PID, at
+			}
+			running, ok := readRunning(i.Paths.Running)
+			switch {
+			case !ok || running.PID != pid:
+				reason = errors.New("running.json does not name the service process")
+			case running.Version != Version:
+				reason = fmt.Errorf("service version %s does not match %s", running.Version, Version)
+			case !running.FirstReportAccepted:
+				reason = errors.New("the first report was not accepted")
+			case at.Sub(stableSince) < 10*time.Second:
+				reason = errors.New("service did not keep one process for 10 seconds")
+			default:
+				kept, err := crew.Read(i.Paths.CrewToken)
+				if err != nil {
+					return err
+				}
+				held, err := i.IsLeaseHeld(kept.FleetURL, kept.CrewToken)
+				if err != nil {
+					return fmt.Errorf("check lease: %w", err)
+				}
+				if !held {
+					return errors.New("lease is not valid")
+				}
+				return nil
+			}
+		}
+		if at.Sub(start) >= 30*time.Second {
+			restarts := max(changes, status.Restarts-baseline)
+			if restarts > 0 {
+				return fmt.Errorf("service restarted %d times in 30 seconds: %w", restarts, reason)
+			}
+			return reason
+		}
+		i.Sleep()
+	}
 }
 
 // installPlugins installs the aeolus-fleet plugin of each picked harness at the tag of this version, leaving one already at it as it is. It runs before anything is registered, so a failure leaves the fleet as it was.
@@ -506,11 +581,6 @@ func (i Init) setUpCodex(configuration config.Configuration, root string, say fu
 	return places, hooks
 }
 
-// hasSaidItsVersion waits until the process the service runs has said its version in running.json, 30 seconds at most.
-func (i Init) hasSaidItsVersion() bool {
-	return hasSaidItsVersion(i.Service, i.Paths.Running, i.Sleep)
-}
-
 func hasSaidItsVersion(service interface {
 	Status() (service.Status, error)
 }, runningFile string, sleep func()) bool {
@@ -529,8 +599,9 @@ func hasSaidItsVersion(service interface {
 
 // Running is what the running trierarch says of itself in running.json: its pid and its version, as it started.
 type Running struct {
-	PID     int    `json:"pid"`
-	Version string `json:"version"`
+	PID                 int    `json:"pid"`
+	Version             string `json:"version"`
+	FirstReportAccepted bool   `json:"firstReportAccepted,omitempty"`
 }
 
 // RunningPID is the pid of the trierarch running.json at the path names, 0 when it names none.
@@ -549,4 +620,33 @@ func readRunning(path string) (Running, bool) {
 		return Running{}, false
 	}
 	return running, true
+}
+
+// ReportAccepted records that this process's first report reached the fleet.
+func ReportAccepted(path string, pid int) error {
+	return writeRunning(path, Running{PID: pid, Version: Version, FirstReportAccepted: true})
+}
+
+func writeRunning(path string, running Running) error {
+	text, err := json.Marshal(running)
+	if err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(filepath.Dir(path), ".running-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	if err := file.Chmod(0o644); err != nil {
+		file.Close()
+		return err
+	}
+	if _, err := file.Write(append(text, '\n')); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(file.Name(), path)
 }
