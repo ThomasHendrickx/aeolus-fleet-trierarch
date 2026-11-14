@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -186,5 +187,74 @@ func TestReportFailuresAreLoggedAndKeepThePermissionWaitUntilItsLimitOrCancel(t 
 				})
 			})
 		}
+	}
+}
+
+type questions struct {
+	asked, withdrawn atomic.Int32
+	err              error
+}
+
+func (q *questions) Ask(context.Context, string, Request) (string, error) {
+	q.asked.Add(1)
+	if q.err != nil {
+		return "", q.err
+	}
+	return "question-1", nil
+}
+func (q *questions) Withdraw(ctx context.Context, ship, id string) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	q.withdrawn.Add(1)
+	return nil
+}
+func TestQuestionsAreWithdrawnAtTheLimitAndOnCancellation(t *testing.T) {
+	for _, end := range []string{"limit", "cancel", "connection close"} {
+		t.Run(end, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				q := &questions{}
+				service := Service{Owners: &owners{person: true}, Reports: &reports{}, Questions: q, Clock: SystemClock{}}
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				done := make(chan Decision, 1)
+				go func() { done <- service.Await(ctx, "scout", "Run `npm install`") }()
+				synctest.Wait()
+				if q.asked.Load() != 1 || q.withdrawn.Load() != 0 {
+					t.Fatalf("questions before end = %+v", q)
+				}
+				if end == "limit" {
+					time.Sleep(30 * time.Minute)
+				} else {
+					cancel()
+				}
+				<-done
+				if q.withdrawn.Load() != 1 {
+					t.Fatalf("withdrawals = %d, want 1", q.withdrawn.Load())
+				}
+			})
+		})
+	}
+}
+func TestARefusedQuestionDeniesAndLogsWithoutWaiting(t *testing.T) {
+	q := &questions{err: errors.New("fleet refused")}
+	var logs []string
+	service := Service{Owners: &owners{person: true}, Reports: &reports{}, Questions: q, Clock: SystemClock{}, Log: func(line string) { logs = append(logs, line) }}
+	got := service.Await(context.Background(), "scout", "Run `npm install`")
+	if got.Behavior != "deny" || got.Message != "could not ask" || len(logs) != 1 || q.withdrawn.Load() != 0 {
+		t.Fatalf("decision %+v, logs %v, questions %+v", got, logs, q)
+	}
+}
+
+type unansweredQuestion struct{ questions }
+
+func (q *unansweredQuestion) Ask(context.Context, string, Request) (string, error) {
+	return "question-1", errors.New("send did not answer")
+}
+func TestAQuestionWhoseSendDidNotAnswerIsWithdrawnBeforeDenying(t *testing.T) {
+	q := &unansweredQuestion{}
+	got := (Service{Owners: &owners{person: true}, Reports: &reports{}, Questions: q, Clock: SystemClock{}}).Await(context.Background(), "scout", "Run `npm install`")
+	if got.Message != "could not ask" || q.withdrawn.Load() != 1 {
+		t.Fatalf("decision %+v, withdrawals %d", got, q.withdrawn.Load())
 	}
 }

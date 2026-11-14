@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -123,5 +125,189 @@ func TestAnAbsentReportReturnsToWorkingWithAnEmptyNote(t *testing.T) {
 	got, err := (Fleet{URL: fleet.URL, TokenOf: func(string) string { return "crew-for-test" }}).ReadReport(context.Background(), "scout")
 	if err != nil || got.State != "working" || got.Note != "" {
 		t.Fatalf("ReadReport = %+v, %v", got, err)
+	}
+}
+
+type closingQuestion struct{ started, cancelled, cleanup chan struct{} }
+
+func (q closingQuestion) Owner(context.Context, string) (Owner, error) {
+	return Owner{IsPerson: true}, nil
+}
+func (q closingQuestion) Ask(ctx context.Context, _ string, _ Request) Decision {
+	close(q.started)
+	<-ctx.Done()
+	close(q.cancelled)
+	<-q.cleanup
+	return Decision{Behavior: "deny", Message: "permission call cancelled"}
+}
+func TestClosingThePrivateChannelWaitsForQuestionWithdrawalBeforeReturning(t *testing.T) {
+	folder, err := os.MkdirTemp("", "permission-close-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(folder)
+	q := closingQuestion{started: make(chan struct{}), cancelled: make(chan struct{}), cleanup: make(chan struct{})}
+	channel, err := Listen(filepath.Join(folder, "p.sock"), func(string, string) bool { return true }, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan Decision, 1)
+	go func() {
+		done <- (Client{Socket: filepath.Join(folder, "p.sock"), Token: "test-session"}).Ask(context.Background(), "scout", Request{Title: "Run `npm install`"})
+	}()
+	<-q.started
+	closed := make(chan struct{})
+	go func() { _ = channel.Close(); close(closed) }()
+	<-q.cancelled
+	select {
+	case <-closed:
+		close(q.cleanup)
+		<-done
+		t.Fatal("channel closed before the question's withdrawal finished")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(q.cleanup)
+	<-closed
+	<-done
+}
+
+func TestDrainingAShipWaitsForWithdrawalOrNamesItAtTheDeadline(t *testing.T) {
+	for _, end := range []string{"withdrawn", "deadline"} {
+		t.Run(end, func(t *testing.T) {
+			folder, err := os.MkdirTemp("", "permission-drain-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(folder)
+			q := closingQuestion{started: make(chan struct{}), cancelled: make(chan struct{}), cleanup: make(chan struct{})}
+			channel, err := Listen(filepath.Join(folder, "p.sock"), func(string, string) bool { return true }, q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer channel.Close()
+			done := make(chan Decision, 1)
+			go func() {
+				done <- (Client{Socket: filepath.Join(folder, "p.sock"), Token: "test-session"}).Ask(context.Background(), "scout", Request{Title: "Run `npm install`"})
+			}()
+			<-q.started
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			drained := make(chan []string, 1)
+			go func() { drained <- channel.Drain(ctx, "scout") }()
+			<-q.cancelled
+			select {
+			case <-drained:
+				t.Fatal("drain returned before withdrawal or deadline")
+			default:
+			}
+			if end == "withdrawn" {
+				close(q.cleanup)
+			} else {
+				cancel()
+			}
+			unfinished := <-drained
+			if end == "deadline" {
+				if len(unfinished) != 1 || unfinished[0] != "permission call" {
+					t.Fatalf("unfinished withdrawals: %v", unfinished)
+				}
+				close(q.cleanup)
+			} else if len(unfinished) != 0 {
+				t.Fatalf("unfinished withdrawals: %v", unfinished)
+			}
+			<-done
+		})
+	}
+}
+
+func TestEndingAShipLogsEachWithdrawalStillUnfinishedAfterTenSeconds(t *testing.T) {
+	folder, err := os.MkdirTemp("", "permission-end-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(folder)
+	q := closingQuestion{started: make(chan struct{}), cancelled: make(chan struct{}), cleanup: make(chan struct{})}
+	channel, err := Listen(filepath.Join(folder, "p.sock"), func(string, string) bool { return true }, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer channel.Close()
+	done := make(chan Decision, 1)
+	go func() {
+		done <- (Client{Socket: filepath.Join(folder, "p.sock"), Token: "test-session"}).Ask(context.Background(), "scout", Request{UseID: "tool-7", Title: "Run `npm install`"})
+	}()
+	<-q.started
+	var logs []string
+	ended := make(chan struct{})
+	started := time.Now()
+	go func() { channel.End("scout", func(line string) { logs = append(logs, line) }); close(ended) }()
+	<-q.cancelled
+	select {
+	case <-ended:
+	case <-time.After(11 * time.Second):
+		close(q.cleanup)
+		t.Fatal("release did not continue at its 10-second limit")
+	}
+	elapsed := time.Since(started)
+	close(q.cleanup)
+	<-done
+	if elapsed < 10*time.Second || len(logs) != 1 || logs[0] != "permission withdrawal for scout (tool-7) did not finish within 10 seconds; release continues" {
+		t.Fatalf("release took %s, logs %v", elapsed, logs)
+	}
+}
+
+type immediateQuestion struct {
+	owners
+	asked atomic.Int32
+}
+
+func (q *immediateQuestion) Ask(context.Context, string, Request) Decision {
+	q.asked.Add(1)
+	return Decision{Behavior: "deny", Message: "unexpected ask"}
+}
+func TestARequestStillReadingItsInputCannotOpenAQuestionAfterItsSessionStops(t *testing.T) {
+	folder, err := os.MkdirTemp("", "permission-late-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(folder)
+	var isRunning atomic.Bool
+	isRunning.Store(true)
+	checked := make(chan struct{})
+	var once sync.Once
+	q := &immediateQuestion{}
+	channel, err := Listen(filepath.Join(folder, "p.sock"), func(string, string) bool { once.Do(func() { close(checked) }); return isRunning.Load() }, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer channel.Close()
+	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(folder, "p.sock"))
+	}}
+	defer transport.CloseIdleConnections()
+	body, writer := io.Pipe()
+	request, err := http.NewRequest(http.MethodPost, "http://trierarch/scout", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer test-session")
+	result := make(chan int, 1)
+	go func() {
+		response, err := (&http.Client{Transport: transport}).Do(request)
+		if err != nil {
+			result <- 0
+			return
+		}
+		defer response.Body.Close()
+		result <- response.StatusCode
+	}()
+	<-checked
+	isRunning.Store(false)
+	if unfinished := channel.Drain(context.Background(), "scout"); len(unfinished) != 0 {
+		t.Fatal(unfinished)
+	}
+	_, _ = writer.Write([]byte(`{"tool_name":"Bash","input":{"command":"npm install"}}`))
+	_ = writer.Close()
+	if status := <-result; status != http.StatusForbidden || q.asked.Load() != 0 {
+		t.Fatalf("status %d, questions %d", status, q.asked.Load())
 	}
 }

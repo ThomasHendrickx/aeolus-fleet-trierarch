@@ -3217,3 +3217,23 @@ func TestClaudeCodeKeepsThePermissionProxyRunningWithoutKeysOrRemoteServers(t *t
 		t.Fatalf("kept = %v, want permission proxy running", proxy.kept)
 	}
 }
+
+func TestAReleaseDrainsPermissionWithdrawalsAfterStoppingAndBeforeItsIdentityOrLeaseGoes(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	drained := false
+	pass.pass.EndPermissions = func(ship string) {
+		drained = true
+		if ship != scout || !slices.Contains(pass.sessions.stopped, scout) {
+			t.Errorf("drained %s before its session stopped", ship)
+		}
+		if !pass.harness.HasIdentity(pass.store.state.Entries[scout]) || slices.Contains(pass.fleet.calls, "release "+scout) {
+			t.Error("identity or lease ended before permission withdrawals")
+		}
+	}
+	pass.fleet.requests = []reconciler.Request{aRequest("releasing")}
+	pass.run(t)
+	if !drained || !slices.Contains(pass.fleet.calls, "release "+scout) {
+		t.Fatalf("drained %v, fleet calls %v", drained, pass.fleet.calls)
+	}
+}
