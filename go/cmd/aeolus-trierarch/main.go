@@ -252,6 +252,8 @@ func (p plugins) Update(harness string, tag string) error {
 		// The running trierarch took its plugin scripts from the newest version when it started.
 		running := paths.Of(p.home, "").Running
 		return codex.PluginUpdateOf(p.home, p.env["CODEX_HOME"], func() int { return cli.RunningPID(running) }).Update(tag)
+	case "copilot":
+		return copilot.PluginInstall{Program: "copilot", Home: p.env["COPILOT_HOME"]}.Install(tag)
 	}
 	return fmt.Errorf("the plugin for %s is not updated by upgrade", harness)
 }

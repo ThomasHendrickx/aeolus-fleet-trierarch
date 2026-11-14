@@ -122,13 +122,14 @@ type aMachine struct {
 	fleet      *aFleet
 	service    *aServiceManager
 	claudeCode *aClaudeCode
+	plugins    *somePlugins
 }
 
 func newMachine(t *testing.T) *aMachine {
 	t.Helper()
 	home := t.TempDir()
 	at := paths.Of(home, "")
-	machine := &aMachine{fleet: &aFleet{held: map[string]bool{}}, claudeCode: &aClaudeCode{}}
+	machine := &aMachine{fleet: &aFleet{held: map[string]bool{}}, claudeCode: &aClaudeCode{}, plugins: &somePlugins{versions: map[string]string{}}}
 	machine.service = &aServiceManager{write: func() {
 		_ = os.MkdirAll(at.Home, 0o700)
 		_ = os.WriteFile(at.Running, []byte(`{"pid":41,"version":"0.0.0"}`), 0o644)
@@ -140,6 +141,7 @@ func newMachine(t *testing.T) *aMachine {
 		IsClaudeCodeSignedIn:  true,
 		ClaudeCode:            machine.claudeCode,
 		Service:               machine.service,
+		Plugins:               machine.plugins,
 		Register:              machine.fleet.register,
 		IsLeaseHeld:           machine.fleet.isLeaseHeld,
 		Sleep:                 func() {},

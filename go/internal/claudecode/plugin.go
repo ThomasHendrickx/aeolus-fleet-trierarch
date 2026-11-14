@@ -1,6 +1,7 @@
 package claudecode
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 )
 
 const (
@@ -38,13 +40,18 @@ func PluginUpdateOf(homeDirectory string, configDirectory string) PluginUpdate {
 	return PluginUpdate{Program: "claude", Settings: filepath.Join(configDirectory, "settings.json")}
 }
 
+// commandTimeout bounds each Claude Code command, which reaches the network.
+const commandTimeout = 5 * time.Minute
+
 func (p PluginUpdate) run(args ...string) (string, error) {
-	command := exec.Command(p.Program, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	command := exec.CommandContext(ctx, p.Program, args...)
 	var stderr strings.Builder
 	command.Stderr = &stderr
 	output, err := command.Output()
 	if err != nil {
-		return "", fmt.Errorf("claude %s failed: %s", strings.Join(args, " "), strings.TrimSpace(string(output)+stderr.String()))
+		return "", fmt.Errorf("claude %s failed: %s: %w", strings.Join(args, " "), strings.TrimSpace(string(output)+stderr.String()), err)
 	}
 	return string(output), nil
 }

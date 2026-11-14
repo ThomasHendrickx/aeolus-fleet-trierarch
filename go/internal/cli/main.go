@@ -257,6 +257,7 @@ func Main(args []string, machine Machine) (string, int) {
 				OpenTerminal:          machine.OpenTerminal,
 				Codex:                 machine.Codex(),
 				Service:               machine.Service(at),
+				Plugins:               machine.Plugins(),
 				Register:              machine.Register,
 				IsLeaseHeld:           machine.IsLeaseHeld,
 				Sleep:                 machine.Sleep,
