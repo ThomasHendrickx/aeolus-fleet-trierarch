@@ -113,6 +113,25 @@ func TestAnInterruptEndsACodexTurnWithSIGINTAndTheHoldStays(t *testing.T) {
 	}
 }
 
+func TestACodexTurnThatFailsEndsTheHoldWithItsStatus(t *testing.T) {
+	script := `cat > /dev/null
+echo '{"type":"thread.started","thread_id":"thread-1"}'
+sleep 0.5
+echo '{"type":"turn.failed","error":{"message":"refused"}}'
+exit 1`
+	hold := aHoldOf(t, Options{Harness: "codex", Command: []string{"sh", "-c", script, "sh", "exec", "--json", "--", "first"}})
+
+	select {
+	case code := <-hold.ended:
+		hold.ended <- code
+		if code != 1 {
+			t.Fatalf("exit code = %d, want 1", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("the hold did not end with the failed turn")
+	}
+}
+
 // aCopilotHold is a hold of a harness that answers as `copilot -p` behind its npm launcher does, one process per turn: each start noted with its words, reading its stdin to its end first, a line on stderr, the native process writing the result naming the session after the launcher exited, a failing turn exiting 1, a slow one running until SIGINT ends its group: a SIGINT to the launcher alone waits for its child.
 func aCopilotHold(t *testing.T, starts string, prompt string) aRunningHold {
 	t.Helper()
