@@ -59,6 +59,7 @@ type aServiceManager struct {
 	write      func()
 	override   *service.Status
 	installErr error
+	rewriteErr error
 }
 
 func (s *aServiceManager) Install() error {
@@ -79,7 +80,7 @@ func (s *aServiceManager) Write() error {
 
 func (s *aServiceManager) Rewrite() error {
 	s.calls = append(s.calls, "rewrite")
-	return nil
+	return s.rewriteErr
 }
 
 func (s *aServiceManager) Restart() error {
@@ -799,4 +800,22 @@ func TestInitServiceFailureNamesStatusAsTheNextStep(t *testing.T) {
 			t.Errorf("failed check = %+v", check)
 		}
 	}
+}
+
+func TestInitReportsAServiceRewriteFailure(t *testing.T) {
+	machine := newMachine(t)
+	if _, err := machine.init.Run(setupLine()); err != nil {
+		t.Fatal(err)
+	}
+	machine.service.rewriteErr = errors.New("cannot write the service")
+	report, err := machine.init.Run(setupLine())
+	if err == nil {
+		t.Fatal("wanted rewrite failure")
+	}
+	for _, check := range report.Checks {
+		if check.Part == "service" && check.Status == "failed" && strings.Contains(check.Detail, "cannot write the service") && check.Fix != "" {
+			return
+		}
+	}
+	t.Errorf("report = %+v", report)
 }
