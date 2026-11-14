@@ -234,7 +234,8 @@ While waiting, the report is working with `waiting for its owner: <title>`.
 The title names the tool and command or path, flattened and cut to the report
 note's limit. On every end the entry report's state and note return, unless a
 newer report replaced the waiting report. A crew with no report returns to
-working with an empty note. Task, step and details stay untouched.
+working with an empty note. Task, step and details stay untouched. Reporting
+is best effort: failures are logged and leave the wait and its outcome intact.
 
 Claude Code lists a refused action in `permission_denials`. Creating a
 question, taking its answer and withdrawing it belong to the later

@@ -41,18 +41,21 @@ func (s Service) Await(ctx context.Context, ship, title string) Decision {
 	}
 	before, err := s.Reports.ReadReport(ctx, ship)
 	if err != nil {
-		return s.failed(err)
+		s.logFailure(err)
+		return Wait(ctx, s.Clock)
 	}
 	waiting := Report{State: "working", Note: waitNote(title)}
 	if ctx.Err() != nil {
 		return Decision{Behavior: "deny", Message: "permission call cancelled"}
 	}
 	if err = s.Reports.WriteReport(context.WithoutCancel(ctx), ship, waiting); err != nil {
-		return s.failed(err)
+		s.logFailure(err)
+		return Wait(ctx, s.Clock)
 	}
 	current, err := s.Reports.ReadReport(context.WithoutCancel(ctx), ship)
 	if err != nil {
-		return s.failed(err)
+		s.logFailure(err)
+		return Wait(ctx, s.Clock)
 	}
 	if current.State == waiting.State && current.Note == waiting.Note {
 		defer func() {
@@ -61,12 +64,12 @@ func (s Service) Await(ctx context.Context, ship, title string) Decision {
 			restore := context.WithoutCancel(ctx)
 			last, err := s.Reports.ReadReport(restore, ship)
 			if err != nil {
-				s.failed(err)
+				s.logFailure(err)
 				return
 			}
 			if last == current {
 				if err = s.Reports.WriteReport(restore, ship, before); err != nil {
-					s.failed(err)
+					s.logFailure(err)
 				}
 			}
 		}()
@@ -74,11 +77,10 @@ func (s Service) Await(ctx context.Context, ship, title string) Decision {
 	return Wait(ctx, s.Clock)
 }
 
-func (s Service) failed(err error) Decision {
+func (s Service) logFailure(err error) {
 	if s.Log != nil {
 		s.Log("permission wait: " + err.Error())
 	}
-	return Decision{Behavior: "deny", Message: "could not wait for this ship's owner: nobody is asked"}
 }
 
 func waitNote(title string) string {
