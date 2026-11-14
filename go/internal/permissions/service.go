@@ -26,6 +26,7 @@ type Reports interface {
 type Request struct {
 	Title string          `json:"title"`
 	Tool  string          `json:"tool_name"`
+	UseID string          `json:"tool_use_id"`
 	Input json.RawMessage `json:"input"`
 }
 
@@ -53,7 +54,7 @@ func (s Service) Await(ctx context.Context, ship, title string) Decision {
 // Ask owns the question and withdraws it before the wait ends, even when the
 // request's connection is already gone.
 func (s Service) Ask(ctx context.Context, ship string, request Request) Decision {
-	title := request.Title
+	title := request.ActionTitle()
 	owner, err := s.Owners.Owner(ctx, ship)
 	if err != nil {
 		return Decision{Behavior: "deny", Message: "could not read this ship's owner: nobody is asked"}
@@ -65,17 +66,22 @@ func (s Service) Ask(ctx context.Context, ship string, request Request) Decision
 		return Decision{Behavior: "deny", Message: "permission call cancelled"}
 	}
 	if s.Questions != nil {
-		id, err := s.Questions.Ask(ctx, ship, request)
+		// Finish this bounded script call even if the public stream closes, so its
+		// question id is available to withdraw an ask that reached the fleet.
+		id, err := s.Questions.Ask(context.WithoutCancel(ctx), ship, request)
+		if id != "" {
+			defer func() {
+				if err := s.Questions.Withdraw(context.WithoutCancel(ctx), ship, id); err != nil {
+					s.logFailure(err)
+				}
+			}()
+		}
 		if err != nil {
 			s.logFailure(err)
 			return Decision{Behavior: "deny", Message: "could not ask"}
 		}
-		defer func() {
-			if err := s.Questions.Withdraw(context.WithoutCancel(ctx), ship, id); err != nil {
-				s.logFailure(err)
-			}
-		}()
 	}
+
 	before, err := s.Reports.ReadReport(ctx, ship)
 	if err != nil {
 		s.logFailure(err)

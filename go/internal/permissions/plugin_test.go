@@ -25,6 +25,7 @@ func TestPluginQuestionsNameTheActionRuleInputShipAndModel(t *testing.T) {
 		{"NotebookEdit", "NotebookEdit", `{"notebook_path":"notes.ipynb"}`, "NotebookEdit `notes.ipynb`", "notes.ipynb"},
 		{"4 KB input", "Bash", `{"command":"echo","description":"` + strings.Repeat("x", 4061) + `"}`, "Run `echo`", "echo"},
 		{"one over 4 KB", "Bash", `{"command":"echo","description":"` + strings.Repeat("x", 4062) + `"}`, "Run `echo`", "echo"},
+		{"handed task", "Bash", `{"command":"npm install"}`, "Run `npm install`", "npm install"},
 		{"other tool", "Search", `{"query":"ships"}`, "Search", "Search"},
 		{"5 KB input", "Bash", `{"command":"echo","description":"` + strings.Repeat("x", 5*1024) + `"}`, "Run `echo`", "echo"},
 	} {
@@ -34,6 +35,17 @@ func TestPluginQuestionsNameTheActionRuleInputShipAndModel(t *testing.T) {
 			fleet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/api/v1/ship/whoami" {
 					fmt.Fprint(w, `{"ownerShipId":"shp_01m6jyczpnpp5c0vxh54c966cz","ownerName":"thomas"}`)
+					return
+				}
+				switch r.URL.Path {
+				case "/api/v1/ship/pushReceive":
+					_ = json.NewEncoder(w).Encode(map[string]any{"deliveries": []any{map[string]any{"deliveryId": "dlv_01m6jyczpnpp5c0vxh54c966cw", "messageId": "msg_01m6jyczpnpp5c0vxh54c966cx", "senderName": "orchestrator-1", "payload": strings.Repeat("x", 1025), "contentType": "text/plain", "attempts": 1}}})
+					return
+				case "/api/v1/ship/handed":
+					fmt.Fprint(w, `{"state":"handed"}`)
+					return
+				case "/api/v1/ship/turn":
+					fmt.Fprint(w, `{}`)
 					return
 				}
 				if r.URL.Path != "/api/v1/ship/send" {
@@ -59,6 +71,13 @@ func TestPluginQuestionsNameTheActionRuleInputShipAndModel(t *testing.T) {
 			cmd.Stdin = strings.NewReader("test-crew")
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("write identity: %v: %s", err, out)
+			}
+			if test.name == "handed task" {
+				hand := exec.Command("bash", filepath.Join(p.Root, "scripts/aeolus-push.sh"), "hand")
+				hand.Env = cmd.Env
+				if out, err := hand.CombinedOutput(); err != nil {
+					t.Fatalf("hand task: %v: %s", err, out)
+				}
 			}
 			isCrewed := true
 			questions := PluginQuestions{Session: func(string) (QuestionSession, error) {
@@ -99,6 +118,13 @@ func TestPluginQuestionsNameTheActionRuleInputShipAndModel(t *testing.T) {
 			}
 			if len(question.Options) != 3 || question.Options[0].Label != "Allow once" || question.Options[1].Label != "Allow for this session" || !strings.Contains(question.Options[1].Detail, test.rule) || question.Options[2].Label != "Deny" || question.Pick.Option != 3 || question.Pick.Why != "nothing runs without your yes" {
 				t.Fatalf("options/pick = %+v", question)
+			}
+			if test.name == "handed task" {
+				if !strings.Contains(question.Context, "Task: msg_01m6jyczpnpp5c0vxh54c966cx from orchestrator-1") || !strings.Contains(question.Context, strings.Repeat("x", 1024)+"\n[1 bytes cut]") || strings.Contains(question.Context, strings.Repeat("x", 1025)) {
+					t.Fatalf("task context: %q", question.Context)
+				}
+			} else if !strings.Contains(question.Context, "No task message handed.") {
+				t.Fatalf("context: %q", question.Context)
 			}
 			if !strings.Contains(question.Context, "scout") {
 				t.Fatalf("context = %q", question.Context)

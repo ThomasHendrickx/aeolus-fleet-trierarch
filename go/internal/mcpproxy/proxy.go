@@ -100,7 +100,7 @@ type Proxy struct {
 	// Sessions is the sessions folder, where each session keeps its access.
 	Sessions string
 	// PermissionWait serves cancellable permission waits through the private channel.
-	PermissionWait  func(context.Context, string, string, string) permissions.Decision
+	PermissionWait  func(context.Context, string, string, permissions.Request) permissions.Decision
 	PermissionCalls *PermissionCalls
 	PermissionClock permissions.Clock
 	// Permissions hands a permission request to the trierarch over its private channel.

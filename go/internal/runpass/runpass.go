@@ -165,10 +165,12 @@ type Store interface {
 }
 
 type Pass struct {
-	Fleet     Fleet
-	Sessions  Sessions
-	Harnesses map[string]Harness
-	Workspace Workspace
+	// EndPermissions finishes a stopped ship's withdrawals before its identity or lease ends.
+	EndPermissions func(string)
+	Fleet          Fleet
+	Sessions       Sessions
+	Harnesses      map[string]Harness
+	Workspace      Workspace
 	// FolderProcesses are stopped in an orphan worktree before it is removed.
 	FolderProcesses FolderProcesses
 	Store           Store
@@ -581,7 +583,7 @@ func (p Pass) carryOut(state reconciler.State, action reconciler.Action) (reconc
 		}
 		return p.launch(state, entry)
 	case reconciler.Stop:
-		return state, p.Sessions.Stop(action.ShipID)
+		return state, p.stop(action.ShipID)
 	case reconciler.Release:
 		if !isEntry {
 			return state, nil
@@ -591,7 +593,7 @@ func (p Pass) carryOut(state reconciler.State, action reconciler.Action) (reconc
 		return state, p.Fleet.ConfirmRelease(action.ShipID)
 	case reconciler.Forget:
 		// Its request is no longer assigned here, as when its ship is retired or moved to another trierarch: its workspace goes as a release's does (gap rule 1).
-		if err := p.Sessions.Stop(action.ShipID); err != nil {
+		if err := p.stop(action.ShipID); err != nil {
 			return state, err
 		}
 		if err := p.endWorkspace(*action.Entry); err != nil {
@@ -661,7 +663,7 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 	switch {
 	case ship.Status == "notFound" || ship.Status == "retired":
 		// Forgotten as a request no longer assigned here is.
-		if err := p.Sessions.Stop(entry.ShipID); err != nil {
+		if err := p.stop(entry.ShipID); err != nil {
 			return state, err
 		}
 		if err := p.deleteIdentity(entry); err != nil {
@@ -759,7 +761,7 @@ func (p Pass) registered(entry reconciler.Entry) (string, error) {
 
 // freshAfterReleaseElsewhere removes the workspace of a ship released elsewhere before it is crewed again in a fresh one (row 11, #475). Its session stops first, as a release's does, so nothing reads the worktree while a session works in it, whatever the pass's stop did. The entry is saved without its mark only once that is done, so a failed stop or removal is tried again on the next pass.
 func (p Pass) freshAfterReleaseElsewhere(state reconciler.State, entry reconciler.Entry) (reconciler.State, reconciler.Entry, error) {
-	if err := p.Sessions.Stop(entry.ShipID); err != nil {
+	if err := p.stop(entry.ShipID); err != nil {
 		return state, entry, err
 	}
 	if err := p.endWorkspace(entry); err != nil {
@@ -777,7 +779,7 @@ func (p Pass) freshAfterReleaseElsewhere(state reconciler.State, entry reconcile
 // ship's folder is gone is, a first start telling nobody. The entry is saved without its mark once its workspace is gone, so an
 // interruption crews it again in a fresh ship folder.
 func (p Pass) crewInTheShipFolderLayout(state reconciler.State, entry reconciler.Entry, harness Harness) (reconciler.State, error) {
-	if err := p.Sessions.Stop(entry.ShipID); err != nil {
+	if err := p.stop(entry.ShipID); err != nil {
 		return state, err
 	}
 	if err := p.endWorkspace(entry); err != nil {
@@ -806,7 +808,7 @@ func madeMainOf(workspace reconciler.Workspace) string {
 // and socket go; then its workspace is made in a new ship's folder, its identity written with the crew token its state keeps, and its
 // fresh session given a continuation prompt. Its usage since the last send went with the folder.
 func (p Pass) crewInAFreshShipFolder(state reconciler.State, entry reconciler.Entry, harness Harness) (reconciler.State, error) {
-	if err := p.Sessions.Stop(entry.ShipID); err != nil {
+	if err := p.stop(entry.ShipID); err != nil {
 		return state, err
 	}
 	if err := p.deleteIdentity(entry); err != nil {
@@ -874,7 +876,7 @@ func (p Pass) launch(state reconciler.State, entry reconciler.Entry) (reconciler
 
 // release ends what a removed request held (row 7): the session stops, the lease ends, then the workspace goes; only then is the request confirmed.
 func (p Pass) release(state reconciler.State, entry reconciler.Entry) (reconciler.State, error) {
-	if err := p.Sessions.Stop(entry.ShipID); err != nil {
+	if err := p.stop(entry.ShipID); err != nil {
 		return state, err
 	}
 	ship, err := p.Fleet.Ship(entry.ShipID)
@@ -902,7 +904,7 @@ func (p Pass) release(state reconciler.State, entry reconciler.Entry) (reconcile
 // giveBack gives back a request it cannot crew, with why. The session of the entry it crewed with stops first; then, given back or refused, its workspace goes as a release's does, and the entry only after it, so a failed removal is tried again on the next pass, the request then no longer assigned here.
 func (p Pass) giveBack(state reconciler.State, shipID string, settingsVersion int, reason string, entry *reconciler.Entry) (reconciler.State, error) {
 	if entry != nil {
-		if err := p.Sessions.Stop(shipID); err != nil {
+		if err := p.stop(shipID); err != nil {
 			return state, err
 		}
 	}
@@ -1368,4 +1370,14 @@ func fleetTime(text string) string {
 		return text
 	}
 	return at.UTC().Format("2006-01-02T15:04:05.000Z")
+}
+
+func (p Pass) stop(ship string) error {
+	if err := p.Sessions.Stop(ship); err != nil {
+		return err
+	}
+	if p.EndPermissions != nil {
+		p.EndPermissions(ship)
+	}
+	return nil
 }

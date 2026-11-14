@@ -147,6 +147,13 @@ force() {
 }
 
 case "${1:-}" in
+  permission-context)
+    if id="$(aeolus_store_first confirmed handed onceMore)"; then
+      cat "$(aeolus_store_dir)/$id.json"
+    else
+      printf '{}\n'
+    fi
+    ;;
   hand) hand ;;
   force) force ;;
   died)

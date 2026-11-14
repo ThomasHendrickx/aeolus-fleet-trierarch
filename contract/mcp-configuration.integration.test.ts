@@ -124,15 +124,15 @@ describe.skipIf(isTodaysTrierarch)("the fleet's MCP configuration", () => {
 
 // Permission calls share the MCP proxy, but never use a fleet MCP server.
 describe.skipIf(isTodaysTrierarch)('permission questions for the owner', () => {
-  it('puts the question in the owner inbox and withdraws it when the connection closes', async () => {
+  it.each(['connection closes', 'ship is released'])('puts the question in the owner inbox and withdraws it when the %s', async (end) => {
     const owner = await fleet.commission('thomas');
     await fleet.database.ship.update({ where: { id: owner }, data: { kind: 'person' } });
     const scout = await fleet.commission('scout', { owner });
     const config = join(machine.trierarchHome, 'config.json');
     const configuration = z.looseObject({ harnesses: z.record(z.string(), z.unknown()) }).parse(JSON.parse(readFileSync(config, 'utf8')));
-    writeFileSync(config, JSON.stringify({ ...configuration, harnesses: { ...configuration.harnesses, 'claude-code': { flags: [], options: { model: { values: { opus: ['--model', 'opus'] }, default: 'opus' } } } } }));
+    writeFileSync(config, JSON.stringify({ ...configuration, harnesses: { ...configuration.harnesses, 'claude-code': { flags: [], options: {} } } }));
     expect((await machine.trierarch(['restart'])).status).toBe(0);
-    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code', options: { model: 'opus' } });
+    await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code', options: { model: 'claude-opus-5' } });
     await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: ANSWERED_WITHIN_MS }).toBe('running');
     const servers = z.object({ mcpServers: z.record(z.string(), z.object({ url: z.string(), headers: z.record(z.string(), z.string()) })) }).parse(JSON.parse(readFileSync(join(machine.trierarchHome, 'sessions', scout, 'mcp-config.json'), 'utf8')));
     const permission = servers.mcpServers['aeolus-permissions'];
@@ -145,7 +145,7 @@ describe.skipIf(isTodaysTrierarch)('permission questions for the owner', () => {
       const questions = () => fleet.database.message.findMany({ where: { senderShipId: scout, selectorShipId: owner, contentType: 'application/vnd.aeolus.question+json' } });
       await expect.poll(async () => (await questions()).length, { timeout: ANSWERED_WITHIN_MS }).toBe(1);
       const question = (await questions())[0];
-      expect(question?.model).toBe('opus');
+      expect(question?.model).toBe('claude-opus-5');
       const payload = questionSchema.parse(JSON.parse(question?.payload ?? '{}'));
       expect(payload.title).toBe('Run `npm install`');
       expect(payload.context).toContain('scout');
@@ -153,7 +153,11 @@ describe.skipIf(isTodaysTrierarch)('permission questions for the owner', () => {
       expect(payload.options.map(({ label }) => label)).toEqual(['Allow once', 'Allow for this session', 'Deny']);
       expect(payload.pick).toEqual({ option: 3, why: 'nothing runs without your yes' });
       expect(await fleet.database.delivery.count({ where: { messageId: question?.id, recipientShipId: owner, state: 'pending' } })).toBe(1);
-      cancellation.abort();
+      if (end === 'ship is released') {
+        await fleet.removeCrewRequest(scout);
+      } else {
+        cancellation.abort();
+      }
       await result;
       await expect.poll(() => fleet.database.message.count({ where: { senderShipId: scout, selectorShipId: owner, contentType: 'application/vnd.aeolus.question-withdrawal+json', payload: JSON.stringify({ questionId: payload.id }) } }), { timeout: ANSWERED_WITHIN_MS }).toBe(1);
     } finally {
