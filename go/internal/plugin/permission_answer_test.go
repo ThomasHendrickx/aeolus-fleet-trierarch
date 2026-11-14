@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -41,8 +44,11 @@ func TestPermissionAnswersAreTakenBeforeHandOverOrKeptForTheNextTurn(t *testing.
 			defer fleet.Close()
 			p := thePlugin(t)
 			folder := t.TempDir()
-			if err := p.WriteIdentity(folder, Identity{FleetURL: fleet.URL, ShipID: scout, ShipName: "scout"}, "test-crew"); err != nil {
-				t.Fatal(err)
+			cmd := exec.Command("bash", filepath.Join(p.Root, "scripts/aeolus-identity.sh"), "write", fleet.URL, scout, "scout")
+			cmd.Env = append(os.Environ(), "AEOLUS_FOLDER="+folder, "AEOLUS_DATA="+p.Data, "AEOLUS_CREWS="+p.Crews, "AEOLUS_HARNESS=claude-code")
+			cmd.Stdin = strings.NewReader("test-crew")
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("write identity: %v: %s", err, out)
 			}
 			reply, err := p.PermissionReply(context.Background(), folder)
 			if err != nil {

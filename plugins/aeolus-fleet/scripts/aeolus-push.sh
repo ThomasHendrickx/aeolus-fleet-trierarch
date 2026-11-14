@@ -146,7 +146,56 @@ force() {
   hand_entry "$id" "forced: handed ${id} over"
 }
 
+# Permission replies stay received until the trierarch checks the current owner.
+# No hand-over or busy marker is produced while the permission call waits.
+permission_candidate() {
+  local dir file state
+  dir="$(aeolus_store_dir)" || return 1
+  for file in "$dir"/*.state; do
+    [ -f "$file" ] || continue
+    id="${file##*/}"; id="${id%.state}"
+    state="$(aeolus_store_state "$id")"
+    [ "$state" = received ] || continue
+    [ ! -e "$dir/$id.permission-seen" ] || continue
+    if [ "$(aeolus_json_string "$(cat "$dir/$id.json")" contentType)" = application/vnd.aeolus.answer+json ]; then
+      cat "$dir/$id.json"
+      return 0
+    fi
+  done
+  return 1
+}
+
+permission_receive() {
+  permission_candidate && return 0
+  # push_receive's exit on an empty inbox belongs to this subshell only.
+  (push_receive) >/dev/null
+  permission_candidate && return 0
+  printf '{}\n'
+}
+
+permission_finish() {
+  local dir output sender
+  id="${2:-}"
+  aeolus_is_delivery_id "$id" || exit 2
+  case "${3:-}" in take|keep) ;; *) exit 2 ;; esac
+  dir="$(aeolus_store_dir)" || exit 2
+  [ "$(aeolus_store_state "$id")" = received ] || exit 1
+  output="$(AEOLUS_CALL_MAX_SECONDS="${AEOLUS_CONFIRM_SECONDS:-3}" "$(dirname "$0")/aeolus-fleet.sh" ack "$id" 2>/dev/null)" || exit 1
+  sender="$(aeolus_json_string "$(cat "$dir/$id.json")" senderName)"
+  if [ "$3" = take ]; then
+    # Mark before reporting: a lost handled response cannot hand this answer.
+    aeolus_store_mark "$id" handled || exit 1
+    aeolus_report_end "$identity" "$id" handled
+    aeolus_log "$identity" permission "answer from ${sender}: taken before hand-over"
+  else
+    : > "$dir/$id.permission-seen"
+    aeolus_log "$identity" permission "answer from ${sender}: left for ordinary hand-over"
+  fi
+}
+
 case "${1:-}" in
+  permission-receive) permission_receive ;;
+  permission-finish) permission_finish "$@" ;;
   permission-context)
     if id="$(aeolus_store_first confirmed handed onceMore)"; then
       cat "$(aeolus_store_dir)/$id.json"
@@ -163,7 +212,7 @@ case "${1:-}" in
     exit 0
     ;;
   *)
-    echo "usage: aeolus-push.sh hand|force|died" >&2
+    echo "usage: aeolus-push.sh hand|force|died|permission-context|permission-receive|permission-finish" >&2
     exit 2
     ;;
 esac

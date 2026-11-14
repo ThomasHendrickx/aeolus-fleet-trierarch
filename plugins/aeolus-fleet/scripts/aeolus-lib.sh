@@ -903,7 +903,7 @@ aeolus_store_first() {
 aeolus_store_drop() {
   local dir
   dir="$(aeolus_store_dir)" || return 0
-  rm -f "$dir/$1.json" "$dir/$1.state" "$dir/$1.lease" "$dir/$1.number" "$dir/$1.unreported" "$dir/$1.acking" "$dir/$1.shown" "$dir/$1.ponged" "$dir/$1.payload" "$dir/$1.reason"
+  rm -f "$dir/$1.json" "$dir/$1.state" "$dir/$1.lease" "$dir/$1.number" "$dir/$1.unreported" "$dir/$1.acking" "$dir/$1.shown" "$dir/$1.ponged" "$dir/$1.payload" "$dir/$1.reason" "$dir/$1.permission-seen"
 }
 
 # Removes every entry, as on LEASE_ENDED.
