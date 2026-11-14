@@ -256,7 +256,7 @@ func TestStartLoadsAnUnloadedAgentAndKicksALoadedOne(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := []string{"launchctl print " + target, "launchctl bootstrap gui/501 " + plistOf(agent), "launchctl print " + target, "launchctl kickstart " + target}
+	want := []string{"launchctl print " + target, "launchctl bootstrap gui/501 " + plistOf(agent), "launchctl print " + target, "launchctl kickstart " + target, "launchctl print " + target}
 	if !slices.Equal(launchctl.calls, want) {
 		t.Errorf("ran %q, want %q", launchctl.calls, want)
 	}

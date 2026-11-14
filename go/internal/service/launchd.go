@@ -100,44 +100,50 @@ func (l Launchd) isLoaded() bool {
 	return err == nil
 }
 
+// bootstrap loads the agent: launchd makes it a new job, whose runs count from one again.
 func (l Launchd) bootstrap() error {
-	_, err := l.Exec("launchctl", "bootstrap", l.domain(), l.File())
-	if err == nil {
-		l.markDeliberate()
+	if _, err := l.Exec("launchctl", "bootstrap", l.domain(), l.File()); err != nil {
+		return err
 	}
-	return err
+	return l.recordStart(1)
 }
 
-// deliberateFile marks that the trierarch itself started or restarted the agent (restart, upgrade, init): launchd counts that run in `runs` as it counts a crash's.
-func (l Launchd) deliberateFile() string {
-	return filepath.Join(l.Logs, "deliberate-restart")
+// startedRunsFile keeps launchd's runs as they were when the trierarch itself last started the agent (restart, upgrade, init): launchd counts that run as it counts a crash's.
+func (l Launchd) startedRunsFile() string {
+	return filepath.Join(l.Logs, "started-runs")
 }
 
-// markDeliberate is best effort: without the mark, status may show a restart loop for a few seconds.
-func (l Launchd) markDeliberate() {
-	if os.MkdirAll(l.Logs, 0o755) == nil {
-		_ = os.WriteFile(l.deliberateFile(), nil, 0o644)
+// recordStart keeps the runs the trierarch started the agent at, right when it does, so every later run counts as a restart.
+func (l Launchd) recordStart(runs int) error {
+	if err := os.MkdirAll(l.Logs, 0o755); err != nil {
+		return fmt.Errorf("record the runs the trierarch started at: %w", err)
 	}
+	if err := os.WriteFile(l.startedRunsFile(), []byte(strconv.Itoa(runs)), 0o644); err != nil {
+		return fmt.Errorf("record the runs the trierarch started at: %w", err)
+	}
+	return nil
 }
 
-func (l Launchd) baselineFile() string {
-	return filepath.Join(l.Logs, "deliberate-runs")
+// restartsOf is how often the agent ran again since the trierarch last started it. A job launchd loaded again on its own, at login, has fewer runs than were kept: it counts from its first run.
+func (l Launchd) restartsOf(runs int) (int, error) {
+	started := 1
+	kept, err := os.ReadFile(l.startedRunsFile())
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return 0, fmt.Errorf("read the runs the trierarch started at: %w", err)
+	}
+	if value, err := strconv.Atoi(strings.TrimSpace(string(kept))); err == nil && value >= 1 && value <= runs {
+		started = value
+	}
+	return max(0, runs-started), nil
 }
 
-// restartsOf is how often the agent ran again without the trierarch's own doing: the first status after a deliberate start keeps the runs then as the baseline, which later runs count from.
-func (l Launchd) restartsOf(runs int) int {
-	if _, err := os.Stat(l.deliberateFile()); err == nil {
-		if os.WriteFile(l.baselineFile(), []byte(strconv.Itoa(runs)), 0o644) == nil {
-			_ = os.Remove(l.deliberateFile())
-		}
+func runsOf(printed string) (int, bool) {
+	match := launchdRunsPattern.FindStringSubmatch(printed)
+	if match == nil {
+		return 0, false
 	}
-	baseline := 1
-	if kept, err := os.ReadFile(l.baselineFile()); err == nil {
-		if value, err := strconv.Atoi(strings.TrimSpace(string(kept))); err == nil && value >= 1 && value <= runs {
-			baseline = value
-		}
-	}
-	return max(0, runs-baseline)
+	runs, err := strconv.Atoi(match[1])
+	return runs, err == nil
 }
 
 // bootout unloads the agent, not kills it: KeepAlive would start a killed one again. It loads again at the next login.
@@ -182,11 +188,16 @@ func (l Launchd) Start() error {
 	if !l.isLoaded() {
 		return l.bootstrap()
 	}
-	_, err := l.Exec("launchctl", "kickstart", l.target())
-	if err == nil {
-		l.markDeliberate()
+	if _, err := l.Exec("launchctl", "kickstart", l.target()); err != nil {
+		return err
 	}
-	return err
+	runs := 1
+	if printed, err := l.Exec("launchctl", "print", l.target()); err == nil {
+		if counted, ok := runsOf(printed); ok {
+			runs = max(1, counted)
+		}
+	}
+	return l.recordStart(runs)
 }
 
 // Stop unloads the agent, so KeepAlive does not start it again: its sessions run on under their holds.
@@ -227,9 +238,10 @@ func (l Launchd) Status() (Status, error) {
 		return Status{File: file, IsInstalled: true}, nil
 	}
 	status := Status{File: file, IsInstalled: true}
-	if match := launchdRunsPattern.FindStringSubmatch(printed); match != nil {
-		runs, _ := strconv.Atoi(match[1])
-		status.Restarts = l.restartsOf(runs)
+	if runs, ok := runsOf(printed); ok {
+		if status.Restarts, err = l.restartsOf(runs); err != nil {
+			return Status{}, err
+		}
 	}
 	if match := launchdPIDPattern.FindStringSubmatch(printed); match != nil {
 		status.PID, _ = strconv.Atoi(match[1])
