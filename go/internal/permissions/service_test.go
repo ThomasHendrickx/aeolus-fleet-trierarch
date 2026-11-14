@@ -188,3 +188,56 @@ func TestReportFailuresAreLoggedAndKeepThePermissionWaitUntilItsLimitOrCancel(t 
 		}
 	}
 }
+
+type questions struct {
+	asked, withdrawn int
+	err              error
+}
+
+func (q *questions) Ask(context.Context, string, Request) (string, error) {
+	q.asked++
+	return "question-1", q.err
+}
+func (q *questions) Withdraw(ctx context.Context, ship, id string) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	q.withdrawn++
+	return nil
+}
+func TestQuestionsAreWithdrawnAtTheLimitAndOnCancellation(t *testing.T) {
+	for _, end := range []string{"limit", "cancel", "connection close"} {
+		t.Run(end, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				q := &questions{}
+				service := Service{Owners: &owners{person: true}, Reports: &reports{}, Questions: q, Clock: SystemClock{}}
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				done := make(chan Decision, 1)
+				go func() { done <- service.Await(ctx, "scout", "Run `npm install`") }()
+				synctest.Wait()
+				if q.asked != 1 || q.withdrawn != 0 {
+					t.Fatalf("questions before end = %+v", q)
+				}
+				if end == "limit" {
+					time.Sleep(30 * time.Minute)
+				} else {
+					cancel()
+				}
+				<-done
+				if q.withdrawn != 1 {
+					t.Fatalf("withdrawals = %d, want 1", q.withdrawn)
+				}
+			})
+		})
+	}
+}
+func TestARefusedQuestionDeniesAndLogsWithoutWaiting(t *testing.T) {
+	q := &questions{err: errors.New("fleet refused")}
+	var logs []string
+	service := Service{Owners: &owners{person: true}, Reports: &reports{}, Questions: q, Clock: SystemClock{}, Log: func(line string) { logs = append(logs, line) }}
+	got := service.Await(context.Background(), "scout", "Run `npm install`")
+	if got.Behavior != "deny" || got.Message != "could not ask" || len(logs) != 1 || q.withdrawn != 0 {
+		t.Fatalf("decision %+v, logs %v, questions %+v", got, logs, q)
+	}
+}
