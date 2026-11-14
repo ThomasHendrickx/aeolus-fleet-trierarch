@@ -17,14 +17,12 @@ const (
 	commandTimeout = 5 * time.Minute
 )
 
-// PluginInstall installs the aeolus-fleet plugin through Copilot's own commands. Copilot's marketplace add takes no ref, so the tag cannot be pinned: the plugin installed is checked against the tag after it, and a plugin at another version is an error.
+// PluginInstall installs the aeolus-fleet plugin through Copilot's own commands, its marketplace at the tag given.
 type PluginInstall struct {
 	// Program is Copilot's command, `copilot` on the machine.
 	Program string
 	// Home is COPILOT_HOME when the trierarch has one; empty otherwise.
 	Home string
-	// Version is the version of the aeolus-fleet plugin installed now, empty when there is none.
-	Version func() string
 }
 
 func (p PluginInstall) run(args ...string) (string, error) {
@@ -41,22 +39,20 @@ func (p PluginInstall) run(args ...string) (string, error) {
 	return string(output), nil
 }
 
-// Install adds the aeolus-fleet marketplace where Copilot lacks it, installs the plugin, and checks it is at the tag.
+// Install adds the aeolus-fleet marketplace at the tag and installs the plugin from it. Copilot lists no marketplace's ref and refuses to add one it has, so one it has is removed first, with the plugin installed from it.
 func (p PluginInstall) Install(tag string) error {
 	listed, err := p.run("plugin", "marketplace", "list")
 	if err != nil {
 		return err
 	}
-	if !strings.Contains(listed, marketplaceName) {
-		if _, err := p.run("plugin", "marketplace", "add", marketplaceRepository); err != nil {
+	if strings.Contains(listed, marketplaceName) {
+		if _, err := p.run("plugin", "marketplace", "remove", "--force", marketplaceName); err != nil {
 			return err
 		}
 	}
-	if _, err := p.run("plugin", "install", pluginID); err != nil {
+	if _, err := p.run("plugin", "marketplace", "add", marketplaceRepository+"#"+tag); err != nil {
 		return err
 	}
-	if installed := p.Version(); installed != strings.TrimPrefix(tag, "v") {
-		return fmt.Errorf("the aeolus-fleet plugin Copilot installed is at version %q, not at the tag %s, and its marketplace takes no tag", installed, tag)
-	}
-	return nil
+	_, err = p.run("plugin", "install", pluginID)
+	return err
 }
