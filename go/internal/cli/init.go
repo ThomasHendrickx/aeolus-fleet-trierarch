@@ -286,6 +286,10 @@ func (i Init) Run(flags Flags) (Report, error) {
 	var configuration config.Configuration
 	if _, err := os.Stat(i.Paths.Config); errors.Is(err, os.ErrNotExist) {
 		configuration = config.Initial()
+		// Init offers installed harnesses explicitly; a fresh configuration has no default harness.
+		if i.IsClaudeCodeInstalled {
+			configuration.Harnesses[claudeCode] = config.Harness{Flags: []string{}, Options: map[string]config.Option{}}
+		}
 		// Offering Codex is the default answer where it is installed; launching it without approvals is not.
 		if i.IsCodexInstalled {
 			configuration.Harnesses[codex] = config.Harness{Flags: []string{}, Options: map[string]config.Option{}}

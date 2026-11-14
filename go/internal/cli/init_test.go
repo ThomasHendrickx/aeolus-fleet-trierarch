@@ -199,6 +199,7 @@ func TestInitWritesTheInitialConfigurationAndItsSchema(t *testing.T) {
 func TestInitTrustsThePlaceOfShipsAndEachPlaceAndCompletesTheOnboarding(t *testing.T) {
 	machine := newMachine(t)
 	configuration := config.Initial()
+	configuration.Harnesses["claude-code"] = config.Harness{Flags: []string{}, Options: map[string]config.Option{}}
 	configuration.Repositories["aeolus-fleet"] = config.Repository{Path: "/src/aeolus-fleet"}
 	configuration.Folders["notes"] = config.Folder{Path: "/notes"}
 	if err := os.MkdirAll(machine.init.Paths.Home, 0o700); err != nil {

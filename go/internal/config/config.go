@@ -135,14 +135,14 @@ type DefaultLogins struct {
 	Codex      string `json:"codex,omitempty"`
 }
 
-// Initial is the configuration a fresh init writes: no repository or folder yet, Claude Code with no flag.
+// Initial is a fresh configuration: no repository, folder or harness is offered until written to it.
 func Initial() Configuration {
 	return Configuration{
 		Schema:       SchemaReference,
 		Caps:         Caps{Ships: 4, Running: 2},
 		Repositories: map[string]Repository{},
 		Folders:      map[string]Folder{},
-		Harnesses:    map[string]Harness{"claude-code": {Flags: []string{}, Options: map[string]Option{}}},
+		Harnesses:    map[string]Harness{},
 	}
 }
 

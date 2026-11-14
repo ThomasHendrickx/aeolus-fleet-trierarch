@@ -883,7 +883,7 @@ func (o *offers) options() map[string]map[string][]string {
 // adapters are the harnesses this trierarch has an adapter for, the default first.
 var adapters = []string{"claude-code", "codex", "copilot"}
 
-// harnessesOf are the adapters of the harnesses the configuration offers, each with the aeolus-fleet plugin its harness installed, and their names, the default first. Claude Code's and Codex's plugin is looked for at start, so a trierarch without it does not start; Copilot's at each crew, so the machine offers Copilot once it is installed. A configured harness this trierarch has no adapter for stops it at start, so no request for it is ever crewed.
+// harnessesOf are the adapters of the harnesses the configuration offers, each with the aeolus-fleet plugin its harness installed, and their names, the default first. Each plugin is looked for at use, so a missing one is reported without stopping the trierarch and an installation is found without a restart. A configured harness this trierarch has no adapter for stops it at start, so no request for it is ever crewed.
 func harnessesOf(configuration config.Configuration, at paths.Paths, env map[string]string, home string, running runningSessions, proxy modelproxy.Runtime, offers *offers) (map[string]runpass.Harness, []string, error) {
 	for name := range configuration.Harnesses {
 		if !slices.Contains(adapters, name) {
@@ -908,10 +908,7 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 		settings := settingsOf(offers, name)
 		switch name {
 		case "claude-code":
-			found, err := plugin.Find(home, env)
-			if err != nil {
-				return nil, nil, err
-			}
+			found := plugin.ForClaudeCode(home, env)
 			harnesses[name] = claudecode.Harness{
 				Plugin:     found,
 				Runtime:    running,
@@ -930,10 +927,7 @@ func harnessesOf(configuration config.Configuration, at paths.Paths, env map[str
 				MoveWithinUserNamespace: moveWithinUserNamespaceOf(configuration.Runtime),
 			}
 		case "codex":
-			found, err := plugin.FindCodex(home, env)
-			if err != nil {
-				return nil, nil, err
-			}
+			found := plugin.ForCodex(home, env)
 			harnesses[name] = codex.Harness{Plugin: found, Runtime: running, Settings: settings, Hooks: codex.AppServer{Program: "codex", Version: cli.Version}, Configuration: codex.AppServer{Program: "codex", Version: cli.Version}, Events: events, ProxyURL: proxy.URL}
 		case "copilot":
 			harnesses[name] = copilot.Harness{Plugin: plugin.FindCopilot(home, env), Runtime: running, Settings: settings, Events: events, Version: func() (string, bool) {

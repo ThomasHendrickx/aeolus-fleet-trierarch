@@ -84,7 +84,10 @@ func (h Harness) pluginOf(entry reconciler.Entry) plugin.Plugin {
 		return h.Plugin
 	}
 	home := h.homeOf(entry)
-	return plugin.Plugin{Root: h.Plugin.Root, Data: filepath.Join(home, ".claude", "plugins", "data", plugin.DataFolder), Crews: filepath.Join(home, ".aeolus", "crews", "claude-code")}
+	found := h.Plugin
+	found.Data = filepath.Join(home, ".claude", "plugins", "data", plugin.DataFolder)
+	found.Crews = filepath.Join(home, ".aeolus", "crews", "claude-code")
+	return found
 }
 
 // projectsOf is the projects folder the entry's session keeps its conversations in.

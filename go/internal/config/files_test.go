@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestAFreshInitWritesNoRepositoryNoFolderAndClaudeCodeWithNoFlag(t *testing.T) {
+func TestAFreshConfigurationWritesNoRepositoryNoFolderAndNoHarness(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 
 	if err := Write(path, Initial()); err != nil {
@@ -25,12 +25,7 @@ func TestAFreshInitWritesNoRepositoryNoFolderAndClaudeCodeWithNoFlag(t *testing.
   },
   "repositories": {},
   "folders": {},
-  "harnesses": {
-    "claude-code": {
-      "flags": [],
-      "options": {}
-    }
-  }
+  "harnesses": {}
 }
 `
 	if string(text) != want {
@@ -151,5 +146,30 @@ func TestLoadsAConfigurationNamingCheckoutsAndSaysWhichRepositoriesNameThem(t *t
 
 	if err != nil || !reflect.DeepEqual(loaded.NamesCheckouts, []string{"alpha", "zeta"}) || loaded.Repositories["alpha"].Path != "/srv/alpha" {
 		t.Errorf("Load = %+v, %v, want the repositories naming checkouts, in order, and their paths read", loaded, err)
+	}
+}
+
+func TestAConfigurationKeepsExactlyTheHarnessesWrittenToIt(t *testing.T) {
+	for _, names := range [][]string{{}, {"codex"}, {"claude-code"}, {"claude-code", "codex"}, {"copilot"}} {
+		t.Run(strings.Join(names, "+"), func(t *testing.T) {
+			configured := Initial()
+			want := map[string]Harness{}
+			for _, name := range names {
+				given := Harness{Flags: []string{"--verbose"}, Options: map[string]Option{"model": {Values: map[string][]string{"a-model": {"-m", "a-model"}}, Default: "a-model", Order: []string{"a-model"}}}}
+				configured.Harnesses[name] = given
+				want[name] = given
+			}
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := Write(path, configured); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(loaded.Harnesses, want) {
+				t.Fatalf("Load harnesses = %+v, want %+v", loaded.Harnesses, want)
+			}
+		})
 	}
 }
