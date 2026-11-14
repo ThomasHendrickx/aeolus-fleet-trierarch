@@ -1,5 +1,7 @@
 package permissions
 
+import "path/filepath"
+
 // Answer is the owner's choice in a question reply.
 type Answer struct {
 	QuestionID string `json:"questionId"`
@@ -25,7 +27,7 @@ func (r Request) decision(answer Answer) Decision {
 	if answer.Option == 1 || answer.Option == 2 {
 		result := Decision{Behavior: "allow", UpdatedInput: r.Input}
 		if answer.Option == 2 {
-			result.UpdatedPermissions = []PermissionUpdate{{Type: "addRules", Rules: []PermissionRule{{ToolName: r.Tool, RuleContent: r.action()}}, Behavior: "allow", Destination: "session"}}
+			result.UpdatedPermissions = []PermissionUpdate{{Type: "addRules", Rules: []PermissionRule{{ToolName: r.ruleTool(), RuleContent: r.sessionRule()}}, Behavior: "allow", Destination: "session"}}
 		}
 		return result
 	}
@@ -34,4 +36,22 @@ func (r Request) decision(answer Answer) Decision {
 		note = "The owner denied it."
 	}
 	return Decision{Behavior: "deny", Message: note}
+}
+
+// Claude Code distinguishes a filesystem-absolute rule (//path) from a
+// settings-relative rule (/path). Never turn an exact path into a glob.
+func (r Request) sessionRule() string {
+	action := r.action()
+	if r.Tool != "Bash" && filepath.IsAbs(action) {
+		return "/" + action
+	}
+	return action
+}
+
+func (r Request) ruleTool() string {
+	switch r.Tool {
+	case "Write", "MultiEdit", "NotebookEdit":
+		return "Edit"
+	}
+	return r.Tool
 }

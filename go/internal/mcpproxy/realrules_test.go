@@ -53,7 +53,9 @@ func realSessionRule(t *testing.T, tool string, wantAsks int32) {
 	sessions := filepath.Join(root, "sessions")
 	aSession(t, sessions, scout, os.Getpid(), Access{Token: "test-session", Servers: []string{permissions.Server}})
 	proxy := httptest.NewServer(Proxy{Sessions: sessions, PermissionCalls: NewPermissionCalls(), PermissionWait: func(ctx context.Context, ship, _ string, r permissions.Request) permissions.Decision {
-		return service.Ask(ctx, ship, r)
+		decision:=service.Ask(ctx, ship, r)
+ data,_:=json.Marshal(decision);t.Logf("permission result: %s",data)
+ return decision
 	}})
 	defer proxy.Close()
 	var calls atomic.Int32
