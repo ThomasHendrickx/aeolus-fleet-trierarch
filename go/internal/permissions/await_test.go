@@ -205,7 +205,7 @@ func TestDrainingAShipWaitsForWithdrawalOrNamesItAtTheDeadline(t *testing.T) {
 			}
 			unfinished := <-drained
 			if end == "deadline" {
-				if len(unfinished) != 1 || unfinished[0] != "Run `npm install`" {
+				if len(unfinished) != 1 || unfinished[0] != "permission call" {
 					t.Fatalf("unfinished withdrawals: %v", unfinished)
 				}
 				close(q.cleanup)
@@ -214,5 +214,41 @@ func TestDrainingAShipWaitsForWithdrawalOrNamesItAtTheDeadline(t *testing.T) {
 			}
 			<-done
 		})
+	}
+}
+
+func TestEndingAShipLogsEachWithdrawalStillUnfinishedAfterTenSeconds(t *testing.T) {
+	folder, err := os.MkdirTemp("", "permission-end-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(folder)
+	q := closingQuestion{started: make(chan struct{}), cancelled: make(chan struct{}), cleanup: make(chan struct{})}
+	channel, err := Listen(filepath.Join(folder, "p.sock"), func(string, string) bool { return true }, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer channel.Close()
+	done := make(chan Decision, 1)
+	go func() {
+		done <- (Client{Socket: filepath.Join(folder, "p.sock"), Token: "test-session"}).Ask(context.Background(), "scout", Request{UseID: "tool-7", Title: "Run `npm install`"})
+	}()
+	<-q.started
+	var logs []string
+	ended := make(chan struct{})
+	started := time.Now()
+	go func() { channel.End("scout", func(line string) { logs = append(logs, line) }); close(ended) }()
+	<-q.cancelled
+	select {
+	case <-ended:
+	case <-time.After(11 * time.Second):
+		close(q.cleanup)
+		t.Fatal("release did not continue at its 10-second limit")
+	}
+	elapsed := time.Since(started)
+	close(q.cleanup)
+	<-done
+	if elapsed < 10*time.Second || len(logs) != 1 || logs[0] != "permission withdrawal for scout (tool-7) did not finish within 10 seconds; release continues" {
+		t.Fatalf("release took %s, logs %v", elapsed, logs)
 	}
 }
