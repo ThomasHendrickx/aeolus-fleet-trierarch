@@ -168,3 +168,51 @@ func TestClosingThePrivateChannelWaitsForQuestionWithdrawalBeforeReturning(t *te
 	<-closed
 	<-done
 }
+
+func TestDrainingAShipWaitsForWithdrawalOrNamesItAtTheDeadline(t *testing.T) {
+	for _, end := range []string{"withdrawn", "deadline"} {
+		t.Run(end, func(t *testing.T) {
+			folder, err := os.MkdirTemp("", "permission-drain-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(folder)
+			q := closingQuestion{started: make(chan struct{}), cancelled: make(chan struct{}), cleanup: make(chan struct{})}
+			channel, err := Listen(filepath.Join(folder, "p.sock"), func(string, string) bool { return true }, q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer channel.Close()
+			done := make(chan Decision, 1)
+			go func() {
+				done <- (Client{Socket: filepath.Join(folder, "p.sock"), Token: "test-session"}).Ask(context.Background(), "scout", Request{Title: "Run `npm install`"})
+			}()
+			<-q.started
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			drained := make(chan []string, 1)
+			go func() { drained <- channel.Drain(ctx, "scout") }()
+			<-q.cancelled
+			select {
+			case <-drained:
+				t.Fatal("drain returned before withdrawal or deadline")
+			default:
+			}
+			if end == "withdrawn" {
+				close(q.cleanup)
+			} else {
+				cancel()
+			}
+			unfinished := <-drained
+			if end == "deadline" {
+				if len(unfinished) != 1 || unfinished[0] != "Run `npm install`" {
+					t.Fatalf("unfinished withdrawals: %v", unfinished)
+				}
+				close(q.cleanup)
+			} else if len(unfinished) != 0 {
+				t.Fatalf("unfinished withdrawals: %v", unfinished)
+			}
+			<-done
+		})
+	}
+}
