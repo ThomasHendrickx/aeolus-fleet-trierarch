@@ -107,7 +107,8 @@ type Init struct {
 	Register     func(fleetURL string, shipID string, secret string) (string, error)
 	IsLeaseHeld  func(fleetURL string, crewToken string) (bool, error)
 	// Sleep waits between reads of running.json; a test passes one that does not wait.
-	Sleep func()
+	Sleep   func()
+	LastLog func() string
 	// Detect detects what the harnesses given offer, as by says, and keeps it in detected.json (#365).
 	Detect func(harnesses []string, by detection.By) (detection.Detected, error)
 }
@@ -421,6 +422,11 @@ func (i Init) Run(flags Flags) (Report, error) {
 		}
 	}
 	if err := i.waitForService(); err != nil {
+		if i.LastLog != nil {
+			if last := i.LastLog(); last != "" {
+				return report, fmt.Errorf("%w: last log line: %s", err, last)
+			}
+		}
 		return report, err
 	}
 	say(fmt.Sprintf("The trierarch runs, and starts again at every login (%s). See it with aeolus-trierarch status.", status.File))

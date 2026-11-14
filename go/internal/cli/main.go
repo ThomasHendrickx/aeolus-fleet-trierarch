@@ -260,6 +260,16 @@ func Main(args []string, machine Machine) (string, int) {
 				Register:              machine.Register,
 				IsLeaseHeld:           machine.IsLeaseHeld,
 				Sleep:                 machine.Sleep,
+				LastLog: func() string {
+					if machine.ServiceLog == nil {
+						return ""
+					}
+					lines, err := machine.ServiceLog(at).Tail(1)
+					if err != nil || len(lines) == 0 {
+						return ""
+					}
+					return lines[len(lines)-1]
+				},
 				Detect: func(harnesses []string, by detection.By) (detection.Detected, error) {
 					return machine.Detect(at, harnesses, by)
 				},
