@@ -625,3 +625,22 @@ func TestReportAcceptedReplacesRunningFileAtomically(t *testing.T) {
 		t.Errorf("old file = %q, %v; want unchanged", got, err)
 	}
 }
+
+func TestInitRestartsAnInstalledServiceThatRunsAnotherVersion(t *testing.T) {
+	machine := newMachine(t)
+	if _, err := machine.init.Run(setupLine()); err != nil {
+		t.Fatal(err)
+	}
+	// Another trierarch's service, as on a machine that moves to this one by its setup line.
+	if err := os.WriteFile(machine.init.Paths.Running, []byte(`{"pid":41,"version":"another","firstReportAccepted":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	machine.service.calls = nil
+
+	if _, err := machine.init.Run(setupLine()); err != nil {
+		t.Fatalf("init on a service of another version: %v", err)
+	}
+	if !slices.Contains(machine.service.calls, "restart") {
+		t.Errorf("service calls = %v, want a restart so the service runs this version", machine.service.calls)
+	}
+}
