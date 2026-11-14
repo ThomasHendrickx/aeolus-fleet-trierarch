@@ -122,3 +122,69 @@ func TestWaitReportsFitTheFleetsOneLineLimit(t *testing.T) {
 		})
 	}
 }
+
+type failingReports struct {
+	reports
+	read       int
+	failsRead  int
+	failsWrite bool
+}
+
+func (r *failingReports) ReadReport(ctx context.Context, ship string) (Report, error) {
+	r.read++
+	if r.read == r.failsRead {
+		return Report{}, errors.New("report unavailable")
+	}
+	return r.reports.ReadReport(ctx, ship)
+}
+func (r *failingReports) WriteReport(ctx context.Context, ship string, report Report) error {
+	if r.failsWrite {
+		return errors.New("report unavailable")
+	}
+	return r.reports.WriteReport(ctx, ship, report)
+}
+
+func TestReportFailuresAreLoggedAndKeepThePermissionWaitUntilItsLimitOrCancel(t *testing.T) {
+	for _, failure := range []string{"entry read", "waiting report", "waiting revision"} {
+		for _, end := range []string{"limit", "cancel"} {
+			t.Run(failure+"/"+end, func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					stored := &failingReports{reports: reports{current: Report{State: "working", Note: "before"}}}
+					switch failure {
+					case "entry read":
+						stored.failsRead = 1
+					case "waiting report":
+						stored.failsWrite = true
+					case "waiting revision":
+						stored.failsRead = 2
+					}
+					var logs []string
+					service := Service{Owners: &owners{person: true}, Reports: stored, Clock: SystemClock{}, Log: func(message string) { logs = append(logs, message) }}
+					ctx, cancel := context.WithCancel(context.Background())
+					defer cancel()
+					result := make(chan Decision, 1)
+					go func() { result <- service.Await(ctx, "scout", "Run `npm install`") }()
+					synctest.Wait()
+					select {
+					case got := <-result:
+						t.Fatalf("report failure ended the permission wait: %+v", got)
+					default:
+					}
+					if end == "limit" {
+						time.Sleep(30 * time.Minute)
+					} else {
+						cancel()
+					}
+					got := <-result
+					message := "permission call cancelled"
+					if end == "limit" {
+						message = "not answered in 30 minutes; the question was withdrawn"
+					}
+					if got.Message != message || len(logs) != 1 || !strings.Contains(logs[0], "report unavailable") {
+						t.Fatalf("decision = %+v, logs = %v", got, logs)
+					}
+				})
+			})
+		}
+	}
+}
