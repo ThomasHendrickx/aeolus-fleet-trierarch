@@ -405,7 +405,7 @@ func (i Init) Run(flags Flags) (Report, error) {
 	switch {
 	case !status.IsInstalled:
 		if err := i.Service.Install(); err != nil {
-			return Report{}, err
+			return report, i.serviceError(err)
 		}
 		report.Service = "installed"
 	case report.Configuration != "kept" || isPluginShipNew || isRegisteredAgain:
@@ -413,7 +413,7 @@ func (i Init) Run(flags Flags) (Report, error) {
 			return Report{}, err
 		}
 		if err := i.Service.Restart(); err != nil {
-			return Report{}, err
+			return report, i.serviceError(err)
 		}
 		report.Service = "restarted"
 	default:
@@ -422,15 +422,19 @@ func (i Init) Run(flags Flags) (Report, error) {
 		}
 	}
 	if err := i.waitForService(); err != nil {
-		if i.LastLog != nil {
-			if last := i.LastLog(); last != "" {
-				return report, fmt.Errorf("%w: last log line: %s", err, last)
-			}
-		}
-		return report, err
+		return report, i.serviceError(err)
 	}
 	say(fmt.Sprintf("The trierarch runs, and starts again at every login (%s). See it with aeolus-trierarch status.", status.File))
 	return report, nil
+}
+
+func (i Init) serviceError(err error) error {
+	if i.LastLog != nil {
+		if last := i.LastLog(); last != "" {
+			return fmt.Errorf("%w: last log line: %s", err, last)
+		}
+	}
+	return err
 }
 
 func (i Init) waitForService() error {
