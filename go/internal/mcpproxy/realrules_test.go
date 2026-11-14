@@ -43,7 +43,11 @@ func TestARealClaudeCodeBashRedirectionAsksAgainDespiteTheSessionRule(t *testing
 	realSessionRule(t, "Bash", 3)
 }
 
-func realSessionRule(t *testing.T, tool string, wantAsks int32) {
+func realSessionRule(t *testing.T, tool string, wantAsks int32, names ...string) {
+	name := "a.txt"
+	if len(names) > 0 {
+		name = names[0]
+	}
 	if os.Getenv("AEOLUS_TEST_CLAUDE_CODE") != "1" {
 		t.Skip("runs the installed Claude Code: AEOLUS_TEST_CLAUDE_CODE=1")
 	}
@@ -53,9 +57,10 @@ func realSessionRule(t *testing.T, tool string, wantAsks int32) {
 	sessions := filepath.Join(root, "sessions")
 	aSession(t, sessions, scout, os.Getpid(), Access{Token: "test-session", Servers: []string{permissions.Server}})
 	proxy := httptest.NewServer(Proxy{Sessions: sessions, PermissionCalls: NewPermissionCalls(), PermissionWait: func(ctx context.Context, ship, _ string, r permissions.Request) permissions.Decision {
-		decision:=service.Ask(ctx, ship, r)
- data,_:=json.Marshal(decision);t.Logf("permission result: %s",data)
- return decision
+		decision := service.Ask(ctx, ship, r)
+		data, _ := json.Marshal(decision)
+		t.Logf("permission result: %s", data)
+		return decision
 	}})
 	defer proxy.Close()
 	var calls atomic.Int32
@@ -69,7 +74,7 @@ func realSessionRule(t *testing.T, tool string, wantAsks int32) {
 			ruleModelReply(w, call, "", nil)
 			return
 		}
-		path := filepath.Join(root, "a.txt")
+		path := filepath.Join(root, name)
 		if call == 3 {
 			path = filepath.Join(root, "b.txt")
 		}
@@ -154,4 +159,8 @@ func ruleModelReply(w http.ResponseWriter, call int32, tool string, input map[st
 		data, _ := json.Marshal(event.value)
 		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.name, data)
 	}
+}
+
+func TestARealClaudeCodeSessionRuleEscapesLiteralPathPatternCharacters(t *testing.T) {
+	realSessionRule(t, "Write", 2, "a[1]*?.txt")
 }

@@ -34,3 +34,18 @@ func TestTheOwnersAnswerBecomesThePermissionResult(t *testing.T) {
 		})
 	}
 }
+
+func TestTheQuestionNamesTheNativeExactSessionRule(t *testing.T) {
+	for _, test := range []struct{ tool, input, want string }{
+		{"Write", `{"file_path":"/work/a.ts"}`, "Edit(//work/a.ts)"},
+		{"NotebookEdit", `{"notebook_path":"/work/a.ipynb"}`, "Edit(//work/a.ipynb)"},
+		{"Read", `{"file_path":"/work/a[1]*?.ts"}`, `Read(//work/a\[1\]\*\?.ts)`},
+	} {
+		t.Run(test.tool, func(t *testing.T) {
+			r := Request{Tool: test.tool, Input: json.RawMessage(test.input)}
+			if got := r.rule(); got != test.want {
+				t.Fatalf("rule = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
