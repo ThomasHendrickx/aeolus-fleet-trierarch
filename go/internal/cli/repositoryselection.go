@@ -149,28 +149,28 @@ func repositoryChoices(ctx context.Context, flags Flags, current config.Configur
 	return choices, nil
 }
 
-func cloneRepository(ctx context.Context, choice repositoryChoice) error {
+func cloneRepository(ctx context.Context, choice repositoryChoice) (bool, error) {
 	if _, err := os.Stat(choice.path); err == nil {
 		output, err := exec.CommandContext(ctx, "git", "-C", choice.path, "remote", "get-url", "origin").CombinedOutput()
 		origin := strings.TrimSpace(string(output))
 		if err == nil && origin == choice.url && isGitRepository(ctx, choice.path) {
-			return nil
+			return false, nil
 		}
 		if err != nil {
-			return fmt.Errorf("%s: clone destination %s has no matching origin: %s", choice.url, choice.path, origin)
+			return false, fmt.Errorf("%s: clone destination %s has no matching origin: %s", choice.url, choice.path, origin)
 		}
-		return fmt.Errorf("%s: clone destination %s has different origin %s", choice.url, choice.path, origin)
+		return false, fmt.Errorf("%s: clone destination %s has different origin %s", choice.url, choice.path, origin)
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
+		return false, err
 	}
 	if err := os.MkdirAll(filepath.Dir(choice.path), 0o755); err != nil {
-		return err
+		return false, err
 	}
 	output, err := exec.CommandContext(ctx, "git", "clone", "--", choice.url, choice.path).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("clone %s: %w: %s", choice.url, err, strings.TrimSpace(string(output)))
+		return false, fmt.Errorf("clone %s: %w: %s", choice.url, err, strings.TrimSpace(string(output)))
 	}
-	return nil
+	return true, nil
 }
 
 var errRepositoryAnswer = errors.New("invalid repositories answer")
@@ -213,10 +213,10 @@ func askRepositories(reader *bufio.Reader, terminal io.Writer, flags Flags) (Fla
 	return flags, nil
 }
 
-func (i Init) selectRepositories(ctx context.Context, flags Flags, current config.Configuration, reader *bufio.Reader, terminal io.Writer) (map[string]config.Repository, error) {
+func (i Init) selectRepositories(ctx context.Context, flags Flags, current config.Configuration, reader *bufio.Reader, terminal io.Writer) (map[string]config.Repository, map[string]bool, error) {
 	isWizard := !hasRepositoryChoice(flags) && !flags.IsYes
 	if isWizard && reader == nil {
-		return nil, fmt.Errorf("no terminal: init needs %s", strings.Join(i.missingInitFlags(flags), ", "))
+		return nil, nil, fmt.Errorf("no terminal: init needs %s", strings.Join(i.missingInitFlags(flags), ", "))
 	}
 	home := i.HomeDirectory
 	if home == "" {
@@ -228,7 +228,7 @@ func (i Init) selectRepositories(ctx context.Context, flags Flags, current confi
 		if isWizard {
 			flags, err = askRepositories(reader, terminal, flags)
 			if err != nil && !errors.Is(err, errRepositoryAnswer) {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 		if err == nil {
@@ -238,22 +238,25 @@ func (i Init) selectRepositories(ctx context.Context, flags Flags, current confi
 			break
 		}
 		if !isWizard {
-			return nil, err
+			return nil, nil, err
 		}
 		if _, writeErr := fmt.Fprintln(terminal, err); writeErr != nil {
-			return nil, writeErr
+			return nil, nil, writeErr
 		}
 	}
 	repositories := maps.Clone(current.Repositories)
+	cloned := map[string]bool{}
 	for _, choice := range choices {
 		if choice.url != "" {
-			if err := cloneRepository(ctx, choice); err != nil {
-				return nil, err
+			wasCloned, err := cloneRepository(ctx, choice)
+			if err != nil {
+				return nil, nil, err
 			}
+			cloned[choice.name] = wasCloned
 		}
 		repository := repositories[choice.name]
 		repository.Path = choice.path
 		repositories[choice.name] = repository
 	}
-	return repositories, nil
+	return repositories, cloned, nil
 }

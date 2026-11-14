@@ -54,6 +54,9 @@ func TestInitRepositoryFlags(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("init = %d, %s", code, output)
 			}
+			if strings.HasPrefix(mode, "clone") && !strings.Contains(output, "web (cloned to "+want["web"]+")") {
+				t.Errorf("report = %q, want cloned repository", output)
+			}
 			got, err := config.Load(pathsOf(machine).Config)
 			if err != nil {
 				t.Fatal(err)

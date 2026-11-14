@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -58,6 +59,7 @@ type aServiceManager struct {
 	write      func()
 	override   *service.Status
 	installErr error
+	rewriteErr error
 }
 
 func (s *aServiceManager) Install() error {
@@ -78,7 +80,7 @@ func (s *aServiceManager) Write() error {
 
 func (s *aServiceManager) Rewrite() error {
 	s.calls = append(s.calls, "rewrite")
-	return nil
+	return s.rewriteErr
 }
 
 func (s *aServiceManager) Restart() error {
@@ -524,7 +526,7 @@ func TestInitSaysTheServiceStayedUpAfterTheChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := strings.Join(report.Said, "\n")
-	if !strings.Contains(text, "10 seconds") || strings.Contains(text, "The trierarch runs, and starts again") {
+	if !strings.Contains(text, "10 s") || strings.Contains(text, "The trierarch runs, and starts again") {
 		t.Errorf("report = %q, want the checked service", text)
 	}
 }
@@ -643,4 +645,177 @@ func TestInitRestartsAnInstalledServiceThatRunsAnotherVersion(t *testing.T) {
 	if !slices.Contains(machine.service.calls, "restart") {
 		t.Errorf("service calls = %v, want a restart so the service runs this version", machine.service.calls)
 	}
+}
+
+func TestInitReportsEachPartAndChecksAsJSON(t *testing.T) {
+	machine := newMachine(t)
+	report, err := machine.init.Run(setupLine())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Join(report.Said, "\n")
+	for _, want := range []string{"Installed", "On PATH", "Fleet", "Claude Code", "Repositories", "Service", "Caps", "Ready. Check it any time with: aeolus-trierarch status"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("report = %q, want %q", text, want)
+		}
+	}
+	data, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]json.RawMessage
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	var checks []map[string]any
+	if err := json.Unmarshal(result["checks"], &checks); err != nil {
+		t.Fatalf("checks = %s: %v", result["checks"], err)
+	}
+	if len(checks) != 7 {
+		t.Fatalf("checks = %v, want seven parts", checks)
+	}
+	for _, check := range checks {
+		if check["part"] == nil || check["name"] == nil || check["status"] == nil || check["detail"] == nil {
+			t.Errorf("incomplete check: %v", check)
+		}
+	}
+}
+
+func TestInitReportsDirectInstallationAndPath(t *testing.T) {
+	for _, tc := range []struct{ name, path, status, fix string }{
+		{"on PATH", "/opt/bin:/usr/bin", "ok", ""},
+		{"not on PATH", "/usr/bin", "warning", "add /opt/bin to PATH, then open a new terminal"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := newMachine(t)
+			machine.init.Program = "/opt/bin/aeolus-trierarch"
+			machine.init.Path = tc.path
+			report, err := machine.init.Run(setupLine())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := report.Checks[0]; got.Detail != "/opt/bin/aeolus-trierarch" || got.Status != "ok" {
+				t.Errorf("installed = %+v", got)
+			}
+			if got := report.Checks[1]; got.Status != tc.status || got.Fix != tc.fix {
+				t.Errorf("PATH = %+v, want %s %q", got, tc.status, tc.fix)
+			}
+		})
+	}
+}
+
+func TestInitReportsAServiceFailureWithItsFix(t *testing.T) {
+	machine := newMachine(t)
+	machine.service.write = func() {}
+	machine.init.LastLog = func() string { return "service failed" }
+	report, err := machine.init.Run(setupLine())
+	if err == nil {
+		t.Fatal("wanted service failure")
+	}
+	var found bool
+	for _, check := range report.Checks {
+		if check.Part == "service" {
+			found = true
+			if check.Status != "failed" || !strings.Contains(check.Detail, "service failed") || check.Fix == "" {
+				t.Errorf("service check = %+v", check)
+			}
+		}
+	}
+	if !found || !strings.Contains(strings.Join(report.Said, "\n"), "Not ready: fix the line marked ✗") {
+		t.Errorf("report = %+v", report)
+	}
+}
+
+func TestInitReportsInstallerVerificationAndPathBlock(t *testing.T) {
+	machine := newMachine(t)
+	machine.init.Program = filepath.Join(machine.init.Paths.Home, "bin", "aeolus-trierarch")
+	machine.init.HomeDirectory = t.TempDir()
+	machine.init.InstallVerification = "attested"
+	if err := os.WriteFile(filepath.Join(machine.init.HomeDirectory, ".profile"), []byte("# >>> aeolus-trierarch >>>\nexport PATH=\""+filepath.Dir(machine.init.Program)+":$PATH\"\n# <<< aeolus-trierarch <<<\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := machine.init.Run(setupLine())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(report.Checks[0].Detail, "checksum and attestation checked") {
+		t.Errorf("installed = %+v", report.Checks[0])
+	}
+	if got := report.Checks[1]; got.Status != "ok" || !strings.Contains(got.Detail, ".profile") || !strings.Contains(got.Detail, "new") {
+		t.Errorf("PATH = %+v", got)
+	}
+}
+
+func TestInitUsesTheShipNameOrFallsBackToItsID(t *testing.T) {
+	for _, tc := range []struct {
+		name, shipName string
+		err            error
+		want           string
+	}{
+		{"name", "trierarch-mac", nil, "trierarch-mac"},
+		{"whoami failed", "", errors.New("unavailable"), shipID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			machine := newMachine(t)
+			machine.init.ShipName = func(url, token string) (string, error) {
+				if url != fleetURL || token == "" {
+					t.Errorf("whoami URL %q or token missing", url)
+				}
+				return tc.shipName, tc.err
+			}
+			report, err := machine.init.Run(setupLine())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(report.Said[0], tc.want+" joined ") || !strings.Contains(report.Checks[2].Detail, tc.want+" registered") {
+				t.Errorf("report = %+v", report)
+			}
+		})
+	}
+}
+
+func TestInitNamesTheAttestationVerificationCommand(t *testing.T) {
+	machine := newMachine(t)
+	machine.init.Program = "/opt/bin/aeolus-trierarch"
+	machine.init.InstallVerification = "checksum"
+	report, err := machine.init.Run(setupLine())
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := report.Checks[0]
+	if check.Status != "warning" || !strings.Contains(check.Fix, "gh attestation verify /opt/bin/aeolus-trierarch --repo ThomasHendrickx/aeolus-fleet-trierarch --signer-workflow ThomasHendrickx/aeolus-fleet-trierarch/.github/workflows/release.yml") {
+		t.Errorf("installed check = %+v", check)
+	}
+}
+
+func TestInitServiceFailureNamesStatusAsTheNextStep(t *testing.T) {
+	machine := newMachine(t)
+	machine.service.write = func() {}
+	report, err := machine.init.Run(setupLine())
+	if err == nil {
+		t.Fatal("wanted service failure")
+	}
+	for _, check := range report.Checks {
+		if check.Status == "failed" && !strings.Contains(check.Fix, "aeolus-trierarch status") {
+			t.Errorf("failed check = %+v", check)
+		}
+	}
+}
+
+func TestInitReportsAServiceRewriteFailure(t *testing.T) {
+	machine := newMachine(t)
+	if _, err := machine.init.Run(setupLine()); err != nil {
+		t.Fatal(err)
+	}
+	machine.service.rewriteErr = errors.New("cannot write the service")
+	report, err := machine.init.Run(setupLine())
+	if err == nil {
+		t.Fatal("wanted rewrite failure")
+	}
+	for _, check := range report.Checks {
+		if check.Part == "service" && check.Status == "failed" && strings.Contains(check.Detail, "cannot write the service") && check.Fix != "" {
+			return
+		}
+	}
+	t.Errorf("report = %+v", report)
 }

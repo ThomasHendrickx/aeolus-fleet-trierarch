@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -63,8 +64,9 @@ func TestInitSaysWhatEachHarnessOffersAsDetectedOncePerHarnessVersion(t *testing
 
 	output, code := Main(setupWords(), machine)
 
-	if want := "claude-code 2.1.306: model claude-sonnet-5, claude-opus-5; models confirmed " + detectedAt; code != 0 || !strings.Contains(output, want) {
-		t.Errorf("init said %q, %d, want a line %q", output, code, want)
+	line := regexp.MustCompile(`(?m)^  ✓ Claude Code {3}2\.1\.306, signed in, aeolus-fleet plugin \S+, (asks before each command|runs without permission questions)$`)
+	if code != 0 || !line.MatchString(output) {
+		t.Errorf("init said %q, %d, want a line of version, sign-in, plugin and permission mode", output, code)
 	}
 	if !slices.Equal(found.asked, []string{"start claude-code"}) {
 		t.Errorf("detection asked %v, want claude-code at start", found.asked)

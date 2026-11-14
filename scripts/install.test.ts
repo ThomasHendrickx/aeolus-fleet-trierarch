@@ -37,7 +37,7 @@ function sha256(text: string): string {
 
 /** The binary of an asset name: a script that writes the words it was run with. */
 function binaryText(): string {
-  return `#!/bin/sh\necho "${BINARY_SAYS}: $*" > "${root}/ran"\n`;
+  return `#!/bin/sh\necho "${BINARY_SAYS}: $*" > "${root}/ran"\necho "$AEOLUS_TRIERARCH_INSTALL_VERIFICATION" > "${root}/verification"\n`;
 }
 
 /** A GitHub Release of the version: its API answer, its binaries and its SHA256SUMS. */
@@ -166,7 +166,7 @@ describe('the install script', () => {
     expect(existsSync(join(root, 'ran'))).toBe(false);
   });
 
-  it('without gh installs after the checksum alone, says so and shows the command to verify the attestation by hand', () => {
+  it('passes the checksum-only result to init when gh is absent', () => {
     release('1.2.3');
     const result = install(machine({ system: 'Linux', chip: 'x86_64', attestation: 'absent' }), {
       args: ['--secret', 's3'],
@@ -175,9 +175,7 @@ describe('the install script', () => {
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(installed(), 'utf8')).toContain('# aeolus-trierarch-linux-amd64');
     expect(readFileSync(join(root, 'ran'), 'utf8').trim()).toBe(`${BINARY_SAYS}: init --secret s3`);
-    const said = result.stdout + result.stderr;
-    expect(said).toContain('checksum only');
-    expect(said).toContain(`gh attestation verify ${installed()} --repo ${REPOSITORY} --signer-workflow ${REPOSITORY}/.github/workflows/release.yml`);
+    expect(readFileSync(join(root, 'verification'), 'utf8').trim()).toBe('checksum');
   });
 
   it('without gh still refuses a binary whose checksum fails', () => {
@@ -312,10 +310,11 @@ describe('the install script', () => {
       expect(existsSync(home('.profile'))).toBe(false);
     });
 
-    it('says the current shell needs a new terminal', () => {
+    it('passes the attested result to init', () => {
       const result = run('/bin/bash');
 
-      expect(result.stdout + result.stderr).toContain('open a new terminal');
+      expect(result.status, result.stderr).toBe(0);
+      expect(readFileSync(join(root, 'verification'), 'utf8').trim()).toBe('attested');
     });
 
     it.each(['bash', 'zsh'])('lets a new %s login shell find aeolus-trierarch', (name) => {
