@@ -322,3 +322,47 @@ function realModelReply(response: ServerResponse, at: { call: number; input: { f
   for (const [name, value] of events) response.write(`event: ${name}\ndata: ${JSON.stringify(value)}\n\n`);
   response.end();
 }
+
+
+describe.skipIf(isTodaysTrierarch)('a withdrawn permission question', () => {
+  it('hands its late answer as an ordinary message and logs the sender', async () => {
+    const { owner, scout, permission } = await aPermissionSession();
+    const cancellation = new AbortController();
+    const response = await fetch(permission.url, { method: 'POST', headers: { ...permission.headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'ask', arguments: { tool_name: 'Bash', tool_use_id: 'permission-late', input: { command: 'npm ci' } } } }), signal: cancellation.signal });
+    const result = response.text().catch(() => 'connection closed');
+    try {
+      const question = () => fleet.database.message.findFirst({ where: { senderShipId: scout, selectorShipId: owner, contentType: 'application/vnd.aeolus.question+json' } });
+      await expect.poll(question, { timeout: ANSWERED_WITHIN_MS }).not.toBeNull();
+      const asked = await question();
+      if (asked === null) throw new Error('question is missing');
+      const payload = questionSchema.parse(JSON.parse(asked.payload ?? '{}'));
+      cancellation.abort();
+      await result;
+      await expect.poll(() => fleet.database.message.count({ where: { senderShipId: scout, contentType: 'application/vnd.aeolus.question-withdrawal+json', payload: JSON.stringify({ questionId: payload.id }) } }), { timeout: ANSWERED_WITHIN_MS }).toBe(1);
+      const person: ShipCaller = { shipId: owner, fleetId: fleet.argo.fleetId, kind: 'person', scopes: fleet.argo.scopes };
+      const late = unwrap(await fleet.useCases.sendMessage(person, { selector: { kind: 'ship', shipId: scout }, contentType: 'application/vnd.aeolus.answer+json', inReplyTo: idSchema('message').parse(asked.id), payload: JSON.stringify({ questionId: payload.id, option: 1, note: 'Late answer to the withdrawn ask.' }), idempotencyKey: newKey() })).messageId;
+      await expect.poll(() => fleet.deliveryStateOf(late), { timeout: ANSWERED_WITHIN_MS }).toBe('handled');
+      expect(sessionOf(machine, 'scout').turns().some(({ context }) => context.includes('Late answer to the withdrawn ask.'))).toBe(true);
+      expect(readFileSync(join(machine.pluginData, 'logs', 'aeolus.log'), 'utf8')).toContain('answer from person');
+    } finally {
+      cancellation.abort();
+      await result;
+    }
+  });
+});
+
+async function aPermissionSession(): Promise<{ owner: ShipId; scout: ShipId; permission: { url: string; headers: Record<string, string> } }> {
+  const owner = await fleet.commission('person');
+  await fleet.database.ship.update({ where: { id: owner }, data: { kind: 'person' } });
+  const scout = await fleet.commission('scout', { owner });
+  const config = join(machine.trierarchHome, 'config.json');
+  const configuration = z.looseObject({ harnesses: z.record(z.string(), z.unknown()) }).parse(JSON.parse(readFileSync(config, 'utf8')));
+  writeFileSync(config, JSON.stringify({ ...configuration, harnesses: { ...configuration.harnesses, 'claude-code': { flags: [], options: {} } } }));
+  expect((await machine.trierarch(['restart'])).status).toBe(0);
+  await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code', options: { model: 'claude-opus-5' } });
+  await expect.poll(async () => (await listedEntryOf(machine, scout))?.state, { timeout: ANSWERED_WITHIN_MS }).toBe('running');
+  const servers = z.object({ mcpServers: z.record(z.string(), z.object({ url: z.string(), headers: z.record(z.string(), z.string()) })) }).parse(JSON.parse(readFileSync(join(machine.trierarchHome, 'sessions', scout, 'mcp-config.json'), 'utf8')));
+  const permission = servers.mcpServers['aeolus-permissions'];
+  if (permission === undefined) throw new Error('permission server is missing');
+  return { owner, scout, permission };
+}
