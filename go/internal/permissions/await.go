@@ -38,7 +38,7 @@ func (c Client) Ask(ctx context.Context, ship string, input Request) Decision {
 		return failure
 	}
 	var decision Decision
-	if json.NewDecoder(io.LimitReader(answer.Body, 4096)).Decode(&decision) != nil || decision.Behavior != "deny" {
+	if json.NewDecoder(io.LimitReader(answer.Body, 8<<20)).Decode(&decision) != nil || (decision.Behavior != "deny" && decision.Behavior != "allow") {
 		return failure
 	}
 	return decision

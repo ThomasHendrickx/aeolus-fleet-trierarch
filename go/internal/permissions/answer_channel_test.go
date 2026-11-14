@@ -99,10 +99,10 @@ func TestAnOwnersAnswerTravelsFromThePluginStoreThroughThePrivateChannel(t *test
 				t.Fatalf("deny result = %+v", got)
 			}
 			mu.Lock()
-			defer mu.Unlock()
 			if taken != 1 || withdrawals != 0 || report.Note != "before" {
 				t.Fatalf("taken %d withdrawals %d report %+v", taken, withdrawals, report)
 			}
+			mu.Unlock()
 			if _, ok := p.HandOverLine(folder); ok {
 				t.Fatal("accepted permission answer was handed as a prompt")
 			}
