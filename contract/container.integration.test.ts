@@ -172,6 +172,8 @@ describe('a session in a container', () => {
     const version = z.object({ version: z.string() }).parse(JSON.parse((await machine.trierarch(['--version', '--json'])).stdout)).version;
     const folder = sessionOf(machine, 'scout').folder;
     const sockets = join(machine.trierarchHome, 'ships', scout, 'sockets');
+    const mcpConfig = join(machine.trierarchHome, 'sessions', scout, 'mcp-config.json');
+    const port = readFileSync(join(machine.trierarchHome, 'proxy', 'port'), 'utf8').trim();
     const image = `${SESSION_IMAGE}:${version}`;
 
     const words = run();
@@ -207,8 +209,12 @@ describe('a session in a container', () => {
       `${shipHome()}:/home/ubuntu`,
       '--volume',
       `${sockets}:${sockets}`,
+      '--volume',
+      `${mcpConfig}:${mcpConfig}:ro`,
       '--env',
       'HOME=/home/ubuntu',
+      '--network',
+      `pasta:--no-map-gw,-t,none,-u,none,-T,${port},-U,none`,
       '--workdir',
       folder,
       '--env-file',
