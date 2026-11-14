@@ -3205,3 +3205,13 @@ func TestAShipSavedBeforeTheShipFolderLayoutWithANewSettingsVersionHasItsOldWork
 		t.Errorf("entry %+v, want crewed with settings version 2 in a fresh ship folder", entry)
 	}
 }
+
+func TestClaudeCodeKeepsThePermissionProxyRunningWithoutKeysOrRemoteServers(t *testing.T) {
+	pass := aRunPass(t)
+	proxy := &aProxy{}
+	pass.pass.Proxy, pass.pass.Keys = proxy, nil
+	pass.run(t)
+	if !slices.Equal(proxy.kept, []bool{true}) {
+		t.Fatalf("kept = %v, want permission proxy running", proxy.kept)
+	}
+}

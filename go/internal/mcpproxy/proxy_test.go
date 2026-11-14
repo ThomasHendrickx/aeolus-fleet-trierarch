@@ -520,3 +520,27 @@ func TestAnAccessKeepsTheIdentityItsSessionWasStartedUnderAcrossARestartOfThePro
 		t.Errorf("readAccess = %+v, %v, want the fleet and plugin ship it was written with", read, ok)
 	}
 }
+
+func TestThePermissionServerNeedsNoRemoteConfigurationAndReturnsOneTextDenial(t *testing.T) {
+	sessions := t.TempDir()
+	aSession(t, sessions, scout, os.Getpid(), Access{Token: "permission-token", Servers: []string{"aeolus-permissions"}})
+	proxy := Proxy{Sessions: sessions}
+	request := httptest.NewRequest(http.MethodPost, PathOf(scout, "aeolus-permissions"), strings.NewReader(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"ask","arguments":{"tool_name":"Bash","input":{"command":"touch denied"},"tool_use_id":"use-1"}}}`))
+	request.Header.Set("Authorization", "Bearer permission-token")
+	answer := httptest.NewRecorder()
+	proxy.ServeHTTP(answer, request)
+	var got struct {
+		Result struct {
+			Content []struct {
+				Type string
+				Text string
+			}
+		}
+	}
+	if err := json.Unmarshal(answer.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if answer.Code != 200 || len(got.Result.Content) != 1 || got.Result.Content[0].Type != "text" || got.Result.Content[0].Text != `{"behavior":"deny","message":"could not read this ship's owner: nobody is asked"}` {
+		t.Fatalf("answer = %d %s, want one JSON text denial", answer.Code, answer.Body.String())
+	}
+}

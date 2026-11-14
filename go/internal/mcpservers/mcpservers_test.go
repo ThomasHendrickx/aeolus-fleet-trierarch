@@ -146,3 +146,10 @@ func TestOfferedByLeavesOutAServerAHarnessCannotAdd(t *testing.T) {
 		t.Errorf("OfferedBy = %v, want both for claude-code and company-graph alone for codex", got)
 	}
 }
+
+func TestThePermissionServerNameCannotBeARemoteDefinition(t *testing.T) {
+	_, err := Read(listOf(`{"name":"aeolus-permissions","url":"https://remote.example.test/mcp","tools":["ask"]}`))
+	if err == nil || !strings.Contains(err.Error(), "reserved for the permission tool") {
+		t.Fatalf("Read = %v, want reserved-name refusal", err)
+	}
+}
