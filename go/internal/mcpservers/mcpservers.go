@@ -125,6 +125,9 @@ func Read(payload string) ([]Server, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", nameIn(raw), err)
 		}
+		if server.Name == "aeolus-permissions" {
+			return nil, errors.New("aeolus-permissions is reserved for the permission tool")
+		}
 		if problem := nameProblem(server.Name); problem != "" {
 			return nil, fmt.Errorf("%s: %s", server.Name, problem)
 		}

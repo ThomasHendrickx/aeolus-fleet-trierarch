@@ -1191,6 +1191,7 @@ func onKey(pass *aPass) *someLogins {
 
 func TestEachPassKeepsTheProxyRunningWhileAHarnessHoldsAKey(t *testing.T) {
 	pass := aRunPass(t)
+	pass.pass.Offered = []string{"codex"}
 	proxy := &aProxy{}
 	keys := someKeys{}
 	pass.pass.Proxy, pass.pass.Keys = proxy, keys
@@ -1206,6 +1207,7 @@ func TestEachPassKeepsTheProxyRunningWhileAHarnessHoldsAKey(t *testing.T) {
 
 func TestEachPassKeepsTheProxyRunningWhileAHarnessOffersAnMCPServer(t *testing.T) {
 	pass := aRunPass(t)
+	pass.pass.Offered = []string{"codex"}
 	proxy := &aProxy{}
 	offered := map[string][]string{"claude-code": {}, "codex": {}}
 	pass.pass.Proxy, pass.pass.Keys = proxy, someKeys{}

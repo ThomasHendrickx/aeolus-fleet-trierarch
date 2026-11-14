@@ -17,6 +17,7 @@ package mcpproxy
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/permissions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/proxytoken"
 )
 
@@ -97,6 +99,8 @@ func PathOf(shipID string, server string) string { return Prefix + shipID + "/" 
 type Proxy struct {
 	// Sessions is the sessions folder, where each session keeps its access.
 	Sessions string
+	// Permissions hands a permission request to the trierarch over its private channel.
+	Permissions func(context.Context, string, string) permissions.Decision
 	// Configuration is the MCP configuration the trierarch applied last, read once at each request, so a changed URL, allowlist or credential takes effect on the next call; false when none is applied.
 	Configuration func() (mcpconfiguration.Configuration, bool)
 }
@@ -165,6 +169,10 @@ func (p Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	access, ok := p.accessOf(shipID, name, token)
 	if !ok {
 		refuse(w, http.StatusUnauthorized, "not the token of a running session of this ship started with "+name)
+		return
+	}
+	if name == permissions.Server {
+		p.permission(w, r, shipID, token)
 		return
 	}
 	// A session stays bound to the fleet and plugin ship it started under: a configuration of another, even one naming a server of the same name, never serves it.
@@ -464,4 +472,60 @@ func eventOf(lines []string, tools []string) []byte {
 	}
 	out.WriteString("\n")
 	return []byte(out.String())
+}
+
+// AuthorizesPermission binds a private channel call to the ship's running session.
+func AuthorizesPermission(sessions, ship, token string) bool {
+	if !shipIDPattern.MatchString(ship) {
+		return false
+	}
+	_, ok := (Proxy{Sessions: sessions}).accessOf(ship, permissions.Server, token)
+	return ok
+}
+
+func (p Proxy) permission(w http.ResponseWriter, r *http.Request, ship, token string) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var message struct {
+		ID     json.RawMessage `json:"id"`
+		Method string          `json:"method"`
+		Params struct {
+			Name            string `json:"name"`
+			ProtocolVersion string `json:"protocolVersion"`
+		} `json:"params"`
+	}
+	if json.NewDecoder(io.LimitReader(r.Body, requestRead)).Decode(&message) != nil {
+		writeJSON(w, http.StatusOK, errorAnswer(nil, invalidRequest, "invalid permission request"))
+		return
+	}
+	if len(message.ID) == 0 {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+	var result any
+	switch message.Method {
+	case "initialize":
+		result = map[string]any{"protocolVersion": message.Params.ProtocolVersion, "capabilities": map[string]any{"tools": map[string]any{}}, "serverInfo": map[string]string{"name": permissions.Server, "version": "1"}}
+	case "tools/list":
+		result = map[string]any{"tools": []any{map[string]any{"name": "ask", "description": "Ask the ship's owner for permission", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{"tool_name": map[string]string{"type": "string"}, "input": map[string]string{"type": "object"}, "tool_use_id": map[string]string{"type": "string"}}, "required": []string{"tool_name", "input", "tool_use_id"}}}}}
+	case "tools/call":
+		if message.Params.Name != "ask" {
+			writeJSON(w, http.StatusOK, errorAnswer(message.ID, invalidParams, "unknown permission tool"))
+			return
+		}
+		decision := permissions.Decision{Behavior: "deny", Message: "could not read this ship's owner: nobody is asked"}
+		if p.Permissions != nil {
+			decision = p.Permissions(r.Context(), ship, token)
+		}
+		text, _ := json.Marshal(decision)
+		result = map[string]any{"content": []any{map[string]string{"type": "text", "text": string(text)}}}
+	case "ping":
+		result = map[string]any{}
+	default:
+		writeJSON(w, http.StatusOK, errorAnswer(message.ID, -32601, "unknown permission method"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"jsonrpc": "2.0", "id": message.ID, "result": result})
 }
