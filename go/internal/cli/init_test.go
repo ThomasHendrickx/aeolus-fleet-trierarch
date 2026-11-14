@@ -586,3 +586,42 @@ func TestInitStartsTheInstalledServiceWhenItIsStopped(t *testing.T) {
 		t.Error("the service is not running")
 	}
 }
+
+func TestReportAcceptedWithoutMatchingRunningFile(t *testing.T) {
+	for _, contents := range []string{"", `{"pid":42,"version":"old"}`} {
+		t.Run(contents, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "running.json")
+			if contents != "" {
+				if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := ReportAccepted(path, 41); err != nil {
+				t.Fatalf("ReportAccepted: %v", err)
+			}
+			got, ok := readRunning(path)
+			if !ok || got.PID != 41 || got.Version != Version || !got.FirstReportAccepted {
+				t.Errorf("running = %+v, want accepted process 41", got)
+			}
+		})
+	}
+}
+
+func TestReportAcceptedReplacesRunningFileAtomically(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "old")
+	path := filepath.Join(dir, "running.json")
+	if err := os.WriteFile(target, []byte(`{"pid":41,"version":"old"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReportAccepted(path, 41); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || string(got) != `{"pid":41,"version":"old"}` {
+		t.Errorf("old file = %q, %v; want unchanged", got, err)
+	}
+}
