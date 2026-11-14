@@ -1,6 +1,7 @@
 package claudecode
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -129,5 +130,16 @@ func TestPluginVersionIsTheVersionItsManifestSays(t *testing.T) {
 	}
 	if got := PluginVersion(t.TempDir()); got != "" {
 		t.Errorf("PluginVersion(no manifest) = %q, want none", got)
+	}
+}
+
+func TestPluginUpdateKeepsAndNamesTheErrorWhenClaudeCodeCannotStart(t *testing.T) {
+	err := PluginUpdate{Program: filepath.Join(t.TempDir(), "claude"), Settings: filepath.Join(t.TempDir(), "settings.json")}.Update("v0.41.0")
+
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("error = %v, want the execution error kept for errors.Is", err)
+	}
+	if !strings.Contains(err.Error(), "claude") {
+		t.Errorf("error %q does not name the harness", err)
 	}
 }

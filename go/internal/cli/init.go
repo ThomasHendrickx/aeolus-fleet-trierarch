@@ -104,8 +104,10 @@ type Init struct {
 	OpenTerminal func() (io.ReadWriteCloser, error)
 	Codex        Codex
 	Service      Service
-	Register     func(fleetURL string, shipID string, secret string) (string, error)
-	IsLeaseHeld  func(fleetURL string, crewToken string) (bool, error)
+	// Plugins installs the aeolus-fleet plugin of each picked harness, as upgrade does.
+	Plugins     Plugins
+	Register    func(fleetURL string, shipID string, secret string) (string, error)
+	IsLeaseHeld func(fleetURL string, crewToken string) (bool, error)
 	// Sleep waits between reads of running.json; a test passes one that does not wait.
 	Sleep   func()
 	LastLog func() string
@@ -248,6 +250,10 @@ func (i Init) Run(flags Flags) (Report, error) {
 	say := func(line string) { report.Said = append(report.Said, line) }
 	if _, ok := selection.harnesses["copilot"]; ok {
 		say("! Copilot: sign-in cannot be checked; run copilot login if not done. Copilot always runs without asking, headless.")
+	}
+
+	if err := i.installPlugins(selection, say); err != nil {
+		return Report{}, err
 	}
 
 	// The ship: registered once per machine, never again.
@@ -475,6 +481,25 @@ func (i Init) waitForService() error {
 	}
 	if !held {
 		return errors.New("lease is not valid")
+	}
+	return nil
+}
+
+// installPlugins installs the aeolus-fleet plugin of each picked harness at the tag of this version, leaving one already at it as it is. It runs before anything is registered, so a failure leaves the fleet as it was.
+func (i Init) installPlugins(selection harnessSelection, say func(line string)) error {
+	tag := "v" + Version
+	for _, state := range i.harnessStates() {
+		if _, ok := selection.harnesses[state.name]; !ok {
+			continue
+		}
+		if i.Plugins.Version(state.name) == Version {
+			say(fmt.Sprintf("The aeolus-fleet plugin for %s is on %s already.", state.label, Version))
+			continue
+		}
+		if err := i.Plugins.Update(state.name, tag); err != nil {
+			return fmt.Errorf("the aeolus-fleet plugin was not installed for %s: %w. Nothing is registered: fix what it says, then run the same line again", state.label, err)
+		}
+		say(fmt.Sprintf("Installed the aeolus-fleet plugin %s for %s.", Version, state.label))
 	}
 	return nil
 }
