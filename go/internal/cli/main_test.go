@@ -20,6 +20,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/servicelog"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/state"
 )
@@ -73,7 +74,7 @@ func aMain(t *testing.T) (Machine, *anInstalledService, *aFleet) {
 	home := aShortHome(t)
 	at := paths.Of(home, "")
 	installed := &anInstalledService{aServiceManager: aServiceManager{write: func() {
-		_ = os.WriteFile(at.Running, []byte(`{"pid":41,"version":"`+Version+`"}`), 0o644)
+		_ = os.WriteFile(at.Running, []byte(`{"pid":41,"version":"`+Version+`","firstReportAccepted":true}`), 0o644)
 	}}}
 	fleet := &aFleet{held: map[string]bool{}}
 	return Machine{
@@ -588,5 +589,17 @@ func TestUpgradeAnswersItsReportAndExitsOneWhenThePluginIsNotUpdated(t *testing.
 	plugins.failing = errors.New("claude plugin marketplace update aeolus-fleet failed: Failed to reach the marketplace")
 	if output, code := Main([]string{"upgrade", "--json"}, machine); code != 1 || decoded(t, output)["isPluginUpdated"] != false {
 		t.Errorf("upgrade with the plugin failing answered %q, %d, want exit 1", output, code)
+	}
+}
+
+func TestInitSaysTheLastLogLineWhenTheServiceCrashes(t *testing.T) {
+	machine, manager, _ := aMain(t)
+	machine.Sleep = func() { manager.running = false }
+	machine.ServiceLog = func(paths.Paths) servicelog.Log {
+		return servicelog.Log{Tail: func(int) ([]string, error) { return []string{"plugin missing"}, nil }}
+	}
+	output, code := Main(setupWords(), machine)
+	if code != 1 || !strings.Contains(output, "plugin missing") {
+		t.Errorf("init = %q, %d; want the last log line and exit 1", output, code)
 	}
 }
