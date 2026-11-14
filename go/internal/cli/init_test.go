@@ -511,3 +511,15 @@ func TestInitFailsWhenTheFirstReportWasNotAccepted(t *testing.T) {
 		t.Errorf("Run() error = %v, want the missing report", err)
 	}
 }
+
+func TestInitSaysTheServiceStayedUpAfterTheChecks(t *testing.T) {
+	machine := newMachine(t)
+	report, err := machine.init.Run(setupLine())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Join(report.Said, "\n")
+	if !strings.Contains(text, "10 seconds") || strings.Contains(text, "The trierarch runs, and starts again") {
+		t.Errorf("report = %q, want the checked service", text)
+	}
+}
