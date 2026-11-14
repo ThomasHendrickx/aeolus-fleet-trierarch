@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -16,12 +17,17 @@ type aLaunchctl struct {
 	// onSleep runs at each wait between checks, as launchd goes on meanwhile.
 	onSleep func(waits int)
 	waits   int
+	// then runs after launchctl answers its command line, as launchd changes the agent.
+	then map[string]func()
 }
 
 func (l *aLaunchctl) exec(name string, args ...string) (string, error) {
 	line := name + " " + strings.Join(args, " ")
 	l.calls = append(l.calls, line)
 	if output, ok := l.answers[line]; ok {
+		if then := l.then[line]; then != nil {
+			then()
+		}
 		return output, nil
 	}
 	return "", errors.New(name + " " + args[0] + " failed: not loaded")
@@ -40,6 +46,9 @@ func anAgent(t *testing.T, launchctl *aLaunchctl) Launchd {
 	t.Helper()
 	if launchctl.answers == nil {
 		launchctl.answers = map[string]string{}
+	}
+	if launchctl.then == nil {
+		launchctl.then = map[string]func(){}
 	}
 	home := t.TempDir()
 	return Launchd{
@@ -247,7 +256,7 @@ func TestStartLoadsAnUnloadedAgentAndKicksALoadedOne(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := []string{"launchctl print " + target, "launchctl bootstrap gui/501 " + plistOf(agent), "launchctl print " + target, "launchctl kickstart " + target}
+	want := []string{"launchctl print " + target, "launchctl bootstrap gui/501 " + plistOf(agent), "launchctl print " + target, "launchctl kickstart " + target, "launchctl print " + target}
 	if !slices.Equal(launchctl.calls, want) {
 		t.Errorf("ran %q, want %q", launchctl.calls, want)
 	}
@@ -362,5 +371,94 @@ func TestTheAgentReportsRestartsAcrossItsProcesses(t *testing.T) {
 	}
 	if !status.IsRestarting || status.Restarts != 6 {
 		t.Errorf("Status() = %+v, want six restarts and restarting", status)
+	}
+}
+
+// aStartTheTrierarchMakes drives the agent to start again as restart, upgrade and init do: the loaded agent is unloaded first, and runs counts from one again once launchd loads it.
+var aStartTheTrierarchMakes = map[string]func(*aLaunchctl, Launchd) error{
+	"Start": func(launchctl *aLaunchctl, agent Launchd) error {
+		launchctl.answers["launchctl print "+target] = target + " = {\n\tstate = waiting\n\truns = 6\n}"
+		launchctl.answers["launchctl kickstart "+target] = ""
+		launchctl.then["launchctl kickstart "+target] = func() {
+			launchctl.answers["launchctl print "+target] = target + " = {\n\tstate = running\n\tpid = 41\n\truns = 7\n}"
+		}
+		return agent.Start()
+	},
+	"Restart": func(launchctl *aLaunchctl, agent Launchd) error {
+		reloading(launchctl, agent)
+		return agent.Restart()
+	},
+	"Install": func(launchctl *aLaunchctl, agent Launchd) error {
+		reloading(launchctl, agent)
+		return agent.Install()
+	},
+}
+
+// reloading has launchd unload the running agent at bootout and load it again at bootstrap, its runs counting from one again.
+func reloading(launchctl *aLaunchctl, agent Launchd) {
+	launchctl.answers["launchctl print "+target] = target + " = {\n\tstate = running\n\tpid = 40\n\truns = 6\n}"
+	launchctl.answers["launchctl bootout "+target] = ""
+	launchctl.then["launchctl bootout "+target] = func() { delete(launchctl.answers, "launchctl print "+target) }
+	launchctl.then["launchctl bootstrap gui/501 "+plistOf(agent)] = func() {
+		launchctl.answers["launchctl print "+target] = target + " = {\n\tstate = running\n\tpid = 41\n\truns = 1\n}"
+	}
+}
+
+func TestARestartTheAgentWasToldToMakeIsNoRestartLoop(t *testing.T) {
+	for name, drive := range aStartTheTrierarchMakes {
+		t.Run(name, func(t *testing.T) {
+			launchctl := &aLaunchctl{}
+			agent := installed(t, launchctl)
+
+			if err := drive(launchctl, agent); err != nil {
+				t.Fatal(err)
+			}
+			status, err := agent.Status()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status.Restarts != 0 || status.IsRestarting {
+				t.Errorf("Status() = %+v, want no restarts after a deliberate one", status)
+			}
+		})
+	}
+}
+
+func TestTheAgentCrashingBeforeTheFirstStatusAfterARestartIsARestartLoop(t *testing.T) {
+	for name, drive := range aStartTheTrierarchMakes {
+		t.Run(name, func(t *testing.T) {
+			launchctl := &aLaunchctl{}
+			agent := installed(t, launchctl)
+			if err := drive(launchctl, agent); err != nil {
+				t.Fatal(err)
+			}
+			runs := map[string]int{"Start": 11, "Restart": 5, "Install": 5}[name]
+			launchctl.answers["launchctl print "+target] = target + " = {\n\tstate = waiting\n\truns = " + strconv.Itoa(runs) + "\n\tlast exit code = 1\n}"
+
+			status, err := agent.Status()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status.Restarts != 4 || !status.IsRestarting {
+				t.Errorf("Status() = %+v, want the four crashes since the restart and restarting", status)
+			}
+		})
+	}
+}
+
+func TestStartSaysWhyWhenItCannotRecordTheRunsItStartedAt(t *testing.T) {
+	launchctl := &aLaunchctl{}
+	agent := installed(t, launchctl)
+	launchctl.answers["launchctl print "+target] = target + " = {\n\tstate = running\n\tpid = 41\n\truns = 7\n}"
+	launchctl.answers["launchctl kickstart "+target] = ""
+	if err := os.RemoveAll(agent.Logs); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(agent.Logs, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := agent.Start(); err == nil {
+		t.Error("Start() = nil, want why it cannot record the runs it started at")
 	}
 }
