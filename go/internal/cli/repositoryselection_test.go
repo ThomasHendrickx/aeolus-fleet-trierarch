@@ -2,6 +2,7 @@ package cli
 
 import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -92,6 +93,7 @@ func TestInitInvalidRepositoriesStopBeforeRegistration(t *testing.T) {
 				words = append(words, "--repositories", want, "--clone-into", filepath.Join(root, "clones"))
 			case "missing selection":
 				want = "--repositories"
+				words = words[:len(words)-1]
 			}
 			output, code := Main(words, machine)
 			if code != 1 || !strings.Contains(output, want) {
@@ -102,6 +104,101 @@ func TestInitInvalidRepositoriesStopBeforeRegistration(t *testing.T) {
 			}
 			if mode == "failed clone" && !strings.Contains(output, "does not appear to be a git repository") {
 				t.Fatalf("missing git's reason: %s", output)
+			}
+		})
+	}
+}
+
+func TestInitRepositoryWizardAsksAgain(t *testing.T) {
+	for _, mode := range []string{"not git", "name clash", "folder of repositories", "skip", "harnesses then repositories"} {
+		t.Run(mode, func(t *testing.T) {
+			machine, _, _ := aMain(t)
+			root := t.TempDir()
+			web := aGitRepository(t, filepath.Join(root, "web"))
+			other := aGitRepository(t, filepath.Join(root, "other", "web"))
+			input := "1\n" + root + "\n1\n" + web + "\n"
+			count := 1
+			words := setupWords()
+			words = append(words[:len(words)-1], "--unattended=")
+			switch mode {
+			case "name clash":
+				input = "1\n" + web + "," + other + "\n1\n" + web + "\n"
+			case "folder of repositories":
+				input = "2\n" + root + "\n"
+			case "skip":
+				input = "3\n"
+				count = 0
+			case "harnesses then repositories":
+				words = words[:len(words)-3]
+				words = append(words, "--unattended=")
+				input = "yes\nno\nno\n1\n" + web + "\n"
+			}
+			terminal := &scriptedTerminal{input: strings.NewReader(input)}
+			machine.OpenTerminal = func() (io.ReadWriteCloser, error) { return terminal, nil }
+			output, code := Main(words, machine)
+			if code != 0 {
+				t.Fatalf("init = %d, %s, terminal = %s", code, output, terminal.String())
+			}
+			got, err := config.Load(pathsOf(machine).Config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Repositories) != count {
+				t.Fatalf("repositories = %+v", got.Repositories)
+			}
+			if count == 1 && got.Repositories["web"].Path != web {
+				t.Fatalf("web = %+v", got.Repositories["web"])
+			}
+			if !strings.Contains(terminal.String(), "a folder of repositories") {
+				t.Fatalf("terminal = %s", terminal.String())
+			}
+			if (mode == "not git" || mode == "name clash") && strings.Count(terminal.String(), "Repositories:") != 2 {
+				t.Fatalf("did not ask again: %s", terminal.String())
+			}
+		})
+	}
+}
+
+func TestInitRepeatedRepositorySelection(t *testing.T) {
+	for _, mode := range []string{"same path", "skip keeps existing", "same origin", "different origin", "different path"} {
+		t.Run(mode, func(t *testing.T) {
+			machine, _, fleet := aMain(t)
+			root := t.TempDir()
+			web := aGitRepository(t, filepath.Join(root, "web"))
+			other := aGitRepository(t, filepath.Join(root, "other", "web"))
+			initial := append(setupWords(), "--repositories", web)
+			if strings.Contains(mode, "origin") {
+				initial = append(setupWords(), "--repositories", "file://"+web)
+			}
+			if output, code := Main(initial, machine); code != 0 {
+				t.Fatalf("first init = %d, %s", code, output)
+			}
+			next := initial
+			switch mode {
+			case "skip keeps existing":
+				next = append(setupWords(), "--no-repositories")
+			case "different path":
+				next = append(setupWords(), "--repositories", other)
+			case "different origin":
+				next = append(setupWords(), "--repositories", "file://"+other)
+			}
+			output, code := Main(next, machine)
+			if strings.HasPrefix(mode, "different") {
+				if code != 1 || !strings.Contains(output, "web") {
+					t.Fatalf("second init = %d, %s", code, output)
+				}
+			} else if code != 0 {
+				t.Fatalf("second init = %d, %s", code, output)
+			}
+			if len(fleet.registered) != 1 {
+				t.Fatalf("registered = %v", fleet.registered)
+			}
+			got, err := config.Load(pathsOf(machine).Config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got.Repositories) != 1 {
+				t.Fatalf("repositories = %+v", got.Repositories)
 			}
 		})
 	}
