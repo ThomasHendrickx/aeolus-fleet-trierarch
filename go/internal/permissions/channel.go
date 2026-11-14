@@ -41,8 +41,28 @@ func Listen(path string, authorized func(string, string) bool, owners OwnerReade
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ship := strings.TrimPrefix(r.URL.Path, "/")
 		token, hasBearer := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if r.Method != http.MethodGet || !hasBearer || !authorized(ship, token) {
+		if (r.Method != http.MethodGet && r.Method != http.MethodPost) || !hasBearer || !authorized(ship, token) {
 			http.Error(w, "not a running permission session", http.StatusForbidden)
+			return
+		}
+		if r.Method == http.MethodPost {
+			var input struct {
+				Title string `json:"title"`
+			}
+			if json.NewDecoder(io.LimitReader(r.Body, 4<<20)).Decode(&input) != nil {
+				http.Error(w, "invalid permission wait", http.StatusBadRequest)
+				return
+			}
+			waiter, ok := owners.(interface {
+				Await(context.Context, string, string) Decision
+			})
+			if !ok {
+				http.Error(w, "permission wait unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			decision := waiter.Await(r.Context(), ship, input.Title)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(decision)
 			return
 		}
 		owner, err := owners.Owner(r.Context(), ship)
@@ -93,6 +113,8 @@ func (c Client) Owner(ctx context.Context, ship string) (Owner, error) {
 type Fleet struct {
 	URL     string
 	TokenOf func(string) string
+	Clock   Clock
+	Log     func(string)
 }
 
 // Owner calls whoami with the current crew token and validates its owner.

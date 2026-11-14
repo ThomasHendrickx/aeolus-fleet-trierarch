@@ -11,6 +11,8 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/permissions"
 )
 
+const permissionProgressInterval = 20 * time.Second
+
 // PermissionCalls owns cancellation for calls in this proxy process. The key
 // includes the session token so a new session cannot cancel its predecessor.
 type PermissionCalls struct {
@@ -23,8 +25,7 @@ func NewPermissionCalls() *PermissionCalls {
 	return &PermissionCalls{calls: make(map[string]context.CancelFunc)}
 }
 
-// Count reports outstanding calls.
-func (c *PermissionCalls) Count() int { c.mu.Lock(); defer c.mu.Unlock(); return len(c.calls) }
+func (c *PermissionCalls) count() int { c.mu.Lock(); defer c.mu.Unlock(); return len(c.calls) }
 func (c *PermissionCalls) cancel(key string) {
 	if c == nil {
 		return
@@ -65,7 +66,7 @@ func permissionTitle(arguments json.RawMessage) string {
 		return "Run `" + input.Input.Command + "`"
 	}
 	if input.Input.Path != "" {
-		return input.Tool + " `" + input.Input.Path + "`"
+		return "Edit `" + input.Input.Path + "`"
 	}
 	if input.Tool != "" {
 		return input.Tool
@@ -107,7 +108,7 @@ func (p Proxy) waitPermission(w http.ResponseWriter, r *http.Request, ship, toke
 	if clock == nil {
 		clock = permissions.SystemClock{}
 	}
-	timer := clock.NewTimer(20 * time.Second)
+	timer := clock.NewTimer(permissionProgressInterval)
 	defer func() { timer.Stop() }()
 	progress := 0
 	for {
@@ -129,7 +130,7 @@ func (p Proxy) waitPermission(w http.ResponseWriter, r *http.Request, ship, toke
 					return
 				}
 			}
-			timer = clock.NewTimer(20 * time.Second)
+			timer = clock.NewTimer(permissionProgressInterval)
 		}
 	}
 }

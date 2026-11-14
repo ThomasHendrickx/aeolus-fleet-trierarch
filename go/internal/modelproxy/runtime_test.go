@@ -1,6 +1,7 @@
 package modelproxy
 
 import (
+	"context"
 	"io"
 	"net"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/permissions"
 )
 
 // TestMain lets this test binary be the trierarch program the proxy is started as: `<binary> proxy ...`, of the version AEOLUS_TEST_PROXY_VERSION names.
@@ -323,5 +325,85 @@ func TestAPidFileNamingAnUnrelatedLiveProcessSignalsNothing(t *testing.T) {
 	}
 	if _, err := os.Stat(pidFile); err == nil {
 		t.Fatal("the stale pid file stays, want it removed")
+	}
+}
+
+type waitingOwner struct {
+	started chan struct{}
+	ended   chan struct{}
+}
+
+func (w waitingOwner) Owner(context.Context, string) (permissions.Owner, error) {
+	return permissions.Owner{IsPerson: true}, nil
+}
+func (w waitingOwner) Await(ctx context.Context, _, _ string) permissions.Decision {
+	close(w.started)
+	<-ctx.Done()
+	close(w.ended)
+	return permissions.Decision{Behavior: "deny", Message: "cancelled"}
+}
+
+func TestRestartingTheProxyEndsItsPrivatePermissionWaitAndStartsWithNoWait(t *testing.T) {
+	runtime := aRuntime(t)
+	short, err := os.MkdirTemp("", "permission-restart-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(short) })
+	runtime.Folder = short
+	folder := filepath.Join(runtime.Sessions, scout)
+	if err := os.MkdirAll(folder, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(folder, "hold.pid"), []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := mcpproxy.WriteAccess(folder, mcpproxy.Access{Token: "permission-token", Servers: []string{permissions.Server}}); err != nil {
+		t.Fatal(err)
+	}
+	owner := waitingOwner{started: make(chan struct{}), ended: make(chan struct{})}
+	channel, err := permissions.Listen(filepath.Join(short, permissions.Socket), func(ship, token string) bool { return mcpproxy.AuthorizesPermission(runtime.Sessions, ship, token) }, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer channel.Close()
+	if err := runtime.Keep(true); err != nil {
+		t.Fatal(err)
+	}
+	address, _ := runtime.URL()
+	request, _ := http.NewRequest(http.MethodPost, address+mcpproxy.PathOf(scout, permissions.Server), strings.NewReader(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"ask"}}`))
+	request.Header.Set("Authorization", "Bearer permission-token")
+	answer, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer answer.Body.Close()
+	select {
+	case <-owner.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("private wait did not start")
+	}
+	if err := runtime.Keep(false); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-owner.ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("wait outlived proxy process")
+	}
+	if err := runtime.Keep(true); err != nil {
+		t.Fatal(err)
+	}
+	address, _ = runtime.URL()
+	request, _ = http.NewRequest(http.MethodPost, address+mcpproxy.PathOf(scout, permissions.Server), strings.NewReader(`{"jsonrpc":"2.0","id":8,"method":"ping"}`))
+	request.Header.Set("Authorization", "Bearer permission-token")
+	ping, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ping.Body.Close()
+	text, _ := io.ReadAll(ping.Body)
+	if !strings.Contains(string(text), `"id":8`) {
+		t.Fatalf("restarted proxy = %s", text)
 	}
 }

@@ -189,8 +189,8 @@ func Main(words []string, version string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	proxy := Proxy{Sessions: sessions, Keys: keys.Files{Folder: keysFolder}, States: keys.States{Keys: keysFolder, File: files.KeyStates}, Version: version, Now: time.Now, MCP: mcpproxy.Proxy{Sessions: sessions, Permissions: func(ctx context.Context, ship, token string) permissions.Decision {
-		return permissions.Deny(ctx, ship, permissions.Client{Socket: filepath.Join(folder, permissions.Socket), Token: token})
+	proxy := Proxy{Sessions: sessions, Keys: keys.Files{Folder: keysFolder}, States: keys.States{Keys: keysFolder, File: files.KeyStates}, Version: version, Now: time.Now, MCP: mcpproxy.Proxy{Sessions: sessions, PermissionCalls: mcpproxy.NewPermissionCalls(), PermissionWait: func(ctx context.Context, ship, token, title string) permissions.Decision {
+		return (permissions.Client{Socket: filepath.Join(folder, permissions.Socket), Token: token}).Await(ctx, ship, title)
 	}, Configuration: func() (mcpconfiguration.Configuration, bool) {
 		// Read at each request: the trierarch applies the configuration as it arrives.
 		return mcpconfiguration.ReadFile(configuration)

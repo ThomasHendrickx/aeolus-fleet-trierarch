@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,6 +21,22 @@ import (
 // TestARealClaudeCodeSessionHidesThePermissionToolAndListsTheArgoDenial uses the
 // installed harness and a deterministic model server, without an account or key.
 func TestARealClaudeCodeSessionHidesThePermissionToolAndListsTheArgoDenial(t *testing.T) {
+	realPermissionCall(t, false)
+}
+
+func TestARealClaudeCodePermissionWaitKeepsProgressPastTheSilentHTTPLimit(t *testing.T) {
+	realPermissionCall(t, true)
+}
+
+// The real harness must hold an HTTP permission call past its 60-second silent
+// limit. Only the injected permission limit is shortened; progress stays 20s.
+type permissionTryClock struct{}
+
+func (permissionTryClock) NewTimer(time.Duration) permissions.Timer {
+	return permissions.SystemClock{}.NewTimer(65 * time.Second)
+}
+
+func realPermissionCall(t *testing.T, isPerson bool) {
 	if os.Getenv("AEOLUS_TEST_CLAUDE_CODE") != "1" {
 		t.Skip("runs the installed Claude Code: AEOLUS_TEST_CLAUDE_CODE=1")
 	}
@@ -27,14 +44,36 @@ func TestARealClaudeCodeSessionHidesThePermissionToolAndListsTheArgoDenial(t *te
 	sessions := filepath.Join(root, "sessions")
 	aSession(t, sessions, scout, os.Getpid(), Access{Token: "test-session", Servers: []string{permissions.Server}})
 	var reads atomic.Int32
+	var mu sync.Mutex
+	report := permissions.Report{State: "working", Note: "before", Revision: "before"}
 	fleet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/ship/whoami" || r.Header.Get("Authorization") != "Bearer test-crew" {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.Header.Get("Authorization") != "Bearer test-crew" {
 			http.Error(w, "unexpected fleet call", 400)
 			return
 		}
-		reads.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"ownerShipId":"shp_01m6jyczpnpp5c0vxh54c966cz","ownerName":"argo"}`)
+		switch r.URL.Path {
+		case "/api/v1/ship/whoami":
+			reads.Add(1)
+			name := "argo"
+			if isPerson {
+				name = "thomas"
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"ownerShipId": "shp_01m6jyczpnpp5c0vxh54c966cz", "ownerName": name})
+		case "/api/v1/ship/reportLog":
+			_ = json.NewEncoder(w).Encode(map[string]any{"report": report})
+		case "/api/v1/ship/report":
+			if json.NewDecoder(r.Body).Decode(&report) != nil {
+				http.Error(w, "invalid report", 400)
+				return
+			}
+			report.Revision = "waiting"
+			fmt.Fprint(w, `{}`)
+		default:
+			http.Error(w, "unexpected fleet call", 400)
+		}
 	}))
 	defer fleet.Close()
 	channelFolder, err := os.MkdirTemp("", "permissions-")
@@ -43,13 +82,13 @@ func TestARealClaudeCodeSessionHidesThePermissionToolAndListsTheArgoDenial(t *te
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(channelFolder) })
 	socket := filepath.Join(channelFolder, "p.sock")
-	channel, err := permissions.Listen(socket, func(ship, token string) bool { return AuthorizesPermission(sessions, ship, token) }, permissions.Fleet{URL: fleet.URL, TokenOf: func(string) string { return "test-crew" }})
+	channel, err := permissions.Listen(socket, func(ship, token string) bool { return AuthorizesPermission(sessions, ship, token) }, permissions.Fleet{URL: fleet.URL, Clock: permissionTryClock{}, TokenOf: func(string) string { return "test-crew" }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer channel.Close()
-	proxy := httptest.NewServer(Proxy{Sessions: sessions, Permissions: func(ctx context.Context, ship, token string) permissions.Decision {
-		return permissions.Deny(ctx, ship, permissions.Client{Socket: socket, Token: token})
+	proxy := httptest.NewServer(Proxy{Sessions: sessions, PermissionCalls: NewPermissionCalls(), PermissionWait: func(ctx context.Context, ship, token, title string) permissions.Decision {
+		return (permissions.Client{Socket: socket, Token: token}).Await(ctx, ship, title)
 	}})
 	defer proxy.Close()
 	var messages atomic.Int32
@@ -111,7 +150,7 @@ func TestARealClaudeCodeSessionHidesThePermissionToolAndListsTheArgoDenial(t *te
 	if err := os.WriteFile(filepath.Join(config, ".claude.json"), []byte(`{"hasCompletedOnboarding":true}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, "claude", "-p", "--output-format", "stream-json", "--verbose", "--model", "claude-sonnet-4-6", "--setting-sources", "", "--strict-mcp-config", "--permission-mode", "default", "--permission-prompt-tool", "mcp__aeolus-permissions__ask", "--mcp-config", configuration, "--", "Run the requested Bash action once.")
 	command.Dir = root
@@ -146,9 +185,20 @@ func TestARealClaudeCodeSessionHidesThePermissionToolAndListsTheArgoDenial(t *te
 			}
 		}
 	}
-	if !denied || !strings.Contains(string(output), "this ship's owner is argo: nobody is asked") {
-		t.Fatalf("no argo permission denial: %s", output)
+	message := "this ship's owner is argo: nobody is asked"
+	if isPerson {
+		message = "not answered in 30 minutes; the question was withdrawn"
 	}
+	if !denied || !strings.Contains(string(output), message) {
+		t.Fatalf("no permission denial %q: %s", message, output)
+	}
+	mu.Lock()
+	restored := report.State == "working" && report.Note == "before"
+	mu.Unlock()
+	if !restored {
+		t.Fatal("entry report was not restored")
+	}
+
 	if _, err := os.Stat(filepath.Join(root, "denied.txt")); !os.IsNotExist(err) {
 		t.Fatalf("denied action created the file, stat = %v", err)
 	}

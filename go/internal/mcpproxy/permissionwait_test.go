@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -26,13 +27,21 @@ func TestPermissionWaitStreamsProgressPastASilentCallsLimitAndDeniesAtThirtyMinu
 		}}
 		request := httptest.NewRequest(http.MethodPost, PathOf(scout, permissions.Server), strings.NewReader(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"ask","arguments":{"tool_name":"Bash","input":{"command":"npm install"}},"_meta":{"progressToken":"permission-7"}}}`))
 		request.Header.Set("Authorization", "Bearer permission-token")
-		answer := httptest.NewRecorder()
+		answer := &waitRecorder{ResponseRecorder: httptest.NewRecorder()}
 		done := make(chan struct{})
 		go func() { defer close(done); proxy.ServeHTTP(answer, request) }()
 		synctest.Wait()
-		for range 89 {
-			time.Sleep(20 * time.Second)
+		for tick := 1; tick <= 89; tick++ {
+			time.Sleep(19 * time.Second)
 			synctest.Wait()
+			if got := strings.Count(answer.body(), `"method":"notifications/progress"`); got != tick-1 {
+				t.Fatalf("early progress %d at tick %d", got, tick)
+			}
+			time.Sleep(time.Second)
+			synctest.Wait()
+			if got := strings.Count(answer.body(), `"method":"notifications/progress"`); got != tick {
+				t.Fatalf("progress %d at tick %d", got, tick)
+			}
 		}
 		select {
 		case <-done:
@@ -44,12 +53,12 @@ func TestPermissionWaitStreamsProgressPastASilentCallsLimitAndDeniesAtThirtyMinu
 		if answer.Header().Get("Content-Type") != "text/event-stream" {
 			t.Fatal(answer.Header())
 		}
-		body := answer.Body.String()
+		body := answer.body()
 		progress := strings.Count(body, `"method":"notifications/progress"`)
 		if progress < 89 || progress > 90 || strings.Count(body, `"progressToken":"permission-7"`) != progress || !strings.Contains(body, "not answered in 30 minutes; the question was withdrawn") {
 			t.Fatalf("progress %d, body %s", progress, body)
 		}
-		if calls.Count() != 0 {
+		if calls.count() != 0 {
 			t.Fatal("wait remains registered")
 		}
 	})
@@ -71,7 +80,7 @@ func TestPermissionWaitEndsOnCancelOrConnectionCloseAndLeavesNoWait(t *testing.T
 				defer closeConnection()
 				request := httptest.NewRequest(http.MethodPost, PathOf(scout, permissions.Server), strings.NewReader(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"ask"}}`)).WithContext(ctx)
 				request.Header.Set("Authorization", "Bearer permission-token")
-				answer := httptest.NewRecorder()
+				answer := &waitRecorder{ResponseRecorder: httptest.NewRecorder()}
 				done := make(chan struct{})
 				go func() { defer close(done); proxy.ServeHTTP(answer, request) }()
 				synctest.Wait()
@@ -84,13 +93,27 @@ func TestPermissionWaitEndsOnCancelOrConnectionCloseAndLeavesNoWait(t *testing.T
 				}
 				<-ended
 				<-done
-				if calls.Count() != 0 {
+				if calls.count() != 0 {
 					t.Fatal("permission call remains registered")
 				}
-				if strings.Contains(answer.Body.String(), `"result"`) {
-					t.Fatalf("cancel returned a tool result: %s", answer.Body.String())
+				if strings.Contains(answer.body(), `"result"`) {
+					t.Fatalf("cancel returned a tool result: %s", answer.body())
 				}
 			})
 		})
 	}
 }
+
+// The virtual clock can advance as soon as the test sleeps; the recorder also
+// synchronizes an observation with the next progress write for the race check.
+type waitRecorder struct {
+	mu sync.Mutex
+	*httptest.ResponseRecorder
+}
+
+func (w *waitRecorder) Write(text []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.ResponseRecorder.Write(text)
+}
+func (w *waitRecorder) body() string { w.mu.Lock(); defer w.mu.Unlock(); return w.Body.String() }

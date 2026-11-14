@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+const waitLimit = 30 * time.Minute
+
 // Timer is a wait that its owner can stop on every end.
 type Timer interface {
 	Done() <-chan time.Time
@@ -25,7 +27,7 @@ func (t systemTimer) Stop()                            { t.timer.Stop() }
 
 // Wait denies at the limit and releases its timer when the call is interrupted.
 func Wait(ctx context.Context, clock Clock) Decision {
-	timer := clock.NewTimer(30 * time.Minute)
+	timer := clock.NewTimer(waitLimit)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
