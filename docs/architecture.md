@@ -212,15 +212,19 @@ permission call to the trierarch through `proxy/permissions.sock`, a private Uni
 socket (mode 600), outside the folders mounted into sessions. The channel
 checks the ship's running hold and its session's MCP token and permission-server
 access. The trierarch reads the ship's current crew token from its state and
-calls `/api/v1/ship/whoami` as that ship. The proxy receives the denial, never a crew token. No owner result is cached. While the
+calls `/api/v1/ship/whoami` as that ship. The proxy receives the decision, never a crew token. No owner result is cached. While the
 trierarch is down, the call is denied.
 
-Each `ask` result is one text content containing the JSON
-`{ "behavior": "deny", "message": "..." }`:
+Each `ask` result is one text content containing an allow or deny JSON decision.
+The trierarch asks the person owner through `aeolus-ask.sh`, with the model the
+session started with, its handed task and the tool input. Only a matching reply
+from the owner `whoami` names when it arrives counts:
 
 - Argo owner: `this ship's owner is argo: nobody is asked`.
-- Person owner: a streamed wait of at most 30 minutes, then
-  `not answered in 30 minutes; the question was withdrawn`.
+- Person owner: a streamed wait of at most 30 minutes. Option 1 allows with
+  `updatedInput` unchanged; option 2 also adds a session rule. Option 3 denies
+  with the owner's note or `The owner denied it.` A note alone denies with the
+  note. Without an answer: `not answered in 30 minutes; the question was withdrawn`.
 - An unreadable owner, including a failed private-channel call:
   `could not read this ship's owner: nobody is asked`.
 
@@ -237,6 +241,33 @@ newer report replaced the waiting report. A crew with no report returns to
 working with an empty note. Task, step and details stay untouched. Reporting
 is best effort: failures are logged and leave the wait and its outcome intact.
 
-Claude Code lists a refused action in `permission_denials`. Creating a
-question, taking its answer and withdrawing it belong to the later
-permission-question slices in `docs/design/permission-asks.md`.
+`aeolus-push.sh permission-receive` receives into the plugin's store without
+handing a line. The reply must name both the question UUID and its message in
+`inReplyTo`. `permission-finish` acknowledges it, and takes a counted answer
+out before hand-over. Other replies stay for ordinary hand-over after the busy
+turn and are logged with their sender. Locally held deliveries are excluded
+from the next push receive, so a plain message cannot block a later answer.
+An answer to a withdrawn question is an ordinary message too. Replies to other
+open asks stay with those waits; plugin script access is serialized per ship,
+so separate ships never wait on the same store lock.
+
+When the former owner answers after the owner changed, that answer stays for
+ordinary hand-over. The trierarch withdraws the old ask and asks the current
+person owner afresh, keeping only the time left of the original wait. If the
+new owner is argo, it withdraws and denies with the argo-owned text instead.
+Every end without a counted answer withdraws the question from its original
+recipient. A counted answer is not withdrawn.
+
+Claude Code 2.1.323 was tried with the installed CLI and its real file tools.
+A filesystem-absolute path uses `//`: the rule for Write, Edit, MultiEdit and
+NotebookEdit is `Edit(//absolute/path)`, and a Read rule is
+`Read(//absolute/path)`. `Write(path)` does not match file writes; `/path`
+anchors at the settings source rather than the filesystem root. The test
+proves same-file reuse and a new ask for a different file. Pattern characters
+in file names stay literal; `?` uses `[\x3f]`, because an unescaped question
+mark also matches another character and `\?` does not match the literal path
+in the tried harness. The question names the same native rule as the result. Rules use
+`addRules`, behavior `allow`, destination `session`; no rule is saved to settings.
+A process restarted with `--continue` asks again. A Bash rule carries the exact
+command, but a command with redirection (`echo test > a.txt`) still asks again
+in the tried harness. Claude Code lists refused actions in `permission_denials`.

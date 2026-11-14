@@ -245,7 +245,7 @@ func (f Fleet) Owner(ctx context.Context, ship string) (Owner, error) {
 	if json.Unmarshal(fields["ownerName"], &name) != nil || name == "" {
 		return Owner{}, errors.New("whoami names an invalid owner")
 	}
-	return Owner{IsPerson: name != "argo"}, nil
+	return Owner{IsPerson: name != "argo", ID: id}, nil
 }
 
 // End bounds release cleanup to ten seconds and logs every call still pending.

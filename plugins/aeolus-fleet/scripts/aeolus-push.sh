@@ -73,7 +73,16 @@ handed_over() {
 hand_entry() {
   aeolus_report_handed "$identity" "$1"
   case $? in
-    0) handed_over "$2" ;;
+    0)
+      local delivery sender sender_id
+      delivery="$(cat "$(aeolus_store_dir)/$1.json" 2>/dev/null)"
+      if [ "$(aeolus_json_string "$delivery" contentType)" = application/vnd.aeolus.answer+json ]; then
+        sender="$(aeolus_json_string "$delivery" senderName)"
+        sender_id="$(aeolus_json_string "$delivery" senderShipId)"
+        aeolus_log "$identity" permission "answer from ${sender} (${sender_id}): ordinary hand-over"
+      fi
+      handed_over "$2"
+      ;;
     1)
       [ -d "$(aeolus_store_dir)" ] || exit 3
       exit 1
@@ -98,12 +107,13 @@ hand() {
 # One push receive: sets id to the entry of what the fleet answers first, a
 # forced delivery before any other. Exits 1 when it answers nothing.
 push_receive() {
-  local output wait
+  local output wait input="${1:-}"
+ [ -n "$input" ] || input='{"max":1}'
   # The fleet's key is cut off (decision 0068): not asked again within the wait.
   if aeolus_key_wait_active; then
     exit 1
   fi
-  output="$(AEOLUS_CALL_MAX_SECONDS="$PUSH_RECEIVE_SECONDS" "$(dirname "$0")/aeolus-fleet.sh" pushReceive '{"max":1}' 2>/dev/null)"
+  output="$(AEOLUS_CALL_MAX_SECONDS="$PUSH_RECEIVE_SECONDS" "$(dirname "$0")/aeolus-fleet.sh" pushReceive "$input" 2>/dev/null)"
   case $? in
     0) ;;
     3)
@@ -146,7 +156,71 @@ force() {
   hand_entry "$id" "forced: handed ${id} over"
 }
 
+# Permission replies stay received until the trierarch checks the current owner.
+# No hand-over or busy marker is produced while the permission call waits.
+permission_candidate() {
+  local dir file state delivery question
+  dir="$(aeolus_store_dir)" || return 1
+  for file in "$dir"/*.state; do
+    [ -f "$file" ] || continue
+    id="${file##*/}"; id="${id%.state}"
+    state="$(aeolus_store_state "$id")"
+    [ "$state" = received ] || continue
+    [ ! -e "$dir/$id.permission-seen" ] || continue
+    delivery="$(cat "$dir/$id.json")"
+    if [ "$(aeolus_json_string "$delivery" contentType)" = application/vnd.aeolus.answer+json ]; then
+      question="$(aeolus_json_string "$(aeolus_json_string "$delivery" payload)" questionId)"
+      # An answer to another open ask belongs to that wait, even when this
+      # ask's poll received it first. Never mark it ordinary or consume it.
+      case " $* " in *" ${question} "*) continue ;; esac
+      printf '%s\n' "$delivery"
+      return 0
+    fi
+  done
+  return 1
+}
+
+permission_receive() {
+  permission_candidate "$@" && return 0
+  # Leave locally held messages out of the next receive, so one plain
+  # message cannot keep the owner's later answer behind it indefinitely.
+  local dir file held='' separator=''
+  dir="$(aeolus_store_dir)" || return 1
+  for file in "$dir"/*.state; do
+    [ -f "$file" ] || continue
+    id="${file##*/}"; id="${id%.state}"
+    aeolus_is_delivery_id "$id" || continue
+    held="${held}${separator}\"${id}\""; separator=','
+  done
+  # push_receive's exit on an empty inbox belongs to this subshell only.
+  (push_receive "{\"max\":1,\"excluding\":[${held}]}") >/dev/null
+  permission_candidate "$@" && return 0
+  printf '{}\n'
+}
+
+permission_finish() {
+  local dir output sender
+  id="${2:-}"
+  aeolus_is_delivery_id "$id" || exit 2
+  case "${3:-}" in take|keep) ;; *) exit 2 ;; esac
+  dir="$(aeolus_store_dir)" || exit 2
+  [ "$(aeolus_store_state "$id")" = received ] || exit 1
+  output="$(AEOLUS_CALL_MAX_SECONDS="${AEOLUS_CONFIRM_SECONDS:-3}" "$(dirname "$0")/aeolus-fleet.sh" ack "$id" 2>/dev/null)" || exit 1
+  sender="$(aeolus_json_string "$(cat "$dir/$id.json")" senderName)"
+  if [ "$3" = take ]; then
+    # Mark before reporting: a lost handled response cannot hand this answer.
+    aeolus_store_mark "$id" handled || exit 1
+    aeolus_report_end "$identity" "$id" handled
+    aeolus_log "$identity" permission "answer from ${sender}: taken before hand-over"
+  else
+    : > "$dir/$id.permission-seen"
+    aeolus_log "$identity" permission "answer from ${sender}: left for ordinary hand-over"
+  fi
+}
+
 case "${1:-}" in
+  permission-receive) shift; permission_receive "$@" ;;
+  permission-finish) permission_finish "$@" ;;
   permission-context)
     if id="$(aeolus_store_first confirmed handed onceMore)"; then
       cat "$(aeolus_store_dir)/$id.json"
@@ -163,7 +237,7 @@ case "${1:-}" in
     exit 0
     ;;
   *)
-    echo "usage: aeolus-push.sh hand|force|died" >&2
+    echo "usage: aeolus-push.sh hand|force|died|permission-context|permission-receive|permission-finish" >&2
     exit 2
     ;;
 esac

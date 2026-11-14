@@ -903,7 +903,7 @@ aeolus_store_first() {
 aeolus_store_drop() {
   local dir
   dir="$(aeolus_store_dir)" || return 0
-  rm -f "$dir/$1.json" "$dir/$1.state" "$dir/$1.lease" "$dir/$1.number" "$dir/$1.unreported" "$dir/$1.acking" "$dir/$1.shown" "$dir/$1.ponged" "$dir/$1.payload" "$dir/$1.reason"
+  rm -f "$dir/$1.json" "$dir/$1.state" "$dir/$1.lease" "$dir/$1.number" "$dir/$1.unreported" "$dir/$1.acking" "$dir/$1.shown" "$dir/$1.ponged" "$dir/$1.payload" "$dir/$1.reason" "$dir/$1.permission-seen"
 }
 
 # Removes every entry, as on LEASE_ENDED.
@@ -1093,6 +1093,13 @@ aeolus_store_died_turn() {
 # the ship. <identity file> <deliveryId> [once-more]
 aeolus_report_handed() {
   local identity="$1" id="$2" output status outcome
+  # A permission reply was acknowledged before ordinary hand-over. Core's
+  # hand-over endpoint correctly refuses it as already acknowledged; only
+  # its local hand-over remains, unless a confirmed turn later died.
+  if [ -z "${3:-}" ] && [ -e "$(aeolus_store_dir)/$id.permission-seen" ]; then
+    aeolus_store_mark "$id" handed
+    return
+  fi
   output="$(AEOLUS_CALL_MAX_SECONDS="${AEOLUS_CONFIRM_SECONDS:-3}" "$(dirname "${BASH_SOURCE[0]}")/aeolus-fleet.sh" handed "$(aeolus_store_handing "$id" "${3:-}")" 2>/dev/null)"
   status=$?
   case "$status" in

@@ -14,19 +14,25 @@ import (
 // Question is the permission question passed to the plugin's ask script.
 type Question struct{ Title, Context, Rule, Model string }
 
+var questionMessageID = regexp.MustCompile(`message (msg_[0-9a-z]{26})`)
+
 var questionID = regexp.MustCompile(`question ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`)
 
 // AskQuestion asks through the plugin, with context on stdin rather than argv.
-func (p Plugin) AskQuestion(ctx context.Context, folder string, q Question) (string, error) {
+func (p Plugin) AskQuestion(ctx context.Context, folder string, q Question) (string, string, error) {
 	text, err := p.permissionScript(ctx, folder, "aeolus-ask.sh", q.Context, "ask", "--title", q.Title, "--context-stdin", "--option", "Allow once", "Allow this action once.", "--option", "Allow for this session", "Allow the session rule: "+q.Rule, "--option", "Deny", "Refuse this action.", "--pick", "3", "nothing runs without your yes", "--model", q.Model)
 	match := questionID.FindStringSubmatch(text)
 	if len(match) != 2 {
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
-		return "", errors.New("permission question script returned no question id")
+		return "", "", errors.New("permission question script returned no question id")
 	}
-	return match[1], err
+	message := questionMessageID.FindStringSubmatch(text)
+	if len(message) != 2 {
+		return match[1], "", err
+	}
+	return match[1], message[1], err
 }
 
 // WithdrawQuestion withdraws through the plugin, which remembers the recipient.
@@ -57,4 +63,19 @@ func (p Plugin) permissionScript(ctx context.Context, folder, script, input stri
 		return string(out), errors.New("permission plugin script failed: " + script)
 	}
 	return string(out), nil
+}
+
+// PermissionReply receives into the plugin's store without handing a prompt.
+func (p Plugin) PermissionReply(ctx context.Context, folder string, otherQuestions ...string) (string, error) {
+	return p.permissionScript(ctx, folder, "aeolus-push.sh", "", append([]string{"permission-receive"}, otherQuestions...)...)
+}
+
+// FinishPermissionReply acknowledges a reply and consumes it or leaves it for hand-over.
+func (p Plugin) FinishPermissionReply(ctx context.Context, folder, id string, take bool) error {
+	action := "keep"
+	if take {
+		action = "take"
+	}
+	_, err := p.permissionScript(ctx, folder, "aeolus-push.sh", "", "permission-finish", id, action)
+	return err
 }

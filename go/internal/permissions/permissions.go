@@ -2,14 +2,18 @@
 // The owner is read for every call; no approval or owner is cached.
 package permissions
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 // Server is Claude Code's private permission MCP server name.
 const Server = "aeolus-permissions"
 
 // Owner identifies whether a ship has a person who can answer.
 type Owner struct {
-	IsPerson bool `json:"isPerson"`
+	IsPerson bool   `json:"isPerson"`
+	ID       string `json:"id,omitempty"`
 }
 
 // OwnerReader reads the current owner of one ship.
@@ -19,8 +23,10 @@ type OwnerReader interface {
 
 // Decision is the JSON Claude Code reads from one text content.
 type Decision struct {
-	Behavior string `json:"behavior"`
-	Message  string `json:"message"`
+	Behavior           string             `json:"behavior"`
+	Message            string             `json:"message,omitempty"`
+	UpdatedInput       json.RawMessage    `json:"updatedInput,omitempty"`
+	UpdatedPermissions []PermissionUpdate `json:"updatedPermissions,omitempty"`
 }
 
 // Deny reads the owner and refuses with the reason. Person questions arrive in a later slice.
