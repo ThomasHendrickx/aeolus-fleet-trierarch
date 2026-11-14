@@ -131,7 +131,7 @@ func newMachine(t *testing.T) *aMachine {
 	machine := &aMachine{fleet: &aFleet{held: map[string]bool{}}, claudeCode: &aClaudeCode{}}
 	machine.service = &aServiceManager{write: func() {
 		_ = os.MkdirAll(at.Home, 0o700)
-		_ = os.WriteFile(at.Running, []byte(`{"pid":41,"version":"0.0.0"}`), 0o644)
+		_ = os.WriteFile(at.Running, []byte(`{"pid":41,"version":"0.0.0","firstReportAccepted":true}`), 0o644)
 	}}
 	machine.init = Init{
 		Paths:                 at,
@@ -487,5 +487,17 @@ func TestInitFailsWhenTheLeaseEndsDuringTheWait(t *testing.T) {
 	_, err := machine.init.Run(setupLine())
 	if err == nil || !strings.Contains(err.Error(), "lease") {
 		t.Errorf("Run() error = %v, want an invalid lease", err)
+	}
+}
+
+func TestInitFailsWhenTheFirstReportWasNotAccepted(t *testing.T) {
+	machine := newMachine(t)
+	machine.service.write = func() {
+		_ = os.MkdirAll(machine.init.Paths.Home, 0o700)
+		_ = os.WriteFile(machine.init.Paths.Running, []byte(`{"pid":41,"version":"0.0.0"}`), 0o644)
+	}
+	_, err := machine.init.Run(setupLine())
+	if err == nil || !strings.Contains(err.Error(), "report") {
+		t.Errorf("Run() error = %v, want the missing report", err)
 	}
 }
