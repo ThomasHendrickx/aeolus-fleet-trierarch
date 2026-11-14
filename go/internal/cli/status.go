@@ -154,7 +154,9 @@ func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
 		report.RunningVersion = running.Version
 		if !running.FirstReportAccepted {
 			report.ServiceReadiness = "first report not accepted"
-		} else if started, err := time.Parse(time.RFC3339, manager.Since); err == nil && time.Since(started) < 10*time.Second {
+		} else if started, err := time.Parse(time.RFC3339, manager.Since); err != nil {
+			report.ServiceReadiness = "cannot determine how long the process has run"
+		} else if time.Since(started) < 10*time.Second {
 			report.ServiceReadiness = "waiting for one process to run for 10 seconds"
 		}
 	}
