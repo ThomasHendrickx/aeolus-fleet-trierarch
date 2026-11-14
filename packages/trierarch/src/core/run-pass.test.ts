@@ -3305,6 +3305,19 @@ describe('a ship folder (docs/design/ship-folder.md)', () => {
 });
 
 describe('a ship crewed before the ship folder layout (decision 0013)', () => {
+  it('continues after an upgrade migrates its folder without replaying its task', async () => {
+    const trierarch = aTrierarch();
+    const { shipId } = await aShipCrewedBefore(trierarch);
+
+    await trierarch.pass();
+
+    expect(trierarch.harness.launches.at(-1)).toMatchObject({
+      shipId,
+      isFirstStart: true,
+      firstPrompt: 'This is a continuation of an existing crew request in a fresh session. Your previous conversation is unavailable. Recover the current task and progress from the fleet before acting; do not repeat completed work.',
+    });
+  });
+
   /** A running ship whose entry a trierarch saved before the ship folder layout: its worktree in its ship's folder, the main of a ship folder as the state reads it. */
   async function aShipCrewedBefore(trierarch: Trierarch): Promise<{ shipId: ShipId; worktree: string }> {
     const shipId = await aCrewedShip(trierarch);

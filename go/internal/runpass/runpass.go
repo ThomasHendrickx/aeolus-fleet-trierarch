@@ -801,7 +801,7 @@ func madeMainOf(workspace reconciler.Workspace) string {
 // crewInAFreshShipFolder crews a ship whose ship's folder is gone, removed by hand, again in a fresh one, under the lease it holds:
 // core removes the crew request on a release, so the ship is never released and registered again. Its session stops and its identity
 // and socket go; then its workspace is made in a new ship's folder, its identity written with the crew token its state keeps, and its
-// session started as a first start. Its usage since the last send went with the folder.
+// fresh session given a continuation prompt. Its usage since the last send went with the folder.
 func (p Pass) crewInAFreshShipFolder(state reconciler.State, entry reconciler.Entry, harness Harness) (reconciler.State, error) {
 	if err := p.Sessions.Stop(entry.ShipID); err != nil {
 		return state, err
@@ -831,6 +831,7 @@ func (p Pass) crewInAFreshShipFolder(state reconciler.State, entry reconciler.En
 	launchID := p.NewLaunchID()
 	starting := entry
 	starting.Login = login
+	starting.FirstPrompt = "This is a continuation of an existing crew request in a fresh session. Your previous conversation is unavailable. Recover the current task and progress from the fleet before acting; do not repeat completed work."
 	if err := p.Workspace.WriteRootFiles(starting); err != nil {
 		return state, err
 	}

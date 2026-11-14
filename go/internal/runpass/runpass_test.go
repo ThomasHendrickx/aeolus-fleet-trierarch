@@ -3022,7 +3022,7 @@ func TestAShipWhoseShipsFolderWasRemovedIsCrewedAgainInAFreshOneAsAFirstStartUnd
 	}) {
 		t.Fatalf("calls %q", pass.fleet.calls)
 	}
-	if len(pass.harness.launches) != 1 || !pass.harness.launches[0].isFirstStart || pass.harness.launches[0].firstPrompt != "Review PR 12" {
+	if len(pass.harness.launches) != 1 || !pass.harness.launches[0].isFirstStart || pass.harness.launches[0].firstPrompt != "This is a continuation of an existing crew request in a fresh session. Your previous conversation is unavailable. Recover the current task and progress from the fleet before acting; do not repeat completed work." {
 		t.Fatalf("launches %+v", pass.harness.launches)
 	}
 	if pass.harness.tokens[scoutFolder] != crewToken || pass.harness.identities[scoutFolder].Socket != "/ships/"+scout+"/sockets/fleet.sock" {
@@ -3170,7 +3170,7 @@ func TestAShipSavedBeforeTheShipFolderLayoutIsCrewedAgainInAFreshShipFolderUnder
 	if entry.IsOldLayout || entry.ShipFolder != "/ships/"+scout || entry.Folder != scoutFolder || entry.CrewToken != "aeolus_ct_v1_scout" {
 		t.Fatalf("entry %+v, want crewed in a fresh ship folder under its crew token", entry)
 	}
-	if last := pass.harness.launches[len(pass.harness.launches)-1]; !last.isFirstStart || last.folder != scoutFolder {
+	if last := pass.harness.launches[len(pass.harness.launches)-1]; !last.isFirstStart || last.folder != scoutFolder || last.firstPrompt != "This is a continuation of an existing crew request in a fresh session. Your previous conversation is unavailable. Recover the current task and progress from the fleet before acting; do not repeat completed work." {
 		t.Fatalf("launched %+v, want a first start in the fresh ship folder", last)
 	}
 	if !slices.Contains(pass.workspace.removed, worktree) {
