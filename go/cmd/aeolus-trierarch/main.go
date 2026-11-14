@@ -254,22 +254,9 @@ func (p plugins) Update(harness string, tag string) error {
 		return codex.PluginUpdateOf(p.home, p.env["CODEX_HOME"], func() int { return cli.RunningPID(running) }).Update(tag)
 	case "copilot":
 		// Copilot's plugin is only installed here, at the tag its marketplace names; upgrade updates the other two.
-		return copilotInstall(p.env)
+		return copilot.PluginInstall{Program: "copilot", Home: p.env["COPILOT_HOME"], Version: func() string { return p.Version("copilot") }}.Install(tag)
 	}
 	return fmt.Errorf("the plugin for %s is not updated by upgrade", harness)
-}
-
-// copilotInstall installs the aeolus-fleet plugin through Copilot's own command, the reason being what Copilot said.
-func copilotInstall(env map[string]string) error {
-	command := exec.Command("copilot", "plugin", "install", "aeolus-fleet@aeolus-fleet")
-	if home := env["COPILOT_HOME"]; home != "" {
-		command.Env = append(os.Environ(), "COPILOT_HOME="+home)
-	}
-	output, err := command.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("copilot plugin install aeolus-fleet@aeolus-fleet failed: %s", strings.TrimSpace(string(output)))
-	}
-	return nil
 }
 
 func (p plugins) Version(harness string) string {

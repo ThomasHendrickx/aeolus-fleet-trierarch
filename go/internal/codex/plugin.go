@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -75,15 +76,20 @@ func (p PluginUpdate) cache() string {
 	return filepath.Join(p.Home, "plugins", "cache", marketplace, "aeolus-fleet")
 }
 
+// commandTimeout bounds each Codex command, which reaches the network.
+const commandTimeout = 5 * time.Minute
+
 // run runs Codex with the arguments, in the Codex home given when it is not empty.
 func run(program string, codexHome string, args ...string) error {
-	command := exec.Command(program, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	command := exec.CommandContext(ctx, program, args...)
 	if codexHome != "" {
 		command.Env = append(os.Environ(), "CODEX_HOME="+codexHome)
 	}
 	output, err := command.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("codex %s failed: %s", strings.Join(args, " "), strings.TrimSpace(string(output)))
+		return fmt.Errorf("codex %s failed: %s: %w", strings.Join(args, " "), strings.TrimSpace(string(output)), err)
 	}
 	return nil
 }
