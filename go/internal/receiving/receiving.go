@@ -179,8 +179,23 @@ func (l Loop) step(ctx context.Context) error {
 	return nil
 }
 
-// Run receives and handles until ctx ends.
+// watcher holds the own ship's stream while the loop looks on its hints.
+type watcher interface {
+	Watch(context.Context, func(context.Context) error) error
+}
+
+// Run receives and handles until ctx or the ship's lease ends.
 func (l Loop) Run(ctx context.Context) {
+	if watched, ok := l.Ship.(watcher); ok {
+		if err := watched.Watch(ctx, func(ctx context.Context) error { return l.run(ctx, true) }); err != nil && ctx.Err() == nil {
+			l.Log("The own ship wake stream ended: " + err.Error())
+		}
+		return
+	}
+	_ = l.run(ctx, false)
+}
+
+func (l Loop) run(ctx context.Context, once bool) error {
 	// How long the next wait is while the key is cut off; zero while it is not.
 	var keyWait time.Duration
 	told := func(isCutOff bool) {
@@ -196,12 +211,18 @@ func (l Loop) Run(ctx context.Context) {
 				told(false)
 				l.Log("The fleet's key is reachable again: the trierarch's own ship receives again")
 			}
+			if once {
+				return nil
+			}
 			continue
 		}
 		if ctx.Err() != nil {
-			return
+			return ctx.Err()
 		}
 		var refusal *Refusal
+		if errors.As(err, &refusal) && refusal.Code == "LEASE_ENDED" {
+			return err
+		}
 		if errors.As(err, &refusal) && refusal.Code == keyUnavailable {
 			if keyWait == 0 {
 				told(true)
@@ -216,4 +237,5 @@ func (l Loop) Run(ctx context.Context) {
 		l.Log("The loop failed and goes on: " + err.Error())
 		l.Pause(ctx, l.Interval)
 	}
+	return ctx.Err()
 }
