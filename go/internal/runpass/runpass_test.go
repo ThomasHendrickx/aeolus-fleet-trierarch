@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -287,6 +289,7 @@ type aWorkspace struct {
 	failRemove bool
 	// failUnsaved makes reading what a worktree holds fail, as git failing does.
 	failUnsaved bool
+	readUnsaved func() ([]string, error)
 	// pruned are the repositories whose worktree records were pruned, in order.
 	pruned []string
 	// failPrune are the repositories whose prune fails, as when git refuses.
@@ -383,6 +386,10 @@ func (w *aWorkspace) WriteRootFiles(entry reconciler.Entry) error {
 
 // UnsavedInShipFolder is what the folder itself holds, then each folder in it the test names, by its path.
 func (w *aWorkspace) UnsavedInShipFolder(folder string) ([]workspace.Held, error) {
+	if w.readUnsaved != nil {
+		lines, err := w.readUnsaved()
+		return []workspace.Held{{Folder: folder, Unsaved: lines}}, err
+	}
 	if w.failUnsaved {
 		return nil, errors.New("git status failed in " + folder)
 	}
@@ -401,6 +408,9 @@ func (w *aWorkspace) ShipFolderOf(shipID string) string { return "/ships/" + shi
 // HasShipFolder is whether the ship's folder is there: every one is, but those removed by hand.
 func (w *aWorkspace) HasShipFolder(folder string) bool { return !w.gone[folder] }
 func (w *aWorkspace) Unsaved(folder string) ([]string, error) {
+	if w.readUnsaved != nil {
+		return w.readUnsaved()
+	}
 	if w.failUnsaved {
 		return nil, errors.New("git status failed in " + folder)
 	}
@@ -2823,6 +2833,31 @@ var endedPaths = []struct {
 		p.fleet.requests = nil
 		p.run(t)
 	}},
+}
+
+func TestReleaseAndForgetCompleteAfterInvalidHostGitfileRead(t *testing.T) {
+	for _, path := range []int{0, 3} {
+		ending := endedPaths[path]
+		t.Run(ending.name, func(t *testing.T) {
+			folder := t.TempDir()
+			if err := os.WriteFile(filepath.Join(folder, ".git"), []byte("corrupt-git-file\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			pass := aRunPass(t)
+			pass.workspace.readUnsaved = func() ([]string, error) { return workspace.Unsaved(folder) }
+			ending.end(pass, t, nil)
+			pass.run(t)
+			if _, exists := pass.store.state.Entries[scout]; exists {
+				t.Fatalf("entry remains after %s", ending.name)
+			}
+			if !slices.Contains(pass.workspace.removed, scoutFolder) {
+				t.Fatalf("removed %q, want %s", pass.workspace.removed, scoutFolder)
+			}
+			if !slices.ContainsFunc(pass.logged, func(line string) bool { return strings.Contains(line, "refused, git ") }) {
+				t.Fatalf("logged %q, want refused read", pass.logged)
+			}
+		})
+	}
 }
 
 func TestEveryPathRemovesTheWorktreeWhateverItHoldsLogsWhatItHeldAndTellsArgoNothing(t *testing.T) {
