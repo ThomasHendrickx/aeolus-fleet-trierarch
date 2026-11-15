@@ -110,7 +110,6 @@ func (s Service) Ask(ctx context.Context, ship string, request Request) Decision
 	}
 	if err != nil {
 		s.logFailure(err)
-		return wait()
 	}
 	if endWait != nil {
 		defer func() {
