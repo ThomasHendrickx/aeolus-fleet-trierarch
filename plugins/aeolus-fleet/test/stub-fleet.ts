@@ -24,6 +24,7 @@ export interface StubAnswer {
 export interface StubFleet {
   url: string;
   calls: StubCall[];
+  streams: StubCall[];
   close(): Promise<void>;
 }
 
@@ -40,9 +41,19 @@ function bodyOf(request: IncomingMessage): Promise<string> {
 /** Starts a stub fleet that answers each call with what `answerFor` picks for it: on a TCP port, or on a Unix socket at `socket`. */
 async function serve(answerFor: (call: StubCall) => StubAnswer, socket?: string): Promise<StubFleet> {
   const calls: StubCall[] = [];
+  const streams: StubCall[] = [];
   const server: Server = createServer((request, response) => {
     void bodyOf(request).then(async (body) => {
       const call = { method: request.method ?? '', path: request.url ?? '', authorization: request.headers.authorization, body };
+      if (call.path === '/api/v1/ship/wakeups') {
+        streams.push(call);
+        response.writeHead(200, { 'content-type': 'text/event-stream' });
+        response.write('event: wake\ndata: {"reason":"open"}\n\n');
+        // Existing hand-over tests use a core that keeps offering wake hints.
+        const timer = setInterval(() => response.write('event: wake\ndata: {}\n\n'), 50);
+        response.on('close', () => clearInterval(timer));
+        return;
+      }
       calls.push(call);
       const answer = answerFor(call);
       await answer.hold;
@@ -65,6 +76,7 @@ async function serve(answerFor: (call: StubCall) => StubAnswer, socket?: string)
   return {
     url,
     calls,
+    streams,
     close: () =>
       new Promise((resolve) => {
         server.closeAllConnections();

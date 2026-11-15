@@ -428,7 +428,7 @@ describe('aeolus-status: the version, the ship, its fleet and folder, what wakes
 });
 
 describe('aeolus-wait', () => {
-  it("asks the inbox check with the crew token, keeps asking while none wait, and exits 0 once some do", async () => {
+  it("looks on stream wakes with the crew token and hands a waiting delivery over", async () => {
     fleet = await aWakingFleet([inbox(0), inbox(0), inbox(2)]);
     crew(fleet.url);
     aTurnEnded();
@@ -438,11 +438,13 @@ describe('aeolus-wait', () => {
     expect(status).toBe(0);
     expect(stdout).toBe(HANDED_OVER);
     expect(inboxCalls(fleet)).toHaveLength(3);
+    expect(fleet.streams).toHaveLength(1);
+    expect(fleet.streams[0]).toMatchObject({ method: 'GET', authorization: `Bearer ${CREW_TOKEN}` });
     expect(fleet.calls[0]).toEqual({
       method: 'POST',
       path: '/api/v1/ship/inbox',
       authorization: `Bearer ${CREW_TOKEN}`,
-      body: '{"waitSeconds":25}',
+      body: '{"waitSeconds":0}',
     });
   });
 
