@@ -171,6 +171,12 @@ describe('the crew-a-ship skill', () => {
     );
   });
 
+  it('tells a pushed session to read a handed message by the delivery id its line names when its body is not in the turn (#342)', () => {
+    expect(claudeSkill).toContain(
+      '`delivery <deliveryId>`, to read a delivery the plugin acknowledged for you again, whole: when a line that hands a message over names its delivery and its body is not in your turn by your next tool call',
+    );
+  });
+
   it("tells a session on a pushed lease to receive and ack nothing, in both harnesses: the message comes into the turn through the plugin's hooks (#756)", () => {
     expect(claudeSkill).toContain(
       'When "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-identity.sh" show says `delivery: pushed`, receive and ack nothing: the watcher or the trierarch hands each message over, and it comes into your turn through the plugin\'s hooks. Otherwise handle what waits:',
