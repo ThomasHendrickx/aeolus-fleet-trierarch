@@ -279,6 +279,23 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.fleet.reports).toEqual([{ crewToken: trierarch.fleet.shipOf(shipId).crewToken, state: 'blocked', note: 'blocked: session crashed, restarting' }]);
   });
 
+  it.each([
+    ['bearer token', 'Authorization: Bearer synthetic-token', 'Authorization: [redacted]'],
+    ['API key', 'key sk-synthetic123', 'key [redacted]'],
+    ['Aeolus secret', 'aeolus_ct_v1_synthetic', '[redacted]'],
+    ['URL credential', 'https://alice:synthetic@example.com/error', 'https://[redacted]@example.com/error'],
+    ['JSON body', '{"error":"' + 'x'.repeat(4096) + '"}', '{"error":"' + 'x'.repeat(189) + '…'],
+    ['limit', 'x'.repeat(200), 'x'.repeat(200)],
+    ['over limit', 'x'.repeat(201), 'x'.repeat(199) + '…'],
+  ])('cleans %s before reporting a session failure', async (_name, reason, expected) => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.failureReasons.set(shipId, reason);
+    await crashForGood(trierarch, shipId);
+    expect(trierarch.fleet.reports.at(-1)?.note).toBe('blocked: session crashed, restart budget spent: ' + expected);
+    expect(trierarch.fleet.toArgo.at(-1)?.text).toContain('- Its last failure: ' + expected + '\n');
+  });
+
   it('reports the harness reason on one line when a session exits', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);

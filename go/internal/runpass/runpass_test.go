@@ -869,6 +869,28 @@ func TestARestartIsReportedOnTheShipsBehalf(t *testing.T) {
 	}
 }
 
+func TestFailureReasonsAreCleanedBeforeReporting(t *testing.T) {
+	for _, test := range []struct{ name, reason, want string }{
+		{"bearer token", "Authorization: Bearer synthetic-token", "Authorization: [redacted]"},
+		{"API key", "key sk-synthetic123", "key [redacted]"},
+		{"Aeolus secret", "aeolus_ct_v1_synthetic", "[redacted]"},
+		{"URL credential", "https://alice:synthetic@example.com/error", "https://[redacted]@example.com/error"},
+		{"JSON body", "{\"error\":\"" + strings.Repeat("x", 4096) + "\"}", "{\"error\":\"" + strings.Repeat("x", 189) + "…"},
+		{"limit", strings.Repeat("x", 200), strings.Repeat("x", 200)},
+		{"over limit", strings.Repeat("x", 201), strings.Repeat("x", 199) + "…"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pass := aRunPass(t)
+			pass.exitedASixthTime(t)
+			pass.harness.failureReason = test.reason
+			pass.run(t)
+			if len(pass.fleet.told) != 1 || !strings.Contains(pass.fleet.told[0].text, "- Its last failure: "+test.want+"\n") {
+				t.Fatalf("failure report did not contain cleaned reason")
+			}
+		})
+	}
+}
+
 func TestADeadSessionReportsTheHarnessReasonOnOneLine(t *testing.T) {
 	pass := aRunPass(t)
 	pass.crewed(t)
