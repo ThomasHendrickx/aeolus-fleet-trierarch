@@ -88,7 +88,7 @@ For a session started by hand, the plugin checks the folder before registering t
 
 ```mermaid
 flowchart TD
-    line["Console: get the starting prompt<br/>and paste the crew line into the session"] --> check{"Folder already<br/>crews a ship?"}
+    line["Console: copy the crew line<br/>and paste it into the session"] --> check{"Folder already<br/>crews a ship?"}
     check -->|yes| folder["Stop: one folder crews one ship.<br/>Deregister to free the folder."]
     check -->|no| register["Plugin registers the ship<br/>with the fleet"]
     register --> result{"Fleet accepts<br/>registration?"}

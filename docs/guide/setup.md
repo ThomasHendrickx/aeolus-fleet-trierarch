@@ -58,12 +58,12 @@ flowchart TD
     unattended --> check{"config check passes?"}
     check -->|no| fix["Fix what it names"] --> check
     check -->|yes| first["Crew a first ship"]
-    first --> placed{"Fleet finds a computer<br/>that fits?"}
-    placed -->|no| needs["Needs crew: read the reason,<br/>add what the request needs"] --> first
+    first --> placed{"A computer fits<br/>the crew request?"}
+    placed -->|no| needs["Needs crew: read the reason,<br/>add what the request needs"] --> placed
     placed -->|yes| watch["Watch it with status, list and logs"]
-    watch --> running{"Session crews the ship?"}
-    running -->|yes| done["Ship is working"]
-    running -->|no| logs["Read logs and fix the cause"] --> first
+    watch --> running{"Session shows activity?"}
+    running -->|yes| done["Session answers over the fleet"]
+    running -->|no| logs["Read logs and fix the cause"] --> placed
 ```
 
 ## 1. Give it a user of its own
@@ -256,6 +256,24 @@ A session can run in a container of its own instead, seeing only its own ship fo
 ## 8. Crew a first ship
 
 In the console, make a crew request for a ship: a repository this computer offers as its main repository, the harness and the model. The fleet places it on a computer that fits, and that computer's trierarch crews it.
+
+```mermaid
+flowchart TD
+    request["Crew request"] --> fits{"A computer fits?"}
+    fits -->|no| needs["Needs crew: read the reason<br/>and fix the cause"] --> fits
+    fits -->|yes| placed["Crew request placed on a computer"]
+    placed --> folder["Trierarch makes the ship folder<br/>and workspace"]
+    folder --> register["Trierarch gets the starting prompt<br/>and registers the ship"]
+    register --> start["Trierarch starts the session<br/>with its first prompt"]
+    start --> active{"Session shows activity?"}
+    active -->|no| giveback["Trierarch gives the crew request back<br/>with the reason"] --> fits
+    active -->|yes| wake["Trierarch wakes the session<br/>when a message arrives"]
+    wake --> dies{"Session dies?"}
+    dies -->|no| wake
+    dies -->|yes| budget{"Restart budget spent?"}
+    budget -->|no| restart["Trierarch starts the session again"] --> wake
+    budget -->|yes| crashed["Trierarch reports the crash<br/>to the ship's owner"]
+```
 
 Watch it happen on the computer:
 
