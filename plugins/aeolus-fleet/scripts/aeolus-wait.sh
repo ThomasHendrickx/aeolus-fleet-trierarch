@@ -105,6 +105,17 @@ hand_over() {
 # One call to the fleet with the crew token: <path> <body> <seconds>. Sets
 # status and body.
 call() {
+  local wait draw
+  call_once "$@"
+  for wait in ${AEOLUS_BUSY_WAITS:-1 2 4 8}; do
+    [ "$status" = 503 ] && [ "$(aeolus_json_string "$body" code)" = SERVICE_UNAVAILABLE ] || return 0
+    draw="${AEOLUS_BUSY_DRAW:-$((RANDOM % 1001))e-3}"
+    sleep "$(awk -v wait="$wait" -v draw="$draw" 'BEGIN { printf "%.3f", wait / 2 + wait / 2 * draw }')"
+    call_once "$@"
+  done
+}
+
+call_once() {
   local answer
   answer="$(aeolus_bearer_config "$crew_token" | curl -K - -sS --max-time "$3" -w '\n%{http_code}' -X POST "${fleet_url}$1" \
     -H 'content-type: application/json' \
@@ -266,6 +277,7 @@ wait_for_wake() {
   done
 }
 
+look_owed=0
 while :; do
   # What the fleet did not take yet goes first, also on a watcher's last pass.
   aeolus_send_owed "$identity"
@@ -284,7 +296,8 @@ while :; do
       continue
     fi
   fi
-  wait_for_wake || continue
+  if [ "$look_owed" = 0 ]; then wait_for_wake || continue; fi
+  look_owed=1
   call /api/v1/ship/inbox '{"waitSeconds":0}' "$CALL_SECONDS"
   if [ "$status" != 200 ]; then
     on_refusal
@@ -323,6 +336,7 @@ while :; do
       aeolus_report_key back
       key_delay=0
     fi
+    look_owed=0
     aeolus_lease_key "$crew_token" > "$(aeolus_pushed_file)"
     if id="$(aeolus_store_put "$(printf '%s' "$body" | tr -d '\n')")"; then
       if aeolus_is_idle || aeolus_store_is_forced "$id"; then
@@ -345,6 +359,7 @@ while :; do
   if [ "$is_owed" = 1 ] && { [ "$was_owed" != 1 ] || [ "$waiting" != "${seen:-0}" ]; }; then
     aeolus_log "$identity" wake "held, ${waiting} deliveries wait while the session is busy"
   fi
+  look_owed=0
   printf '%s %s\n' "$waiting" "$is_owed" > "$waiting_file"
   [ "$waiting" -eq 0 ] || sleep "$POLL_SECONDS"
 done
