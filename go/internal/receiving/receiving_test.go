@@ -541,3 +541,17 @@ func TestTheOwnShipReceivesOnlyWhenItsStreamCallsForALook(t *testing.T) {
 		t.Fatalf("watches = %d, ponged = %v, acked = %v, context = %v", ship.watches, ship.ponged, ship.acked, ctx.Err())
 	}
 }
+
+func TestOneWakeDrainsEverythingWaitingBeforeWaitingForAnotherWake(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ship := &aWatchedShip{aShip: aShip{cancel: cancel, answers: []answer{
+		{deliveries: []Delivery{a("text/plain", "one")}},
+		{deliveries: []Delivery{a("text/plain", "two")}},
+		{}, {},
+	}}}
+	Loop{Ship: ship, Log: func(string) {}, Pause: func(context.Context, time.Duration) {}}.Run(ctx)
+	if !slices.Equal(ship.acked, []string{"one", "two"}) || len(ship.answers) != 0 {
+		t.Fatalf("acked = %v, remaining looks = %d, want both deliveries and drained inboxes", ship.acked, len(ship.answers))
+	}
+}
