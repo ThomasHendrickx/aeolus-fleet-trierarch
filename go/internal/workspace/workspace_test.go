@@ -103,6 +103,17 @@ func TestWhatAWorktreeHoldsUnsavedIsItsChangesAndItsCommitsNoBranchHas(t *testin
 	}
 }
 
+func TestInvalidHostGitfileIsReportedAsRefusedWork(t *testing.T) {
+	folder := t.TempDir()
+	if err := os.WriteFile(filepath.Join(folder, ".git"), []byte("corrupt-git-file\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Unsaved(folder)
+	if err != nil || len(got) != 1 || !strings.HasPrefix(got[0], "refused, git ") {
+		t.Fatalf("Unsaved invalid gitfile = %q, %v, want refused git failure", got, err)
+	}
+}
+
 func TestAWorktreeIsRemovedWhateverItHolds(t *testing.T) {
 	repository, root := aRepository(t)
 	folder, _ := Prepare(Worktree{Root: root, Repository: "aeolus-fleet", Path: repository, ShipName: "scout"})

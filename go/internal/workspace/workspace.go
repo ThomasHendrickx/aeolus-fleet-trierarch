@@ -194,16 +194,24 @@ const refusedPrefix = "refused, "
 
 // unsavedIn is what the folder holds that no remote, branch or tag has, as git in it says; a folder the host does not read is one line, why.
 func unsavedIn(folder string, gitIn func(folder string, args ...string) (string, error)) ([]string, error) {
-	changes, err := gitIn(folder, "status", "--porcelain", "--ignore-submodules=all")
-	if refused := (*RefusedError)(nil); errors.As(err, &refused) {
-		return []string{refusedPrefix + refused.Reason}, nil
+	read := func(args ...string) (string, []string) {
+		out, err := gitIn(folder, args...)
+		if err != nil {
+			reason := err.Error()
+			if refused := (*RefusedError)(nil); errors.As(err, &refused) {
+				reason = refused.Reason
+			}
+			return "", []string{refusedPrefix + reason}
+		}
+		return out, nil
 	}
-	if err != nil {
-		return nil, err
+	changes, refused := read("status", "--porcelain", "--ignore-submodules=all")
+	if refused != nil {
+		return refused, nil
 	}
-	commits, err := gitIn(folder, "log", "--no-show-signature", "--format=commit %h %s", "HEAD", "--not", "--branches", "--tags", "--remotes")
-	if err != nil {
-		return nil, err
+	commits, refused := read("log", "--no-show-signature", "--format=commit %h %s", "HEAD", "--not", "--branches", "--tags", "--remotes")
+	if refused != nil {
+		return refused, nil
 	}
 	unsaved := []string{}
 	for _, line := range strings.Split(changes+commits, "\n") {

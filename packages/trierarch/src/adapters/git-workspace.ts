@@ -125,7 +125,7 @@ export function createGitWorkspace(
       if (error instanceof RefusedRead) {
         return [`${REFUSED_PREFIX}${error.reason}`];
       }
-      throw error;
+      return [`${REFUSED_PREFIX}${error instanceof Error ? error.message : String(error)}`];
     }
   };
 

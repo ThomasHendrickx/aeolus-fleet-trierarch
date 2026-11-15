@@ -33,11 +33,13 @@ import { runningVersion } from '../src/adapters/version.js';
 import { FAKE_CLAUDE_CODE, TRIERARCH_PROGRAM } from './support/hold-program.js';
 import { createShipSockets, type ShipSockets } from '../src/adapters/ship-sockets.js';
 import { createRunPass } from '../src/core/run-pass.js';
+import { priceTableOf } from '../src/core/token-cost.js';
 import { createHandleDelivery } from '../src/core/handle-delivery.js';
+import { createReadUsage } from '../src/core/read-usage.js';
 import { createReportSelf } from '../src/core/report-self.js';
 import { TRUSTED_REPOSITORIES_CONTENT_TYPE } from '../src/core/trusted-repositories.js';
 import { createTrustedRepositoriesFile, trustedClonesOf, withTrustedRepositories } from '../src/adapters/trusted-repositories-file.js';
-import { CONFIGURATION, inRepositories } from './support/in-memory.js';
+import { CONFIGURATION, InMemoryUsage, inRepositories } from './support/in-memory.js';
 import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
 
 // The trierarch against a real fleet server on Postgres, over REST: a crew
@@ -224,7 +226,7 @@ async function aTrierarchOnTheFleet(
   const sockets = createShipSockets({ root: paths.sockets, fleetUrl: address, crewTokenOf: async (shipId) => (await state.load()).entries[shipId]?.crewToken, mayCall, log: () => undefined });
   openSockets = sockets;
   // A new run pass over the same files is the trierarch started again.
-  const aRunPass = () => createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, folderProcesses: { stopIn: () => Promise.resolve(0) }, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }), state, setup, clock, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID, sockets, modelLogins: { startProblem: () => Promise.resolve(undefined), keyState: () => Promise.resolve({ state: 'ready' }) }, sendReleasedUsage: () => Promise.resolve() });
+  const aRunPass = () => createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, folderProcesses: { stopIn: () => Promise.resolve(0) }, workspace, trust: createTrust({ configuration, homeDirectory: home, env: {}, managedSettings: join(home, 'managed') }), state, setup, clock, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID, sockets, modelLogins: { startProblem: () => Promise.resolve(undefined), keyState: () => Promise.resolve({ state: 'ready' }) }, sendReleasedUsage: () => Promise.resolve(), readUsage: createReadUsage({ usage: new InMemoryUsage(), state, clock, logger, harnesses: ['claude-code'], prices: priceTableOf(undefined) }) });
   const pass = aRunPass();
   const leasesOf = (shipId: ShipId) => database.lease.count({ where: { shipId, endedAt: null } });
   const folder = join(paths.ships, scout.shipId, 'repositories');
@@ -927,8 +929,9 @@ describe('the trusted repositories on a real fleet (aeolus-fleet#384)', () => {
     const mayCall = createCallerCheck({ platform: process.platform, sessionRootOf: () => Promise.resolve(undefined) });
     const sockets = createShipSockets({ root: paths.sockets, fleetUrl: address, crewTokenOf: async (shipId) => (await state.load()).entries[shipId]?.crewToken, mayCall, log: () => undefined });
     openSockets = sockets;
-    const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, folderProcesses: { stopIn: () => Promise.resolve(0) }, workspace, trust, state, setup, clock: { now: () => new Date() }, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID, sockets, modelLogins: { startProblem: () => Promise.resolve(undefined), keyState: () => Promise.resolve({ state: 'ready' }) }, sendReleasedUsage: () => Promise.resolve() });
-    const reportSelf = createReportSelf({ fleetKey: { isCutOff: () => false }, fleet, processes: sessions, trust, state, setup, readLoad: () => Promise.resolve(undefined), readUsage: () => Promise.resolve({ subscriptions: [], ships: [] }), clock: { now: () => new Date() }, modelLogins: { keyState: () => Promise.resolve({ state: 'ready' }) } });
+    const readUsage = createReadUsage({ usage: new InMemoryUsage(), state, clock: { now: () => new Date() }, logger, harnesses: ['claude-code'], prices: priceTableOf(undefined) });
+    const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness }, processes: sessions, folderProcesses: { stopIn: () => Promise.resolve(0) }, workspace, trust, state, setup, clock: { now: () => new Date() }, logger, refuseModel: () => Promise.resolve(), newLaunchId: randomUUID, sockets, modelLogins: { startProblem: () => Promise.resolve(undefined), keyState: () => Promise.resolve({ state: 'ready' }) }, sendReleasedUsage: () => Promise.resolve(), readUsage });
+    const reportSelf = createReportSelf({ fleetKey: { isCutOff: () => false }, fleet, processes: sessions, trust, state, setup, readLoad: () => Promise.resolve(undefined), readUsage, clock: { now: () => new Date() }, modelLogins: { keyState: () => Promise.resolve({ state: 'ready' }) } });
 
     await sendTrusted([{ name: 'hemma', url }]);
     for (const delivery of await fleet.receive()) {

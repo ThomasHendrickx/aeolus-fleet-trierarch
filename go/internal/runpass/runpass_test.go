@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -20,6 +22,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/usage"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/workspace"
 )
 
@@ -287,6 +290,7 @@ type aWorkspace struct {
 	failRemove bool
 	// failUnsaved makes reading what a worktree holds fail, as git failing does.
 	failUnsaved bool
+	readUnsaved func() ([]string, error)
 	// pruned are the repositories whose worktree records were pruned, in order.
 	pruned []string
 	// failPrune are the repositories whose prune fails, as when git refuses.
@@ -383,6 +387,10 @@ func (w *aWorkspace) WriteRootFiles(entry reconciler.Entry) error {
 
 // UnsavedInShipFolder is what the folder itself holds, then each folder in it the test names, by its path.
 func (w *aWorkspace) UnsavedInShipFolder(folder string) ([]workspace.Held, error) {
+	if w.readUnsaved != nil {
+		lines, err := w.readUnsaved()
+		return []workspace.Held{{Folder: folder, Unsaved: lines}}, err
+	}
 	if w.failUnsaved {
 		return nil, errors.New("git status failed in " + folder)
 	}
@@ -401,6 +409,9 @@ func (w *aWorkspace) ShipFolderOf(shipID string) string { return "/ships/" + shi
 // HasShipFolder is whether the ship's folder is there: every one is, but those removed by hand.
 func (w *aWorkspace) HasShipFolder(folder string) bool { return !w.gone[folder] }
 func (w *aWorkspace) Unsaved(folder string) ([]string, error) {
+	if w.readUnsaved != nil {
+		return w.readUnsaved()
+	}
 	if w.failUnsaved {
 		return nil, errors.New("git status failed in " + folder)
 	}
@@ -1770,6 +1781,76 @@ func TestARequestForAHarnessTheMachineDoesNotOfferIsGivenBackWithWhy(t *testing.
 	}
 }
 
+// aClaudeCodeSubscription is the harness boundary under the project's own usage reader: it says the windows it is given, as Claude Code's rate limit event does, and nothing else.
+type aClaudeCodeSubscription struct{ windows []usage.Window }
+
+func (aClaudeCodeSubscription) TokensOf(usage.Ship) ([]usage.HourTokens, error) { return nil, nil }
+
+func (h aClaudeCodeSubscription) Subscription() ([]usage.Window, error) { return h.windows, nil }
+
+// readingWindows has the pass read its usage with the usage reader the trierarch runs, over a harness that says the windows given.
+func readingWindows(pass *aPass, windows ...usage.Window) {
+	reader := &usage.Reader{
+		Harnesses:  map[string]usage.Harness{"claude-code": aClaudeCodeSubscription{windows: windows}},
+		Configured: []string{"claude-code"},
+		Store:      pass.store,
+		Now:        func() time.Time { return pass.pass.Now() },
+		Log:        func(string) {},
+	}
+	pass.pass.ReadUsage = reader.Read
+}
+
+func TestARequestForAHarnessWhoseSubscriptionWindowIsUsedUpIsGivenBackAtOnceWithTheWindowAndWhenItResets(t *testing.T) {
+	pass := aRunPass(t)
+	readingWindows(pass, usage.Window{WindowMinutes: 300, UsedPercent: 100, ResetsAt: now.Add(3 * time.Hour)})
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+
+	pass.run(t)
+
+	if want := "giveBack " + scout + " 1 mac-mini: harness: claude-code is not offered: its 5-hour subscription window is used up until 2026-11-04 15:00 UTC"; !slices.Contains(pass.fleet.calls, want) {
+		t.Fatalf("calls %q, want %q", pass.fleet.calls, want)
+	}
+}
+
+func TestAHarnessWhoseSubscriptionWindowIsUsedUpIsOfferedAgainOnceItResets(t *testing.T) {
+	pass := aRunPass(t)
+	readingWindows(pass, usage.Window{WindowMinutes: 300, UsedPercent: 100, ResetsAt: now.Add(3 * time.Hour)})
+	pass.run(t)
+	pass.pass.Now = func() time.Time { return now.Add(3 * time.Hour) }
+
+	pass.run(t)
+
+	if pass.store.state.NotOffered != nil {
+		t.Fatalf("not offered %+v, want none", pass.store.state.NotOffered)
+	}
+}
+
+func TestAHarnessWhoseSubscriptionWindowIsNotUsedUpIsOffered(t *testing.T) {
+	pass := aRunPass(t)
+	readingWindows(pass, usage.Window{WindowMinutes: 300, UsedPercent: 99, ResetsAt: now.Add(3 * time.Hour)})
+
+	pass.run(t)
+
+	if pass.store.state.NotOffered != nil {
+		t.Fatalf("not offered %+v, want none", pass.store.state.NotOffered)
+	}
+}
+
+func TestTheWindowThatResetsLastNamesWhyAHarnessIsNotOfferedWhenSeveralAreUsedUp(t *testing.T) {
+	pass := aRunPass(t)
+	readingWindows(pass,
+		usage.Window{WindowMinutes: 300, UsedPercent: 100, ResetsAt: now.Add(3 * time.Hour)},
+		usage.Window{WindowMinutes: 10080, UsedPercent: 100, ResetsAt: now.Add(48 * time.Hour)},
+	)
+
+	pass.run(t)
+
+	want := []reconciler.NotOfferedHarness{{Harness: "claude-code", Reason: "its weekly subscription window is used up until 2026-11-06 12:00 UTC"}}
+	if !slices.Equal(pass.store.state.NotOffered, want) {
+		t.Fatalf("not offered %+v, want %+v", pass.store.state.NotOffered, want)
+	}
+}
+
 func TestARequestForAHarnessWhosePluginIsMissingIsGivenBackAndThePassGoesOn(t *testing.T) {
 	pass := aRunPass(t)
 	pass.harness.pluginMissing = true
@@ -2823,6 +2904,31 @@ var endedPaths = []struct {
 		p.fleet.requests = nil
 		p.run(t)
 	}},
+}
+
+func TestReleaseAndForgetCompleteAfterInvalidHostGitfileRead(t *testing.T) {
+	for _, path := range []int{0, 3} {
+		ending := endedPaths[path]
+		t.Run(ending.name, func(t *testing.T) {
+			folder := t.TempDir()
+			if err := os.WriteFile(filepath.Join(folder, ".git"), []byte("corrupt-git-file\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			pass := aRunPass(t)
+			pass.workspace.readUnsaved = func() ([]string, error) { return workspace.Unsaved(folder) }
+			ending.end(pass, t, nil)
+			pass.run(t)
+			if _, exists := pass.store.state.Entries[scout]; exists {
+				t.Fatalf("entry remains after %s", ending.name)
+			}
+			if !slices.Contains(pass.workspace.removed, scoutFolder) {
+				t.Fatalf("removed %q, want %s", pass.workspace.removed, scoutFolder)
+			}
+			if !slices.ContainsFunc(pass.logged, func(line string) bool { return strings.Contains(line, "refused, git ") }) {
+				t.Fatalf("logged %q, want refused read", pass.logged)
+			}
+		})
+	}
 }
 
 func TestEveryPathRemovesTheWorktreeWhateverItHoldsLogsWhatItHeldAndTellsArgoNothing(t *testing.T) {

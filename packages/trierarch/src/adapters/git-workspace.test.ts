@@ -4,7 +4,7 @@ import { basename, dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { CONFIGURATION, newId, inRepositories } from '../../test/support/in-memory.js';
+import { aTrierarch, CONFIGURATION, crewSettings, newId, inRepositories } from '../../test/support/in-memory.js';
 import { createGitWorkspace } from './git-workspace.js';
 import { runCommand } from './run-command.js';
 
@@ -145,6 +145,37 @@ describe('workspaces in git', () => {
 
     const commit = (await git(['-C', made, 'rev-parse', '--short', 'HEAD'])).trim();
     expect(unsaved).toEqual([' M README.md', '?? draft.md', `commit ${commit} work not pushed`]);
+  });
+
+  it('reports an invalid host gitfile as refused work', async () => {
+    const made = join(folder, 'invalid');
+    mkdirSync(made);
+    writeFileSync(join(made, '.git'), 'corrupt-git-file\n');
+
+    expect(await workspace().unsaved(made)).toEqual([expect.stringContaining('refused, git ')]);
+  });
+
+  it.each(['release', 'forget'])('completes %s after an invalid host gitfile read', async (ending) => {
+    const made = join(folder, 'invalid');
+    mkdirSync(made);
+    writeFileSync(join(made, '.git'), 'corrupt-git-file\n');
+    const trierarch = aTrierarch();
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, crewSettings());
+    await trierarch.pass();
+    await trierarch.pass();
+    trierarch.workspace.unsavedInShipFolder = async () => [{ folder: made, unsaved: await workspace().unsaved(made) }];
+    if (ending === 'release') {
+      trierarch.fleet.removeRequest(shipId);
+    } else {
+      trierarch.fleet.requests.delete(shipId);
+    }
+
+    await trierarch.pass();
+    await trierarch.pass();
+
+    expect(trierarch.state.current().entries[shipId]).toBeUndefined();
+    expect(trierarch.logger.warnings.some((line) => line.includes('refused, git '))).toBe(true);
   });
 
   it('removes a worktree of a configured repository under its root', async () => {

@@ -30,6 +30,8 @@ const (
 type aFleet struct {
 	registered []string
 	held       map[string]bool
+	// leaseErr is what the lease check fails with, as a network failure.
+	leaseErr error
 }
 
 func (f *aFleet) register(url string, ship string, given string) (string, error) {
@@ -48,6 +50,9 @@ func (f *aFleet) register(url string, ship string, given string) (string, error)
 }
 
 func (f *aFleet) isLeaseHeld(_ string, token string) (bool, error) {
+	if f.leaseErr != nil {
+		return false, f.leaseErr
+	}
 	return f.held[token], nil
 }
 
@@ -396,14 +401,69 @@ func TestInitNeverRegistersAnotherShipOnAMachineSetUpAlready(t *testing.T) {
 	}
 }
 
-func TestInitSaysHowToGoOnWhenTheShipIsCrewedElsewhere(t *testing.T) {
+func TestInitSaysWhatHappenedAndWhatToRunWhenTheShipIsCrewedAndThisMachineHoldsNoCrewToken(t *testing.T) {
 	machine := newMachine(t)
 	machine.fleet.held[shipID+"-elsewhere"] = true
 
 	_, err := machine.init.Run(setupLine())
 
-	if err == nil || !strings.Contains(err.Error(), "is crewed already") {
-		t.Errorf("err %v", err)
+	want := shipID + " is crewed already, and this computer holds no crew token for it. Either an earlier setup here stopped before it saved the crew token, or the ship was set up on another computer or as another user. To crew it from here, Release " + shipID + " on its page in the console and run init here with its new secret: aeolus-trierarch init --fleet-url " + fleetURL + " --ship-id " + shipID + " --plugin-ship-id " + pluginShipID + " --secret <its new secret>. If it is set up elsewhere, run that setup line there again instead."
+	if err == nil || err.Error() != want {
+		t.Errorf("init with the setup line while %s is crewed elsewhere: err %v, want %q", shipID, err, want)
+	}
+}
+
+func TestInitSaysTheFleetDoesNotTakeTheSecretWhenTheFleetRefusesAnOldOne(t *testing.T) {
+	machine := newMachine(t)
+	flags := setupLine()
+	flags.Secret = "aeolus_sk_v1_old"
+
+	_, err := machine.init.Run(flags)
+
+	want := "The fleet at " + fleetURL + " does not accept this secret for " + shipID + ": it is wrong, or it is an old one the fleet no longer takes. Copy the ship's current secret from its page in the console (Release " + shipID + " there for a new one), then run init here again: aeolus-trierarch init --fleet-url " + fleetURL + " --ship-id " + shipID + " --plugin-ship-id " + pluginShipID + " --secret <its current secret>"
+	if err == nil || err.Error() != want {
+		t.Errorf("init with the old secret %s: err %v, want %q", flags.Secret, err, want)
+	}
+}
+
+func TestInitSaysWhatItCouldNotCheckAndWhatToRunWhenTheFleetCannotBeReachedForTheLease(t *testing.T) {
+	machine := newMachine(t)
+	if _, err := machine.init.Run(setupLine()); err != nil {
+		t.Fatal(err)
+	}
+	machine.fleet.leaseErr = errors.New("the fleet at " + fleetURL + " cannot be reached: connection refused")
+
+	_, err := machine.init.Run(setupLine())
+
+	want := "Could not check whether this machine still crews " + shipID + " at " + fleetURL + ": the fleet at " + fleetURL + " cannot be reached: connection refused. Nothing was changed. Check that this computer is online and the fleet is up, then run the setup line again."
+	if err == nil || err.Error() != want {
+		t.Errorf("init with the setup line again while the lease check fails with %q: err %v, want %q", machine.fleet.leaseErr, err, want)
+	}
+}
+
+func TestInitClonesNoRepositoryAndChangesNoPluginWhenTheFleetCannotBeReachedForTheLease(t *testing.T) {
+	machine := newMachine(t)
+	if _, err := machine.init.Run(setupLine()); err != nil {
+		t.Fatal(err)
+	}
+	machine.fleet.leaseErr = errors.New("the fleet at " + fleetURL + " cannot be reached: connection refused")
+	machine.plugins.versions["claude-code"] = "0.0.1"
+	machine.plugins.updates = nil
+	web := aGitRepository(t, filepath.Join(t.TempDir(), "web"))
+	clones := filepath.Join(t.TempDir(), "clones")
+	flags := setupLine()
+	flags.Repositories = []string{"file://" + web}
+	flags.CloneInto = clones
+
+	if _, err := machine.init.Run(flags); err == nil {
+		t.Fatalf("init with the setup line again, cloning %s into %s, while the lease check fails: err nil, want an error", flags.Repositories[0], clones)
+	}
+
+	if _, err := os.Stat(clones); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("init with the setup line again, cloning %s into %s, while the lease check fails: %s stat err %v, want it not to exist", flags.Repositories[0], clones, clones, err)
+	}
+	if len(machine.plugins.updates) != 0 {
+		t.Errorf("init with the setup line again, the claude-code plugin on 0.0.1, while the lease check fails: plugins updated %v, want none", machine.plugins.updates)
 	}
 }
 

@@ -211,16 +211,24 @@ func (i Init) missingInitFlags(flags Flags) []string {
 	return missing
 }
 
-// register registers the trierarch's ship; a ship crewed already was registered by its setup line run elsewhere, and the refusal says how to go on.
+// register registers the trierarch's ship; a refusal of the fleet that a person can act on says what happened and what to run next.
 func (i Init) register(fleetURL string, shipID string, secret string, pluginShipID string) (string, error) {
 	crewToken, err := i.Register(fleetURL, shipID, secret)
 	var refusal *fleet.Refusal
-	if errors.As(err, &refusal) && refusal.Code == "CONFLICT" {
-		plugin := ""
-		if pluginShipID != "" {
-			plugin = " --plugin-ship-id " + pluginShipID
-		}
-		return "", fmt.Errorf("%s is crewed already: its setup line ran on another computer, or there as another user. Run that setup line there again to finish its setup, or Release %s on its page in the console and run init here with its new secret: aeolus-trierarch init --fleet-url %s --ship-id %s%s --secret <its new secret>", shipID, shipID, fleetURL, shipID, plugin)
+	if !errors.As(err, &refusal) {
+		return crewToken, err
+	}
+	line := "aeolus-trierarch init --fleet-url " + fleetURL + " --ship-id " + shipID
+	if pluginShipID != "" {
+		line += " --plugin-ship-id " + pluginShipID
+	}
+	switch refusal.Code {
+	case "CONFLICT":
+		//lint:ignore ST1005 Thomas approved this text verbatim, its capital and final period with it (#264).
+		return "", fmt.Errorf("%s is crewed already, and this computer holds no crew token for it. Either an earlier setup here stopped before it saved the crew token, or the ship was set up on another computer or as another user. To crew it from here, Release %s on its page in the console and run init here with its new secret: %s --secret <its new secret>. If it is set up elsewhere, run that setup line there again instead.", shipID, shipID, line)
+	case "UNAUTHORIZED":
+		//lint:ignore ST1005 Thomas approved this text verbatim, its capital with it (#264).
+		return "", fmt.Errorf("The fleet at %s does not accept this secret for %s: it is wrong, or it is an old one the fleet no longer takes. Copy the ship's current secret from its page in the console (Release %s there for a new one), then run init here again: %s --secret <its current secret>", fleetURL, shipID, shipID, line)
 	}
 	return crewToken, err
 }
@@ -238,6 +246,19 @@ func (i Init) Run(flags Flags) (Report, error) {
 		current = loaded
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return Report{}, err
+	}
+	// The lease of a machine set up already is checked before anything changes: before a clone and before a plugin update.
+	kept, keptErr := crew.Read(i.Paths.CrewToken)
+	// The setup line run again names the ship this machine crews: its setup may not have finished.
+	isSetupLineAgain := keptErr == nil && kept.ShipID != "" && strings.TrimSpace(flags.ShipID) == kept.ShipID && (flags.FleetURL == "" || strings.TrimSuffix(strings.TrimSpace(flags.FleetURL), "/") == kept.FleetURL)
+	isLeaseHeld := false
+	if isSetupLineAgain {
+		held, err := i.IsLeaseHeld(kept.FleetURL, kept.CrewToken)
+		if err != nil {
+			//lint:ignore ST1005 Thomas approved this text verbatim, its capital and final period with it (#264).
+			return Report{}, fmt.Errorf("Could not check whether this machine still crews %s at %s: %w. Nothing was changed. Check that this computer is online and the fleet is up, then run the setup line again.", kept.ShipID, kept.FleetURL, err)
+		}
+		isLeaseHeld = held
 	}
 	var terminal io.ReadWriteCloser
 	var reader *bufio.Reader
@@ -274,7 +295,6 @@ func (i Init) Run(flags Flags) (Report, error) {
 	}
 
 	// The ship: registered once per machine, never again.
-	kept, keptErr := crew.Read(i.Paths.CrewToken)
 	isPluginShipNew := false
 	isRegisteredAgain := false
 	if keptErr != nil {
@@ -299,18 +319,12 @@ func (i Init) Run(flags Flags) (Report, error) {
 			ship = kept.ShipID
 		}
 		crews := fmt.Sprintf("the trierarch crews %s at %s", ship, kept.FleetURL)
-		// The setup line run again names the ship this machine crews: its setup may not have finished.
-		isSetupLineAgain := kept.ShipID != "" && strings.TrimSpace(flags.ShipID) == kept.ShipID && (flags.FleetURL == "" || strings.TrimSuffix(strings.TrimSpace(flags.FleetURL), "/") == kept.FleetURL)
 		if !isSetupLineAgain && (flags.ShipID != "" || flags.Secret != "") {
 			return Report{}, fmt.Errorf("this machine is set up already: %s. init never registers again: to register another ship, remove %s first", crews, i.Paths.CrewToken)
 		}
 		crewToken := kept.CrewToken
 		if isSetupLineAgain {
-			held, err := i.IsLeaseHeld(kept.FleetURL, kept.CrewToken)
-			if err != nil {
-				return Report{}, err
-			}
-			if held {
+			if isLeaseHeld {
 				say(fmt.Sprintf("The trierarch crews %s at %s already, so init registers nothing and goes on with the rest of the setup.", kept.ShipID, kept.FleetURL))
 			} else {
 				if flags.Secret == "" {
