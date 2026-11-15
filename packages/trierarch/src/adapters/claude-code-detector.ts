@@ -138,7 +138,8 @@ export function createClaudeCodeDetector(deps: {
           ids.push(...kept.filter((id) => !ids.includes(id)));
         }
       } finally {
-        await rm(folder, { recursive: true, force: true });
+        // A folder that stays is no reason to fail a detection, nor to hide the probe's own error.
+        await rm(folder, { recursive: true, force: true }).catch(() => undefined);
       }
       return {
         version,
