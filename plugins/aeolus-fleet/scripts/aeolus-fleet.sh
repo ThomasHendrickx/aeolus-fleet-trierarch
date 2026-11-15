@@ -10,6 +10,7 @@
 #       the one aeolus_stated_harness tells, none when it cannot (aeolus-fleet#1408)
 #   aeolus-fleet.sh receive|send|report|inbox|setStatement [<json input>|-]   - reads the input from stdin
 #   aeolus-fleet.sh ack|pong <deliveryId>
+#   aeolus-fleet.sh delivery <deliveryId>   - a delivery the crew acknowledged, read again whole (#342)
 #   aeolus-fleet.sh openMeeting|meeting|requestMic|withdrawMicRequest|releaseMic|giveMic|takeMic|setMicPattern
 #     |addToMeeting|leaveMeeting|rejoinMeeting|revokeFromMeeting|transferMeeting|nameModerator|endMeeting
 #       [<json input>|-]   - a meeting's calls (decision 0061), reading the input from stdin with -
@@ -214,7 +215,7 @@ case "$command" in
     [ "$input" = - ] && input="$(cat)"
     method=POST
     ;;
-  ack|pong|handled)
+  ack|pong|handled|delivery)
     [ "$#" -eq 2 ] || usage
     input="{\"deliveryId\":\"$(aeolus_json_escape "$2")\"}"
     method=POST

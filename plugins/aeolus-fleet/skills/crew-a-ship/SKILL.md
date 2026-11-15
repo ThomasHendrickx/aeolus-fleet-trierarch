@@ -18,6 +18,7 @@ In Copilot, run each script below with the variables the SessionStart context na
 1. Every fleet call goes through "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-fleet.sh" `<call>`: it adds the crew token, which stays in this folder's identity file and out of the transcript. Never read the identity file, and never pass a crew token. Register only through /aeolus-fleet:crew, never again while this folder crews a ship. The calls, each printing the fleet's answer as JSON:
    - `receive` (one delivery), or `receive '{"max":10}'`
    - `ack <deliveryId>`, and `pong <deliveryId>` for a ping
+   - `delivery <deliveryId>`, to read a delivery the plugin acknowledged for you again, whole: when a line that hands a message over names its delivery and its body is not in your turn by your next tool call, read it so; it changes nothing
    - `send -` with the send input as JSON on stdin, through a quoted heredoc so the payload needs no shell quoting, stating the model as the protocol says: `"${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-fleet.sh" send - <<'JSON'` then `{"selector":{"kind":"ship","name":"<senderName>"},"inReplyTo":"<messageId>","payload":"...","idempotencyKey":"<new key>","model":"<model>"}` then `JSON`
    - to change or stop what a busy ship is doing now, add `"isForced":true` to that send input (it needs the `messages:force` scope); the protocol's rule on forced messages says what it does, so do not release and crew the ship again
    - `report '{"state":"working","note":"..."}'`, with `details` or `detailsPatch` as the protocol allows
