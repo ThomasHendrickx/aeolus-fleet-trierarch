@@ -1877,6 +1877,58 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.harness.launches.map((launch) => launch.shipId)).toEqual([claudeShip]);
   });
 
+  describe('a harness whose subscription window is used up (aeolus-fleet-trierarch#263)', () => {
+    const FIVE_HOURS = 300;
+    const WEEK = 10_080;
+    const windowOf = (windowMinutes: number, usedPercent: number, resetsAt: string) => ({ windowMinutes, usedPercent, resetsAt: new Date(resetsAt) });
+    const RESET = '2026-10-06T11:00:00.000Z';
+
+    it('is not offered until the window resets: its request is given back at once, with the window and when it resets, and the others go on', async () => {
+      const trierarch = aTrierarch(WITH_CODEX);
+      trierarch.usage.subscriptions.set('codex', [windowOf(FIVE_HOURS, 100, RESET)]);
+      const codexShip = trierarch.fleet.commission('lookout');
+      trierarch.fleet.request(codexShip, crewSettings({ harness: 'codex' }));
+      const claudeShip = trierarch.fleet.commission('scout');
+      trierarch.fleet.request(claudeShip, crewSettings());
+
+      await trierarch.pass();
+
+      expect(trierarch.fleet.givenBack).toEqual([
+        { shipId: codexShip, settingsVersion: 1, reason: 'mac-studio: harness: codex is not offered: its 5-hour subscription window is used up until 2026-10-06 11:00 UTC' },
+      ]);
+      expect(trierarch.harness.launches.map((launch) => launch.shipId)).toEqual([claudeShip]);
+      expect(trierarch.state.current().notOffered).toEqual([{ harness: 'codex', reason: 'its 5-hour subscription window is used up until 2026-10-06 11:00 UTC' }]);
+    });
+
+    it('is offered again once the window resets', async () => {
+      const trierarch = aTrierarch(WITH_CODEX);
+      trierarch.usage.subscriptions.set('codex', [windowOf(FIVE_HOURS, 100, RESET)]);
+      await trierarch.pass();
+      trierarch.clock.advance(3 * 60 * MINUTE_MS);
+      await trierarch.pass();
+
+      expect(trierarch.state.current().notOffered).toBeUndefined();
+    });
+
+    it('is offered while no window is used up', async () => {
+      const trierarch = aTrierarch(WITH_CODEX);
+      trierarch.usage.subscriptions.set('codex', [windowOf(FIVE_HOURS, 99, RESET), windowOf(WEEK, 40, '2026-10-12T08:00:00.000Z')]);
+
+      await trierarch.pass();
+
+      expect(trierarch.state.current().notOffered).toBeUndefined();
+    });
+
+    it('names the window that resets last when several are used up', async () => {
+      const trierarch = aTrierarch(WITH_CODEX);
+      trierarch.usage.subscriptions.set('codex', [windowOf(FIVE_HOURS, 100, RESET), windowOf(WEEK, 100, '2026-10-12T08:00:00.000Z')]);
+
+      await trierarch.pass();
+
+      expect(trierarch.state.current().notOffered).toEqual([{ harness: 'codex', reason: 'its 7-day subscription window is used up until 2026-10-12 08:00 UTC' }]);
+    });
+  });
+
   it('keeps the harnesses its adapters do not offer in the state, with why, and drops them once offered (CC3)', async () => {
     const trierarch = aTrierarch(WITH_CODEX);
     trierarch.codex.notOffered = 'not proven in a container';
