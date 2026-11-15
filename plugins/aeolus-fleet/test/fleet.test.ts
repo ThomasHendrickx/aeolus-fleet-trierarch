@@ -241,6 +241,16 @@ describe('aeolus-fleet calls', () => {
     ]);
   });
 
+  it('reads a delivery it acknowledged again by its id, so a pushed session can read a body its hooks did not put into its turn (#342)', async () => {
+    fleet = await crewedAt([{ status: 200, body: { deliveryId: DELIVERY_ID, payload: 'Stop: take issue 343 instead' } }]);
+
+    const result = await run('aeolus-fleet.sh', { args: ['delivery', DELIVERY_ID] });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Stop: take issue 343 instead');
+    expect(fleet.calls.map((call) => [call.path, call.body])).toEqual([['/api/v1/ship/delivery', `{"deliveryId":"${DELIVERY_ID}"}`]]);
+  });
+
   it("sends the input it reads from stdin with -, so a payload's quotes and newlines need no shell quoting", async () => {
     fleet = await crewedAt([{ status: 200, body: { messageId: 'msg_01m3tbfspe96yf1rnr4ank9h1d' } }]);
     const input = JSON.stringify({ selector: { kind: 'ship', name: 'orchestrator-1' }, payload: "It's \"done\"\nPR 12", idempotencyKey: 'send-1', model: 'claude-opus-5-5' });

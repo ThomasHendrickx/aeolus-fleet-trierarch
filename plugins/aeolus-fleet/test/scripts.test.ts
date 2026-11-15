@@ -114,6 +114,18 @@ const inbox = (waiting: number, forced = 0) => ({ status: 200, body: { waiting, 
 // The hand-over (#756): what the watcher receives and hands to the session.
 const DELIVERY_ID = 'dlv_01m4raygfdtsjfbnmpvqjznsyw';
 const MESSAGE_ID = 'msg_01m4raygfdtsjfbnmpvqjznsyv';
+/**
+ * The line aeolus-push.sh prints for the trierarch to type: it names the delivery and how to read it,
+ * so a session whose hooks put no body into its turn can still read it (#342).
+ */
+const handOverLine = (deliveryId: string) =>
+  `Aeolus handed a message for scout to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it. ` +
+  `It is delivery ${deliveryId}: if its body is not in this turn by your next tool call, read it with "\${AEOLUS_ROOT:-${dirname(SCRIPTS)}}/scripts/aeolus-fleet.sh" delivery ${deliveryId}.\n`;
+/** The script the line's read command runs, as the session's own shell resolves it, with the session's environment. */
+const readCommandScript = (line: string, sessionEnv: Record<string, string>) => {
+  const command = /read it with (".*") delivery /.exec(line)?.[1] ?? '';
+  return spawnSync('bash', ['-c', `printf %s ${command}`], { env: { PATH: process.env.PATH, ...sessionEnv } }).stdout.toString();
+};
 const PING_DELIVERY_ID = 'dlv_01m4rb0m3d6r4xgnmnhm1k8b2q';
 const HANDED_OVER = 'aeolus: a message for scout is handed to this session: it reaches you at your next tool call, or when you end your turn. Do not receive or ack it.\n';
 const NO_WAITS = { AEOLUS_BUSY_WAITS: '0 0 0 0' };
@@ -1758,7 +1770,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
   });
 
   describe('under a trierarch: aeolus-push.sh hands one message over per call, and the trierarch types the line it prints (2a)', () => {
-    const HAND_OVER_LINE = "Aeolus handed a message for scout to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it.\n";
+    const HAND_OVER_LINE = handOverLine(DELIVERY_ID);
     const handedBodies = (stub: StubFleet) => callsTo(stub, '/api/v1/ship/handed').map((call) => call.body);
     const handedNumber = (number: number) => `{"deliveryId":"${DELIVERY_ID}","handOverNumber":${String(number)}}`;
     const aPrompt = () => aHook('aeolus-turn.sh', { payload: { hook_event_name: 'UserPromptSubmit', prompt: 'go on' } });
@@ -1783,6 +1795,20 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       expect(await hand()).toMatchObject({ status: 0, stdout: HAND_OVER_LINE });
       return fleet;
     }
+
+    it("names a read command that resolves to the host session's plugin, the one the trierarch runs (#342)", async () => {
+      await aTrierarchHandOver({});
+
+      expect(readCommandScript(HAND_OVER_LINE, {})).toBe(`${SCRIPTS}aeolus-fleet.sh`);
+    });
+
+    it("names a read command that resolves to a container session's own plugin, which the host's path is not in (#342)", async () => {
+      await aTrierarchHandOver({});
+      const containerRoot = '/home/ubuntu/.claude/plugins/cache/aeolus-fleet/aeolus-fleet/0.39.1';
+
+      // A Claude Code session's SessionStart hook exports AEOLUS_ROOT, its own plugin's root, for its commands.
+      expect(readCommandScript(HAND_OVER_LINE, { AEOLUS_ROOT: containerRoot })).toBe(`${containerRoot}/scripts/aeolus-fleet.sh`);
+    });
 
     it('reads the handed task for a permission question without taking or handing another message', async () => {
       const stub = await aTrierarchHandOver({ '/api/v1/ship/ack': [acknowledged] });
@@ -2075,7 +2101,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
     const FORCED_ID = 'dlv_01m4rbd2k7v3q8x5ycsn1f4c2t';
     const FORCED_MESSAGE_ID = 'msg_01m4rbd2k7v3q8x5ycsn1f4c2s';
     const aForcedDelivery = () => aDelivery({ deliveryId: FORCED_ID, messageId: FORCED_MESSAGE_ID, payload: 'Stop: the release is cancelled', isForced: true });
-    const HAND_OVER_LINE = "Aeolus handed a message for scout to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it.\n";
+    const HAND_OVER_LINE = handOverLine(FORCED_ID);
     const handedBodies = (stub: StubFleet) => callsTo(stub, '/api/v1/ship/handed').map((call) => call.body);
     const handledBodies = (stub: StubFleet) => callsTo(stub, '/api/v1/ship/handled').map((call) => call.body);
     const force = (env: Record<string, string> = {}) => start('aeolus-push.sh', { args: ['force'], env: { ...NO_WAITS, ...env } }).done;
@@ -2191,7 +2217,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
         await force();
         aTurnEnded();
 
-        expect(await hand()).toMatchObject({ status: 0, stdout: HAND_OVER_LINE });
+        expect(await hand()).toMatchObject({ status: 0, stdout: handOverLine(DELIVERY_ID) });
         expect(handedBodies(fleet)).toEqual([`{"deliveryId":"${DELIVERY_ID}","handOverNumber":1}`]);
       });
 

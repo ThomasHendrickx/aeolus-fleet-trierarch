@@ -58,13 +58,20 @@ ship_name="$(aeolus_identity_field "$identity_text" shipName)"
 is_stop_kept=0
 
 # The message is the session's to confirm: the turn is busy from now, and the
-# line goes into the session. <what the log says>
+# line goes into the session. It names the delivery and how to read it, for a
+# turn the hooks put no body into, as a line that lands mid-turn (#342). The
+# read command names the session's own plugin through AEOLUS_ROOT, which its
+# SessionStart hook exports for its commands: a container session's plugin is
+# not at this script's host path. Without it, the session runs this plugin.
+# <deliveryId> <what the log says>
 handed_over() {
+  local root
   is_stop_kept=1
   aeolus_mark_turn busy
   aeolus_report_turn "$(aeolus_identity_read "$identity")"
-  aeolus_log "$identity" wake "$1"
-  echo "Aeolus handed a message for ${ship_name} to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it."
+  aeolus_log "$identity" wake "$2"
+  root="$(cd "$(dirname "$0")/.." && pwd)"
+  echo "Aeolus handed a message for ${ship_name} to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it. It is delivery $1: if its body is not in this turn by your next tool call, read it with \"\${AEOLUS_ROOT:-${root}}/scripts/aeolus-fleet.sh\" delivery $1."
   exit 0
 }
 
@@ -81,7 +88,7 @@ hand_entry() {
         sender_id="$(aeolus_json_string "$delivery" senderShipId)"
         aeolus_log "$identity" permission "answer from ${sender} (${sender_id}): ordinary hand-over"
       fi
-      handed_over "$2"
+      handed_over "$1" "$2"
       ;;
     1)
       [ -d "$(aeolus_store_dir)" ] || exit 3
@@ -95,7 +102,7 @@ hand() {
   local id
   aeolus_send_owed "$identity"
   if id="$(aeolus_store_first onceMore)"; then
-    handed_over "woken: ${id} to hand once more"
+    handed_over "$id" "woken: ${id} to hand once more"
   fi
   if id="$(aeolus_store_first received handed)"; then
     hand_entry "$id" "woken: handed ${id} over again: it was not confirmed"
