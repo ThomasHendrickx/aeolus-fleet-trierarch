@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -37,13 +37,23 @@ afterEach(async ({ task }) => {
   if (task.result?.state === 'fail') {
     console.log(`The service's log:\n${machine.serviceLog()}`);
   }
-  await machine.remove();
-  await fleet.close();
+  try {
+    await machine.remove();
+    await fleet.close();
+  } finally {
+    for (const folder of repositoryFolders.splice(0)) {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  }
 });
+
+/** The folders of the ssh repositories a test made, removed after it, also when it fails. */
+const repositoryFolders: string[] = [];
 
 /** A repository the machine reaches over ssh: git's ssh stand-in runs the remote command here, so the URL's path is a folder of this computer. */
 function anSshRepository(): string {
   const folder = mkdtempSync(join(tmpdir(), 'trierarch-trusted-'));
+  repositoryFolders.push(folder);
   execFileSync('git', ['clone', '-q', '--bare', machine.repository, folder]);
   return `ssh://git@origin.example.test${folder}`;
 }

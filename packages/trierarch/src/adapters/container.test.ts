@@ -106,17 +106,20 @@ describe('the session runtime contract, on rootless Podman under holds', { timeo
   });
 
   afterEach(async () => {
-    for (const session of await runtime.list()) {
-      await runtime.stop(session.shipId);
-    }
-    const containers = await runCommand('podman', { args: ['ps', '--all', '--quiet', '--filter', `label=aeolus.trierarch=${owner}`] });
-    const ids = containers.stdout.split('\n').filter((id) => id !== '');
-    if (ids.length > 0) {
-      await runCommand('podman', { args: ['rm', '--force', '--time', '0', ...ids] });
-    }
-    await Promise.all(listening.splice(0).map((server) => new Promise((resolve) => server.close(resolve))));
-    for (const each of [folder, homes, sockets, sessions]) {
-      rmSync(each, { recursive: true, force: true });
+    try {
+      for (const session of await runtime.list()) {
+        await runtime.stop(session.shipId);
+      }
+      const containers = await runCommand('podman', { args: ['ps', '--all', '--quiet', '--filter', `label=aeolus.trierarch=${owner}`] });
+      const ids = containers.stdout.split('\n').filter((id) => id !== '');
+      if (ids.length > 0) {
+        await runCommand('podman', { args: ['rm', '--force', '--time', '0', ...ids] });
+      }
+      await Promise.all(listening.splice(0).map((server) => new Promise((resolve) => server.close(resolve))));
+    } finally {
+      for (const each of [folder, homes, sockets, sessions]) {
+        rmSync(each, { recursive: true, force: true });
+      }
     }
   });
 
