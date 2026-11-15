@@ -585,6 +585,23 @@ describe('aeolus-wait', () => {
 });
 
 describe('the watcher wake stream', () => {
+  it('finds a lost wake with its safety look while keep-alives keep the stream open', async () => {
+    fleet = await startRoutedStubFleet({
+      '/api/v1/ship/inbox': [inbox(0), inbox(1)],
+      '/api/v1/ship/pushReceive': [receiving(aDelivery())],
+      '/api/v1/ship/handed': [handedOk],
+    }, { wakeups: [{ status: 200, body: 'event: wake\ndata: {"reason":"open"}\n\n', keepAliveMilliseconds: 50 }] });
+    const stub = fleet;
+    crew(stub.url);
+    aTurnEnded();
+    const watcher = start('aeolus-wait.sh', { env: { AEOLUS_SAFETY_SECONDS: '1', AEOLUS_STREAM_SILENCE_SECONDS: '2' } });
+    try {
+      await expect.poll(() => inboxCalls(stub).length, { timeout: 4000 }).toBe(2);
+      expect((await watcher.done).status).toBe(0);
+      expect(stub.streams).toHaveLength(1);
+    } finally { watcher.child.kill(); }
+  });
+
   it('reopens a silent stream and looks at the new open wake', async () => {
     fleet = await startRoutedStubFleet({ '/api/v1/ship/inbox': [inbox(0)] }, { wakeups: [
       { status: 200, body: 'event: wake\ndata: {"reason":"open"}\n\n' },
