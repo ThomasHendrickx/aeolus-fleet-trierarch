@@ -1925,7 +1925,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
 
       await trierarch.pass();
 
-      expect(trierarch.state.current().notOffered).toEqual([{ harness: 'codex', reason: 'its 7-day subscription window is used up until 2026-10-12 08:00 UTC' }]);
+      expect(trierarch.state.current().notOffered).toEqual([{ harness: 'codex', reason: 'its weekly subscription window is used up until 2026-10-12 08:00 UTC' }]);
     });
   });
 

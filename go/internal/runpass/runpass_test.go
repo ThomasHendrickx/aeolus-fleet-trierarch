@@ -1771,16 +1771,28 @@ func TestARequestForAHarnessTheMachineDoesNotOfferIsGivenBackWithWhy(t *testing.
 	}
 }
 
-// aUsedUpWindow is a harness's subscription windows as the usage reader says them, one 5-hour window of claude-code at the percent given, resetting at the time given.
-func aUsedUpWindow(percent float64, resetsAt time.Time) func() (usage.Usage, error) {
-	return func() (usage.Usage, error) {
-		return usage.Usage{Subscriptions: []usage.Subscription{{Harness: "claude-code", ReadAt: now.Format(time.RFC3339), Windows: []usage.WindowReport{{WindowMinutes: 300, UsedPercent: percent, ResetsAt: resetsAt.Format(time.RFC3339)}}}}}, nil
+// aClaudeCodeSubscription is the harness boundary under the project's own usage reader: it says the windows it is given, as Claude Code's rate limit event does, and nothing else.
+type aClaudeCodeSubscription struct{ windows []usage.Window }
+
+func (aClaudeCodeSubscription) TokensOf(usage.Ship) ([]usage.HourTokens, error) { return nil, nil }
+
+func (h aClaudeCodeSubscription) Subscription() ([]usage.Window, error) { return h.windows, nil }
+
+// readingWindows has the pass read its usage with the usage reader the trierarch runs, over a harness that says the windows given.
+func readingWindows(pass *aPass, windows ...usage.Window) {
+	reader := &usage.Reader{
+		Harnesses:  map[string]usage.Harness{"claude-code": aClaudeCodeSubscription{windows: windows}},
+		Configured: []string{"claude-code"},
+		Store:      pass.store,
+		Now:        func() time.Time { return pass.pass.Now() },
+		Log:        func(string) {},
 	}
+	pass.pass.ReadUsage = reader.Read
 }
 
 func TestARequestForAHarnessWhoseSubscriptionWindowIsUsedUpIsGivenBackAtOnceWithTheWindowAndWhenItResets(t *testing.T) {
 	pass := aRunPass(t)
-	pass.pass.ReadUsage = aUsedUpWindow(100, now.Add(3*time.Hour))
+	readingWindows(pass, usage.Window{WindowMinutes: 300, UsedPercent: 100, ResetsAt: now.Add(3 * time.Hour)})
 	pass.fleet.requests = []reconciler.Request{aRequest("")}
 
 	pass.run(t)
@@ -1792,7 +1804,7 @@ func TestARequestForAHarnessWhoseSubscriptionWindowIsUsedUpIsGivenBackAtOnceWith
 
 func TestAHarnessWhoseSubscriptionWindowIsUsedUpIsOfferedAgainOnceItResets(t *testing.T) {
 	pass := aRunPass(t)
-	pass.pass.ReadUsage = aUsedUpWindow(100, now.Add(3*time.Hour))
+	readingWindows(pass, usage.Window{WindowMinutes: 300, UsedPercent: 100, ResetsAt: now.Add(3 * time.Hour)})
 	pass.run(t)
 	pass.pass.Now = func() time.Time { return now.Add(3 * time.Hour) }
 
@@ -1805,7 +1817,7 @@ func TestAHarnessWhoseSubscriptionWindowIsUsedUpIsOfferedAgainOnceItResets(t *te
 
 func TestAHarnessWhoseSubscriptionWindowIsNotUsedUpIsOffered(t *testing.T) {
 	pass := aRunPass(t)
-	pass.pass.ReadUsage = aUsedUpWindow(99, now.Add(3*time.Hour))
+	readingWindows(pass, usage.Window{WindowMinutes: 300, UsedPercent: 99, ResetsAt: now.Add(3 * time.Hour)})
 
 	pass.run(t)
 
@@ -1816,16 +1828,14 @@ func TestAHarnessWhoseSubscriptionWindowIsNotUsedUpIsOffered(t *testing.T) {
 
 func TestTheWindowThatResetsLastNamesWhyAHarnessIsNotOfferedWhenSeveralAreUsedUp(t *testing.T) {
 	pass := aRunPass(t)
-	pass.pass.ReadUsage = func() (usage.Usage, error) {
-		return usage.Usage{Subscriptions: []usage.Subscription{{Harness: "claude-code", Windows: []usage.WindowReport{
-			{WindowMinutes: 300, UsedPercent: 100, ResetsAt: now.Add(3 * time.Hour).Format(time.RFC3339)},
-			{WindowMinutes: 10080, UsedPercent: 100, ResetsAt: now.Add(48 * time.Hour).Format(time.RFC3339)},
-		}}}}, nil
-	}
+	readingWindows(pass,
+		usage.Window{WindowMinutes: 300, UsedPercent: 100, ResetsAt: now.Add(3 * time.Hour)},
+		usage.Window{WindowMinutes: 10080, UsedPercent: 100, ResetsAt: now.Add(48 * time.Hour)},
+	)
 
 	pass.run(t)
 
-	want := []reconciler.NotOfferedHarness{{Harness: "claude-code", Reason: "its 7-day subscription window is used up until 2026-11-06 12:00 UTC"}}
+	want := []reconciler.NotOfferedHarness{{Harness: "claude-code", Reason: "its weekly subscription window is used up until 2026-11-06 12:00 UTC"}}
 	if !slices.Equal(pass.store.state.NotOffered, want) {
 		t.Fatalf("not offered %+v, want %+v", pass.store.state.NotOffered, want)
 	}
