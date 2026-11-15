@@ -207,6 +207,22 @@ describe('the fleet over REST', () => {
   });
 });
 
+describe('the trierarch sends without a model', () => {
+  it('omits the model from usage, trusted repositories, argo and owner sends', async () => {
+    await aFleetAnswering([{ status: 200, body: { messageId: newId('message') } }], async (fleetUrl, asked) => {
+      const fleet = createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_x' });
+      const shipId = newId('ship');
+      await fleet.sendUsage({ pluginShipId: shipId, payload: '{}', idempotencyKey: 'usage' });
+      await fleet.askForTrustedRepositories(shipId);
+      await fleet.reportToArgo({ text: 'report', idempotencyKey: 'argo' });
+      await fleet.reportToOwner({ ownerShipId: shipId, text: 'report', idempotencyKey: 'owner' });
+
+      expect(asked).toHaveLength(4);
+      for (const request of asked) expect(JSON.parse(request.body)).not.toHaveProperty('model');
+    });
+  });
+});
+
 describe("the fleet over REST: trouble to a ship's owner (decision 0045)", () => {
   const assignedAnswer = (request: Record<string, unknown>) => (response: ServerResponse) =>
     response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify([{ settings: { harness: 'codex' }, settingsVersion: 1, requestedAt: '2026-10-10T09:00:00.000Z', status: null, isFinal: false, ...request }]));
