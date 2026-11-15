@@ -584,7 +584,11 @@ describe('the trierarch hands messages over on a real fleet (#756): the plugin k
     await pass();
     await sessions.turnEnds(scout.shipId);
 
-    expect(sessions.turns.at(-1)?.typed).toBe(`Aeolus handed a message for scout to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it. ${NO_TERMINAL_QUESTIONS}`);
+    const { id: deliveryId } = await database.delivery.findFirstOrThrow({ where: { messageId }, select: { id: true } });
+    expect(sessions.turns.at(-1)?.typed).toBe(
+      `Aeolus handed a message for scout to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it. ` +
+        `It is delivery ${deliveryId}: if its body is not in this turn by your next tool call, read it with "\${AEOLUS_ROOT:-${PLUGIN_ROOT}}/scripts/aeolus-fleet.sh" delivery ${deliveryId}. ${NO_TERMINAL_QUESTIONS}`,
+    );
     expect(sessions.turns.at(-1)?.context).toContain(MESSAGE);
     await expect(eventsOf(messageId)).resolves.toEqual(['DeliveryReceived', 'DeliveryHanded 1', 'DeliveryAcknowledged', 'DeliveryHandled']);
     await expect(deliveryOf(messageId)).resolves.toEqual({ state: 'handled', attempts: 1 });
