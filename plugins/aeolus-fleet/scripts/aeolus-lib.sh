@@ -407,6 +407,18 @@ aeolus_log_rotate() {
   return 0
 }
 
+# The sentence a hand-over line ends with: it names the delivery and how to read
+# it, for a turn the hooks put no body into (#342, #428). The read command names
+# the session's own plugin through AEOLUS_ROOT, which a Claude Code session's
+# SessionStart hook exports for its commands: a container session's plugin is
+# not at this script's host path. Without it, the session runs this plugin.
+# <deliveryId>
+aeolus_read_hint() {
+  local root
+  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  echo "It is delivery $1: if its body is not in this turn by your next tool call, read it with \"\${AEOLUS_ROOT:-${root}}/scripts/aeolus-fleet.sh\" delivery $1."
+}
+
 # Appends one record for the ship of an identity file: the action, its outcome,
 # and for a failure what happens next. Logs nothing without the identity file,
 # and never fails its caller. Never the crew token.

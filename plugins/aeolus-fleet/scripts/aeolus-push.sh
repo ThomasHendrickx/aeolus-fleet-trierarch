@@ -65,13 +65,11 @@ is_stop_kept=0
 # not at this script's host path. Without it, the session runs this plugin.
 # <deliveryId> <what the log says>
 handed_over() {
-  local root
   is_stop_kept=1
   aeolus_mark_turn busy
   aeolus_report_turn "$(aeolus_identity_read "$identity")"
   aeolus_log "$identity" wake "$2"
-  root="$(cd "$(dirname "$0")/.." && pwd)"
-  echo "Aeolus handed a message for ${ship_name} to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it. It is delivery $1: if its body is not in this turn by your next tool call, read it with \"\${AEOLUS_ROOT:-${root}}/scripts/aeolus-fleet.sh\" delivery $1."
+  echo "Aeolus handed a message for ${ship_name} to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it. $(aeolus_read_hint "$1")"
   exit 0
 }
 

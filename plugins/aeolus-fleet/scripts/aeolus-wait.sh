@@ -89,7 +89,7 @@ hand_over() {
   aeolus_mark_turn busy
   aeolus_report_turn "$(aeolus_identity_read "$identity")"
   aeolus_log "$identity" wake "$2"
-  echo "aeolus: a message for ${ship_name} is handed to this session: it reaches you at your next tool call, or when you end your turn. Do not receive or ack it."
+  echo "aeolus: a message for ${ship_name} is handed to this session: it reaches you at your next tool call, or when you end your turn. Do not receive or ack it. $(aeolus_read_hint "$1")"
   exit 0
 }
 

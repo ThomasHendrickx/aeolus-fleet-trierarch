@@ -739,7 +739,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       await aFirstToolCall();
       await aTurnEnds();
 
-      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: handedOverLine(anotherDelivery().deliveryId) });
       expect(store()).toEqual([`${anotherDelivery().deliveryId} handed`]);
     });
 
@@ -822,7 +822,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       crew(fleet.url);
       aTurnEnded();
 
-      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: handedOverLine(anotherDelivery().deliveryId) });
       expect(store()).toEqual([`${anotherDelivery().deliveryId} handed`]);
     });
 
@@ -835,7 +835,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       crew(fleet.url);
       aTurnEnded();
 
-      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: handedOverLine(anotherDelivery().deliveryId) });
       expect(store()).toEqual([`${anotherDelivery().deliveryId} handed`]);
     });
 
@@ -848,7 +848,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       crew(fleet.url);
       aTurnEnded();
 
-      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: handedOverLine(anotherDelivery().deliveryId) });
       expect(store()).toEqual([`${anotherDelivery().deliveryId} handed`]);
     });
 
@@ -2131,7 +2131,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
         crew(fleet.url);
         aPromptSubmitted();
 
-        await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+        await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: handedOverLine(FORCED_ID) });
         expect(store()).toEqual([`${FORCED_ID} handed`]);
       });
 
@@ -2150,7 +2150,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
         await aFirstToolCall();
         await aTurnEnds();
 
-        await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+        await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: handedOverLine(FORCED_ID) });
         expect(handedBodies(stub).at(-1)).toBe(`{"deliveryId":"${FORCED_ID}","handOverNumber":1}`);
         expect(store()).toEqual([`${DELIVERY_ID} received`, `${FORCED_ID} handed`]);
       });

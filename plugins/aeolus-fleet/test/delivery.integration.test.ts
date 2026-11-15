@@ -23,9 +23,12 @@ const SCRIPTS = fileURLToPath(new URL('../scripts/', import.meta.url));
 const ACK = '/api/v1/ship/ack';
 const PAYLOAD = 'Review PR 12 and say what you found';
 /** The watcher's line names the delivery it handed and how to read it, whichever delivery that is (#428). */
-const HANDED_OVER = expect.stringMatching(
-  /^aeolus: a message for scout is handed to this session: it reaches you at your next tool call, or when you end your turn\. Do not receive or ack it\. It is delivery (dlv_\w+): if its body is not in this turn by your next tool call, read it with "\$\{AEOLUS_ROOT:-[^"}]+\}\/scripts\/aeolus-fleet\.sh" delivery \1\.\n$/,
-) as string;
+const HANDED_OVER =
+  /^aeolus: a message for scout is handed to this session: it reaches you at your next tool call, or when you end your turn\. Do not receive or ack it\. It is delivery (dlv_\w+): if its body is not in this turn by your next tool call, read it with "\$\{AEOLUS_ROOT:-[^"}]+\}\/scripts\/aeolus-fleet\.sh" delivery \1\.\n$/;
+const expectHandedOver = (watcher: { status: number | null; stdout: string }) => {
+  expect(watcher.status).toBe(0);
+  expect(watcher.stdout).toMatch(HANDED_OVER);
+};
 
 /** A call and every retry the plugin makes of it while the fleet is busy (AEOLUS_BUSY_WAITS, four by default). */
 const BUSY_ANSWERS = 5;
@@ -203,7 +206,7 @@ async function aMessageHandedOver(): Promise<void> {
   expect(registered.status, registered.stdout).toBe(0);
   await aTurnEnds();
   unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', shipId }, payload: PAYLOAD, idempotencyKey: newKey() }));
-  await expect(theWatcher()).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+  expectHandedOver(await theWatcher());
 }
 
 const theDelivery = () => database.delivery.findFirstOrThrow({ where: { recipientShipId: shipId } });
@@ -216,7 +219,7 @@ describe('the plugin on a real fleet: a message the fleet holds acknowledged rea
     expect((await theDelivery()).state).toBe('acknowledged');
     await aTurnEnds();
 
-    await expect(theWatcher()).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+    expectHandedOver(await theWatcher());
     expect((await aFirstToolCall().done).stdout).toContain(PAYLOAD);
   });
 
@@ -265,7 +268,7 @@ async function theFleetMoves(data: { state?: 'handed' | 'acknowledged' | 'undeli
 async function expectTheNextMessageReachesTheModel(): Promise<void> {
   unwrap(await useCases.sendMessage(argo, { selector: { kind: 'ship', shipId }, payload: SECOND_PAYLOAD, idempotencyKey: newKey() }));
   await aTurnEnds();
-  await expect(theWatcher()).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+  expectHandedOver(await theWatcher());
   expect((await aFirstToolCall().done).stdout).toContain(SECOND_PAYLOAD);
 }
 
