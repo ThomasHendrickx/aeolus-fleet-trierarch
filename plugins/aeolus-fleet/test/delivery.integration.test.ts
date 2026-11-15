@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
 import type { ShipId } from '@aeolus-fleet/common';
@@ -83,7 +84,21 @@ async function startLossyDoor(fleetUrl: string): Promise<LossyDoor> {
       const headers: Record<string, string> = {};
       if (request.headers.authorization !== undefined) headers.authorization = request.headers.authorization;
       if (body !== '') headers['content-type'] = 'application/json';
-      const answer = await fetch(`${fleetUrl}${path}`, { method, headers, ...(body === '' ? {} : { body }) });
+      const closing = new AbortController();
+      response.on('close', () => {
+        closing.abort();
+      });
+      const answer = await fetch(`${fleetUrl}${path}`, { method, headers, signal: closing.signal, ...(body === '' ? {} : { body }) }).catch(() => undefined);
+      if (answer === undefined) {
+        request.socket.destroy();
+        return;
+      }
+      // The wake stream never ends: it goes through as it comes, each wake when the fleet sends it.
+      if (answer.headers.get('content-type')?.startsWith('text/event-stream') === true && answer.body !== null) {
+        response.writeHead(answer.status, { 'content-type': 'text/event-stream' });
+        Readable.fromWeb(answer.body).on('error', () => response.destroy()).pipe(response);
+        return;
+      }
       const text = await answer.text();
       const held = holding.get(path);
       if (held !== undefined) {
