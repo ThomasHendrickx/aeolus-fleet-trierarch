@@ -141,8 +141,10 @@ func IsLeaseHeld(fleetURL string, crewToken string) (bool, error) {
 
 // Client is the fleet as the running trierarch calls it: with its own crew token, its crew:run calls for the ships assigned to it, and a session's report with that session's crew token.
 type Client struct {
-	URL       string
-	CrewToken string
+	wakeTiming *wakeTiming
+	wakeRetry  func() time.Duration
+	URL        string
+	CrewToken  string
 	// Model is what every message the trierarch sends states as the model it runs, as today's trierarch states its package and version.
 	Model string
 }

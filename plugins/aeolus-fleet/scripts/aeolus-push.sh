@@ -45,11 +45,6 @@ set -uo pipefail
 # The store stays the session's plugins' (aeolus_store_version_guard).
 aeolus_is_store_claimed=0
 
-# How long the push receive may wait: it waits about 25 seconds when nothing
-# is there, and the trierarch's pass waits for it. A delivery taken after the
-# call gave up comes first again at the next push receive.
-PUSH_RECEIVE_SECONDS="${AEOLUS_PUSH_RECEIVE_SECONDS:-5}"
-
 identity="$(aeolus_identity_file)" || exit 2
 identity_text="$(aeolus_identity_read "$identity")" || { echo "aeolus: this folder crews no ship" >&2; exit 2; }
 ship_name="$(aeolus_identity_field "$identity_text" shipName)"
@@ -118,7 +113,7 @@ push_receive() {
   if aeolus_key_wait_active; then
     exit 1
   fi
-  output="$(AEOLUS_CALL_MAX_SECONDS="$PUSH_RECEIVE_SECONDS" "$(dirname "$0")/aeolus-fleet.sh" pushReceive "$input" 2>/dev/null)"
+  output="$("$(dirname "$0")/aeolus-fleet.sh" pushReceive "$input" 2>/dev/null)"
   case $? in
     0) ;;
     3)

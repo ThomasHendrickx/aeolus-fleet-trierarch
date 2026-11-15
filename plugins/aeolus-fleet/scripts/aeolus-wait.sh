@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The watcher: started by the session as a background task before it ends its
-# turn. It asks the fleet's inbox check, which claims nothing and waits up to
-# 25 seconds per call, and exits only when there is something to say, which
-# wakes the session. No tokens are spent while it waits.
+# turn. It holds the ship's wake stream and looks at the inbox on each wake,
+# at open and every five minutes. It exits when it has a hand-over to report,
+# which wakes the session. No model tokens are spent while it waits.
 #
 # The wake hands one message over (#756), given only when the turn marker says
 # the session is idle, whenever deliveries wait, or at once while a forced one
@@ -24,8 +24,8 @@
 set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
-# How long one inbox check waits while nothing waits; the fleet's maximum.
-WAIT_SECONDS="${AEOLUS_WAIT_SECONDS:-25}"
+# The plain call limit, also against core releases that still hold empty receives.
+CALL_SECONDS="${AEOLUS_CALL_MAX_SECONDS:-60}"
 # The pause between inbox checks while deliveries wait, since the check then
 # answers at once: the trierarch's pass interval.
 POLL_SECONDS="${AEOLUS_POLL_SECONDS:-5}"
@@ -34,13 +34,15 @@ POLL_SECONDS="${AEOLUS_POLL_SECONDS:-5}"
 # cache. The watcher keeps watching: the delivery waits pending.
 KEY_WAIT_SECONDS="${AEOLUS_KEY_WAIT_SECONDS:-5}"
 KEY_WAIT_MAX_SECONDS="${AEOLUS_KEY_WAIT_MAX_SECONDS:-300}"
-# The first pause after a failed call; it doubles up to the most.
-RETRY_SECONDS="${AEOLUS_RETRY_SECONDS:-2}"
+# A random first pause after a drop or failed call; it doubles while core is down.
+RETRY_SECONDS="${AEOLUS_RETRY_SECONDS:-$((1 + RANDOM % 5))}"
 RETRY_MAX_SECONDS="${AEOLUS_RETRY_MAX_SECONDS:-60}"
 # A background task runs at most 2 hours (in a cloud session it is then
 # stopped): the watcher ends itself at 1 hour 55 minutes, saying so, and the
 # session starts it again.
 MAX_SECONDS="${AEOLUS_MAX_SECONDS:-6900}"
+STREAM_SILENCE_SECONDS="${AEOLUS_STREAM_SILENCE_SECONDS:-60}"
+SAFETY_SECONDS="${AEOLUS_SAFETY_SECONDS:-300}"
 
 identity="$(aeolus_identity_file)" || exit 2
 if ! identity_text="$(aeolus_identity_read "$identity")"; then
@@ -57,7 +59,14 @@ pid_file="$(aeolus_pid_file)"
 refused_file="$(aeolus_refused_file)"
 waiting_file="$(aeolus_waiting_file)"
 echo "$$" > "$pid_file"
-trap 'rm -f "$pid_file"' EXIT
+stream_pid=''
+stream_dir="$(mktemp -d)"
+cleanup() {
+  if [ -n "$stream_pid" ]; then kill "$stream_pid" 2>/dev/null || :; wait "$stream_pid" 2>/dev/null || :; fi
+  rm -rf "$stream_dir"
+  rm -f "$pid_file"
+}
+trap cleanup EXIT
 aeolus_log "$identity" watch started
 
 fleet_url="$(aeolus_identity_field "$identity_text" fleetUrl)"
@@ -70,7 +79,7 @@ crew_token="$(aeolus_identity_field "$identity_text" crewToken)"
 # the same number. <deliveryId> <what the log says>.
 hand_over() {
   local outcome
-  call /api/v1/ship/handed "$(aeolus_store_handing "$1")" $((WAIT_SECONDS + 15))
+  call /api/v1/ship/handed "$(aeolus_store_handing "$1")" "$CALL_SECONDS"
   if [ "$status" = 200 ]; then
     answered
     outcome="$(aeolus_json_string "$body" state)"
@@ -96,6 +105,17 @@ hand_over() {
 # One call to the fleet with the crew token: <path> <body> <seconds>. Sets
 # status and body.
 call() {
+  local wait draw
+  call_once "$@"
+  for wait in ${AEOLUS_BUSY_WAITS:-1 2 4 8}; do
+    [ "$status" = 503 ] && [ "$(aeolus_json_string "$body" code)" = SERVICE_UNAVAILABLE ] || return 0
+    draw="${AEOLUS_BUSY_DRAW:-$((RANDOM % 1001))e-3}"
+    sleep "$(awk -v wait="$wait" -v draw="$draw" 'BEGIN { printf "%.3f", wait / 2 + wait / 2 * draw }')"
+    call_once "$@"
+  done
+}
+
+call_once() {
   local answer
   answer="$(aeolus_bearer_config "$crew_token" | curl -K - -sS --max-time "$3" -w '\n%{http_code}' -X POST "${fleet_url}$1" \
     -H 'content-type: application/json' \
@@ -179,6 +199,7 @@ refused_token() {
 # The fleet answered: the crew token holds again.
 answered() {
   rm -f "$refused_file"
+  RETRY_SECONDS="${AEOLUS_RETRY_SECONDS:-$((1 + RANDOM % 5))}"
   delay="$RETRY_SECONDS"
   if [ "$is_failing" = 1 ]; then
     aeolus_log "$identity" watch 'the fleet answers again'
@@ -186,6 +207,84 @@ answered() {
   fi
 }
 
+# The stream carries hints only. The calls below still take every delivery.
+open_stream() {
+  rm -f "$stream_dir/lines"
+  mkfifo "$stream_dir/lines"
+  : > "$stream_dir/headers"
+  stream_is_open=0
+  stream_fragment=''
+  exec 9<> "$stream_dir/lines"
+  aeolus_bearer_config "$crew_token" > "$stream_dir/bearer"
+  curl -K "$stream_dir/bearer" -N -sS --connect-timeout 15 -D "$stream_dir/headers" \
+    "${fleet_url}/api/v1/ship/wakeups" > "$stream_dir/lines" 2>/dev/null &
+  stream_pid=$!
+  stream_last_read=$SECONDS
+  stream_next_look=$((SECONDS + SAFETY_SECONDS))
+}
+
+wait_for_wake() {
+  local line event='' stream_body='' pending=0 owed=0 has_line=0
+  [ -n "$stream_pid" ] || open_stream
+  while :; do
+    [ "$SECONDS" -lt "$MAX_SECONDS" ] || return 1
+    pending=0; owed=0
+    { read -r pending owed < "$waiting_file"; } 2>/dev/null
+    if [ "$owed" = 1 ] && aeolus_is_idle; then return 0; fi
+    line=''; has_line=0
+    if IFS= read -r -t 1 line <&9; then
+      has_line=1
+      line="${stream_fragment}${line}"
+      stream_fragment=''
+      stream_last_read=$SECONDS
+      line="${line%$'\r'}"
+      case "$line" in
+        'event:'*) event="${line#event: }" ;;
+        '')
+          case "$event" in
+            wake) stream_next_look=$((SECONDS + SAFETY_SECONDS)); return 0 ;;
+            end) status=401; body='{"code":"LEASE_ENDED"}'; on_refusal; return 1 ;;
+          esac
+          event=''
+          ;;
+      esac
+    else
+      if [ -n "$line" ]; then stream_last_read=$SECONDS; fi
+      stream_fragment="${stream_fragment}${line}"
+      line=''
+    fi
+    if [ "$SECONDS" -ge "$stream_next_look" ]; then
+      stream_next_look=$((SECONDS + SAFETY_SECONDS))
+      return 0
+    fi
+    if [ "$stream_is_open" = 0 ]; then
+      status="$(sed -n 's/^HTTP[^ ]* \([0-9][0-9][0-9]\).*/\1/p' "$stream_dir/headers" | tail -n 1)"
+      if [ "$status" = 200 ]; then stream_is_open=1; answered; fi
+    fi
+    stream_body="${stream_body}${line}"
+    [ "$has_line" = 0 ] || continue
+    if [ $((SECONDS - stream_last_read)) -ge "$STREAM_SILENCE_SECONDS" ]; then
+      kill "$stream_pid" 2>/dev/null || :
+      wait "$stream_pid" 2>/dev/null || :
+      stream_pid=''
+      exec 9>&-
+      status=000; body=''
+      on_refusal
+      return 1
+    fi
+    if ! kill -0 "$stream_pid" 2>/dev/null; then
+      wait "$stream_pid" 2>/dev/null || :
+      stream_pid=''
+      exec 9>&-
+      status="$(sed -n 's/^HTTP[^ ]* \([0-9][0-9][0-9]\).*/\1/p' "$stream_dir/headers" | tail -n 1)"
+      body="${stream_body}${stream_fragment}"
+      on_refusal
+      return 1
+    fi
+  done
+}
+
+look_owed=0
 while :; do
   # What the fleet did not take yet goes first, also on a watcher's last pass.
   aeolus_send_owed "$identity"
@@ -198,15 +297,15 @@ while :; do
   if aeolus_is_idle && id="$(aeolus_store_first received handed)"; then
     # A forced delivery comes first (decision 0040): the inbox check, without
     # a wait, says whether one waits; the receive below then hands it over.
-    call /api/v1/ship/inbox '{"waitSeconds":0}' 15
+    call /api/v1/ship/inbox '{}' 15
     if [ "$status" != 200 ] || [ "$(aeolus_inbox_forced "$body")" -eq 0 ]; then
       hand_over "$id" "handed ${id} over again: it was not confirmed"
       continue
     fi
   fi
-  wait_now="$WAIT_SECONDS"
-  [ "$wait_now" -le "$left" ] || wait_now="$left"
-  call /api/v1/ship/inbox "{\"waitSeconds\":${wait_now}}" $((wait_now + 15))
+  if [ "$look_owed" = 0 ]; then wait_for_wake || continue; fi
+  look_owed=1
+  call /api/v1/ship/inbox '{}' "$CALL_SECONDS"
   if [ "$status" != 200 ]; then
     on_refusal
     continue
@@ -229,7 +328,7 @@ while :; do
   if [ "$is_owed" = 1 ] && { aeolus_is_idle || { [ "$forced" -gt 0 ] && [ "$(aeolus_harness)" != codex ]; }; }; then
     printf '%s 0\n' "$waiting" > "$waiting_file"
     # Deliveries wait, so the push receive answers at once.
-    call /api/v1/ship/pushReceive '{"max":1}' $((WAIT_SECONDS + 15))
+    call /api/v1/ship/pushReceive '{"max":1}' "$CALL_SECONDS"
     if [ "$status" = 503 ] && [ "$(aeolus_json_string "$body" code)" = KEY_UNAVAILABLE ]; then
       on_key_unavailable
       continue
@@ -244,6 +343,7 @@ while :; do
       aeolus_report_key back
       key_delay=0
     fi
+    look_owed=1
     aeolus_lease_key "$crew_token" > "$(aeolus_pushed_file)"
     if id="$(aeolus_store_put "$(printf '%s' "$body" | tr -d '\n')")"; then
       if aeolus_is_idle || aeolus_store_is_forced "$id"; then
@@ -266,6 +366,7 @@ while :; do
   if [ "$is_owed" = 1 ] && { [ "$was_owed" != 1 ] || [ "$waiting" != "${seen:-0}" ]; }; then
     aeolus_log "$identity" wake "held, ${waiting} deliveries wait while the session is busy"
   fi
+  look_owed=0
   printf '%s %s\n' "$waiting" "$is_owed" > "$waiting_file"
   [ "$waiting" -eq 0 ] || sleep "$POLL_SECONDS"
 done

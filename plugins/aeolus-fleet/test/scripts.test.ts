@@ -428,7 +428,7 @@ describe('aeolus-status: the version, the ship, its fleet and folder, what wakes
 });
 
 describe('aeolus-wait', () => {
-  it("asks the inbox check with the crew token, keeps asking while none wait, and exits 0 once some do", async () => {
+  it("looks on stream wakes with the crew token and hands a waiting delivery over", async () => {
     fleet = await aWakingFleet([inbox(0), inbox(0), inbox(2)]);
     crew(fleet.url);
     aTurnEnded();
@@ -438,11 +438,13 @@ describe('aeolus-wait', () => {
     expect(status).toBe(0);
     expect(stdout).toBe(HANDED_OVER);
     expect(inboxCalls(fleet)).toHaveLength(3);
+    expect(fleet.streams).toHaveLength(1);
+    expect(fleet.streams[0]).toMatchObject({ method: 'GET', authorization: `Bearer ${CREW_TOKEN}` });
     expect(fleet.calls[0]).toEqual({
       method: 'POST',
       path: '/api/v1/ship/inbox',
       authorization: `Bearer ${CREW_TOKEN}`,
-      body: '{"waitSeconds":25}',
+      body: '{}',
     });
   });
 
@@ -579,6 +581,184 @@ describe('aeolus-wait', () => {
 
   it('stops by 1 hour 55 minutes unless told otherwise', () => {
     expect(readFileSync(join(SCRIPTS, 'aeolus-wait.sh'), 'utf8')).toContain('MAX_SECONDS="${AEOLUS_MAX_SECONDS:-6900}"');
+  });
+});
+
+describe('the watcher wake stream', () => {
+  it.each(['empty', 'undeliverable', 'not in flight'])('looks again after a %s receive or hand-over without another wake', async (outcome) => {
+    fleet = await startRoutedStubFleet({
+      '/api/v1/ship/inbox': [inbox(1)],
+      '/api/v1/ship/pushReceive': [outcome === 'empty' ? { status: 200, body: { deliveries: [] } } : receiving(aDelivery()), receiving(anotherDelivery())],
+      '/api/v1/ship/handed': outcome === 'empty' ? [handedOk] : [outcome === 'undeliverable' ? handedAs('undeliverable') : notInFlight, handedOk],
+    }, { wakeups: [{ status: 200, body: 'event: wake\ndata: {}\n\n', keepAliveMilliseconds: 50 }] });
+    const stub = fleet;
+    crew(stub.url);
+    aTurnEnded();
+    const watcher = start('aeolus-wait.sh');
+    try {
+      await expect.poll(() => stub.calls.filter((call) => call.path === '/api/v1/ship/pushReceive').length, { timeout: 2000 }).toBe(2);
+      expect((await watcher.done).status).toBe(0);
+      expect(stub.streams).toHaveLength(1);
+    } finally { watcher.child.kill(); }
+  });
+
+  it('stops on LEASE_ENDED at stream open without retrying', async () => {
+    fleet = await startRoutedStubFleet({}, { wakeups: [{ status: 401, body: '{"code":"LEASE_ENDED","message":"released"}', isClosed: true }] });
+    crew(fleet.url);
+    expect((await start('aeolus-wait.sh').done).status).toBe(3);
+    expect(fleet.streams).toHaveLength(1);
+    expect(statSync(identityFile(), { throwIfNoEntry: false })).toBeUndefined();
+  });
+
+  it('reads a wake whose event line arrives across two read timeouts', async () => {
+    let sendTail = (): void => undefined;
+    const tailAfter = new Promise<void>((resolve) => { sendTail = resolve; });
+    fleet = await startRoutedStubFleet({
+      '/api/v1/ship/inbox': [inbox(1)],
+      '/api/v1/ship/pushReceive': [receiving(aDelivery())],
+      '/api/v1/ship/handed': [handedOk],
+    }, { wakeups: [{ status: 200, body: 'event: wa', tail: 'ke\ndata: {"reason":"open"}\n\n', tailAfter }] });
+    const stub = fleet;
+    crew(stub.url);
+    aTurnEnded();
+    const watcher = start('aeolus-wait.sh');
+    try {
+      await expect.poll(() => stub.streams.length).toBe(1);
+      await new Promise((resolve) => setTimeout(resolve, 2200));
+      sendTail();
+      await expect.poll(() => stub.calls.some((call) => call.path === '/api/v1/ship/handed'), { timeout: 4000 }).toBe(true);
+      expect((await watcher.done).status).toBe(0);
+    } finally { sendTail(); watcher.child.kill(); }
+  });
+
+  it('retries a busy look without needing a second wake', async () => {
+    fleet = await startRoutedStubFleet({
+      '/api/v1/ship/inbox': [busy, inbox(1)],
+      '/api/v1/ship/pushReceive': [receiving(aDelivery())],
+      '/api/v1/ship/handed': [handedOk],
+    }, { wakeups: [{ status: 200, body: 'event: wake\ndata: {"reason":"open"}\n\n', keepAliveMilliseconds: 50 }] });
+    const stub = fleet;
+    crew(stub.url);
+    aTurnEnded();
+    const watcher = start('aeolus-wait.sh');
+    try {
+      await expect.poll(() => inboxCalls(stub).length, { timeout: 4000 }).toBe(2);
+      expect((await watcher.done).status).toBe(0);
+      expect(stub.streams).toHaveLength(1);
+    } finally { watcher.child.kill(); }
+  });
+
+  it('doubles failed stream open backoff up to 60 seconds', async () => {
+    const bin = join(data, 'bin');
+    mkdirSync(bin);
+    const sleep = join(bin, 'sleep');
+    const waits = join(data, 'waits');
+    writeFileSync(sleep, '#!/usr/bin/env bash\nprintf "%s\\n" "$1" >> "$AEOLUS_TEST_WAITS"\n');
+    chmodSync(sleep, 0o700);
+    fleet = await startRoutedStubFleet({}, { wakeups: [
+      ...Array.from({ length: 8 }, () => ({ status: 500, body: '{"code":"INTERNAL_ERROR"}\n', isClosed: true })),
+      { status: 200, body: 'event: end\ndata: {"code":"LEASE_ENDED"}\n\n', isClosed: true },
+    ] });
+    crew(fleet.url);
+    const result = await start('aeolus-wait.sh', { env: {
+      PATH: `${bin}:${process.env.PATH ?? ''}`, AEOLUS_TEST_WAITS: waits, AEOLUS_RETRY_SECONDS: '1',
+    } }).done;
+    expect(result.status).toBe(3);
+    expect(readFileSync(waits, 'utf8').trim().split('\n')).toEqual(['1', '2', '4', '8', '16', '32', '60', '60']);
+    expect(fleet.streams).toHaveLength(9);
+  });
+
+  it('reopens a dropped stream with the initial spread again after core answers', async () => {
+    fleet = await startRoutedStubFleet({}, { wakeups: [
+      { status: 503, body: '{"code":"SERVICE_UNAVAILABLE"}\n', isClosed: true },
+      { status: 200, body: ': keep-alive\n\n', isClosed: true },
+      { status: 200, body: 'event: end\ndata: {"code":"LEASE_ENDED"}\n\n', isClosed: true },
+    ] });
+    crew(fleet.url);
+    expect((await start('aeolus-wait.sh', { env: { AEOLUS_RETRY_SECONDS: '2' } }).done).status).toBe(3);
+    const [first = 0, second = 0, third = 0] = fleet.streamOpenTimes;
+    expect(fleet.streams).toHaveLength(3);
+    expect(third - second).toBeLessThan(second - first + 1000);
+  });
+
+  it('keeps its lifetime bound while only keep-alives arrive', async () => {
+    fleet = await startRoutedStubFleet({ '/api/v1/ship/inbox': [inbox(0)] }, { wakeups: [{ status: 200, body: 'event: wake\ndata: {"reason":"open"}\n\n', keepAliveMilliseconds: 50 }] });
+    crew(fleet.url);
+    const watcher = start('aeolus-wait.sh', { env: { AEOLUS_MAX_SECONDS: '1' } });
+    let status: number | null = null;
+    void watcher.exited.then((result) => { status = result.status; });
+    try { await expect.poll(() => status, { timeout: 4000 }).toBe(6); }
+    finally { watcher.child.kill(); }
+  });
+
+  it('hands a known waiting delivery over when the busy turn ends without another wake', async () => {
+    fleet = await startRoutedStubFleet({
+      '/api/v1/ship/inbox': [inbox(1)],
+      '/api/v1/ship/pushReceive': [receiving(aDelivery())],
+      '/api/v1/ship/handed': [handedOk],
+    }, { wakeups: [{ status: 200, body: 'event: wake\ndata: {"reason":"open"}\n\n', keepAliveMilliseconds: 50 }] });
+    const stub = fleet;
+    crew(stub.url);
+    aPromptSubmitted();
+    const watcher = start('aeolus-wait.sh');
+    try {
+      await expect.poll(() => inboxCalls(stub).length).toBe(1);
+      aTurnEnded();
+      await expect.poll(() => stub.calls.some((call) => call.path === '/api/v1/ship/handed'), { timeout: 4000 }).toBe(true);
+      expect((await watcher.done).status).toBe(0);
+      expect(stub.streams).toHaveLength(1);
+    } finally { watcher.child.kill(); }
+  });
+
+  it('gives the push hook a plain call limit rather than the former five-second wait limit', async () => {
+    const hold = new Promise<void>((resolve) => setTimeout(resolve, 5500));
+    fleet = await startRoutedStubFleet({
+      '/api/v1/ship/pushReceive': [{ ...receiving(aDelivery()), hold }],
+      '/api/v1/ship/handed': [handedOk],
+    });
+    crew(fleet.url);
+    aTurnEnded();
+    expect((await start('aeolus-push.sh', { args: ['hand'] }).done).status).toBe(0);
+  });
+
+  it('finds a lost wake with its safety look while keep-alives keep the stream open', async () => {
+    fleet = await startRoutedStubFleet({
+      '/api/v1/ship/inbox': [inbox(0), inbox(1)],
+      '/api/v1/ship/pushReceive': [receiving(aDelivery())],
+      '/api/v1/ship/handed': [handedOk],
+    }, { wakeups: [{ status: 200, body: 'event: wake\ndata: {"reason":"open"}\n\n', keepAliveMilliseconds: 50 }] });
+    const stub = fleet;
+    crew(stub.url);
+    aTurnEnded();
+    const watcher = start('aeolus-wait.sh', { env: { AEOLUS_SAFETY_SECONDS: '3', AEOLUS_STREAM_SILENCE_SECONDS: '1' } });
+    try {
+      await expect.poll(() => inboxCalls(stub).length, { timeout: 6000 }).toBe(2);
+      expect((await watcher.done).status).toBe(0);
+      expect(stub.streams).toHaveLength(1);
+    } finally { watcher.child.kill(); }
+  });
+
+  it('reopens a silent stream and looks at the new open wake', async () => {
+    fleet = await startRoutedStubFleet({ '/api/v1/ship/inbox': [inbox(0)] }, { wakeups: [
+      { status: 200, body: 'event: wake\ndata: {"reason":"open"}\n\n' },
+      { status: 200, body: 'event: end\ndata: {"code":"LEASE_ENDED"}\n\n', isClosed: true },
+    ] });
+    const stub = fleet;
+    crew(stub.url);
+    const watcher = start('aeolus-wait.sh', { env: { AEOLUS_STREAM_SILENCE_SECONDS: '1' } });
+    try {
+      await expect.poll(() => stub.streams.length, { timeout: 4000 }).toBe(2);
+      expect((await watcher.done).status).toBe(3);
+    } finally { watcher.child.kill(); }
+  });
+
+  it('stops and forgets the lease when the stream ends it', async () => {
+    fleet = await startRoutedStubFleet({}, { wakeups: [{ status: 200, body: 'event: end\ndata: {"code":"LEASE_ENDED"}\n\n', isClosed: true }] });
+    crew(fleet.url);
+    const result = await start('aeolus-wait.sh').done;
+    expect(result.status).toBe(3);
+    expect(statSync(identityFile(), { throwIfNoEntry: false })).toBeUndefined();
+    expect(fleet.calls).toHaveLength(0);
   });
 });
 
