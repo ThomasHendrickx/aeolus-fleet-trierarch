@@ -1500,7 +1500,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
   it('rule 2: a request no longer assigned to it, as when its ship is retired, has its session stopped and its clean worktree removed with what runs in it (#1041)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.folderProcesses.start(`${SHIPS_ROOT}/${shipId}`, 'astro dev');
+    trierarch.folderProcesses.start(`${SHIPS_ROOT}/${shipId}/home`, 'astro dev');
     trierarch.fleet.unassign(shipId);
 
     await trierarch.pass();
@@ -1508,7 +1508,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.processes.sessions.has(shipId)).toBe(false);
     expect(trierarch.state.current().entries).toEqual({});
     expect(trierarch.harness.identities.has(scoutFolder(shipId))).toBe(false);
-    expect(trierarch.folderProcesses.running.has(`${SHIPS_ROOT}/${shipId}`)).toBe(false);
+    expect(trierarch.folderProcesses.running.has(`${SHIPS_ROOT}/${shipId}/home`)).toBe(false);
     expect(trierarch.workspace.folders.has(scoutFolder(shipId))).toBe(false);
     expect(trierarch.state.current().orphans).toEqual([]);
   });
@@ -2977,22 +2977,25 @@ describe('a worktree ends with its session (docs/design/worktrees-end-with-their
   it.each(PATHS)('$path stops what runs anywhere in the ship folder before it goes whole (#436)', async ({ crew, end }) => {
     const trierarch = aTrierarch();
     const shipId = await crew(trierarch);
-    trierarch.folderProcesses.start(`${SHIPS_ROOT}/${shipId}`, 'astro dev');
+    trierarch.folderProcesses.start(`${SHIPS_ROOT}/${shipId}/home`, 'astro dev');
+    trierarch.folderProcesses.start('/elsewhere', 'vite');
     end(trierarch, shipId);
 
     await trierarch.pass();
 
-    expect(trierarch.folderProcesses.stoppedIn).toContain(`${SHIPS_ROOT}/${shipId}`);
+    expect(trierarch.folderProcesses.running).toEqual(new Map([['/elsewhere', ['vite']]]));
   });
 
   it('a release stops what runs in the ship folder of a ship in a configured folder, and nothing in the configured folder (#436)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch, { workspace: { kind: 'folder', name: 'notes' } });
+    trierarch.folderProcesses.start(`${SHIPS_ROOT}/${shipId}/home`, 'astro dev');
+    trierarch.folderProcesses.start(NOTES_FOLDER, 'vim notes.md');
     trierarch.fleet.removeRequest(shipId);
 
     await trierarch.pass();
 
-    expect(trierarch.folderProcesses.stoppedIn).toEqual([`${SHIPS_ROOT}/${shipId}`]);
+    expect(trierarch.folderProcesses.running).toEqual(new Map([[NOTES_FOLDER, ['vim notes.md']]]));
   });
 
   it.each(PATHS)('$path keeps the worktree while the fleet refuses the usage send, and the next pass sends it and removes it', async ({ crew, end }) => {
@@ -3046,11 +3049,13 @@ describe("a ship's folder, ships/<shipId>, which holds every file of the ship (#
   it('a release of a ship crewed before the ship folders stops what runs in its worktree (#436)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aShipCrewedBefore(trierarch);
+    trierarch.folderProcesses.start(`${scoutFolder(shipId)}/main/web`, 'astro dev');
+    trierarch.folderProcesses.start('/elsewhere', 'vite');
     trierarch.fleet.removeRequest(shipId);
 
     await trierarch.pass();
 
-    expect(trierarch.folderProcesses.stoppedIn).toEqual([scoutFolder(shipId)]);
+    expect(trierarch.folderProcesses.running).toEqual(new Map([['/elsewhere', ['vite']]]));
   });
 
   it('is kept in the entry of a ship crewed fresh, its workspace made for it, its socket opened and its session started in it', async () => {
