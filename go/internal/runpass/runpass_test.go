@@ -2874,16 +2874,17 @@ func TestEveryPathRemovesTheWorktreeWhateverItHoldsLogsWhatItHeldAndTellsArgoNot
 	}
 }
 
-func TestEveryPathStopsWhatRunsInTheFolderBeforeTheWorktreeGoes(t *testing.T) {
+func TestEveryPathStopsWhatRunsInTheWholeShipFolderBeforeItGoes(t *testing.T) {
 	for _, path := range endedPaths {
 		t.Run(path.name, func(t *testing.T) {
 			pass := aRunPass(t)
-			pass.processes.running[scoutFolder] = "astro dev"
+			shipFolder := "/ships/" + scout
+			pass.processes.running[shipFolder] = "astro dev"
 
 			path.end(pass, t, nil)
 
-			if !slices.Contains(pass.processes.stoppedIn, scoutFolder) {
-				t.Fatalf("stopped in %q, want %s", pass.processes.stoppedIn, scoutFolder)
+			if !slices.Contains(pass.processes.stoppedIn, shipFolder) {
+				t.Fatalf("stopped in %q, want %s", pass.processes.stoppedIn, shipFolder)
 			}
 		})
 	}
