@@ -146,13 +146,29 @@ func TestALineSentReachesTheHarness(t *testing.T) {
 	})
 }
 
-func TestASessionWhoseHarnessEndedIsListedExited(t *testing.T) {
-	runtime := aRuntime(t)
-	started(t, runtime, `read -r line; exit 1`)
-
+// endedHarness lets Send return before the harness exits, then waits for the hold to end.
+func endedHarness(t *testing.T, runtime Runtime) {
+	t.Helper()
+	gate := filepath.Join(t.TempDir(), "gate")
+	if err := syscall.Mkfifo(gate, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	started(t, runtime, `read -r line; read -r line < `+gate+`; exit 1`)
 	if err := runtime.Send(scout, "{}"); err != nil {
 		t.Fatalf("send: %v", err)
 	}
+	if err := os.WriteFile(gate, []byte("exit\n"), 0o600); err != nil {
+		t.Fatalf("release harness: %v", err)
+	}
+	eventually(t, "the session listed exited", func() bool {
+		sessions := listed(t, runtime)
+		return len(sessions) == 1 && sessions[0].Status == "exited"
+	})
+}
+
+func TestASessionWhoseHarnessEndedIsListedExited(t *testing.T) {
+	runtime := aRuntime(t)
+	endedHarness(t, runtime)
 
 	eventually(t, "the session listed exited", func() bool {
 		sessions := listed(t, runtime)
@@ -162,10 +178,7 @@ func TestASessionWhoseHarnessEndedIsListedExited(t *testing.T) {
 
 func TestAHoldFromBeforeTheMachineStartedIsNotListed(t *testing.T) {
 	runtime := aRuntime(t)
-	started(t, runtime, `read -r line; exit 1`)
-	if err := runtime.Send(scout, "{}"); err != nil {
-		t.Fatalf("send: %v", err)
-	}
+	endedHarness(t, runtime)
 	runtime.BootedAt = func() time.Time { return time.Now().Add(time.Hour) }
 
 	eventually(t, "the session gone from the list", func() bool { return len(listed(t, runtime)) == 0 })
