@@ -59,7 +59,10 @@ is_stop_kept=0
 
 # The message is the session's to confirm: the turn is busy from now, and the
 # line goes into the session. It names the delivery and how to read it, for a
-# turn the hooks put no body into, as a line that lands mid-turn (#342).
+# turn the hooks put no body into, as a line that lands mid-turn (#342). The
+# read command names the session's own plugin through AEOLUS_ROOT, which its
+# SessionStart hook exports for its commands: a container session's plugin is
+# not at this script's host path. Without it, the session runs this plugin.
 # <deliveryId> <what the log says>
 handed_over() {
   local root
@@ -68,7 +71,7 @@ handed_over() {
   aeolus_report_turn "$(aeolus_identity_read "$identity")"
   aeolus_log "$identity" wake "$2"
   root="$(cd "$(dirname "$0")/.." && pwd)"
-  echo "Aeolus handed a message for ${ship_name} to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it. It is delivery $1: if its body is not in this turn by your next tool call, read it with \"${root}/scripts/aeolus-fleet.sh\" delivery $1."
+  echo "Aeolus handed a message for ${ship_name} to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it. It is delivery $1: if its body is not in this turn by your next tool call, read it with \"\${AEOLUS_ROOT:-${root}}/scripts/aeolus-fleet.sh\" delivery $1."
   exit 0
 }
 
