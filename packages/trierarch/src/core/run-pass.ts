@@ -823,11 +823,16 @@ async function removeWorkspace(at: EntryAt): Promise<string> {
   const { folder, shipFolder } = entry;
   if (folder === undefined) {
     if (shipFolder !== undefined) {
+      await deps.folderProcesses.stopIn(shipFolder);
       await deps.workspace.removeShipFolder(shipFolder);
     }
     return 'its worktree removed';
   }
-  if (entry.workspace.kind === 'repositories') {
+  // The ship's folder goes whole, so what runs anywhere in it stops, not only in its repositories (#436); a ship crewed before the
+  // ship folders has only its worktree to stop in. A configured folder is never stopped in: its processes are not the trierarch's.
+  if (shipFolder !== undefined) {
+    await deps.folderProcesses.stopIn(shipFolder);
+  } else if (entry.workspace.kind === 'repositories') {
     await deps.folderProcesses.stopIn(folder);
   }
   await deps.sendReleasedUsage(entry);

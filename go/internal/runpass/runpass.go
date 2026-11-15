@@ -1022,8 +1022,13 @@ func (p Pass) deleteIdentity(entry reconciler.Entry) error {
 // endWorkspace ends the workspace of an entry whose crew ended here (gap rule 1): what runs in its worktree stops, its last usage is sent, its identity goes, then a worktree it made is removed whatever it holds. What it held is logged, and nobody is told: saving is the session's job. A usage send that fails leaves it all for the next pass. A configured folder is never removed.
 func (p Pass) endWorkspace(entry reconciler.Entry) error {
 	isWorktree := entry.Folder != "" && entry.Workspace.Kind == "repositories"
-	if isWorktree && p.FolderProcesses != nil {
-		if _, err := p.FolderProcesses.StopIn(entry.Folder); err != nil {
+	// The ship's folder goes whole, so what runs anywhere in it stops, not only in its repositories (#436); a ship crewed before the ship folders has only its worktree. A configured folder is never stopped in.
+	stopFolder := entry.ShipFolder
+	if stopFolder == "" && isWorktree {
+		stopFolder = entry.Folder
+	}
+	if stopFolder != "" && p.FolderProcesses != nil {
+		if _, err := p.FolderProcesses.StopIn(stopFolder); err != nil {
 			return err
 		}
 	}

@@ -403,6 +403,35 @@ func TestAWorktreeIsRemovedByItsPathFromTheRepositoryItsPathNames(t *testing.T) 
 	}
 }
 
+func TestALockedWorktreeUnderTheRootIsRemoved(t *testing.T) {
+	cases := []struct {
+		name string
+		lock []string
+	}{
+		{name: "locked without a reason", lock: []string{"worktree", "lock"}},
+		{name: "locked with a reason", lock: []string{"worktree", "lock", "--reason", "ship is crewing"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			repository, root := aRepository(t)
+			folder := filepath.Join(root, "aeolus-fleet", "stray")
+			gitIn(t, "-C", repository, "worktree", "add", "-q", "--detach", folder)
+			gitIn(t, append(append([]string{"-C", repository}, c.lock...), folder)...)
+			places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}}
+
+			if err := places.RemoveWorktree(folder); err != nil {
+				t.Fatalf("RemoveWorktree(%s) with %s = %v, want nil", folder, c.name, err)
+			}
+			if _, err := os.Stat(folder); err == nil {
+				t.Errorf("RemoveWorktree(%s) with %s left the folder, want it gone", folder, c.name)
+			}
+			if listed := gitIn(t, "-C", repository, "worktree", "list"); strings.Contains(listed, "stray") {
+				t.Errorf("git worktree list after RemoveWorktree(%s) with %s = %q, want no stray", folder, c.name, listed)
+			}
+		})
+	}
+}
+
 func TestAStrayShipsFolderOnTheHostGoesWholeIntoTheTrashBesideItWhateverItHolds(t *testing.T) {
 	_, root := aRepository(t)
 	stray := filepath.Join(root, "shp_01m78kesv477q4shegenmx6rz6")

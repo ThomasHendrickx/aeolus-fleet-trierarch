@@ -222,13 +222,13 @@ func unsavedIn(folder string, gitIn func(folder string, args ...string) (string,
 	return unsaved, nil
 }
 
-// Remove removes the worktree whatever it holds; one already gone is removed already.
+// Remove removes the worktree whatever it holds, locked or not (a second --force removes a locked one); one already gone is removed already.
 func Remove(repository string, folder string) error {
 	if _, err := os.Stat(folder); errors.Is(err, os.ErrNotExist) {
 		_, _ = git("-C", repository, "worktree", "prune")
 		return nil
 	}
-	_, err := git("-C", repository, "worktree", "remove", "--force", folder)
+	_, err := git("-C", repository, "worktree", "remove", "--force", "--force", folder)
 	return err
 }
 

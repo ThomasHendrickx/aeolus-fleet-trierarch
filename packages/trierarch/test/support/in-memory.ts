@@ -959,7 +959,7 @@ export class InMemoryShipSockets implements ShipSocketsPort {
   }
 }
 
-/** What runs in each folder, as the machine's processes say it: a dev server a session left behind. */
+/** What runs in each folder, as the machine's processes say it: a dev server a session left behind. A stop ends what runs in the folder or below it. */
 export class InMemoryFolderProcesses implements FolderProcessesPort {
   /** The programs running in each folder. */
   readonly running = new Map<string, string[]>();
@@ -976,8 +976,13 @@ export class InMemoryFolderProcesses implements FolderProcessesPort {
     if (this.isFailingStop) {
       return Promise.reject(new Error(`stopping the processes in ${folder} failed`));
     }
-    const stopped = this.running.get(folder)?.length ?? 0;
-    this.running.delete(folder);
+    let stopped = 0;
+    for (const [each, programs] of this.running) {
+      if (each === folder || each.startsWith(`${folder}/`)) {
+        stopped += programs.length;
+        this.running.delete(each);
+      }
+    }
     this.stoppedIn.push(folder);
     return Promise.resolve(stopped);
   }
