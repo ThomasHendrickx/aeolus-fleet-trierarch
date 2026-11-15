@@ -584,6 +584,17 @@ describe('aeolus-wait', () => {
   });
 });
 
+describe('the watcher wake stream', () => {
+  it('stops and forgets the lease when the stream ends it', async () => {
+    fleet = await startRoutedStubFleet({}, { wakeups: [{ status: 200, body: 'event: end\ndata: {"code":"LEASE_ENDED"}\n\n', isClosed: true }] });
+    crew(fleet.url);
+    const result = await start('aeolus-wait.sh').done;
+    expect(result.status).toBe(3);
+    expect(statSync(identityFile(), { throwIfNoEntry: false })).toBeUndefined();
+    expect(fleet.calls).toHaveLength(0);
+  });
+});
+
 describe("the watcher's wake rule: given only when the session is idle", () => {
   it('holds the wake while the session is busy, and gives it once the turn ends', async () => {
     fleet = await aWakingFleet([inbox(1)]);
