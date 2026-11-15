@@ -585,6 +585,17 @@ describe('aeolus-wait', () => {
 });
 
 describe('the watcher wake stream', () => {
+  it('gives the push hook a plain call limit rather than the former five-second wait limit', async () => {
+    const hold = new Promise<void>((resolve) => setTimeout(resolve, 5500));
+    fleet = await startRoutedStubFleet({
+      '/api/v1/ship/pushReceive': [{ ...receiving(aDelivery()), hold }],
+      '/api/v1/ship/handed': [handedOk],
+    });
+    crew(fleet.url);
+    aTurnEnded();
+    expect((await start('aeolus-push.sh', { args: ['hand'] }).done).status).toBe(0);
+  });
+
   it('finds a lost wake with its safety look while keep-alives keep the stream open', async () => {
     fleet = await startRoutedStubFleet({
       '/api/v1/ship/inbox': [inbox(0), inbox(1)],
