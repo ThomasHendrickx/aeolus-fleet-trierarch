@@ -81,6 +81,7 @@ const aPopulatedState = (): Populated<TrierarchState> => {
         crewFailures: 2,
         crewToken: 'aeolus_ct_v1_of_the_crew',
         isIdentityGone: true,
+        usageLimitTold: 'stop-1',
       },
     },
     kept: [{ shipId: newId('ship'), repository: 'aeolus-fleet', path: '/home/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/lookout' }],

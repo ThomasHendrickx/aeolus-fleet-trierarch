@@ -16,6 +16,7 @@ import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
 import type { ShipFiles } from './paths.js';
 import { newProxyToken } from './proxy-tokens.js';
 import { claudeCodeActivityIn, sessionActivityOf } from './session-activity.js';
+import { claudeCodeUsageLimitIn } from './claude-code-usage-limit.js';
 import type { MoveWithinUserNamespace } from './trash.js';
 
 /**
@@ -285,6 +286,7 @@ export function createClaudeCodeHarness(options: {
     // Claude Code is offered wherever its plugin is: no build or runtime of it is held back.
     notOfferedReason: () => Promise.resolve(undefined),
     // The marker says what the session did; the last error event names why a start shows none (H13).
+    usageLimitOf: async ({ shipId }) => claudeCodeUsageLimitIn(await sessions.events(shipId)),
     activityOf: async ({ shipId }) => sessionActivityOf({ sessions, shipId, read: claudeCodeActivityIn }),
     launchSeen: async ({ shipId, folder, shipFolder, launchId, model }) => {
       const marker = await marksOf(filesOf({ shipId, ...(shipFolder !== undefined && { shipFolder }) })).read({ folder, launchId });

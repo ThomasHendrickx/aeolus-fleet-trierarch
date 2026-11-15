@@ -49,6 +49,7 @@ type Fleet interface {
 	// Name is the trierarch's own ship's name.
 	Name() (string, error)
 	ReportFor(crewToken string, state string, note string) error
+	UsageLimitRecipient(shipID string) (string, error)
 	Inbox(crewToken string) (reconciler.Inbox, error)
 	// ReportToArgo tells argo; a key makes a retry safe.
 	ReportToArgo(text string, idempotencyKey string) error
@@ -303,6 +304,7 @@ func (p Pass) Run() error {
 	if err != nil {
 		return err
 	}
+	state = p.reportUsageLimits(state)
 	next, actions, err := p.reconcile(state)
 	if err != nil {
 		p.Log(fmt.Sprintf("The pass failed: %v; %s", err, nextAfterFailure))

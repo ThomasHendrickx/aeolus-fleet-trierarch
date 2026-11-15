@@ -3434,7 +3434,8 @@ describe('a session stopped by its usage limit (#1629)', () => {
     await trierarch.pass();
     await trierarch.pass();
     expect(trierarch.fleet.toOwners).toHaveLength(1);
-    expect(trierarch.fleet.toOwners[0]).toMatchObject({ ownerShipId: requester, text: expect.stringContaining('18:00 UTC') });
+    expect(trierarch.fleet.toOwners[0]?.ownerShipId).toBe(requester);
+    expect(trierarch.fleet.toOwners[0]?.text).toContain('18:00 UTC');
     trierarch.harness.limits.set(shipId, { occurrence: 'stop-2', reason: 'Usage limit reached' });
     await trierarch.pass();
     expect(trierarch.fleet.toOwners).toHaveLength(2);

@@ -90,6 +90,8 @@ export interface Entry {
   readonly sentUsage?: Readonly<Record<string, string>>;
   /** The crew token its register gave, kept here only: its session calls the fleet over its ship's socket (decision 0026). */
   readonly crewToken?: string;
+  /** The usage-limit occurrence whose notice was durably sent, kept across passes and restarts (#1629). */
+  readonly usageLimitTold?: string;
   readonly hasStarted: boolean;
   /** When the session crewing checks in its launch window started (#382), ISO 8601; none before its launch. */
   readonly launchedAt?: string;

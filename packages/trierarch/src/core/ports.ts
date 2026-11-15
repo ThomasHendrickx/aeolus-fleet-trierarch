@@ -92,7 +92,15 @@ export interface SessionActivity {
   readonly tool?: string;
 }
 
+/** A recognised usage-limit stop, identified by the harness event for durable deduplication. */
+export interface UsageLimit {
+  readonly occurrence: string;
+  readonly reason: string;
+}
+
 export interface FleetPort {
+  /** The crew requester, or its ship's owner when no requester remains. Read only for a recognised stop. */
+  usageLimitRecipient(shipId: ShipId): Promise<ShipId | undefined>;
   /** The fleet's URL, written into each session's identity. */
   readonly url: string;
   /** The crew requests assigned to the trierarch's ship, oldest ship first. */
@@ -192,6 +200,8 @@ export interface HarnessSession {
 }
 
 export interface HarnessPort {
+  /** A usage-limit stop in its latest turn; absent on harnesses whose stop format is not recognised. */
+  usageLimitOf?(session: HarnessSession): Promise<UsageLimit | undefined>;
   /**
    * Writes the folder's identity with wakeBy=trierarch, as the aeolus-fleet plugin does. The
    * crew token goes to the plugin only for the lease it stands for, never into the folder.
