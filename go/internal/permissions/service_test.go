@@ -346,3 +346,56 @@ func TestOverlappingAsksLeaveANewerReportInPlace(t *testing.T) {
 		}
 	})
 }
+
+type interruptedReports struct {
+	reports
+	reads             int
+	failRead          int
+	replaceAfterWrite int
+}
+
+func (r *interruptedReports) ReadReport(ctx context.Context, ship string) (Report, error) {
+	r.reads++
+	if r.reads == r.failRead {
+		return Report{}, errors.New("report unavailable")
+	}
+	return r.reports.ReadReport(ctx, ship)
+}
+
+func (r *interruptedReports) WriteReport(ctx context.Context, ship string, report Report) error {
+	if err := r.reports.WriteReport(ctx, ship, report); err != nil {
+		return err
+	}
+	if len(r.writes) == r.replaceAfterWrite {
+		return r.reports.WriteReport(ctx, ship, Report{State: "blocked", Note: "independent"})
+	}
+	return nil
+}
+
+func TestOverlappingAsksRecoverAfterWaitingReportVerificationFails(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		stored := &interruptedReports{reports: reports{current: Report{State: "working", Note: "before", Revision: "before"}}, failRead: 4}
+		service := Service{Owners: &owners{person: true}, Reports: stored, Clock: SystemClock{}, Waits: &ReportWaits{}}
+		a := beginOverlappingAsk(t, service, "A")
+		b := beginOverlappingAsk(t, service, "B")
+		a.end()
+		b.end()
+		if stored.current.Note != "before" {
+			t.Fatalf("report after asks end = %+v, want before", stored.current)
+		}
+	})
+}
+
+func TestOverlappingAsksLeaveAnIndependentReportWrittenDuringSwitch(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		stored := &interruptedReports{reports: reports{current: Report{State: "working", Note: "before", Revision: "before"}}, replaceAfterWrite: 3}
+		service := Service{Owners: &owners{person: true}, Reports: stored, Clock: SystemClock{}, Waits: &ReportWaits{}}
+		a := beginOverlappingAsk(t, service, "A")
+		b := beginOverlappingAsk(t, service, "B")
+		b.end()
+		a.end()
+		if stored.current.Note != "independent" {
+			t.Fatalf("report after asks end = %+v, want independent", stored.current)
+		}
+	})
+}
