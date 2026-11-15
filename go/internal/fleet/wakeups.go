@@ -100,11 +100,18 @@ func (c Client) watch(parent context.Context, look func(context.Context) error) 
 		}
 	}()
 	defer func() { cancel(); response.Body.Close(); <-readDone }()
+	safety := time.NewTimer(timing.safety)
+	defer safety.Stop()
 	event := ""
 	for {
 		select {
 		case <-ctx.Done():
 			return true, ctx.Err()
+		case <-safety.C:
+			if err := look(parent); err != nil {
+				return true, err
+			}
+			safety.Reset(timing.safety)
 		case line, ok := <-lines:
 			if !ok {
 				return true, io.EOF
@@ -117,6 +124,13 @@ func (c Client) watch(parent context.Context, look func(context.Context) error) 
 			}
 			switch event {
 			case "wake":
+				if !safety.Stop() {
+					select {
+					case <-safety.C:
+					default:
+					}
+				}
+				safety.Reset(timing.safety)
 				if err := look(parent); err != nil {
 					return true, err
 				}
