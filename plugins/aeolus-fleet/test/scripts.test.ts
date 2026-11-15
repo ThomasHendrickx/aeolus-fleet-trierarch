@@ -585,6 +585,16 @@ describe('aeolus-wait', () => {
 });
 
 describe('the watcher wake stream', () => {
+  it('keeps its lifetime bound while only keep-alives arrive', async () => {
+    fleet = await startRoutedStubFleet({ '/api/v1/ship/inbox': [inbox(0)] }, { wakeups: [{ status: 200, body: 'event: wake\ndata: {"reason":"open"}\n\n', keepAliveMilliseconds: 50 }] });
+    crew(fleet.url);
+    const watcher = start('aeolus-wait.sh', { env: { AEOLUS_MAX_SECONDS: '1' } });
+    let status: number | null = null;
+    void watcher.exited.then((result) => { status = result.status; });
+    try { await expect.poll(() => status, { timeout: 4000 }).toBe(6); }
+    finally { watcher.child.kill(); }
+  });
+
   it('hands a known waiting delivery over when the busy turn ends without another wake', async () => {
     fleet = await startRoutedStubFleet({
       '/api/v1/ship/inbox': [inbox(1)],
