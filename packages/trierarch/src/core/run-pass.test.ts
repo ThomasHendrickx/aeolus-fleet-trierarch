@@ -279,6 +279,27 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.fleet.reports).toEqual([{ crewToken: trierarch.fleet.shipOf(shipId).crewToken, state: 'blocked', note: 'blocked: session crashed, restarting' }]);
   });
 
+  it('reports the harness reason on one line when a session exits', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.failureReasons.set(shipId, 'provider refused\n  try again');
+    trierarch.processes.exit(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.reports.at(-1)?.note).toBe('blocked: session crashed, restarting: provider refused try again');
+  });
+
+  it('includes the harness reason on one line in the crash report', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.failureReasons.set(shipId, 'provider refused\n  try again');
+
+    await crashForGood(trierarch, shipId);
+
+    expect(trierarch.fleet.toArgo.at(-1)?.text).toContain('- Its last failure: provider refused try again');
+  });
+
   it('row 5: once the restart budget is spent the session is stopped, status crashed and a report sent to argo', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);

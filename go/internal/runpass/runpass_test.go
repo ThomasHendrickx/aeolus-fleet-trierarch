@@ -189,8 +189,9 @@ type launched struct {
 
 // aHarness keeps identities by folder and the launches it made, and says each launch as the marker would.
 type aHarness struct {
-	sessions   *aSessions
-	identities map[string]plugin.Identity
+	failureReason string
+	sessions      *aSessions
+	identities    map[string]plugin.Identity
 	// kept is what the harness keeps for each ship beside its identity, by ship, as Claude Code keeps a ship's home in a container.
 	kept     map[string]bool
 	tokens   map[string]string
@@ -213,6 +214,8 @@ type aHarness struct {
 	// activities are what each ship's session shows, by ship.
 	activities map[string]activity.Activity
 }
+
+func (h *aHarness) FailureReason(entry reconciler.Entry) string { return h.failureReason }
 
 func (h *aHarness) Activity(entry reconciler.Entry) (activity.Activity, bool) {
 	shown, ok := h.activities[entry.ShipID]
@@ -863,6 +866,27 @@ func TestARestartIsReportedOnTheShipsBehalf(t *testing.T) {
 
 	if !slices.Equal(pass.fleet.calls, []string{"report aeolus_ct_v1_scout blocked blocked: session crashed, restarting", "status " + scout + " restarting 1 "}) {
 		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+}
+
+func TestADeadSessionReportsTheHarnessReasonOnOneLine(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	pass.harness.failureReason = "provider refused\n  try again"
+	pass.sessions.observed = []sessions.Observed{{ShipID: scout, Status: "exited"}}
+	pass.run(t)
+	if !slices.Contains(pass.fleet.calls, "report aeolus_ct_v1_scout blocked blocked: session crashed, restarting: provider refused try again") {
+		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+}
+
+func TestACrashReportIncludesTheHarnessReasonOnOneLine(t *testing.T) {
+	pass := aRunPass(t)
+	pass.exitedASixthTime(t)
+	pass.harness.failureReason = "provider refused\n  try again"
+	pass.run(t)
+	if len(pass.fleet.told) != 1 || !strings.Contains(pass.fleet.told[0].text, "- Its last failure: provider refused try again") {
+		t.Fatalf("told %+v", pass.fleet.told)
 	}
 }
 
