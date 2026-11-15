@@ -1500,7 +1500,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
   it('rule 2: a request no longer assigned to it, as when its ship is retired, has its session stopped and its clean worktree removed with what runs in it (#1041)', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
-    trierarch.folderProcesses.start(scoutFolder(shipId), 'astro dev');
+    trierarch.folderProcesses.start(`${SHIPS_ROOT}/${shipId}`, 'astro dev');
     trierarch.fleet.unassign(shipId);
 
     await trierarch.pass();
@@ -1508,7 +1508,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
     expect(trierarch.processes.sessions.has(shipId)).toBe(false);
     expect(trierarch.state.current().entries).toEqual({});
     expect(trierarch.harness.identities.has(scoutFolder(shipId))).toBe(false);
-    expect(trierarch.folderProcesses.running.has(scoutFolder(shipId))).toBe(false);
+    expect(trierarch.folderProcesses.running.has(`${SHIPS_ROOT}/${shipId}`)).toBe(false);
     expect(trierarch.workspace.folders.has(scoutFolder(shipId))).toBe(false);
     expect(trierarch.state.current().orphans).toEqual([]);
   });
@@ -2995,22 +2995,6 @@ describe('a worktree ends with its session (docs/design/worktrees-end-with-their
     expect(trierarch.folderProcesses.stoppedIn).toEqual([`${SHIPS_ROOT}/${shipId}`]);
   });
 
-  it('a release of a ship crewed before the ship folders stops what runs in its worktree (#436)', async () => {
-    const trierarch = aTrierarch();
-    const shipId = await aCrewedShip(trierarch);
-    const entry = trierarch.state.current().entries[shipId];
-    if (entry === undefined) {
-      throw new Error('the ship has no entry');
-    }
-    const { shipFolder: _removed, ...before } = entry;
-    await trierarch.state.save(putEntry(trierarch.state.current(), before));
-    trierarch.fleet.removeRequest(shipId);
-
-    await trierarch.pass();
-
-    expect(trierarch.folderProcesses.stoppedIn).toEqual([scoutFolder(shipId)]);
-  });
-
   it.each(PATHS)('$path keeps the worktree while the fleet refuses the usage send, and the next pass sends it and removes it', async ({ crew, end }) => {
     const trierarch = aTrierarch();
     const shipId = await crew(trierarch);
@@ -3058,6 +3042,16 @@ describe("a ship's folder, ships/<shipId>, which holds every file of the ship (#
     trierarch.sockets.stopTrierarch();
     return shipId;
   }
+
+  it('a release of a ship crewed before the ship folders stops what runs in its worktree (#436)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aShipCrewedBefore(trierarch);
+    trierarch.fleet.removeRequest(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.folderProcesses.stoppedIn).toEqual([scoutFolder(shipId)]);
+  });
 
   it('is kept in the entry of a ship crewed fresh, its workspace made for it, its socket opened and its session started in it', async () => {
     const trierarch = aTrierarch();
