@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -45,5 +46,29 @@ func TestWakeStreamReopensAfterADropAndLooksAgain(t *testing.T) {
 	var refusal *Refusal
 	if opens != 2 || looks != 2 || !errors.As(err, &refusal) || refusal.Code != "LEASE_ENDED" {
 		t.Fatalf("opens = %d, looks = %d, end = %v", opens, looks, err)
+	}
+}
+
+func TestWakeStreamReopensAfterSilence(t *testing.T) {
+	var opens atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := opens.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: wake\ndata: {\"reason\":\"open\"}\n\n")
+		if count == 2 {
+			fmt.Fprint(w, "event: end\ndata: {\"code\":\"LEASE_ENDED\"}\n\n")
+			return
+		}
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	defer cancel()
+	client := Client{URL: server.URL, wakeTiming: &wakeTiming{silence: 20 * time.Millisecond, safety: time.Hour}}
+	err := client.Watch(ctx, func(context.Context) error { return nil })
+	var refusal *Refusal
+	if opens.Load() != 2 || !errors.As(err, &refusal) || refusal.Code != "LEASE_ENDED" {
+		t.Fatalf("opens = %d, end = %v", opens.Load(), err)
 	}
 }
