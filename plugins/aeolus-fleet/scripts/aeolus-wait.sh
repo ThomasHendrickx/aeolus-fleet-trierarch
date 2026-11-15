@@ -343,7 +343,7 @@ while :; do
       aeolus_report_key back
       key_delay=0
     fi
-    look_owed=0
+    look_owed=1
     aeolus_lease_key "$crew_token" > "$(aeolus_pushed_file)"
     if id="$(aeolus_store_put "$(printf '%s' "$body" | tr -d '\n')")"; then
       if aeolus_is_idle || aeolus_store_is_forced "$id"; then

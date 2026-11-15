@@ -15,7 +15,11 @@ import (
 
 // Watch looks on each wake of the trierarch's own ship, until its lease or ctx ends.
 func (c Client) Watch(ctx context.Context, look func(context.Context) error) error {
-	delay := time.Duration(1+rand.IntN(5)) * time.Second
+	retry := c.wakeRetry
+	if retry == nil {
+		retry = func() time.Duration { return time.Duration(1+rand.IntN(5)) * time.Second }
+	}
+	delay := retry()
 	for ctx.Err() == nil {
 		opened, err := c.watch(ctx, look)
 		var refusal *Refusal
@@ -23,7 +27,7 @@ func (c Client) Watch(ctx context.Context, look func(context.Context) error) err
 			return err
 		}
 		if opened {
-			delay = time.Duration(1+rand.IntN(5)) * time.Second
+			delay = retry()
 		}
 		timer := time.NewTimer(delay)
 		select {
@@ -69,13 +73,13 @@ func (c Client) watch(parent context.Context, look func(context.Context) error) 
 	defer silence.Stop()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(c.URL, "/")+"/api/v1/ship/wakeups", nil)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("open wake stream: %w", err)
 	}
 	request.Header.Set("Authorization", "Bearer "+c.CrewToken)
 	request.Header.Set("Accept", "text/event-stream")
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("open wake stream: %w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {

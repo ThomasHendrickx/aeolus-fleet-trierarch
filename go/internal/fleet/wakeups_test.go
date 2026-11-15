@@ -40,10 +40,10 @@ func TestWakeStreamReopensAfterADropAndLooksAgain(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	looks := 0
-	err := (Client{URL: server.URL}).Watch(ctx, func(context.Context) error { looks++; return nil })
+	err := (Client{URL: server.URL, wakeRetry: func() time.Duration { return 0 }}).Watch(ctx, func(context.Context) error { looks++; return nil })
 	var refusal *Refusal
 	if opens.Load() != 2 || looks != 2 || !errors.As(err, &refusal) || refusal.Code != "LEASE_ENDED" {
 		t.Fatalf("opens = %d, looks = %d, end = %v", opens.Load(), looks, err)
@@ -64,9 +64,9 @@ func TestWakeStreamReopensAfterSilence(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	defer server.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	client := Client{URL: server.URL, wakeTiming: &wakeTiming{silence: 20 * time.Millisecond, safety: time.Hour}}
+	client := Client{URL: server.URL, wakeRetry: func() time.Duration { return 0 }, wakeTiming: &wakeTiming{silence: 20 * time.Millisecond, safety: time.Hour}}
 	err := client.Watch(ctx, func(context.Context) error { return nil })
 	var refusal *Refusal
 	if opens.Load() != 2 || !errors.As(err, &refusal) || refusal.Code != "LEASE_ENDED" {
@@ -138,7 +138,7 @@ func TestWakeStreamCancellationClosesTheStreamWithoutReopening(t *testing.T) {
 	defer server.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	err := (Client{URL: server.URL}).Watch(ctx, func(context.Context) error { cancel(); return nil })
+	err := (Client{URL: server.URL, wakeRetry: func() time.Duration { return 0 }}).Watch(ctx, func(context.Context) error { cancel(); return nil })
 	if opens.Load() != 1 || !errors.Is(err, context.Canceled) {
 		t.Fatalf("opens = %d, end = %v", opens.Load(), err)
 	}

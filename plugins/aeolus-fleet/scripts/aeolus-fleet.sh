@@ -38,8 +38,8 @@
 set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
-# The longest a call may take: receive and inbox wait up to 25 seconds. A hook
-# that acknowledges a hand-over bounds it shorter (AEOLUS_CALL_MAX_SECONDS).
+# The longest a REST call may take; wakeups use a separate persistent stream.
+# A hook that acknowledges a hand-over bounds it shorter (AEOLUS_CALL_MAX_SECONDS).
 MAX_SECONDS="${AEOLUS_CALL_MAX_SECONDS:-60}"
 
 # The waits before each next call while the fleet answers busy: bounded, longer each time.
