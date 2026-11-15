@@ -212,6 +212,7 @@ wait_for_wake() {
   local line event='' stream_body='' pending=0 owed=0
   [ -n "$stream_pid" ] || open_stream
   while :; do
+    [ "$SECONDS" -lt "$MAX_SECONDS" ] || return 1
     pending=0; owed=0
     { read -r pending owed < "$waiting_file"; } 2>/dev/null
     if [ "$owed" = 1 ] && aeolus_is_idle; then return 0; fi
