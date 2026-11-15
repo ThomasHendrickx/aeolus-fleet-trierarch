@@ -42,6 +42,7 @@ RETRY_MAX_SECONDS="${AEOLUS_RETRY_MAX_SECONDS:-60}"
 # session starts it again.
 MAX_SECONDS="${AEOLUS_MAX_SECONDS:-6900}"
 STREAM_SILENCE_SECONDS="${AEOLUS_STREAM_SILENCE_SECONDS:-60}"
+SAFETY_SECONDS="${AEOLUS_SAFETY_SECONDS:-300}"
 
 identity="$(aeolus_identity_file)" || exit 2
 if ! identity_text="$(aeolus_identity_read "$identity")"; then
@@ -204,6 +205,7 @@ open_stream() {
     "${fleet_url}/api/v1/ship/wakeups" > "$stream_dir/lines" 2>/dev/null &
   stream_pid=$!
   stream_last_read=$SECONDS
+  stream_next_look=$((SECONDS + SAFETY_SECONDS))
 }
 
 wait_for_wake() {
@@ -218,12 +220,16 @@ wait_for_wake() {
         'event:'*) event="${line#event: }" ;;
         '')
           case "$event" in
-            wake) return 0 ;;
+            wake) stream_next_look=$((SECONDS + SAFETY_SECONDS)); return 0 ;;
             end) status=401; body='{"code":"LEASE_ENDED"}'; on_refusal; return 1 ;;
           esac
           event=''
           ;;
       esac
+    fi
+    if [ "$SECONDS" -ge "$stream_next_look" ]; then
+      stream_next_look=$((SECONDS + SAFETY_SECONDS))
+      return 0
     fi
     stream_body="${stream_body}${line}"
     if [ $((SECONDS - stream_last_read)) -ge "$STREAM_SILENCE_SECONDS" ]; then
