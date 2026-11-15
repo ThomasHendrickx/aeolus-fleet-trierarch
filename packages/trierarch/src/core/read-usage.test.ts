@@ -4,7 +4,7 @@ import { aTrierarch, CONFIGURATION, newId, WORKTREE_ROOT, type Trierarch, inRepo
 import { putEntry, type Entry } from './entry.js';
 
 const MINUTE_MS = 60_000;
-const WITH_CODEX = { ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: {} } };
+const WITH_CODEX = { ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: { flags: [], options: {} } } };
 
 /** An entry crewing the ship in its worktree, its session running. */
 function aCrewedEntry(at: { isWorkspaceMade?: boolean } = {}): Entry {
@@ -165,7 +165,7 @@ describe("the harnesses' usage, as the trierarch reads it (#353)", () => {
     expect(atReset.subscriptions[0]?.readAt).toBe(FIVE_HOURS.resetsAt.toISOString());
   });
 
-  it("reads a subscription that still says a reset time passed once per pass of its interval, not on every pass", async () => {
+  it("reads a subscription that still says a reset time passed once per 5 minutes, not on every pass, and reports it as reset meanwhile", async () => {
     const trierarch = aTrierarch();
     trierarch.usage.subscriptions.set('claude-code', [FIVE_HOURS]);
     await trierarch.readUsage();
@@ -175,7 +175,7 @@ describe("the harnesses' usage, as the trierarch reads it (#353)", () => {
 
     trierarch.clock.advance(MINUTE_MS);
 
-    expect((await trierarch.readUsage()).subscriptions[0]?.windows[0]?.usedPercent).toBe(3);
+    expect((await trierarch.readUsage()).subscriptions[0]?.windows[0]?.usedPercent).toBe(0);
   });
 
   it("reports a window of a harness whose limits come only from its newest session log as reset once its reset time passed, never as freshly read from the old log (#117)", async () => {
