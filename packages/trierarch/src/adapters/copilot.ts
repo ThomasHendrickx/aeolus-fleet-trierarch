@@ -105,6 +105,7 @@ const ERROR_PREFIX = 'Error: ';
 function lastErrorIn(events: readonly string[]): string | undefined {
   for (const line of [...events].reverse()) {
     const event = parsedLine(line);
+    if (z.object({ type: z.literal('result'), exitCode: z.literal(0) }).safeParse(event).success) return undefined;
     const sessionError = sessionErrorSchema.safeParse(event);
     if (sessionError.success) {
       return sessionError.data.data.message;
@@ -207,8 +208,9 @@ export function createCopilotHarness(options: {
       }
       return COPILOT_PROVEN_VERSIONS.includes(version) ? undefined : `Copilot CLI ${version} is not proven: the hooks of its aeolus-fleet plugin are proven on ${proven}`;
     },
-    // The marker says what the session did (#490); what Copilot says before any hook runs, a refused model or login, is read from its output (headless H13).
     activityOf: async ({ shipId }) => sessionActivityOf({ sessions, shipId, read: copilotActivityIn }),
+    failureReason: async ({ shipId }) => lastErrorIn(await sessions.events(shipId)),
+    // The marker says what the session did (#490); what Copilot says before any hook runs, a refused model or login, is read from its output (headless H13).
     launchSeen: async ({ shipId, folder, launchId, model }) => {
       const error = copilotErrorIn({ events: await sessions.events(shipId), ...(model !== undefined && { model }) });
       if (error?.kind === 'refused') {

@@ -516,3 +516,14 @@ func TestASessionWhoseFlagsPickAProfileOrAnotherFolderStartsNothing(t *testing.T
 		})
 	}
 }
+
+func TestAnEarlierFailureIsNotReportedAfterASuccessfulTurn(t *testing.T) {
+	harness, _, _ := aHarness(t)
+	entry := anEntry(t)
+	if err := os.WriteFile(harness.Events(scout), []byte(`{"type":"turn.failed","error":{"message":"old error"}}`+"\n"+`{"type":"turn.completed"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := harness.FailureReason(entry); got != "" {
+		t.Fatalf("FailureReason = %q, want no earlier failure", got)
+	}
+}

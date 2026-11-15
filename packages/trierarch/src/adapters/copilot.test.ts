@@ -86,6 +86,12 @@ function harness(at: { pluginRoot?: string | (() => Promise<string>); version?: 
 }
 
 const shipId = newId('ship');
+
+it('does not report an earlier failure after a successful turn', async () => {
+  events.set(shipId, ['{"type":"session.error","data":{"message":"old error"}}', '{"type":"result","exitCode":0}']);
+  await expect(harness().failureReason({ shipId, folder })).resolves.toBeUndefined();
+});
+
 const LAUNCH_ID = 'launch-1';
 const launchOf = (ship: ShipId) => ({ shipId: ship, shipName: 'scout', folder, harness: 'copilot', workspace: inRepositories('aeolus-fleet'), launchId: LAUNCH_ID, login: 'subscription' }) as const;
 const ADAPTER_WORDS = ['--output-format=json', '--allow-all-tools', '--no-ask-user'];

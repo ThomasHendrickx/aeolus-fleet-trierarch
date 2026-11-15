@@ -82,6 +82,8 @@ func ErrorIn(events string) string {
 			continue
 		}
 		switch event.Type {
+		case "turn.completed":
+			cause = ""
 		case "turn.failed":
 			cause = apiMessageOf(event.Error.Message)
 		case "error":

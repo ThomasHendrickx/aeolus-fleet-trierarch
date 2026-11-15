@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -247,6 +248,8 @@ type Observed struct {
 	Ships map[string]Seen
 	// StartProblems are, by ship id, why its session cannot start on its login now, as a key not ready (api keys K9).
 	StartProblems map[string]string
+	// FailureReasons are the latest harness turn failures, by ship id, before report cleaning.
+	FailureReasons map[string]string
 	// WithoutIdentity are the ships whose entry would be watched or reported for, but whose folder holds no identity (#659, #664).
 	WithoutIdentity []string
 	// ShipFoldersGone are the ships running, restarting or crashed whose ship's folder is gone, removed by hand.
@@ -367,7 +370,9 @@ type Action struct {
 	Model       string
 	Exits       int
 	FailedStart string
-	Key         string
+	// FailureReason is the cleaned, bounded reason for the last failed turn.
+	FailureReason string
+	Key           string
 	// FailedStarts are the failed starts a StoppedOffering tells.
 	FailedStarts *failedstarts.Starts
 }
@@ -860,7 +865,7 @@ func launchStep(entry Entry, context Context, isFinal bool) step {
 func failedLaunch(entry Entry, now time.Time, why refusal, isFinal bool) step {
 	outcome := machineFailedStart(entry, why)
 	if isFinal {
-		failed := exitStep(withoutLaunch(entry), now, why.reason)
+		failed := exitStep(withoutLaunch(entry), now, why.reason, "")
 		failed.actions = append(append([]Action{}, why.actions...), failed.actions...)
 		failed.outcome = outcome
 		return failed
@@ -947,7 +952,7 @@ func runningStep(entry Entry, context Context, canStart bool) step {
 		return step{entry: &started, actions: []Action{{Kind: Launch, ShipID: entry.ShipID}}, starts: 1}
 	}
 	if session.Status == SessionExited {
-		return exitStep(entry, context.Now, "")
+		return exitStep(entry, context.Now, "", context.Observed.FailureReasons[entry.ShipID])
 	}
 	if session.IsOtherVersion {
 		return otherVersionStep(entry, context)
@@ -969,7 +974,7 @@ func runningStep(entry Entry, context Context, canStart bool) step {
 	if !isWindowOver(entry, context.Now) {
 		return wakeStep(entry, context)
 	}
-	quiet := exitStep(entry, context.Now, noActivity(entry, launch))
+	quiet := exitStep(entry, context.Now, noActivity(entry, launch), "")
 	quiet.outcome = &failedstarts.Outcome{ShipID: entry.ShipID, Reason: noActivity(entry, launch)}
 	return quiet
 }
@@ -998,8 +1003,16 @@ func wakeStep(entry Entry, context Context) step {
 	return step{}
 }
 
+func noteWithReason(note string, reason string) string {
+	if reason == "" {
+		return note
+	}
+	return note + ": " + reason
+}
+
 // exitStep is a session that exited, or failed its start with the reason given: it starts again after its wait, or, with the restart budget spent, the entry is crashed and its owner told, with why its last start failed when it did. A session that failed its start still runs, so it stops first.
-func exitStep(entry Entry, now time.Time, failedStart string) step {
+func exitStep(entry Entry, now time.Time, failedStart string, failureReason string) step {
+	failureReason = cleanFailureReason(failureReason)
 	exits := []string{}
 	for _, exit := range entry.Exits {
 		if now.Sub(parsed(exit)) < RestartWindow {
@@ -1011,8 +1024,8 @@ func exitStep(entry Entry, now time.Time, failedStart string) step {
 	if len(exits) > RestartBudget {
 		crashed := withState(withoutLaunch(entry), "crashed", now)
 		crashed.Exits = exits
-		told := Action{Kind: Crashed, ShipID: entry.ShipID, ShipName: entry.ShipName, Exits: len(exits), FailedStart: failedStart, Key: "trierarch:crashed:" + entry.ShipID + ":" + now.UTC().Format("2006-01-02T15:04:05.000Z")}
-		return step{entry: &crashed, actions: []Action{stop, {Kind: Report, ShipID: entry.ShipID, Note: crashedNote}, told}}
+		told := Action{Kind: Crashed, ShipID: entry.ShipID, ShipName: entry.ShipName, Exits: len(exits), FailedStart: failedStart, FailureReason: failureReason, Key: "trierarch:crashed:" + entry.ShipID + ":" + now.UTC().Format("2006-01-02T15:04:05.000Z")}
+		return step{entry: &crashed, actions: []Action{stop, {Kind: Report, ShipID: entry.ShipID, Note: noteWithReason(crashedNote, failureReason)}, told}}
 	}
 	restarting := withState(withoutLaunch(entry), "restarting", now)
 	restarting.Exits = exits
@@ -1021,6 +1034,34 @@ func exitStep(entry Entry, now time.Time, failedStart string) step {
 	if failedStart != "" {
 		actions = append(actions, stop)
 	}
-	actions = append(actions, Action{Kind: Report, ShipID: entry.ShipID, Note: restartingNote})
+	actions = append(actions, Action{Kind: Report, ShipID: entry.ShipID, Note: noteWithReason(restartingNote, failureReason)})
 	return step{entry: &restarting, actions: actions}
+}
+
+// Failure reasons cross the fleet boundary: scrub before shortening, so truncation cannot expose part of a credential.
+var failureSecrets = []*regexp.Regexp{
+	regexp.MustCompile(`(?is)-----BEGIN[^-]*PRIVATE KEY-----.*?-----END[^-]*PRIVATE KEY-----`),
+	regexp.MustCompile(`(?i)\bBearer\s+[^\s"'<>]+`),
+	regexp.MustCompile(`(?i)\b(?:sk-|key-|aeolus_|ghp_|github_pat_)[a-z0-9_.-]+`),
+	regexp.MustCompile(`(?i)[a-z][a-z0-9+.-]*://[^\s/@]+@`),
+	regexp.MustCompile(`(?i)(["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|crew[_-]?token|token|secret|password|credential|authorization|private[_-]?key)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)`),
+}
+
+func cleanFailureReason(reason string) string {
+	for index, secret := range failureSecrets {
+		if index == 3 {
+			reason = secret.ReplaceAllStringFunc(reason, func(value string) string { return strings.SplitN(value, "://", 2)[0] + "://[redacted]@" })
+		} else if index == 4 {
+			reason = secret.ReplaceAllString(reason, "${1}[redacted]")
+		} else {
+			reason = secret.ReplaceAllString(reason, "[redacted]")
+		}
+	}
+	reason = strings.Join(strings.Fields(reason), " ")
+	const limit = 200
+	characters := []rune(reason)
+	if len(characters) > limit {
+		return string(characters[:limit-1]) + "…"
+	}
+	return reason
 }

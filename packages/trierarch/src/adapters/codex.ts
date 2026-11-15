@@ -104,7 +104,9 @@ const NOT_SUPPORTED = /^The '([^']+)' model is not supported/u;
 /** The harness's last error event in its events, as its message says it: an API error by its own message; none without one. */
 function lastErrorIn(events: readonly string[]): { message: string; code?: string } | undefined {
   for (const line of [...events].reverse()) {
-    const event = errorEventSchema.safeParse(parsedLine(line));
+    const parsed = parsedLine(line);
+    if (z.object({ type: z.literal('turn.completed') }).safeParse(parsed).success) return undefined;
+    const event = errorEventSchema.safeParse(parsed);
     if (event.success) {
       const message = event.data.type === 'turn.failed' ? event.data.error.message : event.data.message;
       const api = apiErrorSchema.safeParse(parsedLine(message));
@@ -203,8 +205,9 @@ export function createCodexHarness(options: {
     marksLaunches: () => marks.isMarking(),
     // Codex is offered wherever its plugin is: no build or runtime of it is held back.
     notOfferedReason: () => Promise.resolve(undefined),
-    // The marker says what the session did (#490); Codex has no hook for a failed turn, so a refusal, or why a start shows none, is read from its last error event (headless H13).
     activityOf: async ({ shipId }) => sessionActivityOf({ sessions, shipId, read: codexActivityIn }),
+    failureReason: async ({ shipId }) => lastErrorIn(await sessions.events(shipId))?.message,
+    // The marker says what the session did (#490); Codex has no hook for a failed turn, so a refusal, or why a start shows none, is read from its last error event (headless H13).
     launchSeen: async ({ shipId, folder, launchId, model }) => {
       const error = codexErrorIn({ events: await sessions.events(shipId), ...(model !== undefined && { model }) });
       if (error?.kind === 'refused') {

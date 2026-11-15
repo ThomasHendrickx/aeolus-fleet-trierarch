@@ -498,6 +498,12 @@ export class InMemoryProcesses implements Pick<SessionRuntime, 'list' | 'stop'> 
 }
 
 export class InMemoryHarness implements HarnessPort {
+  readonly failureReasons = new Map<ShipId, string>();
+
+  failureReason(session: { shipId: ShipId }): Promise<string | undefined> {
+    return Promise.resolve(this.failureReasons.get(session.shipId));
+  }
+
   readonly identities = new Map<string, Identity>();
   readonly launches: { shipId: ShipId; shipName: string; folder: string; workspace: TrierarchWorkspace; isFirstStart: boolean; firstPrompt?: string }[] = [];
   /** The launch id of each launch, in order (#490). */

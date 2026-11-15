@@ -76,6 +76,7 @@ func CommandLine(flags []string, line string, sessionID string) []string {
 type event struct {
 	Type      string `json:"type"`
 	SessionID string `json:"sessionId"`
+	ExitCode  *int   `json:"exitCode"`
 	Line      string `json:"line"`
 	Data      struct {
 		Message string `json:"message"`
@@ -104,6 +105,8 @@ func ErrorIn(events string) string {
 	cause := ""
 	eachEvent(events, func(said event) {
 		switch {
+		case said.Type == "result" && said.ExitCode != nil && *said.ExitCode == 0:
+			cause = ""
 		case said.Type == "session.error" && said.Data.Message != "":
 			cause = said.Data.Message
 		case said.Type == hold.StderrEvent && strings.HasPrefix(said.Line, errorPrefix):

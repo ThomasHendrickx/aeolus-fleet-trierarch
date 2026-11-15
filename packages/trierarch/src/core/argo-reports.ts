@@ -27,8 +27,8 @@ const paragraphs = (...parts: readonly string[]): string => parts.join('\n\n');
  * The crash report, true for its reader (decision 0045): argo restarts the
  * ship in the console, so a person who owns it is told argo can.
  */
-export function crashText(ship: ShipNamed, at: { exits: number; failedStart?: string; isForArgo: boolean }): string {
-  const facts = [shipFact(ship), '- Status: crashed, its restart budget spent', ...(at.failedStart === undefined ? [] : [`- Its last start: ${at.failedStart}`])];
+export function crashText(ship: ShipNamed, at: { exits: number; failedStart?: string; failureReason?: string; isForArgo: boolean }): string {
+  const facts = [shipFact(ship), '- Status: crashed, its restart budget spent', ...(at.failedStart === undefined ? [] : [`- Its last start: ${at.failedStart}`]), ...(at.failureReason === undefined ? [] : [`- Its last failure: ${at.failureReason}`])];
   return argoMessage({
     headline: `${nameOf(ship)} crashed ${String(at.exits)} times in an hour`,
     body: paragraphs(facts.join('\n'), at.isForArgo ? 'Restart it in the console to crew it again.' : 'argo can restart it in the console.'),
