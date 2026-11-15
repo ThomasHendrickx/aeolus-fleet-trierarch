@@ -585,6 +585,19 @@ describe('aeolus-wait', () => {
 });
 
 describe('the watcher wake stream', () => {
+  it('reopens a dropped stream with the initial spread again after core answers', async () => {
+    fleet = await startRoutedStubFleet({}, { wakeups: [
+      { status: 503, body: '{"code":"SERVICE_UNAVAILABLE"}\n', isClosed: true },
+      { status: 200, body: ': keep-alive\n\n', isClosed: true },
+      { status: 200, body: 'event: end\ndata: {"code":"LEASE_ENDED"}\n\n', isClosed: true },
+    ] });
+    crew(fleet.url);
+    expect((await start('aeolus-wait.sh', { env: { AEOLUS_RETRY_SECONDS: '2' } }).done).status).toBe(3);
+    const [first = 0, second = 0, third = 0] = fleet.streamOpenTimes;
+    expect(fleet.streams).toHaveLength(3);
+    expect(third - second).toBeLessThan(second - first + 1000);
+  });
+
   it('keeps its lifetime bound while only keep-alives arrive', async () => {
     fleet = await startRoutedStubFleet({ '/api/v1/ship/inbox': [inbox(0)] }, { wakeups: [{ status: 200, body: 'event: wake\ndata: {"reason":"open"}\n\n', keepAliveMilliseconds: 50 }] });
     crew(fleet.url);

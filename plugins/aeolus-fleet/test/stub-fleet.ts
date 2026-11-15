@@ -25,6 +25,7 @@ export interface StubFleet {
   url: string;
   calls: StubCall[];
   streams: StubCall[];
+  streamOpenTimes: number[];
   close(): Promise<void>;
 }
 
@@ -55,11 +56,13 @@ function bodyOf(request: IncomingMessage): Promise<string> {
 async function serve(answerFor: (call: StubCall) => StubAnswer, options: StubOptions = {}): Promise<StubFleet> {
   const calls: StubCall[] = [];
   const streams: StubCall[] = [];
+  const streamOpenTimes: number[] = [];
   const server: Server = createServer((request, response) => {
     void bodyOf(request).then(async (body) => {
       const call = { method: request.method ?? '', path: request.url ?? '', authorization: request.headers.authorization, body };
       if (call.path === '/api/v1/ship/wakeups') {
         streams.push(call);
+        streamOpenTimes.push(Date.now());
         const stream = options.wakeups?.[Math.min(streams.length - 1, options.wakeups.length - 1)];
         response.writeHead(stream?.status ?? 200, { 'content-type': 'text/event-stream' });
         response.write(stream?.body ?? 'event: wake\ndata: {"reason":"open"}\n\n');
@@ -95,6 +98,7 @@ async function serve(answerFor: (call: StubCall) => StubAnswer, options: StubOpt
     url,
     calls,
     streams,
+    streamOpenTimes,
     close: () =>
       new Promise((resolve) => {
         server.closeAllConnections();
