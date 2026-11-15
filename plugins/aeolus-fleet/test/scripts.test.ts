@@ -585,6 +585,20 @@ describe('aeolus-wait', () => {
 });
 
 describe('the watcher wake stream', () => {
+  it('reopens a silent stream and looks at the new open wake', async () => {
+    fleet = await startRoutedStubFleet({ '/api/v1/ship/inbox': [inbox(0)] }, { wakeups: [
+      { status: 200, body: 'event: wake\ndata: {"reason":"open"}\n\n' },
+      { status: 200, body: 'event: end\ndata: {"code":"LEASE_ENDED"}\n\n', isClosed: true },
+    ] });
+    const stub = fleet;
+    crew(stub.url);
+    const watcher = start('aeolus-wait.sh', { env: { AEOLUS_STREAM_SILENCE_SECONDS: '1' } });
+    try {
+      await expect.poll(() => stub.streams.length, { timeout: 4000 }).toBe(2);
+      expect((await watcher.done).status).toBe(3);
+    } finally { watcher.child.kill(); }
+  });
+
   it('stops and forgets the lease when the stream ends it', async () => {
     fleet = await startRoutedStubFleet({}, { wakeups: [{ status: 200, body: 'event: end\ndata: {"code":"LEASE_ENDED"}\n\n', isClosed: true }] });
     crew(fleet.url);
