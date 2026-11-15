@@ -1,3 +1,7 @@
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import type { DetectedHarness } from '../core/ports.js';
@@ -40,7 +44,7 @@ const failed = (stderr: string): CommandResult => ({ status: 1, stdout: '', stde
  * its probe with the exact id in modelUsage (beside `helper` when set), a
  * `refused` one is unrecognized, any other fails otherwise.
  */
-function aClaude(at: { resolves?: Readonly<Record<string, string>>; refused?: readonly string[]; help?: string; helper?: string } = {}) {
+function aClaude(at: { resolves?: Readonly<Record<string, string>>; refused?: readonly string[]; help?: string; helper?: string; neutral?: string } = {}) {
   const calls: { args: readonly string[]; cwd: string | undefined; timeoutMs: number | undefined }[] = [];
   const run = (command: string, options: { args: readonly string[]; cwd?: string; timeoutMs?: number }): Promise<CommandResult> => {
     calls.push({ args: options.args, cwd: options.cwd, timeoutMs: options.timeoutMs });
@@ -63,7 +67,7 @@ function aClaude(at: { resolves?: Readonly<Record<string, string>>; refused?: re
     }
     return Promise.resolve(failed('API Error: Connection error.'));
   };
-  return { calls, detector: createClaudeCodeDetector({ run, neutralFolder: () => Promise.resolve(NEUTRAL) }) };
+  return { calls, detector: createClaudeCodeDetector({ run, neutralFolder: () => Promise.resolve(at.neutral ?? NEUTRAL) }) };
 }
 
 const modelOption = (ids: readonly string[]) => ({ values: Object.fromEntries(ids.map((id) => [id, ['--model', id]])) });
@@ -71,6 +75,17 @@ const EFFORT = { values: { low: ['--effort', 'low'], medium: ['--effort', 'mediu
 const ALL_IDS = ['claude-fable-5-1', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
 
 describe('detecting Claude Code (#365)', () => {
+  it('removes the neutral folder it probed from once detection ends, so no probe folder is left behind (#454)', async () => {
+    const neutral = mkdtempSync(join(tmpdir(), 'probe-removed-'));
+    try {
+      await aClaude({ neutral }).detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
+
+      expect(existsSync(neutral)).toBe(false);
+    } finally {
+      rmSync(neutral, { recursive: true, force: true });
+    }
+  });
+
   it("reads the aliases and the effort levels from --help whose descriptions wrap over several lines (#383)", async () => {
     const detected = await aClaude({ help: WRAPPED_HELP }).detector.detect({ version: '2.1.295', previous: undefined, now: NOW });
 
