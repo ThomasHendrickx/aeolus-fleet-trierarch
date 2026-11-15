@@ -456,6 +456,19 @@ describe('aeolus-trierarch init, the whole setup', () => {
     );
   });
 
+  it('changes nothing on this machine when the fleet cannot be reached while it checks the lease', async () => {
+    const shipId = newId('ship');
+    await init({ fleetUrl: FLEET_URL, shipId, secret: SECRET, isYes: true });
+    const crewFile = readFileSync(paths.crewToken, 'utf8');
+    const configuration = readFileSync(paths.config, 'utf8');
+    const done = [...service.done];
+    whoamiFailure = new Error(`The fleet at ${FLEET_URL} cannot be reached: fetch failed`);
+
+    await expect(init({ fleetUrl: FLEET_URL, shipId, secret: SECRET, isYes: true })).rejects.toThrow('Nothing was changed.');
+
+    expect({ crewFile: readFileSync(paths.crewToken, 'utf8'), configuration: readFileSync(paths.config, 'utf8'), done: service.done, registered: registered.length }).toEqual({ crewFile, configuration, done, registered: 1 });
+  });
+
   it('says it registers the ship at the fleet before it calls the fleet, so a slow fleet shows what it waits on', async () => {
     const shipId = newId('ship');
     const prompter = new ScriptedPrompter(defaults());
