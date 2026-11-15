@@ -29,3 +29,11 @@ it('keeps one occurrence while the assistant error becomes the turn result (#162
   expect(claudeCodeUsageLimitIn([assistant, result])).toEqual({ occurrence: 'assistant-1', reason: message });
   expect(claudeCodeUsageLimitIn([assistant, result, JSON.stringify({ type: 'result', is_error: true, result: 'Not logged in' })])).toBeUndefined();
 });
+
+it('includes the structured reset of a rejected window, and ignores allowed windows (#1629)', () => {
+  const rate = (status: string) => JSON.stringify({ type: 'rate_limit_event', uuid: 'rate-1', rate_limit_info: { status, resetsAt: 1794765600 } });
+  const assistant = JSON.stringify({ type: 'assistant', uuid: 'assistant-1', error: 'rate_limit', message: { content: [{ type: 'text', text: "You've hit your usage limit" }] } });
+  expect(claudeCodeUsageLimitIn([rate('allowed')])).toBeUndefined();
+  expect(claudeCodeUsageLimitIn([rate('allowed_warning')])).toBeUndefined();
+  expect(claudeCodeUsageLimitIn([rate('rejected'), assistant])).toEqual({ occurrence: 'rate-1', reason: "You've hit your usage limit; resets at 2026-11-15T18:00:00.000Z" });
+});

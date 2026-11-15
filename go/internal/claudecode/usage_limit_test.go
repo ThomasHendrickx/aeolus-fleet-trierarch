@@ -49,3 +49,29 @@ func TestOneUsageLimitOccurrenceSurvivesItsTurnResultButNotALaterError(t *testin
 		})
 	}
 }
+
+func TestARejectedWindowIncludesItsStructuredResetAndAllowedWindowsAreNotStops(t *testing.T) {
+	h, _, _ := aHarness(t)
+	entry := anEntry(t)
+	for _, status := range []string{"allowed", "allowed_warning", "rejected"} {
+		t.Run(status, func(t *testing.T) {
+			events := `{"type":"rate_limit_event","uuid":"rate-1","rate_limit_info":{"status":"` + status + `","resetsAt":1794765600}}`
+			if status == "rejected" {
+				events += "\n" + `{"type":"assistant","uuid":"assistant-1","error":"rate_limit","message":{"content":[{"type":"text","text":"You've hit your usage limit"}]}}`
+			}
+			if err := os.WriteFile(h.Events(entry.ShipID), []byte(events+"\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			occurrence, reason := h.UsageLimit(entry)
+			if status != "rejected" {
+				if occurrence != "" {
+					t.Fatalf("%s window counted as a stop: %q", status, reason)
+				}
+				return
+			}
+			if occurrence != "rate-1" || reason != "You've hit your usage limit; resets at 2026-11-15T18:00:00.000Z" {
+				t.Fatalf("got %q, %q, want rate-1 with reset", occurrence, reason)
+			}
+		})
+	}
+}
