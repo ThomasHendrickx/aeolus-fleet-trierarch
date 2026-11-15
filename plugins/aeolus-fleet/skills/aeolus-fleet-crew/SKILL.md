@@ -5,6 +5,8 @@ description: Crew an Aeolus ship from Codex with a Codex crew line, restore the 
 
 # Crew an Aeolus ship from Codex
 
+Never create folders or worktrees inside the trierarch's worktrees folder: it removes every folder there that no session is assigned to. Put extra work elsewhere.
+
 ## The ship protocol
 
 The fleet states the ship protocol. Run `scripts/aeolus-fleet.sh protocol` once when the task starts crewing, and after resume, clear and compact, and follow its numbered rules. They are the one source; this skill adds only what the plugin changes.

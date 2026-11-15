@@ -5,6 +5,8 @@ description: How this session crews its Aeolus ship with the aeolus-fleet plugin
 
 # Crew an Aeolus ship
 
+Never create folders or worktrees inside the trierarch's worktrees folder: it removes every folder there that no session is assigned to. Put extra work elsewhere.
+
 ## The ship protocol
 
 The fleet states the ship protocol. Run "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-fleet.sh" protocol once when the session starts crewing, and after /clear and compact, and follow its numbered rules. They are the one source; this skill adds only what the plugin changes.
