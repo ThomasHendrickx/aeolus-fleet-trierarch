@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { aTrierarch, crewSettings, SHIPS_ROOT } from '../../test/support/in-memory.js';
 import { createFolderProcesses, foldersFromLsof, isInside, readProcessFolders } from './folder-processes.js';
 
 describe('the folders processes work in, as lsof says them', () => {
@@ -115,5 +116,32 @@ describe('stopping the processes in a folder (#1041)', () => {
 
   it('stops nothing in a folder nothing works in', async () => {
     expect(await createFolderProcesses().stopIn(aFolder())).toBe(0);
+  });
+
+  it('on a release, stops a process in the home/ folder beside the repositories of the ship folder, and none outside the ship folder (#436)', async () => {
+    const onDisk = aFolder();
+    mkdirSync(join(onDisk, 'home'));
+    const inHome = runIn(join(onDisk, 'home'));
+    const outside = runIn(aFolder());
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const trierarch = aTrierarch();
+    const shipId = trierarch.fleet.commission('scout');
+    trierarch.fleet.request(shipId, crewSettings());
+    await trierarch.pass();
+    await trierarch.pass();
+    const shipFolder = `${SHIPS_ROOT}/${shipId}`;
+    // Only the processes this test started are stopped, the in-memory ship folder standing for the folder on disk.
+    const ours = new Set([inHome.pid, outside.pid]);
+    const stopper = createFolderProcesses({ processFolders: () => readProcessFolders().filter((each) => ours.has(each.pid)), graceMs: 300 });
+    trierarch.folderProcesses.stopIn = (folder) => stopper.stopIn(folder.replace(shipFolder, onDisk));
+    trierarch.fleet.removeRequest(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.workspace.removedShipFolders).toContain(shipFolder);
+    await exited(inHome);
+    expect(inHome.signalCode).toBe('SIGTERM');
+    expect(outside.exitCode).toBeNull();
+    expect(outside.signalCode).toBeNull();
   });
 });
