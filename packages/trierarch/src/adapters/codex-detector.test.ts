@@ -87,6 +87,12 @@ describe('detecting Codex (#365)', () => {
     }
   });
 
+  it('detects as usual when the neutral folder cannot be removed, a path with a NUL byte which every rm rejects (#454)', async () => {
+    const detected = await aCodex({ neutral: '/nowhere/probe\0folder' }).detect({ version: '0.160.1', previous: undefined, now: NOW });
+
+    expect(detected?.options.model?.values).toEqual(MODEL_VALUES);
+  });
+
   it('probes each model of the catalog it runs with, hidden ones included, once, non-interactively from a neutral folder, and declares only those this login may use (#392)', async () => {
     const codex = aCodex({ live: { status: 0, stdout: LIVE_CATALOG, stderr: '' }, probes: { 'gpt-6.1-sol': 'refused' } });
 

@@ -86,6 +86,24 @@ describe('detecting Claude Code (#365)', () => {
     }
   });
 
+  // A path with a NUL byte makes every rm of it reject, whatever its options.
+  const UNREMOVABLE = '/nowhere/probe\0folder';
+
+  it('detects as usual when the neutral folder cannot be removed (#454)', async () => {
+    const detected = await aClaude({ neutral: UNREMOVABLE }).detector.detect({ version: '2.1.293', previous: undefined, now: NOW });
+
+    expect(detected?.version).toBe('2.1.293');
+  });
+
+  it("rejects with the probe's own error, not the removal's, when a probe throws and the neutral folder cannot be removed (#454)", async () => {
+    const detector = createClaudeCodeDetector({
+      run: (_command, options) => (options.args.includes('-p') ? Promise.reject(new Error('the probe broke')) : Promise.resolve({ status: 0, stdout: '', stderr: '' })),
+      neutralFolder: () => Promise.resolve(UNREMOVABLE),
+    });
+
+    await expect(detector.detect({ version: '2.1.293', previous: undefined, now: NOW })).rejects.toThrow('the probe broke');
+  });
+
   it("reads the aliases and the effort levels from --help whose descriptions wrap over several lines (#383)", async () => {
     const detected = await aClaude({ help: WRAPPED_HELP }).detector.detect({ version: '2.1.295', previous: undefined, now: NOW });
 
