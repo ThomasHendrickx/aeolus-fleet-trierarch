@@ -156,6 +156,16 @@ describe('workspaces in git', () => {
     expect(await git(['-C', repository, 'worktree', 'list'])).not.toContain('scout');
   });
 
+  it('removes a locked worktree of a configured repository under its root (#434)', async () => {
+    const made = await aWorktreeAt(join(root, 'aeolus-fleet', 'stray'));
+    await git(['-C', repository, 'worktree', 'lock', made]);
+
+    await workspace().remove(made);
+
+    expect(existsSync(made)).toBe(false);
+    expect(await git(['-C', repository, 'worktree', 'list'])).not.toContain('stray');
+  });
+
   it('refuses to remove anything outside its root', async () => {
     await expect(workspace().remove(notes)).rejects.toThrow('removes only a folder under the root');
     expect(existsSync(notes)).toBe(true);

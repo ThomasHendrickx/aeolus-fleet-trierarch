@@ -392,6 +392,24 @@ func TestAWorktreeIsRemovedByItsPathFromTheRepositoryItsPathNames(t *testing.T) 
 	}
 }
 
+func TestALockedWorktreeUnderTheRootIsRemoved(t *testing.T) {
+	repository, root := aRepository(t)
+	folder := filepath.Join(root, "aeolus-fleet", "stray")
+	gitIn(t, "-C", repository, "worktree", "add", "-q", "--detach", folder)
+	gitIn(t, "-C", repository, "worktree", "lock", folder)
+	places := Places{Root: root, Repositories: map[string]string{"aeolus-fleet": repository}}
+
+	if err := places.RemoveWorktree(folder); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(folder); err == nil {
+		t.Error("the worktree stayed")
+	}
+	if listed := gitIn(t, "-C", repository, "worktree", "list"); strings.Contains(listed, "stray") {
+		t.Errorf("git still lists it: %s", listed)
+	}
+}
+
 func TestAStrayShipsFolderOnTheHostGoesWholeIntoTheTrashBesideItWhateverItHolds(t *testing.T) {
 	_, root := aRepository(t)
 	stray := filepath.Join(root, "shp_01m78kesv477q4shegenmx6rz6")
