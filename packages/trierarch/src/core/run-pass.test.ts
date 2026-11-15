@@ -2974,15 +2974,41 @@ describe('a worktree ends with its session (docs/design/worktrees-end-with-their
     expect(trierarch.fleet.toArgo).toEqual([]);
   });
 
-  it.each(PATHS)('$path stops what runs in the folder before the worktree goes', async ({ crew, end }) => {
+  it.each(PATHS)('$path stops what runs anywhere in the ship folder before it goes whole (#436)', async ({ crew, end }) => {
     const trierarch = aTrierarch();
     const shipId = await crew(trierarch);
-    trierarch.folderProcesses.start(scoutFolder(shipId), 'astro dev');
+    trierarch.folderProcesses.start(`${SHIPS_ROOT}/${shipId}`, 'astro dev');
     end(trierarch, shipId);
 
     await trierarch.pass();
 
-    expect(trierarch.folderProcesses.stoppedIn).toContain(scoutFolder(shipId));
+    expect(trierarch.folderProcesses.stoppedIn).toContain(`${SHIPS_ROOT}/${shipId}`);
+  });
+
+  it('a release stops what runs in the ship folder of a ship in a configured folder, and nothing in the configured folder (#436)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch, { workspace: { kind: 'folder', name: 'notes' } });
+    trierarch.fleet.removeRequest(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.folderProcesses.stoppedIn).toEqual([`${SHIPS_ROOT}/${shipId}`]);
+  });
+
+  it('a release of a ship crewed before the ship folders stops what runs in its worktree (#436)', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    const entry = trierarch.state.current().entries[shipId];
+    if (entry === undefined) {
+      throw new Error('the ship has no entry');
+    }
+    const { shipFolder: _removed, ...before } = entry;
+    await trierarch.state.save(putEntry(trierarch.state.current(), before));
+    trierarch.fleet.removeRequest(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.folderProcesses.stoppedIn).toEqual([scoutFolder(shipId)]);
   });
 
   it.each(PATHS)('$path keeps the worktree while the fleet refuses the usage send, and the next pass sends it and removes it', async ({ crew, end }) => {
