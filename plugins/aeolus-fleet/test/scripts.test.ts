@@ -444,7 +444,7 @@ describe('aeolus-wait', () => {
       method: 'POST',
       path: '/api/v1/ship/inbox',
       authorization: `Bearer ${CREW_TOKEN}`,
-      body: '{"waitSeconds":0}',
+      body: '{}',
     });
   });
 
