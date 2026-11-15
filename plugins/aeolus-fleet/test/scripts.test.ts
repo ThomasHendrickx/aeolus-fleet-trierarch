@@ -127,7 +127,14 @@ const readCommandScript = (line: string, sessionEnv: Record<string, string>) => 
   return spawnSync('bash', ['-c', `printf %s ${command}`], { env: { PATH: process.env.PATH, ...sessionEnv } }).stdout.toString();
 };
 const PING_DELIVERY_ID = 'dlv_01m4rb0m3d6r4xgnmnhm1k8b2q';
-const HANDED_OVER = 'aeolus: a message for scout is handed to this session: it reaches you at your next tool call, or when you end your turn. Do not receive or ack it.\n';
+/**
+ * The line aeolus-wait.sh prints when it hands a message over: it names the delivery and how to read it, as the
+ * trierarch's hand-over line does, so a body dropped mid-turn can still be read (#428).
+ */
+const handedOverLine = (deliveryId: string) =>
+  `aeolus: a message for scout is handed to this session: it reaches you at your next tool call, or when you end your turn. Do not receive or ack it. ` +
+  `It is delivery ${deliveryId}: if its body is not in this turn by your next tool call, read it with "\${AEOLUS_ROOT:-${dirname(SCRIPTS)}}/scripts/aeolus-fleet.sh" delivery ${deliveryId}.\n`;
+const HANDED_OVER = handedOverLine(DELIVERY_ID);
 const NO_WAITS = { AEOLUS_BUSY_WAITS: '0 0 0 0' };
 
 /** A delivery as the fleet's receive answers it. */
@@ -638,6 +645,17 @@ describe("the watcher's wake rule: given only when the session is idle", () => {
     aTurnEnded();
 
     await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+  });
+
+  it("names a read command that resolves to the host session's plugin, and to a container session's own plugin, as the trierarch's line does (#428)", async () => {
+    fleet = await aWakingFleet([inbox(1)]);
+    crew(fleet.url);
+    aTurnEnded();
+    const line = (await start('aeolus-wait.sh').exited).stdout;
+    const containerRoot = '/home/ubuntu/.claude/plugins/cache/aeolus-fleet/aeolus-fleet/0.39.1';
+
+    expect(readCommandScript(line, {})).toBe(`${SCRIPTS}aeolus-fleet.sh`);
+    expect(readCommandScript(line, { AEOLUS_ROOT: containerRoot })).toBe(`${containerRoot}/scripts/aeolus-fleet.sh`);
   });
 
   it('forgets what it saw with the ship', async () => {

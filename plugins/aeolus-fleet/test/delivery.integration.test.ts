@@ -22,7 +22,10 @@ import { scriptEnvironment } from './script-environment.js';
 const SCRIPTS = fileURLToPath(new URL('../scripts/', import.meta.url));
 const ACK = '/api/v1/ship/ack';
 const PAYLOAD = 'Review PR 12 and say what you found';
-const HANDED_OVER = 'aeolus: a message for scout is handed to this session: it reaches you at your next tool call, or when you end your turn. Do not receive or ack it.\n';
+/** The watcher's line names the delivery it handed and how to read it, whichever delivery that is (#428). */
+const HANDED_OVER = expect.stringMatching(
+  /^aeolus: a message for scout is handed to this session: it reaches you at your next tool call, or when you end your turn\. Do not receive or ack it\. It is delivery (dlv_\w+): if its body is not in this turn by your next tool call, read it with "\$\{AEOLUS_ROOT:-[^"}]+\}\/scripts\/aeolus-fleet\.sh" delivery \1\.\n$/,
+) as string;
 
 /** A call and every retry the plugin makes of it while the fleet is busy (AEOLUS_BUSY_WAITS, four by default). */
 const BUSY_ANSWERS = 5;
