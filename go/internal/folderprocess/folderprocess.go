@@ -91,6 +91,10 @@ func (s Stopper) StopIn(folder string) (int, error) {
 	if wait == 0 {
 		wait = grace
 	}
+	// Process listings use the real path even when the managed root is a link.
+	if canonical, err := filepath.EvalSymlinks(folder); err == nil {
+		folder = canonical
+	}
 	pids := []int{}
 	for _, each := range folders() {
 		if each.PID != os.Getpid() && IsInside(each.Path, folder) {

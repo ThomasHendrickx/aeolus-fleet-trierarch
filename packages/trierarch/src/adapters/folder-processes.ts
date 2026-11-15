@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readlinkSync } from 'node:fs';
+import { readdirSync, readlinkSync, realpathSync } from 'node:fs';
 import { sep } from 'node:path';
 
 import type { FolderProcessesPort } from '../core/ports.js';
@@ -88,9 +88,16 @@ export function createFolderProcesses(at: { processFolders?: () => ProcessFolder
   const graceMs = at.graceMs ?? GRACE_MS;
   return {
     stopIn: async (folder) => {
+      // Process listings use the real path even when the managed root is a link.
+      let canonicalFolder = folder;
+      try {
+        canonicalFolder = realpathSync(folder);
+      } catch {
+        // The folder may already have been removed; retain matching for deleted cwd paths.
+      }
       // Never the trierarch itself, whose own folder may be anywhere.
       const pids = processFolders()
-        .filter((each) => each.pid !== process.pid && isInside(each.folder, folder))
+        .filter((each) => each.pid !== process.pid && isInside(each.folder, canonicalFolder))
         .map((each) => each.pid);
       for (const pid of pids) {
         signal(pid, 'SIGTERM');
