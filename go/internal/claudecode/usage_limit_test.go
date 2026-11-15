@@ -27,3 +27,25 @@ func TestAUsageLimitStopKeepsItsReasonResetAndOccurrence(t *testing.T) {
 		})
 	}
 }
+
+func TestOneUsageLimitOccurrenceSurvivesItsTurnResultButNotALaterError(t *testing.T) {
+	h, _, _ := aHarness(t)
+	entry := anEntry(t)
+	assistant := `{"type":"assistant","uuid":"assistant-1","error":"rate_limit","message":{"content":[{"type":"text","text":"You've hit your usage limit. Resets at 18:00 UTC."}]}}`
+	result := `{"type":"result","uuid":"result-1","is_error":true,"errors":["You've hit your usage limit. Resets at 18:00 UTC."]}`
+	for _, tt := range []struct{ name, events, occurrence string }{
+		{"assistant", assistant, "assistant-1"},
+		{"result", assistant + "\n" + result, "assistant-1"},
+		{"later error", assistant + "\n" + result + "\n" + `{"type":"result","is_error":true,"result":"Not logged in"}`, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := os.WriteFile(h.Events(entry.ShipID), []byte(tt.events+"\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := h.UsageLimit(entry)
+			if got != tt.occurrence {
+				t.Fatalf("occurrence = %q, want %q", got, tt.occurrence)
+			}
+		})
+	}
+}
