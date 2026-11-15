@@ -205,6 +205,7 @@ export function createCodexHarness(options: {
     notOfferedReason: () => Promise.resolve(undefined),
     // The marker says what the session did (#490); Codex has no hook for a failed turn, so a refusal, or why a start shows none, is read from its last error event (headless H13).
     activityOf: async ({ shipId }) => sessionActivityOf({ sessions, shipId, read: codexActivityIn }),
+    failureReason: async ({ shipId }) => lastErrorIn(await sessions.events(shipId))?.message,
     launchSeen: async ({ shipId, folder, launchId, model }) => {
       const error = codexErrorIn({ events: await sessions.events(shipId), ...(model !== undefined && { model }) });
       if (error?.kind === 'refused') {

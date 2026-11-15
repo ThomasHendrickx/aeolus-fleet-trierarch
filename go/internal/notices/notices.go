@@ -70,10 +70,13 @@ func paragraphs(parts ...string) string {
 }
 
 // Crash is the crash report, true for its reader (decision 0045): argo restarts the ship in the console, so a person who owns it is told argo can. failedStart is why its last start failed, empty when it did not.
-func Crash(ship Ship, exits int, failedStart string, isForArgo bool) string {
+func Crash(ship Ship, exits int, failedStart string, isForArgo bool, failureReasons ...string) string {
 	facts := []string{ship.fact(), "- Status: crashed, its restart budget spent"}
 	if failedStart != "" {
 		facts = append(facts, "- Its last start: "+failedStart)
+	}
+	if len(failureReasons) > 0 && failureReasons[0] != "" {
+		facts = append(facts, "- Its last failure: "+failureReasons[0])
 	}
 	next := "argo can restart it in the console."
 	if isForArgo {

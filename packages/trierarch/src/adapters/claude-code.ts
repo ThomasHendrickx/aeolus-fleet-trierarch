@@ -286,6 +286,7 @@ export function createClaudeCodeHarness(options: {
     notOfferedReason: () => Promise.resolve(undefined),
     // The marker says what the session did; the last error event names why a start shows none (H13).
     activityOf: async ({ shipId }) => sessionActivityOf({ sessions, shipId, read: claudeCodeActivityIn }),
+    failureReason: async ({ shipId }) => claudeCodeErrorIn(await sessions.events(shipId)),
     launchSeen: async ({ shipId, folder, shipFolder, launchId, model }) => {
       const marker = await marksOf(filesOf({ shipId, ...(shipFolder !== undefined && { shipFolder }) })).read({ folder, launchId });
       if (marker?.refused !== undefined) {

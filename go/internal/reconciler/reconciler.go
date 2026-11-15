@@ -246,7 +246,8 @@ type Observed struct {
 	// Ships are, by ship id, what was seen of each watched session.
 	Ships map[string]Seen
 	// StartProblems are, by ship id, why its session cannot start on its login now, as a key not ready (api keys K9).
-	StartProblems map[string]string
+	StartProblems  map[string]string
+	FailureReasons map[string]string
 	// WithoutIdentity are the ships whose entry would be watched or reported for, but whose folder holds no identity (#659, #664).
 	WithoutIdentity []string
 	// ShipFoldersGone are the ships running, restarting or crashed whose ship's folder is gone, removed by hand.
@@ -361,13 +362,14 @@ type Action struct {
 	// Repository is what a clear names beside its ship: the repository of the ship's worktree.
 	Repository string
 	// ShipName, Harness, Version, Model, Exits, FailedStart and Key are what a notice names: the ship, the harness at its version and the model it refused, how often the session exited and why its last start failed, and the key that makes the notice told once.
-	ShipName    string
-	Harness     string
-	Version     string
-	Model       string
-	Exits       int
-	FailedStart string
-	Key         string
+	ShipName      string
+	Harness       string
+	Version       string
+	Model         string
+	Exits         int
+	FailedStart   string
+	FailureReason string
+	Key           string
 	// FailedStarts are the failed starts a StoppedOffering tells.
 	FailedStarts *failedstarts.Starts
 }
@@ -860,7 +862,7 @@ func launchStep(entry Entry, context Context, isFinal bool) step {
 func failedLaunch(entry Entry, now time.Time, why refusal, isFinal bool) step {
 	outcome := machineFailedStart(entry, why)
 	if isFinal {
-		failed := exitStep(withoutLaunch(entry), now, why.reason)
+		failed := exitStep(withoutLaunch(entry), now, why.reason, "")
 		failed.actions = append(append([]Action{}, why.actions...), failed.actions...)
 		failed.outcome = outcome
 		return failed
@@ -947,7 +949,7 @@ func runningStep(entry Entry, context Context, canStart bool) step {
 		return step{entry: &started, actions: []Action{{Kind: Launch, ShipID: entry.ShipID}}, starts: 1}
 	}
 	if session.Status == SessionExited {
-		return exitStep(entry, context.Now, "")
+		return exitStep(entry, context.Now, "", context.Observed.FailureReasons[entry.ShipID])
 	}
 	if session.IsOtherVersion {
 		return otherVersionStep(entry, context)
@@ -969,7 +971,7 @@ func runningStep(entry Entry, context Context, canStart bool) step {
 	if !isWindowOver(entry, context.Now) {
 		return wakeStep(entry, context)
 	}
-	quiet := exitStep(entry, context.Now, noActivity(entry, launch))
+	quiet := exitStep(entry, context.Now, noActivity(entry, launch), "")
 	quiet.outcome = &failedstarts.Outcome{ShipID: entry.ShipID, Reason: noActivity(entry, launch)}
 	return quiet
 }
@@ -999,7 +1001,15 @@ func wakeStep(entry Entry, context Context) step {
 }
 
 // exitStep is a session that exited, or failed its start with the reason given: it starts again after its wait, or, with the restart budget spent, the entry is crashed and its owner told, with why its last start failed when it did. A session that failed its start still runs, so it stops first.
-func exitStep(entry Entry, now time.Time, failedStart string) step {
+func noteWithReason(note string, reason string) string {
+	if reason == "" {
+		return note
+	}
+	return note + ": " + reason
+}
+
+func exitStep(entry Entry, now time.Time, failedStart string, failureReason string) step {
+	failureReason = strings.Join(strings.Fields(failureReason), " ")
 	exits := []string{}
 	for _, exit := range entry.Exits {
 		if now.Sub(parsed(exit)) < RestartWindow {
@@ -1011,8 +1021,8 @@ func exitStep(entry Entry, now time.Time, failedStart string) step {
 	if len(exits) > RestartBudget {
 		crashed := withState(withoutLaunch(entry), "crashed", now)
 		crashed.Exits = exits
-		told := Action{Kind: Crashed, ShipID: entry.ShipID, ShipName: entry.ShipName, Exits: len(exits), FailedStart: failedStart, Key: "trierarch:crashed:" + entry.ShipID + ":" + now.UTC().Format("2006-01-02T15:04:05.000Z")}
-		return step{entry: &crashed, actions: []Action{stop, {Kind: Report, ShipID: entry.ShipID, Note: crashedNote}, told}}
+		told := Action{Kind: Crashed, ShipID: entry.ShipID, ShipName: entry.ShipName, Exits: len(exits), FailedStart: failedStart, FailureReason: failureReason, Key: "trierarch:crashed:" + entry.ShipID + ":" + now.UTC().Format("2006-01-02T15:04:05.000Z")}
+		return step{entry: &crashed, actions: []Action{stop, {Kind: Report, ShipID: entry.ShipID, Note: noteWithReason(crashedNote, failureReason)}, told}}
 	}
 	restarting := withState(withoutLaunch(entry), "restarting", now)
 	restarting.Exits = exits
@@ -1021,6 +1031,6 @@ func exitStep(entry Entry, now time.Time, failedStart string) step {
 	if failedStart != "" {
 		actions = append(actions, stop)
 	}
-	actions = append(actions, Action{Kind: Report, ShipID: entry.ShipID, Note: restartingNote})
+	actions = append(actions, Action{Kind: Report, ShipID: entry.ShipID, Note: noteWithReason(restartingNote, failureReason)})
 	return step{entry: &restarting, actions: actions}
 }

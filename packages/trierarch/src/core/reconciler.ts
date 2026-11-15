@@ -28,6 +28,7 @@ export interface Observed {
   readonly withoutIdentity: readonly ShipId[];
   /** By ship id, why its session cannot start on its login now, as a key not ready (api keys K9): it waits, restarting, with no restart counted. */
   readonly startProblems?: Readonly<Record<string, string>>;
+  readonly failureReasons?: Readonly<Record<string, string>>;
   /** The entries crewed here whose ship's folder is gone, as when ships/ was removed by hand: each is crewed again in a fresh one. */
   readonly shipFoldersGone?: readonly ShipId[];
 }
@@ -63,7 +64,7 @@ export type Action =
   /** A ship's folder holds no identity while it runs, restarts or crashed (#659, #664): argo told, as nothing reaches it until a human crews it again. */
   | { readonly kind: 'identityGone'; readonly shipId: ShipId; readonly shipName?: string }
   /** Its restart budget is spent (#397): its owner told, argo when argo owns it, with why its last start failed when it did. */
-  | { readonly kind: 'crashed'; readonly shipId: ShipId; readonly shipName?: string; readonly exits: number; readonly failedStart?: string; readonly idempotencyKey: string }
+  | { readonly kind: 'crashed'; readonly shipId: ShipId; readonly shipName?: string; readonly exits: number; readonly failedStart?: string; readonly failureReason?: string; readonly idempotencyKey: string }
   /** A clear request (decision 0032): confirmed not-kept, as no worktree is kept. */
   | { readonly kind: 'clear'; readonly shipId: ShipId; readonly repository: string }
   /** A folder under the root no crewed ship uses (gap rule 2): stop what runs in it, then remove it, whatever it is or holds. */
@@ -479,7 +480,7 @@ function runningStep(entry: Entry, context: ReconcileContext & { canStart: boole
     return canStart ? { entry: withoutLaunch(entry), actions: [{ kind: 'launch', shipId: entry.shipId }], starts: 1 } : NOTHING;
   }
   if (session.status === 'exited') {
-    return exitStep(entry, { now });
+    return exitStep(entry, { now, failureReason: observed.failureReasons?.[entry.shipId] });
   }
   if (session.isOtherVersion === true) {
     return otherVersionStep(entry, observed.ships[entry.shipId]);
@@ -541,8 +542,10 @@ function restartWindowStep(entry: Entry, context: ReconcileContext): Step {
  * is crashed and its owner told. A session that failed its start still runs, so it
  * stops first.
  */
-function exitStep(entry: Entry, at: { now: Date; failedStart?: string }): Step {
+function exitStep(entry: Entry, at: { now: Date; failedStart?: string; failureReason?: string | undefined }): Step {
   const { now, failedStart } = at;
+  const reason = at.failureReason?.trim().replace(/\s+/gu, ' ');
+  const failureReason = reason === '' ? undefined : reason;
   const exits = [...exitsInWindow(entry.exits, now), now.toISOString()];
   const decision = decideRestart(exits, now);
   const stop: Action = { kind: 'stop', shipId: entry.shipId };
@@ -550,7 +553,7 @@ function exitStep(entry: Entry, at: { now: Date; failedStart?: string }): Step {
     case 'restart':
       return {
         entry: { ...withState(withoutLaunch(entry), { state: 'restarting', now }), exits, restartAt: decision.at.toISOString() },
-        actions: [...(failedStart === undefined ? [] : [stop]), { kind: 'report', shipId: entry.shipId, note: RESTARTING_NOTE }],
+        actions: [...(failedStart === undefined ? [] : [stop]), { kind: 'report', shipId: entry.shipId, note: failureReason === undefined ? RESTARTING_NOTE : `${RESTARTING_NOTE}: ${failureReason}` }],
         starts: 0,
       };
     case 'crashed':
@@ -558,8 +561,8 @@ function exitStep(entry: Entry, at: { now: Date; failedStart?: string }): Step {
         entry: { ...withState(withoutLaunch(entry), { state: 'crashed', now }), exits },
         actions: [
           stop,
-          { kind: 'report', shipId: entry.shipId, note: CRASHED_NOTE },
-          crashed(entry, { exits: exits.length, now, ...(failedStart !== undefined && { failedStart }) }),
+          { kind: 'report', shipId: entry.shipId, note: failureReason === undefined ? CRASHED_NOTE : `${CRASHED_NOTE}: ${failureReason}` },
+          crashed(entry, { exits: exits.length, now, ...(failedStart !== undefined && { failedStart }), ...(failureReason !== undefined && { failureReason }) }),
         ],
         starts: 0,
       };
@@ -567,13 +570,14 @@ function exitStep(entry: Entry, at: { now: Date; failedStart?: string }): Step {
 }
 
 /** What the ship's owner is told when a session's restart budget is spent, with why its last start failed when it did (#397): a human decides. */
-function crashed(entry: Entry, at: { exits: number; now: Date; failedStart?: string }): Action {
+function crashed(entry: Entry, at: { exits: number; now: Date; failedStart?: string; failureReason?: string }): Action {
   return {
     kind: 'crashed',
     shipId: entry.shipId,
     ...(entry.shipName !== undefined && { shipName: entry.shipName }),
     exits: at.exits,
     ...(at.failedStart !== undefined && { failedStart: at.failedStart }),
+    ...(at.failureReason !== undefined && { failureReason: at.failureReason }),
     idempotencyKey: `trierarch:crashed:${entry.shipId}:${at.now.toISOString()}`,
   };
 }

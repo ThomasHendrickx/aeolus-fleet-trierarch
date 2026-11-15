@@ -370,6 +370,7 @@ async function observe(state: TrierarchState, at: { deps: RunPassDeps; missingPl
   const folders = await deps.workspace.foldersUnderRoot();
   const ships: Record<string, Observed['ships'][string]> = {};
   const launches: Record<string, LaunchSeen> = {};
+  const failureReasons: Record<string, string> = {};
   const withoutIdentity: ShipId[] = [];
   const startProblems: Record<string, string> = {};
   const shipFoldersGone: ShipId[] = [];
@@ -387,6 +388,10 @@ async function observe(state: TrierarchState, at: { deps: RunPassDeps; missingPl
     }
     const { folder } = entry;
     const harness = missingPlugins.has(entry.harness) ? undefined : harnessOf(entry, deps);
+    if (entry.state === 'running' && session?.status === 'exited' && folder !== undefined && harness !== undefined) {
+      const reason = await harness.failureReason(sessionOf(entry, folder));
+      if (reason !== undefined) failureReasons[entry.shipId] = reason;
+    }
     // A crewing session's launch window (#382), and a final crew's first minute after a restart (#397).
     const { launchId } = entry;
     if ((entry.state === 'crewing' || entry.state === 'running') && entry.launchedAt !== undefined && launchId !== undefined && folder !== undefined && session !== undefined && harness !== undefined) {
@@ -417,7 +422,7 @@ async function observe(state: TrierarchState, at: { deps: RunPassDeps; missingPl
       ships[entry.shipId] = { inbox: await deps.fleet.inbox(crewToken), turn, isHolding, ...(isKeyNotReady && { isKeyNotReady }) };
     }
   }
-  return { sessions, folders, ships, launches, withoutIdentity, startProblems, shipFoldersGone };
+  return { sessions, folders, ships, launches, failureReasons, withoutIdentity, startProblems, shipFoldersGone };
 }
 
 function log(deps: RunPassDeps, logged: Omit<LoggedAction, 'time'>): void {
@@ -982,11 +987,11 @@ async function refuse(state: TrierarchState, at: CarryOut & { action: Extract<Ac
 /** A session's restart budget is spent (#397): its owner is told, in the words true for its reader. */
 async function crashed(at: CarryOut & { action: Extract<Action, { kind: 'crashed' }> }): Promise<void> {
   const { action, deps } = at;
-  const { shipId, shipName, exits, failedStart, idempotencyKey } = action;
+  const { shipId, shipName, exits, failedStart, failureReason, idempotencyKey } = action;
   const told = await reportTrouble(deps, {
     shipId,
     shipName,
-    text: (isForArgo) => crashText({ shipId, shipName }, { exits, isForArgo, ...(failedStart !== undefined && { failedStart }) }),
+    text: (isForArgo) => crashText({ shipId, shipName }, { exits, isForArgo, ...(failedStart !== undefined && { failedStart }), ...(failureReason !== undefined && { failureReason }) }),
     idempotencyKey,
   });
   log(deps, { shipId, ...(shipName !== undefined && { shipName }), action: 'crashed', outcome: `crashed, its restart budget spent; ${told} told` });
