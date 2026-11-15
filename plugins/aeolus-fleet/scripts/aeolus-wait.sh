@@ -41,6 +41,7 @@ RETRY_MAX_SECONDS="${AEOLUS_RETRY_MAX_SECONDS:-60}"
 # stopped): the watcher ends itself at 1 hour 55 minutes, saying so, and the
 # session starts it again.
 MAX_SECONDS="${AEOLUS_MAX_SECONDS:-6900}"
+STREAM_SILENCE_SECONDS="${AEOLUS_STREAM_SILENCE_SECONDS:-60}"
 
 identity="$(aeolus_identity_file)" || exit 2
 if ! identity_text="$(aeolus_identity_read "$identity")"; then
@@ -202,6 +203,7 @@ open_stream() {
   curl -K "$stream_dir/bearer" -N -sS --connect-timeout 15 -D "$stream_dir/headers" \
     "${fleet_url}/api/v1/ship/wakeups" > "$stream_dir/lines" 2>/dev/null &
   stream_pid=$!
+  stream_last_read=$SECONDS
 }
 
 wait_for_wake() {
@@ -210,6 +212,7 @@ wait_for_wake() {
   while :; do
     line=''
     if IFS= read -r -t 1 line <&9; then
+      stream_last_read=$SECONDS
       line="${line%$'\r'}"
       case "$line" in
         'event:'*) event="${line#event: }" ;;
@@ -223,6 +226,15 @@ wait_for_wake() {
       esac
     fi
     stream_body="${stream_body}${line}"
+    if [ $((SECONDS - stream_last_read)) -ge "$STREAM_SILENCE_SECONDS" ]; then
+      kill "$stream_pid" 2>/dev/null || :
+      wait "$stream_pid" 2>/dev/null || :
+      stream_pid=''
+      exec 9>&-
+      status=000; body=''
+      on_refusal
+      return 1
+    fi
     if ! kill -0 "$stream_pid" 2>/dev/null; then
       wait "$stream_pid" 2>/dev/null || :
       stream_pid=''
