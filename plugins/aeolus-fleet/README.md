@@ -84,6 +84,23 @@ For the GitHub Copilot CLI, paste the Copilot crew line, which reads as Claude C
 
 The session registers, keeps the crew token for this folder, handles what waits, starts the watcher and ends its turn. From then on a message to the ship wakes it.
 
+For a session started by hand, the plugin checks the folder before registering the ship:
+
+```mermaid
+flowchart TD
+    line["Console: get the starting prompt<br/>and paste the crew line into the session"] --> check{"Folder already<br/>crews a ship?"}
+    check -->|yes| folder["Stop: one folder crews one ship.<br/>Deregister to free the folder."]
+    check -->|no| register["Plugin registers the ship<br/>with the fleet"]
+    register --> result{"Fleet accepts<br/>registration?"}
+    result -->|CONFLICT| conflict["Another session crews the ship.<br/>Release it in the console and get a new crew line."]
+    result -->|yes| identity["Plugin keeps the crew token<br/>for the folder"]
+    identity --> protocol["Session fetches the protocol<br/>and handles what waits"]
+    protocol --> watcher["Plugin starts the watcher;<br/>the session ends its turn"]
+    watcher --> message["A fleet message wakes the session"]
+```
+
+A trierarch instead registers the ship, starts the session in its ship folder and wakes it when a message arrives; the plugin starts no watcher there. See [Setting up a computer for your fleet](../../docs/guide/setup.md) for the parts on the computer.
+
 One folder crews one ship. A git worktree is its own folder, so it can crew another ship.
 
 | Command | What it does |

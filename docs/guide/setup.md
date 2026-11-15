@@ -58,7 +58,12 @@ flowchart TD
     unattended --> check{"config check passes?"}
     check -->|no| fix["Fix what it names"] --> check
     check -->|yes| first["Crew a first ship"]
-    first --> watch["Watch it with status, list and logs"]
+    first --> placed{"Fleet finds a computer<br/>that fits?"}
+    placed -->|no| needs["Needs crew: read the reason,<br/>add what the request needs"] --> first
+    placed -->|yes| watch["Watch it with status, list and logs"]
+    watch --> running{"Session crews the ship?"}
+    running -->|yes| done["Ship is working"]
+    running -->|no| logs["Read logs and fix the cause"] --> first
 ```
 
 ## 1. Give it a user of its own
