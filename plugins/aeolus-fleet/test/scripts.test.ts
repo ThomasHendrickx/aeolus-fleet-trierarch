@@ -585,6 +585,27 @@ describe('aeolus-wait', () => {
 });
 
 describe('the watcher wake stream', () => {
+  it('reads a wake whose event line arrives across two read timeouts', async () => {
+    let sendTail = (): void => undefined;
+    const tailAfter = new Promise<void>((resolve) => { sendTail = resolve; });
+    fleet = await startRoutedStubFleet({
+      '/api/v1/ship/inbox': [inbox(1)],
+      '/api/v1/ship/pushReceive': [receiving(aDelivery())],
+      '/api/v1/ship/handed': [handedOk],
+    }, { wakeups: [{ status: 200, body: 'event: wa', tail: 'ke\ndata: {"reason":"open"}\n\n', tailAfter }] });
+    const stub = fleet;
+    crew(stub.url);
+    aTurnEnded();
+    const watcher = start('aeolus-wait.sh');
+    try {
+      await expect.poll(() => stub.streams.length).toBe(1);
+      await new Promise((resolve) => setTimeout(resolve, 2200));
+      sendTail();
+      await expect.poll(() => stub.calls.some((call) => call.path === '/api/v1/ship/handed'), { timeout: 4000 }).toBe(true);
+      expect((await watcher.done).status).toBe(0);
+    } finally { sendTail(); watcher.child.kill(); }
+  });
+
   it('retries a busy look without needing a second wake', async () => {
     fleet = await startRoutedStubFleet({
       '/api/v1/ship/inbox': [busy, inbox(1)],

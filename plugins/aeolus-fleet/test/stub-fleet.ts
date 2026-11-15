@@ -31,6 +31,8 @@ export interface StubFleet {
 
 /** Scripted wake streams; a closed one drops its connection after its body. */
 interface StubWakeup {
+  tail?: string;
+  tailAfter?: Promise<void>;
   status: number;
   body: string;
   isClosed?: boolean;
@@ -67,6 +69,7 @@ async function serve(answerFor: (call: StubCall) => StubAnswer, options: StubOpt
         response.writeHead(stream?.status ?? 200, { 'content-type': 'text/event-stream' });
         response.write(stream?.body ?? 'event: wake\ndata: {"reason":"open"}\n\n');
         response.flushHeaders();
+        if (stream?.tail !== undefined) { await stream.tailAfter; response.write(stream.tail); }
         if (stream?.isClosed === true) { response.end(); return; }
         // Existing hand-over tests use a core that keeps offering wake hints.
         if (stream === undefined || stream.keepAliveMilliseconds !== undefined) {
