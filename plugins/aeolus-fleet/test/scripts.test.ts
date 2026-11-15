@@ -120,7 +120,12 @@ const MESSAGE_ID = 'msg_01m4raygfdtsjfbnmpvqjznsyv';
  */
 const handOverLine = (deliveryId: string) =>
   `Aeolus handed a message for scout to this session: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it. ` +
-  `It is delivery ${deliveryId}: if its body is not in this turn by your next tool call, read it with "${SCRIPTS}aeolus-fleet.sh" delivery ${deliveryId}.\n`;
+  `It is delivery ${deliveryId}: if its body is not in this turn by your next tool call, read it with "\${AEOLUS_ROOT:-${dirname(SCRIPTS)}}/scripts/aeolus-fleet.sh" delivery ${deliveryId}.\n`;
+/** The script the line's read command runs, as the session's own shell resolves it, with the session's environment. */
+const readCommandScript = (line: string, sessionEnv: Record<string, string>) => {
+  const command = /read it with (".*") delivery /.exec(line)?.[1] ?? '';
+  return spawnSync('bash', ['-c', `printf %s ${command}`], { env: { PATH: process.env.PATH, ...sessionEnv } }).stdout.toString();
+};
 const PING_DELIVERY_ID = 'dlv_01m4rb0m3d6r4xgnmnhm1k8b2q';
 const HANDED_OVER = 'aeolus: a message for scout is handed to this session: it reaches you at your next tool call, or when you end your turn. Do not receive or ack it.\n';
 const NO_WAITS = { AEOLUS_BUSY_WAITS: '0 0 0 0' };
@@ -1790,6 +1795,20 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       expect(await hand()).toMatchObject({ status: 0, stdout: HAND_OVER_LINE });
       return fleet;
     }
+
+    it("names a read command that resolves to the host session's plugin, the one the trierarch runs (#342)", async () => {
+      await aTrierarchHandOver({});
+
+      expect(readCommandScript(HAND_OVER_LINE, {})).toBe(`${SCRIPTS}aeolus-fleet.sh`);
+    });
+
+    it("names a read command that resolves to a container session's own plugin, which the host's path is not in (#342)", async () => {
+      await aTrierarchHandOver({});
+      const containerRoot = '/home/ubuntu/.claude/plugins/cache/aeolus-fleet/aeolus-fleet/0.39.1';
+
+      // A Claude Code session's SessionStart hook exports AEOLUS_ROOT, its own plugin's root, for its commands.
+      expect(readCommandScript(HAND_OVER_LINE, { AEOLUS_ROOT: containerRoot })).toBe(`${containerRoot}/scripts/aeolus-fleet.sh`);
+    });
 
     it('reads the handed task for a permission question without taking or handing another message', async () => {
       const stub = await aTrierarchHandOver({ '/api/v1/ship/ack': [acknowledged] });
