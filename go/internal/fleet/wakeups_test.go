@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -99,13 +100,13 @@ func TestWakeStreamLooksForLostWakesWithoutReopening(t *testing.T) {
 	client := Client{URL: server.URL, wakeTiming: &wakeTiming{silence: 50 * time.Millisecond, safety: 20 * time.Millisecond}}
 	client.Watch(ctx, func(context.Context) error {
 		looks++
-		if looks == 3 {
+		if looks == 5 {
 			cancel()
 		}
 		return nil
 	})
-	if looks != 3 || opens.Load() != 1 {
-		t.Fatalf("looks = %d, opens = %d, want 3 and 1", looks, opens.Load())
+	if looks != 5 || opens.Load() != 1 {
+		t.Fatalf("looks = %d, opens = %d, want 5 and 1", looks, opens.Load())
 	}
 }
 
@@ -140,5 +141,16 @@ func TestWakeStreamCancellationClosesTheStreamWithoutReopening(t *testing.T) {
 	err := (Client{URL: server.URL}).Watch(ctx, func(context.Context) error { cancel(); return nil })
 	if opens.Load() != 1 || !errors.Is(err, context.Canceled) {
 		t.Fatalf("opens = %d, end = %v", opens.Load(), err)
+	}
+}
+
+func TestWakeStreamWrapsOpenErrors(t *testing.T) {
+	for _, url := range []string{":invalid", "unsupported://fleet"} {
+		t.Run(url, func(t *testing.T) {
+			_, err := (Client{URL: url}).watch(context.Background(), func(context.Context) error { return nil })
+			if err == nil || !strings.HasPrefix(err.Error(), "open wake stream: ") || errors.Unwrap(err) == nil {
+				t.Fatalf("watch(%q) = %v, want wrapped open wake stream error", url, err)
+			}
+		})
 	}
 }

@@ -585,6 +585,31 @@ describe('aeolus-wait', () => {
 });
 
 describe('the watcher wake stream', () => {
+  it.each(['empty', 'undeliverable', 'not in flight'])('looks again after a %s receive or hand-over without another wake', async (outcome) => {
+    fleet = await startRoutedStubFleet({
+      '/api/v1/ship/inbox': [inbox(1)],
+      '/api/v1/ship/pushReceive': [outcome === 'empty' ? { status: 200, body: { deliveries: [] } } : receiving(aDelivery()), receiving(anotherDelivery())],
+      '/api/v1/ship/handed': outcome === 'empty' ? [handedOk] : [outcome === 'undeliverable' ? handedAs('undeliverable') : notInFlight, handedOk],
+    }, { wakeups: [{ status: 200, body: 'event: wake\ndata: {}\n\n', keepAliveMilliseconds: 50 }] });
+    const stub = fleet;
+    crew(stub.url);
+    aTurnEnded();
+    const watcher = start('aeolus-wait.sh');
+    try {
+      await expect.poll(() => stub.calls.filter((call) => call.path === '/api/v1/ship/pushReceive').length, { timeout: 2000 }).toBe(2);
+      expect((await watcher.done).status).toBe(0);
+      expect(stub.streams).toHaveLength(1);
+    } finally { watcher.child.kill(); }
+  });
+
+  it('stops on LEASE_ENDED at stream open without retrying', async () => {
+    fleet = await startRoutedStubFleet({}, { wakeups: [{ status: 401, body: '{"code":"LEASE_ENDED","message":"released"}', isClosed: true }] });
+    crew(fleet.url);
+    expect((await start('aeolus-wait.sh').done).status).toBe(3);
+    expect(fleet.streams).toHaveLength(1);
+    expect(statSync(identityFile(), { throwIfNoEntry: false })).toBeUndefined();
+  });
+
   it('reads a wake whose event line arrives across two read timeouts', async () => {
     let sendTail = (): void => undefined;
     const tailAfter = new Promise<void>((resolve) => { sendTail = resolve; });
@@ -685,9 +710,9 @@ describe('the watcher wake stream', () => {
     const stub = fleet;
     crew(stub.url);
     aTurnEnded();
-    const watcher = start('aeolus-wait.sh', { env: { AEOLUS_SAFETY_SECONDS: '1', AEOLUS_STREAM_SILENCE_SECONDS: '2' } });
+    const watcher = start('aeolus-wait.sh', { env: { AEOLUS_SAFETY_SECONDS: '3', AEOLUS_STREAM_SILENCE_SECONDS: '1' } });
     try {
-      await expect.poll(() => inboxCalls(stub).length, { timeout: 4000 }).toBe(2);
+      await expect.poll(() => inboxCalls(stub).length, { timeout: 6000 }).toBe(2);
       expect((await watcher.done).status).toBe(0);
       expect(stub.streams).toHaveLength(1);
     } finally { watcher.child.kill(); }
