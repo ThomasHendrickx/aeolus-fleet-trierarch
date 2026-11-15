@@ -19,8 +19,8 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/usage"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/usage"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/workspace"
 )
 
