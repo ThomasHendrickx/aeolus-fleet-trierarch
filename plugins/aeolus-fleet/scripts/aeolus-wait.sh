@@ -209,9 +209,12 @@ open_stream() {
 }
 
 wait_for_wake() {
-  local line event='' stream_body=''
+  local line event='' stream_body='' pending=0 owed=0
   [ -n "$stream_pid" ] || open_stream
   while :; do
+    pending=0; owed=0
+    { read -r pending owed < "$waiting_file"; } 2>/dev/null
+    if [ "$owed" = 1 ] && aeolus_is_idle; then return 0; fi
     line=''
     if IFS= read -r -t 1 line <&9; then
       stream_last_read=$SECONDS
