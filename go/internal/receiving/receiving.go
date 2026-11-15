@@ -166,17 +166,17 @@ func (l Loop) handle(delivery Delivery) error {
 	return nil
 }
 
-func (l Loop) step(ctx context.Context) error {
+func (l Loop) step(ctx context.Context) (bool, error) {
 	deliveries, err := l.Ship.Receive(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	for _, delivery := range deliveries {
 		if err := l.handle(delivery); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return nil
+	return len(deliveries) > 0, nil
 }
 
 // watcher holds the own ship's stream while the loop looks on its hints.
@@ -204,14 +204,14 @@ func (l Loop) run(ctx context.Context, once bool) error {
 		}
 	}
 	for ctx.Err() == nil {
-		err := l.step(ctx)
+		hasDeliveries, err := l.step(ctx)
 		if err == nil {
 			if keyWait != 0 {
 				keyWait = 0
 				told(false)
 				l.Log("The fleet's key is reachable again: the trierarch's own ship receives again")
 			}
-			if once {
+			if once && !hasDeliveries {
 				return nil
 			}
 			continue

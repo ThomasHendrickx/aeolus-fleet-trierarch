@@ -533,8 +533,8 @@ func TestTheOwnShipReceivesOnlyWhenItsStreamCallsForALook(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ship := &aWatchedShip{aShip: aShip{cancel: cancel, answers: []answer{
-		{deliveries: []Delivery{a(pingContentType, "ping")}},
-		{deliveries: []Delivery{a("text/plain", "message")}},
+		{deliveries: []Delivery{a(pingContentType, "ping")}}, {},
+		{deliveries: []Delivery{a("text/plain", "message")}}, {},
 	}}}
 	Loop{Ship: ship, Log: func(string) {}, Pause: func(context.Context, time.Duration) {}}.Run(ctx)
 	if ship.watches != 1 || len(ship.ponged) != 1 || len(ship.acked) != 1 || ctx.Err() != nil {
