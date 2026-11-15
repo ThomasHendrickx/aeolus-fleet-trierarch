@@ -24,8 +24,8 @@
 set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
-# How long one inbox check waits while nothing waits; the fleet's maximum.
-WAIT_SECONDS="${AEOLUS_WAIT_SECONDS:-25}"
+# The plain call limit, also against core releases that still hold empty receives.
+CALL_SECONDS="${AEOLUS_CALL_MAX_SECONDS:-60}"
 # The pause between inbox checks while deliveries wait, since the check then
 # answers at once: the trierarch's pass interval.
 POLL_SECONDS="${AEOLUS_POLL_SECONDS:-5}"
@@ -79,7 +79,7 @@ crew_token="$(aeolus_identity_field "$identity_text" crewToken)"
 # the same number. <deliveryId> <what the log says>.
 hand_over() {
   local outcome
-  call /api/v1/ship/handed "$(aeolus_store_handing "$1")" $((WAIT_SECONDS + 15))
+  call /api/v1/ship/handed "$(aeolus_store_handing "$1")" "$CALL_SECONDS"
   if [ "$status" = 200 ]; then
     answered
     outcome="$(aeolus_json_string "$body" state)"
@@ -272,7 +272,7 @@ while :; do
     fi
   fi
   wait_for_wake || continue
-  call /api/v1/ship/inbox '{"waitSeconds":0}' 60
+  call /api/v1/ship/inbox '{"waitSeconds":0}' "$CALL_SECONDS"
   if [ "$status" != 200 ]; then
     on_refusal
     continue
@@ -295,7 +295,7 @@ while :; do
   if [ "$is_owed" = 1 ] && { aeolus_is_idle || { [ "$forced" -gt 0 ] && [ "$(aeolus_harness)" != codex ]; }; }; then
     printf '%s 0\n' "$waiting" > "$waiting_file"
     # Deliveries wait, so the push receive answers at once.
-    call /api/v1/ship/pushReceive '{"max":1}' $((WAIT_SECONDS + 15))
+    call /api/v1/ship/pushReceive '{"max":1}' "$CALL_SECONDS"
     if [ "$status" = 503 ] && [ "$(aeolus_json_string "$body" code)" = KEY_UNAVAILABLE ]; then
       on_key_unavailable
       continue
