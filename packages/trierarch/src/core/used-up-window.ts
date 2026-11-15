@@ -2,9 +2,12 @@ import type { HarnessUsage } from './read-usage.js';
 
 type Window = HarnessUsage['subscriptions'][number]['windows'][number];
 
-/** How long a window is, as a person says it: 5-hour, 7-day, or in minutes when it is neither. */
+/** How long a window is, as a person says it: 5-hour, weekly, or in minutes when it is neither. */
 function lengthOf(windowMinutes: number): string {
   const day = 24 * 60;
+  if (windowMinutes === 7 * day) {
+    return 'weekly';
+  }
   if (windowMinutes % day === 0) {
     return `${String(windowMinutes / day)}-day`;
   }

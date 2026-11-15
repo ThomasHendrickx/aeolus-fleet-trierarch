@@ -1369,9 +1369,11 @@ func usedUpReason(windows []usage.WindowReport, now time.Time) string {
 	return fmt.Sprintf("its %s subscription window is used up until %s UTC", windowLength(holding.WindowMinutes), until.UTC().Format("2006-01-02 15:04"))
 }
 
-// windowLength is how long a window is, as a person says it: 5-hour, 7-day, or in minutes when it is neither.
+// windowLength is how long a window is, as a person says it: 5-hour, weekly, or in minutes when it is neither.
 func windowLength(minutes float64) string {
 	switch {
+	case minutes == 7*24*60:
+		return "weekly"
 	case math.Mod(minutes, 24*60) == 0:
 		return fmt.Sprintf("%.0f-day", minutes/(24*60))
 	case math.Mod(minutes, 60) == 0:
