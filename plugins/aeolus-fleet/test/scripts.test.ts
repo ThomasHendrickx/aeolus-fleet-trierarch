@@ -127,7 +127,14 @@ const readCommandScript = (line: string, sessionEnv: Record<string, string>) => 
   return spawnSync('bash', ['-c', `printf %s ${command}`], { env: { PATH: process.env.PATH, ...sessionEnv } }).stdout.toString();
 };
 const PING_DELIVERY_ID = 'dlv_01m4rb0m3d6r4xgnmnhm1k8b2q';
-const HANDED_OVER = 'aeolus: a message for scout is handed to this session: it reaches you at your next tool call, or when you end your turn. Do not receive or ack it.\n';
+/**
+ * The line aeolus-wait.sh prints when it hands a message over: it names the delivery and how to read it, as the
+ * trierarch's hand-over line does, so a body dropped mid-turn can still be read (#428).
+ */
+const handedOverLine = (deliveryId: string) =>
+  `aeolus: a message for scout is handed to this session: it reaches you at your next tool call, or when you end your turn. Do not receive or ack it. ` +
+  `It is delivery ${deliveryId}: if its body is not in this turn by your next tool call, read it with "\${AEOLUS_ROOT:-${dirname(SCRIPTS)}}/scripts/aeolus-fleet.sh" delivery ${deliveryId}.\n`;
+const HANDED_OVER = handedOverLine(DELIVERY_ID);
 const NO_WAITS = { AEOLUS_BUSY_WAITS: '0 0 0 0' };
 
 /** A delivery as the fleet's receive answers it. */
@@ -640,6 +647,17 @@ describe("the watcher's wake rule: given only when the session is idle", () => {
     await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
   });
 
+  it("names a read command that resolves to the host session's plugin, and to a container session's own plugin, as the trierarch's line does (#428)", async () => {
+    fleet = await aWakingFleet([inbox(1)]);
+    crew(fleet.url);
+    aTurnEnded();
+    const line = (await start('aeolus-wait.sh').exited).stdout;
+    const containerRoot = '/home/ubuntu/.claude/plugins/cache/aeolus-fleet/aeolus-fleet/0.39.1';
+
+    expect(readCommandScript(line, {})).toBe(`${SCRIPTS}aeolus-fleet.sh`);
+    expect(readCommandScript(line, { AEOLUS_ROOT: containerRoot })).toBe(`${containerRoot}/scripts/aeolus-fleet.sh`);
+  });
+
   it('forgets what it saw with the ship', async () => {
     fleet = await aWakingFleet([inbox(1)]);
     crew(fleet.url);
@@ -721,7 +739,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       await aFirstToolCall();
       await aTurnEnds();
 
-      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: handedOverLine(anotherDelivery().deliveryId) });
       expect(store()).toEqual([`${anotherDelivery().deliveryId} handed`]);
     });
 
@@ -804,7 +822,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       crew(fleet.url);
       aTurnEnded();
 
-      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: handedOverLine(anotherDelivery().deliveryId) });
       expect(store()).toEqual([`${anotherDelivery().deliveryId} handed`]);
     });
 
@@ -817,7 +835,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       crew(fleet.url);
       aTurnEnded();
 
-      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: handedOverLine(anotherDelivery().deliveryId) });
       expect(store()).toEqual([`${anotherDelivery().deliveryId} handed`]);
     });
 
@@ -830,7 +848,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       crew(fleet.url);
       aTurnEnded();
 
-      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+      await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: handedOverLine(anotherDelivery().deliveryId) });
       expect(store()).toEqual([`${anotherDelivery().deliveryId} handed`]);
     });
 
@@ -1475,9 +1493,8 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
 
   describe('in Codex: the wake bridge hands a message over, and the prompt it queues confirms it (2b, Codex)', () => {
     const THREAD_ID = '01a103c9-80b0-7ab1-82e3-6f4a2f70ad86';
-    const QUEUED =
-      "Aeolus handed a message for scout to this task: it comes into this turn through the plugin's hooks, acknowledged. " +
-      'Do not receive or ack it. Handle it as the aeolus-fleet-crew skill says, then re-arm automatic wake-up before ending the turn.';
+    /** The watcher's own line, as the bridge queues it: it names the delivery and how to read it (#428). */
+    const QUEUED = handedOverLine(DELIVERY_ID).trimEnd();
 
     /** Runs a hook as Codex does: PLUGIN_ROOT and PLUGIN_DATA set, the task id in the payload, no Claude Code variables. */
     const aCodexHook = (script: string, payload: Record<string, unknown>) =>
@@ -1525,7 +1542,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
         expect(store()).toEqual([`${DELIVERY_ID} handed`]);
       });
 
-      it('queues one prompt to the task, saying the message comes into that turn through the hooks, without its content', async () => {
+      it("queues the watcher's line to the task: the message comes into that turn through the hooks, and the line names its delivery and how to read it (#428)", async () => {
         const { queued } = await aCodexHandOver({});
 
         expect(queued()).toBe(`queue --thread ${THREAD_ID} --message ${QUEUED}\n`);
@@ -2113,7 +2130,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
         crew(fleet.url);
         aPromptSubmitted();
 
-        await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+        await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: handedOverLine(FORCED_ID) });
         expect(store()).toEqual([`${FORCED_ID} handed`]);
       });
 
@@ -2132,7 +2149,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
         await aFirstToolCall();
         await aTurnEnds();
 
-        await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: HANDED_OVER });
+        await expect(start('aeolus-wait.sh').exited).resolves.toEqual({ status: 0, stdout: handedOverLine(FORCED_ID) });
         expect(handedBodies(stub).at(-1)).toBe(`{"deliveryId":"${FORCED_ID}","handOverNumber":1}`);
         expect(store()).toEqual([`${DELIVERY_ID} received`, `${FORCED_ID} handed`]);
       });
@@ -2565,7 +2582,7 @@ describe('the Codex wake bridge', () => {
     }).exited;
 
     expect(result.status).toBe(0);
-    expect(readFileSync(calls, 'utf8')).toContain(`queue --thread ${threadId} --message Aeolus handed a message for scout to this task:`);
+    expect(readFileSync(calls, 'utf8')).toContain(`queue --thread ${threadId} --message ${handedOverLine(DELIVERY_ID).trimEnd()}\n`);
     expect(readFileSync(calls, 'utf8')).not.toContain(CREW_TOKEN);
   });
 
