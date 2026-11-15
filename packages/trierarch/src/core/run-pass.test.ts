@@ -1880,12 +1880,12 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
   describe('a harness whose subscription window is used up (aeolus-fleet-trierarch#263)', () => {
     const FIVE_HOURS = 300;
     const WEEK = 10_080;
-    const windowOf = (windowMinutes: number, usedPercent: number, resetsAt: string) => ({ windowMinutes, usedPercent, resetsAt: new Date(resetsAt) });
+    const windowOf = (at: { windowMinutes: number; usedPercent: number; resetsAt: string }) => ({ ...at, resetsAt: new Date(at.resetsAt) });
     const RESET = '2026-10-06T11:00:00.000Z';
 
     it('is not offered until the window resets: its request is given back at once, with the window and when it resets, and the others go on', async () => {
       const trierarch = aTrierarch(WITH_CODEX);
-      trierarch.usage.subscriptions.set('codex', [windowOf(FIVE_HOURS, 100, RESET)]);
+      trierarch.usage.subscriptions.set('codex', [windowOf({ windowMinutes: FIVE_HOURS, usedPercent: 100, resetsAt: RESET })]);
       const codexShip = trierarch.fleet.commission('lookout');
       trierarch.fleet.request(codexShip, crewSettings({ harness: 'codex' }));
       const claudeShip = trierarch.fleet.commission('scout');
@@ -1902,7 +1902,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
 
     it('is offered again once the window resets', async () => {
       const trierarch = aTrierarch(WITH_CODEX);
-      trierarch.usage.subscriptions.set('codex', [windowOf(FIVE_HOURS, 100, RESET)]);
+      trierarch.usage.subscriptions.set('codex', [windowOf({ windowMinutes: FIVE_HOURS, usedPercent: 100, resetsAt: RESET })]);
       await trierarch.pass();
       trierarch.clock.advance(3 * 60 * MINUTE_MS);
       await trierarch.pass();
@@ -1912,7 +1912,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
 
     it('is offered while no window is used up', async () => {
       const trierarch = aTrierarch(WITH_CODEX);
-      trierarch.usage.subscriptions.set('codex', [windowOf(FIVE_HOURS, 99, RESET), windowOf(WEEK, 40, '2026-10-12T08:00:00.000Z')]);
+      trierarch.usage.subscriptions.set('codex', [windowOf({ windowMinutes: FIVE_HOURS, usedPercent: 99, resetsAt: RESET }), windowOf({ windowMinutes: WEEK, usedPercent: 40, resetsAt: '2026-10-12T08:00:00.000Z' })]);
 
       await trierarch.pass();
 
@@ -1921,7 +1921,7 @@ describe('the gaps the loop closes (docs/trierarch.md)', () => {
 
     it('names the window that resets last when several are used up', async () => {
       const trierarch = aTrierarch(WITH_CODEX);
-      trierarch.usage.subscriptions.set('codex', [windowOf(FIVE_HOURS, 100, RESET), windowOf(WEEK, 100, '2026-10-12T08:00:00.000Z')]);
+      trierarch.usage.subscriptions.set('codex', [windowOf({ windowMinutes: FIVE_HOURS, usedPercent: 100, resetsAt: RESET }), windowOf({ windowMinutes: WEEK, usedPercent: 100, resetsAt: '2026-10-12T08:00:00.000Z' })]);
 
       await trierarch.pass();
 

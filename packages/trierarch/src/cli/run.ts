@@ -181,7 +181,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   });
   const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configured.harnesses), prices: priceTableOf(configured.prices) });
   const sendReleasedUsage = createSendReleasedUsage({ fleet, usage, clock, logger, prices: priceTableOf(configured.prices), ...(crew.shipId !== undefined && { trierarchShipId: crew.shipId }), ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
-  const runPass = createRunPass({ fleet, harnesses, processes: sessions, folderProcesses, workspace, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets, modelLogins, sendReleasedUsage, trash, ...(configured.logins !== undefined && { logins: configured.logins }) });
+  const runPass = createRunPass({ fleet, harnesses, processes: sessions, folderProcesses, workspace, trust, state, setup, clock, logger, refuseModel, newLaunchId: randomUUID, sockets, modelLogins, sendReleasedUsage, trash, readUsage, ...(configured.logins !== undefined && { logins: configured.logins }) });
   // Set by the receive loop, read by each report of the trierarch's own ship.
   let isFleetKeyCutOff = false;
   const reportSelf = createReportSelf({ fleetKey: { isCutOff: () => isFleetKeyCutOff }, fleet, processes: sessions, trust, state, setup, readLoad, readUsage, clock, modelLogins, ...(configured.logins !== undefined && { logins: configured.logins }) });
