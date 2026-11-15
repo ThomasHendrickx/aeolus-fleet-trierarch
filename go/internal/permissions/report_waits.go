@@ -23,6 +23,7 @@ type shipReportWaits struct {
 	mu      sync.Mutex
 	before  Report
 	written Report
+	pending bool
 	open    []*Report
 }
 
@@ -40,8 +41,7 @@ func (w *ReportWaits) of(ship string) *shipReportWaits {
 	return waits
 }
 
-// begin writes the ask's waiting report. It answers no end when the report
-// could not be written or was replaced at once, so nothing is restored for it.
+// begin writes the ask's waiting report and tracks it even if verification fails.
 func (w *ReportWaits) begin(ctx context.Context, reports Reports, ship string, waiting Report) (func(context.Context) error, error) {
 	waits := w.of(ship)
 	waits.mu.Lock()
@@ -53,6 +53,10 @@ func (w *ReportWaits) begin(ctx context.Context, reports Reports, ship string, w
 	if ctx.Err() != nil {
 		return nil, errAskCancelled
 	}
+	if waits.pending && current.State == waits.written.State && current.Note == waits.written.Note {
+		waits.written = current
+		waits.pending = false
+	}
 	// The report a later ask finds is the one to restore when no ask of ours
 	// wrote it: either none is open, or a newer report replaced ours.
 	before := waits.before
@@ -62,18 +66,24 @@ func (w *ReportWaits) begin(ctx context.Context, reports Reports, ship string, w
 	if err = reports.WriteReport(context.WithoutCancel(ctx), ship, waiting); err != nil {
 		return nil, err
 	}
-	written, err := reports.ReadReport(context.WithoutCancel(ctx), ship)
-	if err != nil {
-		return nil, err
-	}
-	if written.State != waiting.State || written.Note != waiting.Note {
-		return nil, nil
-	}
 	ask := &waiting
 	waits.before = before
-	waits.written = written
+	waits.written = waiting
+	waits.pending = true
 	waits.open = append(waits.open, ask)
-	return func(ctx context.Context) error { return waits.end(ctx, reports, ship, ask) }, nil
+	end := func(ctx context.Context) error { return waits.end(ctx, reports, ship, ask) }
+	written, err := reports.ReadReport(context.WithoutCancel(ctx), ship)
+	if err != nil {
+		return end, err
+	}
+	if written.State != waiting.State || written.Note != waiting.Note {
+		waits.open = slices.DeleteFunc(waits.open, func(open *Report) bool { return open == ask })
+		waits.pending = false
+		return nil, nil
+	}
+	waits.written = written
+	waits.pending = false
+	return end, nil
 }
 
 // end closes one ask. The report moves to the most recent remaining ask, or
@@ -83,8 +93,18 @@ func (s *shipReportWaits) end(ctx context.Context, reports Reports, ship string,
 	defer s.mu.Unlock()
 	s.open = slices.DeleteFunc(s.open, func(open *Report) bool { return open == ask })
 	current, err := reports.ReadReport(ctx, ship)
-	if err != nil || current != s.written {
+	if err != nil {
 		return err
+	}
+	if s.pending {
+		if current.State != s.written.State || current.Note != s.written.Note {
+			return nil
+		}
+		s.written = current
+		s.pending = false
+	}
+	if current != s.written {
+		return nil
 	}
 	next := s.before
 	if len(s.open) > 0 {
@@ -93,9 +113,19 @@ func (s *shipReportWaits) end(ctx context.Context, reports Reports, ship string,
 			return nil
 		}
 	}
+	// A concurrent report between this read and the write can still be overwritten.
 	if err = reports.WriteReport(ctx, ship, next); err != nil || len(s.open) == 0 {
 		return err
 	}
-	s.written, err = reports.ReadReport(ctx, ship)
-	return err
+	s.written = next
+	s.pending = true
+	written, err := reports.ReadReport(ctx, ship)
+	if err != nil {
+		return err
+	}
+	if written.State == next.State && written.Note == next.Note {
+		s.written = written
+		s.pending = false
+	}
+	return nil
 }
