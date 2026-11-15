@@ -345,7 +345,7 @@ func (f *someFolderProcesses) StopIn(folder string) (int, error) {
 	if f.failStop {
 		return 0, errors.New("cannot stop what runs in " + folder)
 	}
-	if !f.workspace.made[folder] {
+	if !f.workspace.made[folder] && !strings.HasPrefix(folder, "/ships/") || slices.Contains(f.workspace.removed, folder) {
 		return 0, errors.New("stopped in " + folder + " after it was removed")
 	}
 	f.stoppedIn = append(f.stoppedIn, folder)
@@ -920,8 +920,35 @@ func TestARequestNoLongerAssignedHereEndsItsSessionAndIdentityAndRemovesItsClean
 	if !slices.Equal(pass.sessions.stopped, []string{scout}) || len(pass.harness.identities) != 0 || len(pass.store.state.Entries) != 0 {
 		t.Fatalf("stopped %q, identities %+v, entries %+v", pass.sessions.stopped, pass.harness.identities, pass.store.state.Entries)
 	}
-	if !slices.Equal(pass.processes.stoppedIn, []string{folder}) || !slices.Equal(pass.workspace.removed, []string{folder}) || len(pass.store.state.Orphans) != 0 {
+	if !slices.Equal(pass.processes.stoppedIn, []string{"/ships/" + scout}) || !slices.Equal(pass.workspace.removed, []string{folder}) || len(pass.store.state.Orphans) != 0 {
 		t.Fatalf("stopped in %q, removed %q, orphans %+v", pass.processes.stoppedIn, pass.workspace.removed, pass.store.state.Orphans)
+	}
+}
+
+func TestAReleaseStopsWhatRunsInTheWholeShipFolderOfAShipInAConfiguredFolderAndNothingInTheConfiguredFolder(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	entry := pass.store.state.Entries[scout]
+	entry.Workspace = reconciler.Workspace{Kind: "folder", Name: "notes"}
+	pass.store.state.Entries[scout] = entry
+	pass.fleet.requests = nil
+
+	pass.run(t)
+
+	if !slices.Equal(pass.processes.stoppedIn, []string{"/ships/" + scout}) {
+		t.Fatalf("stopped in %q", pass.processes.stoppedIn)
+	}
+}
+
+func TestAReleaseOfAShipCrewedBeforeTheShipFoldersStopsWhatRunsInItsWorktree(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewedBefore(t)
+	pass.fleet.requests = nil
+
+	pass.run(t)
+
+	if !slices.Equal(pass.processes.stoppedIn, []string{folder}) {
+		t.Fatalf("stopped in %q", pass.processes.stoppedIn)
 	}
 }
 
