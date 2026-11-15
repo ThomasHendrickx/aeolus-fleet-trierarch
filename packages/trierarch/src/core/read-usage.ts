@@ -25,6 +25,9 @@ interface SubscriptionRead {
   readonly tokens: number;
 }
 
+/** Whether a window of the reading reset since it was read: its figure is then older than its reset, and is read again whatever the work or interval (#117). */
+const isPastReset = (read: SubscriptionRead, now: Date): boolean => read.windows?.some(({ resetsAt }) => resetsAt.getTime() > read.at.getTime() && resetsAt.getTime() <= now.getTime()) === true;
+
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /** A ship's tokens added up per model and login over the hours, in the order they came: the report says no hours. */
@@ -48,6 +51,9 @@ const totalOf = (models: readonly ModelTokens[]): number => models.reduce((sum, 
  * subscription is read at start, then again only once 30 minutes passed and
  * the harness's ships did work since: Claude Code's read is a turn of its own.
  * A read that fails keeps what was read before.
+ * A window whose reset time passed since it was read is read again at the next
+ * pass, with no session running: a reported window is never older than its
+ * reset (#117).
  */
 export function createReadUsage(deps: { usage: UsagePort; state: StatePort; clock: Clock; logger: Pick<Logger, 'warn'>; harnesses: readonly string[]; prices: PriceTable }): ReadUsage {
   let ships: readonly ShipUsage[] = [];
@@ -55,6 +61,8 @@ export function createReadUsage(deps: { usage: UsagePort; state: StatePort; cloc
   /** Each harness's ships' tokens at the last read, so a subscription is read again only after work. */
   let tokensByHarness = new Map<string, number>();
   const subscriptions = new Map<string, SubscriptionRead>();
+  /** When each harness's subscription was last tried, so a read that keeps failing past a reset is tried every 5 minutes, not every pass. */
+  const triedAt = new Map<string, number>();
 
   const readTokens = async (): Promise<void> => {
     const { entries } = await deps.state.load();
@@ -86,9 +94,10 @@ export function createReadUsage(deps: { usage: UsagePort; state: StatePort; cloc
   const readSubscription = async (harness: string, now: Date): Promise<void> => {
     const tokens = tokensByHarness.get(harness) ?? 0;
     const last = subscriptions.get(harness);
-    if (last !== undefined && (now.getTime() - last.at.getTime() < SUBSCRIPTION_READ_INTERVAL_MS || tokens === last.tokens)) {
+    if (last !== undefined && !(isPastReset(last, now) && now.getTime() - (triedAt.get(harness) ?? 0) >= TOKENS_READ_INTERVAL_MS) && (now.getTime() - last.at.getTime() < SUBSCRIPTION_READ_INTERVAL_MS || tokens === last.tokens)) {
       return;
     }
+    triedAt.set(harness, now.getTime());
     const windows = await deps.usage.subscriptionOf(harness).catch((error: unknown) => {
       deps.logger.warn(`Could not read the ${harness} subscription: ${messageOf(error)}`);
       return undefined;
