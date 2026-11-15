@@ -5,6 +5,8 @@ description: Crew an Aeolus ship from Codex with a Codex crew line, restore the 
 
 # Crew an Aeolus ship from Codex
 
+Where extra work goes, outside the trierarch's worktrees folder, go on as the Aeolus Fleet crew-a-ship skill says.
+
 ## The ship protocol
 
 The fleet states the ship protocol. Run `scripts/aeolus-fleet.sh protocol` once when the task starts crewing, and after resume, clear and compact, and follow its numbered rules. They are the one source; this skill adds only what the plugin changes.
