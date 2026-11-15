@@ -22,6 +22,7 @@ func (h Harness) UsageLimit(entry reconciler.Entry) (occurrence string, reason s
 	defer file.Close()
 	lines := bufio.NewScanner(file)
 	lines.Buffer(make([]byte, 64*1024), 64*1024*1024)
+	isAssistantLimit := false
 	for lines.Scan() {
 		var event struct {
 			Type    string   `json:"type"`
@@ -44,25 +45,35 @@ func (h Harness) UsageLimit(entry reconciler.Entry) (occurrence string, reason s
 			continue
 		}
 		isError := event.Type == "result" && event.IsError || event.Type == "assistant" && event.Error == "rate_limit"
-		if !isError {
-			occurrence, reason = "", ""
-			continue
-		}
 		texts := append([]string{event.Result}, event.Errors...)
 		if event.Message != nil {
 			for _, block := range event.Message.Content {
 				texts = append(texts, block.Text)
 			}
 		}
-		for _, text := range texts {
-			if usageLimitMessage.MatchString(text) {
-				occurrence, reason = event.UUID, text
+		matched := ""
+		if isError {
+			for _, text := range texts {
+				if usageLimitMessage.MatchString(text) {
+					matched = text
+					break
+				}
+			}
+		}
+		if isError && event.Type == "result" && isAssistantLimit && occurrence != "" {
+			if matched != "" {
+				reason = matched
+			}
+		} else {
+			occurrence, reason = "", ""
+			if matched != "" {
+				occurrence, reason = event.UUID, matched
 				if occurrence == "" {
 					occurrence = fmt.Sprintf("%x", sha256.Sum256(lines.Bytes()))
 				}
-				break
 			}
 		}
+		isAssistantLimit = event.Type == "assistant" && occurrence != ""
 	}
 	return occurrence, reason
 }

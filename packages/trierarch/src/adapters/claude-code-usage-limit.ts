@@ -14,19 +14,22 @@ const LIMIT = /you(?:'|’)?ve hit your (?:usage )?limit|usage limit (?:reached|
 
 /** The latest turn's usage-limit error, never ordinary assistant text or an older, recovered stop. */
 export function claudeCodeUsageLimitIn(events: readonly string[]): UsageLimit | undefined {
-  for (const line of [...events].reverse()) {
+  let limit: UsageLimit | undefined;
+  let isAssistantLimit = false;
+  for (const line of events) {
     const parsed = eventSchema.safeParse(parsedLine(line));
     if (!parsed.success) { continue; }
     const event = parsed.data;
     if (event.type !== 'result' && event.type !== 'assistant' && event.type !== 'user') { continue; }
     const isError = event.type === 'result' ? event.is_error === true : event.type === 'assistant' && event.error === 'rate_limit';
-    if (!isError) { return undefined; }
-    const reason = [event.result, ...(event.errors ?? []), ...(event.message?.content.map((block) => block.text) ?? [])].find((text) => text !== undefined && LIMIT.test(text));
-    if (reason !== undefined) {
-      return { occurrence: event.uuid ?? createHash('sha256').update(line).digest('hex'), reason };
+    const reason = isError ? [event.result, ...(event.errors ?? []), ...(event.message?.content.map((block) => block.text) ?? [])].find((text) => text !== undefined && LIMIT.test(text)) : undefined;
+    // The assistant error and its following error result are the same stop, even across passes.
+    if (isError && event.type === 'result' && isAssistantLimit && limit !== undefined) {
+      limit = { ...limit, reason: reason ?? limit.reason };
+    } else {
+      limit = reason === undefined ? undefined : { occurrence: event.uuid ?? createHash('sha256').update(line).digest('hex'), reason };
     }
-    // An error result can carry only a subtype; its assistant error still explains the stop.
-    if (event.type !== 'result') { return undefined; }
+    isAssistantLimit = event.type === 'assistant' && limit !== undefined;
   }
-  return undefined;
+  return limit;
 }
