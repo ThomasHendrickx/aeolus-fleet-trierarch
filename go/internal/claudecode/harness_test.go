@@ -838,3 +838,14 @@ func TestABypassSessionGetsNeitherThePermissionServerNorThePromptFlag(t *testing
 		})
 	}
 }
+
+func TestAnEarlierFailureIsNotReportedAfterASuccessfulTurn(t *testing.T) {
+	harness, _, _ := aHarness(t)
+	entry := anEntry(t)
+	if err := os.WriteFile(harness.Events(scout), []byte(`{"type":"result","is_error":true,"result":"old error"}`+"\n"+`{"type":"result","is_error":false,"result":"ok"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := harness.FailureReason(entry); got != "" {
+		t.Fatalf("FailureReason = %q, want no earlier failure", got)
+	}
+}

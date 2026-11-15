@@ -279,6 +279,44 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.fleet.reports).toEqual([{ crewToken: trierarch.fleet.shipOf(shipId).crewToken, state: 'blocked', note: 'blocked: session crashed, restarting' }]);
   });
 
+  it.each([
+    { name: 'bearer token', reason: 'Authorization: Bearer synthetic-token', expected: 'Authorization: [redacted]' },
+    { name: 'API key', reason: 'key sk-synthetic123', expected: 'key [redacted]' },
+    { name: 'Aeolus secret', reason: 'aeolus_ct_v1_synthetic', expected: '[redacted]' },
+    { name: 'URL credential', reason: 'https://alice:synthetic@example.com/error', expected: 'https://[redacted]@example.com/error' },
+    { name: 'JSON body', reason: '{"error":"' + 'x'.repeat(4096) + '"}', expected: '{"error":"' + 'x'.repeat(189) + '…' },
+    { name: 'limit', reason: 'x'.repeat(200), expected: 'x'.repeat(200) },
+    { name: 'over limit', reason: 'x'.repeat(201), expected: 'x'.repeat(199) + '…' },
+  ])('cleans $name before reporting a session failure', async ({ reason, expected }) => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.failureReasons.set(shipId, reason);
+    await crashForGood(trierarch, shipId);
+    expect(trierarch.fleet.reports.at(-1)?.note).toBe('blocked: session crashed, restart budget spent: ' + expected);
+    expect(trierarch.fleet.toArgo.at(-1)?.text).toContain('- Its last failure: ' + expected + '\n');
+  });
+
+  it('reports the harness reason on one line when a session exits', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.failureReasons.set(shipId, 'provider refused\n  try again');
+    trierarch.processes.exit(shipId);
+
+    await trierarch.pass();
+
+    expect(trierarch.fleet.reports.at(-1)?.note).toBe('blocked: session crashed, restarting: provider refused try again');
+  });
+
+  it('includes the harness reason on one line in the crash report', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.harness.failureReasons.set(shipId, 'provider refused\n  try again');
+
+    await crashForGood(trierarch, shipId);
+
+    expect(trierarch.fleet.toArgo.at(-1)?.text).toContain('- Its last failure: provider refused try again');
+  });
+
   it('row 5: once the restart budget is spent the session is stopped, status crashed and a report sent to argo', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);

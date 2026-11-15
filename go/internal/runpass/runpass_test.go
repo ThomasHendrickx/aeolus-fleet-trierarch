@@ -192,8 +192,9 @@ type launched struct {
 
 // aHarness keeps identities by folder and the launches it made, and says each launch as the marker would.
 type aHarness struct {
-	sessions   *aSessions
-	identities map[string]plugin.Identity
+	failureReason string
+	sessions      *aSessions
+	identities    map[string]plugin.Identity
 	// kept is what the harness keeps for each ship beside its identity, by ship, as Claude Code keeps a ship's home in a container.
 	kept     map[string]bool
 	tokens   map[string]string
@@ -222,6 +223,8 @@ func (h *aHarness) UsageLimit(entry reconciler.Entry) (string, string) {
 	limit := h.limits[entry.ShipID]
 	return limit[0], limit[1]
 }
+
+func (h *aHarness) FailureReason(entry reconciler.Entry) string { return h.failureReason }
 
 func (h *aHarness) Activity(entry reconciler.Entry) (activity.Activity, bool) {
 	shown, ok := h.activities[entry.ShipID]
@@ -875,6 +878,49 @@ func TestARestartIsReportedOnTheShipsBehalf(t *testing.T) {
 	}
 }
 
+func TestFailureReasonsAreCleanedBeforeReporting(t *testing.T) {
+	for _, test := range []struct{ name, reason, want string }{
+		{"bearer token", "Authorization: Bearer synthetic-token", "Authorization: [redacted]"},
+		{"API key", "key sk-synthetic123", "key [redacted]"},
+		{"Aeolus secret", "aeolus_ct_v1_synthetic", "[redacted]"},
+		{"URL credential", "https://alice:synthetic@example.com/error", "https://[redacted]@example.com/error"},
+		{"JSON body", "{\"error\":\"" + strings.Repeat("x", 4096) + "\"}", "{\"error\":\"" + strings.Repeat("x", 189) + "…"},
+		{"limit", strings.Repeat("x", 200), strings.Repeat("x", 200)},
+		{"over limit", strings.Repeat("x", 201), strings.Repeat("x", 199) + "…"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			pass := aRunPass(t)
+			pass.exitedASixthTime(t)
+			pass.harness.failureReason = test.reason
+			pass.run(t)
+			if len(pass.fleet.told) != 1 || !strings.Contains(pass.fleet.told[0].text, "- Its last failure: "+test.want+"\n") {
+				t.Fatalf("failure report did not contain cleaned reason")
+			}
+		})
+	}
+}
+
+func TestADeadSessionReportsTheHarnessReasonOnOneLine(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	pass.harness.failureReason = "provider refused\n  try again"
+	pass.sessions.observed = []sessions.Observed{{ShipID: scout, Status: "exited"}}
+	pass.run(t)
+	if !slices.Contains(pass.fleet.calls, "report aeolus_ct_v1_scout blocked blocked: session crashed, restarting: provider refused try again") {
+		t.Fatalf("calls %q", pass.fleet.calls)
+	}
+}
+
+func TestACrashReportIncludesTheHarnessReasonOnOneLine(t *testing.T) {
+	pass := aRunPass(t)
+	pass.exitedASixthTime(t)
+	pass.harness.failureReason = "provider refused\n  try again"
+	pass.run(t)
+	if len(pass.fleet.told) != 1 || !strings.Contains(pass.fleet.told[0].text, "- Its last failure: provider refused try again") {
+		t.Fatalf("told %+v", pass.fleet.told)
+	}
+}
+
 func TestAReleaseStopsTheSessionEndsTheLeaseRemovesTheWorktreeThenConfirms(t *testing.T) {
 	pass := aRunPass(t)
 	pass.crewed(t)
@@ -1505,7 +1551,7 @@ func TestACrashTellsArgoWhenItOwnsTheShip(t *testing.T) {
 	pass.run(t)
 
 	key := "trierarch:crashed:" + scout + ":2026-11-04T12:00:00.000Z"
-	want := []told{{to: "argo", key: key, text: notices.Crash(notices.Ship{ID: scout, Name: "scout"}, 6, "", true)}}
+	want := []told{{to: "argo", key: key, text: notices.Crash(notices.Ship{ID: scout, Name: "scout"}, 6, "", true, "")}}
 	if !reflect.DeepEqual(pass.fleet.told, want) {
 		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
 	}
@@ -1533,7 +1579,7 @@ func TestACrashTellsAPersonWhoOwnsTheShipThatArgoCanRestartIt(t *testing.T) {
 
 	pass.run(t)
 
-	want := []told{{to: "shp_owner", key: "trierarch:crashed:" + scout + ":2026-11-04T12:00:00.000Z", text: notices.Crash(notices.Ship{ID: scout, Name: "scout"}, 6, "", false)}}
+	want := []told{{to: "shp_owner", key: "trierarch:crashed:" + scout + ":2026-11-04T12:00:00.000Z", text: notices.Crash(notices.Ship{ID: scout, Name: "scout"}, 6, "", false, "")}}
 	if !reflect.DeepEqual(pass.fleet.told, want) {
 		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
 	}
@@ -1547,7 +1593,7 @@ func TestACrashTheFleetRefusesToTheOwnerIsToldToArgoWithWhyAndLogged(t *testing.
 
 	pass.run(t)
 
-	report := notices.Crash(notices.Ship{ID: scout, Name: "scout"}, 6, "", true)
+	report := notices.Crash(notices.Ship{ID: scout, Name: "scout"}, 6, "", true, "")
 	want := []told{{to: "argo", key: "trierarch:crashed:" + scout + ":2026-11-04T12:00:00.000Z:owner-unreachable", text: notices.OwnerUnreachable(report, "thomas", "FORBIDDEN", "The network rules do not allow this send")}}
 	if !reflect.DeepEqual(pass.fleet.told, want) {
 		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)

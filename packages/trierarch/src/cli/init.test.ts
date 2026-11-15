@@ -28,6 +28,10 @@ let nextCrewToken: string;
 let endedLeases: Set<string>;
 /** Whether the trierarch's ship is crewed already, by a setup line run on another computer. */
 let isCrewedElsewhere: boolean;
+/** What the fleet answers register with when it refuses, other than being crewed already. */
+let registerRefusal: FleetRefusal | undefined;
+/** What whoami fails with other than an ended lease, as a network failure. */
+let whoamiFailure: Error | undefined;
 let service: FakeService;
 let repository: string;
 let codex: FakeCodexSetup;
@@ -157,6 +161,8 @@ beforeEach(() => {
   nextCrewToken = 'aeolus_ct_v1_trierarch';
   endedLeases = new Set();
   isCrewedElsewhere = false;
+  registerRefusal = undefined;
+  whoamiFailure = undefined;
   service = new FakeService();
   saying = [{ pid: 2, version: '0.21.0' }];
   reads = 0;
@@ -186,11 +192,16 @@ function init(flags: Partial<InitFlags>, prompter: Prompter = new ScriptedPrompt
         if (isCrewedElsewhere) {
           return Promise.reject(new FleetRefusal('CONFLICT', 'machine-1 is crewed: a session claims a ship only while it awaits crew'));
         }
+        if (registerRefusal !== undefined) {
+          return Promise.reject(registerRefusal);
+        }
         registered.push({ fleetUrl, ...crew });
         return Promise.resolve({ crewToken: nextCrewToken });
       },
       whoami: () =>
-        crewToken === undefined || endedLeases.has(crewToken)
+        whoamiFailure !== undefined
+          ? Promise.reject(whoamiFailure)
+          : crewToken === undefined || endedLeases.has(crewToken)
           ? Promise.reject(new FleetRefusal('LEASE_ENDED', 'the lease of this crew token has ended'))
           : Promise.resolve({ shipId: registered[0]?.shipId ?? newId('ship'), name: 'machine-1' }),
     }),
@@ -414,15 +425,48 @@ describe('aeolus-trierarch init, the whole setup', () => {
     expect(report.said.join('\n')).toContain('aeolus-trierarch install');
   });
 
-  it('says how to go on when its ship is crewed already, from a setup line run on another computer, and keeps no crew file (aeolus-fleet#1236)', async () => {
+  it('says what happened and what to run when its ship is crewed already and this machine holds no crew token, whether an earlier setup here stopped or another computer set it up, and keeps no crew file (aeolus-fleet#1236)', async () => {
     isCrewedElsewhere = true;
     const shipId = newId('ship');
     const pluginShipId = newId('ship');
 
     await expect(init({ fleetUrl: FLEET_URL, shipId, pluginShipId, secret: SECRET, isYes: true })).rejects.toThrow(
-      `${shipId} is crewed already: its setup line ran on another computer, or there as another user. Run that setup line there again to finish its setup, or Release ${shipId} on its page in the console and run init here with its new secret: npx @aeolus-fleet/trierarch init --fleet-url ${FLEET_URL} --ship-id ${shipId} --plugin-ship-id ${pluginShipId} --secret <its new secret>`,
+      `${shipId} is crewed already, and this computer holds no crew token for it. Either an earlier setup here stopped before it saved the crew token, or the ship was set up on another computer or as another user. To crew it from here, Release ${shipId} on its page in the console and run init here with its new secret: npx @aeolus-fleet/trierarch init --fleet-url ${FLEET_URL} --ship-id ${shipId} --plugin-ship-id ${pluginShipId} --secret <its new secret>. If it is set up elsewhere, run that setup line there again instead.`,
     );
     expect(existsSync(paths.crewToken)).toBe(false);
+  });
+
+  it('says the fleet does not take the secret, and what to run, when the fleet refuses an old or wrong secret', async () => {
+    registerRefusal = new FleetRefusal('UNAUTHORIZED', 'no such ship or secret');
+    const shipId = newId('ship');
+
+    await expect(init({ fleetUrl: FLEET_URL, shipId, secret: SECRET, isYes: true })).rejects.toThrow(
+      `The fleet at ${FLEET_URL} does not accept this secret for ${shipId}: it is wrong, or it is an old one the fleet no longer takes. Copy the ship's current secret from its page in the console (Release ${shipId} there for a new one), then run init here again: npx @aeolus-fleet/trierarch init --fleet-url ${FLEET_URL} --ship-id ${shipId} --secret <its current secret>`,
+    );
+    expect(existsSync(paths.crewToken)).toBe(false);
+  });
+
+  it('says what it could not check, that nothing changed and what to run when the fleet cannot be reached while it checks the lease', async () => {
+    const shipId = newId('ship');
+    await init({ fleetUrl: FLEET_URL, shipId, secret: SECRET, isYes: true });
+    whoamiFailure = new Error(`The fleet at ${FLEET_URL} cannot be reached: fetch failed`);
+
+    await expect(init({ fleetUrl: FLEET_URL, shipId, secret: SECRET, isYes: true })).rejects.toThrow(
+      `Could not check whether this machine still crews ${shipId} at ${FLEET_URL}: The fleet at ${FLEET_URL} cannot be reached: fetch failed. Nothing was changed. Check that this computer is online and the fleet is up, then run the setup line again.`,
+    );
+  });
+
+  it('changes nothing on this machine when the fleet cannot be reached while it checks the lease', async () => {
+    const shipId = newId('ship');
+    await init({ fleetUrl: FLEET_URL, shipId, secret: SECRET, isYes: true });
+    const crewFile = readFileSync(paths.crewToken, 'utf8');
+    const configuration = readFileSync(paths.config, 'utf8');
+    const done = [...service.done];
+    whoamiFailure = new Error(`The fleet at ${FLEET_URL} cannot be reached: fetch failed`);
+
+    await expect(init({ fleetUrl: FLEET_URL, shipId, secret: SECRET, isYes: true })).rejects.toThrow('Nothing was changed.');
+
+    expect({ crewFile: readFileSync(paths.crewToken, 'utf8'), configuration: readFileSync(paths.config, 'utf8'), done: service.done, registered: registered.length }).toEqual({ crewFile, configuration, done, registered: 1 });
   });
 
   it('says it registers the ship at the fleet before it calls the fleet, so a slow fleet shows what it waits on', async () => {

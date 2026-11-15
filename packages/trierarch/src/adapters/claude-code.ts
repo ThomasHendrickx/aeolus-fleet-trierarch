@@ -178,6 +178,7 @@ export function userLine(prompt: string): string {
 export function claudeCodeErrorIn(events: readonly string[]): string | undefined {
   for (const line of [...events].reverse()) {
     const event = parsedLine(line);
+    if (typeof event === 'object' && event !== null && Reflect.get(event, 'type') === 'result' && Reflect.get(event, 'is_error') === false) return undefined;
     if (typeof event === 'object' && event !== null && Reflect.get(event, 'type') === 'result' && Reflect.get(event, 'is_error') === true) {
       const result: unknown = Reflect.get(event, 'result');
       const subtype: unknown = Reflect.get(event, 'subtype');
@@ -285,9 +286,10 @@ export function createClaudeCodeHarness(options: {
     marksLaunches: () => createLaunchMarks(plugin).isMarking(),
     // Claude Code is offered wherever its plugin is: no build or runtime of it is held back.
     notOfferedReason: () => Promise.resolve(undefined),
-    // The marker says what the session did; the last error event names why a start shows none (H13).
     usageLimitOf: async ({ shipId }) => claudeCodeUsageLimitIn(await sessions.events(shipId)),
     activityOf: async ({ shipId }) => sessionActivityOf({ sessions, shipId, read: claudeCodeActivityIn }),
+    failureReason: async ({ shipId }) => claudeCodeErrorIn(await sessions.events(shipId)),
+    // The marker says what the session did; the last error event names why a start shows none (H13).
     launchSeen: async ({ shipId, folder, shipFolder, launchId, model }) => {
       const marker = await marksOf(filesOf({ shipId, ...(shipFolder !== undefined && { shipFolder }) })).read({ folder, launchId });
       if (marker?.refused !== undefined) {

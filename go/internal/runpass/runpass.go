@@ -76,6 +76,8 @@ type Harness interface {
 	// Launch starts the entry's session in its folder, with its first prompt on a first start and the wake otherwise.
 	Launch(entry reconciler.Entry, isFirstStart bool, launchID string) error
 	LaunchSeen(entry reconciler.Entry) reconciler.LaunchSeen
+	// FailureReason is the latest failed turn reason; a later success clears it.
+	FailureReason(entry reconciler.Entry) string
 	WriteIdentity(entry reconciler.Entry, identity plugin.Identity, crewToken string) error
 	HasIdentity(entry reconciler.Entry) bool
 	DeleteIdentity(entry reconciler.Entry) error
@@ -478,7 +480,7 @@ func (p Pass) crewFailed(held reconciler.State, shipID string, failure error) re
 
 // observe is what runs: the sessions, what each in its launch window did, and for each entry whose session runs its inbox and turn. An inbox is watched only while its session runs, a crewing one from the moment its session runs (#473); its socket is opened again, as after the trierarch stopped, since its session keeps running and calls over it (decision 0026).
 func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reconciler.Observed, map[string]string, error) {
-	observed := reconciler.Observed{Sessions: []reconciler.Session{}, Launches: map[string]reconciler.LaunchSeen{}, Ships: map[string]reconciler.Seen{}, StartProblems: map[string]string{}}
+	observed := reconciler.Observed{Sessions: []reconciler.Session{}, Launches: map[string]reconciler.LaunchSeen{}, Ships: map[string]reconciler.Seen{}, StartProblems: map[string]string{}, FailureReasons: map[string]string{}}
 	versions := map[string]string{}
 	statusOf := map[string]string{}
 	for _, session := range running {
@@ -502,6 +504,9 @@ func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reco
 		if isCrewed && entry.ShipFolder != "" && !p.Workspace.HasShipFolder(entry.ShipFolder) {
 			observed.ShipFoldersGone = append(observed.ShipFoldersGone, shipID)
 			continue
+		}
+		if entry.State == "running" && status == reconciler.SessionExited {
+			observed.FailureReasons[shipID] = harness.FailureReason(entry)
 		}
 		if entry.LaunchedAt != "" && status == reconciler.SessionRunning {
 			launch := harness.LaunchSeen(entry)
@@ -1163,7 +1168,7 @@ const argoName = "argo"
 func (p Pass) crashed(action reconciler.Action) error {
 	ship := notices.Ship{ID: action.ShipID, Name: action.ShipName}
 	told, err := p.reportTrouble(ship, action.Key, func(isForArgo bool) string {
-		return notices.Crash(ship, action.Exits, action.FailedStart, isForArgo)
+		return notices.Crash(ship, action.Exits, action.FailedStart, isForArgo, action.FailureReason)
 	})
 	if err != nil {
 		return err

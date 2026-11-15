@@ -155,13 +155,18 @@ type FleetAt = (fleetUrl: string, crewToken?: string) => Pick<RestFleet, 'regist
 async function registerShip(at: { fleetAt: FleetAt; prompter: Prompter; fleetUrl: string; shipId: ShipId; secret: string; pluginShipId: ShipId | undefined }): Promise<string> {
   const { fleetUrl, shipId, pluginShipId } = at;
   at.prompter.say(`Registering ${shipId} at ${fleetUrl}...`);
+  const line = `npx @aeolus-fleet/trierarch init --fleet-url ${fleetUrl} --ship-id ${shipId}${pluginShipId === undefined ? '' : ` --plugin-ship-id ${pluginShipId}`}`;
   try {
     return (await at.fleetAt(fleetUrl).registerSelf({ shipId, secret: at.secret })).crewToken;
   } catch (error) {
     if (error instanceof FleetRefusal && error.code === 'CONFLICT') {
-      const line = `npx @aeolus-fleet/trierarch init --fleet-url ${fleetUrl} --ship-id ${shipId}${pluginShipId === undefined ? '' : ` --plugin-ship-id ${pluginShipId}`} --secret <its new secret>`;
       throw new TrierarchFileError(
-        `${shipId} is crewed already: its setup line ran on another computer, or there as another user. Run that setup line there again to finish its setup, or Release ${shipId} on its page in the console and run init here with its new secret: ${line}`,
+        `${shipId} is crewed already, and this computer holds no crew token for it. Either an earlier setup here stopped before it saved the crew token, or the ship was set up on another computer or as another user. To crew it from here, Release ${shipId} on its page in the console and run init here with its new secret: ${line} --secret <its new secret>. If it is set up elsewhere, run that setup line there again instead.`,
+      );
+    }
+    if (error instanceof FleetRefusal && error.code === 'UNAUTHORIZED') {
+      throw new TrierarchFileError(
+        `The fleet at ${fleetUrl} does not accept this secret for ${shipId}: it is wrong, or it is an old one the fleet no longer takes. Copy the ship's current secret from its page in the console (Release ${shipId} there for a new one), then run init here again: ${line} --secret <its current secret>`,
       );
     }
     throw error;
@@ -169,15 +174,17 @@ async function registerShip(at: { fleetAt: FleetAt; prompter: Prompter; fleetUrl
 }
 
 /** Whether the kept crew token still holds the lease: it no longer does once the ship was released. */
-async function isLeaseHeld(fleet: Pick<RestFleet, 'whoami'>): Promise<boolean> {
+async function isLeaseHeld(at: { fleet: Pick<RestFleet, 'whoami'>; shipId: ShipId; fleetUrl: string }): Promise<boolean> {
   try {
-    await fleet.whoami();
+    await at.fleet.whoami();
     return true;
   } catch (error) {
     if (isLeaseEnded(error)) {
       return false;
     }
-    throw error;
+    throw new TrierarchFileError(
+      `Could not check whether this machine still crews ${at.shipId} at ${at.fleetUrl}: ${error instanceof Error ? error.message : String(error)}. Nothing was changed. Check that this computer is online and the fleet is up, then run the setup line again.`,
+    );
   }
 }
 
@@ -380,7 +387,7 @@ export async function initTrierarch(input: {
     let { crewToken } = crew;
     if (shipId !== undefined && isSetupLineAgain) {
       prompter.say(`Checking that this machine still crews ${shipId} at ${fleetUrl}...`);
-      if (await isLeaseHeld(input.fleetAt(fleetUrl, crewToken))) {
+      if (await isLeaseHeld({ fleet: input.fleetAt(fleetUrl, crewToken), shipId, fleetUrl })) {
         said.push(`The trierarch crews ${shipId} at ${fleetUrl} already, so init registers nothing and goes on with the rest of the setup.`);
       } else {
         const secret = flags.secret ?? (await prompter.secret(`${shipId} was released since this machine registered it. Its new secret (aeolus_sk_v1_..., not shown as you type)?`));

@@ -241,6 +241,11 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 }
 
 // LaunchSeen is what the session did in its launch window, as its marker says; with no activity, the cause its last error event gives (H13).
+// FailureReason is the last failure the harness reported.
+func (h Harness) FailureReason(entry reconciler.Entry) string {
+	return errorIn(h.Events(entry.ShipID))
+}
+
 func (h Harness) LaunchSeen(entry reconciler.Entry) reconciler.LaunchSeen {
 	seen := h.pluginOf(entry).LaunchSeen(entry.Folder, entry.LaunchID)
 	if seen.IsRefused {
@@ -269,7 +274,11 @@ func errorIn(events string) string {
 			Result  any    `json:"result"`
 			Subtype string `json:"subtype"`
 		}
-		if json.Unmarshal([]byte(lines.Text()), &event) != nil || event.Type != "result" || !event.IsError {
+		if json.Unmarshal([]byte(lines.Text()), &event) != nil || event.Type != "result" {
+			continue
+		}
+		if !event.IsError {
+			cause = ""
 			continue
 		}
 		if result, ok := event.Result.(string); ok && strings.TrimSpace(result) != "" {
