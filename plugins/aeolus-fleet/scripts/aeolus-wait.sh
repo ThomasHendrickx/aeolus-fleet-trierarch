@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The watcher: started by the session as a background task before it ends its
-# turn. It asks the fleet's inbox check, which claims nothing and waits up to
-# 25 seconds per call, and exits only when there is something to say, which
-# wakes the session. No tokens are spent while it waits.
+# turn. It holds the ship's wake stream and looks at the inbox on each wake,
+# at open and every five minutes. It exits when it has a hand-over to report,
+# which wakes the session. No model tokens are spent while it waits.
 #
 # The wake hands one message over (#756), given only when the turn marker says
 # the session is idle, whenever deliveries wait, or at once while a forced one
@@ -34,7 +34,7 @@ POLL_SECONDS="${AEOLUS_POLL_SECONDS:-5}"
 # cache. The watcher keeps watching: the delivery waits pending.
 KEY_WAIT_SECONDS="${AEOLUS_KEY_WAIT_SECONDS:-5}"
 KEY_WAIT_MAX_SECONDS="${AEOLUS_KEY_WAIT_MAX_SECONDS:-300}"
-# The first pause after a failed call; it doubles up to the most.
+# A random first pause after a drop or failed call; it doubles while core is down.
 RETRY_SECONDS="${AEOLUS_RETRY_SECONDS:-$((1 + RANDOM % 5))}"
 RETRY_MAX_SECONDS="${AEOLUS_RETRY_MAX_SECONDS:-60}"
 # A background task runs at most 2 hours (in a cloud session it is then
@@ -213,6 +213,7 @@ open_stream() {
   mkfifo "$stream_dir/lines"
   : > "$stream_dir/headers"
   stream_is_open=0
+  stream_fragment=''
   exec 9<> "$stream_dir/lines"
   aeolus_bearer_config "$crew_token" > "$stream_dir/bearer"
   curl -K "$stream_dir/bearer" -N -sS --connect-timeout 15 -D "$stream_dir/headers" \
@@ -233,6 +234,8 @@ wait_for_wake() {
     line=''; has_line=0
     if IFS= read -r -t 1 line <&9; then
       has_line=1
+      line="${stream_fragment}${line}"
+      stream_fragment=''
       stream_last_read=$SECONDS
       line="${line%$'\r'}"
       case "$line" in
@@ -245,6 +248,10 @@ wait_for_wake() {
           event=''
           ;;
       esac
+    else
+      if [ -n "$line" ]; then stream_last_read=$SECONDS; fi
+      stream_fragment="${stream_fragment}${line}"
+      line=''
     fi
     if [ "$SECONDS" -ge "$stream_next_look" ]; then
       stream_next_look=$((SECONDS + SAFETY_SECONDS))
@@ -270,7 +277,7 @@ wait_for_wake() {
       stream_pid=''
       exec 9>&-
       status="$(sed -n 's/^HTTP[^ ]* \([0-9][0-9][0-9]\).*/\1/p' "$stream_dir/headers" | tail -n 1)"
-      body="$stream_body"
+      body="${stream_body}${stream_fragment}"
       on_refusal
       return 1
     fi
