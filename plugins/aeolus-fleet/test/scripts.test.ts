@@ -648,6 +648,26 @@ describe('the watcher wake stream', () => {
     } finally { watcher.child.kill(); }
   });
 
+  it('doubles failed stream open backoff up to 60 seconds', async () => {
+    const bin = join(data, 'bin');
+    mkdirSync(bin);
+    const sleep = join(bin, 'sleep');
+    const waits = join(data, 'waits');
+    writeFileSync(sleep, '#!/usr/bin/env bash\nprintf "%s\\n" "$1" >> "$AEOLUS_TEST_WAITS"\n');
+    chmodSync(sleep, 0o700);
+    fleet = await startRoutedStubFleet({}, { wakeups: [
+      ...Array.from({ length: 8 }, () => ({ status: 500, body: '{"code":"INTERNAL_ERROR"}\n', isClosed: true })),
+      { status: 200, body: 'event: end\ndata: {"code":"LEASE_ENDED"}\n\n', isClosed: true },
+    ] });
+    crew(fleet.url);
+    const result = await start('aeolus-wait.sh', { env: {
+      PATH: `${bin}:${process.env.PATH ?? ''}`, AEOLUS_TEST_WAITS: waits, AEOLUS_RETRY_SECONDS: '1',
+    } }).done;
+    expect(result.status).toBe(3);
+    expect(readFileSync(waits, 'utf8').trim().split('\n')).toEqual(['1', '2', '4', '8', '16', '32', '60', '60']);
+    expect(fleet.streams).toHaveLength(9);
+  });
+
   it('reopens a dropped stream with the initial spread again after core answers', async () => {
     fleet = await startRoutedStubFleet({}, { wakeups: [
       { status: 503, body: '{"code":"SERVICE_UNAVAILABLE"}\n', isClosed: true },
