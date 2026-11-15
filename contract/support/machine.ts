@@ -532,16 +532,19 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
         .filter((line) => line !== ''),
     remove: async () => {
       // uninstall stops every session and the service, as it does on a machine; the service's pid is ended too when it did not.
-      await trierarch(['uninstall']);
-      const pid = servicePid();
-      if (pid !== undefined) {
-        try {
-          process.kill(pid, 'SIGKILL');
-        } catch {
-          // Ended already.
+      try {
+        await trierarch(['uninstall']);
+        const pid = servicePid();
+        if (pid !== undefined) {
+          try {
+            process.kill(pid, 'SIGKILL');
+          } catch {
+            // Ended already.
+          }
         }
+      } finally {
+        rmSync(root, { recursive: true, force: true });
       }
-      rmSync(root, { recursive: true, force: true });
     },
   };
 }

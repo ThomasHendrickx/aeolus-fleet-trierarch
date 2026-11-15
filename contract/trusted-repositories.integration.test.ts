@@ -38,8 +38,11 @@ afterEach(async ({ task }) => {
     console.log(`The service's log:\n${machine.serviceLog()}`);
   }
   try {
-    await machine.remove();
-    await fleet.close();
+    try {
+      await machine.remove();
+    } finally {
+      await fleet.close();
+    }
   } finally {
     for (const folder of repositoryFolders.splice(0)) {
       rmSync(folder, { recursive: true, force: true });

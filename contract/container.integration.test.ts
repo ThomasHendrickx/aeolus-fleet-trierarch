@@ -38,8 +38,11 @@ afterEach(async ({ task }) => {
   // A folder a test's session made read-only is made writable again so the machine can go; a workspace that goes meanwhile is no matter.
   spawnSync('chmod', ['-R', 'u+w', machine.trierarchHome]);
   try {
-    await machine.remove();
-    await fleet.close();
+    try {
+      await machine.remove();
+    } finally {
+      await fleet.close();
+    }
   } finally {
     for (const folder of upstreamFolders.splice(0)) {
       rmSync(folder, { recursive: true, force: true });
