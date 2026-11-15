@@ -89,9 +89,9 @@ answer="$(cat "$wait_output")"
 
 case "$status" in
   0)
-    ship_name="$(aeolus_identity_field "$identity_text" shipName)"
     delivery_id="$(aeolus_store_first handed)"
-    message="Aeolus handed a message for ${ship_name} to this task: it comes into this turn through the plugin's hooks, acknowledged. Do not receive or ack it. Handle it as the aeolus-fleet-crew skill says, then re-arm automatic wake-up before ending the turn."
+    # The watcher's own line: it names the delivery and how to read it, should the hook body be lost (#428).
+    message="$answer"
     if ! queued="$(codex queue --thread "$thread_id" --message "$message" 2>&1)"; then
       aeolus_log "$identity" wakeBridge "failed: codex did not queue the hand-over to Codex task ${thread_id}: ${queued}" "$NEXT"
       exit 1
