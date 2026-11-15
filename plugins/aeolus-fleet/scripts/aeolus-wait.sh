@@ -35,7 +35,7 @@ POLL_SECONDS="${AEOLUS_POLL_SECONDS:-5}"
 KEY_WAIT_SECONDS="${AEOLUS_KEY_WAIT_SECONDS:-5}"
 KEY_WAIT_MAX_SECONDS="${AEOLUS_KEY_WAIT_MAX_SECONDS:-300}"
 # The first pause after a failed call; it doubles up to the most.
-RETRY_SECONDS="${AEOLUS_RETRY_SECONDS:-2}"
+RETRY_SECONDS="${AEOLUS_RETRY_SECONDS:-$((1 + RANDOM % 5))}"
 RETRY_MAX_SECONDS="${AEOLUS_RETRY_MAX_SECONDS:-60}"
 # A background task runs at most 2 hours (in a cloud session it is then
 # stopped): the watcher ends itself at 1 hour 55 minutes, saying so, and the
@@ -188,6 +188,7 @@ refused_token() {
 # The fleet answered: the crew token holds again.
 answered() {
   rm -f "$refused_file"
+  RETRY_SECONDS="${AEOLUS_RETRY_SECONDS:-$((1 + RANDOM % 5))}"
   delay="$RETRY_SECONDS"
   if [ "$is_failing" = 1 ]; then
     aeolus_log "$identity" watch 'the fleet answers again'
@@ -199,6 +200,8 @@ answered() {
 open_stream() {
   rm -f "$stream_dir/lines"
   mkfifo "$stream_dir/lines"
+  : > "$stream_dir/headers"
+  stream_is_open=0
   exec 9<> "$stream_dir/lines"
   aeolus_bearer_config "$crew_token" > "$stream_dir/bearer"
   curl -K "$stream_dir/bearer" -N -sS --connect-timeout 15 -D "$stream_dir/headers" \
@@ -209,15 +212,16 @@ open_stream() {
 }
 
 wait_for_wake() {
-  local line event='' stream_body='' pending=0 owed=0
+  local line event='' stream_body='' pending=0 owed=0 has_line=0
   [ -n "$stream_pid" ] || open_stream
   while :; do
     [ "$SECONDS" -lt "$MAX_SECONDS" ] || return 1
     pending=0; owed=0
     { read -r pending owed < "$waiting_file"; } 2>/dev/null
     if [ "$owed" = 1 ] && aeolus_is_idle; then return 0; fi
-    line=''
+    line=''; has_line=0
     if IFS= read -r -t 1 line <&9; then
+      has_line=1
       stream_last_read=$SECONDS
       line="${line%$'\r'}"
       case "$line" in
@@ -235,7 +239,12 @@ wait_for_wake() {
       stream_next_look=$((SECONDS + SAFETY_SECONDS))
       return 0
     fi
+    if [ "$stream_is_open" = 0 ]; then
+      status="$(sed -n 's/^HTTP[^ ]* \([0-9][0-9][0-9]\).*/\1/p' "$stream_dir/headers" | tail -n 1)"
+      if [ "$status" = 200 ]; then stream_is_open=1; answered; fi
+    fi
     stream_body="${stream_body}${line}"
+    [ "$has_line" = 0 ] || continue
     if [ $((SECONDS - stream_last_read)) -ge "$STREAM_SILENCE_SECONDS" ]; then
       kill "$stream_pid" 2>/dev/null || :
       wait "$stream_pid" 2>/dev/null || :
