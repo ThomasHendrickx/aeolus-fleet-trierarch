@@ -1,17 +1,25 @@
 package processproof
 
 import (
+	"io"
 	"os/exec"
 	"testing"
 )
 
 func TestAProcessRunsTheWordsItWasStartedWith(t *testing.T) {
 	// The shell keeps the words as arguments it ignores: macOS sleep refuses --folder and ends at once.
-	process := exec.Command("sh", "-c", "while :; do sleep 1; done", "sleep", "30", "--folder", "/a/folder")
+	process := exec.Command("sh", "-c", "printf x; while :; do sleep 1; done", "sleep", "30", "--folder", "/a/folder")
+	ready, err := process.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := process.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = process.Process.Kill(); _ = process.Wait() })
+	if _, err := io.ReadFull(ready, make([]byte, 1)); err != nil {
+		t.Fatalf("wait for shell: %v", err)
+	}
 
 	if !Runs(process.Process.Pid, "sh", "-c") {
 		t.Fatal("Runs = false, want true for the shell that was started")
