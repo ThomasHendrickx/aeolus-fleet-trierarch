@@ -105,6 +105,7 @@ const ERROR_PREFIX = 'Error: ';
 function lastErrorIn(events: readonly string[]): string | undefined {
   for (const line of [...events].reverse()) {
     const event = parsedLine(line);
+    if (z.object({ type: z.literal('result'), exitCode: z.literal(0) }).safeParse(event).success) return undefined;
     const sessionError = sessionErrorSchema.safeParse(event);
     if (sessionError.success) {
       return sessionError.data.data.message;

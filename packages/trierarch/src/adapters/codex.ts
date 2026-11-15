@@ -104,7 +104,9 @@ const NOT_SUPPORTED = /^The '([^']+)' model is not supported/u;
 /** The harness's last error event in its events, as its message says it: an API error by its own message; none without one. */
 function lastErrorIn(events: readonly string[]): { message: string; code?: string } | undefined {
   for (const line of [...events].reverse()) {
-    const event = errorEventSchema.safeParse(parsedLine(line));
+    const parsed = parsedLine(line);
+    if (z.object({ type: z.literal('turn.completed') }).safeParse(parsed).success) return undefined;
+    const event = errorEventSchema.safeParse(parsed);
     if (event.success) {
       const message = event.data.type === 'turn.failed' ? event.data.error.message : event.data.message;
       const api = apiErrorSchema.safeParse(parsedLine(message));

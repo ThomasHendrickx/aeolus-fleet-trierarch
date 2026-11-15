@@ -177,6 +177,7 @@ export function userLine(prompt: string): string {
 export function claudeCodeErrorIn(events: readonly string[]): string | undefined {
   for (const line of [...events].reverse()) {
     const event = parsedLine(line);
+    if (typeof event === 'object' && event !== null && Reflect.get(event, 'type') === 'result' && Reflect.get(event, 'is_error') === false) return undefined;
     if (typeof event === 'object' && event !== null && Reflect.get(event, 'type') === 'result' && Reflect.get(event, 'is_error') === true) {
       const result: unknown = Reflect.get(event, 'result');
       const subtype: unknown = Reflect.get(event, 'subtype');

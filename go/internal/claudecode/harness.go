@@ -274,7 +274,11 @@ func errorIn(events string) string {
 			Result  any    `json:"result"`
 			Subtype string `json:"subtype"`
 		}
-		if json.Unmarshal([]byte(lines.Text()), &event) != nil || event.Type != "result" || !event.IsError {
+		if json.Unmarshal([]byte(lines.Text()), &event) != nil || event.Type != "result" {
+			continue
+		}
+		if !event.IsError {
+			cause = ""
 			continue
 		}
 		if result, ok := event.Result.(string); ok && strings.TrimSpace(result) != "" {
