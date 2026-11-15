@@ -513,3 +513,31 @@ func TestTheOldServerListAndSecretsMessagesAreAcknowledgedAsNotHandled(t *testin
 		t.Fatalf("acked %v, confirmed %v, logged %q, want both acknowledged as not handled", ran.ship.acked, ran.confirmer.sent, ran.logged)
 	}
 }
+
+type aWatchedShip struct {
+	aShip
+	watches int
+}
+
+func (s *aWatchedShip) Watch(ctx context.Context, look func(context.Context) error) error {
+	s.watches++
+	for range 2 {
+		if err := look(ctx); err != nil {
+			return err
+		}
+	}
+	return &Refusal{Code: "LEASE_ENDED", Message: "released"}
+}
+
+func TestTheOwnShipReceivesOnlyWhenItsStreamCallsForALook(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ship := &aWatchedShip{aShip: aShip{cancel: cancel, answers: []answer{
+		{deliveries: []Delivery{a(pingContentType, "ping")}},
+		{deliveries: []Delivery{a("text/plain", "message")}},
+	}}}
+	Loop{Ship: ship, Log: func(string) {}, Pause: func(context.Context, time.Duration) {}}.Run(ctx)
+	if ship.watches != 1 || len(ship.ponged) != 1 || len(ship.acked) != 1 || ctx.Err() != nil {
+		t.Fatalf("watches = %d, ponged = %v, acked = %v, context = %v", ship.watches, ship.ponged, ship.acked, ctx.Err())
+	}
+}
