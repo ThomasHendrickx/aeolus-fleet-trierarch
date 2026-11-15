@@ -4,6 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -14,6 +17,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/failedstarts"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/fleet"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/folderprocess"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
@@ -332,7 +336,7 @@ func (w *aWorkspace) RemoveWorktree(folder string) error {
 	return w.Remove(reconciler.Entry{Folder: folder})
 }
 
-// someFolderProcesses run in the folders the test names, each by what runs, and stop them, writing down each folder stopped in while its worktree was still there.
+// someFolderProcesses run in the folders the test names, each by what runs, and stop what runs in a folder or below it, writing down each folder stopped in while its worktree was still there.
 type someFolderProcesses struct {
 	workspace *aWorkspace
 	running   map[string]string
@@ -349,11 +353,14 @@ func (f *someFolderProcesses) StopIn(folder string) (int, error) {
 		return 0, errors.New("stopped in " + folder + " after it was removed")
 	}
 	f.stoppedIn = append(f.stoppedIn, folder)
-	if _, ok := f.running[folder]; !ok {
-		return 0, nil
+	stopped := 0
+	for each := range f.running {
+		if folderprocess.IsInside(each, folder) {
+			delete(f.running, each)
+			stopped++
+		}
 	}
-	delete(f.running, folder)
-	return 1, nil
+	return stopped, nil
 }
 
 // Prepare makes the folder of the ship's main repository and its name, `/worktrees/<main>/<ship>`, writing down the repository its
@@ -912,7 +919,7 @@ func TestAReleaseTheFleetRefusesIsTriedAgainOnTheNextPass(t *testing.T) {
 func TestARequestNoLongerAssignedHereEndsItsSessionAndIdentityAndRemovesItsCleanWorktreeWithWhatRunsInIt(t *testing.T) {
 	pass := aRunPass(t)
 	pass.crewed(t)
-	pass.processes.running[folder] = "astro dev"
+	pass.processes.running["/ships/"+scout+"/home"] = "astro dev"
 	pass.fleet.requests = nil
 
 	pass.run(t)
@@ -920,8 +927,8 @@ func TestARequestNoLongerAssignedHereEndsItsSessionAndIdentityAndRemovesItsClean
 	if !slices.Equal(pass.sessions.stopped, []string{scout}) || len(pass.harness.identities) != 0 || len(pass.store.state.Entries) != 0 {
 		t.Fatalf("stopped %q, identities %+v, entries %+v", pass.sessions.stopped, pass.harness.identities, pass.store.state.Entries)
 	}
-	if !slices.Equal(pass.processes.stoppedIn, []string{"/ships/" + scout}) || !slices.Equal(pass.workspace.removed, []string{folder}) || len(pass.store.state.Orphans) != 0 {
-		t.Fatalf("stopped in %q, removed %q, orphans %+v", pass.processes.stoppedIn, pass.workspace.removed, pass.store.state.Orphans)
+	if len(pass.processes.running) != 0 || !slices.Equal(pass.workspace.removed, []string{folder}) || len(pass.store.state.Orphans) != 0 {
+		t.Fatalf("still running %v, removed %q, orphans %+v", pass.processes.running, pass.workspace.removed, pass.store.state.Orphans)
 	}
 }
 
@@ -931,24 +938,28 @@ func TestAReleaseStopsWhatRunsInTheWholeShipFolderOfAShipInAConfiguredFolderAndN
 	entry := pass.store.state.Entries[scout]
 	entry.Workspace = reconciler.Workspace{Kind: "folder", Name: "notes"}
 	pass.store.state.Entries[scout] = entry
+	pass.processes.running["/ships/"+scout+"/home"] = "astro dev"
+	pass.processes.running[entry.Folder] = "vim notes.md"
 	pass.fleet.requests = nil
 
 	pass.run(t)
 
-	if !slices.Equal(pass.processes.stoppedIn, []string{"/ships/" + scout}) {
-		t.Fatalf("stopped in %q", pass.processes.stoppedIn)
+	if !maps.Equal(pass.processes.running, map[string]string{entry.Folder: "vim notes.md"}) {
+		t.Fatalf("still running %v, want only what runs in the configured folder %s", pass.processes.running, entry.Folder)
 	}
 }
 
 func TestAReleaseOfAShipCrewedBeforeTheShipFoldersStopsWhatRunsInItsWorktree(t *testing.T) {
 	pass := aRunPass(t)
 	pass.crewedBefore(t)
+	pass.processes.running[folder+"/web"] = "astro dev"
+	pass.processes.running["/elsewhere"] = "vite"
 	pass.fleet.requests = nil
 
 	pass.run(t)
 
-	if !slices.Equal(pass.processes.stoppedIn, []string{folder}) {
-		t.Fatalf("stopped in %q", pass.processes.stoppedIn)
+	if !maps.Equal(pass.processes.running, map[string]string{"/elsewhere": "vite"}) {
+		t.Fatalf("still running %v, want only what runs outside the worktree", pass.processes.running)
 	}
 }
 
@@ -2878,13 +2889,13 @@ func TestEveryPathStopsWhatRunsInTheWholeShipFolderBeforeItGoes(t *testing.T) {
 	for _, path := range endedPaths {
 		t.Run(path.name, func(t *testing.T) {
 			pass := aRunPass(t)
-			shipFolder := "/ships/" + scout
-			pass.processes.running[shipFolder] = "astro dev"
+			pass.processes.running["/ships/"+scout+"/home"] = "astro dev"
+			pass.processes.running["/elsewhere"] = "vite"
 
 			path.end(pass, t, nil)
 
-			if !slices.Contains(pass.processes.stoppedIn, shipFolder) {
-				t.Fatalf("stopped in %q, want %s", pass.processes.stoppedIn, shipFolder)
+			if !maps.Equal(pass.processes.running, map[string]string{"/elsewhere": "vite"}) {
+				t.Fatalf("still running %v, want only what runs outside the ship folder", pass.processes.running)
 			}
 		})
 	}
@@ -3263,5 +3274,80 @@ func TestAReleaseDrainsPermissionWithdrawalsAfterStoppingAndBeforeItsIdentityOrL
 	pass.run(t)
 	if !drained || !slices.Contains(pass.fleet.calls, "release "+scout) {
 		t.Fatalf("drained %v, fleet calls %v", drained, pass.fleet.calls)
+	}
+}
+
+// aProgramIn starts a program that waits in the folder given, and answers its process with a channel closed once it ended; cleanup kills it if it still runs.
+func aProgramIn(t *testing.T, folder string) (*exec.Cmd, <-chan struct{}) {
+	t.Helper()
+	program := exec.Command("sleep", "60")
+	program.Dir = folder
+	if err := program.Start(); err != nil {
+		t.Fatal(err)
+	}
+	ended := make(chan struct{})
+	go func() {
+		_ = program.Wait()
+		close(ended)
+	}()
+	t.Cleanup(func() {
+		_ = program.Process.Kill()
+		<-ended
+	})
+	return program, ended
+}
+
+// aRealFolder is a new folder as a process's working folder names it: macOS keeps temporary folders under the symlink /var.
+func aRealFolder(t *testing.T) string {
+	t.Helper()
+	folder, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return folder
+}
+
+// shipFolderOnDisk stops what really runs in a folder, the pass's /ships/<ship> standing for a folder on disk, and only in the processes
+// the test started, so nothing else on the machine is stopped.
+type shipFolderOnDisk struct {
+	onDisk  string
+	stopper folderprocess.Stopper
+}
+
+func (s shipFolderOnDisk) StopIn(folder string) (int, error) {
+	return s.stopper.StopIn(strings.Replace(folder, "/ships/"+scout, s.onDisk, 1))
+}
+
+func TestAReleaseStopsAProcessRunningInTheShipFoldersHomeAndLeavesOneOutsideTheShipFolderRunning(t *testing.T) {
+	pass := aRunPass(t)
+	onDisk := aRealFolder(t)
+	home := filepath.Join(onDisk, "home")
+	if err := os.Mkdir(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	inHome, homeEnded := aProgramIn(t, home)
+	outside, outsideEnded := aProgramIn(t, aRealFolder(t))
+	ours := []int{inHome.Process.Pid, outside.Process.Pid}
+	pass.pass.FolderProcesses = shipFolderOnDisk{onDisk: onDisk, stopper: folderprocess.Stopper{
+		Folders: func() []folderprocess.Folder {
+			return slices.DeleteFunc(folderprocess.ProcessFolders(), func(each folderprocess.Folder) bool { return !slices.Contains(ours, each.PID) })
+		},
+		Grace: time.Second,
+	}}
+
+	pass.released(t)
+
+	if !slices.Contains(pass.workspace.removed, scoutFolder) {
+		t.Fatalf("removed %q, want the ship's worktree", pass.workspace.removed)
+	}
+	select {
+	case <-homeEnded:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("the process in the ship folder's home/ still runs after the release")
+	}
+	select {
+	case <-outsideEnded:
+		t.Fatalf("the process outside the ship folder was stopped by the release")
+	default:
 	}
 }
