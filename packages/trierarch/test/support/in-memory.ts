@@ -1051,6 +1051,9 @@ export class InMemoryUsage implements UsagePort {
   /** Each ship's tokens as its sessions wrote them, with when: counted per model, hour and login of the session that wrote them, when the ship's logins are given. */
   readonly written = new Map<ShipId, readonly (ModelTokens & { at: Date })[]>();
   readonly subscriptions = new Map<string, readonly SubscriptionWindow[]>();
+  /** Harnesses whose subscription cannot be read, and how often it was tried, by harness. */
+  readonly unreadableSubscriptions = new Set<string>();
+  readonly subscriptionTries = new Map<string, number>();
   /** Ships whose transcripts cannot be read. */
   readonly unreadable = new Set<ShipId>();
   /** When each folder was made, by folder; FOLDER_MADE_AT for any other. */
@@ -1084,6 +1087,10 @@ export class InMemoryUsage implements UsagePort {
   }
 
   subscriptionOf(harness: string): Promise<readonly SubscriptionWindow[] | undefined> {
+    this.subscriptionTries.set(harness, (this.subscriptionTries.get(harness) ?? 0) + 1);
+    if (this.unreadableSubscriptions.has(harness)) {
+      return Promise.reject(new Error('not logged in'));
+    }
     return Promise.resolve(this.subscriptions.get(harness));
   }
 }
