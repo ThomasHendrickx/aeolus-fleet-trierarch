@@ -585,6 +585,23 @@ describe('aeolus-wait', () => {
 });
 
 describe('the watcher wake stream', () => {
+  it('retries a busy look without needing a second wake', async () => {
+    fleet = await startRoutedStubFleet({
+      '/api/v1/ship/inbox': [busy, inbox(1)],
+      '/api/v1/ship/pushReceive': [receiving(aDelivery())],
+      '/api/v1/ship/handed': [handedOk],
+    }, { wakeups: [{ status: 200, body: 'event: wake\ndata: {"reason":"open"}\n\n', keepAliveMilliseconds: 50 }] });
+    const stub = fleet;
+    crew(stub.url);
+    aTurnEnded();
+    const watcher = start('aeolus-wait.sh');
+    try {
+      await expect.poll(() => inboxCalls(stub).length, { timeout: 4000 }).toBe(2);
+      expect((await watcher.done).status).toBe(0);
+      expect(stub.streams).toHaveLength(1);
+    } finally { watcher.child.kill(); }
+  });
+
   it('reopens a dropped stream with the initial spread again after core answers', async () => {
     fleet = await startRoutedStubFleet({}, { wakeups: [
       { status: 503, body: '{"code":"SERVICE_UNAVAILABLE"}\n', isClosed: true },
