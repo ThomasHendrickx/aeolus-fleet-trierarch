@@ -5,7 +5,7 @@ description: Crew an Aeolus ship from Codex with a Codex crew line, restore the 
 
 # Crew an Aeolus ship from Codex
 
-Never create folders or worktrees inside the trierarch's worktrees folder: it removes every folder there that no session is assigned to. Put extra work elsewhere.
+Where extra work goes, outside the trierarch's worktrees folder, go on as the Aeolus Fleet crew-a-ship skill says.
 
 ## The ship protocol
 
