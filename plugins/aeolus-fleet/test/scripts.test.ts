@@ -1493,9 +1493,8 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
 
   describe('in Codex: the wake bridge hands a message over, and the prompt it queues confirms it (2b, Codex)', () => {
     const THREAD_ID = '01a103c9-80b0-7ab1-82e3-6f4a2f70ad86';
-    const QUEUED =
-      "Aeolus handed a message for scout to this task: it comes into this turn through the plugin's hooks, acknowledged. " +
-      'Do not receive or ack it. Handle it as the aeolus-fleet-crew skill says, then re-arm automatic wake-up before ending the turn.';
+    /** The watcher's own line, as the bridge queues it: it names the delivery and how to read it (#428). */
+    const QUEUED = handedOverLine(DELIVERY_ID).trimEnd();
 
     /** Runs a hook as Codex does: PLUGIN_ROOT and PLUGIN_DATA set, the task id in the payload, no Claude Code variables. */
     const aCodexHook = (script: string, payload: Record<string, unknown>) =>
@@ -1543,7 +1542,7 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
         expect(store()).toEqual([`${DELIVERY_ID} handed`]);
       });
 
-      it('queues one prompt to the task, saying the message comes into that turn through the hooks, without its content', async () => {
+      it("queues the watcher's line to the task: the message comes into that turn through the hooks, and the line names its delivery and how to read it (#428)", async () => {
         const { queued } = await aCodexHandOver({});
 
         expect(queued()).toBe(`queue --thread ${THREAD_ID} --message ${QUEUED}\n`);
@@ -2583,7 +2582,7 @@ describe('the Codex wake bridge', () => {
     }).exited;
 
     expect(result.status).toBe(0);
-    expect(readFileSync(calls, 'utf8')).toContain(`queue --thread ${threadId} --message Aeolus handed a message for scout to this task:`);
+    expect(readFileSync(calls, 'utf8')).toContain(`queue --thread ${threadId} --message ${handedOverLine(DELIVERY_ID).trimEnd()}\n`);
     expect(readFileSync(calls, 'utf8')).not.toContain(CREW_TOKEN);
   });
 
