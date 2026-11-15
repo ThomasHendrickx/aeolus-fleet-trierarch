@@ -365,6 +365,12 @@ export class InMemoryFleet implements FleetPort {
     this.shipOf(shipId).crewToken = 'aeolus_ct_v1_elsewhere';
   }
 
+  readonly limitRecipients = new Map<ShipId, ShipId>();
+
+  usageLimitRecipient(shipId: ShipId): Promise<ShipId | undefined> {
+    return Promise.resolve(this.limitRecipients.get(shipId) ?? this.requests.get(shipId)?.owner.shipId);
+  }
+
   ship(shipId: ShipId): Promise<FleetShipStatus> {
     const ship = this.ships.get(shipId);
     if (ship === undefined) {
@@ -621,6 +627,12 @@ export class InMemoryHarness implements HarnessPort {
   }
 
   /** What each ship's session did last, as its events say; a ship with none shows no activity yet. */
+  readonly limits = new Map<ShipId, { occurrence: string; reason: string }>();
+
+  usageLimitOf(session: { shipId: ShipId }): Promise<{ occurrence: string; reason: string } | undefined> {
+    return Promise.resolve(this.limits.get(session.shipId));
+  }
+
   readonly activities = new Map<ShipId, SessionActivity>();
 
   activityOf(session: { shipId: ShipId; folder: string }): Promise<SessionActivity | undefined> {

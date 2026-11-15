@@ -3416,3 +3416,41 @@ describe('a ship crewed before the ship folder layout (decision 0013)', () => {
     expect(trierarch.state.current().entries[shipId]).toMatchObject({ folder: scoutFolder(shipId), settingsVersion: 2 });
   });
 });
+
+
+describe('a session stopped by its usage limit (#1629)', () => {
+  it('reports blocked and tells the requester once, retries refusals, and tells a later occurrence without restarting', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    const requester = newId('ship');
+    trierarch.fleet.limitRecipients.set(shipId, requester);
+    trierarch.harness.limits.set(shipId, { occurrence: 'stop-1', reason: 'Usage limit reached, resets at 18:00 UTC' });
+    trierarch.fleet.isRefusingOwnerReports = true;
+    const launches = trierarch.harness.launches.length;
+
+    await trierarch.pass();
+    expect(trierarch.fleet.reports.at(-1)).toMatchObject({ state: 'blocked', note: 'claude-code usage limit reached: Usage limit reached, resets at 18:00 UTC' });
+    trierarch.fleet.isRefusingOwnerReports = false;
+    await trierarch.pass();
+    await trierarch.pass();
+    expect(trierarch.fleet.toOwners).toHaveLength(1);
+    expect(trierarch.fleet.toOwners[0]).toMatchObject({ ownerShipId: requester, text: expect.stringContaining('18:00 UTC') });
+    trierarch.harness.limits.set(shipId, { occurrence: 'stop-2', reason: 'Usage limit reached' });
+    await trierarch.pass();
+    expect(trierarch.fleet.toOwners).toHaveLength(2);
+    expect(trierarch.harness.launches).toHaveLength(launches);
+  });
+
+  it('falls back to the owner when there is no requester and leaves ordinary errors alone', async () => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    const owner = { shipId: newId('ship'), name: 'owner' };
+    trierarch.fleet.own(shipId, owner);
+    trierarch.harness.activities.set(shipId, { at: trierarch.clock.now(), kind: 'error' });
+    await trierarch.pass();
+    expect(trierarch.fleet.toOwners).toHaveLength(0);
+    trierarch.harness.limits.set(shipId, { occurrence: 'stop-1', reason: 'Usage limit reached' });
+    await trierarch.pass();
+    expect(trierarch.fleet.toOwners[0]).toMatchObject({ ownerShipId: owner.shipId });
+  });
+});

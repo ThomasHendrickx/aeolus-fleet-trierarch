@@ -32,12 +32,13 @@ var now = time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
 
 // aFleet holds the requests assigned to the trierarch and its ships, and writes down every call it was made; each session's inbox, by crew token, is asked apart.
 type aFleet struct {
-	requests []reconciler.Request
-	ships    map[string]fleet.Ship
-	calls    []string
-	refuse   string
-	inboxes  map[string]reconciler.Inbox
-	asked    []string
+	requests       []reconciler.Request
+	limitRecipient string
+	ships          map[string]fleet.Ship
+	calls          []string
+	refuse         string
+	inboxes        map[string]reconciler.Inbox
+	asked          []string
 	// told is every notice, in order; refuseOwner is the refusal the fleet gives a report to an owner.
 	told        []told
 	refuseOwner *fleet.Refusal
@@ -93,6 +94,8 @@ func (f *aFleet) AssignedRequests() ([]reconciler.Request, error) {
 	}
 	return f.requests, nil
 }
+func (f *aFleet) UsageLimitRecipient(shipID string) (string, error) { return f.limitRecipient, nil }
+
 func (f *aFleet) Ship(shipID string) (fleet.Ship, error) {
 	if ship, ok := f.ships[shipID]; ok {
 		return ship, nil
@@ -212,6 +215,12 @@ type aHarness struct {
 	logins []string
 	// activities are what each ship's session shows, by ship.
 	activities map[string]activity.Activity
+	limits     map[string][2]string
+}
+
+func (h *aHarness) UsageLimit(entry reconciler.Entry) (string, string) {
+	limit := h.limits[entry.ShipID]
+	return limit[0], limit[1]
 }
 
 func (h *aHarness) Activity(entry reconciler.Entry) (activity.Activity, bool) {
@@ -3341,5 +3350,30 @@ func TestAReleaseDrainsPermissionWithdrawalsAfterStoppingAndBeforeItsIdentityOrL
 	pass.run(t)
 	if !drained || !slices.Contains(pass.fleet.calls, "release "+scout) {
 		t.Fatalf("drained %v, fleet calls %v", drained, pass.fleet.calls)
+	}
+}
+
+func TestAUsageLimitReportsBlockedAndTellsTheRequesterOncePerOccurrenceWithoutRestarting(t *testing.T) {
+	at := aRunPass(t)
+	at.crewed(t)
+	at.fleet.limitRecipient = "requester"
+	at.harness.limits = map[string][2]string{scout: {"stop-1", "Usage limit reached, resets at 18:00 UTC"}}
+	at.fleet.refuseOwner = &fleet.Refusal{Code: "NOT_REACHABLE", Message: "no rule"}
+	launches := len(at.harness.launches)
+	at.run(t)
+	want := "report aeolus_ct_v1_scout blocked claude-code usage limit reached: Usage limit reached, resets at 18:00 UTC"
+	if !slices.Contains(at.fleet.calls, want) {
+		t.Fatalf("calls %q, want %q", at.fleet.calls, want)
+	}
+	at.fleet.refuseOwner = nil
+	at.run(t)
+	at.run(t)
+	if len(at.fleet.told) != 1 || at.fleet.told[0].to != "requester" || !strings.Contains(at.fleet.told[0].text, "18:00 UTC") {
+		t.Fatalf("told %+v, want requester once with reset", at.fleet.told)
+	}
+	at.harness.limits[scout] = [2]string{"stop-2", "Usage limit reached"}
+	at.run(t)
+	if len(at.fleet.told) != 2 || len(at.harness.launches) != launches {
+		t.Fatalf("told %+v, launches %d, want two notices and %d launches", at.fleet.told, len(at.harness.launches), launches)
 	}
 }

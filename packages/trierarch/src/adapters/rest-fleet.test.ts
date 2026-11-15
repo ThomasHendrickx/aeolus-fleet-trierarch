@@ -381,3 +381,20 @@ describe('the fleet over REST while it is busy (#546)', () => {
     });
   });
 });
+
+it('routes a usage-limit notice to the crew requester, falling back to the owner (#1629)', async () => {
+  const requester = newId('ship');
+  const owner = newId('ship');
+  const shipId = newId('ship');
+  for (const [body, expected] of [
+    [{ crewRequest: { requestedBy: { id: requester, name: 'requester' } }, ownerShipId: owner }, requester],
+    [{ crewRequest: { requestedBy: null }, ownerShipId: owner }, owner],
+    [{ crewRequest: null, ownerShipId: null }, undefined],
+  ] as const) {
+    await aFleetAnswering([{ status: 200, body }], async (fleetUrl, asked) => {
+      const fleet = createRestFleet({ fleetUrl, crewToken: 'aeolus_ct_v1_test' });
+      expect(await fleet.usageLimitRecipient(shipId)).toBe(expected);
+      expect(asked[0]?.url).toBe('/api/v1/fleet/ship');
+    });
+  }
+});

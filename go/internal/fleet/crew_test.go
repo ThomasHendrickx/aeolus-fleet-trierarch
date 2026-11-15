@@ -388,3 +388,19 @@ func TestAClearTheFleetRefusesIsAFailure(t *testing.T) {
 		t.Fatalf("err %v, want the fleet's refusal", err)
 	}
 }
+
+func TestAUsageLimitNoticeGoesToTheRequesterOrFallsBackToTheOwner(t *testing.T) {
+	for _, tt := range []struct{ name, body, want string }{
+		{"requester", `{"crewRequest":{"requestedBy":{"id":"requester","name":"requester"}},"ownerShipId":"owner"}`, "requester"},
+		{"owner", `{"crewRequest":{"requestedBy":null},"ownerShipId":"owner"}`, "owner"},
+		{"none", `{"crewRequest":null,"ownerShipId":null}`, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, client := aFleetAnswering(t, map[string]string{"/api/v1/fleet/ship": tt.body})
+			got, err := client.UsageLimitRecipient(scout)
+			if err != nil || got != tt.want {
+				t.Fatalf("recipient = %q, %v, want %q", got, err, tt.want)
+			}
+		})
+	}
+}
