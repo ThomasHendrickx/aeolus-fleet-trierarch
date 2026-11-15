@@ -99,6 +99,12 @@ function harness(at: { pluginRoot?: string; proxyUrl?: string } = {}) {
 }
 
 const shipId = newId('ship');
+
+it('does not report an earlier failure after a successful turn', async () => {
+  events.set(shipId, ['{"type":"turn.failed","error":{"message":"old error"}}', '{"type":"turn.completed"}']);
+  await expect(harness().failureReason({ shipId, folder })).resolves.toBeUndefined();
+});
+
 /** Handed to the plugin on stdin, which keeps only the lease it stands for. */
 const CREW_TOKEN = 'aeolus_ct_v1_of_the_crew';
 const identity = { fleetUrl: 'https://fleet.example.com', shipId, shipName: 'scout', socket: `/home/thomas/.aeolus/trierarch/sockets/${shipId}/fleet.sock` };

@@ -412,3 +412,14 @@ func TestAServerTheUsersCopilotNamesAsACrewedOneIsTheProxysOneInTheSession(t *te
 		t.Fatalf("the additional configuration's company-graph is at %q, want the proxy at %q", got, want)
 	}
 }
+
+func TestAnEarlierFailureIsNotReportedAfterASuccessfulTurn(t *testing.T) {
+	harness, _ := aHarness(t)
+	entry := anEntry(t)
+	if err := os.WriteFile(harness.Events(scout), []byte(`{"type":"session.error","data":{"message":"old error"}}`+"\n"+`{"type":"result","exitCode":0}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := harness.FailureReason(entry); got != "" {
+		t.Fatalf("FailureReason = %q, want no earlier failure", got)
+	}
+}
