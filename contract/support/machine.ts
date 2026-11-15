@@ -273,7 +273,7 @@ exec /usr/bin/id "$@"
  * clean environment with the user's HOME; stop ends that process alone
  * (KillMode=process); show answers its state and MainPID.
  */
-function systemctlStandIn(at: { machine: string; home: string }): string {
+function systemctlStandIn(at: { machine: string; home: string; nodeOptions?: string }): string {
   const state = join(at.machine, 'systemd');
   return `#!/bin/bash
 state='${state}'
@@ -292,7 +292,7 @@ stop() {
 }
 start() {
   [ -f "$file" ] || { echo "Unit $unit not found." >&2; exit 5; }
-  local line words=() environment=(HOME='${at.home}' USER="$USER" LANG=C.UTF-8 HTTPS_PROXY='${NO_NETWORK_PROXY}')
+  local line words=() environment=(HOME='${at.home}' USER="$USER" LANG=C.UTF-8 HTTPS_PROXY='${NO_NETWORK_PROXY}'${at.nodeOptions === undefined ? '' : ` NODE_OPTIONS='${at.nodeOptions}'`})
   while IFS= read -r line; do
     case "$line" in
       ExecStart=*) eval "words=(\${line#ExecStart=})" ;;
@@ -400,7 +400,7 @@ async function git(args: readonly string[]): Promise<void> {
 export type OtherHarness = 'codex' | 'copilot';
 
 /** A machine with Claude Code installed and signed in, and the other harnesses given, a repository checked out, and no trierarch yet. */
-export async function aMachine(at: { others?: readonly OtherHarness[] } = {}): Promise<Machine> {
+export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDiagnoseHolds?: boolean } = {}): Promise<Machine> {
   const others = at.others ?? [];
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'tc-')));
   const home = join(root, 'home');
@@ -413,7 +413,7 @@ export async function aMachine(at: { others?: readonly OtherHarness[] } = {}): P
   const pluginData = join(home, '.claude', 'plugins', 'data', 'aeolus-fleet-aeolus-fleet');
   const codexPluginData = join(home, '.codex', 'plugins', 'data', 'aeolus-fleet-aeolus-fleet');
   script(join(bin, 'claude'), claudeStandIn({ machine, home, pluginData }));
-  script(join(bin, 'systemctl'), systemctlStandIn({ machine, home }));
+  script(join(bin, 'systemctl'), systemctlStandIn({ machine, home, ...(at.shouldDiagnoseHolds === true && { nodeOptions: `--import="${fileURLToPath(new URL('./hold-diagnostics.ts', import.meta.url))}"` }) }));
   script(join(bin, 'journalctl'), journalctlStandIn({ machine }));
   script(join(bin, 'ssh'), sshStandIn());
   script(join(bin, 'podman'), podmanStandIn({ machine }));
