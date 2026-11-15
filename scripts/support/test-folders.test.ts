@@ -30,8 +30,7 @@ afterEach(() => {
 const start = () => startTestFolders({ repositoryRoot: repository, home, now: NOW, env });
 
 /** A run folder an earlier run left, last touched `hoursAgo` hours before NOW. */
-function anEarlierRun(base: string, name: string, hoursAgo: number): string {
-  const folder = join(base, name);
+function anEarlierRun(folder: string, hoursAgo: number): string {
   mkdirSync(folder, { recursive: true });
   writeFileSync(join(folder, 'left'), 'x');
   const touched = new Date(NOW.getTime() - hoursAgo * HOUR);
@@ -52,7 +51,7 @@ describe('the folders a test run makes its temporary folders in (#454)', () => {
 
     const short = env.TRIERARCH_TEST_SHORT_FOLDER ?? '';
     expect(short.startsWith(home)).toBe(true);
-    expect(short.length).toBeLessThan(join(home, '.cache', 'trierarch-tests', 'x').length + 12);
+    expect(short.slice(join(home, '.cache', 'tt').length + 1).length).toBeLessThanOrEqual(6);
     expect(existsSync(short)).toBe(true);
   });
 
@@ -68,9 +67,9 @@ describe('the folders a test run makes its temporary folders in (#454)', () => {
   });
 
   it('removes the run folders older than 24 hours at its start, a killed run left, and keeps the newer ones', () => {
-    const bases = [join(repository, 'node_modules', '.cache', 'trierarch-tests'), join(home, '.cache', 'trierarch-tests')];
-    const old = bases.map((base) => anEarlierRun(base, 'killed', 25));
-    const recent = bases.map((base) => anEarlierRun(base, 'running', 23));
+    const bases = [join(repository, 'node_modules', '.cache', 'trierarch-tests'), join(home, '.cache', 'tt')];
+    const old = bases.map((base) => anEarlierRun(join(base, 'killed'), 25));
+    const recent = bases.map((base) => anEarlierRun(join(base, 'running'), 23));
 
     start();
 

@@ -11,6 +11,7 @@ import { TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
 import { newId } from '../../test/support/in-memory.js';
 import { buildTestSessionImage, rootlessPodman } from '../../test/support/podman.js';
 import { sessionRuntimeContract } from '../../test/support/session-runtime-contract.js';
+import { aShortHome } from '../../test/support/short-home.js';
 import { createCallerCheck } from './caller-check.js';
 import { createContainerRuntime, MODEL_PROXY_HOST, MODEL_TOKEN_VARIABLE } from './container.js';
 import { runCommand, type CommandResult } from './run-command.js';
@@ -99,9 +100,9 @@ describe('the session runtime contract, on rootless Podman under holds', { timeo
     folder = realpathSync(mkdtempSync(join(tmpdir(), 'trierarch-container-')));
     writeFileSync(join(folder, 'model-token'), `${MODEL_TOKEN}\n`, { mode: 0o600 });
     homes = realpathSync(mkdtempSync(join(tmpdir(), 'trierarch-homes-')));
-    // Short, under /tmp: a Unix socket path is at most 104 bytes on macOS.
-    sockets = realpathSync(mkdtempSync('/tmp/aeolus-sockets-'));
-    sessions = realpathSync(mkdtempSync('/tmp/aeolus-holds-'));
+    // Short, in the run's short folder: a Unix socket path is at most 104 bytes on macOS.
+    sockets = realpathSync(aShortHome('aeolus-sockets'));
+    sessions = realpathSync(aShortHome('aeolus-holds'));
     runtime = aRuntime();
   });
 
@@ -349,7 +350,7 @@ describe('the container a session runs in', () => {
     writeFileSync(tokenFile, `${MODEL_TOKEN}\n`, { mode: 0o600 });
     homes = join(folder, 'homes');
     sockets = join(folder, 'sockets');
-    sessions = realpathSync(mkdtempSync('/tmp/aeolus-holds-'));
+    sessions = realpathSync(aShortHome('aeolus-holds'));
     binary = join(folder, 'runtime');
     writeFileSync(binary, `#!/bin/sh\nenv > "$0.env"\nfor word in "$@"; do printf '%s\\n' "$word"; done > "$0.words"\nexec sleep 30\n`);
     chmodSync(binary, 0o755);

@@ -523,8 +523,8 @@ describe("a folder whose fleet calls go over its trierarch's socket (decision 00
   let socket: string;
 
   beforeEach(() => {
-    // Short, under /tmp: a Unix socket path is at most 104 bytes on macOS.
-    sockets = mkdtempSync('/tmp/aeolus-sock-');
+    // Short, in the run's short folder: a Unix socket path is at most 104 bytes on macOS.
+    sockets = mkdtempSync(join(process.env.TRIERARCH_TEST_SHORT_FOLDER ?? '', 'aeolus-sock-'));
     socket = join(sockets, 'fleet.sock');
   });
 

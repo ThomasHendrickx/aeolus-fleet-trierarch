@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { TrierarchConfiguration } from '@aeolus-fleet/common';
@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
 import { newId, inRepositories } from '../../test/support/in-memory.js';
+import { aShortHome } from '../../test/support/short-home.js';
 import { trierarchPaths, type TrierarchPaths } from './paths.js';
 import { runCommand } from './run-command.js';
 import { runtimeAdaptersOf } from './runtime-adapters.js';
@@ -28,8 +29,8 @@ async function git(args: readonly string[]): Promise<void> {
 }
 
 beforeEach(async () => {
-  // Short, under /tmp: a hold's socket sits in the trierarch's files under it, and a Unix socket path is at most 104 bytes on macOS.
-  home = realpathSync(mkdtempSync('/tmp/aeolus-adapters-'));
+  // Short, in the run's short folder: a hold's socket sits in the trierarch's files under it, and a Unix socket path is at most 104 bytes on macOS.
+  home = realpathSync(aShortHome('aeolus-adapters'));
   paths = trierarchPaths({ homeDirectory: home });
   repository = join(home, 'demo');
   await git(['init', '-q', '-b', 'main', repository]);
