@@ -24,12 +24,12 @@ func TestMessageWritesAHeadlineOnOneLine(t *testing.T) {
 }
 
 func TestCrashSaysArgoCanRestartItToAPersonAndTheConsoleToArgo(t *testing.T) {
-	forOwner := Crash(scout, 6, "", false)
+	forOwner := Crash(scout, 6, "", false, "")
 	want := "scout crashed 6 times in an hour\n\n- Ship: scout (`shp_1`)\n- Status: crashed, its restart budget spent\n\nargo can restart it in the console."
 	if forOwner != want {
 		t.Fatalf("got %q", forOwner)
 	}
-	forArgo := Crash(scout, 6, "claude-code 2.1.306 refused claude-sonnet-5", true)
+	forArgo := Crash(scout, 6, "claude-code 2.1.306 refused claude-sonnet-5", true, "")
 	want = "scout crashed 6 times in an hour\n\n- Ship: scout (`shp_1`)\n- Status: crashed, its restart budget spent\n- Its last start: claude-code 2.1.306 refused claude-sonnet-5\n\nRestart it in the console to crew it again."
 	if forArgo != want {
 		t.Fatalf("got %q", forArgo)
@@ -37,7 +37,7 @@ func TestCrashSaysArgoCanRestartItToAPersonAndTheConsoleToArgo(t *testing.T) {
 }
 
 func TestCrashNamesAShipTheFleetGaveNoNameByItsId(t *testing.T) {
-	got := Crash(Ship{ID: "shp_1"}, 6, "", true)
+	got := Crash(Ship{ID: "shp_1"}, 6, "", true, "")
 	if !strings.HasPrefix(got, "shp_1 crashed 6 times in an hour\n\n- Ship: `shp_1`\n") {
 		t.Fatalf("got %q", got)
 	}

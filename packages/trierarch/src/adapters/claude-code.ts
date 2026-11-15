@@ -285,9 +285,9 @@ export function createClaudeCodeHarness(options: {
     marksLaunches: () => createLaunchMarks(plugin).isMarking(),
     // Claude Code is offered wherever its plugin is: no build or runtime of it is held back.
     notOfferedReason: () => Promise.resolve(undefined),
-    // The marker says what the session did; the last error event names why a start shows none (H13).
     activityOf: async ({ shipId }) => sessionActivityOf({ sessions, shipId, read: claudeCodeActivityIn }),
     failureReason: async ({ shipId }) => claudeCodeErrorIn(await sessions.events(shipId)),
+    // The marker says what the session did; the last error event names why a start shows none (H13).
     launchSeen: async ({ shipId, folder, shipFolder, launchId, model }) => {
       const marker = await marksOf(filesOf({ shipId, ...(shipFolder !== undefined && { shipFolder }) })).read({ folder, launchId });
       if (marker?.refused !== undefined) {

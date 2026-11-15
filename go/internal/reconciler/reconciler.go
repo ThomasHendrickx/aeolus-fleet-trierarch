@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -246,7 +247,8 @@ type Observed struct {
 	// Ships are, by ship id, what was seen of each watched session.
 	Ships map[string]Seen
 	// StartProblems are, by ship id, why its session cannot start on its login now, as a key not ready (api keys K9).
-	StartProblems  map[string]string
+	StartProblems map[string]string
+	// FailureReasons are the latest harness turn failures, by ship id, before report cleaning.
 	FailureReasons map[string]string
 	// WithoutIdentity are the ships whose entry would be watched or reported for, but whose folder holds no identity (#659, #664).
 	WithoutIdentity []string
@@ -362,12 +364,13 @@ type Action struct {
 	// Repository is what a clear names beside its ship: the repository of the ship's worktree.
 	Repository string
 	// ShipName, Harness, Version, Model, Exits, FailedStart and Key are what a notice names: the ship, the harness at its version and the model it refused, how often the session exited and why its last start failed, and the key that makes the notice told once.
-	ShipName      string
-	Harness       string
-	Version       string
-	Model         string
-	Exits         int
-	FailedStart   string
+	ShipName    string
+	Harness     string
+	Version     string
+	Model       string
+	Exits       int
+	FailedStart string
+	// FailureReason is the cleaned, bounded reason for the last failed turn.
 	FailureReason string
 	Key           string
 	// FailedStarts are the failed starts a StoppedOffering tells.
@@ -1000,7 +1003,6 @@ func wakeStep(entry Entry, context Context) step {
 	return step{}
 }
 
-// exitStep is a session that exited, or failed its start with the reason given: it starts again after its wait, or, with the restart budget spent, the entry is crashed and its owner told, with why its last start failed when it did. A session that failed its start still runs, so it stops first.
 func noteWithReason(note string, reason string) string {
 	if reason == "" {
 		return note
@@ -1008,8 +1010,9 @@ func noteWithReason(note string, reason string) string {
 	return note + ": " + reason
 }
 
+// exitStep is a session that exited, or failed its start with the reason given: it starts again after its wait, or, with the restart budget spent, the entry is crashed and its owner told, with why its last start failed when it did. A session that failed its start still runs, so it stops first.
 func exitStep(entry Entry, now time.Time, failedStart string, failureReason string) step {
-	failureReason = strings.Join(strings.Fields(failureReason), " ")
+	failureReason = cleanFailureReason(failureReason)
 	exits := []string{}
 	for _, exit := range entry.Exits {
 		if now.Sub(parsed(exit)) < RestartWindow {
@@ -1033,4 +1036,32 @@ func exitStep(entry Entry, now time.Time, failedStart string, failureReason stri
 	}
 	actions = append(actions, Action{Kind: Report, ShipID: entry.ShipID, Note: noteWithReason(restartingNote, failureReason)})
 	return step{entry: &restarting, actions: actions}
+}
+
+// Failure reasons cross the fleet boundary: scrub before shortening, so truncation cannot expose part of a credential.
+var failureSecrets = []*regexp.Regexp{
+	regexp.MustCompile(`(?is)-----BEGIN[^-]*PRIVATE KEY-----.*?-----END[^-]*PRIVATE KEY-----`),
+	regexp.MustCompile(`(?i)\bBearer\s+[^\s"'<>]+`),
+	regexp.MustCompile(`(?i)\b(?:sk-|key-|aeolus_|ghp_|github_pat_)[a-z0-9_.-]+`),
+	regexp.MustCompile(`(?i)[a-z][a-z0-9+.-]*://[^\s/@]+@`),
+	regexp.MustCompile(`(?i)(["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|crew[_-]?token|token|secret|password|credential|authorization|private[_-]?key)["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)`),
+}
+
+func cleanFailureReason(reason string) string {
+	for index, secret := range failureSecrets {
+		if index == 3 {
+			reason = secret.ReplaceAllStringFunc(reason, func(value string) string { return strings.SplitN(value, "://", 2)[0] + "://[redacted]@" })
+		} else if index == 4 {
+			reason = secret.ReplaceAllString(reason, "${1}[redacted]")
+		} else {
+			reason = secret.ReplaceAllString(reason, "[redacted]")
+		}
+	}
+	reason = strings.Join(strings.Fields(reason), " ")
+	const limit = 200
+	characters := []rune(reason)
+	if len(characters) > limit {
+		return string(characters[:limit-1]) + "…"
+	}
+	return reason
 }

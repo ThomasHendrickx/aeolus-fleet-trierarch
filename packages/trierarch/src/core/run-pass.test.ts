@@ -280,14 +280,14 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
   });
 
   it.each([
-    ['bearer token', 'Authorization: Bearer synthetic-token', 'Authorization: [redacted]'],
-    ['API key', 'key sk-synthetic123', 'key [redacted]'],
-    ['Aeolus secret', 'aeolus_ct_v1_synthetic', '[redacted]'],
-    ['URL credential', 'https://alice:synthetic@example.com/error', 'https://[redacted]@example.com/error'],
-    ['JSON body', '{"error":"' + 'x'.repeat(4096) + '"}', '{"error":"' + 'x'.repeat(189) + '…'],
-    ['limit', 'x'.repeat(200), 'x'.repeat(200)],
-    ['over limit', 'x'.repeat(201), 'x'.repeat(199) + '…'],
-  ])('cleans %s before reporting a session failure', async (_name, reason, expected) => {
+    { name: 'bearer token', reason: 'Authorization: Bearer synthetic-token', expected: 'Authorization: [redacted]' },
+    { name: 'API key', reason: 'key sk-synthetic123', expected: 'key [redacted]' },
+    { name: 'Aeolus secret', reason: 'aeolus_ct_v1_synthetic', expected: '[redacted]' },
+    { name: 'URL credential', reason: 'https://alice:synthetic@example.com/error', expected: 'https://[redacted]@example.com/error' },
+    { name: 'JSON body', reason: '{"error":"' + 'x'.repeat(4096) + '"}', expected: '{"error":"' + 'x'.repeat(189) + '…' },
+    { name: 'limit', reason: 'x'.repeat(200), expected: 'x'.repeat(200) },
+    { name: 'over limit', reason: 'x'.repeat(201), expected: 'x'.repeat(199) + '…' },
+  ])('cleans $name before reporting a session failure', async ({ reason, expected }) => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     trierarch.harness.failureReasons.set(shipId, reason);

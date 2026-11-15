@@ -231,8 +231,9 @@ export interface HarnessPort {
   isHolding(session: HarnessSession): Promise<boolean>;
   /** Tells the session's store that its session died, before it starts again (#756, 3.5 to 3.7, 3.10). */
   sessionDied(session: HarnessSession): Promise<void>;
-  /** What the session did in its launch window (#382), as its hooks marked the launch it was started for (#490), for the model it launched with; any model refused when it launched with none. */
+  /** Latest failed turn reason; a later successful turn clears it. */
   failureReason(session: HarnessSession): Promise<string | undefined>;
+  /** What the session did in its launch window (#382), as its hooks marked the launch it was started for (#490), for the model it launched with; any model refused when it launched with none. */
   launchSeen(session: HarnessSession & { launchId: string; model?: string }): Promise<LaunchSeen>;
   /** What the session did last, from its events and when it last wrote one; none while it wrote none that shows activity (monitoring W3b). */
   activityOf(session: HarnessSession): Promise<SessionActivity | undefined>;

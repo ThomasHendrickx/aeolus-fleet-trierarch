@@ -1542,7 +1542,7 @@ func TestACrashTellsArgoWhenItOwnsTheShip(t *testing.T) {
 	pass.run(t)
 
 	key := "trierarch:crashed:" + scout + ":2026-11-04T12:00:00.000Z"
-	want := []told{{to: "argo", key: key, text: notices.Crash(notices.Ship{ID: scout, Name: "scout"}, 6, "", true)}}
+	want := []told{{to: "argo", key: key, text: notices.Crash(notices.Ship{ID: scout, Name: "scout"}, 6, "", true, "")}}
 	if !reflect.DeepEqual(pass.fleet.told, want) {
 		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
 	}
@@ -1570,7 +1570,7 @@ func TestACrashTellsAPersonWhoOwnsTheShipThatArgoCanRestartIt(t *testing.T) {
 
 	pass.run(t)
 
-	want := []told{{to: "shp_owner", key: "trierarch:crashed:" + scout + ":2026-11-04T12:00:00.000Z", text: notices.Crash(notices.Ship{ID: scout, Name: "scout"}, 6, "", false)}}
+	want := []told{{to: "shp_owner", key: "trierarch:crashed:" + scout + ":2026-11-04T12:00:00.000Z", text: notices.Crash(notices.Ship{ID: scout, Name: "scout"}, 6, "", false, "")}}
 	if !reflect.DeepEqual(pass.fleet.told, want) {
 		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)
 	}
@@ -1584,7 +1584,7 @@ func TestACrashTheFleetRefusesToTheOwnerIsToldToArgoWithWhyAndLogged(t *testing.
 
 	pass.run(t)
 
-	report := notices.Crash(notices.Ship{ID: scout, Name: "scout"}, 6, "", true)
+	report := notices.Crash(notices.Ship{ID: scout, Name: "scout"}, 6, "", true, "")
 	want := []told{{to: "argo", key: "trierarch:crashed:" + scout + ":2026-11-04T12:00:00.000Z:owner-unreachable", text: notices.OwnerUnreachable(report, "thomas", "FORBIDDEN", "The network rules do not allow this send")}}
 	if !reflect.DeepEqual(pass.fleet.told, want) {
 		t.Fatalf("told %+v, want %+v", pass.fleet.told, want)

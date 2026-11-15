@@ -75,6 +75,7 @@ type Harness interface {
 	// Launch starts the entry's session in its folder, with its first prompt on a first start and the wake otherwise.
 	Launch(entry reconciler.Entry, isFirstStart bool, launchID string) error
 	LaunchSeen(entry reconciler.Entry) reconciler.LaunchSeen
+	// FailureReason is the latest failed turn reason; a later success clears it.
 	FailureReason(entry reconciler.Entry) string
 	WriteIdentity(entry reconciler.Entry, identity plugin.Identity, crewToken string) error
 	HasIdentity(entry reconciler.Entry) bool
