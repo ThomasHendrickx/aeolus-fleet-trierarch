@@ -1,6 +1,7 @@
 package folderprocess
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -58,6 +59,31 @@ func TestWhatRunsInAFolderIsAskedToEnd(t *testing.T) {
 	}
 	if !isEnded(ended, time.Second) {
 		t.Fatal("the process still runs")
+	}
+}
+
+func TestStopsProcessUnderSymlinkedManagedRoot(t *testing.T) {
+	root := aFolder(t)
+	real := filepath.Join(root, "real")
+	link := filepath.Join(root, "link")
+	if err := os.MkdirAll(filepath.Join(real, "stray"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	child, ended := aProcessIn(t, filepath.Join(link, "stray"), "sleep", "30")
+	folders := func() []Folder {
+		for _, folder := range ProcessFolders() {
+			if folder.PID == child.Process.Pid {
+				return []Folder{folder}
+			}
+		}
+		return nil
+	}
+	stopped, err := (Stopper{Folders: folders, Grace: time.Second}).StopIn(filepath.Join(link, "stray"))
+	if err != nil || stopped != 1 || !isEnded(ended, time.Second) {
+		t.Fatalf("StopIn(%s) = %d, %v, want 1, nil and process ended", link, stopped, err)
 	}
 }
 

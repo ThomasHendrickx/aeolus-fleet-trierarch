@@ -1158,11 +1158,11 @@ function trierarchOn(at: { configuration: TrierarchConfiguration; detected: Dete
   const usage = new InMemoryUsage();
   const sendReleasedUsage = createSendReleasedUsage({ fleet, usage, clock, logger, prices: priceTableOf(undefined), trierarchShipId: TRIERARCH_SHIP_ID, ...(pluginShipId !== undefined && { pluginShipId }) });
   const trash = new InMemoryTrash();
-  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, folderProcesses, workspace, trust, state, setup, clock, logger, refuseModel, newLaunchId, sockets, modelLogins, sendReleasedUsage, trash, ...(logins !== undefined && { logins }) });
+  const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configuration.harnesses), prices: priceTableOf(undefined) });
+  const pass = createRunPass({ fleet, harnesses: { 'claude-code': harness, codex }, processes, folderProcesses, workspace, trust, state, setup, clock, logger, refuseModel, newLaunchId, sockets, modelLogins, sendReleasedUsage, trash, readUsage, ...(logins !== undefined && { logins }) });
   const uninstall = createUninstall({ processes, state });
   const machine = new InMemoryMachine();
   const readLoad = createReadLoad({ machine, fleet, state, clock, logger });
-  const readUsage = createReadUsage({ usage, state, clock, logger, harnesses: Object.keys(configuration.harnesses), prices: priceTableOf(undefined) });
   const sendUsage = createSendUsage({ fleet, usage, state, readUsage, clock, logger, prices: priceTableOf(undefined), trierarchShipId: TRIERARCH_SHIP_ID, ...(pluginShipId !== undefined && { pluginShipId }) });
   const fleetKey = new InMemoryFleetKey();
   const reportSelf = createReportSelf({ fleetKey, fleet, processes, trust, state, setup, readLoad, readUsage, clock, modelLogins, ...(logins !== undefined && { logins }) });

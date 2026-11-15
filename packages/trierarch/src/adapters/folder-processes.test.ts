@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -83,6 +83,24 @@ describe('stopping the processes in a folder (#1041)', () => {
     expect(stopped).toBe(2);
     expect(beside.exitCode).toBeNull();
     expect(beside.signalCode).toBeNull();
+  });
+
+  it('stops a process under a managed root reached through a symbolic link', async () => {
+    const root = aFolder();
+    const real = join(root, 'real');
+    const link = join(root, 'link');
+    mkdirSync(join(real, 'stray'), { recursive: true });
+    symlinkSync(real, link);
+    const child = runIn(join(link, 'stray'));
+    await new Promise((resolve) => child.once('spawn', resolve));
+
+    const stopped = await createFolderProcesses({
+      processFolders: () => readProcessFolders().filter((each) => each.pid === child.pid),
+      graceMs: 0,
+    }).stopIn(join(link, 'stray'));
+
+    expect(stopped).toBe(1);
+    await exited(child);
   });
 
   it('kills a process that ignores the request to end once the grace period is spent', async () => {

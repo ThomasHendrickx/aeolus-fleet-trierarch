@@ -744,6 +744,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	// The usage goes to the trierarch plugin's ship once an hour, and a released ship's last usage before its folder goes.
 	sender := &usage.Sender{Harnesses: read.Harnesses, Reader: read, MadeAt: usage.FolderMadeAt, Store: saved, Fleet: client, Prices: read.Prices, Now: time.Now, Log: logLine, TrierarchShipID: kept.ShipID, PluginShipID: kept.PluginShipID}
 	pass.SendReleasedUsage = sender.SendReleased
+	pass.ReadUsage = read.Read
 	reporter := &selfreport.Reporter{
 		Fleet:    client,
 		Store:    pass.Store,

@@ -7,9 +7,11 @@ import { countStart, PROBE_AFTER_MINUTES, withConfiguration, type StartOutcome }
 import { loginOf, startedOn, type KeyState, type Login, type Logins } from './login.js';
 import type { FleetPort, FolderProcessesPort, HarnessPort, HarnessSession, LaunchSeen, LeftInTrash, LoggedAction, Logger, ModelLoginsPort, SessionActivity, SessionRuntime, ShipSocketsPort, StatePort, TrashPort, TrierarchSetup, TrustPort, WorkspacePort } from './ports.js';
 import { HOLDS_IDENTITY, keepsShipFolder, reconcile, writtenStatusOf, type Action, type Observed } from './reconciler.js';
+import type { ReadUsage } from './read-usage.js';
 import type { RefuseModel } from './refuse-model.js';
 import type { SendReleasedUsage } from './send-usage.js';
 import type { Clock } from './shared/clock.js';
+import { usedUpReason } from './used-up-window.js';
 
 /**
  * Use case: one pass of the trierarch's loop (docs/trierarch.md, "Crewing a
@@ -50,6 +52,8 @@ export interface RunPassDeps {
   modelLogins: ModelLoginsPort;
   /** Sends a released ship's last usage before its folder goes (the usage design, U9); rejects while the fleet does not take it. */
   sendReleasedUsage: SendReleasedUsage;
+  /** The harnesses' usage, read as often as its own intervals allow: a harness whose subscription window is used up is not offered until it resets (#263). */
+  readUsage: ReadUsage;
   /** The trash a released clone and ship's home go aside to, emptied every pass; none empties nothing. */
   trash?: TrashPort;
 }
@@ -193,9 +197,17 @@ async function launchMarks(deps: RunPassDeps): Promise<{ marksLaunches: Record<s
   const marksLaunches: Record<string, boolean> = {};
   const missingPlugins = new Set<string>();
   const notOffered: Record<string, string> = {};
+  const subscriptions = await deps.readUsage().then(
+    ({ subscriptions: read }) => read,
+    (error: unknown) => {
+      deps.logger.warn(`The subscriptions were not read, so no used-up window holds a harness back: ${reasonOf(error)}`);
+      return [];
+    },
+  );
+  const now = deps.clock.now();
   await Promise.all(
     Object.entries(deps.harnesses).map(async ([harness, port]) => {
-      const reason = await port.notOfferedReason();
+      const reason = (await port.notOfferedReason()) ?? usedUpReason(subscriptions.find((read) => read.harness === harness)?.windows ?? [], now);
       if (reason !== undefined) {
         notOffered[harness] = reason;
       }
