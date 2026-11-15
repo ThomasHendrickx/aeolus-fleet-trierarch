@@ -72,3 +72,39 @@ func TestWakeStreamReopensAfterSilence(t *testing.T) {
 		t.Fatalf("opens = %d, end = %v", opens.Load(), err)
 	}
 }
+
+func TestWakeStreamLooksForLostWakesWithoutReopening(t *testing.T) {
+	var opens atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opens.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: wake\ndata: {\"reason\":\"open\"}\n\n")
+		w.(http.Flusher).Flush()
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-ticker.C:
+				fmt.Fprint(w, ": keep-alive\n\n")
+				w.(http.Flusher).Flush()
+			}
+		}
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	looks := 0
+	client := Client{URL: server.URL, wakeTiming: &wakeTiming{silence: 50 * time.Millisecond, safety: 20 * time.Millisecond}}
+	client.Watch(ctx, func(context.Context) error {
+		looks++
+		if looks == 3 {
+			cancel()
+		}
+		return nil
+	})
+	if looks != 3 || opens.Load() != 1 {
+		t.Fatalf("looks = %d, opens = %d, want 3 and 1", looks, opens.Load())
+	}
+}
