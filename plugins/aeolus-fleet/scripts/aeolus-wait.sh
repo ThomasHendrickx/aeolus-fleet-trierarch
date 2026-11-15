@@ -297,7 +297,7 @@ while :; do
   if aeolus_is_idle && id="$(aeolus_store_first received handed)"; then
     # A forced delivery comes first (decision 0040): the inbox check, without
     # a wait, says whether one waits; the receive below then hands it over.
-    call /api/v1/ship/inbox '{"waitSeconds":0}' 15
+    call /api/v1/ship/inbox '{}' 15
     if [ "$status" != 200 ] || [ "$(aeolus_inbox_forced "$body")" -eq 0 ]; then
       hand_over "$id" "handed ${id} over again: it was not confirmed"
       continue
@@ -305,7 +305,7 @@ while :; do
   fi
   if [ "$look_owed" = 0 ]; then wait_for_wake || continue; fi
   look_owed=1
-  call /api/v1/ship/inbox '{"waitSeconds":0}' "$CALL_SECONDS"
+  call /api/v1/ship/inbox '{}' "$CALL_SECONDS"
   if [ "$status" != 200 ]; then
     on_refusal
     continue
