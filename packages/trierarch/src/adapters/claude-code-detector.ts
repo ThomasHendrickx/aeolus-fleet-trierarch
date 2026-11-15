@@ -1,3 +1,5 @@
+import { rm } from 'node:fs/promises';
+
 import { trierarchNameSchema } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
@@ -128,11 +130,15 @@ export function createClaudeCodeDetector(deps: {
       const folder = await deps.neutralFolder();
       const ids: string[] = [];
       let isAnyResolved = false;
-      for (const alias of aliases) {
-        const outcome = outcomeOf(alias, await deps.run(program, { args: ['-p', '--model', alias, '--max-turns', '1', '--output-format', 'json', PROBE_PROMPT], cwd: folder, timeoutMs: CLAUDE_CODE_PROBE_TIMEOUT_MS }));
-        isAnyResolved ||= outcome.kind === 'resolved';
-        const kept = outcome.kind === 'resolved' ? [outcome.id] : outcome.kind === 'unknown' ? resolvedBefore.filter((id) => id.includes(alias)) : [];
-        ids.push(...kept.filter((id) => !ids.includes(id)));
+      try {
+        for (const alias of aliases) {
+          const outcome = outcomeOf(alias, await deps.run(program, { args: ['-p', '--model', alias, '--max-turns', '1', '--output-format', 'json', PROBE_PROMPT], cwd: folder, timeoutMs: CLAUDE_CODE_PROBE_TIMEOUT_MS }));
+          isAnyResolved ||= outcome.kind === 'resolved';
+          const kept = outcome.kind === 'resolved' ? [outcome.id] : outcome.kind === 'unknown' ? resolvedBefore.filter((id) => id.includes(alias)) : [];
+          ids.push(...kept.filter((id) => !ids.includes(id)));
+        }
+      } finally {
+        await rm(folder, { recursive: true, force: true });
       }
       return {
         version,

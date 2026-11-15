@@ -1,3 +1,5 @@
+import { rm } from 'node:fs/promises';
+
 import { trierarchNameSchema } from '@aeolus-fleet/common';
 import { z } from 'zod';
 
@@ -92,14 +94,18 @@ export function createCodexDetector(deps: {
       const folder = await deps.neutralFolder();
       const confirmed: string[] = [];
       let isAnyConfirmed = false;
-      for (const { slug } of models) {
-        const outcome = outcomeOf(
-          await deps.run(program, { args: ['exec', '--skip-git-repo-check', '-m', slug, PROBE_PROMPT], cwd: folder, timeoutMs: CODEX_PROBE_TIMEOUT_MS }).catch(() => ({ status: 1, stdout: '', stderr: '' })),
-        );
-        isAnyConfirmed ||= outcome === 'confirmed';
-        if (outcome === 'confirmed' || (outcome === 'unknown' && confirmedBefore.has(slug))) {
-          confirmed.push(slug);
+      try {
+        for (const { slug } of models) {
+          const outcome = outcomeOf(
+            await deps.run(program, { args: ['exec', '--skip-git-repo-check', '-m', slug, PROBE_PROMPT], cwd: folder, timeoutMs: CODEX_PROBE_TIMEOUT_MS }).catch(() => ({ status: 1, stdout: '', stderr: '' })),
+          );
+          isAnyConfirmed ||= outcome === 'confirmed';
+          if (outcome === 'confirmed' || (outcome === 'unknown' && confirmedBefore.has(slug))) {
+            confirmed.push(slug);
+          }
         }
+      } finally {
+        await rm(folder, { recursive: true, force: true });
       }
       const confirmedAt = isAnyConfirmed ? now : (before?.confirmedAt ?? null);
       if (confirmed.length === 0) {
