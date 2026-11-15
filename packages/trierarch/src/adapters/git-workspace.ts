@@ -181,7 +181,8 @@ export function createGitWorkspace(
       }
       const repository = await repositoryOf(folder);
       if (repository !== undefined && (await isWorktreeOf(repository, folder))) {
-        await git(['-C', repository, 'worktree', 'remove', '--force', folder]);
+        // A second --force removes a locked worktree too (#434): one alone leaves it, and every pass after.
+        await git(['-C', repository, 'worktree', 'remove', '--force', '--force', folder]);
         return;
       }
       // Anything else under the root goes whole into the trash beside it: a plain clone, a worktree of another repository, a folder git does not know.
