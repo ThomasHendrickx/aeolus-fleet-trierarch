@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/usage"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/workspace"
 )
 
@@ -210,6 +212,8 @@ type Pass struct {
 	ConfirmDue func()
 	// RefuseModel keeps a model a session refused as refused for its harness's detected version.
 	RefuseModel func(harness string, model string) error
+	// ReadUsage reads the harnesses' usage as often as its own intervals allow: a harness whose subscription window is used up is not offered until it resets (#263). None offers every harness.
+	ReadUsage func() (usage.Usage, error)
 	// SendReleasedUsage sends a released ship's last usage before its folder goes (the usage design, U9); it fails while the fleet does not take it, so the folder stays. None sends nothing.
 	SendReleasedUsage func(entry reconciler.Entry) error
 	// Load reads the machine's load, at most once a minute; none reads nothing (#400).
@@ -1311,9 +1315,13 @@ func (p Pass) launchMarks() (map[string]bool, []string, map[string]string) {
 	marksLaunches := map[string]bool{}
 	missingPlugins := []string{}
 	notOffered := map[string]string{}
+	subscriptions := p.subscriptions()
+	now := p.Now()
 	for _, name := range slices.Sorted(maps.Keys(p.Harnesses)) {
 		harness := p.Harnesses[name]
 		if reason := harness.NotOfferedReason(); reason != "" {
+			notOffered[name] = reason
+		} else if reason := usedUpReason(subscriptions[name], now); reason != "" {
 			notOffered[name] = reason
 		}
 		marks, err := harness.MarksLaunches()
@@ -1325,6 +1333,53 @@ func (p Pass) launchMarks() (map[string]bool, []string, map[string]string) {
 		marksLaunches[name] = marks
 	}
 	return marksLaunches, missingPlugins, notOffered
+}
+
+// subscriptions are the harnesses' subscription windows by harness; none when the usage cannot be read, which holds no harness back.
+func (p Pass) subscriptions() map[string][]usage.WindowReport {
+	read := map[string][]usage.WindowReport{}
+	if p.ReadUsage == nil {
+		return read
+	}
+	used, err := p.ReadUsage()
+	if err != nil {
+		p.Log("The subscriptions were not read, so no used-up window holds a harness back: " + err.Error())
+		return read
+	}
+	for _, subscription := range used.Subscriptions {
+		read[subscription.Harness] = subscription.Windows
+	}
+	return read
+}
+
+// usedUpReason is why a harness is not offered while a window of its subscription is used up (#263): a window at 100% holds until it resets, so the one that resets last decides. Empty while none is used up, or each has reset.
+func usedUpReason(windows []usage.WindowReport, now time.Time) string {
+	var holding usage.WindowReport
+	var until time.Time
+	for _, window := range windows {
+		resetsAt, err := time.Parse(time.RFC3339, window.ResetsAt)
+		if err != nil || window.UsedPercent < 100 || !resetsAt.After(now) || !resetsAt.After(until) {
+			continue
+		}
+		holding, until = window, resetsAt
+	}
+	if until.IsZero() {
+		return ""
+	}
+	return fmt.Sprintf("its %s subscription window is used up until %s UTC", windowLength(holding.WindowMinutes), until.UTC().Format("2006-01-02 15:04"))
+}
+
+// windowLength is how long a window is, as a person says it: 5-hour, weekly, or in minutes when it is neither.
+func windowLength(minutes float64) string {
+	switch {
+	case minutes == 7*24*60:
+		return "weekly"
+	case math.Mod(minutes, 24*60) == 0:
+		return fmt.Sprintf("%.0f-day", minutes/(24*60))
+	case math.Mod(minutes, 60) == 0:
+		return fmt.Sprintf("%.0f-hour", minutes/60)
+	}
+	return fmt.Sprintf("%g-minute", minutes)
 }
 
 // watchLoad reads the machine's load and tells argo each resource it started to be low on, once: again only after it recovered and dropped again. What argo was told is kept in the state, so a restart while it stays low tells nothing. A failure is logged; the next read tries again (#400).

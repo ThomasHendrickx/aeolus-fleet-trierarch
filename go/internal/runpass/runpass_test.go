@@ -20,6 +20,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/usage"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/workspace"
 )
 
@@ -1767,6 +1768,76 @@ func TestARequestForAHarnessTheMachineDoesNotOfferIsGivenBackWithWhy(t *testing.
 
 	if want := "giveBack " + scout + " 1 mac-mini: harness: claude-code is not offered: its Copilot CLI version is not detected yet"; !slices.Contains(pass.fleet.calls, want) {
 		t.Fatalf("calls %q, want %q", pass.fleet.calls, want)
+	}
+}
+
+// aClaudeCodeSubscription is the harness boundary under the project's own usage reader: it says the windows it is given, as Claude Code's rate limit event does, and nothing else.
+type aClaudeCodeSubscription struct{ windows []usage.Window }
+
+func (aClaudeCodeSubscription) TokensOf(usage.Ship) ([]usage.HourTokens, error) { return nil, nil }
+
+func (h aClaudeCodeSubscription) Subscription() ([]usage.Window, error) { return h.windows, nil }
+
+// readingWindows has the pass read its usage with the usage reader the trierarch runs, over a harness that says the windows given.
+func readingWindows(pass *aPass, windows ...usage.Window) {
+	reader := &usage.Reader{
+		Harnesses:  map[string]usage.Harness{"claude-code": aClaudeCodeSubscription{windows: windows}},
+		Configured: []string{"claude-code"},
+		Store:      pass.store,
+		Now:        func() time.Time { return pass.pass.Now() },
+		Log:        func(string) {},
+	}
+	pass.pass.ReadUsage = reader.Read
+}
+
+func TestARequestForAHarnessWhoseSubscriptionWindowIsUsedUpIsGivenBackAtOnceWithTheWindowAndWhenItResets(t *testing.T) {
+	pass := aRunPass(t)
+	readingWindows(pass, usage.Window{WindowMinutes: 300, UsedPercent: 100, ResetsAt: now.Add(3 * time.Hour)})
+	pass.fleet.requests = []reconciler.Request{aRequest("")}
+
+	pass.run(t)
+
+	if want := "giveBack " + scout + " 1 mac-mini: harness: claude-code is not offered: its 5-hour subscription window is used up until 2026-11-04 15:00 UTC"; !slices.Contains(pass.fleet.calls, want) {
+		t.Fatalf("calls %q, want %q", pass.fleet.calls, want)
+	}
+}
+
+func TestAHarnessWhoseSubscriptionWindowIsUsedUpIsOfferedAgainOnceItResets(t *testing.T) {
+	pass := aRunPass(t)
+	readingWindows(pass, usage.Window{WindowMinutes: 300, UsedPercent: 100, ResetsAt: now.Add(3 * time.Hour)})
+	pass.run(t)
+	pass.pass.Now = func() time.Time { return now.Add(3 * time.Hour) }
+
+	pass.run(t)
+
+	if pass.store.state.NotOffered != nil {
+		t.Fatalf("not offered %+v, want none", pass.store.state.NotOffered)
+	}
+}
+
+func TestAHarnessWhoseSubscriptionWindowIsNotUsedUpIsOffered(t *testing.T) {
+	pass := aRunPass(t)
+	readingWindows(pass, usage.Window{WindowMinutes: 300, UsedPercent: 99, ResetsAt: now.Add(3 * time.Hour)})
+
+	pass.run(t)
+
+	if pass.store.state.NotOffered != nil {
+		t.Fatalf("not offered %+v, want none", pass.store.state.NotOffered)
+	}
+}
+
+func TestTheWindowThatResetsLastNamesWhyAHarnessIsNotOfferedWhenSeveralAreUsedUp(t *testing.T) {
+	pass := aRunPass(t)
+	readingWindows(pass,
+		usage.Window{WindowMinutes: 300, UsedPercent: 100, ResetsAt: now.Add(3 * time.Hour)},
+		usage.Window{WindowMinutes: 10080, UsedPercent: 100, ResetsAt: now.Add(48 * time.Hour)},
+	)
+
+	pass.run(t)
+
+	want := []reconciler.NotOfferedHarness{{Harness: "claude-code", Reason: "its weekly subscription window is used up until 2026-11-06 12:00 UTC"}}
+	if !slices.Equal(pass.store.state.NotOffered, want) {
+		t.Fatalf("not offered %+v, want %+v", pass.store.state.NotOffered, want)
 	}
 }
 
