@@ -13,6 +13,9 @@ func TestAProcessRunsTheWordsItWasStartedWith(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = process.Process.Kill(); _ = process.Wait() })
 
+	if !Runs(process.Process.Pid, "sh", "-c") {
+		t.Fatal("Runs = false, want true for the shell that was started")
+	}
 	if !Runs(process.Process.Pid, "sleep", "30", "--folder", "/a/folder") {
 		t.Fatal("Runs = false, want true for the words the process was started with")
 	}
