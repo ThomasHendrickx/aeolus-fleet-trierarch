@@ -29,12 +29,12 @@ func TestWakeStreamLooksOnOpenAndWakeAndStopsOnLeaseEnd(t *testing.T) {
 }
 
 func TestWakeStreamReopensAfterADropAndLooksAgain(t *testing.T) {
-	opens := 0
+	var opens atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		opens++
+		count := opens.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprint(w, "event: wake\ndata: {\"reason\":\"open\"}\n\n")
-		if opens == 2 {
+		if count == 2 {
 			fmt.Fprint(w, "event: end\ndata: {\"code\":\"LEASE_ENDED\"}\n\n")
 		}
 	}))
@@ -44,8 +44,8 @@ func TestWakeStreamReopensAfterADropAndLooksAgain(t *testing.T) {
 	looks := 0
 	err := (Client{URL: server.URL}).Watch(ctx, func(context.Context) error { looks++; return nil })
 	var refusal *Refusal
-	if opens != 2 || looks != 2 || !errors.As(err, &refusal) || refusal.Code != "LEASE_ENDED" {
-		t.Fatalf("opens = %d, looks = %d, end = %v", opens, looks, err)
+	if opens.Load() != 2 || looks != 2 || !errors.As(err, &refusal) || refusal.Code != "LEASE_ENDED" {
+		t.Fatalf("opens = %d, looks = %d, end = %v", opens.Load(), looks, err)
 	}
 }
 
@@ -106,5 +106,39 @@ func TestWakeStreamLooksForLostWakesWithoutReopening(t *testing.T) {
 	})
 	if looks != 3 || opens.Load() != 1 {
 		t.Fatalf("looks = %d, opens = %d, want 3 and 1", looks, opens.Load())
+	}
+}
+
+func TestWakeStreamDoesNotRetryAnEndedLeaseAtOpen(t *testing.T) {
+	var opens atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opens.Add(1)
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"code":"LEASE_ENDED","message":"released"}`)
+	}))
+	defer server.Close()
+	looks := 0
+	err := (Client{URL: server.URL}).Watch(context.Background(), func(context.Context) error { looks++; return nil })
+	var refusal *Refusal
+	if opens.Load() != 1 || looks != 0 || !errors.As(err, &refusal) || refusal.Code != "LEASE_ENDED" {
+		t.Fatalf("opens = %d, looks = %d, end = %v", opens.Load(), looks, err)
+	}
+}
+
+func TestWakeStreamCancellationClosesTheStreamWithoutReopening(t *testing.T) {
+	var opens atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		opens.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: wake\ndata: {}\n\n")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := (Client{URL: server.URL}).Watch(ctx, func(context.Context) error { cancel(); return nil })
+	if opens.Load() != 1 || !errors.Is(err, context.Canceled) {
+		t.Fatalf("opens = %d, end = %v", opens.Load(), err)
 	}
 }
