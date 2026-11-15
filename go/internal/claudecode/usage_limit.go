@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 )
@@ -22,10 +23,15 @@ func (h Harness) UsageLimit(entry reconciler.Entry) (occurrence string, reason s
 	defer file.Close()
 	lines := bufio.NewScanner(file)
 	lines.Buffer(make([]byte, 64*1024), 64*1024*1024)
-	isAssistantLimit := false
+	isPendingLimit := false
+	reset := ""
 	for lines.Scan() {
 		var event struct {
-			Type    string   `json:"type"`
+			Type          string `json:"type"`
+			RateLimitInfo *struct {
+				Status   string `json:"status"`
+				ResetsAt int64  `json:"resetsAt"`
+			} `json:"rate_limit_info"`
 			UUID    string   `json:"uuid"`
 			IsError bool     `json:"is_error"`
 			Error   string   `json:"error"`
@@ -39,6 +45,23 @@ func (h Harness) UsageLimit(entry reconciler.Entry) (occurrence string, reason s
 			} `json:"message"`
 		}
 		if json.Unmarshal(lines.Bytes(), &event) != nil {
+			continue
+		}
+		if event.Type == "rate_limit_event" {
+			if event.RateLimitInfo != nil && event.RateLimitInfo.Status == "rejected" {
+				reset = ""
+				if at := event.RateLimitInfo.ResetsAt; at > 0 && at <= 253402300799 {
+					reset = "; resets at " + time.Unix(at, 0).UTC().Format("2006-01-02T15:04:05.000Z")
+				}
+				if occurrence == "" || !isPendingLimit {
+					occurrence = event.UUID
+					if occurrence == "" {
+						occurrence = fmt.Sprintf("%x", sha256.Sum256(lines.Bytes()))
+					}
+				}
+				reason = "Usage limit reached" + reset
+				isPendingLimit = true
+			}
 			continue
 		}
 		if event.Type != "result" && event.Type != "assistant" && event.Type != "user" {
@@ -60,9 +83,9 @@ func (h Harness) UsageLimit(entry reconciler.Entry) (occurrence string, reason s
 				}
 			}
 		}
-		if isError && event.Type == "result" && isAssistantLimit && occurrence != "" {
+		if isError && isPendingLimit && occurrence != "" {
 			if matched != "" {
-				reason = matched
+				reason = matched + reset
 			}
 		} else {
 			occurrence, reason = "", ""
@@ -73,7 +96,10 @@ func (h Harness) UsageLimit(entry reconciler.Entry) (occurrence string, reason s
 				}
 			}
 		}
-		isAssistantLimit = event.Type == "assistant" && occurrence != ""
+		isPendingLimit = event.Type == "assistant" && occurrence != ""
+		if !isPendingLimit {
+			reset = ""
+		}
 	}
 	return occurrence, reason
 }
