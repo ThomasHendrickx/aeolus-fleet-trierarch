@@ -56,6 +56,7 @@ const stateSchema = z.object({
       isOldLayout: z.literal(true).optional(),
       crewFailures: z.int().min(1).optional(),
       isIdentityGone: z.literal(true).optional(),
+      usageLimitTold: z.string().optional(),
     })
       .transform(fromOldLayout),
   ),

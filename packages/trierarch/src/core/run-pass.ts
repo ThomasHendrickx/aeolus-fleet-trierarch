@@ -12,6 +12,7 @@ import type { RefuseModel } from './refuse-model.js';
 import type { SendReleasedUsage } from './send-usage.js';
 import type { Clock } from './shared/clock.js';
 import { usedUpReason } from './used-up-window.js';
+import { reportUsageLimits } from './report-usage-limits.js';
 
 /**
  * Use case: one pass of the trierarch's loop (docs/trierarch.md, "Crewing a
@@ -76,6 +77,7 @@ export function createRunPass(deps: RunPassDeps): RunPass {
     let actions: readonly Action[];
     try {
       const requests = await deps.fleet.assignedRequests();
+      state = await reportUsageLimits(state, deps);
       const clears = await deps.fleet.pendingClears();
       // Before anything reads a session through its plugin: a harness whose plugin is gone is left unread (#1212).
       const { marksLaunches, missingPlugins, notOffered } = await launchMarks(deps);

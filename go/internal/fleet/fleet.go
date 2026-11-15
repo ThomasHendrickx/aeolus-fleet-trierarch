@@ -461,3 +461,25 @@ func newKey() string {
 	text := hex.EncodeToString(bytes)
 	return text[0:8] + "-" + text[8:12] + "-" + text[12:16] + "-" + text[16:20] + "-" + text[20:]
 }
+
+// UsageLimitRecipient reads the requester of the crew, falling back to the ship's owner (#1629).
+func (c Client) UsageLimitRecipient(shipID string) (string, error) {
+	var ship struct {
+		OwnerShipID *string `json:"ownerShipId"`
+		CrewRequest *struct {
+			RequestedBy *struct {
+				ID string `json:"id"`
+			} `json:"requestedBy"`
+		} `json:"crewRequest"`
+	}
+	if err := call(c.URL, request{path: "/fleet/ship", crewToken: c.CrewToken, body: map[string]string{"shipId": shipID}}, &ship); err != nil {
+		return "", err
+	}
+	if ship.CrewRequest != nil && ship.CrewRequest.RequestedBy != nil {
+		return ship.CrewRequest.RequestedBy.ID, nil
+	}
+	if ship.OwnerShipID != nil {
+		return *ship.OwnerShipID, nil
+	}
+	return "", nil
+}

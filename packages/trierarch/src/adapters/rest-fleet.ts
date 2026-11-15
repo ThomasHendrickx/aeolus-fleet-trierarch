@@ -127,6 +127,13 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string; 
 
   return {
     url: fleetUrl,
+    usageLimitRecipient: async (shipId) => {
+      const ship = await call({ path: '/fleet/ship', body: { shipId }, answers: z.object({
+        crewRequest: z.object({ requestedBy: z.object({ id: idSchema('ship') }).nullable() }).nullable(),
+        ownerShipId: idSchema('ship').nullable(),
+      }) });
+      return ship.crewRequest?.requestedBy?.id ?? ship.ownerShipId ?? undefined;
+    },
     ship: async (shipId) => {
       try {
         const ship = await call({ path: '/fleet/ship', body: { shipId }, answers: shipDetailOutputSchema });
