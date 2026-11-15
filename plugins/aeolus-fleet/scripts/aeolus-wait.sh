@@ -57,7 +57,14 @@ pid_file="$(aeolus_pid_file)"
 refused_file="$(aeolus_refused_file)"
 waiting_file="$(aeolus_waiting_file)"
 echo "$$" > "$pid_file"
-trap 'rm -f "$pid_file"' EXIT
+stream_pid=''
+stream_dir="$(mktemp -d)"
+cleanup() {
+  if [ -n "$stream_pid" ]; then kill "$stream_pid" 2>/dev/null || :; wait "$stream_pid" 2>/dev/null || :; fi
+  rm -rf "$stream_dir"
+  rm -f "$pid_file"
+}
+trap cleanup EXIT
 aeolus_log "$identity" watch started
 
 fleet_url="$(aeolus_identity_field "$identity_text" fleetUrl)"
@@ -186,6 +193,48 @@ answered() {
   fi
 }
 
+# The stream carries hints only. The calls below still take every delivery.
+open_stream() {
+  rm -f "$stream_dir/lines"
+  mkfifo "$stream_dir/lines"
+  exec 9<> "$stream_dir/lines"
+  aeolus_bearer_config "$crew_token" > "$stream_dir/bearer"
+  curl -K "$stream_dir/bearer" -N -sS --connect-timeout 15 -D "$stream_dir/headers" \
+    "${fleet_url}/api/v1/ship/wakeups" > "$stream_dir/lines" 2>/dev/null &
+  stream_pid=$!
+}
+
+wait_for_wake() {
+  local line event='' stream_body=''
+  [ -n "$stream_pid" ] || open_stream
+  while :; do
+    line=''
+    if IFS= read -r -t 1 line <&9; then
+      line="${line%$'\r'}"
+      case "$line" in
+        'event:'*) event="${line#event: }" ;;
+        '')
+          case "$event" in
+            wake) return 0 ;;
+            end) status=401; body='{"code":"LEASE_ENDED"}'; on_refusal; return 1 ;;
+          esac
+          event=''
+          ;;
+      esac
+    fi
+    stream_body="${stream_body}${line}"
+    if ! kill -0 "$stream_pid" 2>/dev/null; then
+      wait "$stream_pid" 2>/dev/null || :
+      stream_pid=''
+      exec 9>&-
+      status="$(sed -n 's/^HTTP[^ ]* \([0-9][0-9][0-9]\).*/\1/p' "$stream_dir/headers" | tail -n 1)"
+      body="$stream_body"
+      on_refusal
+      return 1
+    fi
+  done
+}
+
 while :; do
   # What the fleet did not take yet goes first, also on a watcher's last pass.
   aeolus_send_owed "$identity"
@@ -204,9 +253,8 @@ while :; do
       continue
     fi
   fi
-  wait_now="$WAIT_SECONDS"
-  [ "$wait_now" -le "$left" ] || wait_now="$left"
-  call /api/v1/ship/inbox "{\"waitSeconds\":${wait_now}}" $((wait_now + 15))
+  wait_for_wake || continue
+  call /api/v1/ship/inbox '{"waitSeconds":0}' 60
   if [ "$status" != 200 ]; then
     on_refusal
     continue
