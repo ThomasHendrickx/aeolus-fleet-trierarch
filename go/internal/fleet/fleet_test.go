@@ -116,7 +116,7 @@ func aSendingFleet(t *testing.T, answer func(w http.ResponseWriter)) (Client, *m
 		answer(w)
 	}))
 	t.Cleanup(server.Close)
-	return Client{URL: server.URL, CrewToken: "aeolus_ct_v1_trierarch", Model: "aeolus-trierarch@1.2.3"}, &sent
+	return Client{URL: server.URL, CrewToken: "aeolus_ct_v1_trierarch"}, &sent
 }
 
 func TestTrierarchSendsWithoutAModel(t *testing.T) {

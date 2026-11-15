@@ -145,8 +145,6 @@ type Client struct {
 	wakeRetry  func() time.Duration
 	URL        string
 	CrewToken  string
-	// Model is what every message the trierarch sends states as the model it runs, as today's trierarch states its package and version.
-	Model string
 }
 
 // AssignedRequests are the crew requests assigned to the trierarch.
@@ -331,13 +329,13 @@ func (c Client) ReportSelf(state string, note string, details any) error {
 
 // send sends a message from the trierarch's own ship to the ship named or identified by the selector, as markdown.
 func (c Client) send(selector map[string]string, text string, idempotencyKey string) error {
-	body := map[string]any{"selector": selector, "payload": text, "contentType": "text/markdown", "model": c.Model, "idempotencyKey": idempotencyKey}
+	body := map[string]any{"selector": selector, "payload": text, "contentType": "text/markdown", "idempotencyKey": idempotencyKey}
 	return call(c.URL, request{path: "/ship/send", crewToken: c.CrewToken, body: body}, &map[string]any{})
 }
 
 // AskForTrustedRepositories asks the trierarch plugin's ship for the trusted repositories again, as the trierarch's own ship (aeolus-fleet#384).
 func (c Client) AskForTrustedRepositories(pluginShipID string) error {
-	body := map[string]any{"selector": map[string]string{"kind": "ship", "shipId": pluginShipID}, "payload": "{}", "contentType": trusted.RequestContentType, "model": c.Model, "idempotencyKey": newKey()}
+	body := map[string]any{"selector": map[string]string{"kind": "ship", "shipId": pluginShipID}, "payload": "{}", "contentType": trusted.RequestContentType, "idempotencyKey": newKey()}
 	return call(c.URL, request{path: "/ship/send", crewToken: c.CrewToken, body: body}, &map[string]any{})
 }
 
@@ -353,7 +351,7 @@ func (c Client) ConfirmMcpConfiguration(pluginShipID string, payload string) err
 
 // sendPlugin sends the trierarch plugin's ship a message of the content type, with a key of its own.
 func (c Client) sendPlugin(pluginShipID string, contentType string, payload string) error {
-	body := map[string]any{"selector": map[string]string{"kind": "ship", "shipId": pluginShipID}, "payload": payload, "contentType": contentType, "model": c.Model, "idempotencyKey": newKey()}
+	body := map[string]any{"selector": map[string]string{"kind": "ship", "shipId": pluginShipID}, "payload": payload, "contentType": contentType, "idempotencyKey": newKey()}
 	return call(c.URL, request{path: "/ship/send", crewToken: c.CrewToken, body: body}, &map[string]any{})
 }
 
@@ -390,7 +388,7 @@ const usageContentType = "application/vnd.aeolus.trierarch.usage+json"
 
 // SendUsage sends the trierarch plugin's ship a usage message as the trierarch's own ship; the fleet's refusal, such as its daily message limit, is an error, and the key makes a retry safe.
 func (c Client) SendUsage(pluginShipID string, payload string, idempotencyKey string) error {
-	body := map[string]any{"selector": map[string]string{"kind": "ship", "shipId": pluginShipID}, "payload": payload, "contentType": usageContentType, "model": c.Model, "idempotencyKey": idempotencyKey}
+	body := map[string]any{"selector": map[string]string{"kind": "ship", "shipId": pluginShipID}, "payload": payload, "contentType": usageContentType, "idempotencyKey": idempotencyKey}
 	return call(c.URL, request{path: "/ship/send", crewToken: c.CrewToken, body: body}, &map[string]any{})
 }
 
