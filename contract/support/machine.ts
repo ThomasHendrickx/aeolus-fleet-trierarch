@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -399,12 +400,19 @@ async function git(args: readonly string[]): Promise<void> {
 /** The harnesses a machine may have installed, besides Claude Code, which every machine has. */
 export type OtherHarness = 'codex' | 'copilot';
 
+/** A new folder of four characters in the run's short folder, for the machine: a ship's socket path under its home is within the system's limit only for a short path. */
+function aShortFolder(): string {
+  const folder = join(process.env.TRIERARCH_TEST_SHORT_FOLDER ?? '', randomBytes(2).toString('hex'));
+  mkdirSync(folder);
+  return realpathSync(folder);
+}
+
 /** A machine with Claude Code installed and signed in, and the other harnesses given, a repository checked out, and no trierarch yet. */
 export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDiagnoseHolds?: boolean } = {}): Promise<Machine> {
   const others = at.others ?? [];
   // In the run's short folder: the ship sockets under the machine's home are within the system's limit only for a short path.
-  const root = realpathSync(mkdtempSync(join(process.env.TRIERARCH_TEST_SHORT_FOLDER ?? '', 'm-')));
-  const home = join(root, 'home');
+  const root = aShortFolder();
+  const home = join(root, 'h');
   const machine = join(root, 'machine');
   const bin = join(machine, 'bin');
   mkdirSync(home);
