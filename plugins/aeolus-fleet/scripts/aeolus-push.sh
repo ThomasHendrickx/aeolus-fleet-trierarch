@@ -180,8 +180,36 @@ permission_candidate() {
   return 1
 }
 
+# How many deliveries the store holds.
+permission_held_count() {
+  local dir file count=0
+  dir="$(aeolus_store_dir)" || { echo 0; return; }
+  for file in "$dir"/*.state; do
+    [ -f "$file" ] && count=$((count + 1))
+  done
+  echo "$count"
+}
+
+# Whether a received answer unmarked as seen belongs to one of the asks named.
+permission_others_answer() {
+  local dir file id delivery question
+  dir="$(aeolus_store_dir)" || return 1
+  for file in "$dir"/*.state; do
+    [ -f "$file" ] || continue
+    id="${file##*/}"; id="${id%.state}"
+    [ "$(aeolus_store_state "$id")" = received ] || continue
+    delivery="$(cat "$dir/$id.json")"
+    [ "$(aeolus_json_string "$delivery" contentType)" = application/vnd.aeolus.answer+json ] || continue
+    question="$(aeolus_json_string "$(aeolus_json_string "$delivery" payload)" questionId)"
+    case " $* " in *" ${question} "*) return 0 ;; esac
+  done
+  return 1
+}
+
 permission_receive() {
   permission_candidate "$@" && return 0
+  local held_count
+  held_count="$(permission_held_count)"
   # Leave locally held messages out of the next receive, so one plain
   # message cannot keep the owner's later answer behind it indefinitely.
   local dir file held='' separator=''
@@ -195,6 +223,12 @@ permission_receive() {
   # push_receive's exit on an empty inbox belongs to this subshell only.
   (push_receive "{\"max\":1,\"excluding\":[${held}]}") >/dev/null
   permission_candidate "$@" && return 0
+  # What it stored is another open ask's answer: read on at once, for this
+  # ask's own may follow it, rather than answer empty and wait out a backoff.
+  if [ "$(permission_held_count)" -gt "$held_count" ] && permission_others_answer "$@"; then
+    permission_receive "$@"
+    return
+  fi
   printf '{}\n'
 }
 
