@@ -1,0 +1,8 @@
+{
+  "firstPermissions": 1,
+  "newProcessPermissions": 0,
+  "changedPaths": [
+    ".config/cursor/cli-config.json",
+    ".config/cursor/acp-sessions/session-allow-always/meta.json"
+  ]
+}
