@@ -169,7 +169,9 @@ describe("upgrade with Codex on offer updates Codex's aeolus-fleet plugin", () =
   const cache = () => join(codexHome(), 'plugins', 'cache', 'aeolus-fleet', 'aeolus-fleet');
   const versionFolders = () => (existsSync(cache()) ? readdirSync(cache()).sort() : []);
   /** Codex's cache as the tests set it: init installed the plugin of the trierarch's own version there, which sorts among the versions a test seeds. */
-  const withEmptyCache = () => rmSync(cache(), { recursive: true, force: true });
+  const withEmptyCache = () => {
+    rmSync(cache(), { recursive: true, force: true });
+  };
   /** A version folder of the plugin in Codex's cache, as its version came at the time given. */
   const aVersionFolder = (folder: string, came: Date) => {
     mkdirSync(join(cache(), folder, '.codex-plugin'), { recursive: true });
