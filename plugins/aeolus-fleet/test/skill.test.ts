@@ -16,6 +16,17 @@ const protocolRules = SHIP_PROTOCOL.split('\n').filter((line) => /^\d+\. /.test(
 // only what the plugin adds.
 
 describe('the crew-a-ship skill', () => {
+  it('gives the shapes of a first setStatement and a first reply, so a fresh session gets them right at once (#478)', () => {
+    for (const skill of [claudeSkill, codexSkill]) {
+      expect(skill).toContain('"capabilities":[{"name":"<capability name>","description":"<what it does>"}]');
+      expect(skill).toContain('each capability is an object with a name, never a string');
+      expect(skill).toContain('"summary":"<one plain sentence of what the ship does for a person, then more>"');
+      expect(skill).toContain('selector is an object, never a string');
+      expect(skill).toContain('payload is plain text, never an object');
+      expect(skill).toContain('inReplyTo is the delivery\'s messageId, never its deliveryId');
+    }
+  });
+
   it('says in one line that "isForced": true on a send changes or stops what a busy ship does now, and points to the protocol for the rule', () => {
     const line = claudeSkill.split('\n').find((l) => l.includes('"isForced":true'));
     expect(line).toContain('busy ship');
