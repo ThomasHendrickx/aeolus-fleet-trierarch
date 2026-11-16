@@ -224,7 +224,7 @@ func TestLoginRefusesCopilotAndWhatItCannotTake(t *testing.T) {
 		want  string
 	}{
 		{[]string{"login", "copilot", "--api-key"}, "copilot signs in with this computer's own login"},
-		{[]string{"login", "cursor", "--api-key"}, "login takes claude-code or codex"},
+		{[]string{"login", "cursor", "--api-key"}, "cursor signs in with this computer's own login (agent login)"},
 		{[]string{"login", "claude-code"}, "login takes claude-code or codex"},
 		{[]string{"login", "claude-code", "--api-key", "--check"}, "login takes claude-code or codex"},
 		{[]string{"login", "claude-code", "--default", "default"}, "a login is api-key or subscription"},

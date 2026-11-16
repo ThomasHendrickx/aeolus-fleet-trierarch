@@ -253,6 +253,12 @@ describe('aeolus-trierarch', () => {
     expect(output).toBe("Copilot signs in with this computer's own login (copilot login), never an API key: the trierarch keeps no Copilot key and runs every Copilot session on that login");
   });
 
+  it.each([['--api-key'], ['--remove-key'], ['--check'], ['--default', 'api-key']])("login refuses Cursor with %s, naming the machine login (CC6)", async (...words) => {
+    const { output, code } = await main(['login', 'cursor', ...words], machine({ HOME: home }));
+    expect(code).toBe(1);
+    expect(output).toBe("Cursor signs in with this computer's own login (agent login), never an API key: the trierarch keeps no Cursor key and runs every Cursor session on that login");
+  });
+
   it('login refuses a harness it does not know, naming the ones it does', async () => {
     const { output, code } = await main(['login', 'gemini', '--remove-key'], machine({ HOME: home }));
 

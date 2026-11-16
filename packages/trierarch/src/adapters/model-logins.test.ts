@@ -67,6 +67,10 @@ describe('whether a session can start on its login (api keys K9)', () => {
     await expect(createModelLogins(harnesses()).startProblem({ harness: 'copilot', login: 'apiKey', options: {} })).resolves.toBe("copilot signs in with this computer's own login and runs on no API key: run the ship on its subscription");
   });
 
+  it("not Cursor on an API key: it uses the machine login (CC6)", async () => {
+    await expect(createModelLogins(harnesses()).startProblem({ harness: 'cursor', login: 'apiKey', options: {} })).resolves.toBe("cursor signs in with this computer's own login and runs on no API key: run the ship on its subscription");
+  });
+
   it('on an API key on either runtime, once its harness holds a key: containers reach the model proxy too (headless H16)', async () => {
     await keys.write('claude-code', 'test-key-not-real');
 
