@@ -30,7 +30,7 @@ func TestCursorDetectionUsesTheCapturedBuildAndModelsWithoutAPrompt(t *testing.T
 		t.Errorf("Version() = %q, %v", version, ok)
 	}
 	found, ok := d.Detect(context.Background(), "2026.11.13-eacade1", nil, time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC))
-	if !ok || found.Options["model"].Default != "auto" || found.ConfirmedAt != "" {
+	if !ok || found.Options["model"].Default != "auto" || found.ConfirmedAt != nil {
 		t.Errorf("Detect() = %+v, %v, want auto without confirmation", found, ok)
 	}
 	for _, id := range []string{"auto", "gpt-5.3-codex"} {
