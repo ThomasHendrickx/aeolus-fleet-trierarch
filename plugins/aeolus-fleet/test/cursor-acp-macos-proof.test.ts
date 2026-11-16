@@ -21,7 +21,8 @@ const observations = (name: string) => trace(name).filter((entry) => entry.direc
 
 describe('Cursor CLI 2026.11.13-eacade1 ACP on macOS', () => {
   it('captures load-session capability and the machine login method', () => {
-    expect(trace('lifecycle')).toContainEqual(expect.objectContaining({ direction: 'received', message: expect.objectContaining({ result: expect.objectContaining({ protocolVersion: 1, agentCapabilities: expect.objectContaining({ loadSession: true }), authMethods: expect.arrayContaining([expect.objectContaining({ id: 'cursor_login' })]) }) }) }));
+    const initialized = trace('lifecycle').find((entry) => entry.process === 'A' && entry.direction === 'received' && entry.message.id === 1);
+    expect(initialized?.message).toMatchObject({ result: { protocolVersion: 1, agentCapabilities: { loadSession: true }, authMethods: [{ id: 'cursor_login' }] } });
   });
 
   it('keeps the second live process model before and after the first changes model and the second completes a prompt', () => {
@@ -31,7 +32,7 @@ describe('Cursor CLI 2026.11.13-eacade1 ACP on macOS', () => {
 
     expect(models('B')).toEqual(['gpt-5.4-mini[reasoning=medium]', 'gpt-5.4-mini[reasoning=medium]', 'gpt-5.4-mini[reasoning=medium]']);
     expect(models('A')).toEqual(['composer-2.5[fast=true]']);
-    expect(entries).toContainEqual(expect.objectContaining({ process: 'B', direction: 'received', message: expect.objectContaining({ result: { stopReason: 'end_turn' } }) }));
+    expect(entries.filter((entry) => entry.process === 'B' && entry.direction === 'received').map((entry) => entry.message.result)).toContainEqual({ stopReason: 'end_turn' });
   });
 
   it('keeps a permission request open for thirty minutes and completes after the delayed denial', () => {
@@ -42,41 +43,50 @@ describe('Cursor CLI 2026.11.13-eacade1 ACP on macOS', () => {
     expect(answered?.message.id).toBe(requested?.message.id);
     expect(answered?.message.result).toEqual({ outcome: { outcome: 'selected', optionId: 'reject-once' } });
     expect((answered?.elapsedMs ?? 0) - (requested?.elapsedMs ?? 0)).toBeGreaterThanOrEqual(1_800_000);
-    expect(entries).toContainEqual(expect.objectContaining({ direction: 'received', message: expect.objectContaining({ result: { stopReason: 'end_turn' } }) }));
+    expect(entries.filter((entry) => entry.direction === 'received').map((entry) => entry.message.result)).toContainEqual({ stopReason: 'end_turn' });
   });
 
   it('ignores modelId in session/new and requires explicit model selection', () => {
     expect(observations('lifecycle')).toContainEqual({ event: 'session-new-model', requested: 'gpt-5.4-mini[reasoning=medium]', actual: 'composer-2.5[fast=true]' });
-    expect(trace('lifecycle')).toContainEqual(expect.objectContaining({ direction: 'sent', message: expect.objectContaining({ method: 'session/set_model', params: expect.objectContaining({ modelId: 'composer-2.5[fast=true]' }) }) }));
+    expect(trace('lifecycle').find((entry) => entry.direction === 'sent' && entry.message.method === 'session/set_model')?.message.params).toMatchObject({ modelId: 'composer-2.5[fast=true]' });
   });
 
   it('returns end_turn after a failed shell command rather than treating a tool exit as a failed turn', () => {
-    expect(updates('lifecycle', 'A')).toContainEqual(expect.objectContaining({ sessionUpdate: 'tool_call_update', status: 'completed', rawOutput: { exitCode: 7, stdout: 'ACP_MAC_TOOL_FAILED\n', stderr: '' } }));
-    expect(trace('lifecycle').filter((entry) => entry.process === 'A' && entry.direction === 'received' && entry.message.result !== undefined)).toContainEqual(expect.objectContaining({ message: expect.objectContaining({ id: 6, result: { stopReason: 'end_turn' } }) }));
+    expect(updates('lifecycle', 'A').find((update) => update.status === 'completed')).toMatchObject({ sessionUpdate: 'tool_call_update', rawOutput: { exitCode: 7, stdout: 'ACP_MAC_TOOL_FAILED\n', stderr: '' } });
+    expect(trace('lifecycle').find((entry) => entry.process === 'A' && entry.direction === 'received' && entry.message.id === 6)?.message.result).toEqual({ stopReason: 'end_turn' });
   });
 
   it('captures distinct errors for loading a missing session and prompting one', () => {
-    const messages = trace('lifecycle').map((entry) => entry.message);
-    expect(messages).toContainEqual(expect.objectContaining({ error: expect.objectContaining({ code: -32602, message: 'Invalid params' }) }));
-    expect(messages).toContainEqual(expect.objectContaining({ error: expect.objectContaining({ code: -32603, message: 'Internal error' }) }));
+    const errorSchema = z.object({ code: z.number(), message: z.string() });
+    const errors = trace('lifecycle').filter((entry) => entry.direction === 'received' && entry.message.error !== undefined).map((entry) => errorSchema.parse(entry.message.error));
+    expect(errors).toContainEqual({ code: -32602, message: 'Invalid params' });
+    expect(errors).toContainEqual({ code: -32603, message: 'Internal error' });
   });
 
   it('replays history and resumes a session after killing its owning process mid-turn', () => {
-    expect(observations('lifecycle')).toContainEqual(expect.objectContaining({ event: 'signal', signal: 'SIGKILL', target: 'owned agent acp PID', while: 'session/prompt open and permission pending' }));
-    expect(updates('lifecycle', 'A-resumed').length).toBeGreaterThan(0);
-    expect(trace('lifecycle')).toContainEqual(expect.objectContaining({ process: 'after-kill', direction: 'received', message: expect.objectContaining({ result: { stopReason: 'end_turn' } }) }));
+    expect(observations('lifecycle').find((entry) => entry.event === 'signal')).toMatchObject({ signal: 'SIGKILL', target: 'owned agent acp PID', while: 'session/prompt open and permission pending' });
+    for (const process of ['A-resumed', 'after-kill']) {
+      const entries = trace('lifecycle').filter((entry) => entry.process === process);
+      const loadRequest = entries.findIndex((entry) => entry.direction === 'sent' && entry.message.method === 'session/load');
+      const loadResponse = entries.findIndex((entry) => entry.direction === 'received' && entry.message.id === 2);
+      const replay = entries.slice(loadRequest + 1, loadResponse).filter((entry) => entry.message.method === 'session/update');
+      expect(replay.map((entry) => updateSchema.parse(entry.message).params.update.sessionUpdate)).toContain('user_message_chunk');
+    }
+    expect(trace('lifecycle').filter((entry) => entry.process === 'cancel' && entry.direction === 'received').map((entry) => entry.message.result)).toContainEqual({ stopReason: 'cancelled' });
+    expect(trace('lifecycle').filter((entry) => entry.process === 'after-kill' && entry.direction === 'received').map((entry) => entry.message.result)).toContainEqual({ stopReason: 'end_turn' });
   });
 
   it.each(['missing-login', 'synthetic-expired-login'])('refuses a session with %s in an isolated credential store', (process) => {
-    expect(trace('configuration')).toContainEqual(expect.objectContaining({ process, direction: 'received', message: expect.objectContaining({ error: expect.objectContaining({ code: -32000, message: 'Authentication required' }) }) }));
+    expect(trace('configuration').find((entry) => entry.process === process && entry.direction === 'received' && entry.message.id === 2)?.message.error).toMatchObject({ code: -32000, message: 'Authentication required' });
   });
 
   it('records the default-home user MCP server starting despite an empty session server list', () => {
     const entries = trace('configuration').filter((entry) => entry.process === 'MCP-home');
-    expect(entries).toContainEqual(expect.objectContaining({ direction: 'sent', message: expect.objectContaining({ method: 'session/new', params: expect.objectContaining({ mcpServers: [] }) }) }));
-    expect(entries).toContainEqual(expect.objectContaining({ direction: 'observation', message: { event: 'mcp-default-home', stage: 'after-initialize', homeStarted: false, xdgStarted: false, projectStarted: false } }));
-    expect(entries).toContainEqual(expect.objectContaining({ direction: 'observation', message: { event: 'mcp-default-home', stage: 'after-session-new', homeStarted: true, xdgStarted: false, projectStarted: false } }));
-    expect(observations('configuration')).toContainEqual(expect.objectContaining({ event: 'mcp-exclusion', explicitStarted: true, userStarted: false, projectStarted: false }));
+    expect(entries.find((entry) => entry.direction === 'sent' && entry.message.method === 'session/new')?.message.params).toMatchObject({ mcpServers: [] });
+    const seen = entries.filter((entry) => entry.direction === 'observation').map((entry) => entry.message);
+    expect(seen).toContainEqual({ event: 'mcp-default-home', stage: 'after-initialize', homeStarted: false, xdgStarted: false, projectStarted: false });
+    expect(seen).toContainEqual({ event: 'mcp-default-home', stage: 'after-session-new', homeStarted: true, xdgStarted: false, projectStarted: false });
+    expect(observations('configuration').find((entry) => entry.event === 'mcp-exclusion')).toMatchObject({ explicitStarted: true, userStarted: false, projectStarted: false });
   });
 
   it('persists allow-always in the command allowlist beyond the session and process', () => {
@@ -85,16 +95,18 @@ describe('Cursor CLI 2026.11.13-eacade1 ACP on macOS', () => {
     for (const stage of ['same-session', 'new-session-same-process', 'new-process']) {
       expect(seen).toContainEqual({ event: 'allow-always-permissions', stage, permissionCount: 0 });
     }
-    expect(seen).toContainEqual(expect.objectContaining({ event: 'allow-always-files', files: expect.arrayContaining([{ path: 'cli-config.json', settings: { permissions: { allow: ['Shell(ls)', 'Shell(python3)'], deny: [] } } }]) }));
-    expect(trace('configuration')).toContainEqual(expect.objectContaining({ direction: 'sent', message: expect.objectContaining({ result: { outcome: { outcome: 'selected', optionId: 'allow-always' } } }) }));
+    const filesSchema = z.object({ files: z.array(z.object({ path: z.string(), settings: z.record(z.string(), z.unknown()) })) });
+    const files = filesSchema.parse(seen.find((entry) => entry.event === 'allow-always-files')).files;
+    expect(files.find((file) => file.path === 'cli-config.json')?.settings).toEqual({ permissions: { allow: ['Shell(ls)', 'Shell(python3)'], deny: [] } });
+    expect(trace('configuration').filter((entry) => entry.direction === 'sent').map((entry) => entry.message.result)).toContainEqual({ outcome: { outcome: 'selected', optionId: 'allow-always' } });
   });
 
   it('reads a fresh workspace without a separate trust exchange', () => {
-    expect(updates('configuration', 'workspace-trust')).toContainEqual(expect.objectContaining({ sessionUpdate: 'tool_call_update', status: 'completed', rawOutput: { content: 'ACP_MAC_TRUST_MARKER\n' } }));
+    expect(updates('configuration', 'workspace-trust').find((entry) => entry.status === 'completed')).toMatchObject({ rawOutput: { content: 'ACP_MAC_TRUST_MARKER\n' } });
     expect(trace('configuration').filter((entry) => entry.process === 'workspace-trust' && entry.direction === 'received' && entry.message.id !== undefined && entry.message.method !== undefined)).toEqual([]);
   });
 
-  it('finishes background shell work before returning end_turn', () => {
+  it('finishes background shell work before returning end_turn when explicitly asked to wait', () => {
     const entries = trace('configuration').filter((entry) => entry.process === 'background-shell');
     const completion = entries.findIndex((entry) => JSON.stringify(entry.message).includes('ACP_MAC_BACKGROUND_END\\n\\n---\\nexit_code: 0'));
     const ended = entries.findIndex((entry) => JSON.stringify(entry.message.result) === JSON.stringify({ stopReason: 'end_turn' }));
@@ -103,11 +115,11 @@ describe('Cursor CLI 2026.11.13-eacade1 ACP on macOS', () => {
   });
 
   it('records whether a background shell remains running when the prompt ends', () => {
-    expect(observations('background-early')).toContainEqual(expect.objectContaining({ event: 'background-at-end-turn', markerAtEndTurn: false, markerLater: true }));
+    expect(observations('background-early').find((entry) => entry.event === 'background-at-end-turn')).toMatchObject({ markerAtEndTurn: false, markerLater: true });
   });
 
   it('records idle memory and keeps genuine expiry and initialized-turn failures explicitly unproven', () => {
-    expect(observations('lifecycle')).toContainEqual(expect.objectContaining({ event: 'idle-rss', kilobytes: 105952, scope: 'agent acp PID, excludes children' }));
+    expect(observations('lifecycle').find((entry) => entry.event === 'idle-rss')).toMatchObject({ kilobytes: 105952, scope: 'agent acp PID, excludes children' });
     const manifest = z.object({ eligible: z.boolean(), unproven: z.array(z.string()) }).parse(JSON.parse(fixture('capture.json')));
     expect(manifest.eligible).toBe(false);
     expect(manifest.unproven).toEqual(['genuine-expired-login', 'initialized-backend-failed-turn']);
