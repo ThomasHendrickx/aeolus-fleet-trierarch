@@ -402,7 +402,8 @@ export type OtherHarness = 'codex' | 'copilot';
 /** A machine with Claude Code installed and signed in, and the other harnesses given, a repository checked out, and no trierarch yet. */
 export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDiagnoseHolds?: boolean } = {}): Promise<Machine> {
   const others = at.others ?? [];
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'tc-')));
+  // In the run's short folder: the ship sockets under the machine's home are within the system's limit only for a short path.
+  const root = realpathSync(mkdtempSync(join(process.env.TRIERARCH_TEST_SHORT_FOLDER ?? '', 'm-')));
   const home = join(root, 'home');
   const machine = join(root, 'machine');
   const bin = join(machine, 'bin');
