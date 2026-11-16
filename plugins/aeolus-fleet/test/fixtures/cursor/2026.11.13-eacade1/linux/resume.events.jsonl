@@ -1,0 +1,18 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/tmp/cursor-s7-linux","session_id":"00000000-0000-4000-8000-000000000001","model":"Auto","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Do not call tools. Reply with S7_RESUME_TOOL_FREE."}]},"session_id":"00000000-0000-4000-8000-000000000001"}
+{"type":"thinking","subtype":"delta","text":"The","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794816688850}
+{"type":"thinking","subtype":"delta","text":" user wants","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794816688967}
+{"type":"thinking","subtype":"delta","text":" me","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794816689089}
+{"type":"thinking","subtype":"delta","text":" to","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794816689158}
+{"type":"thinking","subtype":"delta","text":" reply","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794816689227}
+{"type":"thinking","subtype":"delta","text":" with exactly","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794816689352}
+{"type":"thinking","subtype":"delta","text":" \"S7_RESU","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794816689542}
+{"type":"thinking","subtype":"delta","text":"ME_TOOL_","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794816689660}
+{"type":"thinking","subtype":"delta","text":"FREE\"","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794816689805}
+{"type":"thinking","subtype":"delta","text":" and","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794816689870}
+{"type":"thinking","subtype":"delta","text":" not call any","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794816689960}
+{"type":"thinking","subtype":"delta","text":" tools.\n\nNo new hooks context","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794816690013}
+{"type":"thinking","subtype":"delta","text":" appears in this message.","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794816690154}
+{"type":"thinking","subtype":"completed","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794816693623}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"S7_RESUME_TOOL_FREE"}]},"session_id":"00000000-0000-4000-8000-000000000001"}
+{"type":"result","subtype":"success","duration_ms":7048,"duration_api_ms":7048,"is_error":false,"result":"S7_RESUME_TOOL_FREE","session_id":"00000000-0000-4000-8000-000000000001","request_id":"c1c079e6-04db-4142-8dd5-b45637103a23","usage":{"inputTokens":10015,"outputTokens":279,"cacheReadTokens":2816,"cacheWriteTokens":0,"reasoningTokens":271}}
