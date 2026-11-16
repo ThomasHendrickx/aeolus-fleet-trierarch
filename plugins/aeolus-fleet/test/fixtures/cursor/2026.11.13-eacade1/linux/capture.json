@@ -1,0 +1,22 @@
+{
+  "host": "agent-host-1",
+  "os": "Linux",
+  "build": "2026.11.13-eacade1",
+  "command": [
+    "agent",
+    "-p",
+    "Run the shell command printf S7_TOOL_PROBE. Then state any context markers you received.",
+    "--output-format",
+    "stream-json",
+    "--trust"
+  ],
+  "missingRole": "turn idle; keep the turn open with an unconfirmed message",
+  "missingHook": "stop",
+  "resume": "not run: CC1 stops at the first missing role",
+  "sanitization": [
+    "account email",
+    "home path",
+    "conversation/session id"
+  ],
+  "result": "blocked: not a successful S7 proof"
+}
