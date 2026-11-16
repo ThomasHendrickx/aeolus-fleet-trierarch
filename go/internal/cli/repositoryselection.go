@@ -159,9 +159,9 @@ func cloneRepository(ctx context.Context, choice repositoryChoice) (bool, error)
 			return false, nil
 		}
 		if err != nil {
-			return false, fmt.Errorf("%s: clone destination %s has no matching origin: %s", choice.url, choice.path, origin)
+			return false, fmt.Errorf("%s: clone destination %s has no matching origin: %s", withoutCredentials(choice.url), choice.path, hidingCredentials(origin, choice.url))
 		}
-		return false, fmt.Errorf("%s: clone destination %s has different origin %s", choice.url, choice.path, origin)
+		return false, fmt.Errorf("%s: clone destination %s has different origin %s", withoutCredentials(choice.url), choice.path, withoutCredentials(origin))
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, err
 	}
@@ -170,9 +170,37 @@ func cloneRepository(ctx context.Context, choice repositoryChoice) (bool, error)
 	}
 	output, err := exec.CommandContext(ctx, "git", "clone", "--", choice.url, choice.path).CombinedOutput()
 	if err != nil {
-		return false, fmt.Errorf("clone %s: %w: %s", choice.url, err, strings.TrimSpace(string(output)))
+		return false, fmt.Errorf("clone %s: %w: %s", withoutCredentials(choice.url), err, hidingCredentials(strings.TrimSpace(string(output)), choice.url))
 	}
 	return true, nil
+}
+
+// withoutCredentials is a repository URL as setup may show it: without its user, password, token or query.
+func withoutCredentials(repositoryURL string) string {
+	parsed, err := url.Parse(repositoryURL)
+	if err != nil || parsed.Host == "" {
+		return repositoryURL
+	}
+	parsed.User, parsed.RawQuery, parsed.ForceQuery, parsed.Fragment = nil, "", false, ""
+	return parsed.String()
+}
+
+// hidingCredentials is text, such as what git said, with the credentials of each repository URL taken out.
+func hidingCredentials(text string, repositoryURLs ...string) string {
+	for _, repositoryURL := range repositoryURLs {
+		text = strings.ReplaceAll(text, repositoryURL, withoutCredentials(repositoryURL))
+		parsed, err := url.Parse(repositoryURL)
+		if err != nil || parsed.Host == "" {
+			continue
+		}
+		if parsed.User != nil {
+			text = strings.ReplaceAll(text, parsed.User.String()+"@", "")
+		}
+		if parsed.RawQuery != "" {
+			text = strings.ReplaceAll(text, "?"+parsed.RawQuery, "")
+		}
+	}
+	return text
 }
 
 const workspacesCopy = `For a repository, each ship gets its own git worktree.
@@ -300,7 +328,7 @@ func (i Init) selectRepositories(ctx context.Context, flags Flags, current confi
 	cloned := map[string]bool{}
 	for _, choice := range choices {
 		if choice.url != "" {
-			w.say(fmt.Sprintf("Cloning %s to %s...", choice.url, shown(choice.path, home)))
+			w.say(fmt.Sprintf("Cloning %s to %s...", withoutCredentials(choice.url), shown(choice.path, home)))
 			wasCloned, err := cloneRepository(ctx, choice)
 			if err != nil {
 				return nil, nil, nil, stopped(err.Error()+".", notJoinedBeforeRegistration, "Repositories cloned before it remain.", "Fix the reported cause, then run your setup line again.")
