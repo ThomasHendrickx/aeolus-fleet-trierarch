@@ -7,6 +7,7 @@ import { createInterface } from 'node:readline';
 
 import { codexThreadStartedSchema, codexTurnCommand } from './codex.js';
 import { copilotSessionIdOf, copilotStderrEvent, copilotTurnCommand } from './copilot.js';
+import { cursorSessionIdOf, cursorTurnCommand } from './cursor-session.js';
 import type { HoldAnswer, HoldFiles, HoldRequest } from './hold-protocol.js';
 import { holdRequestSchema, parsedLine, REFUSED } from './hold-protocol.js';
 
@@ -115,8 +116,10 @@ export async function runHold(options: HoldOptions): Promise<number> {
   let isStopping = false;
   const isCodex = harness === 'codex';
   const isCopilot = harness === 'copilot';
+  const isCursor = harness === 'cursor';
   /** Codex and Copilot run one process per turn, with no process between turns (H11, CC4). */
-  const isTurnPerProcess = isCodex || isCopilot;
+  const isTurnPerProcess = isCodex || isCopilot || isCursor;
+  const interrupted = new Set<Harness>();
   let controls = 0;
   const waiters = new Set<Waiter>();
   const tell = (event: Parameters<Waiter>[0]): void => {
@@ -143,12 +146,12 @@ export async function runHold(options: HoldOptions): Promise<number> {
       return;
     }
     const type: unknown = Reflect.get(event, 'type');
-    const id = isCodex ? codexThreadStartedSchema.safeParse(event).data?.thread_id : isCopilot ? copilotSessionIdOf(line) : sessionIdOf(event);
+    const id = isCodex ? codexThreadStartedSchema.safeParse(event).data?.thread_id : isCopilot ? copilotSessionIdOf(line) : isCursor ? cursorSessionIdOf(line) : sessionIdOf(event);
     if (id !== undefined && id !== sessionId) {
       sessionId = id;
       void writeFile(files.sessionId, id);
     }
-    if (type === 'result') {
+    if (type === 'result' && !isCursor) {
       isBusy = false;
       tell({ type: 'result' });
     }
@@ -179,12 +182,13 @@ export async function runHold(options: HoldOptions): Promise<number> {
   const spawnHarness = (program: string, args: readonly string[]): Harness => {
     // A process group of its own: a stop ends the harness and every process it started.
     const at = { cwd: folder, env: { ...environment }, detached: true };
-    return isCopilot ? spawn(program, args, { ...at, stdio: ['pipe', 'pipe', 'pipe'] }) : spawn(program, args, { ...at, stdio: ['pipe', 'pipe', 'ignore'] });
+    return isCopilot || isCursor ? spawn(program, args, { ...at, stdio: ['pipe', 'pipe', 'pipe'] }) : spawn(program, args, { ...at, stdio: ['pipe', 'pipe', 'ignore'] });
   };
 
   const startHarness = (command: readonly string[]): Harness => {
     const [program = '', ...args] = command;
     const started = spawnHarness(program, args);
+    if (isCursor) onLine(JSON.stringify({ type: 'aeolus.turn', state: 'busy' }));
     if (started.pid !== undefined) {
       guard.stdin.write(`${String(started.pid)}\n`);
       // Written before the turn can end, so a process it forked is refused once the harness is gone (#208).
@@ -205,14 +209,16 @@ export async function runHold(options: HoldOptions): Promise<number> {
       resolveEnd(1);
     });
     // Copilot's turn ends once its native process closed the output it inherited from the launcher, which may exit first.
-    started.on(isCopilot ? 'close' : 'exit', (code: number | null) => {
+    started.on(isCopilot || isCursor ? 'close' : 'exit', (code: number | null) => {
       if (isTurnPerProcess && child === started) {
         isBusy = false;
         child = undefined;
       }
+      if (isCursor) onLine(JSON.stringify({ type: 'aeolus.turn', state: 'idle', exitStatus: code ?? 1 }));
       tell({ type: 'exit' });
       // A Copilot turn that failed died: its exit status ends the hold. One the hold stopped ends by its signal, with no status.
-      const isDiedTurn = isCopilot && code !== null && code !== 0;
+      const isDiedTurn = isCursor ? code !== 0 && !interrupted.has(started) : isCopilot && code !== null && code !== 0;
+      interrupted.delete(started);
       if (isStopping || isDiedTurn || (!isRestarting && !isTurnPerProcess)) {
         resolveEnd(code ?? 1);
       }
@@ -256,6 +262,7 @@ export async function runHold(options: HoldOptions): Promise<number> {
       return;
     }
     const exited = waitFor((event) => event.type === 'exit', INTERRUPT_WAIT_MS);
+    interrupted.add(running);
     if (signal === 'SIGINT' && isCopilot) {
       // To the native process too: the launcher alone would end and leave the turn running.
       signalGroup(running, 'SIGINT');
@@ -279,10 +286,10 @@ export async function runHold(options: HoldOptions): Promise<number> {
       }
     }
     if (sessionId === undefined) {
-      return { isOk: false, error: isCopilot ? 'Copilot named no session to resume yet' : 'Codex named no thread to resume yet' };
+      return { isOk: false, error: isCursor ? 'Cursor named no chat to resume yet' : isCopilot ? 'Copilot named no session to resume yet' : 'Codex named no thread to resume yet' };
     }
     isBusy = true;
-    child = startHarness(isCopilot ? copilotTurnCommand({ start: options.command, sessionId, line }) : codexTurnCommand({ start: options.command, threadId: sessionId, line }));
+    child = startHarness(isCursor ? cursorTurnCommand({ start: options.command, sessionId, line }) : isCopilot ? copilotTurnCommand({ start: options.command, sessionId, line }) : codexTurnCommand({ start: options.command, threadId: sessionId, line }));
     return { isOk: true };
   };
 

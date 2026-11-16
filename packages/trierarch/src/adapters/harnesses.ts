@@ -8,6 +8,8 @@ import { createClaudeCodeSetup, type ClaudeCodeSetup } from './claude-code-setup
 import { createCodexSetup } from './codex-setup.js';
 import { CODEX_ADAPTER_FLAGS, CODEX_RISKY_FLAGS, codexCommandLine, createCodexHarness, WAKE_PROMPT as CODEX_WAKE_PROMPT } from './codex.js';
 import { COPILOT_ADAPTER_FLAGS, COPILOT_RISKY_FLAGS, copilotCommandLine, createCopilotHarness, WAKE_PROMPT as COPILOT_WAKE_PROMPT } from './copilot.js';
+import { createCursorHarness, CURSOR_RISKY_FLAGS, CURSOR_WAKE_PROMPT } from './cursor.js';
+import { CURSOR_ADAPTER_FLAGS, cursorCommandLine } from './cursor-session.js';
 import type { CommandPart } from './command-line.js';
 import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
 import type { AeolusPlugin } from './plugin-identity.js';
@@ -46,6 +48,11 @@ const ADAPTERS: Readonly<
       const commandLine = (isFirstStart: boolean) => codexCommandLine({ flags, prompt: isFirstStart ? firstPromptOf(FIRST_PROMPT) : wakePromptOf(CODEX_WAKE_PROMPT), isFirstStart });
       return Promise.resolve({ firstStart: commandLine(true), restart: commandLine(false) });
     },
+  },
+  cursor: {
+    adapterFlags: CURSOR_ADAPTER_FLAGS,
+    riskyFlags: CURSOR_RISKY_FLAGS,
+    commandLines: (flags) => Promise.resolve({ firstStart: cursorCommandLine({ flags, prompt: firstPromptOf(FIRST_PROMPT) }), restart: cursorCommandLine({ flags, prompt: wakePromptOf(CURSOR_WAKE_PROMPT) }) }),
   },
   copilot: {
     adapterFlags: COPILOT_ADAPTER_FLAGS,
@@ -94,11 +101,15 @@ export async function createHarnesses(at: {
   const harnesses: Record<string, HarnessPort> = {};
   const plugins: Record<string, AeolusPlugin> = {};
   for (const name of Object.keys(configuration.harnesses)) {
-    if (name !== 'claude-code' && name !== 'codex' && name !== 'copilot') {
-      throw new Error(`This trierarch has no adapter for the harness ${name}: it offers claude-code, codex and copilot`);
+    if (name !== 'claude-code' && name !== 'codex' && name !== 'copilot' && name !== 'cursor') {
+      throw new Error(`This trierarch has no adapter for the harness ${name}: it offers claude-code, codex, copilot and cursor`);
     }
     const plugin = await findAeolusPlugin({ homeDirectory, env, harness: name });
     plugins[name] = plugin;
+    if (name === 'cursor') {
+      harnesses[name] = createCursorHarness({ configuration, plugin, sessions, detectedVersion: () => detected().cursor?.version, isInContainer: shipHomes !== undefined });
+      continue;
+    }
     if (name === 'copilot') {
       // Copilot runs on the host only (CC10): with homes for containers, the machine does not offer it.
       harnesses[name] = createCopilotHarness({ configuration, plugin, sessions, detectedVersion: () => detected().copilot?.version, isInContainer: shipHomes !== undefined, ...(env.COPILOT_HOME !== undefined && { copilotHome: env.COPILOT_HOME }) });

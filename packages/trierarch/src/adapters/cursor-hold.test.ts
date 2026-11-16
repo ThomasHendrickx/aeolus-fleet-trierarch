@@ -10,6 +10,7 @@ import { newId } from '../../test/support/in-memory.js';
 import { aShortHome } from '../../test/support/short-home.js';
 import type { SessionRuntime } from '../core/ports.js';
 import { createHoldRuntime } from './hold-runtime.js';
+import { runningVersion } from './version.js';
 
 let folder: string;
 let sessions: string;
@@ -20,7 +21,7 @@ beforeEach(() => {
   folder = aShortHome('cursor-folder');
   sessions = aShortHome('cursor-holds');
   shipId = newId('ship');
-  runtime = createHoldRuntime({ sessions, program: TRIERARCH_PROGRAM, version: 'test', platform: process.platform });
+  runtime = createHoldRuntime({ sessions, program: TRIERARCH_PROGRAM, version: runningVersion(), platform: process.platform });
   writeFileSync(join(folder, 'agent.cjs'), `const fs = require('node:fs');
 const args = process.argv.slice(2);
 const prompt = args.at(-1);

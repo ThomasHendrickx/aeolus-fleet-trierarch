@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { HarnessDetector } from '../core/ports.js';
 import { createClaudeCodeDetector } from './claude-code-detector.js';
 import { createCodexDetector } from './codex-detector.js';
+import { createCursorDetector } from './cursor-detector.js';
 import { createCopilotDetector } from './copilot-detector.js';
 import { runCommand } from './run-command.js';
 
@@ -23,6 +24,7 @@ export function createDetectors(at: { homeDirectory: string; env: Readonly<Recor
       // As for Claude Code: a new empty folder per detection, so a probe is never a ship.
       neutralFolder: () => mkdtemp(join(tmpdir(), 'aeolus-trierarch-probe-')),
     }),
+    cursor: createCursorDetector({ run: runCommand }),
     copilot: createCopilotDetector({
       run: runCommand,
       // Copilot's settings where Copilot keeps them: in COPILOT_HOME when it is set.

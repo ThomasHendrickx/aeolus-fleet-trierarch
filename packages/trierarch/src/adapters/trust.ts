@@ -26,6 +26,8 @@ export function createTrust(at: { configuration: TrierarchConfiguration; homeDir
     'claude-code': () => claudeCode.trustedFolders(),
     codex: () => codexTrustedFolders({ homeDirectory, env }),
     copilot: () => Promise.resolve(configured),
+    // Cursor receives --trust on every headless launch (CC4).
+    cursor: () => Promise.resolve(configured),
   };
   const unaccepted: Readonly<Record<string, (() => Promise<readonly string[]>) | undefined>> = {
     'claude-code': async () => {

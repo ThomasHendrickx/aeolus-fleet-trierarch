@@ -11,10 +11,10 @@ export type PluginHarness = 'claude-code' | 'codex';
 export const PLUGIN_HARNESSES: readonly PluginHarness[] = ['claude-code', 'codex'];
 
 /** Every harness the aeolus-fleet plugin crews a ship from: Claude Code and Codex, and Copilot, whose plugin the trierarch neither upgrades nor gives an API key. */
-export type CrewHarness = PluginHarness | 'copilot';
+export type CrewHarness = PluginHarness | 'copilot' | 'cursor';
 
 /** The manifest each harness reads the plugin's version from. */
-const MANIFESTS: Readonly<Record<CrewHarness, string>> = { 'claude-code': '.claude-plugin', codex: '.codex-plugin', copilot: join('.github', 'plugin') };
+const MANIFESTS: Readonly<Record<CrewHarness, string>> = { 'claude-code': '.claude-plugin', codex: '.codex-plugin', copilot: join('.github', 'plugin'), cursor: '.cursor-plugin' };
 
 /** The aeolus-fleet plugin's data folder in a harness's plugin folders, as both harnesses name it. */
 export const PLUGIN_DATA_FOLDER = 'aeolus-fleet-aeolus-fleet';
@@ -74,6 +74,14 @@ export async function findAeolusPlugin(at: { homeDirectory: string; env: Readonl
   if (harness === 'copilot') {
     return findCopilotPlugin({ ...at, crews });
   }
+  if (harness === 'cursor') {
+    const root = at.env.AEOLUS_CURSOR_PLUGIN_ROOT ?? join(at.homeDirectory, '.cursor/plugins/local/aeolus-fleet');
+    const installed = async () => {
+      if (await stat(join(root, '.cursor-plugin/plugin.json')).catch(() => undefined) === undefined) throw new Error('The aeolus-fleet plugin is not installed for Cursor');
+      return root;
+    };
+    return { root: installed, data: at.env.AEOLUS_CURSOR_PLUGIN_DATA ?? join(at.homeDirectory, '.aeolus/plugins/cursor/aeolus-fleet'), crews };
+  }
   const places = placesOf({ ...at, harness });
   const data = places.data ?? join(places.plugins, 'data', PLUGIN_DATA_FOLDER);
   const { root } = places;
@@ -108,7 +116,7 @@ const manifestSchema = z.object({ version: z.string() });
  * its manifest says no version.
  */
 export async function aeolusPluginVersion(at: { homeDirectory: string; env: Readonly<Record<string, string | undefined>>; harness: string }): Promise<string | undefined> {
-  const harness = [...PLUGIN_HARNESSES, 'copilot' as const].find((name) => name === at.harness);
+  const harness = [...PLUGIN_HARNESSES, 'copilot' as const, 'cursor' as const].find((name) => name === at.harness);
   if (harness === undefined) {
     return undefined;
   }
