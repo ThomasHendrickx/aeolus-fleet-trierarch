@@ -417,7 +417,7 @@ func (h *held) wait(run *harness, outputs []*os.File, read <-chan struct{}) {
 		h.child = nil
 	}
 	h.tell(event{kind: exitEvent})
-	isDiedTurn := isExited && code != 0 && isTurnPerProcess && !run.isInterrupted
+	isDiedTurn := err != nil && isTurnPerProcess && !run.isInterrupted
 	if h.isStopping || isDiedTurn || (!h.isRestarting && !isTurnPerProcess) {
 		reason := fmt.Sprintf("session process exited with code %d", code)
 		if !isExited && err != nil {
