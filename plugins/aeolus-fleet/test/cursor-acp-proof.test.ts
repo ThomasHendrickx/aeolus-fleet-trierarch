@@ -31,3 +31,24 @@ describe('Cursor ACP Linux: model isolation across live processes', () => {
     expect(messages.some((entry) => entry.process === 'A' && entry.message.method === 'session/set_model')).toBe(true);
   });
 });
+
+const scenarioMessages = (name: string) => readFileSync(new URL(`./fixtures/cursor-acp/2026.11.13-eacade1/linux/${name}.jsonl`, import.meta.url), 'utf8')
+  .trim().split('\n').map((line) => z.object({ process: z.string(), direction: z.enum(['sent', 'received']), message: z.record(z.string(), z.unknown()) }).parse(JSON.parse(line)));
+
+describe('Cursor ACP Linux: session failures and recovery', () => {
+  it('returns an auth error with no machine login', () => {
+    const messages = scenarioMessages('no-login');
+    expect(messages.find((entry) => entry.direction === 'received' && entry.message.id === 2)?.message).toMatchObject({ error: { code: -32000 } });
+  });
+
+  it('refuses a missing session id rather than creating a session silently', () => {
+    const messages = scenarioMessages('missing-session');
+    expect(messages.find((entry) => entry.direction === 'received' && entry.message.id === 2)?.message).toHaveProperty('error');
+  });
+
+  it('records a killed prompt and loads the same session in a new process', () => {
+    const messages = scenarioMessages('killed-turn');
+    expect(messages.find((entry) => entry.process === 'restart' && entry.direction === 'sent' && entry.message.method === 'session/load')?.message).toMatchObject({ params: { sessionId: 'session-killed' } });
+    expect(messages.find((entry) => entry.process === 'restart' && entry.direction === 'received' && entry.message.id === 2)?.message).toHaveProperty('result');
+  });
+});
