@@ -11,7 +11,8 @@ export const SHORT_FOLDER_VARIABLE = 'TRIERARCH_TEST_SHORT_FOLDER';
 
 export interface TestFolders {
   readonly repositoryRoot: string;
-  readonly home: string;
+  /** A short folder to make the short run folder in: /tmp, as the home is long on macOS and a socket's path is at most 104 bytes there. */
+  readonly shortRoot: string;
   readonly now: Date;
   /** The environment to set TMPDIR in: process.env for a run. */
   readonly env: Record<string, string | undefined>;
@@ -21,7 +22,7 @@ export interface TestFolders {
  * Makes the folders one test run makes its temporary folders in, and points
  * TMPDIR at the first, so every `os.tmpdir()` of the run lands there and
  * nothing is left in the operating system's temporary folder: a run folder
- * of the repository's ignored cache, and a short one under the home (`.tt`, as short as a ship's socket path needs), named by
+ * of the repository's ignored cache, and a short one under the short root (`.tt`, as short as a ship's socket path needs), named by
  * TRIERARCH_TEST_SHORT_FOLDER. Removes the run folders older than 24 hours
  * first, so a killed run leaves nothing for long. Returns what ends the run:
  * it removes both folders. Called again within the run (each project's global
@@ -32,7 +33,7 @@ export function startTestFolders(at: TestFolders): () => void {
   if (env[RUN_MARKER] !== undefined) {
     return () => undefined;
   }
-  const bases = [join(at.repositoryRoot, 'node_modules', '.cache', 'trierarch-tests'), join(at.home, '.tt')];
+  const bases = [join(at.repositoryRoot, 'node_modules', '.cache', 'trierarch-tests'), join(at.shortRoot, '.tt')];
   for (const base of bases) {
     removeStale(base, at.now);
   }

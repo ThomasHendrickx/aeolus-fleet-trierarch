@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 /**
  * A home folder as short as a person's, in the test run's short folder (under
- * the real home, not /tmp: the run removes it), so a ship's socket path under
+ * /tmp, which is short on macOS too; the run removes it), so a ship's socket path under
  * its place of ships/ is within the system's limit (104 bytes on macOS), as
  * the test runner's own temporary folder is not. The prefix is cut to its
  * first letter, the path's length being what a socket's limit leaves.
