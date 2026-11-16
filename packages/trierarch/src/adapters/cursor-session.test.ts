@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { wordsOf } from './command-line.js';
-import { cursorCommandLine, cursorErrorIn, cursorSessionIdOf, cursorTurnCommand } from './cursor-session.js';
+import { cursorActivityIn, cursorCommandLine, cursorErrorIn, cursorSessionIdOf, cursorTurnCommand } from './cursor-session.js';
 
 const fixture = (name: string) => readFileSync(new URL(`../../../../plugins/aeolus-fleet/test/fixtures/cursor/2026.11.13-eacade1/linux/${name}`, import.meta.url), 'utf8').trim().split('\n');
 
@@ -27,6 +27,17 @@ describe('Cursor turn commands and captured events (CC4, H13)', () => {
     const events = fixture('failed.stderr').map((line) => JSON.stringify({ type: 'aeolus.stderr', line }));
     expect(cursorErrorIn({ events, model: 's7-nonexistent-model' })).toEqual({ kind: 'refused', model: 's7-nonexistent-model' });
     expect(cursorErrorIn({ events, model: 'auto' })?.kind).toBe('cause');
+  });
+
+  it('names the captured missing machine login without reading or keeping a credential', () => {
+    const events = readFileSync(new URL('../../test/logs/cursor-events-no-login.jsonl', import.meta.url), 'utf8').trim().split('\n');
+    expect(cursorErrorIn({ events })).toEqual({ kind: 'cause', cause: "Error: Authentication required. Please run 'agent login' first, or set CURSOR_API_KEY environment variable." });
+  });
+
+  it('reads activity from captured Cursor tool events and process failure markers', () => {
+    const events = fixture('adapted/interrupt-fresh.events.jsonl');
+    expect(cursorActivityIn(events)).toEqual({ kind: 'tool', tool: 'shell' });
+    expect(cursorActivityIn([...events, '{"type":"aeolus.turn","state":"idle","exitStatus":130}'])).toEqual({ kind: 'error' });
   });
 
   it('clears an earlier launch error after a successful result', () => {
