@@ -180,11 +180,27 @@ permission_candidate() {
   return 1
 }
 
+# Whether the delivery just stored, if unmarked as seen, is a received answer
+# to one of the asks named.
+permission_others_answer() {
+  local dir id="$1" delivery question
+  shift
+  dir="$(aeolus_store_dir)" || return 1
+  [ -f "$dir/$id.state" ] || return 1
+  [ "$(aeolus_store_state "$id")" = received ] || return 1
+  [ ! -e "$dir/$id.permission-seen" ] || return 1
+  delivery="$(cat "$dir/$id.json")"
+  [ "$(aeolus_json_string "$delivery" contentType)" = application/vnd.aeolus.answer+json ] || return 1
+  question="$(aeolus_json_string "$(aeolus_json_string "$delivery" payload)" questionId)"
+  case " $* " in *" ${question} "*) return 0 ;; esac
+  return 1
+}
+
 permission_receive() {
   permission_candidate "$@" && return 0
   # Leave locally held messages out of the next receive, so one plain
   # message cannot keep the owner's later answer behind it indefinitely.
-  local dir file held='' separator=''
+  local dir file held='' separator='' stored
   dir="$(aeolus_store_dir)" || return 1
   for file in "$dir"/*.state; do
     [ -f "$file" ] || continue
@@ -195,6 +211,19 @@ permission_receive() {
   # push_receive's exit on an empty inbox belongs to this subshell only.
   (push_receive "{\"max\":1,\"excluding\":[${held}]}") >/dev/null
   permission_candidate "$@" && return 0
+  # What it stored is another open ask's answer: read on at once, for this
+  # ask's own may follow it, rather than answer empty and wait out a backoff.
+  # Only that delivery counts: queued plain messages must not keep it going.
+  for file in "$dir"/*.state; do
+    [ -f "$file" ] || continue
+    stored="${file##*/}"; stored="${stored%.state}"
+    aeolus_is_delivery_id "$stored" || continue
+    case ",${held}," in *",\"${stored}\","*) continue ;; esac
+    if permission_others_answer "$stored" "$@"; then
+      permission_receive "$@"
+      return
+    fi
+  done
   printf '{}\n'
 }
 
