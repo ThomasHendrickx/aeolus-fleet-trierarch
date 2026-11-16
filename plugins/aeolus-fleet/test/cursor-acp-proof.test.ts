@@ -52,3 +52,22 @@ describe('Cursor ACP Linux: session failures and recovery', () => {
     expect(messages.find((entry) => entry.process === 'restart' && entry.direction === 'received' && entry.message.id === 2)?.message).toHaveProperty('result');
   });
 });
+
+describe('Cursor ACP Linux: captured configuration boundaries', () => {
+  it('captures how session/new handles a supplied modelId', () => {
+    const messages = scenarioMessages('new-model');
+    expect(messages.find((entry) => entry.direction === 'sent' && entry.message.method === 'session/new')?.message).toMatchObject({ params: { modelId: 'gpt-5.4-mini[reasoning=medium]' } });
+    expect(messages.find((entry) => entry.direction === 'received' && entry.message.id === 2)?.message).toHaveProperty('result.models.currentModelId');
+  });
+
+  it('captures an initialized prompt failure with invalid image bytes', () => {
+    const messages = scenarioMessages('failed-turn');
+    expect(messages.find((entry) => entry.direction === 'received' && entry.message.id === 3)?.message).toHaveProperty('error');
+  });
+
+  it('keeps both user and project MCP sentinels out of an explicitly empty session', () => {
+    const evidence = z.object({ sentinelStarted: z.boolean(), loginSucceeded: z.boolean() }).parse(JSON.parse(readFileSync(new URL('./fixtures/cursor-acp/2026.11.13-eacade1/linux/mcp-trust.capture.json', import.meta.url), 'utf8')));
+    expect(evidence).toEqual({ sentinelStarted: false, loginSucceeded: true });
+    expect(scenarioMessages('mcp-trust').find((entry) => entry.direction === 'received' && entry.message.id === 3)?.message).toMatchObject({ result: { stopReason: 'end_turn' } });
+  });
+});
