@@ -14,8 +14,16 @@ source_event="$(aeolus_json_string "$payload" source)"
 refused=0
 aeolus_hook_folder "$payload" || refused=1
 [ -n "$AEOLUS_FOLDER" ] || exit 0
-export AEOLUS_DATA="${PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-}}"
-root="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}"
+if [ "${AEOLUS_HARNESS:-}" = cursor ]; then
+  export AEOLUS_DATA="$(aeolus_data)"
+else
+  export AEOLUS_DATA="${PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-}}"
+fi
+if [ "${AEOLUS_HARNESS:-}" = cursor ]; then
+  root="${CURSOR_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+else
+  root="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}"
+fi
 # The Codex wake bridge logs to the plugin's log now: a .wake.log an earlier
 # plugin left beside the identities is no longer written, so it goes (#678).
 # Its bridge kept its watcher's output in <key>.wake.log.wait.<pid>, today's in
@@ -98,19 +106,25 @@ fi
 # Copilot exports nothing to the session's commands, so the context names what
 # each command sets for the scripts to find the folder's ship. In a folder that
 # crews no ship it says so too: the Copilot crew skill registers from it.
-if [ "${AEOLUS_HARNESS:-}" = copilot ]; then
+if [ "${AEOLUS_HARNESS:-}" = copilot ] || [ "${AEOLUS_HARNESS:-}" = cursor ]; then
+  harness_name=Copilot
+  [ "${AEOLUS_HARNESS:-}" != cursor ] || harness_name=Cursor
   [ "$refused" -eq 0 ] || exit 1
   identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
-  run="$(aeolus_copilot_run)"
+  if [ "${AEOLUS_HARNESS:-}" = cursor ]; then
+    run="AEOLUS_HARNESS=cursor AEOLUS_DATA='$(aeolus_data)' AEOLUS_FOLDER='${AEOLUS_FOLDER}'"
+  else
+    run="$(aeolus_copilot_run)"
+  fi
   if ! identity_text="$(aeolus_identity_read "$identity")"; then
-    aeolus_hook_context SessionStart "Aeolus Fleet Copilot hooks are active. This folder crews no Aeolus ship. Run every Aeolus Fleet script with ${run} before it; the scripts are in ${root}/scripts."
+    aeolus_hook_context SessionStart "Aeolus Fleet ${harness_name} hooks are active. This folder crews no Aeolus ship. Run every Aeolus Fleet script with ${run} before it; the scripts are in ${root}/scripts."
     exit 0
   fi
   ship_name="$(aeolus_identity_field "$identity_text" shipName)"
   ship_id="$(aeolus_identity_field "$identity_text" shipId)"
   fleet_url="$(aeolus_identity_field "$identity_text" fleetUrl)"
   squadron="$(aeolus_identity_field "$identity_text" squadron)"
-  context="Aeolus Fleet Copilot hooks are active. This folder crews the Aeolus ship ${ship_name} (${ship_id}) in the fleet at ${fleet_url}. Run every Aeolus Fleet script with ${run} before it: every fleet call goes through ${run} \"${root}/scripts/aeolus-fleet.sh\", which adds the crew token: never read the identity file or pass a crew token. Do not register again. It states the model this session runs on every send: state none yourself."
+  context="Aeolus Fleet ${harness_name} hooks are active. This folder crews the Aeolus ship ${ship_name} (${ship_id}) in the fleet at ${fleet_url}. Run every Aeolus Fleet script with ${run} before it: every fleet call goes through ${run} \"${root}/scripts/aeolus-fleet.sh\", which adds the crew token: never read the identity file or pass a crew token. Do not register again. It states the model this session runs on every send: state none yourself."
   if [ -n "$squadron" ]; then
     context="${context} This ship is a member of the squadron ${squadron}. Before anything else, check in at its flagship ${squadron}, as the Aeolus Fleet crew-a-ship skill says for a squadron member."
     check_in="$(aeolus_identity_field "$identity_text" checkIn)"
