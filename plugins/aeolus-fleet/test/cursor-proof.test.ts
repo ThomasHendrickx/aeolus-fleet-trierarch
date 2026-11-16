@@ -1,5 +1,5 @@
 /** Captured Cursor CLI evidence for the CC1 gate, without claiming unsupported roles. */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -66,5 +66,21 @@ describe('Cursor CLI 2026.11.13-eacade1 on macOS: captured stop limitation, adap
     const capture = z.object({ failed: z.string(), result: z.string() }).parse(JSON.parse(macFixture('capture.json')));
     expect(capture.failed).toContain('failed initialized-turn stop and sessionEnd final_status remain unproven');
     expect(capture.result).toBe('blocked: not a successful S7 proof');
+  });
+});
+
+describe('Cursor CLI captured fixture privacy', () => {
+  it('names the capturing computer only by a neutral host in every Cursor fixture', () => {
+    const root = new URL('./fixtures/cursor/', import.meta.url);
+    const files = readdirSync(root, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile());
+    expect(files.length).toBeGreaterThan(0);
+    for (const file of files) {
+      const name = `${file.parentPath}/${file.name}`;
+      const content = readFileSync(name, 'utf8');
+      for (const [, host] of content.matchAll(/"host"\s*:\s*"([^"]*)"/g)) {
+        expect(['agent-host-1', 'agent-host-2'], name).toContain(host);
+      }
+      expect(content, name).not.toMatch(/mac[ -]?mini|macbook|\bimac\b|[\w-]+\.local\b(?!\/)/i);
+    }
   });
 });
