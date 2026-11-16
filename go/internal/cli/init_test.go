@@ -585,9 +585,8 @@ func TestInitSaysTheServiceStayedUpAfterTheChecks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := strings.Join(report.Said, "\n")
-	if !strings.Contains(text, "10 s") || strings.Contains(text, "The trierarch runs, and starts again") {
-		t.Errorf("report = %q, want the checked service", text)
+	if service := report.Checks[5]; service.Part != "service" || !strings.Contains(service.Detail, "10 s") || !slices.Contains(report.Said, "  Service: running; starts again at login") {
+		t.Errorf("report = %+v, want the checked service", report)
 	}
 }
 
@@ -714,7 +713,7 @@ func TestInitReportsEachPartAndChecksAsJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := strings.Join(report.Said, "\n")
-	for _, want := range []string{"Installed", "On PATH", "Fleet", "Claude Code", "Repositories", "Service", "Caps", "Ready. Check it any time with: aeolus-trierarch status"} {
+	for _, want := range []string{"Ready: this computer is joined to the fleet.", "Claude Code", "Repositories", "Folders", "Limits", "Service", "Check this computer with: aeolus-trierarch status"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("report = %q, want %q", text, want)
 		}
@@ -781,7 +780,7 @@ func TestInitReportsAServiceFailureWithItsFix(t *testing.T) {
 			}
 		}
 	}
-	if !found || !strings.Contains(strings.Join(report.Said, "\n"), "Not ready: fix the line marked ✗") {
+	if !found || !strings.Contains(strings.Join(report.Said, "\n"), "Not ready: the service did not stay running.\nLast error: running.json does not name the service process: last log line: service failed") {
 		t.Errorf("report = %+v", report)
 	}
 }
@@ -827,7 +826,7 @@ func TestInitUsesTheShipNameOrFallsBackToItsID(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(report.Said[0], tc.want+" joined ") || !strings.Contains(report.Checks[2].Detail, tc.want+" registered") {
+			if !strings.Contains(report.Checks[2].Detail, tc.want+" registered") {
 				t.Errorf("report = %+v", report)
 			}
 		})

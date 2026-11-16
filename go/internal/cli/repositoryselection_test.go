@@ -50,12 +50,14 @@ func TestInitRepositoryFlags(t *testing.T) {
 				}
 				want["web"] = filepath.Join(destination, "web")
 			}
+			var printed []string
+			machine.Print = func(line string) { printed = append(printed, line) }
 			output, code := Main(words, machine)
 			if code != 0 {
 				t.Fatalf("init = %d, %s", code, output)
 			}
-			if strings.HasPrefix(mode, "clone") && !strings.Contains(output, "web (cloned to "+want["web"]+")") {
-				t.Errorf("report = %q, want cloned repository", output)
+			if strings.HasPrefix(mode, "clone") && !strings.Contains(strings.Join(printed, "\n"), "Cloning file://"+web+" to ") {
+				t.Errorf("printed %q, want the clone said before it starts", printed)
 			}
 			got, err := config.Load(pathsOf(machine).Config)
 			if err != nil {
@@ -120,22 +122,22 @@ func TestInitRepositoryWizardAsksAgain(t *testing.T) {
 			root := t.TempDir()
 			web := aGitRepository(t, filepath.Join(root, "web"))
 			other := aGitRepository(t, filepath.Join(root, "other", "web"))
-			input := "1\n" + root + "\n1\n" + web + "\n"
+			input := "1\n" + root + "\n" + web + "\n\n\n\n\n"
 			count := 1
 			words := setupWords()
 			words = append(words[:len(words)-1], "--unattended=")
 			switch mode {
 			case "name clash":
-				input = "1\n" + web + "," + other + "\n1\n" + web + "\n"
+				input = "1\n" + web + "," + other + "\n" + web + "\n\n\n\n\n"
 			case "folder of repositories":
-				input = "2\n" + root + "\n"
+				input = "2\n" + root + "\n\n\n\n\n"
 			case "skip":
-				input = "3\n"
+				input = "3\n\n\n\n\n"
 				count = 0
 			case "harnesses then repositories":
 				words = words[:len(words)-3]
 				words = append(words, "--unattended=")
-				input = "yes\nno\nno\n1\n" + web + "\n"
+				input = "yes\nno\nno\n1\n" + web + "\n\n\n\n\n"
 			}
 			terminal := &scriptedTerminal{input: strings.NewReader(input)}
 			machine.OpenTerminal = func() (io.ReadWriteCloser, error) { return terminal, nil }
@@ -153,10 +155,10 @@ func TestInitRepositoryWizardAsksAgain(t *testing.T) {
 			if count == 1 && got.Repositories["web"].Path != web {
 				t.Fatalf("web = %+v", got.Repositories["web"])
 			}
-			if !strings.Contains(terminal.String(), "a folder of repositories") {
+			if !strings.Contains(terminal.String(), "A folder containing git repositories") {
 				t.Fatalf("terminal = %s", terminal.String())
 			}
-			if (mode == "not git" || mode == "name clash") && strings.Count(terminal.String(), "Repositories:") != 2 {
+			if (mode == "not git" || mode == "name clash") && strings.Count(terminal.String(), listPrompt) != 2 {
 				t.Fatalf("did not ask again: %s", terminal.String())
 			}
 		})
