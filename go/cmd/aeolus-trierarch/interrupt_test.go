@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -38,8 +39,13 @@ func TestCtrlCAtASetupQuestionStopsSetupAndSaysItsClosingState(t *testing.T) {
 		t.Fatal(err)
 	}
 	home := t.TempDir()
+	// Only an ss stand-in on PATH: Linux setup needs ss, and no harness is found.
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "ss"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	command := exec.Command(program)
-	command.Env = []string{"AEOLUS_TRIERARCH_TEST_RUN_MAIN=init", "HOME=" + home, "PATH=" + t.TempDir()}
+	command.Env = []string{"AEOLUS_TRIERARCH_TEST_RUN_MAIN=init", "HOME=" + home, "PATH=" + bin}
 	command.Stdin, command.Stdout, command.Stderr = terminal, terminal, terminal
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
 	if err := command.Start(); err != nil {
