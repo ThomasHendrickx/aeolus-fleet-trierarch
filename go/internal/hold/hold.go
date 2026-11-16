@@ -61,6 +61,8 @@ type Files struct {
 	Folder string
 	Socket string
 	PID    string
+	// ExitReason is the last process exit status or signal, kept before the hold ends.
+	ExitReason string
 	// Events holds every line the harness writes, appended.
 	Events string
 	// SessionID is the harness's own session id, as its events name it, so a start resumes it.
@@ -73,7 +75,7 @@ type Files struct {
 
 func FilesOf(sessions string, shipID string) Files {
 	folder := filepath.Join(sessions, shipID)
-	return Files{Folder: folder, Socket: filepath.Join(folder, "hold.sock"), PID: filepath.Join(folder, "hold.pid"), Events: filepath.Join(folder, "events.jsonl"), SessionID: filepath.Join(folder, "session-id"), McpConfig: filepath.Join(folder, "mcp-config.json"), SecretEnv: filepath.Join(folder, "secret-env.json")}
+	return Files{Folder: folder, Socket: filepath.Join(folder, "hold.sock"), PID: filepath.Join(folder, "hold.pid"), ExitReason: filepath.Join(folder, "exit-reason"), Events: filepath.Join(folder, "events.jsonl"), SessionID: filepath.Join(folder, "session-id"), McpConfig: filepath.Join(folder, "mcp-config.json"), SecretEnv: filepath.Join(folder, "secret-env.json")}
 }
 
 // Request is one call to a hold.
@@ -417,6 +419,12 @@ func (h *held) wait(run *harness, outputs []*os.File, read <-chan struct{}) {
 	h.tell(event{kind: exitEvent})
 	isDiedTurn := isExited && code != 0 && isTurnPerProcess && !run.isInterrupted
 	if h.isStopping || isDiedTurn || (!h.isRestarting && !isTurnPerProcess) {
+		reason := fmt.Sprintf("session process exited with code %d", code)
+		if !isExited && err != nil {
+			reason = "session process ended: " + err.Error()
+		}
+		// Written before the hold ends so the next pass can report it even without a harness error event.
+		_ = os.WriteFile(h.options.Files.ExitReason, []byte(reason), 0o600)
 		select {
 		case h.ended <- code:
 		default:
