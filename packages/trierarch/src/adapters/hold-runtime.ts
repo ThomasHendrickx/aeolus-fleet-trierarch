@@ -211,10 +211,11 @@ export function createHoldRuntime(options: {
     },
     events: async (shipId) => {
       const text = await readFile(filesOf(shipId).events, 'utf8').catch(() => '');
-      return text
-        .split('\n')
-        .filter((line) => line !== '')
-        .slice(-EVENT_LINES);
+      const lines = text.split('\n').filter((line) => line !== '');
+      const recent = lines.slice(-EVENT_LINES);
+      // Cursor's process state can predate a long turn's event tail. Keep its latest boundary before that tail.
+      const lastTurn = lines.findLast((line) => line.startsWith('{"type":"aeolus.turn",'));
+      return lastTurn === undefined || recent.includes(lastTurn) ? recent : [lastTurn, ...recent];
     },
     lastEventAt: async (shipId) => (await stat(filesOf(shipId).events).catch(() => undefined))?.mtime,
     sessionRootOf: runningPid,
