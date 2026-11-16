@@ -77,3 +77,25 @@ describe('Cursor ACP Linux: captured configuration boundaries', () => {
     expect(scenarioMessages('mcp-trust').find((entry) => entry.direction === 'received' && entry.message.id === 3)?.message).toMatchObject({ result: { stopReason: 'end_turn' } });
   });
 });
+
+describe('Cursor ACP Linux: permissions and idle processes', () => {
+  it('persists allow-always into user configuration and a subsequent process', () => {
+    const evidence = z.object({ firstPermissions: z.number(), newProcessPermissions: z.number(), changedPaths: z.array(z.string()) }).parse(JSON.parse(readFileSync(new URL('./fixtures/cursor-acp/2026.11.13-eacade1/linux/permission-persistence.capture.json', import.meta.url), 'utf8')));
+    expect(evidence.firstPermissions).toBe(1);
+    expect(evidence.newProcessPermissions).toBe(0);
+    expect(evidence.changedPaths).toContain('.config/cursor/cli-config.json');
+  });
+
+  it('measures both the idle process and its child processes', () => {
+    const evidence = z.object({ rootRssKiB: z.number(), treeRssKiB: z.number(), processCount: z.number() }).parse(JSON.parse(readFileSync(new URL('./fixtures/cursor-acp/2026.11.13-eacade1/linux/idle-memory.capture.json', import.meta.url), 'utf8')));
+    expect(evidence.rootRssKiB).toBeGreaterThan(0);
+    expect(evidence.treeRssKiB).toBeGreaterThanOrEqual(evidence.rootRssKiB);
+    expect(evidence.processCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it('observes the shell completion marker separately from the prompt response', () => {
+    const evidence = z.object({ markerAtPromptEnd: z.boolean(), markerObserved: z.boolean() }).parse(JSON.parse(readFileSync(new URL('./fixtures/cursor-acp/2026.11.13-eacade1/linux/background.capture.json', import.meta.url), 'utf8')));
+    expect(evidence.markerAtPromptEnd).toBe(false);
+    expect(evidence.markerObserved).toBe(true);
+  });
+});
