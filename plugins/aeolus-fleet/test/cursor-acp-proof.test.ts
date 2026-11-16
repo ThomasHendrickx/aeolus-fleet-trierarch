@@ -60,14 +60,20 @@ describe('Cursor ACP Linux: captured configuration boundaries', () => {
     expect(messages.find((entry) => entry.direction === 'received' && entry.message.id === 2)?.message).toHaveProperty('result.models.currentModelId');
   });
 
-  it('captures an initialized prompt failure with invalid image bytes', () => {
+  it('records that invalid image bytes still end the turn successfully', () => {
     const messages = scenarioMessages('failed-turn');
-    expect(messages.find((entry) => entry.direction === 'received' && entry.message.id === 3)?.message).toHaveProperty('error');
+    expect(messages.find((entry) => entry.direction === 'received' && entry.message.id === 3)?.message).toMatchObject({ result: { stopReason: 'end_turn' } });
   });
 
-  it('keeps both user and project MCP sentinels out of an explicitly empty session', () => {
+  it('records the exclusion blocker rather than treating this build as proven', () => {
     const evidence = z.object({ sentinelStarted: z.boolean(), loginSucceeded: z.boolean() }).parse(JSON.parse(readFileSync(new URL('./fixtures/cursor-acp/2026.11.13-eacade1/linux/mcp-trust.capture.json', import.meta.url), 'utf8')));
-    expect(evidence).toEqual({ sentinelStarted: false, loginSucceeded: true });
+    expect(evidence).toEqual({ sentinelStarted: true, loginSucceeded: true });
+    const sources = z.array(z.object({ source: z.string(), beforeInitialize: z.boolean(), afterInitialize: z.boolean(), afterNew: z.boolean(), sessionCreated: z.boolean() })).parse(JSON.parse(readFileSync(new URL('./fixtures/cursor-acp/2026.11.13-eacade1/linux/mcp-exclusion.capture.json', import.meta.url), 'utf8')));
+    expect(sources).toEqual([
+      { source: 'home', beforeInitialize: false, afterInitialize: false, afterNew: true, sessionCreated: true },
+      { source: 'xdg', beforeInitialize: false, afterInitialize: false, afterNew: false, sessionCreated: true },
+      { source: 'project', beforeInitialize: false, afterInitialize: false, afterNew: false, sessionCreated: true },
+    ]);
     expect(scenarioMessages('mcp-trust').find((entry) => entry.direction === 'received' && entry.message.id === 3)?.message).toMatchObject({ result: { stopReason: 'end_turn' } });
   });
 });

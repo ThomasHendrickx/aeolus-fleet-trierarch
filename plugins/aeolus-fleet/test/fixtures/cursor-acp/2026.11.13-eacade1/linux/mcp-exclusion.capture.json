@@ -1,0 +1,23 @@
+[
+  {
+    "source": "home",
+    "beforeInitialize": false,
+    "afterInitialize": false,
+    "afterNew": true,
+    "sessionCreated": true
+  },
+  {
+    "source": "xdg",
+    "beforeInitialize": false,
+    "afterInitialize": false,
+    "afterNew": false,
+    "sessionCreated": true
+  },
+  {
+    "source": "project",
+    "beforeInitialize": false,
+    "afterInitialize": false,
+    "afterNew": false,
+    "sessionCreated": true
+  }
+]
