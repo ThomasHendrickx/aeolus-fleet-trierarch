@@ -85,7 +85,7 @@ One rule for every harness: **the host's harness keeps its login and renews it; 
 
 Thomas's note on the approval, verbatim: "Best case we proxy all calls between the container and the internet through the trierarch that injects the login credentials".
 
-**Preferred road.** Every call between the container and the internet goes through the trierarch, which injects the login credentials; no access, short-lived or not, enters the container. Slice C1 proves this road first for each harness (Claude Code, Codex, Cursor, Copilot). The access-file road below stays only for a harness where C1 proves the proxy road impossible, and the report says so.
+**Preferred road.** Every call between the container and the internet goes through the trierarch, which injects the login credentials; no access, short-lived or not, enters the container. Slice C1 proves this road first for each harness (Claude Code, Codex, Cursor, Copilot). The access-file road below stays only for a harness where C1 proves the proxy road impossible, and the report says so. C1 proved the proxy road for all four on Linux (section 9): no harness takes the access-file road, and the table's "Proof still needed" is answered there.
 
 Two roads, picked per harness by what it can be pointed at:
 
@@ -271,3 +271,29 @@ Thomas approved all nine on 16 Nov, each as picked.
 - **D7. Read-only root:** yes; every write lands in the ship's folder, counted and removed.
 - **D8. Image:** one image with all four harnesses.
 - **D9. An explicit `{ "kind": "container" }`:** stays strict; it refuses what would not hold, and the trierarch does not start.
+
+## 9. What C1 proved (16 Nov, Linux amd64)
+
+Proven on one Linux amd64 computer: rootless Podman 4.9.3, the 0.40.0 session image, each harness logged in on the host. The probe and its captures are `packages/trierarch/test/container-logins-probe` and `packages/trierarch/test/fixtures/container-logins/linux-amd64`; `container-logins.test.ts` holds each result below as a test. The probe's login proxy stands in for the trierarch's: it takes a request only with the session's own token, drops it, reads the host login from the host harness's own file at every request and injects it, and forwards to that harness's vendor alone.
+
+For every harness, each with a fresh home and workspace of its own:
+- Turns complete over pasta forwarding the proxy's port alone, and again in a container with no network at all, the proxy reached over a Unix socket: nothing a turn needs goes another way.
+- The container holds only the session's proxy token, in a read-only file; no harness reads it from the environment. Its environments, command lines, home, workspace and scratch, read while a turn runs, hold no access, refresh token, model token, API key or crew token of this computer, and no host harness home is mounted.
+- With a login the vendor refuses, the turn ends with the harness's own login error, the vendor's answer 401.
+
+| Harness | Pointed at the proxy by | The proxy sends | Host login stays valid |
+| --- | --- | --- | --- |
+| Claude Code 2.1.325 | `ANTHROPIC_BASE_URL` at `/anthropic`; the proxy token from `apiKeyHelper` in the home's `settings.json` | `Authorization: Bearer` of the subscription access, with `anthropic-beta: oauth-2025-04-20`, to Anthropic | long-lived: the model token is a one-year OAuth access, nothing to renew |
+| Codex 0.169.0, ChatGPT login | a model provider in the home's `config.toml`, `base_url` at `/chatgpt`, `wire_api = "responses"`, its `auth.command` reading the token file | the host's access and `chatgpt-account-id`, from `auth.json` at every request, to `chatgpt.com/backend-api/codex` (`GET /models`, `POST /responses`) | by the host's Codex, with no turn: `codex app-server`, `account/read` with `refreshToken: true`; the next request carries the new access |
+| Cursor CLI 2026.11.13-eacade1 | `--endpoint http://localhost:<port>/cursor`; `network.useHttp1ForAgent: true` in the home's `cli-config.json`; the home's `~/.config/cursor/auth.json` holding the session token, JWT-shaped with claims naming nobody, in both fields | the host's access to `api2.cursor.sh`, every call (the agent's `RunSSE`, `BidiAppend`, dashboard, models, analytics) | only by signing in again: the CLI renews an access only with an API key; the host's access read on 16 Nov ends in about 60 days, then needs `agent login` on the host |
+| Copilot CLI 1.0.105 | its documented provider variables: `COPILOT_PROVIDER_BASE_URL` at `/copilot`, type `openai`, wire `responses`, `COPILOT_PROVIDER_API_KEY_COMMAND` reading the token file, `COPILOT_MODEL` | the host's GitHub OAuth token and `Copilot-Integration-Id` to the Copilot API of the login's plan (`api.github.com/copilot_internal/user` names it) | long-lived: `copilot login` keeps a GitHub token with no expiry and no refresh token |
+
+An `exec` turn of Codex in a running container stopped 210 ms after SIGINT to its process group inside it, the container kept.
+
+What each harness asks of the slices that build it:
+- **Claude Code (C3).** The probe injected the host Claude Code's own subscription access, the same kind of bearer as a model token, since this computer holds no model token. Usage limits and model aliases on a model token were not probed.
+- **Codex (C8).** Concurrent sessions on one access were not probed: turns ran one after another.
+- **Cursor (C9).** The CLI sends its agent's calls to the endpoint itself only when the endpoint's URL names `localhost` (or a staging host); any other endpoint sends them to the agent hosts its server configuration names, with the session token, and the turn fails with an authentication error. This is the CLI's code, not a documented setting, so a Cursor build may change it; each pinned build is proven again. With `--api-key` the CLI exchanges the key at `/auth/exchange_user_api_key` instead, so the session token goes in the login file. Proven with `agent -p`, not a live `agent acp`. Since the host's login is not renewed, its `login` state turns `renewFailed` when its access ends, and argo is told the step `agent login`.
+- **Copilot (C10).** On the provider road the CLI holds no GitHub login: GitHub's side (its MCP server, Copilot's model routing) is off, and only models the Copilot API serves on `/responses` answer; a model of `/chat/completions` is refused as not supported for the integration. A refused login reads as the provider's key failing, not as `copilot login`: the step comes from the trierarch's `login` state.
+
+Not proven by C1: arm64 (no arm64 computer here); the harnesses inside the published image (Codex, Cursor and Copilot were mounted read-only from the host, as 4.3 puts them in the image); and macOS (#473).

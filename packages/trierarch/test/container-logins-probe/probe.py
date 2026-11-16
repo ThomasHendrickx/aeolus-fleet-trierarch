@@ -255,7 +255,7 @@ def renew_codex() -> None:
 HOST_LOGINS = {
     'claude-code': ('long-lived, nothing to renew', 'The model token (`claude setup-token`) is an OAuth access of one year the trierarch keeps. This computer holds none, so the probe injected the host Claude Code\'s own subscription access, the same kind of bearer, read from its login file at every request.'),
     'codex': ('by its harness on the host', 'The host\'s Codex renewed its ChatGPT login with no turn (`codex app-server`, `account/read` with `refreshToken: true`); the proxy read the new access at the next request.'),
-    'cursor': ('only by signing in again', f'Cursor CLI {CURSOR_VERSION} renews an access only with an API key (`auth-refresh.ts`: `loginWithApiKey`, once `exp` is within 300 seconds); a browser login\'s access lives about 60 days, then needs `agent login` on the host. The proxy reads the host login at every request, so the container needs nothing when it is signed in again.'),
+    'cursor': ('only by signing in again', f'Cursor CLI {CURSOR_VERSION} renews an access only with an API key (`auth-refresh.ts`: `loginWithApiKey`, once `exp` is within 300 seconds); the host\'s access read on 16 Nov ends in about 60 days, then needs `agent login` on the host. The proxy reads the host login at every request, so the container needs nothing when it is signed in again.'),
     'copilot': ('long-lived, nothing to renew', '`copilot login` keeps a GitHub OAuth token with no expiry and no refresh token; the proxy sends it to the Copilot API of the login\'s plan, as `api.github.com/copilot_internal/user` names it.'),
 }
 

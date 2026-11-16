@@ -23,7 +23,7 @@
   ],
   "hostLogin": {
     "renewal": "only by signing in again",
-    "evidence": "Cursor CLI 2026.11.13-eacade1 renews an access only with an API key (`auth-refresh.ts`: `loginWithApiKey`, once `exp` is within 300 seconds); a browser login's access lives about 60 days, then needs `agent login` on the host. The proxy reads the host login at every request, so the container needs nothing when it is signed in again."
+    "evidence": "Cursor CLI 2026.11.13-eacade1 renews an access only with an API key (`auth-refresh.ts`: `loginWithApiKey`, once `exp` is within 300 seconds); the host's access read on 16 Nov ends in about 60 days, then needs `agent login` on the host. The proxy reads the host login at every request, so the container needs nothing when it is signed in again."
   },
   "container": {
     "checked": [
