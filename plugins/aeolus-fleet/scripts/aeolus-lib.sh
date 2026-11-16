@@ -12,6 +12,9 @@
 # AEOLUS_DATA in a session's commands.
 aeolus_data() {
   local data="${AEOLUS_DATA:-${PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-}}}"
+  if [ -z "$data" ] && [ "${AEOLUS_HARNESS:-}" = cursor ]; then
+    data="${HOME:?}/.aeolus/plugins/cursor/aeolus-fleet"
+  fi
   if [ -z "$data" ]; then
     echo "aeolus: no plugin data folder; start a new session so the Aeolus Fleet SessionStart hook can set it up" >&2
     return 1
@@ -56,6 +59,8 @@ aeolus_harness() {
   local folder key
   if [ -n "${AEOLUS_HARNESS:-}" ]; then
     printf '%s' "$AEOLUS_HARNESS"
+  elif [ -n "${CURSOR_PLUGIN_ROOT:-}" ]; then
+    printf cursor
   elif [ -n "${PLUGIN_ROOT:-}" ]; then
     printf codex
   else
@@ -76,6 +81,8 @@ aeolus_harness() {
 aeolus_stated_harness() {
   if [ -n "${AEOLUS_HARNESS:-}" ]; then
     printf '%s' "$AEOLUS_HARNESS"
+  elif [ -n "${CURSOR_PLUGIN_ROOT:-}" ]; then
+    printf cursor
   elif [ -n "${PLUGIN_ROOT:-}" ]; then
     printf codex
   elif [ -n "${CLAUDECODE:-}" ] || [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
@@ -97,7 +104,7 @@ aeolus_register_harness() {
 # AEOLUS_HARNESS names it, or a hook of either harness runs. A Codex command
 # without AEOLUS_HARNESS guesses claude-code, so it must not move (#679).
 aeolus_crews_known() {
-  [ -n "${AEOLUS_CREWS:-}" ] || [ -n "${AEOLUS_HARNESS:-}" ] || [ -n "${PLUGIN_ROOT:-}" ] || [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]
+  [ -n "${AEOLUS_CREWS:-}" ] || [ -n "${AEOLUS_HARNESS:-}" ] || [ -n "${PLUGIN_ROOT:-}" ] || [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || [ -n "${CURSOR_PLUGIN_ROOT:-}" ]
 }
 
 # Whether a Codex hook runs: Codex sets PLUGIN_ROOT in its hooks. Copilot sets
@@ -129,7 +136,9 @@ aeolus_start_the_watcher() {
 # reads additionalContext at the top level, Claude Code and Codex inside
 # hookSpecificOutput. <hook event> <text>
 aeolus_hook_context() {
-  if [ "${AEOLUS_HARNESS:-}" = copilot ]; then
+  if [ "${AEOLUS_HARNESS:-}" = cursor ]; then
+    printf '{"additional_context":"%s"}\n' "$(aeolus_json_escape "$2")"
+  elif [ "${AEOLUS_HARNESS:-}" = copilot ]; then
     printf '{"additionalContext":"%s"}\n' "$(aeolus_json_escape "$2")"
   else
     printf '{"hookSpecificOutput":{"hookEventName":"%s","additionalContext":"%s"}}\n' "$1" "$(aeolus_json_escape "$2")"
@@ -622,8 +631,14 @@ aeolus_json_string() {
 # refused, so the hook acts as no ship (#884).
 aeolus_hook_folder() {
   local own inherited="${AEOLUS_FOLDER:-}"
-  own="${CLAUDE_PROJECT_DIR:-}"
-  [ -n "$own" ] || own="$(aeolus_json_string "$1" cwd)"
+  if [ "${AEOLUS_HARNESS:-}" = cursor ]; then
+    # Cursor's tool cwd follows the tool; the first workspace root stays the session's folder.
+    own="$(aeolus_json_string "$(printf '%s' "$1" | sed -E 's/"workspace_roots"[[:space:]]*:[[:space:]]*\[/"aeolus_workspace_root":/')" aeolus_workspace_root)"
+    [ -n "$own" ] || own="$(pwd -P)"
+  else
+    own="${CLAUDE_PROJECT_DIR:-}"
+    [ -n "$own" ] || own="$(aeolus_json_string "$1" cwd)"
+  fi
   AEOLUS_FOLDER="$(aeolus_physical_folder "${own:-$inherited}")"
   export AEOLUS_FOLDER
   if [ -n "$own" ] && [ -n "$inherited" ] && [ "$(aeolus_physical_folder "$own")" != "$(aeolus_physical_folder "$inherited")" ]; then

@@ -19,6 +19,7 @@ export const HARNESS_VARIABLES = [
   'AEOLUS_DATA',
   'AEOLUS_LAUNCH',
   'COPILOT_HOME',
+  'CURSOR_PLUGIN_ROOT',
 ] as const;
 
 /** The caller's environment without its harness and crew variables, with the test's own variables set over it. */

@@ -57,7 +57,7 @@ describe('setVersion', () => {
     expect(PLUGIN_MANIFESTS).toContain('plugins/aeolus-fleet/.cursor-plugin/plugin.json');
   });
 
-  it('sets the same version on both aeolus-fleet plugin manifests, keeping their other fields', () => {
+  it('sets the same version on every aeolus-fleet plugin manifest, keeping their other fields', () => {
     const before = PLUGIN_MANIFESTS.map(pluginManifest);
 
     setVersion(copy, '0.28.0');
@@ -163,6 +163,7 @@ describe('setPluginVersion', () => {
       expect.objectContaining({ name: 'aeolus-fleet', version: '0.28.0' }),
       expect.objectContaining({ name: 'aeolus-fleet', version: '0.28.0' }),
       expect.objectContaining({ name: 'aeolus-fleet', version: '0.28.0' }),
+      expect.objectContaining({ name: 'aeolus-fleet', version: '0.28.0' }),
     ]);
     expect(PUBLISHED_PACKAGES.map((name) => rawManifest(name))).toEqual(packagesBefore);
   });
@@ -184,7 +185,7 @@ describe('setPluginVersionUnlessNewer', () => {
 
     setPluginVersionUnlessNewer(copy, '0.36.1');
 
-    expect(PLUGIN_MANIFESTS.map((path) => pluginManifest(path).version)).toEqual(['0.36.1', '0.36.1', '0.36.1']);
+    expect(PLUGIN_MANIFESTS.map((path) => pluginManifest(path).version)).toEqual(['0.36.1', '0.36.1', '0.36.1', '0.36.1']);
   });
 
   it('compares versions by number, not by text: 0.36.10 is newer than 0.36.9', () => {
@@ -192,7 +193,7 @@ describe('setPluginVersionUnlessNewer', () => {
 
     setPluginVersionUnlessNewer(copy, '0.36.10');
 
-    expect(PLUGIN_MANIFESTS.map((path) => pluginManifest(path).version)).toEqual(['0.36.10', '0.36.10', '0.36.10']);
+    expect(PLUGIN_MANIFESTS.map((path) => pluginManifest(path).version)).toEqual(['0.36.10', '0.36.10', '0.36.10', '0.36.10']);
   });
 
   it("leaves a plugin that is newer alone: a hotfix of an older line never takes main's plugin back", () => {
@@ -200,7 +201,7 @@ describe('setPluginVersionUnlessNewer', () => {
 
     setPluginVersionUnlessNewer(copy, '0.36.2');
 
-    expect(PLUGIN_MANIFESTS.map((path) => pluginManifest(path).version)).toEqual(['0.37.0', '0.37.0', '0.37.0']);
+    expect(PLUGIN_MANIFESTS.map((path) => pluginManifest(path).version)).toEqual(['0.37.0', '0.37.0', '0.37.0', '0.37.0']);
   });
 
   it('refuses a version that is not semantic', () => {

@@ -30,13 +30,22 @@ let_end() {
   rm -f "$(aeolus_forced_stop_file)"
   aeolus_send_owed "$identity"
   aeolus_store_end_turn "$identity"
-  aeolus_mark_turn idle
+  [ "${AEOLUS_HARNESS:-}" = cursor ] || aeolus_mark_turn idle
   aeolus_log "$identity" turn 'idle: the turn ended'
   aeolus_report_turn "$(aeolus_identity_read "$identity")"
 }
 
 root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 ship_name="$(aeolus_identity_field "$identity_text" shipName)"
+
+# Cursor CLI has no stop follow-up: sessionEnd confirms only a completed turn.
+# Nothing is received here; a message arriving during the process waits for the next turn (CC3).
+if [ "${AEOLUS_HARNESS:-}" = cursor ]; then
+  [ "$(aeolus_json_string "$payload" final_status)" = completed ] || exit 0
+  aeolus_put_into_turn "$identity" "$ship_name" "$root" '' >/dev/null || true
+  let_end
+  exit 0
+fi
 
 if ! aeolus_codex_hook && text="$(aeolus_put_into_turn "$identity" "$ship_name" "$root" '')"; then
   reason="${text%x}"

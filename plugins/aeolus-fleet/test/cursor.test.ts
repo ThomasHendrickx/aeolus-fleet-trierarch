@@ -33,11 +33,13 @@ afterEach(async () => {
   rmSync(folder, { recursive: true, force: true });
 });
 
-function command(script: string, args: string[] = [], input = '') {
+function command(script: string, options: string[] | { args: string[]; input: string } = []) {
+  const args = Array.isArray(options) ? options : options.args;
+  const input = Array.isArray(options) ? '' : options.input;
   return spawnSync('bash', [join(PLUGIN, 'scripts', script), ...args], { cwd: folder, encoding: 'utf8', input, env: scriptEnvironment({ HOME: home, AEOLUS_HARNESS: 'cursor', AEOLUS_DATA: data(), AEOLUS_FOLDER: folder }) });
 }
 function crew(url = 'https://fleet.example.com', squadron?: string) {
-  expect(command('aeolus-identity.sh', ['write', '--wake-by', 'trierarch', url, SHIP, 'scout', ...(squadron === undefined ? [] : [squadron])], 'aeolus_ct_v1_test').status).toBe(0);
+  expect(command('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', url, SHIP, 'scout', ...(squadron === undefined ? [] : [squadron])], input: 'aeolus_ct_v1_test' }).status).toBe(0);
 }
 
 /** Runs the packaged commands as Cursor does, with Cursor's environment and no foreign harness variables. */
@@ -93,7 +95,7 @@ describe('the Cursor plugin package (CC5)', () => {
 
 describe('Cursor native hook behavior', () => {
   it('keeps the Cursor identity apart and emits start context in additional_context, marking started', async () => {
-    crew();
+    await handed();
     expect(command('aeolus-identity.sh', ['path']).stdout).toContain(join(home, '.aeolus/crews/cursor'));
     const outputs = await hook('sessionStart');
     const context = z.object({ additional_context: z.string() }).parse(JSON.parse(outputs[0] ?? '{}')).additional_context;
@@ -130,7 +132,6 @@ describe('Cursor native hook behavior', () => {
 
   it('leaves a merely received message for the next turn when sessionEnd completes', async () => {
     await handed();
-    command('aeolus-identity.sh');
     const state = sibling('.store') + '/' + DELIVERY + '.state';
     writeFileSync(state, 'received\n');
     await hook('sessionEnd', { final_status: 'completed' });
@@ -156,7 +157,7 @@ describe('Cursor native hook behavior', () => {
   it('preserves confirmed work when the trierarch interrupted for a forced hand-over', async () => {
     await handed();
     await hook('preToolUse', { tool_name: 'Shell' });
-    writeFileSync(sibling('.forced-stop'), 'forced\n');
+    writeFileSync(sibling('.turn.forcedStop'), 'forced\n');
     await hook('sessionEnd', { final_status: 'error', reason: 'error' });
     expect(command('aeolus-identity.sh', ['store']).stdout).toContain(`${DELIVERY} confirmed`);
   });

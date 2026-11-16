@@ -20,11 +20,12 @@ import { z } from 'zod';
 
 export const PUBLISHED_PACKAGES = ['trierarch'] as const;
 
-/** The aeolus-fleet plugin's Claude Code, Codex and Copilot manifests, released together. */
+/** The aeolus-fleet plugin's Claude Code, Codex, Copilot and Cursor manifests, released together. */
 export const PLUGIN_MANIFESTS = [
   'plugins/aeolus-fleet/.claude-plugin/plugin.json',
   'plugins/aeolus-fleet/.codex-plugin/plugin.json',
   'plugins/aeolus-fleet/.github/plugin/plugin.json',
+  'plugins/aeolus-fleet/.cursor-plugin/plugin.json',
 ] as const;
 
 const SCOPE = '@aeolus-fleet/';

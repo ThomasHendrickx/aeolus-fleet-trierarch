@@ -19,6 +19,10 @@ if [ -z "$model" ] && [ "${AEOLUS_HARNESS:-}" = copilot ]; then
   [ -n "$session_id" ] && [ -f "$events" ] || exit 0
   model="$(grep -E '"type":"session\.(model_change|resume)"' "$events" | sed -E -n 's/.*"(newModel|selectedModel)":"([^"\\]+)".*/\2/p' | tail -n 1)"
 fi
+if [ "${AEOLUS_HARNESS:-}" = cursor ] && [ "$model" = default ]; then
+  # Cursor CLI on Auto names its model "default" in the captured hook input (CC11).
+  model=auto
+fi
 [ -n "$model" ] || exit 0
 aeolus_hook_folder "$payload" || exit 1
 file="$(aeolus_model_file 2>/dev/null)" || exit 0

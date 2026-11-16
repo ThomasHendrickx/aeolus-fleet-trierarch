@@ -13,7 +13,12 @@ set -uo pipefail
 
 payload="$(cat)"
 hook_event="$(aeolus_json_string "$payload" hook_event_name)"
-if [ "$hook_event" = SessionEnd ]; then
+if [ "${AEOLUS_HARNESS:-}" = cursor ]; then
+  case "$(aeolus_json_string "$payload" final_status)" in
+    error|aborted) ;;
+    *) exit 0 ;;
+  esac
+elif [ "$hook_event" = SessionEnd ]; then
   case "$(aeolus_json_string "$payload" reason)" in
     error|abort|timeout) ;;
     *) exit 0 ;;
@@ -28,7 +33,7 @@ aeolus_store_drop_older_leases
 # stopping is not dying, so what the turn confirmed stays confirmed, handled
 # when the forced turn ends, and the forced prompt follows at once.
 forced_stop="$(aeolus_forced_stop_file)"
-if [ "$hook_event" = Interrupt ] && [ -f "$forced_stop" ]; then
+if { [ "$hook_event" = Interrupt ] || [ "${AEOLUS_HARNESS:-}" = cursor ]; } && [ -f "$forced_stop" ]; then
   rm -f "$forced_stop"
   aeolus_log "$identity" turn 'stopped for a forced message: what the turn took is handled when the forced turn ends'
   aeolus_send_owed "$identity"
@@ -37,7 +42,7 @@ fi
 error="$(aeolus_json_string "$payload" error)"
 [ -n "$error" ] || error="$(aeolus_json_string "$payload" reason)"
 aeolus_store_died_turn "$identity" "the turn it was handed once more to died too (${hook_event:-a died turn}${error:+: ${error}})"
-aeolus_mark_turn idle
+[ "${AEOLUS_HARNESS:-}" = cursor ] || aeolus_mark_turn idle
 aeolus_log "$identity" turn 'idle: the turn failed'
 aeolus_send_owed "$identity"
 exit 0

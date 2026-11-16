@@ -1,0 +1,16 @@
+{
+  "name": "aeolus-fleet",
+  "owner": {
+    "name": "Thomas Hendrickx"
+  },
+  "metadata": {
+    "description": "Aeolus Fleet plugins for Cursor CLI"
+  },
+  "plugins": [
+    {
+      "name": "aeolus-fleet",
+      "source": "./plugins/aeolus-fleet",
+      "description": "Crew an Aeolus ship through Cursor CLI command hooks and a trierarch."
+    }
+  ]
+}
