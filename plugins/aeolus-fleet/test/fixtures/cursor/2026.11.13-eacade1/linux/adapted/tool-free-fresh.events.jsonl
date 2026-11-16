@@ -1,0 +1,17 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/tmp/cursor-s7-linux/adapted","session_id":"00000000-0000-4000-8000-000000000022","model":"Auto","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Do not use tools. Reply S7_TOOL_FREE."}]},"session_id":"00000000-0000-4000-8000-000000000022"}
+{"type":"thinking","subtype":"delta","text":"The","session_id":"00000000-0000-4000-8000-000000000022","timestamp_ms":1794817035730}
+{"type":"thinking","subtype":"delta","text":" user","session_id":"00000000-0000-4000-8000-000000000022","timestamp_ms":1794817035824}
+{"type":"thinking","subtype":"delta","text":" wants","session_id":"00000000-0000-4000-8000-000000000022","timestamp_ms":1794817035892}
+{"type":"thinking","subtype":"delta","text":" me","session_id":"00000000-0000-4000-8000-000000000022","timestamp_ms":1794817035968}
+{"type":"thinking","subtype":"delta","text":" to","session_id":"00000000-0000-4000-8000-000000000022","timestamp_ms":1794817036032}
+{"type":"thinking","subtype":"delta","text":" reply","session_id":"00000000-0000-4000-8000-000000000022","timestamp_ms":1794817036102}
+{"type":"thinking","subtype":"delta","text":" with","session_id":"00000000-0000-4000-8000-000000000022","timestamp_ms":1794817036171}
+{"type":"thinking","subtype":"delta","text":" \"S7_TOOL","session_id":"00000000-0000-4000-8000-000000000022","timestamp_ms":1794817036242}
+{"type":"thinking","subtype":"delta","text":"_FREE\"","session_id":"00000000-0000-4000-8000-000000000022","timestamp_ms":1794817036311}
+{"type":"thinking","subtype":"delta","text":" and not","session_id":"00000000-0000-4000-8000-000000000022","timestamp_ms":1794817036398}
+{"type":"thinking","subtype":"delta","text":" use any","session_id":"00000000-0000-4000-8000-000000000022","timestamp_ms":1794817036460}
+{"type":"thinking","subtype":"delta","text":" tools.\n\nThe final answer must also include the exact marker \"S7_START_ADAPTED\".","session_id":"00000000-0000-4000-8000-000000000022","timestamp_ms":1794817036782}
+{"type":"thinking","subtype":"completed","session_id":"00000000-0000-4000-8000-000000000022","timestamp_ms":1794817036783}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"S7_TOOL_FREE\nS7_START_ADAPTED"}]},"session_id":"00000000-0000-4000-8000-000000000022"}
+{"type":"result","subtype":"success","duration_ms":3027,"duration_api_ms":3027,"is_error":false,"result":"S7_TOOL_FREE\nS7_START_ADAPTED","session_id":"00000000-0000-4000-8000-000000000022","request_id":"00000000-0000-4000-8000-000000000023","usage":{"inputTokens":8508,"outputTokens":77,"cacheReadTokens":3968,"cacheWriteTokens":0,"reasoningTokens":62}}

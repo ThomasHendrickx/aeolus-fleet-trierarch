@@ -1,0 +1,47 @@
+{
+  "host": "agent-host-1",
+  "os": "Linux",
+  "build": "2026.11.13-eacade1",
+  "command": [
+    "agent",
+    "-p",
+    "Run the shell command printf S7_TOOL_PROBE. Then state any context markers you received.",
+    "--output-format",
+    "stream-json",
+    "--trust"
+  ],
+  "missingRole": "turn idle; keep the turn open with an unconfirmed message",
+  "missingHook": "stop",
+  "resume": {
+    "command": [
+      "agent",
+      "--resume",
+      "00000000-0000-4000-8000-000000000001",
+      "-p",
+      "Do not call tools. Reply with S7_RESUME_TOOL_FREE.",
+      "--output-format",
+      "stream-json",
+      "--trust"
+    ],
+    "result": "exit 0; sessionEnd completed only; no stop"
+  },
+  "sanitization": [
+    "account email",
+    "home path",
+    "conversation/session id"
+  ],
+  "result": "blocked: not a successful S7 proof",
+  "failed": {
+    "command": [
+      "agent",
+      "-p",
+      "Reply with S7_FAILURE_PROBE.",
+      "--model",
+      "s7-nonexistent-model",
+      "--output-format",
+      "stream-json",
+      "--trust"
+    ],
+    "result": "exit 1 before a turn starts; no hooks; does not prove in-turn stop status error"
+  }
+}

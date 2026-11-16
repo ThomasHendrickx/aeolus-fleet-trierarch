@@ -1,0 +1,33 @@
+{
+  "command": [
+    "agent",
+    "-p",
+    "Run sleep 60 in the shell, then report completion.",
+    "--output-format",
+    "stream-json",
+    "--trust",
+    "--resume",
+    "00000000-0000-4000-8000-000000000008",
+    "--force"
+  ],
+  "build": "2026.11.13-eacade1",
+  "os": "Linux",
+  "host": "agent-host-1",
+  "lifecycle": [
+    {
+      "state": "busy",
+      "source": "process start"
+    },
+    {
+      "signal": "SIGINT",
+      "target": "owned Cursor process"
+    },
+    {
+      "state": "idle",
+      "source": "process exit",
+      "exitStatus": 130
+    }
+  ],
+  "started": false,
+  "active": true
+}
