@@ -290,6 +290,7 @@ The JSON-RPC fixtures and their observations live under [`plugins/aeolus-fleet/t
 | Model supplied to `session/new` | `new-model.jsonl`: a supplied `modelId` is ignored; the response still names the persisted default | Explicit `session/set_model` remains necessary |
 | User MCP exclusion | `mcp-home.jsonl`, `mcp-exclusion.capture.json`: a sentinel configured only in private `HOME/.cursor/mcp.json` starts after `session/new` with `mcpServers: []`. It did not start during `initialize` | **Failed.** The build cannot satisfy the named-servers-only rule |
 | Other MCP paths | Separate XDG and project sentinels do not start (`mcp-xdg.jsonl`, `mcp-project.jsonl`) | Changing `CURSOR_CONFIG_DIR` or XDG configuration alone does not prove default-home exclusion |
+| Permission held 30 minutes | `permission-hold.jsonl`, `permission-hold.capture.json`: a real request is held for 1,800.005 seconds, then `allow-once` runs the requested command and the prompt returns `end_turn` | The delayed permission response is accepted on the captured build |
 | Permission persistence | `permission-persistence.jsonl`: answering `allow-always` changes the private `.config/cursor/cli-config.json`; a new process and new session run the same command without another permission request | Q5's proposed label "Allow for this session" would misstate the scope. Thomas must decide the offered option |
 | Missing login | `no-login.jsonl`: an empty home and XDG configuration produce auth error `-32000` on `session/new` | No API key is requested |
 | Missing saved session | `missing-session.jsonl`: `session/load` returns `-32602` | The hold must handle refused load explicitly |
@@ -300,4 +301,4 @@ The JSON-RPC fixtures and their observations live under [`plugins/aeolus-fleet/t
 | Initialized turn failure | Invalid image bytes still return `end_turn` (`failed-turn.jsonl`). An unknown prompt session returns `-32603` (`unknown-prompt-session.jsonl`) | A genuine failed initialized turn remains unproven. Neither probe proves a failure inside a live initialized turn |
 | Expired machine login | A generated unsigned expired credential is rejected with `-32000` (`synthetic-expired.jsonl`); no genuinely expired machine login is available | Genuine expiry remains unproven; missing login or a rejected synthetic credential does not prove it |
 
-The 30-minute permission result and the independent macOS captures must be read alongside these Linux observations. None of the unproven cases is a successful eligibility proof.
+The independent macOS captures must be read alongside these Linux observations. None of the unproven cases is a successful eligibility proof.
