@@ -116,6 +116,27 @@ describe('Cursor ACP captured fixture privacy', () => {
       expect(content, name).not.toMatch(/"(?:accessToken|refreshToken|apiKey|authorization)"\s*:/i);
     }
   });
+
+  it('keeps only the synthetic command list and no installed skill of the capturing user in any trace', () => {
+    const synthetic = ['synthetic-command-one', 'synthetic-command-two'];
+    const commandsUpdate = z.object({ message: z.object({ params: z.object({ update: z.object({ sessionUpdate: z.literal('available_commands_update'), availableCommands: z.array(z.object({ name: z.string() })) }) }) }) });
+    const root = new URL('./fixtures/cursor-acp/2026.11.13-eacade1/', import.meta.url);
+    const traces = ['linux/', 'macos/'].flatMap((platform) => readdirSync(new URL(platform, root))
+      .filter((name) => name.endsWith('.jsonl')).map((name) => `${platform}${name}`));
+    let commandLists = 0;
+    for (const name of traces) {
+      const content = readFileSync(new URL(name, root), 'utf8');
+      expect(content, name).not.toMatch(/\((?:user skill|global)\)|mac-mini-rc-sessions|import-memory|multi-model-review|claude-rc|\bmorning\b|\bhemma\b|mac mini/i);
+      for (const line of content.trim().split('\n')) {
+        const parsed = commandsUpdate.safeParse(JSON.parse(line));
+        if (line.includes('"available_commands_update"')) {
+          commandLists += 1;
+          expect(parsed.data?.message.params.update.availableCommands.map((command) => command.name), name).toEqual(synthetic);
+        }
+      }
+    }
+    expect(commandLists).toBeGreaterThan(0);
+  });
 });
 
 describe('Cursor ACP Linux: rejected credentials and prompt error shape', () => {
