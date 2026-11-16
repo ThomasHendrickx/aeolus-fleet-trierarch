@@ -7,5 +7,5 @@ import { startTestFolders } from './test-folders.js';
  * removes them when it ends (#454). Every project lists it.
  */
 export function setup(): () => void {
-  return startTestFolders({ repositoryRoot: fileURLToPath(new URL('../../', import.meta.url)), shortRoot: '/tmp', now: new Date(), env: process.env });
+  return startTestFolders({ repositoryRoot: fileURLToPath(new URL('../../', import.meta.url)), shortRoot: '/tmp', userId: process.getuid?.() ?? 0, now: new Date(), env: process.env });
 }
