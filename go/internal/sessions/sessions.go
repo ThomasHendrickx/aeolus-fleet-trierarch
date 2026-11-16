@@ -50,6 +50,8 @@ type Observed struct {
 	ShipID         string
 	Status         string
 	IsOtherVersion bool
+	// ExitReason names the process status or signal, or explicitly says the hold left no record.
+	ExitReason string
 }
 
 // Start is what a session's start is given.
@@ -145,7 +147,11 @@ func (r Runtime) observed(shipID string) (Observed, bool) {
 	}
 	answer, err := hold.Call(files.Socket, hold.Request{Call: "state"}, callTimeout)
 	if err != nil || !answer.IsOK || answer.State == nil {
-		return Observed{ShipID: shipID, Status: "exited"}, true
+		reason, _ := os.ReadFile(files.ExitReason)
+		if len(reason) == 0 {
+			reason = []byte("session hold ended without an exit record")
+		}
+		return Observed{ShipID: shipID, Status: "exited", ExitReason: string(reason)}, true
 	}
 	return Observed{ShipID: shipID, Status: "running", IsOtherVersion: answer.State.Version != r.Version}, true
 }
