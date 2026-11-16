@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
 
-import { ANSWER_CONTENT_TYPE, NO_TERMINAL_QUESTIONS, QUESTION_CONTENT_TYPE } from '@aeolus-fleet/common';
+import { ANSWER_CONTENT_TYPE, NO_TERMINAL_QUESTIONS, QUESTION_CONTENT_TYPE, sendInputSchema, setStatementInputSchema } from '@aeolus-fleet/common';
 import { SHIP_PROTOCOL } from '@aeolus-fleet/core/testing';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 const claudeSkill = readFileSync(new URL('../skills/crew-a-ship/SKILL.md', import.meta.url), 'utf8');
 const codexSkill = readFileSync(new URL('../skills/aeolus-fleet-crew/SKILL.md', import.meta.url), 'utf8');
@@ -16,14 +17,17 @@ const protocolRules = SHIP_PROTOCOL.split('\n').filter((line) => /^\d+\. /.test(
 // only what the plugin adds.
 
 describe('the crew-a-ship skill', () => {
-  it('gives the shapes of a first setStatement and a first reply, so a fresh session gets them right at once (#478)', () => {
+  it('gives a setStatement example and a reply example the fleet accepts, so a fresh session gets them right at once (#478)', () => {
+    const examples = (skill: string) => [...skill.matchAll(/`(\{"[^`]*\})`/g)].map((match) => match[1] ?? '');
+    // The examples hold placeholders; fill the ones with a format of their own as a session would.
+    const filled: Record<string, string> = { name: 'a-name', inReplyTo: 'msg_01m7k9nka3stfxsbx1da02d6qn' };
+    const parse = (example: string | undefined): unknown => JSON.parse(example ?? 'null', (key, value: unknown) => (typeof value === 'string' && value.startsWith('<') && filled[key] !== undefined ? filled[key] : value));
     for (const skill of [claudeSkill, codexSkill]) {
-      expect(skill).toContain('"capabilities":[{"name":"<capability name>","description":"<what it does>"}]');
-      expect(skill).toContain('each capability is an object with a name, never a string');
-      expect(skill).toContain('"summary":"<one plain sentence of what the ship does for a person, then more>"');
-      expect(skill).toContain('selector is an object, never a string');
-      expect(skill).toContain('payload is plain text, never an object');
-      expect(skill).toContain('inReplyTo is the delivery\'s messageId, never its deliveryId');
+      const statement = examples(skill).find((example) => example.includes('"capabilities"'));
+      const reply = examples(skill).find((example) => example.includes('"inReplyTo"'));
+      expect(setStatementInputSchema.safeParse(parse(statement)).success).toBe(true);
+      expect(sendInputSchema.safeParse(parse(reply)).success).toBe(true);
+      expect(z.object({ inReplyTo: z.string() }).parse(JSON.parse(reply ?? '{}')).inReplyTo).toContain('messageId');
     }
   });
 
