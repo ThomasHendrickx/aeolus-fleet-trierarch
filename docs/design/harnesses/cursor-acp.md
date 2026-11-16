@@ -1,6 +1,6 @@
 # The trierarch crews Cursor over ACP
 
-Status: for Thomas's approval. Nothing is built. It replaces S9 of [cursor-copilot.md](cursor-copilot.md) (the Cursor adapter) and changes CC3 and CC4 for Cursor only; Copilot stays as that design says.
+Status: approved by Thomas on 16 Nov 2026 (card a4e8c2d6, all eight picks). Implementation starts with A1; Q4's fallback remains conditional on its live-session probe. It replaces S9 of [cursor-copilot.md](cursor-copilot.md) (the Cursor adapter) and changes CC3 and CC4 for Cursor only; Copilot stays as that design says.
 
 Inputs: Thomas's choice (16 Nov) to run Cursor ships on `agent acp` instead of `agent -p`; the hands-on ACP research and adapter plan on [aeolus-fleet#1462](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1462); the approved [Cursor and Copilot design](cursor-copilot.md); the merged S7 (#456) and S8 (#461); draft PR #462 (S9 on `agent -p`); [trierarch.md](../../trierarch.md), [architecture.md](../../architecture.md) and [permission-asks.md](../permission-asks.md).
 
