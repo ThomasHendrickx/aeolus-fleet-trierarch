@@ -95,7 +95,7 @@ Thomas decided these on 28 Oct.
 | --- | --- |
 | CC1 | **Copilot first; Cursor after its CLI hooks are proven on a captured build.** The proof of Cursor's CLI hooks runs beside the Copilot slices. A role whose hook does not run in Cursor's CLI keeps Cursor in `notOffered`, naming that hook, and the Cursor slices stop to ask Thomas |
 | CC2 | **The MCP guide now, the crewed session as the purpose.** A guide per harness says how a Cursor or Copilot session reaches the fleet over MCP with the starting prompt for a chat, and states its limits: it does not wake, and the crew token is in the transcript (0015's accepted risk) |
-| CC3 | **H5 holds.** A harness is offered only when every role in the hook table below has a hook proven in its headless mode; a missing one keeps it in `notOffered`, naming the role. The turn marker alone may be filled from the process (busy when the turn's process starts, idle when it exits), as a turn per process allows, once that is proven. The trierarch never acks. A hand-over is confirmed at the turn's first tool call, or at its end when the turn calls no tool; it is never confirmed at the prompt. Force in a busy turn stays best effort, as in Codex |
+| CC3 | **H5 holds.** A harness is offered only when every role in the hook table below has a hook proven in its headless mode; a missing one keeps it in `notOffered`, naming the role. The turn marker alone may be filled from the process (busy when the turn's process starts, idle when it exits), as a turn per process allows, once that is proven. The trierarch never acks. A hand-over is confirmed at the turn's first tool call, or at its end when the turn calls no tool; it is never confirmed at the prompt. For Cursor, a tool-free turn confirms at `sessionEnd` with `final_status: completed`; a message arriving during a turn waits for the next turn. Cursor's turn marker comes from its process (busy at start, idle at exit), and a died turn is read from `sessionEnd.final_status` and the exit status (Thomas, 16 Nov). Force in a busy turn stays best effort, as in Codex |
 | CC4 | **A turn per process with resume, as Codex.** Copilot: the first turn `copilot -p <prompt> --output-format json --allow-all-tools --no-ask-user`, every later hand-over the same with `--resume <session id>`. Cursor: `agent -p <prompt> --output-format stream-json --trust`, every later one with `--resume <chat id>`. The hold keeps the session or chat id and appends the events to `events.jsonl`; no harness process runs between turns. Force ends the turn's process with SIGINT, as for Codex. ACP is later ([#1359](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1359)) |
 | CC5 | **One plugin, one set of scripts.** The aeolus-fleet plugin gains a manifest and a hooks file for Copilot and for Cursor, each mapping that harness's events onto the same scripts, and a marketplace entry for each. Identities live in `~/.aeolus/crews/copilot/` and `~/.aeolus/crews/cursor/` (0015). The trierarch reaches both through `aeolus-identity.sh` and `aeolus-push.sh` only |
 | CC6 | **Sign-in is the machine's own login.** The person who runs the trierarch signs the harness in (`copilot login --device-code`, `agent login`); the trierarch keeps nothing. The hold's clean environment (H10) passes none of `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` or `CURSOR_API_KEY`. A missing or expired login fails the launch window with the harness's error event as its cause. `aeolus-trierarch login copilot` and `login cursor` with `--api-key` are refused, naming why. A kept login is later ([#1361](https://github.com/ThomasHendrickx/aeolus-fleet/issues/1361)) |
@@ -106,18 +106,18 @@ Thomas decided these on 28 Oct.
 | CC11 | **The model a session states** comes from its harness, as the Codex model does today: the hook input where it carries the model, otherwise the model the trierarch started the session with. A Copilot session on auto mode, where Copilot picks the model per request, states `auto`, as CC9 allows any harness that does; a Copilot session started with `--model`, or switched to a model, states that id. Copilot's hook inputs name no model, so the plugin reads it from the session's events. A Cursor session on auto states `auto` |
 | CC12 | **A hand-crewed session wakes** through what its harness documents for starting a turn in a running session, as Codex's wake bridge uses `codex queue`. A harness with no such way gets no hand crew line (CC7) and its slice stops to ask Thomas. **Copilot** (Thomas, 29 Oct): the session starts the plugin's watcher as a detached background shell (the shell tool with `mode: "async"` and `detach: true`), as Claude Code starts it as a background task; when the watcher hands a message over and exits, Copilot's completion notification starts a turn in the running session, and its hooks confirm the message there. Pinned to the tested Copilot CLI version, 1.0.105. Copilot documents it in its changelog: detached processes in the shell tool (0.0.344), automatic notifications when background shell commands complete (0.0.422), reading output from and stopping detached shells (1.0.66), and a detached command's completion notification no longer lost (1.0.71) (github.com/github/copilot-cli, `changelog.md`) |
 
-The hook table: each role the delivery protocol needs, and the hook that plays it.
+The hook table: each role the delivery protocol needs, and the hook that plays it. Cursor uses the process and `sessionEnd` rule in CC3 instead of keeping a turn open through `stop.followup_message`.
 
 Proven for Copilot CLI 1.0.105 in `copilot -p` and with `--resume`: every Copilot hook in the table runs, and a `preToolUse` deny reason reaches the model. `errorOccurred` does not mark a died turn: it fires at every model call Copilot retries (`recoverable: true`), also in a turn that recovers and ends normally. A turn that dies ends with `sessionEnd` and reason `error`, and its process exits 1. A failure before Copilot picks a model fires no hook, only `session.error` in the JSON output. So the died turn hangs on `sessionEnd`, and `errorOccurred` stays unmapped. On a turn that a detached shell's completion notification starts (its prompt a `<system_notification>`), `preToolUse` deny and `agentStop` block run as on any turn, and the deny reason reaches the model; `read_bash`, which reads a shell's output, fires no `preToolUse`, so a turn that only reads it confirms its hand-over at `agentStop`.
 
-| Role | Claude Code | Copilot CLI | Cursor CLI (to prove) |
+| Role | Claude Code | Copilot CLI | Cursor CLI |
 | --- | --- | --- | --- |
 | Start context, launch marker `started` | SessionStart | `sessionStart` | `sessionStart` |
 | Turn busy | UserPromptSubmit | the turn's process starts (CC3) | the turn's process starts (CC3) |
-| Turn idle; keep the turn open with an unconfirmed message | Stop | `agentStop`, `decision: "block"` with the message as reason | `stop`, `followup_message` |
+| Turn idle; keep the turn open with an unconfirmed message | Stop | `agentStop`, `decision: "block"` with the message as reason | process exit marks idle; `sessionEnd` with `final_status: completed` confirms a tool-free hand-over; messages arriving during a turn wait for the next turn |
 | Confirm a hand-over at the first tool call; launch marker `active` | PreToolUse deny with the message as reason | `preToolUse` deny (exit 2) with the message as reason | `preToolUse` deny with the message as reason |
 | Confirm a hand-over at the prompt | UserPromptSubmit | none (lost, CC3) | none (lost, CC3) |
-| A died turn | StopFailure | `sessionEnd` with reason `error`, `abort` or `timeout`; the hold also reads the exit status and `session.error` | `stop` with status `error` |
+| A died turn | StopFailure | `sessionEnd` with reason `error`, `abort` or `timeout`; the hold also reads the exit status and `session.error` | `sessionEnd.final_status` and process exit status |
 | The report reminder | PostToolUse | `postToolUse` | `postToolUse` |
 
 ## 5. Flow
@@ -150,12 +150,12 @@ flowchart TD
     resume --> handed[handed, channel harness]
     handed --> tool{The turn calls a tool?}
     tool -->|yes| deny["preToolUse denies with the message as reason; the hook acks: the promise ends (0040)"]
-    tool -->|no| stop["agentStop or stop: unconfirmed message, keep the turn open with it as the next prompt; the hook acks"]
+    tool -->|no| stop["Copilot agentStop: keep open and ack; Cursor sessionEnd completed: ack tool-free hand-over; new deliveries wait for next turn"]
     deny --> send["The model acts; each send states the model: Copilot's id, or auto (CC9, CC11)"]
     stop --> send
     send --> exit["Turn ends: process exits, idle"] --> pass
     run -->|forced delivery| force["Forced-stop marker, SIGINT to the turn's process, wait at most 10 s"] --> resume
-    resume -->|"sessionEnd reason error, exit status or session.error; Cursor: stop status error"| died["aeolus-push.sh died: held deliveries once more"]
+    resume -->|"sessionEnd reason error, exit status or session.error; Cursor: sessionEnd final_status and exit status"| died["aeolus-push.sh died: held deliveries once more"]
     died --> budget
     budget -->|yes, after the delay| start
     budget -->|no| crashed([Crashed: the owner is told])
@@ -175,8 +175,8 @@ flowchart TD
 
 Unhappy paths the diagram does not show:
 - **Crash between the line and `handed`.** The hook's ack may already have come; `handed` then answers `acknowledged`. If the turn never took the line, the delivery comes back from `hand` as received and is sent again: one duplicate, nothing lost.
-- **A turn that calls no tool and whose stop hook does not run.** The delivery stays unconfirmed; it is handed once more at the next idle turn. This is why CC3 keeps a harness out until its stop hook is proven.
-- **The stop hook's loop limit** (Cursor 5, Copilot 8 in a row). Messages waiting beyond it are handed at the next idle turn, as a busy session's are.
+- **A turn that calls no tool and whose confirmation hook does not run (`sessionEnd` for Cursor, `agentStop` for Copilot).** The delivery stays unconfirmed; it is handed once more at the next idle turn. This is why CC3 keeps a harness out until its confirmation hook is proven.
+- **The Copilot stop hook's loop limit** (8 in a row). Messages waiting beyond it are handed at the next idle turn, as a busy session's are.
 - **The turn's process hangs after SIGINT.** After 10 s the hold kills it; the forced line goes in with the next `--resume`. Force stays best effort (0040).
 - **`--resume` refuses the id** (the session or chat is gone from the harness's store). The start fails with the error event as cause and counts against the budget; the next start begins a fresh session.
 - **The login expires while a session runs.** The next turn's process fails with the harness's error event; `died` marks held deliveries once more, and each restart fails its launch window with that cause until the person signs in again.
@@ -189,7 +189,7 @@ Unhappy paths the diagram does not show:
 Offering:
 - **Given** a machine with the Copilot CLI and the aeolus-fleet plugin installed for it, **when** the trierarch reports, **then** `copilot` is in its harnesses with the models the CLI names.
 - **Given** the Copilot CLI without the plugin for it, **when** the trierarch reports, **then** `copilot` is in `notOffered` with the reason that its plugin is not installed.
-- **Given** a Cursor CLI build whose `stop` hook is not proven, **when** the trierarch reports, **then** `cursor` is in `notOffered`, naming the role "turn idle".
+- **Given** a Cursor CLI build whose `sessionEnd` confirmation of a tool-free hand-over is not proven, **when** the trierarch reports, **then** `cursor` is in `notOffered`, naming that role.
 - **Given** the container runtime, **when** the trierarch reports, **then** `copilot` and `cursor` are in `notOffered`, not proven in a container.
 - **Given** a Cursor CLI whose models include auto, **when** the trierarch reports, **then** `auto` is among Cursor's models.
 
@@ -197,7 +197,9 @@ Trierarch crew:
 - **Given** a crew request naming `copilot` placed on a signed-in machine, **when** the trierarch crews it, **then** the hold runs one `copilot -p` turn, the session registers, its launch window sees `started` and `active`, and the ship is crewed.
 - **Given** a machine where Copilot is not signed in, **when** a Copilot session starts, **then** the start fails with the harness's error as its cause, and no token is asked for or kept.
 - **Given** a crewed Copilot session that is idle, **when** a delivery arrives, **then** the hold starts one `copilot -p --resume <id>` turn with the line, and the delivery is acknowledged when the turn's first tool call is denied with the message as reason.
-- **Given** a crewed session handed a delivery whose turn calls no tool, **when** the turn ends, **then** the stop hook keeps it open with the message as the next prompt and the delivery is acknowledged.
+- **Given** a crewed Copilot session handed a delivery whose turn calls no tool, **when** the turn ends, **then** `agentStop` keeps it open with the message as the next prompt and the delivery is acknowledged.
+- **Given** a crewed Cursor session handed a delivery whose turn calls no tool, **when** `sessionEnd` reports `final_status: completed`, **then** the hook confirms that hand-over; any message arriving during the turn waits for the next process.
+- **Given** an initialized Cursor turn that dies, **when** its `sessionEnd.final_status` or process exit status reports failure, **then** the hold treats the turn as died.
 - **Given** a busy session, **when** a forced delivery arrives, **then** the turn's process gets SIGINT, and the forced line goes in with the next `--resume` within 10 s.
 - **Given** a Copilot turn that fails, ending with `sessionEnd` and reason `error`, **when** the pass reads it, **then** the held deliveries are marked once more and the session restarts within its budget.
 - **Given** any Copilot or Cursor session, **when** its environment and transcript are read, **then** neither holds the crew token, a GitHub token or a Cursor API key.
