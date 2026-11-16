@@ -102,6 +102,10 @@ describe('Cursor CLI 2026.11.13-eacade1 ACP on macOS', () => {
     expect(ended).toBeGreaterThan(completion);
   });
 
+  it('records whether a background shell remains running when the prompt ends', () => {
+    expect(observations('background-early')).toContainEqual(expect.objectContaining({ event: 'background-at-end-turn', markerAtEndTurn: false, markerLater: true }));
+  });
+
   it('records idle memory and keeps genuine expiry and initialized-turn failures explicitly unproven', () => {
     expect(observations('lifecycle')).toContainEqual(expect.objectContaining({ event: 'idle-rss', kilobytes: 105952, scope: 'agent acp PID, excludes children' }));
     const manifest = z.object({ eligible: z.boolean(), unproven: z.array(z.string()) }).parse(JSON.parse(fixture('capture.json')));
@@ -110,7 +114,7 @@ describe('Cursor CLI 2026.11.13-eacade1 ACP on macOS', () => {
   });
 
   it('keeps personal paths, profile fields and credentials out of every captured trace', () => {
-    for (const name of ['lifecycle', 'model-isolation', 'permission-hold', 'configuration']) {
+    for (const name of ['lifecycle', 'model-isolation', 'permission-hold', 'configuration', 'background-early']) {
       const content = fixture(`${name}.jsonl`);
       expect(content).not.toMatch(/\/Users\/[^/\s"']+|Users-[a-z0-9]+-|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|Bearer\s+[A-Za-z0-9._-]+|sk-[A-Za-z0-9_-]{12,}|google-oauth2\||"authInfo"|"userId"/i);
       expect(trace(name).length).toBeGreaterThan(0);
