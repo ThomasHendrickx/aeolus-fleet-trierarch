@@ -21,6 +21,7 @@ func openPseudoTerminal() (*os.File, string, error) {
 		}
 	}
 	name := make([]byte, 128)
+	//lint:ignore SA1019 x/sys has no wrapper for TIOCPTYGNAME, which writes the terminal's name into a buffer.
 	if _, _, errno := unix.Syscall(unix.SYS_IOCTL, controller.Fd(), uintptr(unix.TIOCPTYGNAME), uintptr(unsafe.Pointer(&name[0]))); errno != 0 {
 		controller.Close()
 		return nil, "", errno

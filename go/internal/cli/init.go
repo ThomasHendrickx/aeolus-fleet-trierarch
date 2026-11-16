@@ -141,6 +141,8 @@ type Init struct {
 	Sleep   func()
 	Now     func() time.Time
 	LastLog func() string
+	// Stop is closed when the process is told to stop: Ctrl+C at a setup question stops setup.
+	Stop <-chan struct{}
 	// Print writes a line of setup's progress where no terminal is open; nil writes nothing, as under --json.
 	Print func(line string)
 	// Detect detects what the harnesses given offer, as by says, and keeps it in detected.json (#365).
@@ -437,7 +439,7 @@ func (i Init) Run(flags Flags) (Report, error) {
 		if err == nil && opened != nil {
 			terminal = opened
 			defer terminal.Close()
-			w = wizard{reader: bufio.NewReader(terminal), out: terminal}
+			w = wizard{reader: bufio.NewReader(terminal), out: terminal, stop: i.Stop}
 		}
 	}
 	canAsk := terminal != nil

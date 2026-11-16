@@ -57,6 +57,14 @@ func stoppedBeforeRegistration(err error) error {
 type wizard struct {
 	reader *bufio.Reader
 	out    io.Writer
+	// stop is closed when the person stops setup with Ctrl+C.
+	stop <-chan struct{}
+}
+
+// read is a line read from the terminal, or why none was.
+type read struct {
+	line string
+	err  error
 }
 
 func (w wizard) say(lines ...string) {
@@ -69,10 +77,23 @@ func (w wizard) part(number int) {
 	w.say("", fmt.Sprintf("Part %d of %d: %s", number, len(setupParts), setupParts[number-1]))
 }
 
-// answer asks prompt once and reads the answer; a closed terminal stops setup before registration.
+// answer asks prompt once and reads the answer; a closed terminal or Ctrl+C stops setup before registration.
 func (w wizard) answer(prompt string) (string, error) {
 	fmt.Fprint(w.out, prompt)
-	line, err := w.reader.ReadString('\n')
+	reads := make(chan read, 1)
+	go func() {
+		line, err := w.reader.ReadString('\n')
+		reads <- read{line: line, err: err}
+	}()
+	var line string
+	var err error
+	select {
+	case <-w.stop:
+		fmt.Fprintln(w.out)
+		return "", stopped("Setup stopped: interrupted by Ctrl+C.", notJoinedBeforeRegistration, runAgainToContinue)
+	case got := <-reads:
+		line, err = got.line, got.err
+	}
 	if err != nil {
 		fmt.Fprintln(w.out)
 		if errors.Is(err, io.EOF) {

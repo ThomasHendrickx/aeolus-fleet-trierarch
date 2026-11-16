@@ -270,6 +270,7 @@ func Main(args []string, machine Machine) (string, int) {
 				IsCopilotInstalled:    optionalCheck(machine.IsCopilotInstalled),
 				IsCursorInstalled:     optionalCheck(machine.IsCursorInstalled),
 				OpenTerminal:          machine.OpenTerminal,
+				Stop:                  machine.Stop,
 				Codex:                 machine.Codex(),
 				Service:               machine.Service(at),
 				Plugins:               machine.Plugins(),
