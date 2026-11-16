@@ -109,7 +109,7 @@ describe('Cursor ACP captured fixture privacy', () => {
     for (const name of names) {
       const content = readFileSync(new URL(name, folder), 'utf8');
       for (const line of name.endsWith('.jsonl') ? content.trim().split('\n') : [content]) {
-        expect(() => JSON.parse(line), name).not.toThrow();
+        expect(() => { JSON.parse(line); }, name).not.toThrow();
       }
       expect(content, name).not.toMatch(/\/home\/(?!probe(?:\/|"))[^/"\s]+|\/Users\/(?!probe(?:\/|"))[^/"\s]+/);
       expect(content, name).not.toMatch(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
