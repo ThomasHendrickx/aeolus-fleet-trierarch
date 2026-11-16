@@ -53,6 +53,10 @@ function pluginManifest(path: string): Record<string, unknown> {
 }
 
 describe('setVersion', () => {
+  it('releases the Cursor manifest with the other harness manifests', () => {
+    expect(PLUGIN_MANIFESTS).toContain('plugins/aeolus-fleet/.cursor-plugin/plugin.json');
+  });
+
   it('sets the same version on both aeolus-fleet plugin manifests, keeping their other fields', () => {
     const before = PLUGIN_MANIFESTS.map(pluginManifest);
 
