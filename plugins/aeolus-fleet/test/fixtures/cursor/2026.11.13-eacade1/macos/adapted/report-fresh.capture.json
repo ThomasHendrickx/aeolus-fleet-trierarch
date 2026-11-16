@@ -1,0 +1,26 @@
+{
+  "host": "Mac mini",
+  "os": "macOS 26.2 (25C56)",
+  "architecture": "arm64",
+  "build": "2026.11.13-eacade1",
+  "command": [
+    "agent",
+    "-p",
+    "Run the shell command printf S7_MAC_ALLOWED_TOOL. Then state all exact context markers you received.",
+    "--output-format",
+    "stream-json",
+    "--trust",
+    "--force"
+  ],
+  "markers": {
+    "started": "sessionStart",
+    "active": "preToolUse"
+  },
+  "result": "captured adapted Cursor roles under CC3",
+  "authentication": "existing agent status login; no credentials read or copied",
+  "sanitization": [
+    "email",
+    "home/workspace/transcript paths",
+    "session/conversation/tool/request identifiers"
+  ]
+}

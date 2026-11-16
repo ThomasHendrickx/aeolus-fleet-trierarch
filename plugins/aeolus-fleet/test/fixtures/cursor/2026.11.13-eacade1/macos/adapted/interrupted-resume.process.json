@@ -1,0 +1,17 @@
+[
+  {
+    "event": "process-start",
+    "turn": "busy"
+  },
+  {
+    "event": "signal",
+    "signal": "SIGINT",
+    "after": "preToolUse",
+    "target": "owned agent PID"
+  },
+  {
+    "event": "process-exit",
+    "turn": "idle",
+    "exitStatus": 130
+  }
+]

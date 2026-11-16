@@ -1,0 +1,27 @@
+{
+  "host": "Mac mini",
+  "os": "macOS 26.2 (25C56)",
+  "architecture": "arm64",
+  "build": "2026.11.13-eacade1",
+  "command": [
+    "agent",
+    "-p",
+    "Run the shell command printf S7_MAC_RESUME_TOOL_PROBE. Then state all exact context markers you received.",
+    "--output-format",
+    "stream-json",
+    "--trust",
+    "--resume",
+    "00000000-0000-4000-8000-000000000001"
+  ],
+  "markers": {
+    "active": "preToolUse",
+    "hand-over-confirmed": "preToolUse"
+  },
+  "result": "captured adapted Cursor roles under CC3",
+  "authentication": "existing agent status login; no credentials read or copied",
+  "sanitization": [
+    "email",
+    "home/workspace/transcript paths",
+    "session/conversation/tool/request identifiers"
+  ]
+}

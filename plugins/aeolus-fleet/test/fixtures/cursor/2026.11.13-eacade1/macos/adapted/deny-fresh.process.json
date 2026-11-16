@@ -1,0 +1,11 @@
+[
+  {
+    "event": "process-start",
+    "turn": "busy"
+  },
+  {
+    "event": "process-exit",
+    "turn": "idle",
+    "exitStatus": 0
+  }
+]
