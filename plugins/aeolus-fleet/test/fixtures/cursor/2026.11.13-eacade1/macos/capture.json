@@ -1,0 +1,50 @@
+{
+  "host": "Mac mini",
+  "os": "macOS",
+  "osVersion": "26.2",
+  "osBuild": "25C56",
+  "architecture": "arm64",
+  "build": "2026.11.13-eacade1",
+  "authentication": "agent status confirmed existing login; no credentials read or moved",
+  "commands": {
+    "fresh": [
+      "agent",
+      "-p",
+      "Call no tools. Reply with the S7 start context marker supplied by the sessionStart hook. If none, reply NO_START_CONTEXT.",
+      "--output-format",
+      "stream-json",
+      "--trust"
+    ],
+    "resume": [
+      "agent",
+      "-p",
+      "Call no tools. Reply exactly S7_MAC_RESUMED_TOOL_FREE.",
+      "--output-format",
+      "stream-json",
+      "--trust",
+      "--resume",
+      "<SESSION_OR_REQUEST_ID>"
+    ],
+    "failed": [
+      "agent",
+      "-p",
+      "Call no tools. Reply S7_MAC_UNEXPECTED_SUCCESS.",
+      "--output-format",
+      "stream-json",
+      "--trust",
+      "--model",
+      "cursor-s7-model-does-not-exist"
+    ]
+  },
+  "missingRole": "turn idle; keep the turn open with an unconfirmed message",
+  "missingHook": "stop",
+  "fresh": "tool-free success; sessionStart and sessionEnd completed; no stop",
+  "resume": "tool-free success; sessionEnd completed; no stop",
+  "failed": "invalid model exits 1 before initialization; no hooks or stream events; failed initialized-turn stop and sessionEnd final_status remain unproven",
+  "sanitization": [
+    "account email",
+    "home/workspace/transcript paths",
+    "conversation/session/request ids"
+  ],
+  "result": "blocked: not a successful S7 proof"
+}

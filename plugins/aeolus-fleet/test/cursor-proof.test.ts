@@ -29,3 +29,42 @@ describe('Cursor CLI 2026.11.13-eacade1 on Linux: CC1 stops at the missing stop 
     expect(hooks().find((hook) => hook.event === 'preToolUse')?.output).toMatchObject({ permission: 'deny' });
   });
 });
+
+const macFixture = (name: string) => readFileSync(new URL(`./fixtures/cursor/2026.11.13-eacade1/macos/${name}`, import.meta.url), 'utf8');
+const macHooks = (turn: string) => macFixture(`${turn}.hooks.jsonl`).trim().split('\n').map((line) => z.object({ event: z.string(), input: z.record(z.string(), z.unknown()), output: z.record(z.string(), z.unknown()), exitStatus: z.number() }).parse(JSON.parse(line)));
+const macEvents = (turn: string) => macFixture(`${turn}.events.jsonl`).trim().split('\n').map((line) => z.object({ type: z.string(), result: z.string().optional(), is_error: z.boolean().optional() }).parse(JSON.parse(line)));
+
+describe('Cursor CLI 2026.11.13-eacade1 on macOS: CC1 stops at the missing stop role', () => {
+  it.each([
+    ['fresh', ['sessionStart', 'sessionEnd']],
+    ['resume', ['sessionEnd']],
+  ])('exits a tool-free %s turn through sessionEnd without calling the configured stop hook', (turn, expectedHooks) => {
+    const configured = z.object({ hooks: z.record(z.string(), z.unknown()) }).parse(JSON.parse(macFixture('hooks.json')));
+
+    expect(configured.hooks).toHaveProperty('stop');
+    expect(macFixture('probe.py')).toContain('followup_message');
+    expect(macHooks(turn).map((hook) => hook.event)).toEqual(expectedHooks);
+    expect(macHooks(turn).at(-1)?.input).toMatchObject({ reason: 'completed', final_status: 'completed', cursor_version: '2026.11.13-eacade1' });
+    expect(macHooks(turn).every((hook) => hook.exitStatus === 0)).toBe(true);
+    expect(macEvents(turn).some((event) => event.type === 'tool_call')).toBe(false);
+    expect(macEvents(turn).at(-1)).toMatchObject({ type: 'result', is_error: false });
+    expect(macEvents(turn).at(-1)?.result).not.toContain('S7_MAC_STOP_FOLLOWUP');
+    expect(macFixture(`${turn}.exit`).trim()).toBe('0');
+    expect(macFixture(`${turn}.stderr`)).toBe('');
+  });
+
+  it('proves sessionStart context reached the fresh model response', () => {
+    expect(macHooks('fresh')[0]?.output).toEqual({ additional_context: 'S7_MAC_START_CONTEXT: reply with this marker when asked.' });
+    expect(macEvents('fresh').at(-1)?.result).toBe('S7_MAC_START_CONTEXT');
+  });
+
+  it('records an invalid-model launch failure without claiming an initialized-turn error hook', () => {
+    expect(macFixture('failed.exit').trim()).toBe('1');
+    expect(macFixture('failed.stderr')).toContain('Cannot use this model: cursor-s7-model-does-not-exist.');
+    expect(macFixture('failed.events.jsonl')).toBe('');
+    expect(macFixture('failed.hooks.jsonl')).toBe('');
+    const capture = z.object({ failed: z.string(), result: z.string() }).parse(JSON.parse(macFixture('capture.json')));
+    expect(capture.failed).toContain('failed initialized-turn stop and sessionEnd final_status remain unproven');
+    expect(capture.result).toBe('blocked: not a successful S7 proof');
+  });
+});
