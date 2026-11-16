@@ -130,6 +130,9 @@ func changeLogin(at paths.Paths, machine Machine, command parsed) ([]string, err
 	if word == "" && !isChange(command) {
 		return nil, nil
 	}
+	if word == "cursor" {
+		return nil, errors.New("cursor signs in with this computer's own login (agent login), never an API key: the trierarch keeps no Cursor key and runs every Cursor session on that login")
+	}
 	if word == "copilot" {
 		return nil, errors.New(copilotRefusal)
 	}

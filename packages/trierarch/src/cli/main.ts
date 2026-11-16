@@ -165,6 +165,9 @@ function loginRequest(word: string | undefined, at: { switches: ReadonlySet<stri
   if (word === undefined && !isApiKey && !isRemoveKey && !isCheck && defaultWord === undefined) {
     return { kind: 'show' };
   }
+  if (word === 'cursor') {
+    throw new TrierarchFileError("Cursor signs in with this computer's own login (agent login), never an API key: the trierarch keeps no Cursor key and runs every Cursor session on that login");
+  }
   if (word === 'copilot') {
     // Copilot signs in with the machine's own login (CC6): it has no API key, default or check to set.
     throw new TrierarchFileError("Copilot signs in with this computer's own login (copilot login), never an API key: the trierarch keeps no Copilot key and runs every Copilot session on that login");

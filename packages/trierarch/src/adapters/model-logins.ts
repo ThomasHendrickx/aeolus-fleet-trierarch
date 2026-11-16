@@ -22,8 +22,8 @@ export function createModelLogins(at: {
       if (login === 'subscription') {
         return subscriptionProblem(at, { harness, options, ...(folder !== undefined && { folder }) });
       }
-      if (harness === 'copilot') {
-        return "copilot signs in with this computer's own login and runs on no API key: run the ship on its subscription";
+      if (harness === 'copilot' || harness === 'cursor') {
+        return `${harness} signs in with this computer's own login and runs on no API key: run the ship on its subscription`;
       }
       const { state, at: since = '' } = await keyStateOf(at, harness);
       switch (state) {
