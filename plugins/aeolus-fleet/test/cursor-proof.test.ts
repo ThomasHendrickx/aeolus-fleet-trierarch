@@ -69,9 +69,9 @@ describe('Cursor CLI 2026.11.13-eacade1 on macOS: captured stop limitation, adap
   });
 });
 
-describe('Cursor CLI captured fixture privacy', () => {
-  it('names the capturing computer only by a neutral host in every Cursor fixture', () => {
-    const root = new URL('./fixtures/cursor/', import.meta.url);
+describe('captured fixture privacy', () => {
+  it('names the capturing computer only by a neutral host in every captured fixture', () => {
+    const root = new URL('./fixtures/', import.meta.url);
     const files = readdirSync(root, { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile());
     expect(files.length).toBeGreaterThan(0);
     for (const file of files) {

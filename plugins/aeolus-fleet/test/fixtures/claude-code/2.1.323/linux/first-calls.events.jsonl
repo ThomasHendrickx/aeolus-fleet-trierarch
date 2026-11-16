@@ -1,0 +1,22 @@
+{"type": "tool_use", "tool": "Bash", "input": {"command": "\"<plugin root>/scripts/aeolus-identity.sh\" show"}}
+{"type": "tool_result", "is_error": true, "content": "Exit code 1\naeolus: this folder crews no ship"}
+{"type": "tool_use", "tool": "Bash", "input": {"command": "\"<plugin root>/scripts/aeolus-fleet.sh\" register 'https://fleet.aeolus-fleet.dev' '<shp id>' '<secret>' 'DEVICE'"}}
+{"type": "tool_result", "is_error": false, "content": "aeolus: this folder now crews first-calls-test (<shp id>)"}
+{"type": "tool_use", "tool": "Skill", "input": {"skill": "<skill>"}}
+{"type": "tool_result", "is_error": false, "content": "Launching skill: <skill>"}
+{"type": "tool_use", "tool": "Bash", "input": {"command": "S=<plugin root>/scripts; \"$S/aeolus-fleet.sh\" protocol; echo ---; \"$S/aeolus-identity.sh\" show"}}
+{"type": "tool_result", "is_error": false, "content": "<the fleet protocol>\n---\nship: first-calls-test (<shp id>)\nfleet: https://fleet.aeolus-fleet.dev\nfolder: <folder>"}
+{"type": "tool_use", "tool": "Bash", "input": {"command": "S=<plugin root>/scripts; ls -la <folder>; \"$S/aeolus-fleet.sh\" whoami; echo ---; \"$S/aeolus-fleet.sh\" receive '{\"max\":10}'"}}
+{"type": "tool_result", "is_error": false, "content": "<folder listing>\n{\"shipId\":\"<shp id>\",\"fleetId\":\"<flt id>\",\"name\":\"first-calls-test\",\"type\":\"docs-test\",\"ownerShipId\":\"<shp id>\",\"ownerName\":\"argo\"}\n---\n{\"deliveries\":[{\"deliveryId\":\"<dlv id>\",\"messageId\":\"<msg id>\",\"senderShipId\":\"<shp id>\",\"senderName\":\"fix-tri-481\",\"senderType\":\"implementer\",\"senderStatus\":\"crewed\",\"recipient\":{\"kind\":\"ship\",\"shipId\":\"<shp id>\"},\"payload\":\"fix-tri-481: test message for the first-calls run. Please reply to this message with one short line saying you received it.\",\"contentType\":\"text/plain\",\"model\":\"claude-opus-5-5\",\"inReplyTo\":null,\"sentAt\":\"2026-11-16T23:04:27.193Z\",\"attempts\":1,\"isForced\":false,\"meetingId\":null,\"scheduleId\":null,\"sendTime\":null}]}"}
+{"type": "tool_use", "tool": "Bash", "input": {"command": "S=<plugin root>/scripts; \"$S/aeolus-fleet.sh\" ack <dlv id>"}}
+{"type": "tool_result", "is_error": false, "content": "{}"}
+{"type": "tool_use", "tool": "Bash", "input": {"command": "S=<plugin root>/scripts; \"$S/aeolus-fleet.sh\" send - <<'JSON'\n{\"selector\":{\"kind\":\"ship\",\"name\":\"fix-tri-481\"},\"inReplyTo\":\"<msg id>\",\"payload\":\"Received: first-calls-test got your test message.\",\"idempotencyKey\":\"first-calls-test-reply-<id>\",\"model\":\"claude-opus-5-5\"}\nJSON\necho ---\n\"$S/aeolus-fleet.sh\" setStatement - <<'JSON'\n{\"summary\":\"This ship is a test crew that confirms Aeolus fleet messages arrive and get answered. It replies to test messages for first-calls runs.\",\"capabilities\":[{\"name\":\"echo-receipt\",\"description\":\"Replies with a short line confirming a message was received.\"}]}\nJSON\necho ---\n\"$S/aeolus-fleet.sh\" report '{\"state\":\"idle\",\"note\":\"Answered the first-calls test message; waiting for work.\"}'\necho ---\n\"$S/aeolus-fleet.sh\" receive '{\"max\":10}'"}}
+{"type": "tool_result", "is_error": false, "content": "{\"messageId\":\"<msg id>\"}\n---\n{\"version\":1}\n---\n{}\n---\n{\"deliveries\":[]}"}
+{"type": "tool_use", "tool": "Bash", "input": {"command": "<plugin root>/scripts/aeolus-watch-status.sh"}}
+{"type": "tool_result", "is_error": true, "content": "Exit code 1\naeolus: not watching"}
+{"type": "tool_use", "tool": "Bash", "input": {"command": "<plugin root>/scripts/aeolus-wait.sh"}}
+{"type": "tool_result", "is_error": false, "content": "Command running in background with ID: <task id>. Output is being written to: <temp path> You will be notified when it completes. To check interim output, use Read on that file path."}
+{"type": "result", "subtype": "success", "is_error": false, "num_turns": 11}
+{"type": "tool_use", "tool": "Bash", "input": {"command": "cat <temp path>"}}
+{"type": "tool_result", "is_error": false, "content": "aeolus: LEASE_ENDED: the operator released first-calls-test; this session no longer crews it, and the plugin forgot it\n\n[exited with code 3]"}
+{"type": "result", "subtype": "success", "is_error": false, "num_turns": 2}
