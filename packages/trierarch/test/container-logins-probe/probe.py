@@ -44,7 +44,6 @@ HERE = Path(__file__).resolve().parent
 HOME = Path.home()
 IMAGE = 'ghcr.io/thomashendrickx/aeolus-session:0.40.0'
 PROMPT = 'Reply with the single word PONG and nothing else.'
-NAME = 'aeolus-c1-probe'
 PASTA = 'pasta:--no-map-gw,-t,none,-u,none,-T,{port},-U,none'
 CURSOR_VERSION = '2026.11.13-eacade1'
 MOUNTS = {
@@ -75,6 +74,8 @@ class Probe:
         self.scratch = Path(tempfile.mkdtemp(prefix=f'c1-{harness}-', dir='/tmp'))
         for folder in ('home', 'work', 'run'):
             (self.scratch / folder).mkdir(mode=0o700)
+        # Named after its scratch folder, unique on this computer, so a probe removes only its own container.
+        self.name = f'aeolus-{self.scratch.name}'
         self.token = self.session_token()
         token_file = self.scratch / 'run/proxy-token'
         token_file.write_text(self.token)
@@ -166,14 +167,14 @@ class Probe:
             source, target = MOUNTS[self.harness]
             mounts += ['-v', f'{source}:{target}:ro']
         environment = [item for name, value in env.items() for item in ('-e', f'{name}={value}')]
-        run('podman', 'run', '-d', '--name', NAME, *network, '--userns=keep-id:uid=1000,gid=1000', *mounts, *environment, '-w', '/work', IMAGE, 'sleep', 'infinity')
+        run('podman', 'run', '-d', '--name', self.name, *network, '--userns=keep-id:uid=1000,gid=1000', *mounts, *environment, '-w', '/work', IMAGE, 'sleep', 'infinity')
         if isolated:
             forwarder = f"require('net').createServer(c=>c.pipe(require('net').connect('/run/aeolus/proxy.sock')).pipe(c)).listen({self.port},'127.0.0.1')"
-            subprocess.Popen(['podman', 'exec', NAME, 'node', '-e', forwarder], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(['podman', 'exec', self.name, 'node', '-e', forwarder], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(1)
 
     def stop_container(self) -> None:
-        run('podman', 'rm', '-f', '-t', '0', NAME, check=False)
+        run('podman', 'rm', '-f', '-t', '0', self.name, check=False)
 
     def command(self) -> list:
         if self.harness == 'claude-code':
@@ -185,7 +186,7 @@ class Probe:
         return ['node', '/opt/copilot/npm-loader.js', '-p', PROMPT, '--allow-all-tools']
 
     def turn(self, name: str, while_running=None) -> dict:
-        process = subprocess.Popen(['podman', 'exec', NAME, *self.command()], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        process = subprocess.Popen(['podman', 'exec', self.name, *self.command()], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         if while_running is not None:
             time.sleep(4)
             while_running()
@@ -196,10 +197,10 @@ class Probe:
 
     def search_container(self) -> list:
         """Every credential kind the container holds, read while a turn runs."""
-        held = run('podman', 'exec', NAME, 'sh', '-c', 'cat /proc/[0-9]*/environ /proc/[0-9]*/cmdline 2>/dev/null; env', check=False).stdout.encode()
-        held += subprocess.run(['podman', 'exec', NAME, 'tar', 'cf', '-', '--ignore-failed-read', '/home/ubuntu', '/work', '/tmp', '/run'], capture_output=True).stdout
+        held = run('podman', 'exec', self.name, 'sh', '-c', 'cat /proc/[0-9]*/environ /proc/[0-9]*/cmdline 2>/dev/null; env', check=False).stdout.encode()
+        held += subprocess.run(['podman', 'exec', self.name, 'tar', 'cf', '-', '--ignore-failed-read', '/home/ubuntu', '/work', '/tmp', '/run'], capture_output=True).stdout
         mounts = self.scratch / 'mounts.json'
-        mounts.write_text(run('podman', 'inspect', '--format', '{{json .Mounts}}', NAME).stdout)
+        mounts.write_text(run('podman', 'inspect', '--format', '{{json .Mounts}}', self.name).stdout)
         checked = subprocess.run([sys.executable, str(HERE / 'credential-check.py'), '--mounts', str(mounts)], input=held, capture_output=True, check=True)
         self.found = json.loads(checked.stdout)
         return self.found
@@ -208,7 +209,7 @@ class Probe:
         if self.harness == 'cursor':
             return CURSOR_VERSION
         command = {'claude-code': ['claude'], 'codex': ['node', '/opt/codex/bin/codex.js'], 'copilot': ['node', '/opt/copilot/npm-loader.js']}[self.harness]
-        words = scrub(run('podman', 'exec', NAME, *command, '--version', check=False).stdout).split(' ')
+        words = scrub(run('podman', 'exec', self.name, *command, '--version', check=False).stdout).split(' ')
         return next(word.rstrip('.') for word in words if re.match(r'^\d+\.\d+', word))
 
     def close(self) -> None:
@@ -306,20 +307,20 @@ def exec_sigint() -> dict:
         probe.start_proxy()
         probe.start_container()
         long = 'Run the shell command `sleep 120` and then reply DONE.'
-        turn = subprocess.Popen(['podman', 'exec', NAME, 'setsid', 'sh', '-c', 'echo $$ > /tmp/turn.pgid; exec node /opt/codex/bin/codex.js exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox "$0"', long], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        turn = subprocess.Popen(['podman', 'exec', probe.name, 'setsid', 'sh', '-c', 'echo $$ > /tmp/turn.pgid; exec node /opt/codex/bin/codex.js exec --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox "$0"', long], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         deadline = time.time() + 120
-        while time.time() < deadline and 'sleep 120' not in run('podman', 'exec', NAME, 'ps', '-eo', 'args', check=False).stdout:
+        while time.time() < deadline and 'sleep 120' not in run('podman', 'exec', probe.name, 'ps', '-eo', 'args', check=False).stdout:
             time.sleep(1)
-        started = 'sleep 120' in run('podman', 'exec', NAME, 'ps', '-eo', 'args', check=False).stdout
-        group = run('podman', 'exec', NAME, 'cat', '/tmp/turn.pgid').stdout.strip()
+        started = 'sleep 120' in run('podman', 'exec', probe.name, 'ps', '-eo', 'args', check=False).stdout
+        group = run('podman', 'exec', probe.name, 'cat', '/tmp/turn.pgid').stdout.strip()
         sent = time.time()
-        run('podman', 'exec', NAME, 'kill', '-INT', '--', f'-{group}', check=False)
+        run('podman', 'exec', probe.name, 'kill', '-INT', '--', f'-{group}', check=False)
         try:
             turn.wait(timeout=30)
         except subprocess.TimeoutExpired:
             turn.send_signal(signal.SIGKILL)
         stopped = round((time.time() - sent) * 1000)
-        kept = run('podman', 'inspect', '--format', '{{.State.Running}}', NAME).stdout.strip() == 'true'
+        kept = run('podman', 'inspect', '--format', '{{.State.Running}}', probe.name).stdout.strip() == 'true'
         return {'harness': 'codex', 'started': started, 'signal': 'SIGINT', 'stoppedWithinMs': stopped, 'containerKept': kept, 'turnExit': turn.returncode}
     finally:
         probe.close()
