@@ -117,3 +117,13 @@ describe('Cursor ACP captured fixture privacy', () => {
     }
   });
 });
+
+describe('Cursor ACP Linux: rejected credentials and prompt error shape', () => {
+  it('rejects a synthetic expired credential without claiming genuine login expiry', () => {
+    expect(scenarioMessages('synthetic-expired').find((entry) => entry.direction === 'received' && entry.message.id === 2)?.message).toMatchObject({ error: { code: -32000 } });
+  });
+
+  it('returns an internal error for an unknown prompt session without claiming an initialized-turn failure', () => {
+    expect(scenarioMessages('unknown-prompt-session').find((entry) => entry.direction === 'received' && entry.message.id === 2)?.message).toMatchObject({ error: { code: -32603 } });
+  });
+});
