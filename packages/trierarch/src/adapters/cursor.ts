@@ -6,11 +6,11 @@ import { effectiveFlags } from '../core/effective-flags.js';
 import { firstPromptOf, wakePromptOf } from '../core/no-terminal-questions.js';
 import { LAUNCH_VARIABLE } from './claude-code.js';
 import { wordsOf } from './command-line.js';
-import { cursorCommandLine, cursorErrorIn, cursorSessionIdOf } from './cursor-session.js';
+import { cursorActivityIn, cursorCommandLine, cursorErrorIn, cursorSessionIdOf } from './cursor-session.js';
 import { parsedLine } from './hold-protocol.js';
 import { createLaunchMarks } from './launch-marker.js';
 import { createPluginIdentity, type AeolusPlugin } from './plugin-identity.js';
-import { claudeCodeActivityIn, sessionActivityOf } from './session-activity.js';
+import { sessionActivityOf } from './session-activity.js';
 
 /** Cursor's approved host protocol: one CLI process per turn, resume by chat id, and sessionEnd hooks confirming tool-free turns (CC3/CC4). */
 export const CURSOR_PROVEN_VERSIONS: readonly string[] = ['2026.11.13-eacade1'];
@@ -68,7 +68,7 @@ export function createCursorHarness(options: {
       if (version === undefined) return `its Cursor CLI version is not detected yet: its hook roles are proven on ${CURSOR_PROVEN_VERSIONS.join(', ')}`;
       return CURSOR_PROVEN_VERSIONS.includes(version) ? undefined : `Cursor CLI ${version} is not proven: sessionStart, preToolUse, postToolUse and sessionEnd roles are proven on ${CURSOR_PROVEN_VERSIONS.join(', ')}`;
     },
-    activityOf: async ({ shipId }) => sessionActivityOf({ sessions, shipId, read: claudeCodeActivityIn }),
+    activityOf: async ({ shipId }) => sessionActivityOf({ sessions, shipId, read: cursorActivityIn }),
     failureReason: async ({ shipId }) => {
       const error = cursorErrorIn({ events: await sessions.events(shipId) });
       return error?.kind === 'cause' ? error.cause : error?.model;

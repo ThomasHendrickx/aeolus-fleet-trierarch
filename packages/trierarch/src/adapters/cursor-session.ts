@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { AdapterFlag } from '../core/ports.js';
 import { partsWithWords, type CommandPart } from './command-line.js';
 import { parsedLine } from './hold-protocol.js';
+import type { EventActivity } from './session-activity.js';
 
 /** Cursor CLI's captured turn-per-process protocol (CC4): trusted stream-json, a positional prompt after --, and explicit chat resume. */
 const OUTPUT = '--output-format=stream-json';
@@ -51,6 +52,24 @@ export function cursorErrorIn(at: { events: readonly string[]; model?: string })
     if (cause === undefined || cause === '') continue;
     const refused = REFUSED_MODEL.exec(cause)?.[1];
     return refused !== undefined && (at.model === undefined || at.model === refused) ? { kind: 'refused', model: refused } : { kind: 'cause', cause };
+  }
+  return undefined;
+}
+
+const activitySchema = z.object({ type: z.string(), is_error: z.boolean().optional(), exitStatus: z.number().optional(), tool_call: z.record(z.string(), z.unknown()).optional() });
+
+/** Cursor's tool names live in native ToolCall keys, unlike Claude Code's message blocks. */
+export function cursorActivityIn(events: readonly string[]): EventActivity | undefined {
+  for (const line of [...events].reverse()) {
+    const event = activitySchema.safeParse(parsedLine(line)).data;
+    if (event === undefined) continue;
+    if (event.type === 'aeolus.turn' && event.exitStatus !== undefined && event.exitStatus !== 0) return { kind: 'error' };
+    if (event.type === 'result') return { kind: event.is_error === true ? 'error' : 'result' };
+    if (event.type === 'assistant') return { kind: 'text' };
+    if (event.type === 'tool_call') {
+      const name = Object.keys(event.tool_call ?? {}).find((key) => key.endsWith('ToolCall'));
+      return name === undefined ? { kind: 'tool' } : { kind: 'tool', tool: name.slice(0, -'ToolCall'.length) };
+    }
   }
   return undefined;
 }
