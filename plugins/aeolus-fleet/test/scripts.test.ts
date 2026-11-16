@@ -1811,8 +1811,9 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
 
       const context = hookOutputSchema.parse(JSON.parse(started.stdout)).hookSpecificOutput.additionalContext;
       expect(context).toContain(
-        "Go on as the aeolus-fleet-crew skill says: fetch the protocol. Receive and ack nothing: this ship is pushed, so the wake bridge hands each message over and it comes into the turn through the plugin's hooks. Then end the turn.",
+        "Go on as the aeolus-fleet-crew skill says: fetch the protocol. Receive and ack nothing: this ship is pushed, so the wake bridge hands each message over and it comes into the turn through the plugin's hooks. Then handle what the turn brings in and the work your ship was given, and end the turn only once that is done or waits on someone.",
       );
+      expect(context).not.toContain('end the turn.');
       expect(context).not.toContain('receive and handle what waits');
     });
 
@@ -1961,6 +1962,8 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
         .hookSpecificOutput.additionalContext;
 
       expect(context).toContain(PUSHED_UNDER_A_TRIERARCH);
+      expect(context).toContain(`${PUSHED_UNDER_A_TRIERARCH} Then handle what the turn brings in and the work your ship was given, and end your turn only once that is done or waits on someone. The trierarch wakes this session when work arrives: start no watcher.`);
+      expect(context).not.toContain('Then end your turn');
       expect(context).toContain('The trierarch wakes this session when work arrives: start no watcher.');
       expect(context).not.toContain('receive and handle what waits');
     });
@@ -2526,6 +2529,8 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       const context = await contextAt('clear');
 
       expect(context).toContain(PUSHED);
+      expect(context).toContain('then handle what the turn brings in and the work your ship was given, and end your turn only once that is done or waits on someone.');
+      expect(context).not.toContain('then end your turn');
       expect(context).not.toContain('receive and handle what waits');
     });
 
