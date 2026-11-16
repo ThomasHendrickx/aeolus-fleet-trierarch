@@ -2,11 +2,13 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -250,5 +252,56 @@ func TestInitRepositoryWizardStopsWhenTheTerminalCannotBeRead(t *testing.T) {
 	}
 	if len(fleet.registered) != 0 {
 		t.Fatal("registered after a terminal read failure")
+	}
+}
+
+// aGitThatClones puts a git on PATH that clones source for any clone and says the URL it was given when it fails.
+func aGitThatClones(t *testing.T, source string, isFailing bool) {
+	t.Helper()
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = clone ]; then
+  if [ %q = true ]; then echo "fatal: unable to access '$3': could not resolve host" >&2; exit 128; fi
+  exec %q clone --quiet -- %q "$4"
+fi
+exec %q "$@"
+`, strconv.FormatBool(isFailing), real, source, real)
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestInitNeverShowsTheCredentialsOfARepositoryURL(t *testing.T) {
+	for _, credentialed := range []string{
+		"https://alice:s3cret-token@example.invalid/team/web.git",
+		"https://s3cret-token@example.invalid/team/web.git",
+		"https://alice:s3cret-token@example.invalid/team/web.git?access_token=s3cret-token",
+	} {
+		for _, outcome := range []string{"cloned", "failed"} {
+			t.Run(outcome+" "+credentialed, func(t *testing.T) {
+				machine, _, _ := aMain(t)
+				aGitThatClones(t, aGitRepository(t, filepath.Join(t.TempDir(), "web")), outcome == "failed")
+				var printed []string
+				machine.Print = func(line string) { printed = append(printed, line) }
+
+				output, code := Main(append(setupWords(), "--repositories", credentialed), machine)
+
+				shown := strings.Join(printed, "\n") + "\n" + output
+				if strings.Contains(shown, "s3cret-token") || strings.Contains(shown, "alice") {
+					t.Errorf("init showed a credential of the repository URL:\n%s", shown)
+				}
+				if !strings.Contains(shown, "Cloning https://example.invalid/team/web.git to ~/repositories/web...") {
+					t.Errorf("init did not say the clone without its credentials:\n%s", shown)
+				}
+				if (code == 0) != (outcome == "cloned") {
+					t.Errorf("init = %d, want it %s:\n%s", code, outcome, shown)
+				}
+			})
+		}
 	}
 }
