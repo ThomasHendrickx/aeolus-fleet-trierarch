@@ -1,5 +1,5 @@
 {
-  "host": "Mac mini",
+  "host": "agent-host-2",
   "os": "macOS 26.2 (25C56)",
   "architecture": "arm64",
   "build": "2026.11.13-eacade1",
