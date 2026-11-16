@@ -245,7 +245,7 @@ Each one PR, test first (the red commit first). C1 goes first; a point it cannot
 
 | # | Slice |
 | --- | --- |
-| C1 | **Login probes on Linux, both architectures.** Claude Code on a setup-token through the proxy; Codex on a ChatGPT login through the proxy, and the host command that renews it; Cursor's access file renewed under a live `agent acp`; Copilot's road (D4); `exec` turns with SIGINT in a container. The proxy road first for every harness, the access file only where it is proven impossible. Each kept as a fixture with nothing personal; the result written into this design |
+| C1 | **Login probes on Linux amd64.** Claude Code on a setup-token through the proxy; Codex on a ChatGPT login through the proxy, and the host command that renews it; Cursor's road and how its host login stays valid; Copilot's road (D4); `exec` turns with SIGINT in a container. The proxy road first for every harness, the access file only where it is proven impossible. Each kept as a fixture with nothing personal; the result written into this design |
 | C2 | **The image per architecture.** `linux/amd64` and `linux/arm64` built on their own runners, one manifest, the image tests on both, Claude Code pinned |
 | C3 | **Claude Code's subscription through the proxy.** The proxy swaps a session's token for the model token; every container session on it gets pasta and the proxy; `session.env` holds no model token; the login state in the report |
 | C4 | **A container's exit and leftovers.** No `--rm`: the hold reads the exit (status, OOM) into `events.jsonl`, then removes the container; a start removes a leftover of its name; the crash report names it |
@@ -256,7 +256,7 @@ Each one PR, test first (the red commit first). C1 goes first; a point it cannot
 | C9 | **Cursor in a container.** After cursor-acp.md's A7: in the image per architecture, the access file and its renewal, the container home's `mcp.json`; proven |
 | C10 | **Copilot in a container.** As C1 decided its road; proven. Closes #115 |
 
-macOS is #473, after these.
+macOS is #473, after these; it proves arm64 too (Thomas, 16 Nov).
 
 ## 8. Decisions
 
@@ -291,9 +291,9 @@ For every harness, each with a fresh home and workspace of its own:
 An `exec` turn of Codex in a running container stopped 210 ms after SIGINT to its process group inside it, the container kept.
 
 What each harness asks of the slices that build it:
-- **Claude Code (C3).** The probe injected the host Claude Code's own subscription access, the same kind of bearer as a model token, since this computer holds no model token. Usage limits and model aliases on a model token were not probed.
+- **Claude Code (C3).** The probe injected the host Claude Code's own subscription access, the same kind of bearer as a model token, since this computer held no model token. Thomas makes a real setup token once (16 Nov), and a ship proves the proxy road with it in C1: turns, usage limits and model aliases on the model token.
 - **Codex (C8).** Concurrent sessions on one access were not probed: turns ran one after another.
-- **Cursor (C9).** The CLI sends its agent's calls to the endpoint itself only when the endpoint's URL names `localhost` (or a staging host); any other endpoint sends them to the agent hosts its server configuration names, with the session token, and the turn fails with an authentication error. This is the CLI's code, not a documented setting, so a Cursor build may change it; each pinned build is proven again. With `--api-key` the CLI exchanges the key at `/auth/exchange_user_api_key` instead, so the session token goes in the login file. Proven with `agent -p`, not a live `agent acp`. Since the host's login is not renewed, its `login` state turns `renewFailed` when its access ends, and argo is told the step `agent login`.
+- **Cursor (C9).** The CLI sends its agent's calls to the endpoint itself only when the endpoint's URL names `localhost` (or a staging host); any other endpoint sends them to the agent hosts its server configuration names, with the session token, and the turn fails with an authentication error. This is the CLI's code, not a documented setting, so a Cursor build may change it; each pinned build is proven again. With `--api-key` the CLI exchanges the key at `/auth/exchange_user_api_key` instead, so the session token goes in the login file. Proven with `agent -p`, not a live `agent acp`. Since the host's login is not renewed, the person signs in again about every 60 days: accepted by Thomas on 16 Nov. A week before the host's access ends, the trierarch warns the owner once with the one command, `agent login` on the host (#480, a later slice); when it has ended, its `login` state turns `renewFailed` and argo is told the same step.
 - **Copilot (C10).** On the provider road the CLI holds no GitHub login: GitHub's side (its MCP server, Copilot's model routing) is off, and only models the Copilot API serves on `/responses` answer; a model of `/chat/completions` is refused as not supported for the integration. A refused login reads as the provider's key failing, not as `copilot login`: the step comes from the trierarch's `login` state.
 
-Not proven by C1: arm64 (no arm64 computer here); the harnesses inside the published image (Codex, Cursor and Copilot were mounted read-only from the host, as 4.3 puts them in the image); and macOS (#473).
+Not proven by C1: arm64, which #473 proves (Thomas, 16 Nov); the harnesses inside the published image (Codex, Cursor and Copilot were mounted read-only from the host, as 4.3 puts them in the image); and macOS (#473).
