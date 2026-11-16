@@ -1,12 +1,11 @@
-import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import { startTestFolders } from './test-folders.js';
 
 /**
- * Around the whole run: gives it its temporary folders outside /tmp, and
+ * Around the whole run: gives it its temporary folders (the short one in /tmp, as the home is long on macOS), and
  * removes them when it ends (#454). Every project lists it.
  */
 export function setup(): () => void {
-  return startTestFolders({ repositoryRoot: fileURLToPath(new URL('../../', import.meta.url)), home: homedir(), now: new Date(), env: process.env });
+  return startTestFolders({ repositoryRoot: fileURLToPath(new URL('../../', import.meta.url)), shortRoot: '/tmp', userId: process.getuid?.() ?? 0, now: new Date(), env: process.env });
 }
