@@ -30,7 +30,7 @@ process.stdin.resume();
 process.stdin.on('end', () => {
  console.log(JSON.stringify({type:'system',subtype:'init',session_id:'chat-cursor'}));
  if (prompt === 'fail') {console.error('Cursor model call failed');setTimeout(()=>process.exit(1),100);return;}
- if (prompt === 'slow') {console.log(JSON.stringify({type:'assistant',message:{content:[{type:'text',text:'working'}]}}));setInterval(()=>{},1000);return;}
+ if (prompt === 'slow') {for(let i=0;i<220;i++) console.log(JSON.stringify({type:'assistant',message:{content:[{type:'text',text:'working'}]}}));console.log(JSON.stringify({type:'assistant',message:{content:[{type:'text',text:'working'}]}}));setInterval(()=>{},1000);return;}
  console.log(JSON.stringify({type:'result',is_error:false,result:'done',session_id:'chat-cursor'}));
  setTimeout(()=>process.exit(0),150);
 });
@@ -61,6 +61,12 @@ describe('Cursor held as a process per turn (CC3, CC4)', () => {
       '{"type":"aeolus.turn","state":"busy"}', '{"type":"aeolus.turn","state":"idle","exitStatus":0}',
     ]);
     await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running' }]);
+  });
+
+  it('retains the process busy marker when a running turn writes beyond the event tail', async () => {
+    await start('slow');
+    await expect.poll(async () => (await events()).length).toBeGreaterThanOrEqual(200);
+    expect(await events()).toContain('{"type":"aeolus.turn","state":"busy"}');
   });
 
   it('retains stderr and exits the hold for an unexpectedly failed turn', async () => {
