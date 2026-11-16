@@ -31,8 +31,8 @@ mark() {
 }
 
 case "$(aeolus_json_string "$payload" hook_event_name)" in
-  SessionStart) mark started "$(aeolus_json_string "$payload" transcript_path)" ;;
-  PreToolUse) mark active ;;
+  SessionStart|sessionStart) mark started "$(aeolus_json_string "$payload" transcript_path)" ;;
+  PreToolUse|preToolUse) mark active ;;
   StopFailure)
     # Its input names no model, so the id is the one its message names, when it names one.
     if [ "$(aeolus_json_string "$payload" error)" = model_not_found ]; then

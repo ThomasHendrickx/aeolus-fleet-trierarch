@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "AEOLUS_HARNESS=cursor bash \"${CURSOR_PLUGIN_ROOT}/scripts/aeolus-session-start.sh\""
+      },
+      {
+        "command": "AEOLUS_HARNESS=cursor bash \"${CURSOR_PLUGIN_ROOT}/scripts/aeolus-launch.sh\""
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "AEOLUS_HARNESS=cursor bash \"${CURSOR_PLUGIN_ROOT}/scripts/aeolus-handover.sh\""
+      },
+      {
+        "command": "AEOLUS_HARNESS=cursor bash \"${CURSOR_PLUGIN_ROOT}/scripts/aeolus-launch.sh\""
+      },
+      {
+        "command": "AEOLUS_HARNESS=cursor bash \"${CURSOR_PLUGIN_ROOT}/scripts/aeolus-model.sh\""
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "AEOLUS_HARNESS=cursor bash \"${CURSOR_PLUGIN_ROOT}/scripts/aeolus-report-due.sh\""
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": "AEOLUS_HARNESS=cursor bash \"${CURSOR_PLUGIN_ROOT}/scripts/aeolus-stop.sh\""
+      },
+      {
+        "command": "AEOLUS_HARNESS=cursor bash \"${CURSOR_PLUGIN_ROOT}/scripts/aeolus-turn-died.sh\""
+      }
+    ]
+  }
+}

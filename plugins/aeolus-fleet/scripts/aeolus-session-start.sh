@@ -14,8 +14,16 @@ source_event="$(aeolus_json_string "$payload" source)"
 refused=0
 aeolus_hook_folder "$payload" || refused=1
 [ -n "$AEOLUS_FOLDER" ] || exit 0
-export AEOLUS_DATA="${PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-}}"
-root="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}"
+if [ "${AEOLUS_HARNESS:-}" = cursor ]; then
+  export AEOLUS_DATA="$(aeolus_data)"
+else
+  export AEOLUS_DATA="${PLUGIN_DATA:-${CLAUDE_PLUGIN_DATA:-}}"
+fi
+if [ "${AEOLUS_HARNESS:-}" = cursor ]; then
+  root="${CURSOR_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+else
+  root="${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}"
+fi
 # The Codex wake bridge logs to the plugin's log now: a .wake.log an earlier
 # plugin left beside the identities is no longer written, so it goes (#678).
 # Its bridge kept its watcher's output in <key>.wake.log.wait.<pid>, today's in
@@ -74,9 +82,9 @@ if aeolus_codex_hook; then
   if aeolus_reports_here "$identity_text"; then
     handing='the wake bridge'
     ! aeolus_woken_by_trierarch "$identity_text" || handing='the trierarch'
-    context="${context} Go on as the aeolus-fleet-crew skill says: fetch the protocol. Receive and ack nothing: this ship is pushed, so ${handing} hands each message over and it comes into the turn through the plugin's hooks. Then end the turn."
+    context="${context} Go on as the aeolus-fleet-crew skill says: fetch the protocol. Receive and ack nothing: this ship is pushed, so ${handing} hands each message over and it comes into the turn through the plugin's hooks. Then handle what the turn brings in and the work your ship was given, and end the turn only once that is done or waits on someone."
   else
-    context="${context} Go on as the aeolus-fleet-crew skill says: fetch the protocol, receive and handle what waits, then end the turn."
+    context="${context} Go on as the aeolus-fleet-crew skill says: fetch the protocol, receive and handle what waits, then handle what the turn brings in and the work your ship was given, and end the turn only once that is done or waits on someone."
   fi
   if aeolus_woken_by_trierarch "$identity_text"; then
     context="${context} The trierarch wakes this session when work arrives: start no watcher."
@@ -98,19 +106,25 @@ fi
 # Copilot exports nothing to the session's commands, so the context names what
 # each command sets for the scripts to find the folder's ship. In a folder that
 # crews no ship it says so too: the Copilot crew skill registers from it.
-if [ "${AEOLUS_HARNESS:-}" = copilot ]; then
+if [ "${AEOLUS_HARNESS:-}" = copilot ] || [ "${AEOLUS_HARNESS:-}" = cursor ]; then
+  harness_name=Copilot
+  [ "${AEOLUS_HARNESS:-}" != cursor ] || harness_name=Cursor
   [ "$refused" -eq 0 ] || exit 1
   identity="$(aeolus_identity_file 2>/dev/null)" || exit 0
-  run="$(aeolus_copilot_run)"
+  if [ "${AEOLUS_HARNESS:-}" = cursor ]; then
+    run="AEOLUS_HARNESS=cursor AEOLUS_DATA='$(aeolus_data)' AEOLUS_FOLDER='${AEOLUS_FOLDER}'"
+  else
+    run="$(aeolus_copilot_run)"
+  fi
   if ! identity_text="$(aeolus_identity_read "$identity")"; then
-    aeolus_hook_context SessionStart "Aeolus Fleet Copilot hooks are active. This folder crews no Aeolus ship. Run every Aeolus Fleet script with ${run} before it; the scripts are in ${root}/scripts."
+    aeolus_hook_context SessionStart "Aeolus Fleet ${harness_name} hooks are active. This folder crews no Aeolus ship. Run every Aeolus Fleet script with ${run} before it; the scripts are in ${root}/scripts."
     exit 0
   fi
   ship_name="$(aeolus_identity_field "$identity_text" shipName)"
   ship_id="$(aeolus_identity_field "$identity_text" shipId)"
   fleet_url="$(aeolus_identity_field "$identity_text" fleetUrl)"
   squadron="$(aeolus_identity_field "$identity_text" squadron)"
-  context="Aeolus Fleet Copilot hooks are active. This folder crews the Aeolus ship ${ship_name} (${ship_id}) in the fleet at ${fleet_url}. Run every Aeolus Fleet script with ${run} before it: every fleet call goes through ${run} \"${root}/scripts/aeolus-fleet.sh\", which adds the crew token: never read the identity file or pass a crew token. Do not register again. It states the model this session runs on every send: state none yourself."
+  context="Aeolus Fleet ${harness_name} hooks are active. This folder crews the Aeolus ship ${ship_name} (${ship_id}) in the fleet at ${fleet_url}. Run every Aeolus Fleet script with ${run} before it: every fleet call goes through ${run} \"${root}/scripts/aeolus-fleet.sh\", which adds the crew token: never read the identity file or pass a crew token. Do not register again. It states the model this session runs on every send: state none yourself."
   if [ -n "$squadron" ]; then
     context="${context} This ship is a member of the squadron ${squadron}. Before anything else, check in at its flagship ${squadron}, as the Aeolus Fleet crew-a-ship skill says for a squadron member."
     check_in="$(aeolus_identity_field "$identity_text" checkIn)"
@@ -123,10 +137,10 @@ if [ "${AEOLUS_HARNESS:-}" = copilot ]; then
     else
       handle='fetch the protocol, receive and handle what waits; then'
     fi
-    context="${context} Go on as the Aeolus Fleet crew-a-ship skill says: ${handle} end your turn. The trierarch wakes this session when work arrives: start no watcher."
+    context="${context} Go on as the Aeolus Fleet crew-a-ship skill says: ${handle} handle what the turn brings in and the work your ship was given, and end your turn only once that is done or waits on someone. The trierarch wakes this session when work arrives: start no watcher."
     told='and that the trierarch wakes it'
   else
-    context="${context} Go on as the Aeolus Fleet crew-a-ship skill says: fetch the protocol, receive and handle what waits; then end your turn."
+    context="${context} Go on as the Aeolus Fleet crew-a-ship skill says: fetch the protocol, receive and handle what waits; then handle what the turn brings in and the work your ship was given, and end your turn only once that is done or waits on someone."
     told='and to handle what waits'
   fi
   aeolus_log "$identity" sessionStart "told the session after ${source_event:-start} which ship it crews, ${told}"
@@ -164,7 +178,7 @@ if aeolus_woken_by_trierarch "$identity_text"; then
   else
     handle='fetch the protocol, receive and handle what waits; then'
   fi
-  context="${context} Go on as the Aeolus Fleet crew-a-ship skill says: ${handle} end your turn. The trierarch wakes this session when work arrives: start no watcher."
+  context="${context} Go on as the Aeolus Fleet crew-a-ship skill says: ${handle} handle what the turn brings in and the work your ship was given, and end your turn only once that is done or waits on someone. The trierarch wakes this session when work arrives: start no watcher."
   aeolus_log "$identity" sessionStart "told the session after ${source_event:-start} which ship it crews, and that the trierarch wakes it"
   printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(aeolus_json_escape "$context")"
   exit 0
@@ -175,6 +189,6 @@ if aeolus_reports_here "$identity_text"; then
 else
   handle='fetch the protocol, receive and handle what waits; then'
 fi
-context="${context} Go on as the Aeolus Fleet crew-a-ship skill says: ${handle}, unless \"${root}/scripts/aeolus-watch-status.sh\" says watching, start \"${root}/scripts/aeolus-wait.sh\" as a background task; then end your turn. When the watcher exits 6 (its 2-hour limit), just start it again."
+context="${context} Go on as the Aeolus Fleet crew-a-ship skill says: ${handle}, unless \"${root}/scripts/aeolus-watch-status.sh\" says watching, start \"${root}/scripts/aeolus-wait.sh\" as a background task; then handle what the turn brings in and the work your ship was given, and end your turn only once that is done or waits on someone. When the watcher exits 6 (its 2-hour limit), just start it again."
 aeolus_log "$identity" sessionStart "told the session after ${source_event:-start} which ship it crews, and to start the watcher"
 printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(aeolus_json_escape "$context")"
