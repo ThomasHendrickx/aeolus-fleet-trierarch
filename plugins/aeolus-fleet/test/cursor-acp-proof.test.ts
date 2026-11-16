@@ -127,3 +127,18 @@ describe('Cursor ACP Linux: rejected credentials and prompt error shape', () => 
     expect(scenarioMessages('unknown-prompt-session').find((entry) => entry.direction === 'received' && entry.message.id === 2)?.message).toMatchObject({ error: { code: -32603 } });
   });
 });
+
+describe('Cursor ACP Linux: real permission timeout boundary', () => {
+  it('accepts a permission answer after thirty minutes and completes the permitted tool', () => {
+    const timing = z.object({ heldSeconds: z.number(), targetSeconds: z.number() }).parse(JSON.parse(readFileSync(new URL('./fixtures/cursor-acp/2026.11.13-eacade1/linux/permission-hold.capture.json', import.meta.url), 'utf8')));
+    expect(timing.targetSeconds).toBe(1800);
+    expect(timing.heldSeconds).toBeGreaterThanOrEqual(1800);
+    const messages = scenarioMessages('permission-hold');
+    const requestIndex = messages.findIndex((entry) => entry.direction === 'received' && entry.message.method === 'session/request_permission');
+    const answerIndex = messages.findIndex((entry) => entry.direction === 'sent' && z.object({ result: z.object({ outcome: z.object({ optionId: z.literal('allow-once') }) }) }).safeParse(entry.message).success);
+    expect(requestIndex).toBeGreaterThan(0);
+    expect(answerIndex).toBeGreaterThan(requestIndex);
+    expect(messages.find((entry) => entry.direction === 'received' && entry.message.id === 3)?.message).toMatchObject({ result: { stopReason: 'end_turn' } });
+    expect(messages.some((entry) => z.object({ params: z.object({ update: z.object({ rawOutput: z.object({ stdout: z.literal('731924\n') }) }) }) }).safeParse(entry.message).success)).toBe(true);
+  });
+});
