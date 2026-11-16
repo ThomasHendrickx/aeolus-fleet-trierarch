@@ -31,7 +31,9 @@ const captureSchema = z.object({
   turns: z.array(turnSchema),
   requests: z.array(requestSchema),
   container: z.object({ checked: z.array(z.enum(PLACES)), searchedFor: z.array(z.enum(CREDENTIALS)), found: z.array(z.string()) }),
-  /** The host's login renewed between two turns; absent where the host login is long-lived (Claude Code's setup-token). */
+  /** How the host login stays valid, with what proves it. */
+  hostLogin: z.object({ renewal: z.enum(['by its harness on the host', 'long-lived, nothing to renew', 'only by signing in again']), evidence: z.string().min(1) }),
+  /** The host's login renewed between two turns, where its harness renews it. */
   renewal: z.object({ command: z.string(), accessChanged: z.boolean(), turnsAfter: z.array(turnSchema) }).optional(),
   /** A host login that cannot be renewed: the proxy forwards a refused one, and the turn ends with the harness's own login error. */
   refused: z.object({ turn: turnSchema, vendorStatus: z.number().int() }),
@@ -74,9 +76,18 @@ describe.each(HARNESSES)('%s in a container on Linux', (harness) => {
   });
 });
 
-describe.each(['codex', 'cursor', 'copilot'] as const)('%s renewed on the host', (harness) => {
-  it('completes turns before and after the host access is renewed, nobody asked to sign in', () => {
-    const capture = captureOf(harness);
+describe('a host login over the proxy road', () => {
+  it.each([
+    ['claude-code', 'long-lived, nothing to renew'],
+    ['codex', 'by its harness on the host'],
+    ['cursor', 'only by signing in again'],
+    ['copilot', 'long-lived, nothing to renew'],
+  ] as const)('%s: stays valid %s', (harness, renewal) => {
+    expect(captureOf(harness).hostLogin.renewal).toBe(renewal);
+  });
+
+  it('completes Codex turns before and after the host renews its ChatGPT login, nobody asked to sign in', () => {
+    const capture = captureOf('codex');
     expect(capture.turns.every((turn) => turn.completed)).toBe(true);
     expect(capture.renewal?.accessChanged).toBe(true);
     expect(capture.renewal?.turnsAfter.length).toBeGreaterThan(0);
