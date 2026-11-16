@@ -11,6 +11,13 @@ const postgresGlobalSetup = fileURLToPath(
 );
 
 /**
+ * Each project's first global setup: the run's temporary folders, outside
+ * /tmp, removed when it ends (#454). The first project to set up makes them;
+ * the others reuse them.
+ */
+const testFoldersGlobalSetup = fileURLToPath(new URL('scripts/support/test-folders.global-setup.ts', import.meta.url));
+
+/**
  * The layers in the order a full run takes them, as each project's name ends
  * (`trierarch:integration`). CI runs each layer as its own job; a full
  * local run takes them one after another too, so no layer's time limits
@@ -29,7 +36,8 @@ function withGroupOrder(project: TestProjectInlineConfiguration): TestProjectInl
   if (groupOrder === -1) {
     throw new Error(`the Vitest project ${label} is in no layer: name it <package>:<${LAYERS.join('|')}>`);
   }
-  return { ...project, test: { ...project.test, sequence: { ...project.test?.sequence, groupOrder } } };
+  const globalSetup = [testFoldersGlobalSetup, ...(project.test?.globalSetup === undefined ? [] : [project.test.globalSetup].flat())];
+  return { ...project, test: { ...project.test, globalSetup, sequence: { ...project.test?.sequence, groupOrder } } };
 }
 
 // No @aeolus-fleet/source condition, unlike in tsconfig.base.json: the

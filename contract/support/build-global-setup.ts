@@ -44,12 +44,17 @@ export function setup(project: TestProject): () => void {
   const under = z.object({ version: z.string() }).parse(JSON.parse(execFileSync(program, [...words, '--version', '--json'], { encoding: 'utf8' }))).version;
   const version = nextOf(under);
   const folder = mkdtempSync(join(tmpdir(), 'trierarch-contract-release-'));
-  const go = join(REPOSITORY_ROOT, 'go');
-  const binary = join(folder, 'aeolus-trierarch');
-  const signer = join(folder, 'testsigstore');
-  execFileSync('go', ['build', '-ldflags', `-X github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/cli.Version=${version}`, '-o', binary, './cmd/aeolus-trierarch'], { cwd: go, stdio: 'inherit' });
-  execFileSync('go', ['build', '-o', signer, './internal/testsigstore/cmd/testsigstore'], { cwd: go, stdio: 'inherit' });
-  project.provide('release', { version, binary, signer });
+  try {
+    const go = join(REPOSITORY_ROOT, 'go');
+    const binary = join(folder, 'aeolus-trierarch');
+    const signer = join(folder, 'testsigstore');
+    execFileSync('go', ['build', '-ldflags', `-X github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/cli.Version=${version}`, '-o', binary, './cmd/aeolus-trierarch'], { cwd: go, stdio: 'inherit' });
+    execFileSync('go', ['build', '-o', signer, './internal/testsigstore/cmd/testsigstore'], { cwd: go, stdio: 'inherit' });
+    project.provide('release', { version, binary, signer });
+  } catch (error) {
+    rmSync(folder, { recursive: true, force: true });
+    throw error;
+  }
   return () => {
     rmSync(folder, { recursive: true, force: true });
   };

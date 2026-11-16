@@ -1,9 +1,10 @@
-import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
+import { aShortHome } from '../../test/support/short-home.js';
 import { createProxyRuntime, type ProxyRuntime } from './proxy-runtime.js';
 import { runningVersion } from './version.js';
 
@@ -16,7 +17,7 @@ let home: string;
 let runtimes: ProxyRuntime[];
 
 beforeEach(() => {
-  home = realpathSync(mkdtempSync('/tmp/aeolus-proxy-'));
+  home = realpathSync(aShortHome('aeolus-proxy'));
   runtimes = [];
 });
 

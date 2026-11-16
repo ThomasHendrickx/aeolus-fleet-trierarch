@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { createServer, type Server, type Socket } from 'node:net';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -8,6 +8,7 @@ import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { newId } from '../../test/support/in-memory.js';
+import { aShortHome } from '../../test/support/short-home.js';
 import { createCallerCheck, createTrierarchCallerCheck } from './caller-check.js';
 import type { CommandResult } from './run-command.js';
 
@@ -28,8 +29,8 @@ let children: ChildProcess[];
 let shipId: ShipId;
 
 beforeEach(async () => {
-  // Short, under /tmp: a Unix socket path is at most 104 bytes on macOS.
-  folder = mkdtempSync('/tmp/aeolus-peer-');
+  // Short, in the run's short folder: a Unix socket path is at most 104 bytes on macOS.
+  folder = aShortHome('aeolus-peer');
   path = join(folder, 'fleet.sock');
   connections = [];
   children = [];
