@@ -1,5 +1,5 @@
 /** ACP evidence comes from real CLI processes, never model self-reports. */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -97,5 +97,23 @@ describe('Cursor ACP Linux: permissions and idle processes', () => {
     const evidence = z.object({ markerAtPromptEnd: z.boolean(), markerObserved: z.boolean() }).parse(JSON.parse(readFileSync(new URL('./fixtures/cursor-acp/2026.11.13-eacade1/linux/background.capture.json', import.meta.url), 'utf8')));
     expect(evidence.markerAtPromptEnd).toBe(false);
     expect(evidence.markerObserved).toBe(true);
+  });
+});
+
+
+describe('Cursor ACP captured fixture privacy', () => {
+  it('stores valid JSON without private home paths, email addresses or credential fields', () => {
+    const folder = new URL('./fixtures/cursor-acp/2026.11.13-eacade1/linux/', import.meta.url);
+    const names = readdirSync(folder).filter((name) => /\.jsonl?$/.test(name));
+    expect(names.length).toBeGreaterThan(0);
+    for (const name of names) {
+      const content = readFileSync(new URL(name, folder), 'utf8');
+      for (const line of name.endsWith('.jsonl') ? content.trim().split('\n') : [content]) {
+        expect(() => JSON.parse(line), name).not.toThrow();
+      }
+      expect(content, name).not.toMatch(/\/home\/(?!probe(?:\/|"))[^/"\s]+|\/Users\/(?!probe(?:\/|"))[^/"\s]+/);
+      expect(content, name).not.toMatch(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+      expect(content, name).not.toMatch(/"(?:accessToken|refreshToken|apiKey|authorization)"\s*:/i);
+    }
   });
 });

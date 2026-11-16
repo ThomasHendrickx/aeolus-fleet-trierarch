@@ -277,3 +277,27 @@ Each one PR, in this repository, a red commit with the failing test first, then 
 | A5 | **Force and model per prompt.** Cancel then prompt, the 10 s bound and kill, `set_model` before every prompt |
 | A6 | **Permission requests.** The allowed set, the owner's question through permission-asks.md's road, argo and unreadable owner refused, 30 minutes, withdrawal on cancel and death |
 | A7 | **The adapter.** `cursor` in `harnesses.ts`: detector, models with `auto`, the ACP build gate, `notOffered` reasons, `config check` (the allow-all choice named a risk), `login cursor --api-key` refused, supervision and `session/load` on restart, the Go side; `trierarch.md`, `architecture.md` and the plugin README. PR 462 closes |
+
+## 9. A1 evidence on build 2026.11.13-eacade1
+
+**This build is not proven for the adapter.** Its user-level MCP configuration is loaded despite `session/new` carrying `mcpServers: []`. Under the MCP exclusion rule above, Cursor stays `notOffered`; later adapter slices wait for Thomas's decision. A1 captures evidence, not a runtime adapter.
+
+The JSON-RPC fixtures and their observations live under [`plugins/aeolus-fleet/test/fixtures/cursor-acp/2026.11.13-eacade1/`](../../../plugins/aeolus-fleet/test/fixtures/cursor-acp/2026.11.13-eacade1/). The Linux probe drivers live under [`scripts/cursor-acp/`](../../../scripts/cursor-acp/). Fixtures replace session ids and private paths, and contain no login credentials. Configuration probes use private homes with access to the machine's existing login, without changing its shared configuration.
+
+| Probe | Linux evidence | Consequence |
+| --- | --- | --- |
+| Model isolation across live processes | `model-isolation.jsonl`: B stays on `gpt-5.4-mini[reasoning=medium]` while A changes to `composer-2.5[fast=true]`; B's selected model also stays after a completed prompt. Observations use protocol `configOptions`, not model self-report | Q4 pick 1 is supported for one process per ship. Sessions within one process are not claimed isolated |
+| Model supplied to `session/new` | `new-model.jsonl`: a supplied `modelId` is ignored; the response still names the persisted default | Explicit `session/set_model` remains necessary |
+| User MCP exclusion | `mcp-home.jsonl`, `mcp-exclusion.capture.json`: a sentinel configured only in private `HOME/.cursor/mcp.json` starts after `session/new` with `mcpServers: []`. It did not start during `initialize` | **Failed.** The build cannot satisfy the named-servers-only rule |
+| Other MCP paths | Separate XDG and project sentinels do not start (`mcp-xdg.jsonl`, `mcp-project.jsonl`) | Changing `CURSOR_CONFIG_DIR` or XDG configuration alone does not prove default-home exclusion |
+| Permission persistence | `permission-persistence.jsonl`: answering `allow-always` changes the private `.config/cursor/cli-config.json`; a new process and new session run the same command without another permission request | Q5's proposed label "Allow for this session" would misstate the scope. Thomas must decide the offered option |
+| Missing login | `no-login.jsonl`: an empty home and XDG configuration produce auth error `-32000` on `session/new` | No API key is requested |
+| Missing saved session | `missing-session.jsonl`: `session/load` returns `-32602` | The hold must handle refused load explicitly |
+| Killed process during a turn | `killed-turn.jsonl`: the process is killed after an agent update; a new process loads the same saved session successfully | Resume after a died process is supported; the process supplies no final prompt response after SIGKILL |
+| Workspace trust | A fresh private home and workspace create a session and complete a prompt without a trust flag or a trust exchange (`mcp-trust.jsonl`) | This is the observed ACP path, not proof of interactive CLI trust behavior |
+| Idle memory | `idle-memory.capture.json`: about 218 MiB for the root process, about 578 MiB summed across five processes after five idle seconds | The sum counts shared pages more than once. No machine capacity threshold or shared-process design is inferred |
+| Background shell | `idle-background.jsonl`, `background.capture.json`: `sleep 12` followed by a marker write is still running when the prompt returns `end_turn`; the marker appears later | The statement that a background shell always keeps the prompt open is not supported. The hold must use the actual prompt response, not assume tools have exited |
+| Initialized turn failure | Invalid image bytes still return `end_turn` (`failed-turn.jsonl`) | A genuine failed initialized turn remains unproven. This is not an error fixture |
+| Expired machine login | No genuinely expired machine login is available | Remains unproven; missing login or a rejected synthetic credential does not prove expiry |
+
+The 30-minute permission result and the independent macOS captures must be read alongside these Linux observations. None of the unproven cases is a successful eligibility proof.
