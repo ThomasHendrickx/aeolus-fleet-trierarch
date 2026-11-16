@@ -74,9 +74,9 @@ if aeolus_codex_hook; then
   if aeolus_reports_here "$identity_text"; then
     handing='the wake bridge'
     ! aeolus_woken_by_trierarch "$identity_text" || handing='the trierarch'
-    context="${context} Go on as the aeolus-fleet-crew skill says: fetch the protocol. Receive and ack nothing: this ship is pushed, so ${handing} hands each message over and it comes into the turn through the plugin's hooks. Then end the turn."
+    context="${context} Go on as the aeolus-fleet-crew skill says: fetch the protocol. Receive and ack nothing: this ship is pushed, so ${handing} hands each message over and it comes into the turn through the plugin's hooks. Then handle what the turn brings in and the work your ship was given, and end the turn only once that is done or waits on someone."
   else
-    context="${context} Go on as the aeolus-fleet-crew skill says: fetch the protocol, receive and handle what waits, then end the turn."
+    context="${context} Go on as the aeolus-fleet-crew skill says: fetch the protocol, receive and handle what waits, then handle what the turn brings in and the work your ship was given, and end the turn only once that is done or waits on someone."
   fi
   if aeolus_woken_by_trierarch "$identity_text"; then
     context="${context} The trierarch wakes this session when work arrives: start no watcher."
@@ -123,10 +123,10 @@ if [ "${AEOLUS_HARNESS:-}" = copilot ]; then
     else
       handle='fetch the protocol, receive and handle what waits; then'
     fi
-    context="${context} Go on as the Aeolus Fleet crew-a-ship skill says: ${handle} end your turn. The trierarch wakes this session when work arrives: start no watcher."
+    context="${context} Go on as the Aeolus Fleet crew-a-ship skill says: ${handle} handle what the turn brings in and the work your ship was given, and end your turn only once that is done or waits on someone. The trierarch wakes this session when work arrives: start no watcher."
     told='and that the trierarch wakes it'
   else
-    context="${context} Go on as the Aeolus Fleet crew-a-ship skill says: fetch the protocol, receive and handle what waits; then end your turn."
+    context="${context} Go on as the Aeolus Fleet crew-a-ship skill says: fetch the protocol, receive and handle what waits; then handle what the turn brings in and the work your ship was given, and end your turn only once that is done or waits on someone."
     told='and to handle what waits'
   fi
   aeolus_log "$identity" sessionStart "told the session after ${source_event:-start} which ship it crews, ${told}"
@@ -164,7 +164,7 @@ if aeolus_woken_by_trierarch "$identity_text"; then
   else
     handle='fetch the protocol, receive and handle what waits; then'
   fi
-  context="${context} Go on as the Aeolus Fleet crew-a-ship skill says: ${handle} end your turn. The trierarch wakes this session when work arrives: start no watcher."
+  context="${context} Go on as the Aeolus Fleet crew-a-ship skill says: ${handle} handle what the turn brings in and the work your ship was given, and end your turn only once that is done or waits on someone. The trierarch wakes this session when work arrives: start no watcher."
   aeolus_log "$identity" sessionStart "told the session after ${source_event:-start} which ship it crews, and that the trierarch wakes it"
   printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(aeolus_json_escape "$context")"
   exit 0
@@ -175,6 +175,6 @@ if aeolus_reports_here "$identity_text"; then
 else
   handle='fetch the protocol, receive and handle what waits; then'
 fi
-context="${context} Go on as the Aeolus Fleet crew-a-ship skill says: ${handle}, unless \"${root}/scripts/aeolus-watch-status.sh\" says watching, start \"${root}/scripts/aeolus-wait.sh\" as a background task; then end your turn. When the watcher exits 6 (its 2-hour limit), just start it again."
+context="${context} Go on as the Aeolus Fleet crew-a-ship skill says: ${handle}, unless \"${root}/scripts/aeolus-watch-status.sh\" says watching, start \"${root}/scripts/aeolus-wait.sh\" as a background task; then handle what the turn brings in and the work your ship was given, and end your turn only once that is done or waits on someone. When the watcher exits 6 (its 2-hour limit), just start it again."
 aeolus_log "$identity" sessionStart "told the session after ${source_event:-start} which ship it crews, and to start the watcher"
 printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$(aeolus_json_escape "$context")"

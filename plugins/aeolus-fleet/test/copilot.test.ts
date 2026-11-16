@@ -298,6 +298,15 @@ describe('the SessionStart hook in Copilot', () => {
     expect(told).toContain('The trierarch wakes this session when work arrives: start no watcher.');
   });
 
+  it('tells a session the trierarch wakes to handle what the turn brings in and its ship\'s work, and to end its turn only once that is done or waits on someone', async () => {
+    crew('https://fleet.example.com', ['--wake-by', 'trierarch']);
+
+    const told = context(await copilotHook('aeolus-session-start.sh', { payload: { hook_event_name: 'SessionStart', source: 'resume' } }));
+
+    expect(told).toContain('; then handle what the turn brings in and the work your ship was given, and end your turn only once that is done or waits on someone. The trierarch wakes this session when work arrives: start no watcher.');
+    expect(told).not.toContain('then end your turn');
+  });
+
   it("tells a session in a folder that crews no ship that the hooks are active, and how to run the plugin's scripts, for the Copilot crew line (S6)", async () => {
     const told = context(await copilotHook('aeolus-session-start.sh', { payload: { hook_event_name: 'SessionStart', source: 'new' } }));
 
