@@ -21,7 +21,7 @@ export interface TestFolders {
  * Makes the folders one test run makes its temporary folders in, and points
  * TMPDIR at the first, so every `os.tmpdir()` of the run lands there and
  * nothing is left in the operating system's temporary folder: a run folder
- * of the repository's ignored cache, and a short one under the home (`.cache/tt`, as short as a socket's path needs), named by
+ * of the repository's ignored cache, and a short one under the home (`.tt`, as short as a ship's socket path needs), named by
  * TRIERARCH_TEST_SHORT_FOLDER. Removes the run folders older than 24 hours
  * first, so a killed run leaves nothing for long. Returns what ends the run:
  * it removes both folders. Called again within the run (each project's global
@@ -32,12 +32,12 @@ export function startTestFolders(at: TestFolders): () => void {
   if (env[RUN_MARKER] !== undefined) {
     return () => undefined;
   }
-  const bases = [join(at.repositoryRoot, 'node_modules', '.cache', 'trierarch-tests'), join(at.home, '.cache', 'tt')];
+  const bases = [join(at.repositoryRoot, 'node_modules', '.cache', 'trierarch-tests'), join(at.home, '.tt')];
   for (const base of bases) {
     removeStale(base, at.now);
   }
-  // Six characters: a socket's path, in the short folder, is at most 104 bytes on macOS.
-  const run = randomBytes(3).toString('hex');
+  // Four characters: a ship's socket path, in the short folder, is at most 104 bytes on macOS.
+  const run = randomBytes(2).toString('hex');
   const [long = '', short = ''] = bases.map((base) => join(base, run));
   for (const folder of [long, short]) {
     mkdirSync(folder, { recursive: true });

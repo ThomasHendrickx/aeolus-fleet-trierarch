@@ -51,7 +51,7 @@ describe('the folders a test run makes its temporary folders in (#454)', () => {
 
     const short = env.TRIERARCH_TEST_SHORT_FOLDER ?? '';
     expect(short.startsWith(home)).toBe(true);
-    expect(short.slice(join(home, '.cache', 'tt').length + 1).length).toBeLessThanOrEqual(6);
+    expect(short.slice(join(home, '.tt').length + 1).length).toBeLessThanOrEqual(4);
     expect(existsSync(short)).toBe(true);
   });
 
@@ -67,7 +67,7 @@ describe('the folders a test run makes its temporary folders in (#454)', () => {
   });
 
   it('removes the run folders older than 24 hours at its start, a killed run left, and keeps the newer ones', () => {
-    const bases = [join(repository, 'node_modules', '.cache', 'trierarch-tests'), join(home, '.cache', 'tt')];
+    const bases = [join(repository, 'node_modules', '.cache', 'trierarch-tests'), join(home, '.tt')];
     const old = bases.map((base) => anEarlierRun(join(base, 'killed'), 25));
     const recent = bases.map((base) => anEarlierRun(join(base, 'running'), 23));
 
