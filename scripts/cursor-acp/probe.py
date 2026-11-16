@@ -35,9 +35,11 @@ def sanitize(value):
 
 
 class Client:
-    def __init__(self, name, folder, home=None):
+    def __init__(self, name, folder, home=None, credential_store=None):
         self.name = name
         env = {key: os.environ[key] for key in ('PATH', 'HOME', 'USER', 'SHELL', 'LANG') if key in os.environ}
+        if credential_store in ('file', 'memory'):
+            env['AGENT_CLI_CREDENTIAL_STORE'] = credential_store
         if home:
             env['HOME'] = str(home)
             env['XDG_CONFIG_HOME'] = str(home / '.config')
