@@ -121,27 +121,43 @@ func (i Init) closingReport(report *Report, configuration config.Configuration, 
 	}
 	add("service", "Service", status, detail, fix)
 	add("caps", "Caps", "ok", fmt.Sprintf("%d ships, %d running", configuration.Caps.Ships, configuration.Caps.Running), "")
-	report.Said = []string{fmt.Sprintf("aeolus-trierarch %s: %s joined %s", Version, shipName, report.FleetURL), ""}
-	for _, c := range report.Checks {
-		mark := "✓"
-		if c.Status == "warning" {
-			mark = "!"
-		}
-		if c.Status == "failed" {
-			mark = "✗"
-		}
-		if c.Part == "caps" {
-			mark = " "
-		}
-		line := fmt.Sprintf("  %s %-13s %s", mark, c.Name, c.Detail)
-		if c.Fix != "" {
-			line += "; " + c.Fix
-		}
-		report.Said = append(report.Said, line)
-	}
 	if serviceErr != nil {
-		report.Said = append(report.Said, "", "Not ready: fix the line marked ✗, then run the same line again.")
-	} else {
-		report.Said = append(report.Said, "", "Ready. Check it any time with: aeolus-trierarch status")
+		report.Said = []string{
+			"Not ready: the service did not stay running.",
+			"Last error: " + serviceErr.Error(),
+			"The computer is joined and its configuration is saved.",
+			"Check: aeolus-trierarch status",
+			"Fix the reported cause, then run the same setup line again.",
+		}
+		return
 	}
+	report.Said = []string{"Ready: this computer is joined to the fleet."}
+	for _, state := range i.harnessStates() {
+		if harness, ok := configuration.Harnesses[state.name]; ok {
+			report.Said = append(report.Said, fmt.Sprintf("  %s: %s", state.label, permissionMode(state.name, slices.Contains(harness.Flags, state.unattendedFlag))))
+		}
+	}
+	report.Said = append(report.Said,
+		"  Repositories: "+namesOrNone(slices.Sorted(maps.Keys(configuration.Repositories))),
+		"  Folders: "+namesOrNone(slices.Sorted(maps.Keys(configuration.Folders))),
+		fmt.Sprintf("  Limits: %d ships, %d sessions at once", configuration.Caps.Ships, configuration.Caps.Running),
+		"  Service: running; starts again at login",
+	)
+	for _, c := range report.Checks {
+		if c.Status == "warning" && c.Part != "repositories" {
+			line := fmt.Sprintf("! %s: %s", c.Name, c.Detail)
+			if c.Fix != "" {
+				line += "; " + c.Fix
+			}
+			report.Said = append(report.Said, line)
+		}
+	}
+	report.Said = append(report.Said, "Check this computer with: aeolus-trierarch status")
+}
+
+func namesOrNone(names []string) string {
+	if len(names) == 0 {
+		return "none"
+	}
+	return strings.Join(names, ", ")
 }

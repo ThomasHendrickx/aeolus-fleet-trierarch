@@ -126,7 +126,7 @@ type Machine struct {
 
 const usage = `Usage: aeolus-trierarch <command>
 
-  init --fleet-url <url> --ship-id <id> --secret <secret> [--plugin-ship-id <id>] [--harnesses <list>] [--unattended <list>] [--repositories <list> | --repositories-in <folder> | --no-repositories] [--clone-into <folder>] [--max-ships <n>] [--max-running <n>] [--yes]
+  init --fleet-url <url> --ship-id <id> --secret <secret> [--plugin-ship-id <id>] [--harnesses <list>] [--unattended <list>] [--repositories <list> | --repositories-in <folder> | --no-repositories] [--clone-into <folder>] [--folder <name> <path>]... [--no-folders] [--max-ships <n>] [--max-running <n>] [--service yes|no] [--yes]
                  set this machine up from the trierarch plugin's setup line
   status         how the trierarch stands on this machine
   list           the ships it crews
@@ -162,13 +162,15 @@ const usage = `Usage: aeolus-trierarch <command>
   --json         answer as JSON
   --config <path> the configuration (AEOLUS_TRIERARCH_CONFIG)`
 
-var valueFlags = []string{"--fleet-url", "--ship-id", "--secret", "--plugin-ship-id", "--config", "--default", "--ship", "--lines", "--harnesses", "--unattended", "--max-ships", "--max-running", "--repositories", "--repositories-in", "--clone-into"}
-var switchFlags = []string{"--json", "--yes", "--version", "--api-key", "--remove-key", "--check", "--no-load", "--follow", "--no-repositories"}
+var valueFlags = []string{"--fleet-url", "--ship-id", "--secret", "--plugin-ship-id", "--config", "--default", "--ship", "--lines", "--harnesses", "--unattended", "--max-ships", "--max-running", "--repositories", "--repositories-in", "--clone-into", "--service"}
+var switchFlags = []string{"--json", "--yes", "--version", "--api-key", "--remove-key", "--check", "--no-load", "--follow", "--no-repositories", "--no-folders"}
 
 type parsed struct {
 	words    []string
 	values   map[string]string
 	switches map[string]bool
+	// folders are init's --folder <name> <path> pairs, in the order given.
+	folders []FolderFlag
 }
 
 // parse takes words, `--flag value` and `--flag=value`; nothing for a flag it does not know or a value missing.
@@ -182,6 +184,9 @@ func parse(args []string) (parsed, bool) {
 		}
 		name, value, hasValue := strings.Cut(arg, "=")
 		switch {
+		case name == "--folder" && !hasValue && index+2 < len(args):
+			result.folders = append(result.folders, FolderFlag{Name: args[index+1], Path: args[index+2]})
+			index += 2
 		case slices.Contains(switchFlags, name) && !hasValue:
 			result.switches[name] = true
 		case slices.Contains(valueFlags, name) && hasValue:
@@ -244,6 +249,11 @@ func Main(args []string, machine Machine) (string, int) {
 	}
 	commands := map[string]func() (answer, error){
 		"init": func() (answer, error) {
+			// Setup's progress goes to stdout as it happens, never into --json.
+			var initPrint func(line string)
+			if !isJSON {
+				initPrint = machine.Print
+			}
 			report, err := Init{
 				HomeDirectory:         machine.HomeDirectory,
 				Program:               machine.Program,
@@ -281,6 +291,7 @@ func Main(args []string, machine Machine) (string, int) {
 				Detect: func(harnesses []string, by detection.By) (detection.Detected, error) {
 					return machine.Detect(at, harnesses, by)
 				},
+				Print: initPrint,
 			}.Run(Flags{
 				FleetURL:         command.values["--fleet-url"],
 				ShipID:           command.values["--ship-id"],
@@ -295,6 +306,9 @@ func Main(args []string, machine Machine) (string, int) {
 				RepositoriesIn:   command.values["--repositories-in"],
 				CloneInto:        command.values["--clone-into"],
 				IsNoRepositories: command.switches["--no-repositories"],
+				Folders:          command.folders,
+				IsNoFolders:      command.switches["--no-folders"],
+				Service:          command.values["--service"],
 			})
 			if err != nil && len(report.Checks) > 0 {
 				return answer{data: report, text: strings.Join(report.Said, "\n"), code: 1}, nil
