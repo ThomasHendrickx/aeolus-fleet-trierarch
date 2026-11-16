@@ -155,7 +155,7 @@ func TestInitSaysWhatItDidAndWhatItRefuses(t *testing.T) {
 
 	output, code := Main(setupWords(), machine)
 
-	if code != 0 || !strings.Contains(output, shipID+" registered") {
+	if code != 0 || !strings.Contains(output, "Ready: this computer is joined to the fleet.") {
 		t.Errorf("answered %q, %d", output, code)
 	}
 	machine.IsClaudeCodeSignedIn = func() bool { return false }

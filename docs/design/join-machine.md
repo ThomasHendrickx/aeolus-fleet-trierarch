@@ -39,8 +39,8 @@ A person copies one line from the console's Join a machine and runs it on a fres
 7. **No terminal and an option left out stops the install**, naming every missing flag, with nothing registered. `--yes` takes every default except the harnesses, which are always picked.
 8. **PATH**: a marked block, written once, in the login file of the person's `$SHELL` (`~/.zprofile` or `~/.bash_profile`) and in `~/.profile`. The report says the current shell needs a new terminal.
 9. **Running and joined means**: the service keeps one pid for 10 seconds, running.json says this version, the lease is valid and the first report was accepted. Otherwise the line says what failed, with the last log line, and exits 1. `status` reads the same: a restart loop with its count and its last error.
-10. **Per picked harness the wizard asks "run without permission questions?"**, no by default, as `--unattended <harness,...>`. Caps are flags only (`--max-ships`, `--max-running`, 4 and 2 by default) and the report shows them.
-11. **The closing report** is one aligned line per part, marked ✓, ✗ or !, in the style's tones (below). `--json` keeps its shape and gains a `checks` list.
+10. **Per picked harness the wizard asks "run without permission questions?"**, no by default, as `--unattended <harness,...>`. The caps, `--max-ships` and `--max-running` (4 and 2 on a fresh computer), are explained and asked when not given, as the [computer setup design](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/design/computer-setup/README.md) (aeolus-fleet#1243) has it, which also adds folders used as they are and consent to the service: [built output](computer-setup/output.md).
+11. **The closing report** is the computer setup design's closing screen (A4): Ready with the choices made, or what failed, its result and what to do. `--json` keeps its shape and gains a `checks` list, one per part, marked ok, warning or failed.
 12. **The dialog**: its name step gains optional Harnesses and Repositories fields; each one filled becomes a flag, so a dialog filled in full builds a line that asks nothing. Repositories given as paths or git URLs are one field each, added with Add field and each removable; the comma separated list is the command line's only. Ticking a harness's "without asking" ticks that harness, and unticking the harness unticks it. The dialog has no clone folder: a git URL is cloned into `~/repositories` on the machine, and only `--clone-into` picks another. Once joined it shows only the one line. The trierarch plugin's join takes the options and builds the whole line; the console builds none.
 
 ### Flags
@@ -52,7 +52,9 @@ A person copies one line from the console's Join a machine and runs it on a fres
 | `--unattended <list>`, a subset of the harnesses | Harnesses, per harness | none run without permission questions |
 | `--repositories <list>`, `--repositories-in <folder>`, `--no-repositories` | Repositories; the list comma or semicolon separated on the command line only, one field per path or git URL in the dialog | stops |
 | `--clone-into <folder>`, command line only | Repositories, when a URL is given | `~/repositories`, where the dialog's git URLs always go |
-| `--max-ships <n>`, `--max-running <n>` | none | 4 and 2 |
+| `--folder <name> <path>` (repeated), `--no-folders` | Folders used as they are | none added; existing ones kept |
+| `--max-ships <n>`, `--max-running <n>` | Ship and session limits | 4 and 2, or the current ones |
+| `--service yes\|no` | Service consent; no stops before joining | yes |
 | `--yes` | every step with a default | |
 
 ## The flow
