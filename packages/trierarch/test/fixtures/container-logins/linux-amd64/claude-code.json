@@ -1,0 +1,78 @@
+{
+  "harness": "claude-code",
+  "harnessVersion": "2.1.325",
+  "image": "aeolus-session:0.40.0",
+  "runtime": "podman 4.9.3 rootless on linux/amd64; pasta forwarding the proxy port alone, then no network but the proxy's socket",
+  "road": "proxy",
+  "turns": [
+    {
+      "name": "first",
+      "completed": true,
+      "answer": "PONG"
+    },
+    {
+      "name": "second",
+      "completed": true,
+      "answer": "PONG"
+    },
+    {
+      "name": "no network but the proxy",
+      "completed": true,
+      "answer": "PONG"
+    }
+  ],
+  "hostLogin": {
+    "renewal": "long-lived, nothing to renew",
+    "evidence": "The model token (`claude setup-token`) is an OAuth access of one year the trierarch keeps. This computer holds none, so the probe injected the host Claude Code's own subscription access, the same kind of bearer, read from its login file at every request."
+  },
+  "container": {
+    "checked": [
+      "environment",
+      "files",
+      "processes"
+    ],
+    "searchedFor": [
+      "access token",
+      "refresh token",
+      "model token",
+      "api key",
+      "crew token",
+      "harness home"
+    ],
+    "found": []
+  },
+  "requests": [
+    {
+      "route": "anthropic",
+      "method": "POST",
+      "path": "/v1/messages",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "anthropic",
+      "method": "POST",
+      "path": "/v1/messages",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "anthropic",
+      "method": "POST",
+      "path": "/v1/messages",
+      "status": 200,
+      "credential": "injected by the proxy"
+    }
+  ],
+  "refused": {
+    "turn": {
+      "name": "refused login",
+      "completed": false,
+      "answer": "Failed to authenticate. API Error: 401 Invalid bearer token"
+    },
+    "vendorStatus": 401,
+    "vendorStatuses": [
+      401
+    ]
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "harness": "codex",
+  "started": true,
+  "signal": "SIGINT",
+  "stoppedWithinMs": 210,
+  "containerKept": true,
+  "turnExit": 0
+}
