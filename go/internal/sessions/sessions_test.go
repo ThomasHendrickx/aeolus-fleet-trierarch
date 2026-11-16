@@ -485,3 +485,24 @@ func TestASessionGetsNoAipVariablesNorTheTrierarchsAipOnItsPath(t *testing.T) {
 		t.Fatalf("environment:\n%s\nwant no AIP variable and no aip folder on its PATH", env)
 	}
 }
+
+func TestAnExitedSessionCarriesItsProcessReasonIntoTheNextPass(t *testing.T) {
+	runtime := aRuntime(t)
+	endedHarness(t, runtime)
+	got := listed(t, runtime)
+	if len(got) != 1 || got[0].ExitReason != "session process exited with code 1" {
+		t.Fatalf("sessions = %+v, want the process exit reason", got)
+	}
+}
+
+func TestAnExitedHoldWithoutARecordSaysItsCauseIsUnknown(t *testing.T) {
+	runtime := aRuntime(t)
+	endedHarness(t, runtime)
+	if err := os.Remove(hold.FilesOf(runtime.Sessions, scout).ExitReason); err != nil {
+		t.Fatal(err)
+	}
+	got := listed(t, runtime)
+	if len(got) != 1 || got[0].ExitReason != "session hold ended without an exit record" {
+		t.Fatalf("sessions = %+v, want an explicit unknown cause", got)
+	}
+}
