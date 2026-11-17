@@ -303,7 +303,7 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);
     if (harnessReason !== undefined) trierarch.harness.failureReasons.set(shipId, harnessReason);
-    trierarch.processes.list = async () => [{ shipId, status: 'exited', exitReason: 'session process ended: signal: SIGKILL' }];
+    trierarch.processes.list = () => Promise.resolve([{ shipId, status: 'exited', exitReason: 'session process ended: signal: SIGKILL' }]);
 
     await crashForGood(trierarch, shipId);
 
