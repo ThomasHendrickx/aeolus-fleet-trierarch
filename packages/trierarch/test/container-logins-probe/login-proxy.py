@@ -51,11 +51,12 @@ def read_json(path: Path) -> dict:
     return json.loads('\n'.join(line for line in text.splitlines() if not line.strip().startswith('//')))
 
 
+MODEL_TOKEN = HOME / '.aeolus/trierarch/model-token'
+
+
 def claude_login() -> dict:
-    """The model token where the trierarch keeps one; else the host's own Claude Code subscription access, the same kind of OAuth bearer."""
-    model_token = HOME / '.aeolus/trierarch/model-token'
-    access = model_token.read_text().strip() if model_token.exists() else read_json(HOME / '.claude/.credentials.json')['claudeAiOauth']['accessToken']
-    return {'authorization': f'Bearer {access}'}
+    """The trierarch's model token (`claude setup-token`), read from its file at every request."""
+    return {'authorization': f'Bearer {MODEL_TOKEN.read_text().strip()}'}
 
 
 def codex_login() -> dict:
@@ -87,6 +88,17 @@ def scrubbed(path: str) -> str:
     return LONG.sub('<id>', ID.sub('<id>', path))
 
 
+UNIFIED_WINDOW = re.compile(r'^anthropic-ratelimit-unified-(\w+)-status$')
+
+
+def unified_limits(headers: list) -> dict:
+    """The subscription's usage windows Anthropic's answer names, and its overall status: names and statuses only, no utilization or reset."""
+    named = {name.lower(): value for name, value in headers}
+    windows = sorted(match.group(1) for name in named if (match := UNIFIED_WINDOW.match(name)) and match.group(1) != 'overage')
+    status = named.get('anthropic-ratelimit-unified-status')
+    return {'windows': windows, 'status': status} if status else {}
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
     server_version = 'aeolus-login-proxy'
@@ -94,8 +106,10 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):  # noqa: D102 - the proxy's own log is the capture
         pass
 
-    def record(self, route: str, status: int, credential: str) -> None:
+    def record(self, route: str, status: int, credential: str, limits: dict | None = None) -> None:
         line = {'route': route, 'method': self.command, 'path': scrubbed(self.path.split('/', 2)[-1] if self.path.count('/') > 1 else '/'), 'status': status, 'credential': credential}
+        if limits:
+            line['limits'] = limits
         line['path'] = '/' + line['path'].lstrip('/')
         with self.server.lock:
             with open(self.server.log, 'a') as log:
@@ -152,7 +166,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
         self.wfile.write(b'0\r\n\r\n')
         upstream.close()
-        self.record(route, answer.status, 'injected by the proxy')
+        self.record(route, answer.status, 'injected by the proxy', unified_limits(answer.getheaders()))
 
     def read_chunked(self) -> bytes:
         data = b''

@@ -195,6 +195,16 @@ class Probe:
         answer = 'PONG' if completed else scrub(output)
         return {'name': name, 'completed': completed, 'answer': answer}
 
+    def alias_turn(self, alias: str) -> dict:
+        """A print-mode turn on a model alias, its stream read for the model that answered and the subscription's usage windows."""
+        answered = run('podman', 'exec', self.name, 'claude', '-p', '--model', alias, '--output-format', 'stream-json', '--verbose', PROMPT, check=False, timeout=300)
+        events = [json.loads(line) for line in answered.stdout.splitlines() if line.startswith('{')]
+        models = [event['message']['model'] for event in events if event.get('type') == 'assistant' and event['message'].get('model') != '<synthetic>']
+        results = [event for event in events if event.get('type') == 'result']
+        windows = sorted({name for event in events if event.get('type') == 'rate_limit_event' for name in event.get('rate_limit_info', {}).get('unifiedWindows', {})})
+        completed = answered.returncode == 0 and bool(results) and not results[-1].get('is_error') and 'PONG' in results[-1].get('result', '')
+        return {'alias': alias, 'completed': completed, 'model': models[0] if models else '', 'windows': windows, 'rateLimitEvent': any(event.get('type') == 'rate_limit_event' for event in events)}
+
     def search_container(self) -> list:
         """Every credential kind the container holds, read while a turn runs."""
         held = run('podman', 'exec', self.name, 'sh', '-c', 'cat /proc/[0-9]*/environ /proc/[0-9]*/cmdline 2>/dev/null; env', check=False).stdout.encode()
@@ -253,8 +263,19 @@ def renew_codex() -> None:
     server.wait()
 
 
+# Anthropic's header names for a window, by the name Claude Code and the trierarch give it.
+WINDOW_NAMES = {'5h': 'five_hour', '7d': 'seven_day'}
+
+
+def usage_limits(requests: list, aliases: list) -> dict:
+    """The windows Anthropic's answers named and its last status, read at the proxy; and whether any alias turn streamed Claude Code's rate limit event."""
+    limited = [request['limits'] for request in requests if request.get('limits')]
+    windows = sorted({WINDOW_NAMES.get(window, window) for limits in limited for window in limits['windows']})
+    return {'vendorWindows': windows, 'vendorStatus': limited[-1]['status'] if limited else 'rejected', 'rateLimitEventStreamed': any(turn['rateLimitEvent'] for turn in aliases)}
+
+
 HOST_LOGINS = {
-    'claude-code': ('long-lived, nothing to renew', 'The model token (`claude setup-token`) is an OAuth access of one year the trierarch keeps. This computer holds none, so the probe injected the host Claude Code\'s own subscription access, the same kind of bearer, read from its login file at every request.'),
+    'claude-code': ('long-lived, nothing to renew', 'The model token (`claude setup-token`) is an OAuth access of one year the trierarch keeps in its `model-token` file; the proxy read it from that file at every request.'),
     'codex': ('by its harness on the host', 'The host\'s Codex renewed its ChatGPT login with no turn (`codex app-server`, `account/read` with `refreshToken: true`); the proxy read the new access at the next request.'),
     'cursor': ('only by signing in again', f'Cursor CLI {CURSOR_VERSION} renews an access only with an API key (`auth-refresh.ts`: `loginWithApiKey`, once `exp` is within 300 seconds); the host\'s access read on 16 Nov ends in about 60 days, then needs `agent login` on the host. The proxy reads the host login at every request, so the container needs nothing when it is signed in again.'),
     'copilot': ('long-lived, nothing to renew', '`copilot login` keeps a GitHub OAuth token with no expiry and no refresh token; the proxy sends it to the Copilot API of the login\'s plan, as `api.github.com/copilot_internal/user` names it.'),
@@ -281,6 +302,14 @@ def probe(harness: str) -> dict:
             'turns': turns,
             'hostLogin': dict(zip(('renewal', 'evidence'), HOST_LOGINS[harness])),
         }
+        if harness == 'claude-code':
+            probe.start_container()
+            aliases = [probe.alias_turn(alias) for alias in ('opus', 'sonnet', 'haiku')]
+            capture['modelToken'] = {
+                'login': 'model token',
+                'aliases': [{key: turn[key] for key in ('alias', 'completed', 'model')} for turn in aliases],
+                'usageLimits': usage_limits(probe.requests(), aliases),
+            }
         if harness in RENEWALS:
             command, renew, current = RENEWALS[harness]
             probe.start_container()
