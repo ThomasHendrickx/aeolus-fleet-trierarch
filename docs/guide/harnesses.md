@@ -1,6 +1,6 @@
 # Harnesses compared
 
-Aeolus crews ships from more than one [harness](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#harness): Claude Code, Codex, GitHub Copilot and Cursor. They do not all do the same. This page is a reference, not a task. It lists what a ship relies on, and for each harness whether Aeolus supports it, supports it in part, or does not support it, so you can pick a harness before you commission a ship.
+Aeolus crews [ships](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#ship) from more than one [harness](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#harness): Claude Code, Codex, GitHub Copilot and Cursor. They do not all do the same. This page is a reference, not a task. It lists what a ship relies on, and for each harness whether Aeolus supports it, supports it in part, or does not support it, so you can pick a harness before you [commission](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#commission) a ship.
 
 Every cell matches the [trierarch](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#trierarch) and the [plugin](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#plugin) as released with plugin 0.40.0, and was checked against their code and tests on main.
 
@@ -12,7 +12,7 @@ Every cell matches the [trierarch](https://github.com/ThomasHendrickx/aeolus-fle
 
 A ship reaches a harness in one of two ways, and some rows differ between them:
 
-- **By hand.** You start a [session](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#session) yourself and paste a [crew line](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#crew-line). Your session is the one that waits for messages.
+- **By hand.** You start a [session](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#session) yourself and paste a [crew line](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#crew-line). Your session is the one that waits for [messages](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#message).
 - **By a trierarch.** A program on a computer starts the session, wakes it when a message arrives and starts it again when it dies. See [Keeping sessions running](keeping-sessions-running.md).
 
 ```mermaid
@@ -32,20 +32,20 @@ flowchart TD
 | **Crew by hand** with a crew line | Supported | Semi-supported: local Codex Desktop and the Codex CLI only. Codex Cloud runs no plugin command hooks | Supported | Not supported: no Cursor crew line |
 | **Crewed by a trierarch** on the computer | Supported | Supported | Supported: needs the plugin installed for Copilot and a Copilot build the plugin is proven on | Not supported: setup says Cursor cannot be picked yet |
 | **Crewed in a container** | Supported | Not supported | Not supported | Not supported |
-| **A hand-crewed session wakes** without spending model tokens | Supported | Semi-supported: local only, through a wake bridge | Supported: through a detached background shell | Not supported: no watcher |
-| **A message is handed into a turn**, and the fleet is told it arrived | Supported | Supported | Semi-supported: confirmed at the turn's first tool call or its end, never at the prompt | Not supported |
+| **A hand-crewed session wakes** without spending [model](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#model) tokens | Supported | Semi-supported: local only, through a wake bridge | Supported: through a detached background shell | Not supported: no watcher |
+| **A message is handed into a turn**, and the [fleet](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#fleet) is told it arrived | Supported | Supported | Semi-supported: confirmed at the turn's first tool call or its end, never at the prompt | Not supported |
 | **End of a turn is known**, so the next message waits for it | Supported | Supported | Supported | Not supported |
 | **A turn that dies** is handed once more | Supported | Supported | Supported | Not supported |
-| **Forced message** stops a busy turn | Supported | Semi-supported: a trierarch stops the turn, a hand-crewed task takes it at its next idle | Supported | Not supported |
+| **[Forced](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#forced) message** stops a busy turn | Supported | Semi-supported: a trierarch stops the turn, a hand-crewed task takes it at its next idle | Supported | Not supported |
 | **Restart resumes the conversation** | Supported | Supported | Semi-supported: resumes only a session a finished turn named, otherwise it starts a new one | Not supported |
-| **Only the MCP servers the crew request names**, none of yours | Supported | Semi-supported: a server whose name holds a dot is not offered | Supported | Not supported: the build tried loads the user's own MCP servers |
-| **A permission request becomes a question** to the ship's owner | Supported: unless a bypass flag is set, and never for an [argo](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#argo)-owned ship | Not supported: a session asks nobody, its flags decide | Not supported: a session asks nobody, its flags decide | Not supported |
+| **Only the MCP servers the [crew request](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#crew-request) names**, none of yours | Supported | Semi-supported: a server whose name holds a dot is not offered, a server you add after the start reaches later turns, and a start is refused when its configuration already names a requested server | Semi-supported: a server you add after the start reaches later turns | Not supported: the build tried loads the user's own MCP servers |
+| **A permission request becomes a [question](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#question)** to the ship's [owner](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#owner) | Supported: unless a bypass flag is set, and never for an [argo](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#argo)-owned ship | Not supported: a session asks nobody, its flags decide | Not supported: a session asks nobody, its flags decide | Not supported |
 | **Model** chosen in the crew request | Supported | Supported | Semi-supported: models are listed, not confirmed, and one your login may not use is refused when the session starts | Not supported |
 | **Effort** chosen in the crew request | Supported | Not supported | Not supported | Not supported |
-| **Usage limit** noticed and told to the ship's owner | Supported | Semi-supported: the failed turn is restarted and reported as a crash, with no usage-limit notice | Not supported: same, a failed turn is reported as a crash | Not supported |
+| **Usage limit** noticed and told to whoever requested the crew, or the ship's owner when none is named | Supported | Semi-supported: the failed turn is restarted and reported as a crash, with no usage-limit notice | Not supported: same, a failed turn is reported as a crash | Not supported |
 | **Tokens used** counted per model | Supported | Supported | Not supported | Not supported |
 | **Subscription or API key** per harness or per ship | Supported | Supported | Not supported: its own login only | Not supported |
-| **Fresh git worktrees** of the ship's repositories | Supported | Supported | Supported | Not supported |
+| **Fresh git worktrees** of the ship's repositories | Supported: in a container a clone, not a worktree | Supported | Supported | Not supported |
 | **Computer setup** by `aeolus-trierarch init` | Supported: also answers its one-time questions | Supported: also trusts the places and the plugin's hooks | Supported: also installs the plugin | Not supported: not offered |
 
 ## What the cells mean
@@ -72,7 +72,7 @@ A [forced](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/
 
 ### Servers, permissions and models
 
-A session a trierarch starts gets the MCP servers its crew request names and no others, never yours, a plugin's or the vendor's own. Claude Code is started so that it loads only the file the trierarch gives it. For Codex and Copilot the trierarch first asks which servers the session would load, and turns each off for that session only. A session whose folder's servers cannot be read is not started.
+A session a trierarch starts gets the MCP servers its crew request names and no others, never yours, a plugin's or the vendor's own, with two limits for Codex and Copilot. Claude Code is started so that it loads only the file the trierarch gives it. For Codex and Copilot the trierarch asks, at each start, which servers the session would load, and turns each off for that session only: a server you add after a start reaches the session's later turns, until its next start. Codex also refuses a start whose configuration already names a server the request names. A session whose folder's servers cannot be read is not started.
 
 A Claude Code session without a bypass flag asks its [owner](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#owner) a [question](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#question) before an action that needs permission. The owner answers within 30 minutes or the action is refused. A ship whose owner is argo, or whose owner cannot be read, is refused at once: nobody is asked. Codex and Copilot sessions run without a person to ask, so what they may do is what the flags you give them allow. See [Setting up a computer for your fleet](setup.md) for the flags and their risk.
 
@@ -84,6 +84,6 @@ Cursor's column is empty on purpose. Aeolus tried Cursor's `agent acp` mode on o
 
 ## Next
 
-- [What you can do](what-you-can-do.md): every feature, with the guide that does it.
+- [What you can do](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/what-you-can-do.md): every feature, with the guide that does it.
 - [Setting up a computer for your fleet](setup.md): offer a harness on your computer.
 - [Trierarch day to day](trierarch-day-to-day.md): what a crewed session's states mean.
