@@ -268,6 +268,8 @@ export type LaunchSeen = { readonly kind: 'active' } | { readonly kind: 'refused
 export interface ObservedSession {
   readonly shipId: ShipId;
   readonly status: 'running' | 'exited';
+  /** Process exit evidence, when the runtime keeps it. */
+  readonly exitReason?: string;
   readonly isOtherVersion?: boolean;
 }
 

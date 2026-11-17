@@ -52,7 +52,7 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
 
     await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'exit 3'], harness: HARNESS });
 
-    await expect.poll(async () => runtime.list(), POLL).toEqual([{ shipId, status: 'exited' }]);
+    await expect.poll(async () => runtime.list(), POLL).toEqual([expect.objectContaining({ shipId, status: 'exited' })]);
   });
 
   it('reads the events of a session whose command ended, so the launch window names what stopped it', async () => {
@@ -62,7 +62,7 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
     await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'echo "Invalid API key"; read line; exit 1'], harness: HARNESS });
     await expect.poll(async () => shown(runtime, shipId), POLL).toContain('Invalid API key');
     await runtime.send({ shipId, line: 'end' });
-    await expect.poll(async () => runtime.list(), POLL).toEqual([{ shipId, status: 'exited' }]);
+    await expect.poll(async () => runtime.list(), POLL).toEqual([expect.objectContaining({ shipId, status: 'exited' })]);
 
     await expect(shown(runtime, shipId)).resolves.toContain('Invalid API key');
   });
@@ -71,7 +71,7 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
     const runtime = at.runtime();
     const shipId = newId('ship');
     await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'exit 3'], harness: HARNESS });
-    await expect.poll(async () => runtime.list(), POLL).toEqual([{ shipId, status: 'exited' }]);
+    await expect.poll(async () => runtime.list(), POLL).toEqual([expect.objectContaining({ shipId, status: 'exited' })]);
 
     await runtime.start({ shipId, folder: at.folder(), command: ['sleep', '30'], harness: HARNESS });
 

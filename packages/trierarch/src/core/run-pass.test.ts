@@ -296,6 +296,20 @@ describe('the lifecycle of an assigned crew request (docs/trierarch.md)', () => 
     expect(trierarch.fleet.toArgo.at(-1)?.text).toContain('- Its last failure: ' + expected + '\n');
   });
 
+  it.each([
+    { harnessReason: undefined, expected: 'session process ended: signal: SIGKILL' },
+    { harnessReason: 'provider refused\n  try again', expected: 'session process ended: signal: SIGKILL; provider refused try again' },
+  ])('keeps the process exit evidence in the crash notice with harness reason $harnessReason', async ({ harnessReason, expected }) => {
+    const trierarch = aTrierarch();
+    const shipId = await aCrewedShip(trierarch);
+    if (harnessReason !== undefined) trierarch.harness.failureReasons.set(shipId, harnessReason);
+    trierarch.processes.list = () => Promise.resolve([{ shipId, status: 'exited', exitReason: 'session process ended: signal: SIGKILL' }]);
+
+    await crashForGood(trierarch, shipId);
+
+    expect(trierarch.fleet.toArgo.at(-1)?.text).toContain('- Its last failure: ' + expected + '\n');
+  });
+
   it('reports the harness reason on one line when a session exits', async () => {
     const trierarch = aTrierarch();
     const shipId = await aCrewedShip(trierarch);

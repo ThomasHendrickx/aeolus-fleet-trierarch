@@ -114,7 +114,8 @@ export function createHoldRuntime(options: {
     }
     const answer = await callHold({ socket: files.socket, request: { call: 'state' }, timeoutMs: CALL_TIMEOUT_MS }).catch(() => undefined);
     if (answer?.isOk !== true || answer.state === undefined) {
-      return { shipId, status: 'exited' };
+      const reason = await readFile(files.exitReason, 'utf8').catch(() => '');
+      return { shipId, status: 'exited', exitReason: reason || 'session hold ended without an exit record' };
     }
     return { shipId, status: 'running', ...(answer.state.version !== version && { isOtherVersion: true }) };
   };
