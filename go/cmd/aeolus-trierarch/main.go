@@ -230,6 +230,8 @@ func releases(environ []string) releaseSource {
 func http1Only() *http.Transport {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.ForceAttemptHTTP2 = false
+	// The clone carries the h2 the default transport offered in its TLS handshake: a server would pick it and this transport cannot speak it.
+	transport.TLSClientConfig = &tls.Config{NextProtos: []string{"http/1.1"}}
 	transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
 	return transport
 }
