@@ -44,6 +44,8 @@ type Source struct {
 	Repository string
 	Trusted    attestation.TrustedRoot
 	Client     *http.Client
+	// Fallback reads again what Client could not carry to its end, over a transport of its own (HTTP/1.1 where Client's is HTTP/2), for a network that stalls one of them.
+	Fallback *http.Client
 }
 
 // Name is the binary's asset name for a system and chip, as Go names them.
@@ -162,34 +164,43 @@ func (s Source) readJSON(ctx context.Context, url string, into any) error {
 	return json.Unmarshal(text, into)
 }
 
-// read is the answer to a GET, at most limit bytes; ErrNoRelease when GitHub has nothing there.
+// read is the answer to a GET, at most limit bytes; ErrNoRelease when GitHub has nothing there. A transfer that fails is read once more with Fallback, when there is one.
 func (s Source) read(ctx context.Context, url string, limit int64) ([]byte, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	request.Header.Set("Accept", "application/vnd.github+json")
 	client := s.Client
 	if client == nil {
 		client = http.DefaultClient
 	}
+	text, isTransfer, err := readWith(ctx, client, url, limit)
+	if err != nil && isTransfer && s.Fallback != nil && ctx.Err() == nil {
+		text, _, err = readWith(ctx, s.Fallback, url, limit)
+	}
+	return text, err
+}
+
+// readWith is read by one client; isTransfer says the error is the transfer's own (no answer, or one cut short), not what GitHub answered.
+func readWith(ctx context.Context, client *http.Client, url string, limit int64) (text []byte, isTransfer bool, err error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	request.Header.Set("Accept", "application/vnd.github+json")
 	answer, err := client.Do(request)
 	if err != nil {
-		return nil, err
+		return nil, true, err
 	}
 	defer answer.Body.Close()
 	if answer.StatusCode == http.StatusNotFound {
-		return nil, ErrNoRelease
+		return nil, false, ErrNoRelease
 	}
 	if answer.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s answered %s", url, answer.Status)
+		return nil, false, fmt.Errorf("%s answered %s", url, answer.Status)
 	}
-	text, err := io.ReadAll(io.LimitReader(answer.Body, limit+1))
+	text, err = io.ReadAll(io.LimitReader(answer.Body, limit+1))
 	if err != nil {
-		return nil, err
+		return nil, true, err
 	}
 	if int64(len(text)) > limit {
-		return nil, fmt.Errorf("%s answered more than %d bytes", url, limit)
+		return nil, false, fmt.Errorf("%s answered more than %d bytes", url, limit)
 	}
-	return text, nil
+	return text, false, nil
 }
