@@ -143,7 +143,7 @@ async function git(args: string[]): Promise<void> {
 beforeEach(async () => {
   const databaseUrl = await createMigratedDatabase();
   database = createPrismaClient(databaseUrl);
-  server = createApp({ databaseUrl, publicUrl: FLEET_URL, logger: false, receiveWaitMs: 100 });
+  server = createApp({ databaseUrl, publicUrl: FLEET_URL, logger: false });
   address = await server.listen({ host: '127.0.0.1', port: 0 });
   home = realpathSync(aShortHome('trierarch-home'));
   paths = trierarchPaths({ homeDirectory: home });
