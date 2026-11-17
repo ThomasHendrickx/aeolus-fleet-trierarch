@@ -54,6 +54,12 @@ describe('the candidate a release publishes', () => {
     expect(refusal({ manifest: [] })).toBe('The candidate has no @aeolus-fleet/trierarch');
   });
 
+  it('refuses a manifest that names a different file from the one published', () => {
+    expect(refusal({ manifest: [aTarball('trierarch', { filename: 'other.tgz' })], downloaded: { 'other.tgz': 'sha512-trierarch' } })).toBe(
+      'The candidate names other.tgz, not aeolus-fleet-trierarch-0.29.0.tgz',
+    );
+  });
+
   it('refuses a tarball whose bytes differ from the candidate\'s record', () => {
     expect(refusal({ downloaded: { ...DOWNLOADED, 'aeolus-fleet-trierarch-0.29.0.tgz': 'sha512-other' } })).toBe(
       'aeolus-fleet-trierarch-0.29.0.tgz is not the tarball the candidate packed: its integrity differs',
