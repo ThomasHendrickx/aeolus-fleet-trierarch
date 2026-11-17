@@ -121,3 +121,11 @@ describe('the finish workflow', () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
 });
+
+describe('the candidate workflow', () => {
+  it('builds and checks the Go binaries for the candidate version', () => {
+    const candidate = workflow('../.github/workflows/candidate.yml');
+    expect(candidate).toMatch(/^ {4}uses: \.\/\.github\/workflows\/go-binaries\.yml$/m);
+    expect(candidate).toMatch(/^ {6}version: \$\{\{ inputs\.version \}\}$/m);
+  });
+});
