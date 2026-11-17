@@ -29,6 +29,8 @@ type aRelease struct {
 	bundles     [][]byte
 	isCompacted bool
 	latest      string
+	// stalls is how many binary downloads hang until the client gives up.
+	stalls int
 }
 
 func (r *aRelease) serve(t *testing.T) *httptest.Server {
@@ -45,6 +47,11 @@ func (r *aRelease) serve(t *testing.T) *httptest.Server {
 		case "/repos/" + repository + "/releases/tags/v" + r.version:
 			_ = json.NewEncoder(w).Encode(map[string]any{"tag_name": "v" + r.version, "assets": []any{asset("aeolus-trierarch-linux-amd64"), asset("SHA256SUMS")}})
 		case "/download/aeolus-trierarch-linux-amd64":
+			if r.stalls > 0 {
+				r.stalls--
+				<-request.Context().Done()
+				return
+			}
 			_, _ = w.Write(r.binary)
 		case "/download/SHA256SUMS":
 			_, _ = w.Write([]byte(r.sums))
@@ -126,6 +133,35 @@ func TestFetchTakesTheReleasesBinaryForTheSystemAndChipWhenItsChecksumAndAttesta
 
 	if err != nil || !bytes.Equal(binary, signed.release.binary) {
 		t.Fatalf("Fetch(0.40.0) = %q, %v, want the release's binary", binary, err)
+	}
+}
+
+func TestFetchTakesTheBinaryFromTheFallbackClientWhenATransferStalls(t *testing.T) {
+	signed := aSignedRelease(t)
+	signed.release.stalls = 1
+	fallback := signed.source.Client
+	signed.source.Client = &http.Client{Transport: fallback.Transport, Timeout: 200 * time.Millisecond}
+	signed.source.Fallback = fallback
+
+	binary, err := signed.source.Fetch(context.Background(), "0.40.0", "linux", "amd64")
+
+	if err != nil || !bytes.Equal(binary, signed.release.binary) {
+		t.Fatalf("Fetch(0.40.0) after a stalled transfer = %q, %v, want the release's binary", binary, err)
+	}
+}
+
+func TestFetchRefusesAFallbackBinaryItsChecksumDoesNotName(t *testing.T) {
+	signed := aSignedRelease(t)
+	signed.release.stalls = 1
+	signed.release.sums = fmt.Sprintf("%x  aeolus-trierarch-linux-amd64\n", sha256.Sum256([]byte("another")))
+	fallback := signed.source.Client
+	signed.source.Client = &http.Client{Transport: fallback.Transport, Timeout: 200 * time.Millisecond}
+	signed.source.Fallback = fallback
+
+	_, err := signed.source.Fetch(context.Background(), "0.40.0", "linux", "amd64")
+
+	if !errors.Is(err, ErrChecksum) {
+		t.Fatalf("Fetch(0.40.0) = %v, want ErrChecksum", err)
 	}
 }
 
