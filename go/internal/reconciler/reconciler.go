@@ -1027,7 +1027,7 @@ func exitStep(entry Entry, now time.Time, failedStart string, failureReason stri
 		crashed := withState(withoutLaunch(entry), "crashed", now)
 		crashed.Exits = exits
 		told := Action{Kind: Crashed, ShipID: entry.ShipID, ShipName: entry.ShipName, Exits: len(exits), FailedStart: failedStart, FailureReason: failureReason, Key: "trierarch:crashed:" + entry.ShipID + ":" + now.UTC().Format("2006-01-02T15:04:05.000Z")}
-		return step{entry: &crashed, actions: []Action{stop, {Kind: Report, ShipID: entry.ShipID, Note: noteWithReason(crashedNote, failureReason)}, told}}
+		return step{entry: &crashed, actions: []Action{stop, {Kind: Report, ShipID: entry.ShipID, Note: noteWithReason(crashedNote, failureReason), FailedStart: cleanFailureReason(failedStart)}, told}}
 	}
 	restarting := withState(withoutLaunch(entry), "restarting", now)
 	restarting.Exits = exits
@@ -1036,7 +1036,7 @@ func exitStep(entry Entry, now time.Time, failedStart string, failureReason stri
 	if failedStart != "" {
 		actions = append(actions, stop)
 	}
-	actions = append(actions, Action{Kind: Report, ShipID: entry.ShipID, Note: noteWithReason(restartingNote, failureReason)})
+	actions = append(actions, Action{Kind: Report, ShipID: entry.ShipID, Note: noteWithReason(restartingNote, failureReason), FailedStart: cleanFailureReason(failedStart)})
 	return step{entry: &restarting, actions: actions}
 }
 

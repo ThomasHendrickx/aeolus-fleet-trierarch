@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# PreToolUse hook on Bash. When a command calls aeolus-fleet.sh or
-# aeolus-ask.sh, records the model the payload names (Codex states its active
+# SessionStart for Codex, and PreToolUse on Bash when a command calls
+# aeolus-fleet.sh or aeolus-ask.sh. Records the model the payload names
+# (Codex states its active
 # model in every hook payload), so the scripts' sends state the model running
 # now, even after a switch. Copilot names none there: its session's events
 # name the model it started with or switched to last, auto when it picks one
@@ -10,7 +11,9 @@ set -uo pipefail
 . "$(dirname "$0")/aeolus-lib.sh"
 
 payload="$(cat)"
-printf '%s' "$payload" | grep -Eq 'aeolus-(fleet|ask)\.sh' || exit 0
+if [ "$(aeolus_json_string "$payload" hook_event_name)" != SessionStart ]; then
+  printf '%s' "$payload" | grep -Eq 'aeolus-(fleet|ask)\.sh' || exit 0
+fi
 # The payload's own key only: inside the command's text its quotes are escaped.
 model="$(printf '%s' "$payload" | tr -d '\n' | sed -E -n 's/^.*"model"[[:space:]]*:[[:space:]]*"([^"\\]+)".*$/\1/p')"
 if [ -z "$model" ] && [ "${AEOLUS_HARNESS:-}" = copilot ]; then

@@ -50,6 +50,10 @@ if aeolus_codex_hook; then
     exit 0
   fi
 
+  # A resumed turn may send without a literal fleet script in a Bash call.
+  # Save the harness's model before that first send, then let PreToolUse track switches.
+  printf '%s' "$payload" | "$root/scripts/aeolus-model.sh"
+
   ship_name="$(aeolus_identity_field "$identity_text" shipName)"
   ship_id="$(aeolus_identity_field "$identity_text" shipId)"
   fleet_url="$(aeolus_identity_field "$identity_text" fleetUrl)"
