@@ -37,6 +37,15 @@ const captureSchema = z.object({
   renewal: z.object({ command: z.string(), accessChanged: z.boolean(), turnsAfter: z.array(turnSchema) }).optional(),
   /** A host login that cannot be renewed: the proxy forwards a refused one, and the turn ends with the harness's own login error. */
   refused: z.object({ turn: turnSchema, vendorStatus: z.number().int() }),
+  /** Claude Code on the trierarch's model token (`claude setup-token`): each model alias and the subscription's usage windows, as a print-mode turn streams them. */
+  modelToken: z
+    .object({
+      login: z.literal('model token'),
+      aliases: z.array(z.object({ alias: z.string(), completed: z.boolean(), model: z.string() })),
+      /** The windows the vendor's answers name (its `anthropic-ratelimit-unified-<window>-status` headers), read at the proxy; and whether Claude Code streamed its rate limit event. */
+      usageLimits: z.object({ vendorWindows: z.array(z.string()), vendorStatus: z.enum(['allowed', 'allowed_warning', 'rejected']), rateLimitEventStreamed: z.boolean() }),
+    })
+    .optional(),
 });
 
 type Capture = z.infer<typeof captureSchema>;
@@ -92,6 +101,28 @@ describe('a host login over the proxy road', () => {
     expect(capture.renewal?.accessChanged).toBe(true);
     expect(capture.renewal?.turnsAfter.length).toBeGreaterThan(0);
     expect(capture.renewal?.turnsAfter.every((turn) => turn.completed)).toBe(true);
+  });
+});
+
+describe('Claude Code on the model token through the proxy', () => {
+  it('runs on the trierarch\'s model token, injected by the proxy', () => {
+    expect(captureOf('claude-code').modelToken?.login).toBe('model token');
+  });
+
+  it.each(['opus', 'sonnet', 'haiku'])('completes a turn on the model alias %s, answered by that model', (alias) => {
+    const answered = captureOf('claude-code').modelToken?.aliases.find((turn) => turn.alias === alias);
+    expect(answered?.completed).toBe(true);
+    expect(answered?.model).toMatch(new RegExp(`^claude-${alias}-`, 'u'));
+  });
+
+  it('is answered under the subscription\'s usage windows, which the proxy reads from the vendor\'s answers', () => {
+    const limits = captureOf('claude-code').modelToken?.usageLimits;
+    expect(limits?.vendorWindows).toContain('seven_day');
+    expect(limits?.vendorStatus).toMatch(/^allowed/u);
+  });
+
+  it('streams no rate limit event: Claude Code takes the proxy token for an API key, so the subscription\'s windows are read at the proxy', () => {
+    expect(captureOf('claude-code').modelToken?.usageLimits.rateLimitEventStreamed).toBe(false);
   });
 });
 
