@@ -121,3 +121,10 @@ describe('the finish workflow', () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
 });
+
+describe('the candidate workflow', () => {
+  it('leaves Go binary builds to the release workflow', () => {
+    const candidate = workflow('../.github/workflows/candidate.yml');
+    expect(candidate).not.toContain('go-binaries.yml');
+  });
+});
