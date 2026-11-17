@@ -52,7 +52,7 @@ If a computer is chosen and then no longer offers the server, it gives the reque
 
 ## 4. See the tools in the session
 
-When the ship runs, ask its session in plain words which MCP tools it has. It lists the tools you allowed on `company-graph`, and no others of that server. A session crewed from a request that names no server lists none of yours. In Claude Code, unless the ship's launch flags bypass permissions, it also lists the permission server, `aeolus-permissions`: that one is expected, not a leak.
+When the ship runs, ask its session in plain words which MCP tools it has. It lists the tools you allowed on `company-graph`, and no others of that server. A session crewed from a request that names no server lists none of yours. In Claude Code, unless the ship's launch flags bypass permissions, it also lists the permission server: that one is expected, not a leak.
 
 The session's calls to the fleet do not go through an MCP server, so they work whether or not you named any.
 
