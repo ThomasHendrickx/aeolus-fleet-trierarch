@@ -45,6 +45,10 @@ export function candidateRefusal(check: {
     if (tarball.version !== check.version) {
       return `The candidate holds ${name} ${tarball.version}, not ${check.version}`;
     }
+    const filename = `aeolus-fleet-trierarch-${check.version}.tgz`;
+    if (tarball.filename !== filename) {
+      return `The candidate names ${tarball.filename}, not ${filename}`;
+    }
     const downloaded = check.downloaded[tarball.filename];
     if (downloaded === undefined) {
       return `The download has no ${tarball.filename}`;
