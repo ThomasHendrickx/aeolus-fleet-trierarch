@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { appendFileSync, createWriteStream } from 'node:fs';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { createServer, type Socket } from 'node:net';
 import type { Readable, Writable } from 'node:stream';
 import { createInterface } from 'node:readline';
@@ -106,7 +106,10 @@ export async function runHold(options: HoldOptions): Promise<number> {
   const { files, folder, harness, environment, version } = options;
   await mkdir(files.folder, { recursive: true, mode: 0o700 });
   await rm(files.socket, { force: true });
-  await writeFile(files.pid, String(process.pid));
+  // Publish the pid only once it is complete, so startup cannot mistake a partial pid for an exited hold.
+  const pendingPid = `${files.pid}.new`;
+  await writeFile(pendingPid, String(process.pid));
+  await rename(pendingPid, files.pid);
   await writeFile(files.harnessSessions, '');
   const events = createWriteStream(files.events, { flags: 'a', mode: 0o600 });
   let sessionId: string | undefined;
