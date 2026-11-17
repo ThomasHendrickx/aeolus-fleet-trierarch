@@ -1,0 +1,131 @@
+{
+  "harness": "codex",
+  "harnessVersion": "0.169.0",
+  "image": "aeolus-session:0.40.0",
+  "runtime": "podman 4.9.3 rootless on linux/amd64; pasta forwarding the proxy port alone, then no network but the proxy's socket",
+  "road": "proxy",
+  "turns": [
+    {
+      "name": "first",
+      "completed": true,
+      "answer": "PONG"
+    },
+    {
+      "name": "second",
+      "completed": true,
+      "answer": "PONG"
+    },
+    {
+      "name": "no network but the proxy",
+      "completed": true,
+      "answer": "PONG"
+    }
+  ],
+  "hostLogin": {
+    "renewal": "by its harness on the host",
+    "evidence": "The host's Codex renewed its ChatGPT login with no turn (`codex app-server`, `account/read` with `refreshToken: true`); the proxy read the new access at the next request."
+  },
+  "renewal": {
+    "command": "codex app-server: account/read {\"refreshToken\": true}",
+    "accessChanged": true,
+    "turnsAfter": [
+      {
+        "name": "after renewal",
+        "completed": true,
+        "answer": "PONG"
+      }
+    ]
+  },
+  "container": {
+    "checked": [
+      "environment",
+      "files",
+      "processes"
+    ],
+    "searchedFor": [
+      "access token",
+      "refresh token",
+      "model token",
+      "api key",
+      "crew token",
+      "harness home"
+    ],
+    "found": []
+  },
+  "requests": [
+    {
+      "route": "chatgpt",
+      "method": "GET",
+      "path": "/models",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "chatgpt",
+      "method": "GET",
+      "path": "/models",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "chatgpt",
+      "method": "POST",
+      "path": "/responses",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "chatgpt",
+      "method": "GET",
+      "path": "/models",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "chatgpt",
+      "method": "POST",
+      "path": "/responses",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "chatgpt",
+      "method": "GET",
+      "path": "/models",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "chatgpt",
+      "method": "POST",
+      "path": "/responses",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "chatgpt",
+      "method": "GET",
+      "path": "/models",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "chatgpt",
+      "method": "POST",
+      "path": "/responses",
+      "status": 200,
+      "credential": "injected by the proxy"
+    }
+  ],
+  "refused": {
+    "turn": {
+      "name": "refused login",
+      "completed": false,
+      "answer": "127.0.0.1:<port>/chatgpt/responses, cf-ray: <id>, request id: <id> ERROR: unexpected status 401 Unauthorized: {\"detail\":\"Could not parse your authentication token. Please try signing in again.\"}, url: http://127.0.0.1:<port>/chatgpt/responses, cf-ray: <id>, request id: <id>"
+    },
+    "vendorStatus": 401,
+    "vendorStatuses": [
+      401
+    ]
+  }
+}
