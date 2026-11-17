@@ -429,3 +429,5 @@ No question waits in a terminal. The result is one text content holding the
 JSON denial, and Claude Code records the action in `permission_denials`.
 The private channel and its authentication are described in
 [architecture.md](architecture.md#claude-code-permission-tool).
+
+CI path evidence.
