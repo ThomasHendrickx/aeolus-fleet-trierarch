@@ -123,9 +123,8 @@ describe('the finish workflow', () => {
 });
 
 describe('the candidate workflow', () => {
-  it('builds and checks the Go binaries for the candidate version', () => {
+  it('leaves Go binary builds to the release workflow', () => {
     const candidate = workflow('../.github/workflows/candidate.yml');
-    expect(candidate).toMatch(/^ {4}uses: \.\/\.github\/workflows\/go-binaries\.yml$/m);
-    expect(candidate).toMatch(/^ {6}version: \$\{\{ inputs\.version \}\}$/m);
+    expect(candidate).not.toContain('go-binaries.yml');
   });
 });
