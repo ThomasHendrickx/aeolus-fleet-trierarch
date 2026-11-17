@@ -486,6 +486,15 @@ describe('Codex fleet calls', () => {
     expect(readFileSync(modelFile, 'utf8')).toBe('gpt-6-astra\n');
   });
 
+  it.each(['startup', 'resume'])('records the Codex model at %s before any fleet command', (source) => {
+    const modelFile = crewed();
+    const hook = runScript('aeolus-session-start.sh', {
+      input: JSON.stringify({ hook_event_name: 'SessionStart', cwd: folder, source, model: 'gpt-6-astra' }),
+    });
+    expect(hook.status).toBe(0);
+    expect(readFileSync(modelFile, 'utf8')).toBe('gpt-6-astra\n');
+  });
+
   it('records nothing for a command that makes no fleet call', () => {
     const modelFile = crewed();
 

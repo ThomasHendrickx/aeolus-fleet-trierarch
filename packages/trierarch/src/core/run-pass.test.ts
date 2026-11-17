@@ -967,6 +967,17 @@ describe('the restart window: a restarted final crew is checked, never held back
     expect(trierarch.fleet.givenBack).toEqual([]);
   });
 
+  it('logs why a restarted session with a live hold is stopped after no activity', async () => {
+    const trierarch = aTrierarch();
+    await aRestartedShip(trierarch, { seen: { kind: 'none' } });
+    trierarch.clock.advance(MINUTE_MS);
+    await trierarch.pass();
+    expect(trierarch.logger.actions).toContainEqual(expect.objectContaining({
+      action: 'report',
+      outcome: 'reported blocked: session crashed, restarting: no activity within a minute of its start',
+    }));
+  });
+
   it('waits out the minute before it counts a failed start', async () => {
     const trierarch = aTrierarch();
     const shipId = await aRestartedShip(trierarch, { seen: { kind: 'none' } });
