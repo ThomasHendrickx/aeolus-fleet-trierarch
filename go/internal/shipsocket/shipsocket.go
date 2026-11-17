@@ -7,8 +7,8 @@
 // included. It answers only a caller the caller check allows, and checks
 // only the path (the ship API, the fleet API and the ship protocol, never
 // register or deregister) and the size: core decides each fleet call by the
-// ship's scopes and reach (decision 0057). It logs one line per call without
-// the body. It queues nothing: when the fleet gives no answer, the session
+// ship's scopes and reach (decision 0057). It logs one line per call, with
+// a refusal's code and reason but no other body fields. It queues nothing: when the fleet gives no answer, the session
 // gets none either.
 package shipsocket
 
@@ -209,7 +209,8 @@ func (s *Sockets) handle(shipID string, w http.ResponseWriter, r *http.Request) 
 		said("403")
 		return
 	}
-	if crewToken := s.options.CrewTokenOf(shipID); crewToken != "" {
+	crewToken := s.options.CrewTokenOf(shipID)
+	if crewToken != "" {
 		call.Header.Set("Authorization", "Bearer "+crewToken)
 	}
 	if contentType := r.Header.Get("Content-Type"); contentType != "" {
@@ -229,13 +230,53 @@ func (s *Sockets) handle(shipID string, w http.ResponseWriter, r *http.Request) 
 	if answer.ContentLength >= 0 {
 		w.Header().Set("Content-Length", strconv.FormatInt(answer.ContentLength, 10))
 	}
+	var from io.Reader = answer.Body
+	if answer.ContentLength >= 0 {
+		// A ship can close as soon as it receives these bytes. Do not wait for
+		// HTTP/2's END_STREAM and mistake that close's cancellation for truncation.
+		from = io.LimitReader(from, answer.ContentLength)
+	}
+	var refusal refusalReason
+	if answer.StatusCode >= http.StatusBadRequest {
+		from = io.TeeReader(from, &refusal)
+	}
 	w.WriteHeader(answer.StatusCode)
-	if err := stream(w, answer.Body); err != nil {
+	if err := stream(w, from); err != nil {
 		// The answer ended before it was whole: close the connection, so the session sees a failed call, not a short answer.
-		said("answer broke off")
+		said(fmt.Sprintf("answer broke off: %v", err))
 		panic(http.ErrAbortHandler)
 	}
-	said(fmt.Sprint(answer.StatusCode))
+	said(fmt.Sprint(answer.StatusCode) + refusal.reason(crewToken))
+}
+
+// refusalReason keeps at most 8 KiB for the fleet's JSON code and message.
+// A proxy's HTML or an oversized refusal is forwarded, never dumped to logs.
+type refusalReason struct {
+	body []byte
+}
+
+const maxRefusalBytes = 8 * 1024
+
+func (r *refusalReason) Write(body []byte) (int, error) {
+	r.body = append(r.body, body[:min(len(body), maxRefusalBytes-len(r.body))]...)
+	return len(body), nil
+}
+
+var refusalCode = regexp.MustCompile(`^[A-Z_]+$`)
+
+func (r *refusalReason) reason(crewToken string) string {
+	var refusal struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(r.body, &refusal) != nil || !refusalCode.MatchString(refusal.Code) || refusal.Message == "" {
+		return ""
+	}
+	if crewToken != "" {
+		refusal.Message = strings.ReplaceAll(refusal.Message, crewToken, "[redacted]")
+	}
+	// Quoting keeps a refusal containing line breaks on one log line.
+	return fmt.Sprintf(" %s %q", refusal.Code, refusal.Message)
 }
 
 // closeWithoutAnswer closes the session's connection with nothing written.

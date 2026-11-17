@@ -215,6 +215,34 @@ func TestANonJSONRefusalLogsOnlyItsStatus(t *testing.T) {
 	}
 }
 
+func TestAFleetRefusalLogIsBoundedWhileItsAnswerIsForwardedWhole(t *testing.T) {
+	for _, size := range []int{8192, 8193} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			const prefix = `{"code":"BAD_REQUEST","message":"send needs model","padding":"`
+			const suffix = `"}`
+			body := prefix + strings.Repeat("x", size-len(prefix)-len(suffix)) + suffix
+			fleet := aFleetAnswering(t, 400, "application/json", body)
+			token := "aeolus_ct_v1_scout"
+			sockets := someSockets(t, fleet.server.URL, &token, false)
+			logged := make(chan string, 1)
+			sockets.options.Log = func(line string) { logged <- line }
+			socket := opened(t, sockets)
+
+			response, got := post(t, socket, "/api/v1/ship/send", `{}`)
+			if response.StatusCode != 400 || got != body {
+				t.Fatalf("answer of %d bytes = %d %q, want unchanged refusal", size, response.StatusCode, got)
+			}
+			want := "fleet call " + scout + " POST /api/v1/ship/send 400"
+			if size == 8192 {
+				want += ` BAD_REQUEST "send needs model"`
+			}
+			if line := <-logged; line != want {
+				t.Fatalf("log of a %d byte refusal = %q, want %q", size, line, want)
+			}
+		})
+	}
+}
+
 func TestEachCallTakesTheCrewTokenOfTheShipAsItIsThen(t *testing.T) {
 	fleet := aFleetAnswering(t, 200, "application/json", `{}`)
 	token := "aeolus_ct_v1_first"
