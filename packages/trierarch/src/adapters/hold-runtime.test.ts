@@ -643,6 +643,30 @@ describe('a Copilot session held by a hold, one copilot -p per turn (CC4)', () =
   });
 });
 
+describe('a starting hold', () => {
+  it('waits for the socket when the PID file exists before its PID is written', async () => {
+    const delayed = `const fs = require('node:fs');
+const net = require('node:net');
+const path = require('node:path');
+const args = process.argv;
+const folder = path.join(args[args.indexOf('--sessions') + 1], args[2]);
+fs.mkdirSync(folder, { recursive: true });
+fs.writeFileSync(path.join(folder, 'hold.pid'), '');
+setTimeout(() => {
+  fs.writeFileSync(path.join(folder, 'hold.pid'), String(process.pid));
+  net.createServer((connection) => {
+    connection.on('data', () => connection.end(JSON.stringify({ isOk: true, state: { status: 'running', version: '${VERSION}' } }) + '\\n'));
+  }).listen(path.join(folder, 'hold.sock'));
+}, 500);`;
+    const runtime = aRuntime({ program: [process.execPath, '-e', delayed] });
+    const shipId = newId('ship');
+
+    await runtime.start({ shipId, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+
+    await expect(runtime.send({ shipId, line: userLine('hello') })).resolves.toBeUndefined();
+  });
+});
+
 describe('why a hold does not start', () => {
   it("says what the starter wrote when it fails, such as systemd-run's own refusal of an option", async () => {
     const runtime = aRuntime({ launch: ['sh', '-c', 'echo "systemd-run: unrecognized option --expand-environment=no" >&2; exit 1', 'sh'] });
