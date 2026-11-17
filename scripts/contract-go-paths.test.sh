@@ -35,4 +35,18 @@ git reset -q --hard "$base"
 rm contract/suite.ts
 git add -A && git commit -qm contract-deleted
 check true
-printf 'contract path gate: docs skip; Go changes and deleted contract files run\n'
+for path in \
+  plugins/aeolus-fleet/scripts/aeolus-turn.sh \
+  packages/trierarch/test/support/fake-codex.ts \
+  .github/actions/test-images/action.yml \
+  .github/workflows/ci.yml \
+  package.json package-lock.json vitest.config.ts tsconfig.json tsconfig.base.json \
+  scripts/support/test-folders.global-setup.ts scripts/support/test-folders.ts \
+  scripts/contract-go-paths.sh; do
+  git reset -q --hard "$base"
+  mkdir -p "$(dirname "$path")"
+  printf 'changed\n' > "$path"
+  git add . && git commit -qm "change $path"
+  check true
+done
+printf 'contract path gate: docs skip; suite inputs run\n'
