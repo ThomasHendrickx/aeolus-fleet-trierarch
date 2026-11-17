@@ -486,6 +486,9 @@ func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reco
 	for _, session := range running {
 		observed.Sessions = append(observed.Sessions, reconciler.Session{ShipID: session.ShipID, Status: session.Status, IsOtherVersion: session.IsOtherVersion})
 		statusOf[session.ShipID] = session.Status
+		if session.Status == reconciler.SessionExited {
+			observed.FailureReasons[session.ShipID] = session.ExitReason
+		}
 	}
 	for _, shipID := range sortedIDs(state.Entries) {
 		entry := state.Entries[shipID]
@@ -506,7 +509,12 @@ func (p Pass) observe(state reconciler.State, running []sessions.Observed) (reco
 			continue
 		}
 		if entry.State == "running" && status == reconciler.SessionExited {
-			observed.FailureReasons[shipID] = harness.FailureReason(entry)
+			if reason := harness.FailureReason(entry); reason != "" {
+				if processReason := observed.FailureReasons[shipID]; processReason != "" {
+					reason = processReason + "; " + reason
+				}
+				observed.FailureReasons[shipID] = reason
+			}
 		}
 		if entry.LaunchedAt != "" && status == reconciler.SessionRunning {
 			launch := harness.LaunchSeen(entry)
@@ -615,6 +623,10 @@ func (p Pass) carryOut(state reconciler.State, action reconciler.Action) (reconc
 	case reconciler.WriteStatus:
 		return state, p.Fleet.WriteStatus(action.ShipID, action.Status.Status, action.Status.Attempt, fleetTime(action.Status.StartedAt))
 	case reconciler.Report:
+		// Keep the cleaned restart evidence even when reporting to the fleet fails or its identity is gone.
+		if strings.HasPrefix(action.Note, "blocked: session crashed") {
+			p.Log(fmt.Sprintf("%s (%s): %s", nameOf(entry), action.ShipID, action.Note))
+		}
 		if !isEntry || entry.CrewToken == "" || entry.Folder == "" {
 			return state, nil
 		}

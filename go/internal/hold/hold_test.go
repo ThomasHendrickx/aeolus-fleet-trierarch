@@ -295,3 +295,24 @@ func TestAHoldToldToHandASecretVariableItsFolderDoesNotKeepStartsNothing(t *test
 		t.Fatal("the hold says a pid, want it never started")
 	}
 }
+
+func TestKeepsTheHarnessExitReasonWithoutAnErrorEvent(t *testing.T) {
+	for _, test := range []struct{ name, script, want string }{
+		{"status", "sleep 0.2; exit 2", "session process exited with code 2"},
+		{"signal", "sleep 0.2; kill -KILL $$", "session process ended: signal: killed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			hold := aHold(t, test.script)
+			select {
+			case code := <-hold.ended:
+				hold.ended <- code
+			case <-time.After(5 * time.Second):
+				t.Fatal("hold did not end")
+			}
+			text, err := os.ReadFile(filepath.Join(hold.files.Folder, "exit-reason"))
+			if err != nil || string(text) != test.want {
+				t.Fatalf("exit reason = %q, %v, want %q", text, err, test.want)
+			}
+		})
+	}
+}

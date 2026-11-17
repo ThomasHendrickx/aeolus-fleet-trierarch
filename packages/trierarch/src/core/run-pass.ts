@@ -392,7 +392,8 @@ async function observe(state: TrierarchState, at: { deps: RunPassDeps; missingPl
     const harness = missingPlugins.has(entry.harness) ? undefined : harnessOf(entry, deps);
     if (entry.state === 'running' && session?.status === 'exited' && folder !== undefined && harness !== undefined) {
       const reason = await harness.failureReason(sessionOf(entry, folder));
-      if (reason !== undefined) failureReasons[entry.shipId] = reason;
+      const evidence = [session.exitReason, reason].filter((each) => each !== undefined && each !== '').join('; ');
+      if (evidence !== '') failureReasons[entry.shipId] = evidence;
     }
     // A crewing session's launch window (#382), and a final crew's first minute after a restart (#397).
     const { launchId } = entry;

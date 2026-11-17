@@ -231,18 +231,30 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
 
     await runtime.send({ shipId, line: userLine('/aeolus-fleet:wake') });
 
-    await expect.poll(async () => runtime.list()).toEqual([{ shipId, status: 'exited' }]);
+    await expect.poll(async () => runtime.list()).toEqual([expect.objectContaining({ shipId, status: 'exited' })]);
     await expect(eventsOfType({ runtime: runtime, shipId: shipId }, 'result')).resolves.toEqual([expect.objectContaining({ is_error: true, result: 'Not logged in · Please run /login' })]);
   });
 
-  it('sees the session exited when its hold dies', async () => {
+  it.each([
+    { name: 'status', script: 'sleep 0.2; exit 2', reason: 'session process exited with code 2' },
+    { name: 'signal', script: 'sleep 0.2; kill -KILL $$', reason: 'session process ended: signal: SIGKILL' },
+  ])('keeps the process $name without a harness error event across a trierarch restart', async ({ script, reason }) => {
+    const runtime = aRuntime();
+    const shipId = newId('ship');
+    await runtime.start({ shipId, folder, command: ['sh', '-c', script], harness: 'claude-code' });
+
+    const restarted = aRuntime();
+    await expect.poll(() => restarted.list(), { timeout: 2000 }).toEqual([{ shipId, status: 'exited', exitReason: reason }]);
+  });
+
+  it('says the exit reason is unknown when its hold dies without a record', async () => {
     const runtime = aRuntime();
     const shipId = await aClaudeCodeSession(runtime);
     const hold = await runtime.sessionRootOf(shipId);
 
     process.kill(hold ?? 0, 'SIGKILL');
 
-    await expect.poll(async () => runtime.list()).toEqual([{ shipId, status: 'exited' }]);
+    await expect.poll(async () => runtime.list(), { timeout: 2000 }).toEqual([{ shipId, status: 'exited', exitReason: 'session hold ended without an exit record' }]);
   });
 
   it('ends the harness, and every process it started, when its hold dies abruptly (H8)', async () => {
@@ -606,7 +618,7 @@ describe('a Copilot session held by a hold, one copilot -p per turn (CC4)', () =
     const runtime = aRuntime();
     const shipId = await aCopilotSession(runtime, { flags: ['--fail-model-call'] });
 
-    await expect.poll(async () => runtime.list()).toEqual([{ shipId, status: 'exited' }]);
+    await expect.poll(async () => runtime.list()).toEqual([expect.objectContaining({ shipId, status: 'exited' })]);
     await expect(eventsOfType({ runtime, shipId }, 'session.error')).resolves.toHaveLength(1);
   });
 
@@ -614,7 +626,7 @@ describe('a Copilot session held by a hold, one copilot -p per turn (CC4)', () =
     const runtime = aRuntime();
     const shipId = await aCopilotSession(runtime, { flags: ['--refuse-model'] });
 
-    await expect.poll(async () => runtime.list()).toEqual([{ shipId, status: 'exited' }]);
+    await expect.poll(async () => runtime.list()).toEqual([expect.objectContaining({ shipId, status: 'exited' })]);
     await expect(eventsOfType({ runtime, shipId }, 'aeolus.stderr')).resolves.toEqual([{ type: 'aeolus.stderr', line: 'Error: Model "no-such-model" from --model flag is not available.' }]);
   });
 
