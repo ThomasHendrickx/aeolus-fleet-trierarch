@@ -37,9 +37,21 @@ afterEach(async ({ task }) => {
   }
   // A folder a test's session made read-only is made writable again so the machine can go; a workspace that goes meanwhile is no matter.
   spawnSync('chmod', ['-R', 'u+w', machine.trierarchHome]);
-  await machine.remove();
-  await fleet.close();
+  try {
+    try {
+      await machine.remove();
+    } finally {
+      await fleet.close();
+    }
+  } finally {
+    for (const folder of upstreamFolders.splice(0)) {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  }
 });
+
+/** The folders of the upstreams a test made, removed after it, also when it fails. */
+const upstreamFolders: string[] = [];
 
 const configFile = (): string => join(machine.trierarchHome, 'config.json');
 const modelTokenFile = (): string => join(machine.trierarchHome, 'model-token');
@@ -322,7 +334,9 @@ describe("a ship's clone in containers", () => {
 
   /** An upstream the machine's repository has as its origin, fetched: its URL. */
   function anUpstream(): string {
-    const upstream = join(mkdtempSync(join(tmpdir(), 'trierarch-upstream-')), 'upstream.git');
+    const folder = mkdtempSync(join(tmpdir(), 'trierarch-upstream-'));
+    upstreamFolders.push(folder);
+    const upstream = join(folder, 'upstream.git');
     execFileSync('git', ['clone', '-q', '--bare', machine.repository, upstream]);
     git(machine.repository, 'remote', 'add', 'origin', upstream);
     git(machine.repository, 'fetch', '-q', 'origin');

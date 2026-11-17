@@ -70,6 +70,13 @@ async function withFiveRestarts(shipId: ShipId, change: (entry: SavedEntry) => v
   await machine.trierarch(['start']);
 }
 
+/** The notice without its line naming the last failure, after checking that it holds one: the process's own words vary, its presence does not. */
+function withoutLastFailure(text: string): string {
+  const lines = text.split('\n');
+  expect(lines.filter((line) => line.startsWith('- Its last failure: '))).toHaveLength(1);
+  return lines.filter((line) => !line.startsWith('- Its last failure: ')).join('\n');
+}
+
 /** The ship's session ended, as a crash ends it. */
 function crash(shipName: string): void {
   process.kill(sessionOf(machine, shipName).starts().at(-1)?.pid ?? 0, 'SIGKILL');
@@ -123,7 +130,10 @@ describe('a session crashed', () => {
 
     crash('scout');
 
-    await expect(told(1)).resolves.toEqual([{ to: 'argo', text: crashedAfterSix(scout, { tail: 'Restart it in the console to crew it again.' }) }]);
+    const [notice] = await told(1);
+
+    expect(notice?.to).toBe('argo');
+    expect(withoutLastFailure(notice?.text ?? '')).toBe(crashedAfterSix(scout, { tail: 'Restart it in the console to crew it again.' }));
     await wait(ANOTHER_PASSES_MS);
     await expect(fleet.toldByTrierarch()).resolves.toHaveLength(1);
   });
@@ -137,7 +147,10 @@ describe('a session crashed', () => {
 
     crash('scout');
 
-    await expect(told(1)).resolves.toEqual([{ to: 'thomas', text: crashedAfterSix(scout, { tail: 'argo can restart it in the console.' }) }]);
+    const [notice] = await told(1);
+
+    expect(notice?.to).toBe('thomas');
+    expect(withoutLastFailure(notice?.text ?? '')).toBe(crashedAfterSix(scout, { tail: 'argo can restart it in the console.' }));
     await wait(ANOTHER_PASSES_MS);
     await expect(fleet.toldByTrierarch()).resolves.toHaveLength(1);
   });
@@ -152,9 +165,12 @@ describe('a session crashed', () => {
 
     crash('scout');
 
-    await expect(told(1)).resolves.toEqual([
-      { to: 'argo', text: crashedAfterSix(scout, { tail: 'Restart it in the console to crew it again.\n\nIts owner thomas could not be reached: FORBIDDEN: The network rules do not allow this send.' }) },
-    ]);
+    const [notice] = await told(1);
+
+    expect(notice?.to).toBe('argo');
+    expect(withoutLastFailure(notice?.text ?? '')).toBe(
+      crashedAfterSix(scout, { tail: 'Restart it in the console to crew it again.\n\nIts owner thomas could not be reached: FORBIDDEN: The network rules do not allow this send.' }),
+    );
   });
 
   it('names why its last start failed, when the model it started with was refused', async () => {

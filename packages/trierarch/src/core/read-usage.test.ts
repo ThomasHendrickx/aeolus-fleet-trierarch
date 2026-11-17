@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { aTrierarch, newId, WORKTREE_ROOT, type Trierarch, inRepositories } from '../../test/support/in-memory.js';
+import { aTrierarch, CONFIGURATION, newId, WORKTREE_ROOT, type Trierarch, inRepositories } from '../../test/support/in-memory.js';
 import { putEntry, type Entry } from './entry.js';
 
 const MINUTE_MS = 60_000;
+const WITH_CODEX = { ...CONFIGURATION, harnesses: { ...CONFIGURATION.harnesses, codex: { flags: [], options: {} } } };
 
 /** An entry crewing the ship in its worktree, its session running. */
 function aCrewedEntry(at: { isWorkspaceMade?: boolean } = {}): Entry {
@@ -147,6 +148,77 @@ describe("the harnesses' usage, as the trierarch reads it (#353)", () => {
     trierarch.clock.advance(3 * 60 * MINUTE_MS);
 
     expect((await trierarch.readUsage()).subscriptions[0]?.windows[0]?.usedPercent).toBe(3);
+  });
+
+  it("reads a harness's subscription again once a window's reset time passed, though no session did work and none runs (#117)", async () => {
+    const trierarch = aTrierarch();
+    trierarch.usage.subscriptions.set('claude-code', [FIVE_HOURS]);
+    await trierarch.readUsage();
+    trierarch.usage.subscriptions.set('claude-code', [{ ...FIVE_HOURS, usedPercent: 0, resetsAt: new Date('2026-10-06T17:00:00.000Z') }]);
+
+    trierarch.clock.advance(FIVE_HOURS.resetsAt.getTime() - trierarch.clock.now().getTime() - 1);
+    const beforeReset = await trierarch.readUsage();
+    trierarch.clock.advance(1);
+    const atReset = await trierarch.readUsage();
+
+    expect([beforeReset, atReset].map((usage) => usage.subscriptions[0]?.windows[0]?.usedPercent)).toEqual([3, 0]);
+    expect(atReset.subscriptions[0]?.readAt).toBe(FIVE_HOURS.resetsAt.toISOString());
+  });
+
+  it("reads a subscription that still says a reset time passed once per 5 minutes, not on every pass, and reports it as reset meanwhile", async () => {
+    const trierarch = aTrierarch();
+    trierarch.usage.subscriptions.set('claude-code', [FIVE_HOURS]);
+    await trierarch.readUsage();
+    trierarch.clock.advance(FIVE_HOURS.resetsAt.getTime() - trierarch.clock.now().getTime());
+    await trierarch.readUsage();
+    trierarch.usage.subscriptions.set('claude-code', [{ ...FIVE_HOURS, usedPercent: 40 }]);
+
+    trierarch.clock.advance(MINUTE_MS);
+
+    expect((await trierarch.readUsage()).subscriptions[0]?.windows[0]?.usedPercent).toBe(0);
+  });
+
+  it("reports a window of a harness whose limits come only from its newest session log as reset once its reset time passed, never as freshly read from the old log (#117)", async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    trierarch.usage.subscriptions.set('codex', [FIVE_HOURS]);
+    const first = await trierarch.readUsage();
+    trierarch.clock.advance(FIVE_HOURS.resetsAt.getTime() - trierarch.clock.now().getTime() + MINUTE_MS);
+
+    const afterReset = await trierarch.readUsage();
+
+    expect(afterReset.subscriptions[0]?.windows[0]?.usedPercent).toBe(0);
+    expect(afterReset.subscriptions[0]?.readAt).toBe(first.subscriptions[0]?.readAt);
+  });
+
+  it("reads a new session log of that harness once one is written after the reset, within 5 minutes", async () => {
+    const trierarch = aTrierarch(WITH_CODEX);
+    trierarch.usage.subscriptions.set('codex', [FIVE_HOURS]);
+    await trierarch.readUsage();
+    trierarch.clock.advance(FIVE_HOURS.resetsAt.getTime() - trierarch.clock.now().getTime() + MINUTE_MS);
+    await trierarch.readUsage();
+    trierarch.usage.subscriptions.set('codex', [{ ...FIVE_HOURS, usedPercent: 7, resetsAt: new Date('2026-10-06T17:00:00.000Z') }]);
+
+    trierarch.clock.advance(5 * MINUTE_MS);
+
+    expect((await trierarch.readUsage()).subscriptions[0]?.windows[0]?.usedPercent).toBe(7);
+  });
+
+  it("tries a read that fails past a reset again only after 5 minutes", async () => {
+    const trierarch = aTrierarch();
+    trierarch.usage.subscriptions.set('claude-code', [FIVE_HOURS]);
+    await trierarch.readUsage();
+    trierarch.usage.unreadableSubscriptions.add('claude-code');
+    trierarch.clock.advance(FIVE_HOURS.resetsAt.getTime() - trierarch.clock.now().getTime());
+    await trierarch.readUsage();
+    const triesAfterFirstFailure = trierarch.usage.subscriptionTries.get('claude-code');
+
+    trierarch.clock.advance(5 * MINUTE_MS - 1);
+    await trierarch.readUsage();
+    const triesJustBefore = trierarch.usage.subscriptionTries.get('claude-code');
+    trierarch.clock.advance(1);
+    await trierarch.readUsage();
+
+    expect([triesAfterFirstFailure, triesJustBefore, trierarch.usage.subscriptionTries.get('claude-code')]).toEqual([2, 2, 3]);
   });
 
   it('splits each model\'s tokens per login, each counted to the login of the session that used them, with its own cost (api keys K8)', async () => {

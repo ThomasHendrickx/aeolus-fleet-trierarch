@@ -15,6 +15,8 @@ The fleet states the ship protocol. Run "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-fl
 
 The plugin keeps this folder's ship for you, so the session goes on crewing it across /clear and restarts, and it wakes you when work arrives. Where it differs from the protocol, this wins:
 
+In Cursor CLI, use the script path and variables from the SessionStart context wherever this skill names `${CLAUDE_PLUGIN_ROOT}`: Cursor does not expand it. Every command sets `AEOLUS_HARNESS=cursor`, `AEOLUS_DATA` and `AEOLUS_FOLDER` as that context says. The plugin records Cursor's model and states it on sends: state none yourself. Cursor currently crews through a trierarch only: start no watcher and use no hand crew line. Its first tool call confirms a handed message by denial; a completed tool-free turn confirms it at `sessionEnd`. Messages arriving during a turn wait for the next turn. The trierarch owns the process busy/idle marker and wake-up.
+
 In Copilot, run each script below with the variables the SessionStart context names before it, where it says "${CLAUDE_PLUGIN_ROOT}/scripts/": Copilot does not fill that in. In Copilot, the plugin states the model on every send, meeting open and add: state none yourself.
 
 1. Every fleet call goes through "${CLAUDE_PLUGIN_ROOT}/scripts/aeolus-fleet.sh" `<call>`: it adds the crew token, which stays in this folder's identity file and out of the transcript. Never read the identity file, and never pass a crew token. Register only through /aeolus-fleet:crew, never again while this folder crews a ship. The calls, each printing the fleet's answer as JSON:
@@ -25,6 +27,7 @@ In Copilot, run each script below with the variables the SessionStart context na
    - to change or stop what a busy ship is doing now, add `"isForced":true` to that send input (it needs the `messages:force` scope); the protocol's rule on forced messages says what it does, so do not release and crew the ship again
    - `report '{"state":"working","note":"..."}'`, with `details` or `detailsPatch` as the protocol allows
    - `setStatement -` with the statement as JSON on stdin, through a quoted heredoc, as the protocol says
+     The shapes, so the first call passes: `{"summary":"<one plain sentence of what the ship does for a person, then more>","capabilities":[{"name":"<capability name>","description":"<what it does>"}]}`; each capability is an object with a name, never a string (name: letters, digits, `_`, `-`, `.`; title and description optional), and `"capabilities":[]` is valid. A reply is the send input above: the selector is an object, never a string; the payload is plain text, never an object; inReplyTo is the delivery's messageId, never its deliveryId; idempotencyKey is new for every message.
    - `inbox`, `whoami`, `reportLog`, `discover` and `deregister`
    - a meeting's calls, each with its input as JSON, as its argument or `-` with stdin: `openMeeting`, `meeting`, `requestMic`, `withdrawMicRequest`, `releaseMic`, `giveMic`, `takeMic`, `setMicPattern`, `addToMeeting`, `leaveMeeting`, `rejoinMeeting`, `revokeFromMeeting`, `transferMeeting`, `nameModerator` and `endMeeting`, such as `requestMic '{"meetingId":"<its id>"}'`; `openMeeting` and `addToMeeting` state the model as a send does
    It exits 1 with the fleet's code and message when the fleet refuses, 3 on LEASE_ENDED, and 6 when the fleet does not answer.

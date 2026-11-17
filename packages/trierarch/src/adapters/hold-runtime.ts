@@ -92,12 +92,16 @@ export function createHoldRuntime(options: {
   const bootedAt = options.bootedAt ?? (() => new Date(Date.now() - uptime() * 1000));
   const filesOf = (shipId: ShipId) => holdFilesOf(sessions, shipId);
 
+  /** The hold's complete pid, once it has been written. */
+  const pidOf = async (shipId: ShipId): Promise<number | undefined> => {
+    const pid = Number(await readFile(filesOf(shipId).pid, 'utf8').catch(() => ''));
+    return Number.isInteger(pid) && pid > 1 ? pid : undefined;
+  };
+
   /** The hold's pid, while its process runs. */
   const runningPid = async (shipId: ShipId): Promise<number | undefined> => {
-    const pid = Number(await readFile(filesOf(shipId).pid, 'utf8').catch(() => ''));
-    if (!Number.isInteger(pid) || pid <= 1) {
-      return undefined;
-    }
+    const pid = await pidOf(shipId);
+    if (pid === undefined) return undefined;
     try {
       process.kill(pid, 0);
       return pid;
@@ -114,7 +118,8 @@ export function createHoldRuntime(options: {
     }
     const answer = await callHold({ socket: files.socket, request: { call: 'state' }, timeoutMs: CALL_TIMEOUT_MS }).catch(() => undefined);
     if (answer?.isOk !== true || answer.state === undefined) {
-      return { shipId, status: 'exited' };
+      const reason = await readFile(files.exitReason, 'utf8').catch(() => '');
+      return { shipId, status: 'exited', exitReason: reason || 'session hold ended without an exit record' };
     }
     return { shipId, status: 'running', ...(answer.state.version !== version && { isOtherVersion: true }) };
   };
@@ -192,9 +197,15 @@ export function createHoldRuntime(options: {
         if (lastAnswer?.isOk === true) {
           return;
         }
-        // A hold whose harness ended at once has ended too: its exit is seen in the next list.
-        if ((await stat(files.pid).catch(() => undefined)) !== undefined && (await runningPid(shipId)) === undefined) {
-          return;
+        // A complete pid whose process ended leaves the exit for the next list.
+        // An empty pid file can still be in the middle of being written.
+        const pid = await pidOf(shipId);
+        if (pid !== undefined) {
+          try {
+            process.kill(pid, 0);
+          } catch (error) {
+            if (error instanceof Error && 'code' in error && error.code === 'ESRCH') return;
+          }
         }
         await wait(START_POLL_MS);
       }

@@ -62,9 +62,9 @@ func TestInitSaysWhatEachHarnessOffersAsDetectedOncePerHarnessVersion(t *testing
 	found := &someDetection{}
 	machine.Detect = found.detect
 
-	output, code := Main(setupWords(), machine)
+	output, code := Main(append(setupWords(), "--json"), machine)
 
-	line := regexp.MustCompile(`(?m)^  ✓ Claude Code {3}2\.1\.306, signed in, aeolus-fleet plugin \S+, (asks before each command|runs without permission questions)$`)
+	line := regexp.MustCompile(`"detail": "2\.1\.306, signed in, aeolus-fleet plugin \S+, (asks before each command|runs without permission questions)"`)
 	if code != 0 || !line.MatchString(output) {
 		t.Errorf("init said %q, %d, want a line of version, sign-in, plugin and permission mode", output, code)
 	}

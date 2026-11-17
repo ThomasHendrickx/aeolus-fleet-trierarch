@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 
@@ -22,7 +22,7 @@ let machine: Machine;
 
 beforeEach(async () => {
   fleet = await aFleet();
-  machine = await aMachine();
+  machine = await aMachine({ shouldDiagnoseHolds: true });
   await aCrewingMachine({ fleet, machine });
   // Every session refuses the model its harness picked: a failed start of the machine's, never of one ship's settings.
   machine.refuseModel('claude-opus-5');
@@ -31,6 +31,8 @@ beforeEach(async () => {
 afterEach(async ({ task }) => {
   if (task.result?.state === 'fail') {
     console.log(`The service's log:\n${machine.serviceLog()}`);
+    const lifecycle = join(machine.trierarchHome, 'hold-diagnostics.jsonl');
+    console.log(`The holds' lifecycle:\n${existsSync(lifecycle) ? readFileSync(lifecycle, 'utf8') : 'No hold started.'}`);
   }
   await machine.remove();
   await fleet.close();

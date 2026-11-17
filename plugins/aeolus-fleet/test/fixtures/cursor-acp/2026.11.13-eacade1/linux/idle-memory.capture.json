@@ -1,0 +1,7 @@
+{
+  "idleSeconds": 5,
+  "rootRssKiB": 223048,
+  "treeRssKiB": 591360,
+  "processCount": 5,
+  "measurement": "Linux /proc VmRSS; sum includes shared pages"
+}

@@ -1,0 +1,911 @@
+{
+  "harness": "cursor",
+  "harnessVersion": "2026.11.13-eacade1",
+  "image": "aeolus-session:0.40.0",
+  "runtime": "podman 4.9.3 rootless on linux/amd64; pasta forwarding the proxy port alone, then no network but the proxy's socket",
+  "road": "proxy",
+  "turns": [
+    {
+      "name": "first",
+      "completed": true,
+      "answer": "PONG"
+    },
+    {
+      "name": "second",
+      "completed": true,
+      "answer": "PONG"
+    },
+    {
+      "name": "no network but the proxy",
+      "completed": true,
+      "answer": "PONG"
+    }
+  ],
+  "hostLogin": {
+    "renewal": "only by signing in again",
+    "evidence": "Cursor CLI 2026.11.13-eacade1 renews an access only with an API key (`auth-refresh.ts`: `loginWithApiKey`, once `exp` is within 300 seconds); the host's access read on 16 Nov ends in about 60 days, then needs `agent login` on the host. The proxy reads the host login at every request, so the container needs nothing when it is signed in again."
+  },
+  "container": {
+    "checked": [
+      "environment",
+      "files",
+      "processes"
+    ],
+    "searchedFor": [
+      "access token",
+      "refresh token",
+      "model token",
+      "api key",
+      "crew token",
+      "harness home"
+    ],
+    "found": []
+  },
+  "requests": [
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetMe",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetMe",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetUserPrivacyMode",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetMe",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetUserPrivacyMode",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/<id>",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetUserPrivacyMode",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetUserPrivacyMode",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetUserPrivacyMode",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/<id>",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.ServerConfigService/GetServerConfig",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/ListMarketplaces",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetEffectiveUserPlugins",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/<id>",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetManagedSkills",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AiService/GetUsableModels",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AiService/AvailableModels",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AnalyticsService/TrackEvents",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetCliDownloadUrl",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AiService/GetDefaultModelForCli",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetMe",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetGlobalCommands",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.ServerConfigService/GetServerConfig",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetUserPrivacyMode",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AnalyticsService/SubmitLogs",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/v1/traces",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AnalyticsService/SubmitLogs",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetUserPrivacyMode",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/agent.v1.AgentService/RunSSE",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AnalyticsService/TrackEvents",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AnalyticsService/TrackEvents",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AnalyticsService/SubmitLogs",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AnalyticsService/TrackEvents",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/<id>",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/<id>",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/ListMarketplaces",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.ServerConfigService/GetServerConfig",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetEffectiveUserPlugins",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/<id>",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetManagedSkills",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetMe",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AiService/AvailableModels",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AiService/GetDefaultModelForCli",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AiService/GetUsableModels",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetUserPrivacyMode",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetMe",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetGlobalCommands",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AnalyticsService/TrackEvents",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetCliDownloadUrl",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AnalyticsService/SubmitLogs",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AnalyticsService/TrackEvents",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AnalyticsService/SubmitLogs",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/agent.v1.AgentService/RunSSE",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/v1/traces",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AnalyticsService/SubmitLogs",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetMe",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetMe",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetUserPrivacyMode",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetMe",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/<id>",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetUserPrivacyMode",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.ServerConfigService/GetServerConfig",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/ListMarketplaces",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetUserPrivacyMode",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/<id>",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetUserPrivacyMode",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetUserPrivacyMode",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/<id>",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetEffectiveUserPlugins",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetUserPrivacyMode",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetManagedSkills",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AiService/AvailableModels",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AiService/GetDefaultModelForCli",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AiService/GetUsableModels",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetMe",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetGlobalCommands",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AnalyticsService/TrackEvents",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetUserPrivacyMode",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.ServerConfigService/GetServerConfig",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AnalyticsService/SubmitLogs",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AnalyticsService/TrackEvents",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetCliDownloadUrl",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.DashboardService/GetUserPrivacyMode",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AnalyticsService/SubmitLogs",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.BidiService/BidiAppend",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/agent.v1.AgentService/RunSSE",
+      "status": 200,
+      "credential": "injected by the proxy"
+    },
+    {
+      "route": "cursor",
+      "method": "POST",
+      "path": "/aiserver.v1.AnalyticsService/SubmitLogs",
+      "status": 200,
+      "credential": "injected by the proxy"
+    }
+  ],
+  "refused": {
+    "turn": {
+      "name": "refused login",
+      "completed": false,
+      "answer": "Your stored authentication is invalid. Please log in again. Please run 'agent login' to authenticate."
+    },
+    "vendorStatus": 401,
+    "vendorStatuses": [
+      401
+    ]
+  }
+}

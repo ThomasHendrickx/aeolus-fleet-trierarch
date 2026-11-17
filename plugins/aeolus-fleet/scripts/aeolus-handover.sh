@@ -23,4 +23,8 @@ identity_text="$(aeolus_identity_read "$identity")" || exit 0
 root="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 denied='aeolus: this tool call did not run: a message came in first. Read it, then go on, and make the call again if you still need it.'
 text="$(aeolus_put_into_turn "$identity" "$(aeolus_identity_field "$identity_text" shipName)" "$root" "${denied}"$'\n\n')" || exit 0
+if [ "${AEOLUS_HARNESS:-}" = cursor ]; then
+  printf '{"permission":"deny","user_message":"%s","agent_message":"%s"}\n' "$(aeolus_json_escape "${text%x}")" "$(aeolus_json_escape "${text%x}")"
+  exit 0
+fi
 printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "$(aeolus_json_escape "${text%x}")"

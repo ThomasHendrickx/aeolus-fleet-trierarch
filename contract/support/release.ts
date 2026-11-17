@@ -56,14 +56,23 @@ export async function aReleaseSource(build: ReleaseBuild, at: { binary?: Buffer;
   const folder = mkdtempSync(join(tmpdir(), 'trierarch-contract-github-'));
   const binary = at.binary ?? readFileSync(build.binary);
   writeFileSync(join(folder, ASSET), binary, { mode: 0o755 });
-  execFileSync(build.signer, [folder, join(folder, ASSET)]);
-  const bundle = readFileSync(join(folder, `${ASSET}.bundle.json`), 'utf8');
-  if (at.fault === 'bad attestation') {
-    // Signed as the release workflow signs, by a Sigstore the trierarch is not told to trust.
-    const other = mkdtempSync(join(tmpdir(), 'trierarch-contract-other-sigstore-'));
-    execFileSync(build.signer, [other]);
-    copyFileSync(join(other, 'trusted_root.json'), join(folder, 'trusted_root.json'));
-    rmSync(other, { recursive: true, force: true });
+  let bundle: string;
+  try {
+    execFileSync(build.signer, [folder, join(folder, ASSET)]);
+    bundle = readFileSync(join(folder, `${ASSET}.bundle.json`), 'utf8');
+    if (at.fault === 'bad attestation') {
+      // Signed as the release workflow signs, by a Sigstore the trierarch is not told to trust.
+      const other = mkdtempSync(join(tmpdir(), 'trierarch-contract-other-sigstore-'));
+      try {
+        execFileSync(build.signer, [other]);
+        copyFileSync(join(other, 'trusted_root.json'), join(folder, 'trusted_root.json'));
+      } finally {
+        rmSync(other, { recursive: true, force: true });
+      }
+    }
+  } catch (error) {
+    rmSync(folder, { recursive: true, force: true });
+    throw error;
   }
   const digest = createHash('sha256').update(binary).digest('hex');
   const named = at.fault === 'bad checksum' ? createHash('sha256').update('another binary').digest('hex') : digest;

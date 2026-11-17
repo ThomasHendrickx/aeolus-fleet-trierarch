@@ -1,0 +1,138 @@
+{
+  "build": "2026.11.13-eacade1",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "osVersion": "26.2",
+  "protocolVersion": 1,
+  "command": [
+    "agent",
+    "acp"
+  ],
+  "capturedAt": "2026-11-16",
+  "eligible": false,
+  "blockers": [
+    "User HOME/.cursor/mcp.json server starts after session/new with mcpServers=[].",
+    "allow-always writes a command allowlist that survives a new session and process.",
+    "A background shell can remain running after session/prompt returns end_turn."
+  ],
+  "unproven": [
+    "genuine-expired-login",
+    "initialized-backend-failed-turn"
+  ],
+  "results": {
+    "live-model-isolation": {
+      "status": "proven",
+      "fixture": "model-isolation.jsonl",
+      "method": "Two live ACP processes; B configOptions model observed before/after changing A, and after a tool-free B prompt. No model identity self-report."
+    },
+    "session-new-model": {
+      "status": "ignored",
+      "fixture": "lifecycle.jsonl",
+      "method": "Extra modelId=gpt-5.4-mini returned currentModelId=composer-2.5; explicit set_model succeeded."
+    },
+    "kill-and-load": {
+      "status": "proven",
+      "fixture": "lifecycle.jsonl",
+      "method": "SIGKILL only the owned ACP PID while its prompt and permission were pending; another process session/load and prompt succeeded."
+    },
+    "missing-session": {
+      "status": "proven",
+      "fixture": "lifecycle.jsonl",
+      "method": "Missing session/load id returns -32602; missing session/prompt id returns -32603."
+    },
+    "failed-turn": {
+      "status": "unproven",
+      "fixture": "lifecycle.jsonl",
+      "method": "Shell exit 7 and invalid image both still returned end_turn. An invalid-session RPC error does not prove an initialized backend turn failure."
+    },
+    "permission-hold": {
+      "status": "proven",
+      "fixture": "permission-hold.jsonl",
+      "method": "Real shell permission held for 1801 seconds; reject-once response after the hold. See elapsedMs for actual timing.",
+      "heldMilliseconds": 1801162
+    },
+    "allow-always": {
+      "status": "persistent",
+      "fixture": "configuration.jsonl",
+      "method": "Actual allow-always response; one permission first prompt, none in subsequent same-session, new-session and new-process prompts. Isolated cli-config.json permissions contains Shell(python3)."
+    },
+    "user-mcp-exclusion": {
+      "status": "failed",
+      "fixture": "configuration.jsonl",
+      "method": "Distinct stdio server process markers for HOME/.cursor, XDG config and project .cursor paths. Only HOME/.cursor starts after session/new with an empty server list. An explicitly supplied MCP server is a separate positive control."
+    },
+    "missing-login": {
+      "status": "proven",
+      "fixture": "configuration.jsonl",
+      "method": "Clean environment, isolated HOME and AGENT_CLI_CREDENTIAL_STORE=file; new returns -32000 Authentication required."
+    },
+    "expired-login": {
+      "status": "unproven",
+      "fixture": "configuration.jsonl",
+      "method": "Synthetic expired credentials in isolated file storage are rejected. No genuine expired machine login was available; real auth was not changed."
+    },
+    "idle-memory": {
+      "status": "measured",
+      "fixture": "lifecycle.jsonl",
+      "kilobytes": 105952,
+      "scope": "ps RSS of owned agent acp PID only, excludes children, after completed prompts and a shell failure",
+      "tree": {
+        "event": "idle-tree-rss",
+        "parentKilobytes": 73632,
+        "treeKilobytes": 73632,
+        "processCount": 1,
+        "scope": "owned agent acp PID and descendants after a completed tool-free prompt and three idle seconds",
+        "caveat": "RSS sums shared pages more than once; not proportional set size"
+      }
+    },
+    "workspace-trust": {
+      "status": "observed",
+      "fixture": "configuration.jsonl",
+      "method": "Fresh workspace and isolated config; read marker.txt completed with no client trust method or permission request. This records observed ACP behavior, not a guarantee about other workspace types."
+    },
+    "background-shell": {
+      "status": "failed-busy-invariant",
+      "fixture": "configuration.jsonl",
+      "method": "A 25-second shell exceeded foreground timeout, returned initial stdout and terminal path; final terminal read had end marker and exit_code 0 before prompt returned end_turn.",
+      "earlyFixture": "background-early.jsonl",
+      "earlyMethod": "sleep 12; printf ACP_BG_DONE > background.done, requested 1000ms foreground timeout and immediate response. end_turn at 11418ms; marker absent then and present later."
+    }
+  },
+  "format": {
+    "wire": "JSONL process, direction=sent|received, elapsedMs, message=full JSON-RPC",
+    "observations": "direction=observation contains process, marker, configuration or RSS observations, never an ACP response",
+    "timing": "elapsedMs is monotonic since the individual capture program started; compare within one process/probe, not across programs"
+  },
+  "privacy": {
+    "replacements": [
+      "session identifiers",
+      "home and workspace paths, including encoded workspace names",
+      "email addresses",
+      "credential and profile fields"
+    ],
+    "configuration": "Only permission allow/deny and ACP model selection fields retained. No credential file contents captured."
+  },
+  "isolation": {
+    "credentials": "Native machine login for normal captures; isolated file store for missing/synthetic-expired cases. Private-home MCP probe links Library/Keychains to machine Keychains so Cursor can use native login; no keychain contents are read by the capture program.",
+    "configuration": "MCP and allow-always tests write only private probe folders. Model selection restored through session/set_model. Shared login and user MCP configuration are not changed."
+  },
+  "reproduce": {
+    "from": "repository root after npm ci --ignore-scripts",
+    "output": "Set ACP_PROBE_OUTPUT to an empty directory. Each program appends to its trace file.",
+    "commands": [
+      "python3 plugins/aeolus-fleet/test/fixtures/cursor-acp/2026.11.13-eacade1/macos/capture/probe.py models",
+      "python3 plugins/aeolus-fleet/test/fixtures/cursor-acp/2026.11.13-eacade1/macos/capture/probe.py hold",
+      "python3 plugins/aeolus-fleet/test/fixtures/cursor-acp/2026.11.13-eacade1/macos/capture/lifecycle.py",
+      "python3 plugins/aeolus-fleet/test/fixtures/cursor-acp/2026.11.13-eacade1/macos/capture/configuration.py",
+      "python3 plugins/aeolus-fleet/test/fixtures/cursor-acp/2026.11.13-eacade1/macos/capture/mcp.py",
+      "python3 plugins/aeolus-fleet/test/fixtures/cursor-acp/2026.11.13-eacade1/macos/capture/mcp-home.py",
+      "python3 plugins/aeolus-fleet/test/fixtures/cursor-acp/2026.11.13-eacade1/macos/capture/permissions.py",
+      "python3 plugins/aeolus-fleet/test/fixtures/cursor-acp/2026.11.13-eacade1/macos/capture/failed-turn.py",
+      "python3 plugins/aeolus-fleet/test/fixtures/cursor-acp/2026.11.13-eacade1/macos/capture/cancel.py",
+      "python3 plugins/aeolus-fleet/test/fixtures/cursor-acp/2026.11.13-eacade1/macos/capture/memory.py",
+      "python3 plugins/aeolus-fleet/test/fixtures/cursor-acp/2026.11.13-eacade1/macos/capture/background-early.py"
+    ],
+    "hold": "The hold program needs at least 30 minutes; run other captures alongside it.",
+    "privateFolders": "Each program creates its own workspace under node_modules/.cache. These private folders include Cursor-created configuration and session data and must not be committed."
+  }
+}

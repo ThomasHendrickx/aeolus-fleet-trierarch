@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,6 +10,7 @@ import { z } from 'zod';
 
 import { createApp, createMigratedDatabase, createPrismaClient, createUseCases, FLEET_URL, newKey, OPERATOR, operatorCaller, secretOf, unwrap, type PrismaClient } from '@aeolus-fleet/core/testing';
 
+import { aShortHome } from './support/short-home.js';
 import { createClaudeCodeHarness } from '../src/adapters/claude-code.js';
 import { adapterFlagsOf, riskyFlagsOf } from '../src/adapters/harnesses.js';
 import { createClaudeCodeSetup } from '../src/adapters/claude-code-setup.js';
@@ -145,7 +145,7 @@ beforeEach(async () => {
   database = createPrismaClient(databaseUrl);
   server = createApp({ databaseUrl, publicUrl: FLEET_URL, logger: false, receiveWaitMs: 100 });
   address = await server.listen({ host: '127.0.0.1', port: 0 });
-  home = realpathSync(mkdtempSync(join(tmpdir(), 'trierarch-home-')));
+  home = realpathSync(aShortHome('trierarch-home'));
   paths = trierarchPaths({ homeDirectory: home });
   repository = join(home, 'aeolus-fleet');
   await git(['init', '-q', '-b', 'main', repository]);

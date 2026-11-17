@@ -12,13 +12,64 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 const scout = "shp_01m6jyczpnpp5c0vxh54c966cy"
+
+// HTTP/2 may deliver the declared bytes before its END_STREAM frame. A ship
+// closes its connection as soon as Content-Length is satisfied, cancelling the
+// proxy's next read even though the whole answer has already reached the ship.
+func TestACompleteAnswerIsNotBrokenOffWhenTheShipClosesBeforeTheFleetEndsItsStream(t *testing.T) {
+	const body = `{"messageId":"msg_accepted"}`
+	var calls atomic.Int32
+	fleet := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		_, _ = io.WriteString(w, body)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	fleet.EnableHTTP2 = true
+	fleet.StartTLS()
+	t.Cleanup(fleet.Close)
+	token := "aeolus_ct_v1_scout"
+	sockets := someSockets(t, fleet.URL, &token, false)
+	sockets.client = fleet.Client()
+	logged := make(chan string, 1)
+	sockets.options.Log = func(line string) { logged <- line }
+	socket := opened(t, sockets)
+
+	client := over(socket)
+	client.Transport.(*http.Transport).DisableKeepAlives = true
+	response, err := client.Post("http://ship/api/v1/ship/send", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if err != nil || string(got) != body {
+		t.Fatalf("answer = %q, %v, want %q", got, err, body)
+	}
+
+	select {
+	case line := <-logged:
+		if line != "fleet call "+scout+" POST /api/v1/ship/send 200" {
+			t.Fatalf("log = %q, want one complete 200 answer", line)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the complete answer was not logged")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("fleet calls = %d, want exactly one send", got)
+	}
+}
 
 // aFleet is a stand-in fleet that answers each call with the status, type and body given, and keeps what it was called with.
 type aFleet struct {
@@ -124,6 +175,71 @@ func TestARefusalOfTheFleetComesBackUnchanged(t *testing.T) {
 
 	if response.StatusCode != 503 || body != `{"code":"SERVICE_UNAVAILABLE","message":"busy"}` {
 		t.Fatalf("answer = %d %q, want the fleet's 503 unchanged", response.StatusCode, body)
+	}
+}
+
+func TestARefusedFleetCallLogsItsCodeAndReasonWithoutItsBodyOrCrewToken(t *testing.T) {
+	token := "aeolus_ct_v1_scout"
+	const body = `{"code":"BAD_REQUEST","message":"send needs model\nfor aeolus_ct_v1_scout","payload":"a secret plan"}`
+	fleet := aFleetAnswering(t, 400, "application/json", body)
+	sockets := someSockets(t, fleet.server.URL, &token, false)
+	logged := make(chan string, 1)
+	sockets.options.Log = func(line string) { logged <- line }
+	socket := opened(t, sockets)
+
+	response, got := post(t, socket, "/api/v1/ship/send", `{"payload":"a secret plan"}`)
+	if response.StatusCode != 400 || got != body {
+		t.Fatalf("answer = %d %q, want unchanged refusal", response.StatusCode, got)
+	}
+	line := <-logged
+	want := `fleet call ` + scout + ` POST /api/v1/ship/send 400 BAD_REQUEST "send needs model\nfor [redacted]"`
+	if line != want {
+		t.Fatalf("log = %q, want %q", line, want)
+	}
+}
+
+func TestANonJSONRefusalLogsOnlyItsStatus(t *testing.T) {
+	fleet := aFleetAnswering(t, 502, "text/html", "<html>a secret plan</html>")
+	token := "aeolus_ct_v1_scout"
+	sockets := someSockets(t, fleet.server.URL, &token, false)
+	logged := make(chan string, 1)
+	sockets.options.Log = func(line string) { logged <- line }
+	socket := opened(t, sockets)
+
+	response, got := post(t, socket, "/api/v1/ship/send", `{}`)
+	if response.StatusCode != 502 || got != "<html>a secret plan</html>" {
+		t.Fatalf("answer = %d %q, want unchanged refusal", response.StatusCode, got)
+	}
+	if line := <-logged; line != "fleet call "+scout+" POST /api/v1/ship/send 502" {
+		t.Fatalf("log = %q, want only status for an unrecognized refusal", line)
+	}
+}
+
+func TestAFleetRefusalLogIsBoundedWhileItsAnswerIsForwardedWhole(t *testing.T) {
+	for _, size := range []int{8192, 8193} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			const prefix = `{"code":"BAD_REQUEST","message":"send needs model","padding":"`
+			const suffix = `"}`
+			body := prefix + strings.Repeat("x", size-len(prefix)-len(suffix)) + suffix
+			fleet := aFleetAnswering(t, 400, "application/json", body)
+			token := "aeolus_ct_v1_scout"
+			sockets := someSockets(t, fleet.server.URL, &token, false)
+			logged := make(chan string, 1)
+			sockets.options.Log = func(line string) { logged <- line }
+			socket := opened(t, sockets)
+
+			response, got := post(t, socket, "/api/v1/ship/send", `{}`)
+			if response.StatusCode != 400 || got != body {
+				t.Fatalf("answer of %d bytes = %d %q, want unchanged refusal", size, response.StatusCode, got)
+			}
+			want := "fleet call " + scout + " POST /api/v1/ship/send 400"
+			if size == 8192 {
+				want += ` BAD_REQUEST "send needs model"`
+			}
+			if line := <-logged; line != want {
+				t.Fatalf("log of a %d byte refusal = %q, want %q", size, line, want)
+			}
+		})
 	}
 }
 
@@ -358,7 +474,9 @@ func TestOpeningAnOpenSocketKeepsIt(t *testing.T) {
 }
 
 func TestAnAnswerThatEndsBeforeItsContentLengthGivesTheShipNoCompleteAnswer(t *testing.T) {
+	var calls atomic.Int32
 	fleet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
 		connection, _, err := w.(http.Hijacker).Hijack()
 		if err != nil {
 			return
@@ -368,7 +486,10 @@ func TestAnAnswerThatEndsBeforeItsContentLengthGivesTheShipNoCompleteAnswer(t *t
 	}))
 	t.Cleanup(fleet.Close)
 	token := "aeolus_ct_v1_scout"
-	socket := opened(t, someSockets(t, fleet.URL, &token, false))
+	sockets := someSockets(t, fleet.URL, &token, false)
+	logged := make(chan string, 1)
+	sockets.options.Log = func(line string) { logged <- line }
+	socket := opened(t, sockets)
 
 	response, err := over(socket).Post("http://ship/api/v1/ship/send", "application/json", strings.NewReader(`{}`))
 	if err == nil {
@@ -378,6 +499,12 @@ func TestAnAnswerThatEndsBeforeItsContentLengthGivesTheShipNoCompleteAnswer(t *t
 
 	if err == nil {
 		t.Fatal("the ship got a whole answer, want an error or a closed connection")
+	}
+	if line := <-logged; !strings.Contains(line, "answer broke off: unexpected EOF") {
+		t.Fatalf("log = %q, want the cause of the incomplete answer", line)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("fleet calls = %d, want exactly one uncertain send", got)
 	}
 }
 

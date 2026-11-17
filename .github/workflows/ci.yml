@@ -164,11 +164,37 @@ jobs:
       - uses: ./.github/actions/test-images
       - run: npm run test:integration
 
+  contract-go-paths:
+    name: Go contract changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.paths.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: paths
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [[ "$EVENT" == pull_request ]]; then
+            BASE=$(git merge-base "$BASE" "$HEAD")
+          fi
+          changed=$(bash scripts/contract-go-paths.sh "$BASE" "$HEAD")
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+
   contract-go:
     # The contract suite's parts the Go trierarch is built to so far, driven against its binary.
     name: Contract tests on the Go trierarch
+    needs: contract-go-paths
+    if: ${{ always() && (needs.contract-go-paths.result != 'success' || needs.contract-go-paths.outputs.changed == 'true') }}
     runs-on: ubuntu-latest
     steps:
+      - name: Require changed paths result
+        if: ${{ needs.contract-go-paths.result != 'success' }}
+        run: exit 1
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
@@ -180,8 +206,8 @@ jobs:
           cache-dependency-path: go/go.sum
       - run: npm ci
       - uses: ./.github/actions/test-images
-      # A version of its own, as a release's is, so it and today's trierarch take over each other's holds; MAJOR.MINOR.PATCH, the only versions upgrade takes.
-      - run: go build -ldflags "-X github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/cli.Version=0.0.1" -o "$RUNNER_TEMP/aeolus-trierarch" ./cmd/aeolus-trierarch
+      # A version of its own, as a release's is, so it and today's trierarch take over each other's holds, and above every version the tests seed, as a release's is; MAJOR.MINOR.PATCH, the only versions upgrade takes.
+      - run: go build -ldflags "-X github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/cli.Version=0.99.0" -o "$RUNNER_TEMP/aeolus-trierarch" ./cmd/aeolus-trierarch
         working-directory: go
       # The upgrade tests build the Go trierarch of the next version for the suite's own GitHub Release, with go on PATH.
       - run: npm run test:contract:go

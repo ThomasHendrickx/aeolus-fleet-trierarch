@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
 	"slices"
 	"strings"
 	"testing"
@@ -272,5 +275,30 @@ func TestProcessesAreWhatPsSaysEachStartedItsElapsedTimeBeforeNow(t *testing.T) 
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("processesOf(%q) = %v, want %v", said, got, want)
+	}
+}
+
+func TestAnUpgradeKeepsACrewedCodexShipsIdentityAndRunningPluginPath(t *testing.T) {
+	codex := aCodexOn(t)
+	codex.versionFolder(t, "0.40.0", upgradedAt.Add(-time.Hour))
+	_, source, _, _ := runtime.Caller(0)
+	oldRoot := filepath.Join(codex.cache(), "0.40.0")
+	if err := os.CopyFS(filepath.Join(oldRoot, "scripts"), os.DirFS(filepath.Join(filepath.Dir(source), "..", "..", "..", "plugins", "aeolus-fleet", "scripts"))); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AEOLUS_HARNESS", "codex")
+	running := plugin.Plugin{Root: oldRoot, Data: filepath.Join(codex.home, "plugins", "data", plugin.DataFolder), Crews: filepath.Join(t.TempDir(), ".aeolus", "crews", "codex")}
+	folder := t.TempDir()
+	if err := running.WriteIdentity(folder, plugin.Identity{FleetURL: "https://fleet.example", ShipID: "shp_01m6jyczpnpp5c0vxh54c966cy", ShipName: "scout", Socket: "/run/scout/fleet.sock"}, "aeolus_ct_v1_synthetic"); err != nil {
+		t.Fatal(err)
+	}
+	if err := codex.update(t, []Process{{PID: 42, Program: "codex", StartedAt: upgradedAt.Add(-time.Hour)}}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if !running.HasIdentity(folder) {
+		t.Fatal("the running session lost its plugin scripts or identity after upgrade")
+	}
+	if got := codex.versions(t); !slices.Equal(got, []string{"0.40.0", "0.41.0"}) {
+		t.Fatalf("versions = %q, want running and new versions", got)
 	}
 }

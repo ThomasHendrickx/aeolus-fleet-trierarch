@@ -1,6 +1,7 @@
 package hold
 
 import (
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -244,5 +245,22 @@ func TestAnInterruptEndsACopilotTurnInItsWholeProcessGroup(t *testing.T) {
 	}
 	if state, err := Call(hold.files.Socket, Request{Call: "state"}, time.Second); err != nil || !state.IsOK {
 		t.Fatalf("state after the interrupt = %+v %v, want the hold running", state, err)
+	}
+}
+
+func TestACodexTurnKilledWithoutAnErrorEventEndsTheHoldAndKeepsTheSignal(t *testing.T) {
+	hold := aHoldOf(t, Options{Harness: "codex", Command: []string{"sh", "-c", "sleep 0.2; kill -KILL $$"}})
+	select {
+	case code := <-hold.ended:
+		hold.ended <- code
+		if code == 0 {
+			t.Fatal("killed turn ended successfully")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("killed Codex turn left its hold running without a process")
+	}
+	text, err := os.ReadFile(hold.files.ExitReason)
+	if err != nil || string(text) != "session process ended: signal: killed" {
+		t.Fatalf("exit reason = %q, %v, want signal", text, err)
 	}
 }

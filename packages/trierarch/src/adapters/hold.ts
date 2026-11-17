@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
-import { appendFileSync, createWriteStream } from 'node:fs';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { appendFileSync, writeFileSync, createWriteStream } from 'node:fs';
+import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { createServer, type Socket } from 'node:net';
 import type { Readable, Writable } from 'node:stream';
 import { createInterface } from 'node:readline';
@@ -106,7 +106,10 @@ export async function runHold(options: HoldOptions): Promise<number> {
   const { files, folder, harness, environment, version } = options;
   await mkdir(files.folder, { recursive: true, mode: 0o700 });
   await rm(files.socket, { force: true });
-  await writeFile(files.pid, String(process.pid));
+  // Publish the pid only once it is complete, so startup cannot mistake a partial pid for an exited hold.
+  const pendingPid = `${files.pid}.new`;
+  await writeFile(pendingPid, String(process.pid));
+  await rename(pendingPid, files.pid);
   await writeFile(files.harnessSessions, '');
   const events = createWriteStream(files.events, { flags: 'a', mode: 0o600 });
   let sessionId: string | undefined;
@@ -205,7 +208,7 @@ export async function runHold(options: HoldOptions): Promise<number> {
       resolveEnd(1);
     });
     // Copilot's turn ends once its native process closed the output it inherited from the launcher, which may exit first.
-    started.on(isCopilot ? 'close' : 'exit', (code: number | null) => {
+    started.on(isCopilot ? 'close' : 'exit', (code: number | null, signal: NodeJS.Signals | null) => {
       if (isTurnPerProcess && child === started) {
         isBusy = false;
         child = undefined;
@@ -214,6 +217,9 @@ export async function runHold(options: HoldOptions): Promise<number> {
       // A Copilot turn that failed died: its exit status ends the hold. One the hold stopped ends by its signal, with no status.
       const isDiedTurn = isCopilot && code !== null && code !== 0;
       if (isStopping || isDiedTurn || (!isRestarting && !isTurnPerProcess)) {
+        // Saved before the socket closes, so a new trierarch can observe the exit without a harness error event.
+        const reason = signal === null ? `session process exited with code ${String(code)}` : `session process ended: signal: ${signal}`;
+        writeFileSync(files.exitReason, reason, { mode: 0o600 });
         resolveEnd(code ?? 1);
       }
     });

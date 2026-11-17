@@ -223,6 +223,21 @@ open_stream() {
   stream_next_look=$((SECONDS + SAFETY_SECONDS))
 }
 
+# Reads the stream's next line into the caller's `line`: returns 0 when a whole
+# line came, 1 when a second passed without one, `line` then holding what came
+# so far. A character at a time, as the bash macOS ships (3.2) drops what a
+# timed-out `read -t` read of a line so far.
+read_stream_line() {
+  local char
+  line=''
+  while :; do
+    char=''
+    IFS= read -r -n 1 -t 1 char <&9 || return 1
+    [ -n "$char" ] || return 0
+    line="${line}${char}"
+  done
+}
+
 wait_for_wake() {
   local line event='' stream_body='' pending=0 owed=0 has_line=0
   [ -n "$stream_pid" ] || open_stream
@@ -232,7 +247,7 @@ wait_for_wake() {
     { read -r pending owed < "$waiting_file"; } 2>/dev/null
     if [ "$owed" = 1 ] && aeolus_is_idle; then return 0; fi
     line=''; has_line=0
-    if IFS= read -r -t 1 line <&9; then
+    if read_stream_line; then
       has_line=1
       line="${stream_fragment}${line}"
       stream_fragment=''

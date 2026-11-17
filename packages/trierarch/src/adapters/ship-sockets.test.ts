@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { createServer, request, type IncomingMessage, type Server } from 'node:http';
 import { join } from 'node:path';
 
@@ -7,6 +7,7 @@ import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { newId } from '../../test/support/in-memory.js';
+import { aShortHome } from '../../test/support/short-home.js';
 import { createCallerCheck } from './caller-check.js';
 import { createShipSockets, SHIP_CALL_MAX_BYTES, type ShipSockets } from './ship-sockets.js';
 
@@ -47,8 +48,8 @@ function bodyOf(message: IncomingMessage): Promise<string> {
 }
 
 beforeEach(async () => {
-  // Short, under /tmp: a Unix socket path is at most 104 bytes on macOS.
-  root = mkdtempSync('/tmp/aeolus-sockets-');
+  // Short, in the run's short folder: a Unix socket path is at most 104 bytes on macOS.
+  root = aShortHome('aeolus-sockets');
   calls = [];
   answer = { status: 200, body: '{"ok":true}' };
   fleet = createServer((incoming, response) => {

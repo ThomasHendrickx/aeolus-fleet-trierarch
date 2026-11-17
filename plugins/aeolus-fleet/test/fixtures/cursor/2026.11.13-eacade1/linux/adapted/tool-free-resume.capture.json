@@ -1,0 +1,28 @@
+{
+  "command": [
+    "agent",
+    "-p",
+    "Do not use tools. Reply S7_TOOL_FREE.",
+    "--output-format",
+    "stream-json",
+    "--trust",
+    "--resume",
+    "00000000-0000-4000-8000-000000000022"
+  ],
+  "build": "2026.11.13-eacade1",
+  "os": "Linux",
+  "host": "agent-host-1",
+  "lifecycle": [
+    {
+      "state": "busy",
+      "source": "process start"
+    },
+    {
+      "state": "idle",
+      "source": "process exit",
+      "exitStatus": 0
+    }
+  ],
+  "started": false,
+  "active": false
+}

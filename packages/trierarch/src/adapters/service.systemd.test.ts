@@ -1,11 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 
 import { newId } from '../../test/support/in-memory.js';
+import { aShortHome } from '../../test/support/short-home.js';
 import { buildTestSessionImage, rootlessPodman } from '../../test/support/podman.js';
 import { USER_SYSTEMD_TESTS_VARIABLE, userSystemd } from '../../test/support/user-systemd.js';
 import { createContainerRuntime } from './container.js';
@@ -83,7 +84,7 @@ describe('the systemd user unit on this machine', () => {
   });
 
   beforeEach(() => {
-    folder = mkdtempSync(join(tmpdir(), 'trierarch-systemd-'));
+    folder = aShortHome('trierarch-systemd');
     const suffix = folder.slice(-6).toLowerCase().replaceAll(/[^a-z0-9]/g, 'x');
     name = `aeolus-trierarch-test-${suffix}.service`;
     pidFile = join(folder, 'session.pid');
@@ -175,7 +176,7 @@ describe('container sessions under the systemd user unit on this machine', () =>
   });
 
   beforeEach(() => {
-    containerFolder = mkdtempSync(join(tmpdir(), 'trierarch-systemd-container-'));
+    containerFolder = aShortHome('trierarch-systemd-container');
     container = '';
     scope = '';
   });

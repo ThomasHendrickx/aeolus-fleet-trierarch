@@ -16,6 +16,8 @@ export interface HoldFiles {
   readonly folder: string;
   readonly socket: string;
   readonly pid: string;
+  /** The process exit status or signal, saved before the hold ends. */
+  readonly exitReason: string;
   /** Every event line the harness writes, appended. */
   readonly events: string;
   /** The harness's own session id, as its first event names it, so a start resumes it. */
@@ -26,7 +28,7 @@ export interface HoldFiles {
 
 export function holdFilesOf(sessions: string, shipId: ShipId): HoldFiles {
   const folder = join(sessions, shipId);
-  return { folder, socket: join(folder, 'hold.sock'), pid: join(folder, 'hold.pid'), events: join(folder, 'events.jsonl'), sessionId: join(folder, 'session-id'), harnessSessions: join(folder, 'harness-sessions') };
+  return { folder, socket: join(folder, 'hold.sock'), pid: join(folder, 'hold.pid'), exitReason: join(folder, 'exit-reason'), events: join(folder, 'events.jsonl'), sessionId: join(folder, 'session-id'), harnessSessions: join(folder, 'harness-sessions') };
 }
 
 export const holdRequestSchema = z.discriminatedUnion('call', [

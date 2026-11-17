@@ -3535,3 +3535,25 @@ func TestAReleaseStopsAProcessRunningInTheShipFoldersHomeAndLeavesOneOutsideTheS
 	default:
 	}
 }
+
+func TestEveryRestartLogsTheProcessExitReasonBeforeItsFilesAreRemoved(t *testing.T) {
+	for _, reason := range []string{"", "provider refused\n  try again"} {
+		t.Run(reason, func(t *testing.T) {
+			pass := aRunPass(t)
+			pass.crewed(t)
+			pass.harness.failureReason = reason
+			pass.sessions.observed = []sessions.Observed{{ShipID: scout, Status: "exited", ExitReason: "session process ended: signal: killed"}}
+			pass.run(t)
+			want := "session process ended: signal: killed"
+			if reason != "" {
+				want += "; provider refused try again"
+			}
+			if !slices.Contains(pass.fleet.calls, "report aeolus_ct_v1_scout blocked blocked: session crashed, restarting: "+want) {
+				t.Fatalf("calls %q, want process reason and harness failure", pass.fleet.calls)
+			}
+			if !strings.Contains(strings.Join(pass.logged, "\n"), want) {
+				t.Fatalf("log %q, want durable exit reason", pass.logged)
+			}
+		})
+	}
+}

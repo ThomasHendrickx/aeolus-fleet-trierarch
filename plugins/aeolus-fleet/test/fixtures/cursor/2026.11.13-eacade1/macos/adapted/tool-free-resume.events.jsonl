@@ -1,0 +1,13 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"<WORKSPACE>","session_id":"00000000-0000-4000-8000-000000000001","model":"Auto","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Call no tools. Reply exactly S7_MAC_TOOL_FREE_RESUME."}]},"session_id":"00000000-0000-4000-8000-000000000001"}
+{"type":"thinking","subtype":"delta","text":"The","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817255257}
+{"type":"thinking","subtype":"delta","text":" user","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817255259}
+{"type":"thinking","subtype":"delta","text":" wants","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817255260}
+{"type":"thinking","subtype":"delta","text":" me to","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817255351}
+{"type":"thinking","subtype":"delta","text":" call","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817255411}
+{"type":"thinking","subtype":"delta","text":" no","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817255477}
+{"type":"thinking","subtype":"delta","text":" tools","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817255549}
+{"type":"thinking","subtype":"delta","text":" and reply exactly with \"S7_MAC_TOOL_FREE_RESUME\".","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817256077}
+{"type":"thinking","subtype":"completed","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817256078}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"S7_MAC_TOOL_FREE_RESUME"}]},"session_id":"00000000-0000-4000-8000-000000000001"}
+{"type":"result","subtype":"success","duration_ms":2777,"duration_api_ms":2777,"is_error":false,"result":"S7_MAC_TOOL_FREE_RESUME","session_id":"00000000-0000-4000-8000-000000000001","request_id":"00000000-0000-4000-8000-000000000001","usage":{"inputTokens":555,"outputTokens":67,"cacheReadTokens":15744,"cacheWriteTokens":0,"reasoningTokens":57}}

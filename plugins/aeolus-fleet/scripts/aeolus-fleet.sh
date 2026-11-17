@@ -77,7 +77,7 @@ fleet_busy() {
 # with no bearer: the trierarch adds the crew token and hands back the fleet's
 # answer unchanged. Any other calls the fleet with its own crew token.
 call_fleet_once() {
-  local method="$1" path="$2" token="$3" input="$4" answer
+  local method="$1" path="$2" token="$3" input="$4" answer transfer_status
   local args=(-sS --max-time "$MAX_SECONDS" -w '\n%{http_code}' -X "$method")
   if [ -n "${socket:-}" ]; then
     args+=(--unix-socket "$socket" "http://trierarch${path}")
@@ -86,9 +86,12 @@ call_fleet_once() {
   fi
   [ -n "$input" ] && args+=(-H 'content-type: application/json')
   answer="$({ [ -n "${socket:-}" ] || aeolus_bearer_config "$token"; aeolus_body_config "$input"; } | curl -K - "${args[@]}" 2>/dev/null)"
+  transfer_status=$?
   status="$(printf '%s' "$answer" | tail -n 1)"
   body="$(printf '%s' "$answer" | sed '$d')"
-  if [ -z "$status" ] || [ "$status" = 000 ]; then
+  # A status or even a whole JSON value may precede a broken transfer. Never
+  # accept it or retry it as a busy refusal: the call may already be stored.
+  if [ "$transfer_status" -ne 0 ] || [ -z "$status" ] || [ "$status" = 000 ]; then
     if [ -n "${socket:-}" ]; then
       echo "aeolus: no answer from the trierarch at ${socket}"
     else

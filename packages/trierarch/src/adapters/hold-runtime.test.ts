@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 
@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { FAKE_CLAUDE_CODE, FAKE_CODEX, FAKE_COPILOT, TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
 import { newId } from '../../test/support/in-memory.js';
 import { sessionRuntimeContract } from '../../test/support/session-runtime-contract.js';
+import { aShortHome } from '../../test/support/short-home.js';
 import type { ObservedSession, SessionRuntime } from '../core/ports.js';
 import { createCallerCheck } from './caller-check.js';
 import { createHoldRuntime, sessionsLaunch, systemdVersionOf } from './hold-runtime.js';
@@ -17,7 +18,7 @@ import { runningVersion } from './version.js';
 
 // Against real holds, each the trierarch program from source started as the
 // trierarch starts it, running the stand-in for Claude Code in print mode
-// with streamed JSON, or a shell command. The folders sit under /tmp: a Unix
+// with streamed JSON, or a shell command. The folders sit in the run's short folder: a Unix
 // socket path is at most 104 bytes on macOS.
 
 /** The version a hold states: the trierarch's own, which runs it. */
@@ -37,8 +38,8 @@ let folder: string;
 let runtimes: SessionRuntime[];
 
 beforeEach(() => {
-  sessions = realpathSync(mkdtempSync('/tmp/aeolus-holds-'));
-  folder = realpathSync(mkdtempSync('/tmp/aeolus-folder-'));
+  sessions = realpathSync(aShortHome('aeolus-holds'));
+  folder = realpathSync(aShortHome('aeolus-folder'));
   runtimes = [];
 });
 
@@ -230,18 +231,30 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
 
     await runtime.send({ shipId, line: userLine('/aeolus-fleet:wake') });
 
-    await expect.poll(async () => runtime.list()).toEqual([{ shipId, status: 'exited' }]);
+    await expect.poll(async () => runtime.list()).toEqual([expect.objectContaining({ shipId, status: 'exited' })]);
     await expect(eventsOfType({ runtime: runtime, shipId: shipId }, 'result')).resolves.toEqual([expect.objectContaining({ is_error: true, result: 'Not logged in · Please run /login' })]);
   });
 
-  it('sees the session exited when its hold dies', async () => {
+  it.each([
+    { name: 'status', script: 'sleep 0.2; exit 2', reason: 'session process exited with code 2' },
+    { name: 'signal', script: 'sleep 0.2; kill -KILL $$', reason: 'session process ended: signal: SIGKILL' },
+  ])('keeps the process $name without a harness error event across a trierarch restart', async ({ script, reason }) => {
+    const runtime = aRuntime();
+    const shipId = newId('ship');
+    await runtime.start({ shipId, folder, command: ['sh', '-c', script], harness: 'claude-code' });
+
+    const restarted = aRuntime();
+    await expect.poll(() => restarted.list(), { timeout: 2000 }).toEqual([{ shipId, status: 'exited', exitReason: reason }]);
+  });
+
+  it('says the exit reason is unknown when its hold dies without a record', async () => {
     const runtime = aRuntime();
     const shipId = await aClaudeCodeSession(runtime);
     const hold = await runtime.sessionRootOf(shipId);
 
     process.kill(hold ?? 0, 'SIGKILL');
 
-    await expect.poll(async () => runtime.list()).toEqual([{ shipId, status: 'exited' }]);
+    await expect.poll(async () => runtime.list(), { timeout: 2000 }).toEqual([{ shipId, status: 'exited', exitReason: 'session hold ended without an exit record' }]);
   });
 
   it('ends the harness, and every process it started, when its hold dies abruptly (H8)', async () => {
@@ -605,7 +618,7 @@ describe('a Copilot session held by a hold, one copilot -p per turn (CC4)', () =
     const runtime = aRuntime();
     const shipId = await aCopilotSession(runtime, { flags: ['--fail-model-call'] });
 
-    await expect.poll(async () => runtime.list()).toEqual([{ shipId, status: 'exited' }]);
+    await expect.poll(async () => runtime.list()).toEqual([expect.objectContaining({ shipId, status: 'exited' })]);
     await expect(eventsOfType({ runtime, shipId }, 'session.error')).resolves.toHaveLength(1);
   });
 
@@ -613,7 +626,7 @@ describe('a Copilot session held by a hold, one copilot -p per turn (CC4)', () =
     const runtime = aRuntime();
     const shipId = await aCopilotSession(runtime, { flags: ['--refuse-model'] });
 
-    await expect.poll(async () => runtime.list()).toEqual([{ shipId, status: 'exited' }]);
+    await expect.poll(async () => runtime.list()).toEqual([expect.objectContaining({ shipId, status: 'exited' })]);
     await expect(eventsOfType({ runtime, shipId }, 'aeolus.stderr')).resolves.toEqual([{ type: 'aeolus.stderr', line: 'Error: Model "no-such-model" from --model flag is not available.' }]);
   });
 
@@ -627,6 +640,30 @@ describe('a Copilot session held by a hold, one copilot -p per turn (CC4)', () =
 
     await expect(runtime.list()).resolves.toEqual([]);
     await expect.poll(() => isAlive(turn?.pid ?? 0)).toBe(false);
+  });
+});
+
+describe('a starting hold', () => {
+  it('waits for the socket when the PID file exists before its PID is written', async () => {
+    const delayed = `const fs = require('node:fs');
+const net = require('node:net');
+const path = require('node:path');
+const args = process.argv;
+const folder = path.join(args[args.indexOf('--sessions') + 1], args[2]);
+fs.mkdirSync(folder, { recursive: true });
+fs.writeFileSync(path.join(folder, 'hold.pid'), '');
+setTimeout(() => {
+  fs.writeFileSync(path.join(folder, 'hold.pid'), String(process.pid));
+  net.createServer((connection) => {
+    connection.on('data', () => connection.end(JSON.stringify({ isOk: true, state: { status: 'running', version: '${VERSION}' } }) + '\\n'));
+  }).listen(path.join(folder, 'hold.sock'));
+}, 500);`;
+    const runtime = aRuntime({ program: [process.execPath, '-e', delayed] });
+    const shipId = newId('ship');
+
+    await runtime.start({ shipId, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+
+    await expect(runtime.send({ shipId, line: userLine('hello') })).resolves.toBeUndefined();
   });
 });
 

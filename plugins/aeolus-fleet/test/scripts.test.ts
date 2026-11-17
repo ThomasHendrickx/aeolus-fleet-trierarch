@@ -596,7 +596,7 @@ describe('the watcher wake stream', () => {
     aTurnEnded();
     const watcher = start('aeolus-wait.sh');
     try {
-      await expect.poll(() => stub.calls.filter((call) => call.path === '/api/v1/ship/pushReceive').length, { timeout: 2000 }).toBe(2);
+      await expect.poll(() => stub.calls.filter((call) => call.path === '/api/v1/ship/pushReceive').length).toBe(2);
       expect((await watcher.done).status).toBe(0);
       expect(stub.streams).toHaveLength(1);
     } finally { watcher.child.kill(); }
@@ -1811,8 +1811,9 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
 
       const context = hookOutputSchema.parse(JSON.parse(started.stdout)).hookSpecificOutput.additionalContext;
       expect(context).toContain(
-        "Go on as the aeolus-fleet-crew skill says: fetch the protocol. Receive and ack nothing: this ship is pushed, so the wake bridge hands each message over and it comes into the turn through the plugin's hooks. Then end the turn.",
+        "Go on as the aeolus-fleet-crew skill says: fetch the protocol. Receive and ack nothing: this ship is pushed, so the wake bridge hands each message over and it comes into the turn through the plugin's hooks. Then handle what the turn brings in and the work your ship was given, and end the turn only once that is done or waits on someone.",
       );
+      expect(context).not.toContain('end the turn.');
       expect(context).not.toContain('receive and handle what waits');
     });
 
@@ -1961,6 +1962,8 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
         .hookSpecificOutput.additionalContext;
 
       expect(context).toContain(PUSHED_UNDER_A_TRIERARCH);
+      expect(context).toContain(`${PUSHED_UNDER_A_TRIERARCH} Then handle what the turn brings in and the work your ship was given, and end your turn only once that is done or waits on someone. The trierarch wakes this session when work arrives: start no watcher.`);
+      expect(context).not.toContain('Then end your turn');
       expect(context).toContain('The trierarch wakes this session when work arrives: start no watcher.');
       expect(context).not.toContain('receive and handle what waits');
     });
@@ -2211,8 +2214,8 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       let sockets: string;
 
       beforeEach(() => {
-        // Short, under /tmp: a Unix socket path is at most 104 bytes on macOS.
-        sockets = mkdtempSync('/tmp/aeolus-sock-');
+        // Short, in the run's short folder: a Unix socket path is at most 104 bytes on macOS.
+        sockets = mkdtempSync(join(process.env.TRIERARCH_TEST_SHORT_FOLDER ?? '', 's-'));
       });
 
       afterEach(() => {
@@ -2526,6 +2529,8 @@ describe('the hand-over (#756): the watcher receives one delivery, and the hooks
       const context = await contextAt('clear');
 
       expect(context).toContain(PUSHED);
+      expect(context).toContain('then handle what the turn brings in and the work your ship was given, and end your turn only once that is done or waits on someone.');
+      expect(context).not.toContain('then end your turn');
       expect(context).not.toContain('receive and handle what waits');
     });
 
@@ -3685,16 +3690,29 @@ describe("the plugin's log: what the watcher and hooks do, one record per line i
     const keyActions = () => actions().filter((record) => 'outcome' in record && record.outcome.includes('key'));
 
     it('waits longer after each KEY_UNAVAILABLE on the push receive, up to a most, and keeps watching', async () => {
-      fleet = await startRoutedStubFleet({ '/api/v1/ship/inbox': [inbox(1)], '/api/v1/ship/pushReceive': [keyUnavailable] });
+      const bin = join(data, 'bin');
+      mkdirSync(bin);
+      const sleep = join(bin, 'sleep');
+      const waits = join(data, 'waits');
+      // Record the requested waits instead of depending on the machine's scheduling.
+      writeFileSync(sleep, '#!/usr/bin/env bash\nprintf "%s\\n" "$1" >> "$AEOLUS_TEST_WAITS"\n');
+      chmodSync(sleep, 0o700);
+      fleet = await startRoutedStubFleet({
+        '/api/v1/ship/inbox': [inbox(1)],
+        '/api/v1/ship/pushReceive': [keyUnavailable, keyUnavailable, keyUnavailable, receiving(aDelivery())],
+        '/api/v1/ship/handed': [handedOk],
+        '/api/v1/ship/report': [taken],
+      });
       crew(fleet.url);
       aTurnEnded();
-      const watcher = start('aeolus-wait.sh', { env: KEY_WAIT });
+      const watcher = start('aeolus-wait.sh', { env: {
+        ...KEY_WAIT, PATH: `${bin}:${process.env.PATH ?? ''}`, AEOLUS_TEST_WAITS: waits,
+      } });
 
       try {
-        await new Promise((resolve) => setTimeout(resolve, 4500));
-
-        expect(fleet.calls.filter((call) => call.path === '/api/v1/ship/pushReceive')).toHaveLength(3);
-        expect(watcher.child.exitCode).toBeNull();
+        expect(await watcher.done).toMatchObject({ status: 0, stdout: HANDED_OVER });
+        expect(readFileSync(waits, 'utf8').trim().split('\n')).toEqual(['1', '2', '2']);
+        expect(fleet.calls.filter((call) => call.path === '/api/v1/ship/pushReceive')).toHaveLength(4);
       } finally {
         watcher.child.kill();
       }

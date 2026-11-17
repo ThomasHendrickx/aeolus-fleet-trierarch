@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -273,7 +274,7 @@ exec /usr/bin/id "$@"
  * clean environment with the user's HOME; stop ends that process alone
  * (KillMode=process); show answers its state and MainPID.
  */
-function systemctlStandIn(at: { machine: string; home: string }): string {
+function systemctlStandIn(at: { machine: string; home: string; nodeOptions?: string }): string {
   const state = join(at.machine, 'systemd');
   return `#!/bin/bash
 state='${state}'
@@ -292,7 +293,7 @@ stop() {
 }
 start() {
   [ -f "$file" ] || { echo "Unit $unit not found." >&2; exit 5; }
-  local line words=() environment=(HOME='${at.home}' USER="$USER" LANG=C.UTF-8 HTTPS_PROXY='${NO_NETWORK_PROXY}')
+  local line words=() environment=(HOME='${at.home}' USER="$USER" LANG=C.UTF-8 HTTPS_PROXY='${NO_NETWORK_PROXY}'${at.nodeOptions === undefined ? '' : ` NODE_OPTIONS='${at.nodeOptions}'`})
   while IFS= read -r line; do
     case "$line" in
       ExecStart=*) eval "words=(\${line#ExecStart=})" ;;
@@ -399,11 +400,19 @@ async function git(args: readonly string[]): Promise<void> {
 /** The harnesses a machine may have installed, besides Claude Code, which every machine has. */
 export type OtherHarness = 'codex' | 'copilot';
 
+/** A new folder of four characters in the run's short folder, for the machine: a ship's socket path under its home is within the system's limit only for a short path. */
+function aShortFolder(): string {
+  const folder = join(process.env.TRIERARCH_TEST_SHORT_FOLDER ?? '', randomBytes(2).toString('hex'));
+  mkdirSync(folder);
+  return realpathSync(folder);
+}
+
 /** A machine with Claude Code installed and signed in, and the other harnesses given, a repository checked out, and no trierarch yet. */
-export async function aMachine(at: { others?: readonly OtherHarness[] } = {}): Promise<Machine> {
+export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDiagnoseHolds?: boolean } = {}): Promise<Machine> {
   const others = at.others ?? [];
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'tc-')));
-  const home = join(root, 'home');
+  // In the run's short folder: the ship sockets under the machine's home are within the system's limit only for a short path.
+  const root = aShortFolder();
+  const home = join(root, 'h');
   const machine = join(root, 'machine');
   const bin = join(machine, 'bin');
   mkdirSync(home);
@@ -413,7 +422,7 @@ export async function aMachine(at: { others?: readonly OtherHarness[] } = {}): P
   const pluginData = join(home, '.claude', 'plugins', 'data', 'aeolus-fleet-aeolus-fleet');
   const codexPluginData = join(home, '.codex', 'plugins', 'data', 'aeolus-fleet-aeolus-fleet');
   script(join(bin, 'claude'), claudeStandIn({ machine, home, pluginData }));
-  script(join(bin, 'systemctl'), systemctlStandIn({ machine, home }));
+  script(join(bin, 'systemctl'), systemctlStandIn({ machine, home, ...(at.shouldDiagnoseHolds === true && { nodeOptions: `--import="${fileURLToPath(new URL('./hold-diagnostics.ts', import.meta.url))}"` }) }));
   script(join(bin, 'journalctl'), journalctlStandIn({ machine }));
   script(join(bin, 'ssh'), sshStandIn());
   script(join(bin, 'podman'), podmanStandIn({ machine }));
@@ -532,16 +541,19 @@ export async function aMachine(at: { others?: readonly OtherHarness[] } = {}): P
         .filter((line) => line !== ''),
     remove: async () => {
       // uninstall stops every session and the service, as it does on a machine; the service's pid is ended too when it did not.
-      await trierarch(['uninstall']);
-      const pid = servicePid();
-      if (pid !== undefined) {
-        try {
-          process.kill(pid, 'SIGKILL');
-        } catch {
-          // Ended already.
+      try {
+        await trierarch(['uninstall']);
+        const pid = servicePid();
+        if (pid !== undefined) {
+          try {
+            process.kill(pid, 'SIGKILL');
+          } catch {
+            // Ended already.
+          }
         }
+      } finally {
+        rmSync(root, { recursive: true, force: true });
       }
-      rmSync(root, { recursive: true, force: true });
     },
   };
 }

@@ -41,15 +41,16 @@ raw_folder="${AEOLUS_FOLDER:-$folder}"
 # The Aeolus layer: what the plugin itself knows must not leave the machine.
 redact_aeolus() {
   local text
-  text="$(sed -E \
+  text="$(cat)"
+  # Literal paths first: a checkout under the home may itself contain a ship id.
+  text="${text//"$folder"/[folder]}"
+  text="${text//"$raw_folder"/[folder]}"
+  text="${text//"$HOME"/[home]}"
+  text="$(printf '%s' "$text" | sed -E \
     -e 's/([Bb]earer) +[^][ "'"'"']+/\1 [token]/g' \
     -e 's/aeolus_ct_v1_[A-Za-z0-9_-]+/[crew token]/g' \
     -e 's/aeolus_sk_v1_[A-Za-z0-9_-]+/[ship secret]/g' \
     -e "s/${SHIP_ID_PATTERN}/[ship id]/g")"
-  # Literal text, longest first: a folder may lie under the home folder.
-  text="${text//"$folder"/[folder]}"
-  text="${text//"$raw_folder"/[folder]}"
-  text="${text//"$HOME"/[home]}"
   [ -z "$fleet_host" ] || text="${text//"$fleet_host"/[fleet]}"
   [ -z "$ship_name" ] || text="${text//"$ship_name"/[ship]}"
   printf '%s\n' "$text"
