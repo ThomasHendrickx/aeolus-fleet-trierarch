@@ -103,3 +103,10 @@ jobs:
             ${{ runner.temp }}/candidate/*.tgz
             ${{ runner.temp }}/candidate/integrity.json
           if-no-files-found: error
+
+  binaries:
+    name: Go binaries ${{ inputs.version }}
+    needs: candidate
+    uses: ./.github/workflows/go-binaries.yml
+    with:
+      version: ${{ inputs.version }}
