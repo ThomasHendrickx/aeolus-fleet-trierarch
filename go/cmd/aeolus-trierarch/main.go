@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -207,7 +208,7 @@ func releases(environ []string) releaseSource {
 			env[name] = value
 		}
 	}
-	source := release.Source{API: release.GitHub, Repository: release.Repository, Trusted: attestation.PublicGood(), Client: &http.Client{Timeout: 5 * time.Minute}}
+	source := release.Source{API: release.GitHub, Repository: release.Repository, Trusted: attestation.PublicGood(), Client: &http.Client{Timeout: 5 * time.Minute}, Fallback: &http.Client{Timeout: 5 * time.Minute, Transport: http1Only()}}
 	if api := env["AEOLUS_TRIERARCH_RELEASES_URL"]; api != "" {
 		source.API = strings.TrimSuffix(api, "/")
 	}
@@ -223,6 +224,16 @@ func releases(environ []string) releaseSource {
 		source.Trusted = trusted
 	}
 	return releaseSource{source: source}
+}
+
+// http1Only is the default transport with HTTP/2 off, for the release download's second try on a network that stalls HTTP/2.
+func http1Only() *http.Transport {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ForceAttemptHTTP2 = false
+	// The clone carries the h2 the default transport offered in its TLS handshake: a server would pick it and this transport cannot speak it.
+	transport.TLSClientConfig = &tls.Config{NextProtos: []string{"http/1.1"}}
+	transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+	return transport
 }
 
 func (r releaseSource) Latest() (string, error) {
