@@ -27,3 +27,5 @@ func TestTheProcessesInAFolderAreStoppedOnTheHostAndInContainersOnlyOnceNoContai
 		t.Errorf("in containers StopIn(%s) = %v; want it left for the next pass", folder, containerErr)
 	}
 }
+
+// CI path evidence.
