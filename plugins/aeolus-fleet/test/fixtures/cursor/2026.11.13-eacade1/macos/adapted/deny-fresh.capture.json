@@ -1,0 +1,26 @@
+{
+  "host": "agent-host-2",
+  "os": "macOS 26.2 (25C56)",
+  "architecture": "arm64",
+  "build": "2026.11.13-eacade1",
+  "command": [
+    "agent",
+    "-p",
+    "Run the shell command printf S7_MAC_TOOL_PROBE. Then state all exact context markers you received.",
+    "--output-format",
+    "stream-json",
+    "--trust"
+  ],
+  "markers": {
+    "started": "sessionStart",
+    "active": "preToolUse",
+    "hand-over-confirmed": "preToolUse"
+  },
+  "result": "captured adapted Cursor roles under CC3",
+  "authentication": "existing agent status login; no credentials read or copied",
+  "sanitization": [
+    "email",
+    "home/workspace/transcript paths",
+    "session/conversation/tool/request identifiers"
+  ]
+}

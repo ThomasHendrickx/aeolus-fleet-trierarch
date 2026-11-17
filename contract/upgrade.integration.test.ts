@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, inject, it } from 'vitest';
@@ -168,6 +168,10 @@ describe("upgrade with Codex on offer updates Codex's aeolus-fleet plugin", () =
   const codexHome = () => join(machine.home, '.codex');
   const cache = () => join(codexHome(), 'plugins', 'cache', 'aeolus-fleet', 'aeolus-fleet');
   const versionFolders = () => (existsSync(cache()) ? readdirSync(cache()).sort() : []);
+  /** Codex's cache as the tests set it: init installed the plugin of the trierarch's own version there, which sorts among the versions a test seeds. */
+  const withEmptyCache = () => {
+    rmSync(cache(), { recursive: true, force: true });
+  };
   /** A version folder of the plugin in Codex's cache, as its version came at the time given. */
   const aVersionFolder = (folder: string, came: Date) => {
     mkdirSync(join(cache(), folder, '.codex-plugin'), { recursive: true });
@@ -188,6 +192,7 @@ describe("upgrade with Codex on offer updates Codex's aeolus-fleet plugin", () =
   });
 
   it('adds the plugin when Codex holds no version of it', async () => {
+    withEmptyCache();
     const upgrade = await machine.trierarch(['upgrade', version, '--json']);
 
     expect(upgrade.status, upgrade.stdout + upgrade.stderr).toBe(0);
@@ -196,6 +201,7 @@ describe("upgrade with Codex on offer updates Codex's aeolus-fleet plugin", () =
   });
 
   it('puts back the version folder a running process may use, and removes the one none can', async () => {
+    withEmptyCache();
     // 0.2.0 came before the service's trierarch started, so it left 0.1.0 behind; 0.3.0, which the upgrade installs, came after it started.
     aVersionFolder('0.1.0', new Date('2020-01-01T00:00:00Z'));
     aVersionFolder('0.2.0', new Date('2020-01-02T00:00:00Z'));

@@ -1,0 +1,32 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"<WORKSPACE>","session_id":"00000000-0000-4000-8000-000000000001","model":"Auto","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Call no tools. Reply exactly S7_MAC_TOOL_FREE_FRESH."}]},"session_id":"00000000-0000-4000-8000-000000000001"}
+{"type":"thinking","subtype":"delta","text":"The","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817239614}
+{"type":"thinking","subtype":"delta","text":" user","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817239697}
+{"type":"thinking","subtype":"delta","text":" wants","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817239763}
+{"type":"thinking","subtype":"delta","text":" me to","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817239901}
+{"type":"thinking","subtype":"delta","text":" reply","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817240004}
+{"type":"thinking","subtype":"delta","text":" exactly","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817240100}
+{"type":"thinking","subtype":"delta","text":" with","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817240234}
+{"type":"thinking","subtype":"delta","text":" \"S7_MAC_","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817240301}
+{"type":"thinking","subtype":"delta","text":"TOOL_FRE","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817240440}
+{"type":"thinking","subtype":"delta","text":"E_FRESH\" and","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817240608}
+{"type":"thinking","subtype":"delta","text":" call","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817240644}
+{"type":"thinking","subtype":"delta","text":" no tools.\n\nThe hooks context ","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817240715}
+{"type":"thinking","subtype":"delta","text":"also requires including","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817240847}
+{"type":"thinking","subtype":"delta","text":" the exact marker \"S7_MAC_START_CONTEXT\"","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817240923}
+{"type":"thinking","subtype":"delta","text":" in the final answer.","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817240991}
+{"type":"thinking","subtype":"delta","text":"\n\nThe user's exact reply","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817242601}
+{"type":"thinking","subtype":"delta","text":" conflicts with the ","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817242678}
+{"type":"thinking","subtype":"delta","text":"hooks instruction to","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817242745}
+{"type":"thinking","subtype":"delta","text":" include \"S7_MAC_START_CONTEXT\".","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817242814}
+{"type":"thinking","subtype":"delta","text":" The marker to include","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817242887}
+{"type":"thinking","subtype":"delta","text":" is \"S7_MAC_START_CONTEXT\".","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817243048}
+{"type":"thinking","subtype":"delta","text":"\n\nThe user's explicit","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817244727}
+{"type":"thinking","subtype":"delta","text":" instruction to reply","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817244769}
+{"type":"thinking","subtype":"delta","text":" exactly \"S7_MAC_TOOL_FREE_FRESH\"","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817244856}
+{"type":"thinking","subtype":"delta","text":" takes precedence over the hooks requirement.","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817244914}
+{"type":"thinking","subtype":"delta","text":" I will provide that","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817244980}
+{"type":"thinking","subtype":"delta","text":" exact reply.","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817245055}
+{"type":"thinking","subtype":"completed","session_id":"00000000-0000-4000-8000-000000000001","timestamp_ms":1794817246277}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"S7_MAC_TOOL_FREE_FRESH"}]},"session_id":"00000000-0000-4000-8000-000000000001"}
+{"type":"result","subtype":"success","duration_ms":10166,"duration_api_ms":10166,"is_error":false,"result":"S7_MAC_TOOL_FREE_FRESH","session_id":"00000000-0000-4000-8000-000000000001","request_id":"00000000-0000-4000-8000-000000000001","usage":{"inputTokens":11790,"outputTokens":478,"cacheReadTokens":3968,"cacheWriteTokens":0,"reasoningTokens":467}}

@@ -1,0 +1,15 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"<WORKSPACE>","session_id":"<SESSION_OR_REQUEST_ID>","model":"Auto","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Call no tools. Reply with the S7 start context marker supplied by the sessionStart hook. If none, reply NO_START_CONTEXT."}]},"session_id":"<SESSION_OR_REQUEST_ID>"}
+{"type":"thinking","subtype":"delta","text":"The","session_id":"<SESSION_OR_REQUEST_ID>","timestamp_ms":1794816672673}
+{"type":"thinking","subtype":"delta","text":" user","session_id":"<SESSION_OR_REQUEST_ID>","timestamp_ms":1794816672699}
+{"type":"thinking","subtype":"delta","text":" wants","session_id":"<SESSION_OR_REQUEST_ID>","timestamp_ms":1794816672700}
+{"type":"thinking","subtype":"delta","text":" me to","session_id":"<SESSION_OR_REQUEST_ID>","timestamp_ms":1794816672764}
+{"type":"thinking","subtype":"delta","text":" reply","session_id":"<SESSION_OR_REQUEST_ID>","timestamp_ms":1794816672836}
+{"type":"thinking","subtype":"delta","text":" with","session_id":"<SESSION_OR_REQUEST_ID>","timestamp_ms":1794816672909}
+{"type":"thinking","subtype":"delta","text":" the S7","session_id":"<SESSION_OR_REQUEST_ID>","timestamp_ms":1794816673061}
+{"type":"thinking","subtype":"delta","text":" start","session_id":"<SESSION_OR_REQUEST_ID>","timestamp_ms":1794816673158}
+{"type":"thinking","subtype":"delta","text":" context","session_id":"<SESSION_OR_REQUEST_ID>","timestamp_ms":1794816673207}
+{"type":"thinking","subtype":"delta","text":" marker from the sessionStart hook, without calling any tools.\n\nChecking the hooks_context for the S7 start context marker.\n\nThe S7 start context marker is `S7_MAC_START_CONTEXT`.","session_id":"<SESSION_OR_REQUEST_ID>","timestamp_ms":1794816674068}
+{"type":"thinking","subtype":"completed","session_id":"<SESSION_OR_REQUEST_ID>","timestamp_ms":1794816674069}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"S7_MAC_START_CONTEXT"}]},"session_id":"<SESSION_OR_REQUEST_ID>"}
+{"type":"result","subtype":"success","duration_ms":5054,"duration_api_ms":5054,"is_error":false,"result":"S7_MAC_START_CONTEXT","session_id":"<SESSION_OR_REQUEST_ID>","request_id":"<SESSION_OR_REQUEST_ID>","usage":{"inputTokens":13736,"outputTokens":73,"cacheReadTokens":3968,"cacheWriteTokens":0,"reasoningTokens":65}}

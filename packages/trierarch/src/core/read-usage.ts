@@ -23,7 +23,12 @@ interface SubscriptionRead {
   readonly windows: readonly SubscriptionWindow[] | undefined;
   readonly at: Date;
   readonly tokens: number;
+  /** Whether a window of it was past its reset when read: the harness gave no newer reading (Codex's newest session log is old), so it is tried again every 5 minutes. */
+  readonly isStale?: boolean;
 }
+
+/** Whether a window of the reading reset since it was read: its figure is then older than its reset, and is read again whatever the work or interval (#117). */
+const isPastReset = (read: SubscriptionRead, now: Date): boolean => read.isStale === true || read.windows?.some(({ resetsAt }) => resetsAt.getTime() > read.at.getTime() && resetsAt.getTime() <= now.getTime()) === true;
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -48,6 +53,10 @@ const totalOf = (models: readonly ModelTokens[]): number => models.reduce((sum, 
  * subscription is read at start, then again only once 30 minutes passed and
  * the harness's ships did work since: Claude Code's read is a turn of its own.
  * A read that fails keeps what was read before.
+ * A window whose reset time passed since it was read is read again at the next
+ * pass, with no session running (at most every 5 minutes). Until a reading
+ * shows it started again, such a window is reported as reset (0 % used), never
+ * stamped as read now from an old log (#117).
  */
 export function createReadUsage(deps: { usage: UsagePort; state: StatePort; clock: Clock; logger: Pick<Logger, 'warn'>; harnesses: readonly string[]; prices: PriceTable }): ReadUsage {
   let ships: readonly ShipUsage[] = [];
@@ -55,6 +64,8 @@ export function createReadUsage(deps: { usage: UsagePort; state: StatePort; cloc
   /** Each harness's ships' tokens at the last read, so a subscription is read again only after work. */
   let tokensByHarness = new Map<string, number>();
   const subscriptions = new Map<string, SubscriptionRead>();
+  /** When each harness's subscription was last tried, so a read that keeps failing past a reset is tried every 5 minutes, not every pass. */
+  const triedAt = new Map<string, number>();
 
   const readTokens = async (): Promise<void> => {
     const { entries } = await deps.state.load();
@@ -86,14 +97,22 @@ export function createReadUsage(deps: { usage: UsagePort; state: StatePort; cloc
   const readSubscription = async (harness: string, now: Date): Promise<void> => {
     const tokens = tokensByHarness.get(harness) ?? 0;
     const last = subscriptions.get(harness);
-    if (last !== undefined && (now.getTime() - last.at.getTime() < SUBSCRIPTION_READ_INTERVAL_MS || tokens === last.tokens)) {
+    if (last !== undefined && !(isPastReset(last, now) && now.getTime() - (triedAt.get(harness) ?? 0) >= TOKENS_READ_INTERVAL_MS) && (now.getTime() - last.at.getTime() < SUBSCRIPTION_READ_INTERVAL_MS || tokens === last.tokens)) {
       return;
     }
+    triedAt.set(harness, now.getTime());
     const windows = await deps.usage.subscriptionOf(harness).catch((error: unknown) => {
       deps.logger.warn(`Could not read the ${harness} subscription: ${messageOf(error)}`);
       return undefined;
     });
-    subscriptions.set(harness, windows === undefined && last?.windows !== undefined ? { ...last, tokens } : { windows, at: now, tokens });
+    if (windows === undefined && last?.windows !== undefined) {
+      subscriptions.set(harness, { ...last, tokens });
+      return;
+    }
+    const resets = (windows ?? []).filter(({ resetsAt }) => resetsAt.getTime() <= now.getTime()).map(({ resetsAt }) => resetsAt.getTime());
+    // A reading whose window reset already comes from an old log: it is no fresher than the log, so it is not stamped as read now (#117).
+    const at = resets.length === 0 ? now : (last?.at ?? new Date(Math.max(...resets)));
+    subscriptions.set(harness, { windows, at, tokens, isStale: resets.length > 0 });
   };
 
   return async () => {
@@ -110,7 +129,7 @@ export function createReadUsage(deps: { usage: UsagePort; state: StatePort; cloc
         const read = subscriptions.get(harness);
         return read?.windows === undefined
           ? []
-          : [{ harness, readAt: read.at.toISOString(), windows: read.windows.map((window) => ({ windowMinutes: window.windowMinutes, usedPercent: window.usedPercent, resetsAt: window.resetsAt.toISOString() })) }];
+          : [{ harness, readAt: read.at.toISOString(), windows: read.windows.map((window) => ({ windowMinutes: window.windowMinutes, usedPercent: window.resetsAt.getTime() <= now.getTime() ? 0 : window.usedPercent, resetsAt: window.resetsAt.toISOString() })) }];
       }),
       ships: [...ships],
     };

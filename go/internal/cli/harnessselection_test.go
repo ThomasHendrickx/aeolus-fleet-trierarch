@@ -88,7 +88,7 @@ func TestInitSelectionStopsBeforeRegistration(t *testing.T) {
 func TestInitWizardUsesTerminalAndNeverDefaultsAHarness(t *testing.T) {
 	m := newMachine(t)
 	withCodex(m, true)
-	terminal := &scriptedTerminal{input: strings.NewReader("no\nyes\nno\nyes\n")}
+	terminal := &scriptedTerminal{input: strings.NewReader("no\nyes\nno\nyes\n\n\n\n\n")}
 	m.init.OpenTerminal = func() (io.ReadWriteCloser, error) { return terminal, nil }
 	f := setupLine()
 	f.Harnesses = nil
@@ -104,7 +104,7 @@ func TestInitWizardUsesTerminalAndNeverDefaultsAHarness(t *testing.T) {
 	if len(got.Harnesses) != 1 || !reflect.DeepEqual(got.Harnesses["codex"].Flags, []string{"--dangerously-bypass-approvals-and-sandbox"}) {
 		t.Fatalf("harnesses = %+v", got.Harnesses)
 	}
-	for _, text := range []string{"Claude Code", "Codex", "Copilot", "signed in", "not installed", "run without permission questions?"} {
+	for _, text := range []string{"Claude Code", "Codex", "Copilot", "signed in", "not installed", "without permission questions?"} {
 		if !strings.Contains(terminal.String(), text) {
 			t.Errorf("terminal missing %q: %s", text, terminal.String())
 		}
@@ -125,7 +125,7 @@ func TestInitWizardBlankAnswersPickNothing(t *testing.T) {
 
 func TestInitYesSkipsPermissionQuestionsButStillAsksHarnesses(t *testing.T) {
 	m := newMachine(t)
-	terminal := &scriptedTerminal{input: strings.NewReader("yes\nno\nno\n")}
+	terminal := &scriptedTerminal{input: strings.NewReader("yes\nno\nno\n\n\n\n\n")}
 	m.init.OpenTerminal = func() (io.ReadWriteCloser, error) { return terminal, nil }
 	f := setupLine()
 	f.Harnesses = nil
@@ -133,7 +133,7 @@ func TestInitYesSkipsPermissionQuestionsButStillAsksHarnesses(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := config.Load(m.init.Paths.Config)
-	if len(got.Harnesses["claude-code"].Flags) != 0 || strings.Contains(terminal.String(), "run without permission questions?") {
+	if len(got.Harnesses["claude-code"].Flags) != 0 || strings.Contains(terminal.String(), "without permission questions?") {
 		t.Fatalf("configuration = %+v, terminal = %s", got, terminal.String())
 	}
 }
@@ -142,7 +142,7 @@ func TestInitCopilotNeedsOnlyInstallationAndReportsUncheckedSignIn(t *testing.T)
 	m := newMachine(t)
 	m.init.IsClaudeCodeInstalled = false
 	m.init.IsCopilotInstalled = true
-	terminal := &scriptedTerminal{input: strings.NewReader("")}
+	terminal := &scriptedTerminal{input: strings.NewReader("\n\n\n\n")}
 	m.init.OpenTerminal = func() (io.ReadWriteCloser, error) { return terminal, nil }
 	f := setupLine()
 	f.Harnesses = []string{"copilot"}
@@ -160,7 +160,7 @@ func TestInitCopilotNeedsOnlyInstallationAndReportsUncheckedSignIn(t *testing.T)
 	if !strings.Contains(said, "! Copilot") || !strings.Contains(said, "sign-in cannot be checked") || !strings.Contains(said, "copilot login") {
 		t.Fatalf("report = %s", said)
 	}
-	if strings.Contains(terminal.String(), "run without permission questions?") {
+	if strings.Contains(terminal.String(), "without permission questions?") {
 		t.Fatalf("asked Copilot permission question: %s", terminal.String())
 	}
 }
@@ -182,7 +182,7 @@ func TestInitRerunStartsWithCurrentAnswersAndSavesOnlyChanges(t *testing.T) {
 	if err := config.Write(m.init.Paths.Config, current); err != nil {
 		t.Fatal(err)
 	}
-	terminal := &scriptedTerminal{input: strings.NewReader("no\n\n\nyes\n")}
+	terminal := &scriptedTerminal{input: strings.NewReader("no\n\n\nyes\n\n\n\n\n")}
 	m.init.OpenTerminal = func() (io.ReadWriteCloser, error) { return terminal, nil }
 	f = setupLine()
 	f.Harnesses = nil
@@ -214,7 +214,7 @@ func TestInitRerunBlankAnswersKeepCurrentHarnessOptions(t *testing.T) {
 	if _, err := m.init.Run(f); err != nil {
 		t.Fatal(err)
 	}
-	terminal := &scriptedTerminal{input: strings.NewReader("\n\n\n\n")}
+	terminal := &scriptedTerminal{input: strings.NewReader("\n\n\n\n\n\n\n\n")}
 	m.init.OpenTerminal = func() (io.ReadWriteCloser, error) { return terminal, nil }
 	f.Harnesses = nil
 	f.Unattended = nil

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 
@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { FAKE_CLAUDE_CODE, FAKE_CODEX, FAKE_COPILOT, TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
 import { newId } from '../../test/support/in-memory.js';
 import { sessionRuntimeContract } from '../../test/support/session-runtime-contract.js';
+import { aShortHome } from '../../test/support/short-home.js';
 import type { ObservedSession, SessionRuntime } from '../core/ports.js';
 import { createCallerCheck } from './caller-check.js';
 import { createHoldRuntime, sessionsLaunch, systemdVersionOf } from './hold-runtime.js';
@@ -17,7 +18,7 @@ import { runningVersion } from './version.js';
 
 // Against real holds, each the trierarch program from source started as the
 // trierarch starts it, running the stand-in for Claude Code in print mode
-// with streamed JSON, or a shell command. The folders sit under /tmp: a Unix
+// with streamed JSON, or a shell command. The folders sit in the run's short folder: a Unix
 // socket path is at most 104 bytes on macOS.
 
 /** The version a hold states: the trierarch's own, which runs it. */
@@ -37,8 +38,8 @@ let folder: string;
 let runtimes: SessionRuntime[];
 
 beforeEach(() => {
-  sessions = realpathSync(mkdtempSync('/tmp/aeolus-holds-'));
-  folder = realpathSync(mkdtempSync('/tmp/aeolus-folder-'));
+  sessions = realpathSync(aShortHome('aeolus-holds'));
+  folder = realpathSync(aShortHome('aeolus-folder'));
   runtimes = [];
 });
 

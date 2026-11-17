@@ -2,11 +2,13 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -50,12 +52,14 @@ func TestInitRepositoryFlags(t *testing.T) {
 				}
 				want["web"] = filepath.Join(destination, "web")
 			}
+			var printed []string
+			machine.Print = func(line string) { printed = append(printed, line) }
 			output, code := Main(words, machine)
 			if code != 0 {
 				t.Fatalf("init = %d, %s", code, output)
 			}
-			if strings.HasPrefix(mode, "clone") && !strings.Contains(output, "web (cloned to "+want["web"]+")") {
-				t.Errorf("report = %q, want cloned repository", output)
+			if strings.HasPrefix(mode, "clone") && !strings.Contains(strings.Join(printed, "\n"), "Cloning file://"+web+" to ") {
+				t.Errorf("printed %q, want the clone said before it starts", printed)
 			}
 			got, err := config.Load(pathsOf(machine).Config)
 			if err != nil {
@@ -120,22 +124,22 @@ func TestInitRepositoryWizardAsksAgain(t *testing.T) {
 			root := t.TempDir()
 			web := aGitRepository(t, filepath.Join(root, "web"))
 			other := aGitRepository(t, filepath.Join(root, "other", "web"))
-			input := "1\n" + root + "\n1\n" + web + "\n"
+			input := "1\n" + root + "\n" + web + "\n\n\n\n\n"
 			count := 1
 			words := setupWords()
 			words = append(words[:len(words)-1], "--unattended=")
 			switch mode {
 			case "name clash":
-				input = "1\n" + web + "," + other + "\n1\n" + web + "\n"
+				input = "1\n" + web + "," + other + "\n" + web + "\n\n\n\n\n"
 			case "folder of repositories":
-				input = "2\n" + root + "\n"
+				input = "2\n" + root + "\n\n\n\n\n"
 			case "skip":
-				input = "3\n"
+				input = "3\n\n\n\n\n"
 				count = 0
 			case "harnesses then repositories":
 				words = words[:len(words)-3]
 				words = append(words, "--unattended=")
-				input = "yes\nno\nno\n1\n" + web + "\n"
+				input = "yes\nno\nno\n1\n" + web + "\n\n\n\n\n"
 			}
 			terminal := &scriptedTerminal{input: strings.NewReader(input)}
 			machine.OpenTerminal = func() (io.ReadWriteCloser, error) { return terminal, nil }
@@ -153,10 +157,10 @@ func TestInitRepositoryWizardAsksAgain(t *testing.T) {
 			if count == 1 && got.Repositories["web"].Path != web {
 				t.Fatalf("web = %+v", got.Repositories["web"])
 			}
-			if !strings.Contains(terminal.String(), "a folder of repositories") {
+			if !strings.Contains(terminal.String(), "A folder containing git repositories") {
 				t.Fatalf("terminal = %s", terminal.String())
 			}
-			if (mode == "not git" || mode == "name clash") && strings.Count(terminal.String(), "Repositories:") != 2 {
+			if (mode == "not git" || mode == "name clash") && strings.Count(terminal.String(), listPrompt) != 2 {
 				t.Fatalf("did not ask again: %s", terminal.String())
 			}
 		})
@@ -248,5 +252,56 @@ func TestInitRepositoryWizardStopsWhenTheTerminalCannotBeRead(t *testing.T) {
 	}
 	if len(fleet.registered) != 0 {
 		t.Fatal("registered after a terminal read failure")
+	}
+}
+
+// aGitThatClones puts a git on PATH that clones source for any clone and says the URL it was given when it fails.
+func aGitThatClones(t *testing.T, source string, isFailing bool) {
+	t.Helper()
+	real, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	script := fmt.Sprintf(`#!/bin/sh
+if [ "$1" = clone ]; then
+  if [ %q = true ]; then echo "fatal: unable to access '$3': could not resolve host" >&2; exit 128; fi
+  exec %q clone --quiet -- %q "$4"
+fi
+exec %q "$@"
+`, strconv.FormatBool(isFailing), real, source, real)
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestInitNeverShowsTheCredentialsOfARepositoryURL(t *testing.T) {
+	for _, credentialed := range []string{
+		"https://alice:s3cret-token@example.invalid/team/web.git",
+		"https://s3cret-token@example.invalid/team/web.git",
+		"https://alice:s3cret-token@example.invalid/team/web.git?access_token=s3cret-token",
+	} {
+		for _, outcome := range []string{"cloned", "failed"} {
+			t.Run(outcome+" "+credentialed, func(t *testing.T) {
+				machine, _, _ := aMain(t)
+				aGitThatClones(t, aGitRepository(t, filepath.Join(t.TempDir(), "web")), outcome == "failed")
+				var printed []string
+				machine.Print = func(line string) { printed = append(printed, line) }
+
+				output, code := Main(append(setupWords(), "--repositories", credentialed), machine)
+
+				shown := strings.Join(printed, "\n") + "\n" + output
+				if strings.Contains(shown, "s3cret-token") || strings.Contains(shown, "alice") {
+					t.Errorf("init showed a credential of the repository URL:\n%s", shown)
+				}
+				if !strings.Contains(shown, "Cloning https://example.invalid/team/web.git to ~/repositories/web...") {
+					t.Errorf("init did not say the clone without its credentials:\n%s", shown)
+				}
+				if (code == 0) != (outcome == "cloned") {
+					t.Errorf("init = %d, want it %s:\n%s", code, outcome, shown)
+				}
+			})
+		}
 	}
 }

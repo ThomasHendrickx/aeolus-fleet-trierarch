@@ -1,3 +1,7 @@
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import { createCodexDetector } from './codex-detector.js';
@@ -48,7 +52,7 @@ const NEUTRAL_FOLDER = '/tmp/aeolus-trierarch-probe-x1';
  * it. Each model's probe ends as `probes` says, confirmed when it says
  * nothing; the probes run are kept, in order.
  */
-function aCodex(at: { catalog?: CommandResult; config?: string; live?: CommandResult; probes?: Readonly<Record<string, ProbeEnd>> } = {}) {
+function aCodex(at: { catalog?: CommandResult; config?: string; live?: CommandResult; probes?: Readonly<Record<string, ProbeEnd>>; neutral?: string } = {}) {
   const probed: { args: readonly string[]; cwd: string | undefined }[] = [];
   const run = (command: string, options: { args: readonly string[]; cwd?: string }): Promise<CommandResult> => {
     expect(command).toBe('codex');
@@ -66,12 +70,29 @@ function aCodex(at: { catalog?: CommandResult; config?: string; live?: CommandRe
     expect(options.args).toEqual(['debug', 'models', '--bundled']);
     return Promise.resolve(at.catalog ?? { status: 0, stdout: CATALOG, stderr: '' });
   };
-  return Object.assign(createCodexDetector({ run, readConfig: () => Promise.resolve(at.config), neutralFolder: () => Promise.resolve(NEUTRAL_FOLDER) }), { probed });
+  return Object.assign(createCodexDetector({ run, readConfig: () => Promise.resolve(at.config), neutralFolder: () => Promise.resolve(at.neutral ?? NEUTRAL_FOLDER) }), { probed });
 }
 
 const MODEL_VALUES = { 'gpt-6.1-sol': ['-m', 'gpt-6.1-sol'], 'gpt-6-luna': ['-m', 'gpt-6-luna'], 'gpt-reserve': ['-m', 'gpt-reserve'] };
 
 describe('detecting Codex (#365)', () => {
+  it('removes the neutral folder it probed from once detection ends, so no probe folder is left behind (#454)', async () => {
+    const neutral = mkdtempSync(join(tmpdir(), 'probe-removed-'));
+    try {
+      await aCodex({ neutral }).detect({ version: '0.160.1', previous: undefined, now: NOW });
+
+      expect(existsSync(neutral)).toBe(false);
+    } finally {
+      rmSync(neutral, { recursive: true, force: true });
+    }
+  });
+
+  it('detects as usual when the neutral folder cannot be removed, a path with a NUL byte which every rm rejects (#454)', async () => {
+    const detected = await aCodex({ neutral: '/nowhere/probe\0folder' }).detect({ version: '0.160.1', previous: undefined, now: NOW });
+
+    expect(detected?.options.model?.values).toEqual(MODEL_VALUES);
+  });
+
   it('probes each model of the catalog it runs with, hidden ones included, once, non-interactively from a neutral folder, and declares only those this login may use (#392)', async () => {
     const codex = aCodex({ live: { status: 0, stdout: LIVE_CATALOG, stderr: '' }, probes: { 'gpt-6.1-sol': 'refused' } });
 

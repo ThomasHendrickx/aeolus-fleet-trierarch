@@ -1,0 +1,7 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/tmp/cursor-s7-linux/adapted","session_id":"00000000-0000-4000-8000-000000000022","model":"Auto","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Do not use tools. Reply S7_TOOL_FREE."}]},"session_id":"00000000-0000-4000-8000-000000000022"}
+{"type":"thinking","subtype":"delta","text":"The","session_id":"00000000-0000-4000-8000-000000000022","timestamp_ms":1794817042486}
+{"type":"thinking","subtype":"delta","text":" user wants me to reply S7_TOOL_FREE without using tools, and include S7_START_ADAPTED from the hooks context.","session_id":"00000000-0000-4000-8000-000000000022","timestamp_ms":1794817042491}
+{"type":"thinking","subtype":"completed","session_id":"00000000-0000-4000-8000-000000000022","timestamp_ms":1794817042492}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"S7_TOOL_FREE\nS7_START_ADAPTED"}]},"session_id":"00000000-0000-4000-8000-000000000022"}
+{"type":"result","subtype":"success","duration_ms":2315,"duration_api_ms":2315,"is_error":false,"result":"S7_TOOL_FREE\nS7_START_ADAPTED","session_id":"00000000-0000-4000-8000-000000000022","request_id":"00000000-0000-4000-8000-000000000024","usage":{"inputTokens":196,"outputTokens":46,"cacheReadTokens":12416,"cacheWriteTokens":0,"reasoningTokens":31}}

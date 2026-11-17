@@ -1,0 +1,26 @@
+{
+  "command": [
+    "agent",
+    "-p",
+    "Run printf S7_TOOL. Report all context markers received. Do not retry a denied tool.",
+    "--output-format",
+    "stream-json",
+    "--trust"
+  ],
+  "build": "2026.11.13-eacade1",
+  "os": "Linux",
+  "host": "agent-host-1",
+  "lifecycle": [
+    {
+      "state": "busy",
+      "source": "process start"
+    },
+    {
+      "state": "idle",
+      "source": "process exit",
+      "exitStatus": 0
+    }
+  ],
+  "started": true,
+  "active": true
+}
