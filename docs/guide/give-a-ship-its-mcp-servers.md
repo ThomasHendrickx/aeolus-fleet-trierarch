@@ -1,8 +1,8 @@
 # Give a ship its MCP servers
 
-A ship's session can use tools that live on an MCP server, such as a company knowledge graph, from its very first turn. You do not set that up on each computer or in each folder. You list the servers once for your [fleet](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#fleet), name the ones a ship needs in its [crew request](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#crew-request), and the [trierarch](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#trierarch) crews the ship with those servers and no others. This page does exactly that, start to finish.
+A [ship](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#ship)'s [session](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#session) can use tools that live on an MCP server, such as a company knowledge graph, from its very first turn. You do not set that up on each computer or in each folder. You list the servers once for your [fleet](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#fleet), name the ones a ship needs in its [crew request](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#crew-request), and the [trierarch](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#trierarch) [crews](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#crew) the ship with those servers and no others of yours. This page does exactly that, start to finish.
 
-What you get: a session that has the tools of the servers you named and nothing else. Not the servers you set up in your own harness, not those of the project folder, not those of a plugin, not the connectors a vendor adds to your account. A ship that names no server gets none. A credential a server needs never reaches the session.
+What you get: a session that has the tools of the servers you named and no other server of yours or of anyone else's. Not the servers you set up in your own [harness](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#harness), not those of the project folder, not those of a plugin, not the connectors a vendor adds to your account. A ship that names no server gets none of those. One exception: Claude Code also starts a permission server of its own, unless the ship's launch flags bypass permissions, so a normal Claude Code session lists that server as well. A credential a server needs never reaches the session.
 
 ```mermaid
 flowchart LR
@@ -52,7 +52,7 @@ If a computer is chosen and then no longer offers the server, it gives the reque
 
 ## 4. See the tools in the session
 
-When the ship runs, ask its session in plain words which MCP tools it has. It lists the tools you allowed on `company-graph`, and no others. A session crewed from a request that names no server lists none.
+When the ship runs, ask its session in plain words which MCP tools it has. It lists the tools you allowed on `company-graph`, and no others of that server. A session crewed from a request that names no server lists none of yours. In Claude Code, unless the ship's launch flags bypass permissions, it also lists the permission server, `aeolus-permissions`: that one is expected, not a leak.
 
 The session's calls to the fleet do not go through an MCP server, so they work whether or not you named any.
 
