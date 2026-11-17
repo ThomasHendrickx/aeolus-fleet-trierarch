@@ -596,7 +596,7 @@ describe('the watcher wake stream', () => {
     aTurnEnded();
     const watcher = start('aeolus-wait.sh');
     try {
-      await expect.poll(() => stub.calls.filter((call) => call.path === '/api/v1/ship/pushReceive').length, { timeout: 2000 }).toBe(2);
+      await expect.poll(() => stub.calls.filter((call) => call.path === '/api/v1/ship/pushReceive').length).toBe(2);
       expect((await watcher.done).status).toBe(0);
       expect(stub.streams).toHaveLength(1);
     } finally { watcher.child.kill(); }
@@ -3690,16 +3690,29 @@ describe("the plugin's log: what the watcher and hooks do, one record per line i
     const keyActions = () => actions().filter((record) => 'outcome' in record && record.outcome.includes('key'));
 
     it('waits longer after each KEY_UNAVAILABLE on the push receive, up to a most, and keeps watching', async () => {
-      fleet = await startRoutedStubFleet({ '/api/v1/ship/inbox': [inbox(1)], '/api/v1/ship/pushReceive': [keyUnavailable] });
+      const bin = join(data, 'bin');
+      mkdirSync(bin);
+      const sleep = join(bin, 'sleep');
+      const waits = join(data, 'waits');
+      // Record the requested waits instead of depending on the machine's scheduling.
+      writeFileSync(sleep, '#!/usr/bin/env bash\nprintf "%s\\n" "$1" >> "$AEOLUS_TEST_WAITS"\n');
+      chmodSync(sleep, 0o700);
+      fleet = await startRoutedStubFleet({
+        '/api/v1/ship/inbox': [inbox(1)],
+        '/api/v1/ship/pushReceive': [keyUnavailable, keyUnavailable, keyUnavailable, receiving(aDelivery())],
+        '/api/v1/ship/handed': [handedOk],
+        '/api/v1/ship/report': [taken],
+      });
       crew(fleet.url);
       aTurnEnded();
-      const watcher = start('aeolus-wait.sh', { env: KEY_WAIT });
+      const watcher = start('aeolus-wait.sh', { env: {
+        ...KEY_WAIT, PATH: `${bin}:${process.env.PATH ?? ''}`, AEOLUS_TEST_WAITS: waits,
+      } });
 
       try {
-        await new Promise((resolve) => setTimeout(resolve, 4500));
-
-        expect(fleet.calls.filter((call) => call.path === '/api/v1/ship/pushReceive')).toHaveLength(3);
-        expect(watcher.child.exitCode).toBeNull();
+        expect(await watcher.done).toMatchObject({ status: 0, stdout: HANDED_OVER });
+        expect(readFileSync(waits, 'utf8').trim().split('\n')).toEqual(['1', '2', '2']);
+        expect(fleet.calls.filter((call) => call.path === '/api/v1/ship/pushReceive')).toHaveLength(4);
       } finally {
         watcher.child.kill();
       }

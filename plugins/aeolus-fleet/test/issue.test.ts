@@ -91,6 +91,21 @@ function aDraft(body = ''): string {
 }
 
 describe('aeolus-fleet-issue redact', () => {
+  it('strips the whole checkout path when it contains a ship id under the home folder', () => {
+    const home = realpathSync(data);
+    const checkout = join(home, SHIP_ID, 'checkout');
+    mkdirSync(checkout, { recursive: true });
+    const env = { HOME: home, AEOLUS_FOLDER: checkout };
+    expect(run('aeolus-identity.sh', { args: ['write', FLEET_URL, SHIP_ID, 'l3lo'], stdin: CREW_TOKEN, env }).status).toBe(0);
+    const draft = join(data, 'checkout.md');
+    writeFileSync(draft, `from ${checkout}/file.ts under ${home}/.claude\n`);
+
+    const { status, stdout } = run('aeolus-issue.sh', { args: ['redact', draft], env });
+
+    expect(status).toBe(0);
+    expect(stdout).toBe('from [folder]/file.ts under [home]/.claude\n');
+  });
+
   it('strips crew tokens, secrets, bearer values, the fleet host, home and folder paths, and ship names and ids, keeping the rest', () => {
     const { status, stdout } = run('aeolus-issue.sh', { args: ['redact', aDraft()] });
 
