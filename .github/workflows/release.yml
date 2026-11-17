@@ -129,6 +129,7 @@ jobs:
       - name: Check the staging walk passed on the commit
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           OVERRIDE_REASON: ${{ inputs.override_reason }}
         run: |
           gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/statuses" \
@@ -137,6 +138,7 @@ jobs:
       - name: Download the candidate
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RUN_ID: ${{ inputs.candidate_run_id }}
           VERSION: ${{ inputs.version }}
         run: |
