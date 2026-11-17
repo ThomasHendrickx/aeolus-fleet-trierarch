@@ -173,7 +173,7 @@ async function aTrierarchOnTheFleet(
 ) {
   const useCases = createUseCases({ prisma: database });
   const argo = operatorCaller(unwrap(await useCases.initialiseFleet({ name: 'home fleet', ...OPERATOR })));
-  const trierarchShip = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'mac-mini', type: 'trierarch', scopes: ['crew:run'] }));
+  const trierarchShip = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'test-machine', type: 'trierarch', kind: 'trierarch', scopes: ['crew:run'] }));
   const scout = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'scout', type: 'reviewer' }));
 
   const service = { install: () => Promise.resolve(), rewrite: () => Promise.resolve(), restart: () => Promise.resolve(), status: () => Promise.resolve({ file: 'none', isInstalled: true, isRunning: true }) };
@@ -856,7 +856,7 @@ describe('the trusted repositories on a real fleet (aeolus-fleet#384)', () => {
     const { crewToken } = z.object({ crewToken: z.string() }).parse(await shipCall('/ship/register', { body: { shipId: plugin.shipId, secret: secretOf(plugin.secret), location: { kind: 'SERVER' }, harness: 'aeolus-trierarch-plugin' } }));
     const machine = z
       .object({ shipId: z.templateLiteral(['shp_', z.string()]), secret: z.string() })
-      .parse(await shipCall('/fleet/commission', { body: { name: 'mac-mini', type: 'trierarch', scopes: ['crew:run'], idempotencyKey: newKey() }, crewToken }));
+      .parse(await shipCall('/fleet/commission', { body: { name: 'test-machine', type: 'trierarch', kind: 'trierarch', scopes: ['crew:run'], idempotencyKey: newKey() }, crewToken }));
     const label = defineLabelOutputSchema.parse(await shipCall('/fleet/defineLabel', { body: { key: 'trierarch', values: ['plugin', 'machine'] }, crewToken }));
     const valueOf = (value: string) => label.values.find((each) => each.value === value)?.id;
     await shipCall('/fleet/assignLabel', { body: { shipId: plugin.shipId, valueId: valueOf('plugin') }, crewToken });
