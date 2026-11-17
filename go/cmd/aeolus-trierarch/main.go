@@ -142,14 +142,14 @@ func main() {
 		},
 		PassEvery: passEvery,
 		OwnShip: func(kept crew.File) receiving.Ship {
-			return fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken, Model: "@aeolus-fleet/trierarch@" + cli.Version}
+			return fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken}
 		},
 		Trusted: func(at paths.Paths, configuration config.Configuration) receiving.Keeper {
 			return trustedRepositories(at, configuration, home)
 		},
 		McpConfiguration: heldMcpConfigurationOf,
 		McpFleet: func(kept crew.File) cli.McpFleet {
-			return fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken, Model: "@aeolus-fleet/trierarch@" + cli.Version}
+			return fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken}
 		},
 		Sessions: func(at paths.Paths) cli.Sessions {
 			// A configuration that cannot be read runs no session in a container.
@@ -561,7 +561,7 @@ func environment() map[string]string {
 // newPass is one pass of the run loop with this machine's adapters: the fleet over /api/v1 with the trierarch's crew token, the harnesses the configuration offers, worktrees of the configured repositories, and the state file.
 func newPass(at paths.Paths, kept crew.File, configuration config.Configuration, home string, program string) (func(isKeyCutOff bool) error, error) {
 	env := environment()
-	client := fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken, Model: "@aeolus-fleet/trierarch@" + cli.Version}
+	client := fleet.Client{URL: kept.FleetURL, CrewToken: kept.CrewToken}
 	// Detected again only for a harness whose version changed since (#365); the operator's own options win.
 	detect := detectionOf(at, env, home, logLine)
 	detected, err := detect.Detect(context.Background(), slices.Sorted(maps.Keys(configuration.Harnesses)), detection.ByStart)

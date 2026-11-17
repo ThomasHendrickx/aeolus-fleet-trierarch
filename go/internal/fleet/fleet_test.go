@@ -116,17 +116,42 @@ func aSendingFleet(t *testing.T, answer func(w http.ResponseWriter)) (Client, *m
 		answer(w)
 	}))
 	t.Cleanup(server.Close)
-	return Client{URL: server.URL, CrewToken: "aeolus_ct_v1_trierarch", Model: "aeolus-trierarch@1.2.3"}, &sent
+	return Client{URL: server.URL, CrewToken: "aeolus_ct_v1_trierarch"}, &sent
 }
 
-func TestTellsArgoByNameInMarkdownStatingItsModelWithAKeyThatMakesARetrySafe(t *testing.T) {
+func TestTrierarchSendsWithoutAModel(t *testing.T) {
+	tests := []struct {
+		name string
+		send func(Client) error
+	}{
+		{"argo", func(c Client) error { return c.ReportToArgo("report", "key") }},
+		{"owner", func(c Client) error { _, err := c.ReportToOwner("shp_owner", "report", "key"); return err }},
+		{"trusted repositories", func(c Client) error { return c.AskForTrustedRepositories("shp_plugin") }},
+		{"usage", func(c Client) error { return c.SendUsage("shp_plugin", "{}", "key") }},
+		{"mcp configuration request", func(c Client) error { return c.AskForMcpConfiguration("shp_plugin", "{}") }},
+		{"mcp configuration applied", func(c Client) error { return c.ConfirmMcpConfiguration("shp_plugin", "{}") }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			client, sent := aSendingFleet(t, func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"messageId":"msg_1"}`)) })
+			if err := test.send(client); err != nil {
+				t.Fatal(err)
+			}
+			if model, exists := (*sent)["model"]; exists {
+				t.Errorf("model = %v, want absent", model)
+			}
+		})
+	}
+}
+
+func TestTellsArgoByNameInMarkdownWithAKeyThatMakesARetrySafe(t *testing.T) {
 	client, sent := aSendingFleet(t, func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"messageId":"msg_1"}`)) })
 
 	if err := client.ReportToArgo("headline\n\nbody", "trierarch:key:1"); err != nil {
 		t.Fatal(err)
 	}
 
-	want := map[string]any{"selector": map[string]any{"kind": "ship", "name": "argo"}, "payload": "headline\n\nbody", "contentType": "text/markdown", "model": "aeolus-trierarch@1.2.3", "idempotencyKey": "trierarch:key:1"}
+	want := map[string]any{"selector": map[string]any{"kind": "ship", "name": "argo"}, "payload": "headline\n\nbody", "contentType": "text/markdown", "idempotencyKey": "trierarch:key:1"}
 	if got, _ := json.Marshal(*sent); string(got) != mustJSON(want) {
 		t.Errorf("sent %s, want %s", got, mustJSON(want))
 	}
@@ -183,7 +208,7 @@ func TestAsksThePluginsShipForTheTrustedRepositoriesAsItsOwnShipWithAKeyOfItsOwn
 	}
 
 	got := *sent
-	if got["payload"] != "{}" || got["contentType"] != "application/vnd.aeolus.trierarch.trusted-repositories-request+json" || got["model"] != "aeolus-trierarch@1.2.3" || mustJSON(got["selector"]) != mustJSON(map[string]any{"kind": "ship", "shipId": "shp_plugin"}) {
+	if got["payload"] != "{}" || got["contentType"] != "application/vnd.aeolus.trierarch.trusted-repositories-request+json" || mustJSON(got["selector"]) != mustJSON(map[string]any{"kind": "ship", "shipId": "shp_plugin"}) {
 		t.Errorf("sent %v", got)
 	}
 	if key, _ := got["idempotencyKey"].(string); key == "" || key == first {
@@ -210,7 +235,7 @@ func TestSendsTheUsageToThePluginsShipAsItsOwnShipUnderTheKeyItIsGiven(t *testin
 	}
 
 	got := *sent
-	if got["payload"] != `{"hours":[]}` || got["contentType"] != "application/vnd.aeolus.trierarch.usage+json" || got["model"] != "aeolus-trierarch@1.2.3" || got["idempotencyKey"] != "usage:shp_trierarch:2026-10-06T08:00:00.000Z" || mustJSON(got["selector"]) != mustJSON(map[string]any{"kind": "ship", "shipId": "shp_plugin"}) {
+	if got["payload"] != `{"hours":[]}` || got["contentType"] != "application/vnd.aeolus.trierarch.usage+json" || got["idempotencyKey"] != "usage:shp_trierarch:2026-10-06T08:00:00.000Z" || mustJSON(got["selector"]) != mustJSON(map[string]any{"kind": "ship", "shipId": "shp_plugin"}) {
 		t.Errorf("sent %v", got)
 	}
 }

@@ -97,11 +97,11 @@ export interface Told {
 export async function aFleet(): Promise<Fleet> {
   const databaseUrl = await createMigratedDatabase();
   const database = createPrismaClient(databaseUrl);
-  const server = createApp({ databaseUrl, publicUrl: FLEET_URL, logger: false, receiveWaitMs: 100 });
+  const server = createApp({ databaseUrl, publicUrl: FLEET_URL, logger: false });
   const url = await server.listen({ host: '127.0.0.1', port: 0 });
   const useCases = createUseCases({ prisma: database });
   const argo = operatorCaller(unwrap(await useCases.initialiseFleet({ name: 'home fleet', ...OPERATOR })));
-  const commissioned = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'mac-mini', type: 'trierarch', scopes: ['crew:run'] }));
+  const commissioned = unwrap(await useCases.commissionShip(argo, { idempotencyKey: newKey(), name: 'test-machine', type: 'trierarch', kind: 'trierarch', scopes: ['crew:run'] }));
   const trierarchShip = { shipId: commissioned.shipId, secret: secretOf(commissioned.secret) };
   return {
     url,

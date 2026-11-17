@@ -56,7 +56,7 @@ describe('a session on its subscription', () => {
 
     await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
 
-    await expect.poll(() => fleet.givenBackReasonOf(scout), { timeout: CREWED_WITHIN_MS }).toBe(`mac-mini: claude-code would reach an API key on its subscription (apiKeyHelper in ${userSettings()}): remove it, or run the ship on its API key`);
+    await expect.poll(() => fleet.givenBackReasonOf(scout), { timeout: CREWED_WITHIN_MS }).toBe(`test-machine: claude-code would reach an API key on its subscription (apiKeyHelper in ${userSettings()}): remove it, or run the ship on its API key`);
     expect(await fleet.givenBackReasonOf(scout)).not.toContain(HELPER);
     expect(sessionOf(machine, 'scout').starts()).toEqual([]);
     await expect(fleet.leasesOf(scout)).resolves.toBe(0);

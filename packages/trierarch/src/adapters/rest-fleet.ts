@@ -6,7 +6,6 @@ import { z } from 'zod';
 
 import type { Delivery, FleetPort } from '../core/ports.js';
 import { TRUSTED_REPOSITORIES_REQUEST_CONTENT_TYPE } from '../core/trusted-repositories.js';
-import { runningVersion } from './version.js';
 
 /**
  * The fleet over its REST API (`/api/v1`), as any ship may call it: the
@@ -19,8 +18,8 @@ import { runningVersion } from './version.js';
  * waits (each drawn by `busyWaitMs`), so a send keeps its idempotency key.
  */
 
-/** What the trierarch states as model and harness: it is software, not a model, as squadrons is (#157). */
-export const TRIERARCH_SELF = { model: `@aeolus-fleet/trierarch@${runningVersion()}`, harness: 'aeolus-trierarch' } as const;
+/** The harness the trierarch states when registering its own ship. */
+const TRIERARCH_HARNESS = 'aeolus-trierarch';
 
 /** The most activities the fleet takes in one `fleet.reportActivity` call. */
 const ACTIVITIES_PER_CALL = 100;
@@ -154,7 +153,7 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string; 
     },
     getStartingPrompt: async (shipId) => call({ path: '/fleet/getStartingPrompt', body: { shipId }, answers: z.object({ secret: z.string() }) }),
     register: async (crew) => register(crew),
-    registerSelf: async (crew) => register({ ...crew, harness: TRIERARCH_SELF.harness }),
+    registerSelf: async (crew) => register({ ...crew, harness: TRIERARCH_HARNESS }),
     whoami: async () => call({ path: '/ship/whoami', answers: z.object({ shipId: idSchema('ship'), name: z.string() }) }),
     release: async (shipId) => {
       await call({ path: '/fleet/release', body: { shipId }, answers: z.unknown() });
@@ -172,21 +171,21 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string; 
     sendUsage: async ({ pluginShipId, payload, idempotencyKey }) => {
       await call({
         path: '/ship/send',
-        body: { selector: { kind: 'ship', shipId: pluginShipId }, payload, contentType: TRIERARCH_USAGE_CONTENT_TYPE, model: TRIERARCH_SELF.model, idempotencyKey },
+        body: { selector: { kind: 'ship', shipId: pluginShipId }, payload, contentType: TRIERARCH_USAGE_CONTENT_TYPE, idempotencyKey },
         answers: z.object({ messageId: idSchema('message') }),
       });
     },
     askForTrustedRepositories: async (pluginShipId) => {
       await call({
         path: '/ship/send',
-        body: { selector: { kind: 'ship', shipId: pluginShipId }, payload: '{}', contentType: TRUSTED_REPOSITORIES_REQUEST_CONTENT_TYPE, model: TRIERARCH_SELF.model, idempotencyKey: randomUUID() },
+        body: { selector: { kind: 'ship', shipId: pluginShipId }, payload: '{}', contentType: TRUSTED_REPOSITORIES_REQUEST_CONTENT_TYPE, idempotencyKey: randomUUID() },
         answers: z.object({ messageId: idSchema('message') }),
       });
     },
     reportToArgo: async ({ text, idempotencyKey }) => {
       await call({
         path: '/ship/send',
-        body: { selector: { kind: 'ship', name: 'argo' }, payload: text, contentType: MARKDOWN_CONTENT_TYPE, model: TRIERARCH_SELF.model, idempotencyKey },
+        body: { selector: { kind: 'ship', name: 'argo' }, payload: text, contentType: MARKDOWN_CONTENT_TYPE, idempotencyKey },
         answers: z.object({ messageId: idSchema('message') }),
       });
     },
@@ -194,7 +193,7 @@ export function createRestFleet(options: { fleetUrl: string; crewToken: string; 
       try {
         await call({
           path: '/ship/send',
-          body: { selector: { kind: 'ship', shipId: ownerShipId }, payload: text, contentType: MARKDOWN_CONTENT_TYPE, model: TRIERARCH_SELF.model, idempotencyKey },
+          body: { selector: { kind: 'ship', shipId: ownerShipId }, payload: text, contentType: MARKDOWN_CONTENT_TYPE, idempotencyKey },
           answers: z.object({ messageId: idSchema('message') }),
         });
         return { kind: 'sent' };
