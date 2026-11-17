@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,7 +31,7 @@ type aRelease struct {
 	isCompacted bool
 	latest      string
 	// stalls is how many binary downloads hang until the client gives up.
-	stalls int
+	stalls atomic.Int32
 }
 
 func (r *aRelease) serve(t *testing.T) *httptest.Server {
@@ -47,8 +48,7 @@ func (r *aRelease) serve(t *testing.T) *httptest.Server {
 		case "/repos/" + repository + "/releases/tags/v" + r.version:
 			_ = json.NewEncoder(w).Encode(map[string]any{"tag_name": "v" + r.version, "assets": []any{asset("aeolus-trierarch-linux-amd64"), asset("SHA256SUMS")}})
 		case "/download/aeolus-trierarch-linux-amd64":
-			if r.stalls > 0 {
-				r.stalls--
+			if r.stalls.Add(-1) >= 0 {
 				<-request.Context().Done()
 				return
 			}
@@ -138,7 +138,7 @@ func TestFetchTakesTheReleasesBinaryForTheSystemAndChipWhenItsChecksumAndAttesta
 
 func TestFetchTakesTheBinaryFromTheFallbackClientWhenATransferStalls(t *testing.T) {
 	signed := aSignedRelease(t)
-	signed.release.stalls = 1
+	signed.release.stalls.Store(1)
 	fallback := signed.source.Client
 	signed.source.Client = &http.Client{Transport: fallback.Transport, Timeout: 200 * time.Millisecond}
 	signed.source.Fallback = fallback
@@ -152,7 +152,7 @@ func TestFetchTakesTheBinaryFromTheFallbackClientWhenATransferStalls(t *testing.
 
 func TestFetchRefusesAFallbackBinaryItsChecksumDoesNotName(t *testing.T) {
 	signed := aSignedRelease(t)
-	signed.release.stalls = 1
+	signed.release.stalls.Store(1)
 	signed.release.sums = fmt.Sprintf("%x  aeolus-trierarch-linux-amd64\n", sha256.Sum256([]byte("another")))
 	fallback := signed.source.Client
 	signed.source.Client = &http.Client{Transport: fallback.Transport, Timeout: 200 * time.Millisecond}

@@ -5,15 +5,19 @@ import (
 	"crypto/x509"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 )
 
 // On a network that stalls HTTP/2, the release download recovers through the fallback as production configures it: the clients releases builds, over a TLS server that negotiates HTTP/2 and stalls it.
 func TestTheProductionReleaseClientsRecoverAStalledHTTP2TransferOverHTTP11(t *testing.T) {
+	var seen sync.Mutex
 	var protocols []string
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen.Lock()
 		protocols = append(protocols, r.Proto)
+		seen.Unlock()
 		if r.ProtoMajor == 2 {
 			<-r.Context().Done()
 			return
@@ -44,6 +48,8 @@ func TestTheProductionReleaseClientsRecoverAStalledHTTP2TransferOverHTTP11(t *te
 	if err != nil || version != "0.40.0" {
 		t.Fatalf("Latest after a stalled HTTP/2 transfer = %q, %v, want 0.40.0", version, err)
 	}
+	seen.Lock()
+	defer seen.Unlock()
 	if len(protocols) != 2 || protocols[0] != "HTTP/2.0" || protocols[1] != "HTTP/1.1" {
 		t.Fatalf("the server saw %v, want a stalled HTTP/2.0 try and then an HTTP/1.1 retry", protocols)
 	}
