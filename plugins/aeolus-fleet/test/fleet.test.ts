@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -618,6 +619,32 @@ describe("a folder whose fleet calls go over its trierarch's socket (decision 00
 
     expect(result.status).toBe(6);
     expect(result.stdout).toContain('no answer');
+  });
+
+  it.each([200, 503])('refuses a truncated %s answer without replaying an uncertain send', async (status) => {
+    const written = await run('aeolus-identity.sh', { args: ['write', '--wake-by', 'trierarch', '--socket', socket, 'https://fleet.example.com', SHIP_ID, 'scout'], stdin: CREW_TOKEN });
+    expect(written.status).toBe(0);
+    let calls = 0;
+    // A whole JSON value is still an incomplete HTTP answer when bytes are
+    // missing. A truncated busy refusal must not trigger another send either.
+    const server = createServer((connection) => {
+      connection.once('data', () => {
+        calls += 1;
+        connection.end(`HTTP/1.1 ${String(status)} Answer\r\nContent-Length: 1000\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(status === 200 ? { messageId: 'msg_accepted' } : busy.body)}`);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(socket, resolve));
+    try {
+      const result = await run('aeolus-fleet.sh', { args: ['send', '-'], stdin: JSON.stringify({ selector: { kind: 'ship', name: 'argo' }, payload: 'hello', idempotencyKey: 'one-send', model: 'gpt-6.1-sol' }), env: { AEOLUS_BUSY_WAITS: '0 0' } });
+
+      expect(result.status).toBe(6);
+      expect(result.stdout).toContain('no answer');
+      expect(result.stdout).not.toContain('msg_accepted');
+      expect(calls).toBe(1);
+      expectNoToken(result);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => { if (error === undefined) { resolve(); } else { reject(error); } }));
+    }
   });
 });
 
