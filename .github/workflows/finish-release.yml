@@ -182,6 +182,13 @@ jobs:
       # is finished again, it is left as it is if its SHA256SUMS is this one;
       # otherwise only the binaries and SHA256SUMS are put on it again, those of
       # the named run, which it attested.
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-metadata
+          run-id: ${{ inputs.run-id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/release-metadata
+
       - name: Create the GitHub Release v${{ inputs.version }}
         working-directory: ${{ runner.temp }}/binaries
         env:
@@ -201,6 +208,11 @@ jobs:
           fi
           gh pr list --state merged --label "$VERSION" --json number,title,url --limit 1000 \
             | node "$GITHUB_WORKSPACE/scripts/release-notes.ts" "$VERSION" > "$RUNNER_TEMP/release-notes.md"
+          reason=$(cat "$RUNNER_TEMP/release-metadata/override-reason")
+          if [[ -n "${reason//[[:space:]]/}" ]]; then
+            actor=$(cat "$RUNNER_TEMP/release-metadata/actor")
+            printf '\n**Released without a passed staging walk**, by %s: %s\n' "$actor" "$reason" >> "$RUNNER_TEMP/release-notes.md"
+          fi
           gh release create "v$VERSION" --verify-tag --title "v$VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" aeolus-trierarch-* SHA256SUMS
 
       # After the GitHub Release, so a run that failed before it leaves the

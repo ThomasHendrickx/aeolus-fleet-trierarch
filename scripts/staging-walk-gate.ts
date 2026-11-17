@@ -1,0 +1,70 @@
+/**
+ * Whether a commit's staging walk lets it be released (decision 0011): the walker
+ * sets the commit status staging-walk on the candidate's commit, and only a passed walk lets the release through. Thomas, the
+ * repository owner, can overrule a failed or missing walk by dispatching the release with a reason; the release writes the
+ * reason into its log and the GitHub Release's notes.
+ *
+ * Usage: gh api repos/<owner>/<repo>/commits/<sha>/statuses \
+ *          | node scripts/staging-walk-gate.ts <sha> <owner> <actor> [<override reason>]
+ */
+import { readFileSync } from 'node:fs';
+
+import { z } from 'zod';
+
+const CONTEXT = 'staging-walk';
+
+const commitStatusSchema = z.object({ context: z.string(), state: z.string(), target_url: z.string().nullable() });
+
+export type CommitStatus = z.infer<typeof commitStatusSchema>;
+
+export type StagingWalkVerdict =
+  | { verdict: 'walked'; url: string | null }
+  | { verdict: 'overruled'; reason: string }
+  | { verdict: 'refused'; why: string };
+
+/** The verdict on a commit; the statuses are GitHub's for the commit, newest first, as its API lists them. */
+export function stagingWalkVerdict(release: {
+  sha: string;
+  owner: string;
+  actor: string;
+  overrideReason: string;
+  statuses: readonly CommitStatus[];
+}): StagingWalkVerdict {
+  const reason = release.overrideReason.trim();
+  if (reason !== '') {
+    return release.actor === release.owner
+      ? { verdict: 'overruled', reason }
+      : { verdict: 'refused', why: `Only ${release.owner} overrules the staging walk; ${release.actor} dispatched this release` };
+  }
+  const walk = release.statuses.find(({ context }) => context === CONTEXT);
+  if (walk === undefined) {
+    return { verdict: 'refused', why: `No staging walk of ${release.sha}: the walker has not reported on it` };
+  }
+  if (walk.state !== 'success') {
+    return { verdict: 'refused', why: `The staging walk of ${release.sha} did not pass (${walk.state}): ${walk.target_url ?? 'no link'}` };
+  }
+  return { verdict: 'walked', url: walk.target_url };
+}
+
+if (import.meta.main) {
+  try {
+    const [sha = '', owner = '', actor = '', overrideReason = ''] = process.argv.slice(2);
+    if (sha === '' || owner === '' || actor === '') {
+      throw new Error("Usage: node scripts/staging-walk-gate.ts <sha> <owner> <actor> [<override reason>], with the commit's statuses as JSON on stdin");
+    }
+    const statuses = z.array(commitStatusSchema).parse(JSON.parse(readFileSync(0, 'utf8')));
+    const result = stagingWalkVerdict({ sha, owner, actor, overrideReason, statuses });
+    if (result.verdict === 'refused') {
+      console.error(`::error::${result.why}`);
+      process.exit(1);
+    }
+    console.log(
+      result.verdict === 'overruled'
+        ? `::warning::${owner} overruled the staging walk of ${sha}: ${result.reason}`
+        : `The staging walk of ${sha} passed: ${result.url ?? 'no link'}`,
+    );
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  }
+}
