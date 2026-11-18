@@ -104,6 +104,9 @@ case "$command" in
     cat "$launch_file" 2>/dev/null || { echo "aeolus: no launch marked yet"; exit 1; }
     ;;
   store)
+    # The trierarch inspects with the newest cached plugin, which the running
+    # session may not use. Reading its store must not claim it (aeolus-fleet#1678).
+    aeolus_is_store_claimed=0
     store_dir="$(aeolus_store_dir)"
     for state_file in "$store_dir"/*.state; do
       [ -f "$state_file" ] || continue

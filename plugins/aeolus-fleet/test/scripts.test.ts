@@ -4686,8 +4686,8 @@ describe('the version guard: an older plugin never touches the delivery store a 
     const STOP = { hook_event_name: 'Stop', stop_hook_active: true };
 
     /** The trierarch inspects the store and hands messages over with the newest plugin in the cache. */
-    const trierarchRuns = (root: string, script: string, args: readonly string[]): Promise<Run> => {
-      const child = spawn('bash', [join(root, 'scripts', script), ...args], {
+    const trierarchRuns = (root: string, command: { script: string; args: readonly string[] }): Promise<Run> => {
+      const child = spawn('bash', [join(root, 'scripts', command.script), ...command.args], {
         env: scriptEnvironment({ HOME: home, AEOLUS_FOLDER: folder, AEOLUS_DATA: data, AEOLUS_CREWS: join(home, '.aeolus', 'crews', 'claude-code'), AEOLUS_RETRY_SECONDS: '0', ...NO_WAITS }),
       });
       child.stdin.end('');
@@ -4701,7 +4701,7 @@ describe('the version guard: an older plugin never touches the delivery store a 
         });
       });
     };
-    const trierarchHands = (root: string) => trierarchRuns(root, 'aeolus-push.sh', ['hand']);
+    const trierarchHands = (root: string) => trierarchRuns(root, { script: 'aeolus-push.sh', args: ['hand'] });
 
     it('delivers every message to the running older session when the upgraded trierarch inspects its store before each hand-over (aeolus-fleet#1678)', async () => {
       // Given a pushed session that has received and handled a message before the upgrade.
@@ -4726,7 +4726,7 @@ describe('the version guard: an older plugin never touches the delivery store a 
       const upgraded = aPlugin('0.37.0');
       const contexts: string[] = [];
       for (const delivery of deliveries.slice(1)) {
-        expect((await trierarchRuns(upgraded, 'aeolus-identity.sh', ['store'])).status).toBe(0);
+        expect((await trierarchRuns(upgraded, { script: 'aeolus-identity.sh', args: ['store'] })).status).toBe(0);
         expect((await trierarchHands(upgraded)).stdout).toContain(delivery.deliveryId);
         const prompted = await session('aeolus-turn.sh', PROMPT);
         expect(prompted.stdout).toContain(delivery.messageId);
@@ -4738,14 +4738,14 @@ describe('the version guard: an older plugin never touches the delivery store a 
       expect(contexts[0]).toContain('Review');
       expect(contexts[1]).toContain('Merge PR 13');
       const expected = [{ deliveryId: DELIVERY_ID }, { deliveryId: 'dlv_01m4rb7cq8m6d0x3ycsn1f4c2t' }, { deliveryId: 'dlv_01m4rb7cq8m6d0x3ycsn1f4c2v' }];
-      expect(ackBodies(fleet)).toEqual(expected);
-      expect(fleet.calls.filter((call) => call.path === '/api/v1/ship/handled').map((call) => call.body)).toEqual(expected);
+      expect(ackBodies(fleet)).toEqual(expected.map((delivery) => JSON.stringify(delivery)));
+      expect(fleet.calls.filter((call) => call.path === '/api/v1/ship/handled').map((call) => call.body)).toEqual(expected.map((delivery) => JSON.stringify(delivery)));
       expect(fleet.calls.filter((call) => call.path === '/api/v1/ship/handed').map((call) => call.body)).toEqual([
         { deliveryId: DELIVERY_ID, handOverNumber: 1 },
         { deliveryId: 'dlv_01m4rb7cq8m6d0x3ycsn1f4c2t', handOverNumber: 1 },
         { deliveryId: 'dlv_01m4rb7cq8m6d0x3ycsn1f4c2v', handOverNumber: 1 },
-      ]);
-      expect((await trierarchRuns(upgraded, 'aeolus-identity.sh', ['store'])).stdout).toBe('');
+      ].map((delivery) => JSON.stringify(delivery)));
+      expect((await trierarchRuns(upgraded, { script: 'aeolus-identity.sh', args: ['store'] })).stdout).toBe('');
     });
 
     it('puts a message the trierarch hands over after the upgrade into the turn of the session still on the older plugin', async () => {
