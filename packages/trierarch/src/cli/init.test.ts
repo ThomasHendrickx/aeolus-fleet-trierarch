@@ -574,6 +574,27 @@ describe('aeolus-trierarch init on a machine set up already', () => {
     expect(prompter.isDone).toBe(true);
   });
 
+  it.each([
+    ['claude-code', 'uninstalled'], ['claude-code', 'signed out'],
+    ['codex', 'uninstalled'], ['codex', 'signed out'],
+  ] as const)('keeps the configured %s harness unchanged when it is %s', async (harness, state) => {
+    const held = { flags: ['--verbose'], options: { model: { values: { custom: ['--model', 'custom'] }, default: 'custom' } } };
+    writeFileSync(paths.config, JSON.stringify({ ...configuration(), harnesses: { [harness]: held } }));
+    isClaudeCodeInstalled = harness !== 'claude-code' || state !== 'uninstalled';
+    isClaudeCodeSignedIn = harness !== 'claude-code' || state !== 'signed out';
+    isCodexInstalled = harness !== 'codex' || state !== 'uninstalled';
+    isCodexSignedIn = harness !== 'codex' || state !== 'signed out';
+    const prompter = new ScriptedPrompter([
+      ['Change the configuration', true],
+      ...(harness === 'codex' ? [['--dangerously-skip-permissions', false] as [string, boolean]] : [['Offer Codex', true] as [string, boolean], ['--dangerously-bypass-approvals-and-sandbox', false] as [string, boolean]]),
+      ['repository', ''], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false],
+    ]);
+
+    await init({}, prompter);
+
+    expect(configuration().harnesses[harness]).toEqual(held);
+  });
+
   it('waits for the restarted trierarch to say its version before it reports, so the status that follows shows it (#402)', async () => {
     saying = [{ pid: 1, version: '0.21.0' }, { pid: 2, version: '0.21.0' }];
     reads = 0;
