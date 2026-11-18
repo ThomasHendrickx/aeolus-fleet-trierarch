@@ -399,7 +399,7 @@ const (
 )
 
 func stamp(at time.Time) string {
-	return at.Format(time.RFC3339Nano)
+	return at.UTC().Format("2006-01-02T15:04:05.000Z")
 }
 
 func parsed(text string) time.Time {
