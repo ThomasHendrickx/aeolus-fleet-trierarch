@@ -52,8 +52,9 @@ export function stagingWalkVerdict(release: {
   if (walk === undefined) {
     return { verdict: 'refused', why: `No staging walk of ${subject} on ${release.sha}: the walker has not reported on it` };
   }
-  if (walk.state !== 'success') {
-    return { verdict: 'refused', why: `The staging walk of ${subject} did not pass (${walk.state}): ${walk.target_url ?? 'no link'}` };
+  const reported = walk.state === 'success' && walk.description?.startsWith(`${walked}blocked,`) === true ? 'blocked' : walk.state;
+  if (reported !== 'success') {
+    return { verdict: 'refused', why: `The staging walk of ${subject} did not pass (${reported}): ${walk.target_url ?? 'no link'}` };
   }
   return { verdict: 'walked', url: walk.target_url };
 }
