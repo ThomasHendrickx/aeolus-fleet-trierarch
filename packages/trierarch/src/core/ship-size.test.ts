@@ -25,17 +25,17 @@ function setup(limit: number | undefined) {
 describe('ship folder size', () => {
   it('tells the owner once per crossing, again only after it was below', async () => {
     const test = setup(100);
-    await test.pass(); await test.pass();
-    test.clock.advance(INTERVAL); await test.pass(); await test.pass();
-    test.setSize(100); test.clock.advance(INTERVAL); await test.pass(); await test.pass();
-    test.setSize(99); test.clock.advance(INTERVAL); await test.pass(); await test.pass();
-    test.setSize(101); test.clock.advance(INTERVAL); await test.pass(); await test.pass();
+    await test.pass(); await test.pass(); await test.pass();
+    test.clock.advance(INTERVAL); await test.pass(); await test.pass(); await test.pass();
+    test.setSize(100); test.clock.advance(INTERVAL); await test.pass(); await test.pass(); await test.pass();
+    test.setSize(99); test.clock.advance(INTERVAL); await test.pass(); await test.pass(); await test.pass();
+    test.setSize(101); test.clock.advance(INTERVAL); await test.pass(); await test.pass(); await test.pass();
     expect(test.reports).toEqual(['scout: 101', 'scout: 101']);
   });
 
   it('does not measure more often than ten minutes', async () => {
     const test = setup(100);
-    await test.pass(); await test.pass();
+    await test.pass(); await test.pass(); await test.pass();
     test.clock.advance(INTERVAL - 1); await test.pass();
     expect(test.reads()).toBe(1);
     test.clock.advance(1); await test.pass();
@@ -44,13 +44,13 @@ describe('ship folder size', () => {
 
   it('does not warn or measure when no size is configured', async () => {
     const test = setup(undefined);
-    await test.pass(); await test.pass();
+    await test.pass(); await test.pass(); await test.pass();
     expect([test.reads(), test.reports]).toEqual([0, []]);
   });
 
   it('keeps the crossing over a restart', async () => {
     const test = setup(100);
-    await test.pass(); await test.pass();
+    await test.pass(); await test.pass(); await test.pass();
     expect(test.state().entries[test.ship.shipId]?.isShipSizeTold).toBe(true);
   });
 
@@ -75,6 +75,18 @@ describe('ship folder size', () => {
     expect(keys[0]).toMatch(/^ship-size:/);
     expect(keys[0]).toBe(keys[1]);
     expect(state.entries[ship.shipId]?.isShipSizeTold).toBe(true);
+  });
+
+  it('keeps the measurement interval over a restart', async () => {
+    const ship = aShip();
+    const clock = new TestClock();
+    let reads = 0;
+    const deps = { limit: 100, clock, logger: new CollectingLogger(), measure: () => { reads += 1; return Promise.resolve(50); }, tell: () => Promise.resolve() };
+    let state = putEntry(EMPTY_STATE, ship);
+    state = await createShipSize(deps)(state);
+    await Promise.resolve();
+    state = await createShipSize(deps)(state);
+    expect(reads).toBe(1);
   });
 
   it('does not wait for a slow measurement', async () => {
