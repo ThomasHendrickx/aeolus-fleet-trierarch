@@ -771,7 +771,7 @@ func (p Pass) crew(state reconciler.State, entry reconciler.Entry, isResumed boo
 		return state, err
 	}
 	entry.CrewFailures = 0
-	entry.HasStarted, entry.LaunchedAt, entry.LaunchID = true, p.Now().Format(time.RFC3339Nano), launchID
+	entry.HasStarted, entry.LaunchedAt, entry.LaunchID = true, p.Now().UTC().Format(isoMillis), launchID
 	entry = startedOn(entry, login, entry.LaunchedAt)
 	p.Log(fmt.Sprintf("%s (%s): crewed, %s started in %s", ship.Name, entry.ShipID, entry.Harness, folder))
 	return p.put(state, entry)
@@ -870,7 +870,7 @@ func (p Pass) crewInAFreshShipFolder(state reconciler.State, entry reconciler.En
 	if err := harness.Launch(starting, true, launchID); err != nil {
 		return state, err
 	}
-	entry.IsShipFolderGone, entry.HasStarted, entry.LaunchedAt, entry.LaunchID = false, true, p.Now().Format(time.RFC3339Nano), launchID
+	entry.IsShipFolderGone, entry.HasStarted, entry.LaunchedAt, entry.LaunchID = false, true, p.Now().UTC().Format(isoMillis), launchID
 	entry = startedOn(entry, login, entry.LaunchedAt)
 	p.Log(fmt.Sprintf("%s (%s): crewed again, %s started in %s", entry.ShipName, entry.ShipID, entry.Harness, folder))
 	return p.put(state, entry)
@@ -895,7 +895,7 @@ func (p Pass) launch(state reconciler.State, entry reconciler.Entry) (reconciler
 	if err := harness.Launch(starting, false, launchID); err != nil {
 		return state, err
 	}
-	entry.LaunchedAt, entry.LaunchID = p.Now().Format(time.RFC3339Nano), launchID
+	entry.LaunchedAt, entry.LaunchID = p.Now().UTC().Format(isoMillis), launchID
 	entry = startedOn(entry, login, entry.LaunchedAt)
 	p.Log(fmt.Sprintf("%s (%s): started again in %s", nameOf(entry), entry.ShipID, entry.Folder))
 	return p.put(state, entry)

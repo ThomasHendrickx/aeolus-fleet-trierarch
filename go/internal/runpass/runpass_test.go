@@ -594,7 +594,7 @@ func TestACrewKeepsItsCrewTokenFolderAndLaunchInTheState(t *testing.T) {
 	pass.run(t)
 
 	entry := pass.store.state.Entries[scout]
-	if entry.State != "crewing" || entry.CrewToken != "aeolus_ct_v1_scout" || entry.Folder != "/worktrees/aeolus-fleet/scout" || entry.ShipName != "scout" || !entry.HasStarted || entry.LaunchID != "launch-1" || entry.LaunchedAt != now.Format(time.RFC3339Nano) {
+	if entry.State != "crewing" || entry.CrewToken != "aeolus_ct_v1_scout" || entry.Folder != "/worktrees/aeolus-fleet/scout" || entry.ShipName != "scout" || !entry.HasStarted || entry.LaunchID != "launch-1" || entry.LaunchedAt != now.UTC().Format("2006-01-02T15:04:05.000Z") {
 		t.Fatalf("entry %+v", entry)
 	}
 }
@@ -1377,7 +1377,7 @@ func TestAStartOnAnotherLoginKeepsTheEarlierOneUntilThatStart(t *testing.T) {
 	pass.run(t)
 
 	entry := pass.store.state.Entries[scout]
-	want := []reconciler.EarlierLogin{{Login: "apiKey", Until: now.Format(time.RFC3339Nano)}}
+	want := []reconciler.EarlierLogin{{Login: "apiKey", Until: now.UTC().Format("2006-01-02T15:04:05.000Z")}}
 	if entry.Login != "subscription" || !reflect.DeepEqual(entry.EarlierLogins, want) {
 		t.Fatalf("entry login %q, earlier %+v, want subscription after %+v", entry.Login, entry.EarlierLogins, want)
 	}

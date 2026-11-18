@@ -78,7 +78,7 @@ func TestANewRequestIsSavedCrewingAndCrewed(t *testing.T) {
 
 	assertActions(t, actions, Action{Kind: Crew, ShipID: scout})
 	entry := next.Entries[scout]
-	if entry.State != "crewing" || entry.Since != now.Format(time.RFC3339Nano) || entry.Harness != "claude-code" || entry.Workspace.Main.Repository != "aeolus-fleet" || entry.HasStarted {
+	if entry.State != "crewing" || entry.Since != now.UTC().Format("2006-01-02T15:04:05.000Z") || entry.Harness != "claude-code" || entry.Workspace.Main.Repository != "aeolus-fleet" || entry.HasStarted {
 		t.Fatalf("entry: %+v", entry)
 	}
 }
@@ -387,7 +387,7 @@ func TestAFinalCrewQuietForItsWholeLaunchWindowRestartsAgainstItsBudget(t *testi
 		Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "restarting", Attempt: 1}},
 	)
 	got := next.Entries[scout]
-	if got.State != "restarting" || got.RestartAt != now.Add(5*time.Second).Format(time.RFC3339Nano) || !reflect.DeepEqual(got.Exits, []string{now.Format(time.RFC3339Nano)}) {
+	if got.State != "restarting" || got.RestartAt != now.Add(5*time.Second).UTC().Format("2006-01-02T15:04:05.000Z") || !reflect.DeepEqual(got.Exits, []string{now.UTC().Format("2006-01-02T15:04:05.000Z")}) {
 		t.Fatalf("entry: %+v", got)
 	}
 }
@@ -426,7 +426,7 @@ func TestASessionThatExitedRestartsAfterFiveSeconds(t *testing.T) {
 		Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "restarting", Attempt: 1}},
 	)
 	got := next.Entries[scout]
-	if got.State != "restarting" || got.RestartAt != now.Add(5*time.Second).Format(time.RFC3339Nano) || len(got.Exits) != 1 {
+	if got.State != "restarting" || got.RestartAt != now.Add(5*time.Second).UTC().Format("2006-01-02T15:04:05.000Z") || len(got.Exits) != 1 {
 		t.Fatalf("entry: %+v", got)
 	}
 }
@@ -440,7 +440,7 @@ func TestASessionThatExitedAgainWaitsLongerEachTime(t *testing.T) {
 
 	next, _ := Reconcile(withEntries(entry), context)
 
-	if got := next.Entries[scout].RestartAt; got != now.Add(10*time.Minute).Format(time.RFC3339Nano) {
+	if got := next.Entries[scout].RestartAt; got != now.Add(10*time.Minute).UTC().Format("2006-01-02T15:04:05.000Z") {
 		t.Fatalf("restartAt: %s", got)
 	}
 }
@@ -639,7 +639,7 @@ func TestARestartingEntryStartsAgainOnceItsWaitIsOver(t *testing.T) {
 
 	next, actions := Reconcile(withEntries(entry), context)
 
-	assertActions(t, actions, Action{Kind: Launch, ShipID: scout}, Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "running", Attempt: 1, StartedAt: now.Format(time.RFC3339Nano)}})
+	assertActions(t, actions, Action{Kind: Launch, ShipID: scout}, Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "running", Attempt: 1, StartedAt: now.UTC().Format("2006-01-02T15:04:05.000Z")}})
 	if got := next.Entries[scout]; got.State != "running" || len(got.Exits) != 1 {
 		t.Fatalf("entry: %+v", got)
 	}
@@ -915,7 +915,7 @@ func TestAShipWaitingOnItsLoginStartsOnceItCanWithNoRestartCounted(t *testing.T)
 
 	next, actions := Reconcile(waiting, later)
 
-	assertActions(t, actions, Action{Kind: Launch, ShipID: scout}, Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "running", Attempt: 0, StartedAt: now.Add(time.Minute).Format(time.RFC3339Nano)}})
+	assertActions(t, actions, Action{Kind: Launch, ShipID: scout}, Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "running", Attempt: 0, StartedAt: now.Add(time.Minute).UTC().Format("2006-01-02T15:04:05.000Z")}})
 	if got := next.Entries[scout]; got.State != "running" || len(got.Exits) != 0 {
 		t.Fatalf("entry: %+v, want running with no exit counted", got)
 	}
@@ -936,7 +936,7 @@ func TestASessionWhoseLeaseEndedIsStoppedAndCrewedAgainAsAFirstStartInAFreshWork
 
 	assertActions(t, actions, Action{Kind: Stop, ShipID: scout}, Action{Kind: Crew, ShipID: scout})
 	got := next.Entries[scout]
-	if got.State != "crewing" || got.Since != now.Format(time.RFC3339Nano) || got.HasStarted || !got.IsReleasedElsewhere || got.Folder != entry.Folder {
+	if got.State != "crewing" || got.Since != now.UTC().Format("2006-01-02T15:04:05.000Z") || got.HasStarted || !got.IsReleasedElsewhere || got.Folder != entry.Folder {
 		t.Fatalf("entry: %+v", got)
 	}
 }
