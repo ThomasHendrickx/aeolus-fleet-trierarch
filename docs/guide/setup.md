@@ -95,7 +95,7 @@ Check: `git --version`, `gh --version` and `tmux -V` answer, and on Linux `login
 Offer Claude Code, Codex, Copilot, or any of them. For each one:
 
 1. **Install it** by its vendor's instructions, so that `claude`, `codex` or `copilot` is on the `PATH`.
-2. For each Claude Code or Codex harness, sign in with its subscription (`claude auth login` or `codex login`), or store its API key before init with `aeolus-trierarch login claude-code --api-key` or `aeolus-trierarch login codex --api-key`. The command reads the key without showing it and checks it with the vendor. Copilot uses `copilot login`. After init, select the API key as the default for each harness that will use it, as in [Paying with an API key](#paying-with-an-api-key).
+2. For each Claude Code or Codex harness, sign in with its subscription (`claude auth login` or `codex login`), or use an API key. If the trierarch is not installed yet, the setup line in section 5 installs it and stops at init; then store the key with `aeolus-trierarch login claude-code --api-key` or `aeolus-trierarch login codex --api-key` and run the setup line again. The command reads the key without showing it and checks it with the vendor. Copilot uses `copilot login`. After init, select the API key as the default for each harness that will use it, as in [Paying with an API key](#paying-with-an-api-key).
 3. **Install the aeolus-fleet plugin in it.** The plugin comes from the marketplace `ThomasHendrickx/aeolus-fleet-trierarch`, and is called `aeolus-fleet@aeolus-fleet`:
 
    ```sh
