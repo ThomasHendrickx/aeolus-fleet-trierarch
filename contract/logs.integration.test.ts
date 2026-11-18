@@ -1,10 +1,10 @@
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { aMachine, type Machine } from './support/machine.js';
+import { aMachine, type Machine, type RunningCommand } from './support/machine.js';
 
 // `aeolus-trierarch logs`: the last lines of the trierarch's log, which on Linux is the journal of its systemd user unit (docs/trierarch.md, "Logs"), and with --follow each line written after (#177).
 
@@ -15,13 +15,15 @@ const JOURNAL = 'journalctl --user --unit aeolus-trierarch.service';
 const SHIP = 'shp_01m6n75scq9v1tqcttft530g8t';
 
 let machine: Machine;
+let isRemoved: boolean;
 
 beforeEach(async () => {
+  isRemoved = false;
   machine = await aMachine();
 });
 
 afterEach(async () => {
-  await machine.remove();
+  if (!isRemoved) await machine.remove();
 });
 
 const journal = () => join(machine.machine, 'systemd', 'trierarch.log');
@@ -42,7 +44,61 @@ async function until(read: () => string, wanted: string): Promise<void> {
   expect(read()).toContain(wanted);
 }
 
+/** The followers started in this machine's private home. */
+function followers(): number[] {
+  return readdirSync('/proc').flatMap((entry) => {
+    if (!/^\d+$/.test(entry)) return [];
+    try {
+      const folder = `/proc/${entry}`;
+      const words = readFileSync(join(folder, 'cmdline'), 'utf8').split('\0');
+      return readlinkSync(join(folder, 'cwd')) === machine.home && words.includes('--follow') && words.includes('logs') ? [Number(entry)] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/** Runs an assertion while a log follower is active. */
+async function withFollower(following: RunningCommand, check: () => Promise<void>): Promise<number> {
+  let status: number;
+  try {
+    await check();
+  } finally {
+    status = await following.interrupt();
+  }
+  return status;
+}
+
 describe('logs', () => {
+  it('stops a follower when its assertion fails', async () => {
+    written(['ready']);
+    const following = machine.start(['logs', '--follow']);
+    try {
+      await until(following.stdout, 'ready');
+      const [pid = 0] = followers();
+      expect(pid).toBeGreaterThan(0);
+      await expect(withFollower(following, () => Promise.reject(new Error('assertion failed')))).rejects.toThrow('assertion failed');
+      expect(followers()).toEqual([]);
+    } finally {
+      await following.interrupt();
+    }
+  });
+
+  it('stops started children when the machine is removed', async () => {
+    written(['ready']);
+    const commands = [machine.start(['logs', '--follow']), machine.start(['logs', '--follow'])];
+    try {
+      await Promise.all(commands.map((command) => until(command.stdout, 'ready')));
+      const pids = followers();
+      expect(pids).toHaveLength(2);
+      isRemoved = true;
+      await machine.remove();
+      for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
+    } finally {
+      await Promise.all(commands.map((command) => command.interrupt()));
+    }
+  });
+
   it('renders the records of the log for the operator, and a line that is no record as it is', async () => {
     written([...records, 'an older line']);
 
@@ -102,11 +158,12 @@ describe('logs', () => {
     written([...records, 'an older line']);
 
     const following = machine.start(['logs', '--follow', '--lines', '2']);
-    await until(following.stdout, 'an older line\n');
-    await wait(FOLLOWER_STARTS_MS);
-    appendFileSync(journal(), `${JSON.stringify({ ...message, message: 'a later record' })}\nplain later line\n`);
-    await until(following.stdout, 'plain later line\n');
-    const status = await following.interrupt();
+    const status = await withFollower(following, async () => {
+      await until(following.stdout, 'an older line\n');
+      await wait(FOLLOWER_STARTS_MS);
+      appendFileSync(journal(), `${JSON.stringify({ ...message, message: 'a later record' })}\nplain later line\n`);
+      await until(following.stdout, 'plain later line\n');
+    });
 
     expect(following.stdout().split('\n')).toEqual([
       '2026-10-06T15:00:10.000Z warn The loop failed and goes on: the fleet cannot be reached',
@@ -122,11 +179,12 @@ describe('logs', () => {
     written([JSON.stringify(action)]);
 
     const following = machine.start(['logs', '--follow', '--json']);
-    await until(following.stdout, '"crew"');
-    await wait(FOLLOWER_STARTS_MS);
-    appendFileSync(journal(), 'plain later line\n');
-    await until(following.stdout, 'plain later line');
-    await following.interrupt();
+    await withFollower(following, async () => {
+      await until(following.stdout, '"crew"');
+      await wait(FOLLOWER_STARTS_MS);
+      appendFileSync(journal(), 'plain later line\n');
+      await until(following.stdout, 'plain later line');
+    });
 
     expect(following.stdout().split('\n')).toEqual([JSON.stringify(action), JSON.stringify({ line: 'plain later line' }), '']);
   });
