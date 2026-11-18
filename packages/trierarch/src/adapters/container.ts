@@ -8,6 +8,7 @@ import type { SessionRoots } from './caller-check.js';
 import { createHoldRuntime } from './hold-runtime.js';
 import { shipHome, shipSockets as socketsOf } from './paths.js';
 import { runCommand, type CommandResult } from './run-command.js';
+import { moveWithinUserNamespace, removeWithinUserNamespace } from './trash.js';
 
 const PREFIX = 'trierarch-';
 const OWNER_LABEL = 'aeolus.trierarch';
@@ -162,6 +163,8 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
     platform: options.platform,
     launch: options.launch ?? [],
     beside: containers,
+    moveWithinUserNamespace: moveWithinUserNamespace(options.binary),
+    removeWithinUserNamespace: removeWithinUserNamespace(options.binary),
     heldAs: async ({ shipId, folder, command, env = {}, proxyToken, shipFolder }, files) => {
       const login: Record<string, string> = proxyToken === undefined ? { [MODEL_TOKEN_VARIABLE]: (await readFile(options.tokenFile, 'utf8')).trim() } : {};
       const content = envFileOf({ ...env, ...login });
@@ -210,6 +213,7 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
           // The session calls the fleet over its ship's socket, at the path its identity names.
           '--volume',
           `${shipSockets}:${shipSockets}`,
+          ...(shipFolder === undefined ? [] : ['--volume', `${join(shipFolder, 'tmp')}:/tmp`]),
           '--env',
           `HOME=${SESSION_HOME}`,
           ...(proxyToken === undefined ? [] : ['--env', proxyToken.variable]),

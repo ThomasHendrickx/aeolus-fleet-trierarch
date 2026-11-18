@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { uptime } from 'node:os';
+import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 
 import { idSchema, type ShipId } from '@aeolus-fleet/common';
@@ -11,6 +12,7 @@ import { INTERRUPT_WAIT_MS } from './hold.js';
 import { callHold, holdFilesOf, REFUSED, type HoldAnswer, type HoldFiles, type HoldRequest } from './hold-protocol.js';
 import { writeProxyToken } from './proxy-tokens.js';
 import type { runCommand } from './run-command.js';
+import { discard, type MoveWithinUserNamespace } from './trash.js';
 
 /** How long a hold has to answer a call other than interrupt. */
 const CALL_TIMEOUT_MS = 2000;
@@ -87,6 +89,8 @@ export function createHoldRuntime(options: {
   heldAs?: (session: SessionStart, files: HoldFiles) => Promise<HeldCommand>;
   /** When the machine started. */
   bootedAt?: () => Date;
+  moveWithinUserNamespace?: MoveWithinUserNamespace;
+  removeWithinUserNamespace?: (path: string) => Promise<void>;
 }): SessionRuntime & SessionRoots {
   const { sessions, version } = options;
   const bootedAt = options.bootedAt ?? (() => new Date(Date.now() - uptime() * 1000));
@@ -173,13 +177,28 @@ export function createHoldRuntime(options: {
       const { shipId, folder, harness, proxyToken } = session;
       await stop(shipId);
       const files = filesOf(shipId);
+      const temp = session.shipFolder === undefined ? undefined : join(session.shipFolder, 'tmp');
+      if (temp !== undefined) {
+        try {
+          await rm(temp, { recursive: true, force: true });
+        } catch (error) {
+          try {
+            if (options.removeWithinUserNamespace === undefined) throw error;
+            await options.removeWithinUserNamespace(temp);
+          } catch {
+            await discard(temp, { at: new Date(), into: join(session.shipFolder ?? '', '..'), ...(options.moveWithinUserNamespace !== undefined && { withinUserNamespace: options.moveWithinUserNamespace }) });
+            process.stderr.write(`Could not empty ${temp}; moved it to the trash: ${String(error)}\n`);
+          }
+        }
+        await mkdir(temp, { recursive: true, mode: 0o700 });
+      }
       // The token goes in the session's folder, which only its user reads, and the hold reads it there: a command line is anyone's to see.
       if (proxyToken !== undefined) {
         await mkdir(files.folder, { recursive: true, mode: 0o700 });
         await writeProxyToken(files.folder, proxyToken);
       }
       const tokenVariable = proxyToken === undefined ? [] : ['--proxy-token-variable', proxyToken.variable];
-      const { command, env } = options.heldAs === undefined ? { command: session.command, env: session.env ?? {} } : await options.heldAs(session, files);
+      const { command, env } = options.heldAs === undefined ? { command: session.command, env: { ...session.env, ...(temp !== undefined && { TMPDIR: temp, TMP: temp, TEMP: temp }) } } : await options.heldAs(session, files);
       const hold = [...options.program, 'hold', shipId, '--sessions', sessions, '--folder', folder, '--harness', harness, ...tokenVariable, ...Object.entries(env).flatMap(([variable, value]) => ['--env', `${variable}=${value}`]), '--', ...command];
       const [program = 'sh', ...args] = [...(options.launch ?? []), 'sh', '-c', DETACHED, 'sh', ...hold];
       const starter = spawn(program, args, { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
