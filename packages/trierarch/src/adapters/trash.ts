@@ -46,7 +46,7 @@ export type MoveWithinUserNamespace = (from: string, to: string) => Promise<void
  * trash beside goes into the trash of the place given (`into`), as a
  * repository of a ship folder goes into the one beside the ships' folders.
  */
-export async function discard(folder: string, options: { at: Date; withinUserNamespace?: MoveWithinUserNamespace; into?: string }): Promise<void> {
+export async function discard(folder: string, options: { at: Date; withinUserNamespace?: MoveWithinUserNamespace; into?: string; name?: string }): Promise<void> {
   const { at, withinUserNamespace } = options;
   const found = await lstat(folder);
   if (!found.isDirectory()) {
@@ -61,7 +61,7 @@ export async function discard(folder: string, options: { at: Date; withinUserNam
   if (!(await lstat(trash)).isDirectory()) {
     throw new Error(`The trash ${trash} is no folder`);
   }
-  const to = join(trash, `${basename(folder)}.${String(at.getTime())}`);
+  const to = join(trash, `${options.name ?? basename(folder)}.${String(at.getTime())}`);
   try {
     await chmod(folder, found.mode | OWNER_RWX);
     await rename(folder, to);

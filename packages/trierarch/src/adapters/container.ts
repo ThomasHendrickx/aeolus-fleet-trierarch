@@ -62,6 +62,7 @@ export interface ContainerRuntimeOptions {
   readonly proxyUrl: () => Promise<string | undefined>;
   /** The sessions folder: a folder per ship, with its hold's files and its env file. */
   readonly sessions: string;
+  readonly shipsRoot?: string;
   /** The trierarch program, which `hold` and its words follow. */
   readonly program: readonly string[];
   readonly version: string;
@@ -158,6 +159,7 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
 
   const holds = createHoldRuntime({
     sessions: options.sessions,
+    ...(options.shipsRoot !== undefined && { shipsRoot: options.shipsRoot }),
     program: options.program,
     version: options.version,
     platform: options.platform,
@@ -213,7 +215,7 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
           // The session calls the fleet over its ship's socket, at the path its identity names.
           '--volume',
           `${shipSockets}:${shipSockets}`,
-          ...(shipFolder === undefined ? [] : ['--volume', `${join(shipFolder, 'tmp')}:/tmp`]),
+          ...((shipFolder ?? (options.shipsRoot === undefined ? undefined : join(options.shipsRoot, shipId))) === undefined ? [] : ['--volume', `${join(shipFolder ?? join(options.shipsRoot ?? '', shipId), 'tmp')}:/tmp`]),
           '--env',
           `HOME=${SESSION_HOME}`,
           ...(proxyToken === undefined ? [] : ['--env', proxyToken.variable]),

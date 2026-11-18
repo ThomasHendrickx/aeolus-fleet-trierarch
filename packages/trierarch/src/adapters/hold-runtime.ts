@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { uptime } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -77,6 +77,8 @@ export function sessionsLaunch(at: { platform: string; env: Readonly<Record<stri
 export function createHoldRuntime(options: {
   /** The sessions folder: a folder per ship, with its hold's files. */
   sessions: string;
+  /** The place of ship folders, also for ships crewed before that layout. */
+  shipsRoot?: string;
   /** The trierarch program, which `hold` and its words follow. */
   program: readonly string[];
   version: string;
@@ -149,7 +151,32 @@ export function createHoldRuntime(options: {
         signalHold(pid, 'SIGKILL');
       }
     }
-    await rm(filesOf(shipId).folder, { recursive: true, force: true });
+    const files = filesOf(shipId);
+    const hasGuard = await access(join(files.folder, 'guard-active')).then(() => true, () => false);
+    if (hasGuard) {
+      const until = Date.now() + STOP_WAIT_MS;
+      while (!(await access(join(files.folder, 'guard-done')).then(() => true, () => false))) {
+        if (Date.now() >= until) throw new Error(`the guard of ${shipId} did not finish stopping its session`);
+        await wait(START_POLL_MS);
+      }
+    } else {
+      const groups = (await readFile(files.harnessSessions, 'utf8').catch(() => '')).split('\n').map(Number).filter((pid) => Number.isInteger(pid) && pid > 1);
+      const isRunning = (): boolean => groups.some((pid) => {
+        try {
+          process.kill(-pid, 0);
+          return true;
+        } catch (error) {
+          if (error instanceof Error && 'code' in error && error.code === 'ESRCH') return false;
+          throw error;
+        }
+      });
+      const until = Date.now() + STOP_WAIT_MS;
+      while (isRunning()) {
+        if (Date.now() >= until) throw new Error(`the processes of ${shipId} did not stop`);
+        await wait(START_POLL_MS);
+      }
+    }
+    await rm(files.folder, { recursive: true, force: true });
   };
 
   const must = async (shipId: ShipId, call: { request: HoldRequest; timeoutMs: number }): Promise<void> => {
@@ -177,7 +204,8 @@ export function createHoldRuntime(options: {
       const { shipId, folder, harness, proxyToken } = session;
       await stop(shipId);
       const files = filesOf(shipId);
-      const temp = session.shipFolder === undefined ? undefined : join(session.shipFolder, 'tmp');
+      const shipFolder = session.shipFolder ?? (options.shipsRoot === undefined ? undefined : join(options.shipsRoot, shipId));
+      const temp = shipFolder === undefined ? undefined : join(shipFolder, 'tmp');
       if (temp !== undefined) {
         try {
           await rm(temp, { recursive: true, force: true });
@@ -186,7 +214,7 @@ export function createHoldRuntime(options: {
             if (options.removeWithinUserNamespace === undefined) throw error;
             await options.removeWithinUserNamespace(temp);
           } catch {
-            await discard(temp, { at: new Date(), into: join(session.shipFolder ?? '', '..'), ...(options.moveWithinUserNamespace !== undefined && { withinUserNamespace: options.moveWithinUserNamespace }) });
+            await discard(temp, { at: new Date(), name: `${shipId}-tmp`, into: join(shipFolder ?? '', '..'), ...(options.moveWithinUserNamespace !== undefined && { withinUserNamespace: options.moveWithinUserNamespace }) });
             process.stderr.write(`Could not empty ${temp}; moved it to the trash: ${String(error)}\n`);
           }
         }
