@@ -1,6 +1,12 @@
 package main
 
 import (
+	"context"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
+	"net/http"
+	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
@@ -55,5 +61,33 @@ func TestCopilotIsWiredWithTheMCPProxyAndTheSessionsFolderItsMCPServersNeed(t *t
 	}
 	if harness.Sessions != at.Sessions {
 		t.Errorf("copilot Sessions = %q, want %q", harness.Sessions, at.Sessions)
+	}
+}
+
+func TestReportsOfferOnlyReachableMCPServersToEveryHarnessAndCheckAgain(t *testing.T) {
+	reachable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(401) }))
+	defer reachable.Close()
+	refused := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }))
+	refused.Close()
+	current := mcpconfiguration.Configuration{Servers: []mcpservers.Server{
+		{Name: "reachable", URL: reachable.URL}, {Name: "refused", URL: refused.URL},
+		{Name: "missing-secret", URL: reachable.URL, Credential: &mcpservers.Credential{Secret: "missing", Header: "Authorization"}},
+	}}
+	harnesses := []string{"claude-code", "codex", "copilot"}
+	for _, want := range []string{"reachable", "restored"} {
+		if want == "restored" {
+			current.Servers[1].URL = reachable.URL
+			current.Servers[1].Name = "restored"
+		}
+		got := mcpServersOffered(context.Background(), current, harnesses, nil)
+		expected := []string{"reachable"}
+		if want == "restored" {
+			expected = append(expected, "restored")
+		}
+		for _, harness := range harnesses {
+			if !slices.Equal(got[harness], expected) {
+				t.Errorf("%s offers %v, want %v", harness, got[harness], expected)
+			}
+		}
 	}
 }

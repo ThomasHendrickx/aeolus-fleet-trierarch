@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { idSchema, questionSchema, type ShipId } from '@aeolus-fleet/common';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { newKey, unwrap, type ShipCaller } from '@aeolus-fleet/core/testing';
 
@@ -23,8 +23,8 @@ const APPLIED_TYPE = 'application/vnd.aeolus.trierarch.mcp-configuration-applied
 /** A pass runs every 5 seconds. */
 const ANSWERED_WITHIN_MS = 30_000;
 
-/** A server that needs no credential, so the configuration carries no sealed secret. */
-const GRAPH = { name: 'company-graph', url: 'https://graph.example.test/mcp', transport: 'streamable-http', tools: ['read_neo4j_cypher'] };
+/** The local server needs no credential, so the configuration carries no sealed secret. */
+let graphUrl: string;
 
 let fleet: Fleet;
 let machine: Machine;
@@ -66,10 +66,23 @@ async function sentToPlugin(contentType: string): Promise<readonly unknown[]> {
 }
 
 function aConfiguration(at: { version: number; publicKey: string; fleetId?: string; servers?: readonly unknown[] }): { payload: string; contentType: string } {
-  return { payload: JSON.stringify({ fleetId: at.fleetId ?? fleet.argo.fleetId, pluginShipId: plugin, version: at.version, publicKey: at.publicKey, servers: at.servers ?? [GRAPH], secrets: [] }), contentType: CONFIGURATION_TYPE };
+  return { payload: JSON.stringify({ fleetId: at.fleetId ?? fleet.argo.fleetId, pluginShipId: plugin, version: at.version, publicKey: at.publicKey, servers: at.servers ?? [{ name: 'company-graph', url: graphUrl, transport: 'streamable-http', tools: ['read_neo4j_cypher'] }], secrets: [] }), contentType: CONFIGURATION_TYPE };
 }
 
 describe.skipIf(isTodaysTrierarch)("the fleet's MCP configuration", () => {
+  const graph = createServer((_request, response) => { response.writeHead(401).end(); });
+
+  beforeAll(async () => {
+    await new Promise<void>((resolve) => graph.listen(0, '127.0.0.1', resolve));
+    const address = graph.address();
+    if (address === null || typeof address === 'string') throw new Error('graph did not listen');
+    graphUrl = `http://127.0.0.1:${String(address.port)}/mcp`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve, reject) => graph.close((error) => { if (error) reject(error); else resolve(); }));
+  });
+
   it("asks the trierarch plugin's ship for it, naming its fleet and that ship", async () => {
     await expect.poll(() => sentToPlugin(REQUEST_TYPE), { timeout: ANSWERED_WITHIN_MS }).toContainEqual({ fleetId: fleet.argo.fleetId, pluginShipId: plugin });
   });

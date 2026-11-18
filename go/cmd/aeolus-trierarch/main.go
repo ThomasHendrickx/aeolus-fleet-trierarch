@@ -46,7 +46,6 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/machineload"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
-	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/modelproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/notices"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
@@ -628,7 +627,7 @@ func newPass(at paths.Paths, kept crew.File, configuration config.Configuration,
 	// The MCP servers each harness offers, read afresh: the configuration changes while the trierarch runs. A server whose credential is not held is offered by none.
 	offeredServers := func() map[string][]string {
 		current, _ := applied.Current()
-		return mcpservers.OfferedBy(mcpservers.WithCredentialHeld(current.Servers, current.SecretNames()), offeredHarnesses, harnessesThatAddMcpServers(configuration.Runtime))
+		return mcpServersOffered(context.Background(), current, offeredHarnesses, configuration.Runtime)
 	}
 	// Every ship's folder is under the place of ships/; the worktrees of the ships crewed before the ship folders stay under the worktree
 	// root they were made in: under a configured place of ships/, else the old default beside ships/.
