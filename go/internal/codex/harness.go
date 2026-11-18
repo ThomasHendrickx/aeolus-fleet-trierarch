@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/activity"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpproxy"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/plugin"
@@ -222,12 +223,12 @@ func (h Harness) Launch(entry reconciler.Entry, isFirstStart bool, launchID stri
 	return h.Runtime.Start(start)
 }
 
-// LaunchSeen is what the session did in its launch window, as its marker says; with no activity, the cause Codex's last error event gives (H13).
 // FailureReason is the last failure the harness reported.
 func (h Harness) FailureReason(entry reconciler.Entry) string {
 	return ErrorIn(h.Events(entry.ShipID))
 }
 
+// LaunchSeen reads the marker or a tool event as activity, and otherwise the cause Codex last gave. The runtime clears its events at every start, so they belong to this launch.
 func (h Harness) LaunchSeen(entry reconciler.Entry) reconciler.LaunchSeen {
 	seen := h.Plugin.LaunchSeen(entry.Folder, entry.LaunchID)
 	if seen.IsRefused {
@@ -236,7 +237,20 @@ func (h Harness) LaunchSeen(entry reconciler.Entry) reconciler.LaunchSeen {
 	if seen.IsActive {
 		return reconciler.LaunchSeen{Kind: reconciler.LaunchActive}
 	}
+	if _, isActive := activity.Of(h.Events(entry.ShipID), readLaunchActivity); isActive {
+		return reconciler.LaunchSeen{Kind: reconciler.LaunchActive}
+	}
 	return reconciler.LaunchSeen{Kind: reconciler.LaunchNone, Cause: ErrorIn(h.Events(entry.ShipID))}
+}
+
+// readLaunchActivity accepts tool calls alone: startup, reasoning and text do not prove the first prompt made one.
+func readLaunchActivity(line string) (activity.Reading, bool) {
+	reading, ok := readActivity(line)
+	switch reading.Tool {
+	case "command_execution", "mcp_tool_call", "web_search", "file_change", "todo_list", "collab_tool_call":
+		return reading, ok
+	}
+	return activity.Reading{}, false
 }
 
 // HandOver hands one message over to the entry's idle session (#756): the plugin's line, as a wake, is the prompt of a turn of its own; false when nothing is handed.
