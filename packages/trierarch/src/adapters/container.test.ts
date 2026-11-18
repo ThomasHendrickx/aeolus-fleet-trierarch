@@ -145,6 +145,19 @@ describe('the session runtime contract, on rootless Podman under holds', { timeo
     await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running' }]);
   });
 
+  it('gives a container an empty ship temp at /tmp on every session start', async () => {
+    const shipId = newId('ship');
+    const shipFolder = join(folder, 'ships', shipId);
+    const temp = join(shipFolder, 'tmp');
+    mkdirSync(temp, { recursive: true });
+    writeFileSync(join(temp, 'old'), 'old');
+    await runtime.start({ shipId, folder, shipFolder, command: ['sh', '-c', 'test ! -e /tmp/old && echo empty; echo written > /tmp/from-container; sleep 30'], harness: 'claude-code' });
+    await expect.poll(async () => shown(shipId), { timeout: 10_000 }).toContain('empty');
+    await expect.poll(() => existsSync(join(temp, 'from-container')), { timeout: 10_000 }).toBe(true);
+    await runtime.start({ shipId, folder, shipFolder, command: ['sh', '-c', 'test ! -e /tmp/from-container && echo empty-again; sleep 30'], harness: 'claude-code' });
+    await expect.poll(async () => shown(shipId), { timeout: 10_000 }).toContain('empty-again');
+  });
+
   it('runs the container under the hold, not detached: stopping the session removes its container (H18)', async () => {
     const shipId = newId('ship');
     await runtime.start({ shipId, folder, command: ['sleep', '30'], harness: 'claude-code' });
@@ -367,8 +380,8 @@ describe('the container a session runs in', () => {
     rmSync(sessions, { recursive: true, force: true });
   });
 
-  function runtimeWith(runner: ReturnType<typeof recordingRunner>, options: { launch?: readonly string[]; proxyUrl?: () => Promise<string | undefined> } = {}): ReturnType<typeof createContainerRuntime> {
-    const runtime = createContainerRuntime({ binary, image, tokenFile, homes, sockets, sessions, program: TRIERARCH_PROGRAM, version: VERSION, platform: process.platform, ...CAPS, run: runner.run, proxyUrl: options.proxyUrl ?? (() => Promise.resolve('http://127.0.0.1:4100')), ...(options.launch !== undefined && { launch: options.launch }) });
+  function runtimeWith(runner: ReturnType<typeof recordingRunner>, options: { launch?: readonly string[]; proxyUrl?: () => Promise<string | undefined>; shipsRoot?: string } = {}): ReturnType<typeof createContainerRuntime> {
+    const runtime = createContainerRuntime({ binary, image, tokenFile, homes, sockets, sessions, program: TRIERARCH_PROGRAM, version: VERSION, platform: process.platform, ...CAPS, run: runner.run, ...(options.shipsRoot !== undefined && { shipsRoot: options.shipsRoot }), proxyUrl: options.proxyUrl ?? (() => Promise.resolve('http://127.0.0.1:4100')), ...(options.launch !== undefined && { launch: options.launch }) });
     runtimes.push(runtime);
     return runtime;
   }
@@ -460,6 +473,13 @@ describe('the container a session runs in', () => {
     writeFileSync(join(temp, 'during'), 'running');
     await runtime.start({ shipId, folder, shipFolder, command: ['claude'], harness: 'claude-code' });
     expect(existsSync(join(temp, 'during'))).toBe(false);
+  });
+
+  it('mounts the temp of a ship crewed before ship folders without moving its home or socket', async () => {
+    const shipsRoot = join(folder, 'ships');
+    const runtime = runtimeWith(recordingRunner(), { shipsRoot });
+    await runtime.start({ shipId, folder, command: ['claude'], harness: 'claude-code' });
+    expect(valuesOf(await wordsRun(), '--volume')).toEqual([`${folder}:${folder}`, `${homes}/${shipId}:/home/ubuntu`, `${sockets}/${shipId}:${sockets}/${shipId}`, `${shipsRoot}/${shipId}/tmp:/tmp`]);
   });
 
   it('moves temp a container left unreadable to the trash and logs it before starting', async () => {

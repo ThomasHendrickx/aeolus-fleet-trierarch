@@ -57,8 +57,8 @@ afterEach(async () => {
 /** Twenty turns started and interrupted, each a stdin line and a poll of the events. */
 const TWENTY_TURNS_MS = 30_000;
 
-function aRuntime(at: { version?: string; beside?: Pick<SessionRuntime, 'list' | 'stop'>; bootedAt?: () => Date; launch?: readonly string[]; program?: readonly string[] } = {}) {
-  const runtime = createHoldRuntime({ sessions, program: at.program ?? TRIERARCH_PROGRAM, version: at.version ?? VERSION, platform: process.platform, ...(at.launch !== undefined && { launch: at.launch }), ...(at.beside !== undefined && { beside: at.beside }), ...(at.bootedAt !== undefined && { bootedAt: at.bootedAt }) });
+function aRuntime(at: { version?: string; beside?: Pick<SessionRuntime, 'list' | 'stop'>; bootedAt?: () => Date; launch?: readonly string[]; program?: readonly string[]; shipsRoot?: string } = {}) {
+  const runtime = createHoldRuntime({ sessions, program: at.program ?? TRIERARCH_PROGRAM, version: at.version ?? VERSION, platform: process.platform, ...(at.shipsRoot !== undefined && { shipsRoot: at.shipsRoot }), ...(at.launch !== undefined && { launch: at.launch }), ...(at.beside !== undefined && { beside: at.beside }), ...(at.bootedAt !== undefined && { bootedAt: at.bootedAt }) });
   runtimes.push(runtime);
   return runtime;
 }
@@ -154,6 +154,16 @@ it('empties the ship temp after stopping its session and points the host session
   await runtime.start({ shipId, folder, shipFolder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
   await expect.poll(() => starts().length).toBe(2);
   expect(existsSync(join(temp, 'during'))).toBe(false);
+});
+
+it('gives a ship crewed before ship folders its own temp without moving its workspace', async () => {
+  const shipsRoot = join(folder, 'ships');
+  const runtime = aRuntime({ shipsRoot });
+  const shipId = newId('ship');
+  const temp = join(shipsRoot, shipId, 'tmp');
+  await runtime.start({ shipId, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+  await expect.poll(() => starts().length).toBe(1);
+  expect(starts()[0]?.env.TMPDIR).toBe(temp);
 });
 
 it('moves temp it cannot empty to the trash, logs it, and starts with an empty temp', async () => {

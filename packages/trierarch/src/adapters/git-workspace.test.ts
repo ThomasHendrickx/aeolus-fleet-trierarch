@@ -318,7 +318,7 @@ describe("a ship's folder, under the place of ships/", () => {
 
     const made = mainOf(await workspace().prepare({ ...scout(), shipFolder }));
 
-    expect([made, existsSync(join(made, 'README.md')), statSync(shipFolder).mode & 0o777]).toEqual([join(shipFolder, 'repositories', 'main'), true, 0o700]);
+    expect([made, existsSync(join(made, 'README.md')), statSync(shipFolder).mode & 0o777, statSync(join(shipFolder, 'tmp')).mode & 0o777]).toEqual([join(shipFolder, 'repositories', 'main'), true, 0o700, 0o700]);
   });
 
   it('goes whole into the trash beside it, whatever it holds', async () => {
@@ -326,11 +326,14 @@ describe("a ship's folder, under the place of ships/", () => {
     const made = mainOf(await workspace().prepare({ ...scout(), shipFolder }));
     mkdirSync(join(shipFolder, 'sockets'));
     writeFileSync(join(made, 'unsaved.txt'), 'unsaved\n');
+    writeFileSync(join(shipFolder, 'tmp', 'scratch'), 'scratch');
 
     await workspace().removeShipFolder(shipFolder);
 
     expect(existsSync(shipFolder)).toBe(false);
-    expect(readdirSync(join(root, '.trash')).map((name) => name.startsWith(`${scoutId}.`))).toEqual([true]);
+    const trashed = readdirSync(join(root, '.trash'));
+    expect(trashed.map((name) => name.startsWith(`${scoutId}.`))).toEqual([true]);
+    expect(readFileSync(join(root, '.trash', trashed[0] ?? '', 'tmp', 'scratch'), 'utf8')).toBe('scratch');
   });
 
   it('is removed already when it is gone', async () => {
