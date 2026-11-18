@@ -440,6 +440,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
     },
     uninstall: async () => {
       const report = await uninstallTrierarch({ service: serviceAt(), uninstall: createUninstall({ processes: hostSessions({ paths, version: runningVersion() }), state: createJsonState(paths.state) }), home: paths.home });
+      await modelProxy({ paths, version: runningVersion() }).keep({ isNeeded: false });
       return { data: report, text: report.said.join('\n') };
     },
     run: async () => {

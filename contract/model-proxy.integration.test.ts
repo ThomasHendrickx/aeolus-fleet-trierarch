@@ -65,7 +65,9 @@ describe('the model proxy', () => {
       expect(await fetch(`${address}/aeolus/state`).catch(() => undefined)).toBeUndefined();
     } finally {
       // This test started the proxy; clean it up even when uninstall fails.
-      try { process.kill(pid, 'SIGTERM'); } catch { /* already stopped */ }
+      if ((await fetch(`${address}/aeolus/state`).catch(() => undefined))?.ok === true) {
+        process.kill(pid, 'SIGTERM');
+      }
     }
   });
 
