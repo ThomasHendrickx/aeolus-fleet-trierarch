@@ -6,6 +6,7 @@ import { setTimeout as wait } from 'node:timers/promises';
 import { z } from 'zod';
 
 import { STATE_PATH } from './model-proxy.js';
+import { runCommand } from './run-command.js';
 
 /**
  * Keeps the model proxy running while a harness needs it (headless H16): one
@@ -79,7 +80,11 @@ export function createProxyRuntime(options: {
     }
     try {
       process.kill(pid, 0);
-      return pid;
+      // A stale pid file can name any process after PID reuse. Both Linux and
+      // macOS ps show the command line, including this proxy's own folder.
+      const command = await runCommand('ps', { args: ['-o', 'command=', '-p', String(pid)] });
+      const isProxy = command.status === 0 && ` ${command.stdout.trim()} `.includes(` proxy --folder ${options.folder} `);
+      return isProxy ? pid : undefined;
     } catch {
       return undefined;
     }
@@ -90,10 +95,10 @@ export function createProxyRuntime(options: {
     if (pid !== undefined) {
       process.kill(pid, 'SIGTERM');
       const until = Date.now() + STOP_WAIT_MS;
-      while ((await runningPid()) !== undefined && Date.now() < until) {
+      while ((await runningPid()) === pid && Date.now() < until) {
         await wait(POLL_MS);
       }
-      if ((await runningPid()) !== undefined) {
+      if ((await runningPid()) === pid) {
         process.kill(pid, 'SIGKILL');
       }
     }
