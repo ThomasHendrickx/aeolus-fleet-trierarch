@@ -156,6 +156,18 @@ it('empties the ship temp after stopping its session and points the host session
   expect(existsSync(join(temp, 'during'))).toBe(false);
 });
 
+it('waits for a stubborn session to end before emptying its temp', { timeout: 15_000 }, async () => {
+  const runtime = aRuntime();
+  const shipId = newId('ship');
+  const shipFolder = join(folder, 'ship');
+  const temp = join(shipFolder, 'tmp');
+  await runtime.start({ shipId, folder, shipFolder, command: ['sh', '-c', 'trap "" TERM; while :; do echo old > "$TMPDIR/writing"; sleep 0.1; done'], harness: 'claude-code' });
+  await expect.poll(() => existsSync(join(temp, 'writing'))).toBe(true);
+  await runtime.start({ shipId, folder, shipFolder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  expect(existsSync(join(temp, 'writing'))).toBe(false);
+});
+
 it('gives a ship crewed before ship folders its own temp without moving its workspace', async () => {
   const shipsRoot = join(folder, 'ships');
   const runtime = aRuntime({ shipsRoot });
