@@ -450,13 +450,25 @@ describe('the container a session runs in', () => {
     });
   });
 
+  it('empties the ship temp before each container start and mounts it as /tmp', async () => {
+    const shipFolder = join(folder, 'ships', shipId);
+    const temp = join(shipFolder, 'tmp');
+    mkdirSync(temp, { recursive: true });
+    writeFileSync(join(temp, 'old'), 'old');
+    const { runtime, words } = await started({ shipFolder });
+    expect([existsSync(join(temp, 'old')), valuesOf(words, '--volume')]).toEqual([false, expect.arrayContaining([`${temp}:/tmp`])]);
+    writeFileSync(join(temp, 'during'), 'running');
+    await runtime.start({ shipId, folder, shipFolder, command: ['claude'], harness: 'claude-code' });
+    expect(existsSync(join(temp, 'during'))).toBe(false);
+  });
+
   it("mounts the home and the socket folder in the ship's folder of a ship crewed fresh, each made for its owner alone, and nothing under the homes or sockets of the ships crewed before", async () => {
     const shipFolder = join(folder, 'ships', shipId);
 
     const { words } = await started({ shipFolder });
 
     const [home, shipSockets] = [join(shipFolder, 'home'), join(shipFolder, 'sockets')];
-    expect(valuesOf(words, '--volume')).toEqual([`${folder}:${folder}`, `${home}:/home/ubuntu`, `${shipSockets}:${shipSockets}`]);
+    expect(valuesOf(words, '--volume')).toEqual([`${folder}:${folder}`, `${home}:/home/ubuntu`, `${shipSockets}:${shipSockets}`, `${join(shipFolder, 'tmp')}:/tmp`]);
     expect([statSync(home).mode & 0o777, statSync(shipSockets).mode & 0o777, existsSync(join(homes, shipId)), existsSync(join(sockets, shipId))]).toEqual([0o700, 0o700, false, false]);
   });
 

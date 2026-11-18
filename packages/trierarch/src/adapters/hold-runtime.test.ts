@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 
@@ -137,6 +137,23 @@ it('fails to stop a session when signalling its hold is denied', async () => {
   } finally {
     signal.mockRestore();
   }
+});
+
+it('empties the ship temp after stopping its session and points the host session there', async () => {
+  const runtime = aRuntime();
+  const shipId = newId('ship');
+  const shipFolder = join(folder, 'ship');
+  const temp = join(shipFolder, 'tmp');
+  mkdirSync(temp, { recursive: true });
+  writeFileSync(join(temp, 'old'), 'old');
+  await runtime.start({ shipId, folder, shipFolder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+  await expect.poll(() => starts().length).toBe(1);
+  expect([existsSync(join(temp, 'old')), starts()[0]?.env.TMPDIR, starts()[0]?.env.TMP, starts()[0]?.env.TEMP]).toEqual([false, temp, temp, temp]);
+  writeFileSync(join(temp, 'during'), 'running');
+  expect(existsSync(join(temp, 'during'))).toBe(true);
+  await runtime.start({ shipId, folder, shipFolder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+  await expect.poll(() => starts().length).toBe(2);
+  expect(existsSync(join(temp, 'during'))).toBe(false);
 });
 
 describe('the session runtime contract, on holds', () => {
