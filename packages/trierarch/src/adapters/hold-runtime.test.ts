@@ -3,7 +3,7 @@ import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import { FAKE_CLAUDE_CODE, FAKE_CODEX, FAKE_COPILOT, TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
@@ -103,6 +103,25 @@ async function aClaudeCodeSession(runtime: SessionRuntime, flags: readonly strin
   await runtime.start({ shipId, folder, command: [...FAKE_CLAUDE_CODE, ...flags], harness: 'claude-code' });
   return shipId;
 }
+
+it('stops a session when its hold exits before it can be signalled', async () => {
+  const runtime = aRuntime();
+  const shipId = await aClaudeCodeSession(runtime);
+  const kill = process.kill.bind(process);
+  const signal = vi.spyOn(process, 'kill').mockImplementation((pid, name) => {
+    if (name === 'SIGTERM') {
+      kill(pid, 'SIGKILL');
+      throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' });
+    }
+    return kill(pid, name);
+  });
+  try {
+    await expect(runtime.stop(shipId)).resolves.toBeUndefined();
+    expect(existsSync(join(sessions, shipId))).toBe(false);
+  } finally {
+    signal.mockRestore();
+  }
+});
 
 describe('the session runtime contract, on holds', () => {
   sessionRuntimeContract({ runtime: () => aRuntime(), folder: () => folder });
