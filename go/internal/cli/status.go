@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -11,6 +12,8 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/crew"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/detection"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpconfiguration"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/mcpservers"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/reconciler"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/service"
@@ -24,6 +27,8 @@ var entryStates = []string{"crewing", "running", "restarting", "crashed", "relea
 
 // StatusReport is how the trierarch stands on this machine, in the shape today's trierarch answers.
 type StatusReport struct {
+	// McpNotReachable names configured MCP servers that cannot answer from this machine.
+	McpNotReachable map[string]string `json:"mcpNotReachable,omitempty"`
 	// Version is the installed version: what the command runs.
 	Version string `json:"version"`
 	// RunningVersion is the version the running service said when it started; none when it does not run or did not say.
@@ -127,6 +132,9 @@ func status(at paths.Paths, machine Machine, look style.Style) (answer, error) {
 		Kept:        keptOf(saved.Kept),
 		Orphans:     orphansOf(saved.Orphans),
 		PassFailure: saved.PassFailure,
+	}
+	if current, ok := mcpconfiguration.ReadFile(at.McpConfiguration); ok {
+		_, report.McpNotReachable = (mcpservers.Checker{}).Check(context.Background(), current.Servers)
 	}
 	if manager.IsRestarting && machine.ServiceLog != nil {
 		lines, err := machine.ServiceLog(at).Tail(1)
@@ -330,6 +338,9 @@ func describeStatus(report StatusReport, look style.Style) string {
 		line("Entries", or(len(entries) == 0, "none", func() string { return strings.Join(entries, ", ") })),
 		line("Kept worktrees", or(len(keptWorktrees) == 0, "none", func() string { return look.Tone(style.Busy, strings.Join(keptWorktrees, ", ")) })),
 		line("Orphans", or(len(report.Orphans) == 0, "none", func() string { return look.Tone(style.Busy, strings.Join(report.Orphans, ", ")) })),
+	}
+	for _, name := range slices.Sorted(maps.Keys(report.McpNotReachable)) {
+		lines = append(lines, line("MCP server", look.Tone(style.Bad, name+" not offered: "+report.McpNotReachable[name])))
 	}
 	return strings.Join(lines, "\n")
 }
