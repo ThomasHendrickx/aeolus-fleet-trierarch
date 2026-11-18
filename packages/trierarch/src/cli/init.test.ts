@@ -851,13 +851,7 @@ describe('aeolus-trierarch init, for Codex', () => {
     writeFileSync(join(paths.keys, harness), 'a stored key');
 
     await expect(init({ isYes: true, fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET })).resolves.toBeDefined();
-  });
-
-  it('stops when an offered harness has neither a sign-in nor a key, even when another is signed in', async () => {
-    isCodexInstalled = true;
-    isClaudeCodeSignedIn = false;
-
-    await expect(init({ isYes: true, fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET })).rejects.toThrow('aeolus-trierarch login claude-code --api-key');
+    expect(Object.keys(configuration().harnesses)).toEqual([harness]);
   });
 
   it('goes on with only Codex installed', async () => {

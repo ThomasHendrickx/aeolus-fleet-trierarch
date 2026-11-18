@@ -276,13 +276,13 @@ const FOLDER_QUESTIONS: PlaceQuestions = {
 
 /**
  * Codex's harness from the operator's answers, asked only where Codex is
- * installed or offered already: whether to offer it, and its flags. Undefined
+ * ready to run: whether to offer it, and its flags. Undefined
  * when it is not offered.
  */
 async function askCodex(at: { base: TrierarchConfiguration; prompter: Prompter; isCodexInstalled: boolean }): Promise<TrierarchConfiguration['harnesses'][string] | undefined> {
   const { base, prompter } = at;
   const harness = base.harnesses[CODEX];
-  if (!(at.isCodexInstalled || harness !== undefined) || !(await prompter.confirm('Offer Codex as a harness too?', { isDefault: true }))) {
+  if (!at.isCodexInstalled || !(await prompter.confirm('Offer Codex as a harness too?', { isDefault: true }))) {
     return undefined;
   }
   const flags = harness?.flags ?? [];
@@ -296,13 +296,13 @@ async function askCodex(at: { base: TrierarchConfiguration; prompter: Prompter; 
 }
 
 /** The configuration from the operator's answers, starting from what it holds: Claude Code's and Codex's flags, the repositories, the folders and the caps. Everything else is kept. */
-async function askConfiguration(at: { base: TrierarchConfiguration; prompter: Prompter; homeDirectory: string; isCodexInstalled: boolean }): Promise<TrierarchConfiguration> {
+async function askConfiguration(at: { base: TrierarchConfiguration; prompter: Prompter; homeDirectory: string; isCodexInstalled: boolean; isClaudeCodeReady: boolean }): Promise<TrierarchConfiguration> {
   const { prompter } = at;
   // A session the trierarch runs has no terminal, so no Remote Control: init offers it no more and keeps none (headless H20).
   const base = withoutRemoteControl(at.base).configuration;
   const harness = base.harnesses[CLAUDE_CODE] ?? { flags: [], options: {} };
   prompter.step('Claude Code');
-  const isSkipping = await prompter.confirm(`Launch Claude Code with ${SKIP_PERMISSIONS}? Its sessions then run every tool without asking.`, {
+  const isSkipping = at.isClaudeCodeReady && await prompter.confirm(`Launch Claude Code with ${SKIP_PERMISSIONS}? Its sessions then run every tool without asking.`, {
     isDefault: harness.flags.includes(SKIP_PERMISSIONS),
   });
   const flags = [...harness.flags.filter((flag) => flag !== SKIP_PERMISSIONS), ...(isSkipping ? [SKIP_PERMISSIONS] : [])];
@@ -314,13 +314,13 @@ async function askConfiguration(at: { base: TrierarchConfiguration; prompter: Pr
   prompter.step('Caps');
   const ships = await askUntil({ prompter, ask: () => prompter.text('How many ships may it keep on its list?', { default: String(base.caps.ships) }), accept: asCap });
   const running = await askUntil({ prompter, ask: () => prompter.text('How many sessions may run at once?', { default: String(base.caps.running) }), accept: asCap });
-  const others = Object.fromEntries(Object.entries(base.harnesses).filter(([name]) => name !== CODEX));
+  const others = Object.fromEntries(Object.entries(base.harnesses).filter(([name]) => name !== CODEX && name !== CLAUDE_CODE));
   return {
     ...base,
     caps: { ships, running },
     repositories,
     folders,
-    harnesses: { ...others, [CLAUDE_CODE]: { ...harness, flags }, ...(codex !== undefined && { [CODEX]: codex }) },
+    harnesses: { ...others, ...(at.isClaudeCodeReady && { [CLAUDE_CODE]: { ...harness, flags } }), ...(codex !== undefined && { [CODEX]: codex }) },
   };
 }
 
@@ -362,7 +362,9 @@ export async function initTrierarch(input: {
   };
 
   const keys = createKeyFiles(paths.keys);
-  checkMachine({ nodeVersion: input.nodeVersion, isSsMissing: input.isSsMissing, isClaudeCodeInstalled: input.isClaudeCodeInstalled, isClaudeCodeSignedIn: input.isClaudeCodeSignedIn || await keys.has(CLAUDE_CODE), isCodexInstalled, isCodexSignedIn: input.isCodexSignedIn || await keys.has(CODEX) });
+  const isClaudeCodeReady = input.isClaudeCodeInstalled && (input.isClaudeCodeSignedIn || await keys.has(CLAUDE_CODE));
+  const isCodexReady = isCodexInstalled && (input.isCodexSignedIn || await keys.has(CODEX));
+  checkMachine({ nodeVersion: input.nodeVersion, isSsMissing: input.isSsMissing, isClaudeCodeInstalled: input.isClaudeCodeInstalled, isClaudeCodeSignedIn: isClaudeCodeReady, isCodexInstalled, isCodexSignedIn: isCodexReady });
   const pluginShipId = pluginShipOf(flags);
   // The ship: registered once per machine, never again.
   const crew = await readCrewFile(paths.crewToken).catch(() => undefined);
@@ -420,14 +422,17 @@ export async function initTrierarch(input: {
   let configuration: TrierarchConfiguration;
   let configured: InitReport['configuration'] = 'kept';
   if (!(await exists(paths.config))) {
-    configuration = { $schema: './config.schema.json', ...(await askConfiguration({ base: initialConfiguration(), prompter, homeDirectory, isCodexInstalled })) };
+    configuration = { $schema: './config.schema.json', ...(await askConfiguration({ base: initialConfiguration(), prompter, homeDirectory, isCodexInstalled: isCodexReady, isClaudeCodeReady })) };
     configured = 'written';
   } else {
     configuration = await loadConfiguration(paths.config);
     if (await prompter.confirm('Change the configuration?', { isDefault: false })) {
-      configuration = await askConfiguration({ base: configuration, prompter, homeDirectory, isCodexInstalled });
+      configuration = await askConfiguration({ base: configuration, prompter, homeDirectory, isCodexInstalled: isCodexReady, isClaudeCodeReady });
       configured = 'changed';
     }
+  }
+  if (configured !== 'kept' && Object.keys(configuration.harnesses).length === 0) {
+    throw new TrierarchFileError('No runnable harness is selected. Install Claude Code or Codex and sign in or store an API key, then run init again and select a harness.');
   }
   for (const harness of [CLAUDE_CODE, CODEX] as const) {
     const isInstalled = harness === CLAUDE_CODE ? input.isClaudeCodeInstalled : isCodexInstalled;
