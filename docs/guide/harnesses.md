@@ -68,19 +68,17 @@ A [message](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide
 
 A hand-crewed session waits in the background without spending tokens. In Claude Code that is a background task, in Copilot a detached background shell, and in local Codex a bridge that queues the next turn. Codex Cloud has none of these: a ship crewed there only sees a message when its session looks again. Under a trierarch, none of this is your session's job: the trierarch wakes it.
 
-A [forced](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#forced) message tries to stop a busy turn and start the new work. Under a trierarch, Claude Code's turn is interrupted and its process kept, Codex's process is stopped with SIGINT, and Copilot's turn is stopped the same way, for at most 10 seconds each. It is a best effort: if the turn does not end in time, the message goes in anyway. A hand-crewed Claude Code or Copilot session gets it at its next tool call or at its turn's end, and a hand-crewed Codex task at its next idle.
+A [forced](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#forced) message tries to stop a busy turn and start the new work. Under a trierarch, Claude Code's turn is interrupted and its process kept, Codex's process is stopped with SIGINT, and Copilot's turn is stopped the same way, within the limit in [Timings and limits](../timings-and-limits.md). It is a best effort: if the turn does not end in time, the message goes in anyway. A hand-crewed Claude Code or Copilot session gets it at its next tool call or at its turn's end, and a hand-crewed Codex task at its next idle.
 
 ### Servers, permissions and models
 
-A session a trierarch starts gets the MCP servers its crew request names and no others, never yours, a plugin's or the vendor's own, with two limits for Codex and Copilot. Claude Code is started so that it loads only the file the trierarch gives it. For Codex and Copilot the trierarch asks, at each start, which servers the session would load, and turns each off for that session only: a server you add after a start reaches the session's later turns, until its next start. Codex also refuses a start whose configuration already names a server the request names. A session whose folder's servers cannot be read is not started.
-
-A Claude Code session without a bypass flag asks its [owner](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#owner) a [question](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#question) before an action that needs permission. The owner answers within 30 minutes or the action is refused. A ship whose owner is argo, or whose owner cannot be read, is refused at once: nobody is asked. Codex and Copilot sessions run without a person to ask, so what they may do is what the flags you give them allow. See [Setting up a computer for your fleet](setup.md) for the flags and their risk.
+For how a trierarch supplies MCP servers, see [Give a ship its MCP servers](give-a-ship-its-mcp-servers.md). For permission flags, see [Setting up a computer for your fleet](setup.md).
 
 The trierarch finds each harness's models itself and offers only those. Claude Code's are the latest of each family, Codex's are the ones its catalog lists and your login accepts, and Copilot's are the ones its help lists, plus `auto`, on which Copilot picks the model for each request.
 
 ### Cursor
 
-Cursor's column is empty on purpose. Aeolus tried Cursor's `agent acp` mode on one build and found that it loads the user's own MCP servers, keeps a permission answer of "allow always" beyond the session, and can leave background work running after a turn ends. Until that is settled, Aeolus does not crew Cursor.
+Cursor's column is all Not supported on purpose. Aeolus tried Cursor's `agent acp` mode on one build and found that it loads the user's own MCP servers, keeps a permission answer of "allow always" beyond the session, and can leave background work running after a turn ends. Until that is settled, Aeolus does not crew Cursor.
 
 ## Next
 

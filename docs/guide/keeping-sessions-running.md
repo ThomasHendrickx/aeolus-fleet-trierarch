@@ -1,6 +1,6 @@
 # Keeping sessions running
 
-Your agents' sessions die: a crash, a closed laptop lid, a restart for an update. A message sent meanwhile waits, but nothing picks it up until someone starts a session again. A [trierarch](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#trierarch) is an optional program on your Mac or Linux computer that does that for you: it starts Claude Code and Codex sessions, wakes them when work arrives, and starts them again when they die. This page shows what it does and what it asks of you, so you can decide whether to install one.
+Your agents' sessions die: a crash, a closed laptop lid, a restart for an update. A message sent meanwhile waits, but nothing picks it up until someone starts a session again. A [trierarch](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#trierarch) is an optional program on your Mac or Linux computer that does that for you: it starts Claude Code, Codex and Copilot sessions, wakes them when work arrives, and starts them again when they die. This page shows what it does and what it asks of you, so you can decide whether to install one.
 
 ## Without a trierarch
 
@@ -68,7 +68,7 @@ flowchart LR
 
 ### Restart
 
-When a session dies, the trierarch starts it again on its own, in the same folder, still holding the ship's [lease](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#lease). Claude Code continues its last conversation, and Codex resumes its last session. A message the session held when it died is handed over again.
+When a session dies, the trierarch starts it again on its own, in the same folder, still holding the ship's [lease](https://github.com/ThomasHendrickx/aeolus-fleet/blob/main/docs/guide/words.md#lease). Claude Code continues its last conversation, and Codex resumes its last session. Copilot resumes a session named by a finished turn; otherwise it starts a new one. A message the session held when it died is handed over again.
 
 It waits a little longer before each try, and gives up after five restarts in an hour:
 
@@ -104,9 +104,9 @@ A trierarch saves you work, and it runs on your computer as you. Know these befo
 
 - **Sessions run as your computer user.** By default they share your account and its files, and their starting folder does not fence them in. A session can read whatever that user can. The [set-up guide](setup.md#1-give-it-a-user-of-its-own) recommends a user of its own for the trierarch for that reason.
 - **Nobody watches a session.** Anything a harness asks stops it. To run without stopping at every tool call, you write the harness's permission-skipping flag into the trierarch's settings yourself; the trierarch never adds it. With it, a session can run any command as that user. Without it, a session stops at its first permission question.
-- **Containers fence a session in.** The trierarch can instead run each Claude Code session in a container of its own, which sees only its ship's folder: rootless Podman on Linux, Colima on macOS. Codex sessions run on the host.
+- **Containers fence a session in.** The trierarch can instead run each Claude Code session in a container of its own, which sees only its ship's folder: rootless Podman on Linux, Colima on macOS. Codex and Copilot sessions run on the host.
 - **Release deletes the ship's folder.** For a repository, the trierarch makes a separate copy for the ship. Releasing the ship stops the session and deletes that copy, uncommitted and unpushed work included. Commit and push first. A plain folder you added yourself is kept.
-- **It needs a few things on the computer:** macOS or Linux, git, and Claude Code or Codex installed and signed in, each with the Aeolus Fleet plugin. The trierarch is one program and needs no Node.
+- **It needs a few things on the computer:** macOS or Linux, git, and Claude Code, Codex or Copilot installed and signed in, each with the Aeolus Fleet plugin. The trierarch is one program and needs no Node.
 
 To stop it: release the ship in the console, run `aeolus-trierarch stop`, or uninstall it.
 
