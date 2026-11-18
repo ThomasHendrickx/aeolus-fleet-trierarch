@@ -631,7 +631,9 @@ aeolus_json_string() {
 # refused, so the hook acts as no ship (#884).
 aeolus_hook_folder() {
   local own inherited="${AEOLUS_FOLDER:-}"
-  if [ "${AEOLUS_HARNESS:-}" = cursor ]; then
+  if [ -n "${2:-}" ]; then
+    own="$2"
+  elif [ "${AEOLUS_HARNESS:-}" = cursor ]; then
     # Cursor's tool cwd follows the tool; the first workspace root stays the session's folder.
     own="$(aeolus_json_string "$(printf '%s' "$1" | sed -E 's/"workspace_roots"[[:space:]]*:[[:space:]]*\[/"aeolus_workspace_root":/')" aeolus_workspace_root)"
     [ -n "$own" ] || own="$(pwd -P)"
