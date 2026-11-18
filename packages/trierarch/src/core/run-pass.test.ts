@@ -2860,6 +2860,26 @@ describe("each session's login (api keys K5, K6, K9)", () => {
     expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'restarting', exits: [] });
   });
 
+  it('after the machine restarts, a ship waiting on its key starts on the first pass it is ready with no restart counted', async () => {
+    const trierarch = aTrierarchOnLogins(ON_KEY);
+    const shipId = await aCrewedShip(trierarch);
+    trierarch.processes.restartMachine();
+    trierarch.modelLogins.problems.set('claude-code:apiKey', NO_KEY);
+
+    await trierarch.pass();
+    trierarch.clock.advance(10 * MINUTE_MS);
+    await trierarch.pass();
+
+    expect(trierarch.harness.launchedLogins).toEqual([{ shipId, login: 'apiKey' }]);
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'restarting', exits: [] });
+
+    trierarch.modelLogins.problems.clear();
+    await trierarch.pass();
+
+    expect(trierarch.harness.launchedLogins).toEqual([{ shipId, login: 'apiKey' }, { shipId, login: 'apiKey' }]);
+    expect(trierarch.state.current().entries[shipId]).toMatchObject({ state: 'running', exits: [] });
+  });
+
   it('a crew not yet final whose key is not ready gives the request back with the cause, so it can be placed on another computer (api keys A5)', async () => {
     const trierarch = aTrierarchOnLogins(ON_KEY);
     trierarch.modelLogins.problems.set('claude-code:apiKey', NO_KEY);
