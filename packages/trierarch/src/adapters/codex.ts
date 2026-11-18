@@ -99,6 +99,12 @@ const errorEventSchema = z.union([z.object({ type: z.literal('turn.failed'), err
 /** The API error an error event carries as JSON text in its message, as Codex passes a refusal on. */
 const apiErrorSchema = z.object({ error: z.object({ message: z.string(), code: z.string().optional() }) });
 
+/** Tool events prove the first prompt ran even when its PreToolUse hook did not mark activity. Startup, reasoning and text alone do not. */
+const toolEventSchema = z.object({
+  type: z.enum(['item.started', 'item.completed']),
+  item: z.object({ type: z.enum(['command_execution', 'mcp_tool_call', 'web_search', 'file_change', 'todo_list', 'collab_tool_call']) }),
+});
+
 const NOT_SUPPORTED = /^The '([^']+)' model is not supported/u;
 
 /** The harness's last error event in its events, as its message says it: an API error by its own message; none without one. */
@@ -207,13 +213,14 @@ export function createCodexHarness(options: {
     notOfferedReason: () => Promise.resolve(undefined),
     activityOf: async ({ shipId }) => sessionActivityOf({ sessions, shipId, read: codexActivityIn }),
     failureReason: async ({ shipId }) => lastErrorIn(await sessions.events(shipId))?.message,
-    // The marker says what the session did (#490); Codex has no hook for a failed turn, so a refusal, or why a start shows none, is read from its last error event (headless H13).
+    // The marker or a tool event proves activity. The runtime clears its events at each start, so they belong to this launch (#523).
     launchSeen: async ({ shipId, folder, launchId, model }) => {
-      const error = codexErrorIn({ events: await sessions.events(shipId), ...(model !== undefined && { model }) });
+      const events = await sessions.events(shipId);
+      const error = codexErrorIn({ events, ...(model !== undefined && { model }) });
       if (error?.kind === 'refused') {
         return { kind: 'refused', model: error.model };
       }
-      if ((await marks.read({ folder, launchId }))?.isActive === true) {
+      if ((await marks.read({ folder, launchId }))?.isActive === true || events.some((line) => toolEventSchema.safeParse(parsedLine(line)).success)) {
         return { kind: 'active' };
       }
       return { kind: 'none', ...(error !== undefined && { cause: error.cause }) };
