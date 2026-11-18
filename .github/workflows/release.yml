@@ -126,14 +126,16 @@ jobs:
           gh run list --workflow ci.yml --commit "$GITHUB_SHA" --branch "$GITHUB_REF_NAME" --event push --json status,conclusion,url \
             | node scripts/release-gate.ts "$GITHUB_REF" "$GITHUB_SHA"
 
-      - name: Check the staging walk passed on the commit
+      - name: Check the staging walk passed on the candidate run
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           OVERRIDE_REASON: ${{ inputs.override_reason }}
+          VERSION: ${{ inputs.version }}
+          RUN_ID: ${{ inputs.candidate_run_id }}
         run: |
           gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/statuses" \
-            | node scripts/staging-walk-gate.ts "$GITHUB_SHA" "$GITHUB_REPOSITORY_OWNER" "$GITHUB_ACTOR" "$OVERRIDE_REASON"
+            | node scripts/staging-walk-gate.ts "$GITHUB_SHA" "$GITHUB_REPOSITORY_OWNER" "$GITHUB_ACTOR" "$VERSION" "$RUN_ID" "$OVERRIDE_REASON"
 
       - name: Download the candidate
         env:
