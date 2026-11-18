@@ -194,7 +194,7 @@ case "$1" in
   auth)
     echo "$*" >> "$machine/claude-calls.txt"
     if [ -e "$machine/claude-signed-out" ]; then echo 'Not logged in' >&2; exit 1; fi
-    echo '{"loggedIn":true}'; exit 0 ;;
+    echo '{"loggedIn":true,"authMethod":"claude.ai"}'; exit 0 ;;
   plugin)
     echo "$*" >> "$machine/claude-calls.txt"
     if [ -e "$machine/claude-plugin-fails" ]; then echo 'Failed to reach the marketplace' >&2; exit 1; fi
