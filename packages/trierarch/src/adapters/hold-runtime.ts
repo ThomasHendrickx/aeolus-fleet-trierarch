@@ -140,6 +140,13 @@ export function createHoldRuntime(options: {
 
   const stop = async (shipId: ShipId): Promise<void> => {
     await options.beside?.stop(shipId);
+    const files = filesOf(shipId);
+    const started = await stat(files.pid).catch(() => undefined);
+    // A previous boot's markers and process ids cannot belong to this session.
+    if (started === undefined || started.mtime < bootedAt()) {
+      await rm(files.folder, { recursive: true, force: true });
+      return;
+    }
     const pid = await runningPid(shipId);
     if (pid !== undefined) {
       signalHold(pid, 'SIGTERM');
@@ -151,7 +158,6 @@ export function createHoldRuntime(options: {
         signalHold(pid, 'SIGKILL');
       }
     }
-    const files = filesOf(shipId);
     const hasGuard = await access(join(files.folder, 'guard-active')).then(() => true, () => false);
     if (hasGuard) {
       const until = Date.now() + STOP_WAIT_MS;
