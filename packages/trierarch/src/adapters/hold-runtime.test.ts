@@ -1,4 +1,5 @@
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 
@@ -154,6 +155,44 @@ it('empties the ship temp after stopping its session and points the host session
   await runtime.start({ shipId, folder, shipFolder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
   await expect.poll(() => starts().length).toBe(2);
   expect(existsSync(join(temp, 'during'))).toBe(false);
+});
+
+it.each(['stale guard marker', 'reused pid'])('starts after a machine restart with a %s and empties only its temp', { timeout: 15_000 }, async (record) => {
+  const runtime = aRuntime();
+  const shipId = newId('ship');
+  const shipFolder = join(folder, 'ship');
+  const temp = join(shipFolder, 'tmp');
+  const previous = join(sessions, shipId);
+  mkdirSync(temp, { recursive: true });
+  mkdirSync(previous, { recursive: true });
+  writeFileSync(join(temp, 'old'), 'old');
+  writeFileSync(join(folder, 'outside'), 'keep');
+  // This process belongs to the test, not to the persisted session.
+  const unrelated = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      unrelated.once('spawn', resolve);
+      unrelated.once('error', reject);
+    });
+    if (unrelated.pid === undefined) throw new Error('the unrelated process did not start');
+    writeFileSync(join(previous, 'hold.pid'), '2147483647');
+    writeFileSync(join(previous, 'harness-sessions'), `${String(unrelated.pid)}\n`);
+    if (record === 'stale guard marker') writeFileSync(join(previous, 'guard-active'), 'active');
+    utimesSync(join(previous, 'hold.pid'), new Date(0), new Date(0));
+
+    await runtime.start({ shipId, folder, shipFolder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+
+    await expect.poll(() => starts().length).toBe(1);
+    expect(readdirSync(temp)).toEqual([]);
+    expect(readFileSync(join(folder, 'outside'), 'utf8')).toBe('keep');
+    expect(isAlive(unrelated.pid)).toBe(true);
+  } finally {
+    const ended = new Promise((resolve) => unrelated.once('exit', resolve));
+    if (unrelated.exitCode === null && unrelated.signalCode === null) {
+      unrelated.kill('SIGKILL');
+      await ended;
+    }
+  }
 });
 
 it('waits for a stubborn session to end before emptying its temp', { timeout: 15_000 }, async () => {
