@@ -1,7 +1,6 @@
 package permissions
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 func TestTwoOpenPermissionAsksTakeTheirOwnAnswersWhenTheOwnerAnswersOutOfOrder(t *testing.T) {
@@ -81,8 +79,7 @@ func TestTwoOpenPermissionAsksTakeTheirOwnAnswersWhenTheOwnerAnswersOutOfOrder(t
 	q := &PluginQuestions{Session: func(string) (QuestionSession, error) {
 		return QuestionSession{Plugin: p, Folder: folder, Name: "scout", Model: "claude-opus-5-5"}, nil
 	}}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	ctx := t.Context()
 	first, err := q.Ask(ctx, ship, Request{Tool: "Bash"})
 	if err != nil {
 		t.Fatal(err)
