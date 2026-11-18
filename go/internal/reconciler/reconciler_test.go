@@ -639,7 +639,7 @@ func TestARestartingEntryStartsAgainOnceItsWaitIsOver(t *testing.T) {
 
 	next, actions := Reconcile(withEntries(entry), context)
 
-	assertActions(t, actions, Action{Kind: Launch, ShipID: scout}, Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "running", Attempt: 1, StartedAt: now.Format(time.RFC3339Nano)}})
+	assertActions(t, actions, Action{Kind: Launch, ShipID: scout}, Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "running", Attempt: 1, StartedAt: now.UTC().Format("2006-01-02T15:04:05.000Z")}})
 	if got := next.Entries[scout]; got.State != "running" || len(got.Exits) != 1 {
 		t.Fatalf("entry: %+v", got)
 	}
@@ -915,7 +915,7 @@ func TestAShipWaitingOnItsLoginStartsOnceItCanWithNoRestartCounted(t *testing.T)
 
 	next, actions := Reconcile(waiting, later)
 
-	assertActions(t, actions, Action{Kind: Launch, ShipID: scout}, Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "running", Attempt: 0, StartedAt: now.Add(time.Minute).Format(time.RFC3339Nano)}})
+	assertActions(t, actions, Action{Kind: Launch, ShipID: scout}, Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "running", Attempt: 0, StartedAt: now.Add(time.Minute).UTC().Format("2006-01-02T15:04:05.000Z")}})
 	if got := next.Entries[scout]; got.State != "running" || len(got.Exits) != 0 {
 		t.Fatalf("entry: %+v, want running with no exit counted", got)
 	}
