@@ -81,6 +81,7 @@ func aMain(t *testing.T) (Machine, *anInstalledService, *aFleet) {
 	elapsed := 0
 	return Machine{
 		Environ:               []string{"HOME=" + home},
+		ReadSecret:            func() (string, error) { return secret, nil },
 		HomeDirectory:         home,
 		Platform:              "linux",
 		ManagedSettings:       filepath.Join(home, "managed-settings"),
@@ -124,7 +125,7 @@ func decoded(t *testing.T, output string) map[string]any {
 }
 
 func setupWords() []string {
-	return []string{"init", "--fleet-url", fleetURL, "--ship-id", shipID, "--secret", secret, "--plugin-ship-id", pluginShipID, "--harnesses", "claude-code", "--yes"}
+	return []string{"init", "--fleet-url", fleetURL, "--ship-id", shipID, "--secret-stdin", "--plugin-ship-id", pluginShipID, "--harnesses", "claude-code", "--yes"}
 }
 
 func TestSaysItsVersion(t *testing.T) {
@@ -700,5 +701,23 @@ func TestStatusUsesTheMachineClockToCheckTheProcessAge(t *testing.T) {
 	output, code := Main([]string{"status"}, machine)
 	if code != 0 || !strings.Contains(output, "10 seconds") {
 		t.Errorf("status = %q, %d; want the ten-second wait", output, code)
+	}
+}
+
+func TestInitRejectsSecretArgument(t *testing.T) {
+	machine, _, _ := aMain(t)
+	_, code := Main([]string{"init", "--secret", "example-secret"}, machine)
+	if code != 2 {
+		t.Fatalf("init with --secret returned %d, want 2", code)
+	}
+}
+
+func TestInitReadsSecretFromStdin(t *testing.T) {
+	machine, _, fleet := aMain(t)
+	machine.ReadSecret = func() (string, error) { return secret + "\n", nil }
+	words := []string{"init", "--fleet-url", fleetURL, "--ship-id", shipID, "--secret-stdin", "--plugin-ship-id", pluginShipID, "--harnesses", "claude-code", "--yes"}
+	output, code := Main(words, machine)
+	if code != 0 || len(fleet.registered) != 1 {
+		t.Fatalf("init from stdin = %q, %d; registrations = %v", output, code, fleet.registered)
 	}
 }

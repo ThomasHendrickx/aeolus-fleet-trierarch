@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs the Go trierarch (docs/trierarch.md, "A machine joins"):
 #
-#   curl -fsSL https://raw.githubusercontent.com/ThomasHendrickx/aeolus-fleet-trierarch/main/install.sh | sh -s -- init-flags...
+#   bash <(curl -fsSL https://raw.githubusercontent.com/ThomasHendrickx/aeolus-fleet-trierarch/main/install.sh) init-flags... --secret-stdin <<< '<secret>'
 #
 # It takes the binary for this system and chip from the GitHub Release, checks
 # it against the release's SHA256SUMS, and with gh against its GitHub artifact
@@ -25,6 +25,12 @@ fail() {
   echo "aeolus-trierarch install: $*" >&2
   exit 1
 }
+
+for arg in "$@"; do
+  case $arg in
+    --secret | --secret=*) fail "--secret was removed; pass --secret-stdin and provide the secret on stdin" ;;
+  esac
+done
 
 case $(uname -s) in
   Linux) system=linux ;;

@@ -22,7 +22,7 @@ A person copies one line from the console's Join a machine and runs it on a fres
 
 - **Claude Code is assumed.** A fresh configuration always offers it (`config.Initial`), while `init` accepts a machine with only Codex signed in. At start a missing Claude Code or Codex plugin fails the whole start (`harnessesOf`), and `Restart=always` turns that into a restart loop. Copilot's plugin is already looked up per crew, so a missing one stops nothing.
 - **Nothing installs the plugin but `upgrade`**, for Claude Code and Codex at the release tag (decision 0011). Copilot's `copilot plugin install aeolus-fleet@aeolus-fleet` is only printed.
-- **`init` asks nothing** and needs `--fleet-url`, `--ship-id` and `--secret`. It needs a signed-in harness, so an API-key-only machine cannot pass it (#371). Its "The trierarch runs" is printed before any check. `status` shows a restart loop as "installed, not running", with no reason.
+- **`init` asks nothing** and needs `--fleet-url`, `--ship-id` and `--secret-stdin`; it reads the secret from standard input. It needs a signed-in harness, so an API-key-only machine cannot pass it (#371). Its "The trierarch runs" is printed before any check. `status` shows a restart loop as "installed, not running", with no reason.
 - **Under `curl | sh`, stdin is the script**: a wizard reads `/dev/tty`. No child changes its parent shell's PATH.
 - **A folder in the configuration is a place used as it is.** AC3's folder is a folder of repositories, each added as a repository: called "a folder of repositories" here, never "a folder".
 - **The setup line is the trierarch plugin's** (docs/trierarch.md, "A machine joins"), and the dialog is the console's. Both are in aeolus-fleet.
@@ -47,7 +47,7 @@ A person copies one line from the console's Join a machine and runs it on a fres
 
 | Flag | Wizard step | Without it, and no terminal |
 | --- | --- | --- |
-| `--fleet-url`, `--ship-id`, `--secret`, `--plugin-ship-id` | none, from the setup line | stops, as today |
+| `--fleet-url`, `--ship-id`, `--secret-stdin`, `--plugin-ship-id` | none, from the setup line; secret on standard input | stops, as today |
 | `--harnesses <list>` of `claude-code`, `codex`, `copilot` | Harnesses | stops |
 | `--unattended <list>`, a subset of the harnesses | Harnesses, per harness | none run without permission questions |
 | `--repositories <list>`, `--repositories-in <folder>`, `--no-repositories` | Repositories; the list comma or semicolon separated on the command line only, one field per path or git URL in the dialog | stops |

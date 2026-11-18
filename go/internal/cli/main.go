@@ -99,7 +99,8 @@ type Machine struct {
 	// Log writes a line to the trierarch's log.
 	Log func(line string)
 	// ReadKey is the API key the operator types, not shown, or pipes in.
-	ReadKey func() (string, error)
+	ReadKey    func() (string, error)
+	ReadSecret func() (string, error)
 	// CheckKey checks a key with its harness's vendor before login keeps it.
 	CheckKey func(harness string, key string) keys.Checked
 	// CheckNow has the model proxy check the harness's key at once (K10): its state after; false when the proxy does not run.
@@ -126,7 +127,7 @@ type Machine struct {
 
 const usage = `Usage: aeolus-trierarch <command>
 
-  init --fleet-url <url> --ship-id <id> --secret <secret> [--plugin-ship-id <id>] [--harnesses <list>] [--unattended <list>] [--repositories <list> | --repositories-in <folder> | --no-repositories] [--clone-into <folder>] [--folder <name> <path>]... [--no-folders] [--max-ships <n>] [--max-running <n>] [--service yes|no] [--yes]
+  init --fleet-url <url> --ship-id <id> --secret-stdin [--plugin-ship-id <id>] [--harnesses <list>] [--unattended <list>] [--repositories <list> | --repositories-in <folder> | --no-repositories] [--clone-into <folder>] [--folder <name> <path>]... [--no-folders] [--max-ships <n>] [--max-running <n>] [--service yes|no] [--yes]
                  set this machine up from the trierarch plugin's setup line
   status         how the trierarch stands on this machine
   list           the ships it crews
@@ -162,8 +163,8 @@ const usage = `Usage: aeolus-trierarch <command>
   --json         answer as JSON
   --config <path> the configuration (AEOLUS_TRIERARCH_CONFIG)`
 
-var valueFlags = []string{"--fleet-url", "--ship-id", "--secret", "--plugin-ship-id", "--config", "--default", "--ship", "--lines", "--harnesses", "--unattended", "--max-ships", "--max-running", "--repositories", "--repositories-in", "--clone-into", "--service"}
-var switchFlags = []string{"--json", "--yes", "--version", "--api-key", "--remove-key", "--check", "--no-load", "--follow", "--no-repositories", "--no-folders"}
+var valueFlags = []string{"--fleet-url", "--ship-id", "--plugin-ship-id", "--config", "--default", "--ship", "--lines", "--harnesses", "--unattended", "--max-ships", "--max-running", "--repositories", "--repositories-in", "--clone-into", "--service"}
+var switchFlags = []string{"--json", "--yes", "--version", "--api-key", "--remove-key", "--check", "--no-load", "--follow", "--no-repositories", "--no-folders", "--secret-stdin"}
 
 type parsed struct {
 	words    []string
@@ -254,6 +255,15 @@ func Main(args []string, machine Machine) (string, int) {
 			if !isJSON {
 				initPrint = machine.Print
 			}
+			secret := ""
+			if command.switches["--secret-stdin"] {
+				var err error
+				secret, err = machine.ReadSecret()
+				if err != nil {
+					return answer{}, err
+				}
+				secret = strings.TrimSpace(secret)
+			}
 			report, err := Init{
 				HomeDirectory:         machine.HomeDirectory,
 				Program:               machine.Program,
@@ -296,7 +306,7 @@ func Main(args []string, machine Machine) (string, int) {
 			}.Run(Flags{
 				FleetURL:         command.values["--fleet-url"],
 				ShipID:           command.values["--ship-id"],
-				Secret:           command.values["--secret"],
+				Secret:           secret,
 				PluginShipID:     command.values["--plugin-ship-id"],
 				IsYes:            command.switches["--yes"],
 				Harnesses:        listFlag(command.values, "--harnesses"),

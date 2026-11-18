@@ -39,15 +39,23 @@ function jsonAt(path: string): unknown {
 }
 
 describe('init', () => {
+  it('registers with the secret on stdin and no secret in its arguments', async () => {
+    const words = setupLine();
+    expect(words).not.toContain(fleet.trierarchShip.secret);
+    const result = await machine.trierarch(words, { input: `${fleet.trierarchShip.secret}\n` });
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    await expect(fleet.leasesOf(fleet.trierarchShip.shipId)).resolves.toBe(1);
+  });
+
   it("registers the trierarch's ship: its lease is held", async () => {
-    const init = await machine.trierarch(setupLine());
+    const init = await machine.trierarch(setupLine(), { input: fleet.trierarchShip.secret });
 
     expect(init.status, init.stdout + init.stderr).toBe(0);
     await expect(fleet.leasesOf(fleet.trierarchShip.shipId)).resolves.toBe(1);
   });
 
   it('keeps the crew token readable by the user only, and the secret nowhere', async () => {
-    await machine.trierarch(setupLine());
+    await machine.trierarch(setupLine(), { input: fleet.trierarchShip.secret });
 
     const crewToken = join(machine.trierarchHome, 'crew-token');
     expect(statSync(crewToken).mode & PERMISSION_BITS).toBe(OWNER_ONLY);
@@ -55,14 +63,14 @@ describe('init', () => {
   });
 
   it('writes the configuration and its JSON Schema', async () => {
-    await machine.trierarch(setupLine());
+    await machine.trierarch(setupLine(), { input: fleet.trierarchShip.secret });
 
     expect(jsonAt(join(machine.trierarchHome, 'config.json'))).toMatchObject({ $schema: './config.schema.json', harnesses: { 'claude-code': {} } });
     expect(jsonAt(join(machine.trierarchHome, 'config.schema.json'))).toMatchObject({ type: 'object' });
   });
 
   it('installs the service and starts it: the trierarch runs and says its version', async () => {
-    await machine.trierarch(setupLine());
+    await machine.trierarch(setupLine(), { input: fleet.trierarchShip.secret });
     const version = z.object({ version: z.string() }).parse(JSON.parse((await machine.trierarch(['--version', '--json'])).stdout)).version;
 
     const status = await machine.trierarch(['status', '--json']);
@@ -74,7 +82,7 @@ describe('init', () => {
   it('refuses before it registers anything when Claude Code is installed but not signed in', async () => {
     machine.toggle('claude-signed-out', true);
 
-    const init = await machine.trierarch(setupLine());
+    const init = await machine.trierarch(setupLine(), { input: fleet.trierarchShip.secret });
 
     expect(init.status).toBe(1);
     expect(init.stdout).toContain('not signed in');
@@ -83,9 +91,9 @@ describe('init', () => {
   });
 
   it('run again with the same setup line, registers nothing again and goes on with the setup', async () => {
-    await machine.trierarch(setupLine());
+    await machine.trierarch(setupLine(), { input: fleet.trierarchShip.secret });
 
-    const again = await machine.trierarch(setupLine());
+    const again = await machine.trierarch(setupLine(), { input: fleet.trierarchShip.secret });
 
     expect(again.status, again.stdout + again.stderr).toBe(0);
     await expect(fleet.database.lease.count({ where: { shipId: fleet.trierarchShip.shipId } })).resolves.toBe(1);
@@ -94,7 +102,7 @@ describe('init', () => {
 
 describe('add', () => {
   it('adds a repository to the configuration and Claude Code trusts it', async () => {
-    await machine.trierarch(setupLine());
+    await machine.trierarch(setupLine(), { input: fleet.trierarchShip.secret });
 
     const add = await machine.trierarch(['add', 'repository', 'aeolus-fleet', machine.repository]);
 

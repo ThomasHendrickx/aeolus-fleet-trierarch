@@ -43,6 +43,11 @@ afterEach(() => {
 });
 
 describe('aeolus-trierarch', () => {
+  it('rejects a secret in a process argument', async () => {
+    const result = await main(['init', '--secret', 'example-secret'], machine({ HOME: home }));
+    expect(result.code).toBe(2);
+  });
+
   it('prints its usage, exiting 2, for no command or an unknown one', async () => {
     await expect(main([], machine({ HOME: home }))).resolves.toEqual({ output: USAGE, code: 2 });
     await expect(main(['sail'], machine({ HOME: home }))).resolves.toEqual({ output: USAGE, code: 2 });

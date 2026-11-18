@@ -484,7 +484,7 @@ func TestSetupLineAnswersEveryChoiceAndShowsItsValues(t *testing.T) {
 	var printed []string
 	machine.Print = func(line string) { printed = append(printed, line) }
 	machine.OpenTerminal = func() (io.ReadWriteCloser, error) { return nil, errors.New("asked on the terminal") }
-	words := []string{"init", "--fleet-url", fleetURL, "--ship-id", shipID, "--secret", secret, "--plugin-ship-id", pluginShipID, "--harnesses", "claude-code", "--unattended", "", "--no-repositories", "--folder", "shared", shared, "--folder", "notes", root, "--max-ships", "5", "--max-running", "1", "--service", "yes"}
+	words := []string{"init", "--fleet-url", fleetURL, "--ship-id", shipID, "--secret-stdin", "--plugin-ship-id", pluginShipID, "--harnesses", "claude-code", "--unattended", "", "--no-repositories", "--folder", "shared", shared, "--folder", "notes", root, "--max-ships", "5", "--max-running", "1", "--service", "yes"}
 
 	output, code := Main(words, machine)
 

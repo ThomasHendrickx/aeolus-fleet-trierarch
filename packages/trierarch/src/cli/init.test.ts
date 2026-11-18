@@ -295,7 +295,7 @@ describe('aeolus-trierarch init, the whole setup', () => {
   });
 
   it('refuses with --yes when a flag is missing, naming it, and registers nothing', async () => {
-    await expect(init({ fleetUrl: FLEET_URL, isYes: true })).rejects.toThrow('init --yes needs --fleet-url, --ship-id and --secret: --ship-id and --secret are missing');
+    await expect(init({ fleetUrl: FLEET_URL, isYes: true })).rejects.toThrow('init --yes needs --fleet-url, --ship-id and --secret-stdin: --ship-id and --secret-stdin are missing');
     expect(registered).toEqual([]);
   });
 
@@ -431,7 +431,7 @@ describe('aeolus-trierarch init, the whole setup', () => {
     const pluginShipId = newId('ship');
 
     await expect(init({ fleetUrl: FLEET_URL, shipId, pluginShipId, secret: SECRET, isYes: true })).rejects.toThrow(
-      `${shipId} is crewed already, and this computer holds no crew token for it. Either an earlier setup here stopped before it saved the crew token, or the ship was set up on another computer or as another user. To crew it from here, Release ${shipId} on its page in the console and run init here with its new secret: npx @aeolus-fleet/trierarch init --fleet-url ${FLEET_URL} --ship-id ${shipId} --plugin-ship-id ${pluginShipId} --secret <its new secret>. If it is set up elsewhere, run that setup line there again instead.`,
+      `${shipId} is crewed already, and this computer holds no crew token for it. Either an earlier setup here stopped before it saved the crew token, or the ship was set up on another computer or as another user. To crew it from here, Release ${shipId} on its page in the console and run init here with its new secret: npx @aeolus-fleet/trierarch init --fleet-url ${FLEET_URL} --ship-id ${shipId} --plugin-ship-id ${pluginShipId} --secret-stdin <<< '<its new secret>'. If it is set up elsewhere, run that setup line there again instead.`,
     );
     expect(existsSync(paths.crewToken)).toBe(false);
   });
@@ -441,7 +441,7 @@ describe('aeolus-trierarch init, the whole setup', () => {
     const shipId = newId('ship');
 
     await expect(init({ fleetUrl: FLEET_URL, shipId, secret: SECRET, isYes: true })).rejects.toThrow(
-      `The fleet at ${FLEET_URL} does not accept this secret for ${shipId}: it is wrong, or it is an old one the fleet no longer takes. Copy the ship's current secret from its page in the console (Release ${shipId} there for a new one), then run init here again: npx @aeolus-fleet/trierarch init --fleet-url ${FLEET_URL} --ship-id ${shipId} --secret <its current secret>`,
+      `The fleet at ${FLEET_URL} does not accept this secret for ${shipId}: it is wrong, or it is an old one the fleet no longer takes. Copy the ship's current secret from its page in the console (Release ${shipId} there for a new one), then run init here again: npx @aeolus-fleet/trierarch init --fleet-url ${FLEET_URL} --ship-id ${shipId} --secret-stdin <<< '<its current secret>'`,
     );
     expect(existsSync(paths.crewToken)).toBe(false);
   });

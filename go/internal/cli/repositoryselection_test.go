@@ -215,7 +215,7 @@ func TestInitRepeatedRepositorySelection(t *testing.T) {
 func TestInitNamesEveryMissingFlagAfterHarnessesAreGiven(t *testing.T) {
 	m := newMachine(t)
 	_, err := m.init.Run(Flags{Harnesses: []string{"claude-code"}})
-	for _, flag := range []string{"--fleet-url", "--ship-id", "--secret", "--repositories", "--repositories-in", "--no-repositories"} {
+	for _, flag := range []string{"--fleet-url", "--ship-id", "--secret-stdin", "--repositories", "--repositories-in", "--no-repositories"} {
 		if err == nil || !strings.Contains(err.Error(), flag) {
 			t.Errorf("error = %v, want missing %s", err, flag)
 		}
