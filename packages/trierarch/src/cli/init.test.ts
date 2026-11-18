@@ -865,6 +865,25 @@ describe('aeolus-trierarch init, for Codex', () => {
     isCodexInstalled = true;
 
     await expect(init({ isYes: true, fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET })).resolves.toBeDefined();
+    expect(Object.keys(configuration().harnesses)).toEqual(['codex']);
+  });
+
+  it('does not offer an installed harness without a sign-in or stored key', async () => {
+    isCodexInstalled = true;
+    isClaudeCodeSignedIn = false;
+
+    await init({ isYes: true, fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET });
+
+    expect(Object.keys(configuration().harnesses)).toEqual(['codex']);
+  });
+
+  it('does not write a configuration when the operator declines the only runnable harness', async () => {
+    isClaudeCodeInstalled = false;
+    isCodexInstalled = true;
+    const prompter = new ScriptedPrompter([['Offer Codex', false], ['repository', ''], ['folder', ''], ['ships', '4'], ['sessions', '2']]);
+
+    await expect(init({ fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET }, prompter)).rejects.toThrow(/install.*sign in/i);
+    expect(existsSync(paths.config)).toBe(false);
   });
 
   it('asks nothing about Codex where it is neither installed nor configured', async () => {
