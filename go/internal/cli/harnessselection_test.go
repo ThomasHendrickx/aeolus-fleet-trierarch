@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
 )
 
 type scriptedTerminal struct {
@@ -38,6 +39,42 @@ func TestInitPicksOnlyNamedHarnessesAndCaps(t *testing.T) {
 	want := map[string]config.Harness{"codex": {Flags: []string{"--dangerously-bypass-approvals-and-sandbox"}, Options: map[string]config.Option{}}}
 	if !reflect.DeepEqual(got.Harnesses, want) || got.Caps != (config.Caps{Ships: 7, Running: 3}) {
 		t.Fatalf("configuration = %+v, want only unattended Codex, caps 7/3", got)
+	}
+}
+
+func TestInitAcceptsStoredAPIKeyWithoutSignIn(t *testing.T) {
+	for _, harness := range []string{"claude-code", "codex"} {
+		t.Run(harness, func(t *testing.T) {
+			m := newMachine(t)
+			withCodex(m, true)
+			m.init.IsClaudeCodeSignedIn = false
+			m.init.IsCodexSignedIn = false
+			if err := (keys.Files{Folder: m.init.Paths.Keys}).Write(harness, "a stored key"); err != nil {
+				t.Fatal(err)
+			}
+			f := setupLine()
+			f.Harnesses = []string{harness}
+			if _, err := m.init.Run(f); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestInitExplainsHowToAddMissingAPIKey(t *testing.T) {
+	for _, harness := range []string{"claude-code", "codex"} {
+		t.Run(harness, func(t *testing.T) {
+			m := newMachine(t)
+			withCodex(m, true)
+			m.init.IsClaudeCodeSignedIn = false
+			m.init.IsCodexSignedIn = false
+			f := setupLine()
+			f.Harnesses = []string{harness}
+			_, err := m.init.Run(f)
+			if err == nil || !strings.Contains(err.Error(), "aeolus-trierarch login "+harness+" --api-key") {
+				t.Fatalf("error = %v, want key instructions", err)
+			}
+		})
 	}
 }
 
