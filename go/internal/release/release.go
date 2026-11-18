@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/attestation"
 )
@@ -53,8 +54,10 @@ func Name(goos string, goarch string) string {
 	return "aeolus-trierarch-" + goos + "-" + goarch
 }
 
-// Latest is the version of the repository's latest release.
+// Latest is the version of the repository's latest release, within five minutes.
 func (s Source) Latest(ctx context.Context) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
 	var latest struct {
 		Tag string `json:"tag_name"`
 	}
@@ -64,8 +67,10 @@ func (s Source) Latest(ctx context.Context) (string, error) {
 	return strings.TrimPrefix(latest.Tag, "v"), nil
 }
 
-// Fetch is the binary of the version for the system and chip, once its checksum and its attestation hold.
+// Fetch is the binary of the version for the system and chip, once its checksum and its attestation hold, within five minutes.
 func (s Source) Fetch(ctx context.Context, version string, goos string, goarch string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
 	var tagged struct {
 		Assets []struct {
 			Name string `json:"name"`
@@ -164,7 +169,7 @@ func (s Source) readJSON(ctx context.Context, url string, into any) error {
 	return json.Unmarshal(text, into)
 }
 
-// read is the answer to a GET, at most limit bytes; ErrNoRelease when GitHub has nothing there. A transfer that fails is read once more with Fallback, when there is one.
+// read is the answer to a GET, at most limit bytes; ErrNoRelease when GitHub has nothing there. A failed or stalled transfer is read once more with Fallback, within the same deadline.
 func (s Source) read(ctx context.Context, url string, limit int64) ([]byte, error) {
 	client := s.Client
 	if client == nil {
@@ -179,6 +184,16 @@ func (s Source) read(ctx context.Context, url string, limit int64) ([]byte, erro
 
 // readWith is read by one client; isTransfer says the error is the transfer's own (no answer, or one cut short), not what GitHub answered.
 func readWith(ctx context.Context, client *http.Client, url string, limit int64) (text []byte, isTransfer bool, err error) {
+	// Leave time for a fresh connection even when the caller has less than
+	// the usual stall interval left. Progress keeps a large download alive.
+	stall := 30 * time.Second
+	if deadline, ok := ctx.Deadline(); ok {
+		stall = min(stall, time.Until(deadline)/2)
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	timer := time.AfterFunc(stall, cancel)
+	defer timer.Stop()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, false, err
@@ -195,7 +210,7 @@ func readWith(ctx context.Context, client *http.Client, url string, limit int64)
 	if answer.StatusCode != http.StatusOK {
 		return nil, false, fmt.Errorf("%s answered %s", url, answer.Status)
 	}
-	text, err = io.ReadAll(io.LimitReader(answer.Body, limit+1))
+	text, err = io.ReadAll(io.LimitReader(progressReader{reader: answer.Body, timer: timer, stall: stall}, limit+1))
 	if err != nil {
 		return nil, true, err
 	}
@@ -203,4 +218,20 @@ func readWith(ctx context.Context, client *http.Client, url string, limit int64)
 		return nil, false, fmt.Errorf("%s answered more than %d bytes", url, limit)
 	}
 	return text, false, nil
+}
+
+// progressReader gives each arriving part another stall interval, rather than
+// limiting the total time of an otherwise healthy transfer.
+type progressReader struct {
+	reader io.Reader
+	timer  *time.Timer
+	stall  time.Duration
+}
+
+func (p progressReader) Read(buffer []byte) (int, error) {
+	n, err := p.reader.Read(buffer)
+	if n > 0 {
+		p.timer.Reset(p.stall)
+	}
+	return n, err
 }
