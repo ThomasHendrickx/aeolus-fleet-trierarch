@@ -104,7 +104,7 @@ func TestRefusesAClaudeJSONThatIsNoObject(t *testing.T) {
 func onPath(t *testing.T, authStatus int) {
 	t.Helper()
 	bin := t.TempDir()
-	script := "#!/bin/sh\n[ \"$1 $2\" = 'auth status' ] && exit " + string(rune('0'+authStatus)) + "\nexit 2\n"
+	script := "#!/bin/sh\n[ \"$1 $2\" = 'auth status' ] && echo '{\"loggedIn\":true,\"authMethod\":\"claude.ai\"}' && exit " + string(rune('0'+authStatus)) + "\nexit 2\n"
 	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
