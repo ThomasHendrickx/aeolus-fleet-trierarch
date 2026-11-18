@@ -17,7 +17,7 @@ function setup(limit: number | undefined) {
   let reads = 0;
   const ship = aShip();
   let state = putEntry(EMPTY_STATE, ship);
-  const check = createShipSize({ limit, clock, logger, measure: async () => { reads += 1; return size; }, tell: async (entry, bytes) => { reports.push(`${entry.shipName}: ${String(bytes)}`); } });
+  const check = createShipSize({ limit, clock, logger, measure: () => { reads += 1; return Promise.resolve(size); }, tell: (entry, bytes) => { reports.push(`${entry.shipName}: ${String(bytes)}`); return Promise.resolve(); } });
   const pass = async () => { state = await check(state); await Promise.resolve(); };
   return { clock, reports, ship, pass, reads: () => reads, setSize: (value: number) => { size = value; }, state: () => state };
 }
@@ -56,7 +56,7 @@ describe('ship folder size', () => {
 
   it('does not wait for a slow measurement', async () => {
     const ship = aShip();
-    const check = createShipSize({ limit: 100, clock: new TestClock(), logger: new CollectingLogger(), measure: () => new Promise<number>(() => {}), tell: async () => {} });
+    const check = createShipSize({ limit: 100, clock: new TestClock(), logger: new CollectingLogger(), measure: () => new Promise<number>(() => undefined), tell: () => Promise.resolve() });
     const state = putEntry(EMPTY_STATE, ship);
     expect(await check(state)).toEqual(state);
   });
