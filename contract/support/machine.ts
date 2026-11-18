@@ -496,6 +496,7 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
   }
   const trierarch = (words: readonly string[], at: { input?: string; as?: readonly string[]; env?: Readonly<Record<string, string>> } = {}) =>
     runProgram([...(at.as ?? underTest), ...words], { cwd: home, env: { ...env, ...at.env }, ...(at.input !== undefined && { input: at.input }) });
+  const running = new Set<RunningCommand>();
   const start = (words: readonly string[]): RunningCommand => {
     const [program = '', ...args] = [...underTest, ...words];
     const child = spawn(program, args, { cwd: home, env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -508,13 +509,16 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
         resolve(code ?? 1);
       });
     });
-    return {
+    const command: RunningCommand = {
       stdout: () => stdout,
       interrupt: () => {
         child.kill('SIGINT');
         return ended;
       },
     };
+    running.add(command);
+    void ended.then(() => running.delete(command));
+    return command;
   };
   return {
     home,
@@ -568,6 +572,7 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
     remove: async () => {
       // uninstall stops every session and the service, as it does on a machine; the service's pid is ended too when it did not.
       try {
+        await Promise.all([...running].map((command) => command.interrupt()));
         await trierarch(['uninstall']);
         const pid = servicePid();
         if (pid !== undefined) {

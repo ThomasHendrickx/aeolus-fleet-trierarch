@@ -60,18 +60,22 @@ function followers(): number[] {
 
 /** Runs an assertion while a log follower is active. */
 async function withFollower(following: RunningCommand, check: () => Promise<void>): Promise<number> {
-  await check();
-  return following.interrupt();
+  let status: number;
+  try {
+    await check();
+  } finally {
+    status = await following.interrupt();
+  }
+  return status;
 }
 
 describe('logs', () => {
   it('stops a follower when its assertion fails', async () => {
     written(['ready']);
     const following = machine.start(['logs', '--follow']);
-    let pid = 0;
     try {
       await until(following.stdout, 'ready');
-      [pid = 0] = followers();
+      const [pid = 0] = followers();
       expect(pid).toBeGreaterThan(0);
       await expect(withFollower(following, () => Promise.reject(new Error('assertion failed')))).rejects.toThrow('assertion failed');
       expect(followers()).toEqual([]);
@@ -82,16 +86,16 @@ describe('logs', () => {
 
   it('stops started children when the machine is removed', async () => {
     written(['ready']);
-    const following = machine.start(['logs', '--follow']);
+    const commands = [machine.start(['logs', '--follow']), machine.start(['logs', '--follow'])];
     try {
-      await until(following.stdout, 'ready');
-      const [pid = 0] = followers();
-      expect(pid).toBeGreaterThan(0);
+      await Promise.all(commands.map((command) => until(command.stdout, 'ready')));
+      const pids = followers();
+      expect(pids).toHaveLength(2);
       isRemoved = true;
       await machine.remove();
-      expect(() => process.kill(pid, 0)).toThrow();
+      for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
     } finally {
-      await following.interrupt();
+      await Promise.all(commands.map((command) => command.interrupt()));
     }
   });
 
@@ -154,11 +158,12 @@ describe('logs', () => {
     written([...records, 'an older line']);
 
     const following = machine.start(['logs', '--follow', '--lines', '2']);
-    await until(following.stdout, 'an older line\n');
-    await wait(FOLLOWER_STARTS_MS);
-    appendFileSync(journal(), `${JSON.stringify({ ...message, message: 'a later record' })}\nplain later line\n`);
-    await until(following.stdout, 'plain later line\n');
-    const status = await following.interrupt();
+    const status = await withFollower(following, async () => {
+      await until(following.stdout, 'an older line\n');
+      await wait(FOLLOWER_STARTS_MS);
+      appendFileSync(journal(), `${JSON.stringify({ ...message, message: 'a later record' })}\nplain later line\n`);
+      await until(following.stdout, 'plain later line\n');
+    });
 
     expect(following.stdout().split('\n')).toEqual([
       '2026-10-06T15:00:10.000Z warn The loop failed and goes on: the fleet cannot be reached',
@@ -174,11 +179,12 @@ describe('logs', () => {
     written([JSON.stringify(action)]);
 
     const following = machine.start(['logs', '--follow', '--json']);
-    await until(following.stdout, '"crew"');
-    await wait(FOLLOWER_STARTS_MS);
-    appendFileSync(journal(), 'plain later line\n');
-    await until(following.stdout, 'plain later line');
-    await following.interrupt();
+    await withFollower(following, async () => {
+      await until(following.stdout, '"crew"');
+      await wait(FOLLOWER_STARTS_MS);
+      appendFileSync(journal(), 'plain later line\n');
+      await until(following.stdout, 'plain later line');
+    });
 
     expect(following.stdout().split('\n')).toEqual([JSON.stringify(action), JSON.stringify({ line: 'plain later line' }), '']);
   });
