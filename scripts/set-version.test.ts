@@ -76,7 +76,7 @@ describe('setVersion', () => {
     setVersion(copy, '0.28.0');
 
     expect(manifest('trierarch').dependencies?.['@aeolus-fleet/common']).toBe('^0.41.0');
-    expect(manifest('trierarch').devDependencies?.['@aeolus-fleet/core']).toBe('^0.41.0');
+    expect(manifest('trierarch').devDependencies?.['@aeolus-fleet/core']).toBe('^0.43.0');
   });
 
   it("pins a dependency on this repository's own package to that version", () => {

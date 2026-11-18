@@ -49,6 +49,6 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@aeolus-fleet/core": "^0.41.0"
+    "@aeolus-fleet/core": "^0.43.0"
   }
 }
