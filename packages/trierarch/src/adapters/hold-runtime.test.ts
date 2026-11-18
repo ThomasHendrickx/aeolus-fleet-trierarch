@@ -123,6 +123,22 @@ it('stops a session when its hold exits before it can be signalled', async () =>
   }
 });
 
+it('fails to stop a session when signalling its hold is denied', async () => {
+  const runtime = aRuntime();
+  const shipId = await aClaudeCodeSession(runtime);
+  const kill = process.kill.bind(process);
+  const denied = Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+  const signal = vi.spyOn(process, 'kill').mockImplementation((pid, name) => {
+    if (name === 'SIGTERM') throw denied;
+    return kill(pid, name);
+  });
+  try {
+    await expect(runtime.stop(shipId)).rejects.toBe(denied);
+  } finally {
+    signal.mockRestore();
+  }
+});
+
 describe('the session runtime contract, on holds', () => {
   sessionRuntimeContract({ runtime: () => aRuntime(), folder: () => folder });
 });
