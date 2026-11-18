@@ -282,7 +282,10 @@ const FOLDER_QUESTIONS: PlaceQuestions = {
 async function askCodex(at: { base: TrierarchConfiguration; prompter: Prompter; isCodexInstalled: boolean }): Promise<TrierarchConfiguration['harnesses'][string] | undefined> {
   const { base, prompter } = at;
   const harness = base.harnesses[CODEX];
-  if (!at.isCodexInstalled || !(await prompter.confirm('Offer Codex as a harness too?', { isDefault: true }))) {
+  if (!at.isCodexInstalled) {
+    return harness;
+  }
+  if (!(await prompter.confirm('Offer Codex as a harness too?', { isDefault: true }))) {
     return undefined;
   }
   const flags = harness?.flags ?? [];
@@ -320,7 +323,7 @@ async function askConfiguration(at: { base: TrierarchConfiguration; prompter: Pr
     caps: { ships, running },
     repositories,
     folders,
-    harnesses: { ...others, ...(at.isClaudeCodeReady && { [CLAUDE_CODE]: { ...harness, flags } }), ...(codex !== undefined && { [CODEX]: codex }) },
+    harnesses: { ...others, ...(at.isClaudeCodeReady ? { [CLAUDE_CODE]: { ...harness, flags } } : base.harnesses[CLAUDE_CODE] !== undefined ? { [CLAUDE_CODE]: base.harnesses[CLAUDE_CODE] } : {}), ...(codex !== undefined && { [CODEX]: codex }) },
   };
 }
 
@@ -422,7 +425,7 @@ export async function initTrierarch(input: {
   let configuration: TrierarchConfiguration;
   let configured: InitReport['configuration'] = 'kept';
   if (!(await exists(paths.config))) {
-    configuration = { $schema: './config.schema.json', ...(await askConfiguration({ base: initialConfiguration(), prompter, homeDirectory, isCodexInstalled: isCodexReady, isClaudeCodeReady })) };
+    configuration = { $schema: './config.schema.json', ...(await askConfiguration({ base: { ...initialConfiguration(), harnesses: {} }, prompter, homeDirectory, isCodexInstalled: isCodexReady, isClaudeCodeReady })) };
     configured = 'written';
   } else {
     configuration = await loadConfiguration(paths.config);
@@ -437,7 +440,7 @@ export async function initTrierarch(input: {
   for (const harness of [CLAUDE_CODE, CODEX] as const) {
     const isInstalled = harness === CLAUDE_CODE ? input.isClaudeCodeInstalled : isCodexInstalled;
     const isSignedIn = harness === CLAUDE_CODE ? input.isClaudeCodeSignedIn : input.isCodexSignedIn;
-    if (configuration.harnesses[harness] !== undefined && isInstalled && !isSignedIn && !(await keys.has(harness))) {
+    if (configured !== 'changed' && configuration.harnesses[harness] !== undefined && isInstalled && !isSignedIn && !(await keys.has(harness))) {
       throw new TrierarchFileError(`${harness} is not signed in and has no API key. Sign in or run aeolus-trierarch login ${harness} --api-key, then run the setup line again.`);
     }
   }

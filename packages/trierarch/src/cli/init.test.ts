@@ -584,9 +584,12 @@ describe('aeolus-trierarch init on a machine set up already', () => {
     isClaudeCodeSignedIn = harness !== 'claude-code' || state !== 'signed out';
     isCodexInstalled = harness !== 'codex' || state !== 'uninstalled';
     isCodexSignedIn = harness !== 'codex' || state !== 'signed out';
+    const readyQuestions: [string, boolean][] = harness === 'codex'
+      ? [['--dangerously-skip-permissions', false]]
+      : [['Offer Codex', true], ['--dangerously-bypass-approvals-and-sandbox', false]];
     const prompter = new ScriptedPrompter([
       ['Change the configuration', true],
-      ...(harness === 'codex' ? [['--dangerously-skip-permissions', false] as [string, boolean]] : [['Offer Codex', true] as [string, boolean], ['--dangerously-bypass-approvals-and-sandbox', false] as [string, boolean]]),
+      ...readyQuestions,
       ['repository', ''], ['folder', ''], ['ships', '4'], ['sessions', '2'], ['Restart', false],
     ]);
 
