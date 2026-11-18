@@ -10,8 +10,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -163,6 +165,60 @@ func TestFetchRefusesAFallbackBinaryItsChecksumDoesNotName(t *testing.T) {
 	if !errors.Is(err, ErrChecksum) {
 		t.Fatalf("Fetch(0.40.0) = %v, want ErrChecksum", err)
 	}
+}
+
+func TestFetchRetriesAMidBodyStallOnAnotherAddressWithinItsDeadline(t *testing.T) {
+	for _, badChecksum := range []bool{false, true} {
+		t.Run(fmt.Sprintf("badChecksum=%v", badChecksum), func(t *testing.T) {
+			signed := aSignedRelease(t)
+			if badChecksum {
+				signed.release.sums = "0000  aeolus-trierarch-linux-amd64\n"
+			}
+			healthy := signed.source.Client
+			stalled := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Length", "1000")
+				_, _ = w.Write([]byte("partial binary"))
+				w.(http.Flusher).Flush()
+				<-r.Context().Done()
+			}))
+			defer stalled.Close()
+			transport := http.DefaultTransport.(*http.Transport).Clone()
+			transport.Proxy = nil
+			var assetConnections atomic.Int32
+			// Metadata uses the healthy address; the first asset request goes to a
+			// different address whose connection succeeds but whose body never finishes.
+			signed.source.Client = &http.Client{Transport: &assetTransport{base: transport, stalled: stalled.URL, connections: &assetConnections}, Timeout: 5 * time.Second}
+			signed.source.Fallback = healthy
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			binary, err := signed.source.Fetch(ctx, "0.40.0", "linux", "amd64")
+			if badChecksum {
+				if !errors.Is(err, ErrChecksum) {
+					t.Fatalf("Fetch after address fallback = %v, want ErrChecksum", err)
+				}
+			} else if err != nil || !bytes.Equal(binary, signed.release.binary) {
+				t.Fatalf("Fetch after address fallback = %q, %v, want complete verified binary", binary, err)
+			}
+		})
+	}
+}
+
+type assetTransport struct {
+	base        *http.Transport
+	stalled     string
+	connections *atomic.Int32
+}
+
+func (a *assetTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if strings.HasSuffix(r.URL.Path, "/aeolus-trierarch-linux-amd64") && a.connections.Add(1) == 1 {
+		r = r.Clone(r.Context())
+		target, err := url.Parse(a.stalled)
+		if err != nil {
+			return nil, err
+		}
+		r.URL = target
+	}
+	return a.base.RoundTrip(r)
 }
 
 func TestFetchReadsAnAttestationGitHubKeepsCompacted(t *testing.T) {
