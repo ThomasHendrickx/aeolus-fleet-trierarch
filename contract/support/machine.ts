@@ -4,6 +4,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSy
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { setTimeout as wait } from 'node:timers/promises';
 
 import { isTodaysTrierarch, TRIERARCH_UNDER_TEST } from './trierarch-under-test.js';
 
@@ -96,6 +97,30 @@ const GIT_ENV = { GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 't@example.com', GI
 export const CLAUDE_CODE_VERSION = '2.1.306';
 /** How long the stand-in systemd waits for a stopped trierarch to end. */
 const STOP_WAIT_SECONDS = 10;
+
+/** Stop only a proxy whose command names this machine's private folder. */
+async function stopProxy(home: string): Promise<void> {
+  const folder = join(home, '.aeolus', 'trierarch', 'proxy');
+  const owned = (): number[] => readdirSync('/proc').flatMap((entry) => {
+    if (!/^\d+$/.test(entry)) return [];
+    try {
+      const words = readFileSync(join('/proc', entry, 'cmdline'), 'utf8').split('\0');
+      return words.includes('proxy') && words.includes('--folder') && words[words.indexOf('--folder') + 1] === folder ? [Number(entry)] : [];
+    } catch {
+      return [];
+    }
+  });
+  for (const pid of owned()) {
+    try { process.kill(pid, 'SIGTERM'); } catch { /* Already ended. */ }
+  }
+  for (let attempt = 0; attempt < 100 && owned().length > 0; attempt++) await wait(50);
+  const remaining = owned();
+  for (const pid of remaining) {
+    try { process.kill(pid, 'SIGKILL'); } catch { /* Already ended. */ }
+  }
+  for (let attempt = 0; attempt < 100 && owned().length > 0; attempt++) await wait(50);
+  if (owned().length > 0) throw new Error('the test machine model proxy did not stop');
+}
 
 /** Runs a program to its end, never blocking this process: the fleet in it must answer meanwhile. */
 export function runProgram(command: readonly string[], at: { cwd: string; env: Readonly<Record<string, string>>; input?: string }): Promise<CommandOutcome> {
@@ -552,7 +577,11 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
           }
         }
       } finally {
-        rmSync(root, { recursive: true, force: true });
+        try {
+          await stopProxy(home);
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
       }
     },
   };

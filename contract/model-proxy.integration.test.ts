@@ -53,7 +53,7 @@ async function aRunningScout(): Promise<void> {
 describe('the model proxy', () => {
   it('leaves none of its model proxy processes running when the machine is removed', async () => {
     const pidFile = join(machine.trierarchHome, 'proxy', 'proxy.pid');
-    await expect.poll(() => existsSync(pidFile), { timeout: CREWED_WITHIN_MS }).toBe(true);
+    await expect.poll(() => existsSync(pidFile) ? Number(readFileSync(pidFile, 'utf8')) : 0, { timeout: CREWED_WITHIN_MS }).toBeGreaterThan(1);
     const pid = Number(readFileSync(pidFile, 'utf8'));
     expect(pid).toBeGreaterThan(1);
     expect(isRunning(pid)).toBe(true);
