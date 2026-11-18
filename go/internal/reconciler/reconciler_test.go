@@ -383,7 +383,7 @@ func TestAFinalCrewQuietForItsWholeLaunchWindowRestartsAgainstItsBudget(t *testi
 
 	assertActions(t, actions,
 		Action{Kind: Stop, ShipID: scout},
-		Action{Kind: Report, ShipID: scout, Note: "blocked: session crashed, restarting"},
+		Action{Kind: Report, ShipID: scout, Note: "blocked: session crashed, restarting", FailedStart: "no activity within a minute of its start"},
 		Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "restarting", Attempt: 1}},
 	)
 	got := next.Entries[scout]
@@ -478,7 +478,7 @@ func TestACrashFromAFailedStartTellsWhyItFailed(t *testing.T) {
 
 	assertActions(t, actions,
 		Action{Kind: Stop, ShipID: scout},
-		Action{Kind: Report, ShipID: scout, Note: "blocked: session crashed, restart budget spent"},
+		Action{Kind: Report, ShipID: scout, Note: "blocked: session crashed, restart budget spent", FailedStart: "no activity within a minute of its start, claude-code said: Not logged in"},
 		Action{Kind: Crashed, ShipID: scout, ShipName: "scout", Exits: 6, FailedStart: "no activity within a minute of its start, claude-code said: Not logged in", Key: "trierarch:crashed:" + scout + ":2026-11-04T12:00:00.000Z"},
 		Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "crashed", Attempt: 5}},
 	)
@@ -541,7 +541,7 @@ func TestAModelRefusedByAFinalCrewIsAFailedStartAgainstTheRestartBudgetAfterTell
 	assertActions(t, actions,
 		Action{Kind: ModelRefused, ShipID: scout, ShipName: "scout", Harness: "claude-code", Version: "2.1.306", Model: "claude-sonnet-5"},
 		Action{Kind: Stop, ShipID: scout},
-		Action{Kind: Report, ShipID: scout, Note: "blocked: session crashed, restarting"},
+		Action{Kind: Report, ShipID: scout, Note: "blocked: session crashed, restarting", FailedStart: "claude-code 2.1.306 refused claude-sonnet-5"},
 		Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "restarting", Attempt: 1}},
 	)
 	if got := next.Entries[scout]; got.State != "restarting" {
@@ -559,7 +559,7 @@ func TestAModelRefusedInARestartedSessionsLaunchWindowIsAFailedStartAfterTelling
 	assertActions(t, actions,
 		Action{Kind: ModelRefused, ShipID: scout, ShipName: "scout", Harness: "claude-code", Version: "2.1.306", Model: "claude-sonnet-5"},
 		Action{Kind: Stop, ShipID: scout},
-		Action{Kind: Report, ShipID: scout, Note: "blocked: session crashed, restarting"},
+		Action{Kind: Report, ShipID: scout, Note: "blocked: session crashed, restarting", FailedStart: "claude-code 2.1.306 refused claude-sonnet-5"},
 		Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "restarting", Attempt: 1}},
 	)
 	if got := next.Entries[scout]; got.State != "restarting" || got.LaunchedAt != "" {
@@ -668,7 +668,7 @@ func TestARestartedSessionQuietForItsWholeLaunchWindowIsAFailedStart(t *testing.
 
 	assertActions(t, actions,
 		Action{Kind: Stop, ShipID: scout},
-		Action{Kind: Report, ShipID: scout, Note: "blocked: session crashed, restarting"},
+		Action{Kind: Report, ShipID: scout, Note: "blocked: session crashed, restarting", FailedStart: "no activity within a minute of its start"},
 		Action{Kind: WriteStatus, ShipID: scout, Status: Status{Status: "restarting", Attempt: 1}},
 	)
 	if got := next.Entries[scout]; got.State != "restarting" {
