@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { stripVTControlCharacters } from 'node:util';
 
 import { NO_TERMINAL_QUESTIONS } from '@aeolus-fleet/common';
@@ -20,13 +21,20 @@ const CONFIGURED = {
 };
 
 let home: string;
+const realUnit = join(homedir(), '.config', 'systemd', 'user', 'aeolus-trierarch.service');
 
 /** The machine a test runs main on: its environment, and a managed settings folder of the test's own, so no test reads the machine's (#516). */
 /** The machine main runs on: Linux unless a test names another platform, and its managed settings in the test's own folder. */
-const machine = (env: Readonly<Record<string, string | undefined>>, platform = 'linux') => ({ env, managedSettings: join(home, 'managed'), platform });
+const machine = (env: Readonly<Record<string, string | undefined>>, platform = 'linux') => ({ env: { XDG_CONFIG_HOME: join(home, '.config'), ...env }, managedSettings: join(home, 'managed'), platform });
 
 beforeEach(() => {
   home = aShortHome('trierarch-main');
+  const bin = join(home, 'guard');
+  mkdirSync(bin);
+  symlinkSync('/usr/bin/true', join(bin, 'systemctl'));
+  vi.stubEnv('HOME', home);
+  vi.stubEnv('XDG_CONFIG_HOME', join(home, '.config'));
+  vi.stubEnv('PATH', `${bin}:${process.env.PATH ?? ''}`);
 });
 
 afterEach(() => {
@@ -430,6 +438,17 @@ describe('aeolus-trierarch with CLAUDE_CONFIG_DIR and CODEX_HOME set (#521)', ()
     expect(json(configSchema)).not.toHaveProperty('stale');
   }, INIT_TIMEOUT_MS);
 
+  it("leaves the user's trierarch unit unchanged when installing", async () => {
+    const before = existsSync(realUnit) ? readFileSync(realUnit) : undefined;
+    await aSetUpMachine({ isServiceInstalled: false });
+
+    const result = await main(['install', '--no-load'], machine(both()));
+
+    expect(result.code, result.output).toBe(0);
+    expect(existsSync(realUnit) ? readFileSync(realUnit) : undefined).toEqual(before);
+    expect(existsSync(join(home, '.config', 'systemd', 'user', 'aeolus-trierarch.service'))).toBe(true);
+  }, INIT_TIMEOUT_MS);
+
   it('add trusts a place in .claude.json under CLAUDE_CONFIG_DIR, leaving ~/.claude.json alone', async () => {
     await aSetUpMachine({ isServiceInstalled: false });
     const drafts = join(home, 'drafts');
@@ -455,6 +474,7 @@ describe('aeolus-trierarch upgrade', () => {
     };
     program('npm', `echo ${runningVersion()}`);
     program('codex', 'if [ "$4" = ThomasHendrickx/aeolus-fleet-trierarch ]; then echo "Error: could not reach github.com" >&2; exit 1; fi');
+    symlinkSync('/usr/bin/true', join(bin, 'systemctl'));
     vi.stubEnv('PATH', `${bin}:/usr/bin:/bin`);
     const paths = trierarchPaths({ homeDirectory: home });
     mkdirSync(paths.home, { recursive: true });

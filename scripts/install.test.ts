@@ -97,6 +97,7 @@ function install(bin: string, options: { args?: string[]; env?: Record<string, s
     env: {
       PATH: bin,
       HOME: home,
+      XDG_CONFIG_HOME: join(home, '.config'),
       SHELL: '/bin/bash',
       AEOLUS_TRIERARCH_RELEASES_URL: `file://${join(root, 'api')}`,
       AEOLUS_TRIERARCH_DOWNLOAD_URL: `file://${join(root, 'download')}`,
