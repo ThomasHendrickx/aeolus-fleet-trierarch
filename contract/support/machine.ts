@@ -444,6 +444,7 @@ export async function aMachine(at: { others?: readonly OtherHarness[]; shouldDia
   await git(['-C', repository, 'commit', '-q', '-m', 'init']);
   const env = {
     HOME: home,
+    XDG_CONFIG_HOME: join(home, '.config'),
     PATH: `${bin}:${tools}`,
     LANG: 'C.UTF-8',
     HTTPS_PROXY: NO_NETWORK_PROXY,
