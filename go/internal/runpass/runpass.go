@@ -625,7 +625,11 @@ func (p Pass) carryOut(state reconciler.State, action reconciler.Action) (reconc
 	case reconciler.Report:
 		// Keep the cleaned restart evidence even when reporting to the fleet fails or its identity is gone.
 		if strings.HasPrefix(action.Note, "blocked: session crashed") {
-			p.Log(fmt.Sprintf("%s (%s): %s", nameOf(entry), action.ShipID, action.Note))
+			note := action.Note
+			if action.FailedStart != "" {
+				note += ": " + action.FailedStart
+			}
+			p.Log(fmt.Sprintf("%s (%s): %s", nameOf(entry), action.ShipID, note))
 		}
 		if !isEntry || entry.CrewToken == "" || entry.Folder == "" {
 			return state, nil

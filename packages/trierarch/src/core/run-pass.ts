@@ -537,13 +537,14 @@ async function carryOutForEntry(state: TrierarchState, at: CarryOut & { action: 
       return state;
     case 'report': {
       const { crewToken } = entry;
+      const note = action.failedStart === undefined ? action.note : `${action.note}: ${action.failedStart}`;
       if (crewToken === undefined || entry.folder === undefined || !(await harnessOf(entry, deps)?.hasIdentity(sessionOf(entry, entry.folder)))) {
         // Argo is told by the identityGone action (#664).
-        log(deps, { ...about(state, { shipId: entry.shipId, action: 'report' }), outcome: `not reported ${action.note}, as its folder holds no identity` });
+        log(deps, { ...about(state, { shipId: entry.shipId, action: 'report' }), outcome: `not reported ${note}, as its folder holds no identity` });
         return state;
       }
       await deps.fleet.report({ crewToken, state: 'blocked', note: action.note });
-      log(deps, { ...about(state, { shipId: entry.shipId, action: 'report' }), outcome: `reported ${action.note}` });
+      log(deps, { ...about(state, { shipId: entry.shipId, action: 'report' }), outcome: `reported ${note}` });
       return state;
     }
   }

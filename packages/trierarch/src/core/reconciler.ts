@@ -51,7 +51,7 @@ export type Action =
   | { readonly kind: 'forget'; readonly shipId: ShipId; readonly entry: Entry }
   | { readonly kind: 'status'; readonly shipId: ShipId; readonly written: WrittenStatus }
   /** Report on the ship's behalf, with its session's crew token. */
-  | { readonly kind: 'report'; readonly shipId: ShipId; readonly note: string }
+  | { readonly kind: 'report'; readonly shipId: ShipId; readonly note: string; readonly failedStart?: string }
   /** Tell the ship's owner it cannot crew this settings version: its crew is final, so it is not given back. */
   | { readonly kind: 'refuse'; readonly shipId: ShipId; readonly settingsVersion: number; readonly refusal: Refusal }
   /**
@@ -554,7 +554,7 @@ function exitStep(entry: Entry, at: { now: Date; failedStart?: string; failureRe
     case 'restart':
       return {
         entry: { ...withState(withoutLaunch(entry), { state: 'restarting', now }), exits, restartAt: decision.at.toISOString() },
-        actions: [...(failedStart === undefined ? [] : [stop]), { kind: 'report', shipId: entry.shipId, note: failureReason === undefined ? RESTARTING_NOTE : `${RESTARTING_NOTE}: ${failureReason}` }],
+        actions: [...(failedStart === undefined ? [] : [stop]), { kind: 'report', shipId: entry.shipId, note: failureReason === undefined ? RESTARTING_NOTE : `${RESTARTING_NOTE}: ${failureReason}`, ...(failedStart === undefined ? {} : { failedStart: cleanFailureReason(failedStart) }) }],
         starts: 0,
       };
     case 'crashed':
@@ -562,7 +562,7 @@ function exitStep(entry: Entry, at: { now: Date; failedStart?: string; failureRe
         entry: { ...withState(withoutLaunch(entry), { state: 'crashed', now }), exits },
         actions: [
           stop,
-          { kind: 'report', shipId: entry.shipId, note: failureReason === undefined ? CRASHED_NOTE : `${CRASHED_NOTE}: ${failureReason}` },
+          { kind: 'report', shipId: entry.shipId, note: failureReason === undefined ? CRASHED_NOTE : `${CRASHED_NOTE}: ${failureReason}`, ...(failedStart === undefined ? {} : { failedStart: cleanFailureReason(failedStart) }) },
           crashed(entry, { exits: exits.length, now, ...(failedStart !== undefined && { failedStart }), ...(failureReason !== undefined && { failureReason }) }),
         ],
         starts: 0,

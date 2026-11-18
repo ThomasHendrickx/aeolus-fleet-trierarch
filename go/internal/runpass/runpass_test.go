@@ -3557,3 +3557,19 @@ func TestEveryRestartLogsTheProcessExitReasonBeforeItsFilesAreRemoved(t *testing
 		})
 	}
 }
+
+func TestARestartWithALiveHoldLogsWhyItsLaunchWindowFailed(t *testing.T) {
+	pass := aRunPass(t)
+	pass.crewed(t)
+	entry := pass.store.state.Entries[scout]
+	entry.LaunchedAt = now.Format(time.RFC3339Nano)
+	entry.LaunchID = "resumed-launch"
+	pass.store.state.Entries[scout] = entry
+	pass.harness.seen[scout] = reconciler.LaunchSeen{Kind: reconciler.LaunchNone}
+	pass.pass.Now = func() time.Time { return now.Add(time.Minute) }
+	pass.run(t)
+	want := "blocked: session crashed, restarting: no activity within a minute of its start"
+	if !strings.Contains(strings.Join(pass.logged, "\n"), want) {
+		t.Fatalf("log %q, want failed launch reason %q", pass.logged, want)
+	}
+}
