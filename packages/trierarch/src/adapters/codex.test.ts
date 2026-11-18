@@ -356,6 +356,23 @@ describe("Codex's launch window, from the launch marker its session's hooks keep
     await expect(seen()).resolves.toEqual({ kind: 'active' });
   });
 
+  it('sees the first tool call made in a repository folder when Codex gives that cwd to its hook (#523)', async () => {
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+    await hooked(sessionStarted);
+    const repository = join(folder, 'main');
+    mkdirSync(repository);
+    // Codex gives command hooks the execution cwd, while this ship's identity belongs to the session folder.
+    const hook = await runCommand('bash', {
+      args: [`${PLUGIN_ROOT}/scripts/aeolus-launch.sh`],
+      env: { AEOLUS_FOLDER: '', AEOLUS_DATA: data, AEOLUS_CREWS: crews, AEOLUS_LAUNCH: LAUNCH_ID },
+      input: JSON.stringify({ ...aToolCall, cwd: repository }),
+    });
+    expect(hook.status).toBe(0);
+    events.set(shipId, [JSON.stringify({ type: 'item.started', item: { id: 'item_0', type: 'command_execution', command: 'pwd', status: 'in_progress' } })]);
+
+    await expect(seen()).resolves.toEqual({ kind: 'active' });
+  });
+
   it.each(['command_execution', 'mcp_tool_call', 'web_search', 'file_change', 'todo_list', 'collab_tool_call'])('sees a first Codex %s tool call even without a launch marker (#523)', async (type) => {
     await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
     events.set(shipId, [JSON.stringify({ type: 'item.started', item: { id: 'item_0', type } })]);
