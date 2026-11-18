@@ -407,6 +407,23 @@ describe('aeolus-trierarch with CLAUDE_CONFIG_DIR and CODEX_HOME set (#521)', ()
     standInPrograms();
   }
 
+  it('checks Claude Code without requiring Codex to be installed', async () => {
+    standInPrograms();
+    rmSync(join(home, 'bin', 'codex'));
+    const { output } = await main(['init', '--yes', '--plugin-ship-id', 'invalid'], machine(both()));
+    expect(output).toContain('invalid is no ship id');
+  }, INIT_TIMEOUT_MS);
+
+  it('does not count a Claude Code API key as a subscription sign-in', async () => {
+    standInPrograms();
+    writeFileSync(join(home, 'bin', 'codex'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    writeFileSync(join(home, 'bin', 'claude'), `#!/bin/sh\necho '{"loggedIn":true,"authMethod":"api_key"}'\n`, { mode: 0o755 });
+
+    const { output, code } = await main(['init', '--yes', '--plugin-ship-id', 'invalid'], machine(both()));
+    expect(code).toBe(1);
+    expect(output).toContain('aeolus-trierarch login claude-code --api-key');
+  }, INIT_TIMEOUT_MS);
+
   it('does not count a native Codex API key as a subscription sign-in', async () => {
     standInPrograms();
     rmSync(join(home, 'bin', 'claude'));

@@ -134,3 +134,15 @@ func TestSaysClaudeCodeIsNotInstalledWhereNoClaudeRuns(t *testing.T) {
 		t.Error("installed with no claude on the PATH")
 	}
 }
+
+func TestAPIKeyIsNotASubscriptionSignIn(t *testing.T) {
+	bin := t.TempDir()
+	script := "#!/bin/sh\nprintf '%s\\n' '{\"loggedIn\":true,\"authMethod\":\"api_key\"}'\n"
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	if IsSignedIn() {
+		t.Fatal("API key was counted as a subscription sign-in")
+	}
+}
