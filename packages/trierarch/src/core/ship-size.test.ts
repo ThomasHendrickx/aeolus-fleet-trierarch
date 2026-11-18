@@ -54,6 +54,29 @@ describe('ship folder size', () => {
     expect(test.state().entries[test.ship.shipId]?.isShipSizeTold).toBe(true);
   });
 
+  it('retries a lost report using the same crossing key after restart', async () => {
+    const ship = aShip();
+    const clock = new TestClock();
+    const logger = new CollectingLogger();
+    const keys: string[] = [];
+    const measure = () => Promise.resolve(101);
+    const tell = (_entry: Entry, _bytes: number, key: string) => {
+      keys.push(key);
+      return keys.length === 1 ? Promise.reject(new Error('lost reply')) : Promise.resolve();
+    };
+    let state = putEntry(EMPTY_STATE, ship);
+    const first = createShipSize({ limit: 100, clock, logger, measure, tell });
+    state = await first(state); await Promise.resolve();
+    state = await first(state); await Promise.resolve();
+    state = await first(state);
+    const second = createShipSize({ limit: 100, clock, logger, measure, tell });
+    state = await second(state);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toMatch(/^ship-size:/);
+    expect(keys[0]).toBe(keys[1]);
+    expect(state.entries[ship.shipId]?.isShipSizeTold).toBe(true);
+  });
+
   it('does not wait for a slow measurement', async () => {
     const ship = aShip();
     const check = createShipSize({ limit: 100, clock: new TestClock(), logger: new CollectingLogger(), measure: () => new Promise<number>(() => undefined), tell: () => Promise.resolve() });
