@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -230,6 +231,10 @@ func releases(environ []string) releaseSource {
 func http1Only() *http.Transport {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.ForceAttemptHTTP2 = false
+	// Race both address families on each fresh retry: a family can accept a
+	// connection yet stop carrying the body. Do not reuse that connection.
+	transport.DialContext = (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second, FallbackDelay: time.Nanosecond}).DialContext
+	transport.DisableKeepAlives = true
 	// The clone carries the h2 the default transport offered in its TLS handshake: a server would pick it and this transport cannot speak it.
 	transport.TLSClientConfig = &tls.Config{NextProtos: []string{"http/1.1"}}
 	transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
