@@ -578,7 +578,7 @@ describe('aeolus-trierarch init on a machine set up already', () => {
     ['claude-code', 'uninstalled'], ['claude-code', 'signed out'],
     ['codex', 'uninstalled'], ['codex', 'signed out'],
   ] as const)('keeps the configured %s harness unchanged when it is %s', async (harness, state) => {
-    const held = { flags: ['--verbose'], options: { model: { values: { custom: ['--model', 'custom'] }, default: 'custom' } } };
+    const held = { flags: ['--remote-control', '--verbose'], options: { model: { values: { custom: ['--model', 'custom'] }, default: 'custom' } } };
     writeFileSync(paths.config, JSON.stringify({ ...configuration(), harnesses: { [harness]: held } }));
     isClaudeCodeInstalled = harness !== 'claude-code' || state !== 'uninstalled';
     isClaudeCodeSignedIn = harness !== 'claude-code' || state !== 'signed out';
