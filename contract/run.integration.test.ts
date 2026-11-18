@@ -75,11 +75,9 @@ describe('run with the reconciler', () => {
     const list = await machine.trierarch(['list', '--json']);
 
     expect(list.status, list.stdout + list.stderr).toBe(0);
-    expect(JSON.parse(list.stdout)).toEqual([expect.objectContaining({
-      shipId: scout,
-      harness: 'claude-code',
-      since: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/),
-    })]);
+    expect(JSON.parse(list.stdout)).toEqual([expect.objectContaining({ shipId: scout, harness: 'claude-code' })]);
+    const listed = z.array(z.looseObject({ since: z.string() })).parse(JSON.parse(list.stdout));
+    expect(listed[0]?.since).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   });
 
   it('ends what a removed request held: the lease, the session and its clean worktree', async () => {
