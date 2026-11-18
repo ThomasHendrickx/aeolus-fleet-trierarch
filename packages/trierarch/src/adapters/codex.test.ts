@@ -342,6 +342,39 @@ describe("Codex's launch window, from the launch marker its session's hooks keep
     await expect(seen()).resolves.toEqual({ kind: 'active' });
   });
 
+  it.each(['item.started', 'item.completed'])('sees the first Codex tool call from its %s event before the launch hook marks activity (#523)', async (type) => {
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+    await hooked(sessionStarted);
+    // Shape captured from codex exec --json: the command can still be running at the first watchdog pass.
+    events.set(shipId, [
+      JSON.stringify({ type: 'thread.started', thread_id: 'thread-1' }),
+      JSON.stringify({ type: 'turn.started' }),
+      JSON.stringify({ type, item: { id: 'item_0', type: 'command_execution', command: 'pwd', aggregated_output: '', exit_code: null, status: 'in_progress' } }),
+      JSON.stringify({ type: 'item.completed', item: { id: 'item_1', type: 'agent_message', text: 'Checking the result.' } }),
+    ]);
+
+    await expect(seen()).resolves.toEqual({ kind: 'active' });
+  });
+
+  it.each(['command_execution', 'mcp_tool_call', 'web_search', 'file_change', 'todo_list', 'collab_tool_call'])('sees a first Codex %s tool call even without a launch marker (#523)', async (type) => {
+    await harness().launch({ ...launchOf(shipId), options: {}, isFirstStart: true });
+    events.set(shipId, [JSON.stringify({ type: 'item.started', item: { id: 'item_0', type } })]);
+
+    await expect(seen()).resolves.toEqual({ kind: 'active' });
+  });
+
+  it.each(['reasoning', 'agent_message', 'error', 'unknown'])('counts no Codex %s item as a first tool call (#523)', async (type) => {
+    events.set(shipId, [
+      JSON.stringify({ type: 'thread.started', thread_id: 'thread-1' }),
+      JSON.stringify({ type: 'turn.started' }),
+      JSON.stringify({ type: 'item.completed', item: { id: 'item_0', type } }),
+      JSON.stringify({ type: 'turn.completed' }),
+      'not json',
+    ]);
+
+    await expect(seen()).resolves.toEqual({ kind: 'none' });
+  });
+
   it('sees the model it launched with refused in its failed turn event, as Codex has no hook for a failed turn (headless H13)', async () => {
     events.set(shipId, eventsOf('codex-events-refused.jsonl'));
     await hooked(sessionStarted);

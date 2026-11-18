@@ -255,6 +255,52 @@ func TestASessionOnAnAPIKeyDoesNotStartBeforeTheProxyListens(t *testing.T) {
 	}
 }
 
+func TestALaunchSeesItsFirstCodexToolEventBeforeTheHookMarksActivity(t *testing.T) {
+	for _, eventType := range []string{"item.started", "item.completed"} {
+		for _, itemType := range []string{"command_execution", "mcp_tool_call", "web_search", "file_change", "todo_list", "collab_tool_call"} {
+			t.Run(eventType+"/"+itemType, func(t *testing.T) {
+				harness, _, _ := aHarness(t)
+				entry := anEntry(t)
+				entry.LaunchID = "launch-1"
+				if err := harness.Launch(entry, true, entry.LaunchID); err != nil {
+					t.Fatal(err)
+				}
+				// A later message must not hide the first tool call from the watchdog.
+				events := `{"type":"thread.started","thread_id":"thread-1"}` + "\n" + `{"type":"turn.started"}` + "\n" +
+					`{"type":"` + eventType + `","item":{"id":"item_0","type":"` + itemType + `"}}` + "\n" +
+					`{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Checking the result."}}` + "\n"
+				if err := os.WriteFile(harness.Events(scout), []byte(events), 0o600); err != nil {
+					t.Fatal(err)
+				}
+
+				if seen, want := harness.LaunchSeen(entry), (reconciler.LaunchSeen{Kind: reconciler.LaunchActive}); seen != want {
+					t.Fatalf("LaunchSeen = %+v, want %+v", seen, want)
+				}
+			})
+		}
+	}
+}
+
+func TestALaunchCountsNoStartupReasoningTextOrUnknownEventAsAToolCall(t *testing.T) {
+	for _, itemType := range []string{"reasoning", "agent_message", "error", "unknown"} {
+		t.Run(itemType, func(t *testing.T) {
+			harness, _, _ := aHarness(t)
+			entry := anEntry(t)
+			entry.LaunchID = "launch-1"
+			events := `{"type":"thread.started","thread_id":"thread-1"}` + "\n" + `{"type":"turn.started"}` + "\n" +
+				`{"type":"item.completed","item":{"id":"item_0","type":"` + itemType + `"}}` + "\n" +
+				`{"type":"turn.completed"}` + "\nnot json\n"
+			if err := os.WriteFile(harness.Events(scout), []byte(events), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			if seen, want := harness.LaunchSeen(entry), (reconciler.LaunchSeen{Kind: reconciler.LaunchNone}); seen != want {
+				t.Fatalf("LaunchSeen = %+v, want %+v", seen, want)
+			}
+		})
+	}
+}
+
 func TestALaunchWithNoActivityNamesTheErrorCodexLastGave(t *testing.T) {
 	harness, _, _ := aHarness(t)
 	entry := anEntry(t)
