@@ -408,10 +408,11 @@ describe('aeolus-trierarch with CLAUDE_CONFIG_DIR and CODEX_HOME set (#521)', ()
   }
 
   it('does not count a native Codex API key as a subscription sign-in', async () => {
-    await aSetUpMachine({ isServiceInstalled: false });
+    standInPrograms();
+    rmSync(join(home, 'bin', 'claude'));
     writeFileSync(join(home, 'bin', 'codex'), '#!/bin/sh\n[ "$1 $2" = "login status" ] && echo "Logged in using an API key" >&2\nexit 0\n', { mode: 0o755 });
 
-    const { output, code } = await main(['init', '--yes'], machine(both()));
+    const { output, code } = await main(['init', '--yes', '--plugin-ship-id', 'invalid'], machine(both()));
     expect(code).toBe(1);
     expect(output).toContain('aeolus-trierarch login codex --api-key');
   }, INIT_TIMEOUT_MS);
