@@ -17,11 +17,10 @@ async function shown(runtime: SessionRuntime, shipId: ShipId): Promise<string> {
  * launch window and wakes behave the same whichever runs the sessions. Each
  * adapter's test calls it inside its own describe, with a fresh runtime and an
  * empty folder per test. How a turn is stopped depends on the harness, so each
- * adapter's own test proves its interrupt.
+ * adapter's own test proves its interrupt. Polls use the repository's timeout,
+ * including its allowance for a loaded machine, rather than a shorter local one.
  */
 export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; folder: () => string }): void {
-  const POLL = { timeout: 5000 };
-
   it('lists none before any starts', async () => {
     await expect(at.runtime().list()).resolves.toEqual([]);
   });
@@ -33,8 +32,8 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
     await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'echo "in $(pwd)"; sleep 30'], harness: HARNESS });
 
     // A start returns once the hold answers, which a container runtime does before its container exists: the list shows it running once it does.
-    await expect.poll(async () => runtime.list(), POLL).toEqual([{ shipId, status: 'running' }]);
-    await expect.poll(async () => shown(runtime, shipId), POLL).toContain(`in ${at.folder()}`);
+    await expect.poll(async () => runtime.list()).toEqual([{ shipId, status: 'running' }]);
+    await expect.poll(async () => shown(runtime, shipId)).toContain(`in ${at.folder()}`);
   });
 
   it('starts the command with the environment given, such as its launch id (#490)', async () => {
@@ -43,7 +42,7 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
 
     await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'echo "launch $AEOLUS_LAUNCH"; sleep 30'], env: { AEOLUS_LAUNCH: 'launch-1' }, harness: HARNESS });
 
-    await expect.poll(async () => shown(runtime, shipId), POLL).toContain('launch launch-1');
+    await expect.poll(async () => shown(runtime, shipId)).toContain('launch launch-1');
   });
 
   it('keeps a session whose command ended, so the exit is seen', async () => {
@@ -52,7 +51,7 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
 
     await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'exit 3'], harness: HARNESS });
 
-    await expect.poll(async () => runtime.list(), POLL).toEqual([expect.objectContaining({ shipId, status: 'exited' })]);
+    await expect.poll(async () => runtime.list()).toEqual([expect.objectContaining({ shipId, status: 'exited' })]);
   });
 
   it('reads the events of a session whose command ended, so the launch window names what stopped it', async () => {
@@ -60,9 +59,9 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
     const shipId = newId('ship');
     // The command ends only once its text is shown: a command that exits at once can end before a terminal has drawn its output (#859).
     await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'echo "Invalid API key"; read line; exit 1'], harness: HARNESS });
-    await expect.poll(async () => shown(runtime, shipId), POLL).toContain('Invalid API key');
+    await expect.poll(async () => shown(runtime, shipId)).toContain('Invalid API key');
     await runtime.send({ shipId, line: 'end' });
-    await expect.poll(async () => runtime.list(), POLL).toEqual([expect.objectContaining({ shipId, status: 'exited' })]);
+    await expect.poll(async () => runtime.list()).toEqual([expect.objectContaining({ shipId, status: 'exited' })]);
 
     await expect(shown(runtime, shipId)).resolves.toContain('Invalid API key');
   });
@@ -71,11 +70,11 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
     const runtime = at.runtime();
     const shipId = newId('ship');
     await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'exit 3'], harness: HARNESS });
-    await expect.poll(async () => runtime.list(), POLL).toEqual([expect.objectContaining({ shipId, status: 'exited' })]);
+    await expect.poll(async () => runtime.list()).toEqual([expect.objectContaining({ shipId, status: 'exited' })]);
 
     await runtime.start({ shipId, folder: at.folder(), command: ['sleep', '30'], harness: HARNESS });
 
-    await expect.poll(async () => runtime.list(), POLL).toEqual([{ shipId, status: 'running' }]);
+    await expect.poll(async () => runtime.list()).toEqual([{ shipId, status: 'running' }]);
   });
 
   it("sends a line to the session's harness, as its next input", async () => {
@@ -85,7 +84,7 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
 
     await runtime.send({ shipId, line: '/aeolus-fleet:wake' });
 
-    await expect.poll(async () => shown(runtime, shipId), POLL).toContain('got /aeolus-fleet:wake');
+    await expect.poll(async () => shown(runtime, shipId)).toContain('got /aeolus-fleet:wake');
   });
 
   it('reads no events for a ship with no session', async () => {
@@ -96,7 +95,7 @@ export function sessionRuntimeContract(at: { runtime: () => SessionRuntime; fold
     const runtime = at.runtime();
     const shipId = newId('ship');
     await runtime.start({ shipId, folder: at.folder(), command: ['sh', '-c', 'echo "an event"; sleep 30'], harness: HARNESS });
-    await expect.poll(async () => shown(runtime, shipId), POLL).toContain('an event');
+    await expect.poll(async () => shown(runtime, shipId)).toContain('an event');
 
     const lastEventAt = await runtime.lastEventAt(shipId);
 
