@@ -39,6 +39,14 @@ function jsonAt(path: string): unknown {
 }
 
 describe('init', () => {
+  it('registers with the secret on stdin and no secret in its arguments', async () => {
+    const words = ['init', '--fleet-url', fleet.url, '--ship-id', fleet.trierarchShip.shipId, '--secret-stdin', '--yes'];
+    expect(words).not.toContain(fleet.trierarchShip.secret);
+    const result = await machine.trierarch(words, { input: `${fleet.trierarchShip.secret}\n` });
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    await expect(fleet.leasesOf(fleet.trierarchShip.shipId)).resolves.toBe(1);
+  });
+
   it("registers the trierarch's ship: its lease is held", async () => {
     const init = await machine.trierarch(setupLine());
 
