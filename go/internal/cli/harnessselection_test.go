@@ -236,7 +236,7 @@ func TestInitNamesEveryMissingFlagWithoutATerminal(t *testing.T) {
 	if err == nil {
 		t.Fatal("accepted missing options")
 	}
-	for _, flag := range []string{"--fleet-url", "--ship-id", "--secret", "--harnesses"} {
+	for _, flag := range []string{"--fleet-url", "--ship-id", "--secret-stdin", "--harnesses"} {
 		if !strings.Contains(err.Error(), flag) {
 			t.Errorf("error %v missing %s", err, flag)
 		}

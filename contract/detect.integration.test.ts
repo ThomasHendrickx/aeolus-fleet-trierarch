@@ -118,7 +118,7 @@ describe('init', () => {
     machine = await aMachine();
 
     // The Go trierarch's closing screen lists the setup choices (aeolus-fleet docs/design/computer-setup/after.md, A4); its checks under --json keep each harness's line.
-    const init = await machine.trierarch(isTodaysTrierarch ? setupLineOf(fleet) : [...setupLineOf(fleet), '--json']);
+    const init = await machine.trierarch(isTodaysTrierarch ? setupLineOf(fleet) : [...setupLineOf(fleet), '--json'], { input: fleet.trierarchShip.secret });
 
     expect(init.status, init.stdout + init.stderr).toBe(0);
     const nodeLine = new RegExp(`claude-code ${CLAUDE_CODE_VERSION}: model claude-sonnet-5, claude-opus-5; effort low, medium, high; models confirmed \\d{4}-\\d{2}-\\d{2}T`);

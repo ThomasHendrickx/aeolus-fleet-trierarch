@@ -37,7 +37,7 @@ function sha256(text: string): string {
 
 /** The binary of an asset name: a script that writes the words it was run with. */
 function binaryText(): string {
-  return `#!/bin/sh\necho "${BINARY_SAYS}: $*" > "${root}/ran"\necho "$AEOLUS_TRIERARCH_INSTALL_VERIFICATION" > "${root}/verification"\n`;
+  return `#!/bin/sh\necho "${BINARY_SAYS}: $*" > "${root}/ran"\necho "$AEOLUS_TRIERARCH_INSTALL_VERIFICATION" > "${root}/verification"\nIFS= read -r secret || :\nprintf "%s" "$secret" > "${root}/input"\n`;
 }
 
 /** A GitHub Release of the version: its API answer, its binaries and its SHA256SUMS. */
@@ -89,11 +89,12 @@ function machine({ system, chip, attestation }: { system: string; chip: string; 
   return bin;
 }
 
-function install(bin: string, options: { args?: string[]; env?: Record<string, string>; home?: string } = {}) {
-  const { args = [], env = {}, home = join(root, 'home') } = options;
+function install(bin: string, options: { args?: string[]; env?: Record<string, string>; home?: string; input?: string } = {}) {
+  const { args = [], env = {}, home = join(root, 'home'), input } = options;
   mkdirSync(home, { recursive: true });
   return spawnSync('/bin/sh', [installScript, ...args], {
     encoding: 'utf8',
+    input,
     env: {
       PATH: bin,
       HOME: home,
@@ -109,6 +110,14 @@ function install(bin: string, options: { args?: string[]; env?: Record<string, s
 const installed = (): string => join(root, 'home', '.local', 'bin', 'aeolus-trierarch');
 
 describe('the install script', () => {
+  it('passes stdin to init without putting the secret in its arguments', () => {
+    release('1.2.3');
+    const result = install(machine({ system: 'Linux', chip: 'x86_64', attestation: 'holds' }), { args: ['--secret-stdin'], input: 'example-secret\n' });
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(join(root, 'ran'), 'utf8')).not.toContain('example-secret');
+    expect(readFileSync(join(root, 'input'), 'utf8')).toBe('example-secret');
+  });
+
   it('rejects the removed secret argument without starting init', () => {
     release('1.2.3');
     const result = install(machine({ system: 'Linux', chip: 'x86_64', attestation: 'holds' }), { args: ['--secret', 'example-secret'] });
@@ -126,13 +135,13 @@ describe('the install script', () => {
     ({ system, chip, asset }) => {
       release('1.2.3');
       const result = install(machine({ system, chip, attestation: 'holds' }), {
-        args: ['--fleet-url', 'https://fleet.example', '--secret', 's3'],
+        args: ['--fleet-url', 'https://fleet.example', '--secret-stdin'],
       });
 
       expect(result.status, result.stderr).toBe(0);
       expect(readFileSync(installed(), 'utf8')).toContain(`# aeolus-trierarch-${asset}`);
       expect(statSync(installed()).mode & 0o111).not.toBe(0);
-      expect(readFileSync(join(root, 'ran'), 'utf8').trim()).toBe(`${BINARY_SAYS}: init --fleet-url https://fleet.example --secret s3`);
+      expect(readFileSync(join(root, 'ran'), 'utf8').trim()).toBe(`${BINARY_SAYS}: init --fleet-url https://fleet.example --secret-stdin`);
       expect(readFileSync(join(root, 'gh'), 'utf8')).toMatch(
         new RegExp(
           `attestation verify .*aeolus-trierarch-${asset} --repo ${REPOSITORY} --signer-workflow ${REPOSITORY}/.github/workflows/release.yml`,
@@ -146,7 +155,7 @@ describe('the install script', () => {
       sums: ({ name }) => `${sha256('another file')}  ${name}\n`,
     });
     const result = install(machine({ system: 'Linux', chip: 'x86_64', attestation: 'holds' }), {
-      args: ['--secret', 's3'],
+      args: ['--secret-stdin'],
     });
 
     expect(result.status).not.toBe(0);
@@ -177,12 +186,12 @@ describe('the install script', () => {
   it('passes the checksum-only result to init when gh is absent', () => {
     release('1.2.3');
     const result = install(machine({ system: 'Linux', chip: 'x86_64', attestation: 'absent' }), {
-      args: ['--secret', 's3'],
+      args: ['--secret-stdin'],
     });
 
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(installed(), 'utf8')).toContain('# aeolus-trierarch-linux-amd64');
-    expect(readFileSync(join(root, 'ran'), 'utf8').trim()).toBe(`${BINARY_SAYS}: init --secret s3`);
+    expect(readFileSync(join(root, 'ran'), 'utf8').trim()).toBe(`${BINARY_SAYS}: init --secret-stdin`);
     expect(readFileSync(join(root, 'verification'), 'utf8').trim()).toBe('checksum');
   });
 

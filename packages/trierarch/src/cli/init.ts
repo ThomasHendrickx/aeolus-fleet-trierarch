@@ -161,12 +161,12 @@ async function registerShip(at: { fleetAt: FleetAt; prompter: Prompter; fleetUrl
   } catch (error) {
     if (error instanceof FleetRefusal && error.code === 'CONFLICT') {
       throw new TrierarchFileError(
-        `${shipId} is crewed already, and this computer holds no crew token for it. Either an earlier setup here stopped before it saved the crew token, or the ship was set up on another computer or as another user. To crew it from here, Release ${shipId} on its page in the console and run init here with its new secret: ${line} --secret <its new secret>. If it is set up elsewhere, run that setup line there again instead.`,
+        `${shipId} is crewed already, and this computer holds no crew token for it. Either an earlier setup here stopped before it saved the crew token, or the ship was set up on another computer or as another user. To crew it from here, Release ${shipId} on its page in the console and run init here with its new secret: ${line} --secret-stdin <<< '<its new secret>'. If it is set up elsewhere, run that setup line there again instead.`,
       );
     }
     if (error instanceof FleetRefusal && error.code === 'UNAUTHORIZED') {
       throw new TrierarchFileError(
-        `The fleet at ${fleetUrl} does not accept this secret for ${shipId}: it is wrong, or it is an old one the fleet no longer takes. Copy the ship's current secret from its page in the console (Release ${shipId} there for a new one), then run init here again: ${line} --secret <its current secret>`,
+        `The fleet at ${fleetUrl} does not accept this secret for ${shipId}: it is wrong, or it is an old one the fleet no longer takes. Copy the ship's current secret from its page in the console (Release ${shipId} there for a new one), then run init here again: ${line} --secret-stdin <<< '<its current secret>'`,
       );
     }
     throw error;
@@ -194,11 +194,11 @@ async function askCrew(flags: InitFlags, prompter: Prompter): Promise<{ fleetUrl
     const missing = [
       ...(flags.fleetUrl === undefined ? ['--fleet-url'] : []),
       ...(flags.shipId === undefined ? ['--ship-id'] : []),
-      ...(flags.secret === undefined ? ['--secret'] : []),
+      ...(flags.secret === undefined ? ['--secret-stdin'] : []),
     ];
     if (missing.length > 0) {
       const named = missing.length === 1 ? `${missing.join('')} is` : `${missing.slice(0, -1).join(', ')} and ${missing.at(-1) ?? ''} are`;
-      throw new TrierarchFileError(`init --yes needs --fleet-url, --ship-id and --secret: ${named} missing`);
+      throw new TrierarchFileError(`init --yes needs --fleet-url, --ship-id and --secret-stdin: ${named} missing`);
     }
   }
   const fromFlag = <T>(value: string | undefined, accept: (answer: string) => Accepted<T>): T | undefined => {

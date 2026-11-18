@@ -48,7 +48,7 @@ describe('install --no-load', () => {
 
 describe('install', () => {
   it('loads the service and starts it: the new trierarch runs and the answer is its status', async () => {
-    await machine.trierarch(setupLineOf(fleet));
+    await machine.trierarch(setupLineOf(fleet), { input: fleet.trierarchShip.secret });
     const before = machine.servicePid();
 
     const install = await machine.trierarch(['install', '--json']);
@@ -59,7 +59,7 @@ describe('install', () => {
   });
 
   it('says where the file and the logs are', async () => {
-    await machine.trierarch(setupLineOf(fleet));
+    await machine.trierarch(setupLineOf(fleet), { input: fleet.trierarchShip.secret });
 
     const install = await machine.trierarch(['install']);
 

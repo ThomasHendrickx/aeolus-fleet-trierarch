@@ -14,14 +14,14 @@ export const REPOSITORY = 'aeolus-fleet';
 export function setupLineOf(fleet: Fleet, options: { pluginShip?: string; harnesses?: readonly string[]; as?: readonly string[] } = {}): string[] {
   const isNodePackage = options.as === undefined ? isTodaysTrierarch : options.as === TODAYS_TRIERARCH;
   const harnessFlags = isNodePackage ? [] : ['--harnesses', (options.harnesses ?? ['claude-code']).join(',')];
-  return ['init', ...harnessFlags, '--fleet-url', fleet.url, '--ship-id', fleet.trierarchShip.shipId, '--secret', fleet.trierarchShip.secret, ...(options.pluginShip === undefined ? [] : ['--plugin-ship-id', options.pluginShip]), '--yes'];
+  return ['init', ...harnessFlags, '--fleet-url', fleet.url, '--ship-id', fleet.trierarchShip.shipId, '--secret-stdin', ...(options.pluginShip === undefined ? [] : ['--plugin-ship-id', options.pluginShip]), '--yes'];
 }
 
 /** Sets the machine up as the trierarch plugin's setup line does, then adds the repository: the service runs and can crew a request in it. With `as`, another trierarch than the one under test does. */
 export async function aCrewingMachine(at: { fleet: Fleet; machine: Machine; as?: readonly string[]; pluginShip?: string; harnesses?: readonly string[] }): Promise<void> {
   const { fleet, machine } = at;
   for (const words of [setupLineOf(fleet, at), ['add', 'repository', REPOSITORY, machine.repository]]) {
-    const ran = await machine.trierarch(words, at.as === undefined ? {} : { as: at.as });
+    const ran = await machine.trierarch(words, { ...(at.as === undefined ? {} : { as: at.as }), ...(words[0] === 'init' ? { input: fleet.trierarchShip.secret } : {}) });
     if (ran.status !== 0) {
       throw new Error(`aeolus-trierarch ${words[0] ?? ''} failed: ${ran.stdout}${ran.stderr}`);
     }

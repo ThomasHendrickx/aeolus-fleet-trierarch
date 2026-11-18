@@ -322,7 +322,7 @@ func TestInitNamesTheFlagsItLacks(t *testing.T) {
 
 	_, err := machine.init.Run(Flags{FleetURL: fleetURL, IsYes: true, Harnesses: []string{"claude-code"}})
 
-	if err == nil || !strings.Contains(err.Error(), "--ship-id and --secret are missing") {
+	if err == nil || !strings.Contains(err.Error(), "--ship-id and --secret-stdin are missing") {
 		t.Errorf("err %v", err)
 	}
 }
@@ -407,7 +407,7 @@ func TestInitSaysWhatHappenedAndWhatToRunWhenTheShipIsCrewedAndThisMachineHoldsN
 
 	_, err := machine.init.Run(setupLine())
 
-	want := shipID + " is crewed already, and this computer holds no crew token for it. Either an earlier setup here stopped before it saved the crew token, or the ship was set up on another computer or as another user. To crew it from here, Release " + shipID + " on its page in the console and run init here with its new secret: aeolus-trierarch init --fleet-url " + fleetURL + " --ship-id " + shipID + " --plugin-ship-id " + pluginShipID + " --secret <its new secret>. If it is set up elsewhere, run that setup line there again instead."
+	want := shipID + " is crewed already, and this computer holds no crew token for it. Either an earlier setup here stopped before it saved the crew token, or the ship was set up on another computer or as another user. To crew it from here, Release " + shipID + " on its page in the console and run init here with its new secret: aeolus-trierarch init --fleet-url " + fleetURL + " --ship-id " + shipID + " --plugin-ship-id " + pluginShipID + " --secret-stdin <<< '<its new secret>'. If it is set up elsewhere, run that setup line there again instead."
 	if err == nil || err.Error() != want {
 		t.Errorf("init with the setup line while %s is crewed elsewhere: err %v, want %q", shipID, err, want)
 	}
@@ -420,7 +420,7 @@ func TestInitSaysTheFleetDoesNotTakeTheSecretWhenTheFleetRefusesAnOldOne(t *test
 
 	_, err := machine.init.Run(flags)
 
-	want := "The fleet at " + fleetURL + " does not accept this secret for " + shipID + ": it is wrong, or it is an old one the fleet no longer takes. Copy the ship's current secret from its page in the console (Release " + shipID + " there for a new one), then run init here again: aeolus-trierarch init --fleet-url " + fleetURL + " --ship-id " + shipID + " --plugin-ship-id " + pluginShipID + " --secret <its current secret>"
+	want := "The fleet at " + fleetURL + " does not accept this secret for " + shipID + ": it is wrong, or it is an old one the fleet no longer takes. Copy the ship's current secret from its page in the console (Release " + shipID + " there for a new one), then run init here again: aeolus-trierarch init --fleet-url " + fleetURL + " --ship-id " + shipID + " --plugin-ship-id " + pluginShipID + " --secret-stdin <<< '<its current secret>'"
 	if err == nil || err.Error() != want {
 		t.Errorf("init with the old secret %s: err %v, want %q", flags.Secret, err, want)
 	}

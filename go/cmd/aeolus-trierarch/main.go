@@ -158,8 +158,9 @@ func main() {
 			configured, _ := config.Load(at.Config)
 			return sessionRuntime(at, program, configured)
 		},
-		Log:     logLine,
-		ReadKey: readKey,
+		Log:        logLine,
+		ReadKey:    readKey,
+		ReadSecret: func() (string, error) { data, err := io.ReadAll(os.Stdin); return string(data), err },
 		CheckKey: func(harness string, key string) keys.Checked {
 			return keys.Check(harness, key, "")
 		},

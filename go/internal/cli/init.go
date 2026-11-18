@@ -188,7 +188,7 @@ func asShipID(text string) (string, error) {
 // askedCrew is the fleet URL, ship id and secret from the flags, all three of which init needs.
 func askedCrew(flags Flags) (fleetURL string, shipID string, err error) {
 	var missing []string
-	for _, flag := range []struct{ name, value string }{{"--fleet-url", flags.FleetURL}, {"--ship-id", flags.ShipID}, {"--secret", flags.Secret}} {
+	for _, flag := range []struct{ name, value string }{{"--fleet-url", flags.FleetURL}, {"--ship-id", flags.ShipID}, {"--secret-stdin", flags.Secret}} {
 		if flag.value == "" {
 			missing = append(missing, flag.name)
 		}
@@ -196,9 +196,9 @@ func askedCrew(flags Flags) (fleetURL string, shipID string, err error) {
 	switch len(missing) {
 	case 0:
 	case 1:
-		return "", "", fmt.Errorf("init needs --fleet-url, --ship-id and --secret: %s is missing", missing[0])
+		return "", "", fmt.Errorf("init needs --fleet-url, --ship-id and --secret-stdin: %s is missing", missing[0])
 	default:
-		return "", "", fmt.Errorf("init needs --fleet-url, --ship-id and --secret: %s and %s are missing", strings.Join(missing[:len(missing)-1], ", "), missing[len(missing)-1])
+		return "", "", fmt.Errorf("init needs --fleet-url, --ship-id and --secret-stdin: %s and %s are missing", strings.Join(missing[:len(missing)-1], ", "), missing[len(missing)-1])
 	}
 	if fleetURL, err = asFleetURL(strings.TrimSpace(flags.FleetURL)); err != nil {
 		return "", "", err
@@ -219,7 +219,7 @@ func (i Init) missingInitFlags(flags Flags) []string {
 		missing = append(missing, "--repositories, --repositories-in or --no-repositories")
 	}
 	if _, err := crew.Read(i.Paths.CrewToken); err != nil {
-		for _, flag := range []struct{ name, value string }{{"--fleet-url", flags.FleetURL}, {"--ship-id", flags.ShipID}, {"--secret", flags.Secret}} {
+		for _, flag := range []struct{ name, value string }{{"--fleet-url", flags.FleetURL}, {"--ship-id", flags.ShipID}, {"--secret-stdin", flags.Secret}} {
 			if flag.value == "" {
 				missing = append(missing, flag.name)
 			}
@@ -256,10 +256,10 @@ func (i Init) register(fleetURL string, shipID string, secret string, pluginShip
 	switch refusal.Code {
 	case "CONFLICT":
 		//lint:ignore ST1005 Thomas approved this text verbatim, its capital and final period with it (#264).
-		return "", fmt.Errorf("%s is crewed already, and this computer holds no crew token for it. Either an earlier setup here stopped before it saved the crew token, or the ship was set up on another computer or as another user. To crew it from here, Release %s on its page in the console and run init here with its new secret: %s --secret <its new secret>. If it is set up elsewhere, run that setup line there again instead.", shipID, shipID, line)
+		return "", fmt.Errorf("%s is crewed already, and this computer holds no crew token for it. Either an earlier setup here stopped before it saved the crew token, or the ship was set up on another computer or as another user. To crew it from here, Release %s on its page in the console and run init here with its new secret: %s --secret-stdin <<< '<its new secret>'. If it is set up elsewhere, run that setup line there again instead.", shipID, shipID, line)
 	case "UNAUTHORIZED":
 		//lint:ignore ST1005 Thomas approved this text verbatim, its capital with it (#264).
-		return "", fmt.Errorf("The fleet at %s does not accept this secret for %s: it is wrong, or it is an old one the fleet no longer takes. Copy the ship's current secret from its page in the console (Release %s there for a new one), then run init here again: %s --secret <its current secret>", fleetURL, shipID, shipID, line)
+		return "", fmt.Errorf("The fleet at %s does not accept this secret for %s: it is wrong, or it is an old one the fleet no longer takes. Copy the ship's current secret from its page in the console (Release %s there for a new one), then run init here again: %s --secret-stdin <<< '<its current secret>'", fleetURL, shipID, shipID, line)
 	}
 	return crewToken, err
 }
@@ -506,7 +506,7 @@ func (i Init) Run(flags Flags) (Report, error) {
 				say(fmt.Sprintf("The trierarch crews %s at %s already, so init registers nothing and goes on with the rest of the setup.", kept.ShipID, kept.FleetURL))
 			} else {
 				if flags.Secret == "" {
-					return Report{}, fmt.Errorf("%s was released since this machine registered it: run init with its new secret (--secret)", kept.ShipID)
+					return Report{}, fmt.Errorf("%s was released since this machine registered it: run init with its new secret (--secret-stdin)", kept.ShipID)
 				}
 				keptPlugin := pluginShipID
 				if keptPlugin == "" {

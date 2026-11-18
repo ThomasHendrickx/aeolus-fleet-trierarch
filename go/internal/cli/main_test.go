@@ -81,6 +81,7 @@ func aMain(t *testing.T) (Machine, *anInstalledService, *aFleet) {
 	elapsed := 0
 	return Machine{
 		Environ:               []string{"HOME=" + home},
+		ReadSecret:            func() (string, error) { return secret, nil },
 		HomeDirectory:         home,
 		Platform:              "linux",
 		ManagedSettings:       filepath.Join(home, "managed-settings"),
@@ -124,7 +125,7 @@ func decoded(t *testing.T, output string) map[string]any {
 }
 
 func setupWords() []string {
-	return []string{"init", "--fleet-url", fleetURL, "--ship-id", shipID, "--secret", secret, "--plugin-ship-id", pluginShipID, "--harnesses", "claude-code", "--yes"}
+	return []string{"init", "--fleet-url", fleetURL, "--ship-id", shipID, "--secret-stdin", "--plugin-ship-id", pluginShipID, "--harnesses", "claude-code", "--yes"}
 }
 
 func TestSaysItsVersion(t *testing.T) {
@@ -713,7 +714,7 @@ func TestInitRejectsSecretArgument(t *testing.T) {
 
 func TestInitReadsSecretFromStdin(t *testing.T) {
 	machine, _, fleet := aMain(t)
-	machine.ReadKey = func() (string, error) { return secret + "\n", nil }
+	machine.ReadSecret = func() (string, error) { return secret + "\n", nil }
 	words := []string{"init", "--fleet-url", fleetURL, "--ship-id", shipID, "--secret-stdin", "--plugin-ship-id", pluginShipID, "--harnesses", "claude-code", "--yes"}
 	output, code := Main(words, machine)
 	if code != 0 || len(fleet.registered) != 1 {

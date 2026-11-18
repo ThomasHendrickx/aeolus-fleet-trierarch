@@ -52,7 +52,7 @@ export const USAGE = [
   '       aeolus-trierarch --version   the installed version (also -v)',
   '',
   'Set up:',
-  "  init [--fleet-url <url>] [--ship-id <shp_...>] [--plugin-ship-id <shp_...>] [--secret <secret>] [--yes]   the whole setup: registers the trierarch's own ship, keeps the trierarch plugin's ship the trusted repositories come from, writes the configuration, answers Claude Code's and Codex's one-time questions and offers to install the service. Asks for what is missing; prefer typing the secret when asked, so it stays out of your shell history",
+  "  init [--fleet-url <url>] [--ship-id <shp_...>] [--plugin-ship-id <shp_...>] [--secret-stdin] [--yes]   the whole setup: registers the trierarch's own ship, keeps the trierarch plugin's ship the trusted repositories come from, writes the configuration, answers Claude Code's and Codex's one-time questions and offers to install the service. Asks for what is missing; prefer typing the secret when asked, so it stays out of your shell history",
   '  add repository <name> <path>   add a repository to make worktrees of, trusted for every configured harness, and restart the service; sessions keep running',
   '  add folder <name> <path>       add a folder to crew a ship in as it is, the same way',
   '  config check          check the configuration and give the effective flags per harness',
@@ -95,11 +95,11 @@ interface Answer {
   readonly code?: number;
 }
 
-const VALUE_FLAGS = new Set(['--config', '--fleet-url', '--ship-id', '--plugin-ship-id', '--secret', '--lines', '--default', '--ship']);
+const VALUE_FLAGS = new Set(['--config', '--fleet-url', '--ship-id', '--plugin-ship-id', '--lines', '--default', '--ship']);
 /** Set for the installed version's upgrade that runs the plugin step of an upgrade (#725), which restarts the service itself (#829); older versions ignore it. */
 const PLUGIN_STEP_VARIABLE = 'AEOLUS_TRIERARCH_PLUGIN_STEP';
 
-const SWITCHES = new Set(['--json', '--yes', '--follow', '--no-load', '--version', '--api-key', '--remove-key', '--check']);
+const SWITCHES = new Set(['--json', '--yes', '--follow', '--no-load', '--version', '--api-key', '--remove-key', '--check', '--secret-stdin']);
 const DEFAULT_LINES = 50;
 const FOLLOW_INTERVAL_MS = 500;
 
@@ -262,7 +262,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
       try {
         const fleetUrl = values.get('--fleet-url');
         const shipId = values.get('--ship-id');
-        const secret = values.get('--secret');
+        const secret = switches.has('--secret-stdin') ? await readKeyFrom(process.stdin) : undefined;
         const pluginShipId = values.get('--plugin-ship-id');
         const report = await initTrierarch({
           homeDirectory,
