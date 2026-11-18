@@ -3285,7 +3285,7 @@ describe("a ship's folder, ships/<shipId>, which holds every file of the ship (#
 
     await trierarch.pass();
 
-    expect([trierarch.workspace.folders.has(scoutFolder(shipId)), trierarch.workspace.removedShipFolders]).toEqual([false, []]);
+    expect([trierarch.workspace.folders.has(scoutFolder(shipId)), trierarch.workspace.removedShipFolders]).toEqual([false, [shipFolderOf(shipId)]]);
     expect([trierarch.sockets.closedIn.has(shipId), trierarch.sockets.closedIn.get(shipId)]).toEqual([true, undefined]);
   });
 
