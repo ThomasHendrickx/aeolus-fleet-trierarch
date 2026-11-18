@@ -214,6 +214,36 @@ it('moves temp it cannot empty to the trash, logs it, and starts with an empty t
   }
 });
 
+it('moves two ships temp folders to the trash even at the same time', async () => {
+  const runtime = aRuntime();
+  const ships = [newId('ship'), newId('ship')];
+  const trash = join(folder, '.trash');
+  for (const shipId of ships) {
+    const locked = join(folder, shipId, 'tmp', 'locked');
+    mkdirSync(locked, { recursive: true });
+    writeFileSync(join(locked, 'left'), shipId);
+    chmodSync(locked, 0o500);
+  }
+  vi.setSystemTime(new Date('2026-11-19T00:00:00Z'));
+  const logged = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  try {
+    for (const shipId of ships) {
+      await runtime.start({ shipId, folder, shipFolder: join(folder, shipId), command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+    }
+    const trashed = readdirSync(trash);
+    expect(trashed).toHaveLength(2);
+    for (const name of trashed) chmodSync(join(trash, name, 'locked'), 0o700);
+  } finally {
+    vi.useRealTimers();
+    logged.mockRestore();
+    for (const shipId of ships) {
+      const locked = join(folder, shipId, 'tmp', 'locked');
+      if (existsSync(locked)) chmodSync(locked, 0o700);
+    }
+    if (existsSync(trash)) for (const name of readdirSync(trash)) chmodSync(join(trash, name, 'locked'), 0o700);
+  }
+});
+
 describe('the session runtime contract, on holds', () => {
   sessionRuntimeContract({ runtime: () => aRuntime(), folder: () => folder });
 });
