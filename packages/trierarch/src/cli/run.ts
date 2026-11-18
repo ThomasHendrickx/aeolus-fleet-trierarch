@@ -21,6 +21,8 @@ import { createKeyStates } from '../adapters/key-states.js';
 import { keyStatesFileOf } from '../adapters/proxy-runtime.js';
 import { claudeCodeKeyInReach } from '../adapters/claude-code.js';
 import { createMachine } from '../adapters/machine.js';
+import { measureShipFolder } from '../adapters/ship-size.js';
+import { createShipSize } from '../core/ship-size.js';
 import type { TrierarchPaths } from '../adapters/paths.js';
 import { runCommand } from '../adapters/run-command.js';
 import { createRestFleet, FleetRefusal } from '../adapters/rest-fleet.js';
@@ -52,6 +54,9 @@ import { checkShipsPlace, runtimeRefused } from './config-check.js';
 
 /** How often the loop runs a pass: restarts, wakes and releases wait at most this long. */
 export const PASS_INTERVAL_MS = 5000;
+
+/** No warning without an explicitly configured size. */
+const DEFAULT_SHIP_SIZE_BYTES: number | undefined = undefined;
 
 /**
  * `aeolus-trierarch run`: the loop. It receives what comes to the trierarch's
@@ -193,11 +198,28 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
       logger.warn(`the model proxy: ${error instanceof Error ? error.message : String(error)}`);
     });
   };
+  const checkShipSize = createShipSize({
+    limit: configured.shipSizeBytes ?? DEFAULT_SHIP_SIZE_BYTES, clock, logger,
+    measure: (entry) => measureShipFolder(entry.shipFolder ?? ''),
+    tell: async (entry, { bytes, key: idempotencyKey }) => {
+      const owner = (await fleet.assignedRequests()).find((request) => request.shipId === entry.shipId)?.owner;
+      const text = `${entry.shipName ?? entry.shipId} exceeds its configured size\n\nIts folder holds ${String(bytes)} bytes. The trierarch stops no session for it.`;
+      if (owner === undefined || owner === null || owner.name === 'argo') {
+        await fleet.reportToArgo({ text, idempotencyKey });
+      } else {
+        const answer = await fleet.reportToOwner({ ownerShipId: owner.shipId, text, idempotencyKey });
+        if (answer.kind === 'refused') { throw new Error(`${answer.code}: ${answer.message}`); }
+      }
+    },
+  });
   // Each pass ends with the trierarch's own report: the first at start, then only when it changed.
   const pass = async (): Promise<void> => {
     await keepProxy();
     await askForTrustedRepositories();
     await runPass();
+    const beforeSize = await state.load();
+    const afterSize = await checkShipSize(beforeSize);
+    if (afterSize !== beforeSize) { await state.save(afterSize); }
     await reportSelf();
     await sendUsage();
   };

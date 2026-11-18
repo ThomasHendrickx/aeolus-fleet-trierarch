@@ -5,6 +5,7 @@ import { EMPTY_STATE, putEntry, type Entry } from './entry.js';
 import { createShipSize } from './ship-size.js';
 
 const INTERVAL = 600_000;
+const clockTime = () => '2026-10-06T08:00:00.000Z';
 function aShip(): Entry {
   return { shipId: newId('ship'), shipName: 'scout', shipFolder: '/ships/scout', harness: 'codex', workspace: inRepositories('main'), options: {}, settingsVersion: 1, state: 'running', since: '2026-10-06T07:00:00.000Z', exits: [], hasStarted: true };
 }
@@ -17,7 +18,7 @@ function setup(limit: number | undefined) {
   let reads = 0;
   const ship = aShip();
   let state = putEntry(EMPTY_STATE, ship);
-  const check = createShipSize({ limit, clock, logger, measure: () => { reads += 1; return Promise.resolve(size); }, tell: (entry, bytes) => { reports.push(`${entry.shipName}: ${String(bytes)}`); return Promise.resolve(); } });
+  const check = createShipSize({ limit, clock, logger, measure: () => { reads += 1; return Promise.resolve(size); }, tell: (entry, { bytes }) => { reports.push(`${entry.shipName}: ${String(bytes)}`); return Promise.resolve(); } });
   const pass = async () => { state = await check(state); await Promise.resolve(); };
   return { clock, reports, ship, pass, reads: () => reads, setSize: (value: number) => { size = value; }, state: () => state };
 }
@@ -60,7 +61,7 @@ describe('ship folder size', () => {
     const logger = new CollectingLogger();
     const keys: string[] = [];
     const measure = () => Promise.resolve(101);
-    const tell = (_entry: Entry, _bytes: number, key: string) => {
+    const tell = (_entry: Entry, { key }: { bytes: number; key: string }) => {
       keys.push(key);
       return keys.length === 1 ? Promise.reject(new Error('lost reply')) : Promise.resolve();
     };
@@ -85,7 +86,7 @@ describe('ship folder size', () => {
     let state = putEntry(EMPTY_STATE, ship);
     state = await createShipSize(deps)(state);
     await Promise.resolve();
-    state = await createShipSize(deps)(state);
+    await createShipSize(deps)(state);
     expect(reads).toBe(1);
   });
 
@@ -93,6 +94,6 @@ describe('ship folder size', () => {
     const ship = aShip();
     const check = createShipSize({ limit: 100, clock: new TestClock(), logger: new CollectingLogger(), measure: () => new Promise<number>(() => undefined), tell: () => Promise.resolve() });
     const state = putEntry(EMPTY_STATE, ship);
-    expect(await check(state)).toEqual(state);
+    expect((await check(state)).entries[ship.shipId]?.shipSizeMeasuredAt).toBe(clockTime());
   });
 });

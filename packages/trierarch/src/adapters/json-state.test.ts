@@ -83,6 +83,8 @@ const aPopulatedState = (): Populated<TrierarchState> => {
         isIdentityGone: true,
         usageLimitTold: 'stop-1',
         isShipSizeTold: true,
+        shipSizeMeasuredAt: '2026-10-06T08:00:00.000Z',
+        shipSizePending: { key: 'ship-size:crossing', bytes: 123 },
       },
     },
     kept: [{ shipId: newId('ship'), repository: 'aeolus-fleet', path: '/home/thomas/.aeolus/trierarch/worktrees/aeolus-fleet/lookout' }],
