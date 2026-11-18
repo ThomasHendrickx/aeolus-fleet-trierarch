@@ -45,9 +45,17 @@ jobs:
           exit 1
       - run: npm run typecheck
       - run: npm run lint
-      - run: npm run test:unit
+      - id: tests
+        run: npm run test:unit
         env:
           AEOLUS_TEST_USER_SYSTEMD: '1'
+          TESTCONTAINERS_RYUK_DISABLED: 'true'
+      - name: Check Docker test leftovers
+        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
+        run: node scripts/check-test-run-leftovers.ts docker
+      - name: Check Podman test leftovers
+        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
+        run: node scripts/check-test-run-leftovers.ts podman
 
   go:
     # The Go trierarch (docs/design/trierarch-binary.md), built beside today's.
@@ -110,6 +118,8 @@ jobs:
       # The trierarch's tmux adapter is tested against the real tmux.
       - run: command -v tmux || brew install tmux
       - run: npx vitest run --project trierarch:unit --project plugin:unit --project scripts:unit
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: 'true'
 
   guardrails:
     # The CI checks in scripts/. Every check runs, so one failure does not hide the next.
@@ -162,7 +172,13 @@ jobs:
       - run: npm ci
       # The images Testcontainers starts, from the Actions cache.
       - uses: ./.github/actions/test-images
-      - run: npm run test:integration
+      - id: tests
+        run: npm run test:integration
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: 'true'
+      - name: Check Docker test leftovers
+        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
+        run: node scripts/check-test-run-leftovers.ts docker
 
   contract-go-paths:
     name: Go contract changed paths
@@ -210,9 +226,14 @@ jobs:
       - run: go build -ldflags "-X github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/cli.Version=0.99.0" -o "$RUNNER_TEMP/aeolus-trierarch" ./cmd/aeolus-trierarch
         working-directory: go
       # The upgrade tests build the Go trierarch of the next version for the suite's own GitHub Release, with go on PATH.
-      - run: npm run test:contract:go
+      - id: tests
+        run: npm run test:contract:go
         env:
           AEOLUS_TRIERARCH_UNDER_TEST: ${{ runner.temp }}/aeolus-trierarch
+          TESTCONTAINERS_RYUK_DISABLED: 'true'
+      - name: Check Docker test leftovers
+        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
+        run: node scripts/check-test-run-leftovers.ts docker
 
   session-image:
     # The image a trierarch runs container sessions from (decision 0039), built
