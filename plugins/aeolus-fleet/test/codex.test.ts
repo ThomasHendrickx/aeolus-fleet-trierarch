@@ -486,6 +486,22 @@ describe('Codex fleet calls', () => {
     expect(readFileSync(modelFile, 'utf8')).toBe('gpt-6-astra\n');
   });
 
+  it('records a model switch for the session when the command runs in another folder', () => {
+    const modelFile = crewed();
+    const commandFolder = join(folder, 'main');
+    mkdirSync(commandFolder);
+    runScript('aeolus-session-start.sh', {
+      input: JSON.stringify({ hook_event_name: 'SessionStart', cwd: folder, source: 'startup', model: 'model-before' }),
+    });
+
+    const hook = runScript('aeolus-model.sh', {
+      input: JSON.stringify({ hook_event_name: 'PreToolUse', cwd: commandFolder, model: 'model-after', tool_name: 'Bash', tool_input: { command: `${SCRIPTS}/aeolus-fleet.sh send` } }),
+    });
+
+    expect(hook.status).toBe(0);
+    expect(readFileSync(modelFile, 'utf8')).toBe('model-after\n');
+  });
+
   it.each(['startup', 'resume'])('records the Codex model at %s before any fleet command', (source) => {
     const modelFile = crewed();
     const hook = runScript('aeolus-session-start.sh', {
