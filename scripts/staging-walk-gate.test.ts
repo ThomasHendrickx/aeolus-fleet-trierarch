@@ -67,6 +67,14 @@ describe('the staging walk gate', () => {
     });
   });
 
+  it('refuses a walk whose state is success but whose description says it was blocked', () => {
+    const statuses = [aStatus({ description: `${VERSION}: blocked, candidate run ${RUN}` })];
+    expect(verdict({ statuses })).toEqual({
+      verdict: 'refused',
+      why: `The staging walk of candidate run ${RUN} at ${VERSION} did not pass (blocked): ${WALK_URL}`,
+    });
+  });
+
   it('refuses a walk whose description names no candidate run', () => {
     expect(verdict({ statuses: [aStatus({ description: `${VERSION}: passed` })] })).toEqual({
       verdict: 'refused',
