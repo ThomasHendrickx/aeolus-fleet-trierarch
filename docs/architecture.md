@@ -67,7 +67,7 @@ sequenceDiagram
   O->>P: machines.join, with the machine's name
   P->>F: commission ship, type trierarch, crew:run (fleet:commission)
   P-->>O: starting prompt and setup line
-  O->>T: the setup line: aeolus-trierarch init --fleet-url --ship-id --secret
+  O->>T: the setup line: install.sh ... --fleet-url --ship-id --secret-stdin <<< '<secret>'
   T->>F: register with the secret, gets the crew token
   T->>F: report {details: harnesses, workspaces, caps, kept, orphans, version}
   P->>F: read the report, assign labels

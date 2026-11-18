@@ -11,7 +11,7 @@ On the machine that will run the sessions (macOS or Linux), with `git`, `curl`, 
 The install script takes the binary for the machine's system and chip from the GitHub Release (`linux` and `darwin`, `amd64` and `arm64`), checks it against the release's `SHA256SUMS` and, when `gh` is installed, its GitHub artifact attestation, puts it in `~/.local/bin/aeolus-trierarch` and runs `aeolus-trierarch init` with the flags it was given. Put `~/.local/bin` on the `PATH`. The trierarch plugin's setup line (step 1 below) runs it; by hand, with the flags that line shows, or none to be asked:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ThomasHendrickx/aeolus-fleet-trierarch/main/install.sh | sh
+bash <(curl -fsSL https://raw.githubusercontent.com/ThomasHendrickx/aeolus-fleet-trierarch/main/install.sh)
 ```
 
 `AEOLUS_TRIERARCH_VERSION` names another version than the latest, and `AEOLUS_TRIERARCH_BIN_DIR` another folder than `~/.local/bin`. The other routes are the bare binary from the release, checked by hand, and Homebrew (`brew install thomashendrickx/aeolus/aeolus-trierarch`); docs/trierarch.md, "A machine joins", has both. On Linux the service is a systemd user service, which stops when you log out unless the user lingers: run `sudo loginctl enable-linger "$USER"` once, so it runs while nobody is logged in.

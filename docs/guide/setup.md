@@ -143,7 +143,7 @@ A trierarch never joins by itself. In the console:
 The line looks like this:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ThomasHendrickx/aeolus-fleet-trierarch/main/install.sh | sh -s -- --fleet-url <url> --ship-id <id> --plugin-ship-id <ship> --secret <secret>
+bash <(curl -fsSL https://raw.githubusercontent.com/ThomasHendrickx/aeolus-fleet-trierarch/main/install.sh) --fleet-url <url> --ship-id <id> --plugin-ship-id <ship> --secret-stdin <<< '<secret>'
 ```
 
 It downloads the trierarch for your system and chip, checks it, and puts it in `~/.local/bin`. It also puts that folder on your `PATH` for every new terminal, so open a new terminal before you type `aeolus-trierarch` yourself. Then it registers the computer with the fleet, answers the harnesses' first-run questions ahead of time, and starts the service.
