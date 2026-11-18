@@ -71,6 +71,23 @@ describe('the model proxy', () => {
     await expect.poll(async () => (await fetch(`${proxyUrl() ?? ''}/aeolus/state`).catch(() => undefined))?.status, { timeout: CREWED_WITHIN_MS }).toBe(200);
   });
 
+  it('stops the model proxy on uninstall', async () => {
+    await expect.poll(proxyUrl, { timeout: CREWED_WITHIN_MS }).toBeDefined();
+    const address = proxyUrl() ?? '';
+    await expect.poll(async () => (await fetch(`${address}/aeolus/state`).catch(() => undefined))?.status, { timeout: CREWED_WITHIN_MS }).toBe(200);
+    const pid = Number(readFileSync(join(machine.trierarchHome, 'proxy', 'proxy.pid'), 'utf8'));
+    try {
+      const result = await machine.trierarch(['uninstall']);
+      expect(result.status, result.stdout + result.stderr).toBe(0);
+      expect(await fetch(`${address}/aeolus/state`).catch(() => undefined)).toBeUndefined();
+    } finally {
+      // This test started the proxy; clean it up even when uninstall fails.
+      if ((await fetch(`${address}/aeolus/state`).catch(() => undefined))?.ok === true) {
+        process.kill(pid, 'SIGTERM');
+      }
+    }
+  });
+
   it('starts a session of a harness whose default login is its key with the proxy as its base URL and a token of its own, never the key', async () => {
     const login = await machine.trierarch(['login', 'claude-code', '--default', 'api-key']);
     expect(login.status, login.stdout + login.stderr).toBe(0);

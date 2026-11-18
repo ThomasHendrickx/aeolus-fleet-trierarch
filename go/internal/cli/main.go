@@ -379,6 +379,9 @@ func Main(args []string, machine Machine) (string, int) {
 					return answer{}, err
 				}
 			}
+			if err := (modelproxy.Runtime{Folder: at.Proxy}).Keep(false); err != nil {
+				return answer{}, err
+			}
 			said := []string{
 				fmt.Sprintf("Removed the service (%s): the trierarch no longer runs, and stopped every session it ran.", before.File),
 				fmt.Sprintf("Its configuration, crew token, state and logs stay in %s. Its ship, and the ships it crewed, stay crewed in the fleet: release them in the console.", at.Home),
