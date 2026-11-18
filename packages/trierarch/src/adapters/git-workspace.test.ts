@@ -337,6 +337,12 @@ describe("a ship's folder, under the place of ships/", () => {
     await expect(workspace().removeShipFolder(join(root, scoutId))).resolves.toBeUndefined();
   });
 
+  it('makes a temp folder with a ship using a configured folder', async () => {
+    const shipFolder = await workspace().shipFolderOf(scoutId);
+    await workspace().prepare({ ...scout(), workspace: { kind: 'folder', name: 'notes' }, shipFolder });
+    expect(statSync(join(shipFolder, 'tmp')).mode & 0o777).toBe(0o700);
+  });
+
   it('of a ship in a configured folder goes, and the configured folder stays', async () => {
     const shipFolder = await workspace().shipFolderOf(scoutId);
     const { folder: made } = await workspace().prepare({ ...scout(), workspace: { kind: 'folder', name: 'notes' }, shipFolder });

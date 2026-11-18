@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 
@@ -154,6 +154,29 @@ it('empties the ship temp after stopping its session and points the host session
   await runtime.start({ shipId, folder, shipFolder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
   await expect.poll(() => starts().length).toBe(2);
   expect(existsSync(join(temp, 'during'))).toBe(false);
+});
+
+it('moves temp it cannot empty to the trash, logs it, and starts with an empty temp', async () => {
+  const runtime = aRuntime();
+  const shipId = newId('ship');
+  const shipFolder = join(folder, 'ship');
+  const temp = join(shipFolder, 'tmp');
+  const locked = join(temp, 'locked');
+  mkdirSync(locked, { recursive: true });
+  writeFileSync(join(locked, 'left'), 'left');
+  chmodSync(locked, 0o500);
+  const logged = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+  try {
+    await runtime.start({ shipId, folder, shipFolder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+    expect(readdirSync(temp)).toEqual([]);
+    const trashed = readdirSync(join(folder, '.trash'));
+    expect(trashed).toHaveLength(1);
+    expect(existsSync(join(folder, '.trash', trashed[0] ?? '', 'locked', 'left'))).toBe(true);
+    expect(logged).toHaveBeenCalledWith(expect.stringContaining('moved it to the trash'));
+    chmodSync(join(folder, '.trash', trashed[0] ?? '', 'locked'), 0o700);
+  } finally {
+    logged.mockRestore();
+  }
 });
 
 describe('the session runtime contract, on holds', () => {

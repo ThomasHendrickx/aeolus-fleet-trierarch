@@ -1,11 +1,11 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createNetServer, type Server as NetServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, inject, it, vi } from 'vitest';
 
 import { TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
 import { newId } from '../../test/support/in-memory.js';
@@ -460,6 +460,26 @@ describe('the container a session runs in', () => {
     writeFileSync(join(temp, 'during'), 'running');
     await runtime.start({ shipId, folder, shipFolder, command: ['claude'], harness: 'claude-code' });
     expect(existsSync(join(temp, 'during'))).toBe(false);
+  });
+
+  it('moves temp a container left unreadable to the trash and logs it before starting', async () => {
+    const shipFolder = join(folder, 'ships', shipId);
+    const temp = join(shipFolder, 'tmp');
+    const locked = join(temp, 'locked');
+    mkdirSync(locked, { recursive: true });
+    writeFileSync(join(locked, 'left'), 'left');
+    chmodSync(locked, 0o500);
+    writeFileSync(binary, `#!/bin/sh\nif [ "$1" = unshare ]; then exit 1; fi\nenv > "$0.env"\nfor word in "$@"; do printf '%s\\n' "$word"; done > "$0.words"\nexec sleep 30\n`);
+    const logged = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      await started({ shipFolder });
+      const trashed = readdirSync(join(folder, 'ships', '.trash'));
+      expect([readdirSync(temp), trashed.length]).toEqual([[], 1]);
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining('moved it to the trash'));
+      chmodSync(join(folder, 'ships', '.trash', trashed[0] ?? '', 'locked'), 0o700);
+    } finally {
+      logged.mockRestore();
+    }
   });
 
   it("mounts the home and the socket folder in the ship's folder of a ship crewed fresh, each made for its owner alone, and nothing under the homes or sockets of the ships crewed before", async () => {
