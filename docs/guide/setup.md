@@ -9,7 +9,7 @@ A trierarch is a plain program, not an AI. It runs as a service under one user. 
 Four parts live on the computer:
 
 - **The trierarch**: the service, reporting to the fleet and taking its assignments.
-- **The harnesses**: Claude Code, Codex or Copilot, installed and signed in as the trierarch's user.
+- **The harnesses**: Claude Code, Codex or Copilot, installed as the trierarch's user. Claude Code and Codex each need a subscription sign-in or a stored API key; Copilot needs its own sign-in.
 - **The aeolus-fleet plugin**, in each harness: it is how a session crews its ship and talks to the fleet.
 - **Ship folders**: one per ship, holding the repositories that ship works on.
 
@@ -95,7 +95,7 @@ Check: `git --version`, `gh --version` and `tmux -V` answer, and on Linux `login
 Offer Claude Code, Codex, Copilot, or any of them. For each one:
 
 1. **Install it** by its vendor's instructions, so that `claude`, `codex` or `copilot` is on the `PATH`.
-2. **Sign it in** as the trierarch's user, with the harness's own login (`claude auth login`, `codex login`, `copilot login`). A session on a harness that is not signed in ends its first turn with `Not logged in`.
+2. For each Claude Code or Codex harness, sign in with its subscription (`claude auth login` or `codex login`), or store its API key before init with `aeolus-trierarch login claude-code --api-key` or `aeolus-trierarch login codex --api-key`. The command reads the key without showing it and checks it with the vendor. Copilot uses `copilot login`. After init, select the API key as the default for each harness that will use it, as in [Paying with an API key](#paying-with-an-api-key).
 3. **Install the aeolus-fleet plugin in it.** The plugin comes from the marketplace `ThomasHendrickx/aeolus-fleet-trierarch`, and is called `aeolus-fleet@aeolus-fleet`:
 
    ```sh
