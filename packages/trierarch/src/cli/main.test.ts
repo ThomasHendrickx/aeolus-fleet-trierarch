@@ -378,8 +378,8 @@ function standInPrograms(): void {
   // Reuse system executables: first executions of fresh shell scripts are slow on macOS.
   symlinkSync('/bin/sh', join(bin, 'sh'));
   // init needs `claude auth status` to say a login, so claude is signed in for it only.
-  program('claude', 'case "$1" in\n  auth) exit 0 ;;\n  *) exit 1 ;;\nesac');
-  program('codex', `case "$1" in\n  --version) echo "codex-cli 0.160.1" ;;\n  debug) echo '${CODEX_CATALOG}' ;;\n  exec) echo OK ;;\n  app-server) read -r line; exit 1 ;;\n  login) exit 0 ;;\n  *) exit 1 ;;\nesac`);
+  program('claude', `case "$1" in\n  auth) echo '{"loggedIn":true,"authMethod":"claude.ai"}' ;;\n  *) exit 1 ;;\nesac`);
+  program('codex', `case "$1" in\n  --version) echo "codex-cli 0.160.1" ;;\n  debug) echo '${CODEX_CATALOG}' ;;\n  exec) echo OK ;;\n  app-server) read -r line; exit 1 ;;\n  login) echo "Logged in using ChatGPT" >&2 ;;\n  *) exit 1 ;;\nesac`);
   symlinkSync('/usr/bin/true', join(bin, 'systemctl'));
   // init refuses a Linux machine without ss: this one has it.
   symlinkSync('/usr/bin/true', join(bin, 'ss'));
@@ -406,6 +406,33 @@ describe('aeolus-trierarch with CLAUDE_CONFIG_DIR and CODEX_HOME set (#521)', ()
     writeFileSync(join(home, 'codex-home', 'config.toml'), 'model = "gpt-6-luna"\n');
     standInPrograms();
   }
+
+  it('checks Claude Code without requiring Codex to be installed', async () => {
+    standInPrograms();
+    rmSync(join(home, 'bin', 'codex'));
+    const { output } = await main(['init', '--yes', '--plugin-ship-id', 'invalid'], machine(both()));
+    expect(output).toContain('invalid is no ship id');
+  }, INIT_TIMEOUT_MS);
+
+  it('does not count a Claude Code API key as a subscription sign-in', async () => {
+    standInPrograms();
+    writeFileSync(join(home, 'bin', 'codex'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    writeFileSync(join(home, 'bin', 'claude'), `#!/bin/sh\necho '{"loggedIn":true,"authMethod":"api_key"}'\n`, { mode: 0o755 });
+
+    const { output, code } = await main(['init', '--yes', '--plugin-ship-id', 'invalid'], machine(both()));
+    expect(code).toBe(1);
+    expect(output).toContain('aeolus-trierarch login claude-code --api-key');
+  }, INIT_TIMEOUT_MS);
+
+  it('does not count a native Codex API key as a subscription sign-in', async () => {
+    standInPrograms();
+    rmSync(join(home, 'bin', 'claude'));
+    writeFileSync(join(home, 'bin', 'codex'), '#!/bin/sh\n[ "$1 $2" = "login status" ] && echo "Logged in using an API key" >&2\nexit 0\n', { mode: 0o755 });
+
+    const { output, code } = await main(['init', '--yes', '--plugin-ship-id', 'invalid'], machine(both()));
+    expect(code).toBe(1);
+    expect(output).toContain('aeolus-trierarch login codex --api-key');
+  }, INIT_TIMEOUT_MS);
 
   it("init answers Claude Code's questions in CLAUDE_CONFIG_DIR and its summary names the files it wrote there", async () => {
     await aSetUpMachine({ isServiceInstalled: true });

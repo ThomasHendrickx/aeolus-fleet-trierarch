@@ -87,6 +87,9 @@ func (i Init) closingReport(report *Report, configuration config.Configuration, 
 		}
 		signed := "signed in"
 		status, fix := "ok", ""
+		if !state.isSignedIn && state.isKeyStored {
+			signed = "API key stored"
+		}
 		if state.name == "copilot" {
 			signed, status, fix = "sign-in cannot be checked", "warning", "run copilot login if not signed in"
 		}

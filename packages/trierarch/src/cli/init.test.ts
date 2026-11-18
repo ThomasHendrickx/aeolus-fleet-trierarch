@@ -832,11 +832,32 @@ describe('aeolus-trierarch init, for Codex', () => {
     expect(registered).toEqual([]);
   });
 
-  it('goes on when Claude Code is not signed in but the installed Codex is', async () => {
+  it.each(['claude-code', 'codex'] as const)('explains how to add a missing API key for %s', async (harness) => {
+    isClaudeCodeInstalled = harness === 'claude-code';
+    isCodexInstalled = harness === 'codex';
+    isClaudeCodeSignedIn = false;
+    isCodexSignedIn = false;
+
+    await expect(init({ isYes: true, fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET })).rejects.toThrow(`aeolus-trierarch login ${harness} --api-key`);
+    expect(registered).toEqual([]);
+  });
+
+  it.each(['claude-code', 'codex'] as const)('accepts a stored API key for %s without a subscription sign-in', async (harness) => {
+    isClaudeCodeInstalled = harness === 'claude-code';
+    isCodexInstalled = harness === 'codex';
+    isClaudeCodeSignedIn = false;
+    isCodexSignedIn = false;
+    mkdirSync(paths.keys, { recursive: true });
+    writeFileSync(join(paths.keys, harness), 'a stored key');
+
+    await expect(init({ isYes: true, fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET })).resolves.toBeDefined();
+  });
+
+  it('stops when an offered harness has neither a sign-in nor a key, even when another is signed in', async () => {
     isCodexInstalled = true;
     isClaudeCodeSignedIn = false;
 
-    await expect(init({ isYes: true, fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET })).resolves.toBeDefined();
+    await expect(init({ isYes: true, fleetUrl: FLEET_URL, shipId: newId('ship'), secret: SECRET })).rejects.toThrow('aeolus-trierarch login claude-code --api-key');
   });
 
   it('goes on with only Codex installed', async () => {

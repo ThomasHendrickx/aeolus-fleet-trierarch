@@ -104,7 +104,7 @@ func TestRefusesAClaudeJSONThatIsNoObject(t *testing.T) {
 func onPath(t *testing.T, authStatus int) {
 	t.Helper()
 	bin := t.TempDir()
-	script := "#!/bin/sh\n[ \"$1 $2\" = 'auth status' ] && exit " + string(rune('0'+authStatus)) + "\nexit 2\n"
+	script := "#!/bin/sh\n[ \"$1 $2\" = 'auth status' ] && echo '{\"loggedIn\":true,\"authMethod\":\"claude.ai\"}' && exit " + string(rune('0'+authStatus)) + "\nexit 2\n"
 	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -132,5 +132,17 @@ func TestSaysClaudeCodeIsNotInstalledWhereNoClaudeRuns(t *testing.T) {
 
 	if IsInstalled() {
 		t.Error("installed with no claude on the PATH")
+	}
+}
+
+func TestAPIKeyIsNotASubscriptionSignIn(t *testing.T) {
+	bin := t.TempDir()
+	script := "#!/bin/sh\nprintf '%s\\n' '{\"loggedIn\":true,\"authMethod\":\"api_key\"}'\n"
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	if IsSignedIn() {
+		t.Fatal("API key was counted as a subscription sign-in")
 	}
 }

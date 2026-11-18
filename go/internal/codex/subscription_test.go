@@ -41,3 +41,11 @@ func TestASessionOnItsSubscriptionStartsWhileCodexIsLoggedInWithChatGPTOrNotAtAl
 		}
 	}
 }
+
+func TestNativeAPIKeyIsNotASubscriptionSignIn(t *testing.T) {
+	program := aCodexSaying(t, "Logged in using an API key", 0)
+	t.Setenv("PATH", filepath.Dir(program))
+	if IsSignedIn() {
+		t.Fatal("native API key was counted as a subscription sign-in")
+	}
+}

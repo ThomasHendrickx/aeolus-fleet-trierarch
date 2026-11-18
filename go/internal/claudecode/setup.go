@@ -119,9 +119,14 @@ func IsInstalled() bool {
 	return err == nil
 }
 
-// IsSignedIn says whether `claude auth status` reports a login.
+// IsSignedIn says whether Claude Code is signed in with its subscription.
 func IsSignedIn() bool {
-	return exec.Command("claude", "auth", "status").Run() == nil
+	said, err := exec.Command("claude", "auth", "status").Output()
+	var status struct {
+		LoggedIn   bool   `json:"loggedIn"`
+		AuthMethod string `json:"authMethod"`
+	}
+	return err == nil && json.Unmarshal(said, &status) == nil && status.LoggedIn && status.AuthMethod == "claude.ai"
 }
 
 // TrustedFolders are the folders whose trust question was accepted, from one read of .claude.json; none where there is no readable file.

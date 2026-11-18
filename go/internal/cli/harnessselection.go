@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/config"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/keys"
 )
 
 type harnessState struct {
@@ -14,6 +15,7 @@ type harnessState struct {
 	label          string
 	isInstalled    bool
 	isSignedIn     bool
+	isKeyStored    bool
 	install        string
 	login          string
 	unattendedFlag string
@@ -21,9 +23,9 @@ type harnessState struct {
 
 func (i Init) harnessStates() []harnessState {
 	return []harnessState{
-		{claudeCode, "Claude Code", i.IsClaudeCodeInstalled, i.IsClaudeCodeSignedIn, "https://code.claude.com/docs/en/setup", "claude auth login", "--dangerously-skip-permissions"},
-		{codex, "Codex", i.IsCodexInstalled, i.IsCodexSignedIn, "npm install -g @openai/codex", "codex login", "--dangerously-bypass-approvals-and-sandbox"},
-		{"copilot", "Copilot", i.IsCopilotInstalled, false, "npm install -g @github/copilot", "copilot login", "--allow-all-tools"},
+		{claudeCode, "Claude Code", i.IsClaudeCodeInstalled, i.IsClaudeCodeSignedIn, (keys.Files{Folder: i.Paths.Keys}).Has(claudeCode), "https://code.claude.com/docs/en/setup", "claude auth login", "--dangerously-skip-permissions"},
+		{codex, "Codex", i.IsCodexInstalled, i.IsCodexSignedIn, (keys.Files{Folder: i.Paths.Keys}).Has(codex), "npm install -g @openai/codex", "codex login", "--dangerously-bypass-approvals-and-sandbox"},
+		{"copilot", "Copilot", i.IsCopilotInstalled, false, false, "npm install -g @github/copilot", "copilot login", "--allow-all-tools"},
 	}
 }
 
@@ -65,6 +67,8 @@ func (s harnessState) status() string {
 		return "installed; sign-in cannot be checked here"
 	case s.isSignedIn:
 		return "installed, signed in"
+	case s.isKeyStored:
+		return "installed, API key stored"
 	}
 	return "installed, not signed in"
 }
@@ -75,7 +79,7 @@ func harnessHelp(state harnessState) string {
 	case state.name == "copilot":
 		text += "Copilot must be installed; its sign-in cannot be checked here.\n"
 	default:
-		text += state.label + " must be installed and signed in.\n"
+		text += state.label + " must be installed and signed in or have an API key stored.\n"
 	}
 	return text + "Pick at least one agent tool. Default: No unless it is the current setting."
 }
@@ -152,8 +156,8 @@ func (i Init) selectHarnesses(flags Flags, current config.Configuration, isRerun
 		if !state.isInstalled {
 			return nil, stopped(state.label+" is not installed.", "Install it with: "+state.install, "Then run your setup line again.", notJoinedBeforeRegistration)
 		}
-		if state.name != "copilot" && !state.isSignedIn {
-			return nil, stopped(state.label+" is installed but not signed in.", "Run: "+state.login, "Then run your setup line again.", notJoinedBeforeRegistration)
+		if state.name != "copilot" && !state.isSignedIn && !state.isKeyStored {
+			return nil, stopped(state.label+" is installed but not signed in.", "Run: "+state.login+" or aeolus-trierarch login "+state.name+" --api-key", "Then run your setup line again.", notJoinedBeforeRegistration)
 		}
 	}
 	for _, name := range unattended {

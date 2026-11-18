@@ -1,3 +1,4 @@
+import { createKeyFiles } from '../adapters/key-files.js';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { idSchema, type ShipId } from '@aeolus-fleet/common';
 
@@ -141,7 +142,7 @@ function checkMachine(at: { nodeVersion: string; isSsMissing: boolean; isClaudeC
   }
   if (!((at.isClaudeCodeInstalled && at.isClaudeCodeSignedIn) || (at.isCodexInstalled && at.isCodexSignedIn))) {
     const steps = [...(at.isClaudeCodeInstalled ? ['Claude Code (run `claude` and sign in)'] : []), ...(at.isCodexInstalled ? ['Codex (run `codex login`)'] : [])];
-    throw new TrierarchFileError(`${steps.join(' and ')} ${steps.length === 1 ? 'is' : 'are'} installed but not signed in, so no session could answer. Sign in: ${steps.join('; ')}, then run the setup line again.`);
+    throw new TrierarchFileError(`${steps.join(' and ')} ${steps.length === 1 ? 'is' : 'are'} installed but not signed in, so no session could answer. Sign in: ${steps.join('; ')}, or add a key: ${[...(at.isClaudeCodeInstalled ? ['aeolus-trierarch login claude-code --api-key'] : []), ...(at.isCodexInstalled ? ['aeolus-trierarch login codex --api-key'] : [])].join('; ')}, then run the setup line again.`);
   }
 }
 
@@ -360,7 +361,8 @@ export async function initTrierarch(input: {
     said.push(line, ...(hasSaidVersion ? [] : [NOT_SAID_YET]));
   };
 
-  checkMachine({ nodeVersion: input.nodeVersion, isSsMissing: input.isSsMissing, isClaudeCodeInstalled: input.isClaudeCodeInstalled, isClaudeCodeSignedIn: input.isClaudeCodeSignedIn, isCodexInstalled, isCodexSignedIn: input.isCodexSignedIn });
+  const keys = createKeyFiles(paths.keys);
+  checkMachine({ nodeVersion: input.nodeVersion, isSsMissing: input.isSsMissing, isClaudeCodeInstalled: input.isClaudeCodeInstalled, isClaudeCodeSignedIn: input.isClaudeCodeSignedIn || await keys.has(CLAUDE_CODE), isCodexInstalled, isCodexSignedIn: input.isCodexSignedIn || await keys.has(CODEX) });
   const pluginShipId = pluginShipOf(flags);
   // The ship: registered once per machine, never again.
   const crew = await readCrewFile(paths.crewToken).catch(() => undefined);
@@ -425,6 +427,13 @@ export async function initTrierarch(input: {
     if (await prompter.confirm('Change the configuration?', { isDefault: false })) {
       configuration = await askConfiguration({ base: configuration, prompter, homeDirectory, isCodexInstalled });
       configured = 'changed';
+    }
+  }
+  for (const harness of [CLAUDE_CODE, CODEX] as const) {
+    const isInstalled = harness === CLAUDE_CODE ? input.isClaudeCodeInstalled : isCodexInstalled;
+    const isSignedIn = harness === CLAUDE_CODE ? input.isClaudeCodeSignedIn : input.isCodexSignedIn;
+    if (configuration.harnesses[harness] !== undefined && isInstalled && !isSignedIn && !(await keys.has(harness))) {
+      throw new TrierarchFileError(`${harness} is not signed in and has no API key. Sign in or run aeolus-trierarch login ${harness} --api-key, then run the setup line again.`);
     }
   }
   if (configured !== 'kept') {

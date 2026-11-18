@@ -223,9 +223,10 @@ func IsInstalled() bool {
 	return err == nil
 }
 
-// IsSignedIn says whether `codex login status` reports a login.
+// IsSignedIn says whether Codex is signed in with ChatGPT.
 func IsSignedIn() bool {
-	return exec.Command("codex", "login", "status").Run() == nil
+	said, err := exec.Command("codex", "login", "status").CombinedOutput()
+	return err == nil && loginKindOf(string(said)) == "chatgpt"
 }
 
 // Subscription is what Codex reads itself before a session on its subscription starts (api keys K6): how it is logged in, as `codex login status` says.

@@ -293,7 +293,7 @@ func TestSetupStopsAtAHarnessNotSignedInBeforeRegistration(t *testing.T) {
 		"Copilot: not installed.\n" +
 		"Use Copilot? [y/N] n\n" +
 		"Claude Code is installed but not signed in.\n" +
-		"Run: claude auth login\n" +
+		"Run: claude auth login or aeolus-trierarch login claude-code --api-key\n" +
 		"Then run your setup line again.\n" +
 		"Not joined: setup stopped before registration.\n"
 	if err == nil || !strings.HasSuffix(screenOf(terminal, report, err), want) {
