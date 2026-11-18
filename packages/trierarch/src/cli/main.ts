@@ -275,7 +275,7 @@ export async function main(argv: readonly string[], machine: Machine): Promise<O
           isCodexInstalled: (await runCommand('sh', { args: ['-c', 'command -v codex'] })).status === 0,
           isClaudeCodeInstalled: (await runCommand('sh', { args: ['-c', 'command -v claude'] })).status === 0,
           isClaudeCodeSignedIn: (await runCommand('sh', { args: ['-c', 'claude auth status'] })).status === 0,
-          isCodexSignedIn: (await runCommand('sh', { args: ['-c', 'codex login status'] })).status === 0,
+          isCodexSignedIn: (await createCodexSetup().loginKind()) === 'chatgpt',
           nodeVersion: process.versions.node,
           isSsMissing: process.platform === 'linux' && (await runCommand('sh', { args: ['-c', 'command -v ss'] })).status !== 0,
           service: serviceAt(),
