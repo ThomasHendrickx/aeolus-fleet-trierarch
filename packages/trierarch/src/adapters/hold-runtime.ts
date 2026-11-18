@@ -124,17 +124,25 @@ export function createHoldRuntime(options: {
     return { shipId, status: 'running', ...(answer.state.version !== version && { isOtherVersion: true }) };
   };
 
+  const signalHold = (pid: number, signal: NodeJS.Signals): void => {
+    try {
+      process.kill(pid, signal);
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH')) throw error;
+    }
+  };
+
   const stop = async (shipId: ShipId): Promise<void> => {
     await options.beside?.stop(shipId);
     const pid = await runningPid(shipId);
     if (pid !== undefined) {
-      process.kill(pid, 'SIGTERM');
+      signalHold(pid, 'SIGTERM');
       const until = Date.now() + STOP_WAIT_MS;
       while ((await runningPid(shipId)) !== undefined && Date.now() < until) {
         await wait(START_POLL_MS);
       }
       if ((await runningPid(shipId)) !== undefined) {
-        process.kill(pid, 'SIGKILL');
+        signalHold(pid, 'SIGKILL');
       }
     }
     await rm(filesOf(shipId).folder, { recursive: true, force: true });
