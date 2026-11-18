@@ -474,7 +474,7 @@ function runningStep(entry: Entry, context: ReconcileContext & { canStart: boole
   const session = observed.sessions.find((each) => each.shipId === entry.shipId);
   if (session === undefined && observed.startProblems?.[entry.shipId] !== undefined) {
     // Its login cannot start it now (api keys K9): it waits, restarting, until it can, with no restart counted.
-    return { entry: withState(withoutLaunch(entry), { state: 'restarting', now }), actions: [], starts: 0 };
+    return { entry: { ...withState(withoutLaunch(entry), { state: 'restarting', now }), restartAt: now.toISOString() }, actions: [], starts: 0 };
   }
   if (session === undefined) {
     // No session at all, as after the machine restarts: start it again, with no restart counted.
