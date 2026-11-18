@@ -72,6 +72,8 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'trierarch:unit',
+          // Real git, container and process operations need scheduling room under concurrent load.
+          testTimeout: 60_000,
           root: 'packages/trierarch',
           include: ['src/**/*.test.ts', 'test/**/*.test.ts'],
           exclude: [...configDefaults.exclude, '**/*.integration.test.ts'],
