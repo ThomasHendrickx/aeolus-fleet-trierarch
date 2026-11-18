@@ -109,6 +109,13 @@ function install(bin: string, options: { args?: string[]; env?: Record<string, s
 const installed = (): string => join(root, 'home', '.local', 'bin', 'aeolus-trierarch');
 
 describe('the install script', () => {
+  it('rejects the removed secret argument without starting init', () => {
+    release('1.2.3');
+    const result = install(machine({ system: 'Linux', chip: 'x86_64', attestation: 'holds' }), { args: ['--secret', 'example-secret'] });
+    expect(result.status).not.toBe(0);
+    expect(existsSync(join(root, 'ran'))).toBe(false);
+  });
+
   it.each([
     { system: 'Linux', chip: 'x86_64', asset: 'linux-amd64' },
     { system: 'Linux', chip: 'aarch64', asset: 'linux-arm64' },
