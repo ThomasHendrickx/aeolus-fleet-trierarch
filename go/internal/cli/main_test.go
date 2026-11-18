@@ -702,3 +702,21 @@ func TestStatusUsesTheMachineClockToCheckTheProcessAge(t *testing.T) {
 		t.Errorf("status = %q, %d; want the ten-second wait", output, code)
 	}
 }
+
+func TestInitRejectsSecretArgument(t *testing.T) {
+	machine, _, _ := aMain(t)
+	_, code := Main([]string{"init", "--secret", "example-secret"}, machine)
+	if code != 2 {
+		t.Fatalf("init with --secret returned %d, want 2", code)
+	}
+}
+
+func TestInitReadsSecretFromStdin(t *testing.T) {
+	machine, _, fleet := aMain(t)
+	machine.ReadKey = func() (string, error) { return secret + "\n", nil }
+	words := []string{"init", "--fleet-url", fleetURL, "--ship-id", shipID, "--secret-stdin", "--plugin-ship-id", pluginShipID, "--harnesses", "claude-code", "--yes"}
+	output, code := Main(words, machine)
+	if code != 0 || len(fleet.registered) != 1 {
+		t.Fatalf("init from stdin = %q, %d; registrations = %v", output, code, fleet.registered)
+	}
+}
