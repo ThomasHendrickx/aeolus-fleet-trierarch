@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { ShipId } from '@aeolus-fleet/common';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { aCrewingMachine, sessionOf, listedEntryOf, REPOSITORY } from './support/crewing.js';
+import { aCrewingMachine, sessionOf, listedEntryOf, isRunning, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
 
@@ -17,8 +17,10 @@ const HTTP_UNAUTHORIZED = 401;
 let fleet: Fleet;
 let machine: Machine;
 let scout: ShipId;
+let isMachineRemoved: boolean;
 
 beforeEach(async () => {
+  isMachineRemoved = false;
   fleet = await aFleet();
   machine = await aMachine();
   await aCrewingMachine({ fleet, machine });
@@ -30,10 +32,10 @@ beforeEach(async () => {
 });
 
 afterEach(async ({ task }) => {
-  if (task.result?.state === 'fail') {
+  if (task.result?.state === 'fail' && !isMachineRemoved) {
     console.log(`The service's log:\n${machine.serviceLog()}`);
   }
-  await machine.remove();
+  if (!isMachineRemoved) await machine.remove();
   await fleet.close();
 });
 
@@ -49,6 +51,21 @@ async function aRunningScout(): Promise<void> {
 }
 
 describe('the model proxy', () => {
+  it('leaves none of its model proxy processes running when the machine is removed', async () => {
+    const pidFile = join(machine.trierarchHome, 'proxy', 'proxy.pid');
+    await expect.poll(() => existsSync(pidFile), { timeout: CREWED_WITHIN_MS }).toBe(true);
+    const pid = Number(readFileSync(pidFile, 'utf8'));
+    expect(pid).toBeGreaterThan(1);
+    expect(isRunning(pid)).toBe(true);
+    try {
+      isMachineRemoved = true;
+      await machine.remove();
+      expect(Number(isRunning(pid))).toBe(0);
+    } finally {
+      if (isRunning(pid)) process.kill(pid, 'SIGTERM');
+    }
+  });
+
   it('runs on loopback once a harness holds an API key, started by the next pass', async () => {
     await expect.poll(proxyUrl, { timeout: CREWED_WITHIN_MS }).toBeDefined();
     await expect.poll(async () => (await fetch(`${proxyUrl() ?? ''}/aeolus/state`).catch(() => undefined))?.status, { timeout: CREWED_WITHIN_MS }).toBe(200);
