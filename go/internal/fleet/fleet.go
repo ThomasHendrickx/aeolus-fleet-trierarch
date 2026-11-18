@@ -74,7 +74,13 @@ func callIn(ctx context.Context, fleetURL string, at request, answer any) error 
 	if at.crewToken != "" {
 		request.Header.Set("Authorization", "Bearer "+at.crewToken)
 	}
-	client := http.Client{Timeout: callTimeout}
+	// A timed-out HTTP/2 stream does not discard its TCP connection. Sharing
+	// that connection can trap every later pass on a dead network path, even
+	// while a fresh dial works. Own the pool for this call, retaining the
+	// default dialer's address-family fallback and TLS handshake timeout.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	defer transport.CloseIdleConnections()
+	client := http.Client{Transport: transport, Timeout: callTimeout}
 	if at.isLongPoll {
 		client.Timeout = 0
 	}
