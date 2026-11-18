@@ -27,7 +27,12 @@ if [ "${AEOLUS_HARNESS:-}" = cursor ] && [ "$model" = default ]; then
   model=auto
 fi
 [ -n "$model" ] || exit 0
-aeolus_hook_folder "$payload" || exit 1
+if aeolus_codex_hook && [ "$(aeolus_json_string "$payload" hook_event_name)" = PreToolUse ]; then
+  # Codex runs the hook in the session folder; payload cwd follows the command.
+  aeolus_hook_folder "$payload" "$(pwd -P)" || exit 1
+else
+  aeolus_hook_folder "$payload" || exit 1
+fi
 file="$(aeolus_model_file 2>/dev/null)" || exit 0
 [ -d "$(dirname "$file")" ] || exit 0
 [ "$(cat "$file" 2>/dev/null)" = "$model" ] && exit 0
