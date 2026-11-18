@@ -310,7 +310,7 @@ async function askConfiguration(at: { base: TrierarchConfiguration; prompter: Pr
   });
   const flags = [...harness.flags.filter((flag) => flag !== SKIP_PERMISSIONS), ...(isSkipping ? [SKIP_PERMISSIONS] : [])];
   prompter.step('Codex');
-  const codex = await askCodex({ ...at, base });
+  const codex = await askCodex({ ...at, base: at.isCodexInstalled ? base : at.base });
   prompter.step('Workspaces');
   const repositories = await askPlaces({ held: base.repositories, prompter, homeDirectory: at.homeDirectory, questions: REPOSITORY_QUESTIONS });
   const folders = await askPlaces({ held: base.folders, prompter, homeDirectory: at.homeDirectory, questions: FOLDER_QUESTIONS });
@@ -323,7 +323,7 @@ async function askConfiguration(at: { base: TrierarchConfiguration; prompter: Pr
     caps: { ships, running },
     repositories,
     folders,
-    harnesses: { ...others, ...(at.isClaudeCodeReady ? { [CLAUDE_CODE]: { ...harness, flags } } : base.harnesses[CLAUDE_CODE] !== undefined ? { [CLAUDE_CODE]: base.harnesses[CLAUDE_CODE] } : {}), ...(codex !== undefined && { [CODEX]: codex }) },
+    harnesses: { ...others, ...(at.isClaudeCodeReady ? { [CLAUDE_CODE]: { ...harness, flags } } : at.base.harnesses[CLAUDE_CODE] !== undefined ? { [CLAUDE_CODE]: at.base.harnesses[CLAUDE_CODE] } : {}), ...(codex !== undefined && { [CODEX]: codex }) },
   };
 }
 
