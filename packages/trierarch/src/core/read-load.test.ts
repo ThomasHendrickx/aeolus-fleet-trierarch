@@ -121,6 +121,7 @@ function diskTrierarch(at: { hasRecovered?: boolean; isFailing?: boolean } = {})
   const clock = new TestClock();
   const logger = new CollectingLogger();
   const leftovers = { trash: ['discarded-worktree'], images: ['old-session-image'] };
+  const ranking: { ships: readonly { name: string; bytes: number }[] | undefined } = { ships: [{ name: 'large-ship', bytes: 900 }, { name: 'small-ship', bytes: 100 }] };
   const read = createReadLoad({ machine, fleet, state, clock, logger, disk: {
     removeUnusedImages: () => { leftovers.images = []; return Promise.resolve(); },
     free: () => {
@@ -130,9 +131,9 @@ function diskTrierarch(at: { hasRecovered?: boolean; isFailing?: boolean } = {})
       if (at.hasRecovered === true) machine.current = aMachineLoad();
       return Promise.resolve();
     },
-    largestShips: () => Promise.resolve([{ name: 'large-ship', bytes: 900 }, { name: 'small-ship', bytes: 100 }]),
+    largestShips: () => ranking.ships,
   } });
-  return { read, machine, fleet, state, clock, logger, leftovers };
+  return { read, machine, fleet, state, clock, logger, leftovers, ranking };
 }
 
 describe('low disk cleanup before telling argo (#352)', () => {
@@ -243,4 +244,48 @@ it('reclaims unused images along with trash on low disk', async () => {
   const trierarch = diskTrierarch();
   await trierarch.read();
   expect(trierarch.leftovers).toEqual({ images: [], trash: [] });
+});
+
+
+describe('low disk while background ship measurements are pending', () => {
+  it('returns the load without waiting for a ranking', async () => {
+    const trierarch = diskTrierarch();
+    trierarch.ranking.ships = undefined;
+    expect(await trierarch.read()).toEqual(LOW_DISK);
+  });
+
+  it('keeps the disk notification pending until ship measurements are ready', async () => {
+    const trierarch = diskTrierarch();
+    trierarch.ranking.ships = undefined;
+    await trierarch.read();
+    expect(trierarch.fleet.toArgo).toEqual([]);
+  });
+
+  it('does not store an unsent disk notification as told', async () => {
+    const trierarch = diskTrierarch();
+    trierarch.ranking.ships = undefined;
+    await trierarch.read();
+    expect(trierarch.state.current().lowResources).toBeUndefined();
+  });
+
+  it('sends the completed ranking on the next pass within the load read interval', async () => {
+    const trierarch = diskTrierarch();
+    const completed = trierarch.ranking.ships;
+    trierarch.ranking.ships = undefined;
+    await trierarch.read();
+    trierarch.ranking.ships = completed;
+    trierarch.clock.advance(5000);
+    await trierarch.read();
+    expect(trierarch.fleet.toArgo[0]?.text).toContain('Ships holding the most:\n- large-ship: 900 bytes\n- small-ship: 100 bytes');
+  });
+
+  it('stores the disk notification after the completed ranking is sent', async () => {
+    const trierarch = diskTrierarch();
+    const completed = trierarch.ranking.ships;
+    trierarch.ranking.ships = undefined;
+    await trierarch.read();
+    trierarch.ranking.ships = completed;
+    await trierarch.read();
+    expect(trierarch.state.current().lowResources).toEqual(['disk']);
+  });
 });
