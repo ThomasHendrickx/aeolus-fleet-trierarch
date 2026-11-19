@@ -171,8 +171,8 @@ export async function runHold(options: HoldOptions): Promise<number> {
   };
 
   // A session of its own, so a signal to the hold's group does not end the guard before it ends the harness.
-  await writeFile(`${files.folder}/guard-active`, 'active');
   const guard = spawn(process.execPath, ['-e', GUARD, `${files.folder}/guard-done`], { env: {}, stdio: ['pipe', 'ignore', 'ignore'], detached: true });
+  writeFileSync(`${files.folder}/guard-active`, String(guard.pid ?? ''));
   guard.stdin.on('error', () => undefined);
   guard.unref();
 

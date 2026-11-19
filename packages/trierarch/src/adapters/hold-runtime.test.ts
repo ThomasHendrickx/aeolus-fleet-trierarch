@@ -195,6 +195,16 @@ it.each(['stale guard marker', 'reused pid'])('starts after a machine restart wi
   }
 });
 
+/** The guard belongs to the hold this test started, beside its recorded harness groups. */
+async function guardOf(runtime: SessionRuntime & { sessionRootOf: (shipId: ShipId) => Promise<number | undefined> }, shipId: ShipId): Promise<number> {
+  const hold = await runtime.sessionRootOf(shipId);
+  const groups = readFileSync(join(sessions, shipId, 'harness-sessions'), 'utf8').trim().split('\n').map(Number);
+  const listed = await runCommand('ps', { args: ['-A', '-o', 'pid=,ppid='] });
+  const guard = listed.stdout.split('\n').map((line) => line.trim().split(/\s+/).map(Number)).find(([pid, parent]) => parent === hold && pid !== undefined && !groups.includes(pid))?.[0];
+  if (guard === undefined) throw new Error('the test session has no guard');
+  return guard;
+}
+
 it('starts after its guard crashes during the current boot, stopping the old session before emptying temp', { timeout: 20_000 }, async () => {
   const runtime = aRuntime();
   const shipId = newId('ship');
@@ -203,11 +213,8 @@ it('starts after its guard crashes during the current boot, stopping the old ses
   const previous = join(sessions, shipId);
   await runtime.start({ shipId, folder, shipFolder, command: ['sh', '-c', 'trap "" TERM; while :; do echo old > "$TMPDIR/writing"; sleep 0.1; done'], harness: 'claude-code' });
   await expect.poll(() => existsSync(join(temp, 'writing'))).toBe(true);
-  const hold = await runtime.sessionRootOf(shipId);
+  const guard = await guardOf(runtime, shipId);
   const groups = readFileSync(join(previous, 'harness-sessions'), 'utf8').trim().split('\n').map(Number);
-  const listed = await runCommand('ps', { args: ['-A', '-o', 'pid=,ppid='] });
-  const guard = listed.stdout.split('\n').map((line) => line.trim().split(/\s+/).map(Number)).find(([pid, parent]) => parent === hold && pid !== undefined && !groups.includes(pid))?.[0];
-  if (guard === undefined) throw new Error('the test session has no guard');
   process.kill(guard, 'SIGKILL');
   await expect.poll(() => isAlive(guard)).toBe(false);
   try {
@@ -263,6 +270,23 @@ it('recovers when a same-boot guard marker points to an unrelated process', { ti
     const ended = new Promise((resolve) => unrelated.once('exit', resolve));
     unrelated.kill('SIGKILL');
     await ended;
+  }
+});
+
+it('keeps temp when a live guard has not finished stopping its session', { timeout: 20_000 }, async () => {
+  const runtime = aRuntime();
+  const shipId = newId('ship');
+  const shipFolder = join(folder, 'ship');
+  const temp = join(shipFolder, 'tmp');
+  await runtime.start({ shipId, folder, shipFolder, command: ['sh', '-c', 'trap "" TERM; while :; do echo old > "$TMPDIR/writing"; sleep 0.1; done'], harness: 'claude-code' });
+  await expect.poll(() => existsSync(join(temp, 'writing'))).toBe(true);
+  const guard = await guardOf(runtime, shipId);
+  process.kill(guard, 'SIGSTOP');
+  try {
+    await expect(runtime.start({ shipId, folder, shipFolder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' })).rejects.toThrow(`the guard of ${shipId} did not finish stopping its session`);
+    expect(existsSync(join(temp, 'writing'))).toBe(true);
+  } finally {
+    process.kill(guard, 'SIGCONT');
   }
 });
 
