@@ -666,6 +666,29 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
     }
   });
 
+  it('does not signal an unrelated process named by a stale hold PID file', async () => {
+    const child = spawn('sleep', ['30']);
+    try {
+      const runtime = aRuntime();
+      const shipId = newId('ship');
+      const holdFolder = join(sessions, shipId);
+      mkdirSync(holdFolder, { recursive: true });
+      writeFileSync(join(holdFolder, 'hold.pid'), String(child.pid));
+
+      await runtime.stop(shipId);
+
+      expect(child.exitCode).toBeNull();
+      expect(child.signalCode).toBeNull();
+      expect(() => process.kill(child.pid ?? 0, 0)).not.toThrow();
+    } finally {
+      child.kill();
+      await new Promise<void>((resolve) => {
+        if (child.exitCode !== null || child.signalCode !== null) resolve();
+        else child.once('exit', () => { resolve(); });
+      });
+    }
+  });
+
   it('stops a session: its hold and harness end, and it is listed no more', async () => {
     const runtime = aRuntime();
     const shipId = await aClaudeCodeSession(runtime);
