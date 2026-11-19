@@ -259,6 +259,7 @@ describe('ships/ removed by hand', () => {
     await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
     await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
     const pid = sessionOf(machine, 'scout').starts()[0]?.pid ?? 0;
+    await expect.poll(() => machine.serviceLog(), { timeout: CREWED_WITHIN_MS }).toContain('crewed, claude-code started in');
 
     const logBeforeRemoval = machine.serviceLog().length;
     rmSync(join(machine.trierarchHome, 'ships'), { recursive: true, force: true });
