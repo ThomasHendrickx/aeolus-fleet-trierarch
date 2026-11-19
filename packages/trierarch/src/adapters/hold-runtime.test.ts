@@ -179,7 +179,9 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
   });
 
   it("hands the session its proxy token in the variable named, from a file of the session's own, never on a command line (api keys K7)", async () => {
-    const runtime = aRuntime();
+    const modelTokenFile = join(sessions, 'model-token');
+    writeFileSync(modelTokenFile, 'test-model-token-not-real');
+    const runtime = aRuntime({ modelTokenFile });
     const shipId = newId('ship');
     const token = 'test-proxy-token-not-real';
 
@@ -188,6 +190,7 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
     await expect.poll(() => written('fake-starts.jsonl')).toHaveLength(1);
     const [start] = starts();
     expect(start?.env.ANTHROPIC_AUTH_TOKEN).toBe(token);
+    expect(start?.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     expect(start?.args.join(' ')).not.toContain(token);
     const tokenFile = join(sessions, shipId, 'proxy-token');
     expect(statSync(tokenFile).mode & 0o777).toBe(0o600);
