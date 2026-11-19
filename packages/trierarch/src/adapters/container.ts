@@ -171,8 +171,7 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
       const login: Record<string, string> = proxyToken === undefined ? { [MODEL_TOKEN_VARIABLE]: (await readFile(options.tokenFile, 'utf8')).trim() } : {};
       const nestedStorage = '/containers';
       const runtimeRoot = options.platform === 'linux' && shipFolder !== undefined ? await userRuntimeDirectory() : undefined;
-      const shipRuntime = runtimeRoot === undefined ? undefined : shipPodmanRuntime(runtimeRoot, shipId);
-      const runtimeMount = shipRuntime === undefined ? [] : ['--volume', `${shipRuntime}:/containers-runtime`];
+      let shipRuntime = runtimeRoot === undefined ? undefined : shipPodmanRuntime(runtimeRoot, shipId);
       const nestedEnv: Readonly<Record<string, string>> = options.platform === 'linux' && shipFolder !== undefined ? {
         CONTAINERS_CONF: `${nestedStorage}/containers.conf`,
         CONTAINERS_STORAGE_CONF: `${nestedStorage}/storage.conf`,
@@ -188,13 +187,20 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
       await mkdir(home, { recursive: true, mode: 0o700 });
       const storage = options.platform === 'linux' && shipFolder !== undefined ? join(shipFolder, 'containers') : undefined;
       await mkdir(files.folder, { recursive: true, mode: 0o700 });
-      if (storage !== undefined && shipFolder !== undefined) {
-        if (shipRuntime === undefined) {
-          await appendFile(files.events, `${JSON.stringify({ type: 'system', subtype: 'podman', message: 'Nested Podman cannot start: no private user runtime directory' })}\n`);
-        } else {
+      if (shipRuntime !== undefined) {
+        try {
           await rm(shipRuntime, { recursive: true, force: true });
           await mkdir(join(shipRuntime, 'tmp'), { recursive: true, mode: 0o700 });
           await mkdir(join(shipRuntime, 'run'), { recursive: true, mode: 0o700 });
+        } catch (error) {
+          await appendFile(files.events, `${JSON.stringify({ type: 'system', subtype: 'podman', message: `Nested Podman cannot start: ${String(error)}` })}\n`);
+          shipRuntime = undefined;
+        }
+      }
+      const runtimeMount = shipRuntime === undefined ? [] : ['--volume', `${shipRuntime}:/containers-runtime`];
+      if (storage !== undefined && shipFolder !== undefined) {
+        if (shipRuntime === undefined) {
+          await appendFile(files.events, `${JSON.stringify({ type: 'system', subtype: 'podman', message: 'Nested Podman cannot start: no private user runtime directory' })}\n`);
         }
         const hasStorage = (await stat(storage).catch(() => undefined)) !== undefined;
         const prepareStorage = async (): Promise<void> => {
@@ -280,7 +286,10 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
       await holds.stop(shipId);
       if (options.platform === 'linux') {
         const root = await userRuntimeDirectory();
-        if (root !== undefined) await rm(shipPodmanRuntime(root, shipId), { recursive: true, force: true });
+        if (root !== undefined) {
+          const runtime = shipPodmanRuntime(root, shipId);
+          if ((await stat(runtime).catch(() => undefined)) !== undefined) await rm(runtime, { recursive: true, force: true });
+        }
       }
     },
     // The container's first process as the host sees it: every process of the session runs under it; none once it runs no more.
