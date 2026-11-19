@@ -139,6 +139,46 @@ it.runIf(process.platform === 'linux')("removes the ship's test volumes when its
   expect({ status: listed.status, volumes: listed.stdout.trim() }).toEqual({ status: 0, volumes: '' });
 });
 
+it.runIf(process.platform === 'linux')("cleans up a killed host session's Testcontainers container and volume on restart", async () => {
+  const runtime = aRuntime({ hasHostContainerStorage: true });
+  const shipId = newId('ship');
+  const shipFolder = join(sessions, shipId + '-ship');
+  const name = `test-${shipId}`;
+  const ready = join(folder, 'testcontainers-ready');
+  const program = `const { createRequire } = require('node:module');
+    const { GenericContainer } = createRequire(${JSON.stringify(join(process.cwd(), 'package.json'))})('testcontainers');
+    (async () => {
+      await new GenericContainer('docker.io/library/postgres:17-alpine').withName(${JSON.stringify(name)}).withEnvironment({ POSTGRES_PASSWORD: 'test' }).start();
+      require('node:fs').writeFileSync(${JSON.stringify(ready)}, 'ready');
+      setInterval(() => {}, 1000);
+    })().catch(e => { console.log(JSON.stringify({ type: 'error', message: String(e) })); process.exit(1); });`;
+  const session = { shipId, shipFolder, folder, command: [process.execPath, '-e', program], harness: 'claude-code', env: { TESTCONTAINERS_RYUK_DISABLED: 'true', TESTCONTAINERS_HOST_OVERRIDE: '127.0.0.1' } };
+  const url = `unix://${shipFolder}/podman.sock`;
+  const client = (args: string[]) => runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', '--url', url, ...args] });
+  try {
+    await runtime.start(session);
+    await expect.poll(() => existsSync(ready), { timeout: 180_000 }).toBe(true);
+    const before = await client(['ps', '--all', '--filter', `name=${name}`, '--format', '{{.Names}}']);
+    const volumes = await client(['volume', 'ls', '--quiet']);
+    expect(before.stdout.trim()).toBe(name);
+    expect(volumes.stdout.trim()).not.toBe('');
+    await runtime.stop(shipId);
+    await runtime.start({ ...session, command: [...FAKE_CLAUDE_CODE] });
+    const after = await client(['ps', '--all', '--filter', `name=${name}`, '--quiet']);
+    const remaining = await client(['volume', 'ls', '--quiet']);
+    expect([after.stdout.trim(), remaining.stdout.trim()]).toEqual(['', '']);
+    const own = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', 'ps', '--all', '--filter', `name=${name}`, '--quiet'] });
+    expect(own.stdout.trim()).toBe('');
+  } finally {
+    await runtime.stop(shipId);
+    const config = join(shipFolder, 'containers', 'storage.conf');
+    if (existsSync(config)) {
+      await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${config}`, 'podman', 'rm', '--all', '--force', '--time', '0', '--volumes'] });
+      await runCommand('podman', { args: ['unshare', 'rm', '-rf', '--', shipFolder] });
+    }
+  }
+}, 240_000);
+
 it('stops a session when its hold exits before it can be signalled', async () => {
   const runtime = aRuntime();
   const shipId = await aClaudeCodeSession(runtime);
