@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -39,6 +39,22 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(home, { recursive: true, force: true });
+});
+
+describe('host Claude Code subscription token', () => {
+  it('blocks only Claude Code subscription sessions until the machine token is written', async () => {
+    const modelTokenFile = join(home, 'model-token');
+    const logins = createModelLogins({ ...harnesses(), modelTokenFile });
+    await keys.write('claude-code', 'test-key-not-real');
+
+    expect(await logins.startProblem({ harness: 'claude-code', login: 'subscription', options: {} })).toContain('model token');
+    await expect(logins.startProblem({ harness: 'claude-code', login: 'apiKey', options: {} })).resolves.toBeUndefined();
+    await expect(logins.startProblem({ harness: 'codex', login: 'subscription', options: {} })).resolves.toBeUndefined();
+    writeFileSync(modelTokenFile, '  \n');
+    expect(await logins.startProblem({ harness: 'claude-code', login: 'subscription', options: {} })).toContain('model token');
+    writeFileSync(modelTokenFile, 'test-token\n');
+    await expect(logins.startProblem({ harness: 'claude-code', login: 'subscription', options: {} })).resolves.toBeUndefined();
+  });
 });
 
 describe('whether a session can start on its login (api keys K9)', () => {
