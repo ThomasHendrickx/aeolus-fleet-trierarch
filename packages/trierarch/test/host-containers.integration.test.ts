@@ -91,7 +91,7 @@ it("cleans up a killed host session's Testcontainers container and volume on res
       await removeWithinIsolatedUserNamespace('podman')(shipFolder);
     }
     rmSync(runtimeDirectory, { recursive: true, force: true });
-    rmSync(sessions, { recursive: true, force: true });
+    await removeWithinIsolatedUserNamespace('podman')(sessions);
     rmSync(folder, { recursive: true, force: true });
   }
 }, 240_000);
