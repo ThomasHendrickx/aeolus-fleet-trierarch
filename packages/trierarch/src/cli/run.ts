@@ -162,6 +162,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   });
   const claudeCodeSetup = createClaudeCodeSetup({ homeDirectory, managedSettings, ...(env.CLAUDE_CONFIG_DIR !== undefined && { configDirectory: env.CLAUDE_CONFIG_DIR }) });
   const modelLogins = createModelLogins({
+    ...(configuration.runtime?.kind !== 'container' && { modelTokenFile: paths.modelToken }),
     keyStates: createKeyStates({ keys: paths.keys, file: keyStatesFileOf(paths.proxy) }),
     // The harness as launch reads it, so the guard sees the flags the session would start with (K6).
     claudeCode: { keyInReach: ({ options, folder }) => claudeCodeKeyInReach(claudeCodeSetup, { harness: configuration.harnesses['claude-code'] ?? { flags: [], options: {} }, options, ...(folder !== undefined && { folder }) }) },
