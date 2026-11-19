@@ -175,6 +175,9 @@ it.runIf(process.platform === 'linux')('starts the host session with its own soc
     await expect.poll(() => starts().length).toBeGreaterThan(0);
     expect(starts()[0]?.env.DOCKER_HOST).toBe(`unix://${shipFolder}/podman.sock`);
     expect(existsSync(join(shipFolder, 'podman.sock'))).toBe(false);
+    const runtimeRoot = await userRuntimeDirectory();
+    if (runtimeRoot === undefined) throw new Error('no private user runtime directory');
+    await expect.poll(() => existsSync(shipPodmanRuntime(runtimeRoot, shipId))).toBe(false);
     await expect.poll(async () => (await runtime.events(shipId)).join('\n')).toContain('podman-refused');
     expect(() => {
       for (const line of readFileSync(join(sessions, shipId, 'events.jsonl'), 'utf8').trim().split('\n')) JSON.parse(line);
@@ -246,6 +249,9 @@ it.runIf(process.platform === 'linux')("cleans up a killed host session's Testco
     const started = await own(['run', '--detach', '--name', ownContainer, '--network', 'bridge', ownImage, 'sleep', '120']);
     expect(started.status).toBe(0);
     await runtime.start(session);
+    const info = await client(['info', '--format', '{{.Store.GraphRoot}}']);
+    expect(info.status, info.stderr).toBe(0);
+    expect(info.stdout.trim()).toBe(join(shipFolder, 'containers', 'graph'));
     await expect.poll(() => existsSync(ready), { timeout: 180_000 }).toBe(true);
     const before = await client(['ps', '--all', '--filter', `name=${name}`, '--format', '{{.Names}}']);
     const volumes = await client(['volume', 'ls', '--quiet']);
