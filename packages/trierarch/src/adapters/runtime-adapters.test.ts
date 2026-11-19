@@ -72,6 +72,8 @@ function adaptersOf(runtime?: TrierarchConfiguration['runtime'], shipsRoot?: str
 describe('the adapters the session runtime picks (decision 0039)', () => {
   it('points host sessions at the trierarch cache', async () => {
     const { sessions } = adaptersOf();
+    mkdirSync(paths.home, { recursive: true });
+    writeFileSync(paths.modelToken, MODEL_TOKEN);
     try {
       await sessions.start({ shipId, folder: home, shipFolder: join(home, 'ship'), command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
       const file = join(home, 'fake-starts.jsonl');
