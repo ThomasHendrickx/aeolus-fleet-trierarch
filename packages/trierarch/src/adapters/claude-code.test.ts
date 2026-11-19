@@ -741,6 +741,21 @@ describe('Claude Code in containers, each ship with a home of its own (decision 
     expect(await setup.isTrusted(folder)).toBe(true);
   });
 
+  it('finds the host identity of a session started before ship homes', async () => {
+    const shipFolder = join(homes, 'ships', shipId);
+    await harness().prepareIdentity({ folder, identity, crewToken: CREW_TOKEN });
+    const upgraded = createClaudeCodeHarness({
+      configuration: CONFIGURATION,
+      plugin: { root: () => Promise.resolve(PLUGIN_ROOT), data, crews },
+      projects,
+      setup: createClaudeCodeSetup({ homeDirectory: home, managedSettings: join(home, 'managed') }),
+      hostShipHomes: { homes, managedSettings: join(home, 'managed') },
+      permissionModes: () => undefined,
+      sessions: { start: () => Promise.resolve(), send: () => Promise.resolve(), interrupt: () => Promise.resolve(), events: () => Promise.resolve([]), lastEventAt: () => Promise.resolve(undefined) },
+    });
+    await expect(upgraded.hasIdentity({ shipId, folder, shipFolder })).resolves.toBe(true);
+  });
+
   it("keeps each ship's identity in its own home alone, never in the host's home or another ship's", async () => {
     await inContainers().prepareIdentity({ folder, identity, crewToken: CREW_TOKEN });
     await inContainers().prepareIdentity({ folder, identity: otherIdentity, crewToken: CREW_TOKEN });
