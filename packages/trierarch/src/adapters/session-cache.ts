@@ -36,15 +36,12 @@ async function directories(path: string): Promise<string[]> {
 /** Trims whole tool-managed units, never following links or touching a person's cache. */
 export function createSessionCache(options: { root: string; maxBytes?: number }): { trim(now: Date, options?: { isUrgent: boolean }): Promise<void> } {
   let lastCheck: number | undefined;
-  let isRunning = false;
-  return {
-    trim: async (now, request) => {
+  let running: Promise<void> | undefined;
+  const trim = async (now: Date, request?: { isUrgent: boolean }): Promise<void> => {
       const { root, maxBytes } = options;
       const time = now.getTime();
-      if (maxBytes === undefined || isRunning || (request?.isUrgent !== true && lastCheck !== undefined && time - lastCheck < HOUR_MS)) return;
-      isRunning = true;
+      if (maxBytes === undefined || (request?.isUrgent !== true && lastCheck !== undefined && time - lastCheck < HOUR_MS)) return;
       lastCheck = time;
-      try {
         const rootInfo = await lstat(root).catch((error: unknown) => {
           if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined;
           throw error;
@@ -69,9 +66,17 @@ export function createSessionCache(options: { root: string; maxBytes?: number })
           index += 1;
           bytes -= unit.bytes;
         }
-      } finally {
-        isRunning = false;
+  };
+  return {
+    trim: async (now, request) => {
+      if (running !== undefined) {
+        await running.catch(() => undefined);
+        if (request?.isUrgent !== true) return;
       }
+      const current = trim(now, request);
+      running = current;
+      try { await current; }
+      finally { if (running === current) running = undefined; }
     },
   };
 }

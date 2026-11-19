@@ -44,6 +44,7 @@ import { createRefuseModel } from '../core/refuse-model.js';
 import { createReportDetectionProblems } from '../core/report-detection-problems.js';
 import { createHandleDelivery } from '../core/handle-delivery.js';
 import { machineOf } from '../core/machine.js';
+import { createFreeDisk } from '../core/free-disk.js';
 import { createReadLoad } from '../core/read-load.js';
 import { createReadUsage } from '../core/read-usage.js';
 import { createSendReleasedUsage, createSendUsage } from '../core/send-usage.js';
@@ -178,17 +179,10 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   // The machine's load (#400) and the harnesses' usage (#353), each read on its own interval for the report.
   const cache = createSessionCache({ root: join(paths.home, 'cache'), ...(configured.cacheSizeBytes !== undefined && { maxBytes: configured.cacheSizeBytes }) });
   const images = createSessionImages({ binary: configured.runtime?.kind === 'container' ? configured.runtime.binary : 'podman', version });
-  const warnCleanup = (error: unknown): void => { logger.warn(`Could not free disk: ${error instanceof Error ? error.message : String(error)}`); };
   const diskReadings = new Map<string, { at: number; bytes: number }>();
   const readLoad = createReadLoad({ machine: createMachine({ worktreeRoot: shipsRoot }), fleet, state, clock, logger, disk: {
     removeUnusedImages: () => images.removeUnused(),
-    free: async () => {
-      await trash.empty().catch(warnCleanup);
-      await images.removeUnused().catch(warnCleanup);
-      await cache.trim(clock.now(), { isUrgent: true }).catch(warnCleanup);
-      // Cache eviction goes through its trash; reclaim those bytes before reading disk again.
-      await trash.empty().catch(warnCleanup);
-    },
+    free: createFreeDisk({ trash, images, cache, clock, logger }),
     largestShips: async () => {
       const entries = Object.values((await state.load()).entries);
       const held = await Promise.all(entries.map(async (entry) => {

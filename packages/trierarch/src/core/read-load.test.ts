@@ -154,7 +154,7 @@ describe('low disk cleanup before telling argo (#352)', () => {
     expect(trierarch.cleanups()).toBe(2);
   });
 
-  it('still tells argo when cleanup isFailing and the disk remains low', async () => {
+  it('still tells argo when cleanup fails and the disk remains low', async () => {
     const trierarch = diskTrierarch({ isFailing: true });
     await trierarch.read();
     expect(trierarch.fleet.toArgo).toHaveLength(1);

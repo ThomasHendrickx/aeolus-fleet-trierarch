@@ -14,7 +14,7 @@ function disk(at: { hasBrokenTrash?: boolean } = {}) {
   const free = createFreeDisk({
     trash: { empty: () => at.hasBrokenTrash === true ? Promise.reject(new Error('trash unavailable')) : reclaim(remaining.includes('cache') ? 'trash' : 'cache-trash').then(() => []) },
     images: { removeUnused: () => at.hasBrokenTrash === true ? Promise.resolve(remaining.splice(0, 2)).then(() => undefined) : reclaim('images') },
-    cache: { trim: (_now, request) => request?.isUrgent === true ? reclaim('cache') : Promise.reject(new Error('must bypass hourly interval')) },
+    cache: { trim: (_now, request) => request.isUrgent ? reclaim('cache') : Promise.reject(new Error('must bypass hourly interval')) },
     clock: new TestClock(), logger,
   });
   return { free, remaining, logger };
