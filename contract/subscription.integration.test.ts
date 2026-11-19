@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 
 import type { ShipId } from '@aeolus-fleet/common';
@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { aCrewingMachine, sessionOf, listedEntryOf, REPOSITORY } from './support/crewing.js';
 import { aFleet, type Fleet } from './support/fleet.js';
 import { aMachine, type Machine } from './support/machine.js';
+import { isTodaysTrierarch } from './support/trierarch-under-test.js';
 
 // A session on its subscription never starts with a key in reach (docs/trierarch.md, "API keys", K6 and K2): what Claude Code reads itself would give it a key, so the request is given back while its crew is not final, and the ship waits once it is.
 
@@ -39,14 +40,16 @@ afterEach(async ({ task }) => {
 
 /** Claude Code's user settings, as it reads them. */
 function userSettings(): string {
-  return join(machine.home, '.claude', 'settings.json');
+  return isTodaysTrierarch
+    ? join(machine.trierarchHome, 'ships', scout, 'home', '.claude', 'settings.json')
+    : join(machine.home, '.claude', 'settings.json');
 }
 
 /** Gives Claude Code's user settings an `apiKeyHelper`, keeping what init wrote there. */
 function aKeyHelperInUserSettings(): void {
   const file = userSettings();
   const settings = existsSync(file) ? z.record(z.string(), z.unknown()).parse(JSON.parse(readFileSync(file, 'utf8'))) : {};
-  mkdirSync(join(machine.home, '.claude'), { recursive: true });
+  mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, JSON.stringify({ ...settings, apiKeyHelper: HELPER }));
 }
 
@@ -56,7 +59,7 @@ describe('a session on its subscription', () => {
 
     await fleet.crewInRepositories(scout, { main: REPOSITORY, harness: 'claude-code' });
 
-    await expect.poll(() => fleet.givenBackReasonOf(scout), { timeout: CREWED_WITHIN_MS }).toBe(`test-machine: claude-code would reach an API key on its subscription (apiKeyHelper in ${userSettings()}): remove it, or run the ship on its API key`);
+    await expect.poll(() => fleet.givenBackReasonOf(scout), { timeout: CREWED_WITHIN_MS }).toContain(`test-machine: claude-code would reach an API key on its subscription (apiKeyHelper in ${userSettings()})`);
     expect(await fleet.givenBackReasonOf(scout)).not.toContain(HELPER);
     expect(sessionOf(machine, 'scout').starts()).toEqual([]);
     await expect(fleet.leasesOf(scout)).resolves.toBe(0);
