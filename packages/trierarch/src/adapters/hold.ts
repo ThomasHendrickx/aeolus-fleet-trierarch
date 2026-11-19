@@ -7,6 +7,8 @@ import { createServer, type Socket } from 'node:net';
 import type { Readable, Writable } from 'node:stream';
 import { createInterface } from 'node:readline';
 
+import { idSchema } from '@aeolus-fleet/common';
+
 import { codexThreadStartedSchema, codexTurnCommand } from './codex.js';
 import { copilotSessionIdOf, copilotStderrEvent, copilotTurnCommand } from './copilot.js';
 import type { HoldAnswer, HoldFiles, HoldRequest } from './hold-protocol.js';
@@ -14,6 +16,10 @@ import { holdRequestSchema, parsedLine, REFUSED } from './hold-protocol.js';
 import { runCommand } from './run-command.js';
 import { shipPodmanRuntime, userRuntimeDirectory } from './paths.js';
 import { discard } from './trash.js';
+
+const PODMAN_CLEANUP_TIMEOUT_MS = 60_000;
+const PODMAN_SERVICE_START_ATTEMPTS = 100;
+const PODMAN_SERVICE_POLL_MS = 50;
 
 /**
  * The hold (headless H8 to H12): a small process per session, started outside
@@ -214,15 +220,15 @@ export async function runHold(options: HoldOptions): Promise<number> {
       if (runtimeRoot === undefined) {
         logPodman('Podman service could not start: XDG_RUNTIME_DIR is unset and the user runtime directory is missing, not private or not owned');
       } else {
-        shipRuntime = shipPodmanRuntime(runtimeRoot, basename(files.folder));
+        shipRuntime = shipPodmanRuntime(runtimeRoot, idSchema('ship').parse(basename(files.folder)));
         const runroot = join(shipRuntime, 'run');
-        const tmpdir = join(shipRuntime, 'tmp');
-        const podmanStorage = ['--root', graph, '--runroot', runroot, '--tmpdir', tmpdir];
+        const temporaryDirectory = join(shipRuntime, 'tmp');
+        const podmanStorage = ['--root', graph, '--runroot', runroot, '--tmpdir', temporaryDirectory];
         await mkdir(runroot, { recursive: true, mode: 0o700 });
-        await mkdir(tmpdir, { recursive: true, mode: 0o700 });
+        await mkdir(temporaryDirectory, { recursive: true, mode: 0o700 });
         const content = `[storage]\ndriver = "overlay"\ngraphroot = ${JSON.stringify(graph)}\nrootless_storage_path = ${JSON.stringify(graph)}\nrunroot = ${JSON.stringify(runroot)}\n`;
         await writeFile(config, content);
-        const cleanup = async (args: readonly string[]) => runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${config}`, 'podman', ...podmanStorage, ...args], timeoutMs: 60_000 });
+        const cleanup = async (args: readonly string[]) => runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${config}`, 'podman', ...podmanStorage, ...args], timeoutMs: PODMAN_CLEANUP_TIMEOUT_MS });
         clearContainers = async () => {
           const removed = await cleanup(['rm', '--all', '--force', '--time', '0', '--volumes']).catch(() => undefined);
           if (removed?.status !== 0) logPodman(`Podman cleanup failed: ${removed?.stderr ?? 'podman could not start'}`);
@@ -235,10 +241,10 @@ export async function runHold(options: HoldOptions): Promise<number> {
           await mkdir(storage, { recursive: true, mode: 0o700 });
           await writeFile(config, content);
         }
-        const serviceEnv = { ...process.env, CONTAINERS_STORAGE_CONF: config };
-        Reflect.deleteProperty(serviceEnv, 'CONTAINER_HOST');
-        Reflect.deleteProperty(serviceEnv, 'DOCKER_HOST');
-        service = spawn('podman', [...podmanStorage, 'system', 'service', '--time=0', `unix://${socket}`], { env: serviceEnv, detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+        const serviceEnvironment = { ...process.env, CONTAINERS_STORAGE_CONF: config };
+        Reflect.deleteProperty(serviceEnvironment, 'CONTAINER_HOST');
+        Reflect.deleteProperty(serviceEnvironment, 'DOCKER_HOST');
+        service = spawn('podman', [...podmanStorage, 'system', 'service', '--time=0', `unix://${socket}`], { env: serviceEnvironment, detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
         if (service.pid !== undefined) guard.stdin.write(`${String(service.pid)}\n`);
         service.stderr?.on('data', (chunk: Buffer) => { logPodman(`Podman service: ${chunk.toString('utf8').trim()}`); });
         const clearFailedService = async (): Promise<void> => {
@@ -253,9 +259,9 @@ export async function runHold(options: HoldOptions): Promise<number> {
             serviceFailed();
           }
         });
-        for (let attempt = 0; attempt < 100 && service.exitCode === null; attempt += 1) {
+        for (let attempt = 0; attempt < PODMAN_SERVICE_START_ATTEMPTS && service.exitCode === null; attempt += 1) {
           if ((await stat(socket).catch(() => undefined))?.isSocket() === true) break;
-          await wait(50);
+          await wait(PODMAN_SERVICE_POLL_MS);
         }
       }
     } catch (error) {

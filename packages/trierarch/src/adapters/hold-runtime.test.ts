@@ -131,7 +131,7 @@ it.runIf(process.platform === 'linux')("gives every host Podman invocation the s
   const shipFolder = join(sessions, shipId + '-ship');
   const podman = join(folder, 'podman');
   const runtimeRoot = realpathSync(aShortHome('podman-runtime'));
-  const runtimeDir = join(runtimeRoot, 'aeolus', createHash('sha256').update(shipId).digest('hex').slice(0, 12));
+  const runtimeDirectory = join(runtimeRoot, 'aeolus', createHash('sha256').update(shipId).digest('hex').slice(0, 12));
   const calls = join(folder, 'podman-calls');
   writeFileSync(podman, `#!/bin/sh\nprintf '%s\n' "$*" >> '${calls}'\ncase " $* " in *" system service "*) exec sleep 30;; esac\nexit 0\n`);
   chmodSync(podman, 0o755);
@@ -141,15 +141,15 @@ it.runIf(process.platform === 'linux')("gives every host Podman invocation the s
   process.env.XDG_RUNTIME_DIR = runtimeRoot;
   try {
     await runtime.start({ shipId, shipFolder, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
-    expect(statSync(runtimeDir).mode & 0o777).toBe(0o700);
+    expect(statSync(runtimeDirectory).mode & 0o777).toBe(0o700);
     await runtime.stop(shipId);
-    expect(existsSync(runtimeDir)).toBe(false);
+    expect(existsSync(runtimeDirectory)).toBe(false);
     const invocations = readFileSync(calls, 'utf8').trim().split('\n');
     expect(invocations.length).toBeGreaterThanOrEqual(3);
     for (const invocation of invocations) {
       expect(invocation).toContain(`--root ${shipFolder}/containers/graph`);
-      expect(invocation).toContain(`--runroot ${runtimeDir}/run`);
-      expect(invocation).toContain(`--tmpdir ${runtimeDir}/tmp`);
+      expect(invocation).toContain(`--runroot ${runtimeDirectory}/run`);
+      expect(invocation).toContain(`--tmpdir ${runtimeDirectory}/tmp`);
     }
   } finally {
     restore('PATH', previous);

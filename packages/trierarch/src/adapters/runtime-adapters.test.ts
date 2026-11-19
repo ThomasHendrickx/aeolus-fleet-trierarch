@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FAKE_CLAUDE_CODE, TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
 import { newId, inRepositories } from '../../test/support/in-memory.js';
 import { aShortHome } from '../../test/support/short-home.js';
-import { shipPodmanRuntime, trierarchPaths, userRuntimeDirectory, type TrierarchPaths } from './paths.js';
+import { shipPodmanRuntime, unsharePodmanRuntime, trierarchPaths, userRuntimeDirectory, type TrierarchPaths } from './paths.js';
 import { runCommand } from './run-command.js';
 import { runtimeAdaptersOf } from './runtime-adapters.js';
 import { removeWithinIsolatedUserNamespace } from './trash.js';
@@ -158,7 +158,7 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
     const fixture = join(home, 'fixture');
     const runtimeRoot = await userRuntimeDirectory();
     if (runtimeRoot === undefined) throw new Error('no private user runtime directory');
-    const runtime = shipPodmanRuntime(runtimeRoot, `${shipId}-fixture`);
+    const runtime = unsharePodmanRuntime(runtimeRoot, fixture);
     mkdirSync(join(runtime, 'run'), { recursive: true });
     mkdirSync(join(runtime, 'tmp'));
     const owned = await runCommand('podman', { args: ['--root', join(fixture, 'graph'), '--runroot', join(runtime, 'run'), '--tmpdir', join(runtime, 'tmp'), 'unshare', 'chown', '-R', '1:1', inner] });

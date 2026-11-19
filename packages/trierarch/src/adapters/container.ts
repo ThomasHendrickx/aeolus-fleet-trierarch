@@ -13,6 +13,10 @@ import { discard, moveWithinIsolatedUserNamespace, moveWithinUserNamespace, remo
 const PREFIX = 'trierarch-';
 const OWNER_LABEL = 'aeolus.trierarch';
 const CONTAINER_OWNER = 'aeolus-trierarch';
+const PODMAN_CLEANUP_TIMEOUT_MS = 60_000;
+const NESTED_CONTAINER_STORAGE = '/containers';
+const NESTED_CONTAINER_RUNTIME = '/containers-runtime';
+
 /** The variable Claude Code reads its long-lived model token from (`claude setup-token`). */
 export const MODEL_TOKEN_VARIABLE = 'CLAUDE_CODE_OAUTH_TOKEN';
 /** The session user's home in the image, where each container gets its ship's own home. */
@@ -169,15 +173,14 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
     removeWithinUserNamespace: removeWithinUserNamespace(options.binary),
     heldAs: async ({ shipId, folder, command, env = {}, proxyToken, shipFolder }, files) => {
       const login: Record<string, string> = proxyToken === undefined ? { [MODEL_TOKEN_VARIABLE]: (await readFile(options.tokenFile, 'utf8')).trim() } : {};
-      const nestedStorage = '/containers';
       const runtimeRoot = options.platform === 'linux' && shipFolder !== undefined ? await userRuntimeDirectory() : undefined;
       let shipRuntime = runtimeRoot === undefined ? undefined : shipPodmanRuntime(runtimeRoot, shipId);
-      const nestedEnv: Readonly<Record<string, string>> = options.platform === 'linux' && shipFolder !== undefined ? {
-        CONTAINERS_CONF: `${nestedStorage}/containers.conf`,
-        CONTAINERS_STORAGE_CONF: `${nestedStorage}/storage.conf`,
-        XDG_RUNTIME_DIR: '/containers-runtime',
+      const nestedEnvironment: Readonly<Record<string, string>> = options.platform === 'linux' && shipFolder !== undefined ? {
+        CONTAINERS_CONF: `${NESTED_CONTAINER_STORAGE}/containers.conf`,
+        CONTAINERS_STORAGE_CONF: `${NESTED_CONTAINER_STORAGE}/storage.conf`,
+        XDG_RUNTIME_DIR: NESTED_CONTAINER_RUNTIME,
       } : {};
-      const content = envFileOf({ ...env, ...login, ...nestedEnv });
+      const content = envFileOf({ ...env, ...login, ...nestedEnvironment });
       const network = proxyToken === undefined ? [] : ['--network', proxyNetworkOf(await proxyPortOf(options.proxyUrl))];
       const ship = { shipId, ...(shipFolder !== undefined && { shipFolder }) };
       const home = shipHome(options.homes, ship);
@@ -197,7 +200,7 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
           shipRuntime = undefined;
         }
       }
-      const runtimeMount = shipRuntime === undefined ? [] : ['--volume', `${shipRuntime}:/containers-runtime`];
+      const runtimeMount = shipRuntime === undefined ? [] : ['--volume', `${shipRuntime}:${NESTED_CONTAINER_RUNTIME}`];
       if (storage !== undefined && shipFolder !== undefined) {
         if (shipRuntime === undefined) {
           await appendFile(files.events, `${JSON.stringify({ type: 'system', subtype: 'podman', message: 'Nested Podman cannot start: no private user runtime directory' })}\n`);
@@ -205,18 +208,18 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
         const hasStorage = (await stat(storage).catch(() => undefined)) !== undefined;
         const prepareStorage = async (): Promise<void> => {
           await mkdir(storage, { recursive: true, mode: 0o700 });
-          await writeFile(join(storage, 'storage.conf'), `[storage]\ndriver = "overlay"\ngraphroot = "${nestedStorage}/graph"\nrootless_storage_path = "${nestedStorage}/graph"\nrunroot = "/containers-runtime/run/containers"\n[storage.options.overlay]\nmount_program = "/usr/bin/fuse-overlayfs"\n`);
-          await writeFile(join(storage, 'containers.conf'), `[containers]\ncgroups = "disabled"\ndefault_sysctls = []\n[engine]\ncgroup_manager = "cgroupfs"\nevents_logger = "file"\ntmp_dir = "/containers-runtime/tmp"\n`);
+          await writeFile(join(storage, 'storage.conf'), `[storage]\ndriver = "overlay"\ngraphroot = "${NESTED_CONTAINER_STORAGE}/graph"\nrootless_storage_path = "${NESTED_CONTAINER_STORAGE}/graph"\nrunroot = "${NESTED_CONTAINER_RUNTIME}/run/containers"\n[storage.options.overlay]\nmount_program = "/usr/bin/fuse-overlayfs"\n`);
+          await writeFile(join(storage, 'containers.conf'), `[containers]\ncgroups = "disabled"\ndefault_sysctls = []\n[engine]\ncgroup_manager = "cgroupfs"\nevents_logger = "file"\ntmp_dir = "${NESTED_CONTAINER_RUNTIME}/tmp"\n`);
         };
         await prepareStorage();
         if (hasStorage) {
           const cleaned = shipRuntime === undefined ? undefined : await run(options.binary, { args: [
             'run', '--rm', '--pull=never', `--userns=keep-id:${SESSION_USER}`,
             '--device', '/dev/fuse', '--device', '/dev/net/tun', '--cap-add', 'SYS_ADMIN', '--security-opt', 'unmask=ALL',
-            '--volume', `${home}:${SESSION_HOME}`, '--volume', `${storage}:${nestedStorage}`, ...runtimeMount,
-            '--env', `HOME=${SESSION_HOME}`, ...Object.entries(nestedEnv).flatMap(([key, value]) => ['--env', `${key}=${value}`]), '--entrypoint', '/bin/sh', options.image, '-c',
+            '--volume', `${home}:${SESSION_HOME}`, '--volume', `${storage}:${NESTED_CONTAINER_STORAGE}`, ...runtimeMount,
+            '--env', `HOME=${SESSION_HOME}`, ...Object.entries(nestedEnvironment).flatMap(([key, value]) => ['--env', `${key}=${value}`]), '--entrypoint', '/bin/sh', options.image, '-c',
             'podman rm --all --force --time 0 --volumes && podman volume rm --all --force',
-          ], timeoutMs: 60_000 }).catch(() => undefined);
+          ], timeoutMs: PODMAN_CLEANUP_TIMEOUT_MS }).catch(() => undefined);
           if (cleaned?.status !== 0) {
             await appendFile(files.events, `${JSON.stringify({ type: 'system', subtype: 'podman', message: `Nested Podman cleanup failed: ${cleaned?.stderr ?? 'runtime could not start'}` })}\n`);
             await discard(storage, { at: new Date(), into: dirname(shipFolder), withinUserNamespace: moveWithinIsolatedUserNamespace(options.binary, run) });
@@ -262,7 +265,7 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
           '--volume',
           `${shipSockets}:${shipSockets}`,
           ...((shipFolder ?? (options.shipsRoot === undefined ? undefined : join(options.shipsRoot, shipId))) === undefined ? [] : ['--volume', `${join(shipFolder ?? join(options.shipsRoot ?? '', shipId), 'tmp')}:/tmp`]),
-          ...(storage === undefined ? [] : ['--volume', `${storage}:${nestedStorage}`, ...runtimeMount]),
+          ...(storage === undefined ? [] : ['--volume', `${storage}:${NESTED_CONTAINER_STORAGE}`, ...runtimeMount]),
           '--env',
           `HOME=${SESSION_HOME}`,
           ...(proxyToken === undefined ? [] : ['--env', proxyToken.variable]),

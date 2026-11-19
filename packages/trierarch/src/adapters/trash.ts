@@ -4,7 +4,7 @@ import { basename, dirname, join } from 'node:path';
 
 import type { LeftInTrash, TrashPort } from '../core/ports.js';
 import { runCommand, type CommandResult } from './run-command.js';
-import { shipPodmanRuntime, userRuntimeDirectory } from './paths.js';
+import { unsharePodmanRuntime, userRuntimeDirectory } from './paths.js';
 
 /**
  * The trash a ship's clone and its ship's home go to when they are removed
@@ -222,16 +222,16 @@ async function isolatedUnshare(runtime: { binary: string; run: Run }, call: { tr
     await rm(scratch, { recursive: true, force: true });
     throw new Error('Podman unshare needs XDG_RUNTIME_DIR or a private owned user runtime directory');
   }
-  const runtimeDir = shipPodmanRuntime(runtimeRoot, scratch);
+  const runtimeDirectory = unsharePodmanRuntime(runtimeRoot, scratch);
   try {
     const graph = join(scratch, 'graph');
-    const runroot = join(runtimeDir, 'run');
-    const tmp = join(runtimeDir, 'tmp');
+    const runroot = join(runtimeDirectory, 'run');
+    const temporaryDirectory = join(runtimeDirectory, 'tmp');
     await mkdir(runroot, { recursive: true, mode: PRIVATE_FOLDER_MODE });
-    await mkdir(tmp, { recursive: true, mode: PRIVATE_FOLDER_MODE });
-    await withinUserNamespace(runtime, { args, flags: ['--root', graph, '--runroot', runroot, '--tmpdir', tmp] });
+    await mkdir(temporaryDirectory, { recursive: true, mode: PRIVATE_FOLDER_MODE });
+    await withinUserNamespace(runtime, { args, flags: ['--root', graph, '--runroot', runroot, '--tmpdir', temporaryDirectory] });
   } finally {
-    await rm(runtimeDir, { recursive: true, force: true });
+    await rm(runtimeDirectory, { recursive: true, force: true });
     await rm(scratch, { recursive: true, force: true });
   }
 }

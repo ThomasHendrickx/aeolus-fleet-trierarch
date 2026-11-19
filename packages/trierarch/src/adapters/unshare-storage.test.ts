@@ -1,5 +1,5 @@
 import { mkdtemp, mkdir, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { tmpdir as systemTemporaryDirectory } from 'node:os';
 import { join } from 'node:path';
 
 import { expect, it } from 'vitest';
@@ -9,7 +9,7 @@ import { aShortHome } from '../../test/support/short-home.js';
 import { moveWithinIsolatedUserNamespace, removeWithinIsolatedUserNamespace } from './trash.js';
 
 it('isolates every Podman unshare call from the user runtime', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'unshare-storage-'));
+  const root = await mkdtemp(join(systemTemporaryDirectory(), 'unshare-storage-'));
   const runtime = aShortHome('unshare-runtime');
   const previous = process.env.XDG_RUNTIME_DIR;
   process.env.XDG_RUNTIME_DIR = runtime;
@@ -27,10 +27,10 @@ it('isolates every Podman unshare call from the user runtime', async () => {
     for (const args of calls) {
       const rootPath = args[args.indexOf('--root') + 1] ?? '';
       const runroot = args[args.indexOf('--runroot') + 1] ?? '';
-      const tmp = args[args.indexOf('--tmpdir') + 1] ?? '';
+      const temporaryDirectory = args[args.indexOf('--tmpdir') + 1] ?? '';
       expect(rootPath.startsWith(`${trash}/`)).toBe(true);
       expect(runroot.startsWith(`${runtime}/aeolus/`)).toBe(true);
-      expect(tmp.startsWith(`${runtime}/aeolus/`)).toBe(true);
+      expect(temporaryDirectory.startsWith(`${runtime}/aeolus/`)).toBe(true);
       expect(args).toContain('unshare');
     }
   } finally {

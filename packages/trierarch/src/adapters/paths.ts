@@ -126,7 +126,19 @@ export async function userRuntimeDirectory(): Promise<string | undefined> {
   return uid === undefined ? undefined : runtimeDirectoryOf({ xdg: process.env.XDG_RUNTIME_DIR, fallback: `/run/user/${String(uid)}`, uid });
 }
 
-/** The short runtime directory of one ship or one isolated unshare operation. */
-export function shipPodmanRuntime(root: string, id: string): string {
-  return join(root, 'aeolus', createHash('sha256').update(id).digest('hex').slice(0, 12));
+/** Keeps rootless network socket paths within the system socket path limit. */
+const PODMAN_RUNTIME_HASH_LENGTH = 12;
+
+function podmanRuntime(root: string, key: string): string {
+  return join(root, 'aeolus', createHash('sha256').update(key).digest('hex').slice(0, PODMAN_RUNTIME_HASH_LENGTH));
+}
+
+/** The short runtime directory of one ship. */
+export function shipPodmanRuntime(root: string, shipId: ShipId): string {
+  return podmanRuntime(root, shipId);
+}
+
+/** The short runtime directory of one isolated unshare operation, keyed by its scratch path. */
+export function unsharePodmanRuntime(root: string, scratchPath: string): string {
+  return podmanRuntime(root, scratchPath);
 }
