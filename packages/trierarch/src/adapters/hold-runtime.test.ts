@@ -202,6 +202,8 @@ it.runIf(process.platform === 'linux')("cleans up a killed host session's Testco
     await expect.poll(() => existsSync(ready), { timeout: 180_000 }).toBe(true);
     const before = await client(['ps', '--all', '--filter', `name=${name}`, '--format', '{{.Names}}']);
     const volumes = await client(['volume', 'ls', '--quiet']);
+    const images = await client(['image', 'ls', '--quiet']);
+    expect(images.stdout.trim()).not.toBe('');
     expect(before.stdout.trim()).toBe(name);
     expect(volumes.stdout.trim()).not.toBe('');
     const ownVolumes = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', 'volume', 'ls', '--quiet'] });
@@ -212,6 +214,8 @@ it.runIf(process.platform === 'linux')("cleans up a killed host session's Testco
     await runtime.start({ ...session, command: [...FAKE_CLAUDE_CODE] });
     const after = await client(['ps', '--all', '--filter', `name=${name}`, '--quiet']);
     const remaining = await client(['volume', 'ls', '--quiet']);
+    const retained = await client(['image', 'ls', '--quiet']);
+    expect(retained.stdout.trim()).toBe(images.stdout.trim());
     expect([after.stdout.trim(), remaining.stdout.trim()]).toEqual(['', '']);
     const own = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', 'ps', '--all', '--filter', `name=${name}`, '--quiet'] });
     expect(own.stdout.trim()).toBe('');
