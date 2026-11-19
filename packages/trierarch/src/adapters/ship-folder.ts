@@ -118,6 +118,7 @@ export async function prepareShipFolder(at: {
   const folder = join(shipFolder, SHIP_FOLDER);
   await mkdir(dirname(shipFolder), { recursive: true });
   await mkdir(shipFolder, { recursive: true, mode: SHIP_FOLDER_MODE });
+  await mkdir(join(shipFolder, 'tmp'), { recursive: true, mode: SHIP_FOLDER_MODE });
   await mkdir(join(folder, SUB_REPOSITORIES_FOLDER), { recursive: true });
   const toTrash = async (path: string): Promise<void> => {
     if ((await lstat(path).catch(() => undefined)) !== undefined) {

@@ -29,8 +29,8 @@ export function modelProxy(at: { paths: TrierarchPaths; version: string; launch?
 }
 
 /** The sessions on the host (headless H4, H8): one hold per ship. */
-export function hostSessions(at: { paths: TrierarchPaths; version: string; launch?: readonly string[]; program?: readonly string[] }): SessionRuntime & SessionRoots {
-  return createHoldRuntime({ sessions: at.paths.sessions, modelTokenFile: at.paths.modelToken, program: at.program ?? TRIERARCH_PROGRAM, version: at.version, platform: process.platform, launch: at.launch ?? [] });
+export function hostSessions(at: { paths: TrierarchPaths; version: string; launch?: readonly string[]; program?: readonly string[]; shipsRoot?: string }): SessionRuntime & SessionRoots {
+  return createHoldRuntime({ sessions: at.paths.sessions, modelTokenFile: at.paths.modelToken, ...(at.shipsRoot !== undefined && { shipsRoot: at.shipsRoot }), program: at.program ?? TRIERARCH_PROGRAM, version: at.version, platform: process.platform, launch: at.launch ?? [] });
 }
 
 /** What runs the sessions, where their workspaces go, and, in containers, where each ship's home is kept. */
@@ -83,7 +83,7 @@ export function runtimeAdaptersOf(at: {
   if (runtime?.kind !== 'container') {
     return {
       modelProxyUrlOf: (url) => url,
-      sessions: hostSessions({ paths, version, launch, ...(at.program !== undefined && { program: at.program }) }),
+      sessions: hostSessions({ paths, version, launch, shipsRoot: root, ...(at.program !== undefined && { program: at.program }) }),
       workspace: createGitWorkspace({ configuration, root, ...(before !== undefined && { before }), ...(trusted !== undefined && { clones: trusted }) }),
       folderProcesses: createFolderProcesses(),
       trash: createTrash({ beside }),
@@ -102,6 +102,7 @@ export function runtimeAdaptersOf(at: {
       memory: runtime.memory,
       cpus: runtime.cpus,
       sessions: paths.sessions,
+      shipsRoot: root,
       program: at.program ?? TRIERARCH_PROGRAM,
       version,
       platform: process.platform,

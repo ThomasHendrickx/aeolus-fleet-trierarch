@@ -380,6 +380,33 @@ func TestASessionsSecretVariablesGoInItsEnvFileAloneNeverOnTheCommandLine(t *tes
 	}
 }
 
+func TestContainerStartsWithAnEmptyShipTempMountedAtTmp(t *testing.T) {
+	r, _ := aContainerRuntime(t)
+	shipFolder := filepath.Join(t.TempDir(), "ships", scout)
+	temp := filepath.Join(shipFolder, "tmp")
+	if err := os.MkdirAll(temp, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(temp, "old"), []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	session := aSession(t.TempDir())
+	session.ShipFolder = shipFolder
+	held, err := r.heldAs(session, filesOf(t, r))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(held.Command, temp+":/tmp") {
+		t.Fatalf("command %q does not mount ship temp", held.Command)
+	}
+	if _, err := os.Stat(filepath.Join(temp, "old")); !os.IsNotExist(err) {
+		t.Fatalf("old temp remains: %v", err)
+	}
+	if mode := modeOf(t, temp); mode != 0700 {
+		t.Fatalf("temp mode %v, want 0700", mode)
+	}
+}
+
 func TestAShipCrewedFreshHasItsHomeAndItsSocketFolderInItsShipsFolderMadeForItsOwnerAlone(t *testing.T) {
 	r, _ := aContainerRuntime(t)
 	shipFolder := filepath.Join(t.TempDir(), "ships", scout)

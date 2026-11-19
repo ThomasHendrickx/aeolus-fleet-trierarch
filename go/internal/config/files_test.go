@@ -2,12 +2,39 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestLoadsAndWritesTheShipSizeLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	text := `{"caps":{"ships":4,"running":2},"repositories":{},"folders":{},"harnesses":{},"shipSizeBytes":9007199254740991}`
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	configuration, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Write(path, configuration); err != nil {
+		t.Fatal(err)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(written, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(fields["shipSizeBytes"]); got != "9007199254740991" {
+		t.Errorf("shipSizeBytes = %s, want 9007199254740991", got)
+	}
+}
 
 func TestAFreshConfigurationWritesNoRepositoryNoFolderAndNoHarness(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")

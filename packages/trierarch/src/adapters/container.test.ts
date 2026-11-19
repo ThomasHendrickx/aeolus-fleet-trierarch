@@ -1,11 +1,11 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createNetServer, type Server as NetServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 
 import type { ShipId } from '@aeolus-fleet/common';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, inject, it, vi } from 'vitest';
 
 import { TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
 import { newId } from '../../test/support/in-memory.js';
@@ -143,6 +143,19 @@ describe('the session runtime contract, on rootless Podman under holds', { timeo
     await expect.poll(async () => shown(shipId), { timeout: 5000 }).toContain('working on the forced one');
     expect(await shown(shipId)).toContain('error_during_execution');
     await expect(runtime.list()).resolves.toEqual([{ shipId, status: 'running' }]);
+  });
+
+  it('gives a container an empty ship temp at /tmp on every session start', async () => {
+    const shipId = newId('ship');
+    const shipFolder = join(folder, 'ships', shipId);
+    const temp = join(shipFolder, 'tmp');
+    mkdirSync(temp, { recursive: true });
+    writeFileSync(join(temp, 'old'), 'old');
+    await runtime.start({ shipId, folder, shipFolder, command: ['sh', '-c', 'test ! -e /tmp/old && echo empty; echo written > /tmp/from-container; sleep 30'], harness: 'claude-code' });
+    await expect.poll(async () => shown(shipId), { timeout: 10_000 }).toContain('empty');
+    await expect.poll(() => existsSync(join(temp, 'from-container')), { timeout: 10_000 }).toBe(true);
+    await runtime.start({ shipId, folder, shipFolder, command: ['sh', '-c', 'test ! -e /tmp/from-container && echo empty-again; sleep 30'], harness: 'claude-code' });
+    await expect.poll(async () => shown(shipId), { timeout: 10_000 }).toContain('empty-again');
   });
 
   it('runs the container under the hold, not detached: stopping the session removes its container (H18)', async () => {
@@ -367,8 +380,8 @@ describe('the container a session runs in', () => {
     rmSync(sessions, { recursive: true, force: true });
   });
 
-  function runtimeWith(runner: ReturnType<typeof recordingRunner>, options: { launch?: readonly string[]; proxyUrl?: () => Promise<string | undefined> } = {}): ReturnType<typeof createContainerRuntime> {
-    const runtime = createContainerRuntime({ binary, image, tokenFile, homes, sockets, sessions, program: TRIERARCH_PROGRAM, version: VERSION, platform: process.platform, ...CAPS, run: runner.run, proxyUrl: options.proxyUrl ?? (() => Promise.resolve('http://127.0.0.1:4100')), ...(options.launch !== undefined && { launch: options.launch }) });
+  function runtimeWith(runner: ReturnType<typeof recordingRunner>, options: { launch?: readonly string[]; proxyUrl?: () => Promise<string | undefined>; shipsRoot?: string } = {}): ReturnType<typeof createContainerRuntime> {
+    const runtime = createContainerRuntime({ binary, image, tokenFile, homes, sockets, sessions, program: TRIERARCH_PROGRAM, version: VERSION, platform: process.platform, ...CAPS, run: runner.run, ...(options.shipsRoot !== undefined && { shipsRoot: options.shipsRoot }), proxyUrl: options.proxyUrl ?? (() => Promise.resolve('http://127.0.0.1:4100')), ...(options.launch !== undefined && { launch: options.launch }) });
     runtimes.push(runtime);
     return runtime;
   }
@@ -450,13 +463,52 @@ describe('the container a session runs in', () => {
     });
   });
 
+  it('empties the ship temp before each container start and mounts it as /tmp', async () => {
+    const shipFolder = join(folder, 'ships', shipId);
+    const temp = join(shipFolder, 'tmp');
+    mkdirSync(temp, { recursive: true });
+    writeFileSync(join(temp, 'old'), 'old');
+    const { runtime, words } = await started({ shipFolder });
+    expect([existsSync(join(temp, 'old')), valuesOf(words, '--volume')]).toEqual([false, expect.arrayContaining([`${temp}:/tmp`])]);
+    writeFileSync(join(temp, 'during'), 'running');
+    await runtime.start({ shipId, folder, shipFolder, command: ['claude'], harness: 'claude-code' });
+    expect(existsSync(join(temp, 'during'))).toBe(false);
+  });
+
+  it('mounts the temp of a ship crewed before ship folders without moving its home or socket', async () => {
+    const shipsRoot = join(folder, 'ships');
+    const runtime = runtimeWith(recordingRunner(), { shipsRoot });
+    await runtime.start({ shipId, folder, command: ['claude'], harness: 'claude-code' });
+    expect(valuesOf(await wordsRun(), '--volume')).toEqual([`${folder}:${folder}`, `${homes}/${shipId}:/home/ubuntu`, `${sockets}/${shipId}:${sockets}/${shipId}`, `${shipsRoot}/${shipId}/tmp:/tmp`]);
+  });
+
+  it('moves temp a container left unreadable to the trash and logs it before starting', async () => {
+    const shipFolder = join(folder, 'ships', shipId);
+    const temp = join(shipFolder, 'tmp');
+    const locked = join(temp, 'locked');
+    mkdirSync(locked, { recursive: true });
+    writeFileSync(join(locked, 'left'), 'left');
+    chmodSync(locked, 0o500);
+    writeFileSync(binary, `#!/bin/sh\nif [ "$1" = unshare ]; then exit 1; fi\nenv > "$0.env"\nfor word in "$@"; do printf '%s\\n' "$word"; done > "$0.words"\nexec sleep 30\n`);
+    const logged = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      await started({ shipFolder });
+      const trashed = readdirSync(join(folder, 'ships', '.trash'));
+      expect([readdirSync(temp), trashed.length]).toEqual([[], 1]);
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining('moved it to the trash'));
+      chmodSync(join(folder, 'ships', '.trash', trashed[0] ?? '', 'locked'), 0o700);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
   it("mounts the home and the socket folder in the ship's folder of a ship crewed fresh, each made for its owner alone, and nothing under the homes or sockets of the ships crewed before", async () => {
     const shipFolder = join(folder, 'ships', shipId);
 
     const { words } = await started({ shipFolder });
 
     const [home, shipSockets] = [join(shipFolder, 'home'), join(shipFolder, 'sockets')];
-    expect(valuesOf(words, '--volume')).toEqual([`${folder}:${folder}`, `${home}:/home/ubuntu`, `${shipSockets}:${shipSockets}`]);
+    expect(valuesOf(words, '--volume')).toEqual([`${folder}:${folder}`, `${home}:/home/ubuntu`, `${shipSockets}:${shipSockets}`, `${join(shipFolder, 'tmp')}:/tmp`]);
     expect([statSync(home).mode & 0o777, statSync(shipSockets).mode & 0o777, existsSync(join(homes, shipId)), existsSync(join(sockets, shipId))]).toEqual([0o700, 0o700, false, false]);
   });
 

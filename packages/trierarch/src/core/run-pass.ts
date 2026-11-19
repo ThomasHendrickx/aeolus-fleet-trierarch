@@ -369,7 +369,8 @@ async function crewFailed(state: TrierarchState, at: EntryAt & { reason: string 
 async function observe(state: TrierarchState, at: { deps: RunPassDeps; missingPlugins: ReadonlySet<string> }): Promise<Observed> {
   const { deps, missingPlugins } = at;
   const sessions = await deps.processes.list();
-  const folders = await deps.workspace.foldersUnderRoot();
+  const legacyFolders = await Promise.all(Object.values(state.entries).filter((entry) => entry.shipFolder === undefined).map((entry) => deps.workspace.shipFolderOf(entry.shipId)));
+  const folders = (await deps.workspace.foldersUnderRoot()).filter((folder) => !legacyFolders.some((legacy) => folder === legacy || folder.startsWith(`${legacy}/`)));
   const ships: Record<string, Observed['ships'][string]> = {};
   const launches: Record<string, LaunchSeen> = {};
   const failureReasons: Record<string, string> = {};
@@ -823,11 +824,18 @@ async function release(state: TrierarchState, at: { shipId: Entry['shipId']; dep
 async function removeWorkspace(at: EntryAt): Promise<string> {
   const { entry, deps } = at;
   const { folder, shipFolder } = entry;
+  const removeLegacyTemp = async (): Promise<void> => {
+    if (shipFolder === undefined) {
+      const legacyTemp = await deps.workspace.shipFolderOf(entry.shipId);
+      if (await deps.workspace.hasShipFolder(legacyTemp)) await deps.workspace.removeShipFolder(legacyTemp);
+    }
+  };
   if (folder === undefined) {
     if (shipFolder !== undefined) {
       await deps.folderProcesses.stopIn(shipFolder);
       await deps.workspace.removeShipFolder(shipFolder);
     }
+    await removeLegacyTemp();
     return 'its worktree removed';
   }
   // The ship's folder goes whole, so what runs anywhere in it stops, not only in its repositories (#436); a ship crewed before the
@@ -843,10 +851,12 @@ async function removeWorkspace(at: EntryAt): Promise<string> {
     if (shipFolder !== undefined) {
       await deps.workspace.removeShipFolder(shipFolder);
     }
+    await removeLegacyTemp();
     return `its folder kept: ${folder}`;
   }
   const held = await heldIn({ entry, deps, folder });
   await (shipFolder === undefined ? deps.workspace.remove(folder) : deps.workspace.removeShipFolder(shipFolder));
+  await removeLegacyTemp();
   const discarded = held.flatMap(({ unsaved }) => unsaved).length;
   if (discarded === 0) {
     return 'its worktree removed';
@@ -883,6 +893,7 @@ async function removeStray(state: TrierarchState, at: { folder: string; deps: Ru
   const { folder, deps } = at;
   // A crew earlier in this pass may have set a folder that reconcile did not know yet.
   const used = Object.values(state.entries).flatMap((entry) => [entry.folder, entry.shipFolder].filter((each) => each !== undefined));
+  used.push(...await Promise.all(Object.values(state.entries).filter((entry) => entry.shipFolder === undefined).map((entry) => deps.workspace.shipFolderOf(entry.shipId))));
   if (used.some((each) => each === folder || each.startsWith(`${folder}/`) || folder.startsWith(`${each}/`))) {
     return state;
   }

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
-import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { uptime } from 'node:os';
+import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 
 import { idSchema, type ShipId } from '@aeolus-fleet/common';
@@ -11,6 +12,7 @@ import { INTERRUPT_WAIT_MS } from './hold.js';
 import { callHold, holdFilesOf, REFUSED, type HoldAnswer, type HoldFiles, type HoldRequest } from './hold-protocol.js';
 import { writeProxyToken } from './proxy-tokens.js';
 import type { runCommand } from './run-command.js';
+import { discard, type MoveWithinUserNamespace } from './trash.js';
 
 /** How long a hold has to answer a call other than interrupt. */
 const CALL_TIMEOUT_MS = 2000;
@@ -76,6 +78,8 @@ export function createHoldRuntime(options: {
   /** The sessions folder: a folder per ship, with its hold's files. */
   sessions: string;
   modelTokenFile?: string;
+  /** The place of ship folders, also for ships crewed before that layout. */
+  shipsRoot?: string;
   /** The trierarch program, which `hold` and its words follow. */
   program: readonly string[];
   version: string;
@@ -88,6 +92,8 @@ export function createHoldRuntime(options: {
   heldAs?: (session: SessionStart, files: HoldFiles) => Promise<HeldCommand>;
   /** When the machine started. */
   bootedAt?: () => Date;
+  moveWithinUserNamespace?: MoveWithinUserNamespace;
+  removeWithinUserNamespace?: (path: string) => Promise<void>;
 }): SessionRuntime & SessionRoots {
   const { sessions, version } = options;
   const bootedAt = options.bootedAt ?? (() => new Date(Date.now() - uptime() * 1000));
@@ -135,6 +141,13 @@ export function createHoldRuntime(options: {
 
   const stop = async (shipId: ShipId): Promise<void> => {
     await options.beside?.stop(shipId);
+    const files = filesOf(shipId);
+    const started = await stat(files.pid).catch(() => undefined);
+    // A previous boot's markers and process ids cannot belong to this session.
+    if (started === undefined || started.mtime < bootedAt()) {
+      await rm(files.folder, { recursive: true, force: true });
+      return;
+    }
     const pid = await runningPid(shipId);
     if (pid !== undefined) {
       signalHold(pid, 'SIGTERM');
@@ -146,7 +159,31 @@ export function createHoldRuntime(options: {
         signalHold(pid, 'SIGKILL');
       }
     }
-    await rm(filesOf(shipId).folder, { recursive: true, force: true });
+    const hasGuard = await access(join(files.folder, 'guard-active')).then(() => true, () => false);
+    if (hasGuard) {
+      const until = Date.now() + STOP_WAIT_MS;
+      while (!(await access(join(files.folder, 'guard-done')).then(() => true, () => false))) {
+        if (Date.now() >= until) throw new Error(`the guard of ${shipId} did not finish stopping its session`);
+        await wait(START_POLL_MS);
+      }
+    } else {
+      const groups = (await readFile(files.harnessSessions, 'utf8').catch(() => '')).split('\n').map(Number).filter((pid) => Number.isInteger(pid) && pid > 1);
+      const isRunning = (): boolean => groups.some((pid) => {
+        try {
+          process.kill(-pid, 0);
+          return true;
+        } catch (error) {
+          if (error instanceof Error && 'code' in error && error.code === 'ESRCH') return false;
+          throw error;
+        }
+      });
+      const until = Date.now() + STOP_WAIT_MS;
+      while (isRunning()) {
+        if (Date.now() >= until) throw new Error(`the processes of ${shipId} did not stop`);
+        await wait(START_POLL_MS);
+      }
+    }
+    await rm(files.folder, { recursive: true, force: true });
   };
 
   const must = async (shipId: ShipId, call: { request: HoldRequest; timeoutMs: number }): Promise<void> => {
@@ -174,6 +211,22 @@ export function createHoldRuntime(options: {
       const { shipId, folder, harness, proxyToken } = session;
       await stop(shipId);
       const files = filesOf(shipId);
+      const shipFolder = session.shipFolder ?? (options.shipsRoot === undefined ? undefined : join(options.shipsRoot, shipId));
+      const temp = shipFolder === undefined ? undefined : join(shipFolder, 'tmp');
+      if (temp !== undefined) {
+        try {
+          await rm(temp, { recursive: true, force: true });
+        } catch (error) {
+          try {
+            if (options.removeWithinUserNamespace === undefined) throw error;
+            await options.removeWithinUserNamespace(temp);
+          } catch {
+            await discard(temp, { at: new Date(), name: `${shipId}-tmp`, into: join(shipFolder ?? '', '..'), ...(options.moveWithinUserNamespace !== undefined && { withinUserNamespace: options.moveWithinUserNamespace }) });
+            process.stderr.write(`Could not empty ${temp}; moved it to the trash: ${String(error)}\n`);
+          }
+        }
+        await mkdir(temp, { recursive: true, mode: 0o700 });
+      }
       // The token goes in the session's folder, which only its user reads, and the hold reads it there: a command line is anyone's to see.
       if (proxyToken !== undefined) {
         await mkdir(files.folder, { recursive: true, mode: 0o700 });
@@ -181,7 +234,7 @@ export function createHoldRuntime(options: {
       }
       const tokenVariable = proxyToken === undefined ? [] : ['--proxy-token-variable', proxyToken.variable];
       const modelToken = harness === 'claude-code' && proxyToken === undefined && options.modelTokenFile !== undefined ? ['--model-token-file', options.modelTokenFile] : [];
-      const { command, env } = options.heldAs === undefined ? { command: session.command, env: session.env ?? {} } : await options.heldAs(session, files);
+      const { command, env } = options.heldAs === undefined ? { command: session.command, env: { ...session.env, ...(temp !== undefined && { TMPDIR: temp, TMP: temp, TEMP: temp }) } } : await options.heldAs(session, files);
       const hold = [...options.program, 'hold', shipId, '--sessions', sessions, '--folder', folder, '--harness', harness, ...tokenVariable, ...modelToken, ...Object.entries(env).flatMap(([variable, value]) => ['--env', `${variable}=${value}`]), '--', ...command];
       const [program = 'sh', ...args] = [...(options.launch ?? []), 'sh', '-c', DETACHED, 'sh', ...hold];
       const starter = spawn(program, args, { stdio: ['ignore', 'ignore', 'pipe'], detached: true });

@@ -226,6 +226,8 @@ describe('a session in a container', () => {
       `${shipHome()}:/home/ubuntu`,
       '--volume',
       `${sockets}:${sockets}`,
+      '--volume',
+      `${join(machine.trierarchHome, 'ships', scout, 'tmp')}:/tmp`,
       ...mcpMount,
       '--env',
       'HOME=/home/ubuntu',

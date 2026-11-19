@@ -356,19 +356,22 @@ describe("a ship's clone in its ship's folder", () => {
 
     const made = mainOf(await workspace().prepare({ ...scout(), shipFolder }));
 
-    expect([made, statSync(join(made, '.git')).isDirectory()]).toEqual([join(shipFolder, 'repositories', 'main'), true]);
+    expect([made, statSync(join(made, '.git')).isDirectory(), statSync(join(shipFolder, 'tmp')).mode & 0o777]).toEqual([join(shipFolder, 'repositories', 'main'), true, 0o700]);
   });
 
   it("goes whole into the trash beside the ship's folder, as the runtime moves it when the host cannot", async () => {
     const shipFolder = await workspace().shipFolderOf(scoutId);
     await workspace().prepare({ ...scout(), shipFolder });
     mkdirSync(join(shipFolder, 'home'));
+    writeFileSync(join(shipFolder, 'tmp', 'scratch'), 'scratch');
     chmodSync(join(shipFolder, 'home'), 0o500);
     const moved: string[] = [];
 
     await workspace({ moveWithinUserNamespace: (from) => { moved.push(from); return Promise.reject(new Error('not moved')); } }).removeShipFolder(shipFolder);
 
-    expect([existsSync(shipFolder), readdirSync(join(root, '.trash')).length, moved]).toEqual([false, 1, []]);
+    const trashed = readdirSync(join(root, '.trash'));
+    expect([existsSync(shipFolder), trashed.length, moved]).toEqual([false, 1, []]);
+    expect(readFileSync(join(root, '.trash', trashed[0] ?? '', 'tmp', 'scratch'), 'utf8')).toBe('scratch');
   });
 
   it("goes into the trash when straight under the place of ships/, and is removed at once when straight under the worktree root of the ships crewed before", async () => {
