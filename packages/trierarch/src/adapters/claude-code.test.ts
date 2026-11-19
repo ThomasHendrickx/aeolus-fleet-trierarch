@@ -731,7 +731,7 @@ describe('Claude Code in containers, each ship with a home of its own (decision 
     });
     await claudeCode.prepareIdentity({ folder, identity, crewToken: CREW_TOKEN, shipFolder });
     await claudeCode.launch({ ...launchOf(shipId), options: {}, isFirstStart: true, shipFolder });
-    expect(started[0]?.env).toMatchObject({ CLAUDE_CONFIG_DIR: join(shipFolder, 'home', '.claude'), AEOLUS_CREWS: join(shipFolder, 'home', '.aeolus', 'crews', 'claude-code') });
+    expect(started[0]?.env).toMatchObject({ CLAUDE_CONFIG_DIR: join(shipFolder, 'home', '.claude'), AEOLUS_CREWS: join(shipFolder, 'home', '.aeolus', 'crews', 'claude-code'), AEOLUS_DATA: join(shipFolder, 'home', '.claude', 'plugins', 'data', 'aeolus-fleet-aeolus-fleet') });
     expect(started[0]?.command).toContain('--plugin-dir');
     expect(started[0]?.command).toContain(PLUGIN_ROOT);
     expect(existsSync(join(shipFolder, 'home', identityFile()))).toBe(true);
