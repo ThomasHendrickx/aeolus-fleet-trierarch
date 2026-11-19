@@ -77,12 +77,14 @@ export async function holdCommand(words: readonly string[], at: { env: Readonly<
     process.stderr.write(`No proxy token in ${files.folder}\n`);
     return 2;
   }
+  const modelTokenFile = options.includes('--model-token-file') ? valueOf('--model-token-file') : undefined;
+  const modelToken = modelTokenFile === undefined ? undefined : (await readFile(modelTokenFile, 'utf8')).trim();
   return runHold({
     files,
     folder,
     harness,
     command,
-    environment: harnessEnvironment(at.env, { ...given, ...(tokenVariable !== undefined && proxyToken !== undefined && { [tokenVariable]: proxyToken.token }) }),
+    environment: harnessEnvironment(at.env, { ...given, ...(modelToken !== undefined && { CLAUDE_CODE_OAUTH_TOKEN: modelToken }), ...(tokenVariable !== undefined && proxyToken !== undefined && { [tokenVariable]: proxyToken.token }) }),
     version: runningVersion(),
     mayCall: createTrierarchCallerCheck({ platform: at.platform, sessionRoots: () => holdPids(sessions), harnessSessions: () => harnessSessions(sessions) }),
   });

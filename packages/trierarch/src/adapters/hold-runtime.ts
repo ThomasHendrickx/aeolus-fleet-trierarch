@@ -75,6 +75,7 @@ export function sessionsLaunch(at: { platform: string; env: Readonly<Record<stri
 export function createHoldRuntime(options: {
   /** The sessions folder: a folder per ship, with its hold's files. */
   sessions: string;
+  modelTokenFile?: string;
   /** The trierarch program, which `hold` and its words follow. */
   program: readonly string[];
   version: string;
@@ -179,8 +180,9 @@ export function createHoldRuntime(options: {
         await writeProxyToken(files.folder, proxyToken);
       }
       const tokenVariable = proxyToken === undefined ? [] : ['--proxy-token-variable', proxyToken.variable];
+      const modelToken = harness === 'claude-code' && proxyToken === undefined && options.modelTokenFile !== undefined ? ['--model-token-file', options.modelTokenFile] : [];
       const { command, env } = options.heldAs === undefined ? { command: session.command, env: session.env ?? {} } : await options.heldAs(session, files);
-      const hold = [...options.program, 'hold', shipId, '--sessions', sessions, '--folder', folder, '--harness', harness, ...tokenVariable, ...Object.entries(env).flatMap(([variable, value]) => ['--env', `${variable}=${value}`]), '--', ...command];
+      const hold = [...options.program, 'hold', shipId, '--sessions', sessions, '--folder', folder, '--harness', harness, ...tokenVariable, ...modelToken, ...Object.entries(env).flatMap(([variable, value]) => ['--env', `${variable}=${value}`]), '--', ...command];
       const [program = 'sh', ...args] = [...(options.launch ?? []), 'sh', '-c', DETACHED, 'sh', ...hold];
       const starter = spawn(program, args, { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
       let wrote = '';
