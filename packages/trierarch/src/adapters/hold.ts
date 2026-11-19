@@ -118,6 +118,7 @@ type Waiter = (event: { type: 'result' } | { type: 'control'; requestId: string;
 export async function runHold(options: HoldOptions): Promise<number> {
   const { files, folder, harness, environment, version } = options;
   await mkdir(files.folder, { recursive: true, mode: 0o700 });
+  if (options.shipContainers !== undefined) await writeFile(join(files.folder, 'ship-containers'), '');
   await rm(files.socket, { force: true });
   // Publish the pid only once it is complete, so startup cannot mistake a partial pid for an exited hold.
   const pendingPid = `${files.pid}.new`;
@@ -228,6 +229,9 @@ export async function runHold(options: HoldOptions): Promise<number> {
     if (service.pid !== undefined) guard.stdin.write(`${String(service.pid)}\n`);
     service.stderr?.on('data', (chunk: Buffer) => { logPodman(`Podman service: ${chunk.toString('utf8').trim()}`); });
     service.on('error', (error) => { logPodman(`Podman service: ${error.message}`); });
+    service.on('exit', (code, signal) => {
+      if (!isStopping) logPodman(`Podman service exited with ${signal === null ? `code ${String(code)}` : `signal ${signal}`}`);
+    });
     for (let attempt = 0; attempt < 100 && service.exitCode === null; attempt += 1) {
       if ((await stat(socket).catch(() => undefined))?.isSocket() === true) break;
       await wait(50);
@@ -444,6 +448,7 @@ export async function runHold(options: HoldOptions): Promise<number> {
   process.once('SIGHUP', stop);
 
   const code = await ended;
+  isStopping = true;
   server.close();
   await clearContainers?.();
   if (service?.pid !== undefined) {

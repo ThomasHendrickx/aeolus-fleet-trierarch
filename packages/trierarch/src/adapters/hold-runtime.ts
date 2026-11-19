@@ -17,11 +17,13 @@ import { discard, type MoveWithinUserNamespace } from './trash.js';
 /** How long a hold has to answer a call other than interrupt. */
 const CALL_TIMEOUT_MS = 2000;
 /** How long a hold has to answer its first call after its start. */
-const START_WAIT_MS = 70_000;
+const START_WAIT_MS = 10_000;
+/** The hold also has to clear a ship's Podman storage before it answers. */
+const STORAGE_WAIT_MS = 70_000;
 /** How often a starting hold is asked whether it answers. */
 const START_POLL_MS = 50;
 /** How long a stopped hold has to end with its harness before it is killed. */
-const STOP_WAIT_MS = 70_000;
+const STOP_WAIT_MS = 5000;
 /** How many of the last event lines are read: the launch window's error event is among the last. */
 const EVENT_LINES = 200;
 /** Runs the command in the background and returns at once: its process is then nobody's child, so no session runs under the trierarch's own process. */
@@ -154,7 +156,8 @@ export function createHoldRuntime(options: {
     const pid = await runningPid(shipId);
     if (pid !== undefined) {
       signalHold(pid, 'SIGTERM');
-      const until = Date.now() + STOP_WAIT_MS;
+      const hasStorage = (await stat(join(filesOf(shipId).folder, 'ship-containers')).catch(() => undefined)) !== undefined;
+      const until = Date.now() + (hasStorage ? STORAGE_WAIT_MS : STOP_WAIT_MS);
       while ((await runningPid(shipId)) === pid && Date.now() < until) {
         await wait(START_POLL_MS);
       }
@@ -271,7 +274,8 @@ export function createHoldRuntime(options: {
           }
         });
       });
-      const until = Date.now() + START_WAIT_MS;
+      const startWait = storage.length === 0 ? START_WAIT_MS : STORAGE_WAIT_MS;
+      const until = Date.now() + startWait;
       let lastAnswer: HoldAnswer | undefined;
       while (Date.now() < until) {
         lastAnswer = await callHold({ socket: files.socket, request: { call: 'state' }, timeoutMs: CALL_TIMEOUT_MS }).catch(() => undefined);
@@ -292,7 +296,7 @@ export function createHoldRuntime(options: {
       }
       // Where no `ss` lists the sockets, the hold cannot tell the trierarch from another caller and refuses it.
       const refusal = lastAnswer?.isOk === false && lastAnswer.error === REFUSED ? `: it refused the trierarch's call (${REFUSED}); on Linux it tells its caller with ss, so install iproute2 if ss is missing` : '';
-      throw new Error(`the hold of ${shipId} did not answer within ${String(START_WAIT_MS)} ms of its start${refusal}`);
+      throw new Error(`the hold of ${shipId} did not answer within ${String(startWait)} ms of its start${refusal}`);
     },
     // A Codex hold starts the line's turn once the last turn's process has ended, which it waits for as long as for an interrupted turn.
     send: async ({ shipId, line }) => {
