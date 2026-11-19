@@ -21,9 +21,9 @@ import { createKeyStates } from '../adapters/key-states.js';
 import { keyStatesFileOf } from '../adapters/proxy-runtime.js';
 import { claudeCodeKeyInReach } from '../adapters/claude-code.js';
 import { createMachine } from '../adapters/machine.js';
-import { measureShipFolder } from '../adapters/ship-size.js';
+import { createLargestShips } from '../adapters/largest-ships.js';
 import { createShipSize } from '../core/ship-size.js';
-import type { TrierarchPaths } from '../adapters/paths.js';
+import { userRuntimeDirectory, type TrierarchPaths } from '../adapters/paths.js';
 import { runCommand } from '../adapters/run-command.js';
 import { createRestFleet, FleetRefusal } from '../adapters/rest-fleet.js';
 import { modelProxy, runtimeAdaptersOf } from '../adapters/runtime-adapters.js';
@@ -31,6 +31,7 @@ import { PLUGIN_HARNESSES } from '../adapters/plugin.js';
 import { createCallerCheck } from '../adapters/caller-check.js';
 import { createShipSockets } from '../adapters/ship-sockets.js';
 import { sessionsLaunch, systemdVersionOf } from '../adapters/hold-runtime.js';
+import { createSessionImages } from '../adapters/session-images.js';
 import { createSessionCache } from '../adapters/session-cache.js';
 import { createTrust } from '../adapters/trust.js';
 import { createTrustedRepositoriesFile, trustedClonesOf, withTrustedRepositories } from '../adapters/trusted-repositories-file.js';
@@ -43,6 +44,7 @@ import { createRefuseModel } from '../core/refuse-model.js';
 import { createReportDetectionProblems } from '../core/report-detection-problems.js';
 import { createHandleDelivery } from '../core/handle-delivery.js';
 import { machineOf } from '../core/machine.js';
+import { createFreeDisk } from '../core/free-disk.js';
 import { createReadLoad } from '../core/read-load.js';
 import { createReadUsage } from '../core/read-usage.js';
 import { createSendReleasedUsage, createSendUsage } from '../core/send-usage.js';
@@ -175,7 +177,19 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     codex: createCodexSetup(),
   });
   // The machine's load (#400) and the harnesses' usage (#353), each read on its own interval for the report.
-  const readLoad = createReadLoad({ machine: createMachine({ worktreeRoot: shipsRoot }), fleet, state, clock, logger });
+  const cache = createSessionCache({ root: join(paths.home, 'cache'), ...(configured.cacheSizeBytes !== undefined && { maxBytes: configured.cacheSizeBytes }) });
+  const images = createSessionImages({ binary: configured.runtime?.kind === 'container' ? configured.runtime.binary : 'podman', version });
+  const runtimeDirectory = process.platform === 'linux' ? await userRuntimeDirectory() : undefined;
+  const largestShips = createLargestShips({ clock, logger, paths: { ...paths, ships: shipsRoot }, ...(runtimeDirectory !== undefined && { runtimeDirectory }) });
+  const freeDisk = createFreeDisk({ trash, images, cache, clock, logger });
+  const readLoad = createReadLoad({ machine: createMachine({ worktreeRoot: shipsRoot }), fleet, state, clock, logger, disk: {
+    removeUnusedImages: () => images.removeUnused(),
+    free: async () => {
+      await freeDisk();
+      largestShips.refresh(Object.values((await state.load()).entries));
+    },
+    largestShips: () => largestShips.read(),
+  } });
   const usage = createUsage({
     'claude-code': createClaudeCodeUsage({
       // In containers each ship's conversations are in its own home (decision 0039).
@@ -194,7 +208,6 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const reportSelf = createReportSelf({ fleetKey: { isCutOff: () => isFleetKeyCutOff }, fleet, processes: sessions, trust, state, setup, readLoad, readUsage, clock, modelLogins, ...(configured.logins !== undefined && { logins: configured.logins }) });
   const sendUsage = createSendUsage({ fleet, usage, state, readUsage, clock, logger, prices: priceTableOf(configured.prices), ...(crew.shipId !== undefined && { trierarchShipId: crew.shipId }), ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
   const askForTrustedRepositories = createAskForTrustedRepositories({ fleet, logger, ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
-  const cache = createSessionCache({ root: join(paths.home, 'cache'), ...(configured.cacheSizeBytes !== undefined && { maxBytes: configured.cacheSizeBytes }) });
   const keepProxy = async (): Promise<void> => {
     const held = await Promise.all(PLUGIN_HARNESSES.map((harness) => keys.has(harness)));
     await proxy.keep({ isNeeded: held.includes(true) }).catch((error: unknown) => {
@@ -203,10 +216,10 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   };
   const checkShipSize = createShipSize({
     limit: configured.shipSizeBytes ?? DEFAULT_SHIP_SIZE_BYTES, clock, logger,
-    measure: (entry) => measureShipFolder(entry.shipFolder ?? ''),
+    measure: (entry) => largestShips.measure(entry),
     tell: async (entry, { bytes, key: idempotencyKey }) => {
       const owner = (await fleet.assignedRequests()).find((request) => request.shipId === entry.shipId)?.owner;
-      const text = `${entry.shipName ?? entry.shipId} exceeds its configured size\n\nIts folder holds ${String(bytes)} bytes. The trierarch stops no session for it.`;
+      const text = `${entry.shipName ?? entry.shipId} exceeds its configured size\n\nIts files hold ${String(bytes)} bytes. The trierarch stops no session for it.`;
       if (owner === undefined || owner === null || owner.name === 'argo') {
         await fleet.reportToArgo({ text, idempotencyKey });
       } else {

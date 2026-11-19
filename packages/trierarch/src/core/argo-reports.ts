@@ -78,7 +78,7 @@ const gbOf = (bytes: number): string => (bytes / GB).toFixed(1);
 
 /**
  * The machine is low on memory or disk (#400). The trierarch stops nothing
- * for it: freeing memory or disk is the operator's.
+ * for it; disk cleanup has already tried what no session uses.
  */
 export function lowResourceText(resource: LowResource, load: MachineLoad): string {
   const { memory, disk } = load;
