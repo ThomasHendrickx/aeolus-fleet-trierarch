@@ -18,30 +18,40 @@ export const LOAD_READ_INTERVAL_MS = 60_000;
  * only after it recovered and dropped again. What argo was told is kept in
  * the state, so a restart while it stays low tells nothing again.
  */
-export function createReadLoad(deps: { disk?: { free: () => Promise<void>; removeUnusedImages: () => Promise<void>; largestShips: () => Promise<readonly { name: string; bytes: number }[]> }; machine: MachinePort; fleet: Pick<FleetPort, 'reportToArgo'>; state: StatePort; clock: Clock; logger: Pick<Logger, 'warn'> }): ReadLoad {
+export function createReadLoad(deps: { disk?: { free: () => Promise<void>; removeUnusedImages: () => Promise<void>; largestShips: () => readonly { name: string; bytes: number }[] | undefined }; machine: MachinePort; fleet: Pick<FleetPort, 'reportToArgo'>; state: StatePort; clock: Clock; logger: Pick<Logger, 'warn'> }): ReadLoad {
   let hasRemovedImages = false;
+  let isDiskReportPending = false;
   let last: { load: MachineLoad; at: number } | undefined;
 
   const tellArgo = async (load: MachineLoad, now: Date): Promise<void> => {
     const state = await deps.state.load();
     const told = state.lowResources ?? [];
     const low = lowResourcesOf(load);
+    const notified = low.filter((resource) => told.includes(resource));
+    isDiskReportPending = false;
     for (const resource of low.filter((each) => !told.includes(each))) {
-      const ships = resource === 'disk' ? await deps.disk?.largestShips().catch((error: unknown) => {
-        deps.logger.warn(`Could not measure the ships for low disk: ${messageOf(error)}`);
-        return [];
-      }) : undefined;
+      const ships = resource === 'disk' ? deps.disk?.largestShips() : undefined;
+      if (resource === 'disk' && deps.disk !== undefined && ships === undefined) {
+        isDiskReportPending = true;
+        continue;
+      }
       const held = ships === undefined || ships.length === 0 ? '' : `\n\nShips holding the most:\n${ships.map((ship) => `- ${ship.name}: ${String(ship.bytes)} bytes`).join('\n')}`;
       await deps.fleet.reportToArgo({ text: lowResourceText(resource, load) + held, idempotencyKey: `low-${resource}-${now.toISOString()}` });
+      notified.push(resource);
     }
-    if (low.length !== told.length || low.some((each) => !told.includes(each))) {
-      await deps.state.save({ ...state, lowResources: low.length > 0 ? low : undefined });
+    if (notified.length !== told.length || notified.some((each) => !told.includes(each))) {
+      await deps.state.save({ ...state, lowResources: notified.length > 0 ? notified : undefined });
     }
   };
 
   return async () => {
     const now = deps.clock.now();
     if (last !== undefined && now.getTime() - last.at < LOAD_READ_INTERVAL_MS) {
+      if (isDiskReportPending) {
+        await tellArgo(last.load, now).catch((error: unknown) => {
+          deps.logger.warn(`Could not tell argo the machine is low: ${messageOf(error)}`);
+        });
+      }
       return last.load;
     }
     let read = await deps.machine.load().catch((error: unknown) => {
