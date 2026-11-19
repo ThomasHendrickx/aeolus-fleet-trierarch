@@ -88,6 +88,7 @@ export async function configCheck(paths: TrierarchPaths, machine: CheckedMachine
     throw runtimeRefused(paths.config, refusals);
   }
   const runtime = configured.runtime ?? { kind: 'host' };
+  const modelTokenProblem = runtime.kind === 'host' && configured.harnesses['claude-code'] !== undefined && !(await host.isModelTokenWritten()) ? `Claude Code subscription sessions cannot start: the model token ${paths.modelToken} is missing or empty` : undefined;
   // The detected options too (#365), as the running trierarch has them.
   const detected = await createDetectedFile(paths.detected).load();
   const configuration = withDetectedOptions(configured, detected);
@@ -120,6 +121,7 @@ export async function configCheck(paths: TrierarchPaths, machine: CheckedMachine
     text: [
       `The configuration at ${paths.config} fits.`,
       runtimeLine(runtime, paths.modelToken),
+      ...(modelTokenProblem === undefined ? [] : [modelTokenProblem]),
       'Flags per harness (settings pick option values by name):',
       describeFlags(configuration),
       '',
