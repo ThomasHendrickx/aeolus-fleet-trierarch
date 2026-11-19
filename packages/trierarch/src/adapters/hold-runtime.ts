@@ -111,7 +111,9 @@ export function createHoldRuntime(options: {
     if (pid === undefined) return undefined;
     try {
       process.kill(pid, 0);
-      return pid;
+      const command = await runCommand('ps', { args: ['-o', 'command=', '-p', String(pid)] });
+      const isHold = command.status === 0 && ` ${command.stdout.trim()} `.includes(` hold ${shipId} --sessions ${sessions} `);
+      return isHold ? pid : undefined;
     } catch {
       return undefined;
     }
@@ -152,10 +154,10 @@ export function createHoldRuntime(options: {
     if (pid !== undefined) {
       signalHold(pid, 'SIGTERM');
       const until = Date.now() + STOP_WAIT_MS;
-      while ((await runningPid(shipId)) !== undefined && Date.now() < until) {
+      while ((await runningPid(shipId)) === pid && Date.now() < until) {
         await wait(START_POLL_MS);
       }
-      if ((await runningPid(shipId)) !== undefined) {
+      if ((await runningPid(shipId)) === pid) {
         signalHold(pid, 'SIGKILL');
       }
     }

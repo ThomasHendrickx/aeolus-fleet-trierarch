@@ -684,7 +684,7 @@ describe('a session held by a hold, Claude Code in print mode with streamed JSON
       child.kill();
       await new Promise<void>((resolve) => {
         if (child.exitCode !== null || child.signalCode !== null) resolve();
-        else child.once('exit', () => resolve());
+        else child.once('exit', () => { resolve(); });
       });
     }
   });
