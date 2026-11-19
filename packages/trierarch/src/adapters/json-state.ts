@@ -57,6 +57,9 @@ const stateSchema = z.object({
       crewFailures: z.int().min(1).optional(),
       isIdentityGone: z.literal(true).optional(),
       usageLimitTold: z.string().optional(),
+      isShipSizeTold: z.literal(true).optional(),
+      shipSizeMeasuredAt: z.string().optional(),
+      shipSizePending: z.object({ key: z.string(), bytes: z.number().nonnegative() }).optional(),
     })
       .transform(fromOldLayout),
   ),

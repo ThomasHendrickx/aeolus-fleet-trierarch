@@ -92,6 +92,12 @@ export interface Entry {
   readonly crewToken?: string;
   /** The usage-limit occurrence whose notice was durably sent, kept across passes and restarts (#1629). */
   readonly usageLimitTold?: string;
+  /** Whether its owner was told the ship folder is over its configured size. */
+  readonly isShipSizeTold?: true;
+  /** When the last measurement was started, retained across trierarch restarts. */
+  readonly shipSizeMeasuredAt?: string;
+  /** A crossing saved before sending, so a lost reply is retried with the same key. */
+  readonly shipSizePending?: { readonly key: string; readonly bytes: number };
   readonly hasStarted: boolean;
   /** When the session crewing checks in its launch window started (#382), ISO 8601; none before its launch. */
   readonly launchedAt?: string;

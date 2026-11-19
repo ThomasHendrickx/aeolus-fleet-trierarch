@@ -28,12 +28,13 @@ const SchemaReference = "./config.schema.json"
 type Configuration struct {
 	Schema string `json:"$schema,omitempty"`
 	// ShipsRoot is the place of every ship's folder, `~/.aeolus/trierarch/ships` when none is named.
-	ShipsRoot    string                `json:"shipsRoot,omitempty"`
-	Runtime      *Runtime              `json:"runtime,omitempty"`
-	Caps         Caps                  `json:"caps"`
-	Repositories map[string]Repository `json:"repositories"`
-	Folders      map[string]Folder     `json:"folders"`
-	Harnesses    map[string]Harness    `json:"harnesses"`
+	ShipsRoot     string                `json:"shipsRoot,omitempty"`
+	ShipSizeBytes int                   `json:"shipSizeBytes,omitempty"`
+	Runtime       *Runtime              `json:"runtime,omitempty"`
+	Caps          Caps                  `json:"caps"`
+	Repositories  map[string]Repository `json:"repositories"`
+	Folders       map[string]Folder     `json:"folders"`
+	Harnesses     map[string]Harness    `json:"harnesses"`
 	// HarnessOrder is the harnesses in the order the file names them, as status says them; empty for a configuration not read from a file.
 	HarnessOrder []string         `json:"-"`
 	Prices       map[string]Price `json:"prices,omitempty"`
