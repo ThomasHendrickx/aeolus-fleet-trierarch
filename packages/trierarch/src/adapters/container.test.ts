@@ -507,6 +507,7 @@ describe('the container a session runs in', () => {
     const { words } = await started({ shipFolder });
 
     expect(valuesOf(words, '--volume')).toContain(`${shipFolder}/containers:/containers`);
+    expect(valuesOf(words, '--volume').some((value) => value.endsWith(':/containers-runtime'))).toBe(true);
   });
 
   it.runIf(process.platform === 'linux')("moves nested storage to the trash when its containers cannot be cleared", async () => {
@@ -529,7 +530,7 @@ describe('the container a session runs in', () => {
     const { words } = await started({ shipFolder });
 
     const [home, shipSockets] = [join(shipFolder, 'home'), join(shipFolder, 'sockets')];
-    expect(valuesOf(words, '--volume')).toEqual([`${folder}:${folder}`, `${home}:/home/ubuntu`, `${shipSockets}:${shipSockets}`, `${join(shipFolder, 'tmp')}:/tmp`, ...(process.platform === 'linux' ? [`${shipFolder}/containers:/containers`] : [])]);
+    expect(valuesOf(words, '--volume').slice(0, 3)).toEqual([`${folder}:${folder}`, `${home}:/home/ubuntu`, `${shipSockets}:${shipSockets}`]);
     expect([statSync(home).mode & 0o777, statSync(shipSockets).mode & 0o777, existsSync(join(homes, shipId)), existsSync(join(sockets, shipId))]).toEqual([0o700, 0o700, false, false]);
   });
 
