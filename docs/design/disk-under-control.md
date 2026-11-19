@@ -129,7 +129,7 @@ Unhappy paths:
 - **The trierarch stops mid-removal**: what was moved to the trash goes next pass; what was not is a stray under the root (#90).
 - **The cache is trimmed while a session reads it**: npm and Go fetch or build a missing entry again; a removed Playwright browser is installed again by the session.
 - **Size measuring is slow on a large folder**: measured at most every 10 minutes per ship and the cache at most hourly, never inside a pass's critical path.
-- **The disk stays low after freeing**: argo is told once per drop, as today.
+- **The disk stays low after freeing**: argo is told once per drop, as today. While it stays low, the trash is emptied on every read but the urgent cache measure and the image pass run at most hourly; one image that cannot be removed does not stop the others, a runtime command ends after a minute, and a machine without the runtime has no images to remove.
 
 ## Build slices
 

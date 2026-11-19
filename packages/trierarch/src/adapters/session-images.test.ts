@@ -4,14 +4,14 @@ import { createSessionImages } from './session-images.js';
 
 const repository = 'ghcr.io/thomashendrickx/aeolus-session';
 
-function runtime(at: { failsRemoving?: readonly string[]; hangs?: string; missing?: boolean; used?: readonly string[]; fails?: string; tags?: Readonly<Record<string, readonly string[]>> } = {}) {
+function runtime(at: { failsRemoving?: readonly string[]; hangs?: string; isMissing?: boolean; used?: readonly string[]; fails?: string; tags?: Readonly<Record<string, readonly string[]>> } = {}) {
   const removed: string[] = [];
   const tags = at.tags ?? { current: [`${repository}:1.0.0`], old: [`${repository}:0.9.0`], held: [`${repository}:0.8.0`] };
   const timeouts: (number | undefined)[] = [];
   const images = createSessionImages({ binary: 'podman', version: '1.0.0', run: (_command, { args, timeoutMs }) => {
     const [operation, action, id] = args;
     timeouts.push(timeoutMs);
-    if (at.missing === true) return Promise.reject(Object.assign(new Error('spawn podman ENOENT'), { code: 'ENOENT' }));
+    if (at.isMissing === true) return Promise.reject(Object.assign(new Error('spawn podman ENOENT'), { code: 'ENOENT' }));
     if (operation === at.hangs) return Promise.resolve({ status: 1, stdout: '', stderr: '', isTimedOut: true });
     if (operation === 'rmi' && at.failsRemoving?.includes(action ?? '') === true) return Promise.resolve({ status: 1, stdout: '', stderr: 'image has several tags' });
     if (operation === at.fails) return Promise.resolve({ status: 1, stdout: '', stderr: 'unavailable' });
@@ -70,7 +70,7 @@ describe('unused session images', () => {
   });
 
   it('has nothing to remove, and no failure to retry, when the machine has no runtime', async () => {
-    const { images } = runtime({ missing: true });
+    const { images } = runtime({ isMissing: true });
     await expect(images.removeUnused()).resolves.toBeUndefined();
   });
 });
