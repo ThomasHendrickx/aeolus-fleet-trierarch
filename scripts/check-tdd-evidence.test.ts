@@ -52,7 +52,7 @@ describe('the TDD evidence check', () => {
     const head = green('feat(trierarch): untested');
 
     expect(violations(head)).toEqual([
-      `${head.slice(0, 12)} "feat(trierarch): untested" changes production code (packages/trierarch/src/core/rules.ts), but the commit before it is not a (red) commit that only adds or changes tests`,
+      `${head.slice(0, 12)} "feat(trierarch): untested" changes production code (packages/trierarch/src/core/rules.ts), but the commit before it is not a (red) commit that only adds, changes or deletes tests`,
     ]);
   });
 
