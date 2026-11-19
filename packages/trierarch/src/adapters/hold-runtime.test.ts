@@ -123,6 +123,32 @@ it.runIf(process.platform === 'linux')("starts a ship's Podman service beside it
   await expect.poll(() => existsSync(join(shipFolder, 'podman.sock'))).toBe(false);
 });
 
+it.runIf(process.platform === 'linux')("gives every host Podman invocation the ship's own root, runroot and tmpdir", async () => {
+  const runtime = aRuntime({ hasHostContainerStorage: true });
+  const shipId = newId('ship');
+  const shipFolder = join(sessions, shipId + '-ship');
+  const podman = join(folder, 'podman');
+  const calls = join(folder, 'podman-calls');
+  writeFileSync(podman, `#!/bin/sh\nprintf '%s\n' "$*" >> '${calls}'\nexit 0\n`);
+  chmodSync(podman, 0o755);
+  const previous = process.env.PATH;
+  process.env.PATH = `${folder}:${previous ?? '/usr/bin:/bin'}`;
+  try {
+    await runtime.start({ shipId, shipFolder, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+    await runtime.stop(shipId);
+    const invocations = readFileSync(calls, 'utf8').trim().split('\n');
+    expect(invocations.length).toBeGreaterThanOrEqual(3);
+    for (const invocation of invocations) {
+      expect(invocation).toContain(`--root ${shipFolder}/containers/graph`);
+      expect(invocation).toContain(`--runroot ${shipFolder}/containers/run`);
+      expect(invocation).toContain(`--tmpdir ${shipFolder}/containers/tmp`);
+    }
+  } finally {
+    restore('PATH', previous);
+    await runtime.stop(shipId);
+  }
+}, 20_000);
+
 it.runIf(process.platform === 'linux')('starts the host session with its own socket when Podman fails to start', async () => {
   const runtime = aRuntime({ hasHostContainerStorage: true });
   const shipId = newId('ship');
