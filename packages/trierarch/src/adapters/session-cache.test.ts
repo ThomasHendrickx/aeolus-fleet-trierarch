@@ -75,3 +75,13 @@ describe('the trierarch session cache', () => {
     await cache.trim(new Date('2026-11-19T12:01:00Z'), { isUrgent: true });
     expect(existsSync(join(root, 'cache', 'go-build'))).toBe(false);
   });
+
+it('waits for an ongoing trim before low disk is read again', async () => {
+  entry('go-build', { contents: '1234', modified: old });
+  const cache = createSessionCache({ root: join(root, 'cache'), maxBytes: 0 });
+  const ongoing = cache.trim(now);
+  await cache.trim(now, { isUrgent: true });
+  const isStillThere = existsSync(join(root, 'cache', 'go-build'));
+  await ongoing;
+  expect(isStillThere).toBe(false);
+});
