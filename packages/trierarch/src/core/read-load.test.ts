@@ -191,3 +191,10 @@ it('removes unused session images on the first pass even with healthy disk', asy
   await trierarch.read();
   expect(trierarch.imagePasses()).toBe(1);
 });
+
+it('uses low disk cleanup for images before the first disk re-read', async () => {
+  const trierarch = diskTrierarch();
+  await trierarch.read();
+  expect(trierarch.cleanups()).toBe(1);
+  expect(trierarch.imagePasses()).toBe(0);
+});
