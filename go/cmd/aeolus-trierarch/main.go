@@ -494,7 +494,7 @@ func sessionRuntime(at paths.Paths, program string, configuration config.Configu
 	if !isInContainers(configured) {
 		return holds
 	}
-	return container.Runtime{Holds: holds, Binary: configured.Binary, Image: sessionImage + ":" + cli.Version, ModelToken: at.ModelToken, ProxyURL: modelproxy.Runtime{Folder: at.Proxy}.URL, Homes: at.Homes, Sockets: at.Sockets, Memory: configured.Memory, Cpus: configured.Cpus}
+	return container.Runtime{Holds: holds, Binary: configured.Binary, Image: sessionImage + ":" + cli.Version, ModelToken: at.ModelToken, ProxyURL: modelproxy.Runtime{Folder: at.Proxy}.URL, Homes: at.Homes, Sockets: at.Sockets, ShipsRoot: shipsPlaceOf(at, configuration), Memory: configured.Memory, Cpus: configured.Cpus}
 }
 
 // folderProcessesOf are the processes running in a folder, stopped before an orphan worktree is read and removed; in containers, only once no container works in it.

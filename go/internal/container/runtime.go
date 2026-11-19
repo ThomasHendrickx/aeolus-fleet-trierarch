@@ -17,6 +17,7 @@ import (
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/hold"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/paths"
 	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/sessions"
+	"github.com/ThomasHendrickx/aeolus-fleet-trierarch/go/internal/trash"
 )
 
 const (
@@ -86,6 +87,8 @@ type Runtime struct {
 	// Sockets is where the sockets of the ships crewed before the ship folders are kept on the host, one folder per ship, each mounted at
 	// its own path (decision 0026); a ship crewed fresh has its sockets folder in its ship's folder.
 	Sockets string
+	// ShipsRoot holds ship folders, including the temp of ships crewed before ship folders.
+	ShipsRoot string
 	// Memory is the memory cap of each container, as the runtime takes it (`4g`).
 	Memory string
 	Cpus   float64
@@ -255,6 +258,25 @@ func (r Runtime) heldAs(session sessions.Start, files hold.Files) (sessions.Star
 		}
 		content.WriteString(name + "=" + env[name] + "\n")
 	}
+	shipFolder := session.ShipFolder
+	if shipFolder == "" && r.ShipsRoot != "" {
+		shipFolder = filepath.Join(r.ShipsRoot, session.ShipID)
+	}
+	temp := ""
+	if shipFolder != "" {
+		temp = filepath.Join(shipFolder, "tmp")
+		if err := os.RemoveAll(temp); err != nil {
+			if removeErr := r.RemoveWithinUserNamespace(temp); removeErr != nil {
+				if discardErr := trash.DiscardInto(temp, filepath.Dir(shipFolder), time.Now(), r.MoveWithinUserNamespace); discardErr != nil {
+					return sessions.Start{}, fmt.Errorf("empty ship temp: %w", discardErr)
+				}
+				fmt.Fprintf(os.Stderr, "could not empty %s; moved it to the trash: %v\n", temp, err)
+			}
+		}
+		if err := os.MkdirAll(temp, 0o700); err != nil {
+			return sessions.Start{}, fmt.Errorf("make ship temp: %w", err)
+		}
+	}
 	home := paths.ShipHome(r.Homes, session.ShipID, session.ShipFolder)
 	sockets := paths.ShipSockets(r.Sockets, session.ShipID, session.ShipFolder)
 	for _, folder := range []string{sockets, home} {
@@ -285,6 +307,9 @@ func (r Runtime) heldAs(session sessions.Start, files hold.Files) (sessions.Star
 		"--volume", home + ":" + SessionHome,
 		// The session calls the fleet over its ship's socket, at the path its identity names.
 		"--volume", sockets + ":" + sockets,
+	}
+	if temp != "" {
+		command = append(command, "--volume", temp+":/tmp")
 	}
 	// Its MCP configuration, read-only at its own path: the one file of the session's folder it sees, kept where it cannot plant a link the trierarch would write through.
 	if session.Mcp != nil {
