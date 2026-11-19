@@ -1,4 +1,4 @@
-import { realpath } from 'node:fs/promises';
+import { mkdir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -30,7 +30,12 @@ export function modelProxy(at: { paths: TrierarchPaths; version: string; launch?
 
 /** The sessions on the host (headless H4, H8): one hold per ship. */
 export function hostSessions(at: { paths: TrierarchPaths; version: string; launch?: readonly string[]; program?: readonly string[]; shipsRoot?: string }): SessionRuntime & SessionRoots {
-  return createHoldRuntime({ sessions: at.paths.sessions, modelTokenFile: at.paths.modelToken, ...(at.shipsRoot !== undefined && { shipsRoot: at.shipsRoot }), program: at.program ?? TRIERARCH_PROGRAM, version: at.version, platform: process.platform, launch: at.launch ?? [] });
+  const cache = join(at.paths.home, 'cache');
+  const environment = { XDG_CACHE_HOME: join(cache, 'xdg'), npm_config_cache: join(cache, 'npm'), GOCACHE: join(cache, 'go-build'), GOMODCACHE: join(cache, 'go-mod'), PLAYWRIGHT_BROWSERS_PATH: join(cache, 'ms-playwright') };
+  return createHoldRuntime({ sessions: at.paths.sessions, modelTokenFile: at.paths.modelToken, ...(at.shipsRoot !== undefined && { shipsRoot: at.shipsRoot }), program: at.program ?? TRIERARCH_PROGRAM, version: at.version, platform: process.platform, launch: at.launch ?? [], heldAs: async (session) => {
+    await Promise.all(Object.values(environment).map(async (folder) => mkdir(folder, { recursive: true })));
+    return { command: session.command, env: { ...session.env, ...environment } };
+  } });
 }
 
 /** What runs the sessions, where their workspaces go, and, in containers, where each ship's home is kept. */
