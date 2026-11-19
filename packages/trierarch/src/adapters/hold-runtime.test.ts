@@ -239,6 +239,33 @@ it('starts after a same-boot guard leaves a marker without an identity', { timeo
   }
 });
 
+it('recovers when a same-boot guard marker points to an unrelated process', { timeout: 15_000 }, async () => {
+  const runtime = aRuntime();
+  const shipId = newId('ship');
+  const previous = join(sessions, shipId);
+  const unrelated = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      unrelated.once('spawn', resolve);
+      unrelated.once('error', reject);
+    });
+    if (unrelated.pid === undefined) throw new Error('the unrelated process did not start');
+    mkdirSync(previous, { recursive: true });
+    writeFileSync(join(previous, 'hold.pid'), '2147483647');
+    writeFileSync(join(previous, 'guard-active'), String(unrelated.pid));
+
+    await runtime.start({ shipId, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+
+    await expect.poll(() => starts().length).toBe(1);
+    expect(isAlive(unrelated.pid)).toBe(true);
+  } finally {
+    rmSync(join(previous, 'guard-active'), { force: true });
+    const ended = new Promise((resolve) => unrelated.once('exit', resolve));
+    unrelated.kill('SIGKILL');
+    await ended;
+  }
+});
+
 it('waits for a stubborn session to end before emptying its temp', { timeout: 15_000 }, async () => {
   const runtime = aRuntime();
   const shipId = newId('ship');
