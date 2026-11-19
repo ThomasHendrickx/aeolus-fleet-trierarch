@@ -89,7 +89,12 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
         TMPDIR: join(home, 'ship', 'tmp'), TMP: join(home, 'ship', 'tmp'), TEMP: join(home, 'ship', 'tmp'),
       } });
     } finally {
-      await sessions.stop(shipId);
+      try {
+        await sessions.stop(shipId);
+      } finally {
+        // The host session's Podman store contains files owned by its mapped container users.
+        if (process.platform === 'linux') await removeWithinIsolatedUserNamespace('podman')(join(home, 'ship'));
+      }
     }
   });
   it('gives sessions on the host a worktree and the host home', async () => {
