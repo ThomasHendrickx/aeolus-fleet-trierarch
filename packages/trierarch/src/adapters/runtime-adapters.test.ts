@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FAKE_CLAUDE_CODE, TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
 import { newId, inRepositories } from '../../test/support/in-memory.js';
 import { aShortHome } from '../../test/support/short-home.js';
+import { makeUnremovable, removeAsRuntime } from '../../test/support/unremovable.js';
 import { trierarchPaths, type TrierarchPaths } from './paths.js';
 import { runCommand } from './run-command.js';
 import { runtimeAdaptersOf } from './runtime-adapters.js';
@@ -141,6 +142,18 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
     await (runtime === 'the host' ? adaptersOf() : adaptersOf({ ...CONTAINER, binary })).trash.empty();
 
     expect(trashed.filter((folder) => existsSync(folder))).toEqual([]);
+  });
+
+  it.runIf(process.platform === 'linux')("empties a ship's container storage in the host trash through Podman's namespace", async () => {
+    const trashed = join(paths.ships, '.trash', `${shipId}.1793707200000`);
+    mkdirSync(trashed, { recursive: true });
+    makeUnremovable(trashed);
+    try {
+      expect(await adaptersOf().trash.empty()).toEqual([]);
+      expect(existsSync(trashed)).toBe(false);
+    } finally {
+      await removeAsRuntime(join(paths.ships, '.trash'));
+    }
   });
 
   it('stops the processes in a folder on the host, and in containers leaves a folder a container works in', async () => {
