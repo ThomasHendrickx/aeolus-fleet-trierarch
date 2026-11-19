@@ -31,6 +31,7 @@ export const trierarchConfigurationSchema = commonConfigurationSchema
     /** Where each ship keeps its own folder, `<shipsRoot>/<shipId>/`; `~/.aeolus/trierarch/ships` when left out. */
     shipsRoot: z.string().min(1).optional(),
     shipSizeBytes: z.int().positive().optional(),
+    cacheSizeBytes: z.int().nonnegative().optional(),
     repositories: z.record(trierarchNameSchema, z.strictObject({ path: z.string().min(1) })),
     prices: z.record(z.string().min(1), z.strictObject({ input: priceSchema, output: priceSchema, cacheRead: priceSchema, cacheWrite: priceSchema })).optional(),
     logins: z.strictObject({ default: z.strictObject({ 'claude-code': loginSchema.optional(), codex: loginSchema.optional() }).optional(), ships: z.record(z.string().min(1), loginSchema).optional() }).optional(),

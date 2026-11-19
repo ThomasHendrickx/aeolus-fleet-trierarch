@@ -83,7 +83,7 @@ export function runtimeAdaptersOf(at: {
   const root = configuration.shipsRoot ?? paths.ships;
   const before = configuration.shipsRoot === undefined ? paths.worktrees : undefined;
   const roots = before === undefined ? [root] : [root, before];
-  const beside = async (): Promise<readonly string[]> => [...roots, ...(await foldersUnder(roots)())];
+  const beside = async (): Promise<readonly string[]> => [...roots, join(paths.home, 'cache'), ...(await foldersUnder(roots)())];
   const { runtime } = configuration;
   if (runtime?.kind !== 'container') {
     return {

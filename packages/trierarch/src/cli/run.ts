@@ -31,6 +31,7 @@ import { PLUGIN_HARNESSES } from '../adapters/plugin.js';
 import { createCallerCheck } from '../adapters/caller-check.js';
 import { createShipSockets } from '../adapters/ship-sockets.js';
 import { sessionsLaunch, systemdVersionOf } from '../adapters/hold-runtime.js';
+import { createSessionCache } from '../adapters/session-cache.js';
 import { createTrust } from '../adapters/trust.js';
 import { createTrustedRepositoriesFile, trustedClonesOf, withTrustedRepositories } from '../adapters/trusted-repositories-file.js';
 import { createUsage, folderMadeAt } from '../adapters/usage.js';
@@ -193,6 +194,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   const reportSelf = createReportSelf({ fleetKey: { isCutOff: () => isFleetKeyCutOff }, fleet, processes: sessions, trust, state, setup, readLoad, readUsage, clock, modelLogins, ...(configured.logins !== undefined && { logins: configured.logins }) });
   const sendUsage = createSendUsage({ fleet, usage, state, readUsage, clock, logger, prices: priceTableOf(configured.prices), ...(crew.shipId !== undefined && { trierarchShipId: crew.shipId }), ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
   const askForTrustedRepositories = createAskForTrustedRepositories({ fleet, logger, ...(crew.pluginShipId !== undefined && { pluginShipId: crew.pluginShipId }) });
+  const cache = createSessionCache({ root: join(paths.home, 'cache'), ...(configured.cacheSizeBytes !== undefined && { maxBytes: configured.cacheSizeBytes }) });
   const keepProxy = async (): Promise<void> => {
     const held = await Promise.all(PLUGIN_HARNESSES.map((harness) => keys.has(harness)));
     await proxy.keep({ isNeeded: held.includes(true) }).catch((error: unknown) => {
@@ -215,6 +217,9 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
   });
   // Each pass ends with the trierarch's own report: the first at start, then only when it changed.
   const pass = async (): Promise<void> => {
+    void cache.trim(new Date()).catch((error: unknown) => {
+      logger.warn(`The session cache was not trimmed: ${error instanceof Error ? error.message : String(error)}`);
+    });
     await keepProxy();
     await askForTrustedRepositories();
     await runPass();

@@ -15,7 +15,8 @@ const recent = new Date('2026-11-19T11:30:00Z');
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'session-cache-')); });
 afterEach(() => { rmSync(root, { recursive: true, force: true }); });
 
-function entry(path: string, contents: string, modified: Date): void {
+function entry(path: string, at: { contents: string; modified: Date }): void {
+  const { contents, modified } = at;
   const file = join(root, 'cache', path, 'data');
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, contents);
@@ -25,29 +26,29 @@ function entry(path: string, contents: string, modified: Date): void {
 
 describe('the trierarch session cache', () => {
   it('leaves the cache intact when no size is configured', async () => {
-    entry('npm', 'old', old);
+    entry('npm', { contents: 'old', modified: old });
     await createSessionCache({ root: join(root, 'cache') }).trim(now);
     expect(readFileSync(join(root, 'cache', 'npm', 'data'), 'utf8')).toBe('old');
   });
 
   it('moves the oldest whole units to the trash until within the configured size', async () => {
-    entry('xdg/old', '1234', old);
-    entry('npm', '1234', newer);
-    entry('go-mod', '1234', recent);
+    entry('xdg/old', { contents: '1234', modified: old });
+    entry('npm', { contents: '1234', modified: newer });
+    entry('go-mod', { contents: '1234', modified: recent });
     await createSessionCache({ root: join(root, 'cache'), maxBytes: 8 }).trim(now);
     expect([existsSync(join(root, 'cache', 'xdg', 'old')), existsSync(join(root, 'cache', 'npm', 'data')), existsSync(join(root, 'cache', 'go-mod', 'data'))]).toEqual([false, true, true]);
     expect(existsSync(join(root, 'cache', '.trash', `old.${String(now.getTime())}`, 'data'))).toBe(true);
   });
 
   it('keeps a unit modified within the last hour even above the limit', async () => {
-    entry('ms-playwright/browser', '1234', recent);
+    entry('ms-playwright/browser', { contents: '1234', modified: recent });
     await createSessionCache({ root: join(root, 'cache'), maxBytes: 0 }).trim(now);
     expect(existsSync(join(root, 'cache', 'ms-playwright', 'browser', 'data'))).toBe(true);
   });
 
   it('uses the newest modification inside a unit to order it', async () => {
-    entry('xdg/first', '1234', old);
-    entry('npm', '1234', newer);
+    entry('xdg/first', { contents: '1234', modified: old });
+    entry('npm', { contents: '1234', modified: newer });
     const nested = join(root, 'cache', 'xdg', 'first', 'nested');
     writeFileSync(nested, '1');
     utimesSync(nested, recent, recent);
@@ -59,7 +60,7 @@ describe('the trierarch session cache', () => {
   it('checks no more than once an hour', async () => {
     const cache = createSessionCache({ root: join(root, 'cache'), maxBytes: 0 });
     await cache.trim(now);
-    entry('go-build', '1234', old);
+    entry('go-build', { contents: '1234', modified: old });
     await cache.trim(new Date('2026-11-19T12:59:59Z'));
     expect(existsSync(join(root, 'cache', 'go-build'))).toBe(true);
     await cache.trim(new Date('2026-11-19T13:00:00Z'));
