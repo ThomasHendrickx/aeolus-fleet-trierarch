@@ -54,11 +54,6 @@ unlink_image_skills() {
   done
 }
 
-if [[ ${AEOLUS_SHIP_CONTAINER_STORAGE:-} == 1 ]]; then
-  podman rm --all --force --volumes || echo 'aeolus-session-init: could not remove test containers' >&2
-  podman volume rm --all --force || echo 'aeolus-session-init: could not remove test volumes' >&2
-fi
-
 link_plugin || echo "aeolus-session-init: could not link the aeolus-fleet plugin into $HOME" >&2
 unlink_image_skills || echo "aeolus-session-init: could not remove an earlier image's skills from $HOME" >&2
 run_health_checks &

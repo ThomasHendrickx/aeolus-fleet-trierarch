@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { appendFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 import { idSchema, type ShipId } from '@aeolus-fleet/common';
 
@@ -8,7 +8,7 @@ import type { SessionRoots } from './caller-check.js';
 import { createHoldRuntime } from './hold-runtime.js';
 import { shipHome, shipSockets as socketsOf } from './paths.js';
 import { runCommand, type CommandResult } from './run-command.js';
-import { moveWithinUserNamespace, removeWithinUserNamespace } from './trash.js';
+import { discard, moveWithinUserNamespace, removeWithinUserNamespace } from './trash.js';
 
 const PREFIX = 'trierarch-';
 const OWNER_LABEL = 'aeolus.trierarch';
@@ -43,7 +43,7 @@ export function containerProxyUrl(url: string): string {
 /** The env file in the session's own folder, beside its hold's files. */
 const ENV_FILE = 'session.env';
 
-type Run = (command: string, options: { args: readonly string[] }) => Promise<CommandResult>;
+type Run = (command: string, options: { args: readonly string[]; timeoutMs?: number }) => Promise<CommandResult>;
 
 export interface ContainerRuntimeOptions {
   /** The docker-style binary of a rootless runtime: podman on Linux, docker in a Colima context on macOS. */
@@ -169,7 +169,7 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
     removeWithinUserNamespace: removeWithinUserNamespace(options.binary),
     heldAs: async ({ shipId, folder, command, env = {}, proxyToken, shipFolder }, files) => {
       const login: Record<string, string> = proxyToken === undefined ? { [MODEL_TOKEN_VARIABLE]: (await readFile(options.tokenFile, 'utf8')).trim() } : {};
-      const content = envFileOf({ ...env, ...login, ...(options.platform === 'linux' && shipFolder !== undefined && { AEOLUS_SHIP_CONTAINER_STORAGE: '1' }) });
+      const content = envFileOf({ ...env, ...login });
       const network = proxyToken === undefined ? [] : ['--network', proxyNetworkOf(await proxyPortOf(options.proxyUrl))];
       const ship = { shipId, ...(shipFolder !== undefined && { shipFolder }) };
       const home = shipHome(options.homes, ship);
@@ -178,8 +178,25 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
       await mkdir(shipSockets, { recursive: true, mode: 0o700 });
       await mkdir(home, { recursive: true, mode: 0o700 });
       const storage = options.platform === 'linux' && shipFolder !== undefined ? join(shipFolder, 'containers') : undefined;
-      if (storage !== undefined) await mkdir(storage, { recursive: true, mode: 0o700 });
       await mkdir(files.folder, { recursive: true, mode: 0o700 });
+      if (storage !== undefined && shipFolder !== undefined) {
+        const hasStorage = (await stat(storage).catch(() => undefined)) !== undefined;
+        await mkdir(storage, { recursive: true, mode: 0o700 });
+        if (hasStorage) {
+          const cleaned = await run(options.binary, { args: [
+            'run', '--rm', '--pull=never', `--userns=keep-id:${SESSION_USER}`,
+            '--device', '/dev/fuse', '--device', '/dev/net/tun', '--cap-add', 'SYS_ADMIN', '--security-opt', 'unmask=ALL',
+            '--volume', `${home}:${SESSION_HOME}`, '--volume', `${storage}:${SESSION_HOME}/.local/share/containers/storage`,
+            '--env', `HOME=${SESSION_HOME}`, '--entrypoint', '/bin/sh', options.image, '-c',
+            'podman rm --all --force --time 0 --volumes && podman volume rm --all --force',
+          ], timeoutMs: 60_000 }).catch(() => undefined);
+          if (cleaned?.status !== 0) {
+            await appendFile(files.events, `Nested Podman cleanup failed: ${cleaned?.stderr ?? 'runtime could not start'}\n`);
+            await discard(storage, { at: new Date(), into: dirname(shipFolder), withinUserNamespace: moveWithinUserNamespace(options.binary, run) });
+            await mkdir(storage, { recursive: true, mode: 0o700 });
+          }
+        }
+      }
       const envFile = join(files.folder, ENV_FILE);
       await writeFile(envFile, content, { mode: 0o600 });
       return {
