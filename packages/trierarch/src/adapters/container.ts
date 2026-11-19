@@ -177,6 +177,8 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
       // The runtime mounts only a folder that exists, and the ship's socket may not have made it yet.
       await mkdir(shipSockets, { recursive: true, mode: 0o700 });
       await mkdir(home, { recursive: true, mode: 0o700 });
+      const storage = options.platform === 'linux' && shipFolder !== undefined ? join(shipFolder, 'containers') : undefined;
+      if (storage !== undefined) await mkdir(storage, { recursive: true, mode: 0o700 });
       await mkdir(files.folder, { recursive: true, mode: 0o700 });
       const envFile = join(files.folder, ENV_FILE);
       await writeFile(envFile, content, { mode: 0o600 });
@@ -216,6 +218,7 @@ export function createContainerRuntime(options: ContainerRuntimeOptions): Sessio
           '--volume',
           `${shipSockets}:${shipSockets}`,
           ...((shipFolder ?? (options.shipsRoot === undefined ? undefined : join(options.shipsRoot, shipId))) === undefined ? [] : ['--volume', `${join(shipFolder ?? join(options.shipsRoot ?? '', shipId), 'tmp')}:/tmp`]),
+          ...(storage === undefined ? [] : ['--volume', `${storage}:${SESSION_HOME}/.local/share/containers/storage`]),
           '--env',
           `HOME=${SESSION_HOME}`,
           ...(proxyToken === undefined ? [] : ['--env', proxyToken.variable]),
