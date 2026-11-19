@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { appendFileSync, writeFileSync, createWriteStream } from 'node:fs';
 import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { createServer, type Socket } from 'node:net';
 import type { Readable, Writable } from 'node:stream';
@@ -11,6 +11,8 @@ import { codexThreadStartedSchema, codexTurnCommand } from './codex.js';
 import { copilotSessionIdOf, copilotStderrEvent, copilotTurnCommand } from './copilot.js';
 import type { HoldAnswer, HoldFiles, HoldRequest } from './hold-protocol.js';
 import { holdRequestSchema, parsedLine, REFUSED } from './hold-protocol.js';
+import { runCommand } from './run-command.js';
+import { discard } from './trash.js';
 
 /**
  * The hold (headless H8 to H12): a small process per session, started outside
@@ -199,10 +201,24 @@ export async function runHold(options: HoldOptions): Promise<number> {
     socket = join(options.shipContainers, 'podman.sock');
     const config = join(storage, 'storage.conf');
     await mkdir(storage, { recursive: true, mode: 0o700 });
-    await writeFile(config, `[storage]\ndriver = "overlay"\ngraphroot = ${JSON.stringify(join(storage, 'graph'))}\nrunroot = ${JSON.stringify(join(storage, 'run'))}\n`);
+    const graph = join(storage, 'graph');
+    const content = `[storage]\ndriver = "overlay"\ngraphroot = ${JSON.stringify(graph)}\nrootless_storage_path = ${JSON.stringify(graph)}\nrunroot = ${JSON.stringify(join(storage, 'run'))}\n`;
+    await writeFile(config, content);
+    const cleanup = async (args: readonly string[]) => runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${config}`, 'podman', ...args] });
+    const containers = await cleanup(['rm', '--all', '--force', '--volumes']).catch(() => undefined);
+    const volumes = containers?.status === 0 ? await cleanup(['volume', 'rm', '--all', '--force']).catch(() => undefined) : undefined;
+    if (containers?.status !== 0 || volumes?.status !== 0) {
+      events.write(`Podman cleanup failed: ${containers?.stderr ?? volumes?.stderr ?? 'podman could not start'}\n`);
+      await discard(storage, { at: new Date(), into: dirname(options.shipContainers) });
+      await mkdir(storage, { recursive: true, mode: 0o700 });
+      await writeFile(config, content);
+    }
     await rm(socket, { force: true });
     Object.assign(sessionEnvironment, { CONTAINERS_STORAGE_CONF: config, DOCKER_HOST: `unix://${socket}`, CONTAINER_HOST: `unix://${socket}` });
-    service = spawn('podman', ['system', 'service', '--time=0', `unix://${socket}`], { env: { ...process.env, CONTAINERS_STORAGE_CONF: config }, detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+    const serviceEnv = { ...process.env, CONTAINERS_STORAGE_CONF: config };
+    Reflect.deleteProperty(serviceEnv, 'CONTAINER_HOST');
+    Reflect.deleteProperty(serviceEnv, 'DOCKER_HOST');
+    service = spawn('podman', ['system', 'service', '--time=0', `unix://${socket}`], { env: serviceEnv, detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
     if (service.pid !== undefined) guard.stdin.write(`${String(service.pid)}\n`);
     service.stderr?.on('data', (chunk: Buffer) => events.write(`Podman service: ${chunk.toString('utf8')}`));
     service.on('error', (error) => events.write(`Podman service: ${error.message}\n`));
