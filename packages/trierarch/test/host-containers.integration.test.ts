@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, it } from 'vitest';
@@ -19,7 +19,24 @@ it("cleans up a killed host session's Testcontainers container and volume on res
   if (!podman.isUsable) context.skip(podman.reason);
   const sessions = realpathSync(aShortHome('aeolus-holds'));
   const folder = realpathSync(aShortHome('aeolus-folder'));
-  const runtime = createHoldRuntime({ sessions, program: TRIERARCH_PROGRAM, version: runningVersion(), platform: process.platform, hasHostContainerStorage: true });
+  const executable = await runCommand('sh', { args: ['-c', 'command -v podman'] });
+  expect(executable.status, executable.stderr).toBe(0);
+  const commands = join(folder, 'podman-commands');
+  const holdLog = join(folder, 'hold.log');
+  const wrapper = join(folder, 'podman');
+  writeFileSync(wrapper, `#!/bin/sh
+"${executable.stdout.trim()}" "$@" 2> "$0.$$.stderr"
+status=$?
+{ printf 'command: %s\\nstatus: %s\\n' "$*" "$status"; cat "$0.$$.stderr"; } >> '${commands}'
+cat "$0.$$.stderr" >&2
+rm -f "$0.$$.stderr"
+exit "$status"
+`);
+  chmodSync(wrapper, 0o755);
+  const launcher = join(folder, 'hold-launcher');
+  writeFileSync(launcher, `#!/bin/sh\nexec "$@" >> '${holdLog}' 2>&1\n`);
+  chmodSync(launcher, 0o755);
+  const runtime = createHoldRuntime({ sessions, program: ['env', `PATH=${folder}:${process.env.PATH ?? '/usr/bin:/bin'}`, launcher, ...TRIERARCH_PROGRAM], version: runningVersion(), platform: process.platform, hasHostContainerStorage: true });
   const shipId = newId('ship');
   const shipFolder = join(sessions, shipId + '-ship');
   const name = `test-${shipId}`;
@@ -75,7 +92,8 @@ it("cleans up a killed host session's Testcontainers container and volume on res
     const remaining = await client(['volume', 'ls', '--quiet']);
     const retained = await client(['image', 'ls', '--quiet']);
     expect([after.status, remaining.status, retained.status]).toEqual([0, 0, 0]);
-    expect(retained.stdout.trim()).toBe(images.stdout.trim());
+    const diagnostics = () => [readFileSync(holdLog, 'utf8'), readFileSync(join(sessions, shipId, 'events.jsonl'), 'utf8'), readFileSync(commands, 'utf8')].join('\n');
+    expect(retained.stdout.trim(), retained.stdout.trim() === images.stdout.trim() ? undefined : diagnostics()).toBe(images.stdout.trim());
     expect([after.stdout.trim(), remaining.stdout.trim()]).toEqual(['', '']);
     const ownContainers = await own(['ps', '--all', '--filter', `name=${name}`, '--quiet']);
     expect(ownContainers.stdout.trim()).toBe('');
