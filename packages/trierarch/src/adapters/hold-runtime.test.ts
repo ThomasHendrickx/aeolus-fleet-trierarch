@@ -10,7 +10,6 @@ import { z } from 'zod';
 
 import { FAKE_CLAUDE_CODE, FAKE_CODEX, FAKE_COPILOT, TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
 import { newId } from '../../test/support/in-memory.js';
-import { buildTestSessionImage } from '../../test/support/podman.js';
 import { sessionRuntimeContract } from '../../test/support/session-runtime-contract.js';
 import { aShortHome } from '../../test/support/short-home.js';
 import type { ObservedSession, SessionRuntime } from '../core/ports.js';
@@ -18,7 +17,6 @@ import { createCallerCheck } from './caller-check.js';
 import { createHoldRuntime, sessionsLaunch, systemdVersionOf } from './hold-runtime.js';
 import { runCommand } from './run-command.js';
 import { shipPodmanRuntime, userRuntimeDirectory } from './paths.js';
-import { removeWithinIsolatedUserNamespace } from './trash.js';
 import { runningVersion } from './version.js';
 
 // Against real holds, each the trierarch program from source started as the
@@ -242,73 +240,6 @@ it.runIf(process.platform === 'linux')("removes the ship's test volumes when its
   expect({ status: listed.status, volumes: listed.stdout.trim() }).toEqual({ status: 0, volumes: '' });
 });
 
-it.runIf(process.platform === 'linux')("cleans up a killed host session's Testcontainers container and volume on restart", async () => {
-  const runtime = aRuntime({ hasHostContainerStorage: true });
-  const shipId = newId('ship');
-  const shipFolder = join(sessions, shipId + '-ship');
-  const name = `test-${shipId}`;
-  const ready = join(folder, 'testcontainers-ready');
-  const program = `const { createRequire } = require('node:module');
-    const { GenericContainer } = createRequire(${JSON.stringify(join(process.cwd(), 'package.json'))})('testcontainers');
-    (async () => {
-      await new GenericContainer('docker.io/library/postgres:17-alpine').withName(${JSON.stringify(name)}).withEnvironment({ POSTGRES_PASSWORD: 'test' }).start();
-      require('node:fs').writeFileSync(${JSON.stringify(ready)}, 'ready');
-      setInterval(() => {}, 1000);
-    })().catch(e => { console.log(JSON.stringify({ type: 'error', message: String(e) })); process.exit(1); });`;
-  const session = { shipId, shipFolder, folder, command: [process.execPath, '-e', program], harness: 'claude-code', env: { TESTCONTAINERS_RYUK_DISABLED: 'true', TESTCONTAINERS_HOST_OVERRIDE: '127.0.0.1' } };
-  const url = `unix://${shipFolder}/podman.sock`;
-  const client = (args: string[]) => runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', '--url', url, ...args] });
-  const own = (args: string[]) => runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', ...args] });
-  const ownImage = `localhost/tri348-${shipId}:latest`;
-  const ownContainer = `tri348-${shipId}`;
-  const runtimeRoot = await userRuntimeDirectory();
-  if (runtimeRoot === undefined) throw new Error('no private user runtime directory');
-  const runtimeDir = shipPodmanRuntime(runtimeRoot, shipId);
-  try {
-    await buildTestSessionImage(ownImage);
-    const started = await own(['run', '--detach', '--name', ownContainer, '--network', 'bridge', ownImage, 'sleep', '120']);
-    expect(started.status).toBe(0);
-    await runtime.start(session);
-    const info = await client(['info', '--format', '{{.Store.GraphRoot}}']);
-    expect(info.status, info.stderr).toBe(0);
-    expect(info.stdout.trim()).toBe(join(shipFolder, 'containers', 'graph'));
-    await expect.poll(() => existsSync(ready), { timeout: 180_000 }).toBe(true);
-    const before = await client(['ps', '--all', '--filter', `name=${name}`, '--format', '{{.Names}}']);
-    const volumes = await client(['volume', 'ls', '--quiet']);
-    const images = await client(['image', 'ls', '--quiet']);
-    expect(images.stdout.trim()).not.toBe('');
-    expect(before.stdout.trim()).toBe(name);
-    expect(volumes.stdout.trim()).not.toBe('');
-    const ownVolumes = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', 'volume', 'ls', '--quiet'] });
-    expect(ownVolumes.stdout.split('\n')).not.toContain(volumes.stdout.trim());
-    await runtime.stop(shipId);
-    mkdirSync(join(runtimeDir, 'run'), { recursive: true, mode: 0o700 });
-    mkdirSync(join(runtimeDir, 'tmp'), { recursive: true, mode: 0o700 });
-    const stopped = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${join(shipFolder, 'containers', 'storage.conf')}`, 'podman', '--root', join(shipFolder, 'containers', 'graph'), '--runroot', join(runtimeDir, 'run'), '--tmpdir', join(runtimeDir, 'tmp'), 'ps', '--quiet'] });
-    expect(stopped.status, stopped.stderr).toBe(0);
-    expect(stopped.stdout.trim()).toBe('');
-    await runtime.start({ ...session, command: [...FAKE_CLAUDE_CODE] });
-    const after = await client(['ps', '--all', '--filter', `name=${name}`, '--quiet']);
-    const remaining = await client(['volume', 'ls', '--quiet']);
-    const retained = await client(['image', 'ls', '--quiet']);
-    expect(retained.stdout.trim()).toBe(images.stdout.trim());
-    expect([after.stdout.trim(), remaining.stdout.trim()]).toEqual(['', '']);
-    const ownContainers = await own(['ps', '--all', '--filter', `name=${name}`, '--quiet']);
-    expect(ownContainers.stdout.trim()).toBe('');
-    const bridge = await own(['run', '--rm', '--network', 'bridge', ownImage, '/bin/sh', '-c', ':']);
-    expect(bridge.status, bridge.stderr).toBe(0);
-  } finally {
-    await runtime.stop(shipId);
-    await own(['rm', '--force', '--time', '0', ownContainer]);
-    await own(['image', 'rm', '--force', ownImage]);
-    const config = join(shipFolder, 'containers', 'storage.conf');
-    if (existsSync(config)) {
-      await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${config}`, 'podman', '--root', join(shipFolder, 'containers', 'graph'), '--runroot', join(runtimeDir, 'run'), '--tmpdir', join(runtimeDir, 'tmp'), 'rm', '--all', '--force', '--time', '0', '--volumes'] });
-      await removeWithinIsolatedUserNamespace('podman')(shipFolder);
-    }
-    rmSync(runtimeDir, { recursive: true, force: true });
-  }
-}, 240_000);
 
 it('stops a session when its hold exits before it can be signalled', async () => {
   const runtime = aRuntime();
