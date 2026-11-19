@@ -91,7 +91,7 @@ export function runtimeAdaptersOf(at: {
       sessions: hostSessions({ paths, version, launch, shipsRoot: root, ...(at.program !== undefined && { program: at.program }) }),
       workspace: createGitWorkspace({ configuration, root, ...(before !== undefined && { before }), ...(trusted !== undefined && { clones: trusted }) }),
       folderProcesses: createFolderProcesses(),
-      trash: createTrash({ beside }),
+      trash: createTrash({ beside, ...(process.platform === 'linux' && { unshare: removeWithinUserNamespace('podman') }) }),
     };
   }
   // A clone or a ship's home whose own top the host cannot give its write goes to the trash as the runtime moves it.
