@@ -188,6 +188,25 @@ it.runIf(process.platform === 'linux')('starts the host session with its own soc
   }
 }, 20_000);
 
+it.runIf(process.platform === 'linux')('starts the session when its named runtime directory cannot be used', async () => {
+  const runtime = aRuntime({ hasHostContainerStorage: true });
+  const shipId = newId('ship');
+  const shipFolder = join(sessions, shipId + '-ship');
+  const invalid = join(folder, 'not-a-directory');
+  writeFileSync(invalid, 'file');
+  const previous = process.env.XDG_RUNTIME_DIR;
+  process.env.XDG_RUNTIME_DIR = invalid;
+  try {
+    await runtime.start({ shipId, shipFolder, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });
+    await expect.poll(() => starts().length).toBeGreaterThan(0);
+    expect(starts()[0]?.env.DOCKER_HOST).toBe(`unix://${shipFolder}/podman.sock`);
+    await expect.poll(async () => (await runtime.events(shipId)).join('\n')).toContain('Podman service could not start');
+  } finally {
+    restore('XDG_RUNTIME_DIR', previous);
+    await runtime.stop(shipId);
+  }
+}, 20_000);
+
 it.runIf(process.platform === 'linux')('logs a Podman service that exits without an error message', async () => {
   const runtime = aRuntime({ hasHostContainerStorage: true });
   const shipId = newId('ship');
