@@ -17,6 +17,7 @@ import type { ObservedSession, SessionRuntime } from '../core/ports.js';
 import { createCallerCheck } from './caller-check.js';
 import { createHoldRuntime, sessionsLaunch, systemdVersionOf } from './hold-runtime.js';
 import { runCommand } from './run-command.js';
+import { shipPodmanRuntime, userRuntimeDirectory } from './paths.js';
 import { removeWithinIsolatedUserNamespace } from './trash.js';
 import { runningVersion } from './version.js';
 
@@ -237,6 +238,9 @@ it.runIf(process.platform === 'linux')("cleans up a killed host session's Testco
   const own = (args: string[]) => runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', ...args] });
   const ownImage = `localhost/tri348-${shipId}:latest`;
   const ownContainer = `tri348-${shipId}`;
+  const runtimeRoot = await userRuntimeDirectory();
+  if (runtimeRoot === undefined) throw new Error('no private user runtime directory');
+  const runtimeDir = shipPodmanRuntime(runtimeRoot, shipId);
   try {
     await buildTestSessionImage(ownImage);
     const started = await own(['run', '--detach', '--name', ownContainer, '--network', 'bridge', ownImage, 'sleep', '120']);
@@ -252,7 +256,7 @@ it.runIf(process.platform === 'linux')("cleans up a killed host session's Testco
     const ownVolumes = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', 'podman', 'volume', 'ls', '--quiet'] });
     expect(ownVolumes.stdout.split('\n')).not.toContain(volumes.stdout.trim());
     await runtime.stop(shipId);
-    const stopped = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${join(shipFolder, 'containers', 'storage.conf')}`, 'podman', '--root', join(shipFolder, 'containers', 'graph'), '--runroot', join(shipFolder, 'containers', 'run'), '--tmpdir', join(shipFolder, 'containers', 'tmp'), 'ps', '--quiet'] });
+    const stopped = await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${join(shipFolder, 'containers', 'storage.conf')}`, 'podman', '--root', join(shipFolder, 'containers', 'graph'), '--runroot', join(runtimeDir, 'run'), '--tmpdir', join(runtimeDir, 'tmp'), 'ps', '--quiet'] });
     expect(stopped.stdout.trim()).toBe('');
     await runtime.start({ ...session, command: [...FAKE_CLAUDE_CODE] });
     const after = await client(['ps', '--all', '--filter', `name=${name}`, '--quiet']);
@@ -270,9 +274,10 @@ it.runIf(process.platform === 'linux')("cleans up a killed host session's Testco
     await own(['image', 'rm', '--force', ownImage]);
     const config = join(shipFolder, 'containers', 'storage.conf');
     if (existsSync(config)) {
-      await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${config}`, 'podman', '--root', join(shipFolder, 'containers', 'graph'), '--runroot', join(shipFolder, 'containers', 'run'), '--tmpdir', join(shipFolder, 'containers', 'tmp'), 'rm', '--all', '--force', '--time', '0', '--volumes'] });
+      await runCommand('env', { args: ['-u', 'CONTAINER_HOST', '-u', 'DOCKER_HOST', `CONTAINERS_STORAGE_CONF=${config}`, 'podman', '--root', join(shipFolder, 'containers', 'graph'), '--runroot', join(runtimeDir, 'run'), '--tmpdir', join(runtimeDir, 'tmp'), 'rm', '--all', '--force', '--time', '0', '--volumes'] });
       await removeWithinIsolatedUserNamespace('podman')(shipFolder);
     }
+    rmSync(runtimeDir, { recursive: true, force: true });
   }
 }, 240_000);
 

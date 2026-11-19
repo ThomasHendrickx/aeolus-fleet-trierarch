@@ -7,10 +7,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FAKE_CLAUDE_CODE, TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
 import { newId, inRepositories } from '../../test/support/in-memory.js';
 import { aShortHome } from '../../test/support/short-home.js';
-import { makeUnremovable, removeAsRuntime } from '../../test/support/unremovable.js';
-import { trierarchPaths, type TrierarchPaths } from './paths.js';
+import { shipPodmanRuntime, trierarchPaths, userRuntimeDirectory, type TrierarchPaths } from './paths.js';
 import { runCommand } from './run-command.js';
 import { runtimeAdaptersOf } from './runtime-adapters.js';
+import { removeWithinIsolatedUserNamespace } from './trash.js';
 
 const MODEL_TOKEN = 'sk-ant-oat01-test-token';
 const CONTAINER = { kind: 'container', binary: '', memory: '4g', cpus: 2 } as const;
@@ -147,12 +147,40 @@ describe('the adapters the session runtime picks (decision 0039)', () => {
   it.runIf(process.platform === 'linux')("empties a ship's container storage in the host trash through Podman's namespace", async () => {
     const trashed = join(paths.ships, '.trash', `${shipId}.1793707200000`);
     mkdirSync(trashed, { recursive: true });
-    makeUnremovable(trashed);
+    const inner = join(trashed, 'a');
+    mkdirSync(inner);
+    writeFileSync(join(inner, 'f'), 'f');
+    const fixture = join(home, 'fixture');
+    const runtimeRoot = await userRuntimeDirectory();
+    if (runtimeRoot === undefined) throw new Error('no private user runtime directory');
+    const runtime = shipPodmanRuntime(runtimeRoot, `${shipId}-fixture`);
+    mkdirSync(join(runtime, 'run'), { recursive: true });
+    mkdirSync(join(runtime, 'tmp'));
+    const owned = await runCommand('podman', { args: ['--root', join(fixture, 'graph'), '--runroot', join(runtime, 'run'), '--tmpdir', join(runtime, 'tmp'), 'unshare', 'chown', '-R', '1:1', inner] });
+    expect(owned.status).toBe(0);
     try {
       expect(await adaptersOf().trash.empty()).toEqual([]);
       expect(existsSync(trashed)).toBe(false);
     } finally {
-      await removeAsRuntime(join(paths.ships, '.trash'));
+      await removeWithinIsolatedUserNamespace('podman')(join(paths.ships, '.trash'));
+      rmSync(runtime, { recursive: true, force: true });
+    }
+  });
+
+  it.runIf(process.platform === 'linux')("removes the ship's Podman runtime when its folder goes", async () => {
+    const runtimeRoot = join(home, 'xdg-runtime');
+    const runtime = shipPodmanRuntime(runtimeRoot, shipId);
+    const shipFolder = join(paths.ships, shipId);
+    mkdirSync(runtime, { recursive: true });
+    mkdirSync(shipFolder, { recursive: true });
+    const previous = process.env.XDG_RUNTIME_DIR;
+    process.env.XDG_RUNTIME_DIR = runtimeRoot;
+    try {
+      await adaptersOf().workspace.removeShipFolder(shipFolder);
+      expect(existsSync(runtime)).toBe(false);
+    } finally {
+      if (previous === undefined) Reflect.deleteProperty(process.env, 'XDG_RUNTIME_DIR');
+      else process.env.XDG_RUNTIME_DIR = previous;
     }
   });
 
