@@ -16,14 +16,14 @@ export function createModelLogins(at: {
   /** What the model proxy recorded of each key (api keys K8). */
   keyStates: Pick<KeyStates, 'stateOf'>;
   /** What in Claude Code's settings would give a session with the options in the folder a key, named; see ClaudeCodeSetup.keyInReach. */
-  claudeCode: { keyInReach(at: { options: Readonly<Record<string, string>>; folder?: string }): Promise<string | undefined> };
+  claudeCode: { keyInReach(at: { options: Readonly<Record<string, string>>; folder?: string; shipFolder?: string }): Promise<string | undefined> };
   codex: Pick<CodexSetup, 'loginKind'>;
   modelTokenFile?: string;
 }): ModelLoginsPort {
   return {
-    startProblem: async ({ harness, login, options, folder }) => {
+    startProblem: async ({ harness, login, options, folder, shipFolder }) => {
       if (login === 'subscription') {
-        return subscriptionProblem(at, { harness, options, ...(folder !== undefined && { folder }) });
+        return subscriptionProblem(at, { harness, options, ...(folder !== undefined && { folder }), ...(shipFolder !== undefined && { shipFolder }) });
       }
       if (harness === 'copilot') {
         return "copilot signs in with this computer's own login and runs on no API key: run the ship on its subscription";
@@ -51,12 +51,12 @@ function keyStateOf(at: { keyStates: Pick<KeyStates, 'stateOf'> }, harness: stri
 }
 
 /** Why a session of the harness would not run on its subscription alone; none when it would. */
-async function subscriptionProblem(at: Parameters<typeof createModelLogins>[0], session: { harness: string; options: Readonly<Record<string, string>>; folder?: string }): Promise<string | undefined> {
+async function subscriptionProblem(at: Parameters<typeof createModelLogins>[0], session: { harness: string; options: Readonly<Record<string, string>>; folder?: string; shipFolder?: string }): Promise<string | undefined> {
   if (session.harness === 'claude-code') {
     if (at.modelTokenFile !== undefined && (await readFile(at.modelTokenFile, 'utf8').catch(() => '')).trim() === '') {
       return `claude-code subscription sessions need the model token in ${at.modelTokenFile}: write the token from claude setup-token there`;
     }
-    const found = await at.claudeCode.keyInReach({ options: session.options, ...(session.folder !== undefined && { folder: session.folder }) });
+    const found = await at.claudeCode.keyInReach({ options: session.options, ...(session.folder !== undefined && { folder: session.folder }), ...(session.shipFolder !== undefined && { shipFolder: session.shipFolder }) });
     return found === undefined ? undefined : `claude-code would reach an API key on its subscription (${found}): remove it, or run the ship on its API key`;
   }
   if (session.harness === 'codex' && (await at.codex.loginKind()) === 'apiKey') {

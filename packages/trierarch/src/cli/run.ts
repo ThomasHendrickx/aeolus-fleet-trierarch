@@ -165,7 +165,7 @@ export async function runTrierarch(input: { paths: TrierarchPaths; homeDirectory
     ...(configuration.runtime?.kind !== 'container' && { modelTokenFile: paths.modelToken }),
     keyStates: createKeyStates({ keys: paths.keys, file: keyStatesFileOf(paths.proxy) }),
     // The harness as launch reads it, so the guard sees the flags the session would start with (K6).
-    claudeCode: { keyInReach: ({ options, folder }) => claudeCodeKeyInReach(claudeCodeSetup, { harness: configuration.harnesses['claude-code'] ?? { flags: [], options: {} }, options, ...(folder !== undefined && { folder }) }) },
+    claudeCode: { keyInReach: ({ options, folder, shipFolder }) => claudeCodeKeyInReach(shipFolder === undefined ? claudeCodeSetup : createClaudeCodeSetup({ homeDirectory: join(shipFolder, 'home'), ...(configuration.runtime?.kind !== 'container' && { configDirectory: join(shipFolder, 'home', '.claude') }), managedSettings }), { harness: configuration.harnesses['claude-code'] ?? { flags: [], options: {} }, options, ...(folder !== undefined && { folder }) }) },
     codex: createCodexSetup(),
   });
   // The machine's load (#400) and the harnesses' usage (#353), each read on its own interval for the report.
