@@ -84,6 +84,7 @@ export function createHoldRuntime(options: {
   program: readonly string[];
   version: string;
   platform: string;
+  hasHostContainerStorage?: boolean;
   /** What a hold's start goes through: a systemd scope of its own under a systemd unit (see sessionsLaunch). */
   launch?: readonly string[];
   /** What runs beside the holds, one per ship: stopped first when its ship's hold stops, and listed as of another version for a ship no hold holds. */
@@ -251,7 +252,8 @@ export function createHoldRuntime(options: {
       const tokenVariable = proxyToken === undefined ? [] : ['--proxy-token-variable', proxyToken.variable];
       const modelToken = harness === 'claude-code' && proxyToken === undefined && options.modelTokenFile !== undefined ? ['--model-token-file', options.modelTokenFile] : [];
       const { command, env } = options.heldAs === undefined ? { command: session.command, env: { ...session.env, ...(temp !== undefined && { TMPDIR: temp, TMP: temp, TEMP: temp }) } } : await options.heldAs(session, { ...files, temp });
-      const hold = [...options.program, 'hold', shipId, '--sessions', sessions, '--folder', folder, '--harness', harness, ...tokenVariable, ...modelToken, ...Object.entries(env).flatMap(([variable, value]) => ['--env', `${variable}=${value}`]), '--', ...command];
+      const storage = options.hasHostContainerStorage === true && options.platform === 'linux' && session.shipFolder !== undefined ? ['--ship-containers', session.shipFolder] : [];
+      const hold = [...options.program, 'hold', shipId, ...storage, '--sessions', sessions, '--folder', folder, '--harness', harness, ...tokenVariable, ...modelToken, ...Object.entries(env).flatMap(([variable, value]) => ['--env', `${variable}=${value}`]), '--', ...command];
       const [program = 'sh', ...args] = [...(options.launch ?? []), 'sh', '-c', DETACHED, 'sh', ...hold];
       const starter = spawn(program, args, { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
       let wrote = '';

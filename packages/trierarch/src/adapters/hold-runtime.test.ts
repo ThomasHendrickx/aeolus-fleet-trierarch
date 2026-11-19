@@ -58,8 +58,8 @@ afterEach(async () => {
 /** Twenty turns started and interrupted, each a stdin line and a poll of the events. */
 const TWENTY_TURNS_MS = 30_000;
 
-function aRuntime(at: { version?: string; beside?: Pick<SessionRuntime, 'list' | 'stop'>; bootedAt?: () => Date; launch?: readonly string[]; program?: readonly string[]; shipsRoot?: string; modelTokenFile?: string; hostContainerStorage?: boolean } = {}) {
-  const runtime = createHoldRuntime({ sessions, program: at.program ?? TRIERARCH_PROGRAM, version: at.version ?? VERSION, platform: process.platform, ...(at.modelTokenFile !== undefined && { modelTokenFile: at.modelTokenFile }), ...(at.shipsRoot !== undefined && { shipsRoot: at.shipsRoot }), ...(at.hostContainerStorage === true && { hostContainerStorage: true }), ...(at.launch !== undefined && { launch: at.launch }), ...(at.beside !== undefined && { beside: at.beside }), ...(at.bootedAt !== undefined && { bootedAt: at.bootedAt }) });
+function aRuntime(at: { version?: string; beside?: Pick<SessionRuntime, 'list' | 'stop'>; bootedAt?: () => Date; launch?: readonly string[]; program?: readonly string[]; shipsRoot?: string; modelTokenFile?: string; hasHostContainerStorage?: boolean } = {}) {
+  const runtime = createHoldRuntime({ sessions, program: at.program ?? TRIERARCH_PROGRAM, version: at.version ?? VERSION, platform: process.platform, ...(at.modelTokenFile !== undefined && { modelTokenFile: at.modelTokenFile }), ...(at.shipsRoot !== undefined && { shipsRoot: at.shipsRoot }), ...(at.hasHostContainerStorage === true && { hasHostContainerStorage: true }), ...(at.launch !== undefined && { launch: at.launch }), ...(at.beside !== undefined && { beside: at.beside }), ...(at.bootedAt !== undefined && { bootedAt: at.bootedAt }) });
   runtimes.push(runtime);
   return runtime;
 }
@@ -106,7 +106,7 @@ async function aClaudeCodeSession(runtime: SessionRuntime, flags: readonly strin
 }
 
 it.runIf(process.platform === 'linux')("starts a ship's Podman service beside its host session and stops it with the session", async () => {
-  const runtime = aRuntime({ hostContainerStorage: true });
+  const runtime = aRuntime({ hasHostContainerStorage: true });
   const shipId = newId('ship');
   const shipFolder = join(sessions, shipId + '-ship');
   await runtime.start({ shipId, shipFolder, folder, command: [...FAKE_CLAUDE_CODE], harness: 'claude-code' });

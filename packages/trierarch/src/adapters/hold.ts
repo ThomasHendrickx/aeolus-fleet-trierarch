@@ -1,6 +1,8 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { appendFileSync, writeFileSync, createWriteStream } from 'node:fs';
-import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { setTimeout as wait } from 'node:timers/promises';
 import { createServer, type Socket } from 'node:net';
 import type { Readable, Writable } from 'node:stream';
 import { createInterface } from 'node:readline';
@@ -86,6 +88,7 @@ lines.on('close', () => {
 
 export interface HoldOptions {
   readonly files: HoldFiles;
+  readonly shipContainers?: string | undefined;
   readonly folder: string;
   /** The harness the command runs: how its turn is stopped. */
   readonly harness: string;
@@ -188,9 +191,30 @@ export async function runHold(options: HoldOptions): Promise<number> {
     signalGroup(running, 'SIGKILL');
   };
 
+  let service: ReturnType<typeof spawn> | undefined;
+  let socket: string | undefined;
+  const sessionEnvironment: Record<string, string> = { ...environment };
+  if (options.shipContainers !== undefined) {
+    const storage = join(options.shipContainers, 'containers');
+    socket = join(options.shipContainers, 'podman.sock');
+    const config = join(storage, 'storage.conf');
+    await mkdir(storage, { recursive: true, mode: 0o700 });
+    await writeFile(config, `[storage]\ndriver = "overlay"\ngraphroot = ${JSON.stringify(join(storage, 'graph'))}\nrunroot = ${JSON.stringify(join(storage, 'run'))}\n`);
+    await rm(socket, { force: true });
+    Object.assign(sessionEnvironment, { CONTAINERS_STORAGE_CONF: config, DOCKER_HOST: `unix://${socket}`, CONTAINER_HOST: `unix://${socket}` });
+    service = spawn('podman', ['system', 'service', '--time=0', `unix://${socket}`], { env: { ...process.env, CONTAINERS_STORAGE_CONF: config }, detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+    if (service.pid !== undefined) guard.stdin.write(`${String(service.pid)}\n`);
+    service.stderr?.on('data', (chunk: Buffer) => events.write(`Podman service: ${chunk.toString('utf8')}`));
+    service.on('error', (error) => events.write(`Podman service: ${error.message}\n`));
+    for (let attempt = 0; attempt < 100 && service.exitCode === null; attempt += 1) {
+      if ((await stat(socket).catch(() => undefined))?.isSocket() === true) break;
+      await wait(50);
+    }
+  }
+
   const spawnHarness = (program: string, args: readonly string[]): Harness => {
     // A process group of its own: a stop ends the harness and every process it started.
-    const at = { cwd: folder, env: { ...environment }, detached: true };
+    const at = { cwd: folder, env: sessionEnvironment, detached: true };
     return isCopilot ? spawn(program, args, { ...at, stdio: ['pipe', 'pipe', 'pipe'] }) : spawn(program, args, { ...at, stdio: ['pipe', 'pipe', 'ignore'] });
   };
 
@@ -399,6 +423,10 @@ export async function runHold(options: HoldOptions): Promise<number> {
 
   const code = await ended;
   server.close();
+  if (service?.pid !== undefined) {
+    try { process.kill(-service.pid, 'SIGTERM'); } catch { /* Already ended. */ }
+  }
+  if (socket !== undefined) await rm(socket, { force: true });
   await rm(files.socket, { force: true });
   await new Promise((resolve) => events.end(resolve));
   return code;

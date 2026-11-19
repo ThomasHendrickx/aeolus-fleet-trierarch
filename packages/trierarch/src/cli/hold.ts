@@ -81,6 +81,7 @@ export async function holdCommand(words: readonly string[], at: { env: Readonly<
   const modelToken = modelTokenFile === undefined ? undefined : (await readFile(modelTokenFile, 'utf8')).trim();
   return runHold({
     files,
+    ...(options.includes('--ship-containers') && { shipContainers: valueOf('--ship-containers') }),
     folder,
     harness,
     command,
