@@ -7,11 +7,16 @@ import { TRIERARCH_PROGRAM } from '../../test/support/hold-program.js';
 import { newId } from '../../test/support/in-memory.js';
 import { aShortHome } from '../../test/support/short-home.js';
 import { createContainerRuntime } from './container.js';
+import { shipPodmanRuntime } from './paths.js';
 
 it('keeps nested Podman storage and runtime files in the ship folder', async () => {
   const folder = realpathSync(aShortHome('nested-storage'));
   const sessions = realpathSync(aShortHome('nested-holds'));
   const shipId = newId('ship');
+  const runtimeRoot = realpathSync(aShortHome('nested-runtime'));
+  const shipRuntime = shipPodmanRuntime(runtimeRoot, shipId);
+  const previous = process.env.XDG_RUNTIME_DIR;
+  process.env.XDG_RUNTIME_DIR = runtimeRoot;
   const shipFolder = join(folder, 'ships', shipId);
   const binary = join(folder, 'runtime');
   const tokenFile = join(folder, 'token');
@@ -34,11 +39,16 @@ it('keeps nested Podman storage and runtime files in the ship folder', async () 
     const nested = '/containers';
     expect(env).toContain(`CONTAINERS_CONF=${nested}/containers.conf`);
     expect(env).toContain(`CONTAINERS_STORAGE_CONF=${nested}/storage.conf`);
-    expect(env).toContain(`XDG_RUNTIME_DIR=${nested}/runtime`);
-    expect(readFileSync(join(shipFolder, 'containers', 'containers.conf'), 'utf8')).toContain(`tmp_dir = "${nested}/tmp"`);
+    expect(env).toContain('XDG_RUNTIME_DIR=/containers-runtime');
+    expect(words).toContain(`${shipRuntime}:/containers-runtime`);
+    expect(readFileSync(join(shipFolder, 'containers', 'containers.conf'), 'utf8')).toContain('tmp_dir = "/containers-runtime/tmp"');
     expect(readFileSync(join(shipFolder, 'containers', 'storage.conf'), 'utf8')).toContain(`rootless_storage_path = "${nested}/graph"`);
   } finally {
     await runtime.stop(shipId);
+    expect(existsSync(shipRuntime)).toBe(false);
+    if (previous === undefined) Reflect.deleteProperty(process.env, 'XDG_RUNTIME_DIR');
+    else process.env.XDG_RUNTIME_DIR = previous;
+    rmSync(runtimeRoot, { recursive: true, force: true });
     rmSync(folder, { recursive: true, force: true });
     rmSync(sessions, { recursive: true, force: true });
   }
