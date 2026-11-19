@@ -261,7 +261,7 @@ export function createClaudeCodeHarness(options: {
       const marks = marksOf(ship);
       await marks.clear(folder);
       const isHostShip = options.hostShipHomes !== undefined && ship.shipFolder !== undefined;
-      const shipEnv: Record<string, string> = isHostShip ? { CLAUDE_CONFIG_DIR: join(ship.shipFolder ?? '', 'home', '.claude'), AEOLUS_CREWS: home.plugin.crews } : {};
+      const shipEnv: Record<string, string> = isHostShip ? { CLAUDE_CONFIG_DIR: join(ship.shipFolder ?? '', 'home', '.claude'), AEOLUS_CREWS: home.plugin.crews, AEOLUS_DATA: home.plugin.data } : {};
       const commandWords = isHostShip ? [...wordsOf(command), '--plugin-dir', await plugin.root()] : wordsOf(command);
       await sessions.start({ shipId, folder, command: commandWords, harness, env: { [LAUNCH_VARIABLE]: launchId, ...route.env, ...shipEnv }, ...(route.proxyToken !== undefined && { proxyToken: route.proxyToken }), ...(shipFolder !== undefined && { shipFolder }) });
       await sessions.send({ shipId, line: userLine(prompt) });
