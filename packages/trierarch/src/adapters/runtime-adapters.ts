@@ -32,9 +32,9 @@ export function modelProxy(at: { paths: TrierarchPaths; version: string; launch?
 export function hostSessions(at: { paths: TrierarchPaths; version: string; launch?: readonly string[]; program?: readonly string[]; shipsRoot?: string }): SessionRuntime & SessionRoots {
   const cache = join(at.paths.home, 'cache');
   const environment = { XDG_CACHE_HOME: join(cache, 'xdg'), npm_config_cache: join(cache, 'npm'), GOCACHE: join(cache, 'go-build'), GOMODCACHE: join(cache, 'go-mod'), PLAYWRIGHT_BROWSERS_PATH: join(cache, 'ms-playwright') };
-  return createHoldRuntime({ sessions: at.paths.sessions, modelTokenFile: at.paths.modelToken, ...(at.shipsRoot !== undefined && { shipsRoot: at.shipsRoot }), program: at.program ?? TRIERARCH_PROGRAM, version: at.version, platform: process.platform, launch: at.launch ?? [], heldAs: async (session) => {
+  return createHoldRuntime({ sessions: at.paths.sessions, modelTokenFile: at.paths.modelToken, ...(at.shipsRoot !== undefined && { shipsRoot: at.shipsRoot }), program: at.program ?? TRIERARCH_PROGRAM, version: at.version, platform: process.platform, launch: at.launch ?? [], heldAs: async (session, { temp }) => {
     await Promise.all(Object.values(environment).map(async (folder) => mkdir(folder, { recursive: true })));
-    return { command: session.command, env: { ...session.env, ...environment } };
+    return { command: session.command, env: { ...session.env, ...environment, ...(temp !== undefined && { TMPDIR: temp, TMP: temp, TEMP: temp }) } };
   } });
 }
 
