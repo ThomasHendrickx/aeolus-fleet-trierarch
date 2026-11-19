@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -260,9 +260,29 @@ describe('ships/ removed by hand', () => {
     await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CREWED_WITHIN_MS }).toBe(1);
     const pid = sessionOf(machine, 'scout').starts()[0]?.pid ?? 0;
 
+    const logBeforeRemoval = machine.serviceLog().length;
     rmSync(join(machine.trierarchHome, 'ships'), { recursive: true, force: true });
 
-    await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CLEARED_WITHIN_MS }).toBe(1);
+    try {
+      await expect.poll(() => sessionOf(machine, 'scout').starts().length, { timeout: CLEARED_WITHIN_MS }).toBe(1);
+    } catch (error) {
+      console.log(`Service log after removing ships/:\n${machine.serviceLog().slice(logBeforeRemoval)}`);
+      const hold = join(machine.trierarchHome, 'sessions', scout);
+      for (const name of ['hold.pid', 'harness-sessions', 'guard-active', 'guard-done', 'exit-reason']) {
+        const file = join(hold, name);
+        console.log(`${name}: ${existsSync(file) ? readFileSync(file, 'utf8') : '(absent)'}`);
+      }
+      // Print process state and cwd, never arguments or environment, which can contain secrets.
+      for (const pid of readdirSync('/proc').filter((name) => /^\d+$/.test(name))) {
+        try {
+          const cwd = readlinkSync(join('/proc', pid, 'cwd'));
+          if (cwd !== machine.home && !cwd.startsWith(`${machine.home}/`)) continue;
+          const status = readFileSync(join('/proc', pid, 'status'), 'utf8').split('\n').filter((line) => /^(Name|State|PPid|NSpgid|NSsid):/.test(line));
+          console.log(`Process ${pid}: ${cwd}\n${status.join('\n')}`);
+        } catch { /* A process may exit while /proc is read. */ }
+      }
+      throw error;
+    }
     expect(sessionOf(machine, 'scout').folder).toBe(join(shipFolderOf(scout), 'repositories'));
     expect(sessionOf(machine, 'scout').starts()[0]?.pid).not.toBe(pid);
     expect(isRunning(pid)).toBe(false);
